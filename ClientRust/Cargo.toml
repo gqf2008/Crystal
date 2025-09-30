@@ -1,0 +1,49 @@
+[package]
+name = "mir2_client"
+version = "0.1.0"
+edition = "2021"
+authors = ["Crystal Porting Team"]
+description = "Experimental Rust rewrite of the Crystal Mir2 client"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+notes = "Work-in-progress port of the C# client."
+
+[dependencies]
+anyhow = "1"
+arboard = "1"
+bitflags = "2"
+bincode = "1"
+config = { version = "0.14", features = ["json", "yaml", "ini"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "1"
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "time",
+    "sync",
+    "io-util",
+] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+    "fmt",
+    "env-filter",
+    "tracing-log",
+] }
+url = "2"
+winit = { version = "0.28", features = ["serde"] }
+rodio = { version = "0.17", default-features = false, features = ["vorbis"] }
+reqwest = { version = "0.12", features = ["json", "gzip", "stream"] }
+bytes = "1"
+parking_lot = "0.12"
+rand = "0.8"
+
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3"
+
+[features]
+default = ["client"]
+client = []
