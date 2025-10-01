@@ -30,6 +30,8 @@ pub enum SharedError {
     Invalid7BitEncodedInt,
     #[error("string length {length} exceeds maximum supported size")]
     StringTooLong { length: usize },
+    #[error("{field} length {length} cannot be negative")]
+    NegativeLength { field: &'static str, length: i32 },
     #[error("invalid UTF-8 string data")]
     InvalidUtf8(#[from] FromUtf8Error),
     #[error(transparent)]

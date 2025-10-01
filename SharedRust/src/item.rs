@@ -6,6 +6,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
+use crate::binary::{read_bool, read_dotnet_string, write_bool, write_dotnet_string};
 use crate::enums::{
     AwakeType, BindMode, ItemGrade, ItemSet, ItemType, MirGridType, RefinedValue, RequiredClass,
     RequiredGender, RequiredType, SpecialItemMode, Stat,
@@ -1428,69 +1429,6 @@ impl ItemRentalInformation {
         writer.write_i64::<LittleEndian>(self.item_return_date_binary)?;
         Ok(())
     }
-}
-
-fn read_bool<R: Read>(reader: &mut R) -> SharedResult<bool> {
-    Ok(reader.read_u8()? != 0)
-}
-
-fn write_bool<W: Write>(writer: &mut W, value: bool) -> SharedResult<()> {
-    writer.write_u8(if value { 1 } else { 0 })?;
-    Ok(())
-}
-
-fn read_dotnet_string<R: Read>(reader: &mut R) -> SharedResult<String> {
-    let length = read_7bit_encoded_int(reader)?;
-    let mut buffer = vec![0u8; length];
-    reader.read_exact(&mut buffer)?;
-    let value = String::from_utf8(buffer)?;
-    Ok(value)
-}
-
-fn write_dotnet_string<W: Write>(writer: &mut W, value: &str) -> SharedResult<()> {
-    let bytes = value.as_bytes();
-    write_7bit_encoded_int(writer, bytes.len())?;
-    writer.write_all(bytes)?;
-    Ok(())
-}
-
-fn read_7bit_encoded_int<R: Read>(reader: &mut R) -> SharedResult<usize> {
-    let mut count: usize = 0;
-    let mut shift = 0;
-
-    loop {
-        if shift >= 35 {
-            return Err(SharedError::Invalid7BitEncodedInt);
-        }
-        let byte = reader.read_u8()?;
-        count |= ((byte & 0x7F) as usize) << shift;
-        if (byte & 0x80) == 0 {
-            break;
-        }
-        shift += 7;
-    }
-
-    Ok(count)
-}
-
-fn write_7bit_encoded_int<W: Write>(writer: &mut W, mut value: usize) -> SharedResult<()> {
-    if value > i32::MAX as usize {
-        return Err(SharedError::StringTooLong { length: value });
-    }
-
-    loop {
-        let mut byte = (value & 0x7F) as u8;
-        value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
-        }
-        writer.write_u8(byte)?;
-        if value == 0 {
-            break;
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

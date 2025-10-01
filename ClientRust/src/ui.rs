@@ -33,7 +33,11 @@ pub async fn launch(
                 tracing::warn!("server disconnected");
                 break;
             }
-            NetworkEvent::Packet(data) => tracing::debug!(size = data.len(), "received packet"),
+            NetworkEvent::Packet { header, payload } => tracing::debug!(
+                opcode = header.opcode,
+                size = payload.len(),
+                "received packet"
+            ),
             NetworkEvent::Error(err) => {
                 tracing::error!(error = %err, "network error");
                 break;

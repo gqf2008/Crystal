@@ -74,6 +74,31 @@ pub enum MirDirection {
     IntoPrimitive,
     TryFromPrimitive,
 )]
+#[repr(i16)]
+pub enum ClientPacketIds {
+    ClientVersion = 0,
+    Disconnect = 1,
+    KeepAlive = 2,
+    NewAccount = 3,
+    ChangePassword = 4,
+    Login = 5,
+    NewCharacter = 6,
+    DeleteCharacter = 7,
+    StartGame = 8,
+    LogOut = 9,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize_repr,
+    Deserialize_repr,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
 #[repr(u8)]
 pub enum StatFormula {
     Health = 0,

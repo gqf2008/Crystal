@@ -1,6 +1,9 @@
 use std::net::SocketAddr;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use byteorder::{ByteOrder, LittleEndian};
+use mir2_shared::packet::{serialize_packet, PacketHeader, PacketMessage};
+use mir2_shared::stats::SharedError;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -12,12 +15,14 @@ use crate::settings::NetworkSettings;
 pub enum NetworkEvent {
     Connected,
     Disconnected,
-    Packet(Vec<u8>),
+    Packet {
+        header: PacketHeader,
+        payload: Vec<u8>,
+    },
     Error(anyhow::Error),
 }
 
 pub struct NetworkStack {
-    #[allow(dead_code)]
     sender: mpsc::Sender<Vec<u8>>,
     #[allow(dead_code)]
     receiver_task: JoinHandle<()>,
@@ -46,6 +51,7 @@ impl NetworkStack {
         let read_tx = event_tx.clone();
         let recv_task = tokio::spawn(async move {
             let mut buf = vec![0u8; 4096];
+            let mut buffer = Vec::with_capacity(8192);
             loop {
                 match read_half.read(&mut buf).await {
                     Ok(0) => {
@@ -53,12 +59,38 @@ impl NetworkStack {
                         break;
                     }
                     Ok(n) => {
-                        if read_tx
-                            .send(NetworkEvent::Packet(buf[..n].to_vec()))
-                            .await
-                            .is_err()
-                        {
-                            break;
+                        buffer.extend_from_slice(&buf[..n]);
+
+                        loop {
+                            if buffer.len() < PacketHeader::HEADER_SIZE {
+                                break;
+                            }
+
+                            let length = LittleEndian::read_u16(&buffer[0..2]) as usize;
+                            if length < PacketHeader::HEADER_SIZE {
+                                let err = SharedError::InvalidPacketLength(length as u16);
+                                let _ = read_tx
+                                    .send(NetworkEvent::Error(anyhow::Error::new(err)))
+                                    .await;
+                                return;
+                            }
+
+                            if buffer.len() < length {
+                                break;
+                            }
+
+                            let opcode = LittleEndian::read_i16(&buffer[2..4]);
+                            let payload = buffer[PacketHeader::HEADER_SIZE..length].to_vec();
+                            buffer.drain(..length);
+
+                            let header = PacketHeader::new(length as u16, opcode);
+                            if read_tx
+                                .send(NetworkEvent::Packet { header, payload })
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
                         }
                     }
                     Err(err) => {
@@ -91,5 +123,18 @@ impl NetworkStack {
 
     pub async fn next_event(&mut self) -> Option<NetworkEvent> {
         self.events.recv().await
+    }
+
+    pub async fn send_raw(&self, data: Vec<u8>) -> Result<()> {
+        self.sender
+            .send(data)
+            .await
+            .map_err(|err| anyhow!("network send failed: {err}"))
+    }
+
+    pub async fn send_packet<P: PacketMessage>(&self, packet: &P) -> Result<()> {
+        let mut buffer = Vec::new();
+        serialize_packet(&mut buffer, packet).map_err(anyhow::Error::new)?;
+        self.send_raw(buffer).await
     }
 }

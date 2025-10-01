@@ -4,6 +4,7 @@ use tokio::runtime::{Builder, Runtime};
 use crate::keybinds::KeyBindSettings;
 use crate::settings::ClientSettings;
 use crate::{audio, net, ui};
+use mir2_shared::ClientVersion;
 
 pub struct ClientRuntime {
     settings: ClientSettings,
@@ -50,6 +51,15 @@ impl ClientRuntime {
             let net = net::NetworkStack::connect(&settings.network)
                 .await
                 .context("initializing network")?;
+
+            if let Err(err) = net
+                .send_packet(&ClientVersion {
+                    version_hash: Vec::new(),
+                })
+                .await
+            {
+                tracing::warn!(error = %err, "failed to send client version handshake");
+            }
             ui::launch(&settings, &keybinds, audio, net)
                 .await
                 .context("running ui")?;
