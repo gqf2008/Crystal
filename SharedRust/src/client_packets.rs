@@ -189,6 +189,25 @@ impl PacketMessage for Login {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartGame {
+    pub character_index: i32,
+}
+
+impl PacketMessage for StartGame {
+    const OPCODE: i16 = ClientPacketIds::StartGame as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let character_index = reader.read_i32::<LittleEndian>()?;
+        Ok(Self { character_index })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.character_index)?;
+        Ok(())
+    }
+}
+
 pub fn decode_header(buffer: &[u8]) -> Option<PacketHeader> {
     if buffer.len() < PacketHeader::HEADER_SIZE {
         return None;

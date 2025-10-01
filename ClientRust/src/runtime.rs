@@ -3,8 +3,7 @@ use tokio::runtime::{Builder, Runtime};
 
 use crate::keybinds::KeyBindSettings;
 use crate::settings::ClientSettings;
-use crate::{audio, net, ui};
-use mir2_shared::ClientVersion;
+use crate::{audio, net, ui, version};
 
 pub struct ClientRuntime {
     settings: ClientSettings,
@@ -52,15 +51,24 @@ impl ClientRuntime {
                 .await
                 .context("initializing network")?;
 
-            if let Err(err) = net
-                .send_packet(&ClientVersion {
-                    version_hash: Vec::new(),
-                })
-                .await
-            {
-                tracing::warn!(error = %err, "failed to send client version handshake");
-            }
-            ui::launch(&settings, &keybinds, audio, net)
+            let version_hash = match version::client_binary_hash() {
+                Ok(hash) => {
+                    tracing::info!(
+                        hash = %version::hash_to_hex(&hash),
+                        "computed client version hash"
+                    );
+                    hash
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "failed to compute client version hash, falling back to empty hash"
+                    );
+                    Vec::new()
+                }
+            };
+
+            ui::launch(&settings, &keybinds, audio, net, version_hash)
                 .await
                 .context("running ui")?;
             keybinds.save().context("saving key bindings")

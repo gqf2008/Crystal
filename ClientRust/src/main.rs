@@ -2,9 +2,13 @@ mod audio;
 mod error;
 mod keybinds;
 mod net;
+mod objects;
+mod protocol;
 mod runtime;
 mod settings;
+mod state;
 mod ui;
+mod version;
 
 use anyhow::Result;
 use runtime::ClientRuntime;

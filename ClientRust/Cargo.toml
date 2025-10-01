@@ -41,6 +41,7 @@ parking_lot = "0.12"
 rand = "0.8"
 mir2_shared = { path = "../SharedRust" }
 byteorder = "1"
+md5 = "0.7"
 
 [dev-dependencies]
 criterion = "0.5"

@@ -1,12 +1,16 @@
 pub mod binary;
+pub mod client_data;
 pub mod client_packets;
 pub mod enums;
 pub mod item;
+pub mod map;
 pub mod packet;
 pub mod packet_ids;
 pub mod stats;
+pub mod world_map;
 
 #[allow(unused_imports)]
 pub use crate::{
-    binary::*, client_packets::*, enums::*, item::*, packet::*, packet_ids::*, stats::*,
+    binary::*, client_data::*, client_packets::*, enums::*, item::*, map::*, packet::*,
+    packet_ids::*, stats::*, world_map::*,
 };

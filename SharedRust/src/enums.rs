@@ -208,7 +208,7 @@ pub enum MouseCursor {
 }
 
 bitflags! {
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     #[repr(transparent)]
     pub struct WeatherSetting: u16 {
         const NONE = 0;
@@ -367,7 +367,7 @@ pub enum AwakeType {
 }
 
 bitflags! {
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     #[repr(transparent)]
     pub struct LevelEffects: u16 {
         const NONE = 0;
@@ -1459,7 +1459,7 @@ pub enum PetMode {
 }
 
 bitflags! {
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     #[repr(transparent)]
     pub struct PoisonType: u16 {
         const NONE = 0;
