@@ -33,7 +33,7 @@ use mir2_shared::packets::server::{
 // Modularized protocol packets (refactored from monolithic structure)
 // Re-export packet types for backward compatibility
 // TODO: protocol_packets module removed - use mir2_shared::packets instead
-// pub use crate::network::network::protocol_packets::packets::*;
+// pub use crate::network::protocol_packets::packets::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServerMessage {
@@ -1025,7 +1025,7 @@ pub struct ObjectDashFail {
 // ============================================================================
 // NOTE: NPC, Item, Magic, Player, Object, Group, Guild, Hero, Quest, Account
 // packet structs have been moved to src/protocol_packets/packets/*.rs
-// They are re-exported via: pub use crate::network::network::protocol_packets::packets::*;
+// They are re-exported via: pub use crate::network::protocol_packets::packets::*;
 // ============================================================================
 
 pub struct Death {

@@ -4,7 +4,7 @@
 use mir2_shared::{Point, UserItem};
 
 use super::map_object::MapObject;
-use crate::network::network::protocol::ObjectItem;
+use crate::network::protocol::ObjectItem;
 
 /// Item object - represents items on the ground
 #[derive(Debug, Clone)]

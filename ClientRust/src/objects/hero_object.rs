@@ -8,7 +8,7 @@ use mir2_shared::{
 };
 
 use super::{map_object::MapObject, user_object::ClientMagic};
-use crate::network::network::protocol::HeroInformation;
+use crate::network::protocol::HeroInformation;
 
 /// Hero spawn state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -14,7 +14,7 @@ use crate::objects::{
     AnimationAdvanceSummary, MapObject, MapObjectType, ObjectActionOutcome, ObjectAttackOutcome,
     ObjectDeathOutcome, ObjectStruckOutcome, ObjectUpdateOutcome,
 };
-use crate::network::network::protocol::{
+use crate::network::protocol::{
     CharacterSummary, ColourChanged, DamageIndicator, Death, DeleteItem, DeleteQuestItem,
     DuraChanged, GainExperience, GainHeroExperience, HealthChanged, HeroHealthChanged,
     HeroLevelChanged, HeroObject, LevelChanged, MapInformation, NewMapInfo, NpcResponse,

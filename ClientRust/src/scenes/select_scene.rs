@@ -2,7 +2,7 @@
 // Mirrors Client/MirScenes/SelectScene.cs
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
-use crate::network::network::protocol::ServerMessage;
+use crate::network::protocol::ServerMessage;
 use mir2_shared::enums::{MirClass, MirGender};
 
 /// Character selection data

@@ -6,8 +6,12 @@ use mir2_shared::{
     Point,
 };
 
-use super::{frames::FrameSet, map_object::MapObject};
-use crate::network::network::protocol::ObjectSpell;
+use super::map_object::MapObject;
+// TODO: ObjectSpell not yet implemented in protocol.rs
+// use crate::network::protocol::ObjectSpell;
+
+// TODO: FrameSet not yet implemented
+// use super::frames::FrameSet;
 
 /// Spell object - represents flying spell projectiles (fireballs, lightning, etc.)
 #[derive(Debug, Clone)]
@@ -30,7 +34,8 @@ pub struct SpellObject {
     pub frame_index: i32,
     
     // Animation
-    pub frames: FrameSet,
+    // TODO: FrameSet not yet implemented
+    // pub frames: FrameSet,
     pub frame_count: i32,
     pub repeat: bool,
     
@@ -54,7 +59,7 @@ impl SpellObject {
             speed: 10,
             frame_interval: 100,
             frame_index: 0,
-            frames: FrameSet::default(),
+            // frames: FrameSet::default(), // TODO: FrameSet not yet implemented
             frame_count: 0,
             repeat: false,
             expired: false,
@@ -63,6 +68,8 @@ impl SpellObject {
     }
 
     /// Load spell information from server
+    // TODO: ObjectSpell not yet implemented
+    /*
     pub fn load(&mut self, info: &ObjectSpell) {
         self.spell = info.spell;
         self.map_object.current_location = info.location;
@@ -79,6 +86,7 @@ impl SpellObject {
         // Set spell-specific parameters
         self.configure_spell();
     }
+    */
 
     /// Calculate velocity vector from start to target
     fn calculate_velocity(&mut self) {

@@ -2,7 +2,7 @@
 // 管理公会成员、公告、仓库、等级、Buff等
 
 use super::Dialog;
-use crate::network::network::protocol::UserItem;
+use crate::network::protocol::UserItem;
 use std::collections::HashMap;
 
 /// 公会页面类型
