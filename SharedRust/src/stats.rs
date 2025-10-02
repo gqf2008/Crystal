@@ -34,6 +34,8 @@ pub enum SharedError {
     NegativeLength { field: &'static str, length: i32 },
     #[error("invalid UTF-8 string data")]
     InvalidUtf8(#[from] FromUtf8Error),
+    #[error("invalid DateTime value")]
+    InvalidDateTime,
     #[error(transparent)]
     Io(#[from] io::Error),
 }

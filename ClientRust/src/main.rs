@@ -1,14 +1,15 @@
-mod audio;
-mod error;
-mod keybinds;
-mod net;
-mod objects;
-mod protocol;
-mod runtime;
-mod settings;
-mod state;
-mod ui;
-mod version;
+mod app;
+mod config;
+mod game;
+mod platform;
+mod protocol_packets; // Modularized protocol packets
+mod support;
+
+pub use app::{runtime, ui};
+pub use config::{keybinds, settings, version};
+pub use game::{objects, protocol, state};
+pub use platform::{audio, net};
+pub use support::error;
 
 use anyhow::Result;
 use runtime::ClientRuntime;

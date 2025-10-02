@@ -2019,7 +2019,7 @@ pub enum ConquestGame {
 }
 
 bitflags! {
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     #[repr(transparent)]
     pub struct GuildRankOptions: u8 {
         const CAN_CHANGE_RANK = 0x01;
@@ -2268,3 +2268,51 @@ mod tests {
         assert_eq!(MirAction::FishingReel as u8, 44);
     }
 }
+
+// ==================== Phase 1.2 Additional Types ====================
+
+/// Color represented as ARGB (Alpha, Red, Green, Blue)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Color {
+    pub argb: i32,
+}
+
+impl Color {
+    pub fn from_argb(argb: i32) -> Self {
+        Color { argb }
+    }
+
+    pub fn to_argb(self) -> i32 {
+        self.argb
+    }
+
+    pub fn alpha(self) -> u8 {
+        ((self.argb >> 24) & 0xFF) as u8
+    }
+
+    pub fn red(self) -> u8 {
+        ((self.argb >> 16) & 0xFF) as u8
+    }
+
+    pub fn green(self) -> u8 {
+        ((self.argb >> 8) & 0xFF) as u8
+    }
+
+    pub fn blue(self) -> u8 {
+        (self.argb & 0xFF) as u8
+    }
+
+    pub fn new(alpha: u8, red: u8, green: u8, blue: u8) -> Self {
+        Color {
+            argb: ((alpha as i32) << 24) | ((red as i32) << 16) | ((green as i32) << 8) | (blue as i32),
+        }
+    }
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Color { argb: 0 }
+    }
+}
+
+

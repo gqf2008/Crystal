@@ -2,7 +2,11 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use mir2_shared::{
-    enums::{DamageType, ItemGrade, MirAction, MirDirection},
+    client_data::{ClientMagic, ClientQuestProgress},
+    enums::{
+        AttackMode, DamageType, HeroSpawnState, ItemGrade, LightSetting, MirAction, MirDirection,
+        PetMode, Spell,
+    },
     UserItem,
 };
 
@@ -11,12 +15,13 @@ use crate::objects::{
     ObjectDeathOutcome, ObjectStruckOutcome, ObjectUpdateOutcome,
 };
 use crate::protocol::{
-    ColourChanged, DamageIndicator, Death, DeleteItem, DeleteQuestItem, DuraChanged,
-    GainExperience, GainHeroExperience, HealthChanged, HeroHealthChanged, HeroLevelChanged,
-    HeroObject, LevelChanged, MapInformation, NewMapInfo, ObjectAttack, ObjectColourChanged,
-    ObjectDied, ObjectGold, ObjectGuildNameChanged, ObjectItem, ObjectLeveled, ObjectMotion,
-    ObjectStruck, PlayerObject, SearchMapResult, UserInformation, UserLocation, UserSlotsRefresh,
-    WorldMapSetupInfo,
+    CharacterSummary, ColourChanged, DamageIndicator, Death, DeleteItem, DeleteQuestItem,
+    DuraChanged, GainExperience, GainHeroExperience, HealthChanged, HeroHealthChanged,
+    HeroLevelChanged, HeroObject, LevelChanged, MapInformation, NewMapInfo, NpcResponse,
+    ObjectAttack, ObjectColourChanged, ObjectDied, ObjectGold, ObjectGuildNameChanged,
+    ObjectHarvest, ObjectHarvested, ObjectItem, ObjectLeveled, ObjectMonster, ObjectMotion,
+    ObjectNpc, ObjectStruck, PlayerObject, SearchMapResult, UserInformation, UserLocation,
+    UserSlotsRefresh, WorldMapSetupInfo,
 };
 
 #[derive(Debug, Default)]
@@ -33,6 +38,7 @@ pub struct ClientState {
     pub objects: HashMap<u32, MapObject>,
     pub hero_object_id: Option<u32>,
     pub ground_objects: HashMap<u32, GroundObject>,
+    pub npcs: HashMap<u32, NpcEntry>,
     pub player_dead: bool,
     pub last_player_death: Option<PlayerDeathEvent>,
     pub damage_history: Vec<DamageIndicatorEvent>,
@@ -75,6 +81,20 @@ pub struct ClientState {
     pub hero_level_change_history: Vec<HeroLevelChangeEvent>,
     pub last_object_level_up: Option<ObjectLevelUpEvent>,
     pub object_level_up_history: Vec<ObjectLevelUpEvent>,
+    pub last_npc_response: Option<NpcResponseEvent>,
+    pub npc_response_history: Vec<NpcResponseEvent>,
+    // New fields for extended packet support
+    pub player_magics: Vec<ClientMagic>,
+    pub hero_magics: Vec<ClientMagic>,
+    pub storage: Vec<Option<UserItem>>,
+    pub hero_storage: Vec<Option<UserItem>>,
+    pub quest_progress: Vec<ClientQuestProgress>,
+    pub attack_mode: Option<AttackMode>,
+    pub pet_mode: Option<PetMode>,
+    pub light_setting: Option<LightSetting>,
+    pub hero_spawn_state: Option<HeroSpawnState>,
+    pub npc_rate: f32,
+    pub logout_characters: Vec<CharacterSummary>,
 }
 
 impl ClientState {
@@ -174,12 +194,41 @@ impl ClientState {
         }
     }
 
+    pub fn upsert_monster_object(&mut self, object: ObjectMonster) -> ObjectUpdateOutcome {
+        let object_id = object.object_id;
+        match self.objects.entry(object_id) {
+            Entry::Occupied(mut entry) => {
+                let map_object = entry.get_mut();
+                let sync = map_object.sync_monster(object);
+                ObjectUpdateOutcome {
+                    created: false,
+                    object_type: map_object.object_type(),
+                    sync,
+                }
+            }
+            Entry::Vacant(entry) => {
+                let (map_object, sync) = MapObject::from_monster(object);
+                let object_type = map_object.object_type();
+                entry.insert(map_object);
+                ObjectUpdateOutcome {
+                    created: true,
+                    object_type,
+                    sync,
+                }
+            }
+        }
+    }
+
     pub fn remove_object(&mut self, object_id: u32) -> Option<MapObject> {
         let removed = self.objects.remove(&object_id);
         if removed.is_some() && self.hero_object_id == Some(object_id) {
             self.hero_object_id = None;
         }
         removed
+    }
+
+    pub fn remove_npc(&mut self, object_id: u32) -> Option<NpcEntry> {
+        self.npcs.remove(&object_id)
     }
 
     pub fn remove_ground_object(&mut self, object_id: u32) -> Option<GroundObjectRemoval> {
@@ -749,6 +798,48 @@ impl ClientState {
         event
     }
 
+    pub fn upsert_npc(&mut self, packet: ObjectNpc) -> NpcUpdateOutcome {
+        let entry = NpcEntry {
+            object_id: packet.object_id,
+            name: packet.name,
+            name_colour_argb: packet.name_colour_argb,
+            image: packet.image,
+            colour_argb: packet.colour_argb,
+            location: packet.location,
+            direction: packet.direction,
+            quest_ids: packet.quest_ids,
+        };
+
+        match self.npcs.entry(entry.object_id) {
+            Entry::Occupied(mut occupied) => {
+                occupied.insert(entry.clone());
+                NpcUpdateOutcome {
+                    created: false,
+                    npc: occupied.get().clone(),
+                }
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(entry.clone());
+                NpcUpdateOutcome {
+                    created: true,
+                    npc: entry,
+                }
+            }
+        }
+    }
+
+    pub fn apply_npc_response(&mut self, packet: NpcResponse) -> NpcResponseEvent {
+        let event = NpcResponseEvent {
+            line_count: packet.page.len(),
+            page: packet.page,
+        };
+        Self::record_clone_event(
+            &mut self.npc_response_history,
+            &mut self.last_npc_response,
+            event,
+        )
+    }
+
     pub fn apply_object_action(
         &mut self,
         motion: ObjectMotion,
@@ -776,6 +867,29 @@ impl ClientState {
             object_id: packet.object_id,
             object_type: object.object_type(),
             attack,
+        })
+    }
+
+    pub fn apply_object_harvest(&mut self, packet: ObjectHarvest) -> Option<ObjectActionOutcome> {
+        let object = self.objects.get_mut(&packet.object_id)?;
+        let result = object.apply_action(MirAction::Harvest, packet.direction, packet.location);
+        Some(ObjectActionOutcome {
+            object_id: packet.object_id,
+            object_type: object.object_type(),
+            result,
+        })
+    }
+
+    pub fn apply_object_harvested(
+        &mut self,
+        packet: ObjectHarvested,
+    ) -> Option<ObjectActionOutcome> {
+        let object = self.objects.get_mut(&packet.object_id)?;
+        let result = object.apply_action(MirAction::Skeleton, packet.direction, packet.location);
+        Some(ObjectActionOutcome {
+            object_id: packet.object_id,
+            object_type: object.object_type(),
+            result,
         })
     }
 
@@ -870,6 +984,7 @@ impl ClientState {
         let mut hero_object_count = 0;
         let mut visible_player_count = 0;
         let mut visible_hero_count = 0;
+        let mut visible_monster_count = 0;
         for object in self.objects.values() {
             match object.object_type() {
                 MapObjectType::Player => {
@@ -883,10 +998,16 @@ impl ClientState {
                         visible_hero_count += 1;
                     }
                 }
+                MapObjectType::Monster => {
+                    if !object.is_hidden() {
+                        visible_monster_count += 1;
+                    }
+                }
             }
         }
 
         let ground_object_count = self.ground_objects.len();
+        let npc_count = self.npcs.len();
 
         let level = self.character.as_ref().map(|info| info.level);
         let experience = self.character.as_ref().map(|info| info.experience);
@@ -919,7 +1040,9 @@ impl ClientState {
             hero_object_count,
             visible_player_count,
             visible_hero_count,
+            visible_monster_count,
             ground_object_count,
+            npc_count,
         }
     }
 }
@@ -949,7 +1072,9 @@ pub struct SummaryState {
     pub hero_object_count: usize,
     pub visible_player_count: usize,
     pub visible_hero_count: usize,
+    pub visible_monster_count: usize,
     pub ground_object_count: usize,
+    pub npc_count: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1080,6 +1205,30 @@ pub struct GoldChangeEvent {
 pub struct CreditChangeEvent {
     pub change: i64,
     pub new_total: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct NpcResponseEvent {
+    pub line_count: usize,
+    pub page: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NpcEntry {
+    pub object_id: u32,
+    pub name: String,
+    pub name_colour_argb: i32,
+    pub image: u16,
+    pub colour_argb: i32,
+    pub location: mir2_shared::Point,
+    pub direction: MirDirection,
+    pub quest_ids: Vec<i32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NpcUpdateOutcome {
+    pub created: bool,
+    pub npc: NpcEntry,
 }
 
 impl ClientState {
@@ -1299,5 +1448,125 @@ impl GroundObjectRemoval {
 
     pub fn kind(&self) -> GroundObjectKind {
         self.object.kind()
+    }
+}
+
+// Extended state management methods
+impl ClientState {
+    // NPC interaction methods
+    pub fn set_npc_rate(&mut self, rate: f32) {
+        self.npc_rate = rate;
+    }
+
+    // Magic/Skill methods
+    pub fn add_magic(&mut self, magic: ClientMagic, hero: bool) {
+        if hero {
+            self.hero_magics.push(magic);
+        } else {
+            self.player_magics.push(magic);
+        }
+    }
+
+    pub fn remove_magic(&mut self, place_id: u8, hero: bool) {
+        if hero {
+            if (place_id as usize) < self.hero_magics.len() {
+                self.hero_magics.remove(place_id as usize);
+            }
+        } else {
+            if (place_id as usize) < self.player_magics.len() {
+                self.player_magics.remove(place_id as usize);
+            }
+        }
+    }
+
+    pub fn level_magic(&mut self, spell: Spell, level: u8, experience: u16, hero: bool) {
+        let magics = if hero {
+            &mut self.hero_magics
+        } else {
+            &mut self.player_magics
+        };
+
+        if let Some(magic) = magics.iter_mut().find(|m| m.spell == spell) {
+            magic.level = level;
+            magic.experience = experience;
+        }
+    }
+
+    pub fn toggle_spell(&mut self, spell: Spell, hero: bool) {
+        let magics = if hero {
+            &mut self.hero_magics
+        } else {
+            &mut self.player_magics
+        };
+
+        if let Some(_magic) = magics.iter_mut().find(|m| m.spell == spell) {
+            // ClientMagic doesn't have is_equipped field, spell toggling logic will be in UI
+        }
+    }
+
+    // Storage methods
+    pub fn update_storage(&mut self, storage: Vec<Option<UserItem>>) {
+        self.storage = storage;
+    }
+
+    pub fn update_hero_storage(&mut self, storage: Vec<Option<UserItem>>) {
+        self.hero_storage = storage;
+    }
+
+    // Mode methods
+    pub fn set_attack_mode(&mut self, mode: AttackMode) {
+        self.attack_mode = Some(mode);
+    }
+
+    pub fn set_pet_mode(&mut self, mode: PetMode) {
+        self.pet_mode = Some(mode);
+    }
+
+    pub fn set_light_setting(&mut self, setting: LightSetting) {
+        self.light_setting = Some(setting);
+    }
+
+    // Hero methods
+    pub fn set_hero_spawn_state(&mut self, state: HeroSpawnState) {
+        self.hero_spawn_state = Some(state);
+    }
+
+    // Quest methods
+    pub fn update_quest(&mut self, quest: ClientQuestProgress) {
+        if let Some(existing) = self.quest_progress.iter_mut().find(|q| q.id == quest.id) {
+            *existing = quest;
+        } else {
+            self.quest_progress.push(quest);
+        }
+    }
+
+    // Object status update methods (simplified - actual implementation depends on MapObject API)
+    pub fn log_object_health(&self, object_id: u32, hp: u32, mp: u32) {
+        if let Some(_object) = self.objects.get(&object_id) {
+            tracing::trace!("Object {} health updated: HP={}, MP={}", object_id, hp, mp);
+        }
+    }
+
+    pub fn log_object_mana(&self, object_id: u32, mp: u32) {
+        if let Some(_object) = self.objects.get(&object_id) {
+            tracing::trace!("Object {} mana updated: MP={}", object_id, mp);
+        }
+    }
+
+    pub fn log_object_hidden(&self, object_id: u32, hidden: bool) {
+        if let Some(_object) = self.objects.get(&object_id) {
+            tracing::debug!("Object {} hidden status: {}", object_id, hidden);
+        }
+    }
+
+    pub fn log_object_name(&self, object_id: u32, name: &str) {
+        if let Some(_object) = self.objects.get(&object_id) {
+            tracing::info!("Object {} name: {}", object_id, name);
+        }
+    }
+
+    // Logout methods
+    pub fn store_logout_characters(&mut self, characters: Vec<CharacterSummary>) {
+        self.logout_characters = characters;
     }
 }
