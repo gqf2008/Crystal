@@ -2,7 +2,7 @@
 // Mirrors Client/MirScenes/LoginScene.cs
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
-use crate::protocol::ServerMessage;
+use crate::network::network::protocol::ServerMessage;
 
 /// Login scene state
 #[derive(Debug)]

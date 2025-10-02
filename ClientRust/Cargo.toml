@@ -39,7 +39,7 @@ reqwest = { version = "0.12", features = ["json", "gzip", "stream"] }
 bytes = "1"
 parking_lot = "0.12"
 rand = "0.8"
-mir2_shared = { path = "../SharedRust" }
+mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
 byteorder = "1"
 md5 = "0.7"
 wgpu = "26.0.1"

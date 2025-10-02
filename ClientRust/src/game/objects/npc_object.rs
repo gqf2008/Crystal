@@ -4,7 +4,7 @@
 use mir2_shared::Point;
 
 use super::map_object::MapObject;
-use crate::protocol::ObjectNpc;
+use crate::network::network::protocol::ObjectNpc;
 
 /// NPC image types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

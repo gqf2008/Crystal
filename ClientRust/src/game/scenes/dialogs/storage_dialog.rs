@@ -2,7 +2,7 @@
 // 显示玩家的仓库物品 (80个普通槽位 + 80个扩展槽位)
 
 use super::Dialog;
-use crate::protocol::UserItem;
+use crate::network::network::protocol::UserItem;
 
 /// 仓库类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -7,7 +7,7 @@ use mir2_shared::{
 };
 
 use super::map_object::MapObject;
-use crate::protocol::ObjectMonster;
+use crate::network::network::protocol::ObjectMonster;
 
 /// Monster image enum - corresponds to different monster graphics
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

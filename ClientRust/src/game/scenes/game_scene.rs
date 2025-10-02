@@ -3,8 +3,8 @@
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
 use crate::game::objects::*;
-use crate::protocol::ServerMessage;
-use mir2_shared::{enums::*, stats::Stats, Point, UserItem};
+use crate::network::network::protocol::ServerMessage;
+use mir2_shared::{enums::*, Stats, Point, UserItem};
 use std::collections::{HashMap, VecDeque};
 
 /// Attack mode

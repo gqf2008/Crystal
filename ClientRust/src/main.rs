@@ -1,18 +1,26 @@
-mod app;
-mod config;
-mod game;
-mod platform;
-mod protocol_packets; // Modularized protocol packets
-mod support;
+// Core modules - organized to match C# Client structure
+mod error;
+mod version;
+mod settings;
+mod key_bind_settings; // Renamed from keybinds
+mod program;           // Renamed from runtime
 
-pub use app::{runtime, ui};
-pub use config::{keybinds, settings, version};
-pub use game::{objects, protocol, state};
-pub use platform::{audio, net};
-pub use support::error;
+// Main functional modules (matching C# Client directory structure)
+mod forms;       // ← Client/Forms/
+mod controls;    // ← Client/MirControls/ (renamed from ui)
+mod graphics;    // ← Client/MirGraphics/
+mod network;     // ← Client/MirNetwork/ (protocol, network moved here)
+mod objects;     // ← Client/MirObjects/
+mod scenes;      // ← Client/MirScenes/ (state moved here)
+mod sounds;      // ← Client/MirSounds/ (renamed from audio)
+mod resolution;  // ← Client/Resolution/
+mod utils;       // ← Client/Utils/
+
+// Legacy game module (will be gradually migrated into above modules)
+mod game;
 
 use anyhow::Result;
-use runtime::ClientRuntime;
+use program::ClientRuntime;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();

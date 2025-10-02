@@ -7,7 +7,7 @@ use mir2_shared::{
 };
 
 use super::{frames::FrameSet, map_object::MapObject};
-use crate::protocol::ObjectSpell;
+use crate::network::network::protocol::ObjectSpell;
 
 /// Spell object - represents flying spell projectiles (fireballs, lightning, etc.)
 #[derive(Debug, Clone)]

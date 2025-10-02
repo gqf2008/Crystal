@@ -1,12 +1,7 @@
-// Game modules - mirrors Client/ structure
+// Game modules - mirrors Client/MirObjects and Client/MirScenes structure
 pub mod objects; // MirObjects/
-pub mod scenes; // MirScenes/
+pub mod scenes;  // MirScenes/
 
-// Re-exports
+// Re-exports for convenience
 pub use objects::*;
 pub use scenes::*;
-
-#[path = "../protocol.rs"]
-pub mod protocol;
-#[path = "../state.rs"]
-pub mod state;

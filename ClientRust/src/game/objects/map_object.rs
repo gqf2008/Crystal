@@ -8,7 +8,7 @@ use mir2_shared::{
     Point,
 };
 
-use crate::protocol::{HeroObject, ObjectMonster, PlayerObject};
+use crate::network::network::protocol::{HeroObject, ObjectMonster, PlayerObject};
 
 use super::frames::{AnimationState, AnimationStep};
 

@@ -2,7 +2,7 @@
 // 显示角色装备、属性、状态、技能等信息
 
 use super::Dialog;
-use crate::protocol::UserItem;
+use crate::network::network::protocol::UserItem;
 
 /// 角色页面类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

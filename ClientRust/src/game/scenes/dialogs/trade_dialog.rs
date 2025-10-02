@@ -2,7 +2,7 @@
 // 用于玩家之间的物品和金币交易
 
 use super::Dialog;
-use crate::protocol::UserItem;
+use crate::network::network::protocol::UserItem;
 
 /// 交易状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

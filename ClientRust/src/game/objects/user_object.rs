@@ -8,7 +8,7 @@ use mir2_shared::{
 };
 
 use super::map_object::MapObject;
-use crate::protocol::UserInformation;
+use crate::network::network::protocol::UserInformation;
 
 /// Special item mode for UI interaction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

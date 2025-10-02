@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
 
-use crate::stats::{SharedError, SharedResult};
+use crate::data::stats::{SharedError, SharedResult};
 
 pub const DOTNET_STRING_MAX: usize = i32::MAX as usize;
 

@@ -3,7 +3,7 @@
 
 use mir2_shared::enums::MirAction;
 
-use crate::protocol::PlayerObject;
+use crate::network::network::protocol::PlayerObject;
 
 #[derive(Debug, Default)]
 pub struct AnimationStep {

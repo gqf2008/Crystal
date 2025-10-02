@@ -1,7 +1,7 @@
 // Scene trait - base interface for all scenes
 // Mirrors Client/MirScenes/MirScene.cs
 
-use crate::protocol::ServerMessage;
+use crate::network::network::protocol::ServerMessage;
 
 /// Scene type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

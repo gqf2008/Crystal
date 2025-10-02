@@ -6,6 +6,10 @@ authors = ["Crystal Porting Team"]
 description = "Rust port of the Crystal Shared library used by client/server"
 license = "MIT OR Apache-2.0"
 
+[features]
+default = []
+client-parse = []  # Enable parse functions for ClientRust usage
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_repr = "0.1"

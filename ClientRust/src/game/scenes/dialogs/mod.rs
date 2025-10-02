@@ -117,7 +117,7 @@ pub use menu_dialog::{MenuDialog, MenuButton};
 pub use option_dialog::{OptionDialog, OptionType};
 pub use keyboard_layout_dialog::{KeyboardLayoutDialog, KeyBind, KeybindOption};
 pub use notice_dialog::{NoticeDialog, Notice};
-pub use inspect_dialog::{InspectDialog, InspectAction, EquipmentSlot, MirClass, MirGender};
+pub use inspect_dialog::{InspectDialog, InspectAction, MirClass, MirGender};
 pub use report_dialog::{ReportDialog, ReportAction, ReportType};
 
 // Core infrastructure
