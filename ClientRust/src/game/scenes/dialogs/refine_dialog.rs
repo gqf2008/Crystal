@@ -1,7 +1,7 @@
 // Refine Dialog - 装备精炼对话框
 // 放置材料精炼装备
 
-use crate::game::items::UserItem;
+use mir2_shared::UserItem;
 
 /// 精炼槽数量 (4x4 = 16)
 pub const REFINE_SLOT_COUNT: usize = 16;

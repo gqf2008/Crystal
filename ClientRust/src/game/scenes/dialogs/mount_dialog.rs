@@ -1,7 +1,7 @@
 // Mount Dialog - 坐骑管理对话框
 // 管理坐骑装备槽 (缰绳、铃铛、马鞍、彩带、面具)
 
-use crate::game::items::UserItem;
+use mir2_shared::UserItem;
 
 /// 坐骑装备槽类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

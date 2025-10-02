@@ -1,7 +1,7 @@
 // Fishing Dialog - 钓鱼系统对话框
 // 管理钓鱼装备和显示钓鱼进度
 
-use crate::game::items::UserItem;
+use mir2_shared::UserItem;
 
 /// 钓鱼装备槽
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

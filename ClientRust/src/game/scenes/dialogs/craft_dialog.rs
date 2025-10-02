@@ -1,7 +1,7 @@
 // Craft Dialog - 物品制作对话框
 // 使用工具和材料制作物品
 
-use crate::game::items::UserItem;
+use mir2_shared::UserItem;
 use std::collections::HashMap;
 
 /// 工具槽数量

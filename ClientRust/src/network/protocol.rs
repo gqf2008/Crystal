@@ -5,7 +5,7 @@ use mir2_shared::{
     binary::{read_bool, read_dotnet_string},
     // Data types from SharedRust data module
     ClientHeroInformation, ClientIntelligentCreature, ClientMagic, ClientQuestInfo,
-    ClientQuestProgress, GuildRank, ItemInfo, ClientMapInfo, UserItem, WorldMapSetup,
+    ClientQuestProgress, GuildRank, ItemInfo, ClientMapInfo, UserItem, WorldMapSetup, Stats,
     // Enums
     enums::{
         AttackMode, BuffType, ChatType, DamageType, HeroBehaviour, HeroSpawnState,
@@ -765,7 +765,7 @@ pub struct ClientBuff {
     pub expire_time: i64,
     pub infinite: bool,
     pub paused: bool,
-    pub stats: mir2_shared::stats::Stats,
+    pub stats: Stats,
     pub values: Vec<i32>,
 }
 

@@ -1,7 +1,7 @@
 // Socket Dialog - 宝石镶嵌对话框
 // 显示装备的宝石槽，支持镶嵌/拆卸宝石
 
-use crate::game::items::UserItem;
+use mir2_shared::UserItem;
 
 /// 最大宝石槽数量 (6x2 = 12)
 pub const MAX_SOCKET_SLOTS: usize = 12;

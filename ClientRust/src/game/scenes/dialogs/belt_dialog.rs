@@ -1,7 +1,7 @@
 // Belt Dialog - 腰带快捷栏对话框
 // 提供6个快捷物品槽，支持水平/垂直布局切换
 
-use crate::game::items::UserItem;
+use mir2_shared::UserItem;
 
 /// 腰带槽数量
 pub const BELT_SLOT_COUNT: usize = 6;
