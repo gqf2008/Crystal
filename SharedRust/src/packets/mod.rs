@@ -12,7 +12,6 @@ use crate::data::client_data::SelectInfo;
 
 // Core infrastructure
 pub mod base;
-pub mod ids;
 
 // Packet definitions
 pub mod client;
