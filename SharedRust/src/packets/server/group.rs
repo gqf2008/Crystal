@@ -2,17 +2,18 @@
 //!
 //! This module contains group/party-related packet definitions and parsers.
 
-use crate::map::Point;
-
-#[cfg(feature = "client-parse")]
-use std::io::Cursor;
-#[cfg(feature = "client-parse")]
-use byteorder::{LittleEndian, ReadBytesExt};
-#[cfg(feature = "client-parse")]
-use crate::binary::read_dotnet_string;
+use std::io::{Read, Write};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crate::{
+    map::Point,
+    enums::ServerPacketIds,
+    binary::{read_dotnet_string, write_dotnet_string},
+};
+use super::super::base::PacketMessage;
+use crate::data::stats::SharedResult;
 
 // ============================================================================
-// Packet Structures
+// Packet Structures & PacketMessage Implementations
 // ============================================================================
 
 /// Switch group mode
@@ -21,10 +22,49 @@ pub struct SwitchGroup {
     pub allow_group: bool,
 }
 
+impl PacketMessage for SwitchGroup {
+    const OPCODE: i16 = ServerPacketIds::SwitchGroup as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let allow_group = reader.read_u8()? != 0;
+        Ok(Self { allow_group })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(if self.allow_group { 1 } else { 0 })?;
+        Ok(())
+    }
+}
+
 /// Group members map info
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupMembersMap {
     pub members: Vec<String>,
+}
+
+impl PacketMessage for GroupMembersMap {
+    const OPCODE: i16 = ServerPacketIds::GroupMembersMap as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let count = reader.read_i32::<LittleEndian>()? as usize;
+        let mut members = Vec::with_capacity(count);
+        
+        for _ in 0..count {
+            members.push(read_dotnet_string(reader)?);
+        }
+        
+        Ok(Self { members })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.members.len() as i32)?;
+        
+        for member in &self.members {
+            write_dotnet_string(writer, member)?;
+        }
+        
+        Ok(())
+    }
 }
 
 /// Send member location
@@ -34,46 +74,25 @@ pub struct SendMemberLocation {
     pub location: Point,
 }
 
-// ============================================================================
-// Parser Functions
-// ============================================================================
+impl PacketMessage for SendMemberLocation {
+    const OPCODE: i16 = ServerPacketIds::SendMemberLocation as i16;
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_switch_group(payload: &[u8]) -> Result<SwitchGroup, String> {
-    let mut cursor = Cursor::new(payload);
-    let allow_group = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read allow_group: {}", e))?
-        != 0;
-    Ok(SwitchGroup { allow_group })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_group_members_map(payload: &[u8]) -> Result<GroupMembersMap, String> {
-    let mut cursor = Cursor::new(payload);
-    let count = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read member count: {}", e))?;
-    let mut members = Vec::new();
-    for _ in 0..count {
-        members.push(read_dotnet_string(&mut cursor)?);
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let member_name = read_dotnet_string(reader)?;
+        let x = reader.read_i32::<LittleEndian>()?;
+        let y = reader.read_i32::<LittleEndian>()?;
+        let location = Point { x, y };
+        
+        Ok(Self {
+            member_name,
+            location,
+        })
     }
-    Ok(GroupMembersMap { members })
-}
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_send_member_location(payload: &[u8]) -> Result<SendMemberLocation, String> {
-    let mut cursor = Cursor::new(payload);
-    let member_name = read_dotnet_string(&mut cursor)?;
-    let x = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read x: {}", e))?;
-    let y = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read y: {}", e))?;
-    let location = Point { x, y };
-    Ok(SendMemberLocation {
-        member_name,
-        location,
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        write_dotnet_string(writer, &self.member_name)?;
+        writer.write_i32::<LittleEndian>(self.location.x)?;
+        writer.write_i32::<LittleEndian>(self.location.y)?;
+        Ok(())
+    }
 }

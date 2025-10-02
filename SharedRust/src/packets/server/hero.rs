@@ -2,15 +2,14 @@
 //!
 //! This module contains all hero-related packet definitions and parsers.
 
+use std::io::{Read, Write};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::{
-    enums::{HeroBehaviour, HeroSpawnState, AttackMode, PetMode},
+    enums::{HeroSpawnState, AttackMode, PetMode, ServerPacketIds},
     data::client_data::ClientHeroInformation,
 };
-
-#[cfg(feature = "client-parse")]
-use std::io::Cursor;
-#[cfg(feature = "client-parse")]
-use byteorder::{LittleEndian, ReadBytesExt};
+use super::super::base::PacketMessage;
+use crate::data::stats::SharedResult;
 
 // ============================================================================
 // Packet Structures
@@ -49,80 +48,103 @@ pub struct HeroCreateRequest {
 }
 
 // ============================================================================
-// Parser Functions
+// PacketMessage Implementations
 // ============================================================================
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_update_hero_spawn_state(
-    payload: &[u8],
-) -> Result<UpdateHeroSpawnState, String> {
-    let mut cursor = Cursor::new(payload);
-    let state_byte = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read state: {}", e))?;
-    let state = HeroSpawnState::try_from(state_byte)
-        .map_err(|_| format!("Unknown hero spawn state: {}", state_byte))?;
-    Ok(UpdateHeroSpawnState { state })
-}
+impl PacketMessage for UpdateHeroSpawnState {
+    const OPCODE: i16 = ServerPacketIds::UpdateHeroSpawnState as i16;
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_set_auto_pot_value(payload: &[u8]) -> Result<SetAutoPotValue, String> {
-    let mut cursor = Cursor::new(payload);
-    let stat = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read stat: {}", e))?;
-    let value = cursor
-        .read_u32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read value: {}", e))?;
-    Ok(SetAutoPotValue { stat, value })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_set_hero_behaviour(payload: &[u8]) -> Result<SetHeroBehaviour, String> {
-    let mut cursor = Cursor::new(payload);
-    let attack_mode_byte = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read attack_mode: {}", e))?;
-    let attack_mode = AttackMode::try_from(attack_mode_byte)
-        .map_err(|_| format!("Unknown attack mode: {}", attack_mode_byte))?;
-    let pet_mode_byte = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read pet_mode: {}", e))?;
-    let pet_mode = PetMode::try_from(pet_mode_byte)
-        .map_err(|_| format!("Unknown pet mode: {}", pet_mode_byte))?;
-    Ok(SetHeroBehaviour {
-        attack_mode,
-        pet_mode,
-    })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_manage_heroes(payload: &[u8]) -> Result<ManageHeroes, String> {
-    let mut cursor = Cursor::new(payload);
-    let count = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read hero count: {}", e))?;
-    let mut heroes = Vec::new();
-    for _ in 0..count {
-        heroes.push(ClientHeroInformation::read_from(&mut cursor)?);
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let state = HeroSpawnState::try_from(reader.read_u8()?)?;
+        Ok(Self { state })
     }
-    Ok(ManageHeroes { heroes })
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(self.state as u8)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_hero_create_request(payload: &[u8]) -> Result<HeroCreateRequest, String> {
-    let mut cursor = Cursor::new(payload);
-    let count = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read class count: {}", e))?;
-    let mut can_create_class = Vec::new();
-    for _ in 0..count {
-        can_create_class.push(
-            cursor
-                .read_u8()
-                .map_err(|e| format!("Failed to read can_create flag: {}", e))?
-                != 0,
-        );
+impl PacketMessage for SetAutoPotValue {
+    const OPCODE: i16 = ServerPacketIds::SetAutoPotValue as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let stat = reader.read_u8()?;
+        let value = reader.read_u32::<LittleEndian>()?;
+        Ok(Self { stat, value })
     }
-    Ok(HeroCreateRequest { can_create_class })
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(self.stat)?;
+        writer.write_u32::<LittleEndian>(self.value)?;
+        Ok(())
+    }
+}
+
+impl PacketMessage for SetHeroBehaviour {
+    const OPCODE: i16 = ServerPacketIds::SetHeroBehaviour as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let attack_mode = AttackMode::try_from(reader.read_u8()?)?;
+        let pet_mode = PetMode::try_from(reader.read_u8()?)?;
+        Ok(Self {
+            attack_mode,
+            pet_mode,
+        })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(self.attack_mode as u8)?;
+        writer.write_u8(self.pet_mode as u8)?;
+        Ok(())
+    }
+}
+
+impl PacketMessage for ManageHeroes {
+    const OPCODE: i16 = ServerPacketIds::ManageHeroes as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let count = reader.read_i32::<LittleEndian>()? as usize;
+        let mut heroes = Vec::with_capacity(count);
+        for _ in 0..count {
+            heroes.push(ClientHeroInformation::read_from(reader)?);
+        }
+        Ok(Self { heroes })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use crate::binary::write_dotnet_string;
+        
+        writer.write_i32::<LittleEndian>(self.heroes.len() as i32)?;
+        for hero in &self.heroes {
+            // Manual serialization since ClientHeroInformation lacks write_to
+            writer.write_i32::<LittleEndian>(hero.index)?;
+            write_dotnet_string(writer, &hero.name)?;
+            writer.write_u16::<LittleEndian>(hero.level)?;
+            writer.write_u8(hero.class as u8)?;
+            writer.write_u8(hero.gender as u8)?;
+        }
+        Ok(())
+    }
+}
+
+impl PacketMessage for HeroCreateRequest {
+    const OPCODE: i16 = ServerPacketIds::HeroCreateRequest as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let count = reader.read_i32::<LittleEndian>()? as usize;
+        let mut can_create_class = Vec::with_capacity(count);
+        for _ in 0..count {
+            can_create_class.push(reader.read_u8()? != 0);
+        }
+        Ok(Self { can_create_class })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.can_create_class.len() as i32)?;
+        for &can_create in &self.can_create_class {
+            writer.write_u8(if can_create { 1 } else { 0 })?;
+        }
+        Ok(())
+    }
 }

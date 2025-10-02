@@ -220,6 +220,8 @@ pub enum ClientPacketIds {
     ItemRentalLockFee = 141,
     ItemRentalLockItem = 142,
     ConfirmItemRental = 143,
+    GuildTerritoryPage,
+    PurchaseGuildTerritory,
 }
 
 #[derive(
@@ -2566,6 +2568,7 @@ pub enum ServerPacketIds {
     GroupMembersMap = 272,
     SendMemberLocation = 273,
     GuildTerritoryPage = 274,
+    PurchaseGuildTerritory = 275,
 }
 
 #[cfg(test)]

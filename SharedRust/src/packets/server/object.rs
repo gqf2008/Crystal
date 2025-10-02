@@ -2,15 +2,17 @@
 //!
 //! This module contains object status-related packet definitions and parsers.
 
-use crate::{enums::SpellEffect, map::Point};
-
-#[cfg(feature = "client-parse")]
-use std::io::Cursor;
-#[cfg(feature = "client-parse")]
-use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{Read, Write};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crate::{
+    enums::{SpellEffect, ServerPacketIds},
+    map::Point,
+};
+use super::super::base::PacketMessage;
+use crate::data::stats::SharedResult;
 
 // ============================================================================
-// Packet Structures
+// Packet Structures & PacketMessage Implementations
 // ============================================================================
 
 /// Object health update
@@ -21,6 +23,28 @@ pub struct ObjectHealth {
     pub expire: u16,
 }
 
+impl PacketMessage for ObjectHealth {
+    const OPCODE: i16 = ServerPacketIds::ObjectHealth as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let object_id = reader.read_u32::<LittleEndian>()?;
+        let percent = reader.read_u8()?;
+        let expire = reader.read_u16::<LittleEndian>()?;
+        Ok(Self {
+            object_id,
+            percent,
+            expire,
+        })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u8(self.percent)?;
+        writer.write_u16::<LittleEndian>(self.expire)?;
+        Ok(())
+    }
+}
+
 /// Object mana update
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectMana {
@@ -28,11 +52,43 @@ pub struct ObjectMana {
     pub percent: u8,
 }
 
+impl PacketMessage for ObjectMana {
+    const OPCODE: i16 = ServerPacketIds::ObjectMana as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let object_id = reader.read_u32::<LittleEndian>()?;
+        let percent = reader.read_u8()?;
+        Ok(Self { object_id, percent })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u8(self.percent)?;
+        Ok(())
+    }
+}
+
 /// Object hidden status changed
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectHidden {
     pub object_id: u32,
     pub hidden: bool,
+}
+
+impl PacketMessage for ObjectHidden {
+    const OPCODE: i16 = ServerPacketIds::ObjectHidden as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let object_id = reader.read_u32::<LittleEndian>()?;
+        let hidden = reader.read_u8()? != 0;
+        Ok(Self { object_id, hidden })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u8(if self.hidden { 1 } else { 0 })?;
+        Ok(())
+    }
 }
 
 /// Map effect
@@ -43,75 +99,27 @@ pub struct MapEffect {
     pub value: i32,
 }
 
-// ============================================================================
-// Parser Functions
-// ============================================================================
+impl PacketMessage for MapEffect {
+    const OPCODE: i16 = ServerPacketIds::MapEffect as i16;
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_health(payload: &[u8]) -> Result<ObjectHealth, String> {
-    let mut cursor = Cursor::new(payload);
-    let object_id = cursor
-        .read_u32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read object_id: {}", e))?;
-    let percent = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read percent: {}", e))?;
-    let expire = cursor
-        .read_u16::<LittleEndian>()
-        .map_err(|e| format!("Failed to read expire: {}", e))?;
-    Ok(ObjectHealth {
-        object_id,
-        percent,
-        expire,
-    })
-}
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let x = reader.read_i32::<LittleEndian>()?;
+        let y = reader.read_i32::<LittleEndian>()?;
+        let location = Point { x, y };
+        let effect = SpellEffect::try_from(reader.read_u8()?)?;
+        let value = reader.read_i32::<LittleEndian>()?;
+        Ok(Self {
+            location,
+            effect,
+            value,
+        })
+    }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_mana(payload: &[u8]) -> Result<ObjectMana, String> {
-    let mut cursor = Cursor::new(payload);
-    let object_id = cursor
-        .read_u32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read object_id: {}", e))?;
-    let percent = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read percent: {}", e))?;
-    Ok(ObjectMana { object_id, percent })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_hidden(payload: &[u8]) -> Result<ObjectHidden, String> {
-    let mut cursor = Cursor::new(payload);
-    let object_id = cursor
-        .read_u32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read object_id: {}", e))?;
-    let hidden = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read hidden: {}", e))?
-        != 0;
-    Ok(ObjectHidden { object_id, hidden })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_map_effect(payload: &[u8]) -> Result<MapEffect, String> {
-    let mut cursor = Cursor::new(payload);
-    let x = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read x: {}", e))?;
-    let y = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read y: {}", e))?;
-    let location = Point { x, y };
-    let effect_byte = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read effect: {}", e))?;
-    let effect = SpellEffect::try_from(effect_byte)
-        .map_err(|_| format!("Unknown spell effect: {}", effect_byte))?;
-    let value = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read value: {}", e))?;
-    Ok(MapEffect {
-        location,
-        effect,
-        value,
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.location.x)?;
+        writer.write_i32::<LittleEndian>(self.location.y)?;
+        writer.write_u8(self.effect as u8)?;
+        writer.write_i32::<LittleEndian>(self.value)?;
+        Ok(())
+    }
 }

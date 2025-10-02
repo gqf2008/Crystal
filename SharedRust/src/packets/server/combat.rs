@@ -1,5 +1,14 @@
-// 战斗系统数据包解析
-// Combat System Packet Parsing
+//! Combat System Packets
+//!
+//! This module contains all combat-related packet definitions.
+
+use std::io::{Read, Write};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crate::{
+    enums::ServerPacketIds,
+    data::stats::SharedResult,
+};
+use super::super::base::PacketMessage;
 
 
 #[derive(Debug, Clone)]
@@ -140,284 +149,365 @@ pub struct HeroHealthChanged {
 
 // ==================== 解析函数 ====================
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_attack(payload: &[u8]) -> Result<ObjectAttack, String> {
-    if payload.len() < 19 {
-        return Err(format!(
-            "ObjectAttack payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for ObjectAttack {
+    const OPCODE: i16 = ServerPacketIds::ObjectAttack as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectAttack {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+            spell: reader.read_u8()?,
+            level: reader.read_u16::<LittleEndian>()?,
+            attack_type: reader.read_u8()?,
+        })
     }
 
-    Ok(ObjectAttack {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_x: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[8..12].try_into().unwrap()),
-        direction: payload[12],
-        spell: payload[13],
-        level: u16::from_le_bytes(payload[14..16].try_into().unwrap()),
-        attack_type: payload[16],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        writer.write_u8(self.spell)?;
+        writer.write_u16::<LittleEndian>(self.level)?;
+        writer.write_u8(self.attack_type)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_struck(payload: &[u8]) -> Result<Struck, String> {
-    if payload.len() < 4 {
-        return Err(format!("Struck payload too short: {} bytes", payload.len()));
+impl PacketMessage for Struck {
+    const OPCODE: i16 = ServerPacketIds::Struck as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(Struck {
+            attacker_id: reader.read_u32::<LittleEndian>()?,
+        })
     }
 
-    Ok(Struck {
-        attacker_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.attacker_id)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_struck(payload: &[u8]) -> Result<ObjectStruck, String> {
-    if payload.len() < 17 {
-        return Err(format!(
-            "ObjectStruck payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for ObjectStruck {
+    const OPCODE: i16 = ServerPacketIds::ObjectStruck as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectStruck {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            attacker_id: reader.read_u32::<LittleEndian>()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+        })
     }
 
-    Ok(ObjectStruck {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        attacker_id: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        location_x: u32::from_le_bytes(payload[8..12].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[12..16].try_into().unwrap()),
-        direction: payload[16],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u32::<LittleEndian>(self.attacker_id)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_damage_indicator(payload: &[u8]) -> Result<DamageIndicator, String> {
-    if payload.len() < 9 {
-        return Err(format!(
-            "DamageIndicator payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for DamageIndicator {
+    const OPCODE: i16 = ServerPacketIds::DamageIndicator as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(DamageIndicator {
+            damage: reader.read_i32::<LittleEndian>()?,
+            damage_type: reader.read_u8()?,
+            object_id: reader.read_u32::<LittleEndian>()?,
+        })
     }
 
-    Ok(DamageIndicator {
-        damage: i32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        damage_type: payload[4],
-        object_id: u32::from_le_bytes(payload[5..9].try_into().unwrap()),
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.damage)?;
+        writer.write_u8(self.damage_type)?;
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_pushed(payload: &[u8]) -> Result<Pushed, String> {
-    if payload.len() < 9 {
-        return Err(format!("Pushed payload too short: {} bytes", payload.len()));
+impl PacketMessage for Pushed {
+    const OPCODE: i16 = ServerPacketIds::Pushed as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(Pushed {
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+        })
     }
 
-    Ok(Pushed {
-        location_x: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        direction: payload[8],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_pushed(payload: &[u8]) -> Result<ObjectPushed, String> {
-    if payload.len() < 13 {
-        return Err(format!(
-            "ObjectPushed payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for ObjectPushed {
+    const OPCODE: i16 = ServerPacketIds::ObjectPushed as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectPushed {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+        })
     }
 
-    Ok(ObjectPushed {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_x: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[8..12].try_into().unwrap()),
-        direction: payload[12],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_range_attack(payload: &[u8]) -> Result<RangeAttack, String> {
-    if payload.len() < 16 {
-        return Err(format!(
-            "RangeAttack payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for RangeAttack {
+    const OPCODE: i16 = ServerPacketIds::RangeAttack as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(RangeAttack {
+            target_id: reader.read_u32::<LittleEndian>()?,
+            target_x: reader.read_u32::<LittleEndian>()?,
+            target_y: reader.read_u32::<LittleEndian>()?,
+            spell: reader.read_u16::<LittleEndian>()?,
+            spell_level: reader.read_u16::<LittleEndian>()?,
+        })
     }
 
-    Ok(RangeAttack {
-        target_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        target_x: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        target_y: u32::from_le_bytes(payload[8..12].try_into().unwrap()),
-        spell: u16::from_le_bytes(payload[12..14].try_into().unwrap()),
-        spell_level: u16::from_le_bytes(payload[14..16].try_into().unwrap()),
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.target_id)?;
+        writer.write_u32::<LittleEndian>(self.target_x)?;
+        writer.write_u32::<LittleEndian>(self.target_y)?;
+        writer.write_u16::<LittleEndian>(self.spell)?;
+        writer.write_u16::<LittleEndian>(self.spell_level)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_range_attack(payload: &[u8]) -> Result<ObjectRangeAttack, String> {
-    if payload.len() < 29 {
-        return Err(format!(
-            "ObjectRangeAttack payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for ObjectRangeAttack {
+    const OPCODE: i16 = ServerPacketIds::ObjectRangeAttack as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectRangeAttack {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+            target_id: reader.read_u32::<LittleEndian>()?,
+            target_x: reader.read_u32::<LittleEndian>()?,
+            target_y: reader.read_u32::<LittleEndian>()?,
+            spell: reader.read_u16::<LittleEndian>()?,
+            spell_level: reader.read_u16::<LittleEndian>()?,
+        })
     }
 
-    Ok(ObjectRangeAttack {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_x: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[8..12].try_into().unwrap()),
-        direction: payload[12],
-        target_id: u32::from_le_bytes(payload[13..17].try_into().unwrap()),
-        target_x: u32::from_le_bytes(payload[17..21].try_into().unwrap()),
-        target_y: u32::from_le_bytes(payload[21..25].try_into().unwrap()),
-        spell: u16::from_le_bytes(payload[25..27].try_into().unwrap()),
-        spell_level: u16::from_le_bytes(payload[27..29].try_into().unwrap()),
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        writer.write_u32::<LittleEndian>(self.target_id)?;
+        writer.write_u32::<LittleEndian>(self.target_x)?;
+        writer.write_u32::<LittleEndian>(self.target_y)?;
+        writer.write_u16::<LittleEndian>(self.spell)?;
+        writer.write_u16::<LittleEndian>(self.spell_level)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_user_dash(payload: &[u8]) -> Result<UserDash, String> {
-    if payload.len() < 9 {
-        return Err(format!(
-            "UserDash payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for UserDash {
+    const OPCODE: i16 = ServerPacketIds::UserDash as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(UserDash {
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+        })
     }
 
-    Ok(UserDash {
-        location_x: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        direction: payload[8],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_dash(payload: &[u8]) -> Result<ObjectDash, String> {
-    if payload.len() < 13 {
-        return Err(format!(
-            "ObjectDash payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for ObjectDash {
+    const OPCODE: i16 = ServerPacketIds::ObjectDash as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectDash {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+        })
     }
 
-    Ok(ObjectDash {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_x: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[8..12].try_into().unwrap()),
-        direction: payload[12],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_user_dash_fail(payload: &[u8]) -> Result<UserDashFail, String> {
-    if payload.len() < 9 {
-        return Err(format!(
-            "UserDashFail payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for UserDashFail {
+    const OPCODE: i16 = ServerPacketIds::UserDashFail as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(UserDashFail {
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+        })
     }
 
-    Ok(UserDashFail {
-        location_x: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        direction: payload[8],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_dash_fail(payload: &[u8]) -> Result<ObjectDashFail, String> {
-    if payload.len() < 13 {
-        return Err(format!(
-            "ObjectDashFail payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for ObjectDashFail {
+    const OPCODE: i16 = ServerPacketIds::ObjectDashFail as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectDashFail {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+        })
     }
 
-    Ok(ObjectDashFail {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_x: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[8..12].try_into().unwrap()),
-        direction: payload[12],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_death(payload: &[u8]) -> Result<Death, String> {
-    if payload.len() < 9 {
-        return Err(format!("Death payload too short: {} bytes", payload.len()));
+impl PacketMessage for Death {
+    const OPCODE: i16 = ServerPacketIds::Death as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(Death {
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+        })
     }
 
-    Ok(Death {
-        location_x: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        direction: payload[8],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_died(payload: &[u8]) -> Result<ObjectDied, String> {
-    if payload.len() < 14 {
-        return Err(format!(
-            "ObjectDied payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for ObjectDied {
+    const OPCODE: i16 = ServerPacketIds::ObjectDied as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectDied {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+            death_type: reader.read_u8()?,
+        })
     }
 
-    Ok(ObjectDied {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_x: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[8..12].try_into().unwrap()),
-        direction: payload[12],
-        death_type: payload[13],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        writer.write_u8(self.death_type)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_revived(_payload: &[u8]) -> Result<Revived, String> {
-    Ok(Revived)
-}
+impl PacketMessage for Revived {
+    const OPCODE: i16 = ServerPacketIds::Revived as i16;
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_revived(payload: &[u8]) -> Result<ObjectRevived, String> {
-    if payload.len() < 5 {
-        return Err(format!(
-            "ObjectRevived payload too short: {} bytes",
-            payload.len()
-        ));
+    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
+        Ok(Revived)
     }
 
-    Ok(ObjectRevived {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        effect: payload[4],
-    })
+    fn write_body<W: Write>(&self, _writer: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_health_changed(payload: &[u8]) -> Result<HealthChanged, String> {
-    if payload.len() < 8 {
-        return Err(format!(
-            "HealthChanged payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for ObjectRevived {
+    const OPCODE: i16 = ServerPacketIds::ObjectRevived as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectRevived {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            effect: reader.read_u8()?,
+        })
     }
 
-    Ok(HealthChanged {
-        hp: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        mp: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u8(self.effect)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_hero_health_changed(payload: &[u8]) -> Result<HeroHealthChanged, String> {
-    if payload.len() < 8 {
-        return Err(format!(
-            "HeroHealthChanged payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for HealthChanged {
+    const OPCODE: i16 = ServerPacketIds::HealthChanged as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(HealthChanged {
+            hp: reader.read_u32::<LittleEndian>()?,
+            mp: reader.read_u32::<LittleEndian>()?,
+        })
     }
 
-    Ok(HeroHealthChanged {
-        hp: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        mp: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.hp)?;
+        writer.write_u32::<LittleEndian>(self.mp)?;
+        Ok(())
+    }
+}
+
+impl PacketMessage for HeroHealthChanged {
+    const OPCODE: i16 = ServerPacketIds::HeroHealthChanged as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(HeroHealthChanged {
+            hp: reader.read_u32::<LittleEndian>()?,
+            mp: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.hp)?;
+        writer.write_u32::<LittleEndian>(self.mp)?;
+        Ok(())
+    }
 }

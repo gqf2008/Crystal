@@ -1,11 +1,11 @@
 //! Group/Party System Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::ReadBytesExt;
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::ClientPacketIds;
 use super::super::base::PacketMessage;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
+use crate::enums::ClientPacketIds;
+use byteorder::ReadBytesExt;
+use std::io::{Read, Write};
 
 /// Switch group mode (allow/disallow grouping)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,7 +22,6 @@ impl PacketMessage for SwitchGroup {
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use std::io::Write as IoWrite;
         writer.write_all(&[if self.allow_group { 1 } else { 0 }])?;
         Ok(())
     }
@@ -83,7 +82,6 @@ impl PacketMessage for GroupInvite {
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use std::io::Write as IoWrite;
         writer.write_all(&[if self.accept_invite { 1 } else { 0 }])?;
         Ok(())
     }

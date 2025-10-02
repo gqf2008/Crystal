@@ -1,7 +1,15 @@
-// 地图系统数据包解析
-// Map System Packet Parsing
+//! Map System Packets
+//!
+//! This module contains all map-related packet definitions and parsers.
 
-use std::io::{Cursor, Read};
+use std::io::{Read, Write};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crate::{
+    enums::ServerPacketIds,
+    binary::{read_dotnet_string, write_dotnet_string},
+};
+use super::super::base::PacketMessage;
+use crate::data::stats::SharedResult;
 
 #[derive(Debug, Clone)]
 pub struct MapInformation {
@@ -95,211 +103,247 @@ pub struct SearchMapResult {
 
 // ==================== 解析函数 ====================
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_map_information(payload: &[u8]) -> Result<MapInformation, String> {
-    let mut cursor = Cursor::new(payload);
+impl PacketMessage for MapInformation {
+    const OPCODE: i16 = ServerPacketIds::MapInformation as i16;
 
-    let map_index = read_i32(&mut cursor)?;
-    let file_name = read_string(&mut cursor)?;
-    let title = read_string(&mut cursor)?;
-    let minimap = read_u16(&mut cursor)?;
-    let big_map = read_u16(&mut cursor)?;
-    let lights = read_u8(&mut cursor)?;
-    let location_x = read_u32(&mut cursor)?;
-    let location_y = read_u32(&mut cursor)?;
-    let direction = read_u8(&mut cursor)?;
-    let map_dark_light = read_u8(&mut cursor)?;
-    let music = read_u16(&mut cursor)?;
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let map_index = reader.read_i32::<LittleEndian>()?;
+        let file_name = read_dotnet_string(reader)?;
+        let title = read_dotnet_string(reader)?;
+        let minimap = reader.read_u16::<LittleEndian>()?;
+        let big_map = reader.read_u16::<LittleEndian>()?;
+        let lights = reader.read_u8()?;
+        let location_x = reader.read_u32::<LittleEndian>()?;
+        let location_y = reader.read_u32::<LittleEndian>()?;
+        let direction = reader.read_u8()?;
+        let map_dark_light = reader.read_u8()?;
+        let music = reader.read_u16::<LittleEndian>()?;
 
-    Ok(MapInformation {
-        map_index,
-        file_name,
-        title,
-        minimap,
-        big_map,
-        lights,
-        location_x,
-        location_y,
-        direction,
-        map_dark_light,
-        music,
-    })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_new_map_info(payload: &[u8]) -> Result<NewMapInfo, String> {
-    let mut cursor = Cursor::new(payload);
-
-    Ok(NewMapInfo {
-        map_index: read_i32(&mut cursor)?,
-        file_name: read_string(&mut cursor)?,
-        title: read_string(&mut cursor)?,
-        minimap: read_u16(&mut cursor)?,
-        big_map: read_u16(&mut cursor)?,
-        music: read_u16(&mut cursor)?,
-        lights: read_u8(&mut cursor)?,
-        location_x: read_u32(&mut cursor)?,
-        location_y: read_u32(&mut cursor)?,
-        direction: read_u8(&mut cursor)?,
-        map_dark_light: read_u8(&mut cursor)?,
-    })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_map_changed(payload: &[u8]) -> Result<MapChanged, String> {
-    let mut cursor = Cursor::new(payload);
-
-    Ok(MapChanged {
-        file_name: read_string(&mut cursor)?,
-        title: read_string(&mut cursor)?,
-        minimap: read_u16(&mut cursor)?,
-        big_map: read_u16(&mut cursor)?,
-        music: read_u16(&mut cursor)?,
-        lights: read_u8(&mut cursor)?,
-        location_x: read_u32(&mut cursor)?,
-        location_y: read_u32(&mut cursor)?,
-        direction: read_u8(&mut cursor)?,
-        map_dark_light: read_u8(&mut cursor)?,
-    })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_hide(payload: &[u8]) -> Result<ObjectHide, String> {
-    if payload.len() < 4 {
-        return Err(format!(
-            "ObjectHide payload too short: {} bytes",
-            payload.len()
-        ));
+        Ok(MapInformation {
+            map_index,
+            file_name,
+            title,
+            minimap,
+            big_map,
+            lights,
+            location_x,
+            location_y,
+            direction,
+            map_dark_light,
+            music,
+        })
     }
 
-    Ok(ObjectHide {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.map_index)?;
+        write_dotnet_string(writer, &self.file_name)?;
+        write_dotnet_string(writer, &self.title)?;
+        writer.write_u16::<LittleEndian>(self.minimap)?;
+        writer.write_u16::<LittleEndian>(self.big_map)?;
+        writer.write_u8(self.lights)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        writer.write_u8(self.map_dark_light)?;
+        writer.write_u16::<LittleEndian>(self.music)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_show(payload: &[u8]) -> Result<ObjectShow, String> {
-    if payload.len() < 4 {
-        return Err(format!(
-            "ObjectShow payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for NewMapInfo {
+    const OPCODE: i16 = ServerPacketIds::NewMapInfo as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(NewMapInfo {
+            map_index: reader.read_i32::<LittleEndian>()?,
+            file_name: read_dotnet_string(reader)?,
+            title: read_dotnet_string(reader)?,
+            minimap: reader.read_u16::<LittleEndian>()?,
+            big_map: reader.read_u16::<LittleEndian>()?,
+            music: reader.read_u16::<LittleEndian>()?,
+            lights: reader.read_u8()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+            map_dark_light: reader.read_u8()?,
+        })
     }
 
-    Ok(ObjectShow {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.map_index)?;
+        write_dotnet_string(writer, &self.file_name)?;
+        write_dotnet_string(writer, &self.title)?;
+        writer.write_u16::<LittleEndian>(self.minimap)?;
+        writer.write_u16::<LittleEndian>(self.big_map)?;
+        writer.write_u16::<LittleEndian>(self.music)?;
+        writer.write_u8(self.lights)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        writer.write_u8(self.map_dark_light)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_teleport_out(payload: &[u8]) -> Result<ObjectTeleportOut, String> {
-    if payload.len() < 5 {
-        return Err(format!(
-            "ObjectTeleportOut payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for MapChanged {
+    const OPCODE: i16 = ServerPacketIds::MapChanged as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(MapChanged {
+            file_name: read_dotnet_string(reader)?,
+            title: read_dotnet_string(reader)?,
+            minimap: reader.read_u16::<LittleEndian>()?,
+            big_map: reader.read_u16::<LittleEndian>()?,
+            music: reader.read_u16::<LittleEndian>()?,
+            lights: reader.read_u8()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+            direction: reader.read_u8()?,
+            map_dark_light: reader.read_u8()?,
+        })
     }
 
-    Ok(ObjectTeleportOut {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        teleport_type: payload[4],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        write_dotnet_string(writer, &self.file_name)?;
+        write_dotnet_string(writer, &self.title)?;
+        writer.write_u16::<LittleEndian>(self.minimap)?;
+        writer.write_u16::<LittleEndian>(self.big_map)?;
+        writer.write_u16::<LittleEndian>(self.music)?;
+        writer.write_u8(self.lights)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_u8(self.direction)?;
+        writer.write_u8(self.map_dark_light)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_teleport_in(payload: &[u8]) -> Result<ObjectTeleportIn, String> {
-    if payload.len() < 5 {
-        return Err(format!(
-            "ObjectTeleportIn payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for ObjectHide {
+    const OPCODE: i16 = ServerPacketIds::ObjectHide as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectHide {
+            object_id: reader.read_u32::<LittleEndian>()?,
+        })
     }
 
-    Ok(ObjectTeleportIn {
-        object_id: u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        teleport_type: payload[4],
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_teleport_in(_payload: &[u8]) -> Result<TeleportIn, String> {
-    Ok(TeleportIn)
-}
+impl PacketMessage for ObjectShow {
+    const OPCODE: i16 = ServerPacketIds::ObjectShow as i16;
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_world_map_setup(payload: &[u8]) -> Result<WorldMapSetupInfo, String> {
-    let mut cursor = Cursor::new(payload);
-    let count = read_i32(&mut cursor)? as usize;
-
-    let mut world_maps = Vec::with_capacity(count);
-    for _ in 0..count {
-        world_maps.push(WorldMapIcon {
-            icon: read_u16(&mut cursor)?,
-            title: read_string(&mut cursor)?,
-            map_index: read_i32(&mut cursor)?,
-            location_x: read_u32(&mut cursor)?,
-            location_y: read_u32(&mut cursor)?,
-        });
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectShow {
+            object_id: reader.read_u32::<LittleEndian>()?,
+        })
     }
 
-    Ok(WorldMapSetupInfo { world_maps })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_search_map_result(payload: &[u8]) -> Result<SearchMapResult, String> {
-    if payload.len() < 12 {
-        return Err(format!(
-            "SearchMapResult payload too short: {} bytes",
-            payload.len()
-        ));
+impl PacketMessage for ObjectTeleportOut {
+    const OPCODE: i16 = ServerPacketIds::ObjectTeleportOut as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectTeleportOut {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            teleport_type: reader.read_u8()?,
+        })
     }
 
-    Ok(SearchMapResult {
-        map_index: i32::from_le_bytes(payload[0..4].try_into().unwrap()),
-        location_x: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        location_y: u32::from_le_bytes(payload[8..12].try_into().unwrap()),
-    })
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u8(self.teleport_type)?;
+        Ok(())
+    }
 }
 
-// ==================== 辅助函数 ====================
+impl PacketMessage for ObjectTeleportIn {
+    const OPCODE: i16 = ServerPacketIds::ObjectTeleportIn as i16;
 
-fn read_u8(cursor: &mut Cursor<&[u8]>) -> Result<u8, String> {
-    let mut buf = [0u8; 1];
-    cursor
-        .read_exact(&mut buf)
-        .map_err(|e| format!("Failed to read u8: {}", e))?;
-    Ok(buf[0])
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectTeleportIn {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            teleport_type: reader.read_u8()?,
+        })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u8(self.teleport_type)?;
+        Ok(())
+    }
 }
 
-fn read_u16(cursor: &mut Cursor<&[u8]>) -> Result<u16, String> {
-    let mut buf = [0u8; 2];
-    cursor
-        .read_exact(&mut buf)
-        .map_err(|e| format!("Failed to read u16: {}", e))?;
-    Ok(u16::from_le_bytes(buf))
+impl PacketMessage for TeleportIn {
+    const OPCODE: i16 = ServerPacketIds::TeleportIn as i16;
+
+    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
+        Ok(TeleportIn)
+    }
+
+    fn write_body<W: Write>(&self, _writer: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
 }
 
-fn read_u32(cursor: &mut Cursor<&[u8]>) -> Result<u32, String> {
-    let mut buf = [0u8; 4];
-    cursor
-        .read_exact(&mut buf)
-        .map_err(|e| format!("Failed to read u32: {}", e))?;
-    Ok(u32::from_le_bytes(buf))
+impl PacketMessage for WorldMapSetupInfo {
+    const OPCODE: i16 = ServerPacketIds::WorldMapSetup as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let count = reader.read_i32::<LittleEndian>()? as usize;
+        let mut world_maps = Vec::with_capacity(count);
+        
+        for _ in 0..count {
+            world_maps.push(WorldMapIcon {
+                icon: reader.read_u16::<LittleEndian>()?,
+                title: read_dotnet_string(reader)?,
+                map_index: reader.read_i32::<LittleEndian>()?,
+                location_x: reader.read_u32::<LittleEndian>()?,
+                location_y: reader.read_u32::<LittleEndian>()?,
+            });
+        }
+
+        Ok(WorldMapSetupInfo { world_maps })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.world_maps.len() as i32)?;
+        
+        for icon in &self.world_maps {
+            writer.write_u16::<LittleEndian>(icon.icon)?;
+            write_dotnet_string(writer, &icon.title)?;
+            writer.write_i32::<LittleEndian>(icon.map_index)?;
+            writer.write_u32::<LittleEndian>(icon.location_x)?;
+            writer.write_u32::<LittleEndian>(icon.location_y)?;
+        }
+        
+        Ok(())
+    }
 }
 
-fn read_i32(cursor: &mut Cursor<&[u8]>) -> Result<i32, String> {
-    let mut buf = [0u8; 4];
-    cursor
-        .read_exact(&mut buf)
-        .map_err(|e| format!("Failed to read i32: {}", e))?;
-    Ok(i32::from_le_bytes(buf))
-}
+impl PacketMessage for SearchMapResult {
+    const OPCODE: i16 = ServerPacketIds::SearchMapResult as i16;
 
-fn read_string(cursor: &mut Cursor<&[u8]>) -> Result<String, String> {
-    let length = read_u16(cursor)? as usize;
-    let mut buf = vec![0u8; length];
-    cursor
-        .read_exact(&mut buf)
-        .map_err(|e| format!("Failed to read string: {}", e))?;
-    String::from_utf8(buf).map_err(|e| format!("Invalid UTF-8: {}", e))
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(SearchMapResult {
+            map_index: reader.read_i32::<LittleEndian>()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.map_index)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
+        Ok(())
+    }
 }

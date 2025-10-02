@@ -23,7 +23,7 @@ pub type CharacterSummary = SelectInfo;
 
 // Re-export packet infrastructure for convenience
 pub use base::*;
-pub use ids::*;
+// pub use ids::*;
 
 // Re-export all packet types for convenience
 pub use client::*;

@@ -2,16 +2,14 @@
 //!
 //! This module contains account and character management packet definitions and parsers.
 
-// Re-use parse_character_summary from player module
-#[cfg(feature = "client-parse")]
-use super::player::parse_character_summary;
-
-#[cfg(feature = "client-parse")]
-use byteorder::ReadBytesExt;
-#[cfg(feature = "client-parse")]
-use crate::binary::read_dotnet_string;
-#[cfg(feature = "client-parse")]
-use std::io::Cursor;
+use std::io::{Read, Write};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crate::{
+    enums::{ServerPacketIds, MirClass, MirGender},
+    binary::{read_dotnet_string, write_dotnet_string},
+};
+use super::super::base::PacketMessage;
+use crate::data::stats::SharedResult;
 
 // ============================================================================
 // Packet Structures
@@ -42,41 +40,89 @@ pub struct DeleteCharacterSuccess {
 }
 
 // ============================================================================
-// Parser Functions
+// PacketMessage Implementations
 // ============================================================================
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_new_character(payload: &[u8]) -> Result<NewCharacter, String> {
-    let mut cursor = Cursor::new(payload);
-    let result = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read result: {}", e))?;
-    Ok(NewCharacter { result })
+impl PacketMessage for NewCharacter {
+    const OPCODE: i16 = ServerPacketIds::NewCharacter as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let result = reader.read_u8()?;
+        Ok(Self { result })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(self.result)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_new_character_success(payload: &[u8]) -> Result<NewCharacterSuccess, String> {
-    let mut cursor = Cursor::new(payload);
-    let character = parse_character_summary(&mut cursor)?;
-    Ok(NewCharacterSuccess { character })
+impl PacketMessage for NewCharacterSuccess {
+    const OPCODE: i16 = ServerPacketIds::NewCharacterSuccess as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let index = reader.read_i32::<LittleEndian>()?;
+        let name = read_dotnet_string(reader)?;
+        let level = reader.read_u16::<LittleEndian>()?;
+        let class = MirClass::try_from(reader.read_u8()?)?;
+        let gender = MirGender::try_from(reader.read_u8()?)?;
+        let ticks = reader.read_i64::<LittleEndian>()?;
+        let unix_epoch_ticks = 621355968000000000i64;
+        let unix_seconds = (ticks - unix_epoch_ticks) / 10000000;
+        use chrono::{TimeZone, Utc};
+        let last_access = Utc.timestamp_opt(unix_seconds, 0)
+            .single()
+            .ok_or(crate::data::stats::SharedError::InvalidDateTime)?;
+
+        Ok(Self {
+            character: super::super::CharacterSummary {
+                index,
+                name,
+                level,
+                class,
+                gender,
+                last_access,
+            },
+        })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.character.index)?;
+        write_dotnet_string(writer, &self.character.name)?;
+        writer.write_u16::<LittleEndian>(self.character.level)?;
+        writer.write_u8(self.character.class as u8)?;
+        writer.write_u8(self.character.gender as u8)?;
+        let unix_epoch_ticks = 621355968000000000i64;
+        let ticks = self.character.last_access.timestamp() * 10000000 + unix_epoch_ticks;
+        writer.write_i64::<LittleEndian>(ticks)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_delete_character(payload: &[u8]) -> Result<DeleteCharacter, String> {
-    let mut cursor = Cursor::new(payload);
-    let result = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read result: {}", e))?;
-    Ok(DeleteCharacter { result })
+impl PacketMessage for DeleteCharacter {
+    const OPCODE: i16 = ServerPacketIds::DeleteCharacter as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let result = reader.read_u8()?;
+        Ok(Self { result })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(self.result)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_delete_character_success(
-    payload: &[u8],
-) -> Result<DeleteCharacterSuccess, String> {
-    let mut cursor = Cursor::new(payload);
-    let character_index = cursor
-        .read_i32::<byteorder::LittleEndian>()
-        .map_err(|e| format!("Failed to read character_index: {}", e))?;
-    Ok(DeleteCharacterSuccess { character_index })
+impl PacketMessage for DeleteCharacterSuccess {
+    const OPCODE: i16 = ServerPacketIds::DeleteCharacterSuccess as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let character_index = reader.read_i32::<LittleEndian>()?;
+        Ok(Self { character_index })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.character_index)?;
+        Ok(())
+    }
 }

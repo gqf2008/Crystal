@@ -2,20 +2,34 @@
 //!
 //! This module contains all NPC-related packet definitions and parsers.
 
-#[cfg(feature = "client-parse")]
-use std::io::Cursor;
-#[cfg(feature = "client-parse")]
-use byteorder::{LittleEndian, ReadBytesExt};
-#[cfg(feature = "client-parse")]
-use crate::binary::read_dotnet_string;
+use std::io::{Read, Write};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crate::{
+    enums::ServerPacketIds,
+    binary::{read_dotnet_string, write_dotnet_string},
+};
+use super::super::base::PacketMessage;
+use crate::data::stats::SharedResult;
 
 // ============================================================================
-// Packet Structures
+// Packet Structures & PacketMessage Implementations
 // ============================================================================
 
 /// NPC opens sell dialog
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NPCSell;
+
+impl PacketMessage for NPCSell {
+    const OPCODE: i16 = ServerPacketIds::NPCSell as i16;
+    
+    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
+        Ok(Self)
+    }
+    
+    fn write_body<W: Write>(&self, _writer: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
+}
 
 /// NPC repair dialog with repair rate
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -23,10 +37,38 @@ pub struct NPCRepair {
     pub rate: f32,
 }
 
+impl PacketMessage for NPCRepair {
+    const OPCODE: i16 = ServerPacketIds::NPCRepair as i16;
+    
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let rate = reader.read_f32::<LittleEndian>()?;
+        Ok(Self { rate })
+    }
+    
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_f32::<LittleEndian>(self.rate)?;
+        Ok(())
+    }
+}
+
 /// NPC special repair dialog with repair rate
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NPCSRepair {
     pub rate: f32,
+}
+
+impl PacketMessage for NPCSRepair {
+    const OPCODE: i16 = ServerPacketIds::NPCSRepair as i16;
+    
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let rate = reader.read_f32::<LittleEndian>()?;
+        Ok(Self { rate })
+    }
+    
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_f32::<LittleEndian>(self.rate)?;
+        Ok(())
+    }
 }
 
 /// NPC refine dialog
@@ -36,14 +78,56 @@ pub struct NPCRefine {
     pub refining: bool,
 }
 
+impl PacketMessage for NPCRefine {
+    const OPCODE: i16 = ServerPacketIds::NPCRefine as i16;
+    
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let rate = reader.read_f32::<LittleEndian>()?;
+        let refining = reader.read_u8()? != 0;
+        Ok(Self { rate, refining })
+    }
+    
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_f32::<LittleEndian>(self.rate)?;
+        writer.write_u8(if self.refining { 1 } else { 0 })?;
+        Ok(())
+    }
+}
+
 /// NPC check refine status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NPCCheckRefine;
+
+impl PacketMessage for NPCCheckRefine {
+    const OPCODE: i16 = ServerPacketIds::NPCCheckRefine as i16;
+    
+    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
+        Ok(Self)
+    }
+    
+    fn write_body<W: Write>(&self, _writer: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
+}
 
 /// NPC collect refine result
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NPCCollectRefine {
     pub success: bool,
+}
+
+impl PacketMessage for NPCCollectRefine {
+    const OPCODE: i16 = ServerPacketIds::NPCCollectRefine as i16;
+    
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let success = reader.read_u8()? != 0;
+        Ok(Self { success })
+    }
+    
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        Ok(())
+    }
 }
 
 /// NPC replace wedding ring dialog
@@ -52,9 +136,35 @@ pub struct NPCReplaceWedRing {
     pub rate: f32,
 }
 
+impl PacketMessage for NPCReplaceWedRing {
+    const OPCODE: i16 = ServerPacketIds::NPCReplaceWedRing as i16;
+    
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let rate = reader.read_f32::<LittleEndian>()?;
+        Ok(Self { rate })
+    }
+    
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_f32::<LittleEndian>(self.rate)?;
+        Ok(())
+    }
+}
+
 /// NPC storage dialog
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NPCStorage;
+
+impl PacketMessage for NPCStorage {
+    const OPCODE: i16 = ServerPacketIds::NPCStorage as i16;
+    
+    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
+        Ok(Self)
+    }
+    
+    fn write_body<W: Write>(&self, _writer: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
+}
 
 /// NPC requests input from player
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,84 +173,18 @@ pub struct NPCRequestInput {
     pub max_length: u8,
 }
 
-// ============================================================================
-// Parser Functions
-// ============================================================================
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_npc_sell(_payload: &[u8]) -> Result<NPCSell, String> {
-    Ok(NPCSell)
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_npc_repair(payload: &[u8]) -> Result<NPCRepair, String> {
-    let mut cursor = Cursor::new(payload);
-    let rate = cursor
-        .read_f32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read rate: {}", e))?;
-    Ok(NPCRepair { rate })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_npc_srepair(payload: &[u8]) -> Result<NPCSRepair, String> {
-    let mut cursor = Cursor::new(payload);
-    let rate = cursor
-        .read_f32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read rate: {}", e))?;
-    Ok(NPCSRepair { rate })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_npc_refine(payload: &[u8]) -> Result<NPCRefine, String> {
-    let mut cursor = Cursor::new(payload);
-    let rate = cursor
-        .read_f32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read rate: {}", e))?;
-    let refining = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read refining: {}", e))?
-        != 0;
-    Ok(NPCRefine { rate, refining })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_npc_check_refine(_payload: &[u8]) -> Result<NPCCheckRefine, String> {
-    Ok(NPCCheckRefine)
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_npc_collect_refine(payload: &[u8]) -> Result<NPCCollectRefine, String> {
-    let mut cursor = Cursor::new(payload);
-    let success = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read success: {}", e))?
-        != 0;
-    Ok(NPCCollectRefine { success })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_npc_replace_wed_ring(payload: &[u8]) -> Result<NPCReplaceWedRing, String> {
-    let mut cursor = Cursor::new(payload);
-    let rate = cursor
-        .read_f32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read rate: {}", e))?;
-    Ok(NPCReplaceWedRing { rate })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_npc_storage(_payload: &[u8]) -> Result<NPCStorage, String> {
-    Ok(NPCStorage)
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_npc_request_input(payload: &[u8]) -> Result<NPCRequestInput, String> {
-    let mut cursor = Cursor::new(payload);
-    let message = read_dotnet_string(&mut cursor)?;
-    let max_length = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read max_length: {}", e))?;
-    Ok(NPCRequestInput {
-        message,
-        max_length,
-    })
+impl PacketMessage for NPCRequestInput {
+    const OPCODE: i16 = ServerPacketIds::NPCRequestInput as i16;
+    
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let message = read_dotnet_string(reader)?;
+        let max_length = reader.read_u8()?;
+        Ok(Self { message, max_length })
+    }
+    
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        write_dotnet_string(writer, &self.message)?;
+        writer.write_u8(self.max_length)?;
+        Ok(())
+    }
 }

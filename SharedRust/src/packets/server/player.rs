@@ -2,61 +2,16 @@
 //!
 //! This module contains all player status-related packet definitions and parsers.
 
+use std::io::{Read, Write};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use chrono::{TimeZone, Utc};
 use crate::{
     data::item::UserItem,
-    enums::{AttackMode, MirClass, MirGender, PetMode},
+    enums::{AttackMode, MirClass, MirGender, PetMode, ServerPacketIds},
+    binary::{read_dotnet_string, write_dotnet_string},
+    data::stats::{SharedResult, SharedError},
 };
-
-#[cfg(feature = "client-parse")]
-use std::io::Cursor;
-#[cfg(feature = "client-parse")]
-use byteorder::{LittleEndian, ReadBytesExt};
-#[cfg(feature = "client-parse")]
-use crate::binary::read_dotnet_string;
-
-// Helper for parsing character summary (shared with account.rs)
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_character_summary(
-    cursor: &mut Cursor<&[u8]>,
-) -> Result<super::super::CharacterSummary, String> {
-    let index = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read index: {}", e))?;
-    let name = read_dotnet_string(cursor)?;
-    let level = cursor
-        .read_u16::<LittleEndian>()
-        .map_err(|e| format!("Failed to read level: {}", e))?;
-    let class_byte = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read class: {}", e))?;
-    let class =
-        MirClass::try_from(class_byte).map_err(|_| format!("Unknown class: {}", class_byte))?;
-    let gender_byte = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read gender: {}", e))?;
-    let gender =
-        MirGender::try_from(gender_byte).map_err(|_| format!("Unknown gender: {}", gender_byte))?;
-    
-    // Read .NET DateTime ticks and convert to chrono DateTime
-    let ticks = cursor
-        .read_i64::<LittleEndian>()
-        .map_err(|e| format!("Failed to read last_access: {}", e))?;
-    let unix_epoch_ticks = 621355968000000000i64; // .NET ticks at Unix epoch
-    let unix_seconds = (ticks - unix_epoch_ticks) / 10000000;
-    use chrono::{TimeZone, Utc};
-    let last_access = Utc.timestamp_opt(unix_seconds, 0)
-        .single()
-        .ok_or_else(|| "Invalid DateTime".to_string())?;
-
-    Ok(super::super::CharacterSummary {
-        index,
-        name,
-        level,
-        class,
-        gender,
-        last_access,
-    })
-}
+use super::super::base::PacketMessage;
 
 // ============================================================================
 // Packet Structures
@@ -128,164 +83,248 @@ pub struct UserStorage {
 // Parser Functions
 // ============================================================================
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_player_update(payload: &[u8]) -> Result<PlayerUpdate, String> {
-    let mut cursor = Cursor::new(payload);
-    let object_id = cursor
-        .read_u32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read object_id: {}", e))?;
-    let light = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read light: {}", e))?;
-    let weapon = cursor
-        .read_i16::<LittleEndian>()
-        .map_err(|e| format!("Failed to read weapon: {}", e))?;
-    let weapon_effect = cursor
-        .read_i16::<LittleEndian>()
-        .map_err(|e| format!("Failed to read weapon_effect: {}", e))?;
-    let armor = cursor
-        .read_i16::<LittleEndian>()
-        .map_err(|e| format!("Failed to read armor: {}", e))?;
-    let wings_effect = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read wings_effect: {}", e))?;
-    Ok(PlayerUpdate {
-        object_id,
-        light,
-        weapon,
-        weapon_effect,
-        armor,
-        wings_effect,
-    })
+impl PacketMessage for PlayerUpdate {
+    const OPCODE: i16 = ServerPacketIds::PlayerUpdate as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(PlayerUpdate {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            light: reader.read_u8()?,
+            weapon: reader.read_i16::<LittleEndian>()?,
+            weapon_effect: reader.read_i16::<LittleEndian>()?,
+            armor: reader.read_i16::<LittleEndian>()?,
+            wings_effect: reader.read_u8()?,
+        })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u8(self.light)?;
+        writer.write_i16::<LittleEndian>(self.weapon)?;
+        writer.write_i16::<LittleEndian>(self.weapon_effect)?;
+        writer.write_i16::<LittleEndian>(self.armor)?;
+        writer.write_u8(self.wings_effect)?;
+        Ok(())
+    }
 }
 
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_player_inspect(payload: &[u8]) -> Result<PlayerInspect, String> {
-    let mut cursor = Cursor::new(payload);
-    let name = read_dotnet_string(&mut cursor)?;
-    let guild_name = read_dotnet_string(&mut cursor)?;
-    let guild_rank = read_dotnet_string(&mut cursor)?;
+impl PacketMessage for PlayerInspect {
+    const OPCODE: i16 = ServerPacketIds::PlayerInspect as i16;
 
-    let count = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read equipment count: {}", e))?;
-    let mut equipment = Vec::new();
-    for _ in 0..count {
-        let has_item = cursor
-            .read_u8()
-            .map_err(|e| format!("Failed to read has_item flag: {}", e))?
-            != 0;
-        if has_item {
-            let item = UserItem::read_from(&mut cursor, i32::MAX, i32::MAX)?;
-            equipment.push(Some(item));
-        } else {
-            equipment.push(None);
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let name = read_dotnet_string(reader)?;
+        let guild_name = read_dotnet_string(reader)?;
+        let guild_rank = read_dotnet_string(reader)?;
+
+        let count = reader.read_i32::<LittleEndian>()? as usize;
+        let mut equipment = Vec::with_capacity(count);
+        for _ in 0..count {
+            let has_item = reader.read_u8()? != 0;
+            if has_item {
+                let item = UserItem::read_from(reader, i32::MAX, i32::MAX)?;
+                equipment.push(Some(item));
+            } else {
+                equipment.push(None);
+            }
         }
+
+        let class_byte = reader.read_u8()?;
+        let class = MirClass::try_from(class_byte)?;
+        let gender_byte = reader.read_u8()?;
+        let gender = MirGender::try_from(gender_byte)?;
+        let hair = reader.read_u8()?;
+        let level = reader.read_u16::<LittleEndian>()?;
+        let lover_name = read_dotnet_string(reader)?;
+
+        Ok(PlayerInspect {
+            name,
+            guild_name,
+            guild_rank,
+            equipment,
+            class,
+            gender,
+            hair,
+            level,
+            lover_name,
+        })
     }
 
-    let class_byte = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read class: {}", e))?;
-    let class =
-        MirClass::try_from(class_byte).map_err(|_| format!("Unknown class: {}", class_byte))?;
-    let gender_byte = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read gender: {}", e))?;
-    let gender =
-        MirGender::try_from(gender_byte).map_err(|_| format!("Unknown gender: {}", gender_byte))?;
-    let hair = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read hair: {}", e))?;
-    let level = cursor
-        .read_u16::<LittleEndian>()
-        .map_err(|e| format!("Failed to read level: {}", e))?;
-    let lover_name = read_dotnet_string(&mut cursor)?;
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        write_dotnet_string(writer, &self.name)?;
+        write_dotnet_string(writer, &self.guild_name)?;
+        write_dotnet_string(writer, &self.guild_rank)?;
 
-    Ok(PlayerInspect {
-        name,
-        guild_name,
-        guild_rank,
-        equipment,
-        class,
-        gender,
-        hair,
-        level,
-        lover_name,
-    })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_logout_success(payload: &[u8]) -> Result<LogOutSuccess, String> {
-    let mut cursor = Cursor::new(payload);
-    let count = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read character count: {}", e))?;
-    let mut characters = Vec::new();
-    for _ in 0..count {
-        characters.push(parse_character_summary(&mut cursor)?);
-    }
-    Ok(LogOutSuccess { characters })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_time_of_day(payload: &[u8]) -> Result<TimeOfDay, String> {
-    let mut cursor = Cursor::new(payload);
-    let lights = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read lights: {}", e))?;
-    Ok(TimeOfDay { lights })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_change_amode(payload: &[u8]) -> Result<ChangeAMode, String> {
-    let mut cursor = Cursor::new(payload);
-    let mode_byte = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read mode: {}", e))?;
-    let mode = AttackMode::try_from(mode_byte)
-        .map_err(|_| format!("Unknown attack mode: {}", mode_byte))?;
-    Ok(ChangeAMode { mode })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_change_pmode(payload: &[u8]) -> Result<ChangePMode, String> {
-    let mut cursor = Cursor::new(payload);
-    let mode_byte = cursor
-        .read_u8()
-        .map_err(|e| format!("Failed to read mode: {}", e))?;
-    let mode =
-        PetMode::try_from(mode_byte).map_err(|_| format!("Unknown pet mode: {}", mode_byte))?;
-    Ok(ChangePMode { mode })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_object_name(payload: &[u8]) -> Result<ObjectName, String> {
-    let mut cursor = Cursor::new(payload);
-    let object_id = cursor
-        .read_u32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read object_id: {}", e))?;
-    let name = read_dotnet_string(&mut cursor)?;
-    Ok(ObjectName { object_id, name })
-}
-
-#[cfg(feature = "client-parse")]
-pub(crate) fn parse_user_storage(payload: &[u8]) -> Result<UserStorage, String> {
-    let mut cursor = Cursor::new(payload);
-    let count = cursor
-        .read_i32::<LittleEndian>()
-        .map_err(|e| format!("Failed to read storage count: {}", e))?;
-    let mut storage = Vec::new();
-    for _ in 0..count {
-        let has_item = cursor
-            .read_u8()
-            .map_err(|e| format!("Failed to read has_item flag: {}", e))?
-            != 0;
-        if has_item {
-            let item = UserItem::read_from(&mut cursor, i32::MAX, i32::MAX)?;
-            storage.push(Some(item));
-        } else {
-            storage.push(None);
+        writer.write_i32::<LittleEndian>(self.equipment.len() as i32)?;
+        for item_opt in &self.equipment {
+            if let Some(item) = item_opt {
+                writer.write_u8(1)?;
+                item.write_to(writer)?;
+            } else {
+                writer.write_u8(0)?;
+            }
         }
+
+        writer.write_u8(self.class as u8)?;
+        writer.write_u8(self.gender as u8)?;
+        writer.write_u8(self.hair)?;
+        writer.write_u16::<LittleEndian>(self.level)?;
+        write_dotnet_string(writer, &self.lover_name)?;
+        Ok(())
     }
-    Ok(UserStorage { storage })
+}
+
+impl PacketMessage for LogOutSuccess {
+    const OPCODE: i16 = ServerPacketIds::LogOutSuccess as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let count = reader.read_i32::<LittleEndian>()? as usize;
+        let mut characters = Vec::with_capacity(count);
+        
+        for _ in 0..count {
+            // Inline CharacterSummary parsing
+            let index = reader.read_i32::<LittleEndian>()?;
+            let name = read_dotnet_string(reader)?;
+            let level = reader.read_u16::<LittleEndian>()?;
+            let class_byte = reader.read_u8()?;
+            let class = MirClass::try_from(class_byte)?;
+            let gender_byte = reader.read_u8()?;
+            let gender = MirGender::try_from(gender_byte)?;
+            
+            // Read .NET DateTime ticks and convert
+            let ticks = reader.read_i64::<LittleEndian>()?;
+            let unix_epoch_ticks = 621355968000000000i64;
+            let unix_seconds = (ticks - unix_epoch_ticks) / 10000000;
+            let last_access = Utc.timestamp_opt(unix_seconds, 0)
+                .single()
+                .ok_or(SharedError::InvalidDateTime)?;
+
+            characters.push(super::super::CharacterSummary {
+                index,
+                name,
+                level,
+                class,
+                gender,
+                last_access,
+            });
+        }
+        
+        Ok(LogOutSuccess { characters })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.characters.len() as i32)?;
+        
+        for char in &self.characters {
+            writer.write_i32::<LittleEndian>(char.index)?;
+            write_dotnet_string(writer, &char.name)?;
+            writer.write_u16::<LittleEndian>(char.level)?;
+            writer.write_u8(char.class as u8)?;
+            writer.write_u8(char.gender as u8)?;
+            
+            // Convert chrono DateTime to .NET ticks
+            let unix_epoch_ticks = 621355968000000000i64;
+            let ticks = unix_epoch_ticks + (char.last_access.timestamp() * 10000000);
+            writer.write_i64::<LittleEndian>(ticks)?;
+        }
+        
+        Ok(())
+    }
+}
+
+impl PacketMessage for TimeOfDay {
+    const OPCODE: i16 = ServerPacketIds::TimeOfDay as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(TimeOfDay {
+            lights: reader.read_u8()?,
+        })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(self.lights)?;
+        Ok(())
+    }
+}
+
+impl PacketMessage for ChangeAMode {
+    const OPCODE: i16 = ServerPacketIds::ChangeAMode as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let mode_byte = reader.read_u8()?;
+        let mode = AttackMode::try_from(mode_byte)?;
+        Ok(ChangeAMode { mode })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(self.mode as u8)?;
+        Ok(())
+    }
+}
+
+impl PacketMessage for ChangePMode {
+    const OPCODE: i16 = ServerPacketIds::ChangePMode as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let mode_byte = reader.read_u8()?;
+        let mode = PetMode::try_from(mode_byte)?;
+        Ok(ChangePMode { mode })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u8(self.mode as u8)?;
+        Ok(())
+    }
+}
+
+impl PacketMessage for ObjectName {
+    const OPCODE: i16 = ServerPacketIds::ObjectName as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        Ok(ObjectName {
+            object_id: reader.read_u32::<LittleEndian>()?,
+            name: read_dotnet_string(reader)?,
+        })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        write_dotnet_string(writer, &self.name)?;
+        Ok(())
+    }
+}
+
+impl PacketMessage for UserStorage {
+    const OPCODE: i16 = ServerPacketIds::UserStorage as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let count = reader.read_i32::<LittleEndian>()? as usize;
+        let mut storage = Vec::with_capacity(count);
+        
+        for _ in 0..count {
+            let has_item = reader.read_u8()? != 0;
+            if has_item {
+                let item = UserItem::read_from(reader, i32::MAX, i32::MAX)?;
+                storage.push(Some(item));
+            } else {
+                storage.push(None);
+            }
+        }
+        
+        Ok(UserStorage { storage })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.storage.len() as i32)?;
+        
+        for item_opt in &self.storage {
+            if let Some(item) = item_opt {
+                writer.write_u8(1)?;
+                item.write_to(writer)?;
+            } else {
+                writer.write_u8(0)?;
+            }
+        }
+        
+        Ok(())
+    }
 }
