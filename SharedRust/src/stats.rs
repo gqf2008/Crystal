@@ -3,6 +3,7 @@ use std::io::{self, Read, Write};
 use std::string::FromUtf8Error;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use num_enum::TryFromPrimitiveError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -41,6 +42,26 @@ pub enum SharedError {
 }
 
 pub type SharedResult<T> = Result<T, SharedError>;
+
+// Generic From implementation for all TryFromPrimitiveError types
+impl<T> From<TryFromPrimitiveError<T>> for SharedError
+where
+    T: num_enum::TryFromPrimitive,
+    <T as num_enum::TryFromPrimitive>::Primitive: TryInto<u32>,
+{
+    fn from(err: TryFromPrimitiveError<T>) -> Self {
+        // Get the type name at compile time
+        let type_name = std::any::type_name::<T>();
+        // Extract just the last part after "::"
+        let short_name = type_name.rsplit("::").next().unwrap_or(type_name);
+        // Convert primitive to u32, defaulting to MAX if conversion fails
+        let value = err.number.try_into().unwrap_or(u32::MAX);
+        SharedError::UnknownEnum {
+            name: Box::leak(short_name.to_string().into_boxed_str()),
+            value,
+        }
+    }
+}
 
 impl SharedError {
     pub fn unknown_enum(name: &'static str, value: u32) -> Self {

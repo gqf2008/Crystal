@@ -5,7 +5,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::binary::{read_bool, read_dotnet_string, write_dotnet_string};
+use crate::binary::{read_bool, read_dotnet_string, write_bool, write_dotnet_string};
 use crate::enums::{IntelligentCreaturePickupMode, IntelligentCreatureType, ItemGrade, MirClass, MirGender, Spell};
 use crate::stats::{SharedError, SharedResult};
 
