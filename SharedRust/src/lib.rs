@@ -4,6 +4,7 @@ pub mod enums;
 pub mod globals;
 pub mod map; // Basic map types (Point)
 pub mod packets; // Packet infrastructure and definitions (base, ids, client, server)
+pub mod utils; // Utility functions (direction, geometry)
 
 // Re-export commonly used items directly
 // Note: We don't glob re-export data::* and packets::* to avoid naming conflicts
