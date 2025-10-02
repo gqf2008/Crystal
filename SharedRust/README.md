@@ -215,6 +215,23 @@ cargo test --verbose
 - ✅ 覆盖所有核心功能
 - ✅ 包含边界情况测试
 
+## 📖 文档
+
+### 完整文档列表
+
+| 文档 | 说明 | 状态 |
+|------|------|------|
+| [README.md](README.md) | 项目概述和快速开始 | ✅ 完成 |
+| [PACKET_GUIDE.md](PACKET_GUIDE.md) | 数据包使用详细指南 | ✅ 完成 |
+| [API_REFERENCE.md](API_REFERENCE.md) | 完整API参考文档 | ✅ 完成 |
+| [CHANGELOG.md](CHANGELOG.md) | 版本更新记录 | ✅ 完成 |
+
+### 快速链接
+
+- 📘 **[数据包使用指南](PACKET_GUIDE.md)** - 学习如何使用各种数据包
+- 📚 **[API参考](API_REFERENCE.md)** - 查阅完整的API文档
+- 📝 **[更新日志](CHANGELOG.md)** - 查看版本历史
+
 ## 📖 使用指南
 
 ### 在 ClientRust 中使用
@@ -222,32 +239,30 @@ cargo test --verbose
 ```rust
 use mir2_shared::{
     MirDirection, Point, utils::*,
-    packets::client::{
-        account::Login,
-        movement::Walk,
-        combat::Attack,
-    },
+    packets::client::{Login, Walk, Attack},
+    packets::base::serialize_packet,
 };
 
 // 1. 登录
 let login = Login {
-    username: "player".to_string(),
-    password: "pass".to_string(),
+    account_id: "player".to_string(),
+    password: "hashed_pass".to_string(),
 };
-network.send(login.write_packet()?);
+let mut buffer = Vec::new();
+serialize_packet(&mut buffer, &login)?;
 
 // 2. 移动
 let walk = Walk {
     direction: MirDirection::Right,
 };
-network.send(walk.write_packet()?);
+serialize_packet(&mut buffer, &walk)?;
 
 // 3. 攻击
 let attack = Attack {
     direction: MirDirection::Right,
     spell: Spell::None,
 };
-network.send(attack.write_packet()?);
+serialize_packet(&mut buffer, &attack)?;
 ```
 
 ### 方向和几何计算
@@ -371,21 +386,60 @@ cargo doc
 
 本项目遵循与原 C# 项目相同的许可证。
 
-## 🔗 相关项目
+## 🔗 相关链接
 
-- **C# Shared**: `../Shared/` - 原始 C# 共享库
-- **ClientRust**: `../ClientRust/` - Rust 客户端
-- **ServerRust**: 待开发
+### 项目资源
+- 📂 **[C# Shared](../Shared/)** - 原始 C# 共享库
+- 🦀 **[ClientRust](../ClientRust/)** - Rust 客户端实现
+- 🎮 **[主项目](https://github.com/gqf2008/Crystal)** - Crystal 传奇2项目
 
-## 📞 联系方式
+### 学习资源
+- 📘 [Rust 官方文档](https://doc.rust-lang.org/)
+- 📚 [Rust 设计模式](https://rust-unofficial.github.io/patterns/)
+- 🔧 [byteorder 库文档](https://docs.rs/byteorder/)
 
-如有问题或建议,请:
-1. 查阅 [PORTING_GUIDE.md](PORTING_GUIDE.md)
-2. 查看 [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-3. 运行 `cargo doc --open` 查看 API 文档
+## 📞 支持与反馈
+
+### 获取帮助
+
+1. 📖 **查阅文档**
+   - [数据包使用指南](PACKET_GUIDE.md)
+   - [API参考文档](API_REFERENCE.md)
+   - 运行 `cargo doc --open` 生成本地文档
+
+2. 🐛 **报告问题**
+   - [GitHub Issues](https://github.com/gqf2008/Crystal/issues)
+   - 提供详细的错误信息和复现步骤
+
+3. 💬 **讨论交流**
+   - [GitHub Discussions](https://github.com/gqf2008/Crystal/discussions)
+   - 分享使用经验和最佳实践
+
+### 贡献代码
+
+欢迎提交 Pull Request！请确保：
+- ✅ 代码通过 `cargo clippy` 检查
+- ✅ 代码通过 `cargo fmt` 格式化
+- ✅ 添加必要的测试
+- ✅ 更新相关文档
+
+## 🙏 致谢
+
+感谢所有为本项目做出贡献的开发者！
+
+特别感谢：
+- 原始 C# 项目的开发者
+- Rust 社区的支持
+- 所有测试和反馈的用户
 
 ---
 
-**最后更新**: 2025年10月2日
-**版本**: 0.1.0
-**状态**: 开发中 (Development)
+<div align="center">
+
+**最后更新**: 2025年10月3日  
+**版本**: 1.0.0  
+**状态**: ✅ 生产就绪 (Production Ready)
+
+**⭐ 如果这个项目对你有帮助，请给一个 Star！⭐**
+
+</div>
