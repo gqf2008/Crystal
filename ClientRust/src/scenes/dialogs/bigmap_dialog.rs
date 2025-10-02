@@ -1,7 +1,7 @@
 // BigMapDialog - World Map / Big Map System
 // Rust implementation of Client/MirScenes/Dialogs/BigMapDialog.cs
 
-use crate::game::scenes::dialogs::Dialog;
+use crate::scenes::dialogs::Dialog;
 
 /// Map information for big map display
 #[derive(Debug, Clone)]

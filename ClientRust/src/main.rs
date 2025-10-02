@@ -16,9 +16,6 @@ mod sounds;      // ← Client/MirSounds/ (renamed from audio)
 mod resolution;  // ← Client/Resolution/
 mod utils;       // ← Client/Utils/
 
-// Legacy game module (will be gradually migrated into above modules)
-mod game;
-
 use anyhow::Result;
 use program::ClientRuntime;
 

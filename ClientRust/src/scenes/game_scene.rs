@@ -2,7 +2,7 @@
 // Mirrors Client/MirScenes/GameScene.cs (12,297 lines)
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
-use crate::game::objects::*;
+use crate::objects::*;
 use crate::network::network::protocol::ServerMessage;
 use mir2_shared::{enums::*, Stats, Point, UserItem};
 use std::collections::{HashMap, VecDeque};

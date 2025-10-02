@@ -1,7 +1,7 @@
 // MailDialog - Mail system for sending and receiving messages
 // Rust implementation of Client/MirScenes/Dialogs/MailDialogs.cs
 
-use crate::game::scenes::dialogs::Dialog;
+use crate::scenes::dialogs::Dialog;
 
 /// Mail type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

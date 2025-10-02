@@ -1,7 +1,7 @@
 // HelpDialog - In-game help system
 // Rust implementation of Client/MirScenes/Dialogs/HelpDialog.cs
 
-use crate::game::scenes::dialogs::Dialog;
+use crate::scenes::dialogs::Dialog;
 
 /// Help page type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

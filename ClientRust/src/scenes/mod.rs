@@ -1,12 +1,16 @@
-// Scenes module - Game scenes (Login, Select, Game)
-// Corresponds to: Client/MirScenes/
+// MirScenes - Game scene system
+// Mirrors the structure of Client/MirScenes/
 
 pub mod state;
-// pub mod base;
-// pub mod login_scene;
-// pub mod select_scene;
-// pub mod game_scene;
-// pub mod dialogs;
+pub mod scene_trait;
+pub mod login_scene;
+pub mod select_scene;
+pub mod game_scene;
+pub mod dialogs;
 
-// Re-exports
+// Re-export scene types
 pub use state::ClientState;
+pub use scene_trait::{Scene, SceneType, MouseButton, KeyCode};
+pub use login_scene::LoginScene;
+pub use select_scene::SelectScene;
+pub use game_scene::GameScene;

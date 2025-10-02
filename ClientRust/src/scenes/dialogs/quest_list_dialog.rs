@@ -1,7 +1,7 @@
 // QuestListDialog - Quest list and management
 // Rust implementation of Client/MirScenes/Dialogs/QuestDialogs.cs (QuestListDialog)
 
-use crate::game::scenes::dialogs::Dialog;
+use crate::scenes::dialogs::Dialog;
 
 /// Quest status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
