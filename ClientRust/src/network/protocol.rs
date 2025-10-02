@@ -35,6 +35,161 @@ use mir2_shared::packets::server::{
 // TODO: protocol_packets module removed - use mir2_shared::packets instead
 // pub use crate::network::protocol_packets::packets::*;
 
+// ============================================================================
+// PLACEHOLDER TYPES - TODO: Implement proper fields and parsing logic
+// ============================================================================
+// These types are referenced in ServerMessage enum but not yet fully implemented.
+// They serve as placeholders to allow compilation while the protocol is being
+// migrated from C#. Each type should be properly implemented with:
+// 1. Correct field definitions based on C# ServerPackets
+// 2. TryFrom<Cursor> implementation for packet parsing
+// 3. Integration with the game logic
+// ============================================================================
+
+// Item-related messages
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SellItem;  // TODO: Implement sell item to NPC
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RepairItem;  // TODO: Implement repair item request
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ItemRepaired;  // TODO: Implement item repaired confirmation
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SplitItem;  // TODO: Implement split item stack
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SplitItem1;  // TODO: Implement split item (variant 1)
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RefreshItem;  // TODO: Implement refresh item data
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ItemSlotSizeChanged;  // TODO: Implement item slot size change
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ItemSealChanged;  // TODO: Implement item seal status change
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CraftItem;  // TODO: Implement craft item
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct NewItemInfo;  // TODO: Implement new item information
+
+// Magic/Spell-related messages
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct NewMagic;  // TODO: Implement new magic learned
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MagicLeveled;  // TODO: Implement magic level up
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RemoveMagic;  // TODO: Implement remove magic
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SpellToggle;  // TODO: Implement spell toggle
+
+// Player status messages
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PlayerUpdate;  // TODO: Implement player update
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PlayerInspect;  // TODO: Implement player inspection
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LogOutSuccess;  // TODO: Implement logout success
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TimeOfDay;  // TODO: Implement time of day update
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ChangeAMode;  // TODO: Implement attack mode change
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ChangePMode;  // TODO: Implement pet mode change
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SetAutoPotValue;  // TODO: Implement auto potion value setting
+
+// Object status messages
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ObjectName;  // TODO: Implement object name
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ObjectHealth;  // TODO: Implement object health update
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ObjectMana;  // TODO: Implement object mana update
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ObjectHidden;  // TODO: Implement object hidden status
+
+// Map effects
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MapEffect;  // TODO: Implement map effect
+
+// Group/Party messages
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SwitchGroup;  // TODO: Implement group switch
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GroupMembersMap;  // TODO: Implement group members map
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SendMemberLocation;  // TODO: Implement member location
+
+// Guild messages
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GuildStorageList;  // TODO: Implement guild storage list
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GuildMemberChange;  // TODO: Implement guild member change
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GuildNoticeChange;  // TODO: Implement guild notice change
+
+// Storage
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct UserStorage;  // TODO: Implement user storage
+
+// Character management
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct NewCharacter;  // TODO: Implement new character creation
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct NewCharacterSuccess;  // TODO: Implement character creation success
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DeleteCharacter;  // TODO: Implement character deletion
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DeleteCharacterSuccess;  // TODO: Implement character deletion success
+
+// Hero management
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ManageHeroes;  // TODO: Implement hero management
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HeroCreateRequest;  // TODO: Implement hero creation request
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SetHeroBehaviour;  // TODO: Implement hero behavior setting
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct UpdateHeroSpawnState;  // TODO: Implement hero spawn state update
+
+// Quest messages
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct NewQuestInfo;  // TODO: Implement new quest information
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ChangeQuest;  // TODO: Implement quest change
+
+// ============================================================================
+// END PLACEHOLDER TYPES
+// ============================================================================
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ServerMessage {
     Connected,
@@ -60,6 +215,9 @@ pub enum ServerMessage {
     Unknown {
         opcode: i16,
         payload: Vec<u8>,
+    },
+    Unimplemented {
+        opcode: i16,
     },
     ParseError {
         opcode: i16,
