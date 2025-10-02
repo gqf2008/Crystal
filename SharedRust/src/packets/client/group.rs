@@ -1,6 +1,6 @@
 //! Group/Party System Packets (Client → Server)
 
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
 use crate::enums::ClientPacketIds;
@@ -13,7 +13,7 @@ pub struct SwitchGroup {
     pub allow_group: bool,
 }
 
-impl PacketMessage for SwitchGroup {
+impl Packet for SwitchGroup {
     const OPCODE: i16 = ClientPacketIds::SwitchGroup as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -33,7 +33,7 @@ pub struct AddMember {
     pub name: String,
 }
 
-impl PacketMessage for AddMember {
+impl Packet for AddMember {
     const OPCODE: i16 = ClientPacketIds::AddMember as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -53,7 +53,7 @@ pub struct DellMember {
     pub name: String,
 }
 
-impl PacketMessage for DellMember {
+impl Packet for DellMember {
     const OPCODE: i16 = ClientPacketIds::DellMember as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -73,7 +73,7 @@ pub struct GroupInvite {
     pub accept_invite: bool,
 }
 
-impl PacketMessage for GroupInvite {
+impl Packet for GroupInvite {
     const OPCODE: i16 = ClientPacketIds::GroupInvite as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

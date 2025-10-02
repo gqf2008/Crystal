@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::{ClientPacketIds, MirClass, MirGender};
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Client requests to create a new character
@@ -15,7 +15,7 @@ pub struct NewCharacter {
     pub gender: MirGender,
 }
 
-impl PacketMessage for NewCharacter {
+impl Packet for NewCharacter {
     const OPCODE: i16 = ClientPacketIds::NewCharacter as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -40,7 +40,7 @@ pub struct DeleteCharacter {
     pub character_index: i32,
 }
 
-impl PacketMessage for DeleteCharacter {
+impl Packet for DeleteCharacter {
     const OPCODE: i16 = ClientPacketIds::DeleteCharacter as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -58,7 +58,7 @@ impl PacketMessage for DeleteCharacter {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LogOut;
 
-impl PacketMessage for LogOut {
+impl Packet for LogOut {
     const OPCODE: i16 = ClientPacketIds::LogOut as i16;
 
     fn read_body<R: Read>(_: &mut R) -> SharedResult<Self> {

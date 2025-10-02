@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::ClientPacketIds;
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Add friend or blocked user
@@ -14,7 +14,7 @@ pub struct AddFriend {
     pub blocked: bool,
 }
 
-impl PacketMessage for AddFriend {
+impl Packet for AddFriend {
     const OPCODE: i16 = ClientPacketIds::AddFriend as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -36,7 +36,7 @@ pub struct RemoveFriend {
     pub character_index: i32,
 }
 
-impl PacketMessage for RemoveFriend {
+impl Packet for RemoveFriend {
     const OPCODE: i16 = ClientPacketIds::RemoveFriend as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -54,7 +54,7 @@ impl PacketMessage for RemoveFriend {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RefreshFriends;
 
-impl PacketMessage for RefreshFriends {
+impl Packet for RefreshFriends {
     const OPCODE: i16 = ClientPacketIds::RefreshFriends as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -73,7 +73,7 @@ pub struct AddMemo {
     pub memo: String,
 }
 
-impl PacketMessage for AddMemo {
+impl Packet for AddMemo {
     const OPCODE: i16 = ClientPacketIds::AddMemo as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

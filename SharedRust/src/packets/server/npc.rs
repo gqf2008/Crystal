@@ -8,7 +8,7 @@ use crate::{
     enums::ServerPacketIds,
     binary::{read_dotnet_string, write_dotnet_string},
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ============================================================================
@@ -19,7 +19,7 @@ use crate::data::stats::SharedResult;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NPCSell;
 
-impl PacketMessage for NPCSell {
+impl Packet for NPCSell {
     const OPCODE: i16 = ServerPacketIds::NPCSell as i16;
     
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -37,7 +37,7 @@ pub struct NPCRepair {
     pub rate: f32,
 }
 
-impl PacketMessage for NPCRepair {
+impl Packet for NPCRepair {
     const OPCODE: i16 = ServerPacketIds::NPCRepair as i16;
     
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -57,7 +57,7 @@ pub struct NPCSRepair {
     pub rate: f32,
 }
 
-impl PacketMessage for NPCSRepair {
+impl Packet for NPCSRepair {
     const OPCODE: i16 = ServerPacketIds::NPCSRepair as i16;
     
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -78,7 +78,7 @@ pub struct NPCRefine {
     pub refining: bool,
 }
 
-impl PacketMessage for NPCRefine {
+impl Packet for NPCRefine {
     const OPCODE: i16 = ServerPacketIds::NPCRefine as i16;
     
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -98,7 +98,7 @@ impl PacketMessage for NPCRefine {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NPCCheckRefine;
 
-impl PacketMessage for NPCCheckRefine {
+impl Packet for NPCCheckRefine {
     const OPCODE: i16 = ServerPacketIds::NPCCheckRefine as i16;
     
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -116,7 +116,7 @@ pub struct NPCCollectRefine {
     pub success: bool,
 }
 
-impl PacketMessage for NPCCollectRefine {
+impl Packet for NPCCollectRefine {
     const OPCODE: i16 = ServerPacketIds::NPCCollectRefine as i16;
     
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -136,7 +136,7 @@ pub struct NPCReplaceWedRing {
     pub rate: f32,
 }
 
-impl PacketMessage for NPCReplaceWedRing {
+impl Packet for NPCReplaceWedRing {
     const OPCODE: i16 = ServerPacketIds::NPCReplaceWedRing as i16;
     
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -154,7 +154,7 @@ impl PacketMessage for NPCReplaceWedRing {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NPCStorage;
 
-impl PacketMessage for NPCStorage {
+impl Packet for NPCStorage {
     const OPCODE: i16 = ServerPacketIds::NPCStorage as i16;
     
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -173,7 +173,7 @@ pub struct NPCRequestInput {
     pub max_length: u8,
 }
 
-impl PacketMessage for NPCRequestInput {
+impl Packet for NPCRequestInput {
     const OPCODE: i16 = ServerPacketIds::NPCRequestInput as i16;
     
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::{ClientPacketIds, PanelType};
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Call NPC to open dialog
@@ -14,7 +14,7 @@ pub struct CallNPC {
     pub key: String,
 }
 
-impl PacketMessage for CallNPC {
+impl Packet for CallNPC {
     const OPCODE: i16 = ClientPacketIds::CallNPC as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -38,7 +38,7 @@ pub struct BuyItem {
     pub panel_type: PanelType,
 }
 
-impl PacketMessage for BuyItem {
+impl Packet for BuyItem {
     const OPCODE: i16 = ClientPacketIds::BuyItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -67,7 +67,7 @@ pub struct SellItem {
     pub count: u16,
 }
 
-impl PacketMessage for SellItem {
+impl Packet for SellItem {
     const OPCODE: i16 = ClientPacketIds::SellItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -91,7 +91,7 @@ pub struct CraftItem {
     pub slots: Vec<i32>,
 }
 
-impl PacketMessage for CraftItem {
+impl Packet for CraftItem {
     const OPCODE: i16 = ClientPacketIds::CraftItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -126,7 +126,7 @@ pub struct RepairItem {
     pub unique_id: u64,
 }
 
-impl PacketMessage for RepairItem {
+impl Packet for RepairItem {
     const OPCODE: i16 = ClientPacketIds::RepairItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -147,7 +147,7 @@ pub struct BuyItemBack {
     pub count: u16,
 }
 
-impl PacketMessage for BuyItemBack {
+impl Packet for BuyItemBack {
     const OPCODE: i16 = ClientPacketIds::BuyItemBack as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -169,7 +169,7 @@ pub struct SRepairItem {
     pub unique_id: u64,
 }
 
-impl PacketMessage for SRepairItem {
+impl Packet for SRepairItem {
     const OPCODE: i16 = ClientPacketIds::SRepairItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -189,7 +189,7 @@ pub struct RequestMapInfo {
     pub map_index: i32,
 }
 
-impl PacketMessage for RequestMapInfo {
+impl Packet for RequestMapInfo {
     const OPCODE: i16 = ClientPacketIds::RequestMapInfo as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -209,7 +209,7 @@ pub struct TeleportToNPC {
     pub object_id: u32,
 }
 
-impl PacketMessage for TeleportToNPC {
+impl Packet for TeleportToNPC {
     const OPCODE: i16 = ClientPacketIds::TeleportToNPC as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -229,7 +229,7 @@ pub struct SearchMap {
     pub text: String,
 }
 
-impl PacketMessage for SearchMap {
+impl Packet for SearchMap {
     const OPCODE: i16 = ClientPacketIds::SearchMap as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -251,7 +251,7 @@ pub struct NPCConfirmInput {
     pub value: String,
 }
 
-impl PacketMessage for NPCConfirmInput {
+impl Packet for NPCConfirmInput {
     const OPCODE: i16 = ClientPacketIds::NPCConfirmInput as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

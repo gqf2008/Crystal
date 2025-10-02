@@ -7,7 +7,7 @@ use crate::{
     data::client_data::{ClientQuestInfo, ClientQuestProgress},
     enums::ServerPacketIds,
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ============================================================================
@@ -20,7 +20,7 @@ pub struct ChangeQuest {
     pub quest: ClientQuestProgress,
 }
 
-impl PacketMessage for ChangeQuest {
+impl Packet for ChangeQuest {
     const OPCODE: i16 = ServerPacketIds::ChangeQuest as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -49,7 +49,7 @@ pub struct NewQuestInfo {
     pub quest: ClientQuestInfo,
 }
 
-impl PacketMessage for NewQuestInfo {
+impl Packet for NewQuestInfo {
     const OPCODE: i16 = ServerPacketIds::NewQuestInfo as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

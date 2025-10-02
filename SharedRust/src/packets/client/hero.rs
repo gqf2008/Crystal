@@ -5,7 +5,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::{ClientPacketIds, MirGender, MirClass, HeroBehaviour};
 use crate::data::stats::SharedResult;
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 
 /// Create new hero
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,7 +15,7 @@ pub struct NewHero {
     pub class: MirClass,
 }
 
-impl PacketMessage for NewHero {
+impl Packet for NewHero {
     const OPCODE: i16 = ClientPacketIds::NewHero as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -40,7 +40,7 @@ pub struct SetAutoPotValue {
     pub value: u8, // Percentage threshold
 }
 
-impl PacketMessage for SetAutoPotValue {
+impl Packet for SetAutoPotValue {
     const OPCODE: i16 = ClientPacketIds::SetAutoPotValue as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -63,7 +63,7 @@ pub struct SetAutoPotItem {
     pub item_index: u64,
 }
 
-impl PacketMessage for SetAutoPotItem {
+impl Packet for SetAutoPotItem {
     const OPCODE: i16 = ClientPacketIds::SetAutoPotItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -85,7 +85,7 @@ pub struct SetHeroBehaviour {
     pub behaviour: HeroBehaviour,
 }
 
-impl PacketMessage for SetHeroBehaviour {
+impl Packet for SetHeroBehaviour {
     const OPCODE: i16 = ClientPacketIds::SetHeroBehaviour as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -105,7 +105,7 @@ pub struct ChangeHero {
     pub list_index: u8, // Which hero slot (0-2)
 }
 
-impl PacketMessage for ChangeHero {
+impl Packet for ChangeHero {
     const OPCODE: i16 = ClientPacketIds::ChangeHero as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

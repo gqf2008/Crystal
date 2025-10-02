@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::enums::{ClientPacketIds, MirDirection, Spell};
 use crate::Point;
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Client performs an attack
@@ -14,7 +14,7 @@ pub struct Attack {
     pub spell: Spell,
 }
 
-impl PacketMessage for Attack {
+impl Packet for Attack {
     const OPCODE: i16 = ClientPacketIds::Attack as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -39,7 +39,7 @@ pub struct RangeAttack {
     pub target_location: Point,
 }
 
-impl PacketMessage for RangeAttack {
+impl Packet for RangeAttack {
     const OPCODE: i16 = ClientPacketIds::RangeAttack as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -78,7 +78,7 @@ pub struct Harvest {
     pub direction: MirDirection,
 }
 
-impl PacketMessage for Harvest {
+impl Packet for Harvest {
     const OPCODE: i16 = ClientPacketIds::Harvest as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -101,7 +101,7 @@ pub struct Magic {
     pub location: Point,
 }
 
-impl PacketMessage for Magic {
+impl Packet for Magic {
     const OPCODE: i16 = ClientPacketIds::Magic as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -137,7 +137,7 @@ pub struct SpellToggle {
     pub can_use: bool,
 }
 
-impl PacketMessage for SpellToggle {
+impl Packet for SpellToggle {
     const OPCODE: i16 = ClientPacketIds::SpellToggle as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -161,7 +161,7 @@ pub struct MagicKey {
     pub old_key: u8,
 }
 
-impl PacketMessage for MagicKey {
+impl Packet for MagicKey {
     const OPCODE: i16 = ClientPacketIds::MagicKey as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

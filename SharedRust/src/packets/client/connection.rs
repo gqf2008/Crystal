@@ -3,7 +3,7 @@
 use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::enums::ClientPacketIds;
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,7 +11,7 @@ pub struct ClientVersion {
     pub version_hash: Vec<u8>,
 }
 
-impl PacketMessage for ClientVersion {
+impl Packet for ClientVersion {
     const OPCODE: i16 = ClientPacketIds::ClientVersion as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -37,7 +37,7 @@ impl PacketMessage for ClientVersion {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Disconnect;
 
-impl PacketMessage for Disconnect {
+impl Packet for Disconnect {
     const OPCODE: i16 = ClientPacketIds::Disconnect as i16;
 
     fn read_body<R: Read>(_: &mut R) -> SharedResult<Self> {
@@ -54,7 +54,7 @@ pub struct KeepAlive {
     pub time: i64,
 }
 
-impl PacketMessage for KeepAlive {
+impl Packet for KeepAlive {
     const OPCODE: i16 = ClientPacketIds::KeepAlive as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

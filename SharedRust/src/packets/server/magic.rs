@@ -8,7 +8,7 @@ use crate::{
     data::client_data::ClientMagic,
     enums::{Spell, ServerPacketIds},
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ============================================================================
@@ -49,7 +49,7 @@ pub struct SpellToggle {
 // PacketMessage Implementations
 // ============================================================================
 
-impl PacketMessage for NewMagic {
+impl Packet for NewMagic {
     const OPCODE: i16 = ServerPacketIds::NewMagic as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -65,7 +65,7 @@ impl PacketMessage for NewMagic {
     }
 }
 
-impl PacketMessage for MagicLeveled {
+impl Packet for MagicLeveled {
     const OPCODE: i16 = ServerPacketIds::MagicLeveled as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -81,7 +81,7 @@ impl PacketMessage for MagicLeveled {
     }
 }
 
-impl PacketMessage for RemoveMagic {
+impl Packet for RemoveMagic {
     const OPCODE: i16 = ServerPacketIds::RemoveMagic as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -96,7 +96,7 @@ impl PacketMessage for RemoveMagic {
     }
 }
 
-impl PacketMessage for SpellToggle {
+impl Packet for SpellToggle {
     const OPCODE: i16 = ServerPacketIds::SpellToggle as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

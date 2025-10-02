@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use byteorder::{ByteOrder, LittleEndian};
-use mir2_shared::packets::{serialize_packet, PacketHeader, PacketMessage};
+use mir2_shared::packets::{serialize_packet, PacketHeader, Packet};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
@@ -155,7 +155,7 @@ impl NetworkStack {
     /// Enqueue a packet to be sent
     /// 
     /// Corresponds to: Network.Enqueue(Packet p)
-    pub fn enqueue<P: PacketMessage>(&mut self, packet: &P) -> Result<()> {
+    pub fn enqueue<P: Packet>(&mut self, packet: &P) -> Result<()> {
         let mut buffer = Vec::new();
         serialize_packet(&mut buffer, packet)
             .map_err(|e| anyhow!("Failed to serialize packet: {}", e))?;

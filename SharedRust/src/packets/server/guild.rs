@@ -9,7 +9,7 @@ use crate::{
     enums::ServerPacketIds,
     binary::{read_dotnet_string, write_dotnet_string},
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ============================================================================
@@ -22,7 +22,7 @@ pub struct GuildStorageList {
     pub items: Vec<Option<GuildStorageItem>>,
 }
 
-impl PacketMessage for GuildStorageList {
+impl Packet for GuildStorageList {
     const OPCODE: i16 = ServerPacketIds::GuildStorageList as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -64,7 +64,7 @@ pub struct GuildNoticeChange {
     pub notice: Vec<String>,
 }
 
-impl PacketMessage for GuildNoticeChange {
+impl Packet for GuildNoticeChange {
     const OPCODE: i16 = ServerPacketIds::GuildNoticeChange as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -98,7 +98,7 @@ pub struct GuildMemberChange {
     pub ranks: Vec<GuildRank>,
 }
 
-impl PacketMessage for GuildMemberChange {
+impl Packet for GuildMemberChange {
     const OPCODE: i16 = ServerPacketIds::GuildMemberChange as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use byteorder::ReadBytesExt;
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::{ServerPacketIds, ChatType};
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Chat message from server
@@ -14,7 +14,7 @@ pub struct Chat {
     pub chat_type: ChatType,
 }
 
-impl PacketMessage for Chat {
+impl Packet for Chat {
     const OPCODE: i16 = ServerPacketIds::Chat as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -38,7 +38,7 @@ pub struct ObjectChat {
     pub chat_type: ChatType,
 }
 
-impl PacketMessage for ObjectChat {
+impl Packet for ObjectChat {
     const OPCODE: i16 = ServerPacketIds::ObjectChat as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

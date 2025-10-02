@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::ClientPacketIds;
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Send mail to another player
@@ -17,7 +17,7 @@ pub struct SendMail {
     pub stamped: bool,
 }
 
-impl PacketMessage for SendMail {
+impl Packet for SendMail {
     const OPCODE: i16 = ClientPacketIds::SendMail as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -55,7 +55,7 @@ pub struct ReadMail {
     pub mail_id: u64,
 }
 
-impl PacketMessage for ReadMail {
+impl Packet for ReadMail {
     const OPCODE: i16 = ClientPacketIds::ReadMail as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -75,7 +75,7 @@ pub struct CollectParcel {
     pub mail_id: u64,
 }
 
-impl PacketMessage for CollectParcel {
+impl Packet for CollectParcel {
     const OPCODE: i16 = ClientPacketIds::CollectParcel as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -95,7 +95,7 @@ pub struct DeleteMail {
     pub mail_id: u64,
 }
 
-impl PacketMessage for DeleteMail {
+impl Packet for DeleteMail {
     const OPCODE: i16 = ClientPacketIds::DeleteMail as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -116,7 +116,7 @@ pub struct LockMail {
     pub lock: bool,
 }
 
-impl PacketMessage for LockMail {
+impl Packet for LockMail {
     const OPCODE: i16 = ClientPacketIds::LockMail as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -139,7 +139,7 @@ pub struct MailLockedItem {
     pub locked: bool,
 }
 
-impl PacketMessage for MailLockedItem {
+impl Packet for MailLockedItem {
     const OPCODE: i16 = ClientPacketIds::MailLockedItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -163,7 +163,7 @@ pub struct MailCost {
     pub stamped: bool,
 }
 
-impl PacketMessage for MailCost {
+impl Packet for MailCost {
     const OPCODE: i16 = ClientPacketIds::MailCost as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

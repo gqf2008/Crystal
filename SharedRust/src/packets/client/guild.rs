@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::ClientPacketIds;
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Edit guild member (kick, promote, demote, etc.)
@@ -16,7 +16,7 @@ pub struct EditGuildMember {
     pub rank_name: String,
 }
 
-impl PacketMessage for EditGuildMember {
+impl Packet for EditGuildMember {
     const OPCODE: i16 = ClientPacketIds::EditGuildMember as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -43,7 +43,7 @@ pub struct EditGuildNotice {
     pub notice_lines: Vec<String>,
 }
 
-impl PacketMessage for EditGuildNotice {
+impl Packet for EditGuildNotice {
     const OPCODE: i16 = ClientPacketIds::EditGuildNotice as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -74,7 +74,7 @@ pub struct GuildInvite {
     pub accept_invite: bool,
 }
 
-impl PacketMessage for GuildInvite {
+impl Packet for GuildInvite {
     const OPCODE: i16 = ClientPacketIds::GuildInvite as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -94,7 +94,7 @@ pub struct RequestGuildInfo {
     pub info_type: u8,
 }
 
-impl PacketMessage for RequestGuildInfo {
+impl Packet for RequestGuildInfo {
     const OPCODE: i16 = ClientPacketIds::RequestGuildInfo as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -114,7 +114,7 @@ pub struct GuildNameReturn {
     pub name: String,
 }
 
-impl PacketMessage for GuildNameReturn {
+impl Packet for GuildNameReturn {
     const OPCODE: i16 = ClientPacketIds::GuildNameReturn as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -134,7 +134,7 @@ pub struct GuildWarReturn {
     pub guild_name: String,
 }
 
-impl PacketMessage for GuildWarReturn {
+impl Packet for GuildWarReturn {
     const OPCODE: i16 = ClientPacketIds::GuildWarReturn as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -155,7 +155,7 @@ pub struct GuildStorageGoldChange {
     pub amount: u32,
 }
 
-impl PacketMessage for GuildStorageGoldChange {
+impl Packet for GuildStorageGoldChange {
     const OPCODE: i16 = ClientPacketIds::GuildStorageGoldChange as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -179,7 +179,7 @@ pub struct GuildStorageItemChange {
     pub to_slot: i32,
 }
 
-impl PacketMessage for GuildStorageItemChange {
+impl Packet for GuildStorageItemChange {
     const OPCODE: i16 = ClientPacketIds::GuildStorageItemChange as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -204,7 +204,7 @@ pub struct GuildBuffUpdate {
     pub buff_id: i32,
 }
 
-impl PacketMessage for GuildBuffUpdate {
+impl Packet for GuildBuffUpdate {
     const OPCODE: i16 = ClientPacketIds::GuildBuffUpdate as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -226,7 +226,7 @@ pub struct GuildTerritoryPage {
     pub page: i32,
 }
 
-impl PacketMessage for GuildTerritoryPage {
+impl Packet for GuildTerritoryPage {
     const OPCODE: i16 = ClientPacketIds::GuildTerritoryPage as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -246,7 +246,7 @@ pub struct PurchaseGuildTerritory {
     pub owner: String,
 }
 
-impl PacketMessage for PurchaseGuildTerritory {
+impl Packet for PurchaseGuildTerritory {
     const OPCODE: i16 = ClientPacketIds::PurchaseGuildTerritory as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

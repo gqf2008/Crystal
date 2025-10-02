@@ -8,7 +8,7 @@ use crate::{
     enums::{HeroSpawnState, AttackMode, PetMode, ServerPacketIds},
     data::client_data::ClientHeroInformation,
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ============================================================================
@@ -51,7 +51,7 @@ pub struct HeroCreateRequest {
 // PacketMessage Implementations
 // ============================================================================
 
-impl PacketMessage for UpdateHeroSpawnState {
+impl Packet for UpdateHeroSpawnState {
     const OPCODE: i16 = ServerPacketIds::UpdateHeroSpawnState as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -65,7 +65,7 @@ impl PacketMessage for UpdateHeroSpawnState {
     }
 }
 
-impl PacketMessage for SetAutoPotValue {
+impl Packet for SetAutoPotValue {
     const OPCODE: i16 = ServerPacketIds::SetAutoPotValue as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -81,7 +81,7 @@ impl PacketMessage for SetAutoPotValue {
     }
 }
 
-impl PacketMessage for SetHeroBehaviour {
+impl Packet for SetHeroBehaviour {
     const OPCODE: i16 = ServerPacketIds::SetHeroBehaviour as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -100,7 +100,7 @@ impl PacketMessage for SetHeroBehaviour {
     }
 }
 
-impl PacketMessage for ManageHeroes {
+impl Packet for ManageHeroes {
     const OPCODE: i16 = ServerPacketIds::ManageHeroes as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -128,7 +128,7 @@ impl PacketMessage for ManageHeroes {
     }
 }
 
-impl PacketMessage for HeroCreateRequest {
+impl Packet for HeroCreateRequest {
     const OPCODE: i16 = ServerPacketIds::HeroCreateRequest as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

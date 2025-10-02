@@ -9,7 +9,7 @@ use crate::{
     enums::ServerPacketIds,
     binary::{read_dotnet_string, write_dotnet_string},
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ==================== 数据结构 & PacketMessage 实现 ====================
@@ -19,7 +19,7 @@ pub struct TradeRequest {
     pub name: String,
 }
 
-impl PacketMessage for TradeRequest {
+impl Packet for TradeRequest {
     const OPCODE: i16 = ServerPacketIds::TradeRequest as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -38,7 +38,7 @@ pub struct TradeAccept {
     pub name: String,
 }
 
-impl PacketMessage for TradeAccept {
+impl Packet for TradeAccept {
     const OPCODE: i16 = ServerPacketIds::TradeAccept as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -57,7 +57,7 @@ pub struct TradeGold {
     pub amount: u32,
 }
 
-impl PacketMessage for TradeGold {
+impl Packet for TradeGold {
     const OPCODE: i16 = ServerPacketIds::TradeGold as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -76,7 +76,7 @@ pub struct TradeItem {
     pub trade_items: Vec<Option<UserItem>>,
 }
 
-impl PacketMessage for TradeItem {
+impl Packet for TradeItem {
     const OPCODE: i16 = ServerPacketIds::TradeItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -115,7 +115,7 @@ impl PacketMessage for TradeItem {
 #[derive(Debug, Clone)]
 pub struct TradeConfirm;
 
-impl PacketMessage for TradeConfirm {
+impl Packet for TradeConfirm {
     const OPCODE: i16 = ServerPacketIds::TradeConfirm as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -132,7 +132,7 @@ pub struct TradeCancel {
     pub unlock: bool,
 }
 
-impl PacketMessage for TradeCancel {
+impl Packet for TradeCancel {
     const OPCODE: i16 = ServerPacketIds::TradeCancel as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

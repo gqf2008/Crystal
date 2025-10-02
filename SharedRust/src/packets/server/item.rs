@@ -8,7 +8,7 @@ use crate::{
     enums::{MirGridType, ServerPacketIds},
     data::item::{ItemInfo, UserItem},
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ============================================================================
@@ -23,7 +23,7 @@ pub struct SellItem {
     pub success: bool,
 }
 
-impl PacketMessage for SellItem {
+impl Packet for SellItem {
     const OPCODE: i16 = ServerPacketIds::SellItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -47,7 +47,7 @@ pub struct RepairItem {
     pub unique_id: u64,
 }
 
-impl PacketMessage for RepairItem {
+impl Packet for RepairItem {
     const OPCODE: i16 = ServerPacketIds::RepairItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -69,7 +69,7 @@ pub struct ItemRepaired {
     pub current_dura: u16,
 }
 
-impl PacketMessage for ItemRepaired {
+impl Packet for ItemRepaired {
     const OPCODE: i16 = ServerPacketIds::ItemRepaired as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -95,7 +95,7 @@ pub struct SplitItem {
     pub count: u16,
 }
 
-impl PacketMessage for SplitItem {
+impl Packet for SplitItem {
     const OPCODE: i16 = ServerPacketIds::SplitItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -121,7 +121,7 @@ pub struct SplitItem1 {
     pub count: u16,
 }
 
-impl PacketMessage for SplitItem1 {
+impl Packet for SplitItem1 {
     const OPCODE: i16 = ServerPacketIds::SplitItem1 as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -145,7 +145,7 @@ pub struct RefreshItem {
     pub item: UserItem,
 }
 
-impl PacketMessage for RefreshItem {
+impl Packet for RefreshItem {
     const OPCODE: i16 = ServerPacketIds::RefreshItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -166,7 +166,7 @@ pub struct ItemSlotSizeChanged {
     pub slot_size: i32,
 }
 
-impl PacketMessage for ItemSlotSizeChanged {
+impl Packet for ItemSlotSizeChanged {
     const OPCODE: i16 = ServerPacketIds::ItemSlotSizeChanged as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -190,7 +190,7 @@ pub struct ItemSealChanged {
     pub expiry_date: i64,
 }
 
-impl PacketMessage for ItemSealChanged {
+impl Packet for ItemSealChanged {
     const OPCODE: i16 = ServerPacketIds::ItemSealChanged as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -216,7 +216,7 @@ pub struct CraftItem {
     pub success: bool,
 }
 
-impl PacketMessage for CraftItem {
+impl Packet for CraftItem {
     const OPCODE: i16 = ServerPacketIds::CraftItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -240,7 +240,7 @@ pub struct NewItemInfo {
     pub info: ItemInfo,
 }
 
-impl PacketMessage for NewItemInfo {
+impl Packet for NewItemInfo {
     const OPCODE: i16 = ServerPacketIds::NewItemInfo as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

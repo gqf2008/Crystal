@@ -8,7 +8,7 @@ use crate::{
     enums::{ServerPacketIds, MirClass, MirGender},
     binary::{read_dotnet_string, write_dotnet_string},
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ============================================================================
@@ -43,7 +43,7 @@ pub struct DeleteCharacterSuccess {
 // PacketMessage Implementations
 // ============================================================================
 
-impl PacketMessage for NewCharacter {
+impl Packet for NewCharacter {
     const OPCODE: i16 = ServerPacketIds::NewCharacter as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -57,7 +57,7 @@ impl PacketMessage for NewCharacter {
     }
 }
 
-impl PacketMessage for NewCharacterSuccess {
+impl Packet for NewCharacterSuccess {
     const OPCODE: i16 = ServerPacketIds::NewCharacterSuccess as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -99,7 +99,7 @@ impl PacketMessage for NewCharacterSuccess {
     }
 }
 
-impl PacketMessage for DeleteCharacter {
+impl Packet for DeleteCharacter {
     const OPCODE: i16 = ServerPacketIds::DeleteCharacter as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -113,7 +113,7 @@ impl PacketMessage for DeleteCharacter {
     }
 }
 
-impl PacketMessage for DeleteCharacterSuccess {
+impl Packet for DeleteCharacterSuccess {
     const OPCODE: i16 = ServerPacketIds::DeleteCharacterSuccess as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

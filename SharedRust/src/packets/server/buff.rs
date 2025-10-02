@@ -8,7 +8,7 @@ use crate::{
     enums::{BuffType, PoisonType, ServerPacketIds},
     binary::{read_dotnet_string, write_dotnet_string},
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::{SharedResult, Stats};
 
 // ClientBuff 结构体
@@ -31,7 +31,7 @@ pub struct AddBuff {
     pub buff: ClientBuff,
 }
 
-impl PacketMessage for AddBuff {
+impl Packet for AddBuff {
     const OPCODE: i16 = ServerPacketIds::AddBuff as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -86,7 +86,7 @@ pub struct RemoveBuff {
     pub object_id: u32,
 }
 
-impl PacketMessage for RemoveBuff {
+impl Packet for RemoveBuff {
     const OPCODE: i16 = ServerPacketIds::RemoveBuff as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -109,7 +109,7 @@ pub struct PauseBuff {
     pub paused: bool,
 }
 
-impl PacketMessage for PauseBuff {
+impl Packet for PauseBuff {
     const OPCODE: i16 = ServerPacketIds::PauseBuff as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -132,7 +132,7 @@ pub struct ColourChanged {
     pub name_colour_argb: i32,
 }
 
-impl PacketMessage for ColourChanged {
+impl Packet for ColourChanged {
     const OPCODE: i16 = ServerPacketIds::ColourChanged as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -152,7 +152,7 @@ pub struct ObjectColourChanged {
     pub name_colour_argb: i32,
 }
 
-impl PacketMessage for ObjectColourChanged {
+impl Packet for ObjectColourChanged {
     const OPCODE: i16 = ServerPacketIds::ObjectColourChanged as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -174,7 +174,7 @@ pub struct ObjectGuildNameChanged {
     pub guild_name: String,
 }
 
-impl PacketMessage for ObjectGuildNameChanged {
+impl Packet for ObjectGuildNameChanged {
     const OPCODE: i16 = ServerPacketIds::ObjectGuildNameChanged as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -195,7 +195,7 @@ pub struct Poisoned {
     pub poison: PoisonType,
 }
 
-impl PacketMessage for Poisoned {
+impl Packet for Poisoned {
     const OPCODE: i16 = ServerPacketIds::Poisoned as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -216,7 +216,7 @@ pub struct ObjectPoisoned {
     pub poison: PoisonType,
 }
 
-impl PacketMessage for ObjectPoisoned {
+impl Packet for ObjectPoisoned {
     const OPCODE: i16 = ServerPacketIds::ObjectPoisoned as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

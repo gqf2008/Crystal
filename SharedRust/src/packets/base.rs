@@ -32,7 +32,7 @@ impl PacketHeader {
     }
 }
 
-pub trait PacketMessage: Sized {
+pub trait Packet: Sized {
     const OPCODE: i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self>;
@@ -43,7 +43,7 @@ pub trait PacketMessage: Sized {
     }
 }
 
-pub fn serialize_packet<W: Write, P: PacketMessage>(
+pub fn serialize_packet<W: Write, P: Packet>(
     writer: &mut W,
     packet: &P,
 ) -> SharedResult<()> {
@@ -63,7 +63,7 @@ pub fn serialize_packet<W: Write, P: PacketMessage>(
     Ok(())
 }
 
-pub fn deserialize_packet<R: Read, P: PacketMessage>(reader: &mut R) -> SharedResult<P> {
+pub fn deserialize_packet<R: Read, P: Packet>(reader: &mut R) -> SharedResult<P> {
     let header = PacketHeader::read_from(reader)?;
     if header.length < PacketHeader::HEADER_SIZE as u16 {
         return Err(SharedError::InvalidPacketLength(header.length));
@@ -90,7 +90,7 @@ pub fn deserialize_packet<R: Read, P: PacketMessage>(reader: &mut R) -> SharedRe
     Ok(packet)
 }
 
-pub fn extract_packet<P: PacketMessage>(buffer: &[u8]) -> SharedResult<Option<(P, Vec<u8>)>> {
+pub fn extract_packet<P: Packet>(buffer: &[u8]) -> SharedResult<Option<(P, Vec<u8>)>> {
     if buffer.len() < PacketHeader::HEADER_SIZE {
         return Ok(None);
     }
@@ -150,7 +150,7 @@ mod tests {
         value: u32,
     }
 
-    impl PacketMessage for SimplePacket {
+    impl Packet for SimplePacket {
         const OPCODE: i16 = 42;
 
         fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -169,7 +169,7 @@ mod tests {
         data: Vec<u8>,
     }
 
-    impl PacketMessage for CompressedPacket {
+    impl Packet for CompressedPacket {
         const OPCODE: i16 = 77;
 
         fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

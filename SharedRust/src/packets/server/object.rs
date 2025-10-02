@@ -8,7 +8,7 @@ use crate::{
     enums::{SpellEffect, ServerPacketIds},
     map::Point,
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ============================================================================
@@ -23,7 +23,7 @@ pub struct ObjectHealth {
     pub expire: u16,
 }
 
-impl PacketMessage for ObjectHealth {
+impl Packet for ObjectHealth {
     const OPCODE: i16 = ServerPacketIds::ObjectHealth as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -52,7 +52,7 @@ pub struct ObjectMana {
     pub percent: u8,
 }
 
-impl PacketMessage for ObjectMana {
+impl Packet for ObjectMana {
     const OPCODE: i16 = ServerPacketIds::ObjectMana as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -75,7 +75,7 @@ pub struct ObjectHidden {
     pub hidden: bool,
 }
 
-impl PacketMessage for ObjectHidden {
+impl Packet for ObjectHidden {
     const OPCODE: i16 = ServerPacketIds::ObjectHidden as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -99,7 +99,7 @@ pub struct MapEffect {
     pub value: i32,
 }
 
-impl PacketMessage for MapEffect {
+impl Packet for MapEffect {
     const OPCODE: i16 = ServerPacketIds::MapEffect as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

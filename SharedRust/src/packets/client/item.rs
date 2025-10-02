@@ -3,7 +3,7 @@
 use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::enums::{ClientPacketIds, MirGridType};
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Client requests to move an item
@@ -14,7 +14,7 @@ pub struct MoveItem {
     pub to: i32,
 }
 
-impl PacketMessage for MoveItem {
+impl Packet for MoveItem {
     const OPCODE: i16 = ClientPacketIds::MoveItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -39,7 +39,7 @@ pub struct StoreItem {
     pub to: i32,
 }
 
-impl PacketMessage for StoreItem {
+impl Packet for StoreItem {
     const OPCODE: i16 = ClientPacketIds::StoreItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -62,7 +62,7 @@ pub struct TakeBackItem {
     pub to: i32,
 }
 
-impl PacketMessage for TakeBackItem {
+impl Packet for TakeBackItem {
     const OPCODE: i16 = ClientPacketIds::TakeBackItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -87,7 +87,7 @@ pub struct MergeItem {
     pub id_to: u64,
 }
 
-impl PacketMessage for MergeItem {
+impl Packet for MergeItem {
     const OPCODE: i16 = ClientPacketIds::MergeItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -115,7 +115,7 @@ pub struct EquipItem {
     pub to: i32,
 }
 
-impl PacketMessage for EquipItem {
+impl Packet for EquipItem {
     const OPCODE: i16 = ClientPacketIds::EquipItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -141,7 +141,7 @@ pub struct RemoveItem {
     pub to: i32,
 }
 
-impl PacketMessage for RemoveItem {
+impl Packet for RemoveItem {
     const OPCODE: i16 = ClientPacketIds::RemoveItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -168,7 +168,7 @@ pub struct RemoveSlotItem {
     pub from_slot: i32,
 }
 
-impl PacketMessage for RemoveSlotItem {
+impl Packet for RemoveSlotItem {
     const OPCODE: i16 = ClientPacketIds::RemoveSlotItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -196,7 +196,7 @@ pub struct SplitItem {
     pub count: u32,
 }
 
-impl PacketMessage for SplitItem {
+impl Packet for SplitItem {
     const OPCODE: i16 = ClientPacketIds::SplitItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -220,7 +220,7 @@ pub struct UseItem {
     pub unique_id: u64,
 }
 
-impl PacketMessage for UseItem {
+impl Packet for UseItem {
     const OPCODE: i16 = ClientPacketIds::UseItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -242,7 +242,7 @@ pub struct DropItem {
     pub hero_inventory: bool,
 }
 
-impl PacketMessage for DropItem {
+impl Packet for DropItem {
     const OPCODE: i16 = ClientPacketIds::DropItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -266,7 +266,7 @@ pub struct DropGold {
     pub amount: u32,
 }
 
-impl PacketMessage for DropGold {
+impl Packet for DropGold {
     const OPCODE: i16 = ClientPacketIds::DropGold as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -284,7 +284,7 @@ impl PacketMessage for DropGold {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PickUp;
 
-impl PacketMessage for PickUp {
+impl Packet for PickUp {
     const OPCODE: i16 = ClientPacketIds::PickUp as i16;
 
     fn read_body<R: Read>(_: &mut R) -> SharedResult<Self> {

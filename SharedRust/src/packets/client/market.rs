@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::{ClientPacketIds, MarketPanelType, ItemType};
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Consign item to market
@@ -15,7 +15,7 @@ pub struct ConsignItem {
     pub panel_type: MarketPanelType,
 }
 
-impl PacketMessage for ConsignItem {
+impl Packet for ConsignItem {
     const OPCODE: i16 = ClientPacketIds::ConsignItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -44,7 +44,7 @@ pub struct MarketSearch {
     pub market_type: MarketPanelType,
 }
 
-impl PacketMessage for MarketSearch {
+impl Packet for MarketSearch {
     const OPCODE: i16 = ClientPacketIds::MarketSearch as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -80,7 +80,7 @@ impl PacketMessage for MarketSearch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarketRefresh;
 
-impl PacketMessage for MarketRefresh {
+impl Packet for MarketRefresh {
     const OPCODE: i16 = ClientPacketIds::MarketRefresh as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -98,7 +98,7 @@ pub struct MarketPage {
     pub page: i32,
 }
 
-impl PacketMessage for MarketPage {
+impl Packet for MarketPage {
     const OPCODE: i16 = ClientPacketIds::MarketPage as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -119,7 +119,7 @@ pub struct MarketBuy {
     pub bid_price: u32,
 }
 
-impl PacketMessage for MarketBuy {
+impl Packet for MarketBuy {
     const OPCODE: i16 = ClientPacketIds::MarketBuy as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -141,7 +141,7 @@ pub struct MarketSellNow {
     pub auction_id: u64,
 }
 
-impl PacketMessage for MarketSellNow {
+impl Packet for MarketSellNow {
     const OPCODE: i16 = ClientPacketIds::MarketSellNow as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -162,7 +162,7 @@ pub struct MarketGetBack {
     pub auction_id: u64,
 }
 
-impl PacketMessage for MarketGetBack {
+impl Packet for MarketGetBack {
     const OPCODE: i16 = ClientPacketIds::MarketGetBack as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

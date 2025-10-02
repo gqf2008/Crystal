@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::ClientPacketIds;
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,7 +32,7 @@ impl Default for NewAccount {
     }
 }
 
-impl PacketMessage for NewAccount {
+impl Packet for NewAccount {
     const OPCODE: i16 = ClientPacketIds::NewAccount as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -76,7 +76,7 @@ impl Default for ChangePassword {
     }
 }
 
-impl PacketMessage for ChangePassword {
+impl Packet for ChangePassword {
     const OPCODE: i16 = ClientPacketIds::ChangePassword as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -110,7 +110,7 @@ impl Default for Login {
     }
 }
 
-impl PacketMessage for Login {
+impl Packet for Login {
     const OPCODE: i16 = ClientPacketIds::Login as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -132,7 +132,7 @@ pub struct StartGame {
     pub character_index: i32,
 }
 
-impl PacketMessage for StartGame {
+impl Packet for StartGame {
     const OPCODE: i16 = ClientPacketIds::StartGame as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

@@ -7,7 +7,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::{ClientPacketIds, AttackMode, PetMode, MirGridType, AwakeType};
 use crate::map::Point;
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ==================== Mode Change Packets ====================
@@ -18,7 +18,7 @@ pub struct ChangeAMode {
     pub mode: AttackMode,
 }
 
-impl PacketMessage for ChangeAMode {
+impl Packet for ChangeAMode {
     const OPCODE: i16 = ClientPacketIds::ChangeAMode as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -38,7 +38,7 @@ pub struct ChangePMode {
     pub mode: PetMode,
 }
 
-impl PacketMessage for ChangePMode {
+impl Packet for ChangePMode {
     const OPCODE: i16 = ClientPacketIds::ChangePMode as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -58,7 +58,7 @@ pub struct ChangeTrade {
     pub allow_trade: bool,
 }
 
-impl PacketMessage for ChangeTrade {
+impl Packet for ChangeTrade {
     const OPCODE: i16 = ClientPacketIds::ChangeTrade as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -78,7 +78,7 @@ impl PacketMessage for ChangeTrade {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarriageRequest;
 
-impl PacketMessage for MarriageRequest {
+impl Packet for MarriageRequest {
     const OPCODE: i16 = ClientPacketIds::MarriageRequest as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -96,7 +96,7 @@ pub struct MarriageReply {
     pub accept_invite: bool,
 }
 
-impl PacketMessage for MarriageReply {
+impl Packet for MarriageReply {
     const OPCODE: i16 = ClientPacketIds::MarriageReply as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -114,7 +114,7 @@ impl PacketMessage for MarriageReply {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChangeMarriage;
 
-impl PacketMessage for ChangeMarriage {
+impl Packet for ChangeMarriage {
     const OPCODE: i16 = ClientPacketIds::ChangeMarriage as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -130,7 +130,7 @@ impl PacketMessage for ChangeMarriage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DivorceRequest;
 
-impl PacketMessage for DivorceRequest {
+impl Packet for DivorceRequest {
     const OPCODE: i16 = ClientPacketIds::DivorceRequest as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -148,7 +148,7 @@ pub struct DivorceReply {
     pub accept_invite: bool,
 }
 
-impl PacketMessage for DivorceReply {
+impl Packet for DivorceReply {
     const OPCODE: i16 = ClientPacketIds::DivorceReply as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -170,7 +170,7 @@ pub struct AddMentor {
     pub name: String,
 }
 
-impl PacketMessage for AddMentor {
+impl Packet for AddMentor {
     const OPCODE: i16 = ClientPacketIds::AddMentor as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -190,7 +190,7 @@ pub struct MentorReply {
     pub accept_invite: bool,
 }
 
-impl PacketMessage for MentorReply {
+impl Packet for MentorReply {
     const OPCODE: i16 = ClientPacketIds::MentorReply as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -208,7 +208,7 @@ impl PacketMessage for MentorReply {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AllowMentor;
 
-impl PacketMessage for AllowMentor {
+impl Packet for AllowMentor {
     const OPCODE: i16 = ClientPacketIds::AllowMentor as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -224,7 +224,7 @@ impl PacketMessage for AllowMentor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CancelMentor;
 
-impl PacketMessage for CancelMentor {
+impl Packet for CancelMentor {
     const OPCODE: i16 = ClientPacketIds::CancelMentor as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -242,7 +242,7 @@ impl PacketMessage for CancelMentor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TownRevive;
 
-impl PacketMessage for TownRevive {
+impl Packet for TownRevive {
     const OPCODE: i16 = ClientPacketIds::TownRevive as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -265,7 +265,7 @@ pub struct EquipSlotItem {
     pub grid_to: MirGridType,
 }
 
-impl PacketMessage for EquipSlotItem {
+impl Packet for EquipSlotItem {
     const OPCODE: i16 = ClientPacketIds::EquipSlotItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -293,7 +293,7 @@ pub struct FishingCast {
     pub cast_out: bool,
 }
 
-impl PacketMessage for FishingCast {
+impl Packet for FishingCast {
     const OPCODE: i16 = ClientPacketIds::FishingCast as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -313,7 +313,7 @@ pub struct FishingChangeAutocast {
     pub auto_cast: bool,
 }
 
-impl PacketMessage for FishingChangeAutocast {
+impl Packet for FishingChangeAutocast {
     const OPCODE: i16 = ClientPacketIds::FishingChangeAutocast as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -333,7 +333,7 @@ impl PacketMessage for FishingChangeAutocast {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AcceptReincarnation;
 
-impl PacketMessage for AcceptReincarnation {
+impl Packet for AcceptReincarnation {
     const OPCODE: i16 = ClientPacketIds::AcceptReincarnation as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -349,7 +349,7 @@ impl PacketMessage for AcceptReincarnation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CancelReincarnation;
 
-impl PacketMessage for CancelReincarnation {
+impl Packet for CancelReincarnation {
     const OPCODE: i16 = ClientPacketIds::CancelReincarnation as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -371,7 +371,7 @@ pub struct CombineItem {
     pub id_to: u64,
 }
 
-impl PacketMessage for CombineItem {
+impl Packet for CombineItem {
     const OPCODE: i16 = ClientPacketIds::CombineItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -398,7 +398,7 @@ pub struct AwakeningNeedMaterials {
     pub awake_type: AwakeType,
 }
 
-impl PacketMessage for AwakeningNeedMaterials {
+impl Packet for AwakeningNeedMaterials {
     const OPCODE: i16 = ClientPacketIds::AwakeningNeedMaterials as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -421,7 +421,7 @@ pub struct AwakeningLockedItem {
     pub locked: bool,
 }
 
-impl PacketMessage for AwakeningLockedItem {
+impl Packet for AwakeningLockedItem {
     const OPCODE: i16 = ClientPacketIds::AwakeningLockedItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -445,7 +445,7 @@ pub struct Awakening {
     pub position_idx: u32,
 }
 
-impl PacketMessage for Awakening {
+impl Packet for Awakening {
     const OPCODE: i16 = ClientPacketIds::Awakening as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -469,7 +469,7 @@ pub struct DisassembleItem {
     pub unique_id: u64,
 }
 
-impl PacketMessage for DisassembleItem {
+impl Packet for DisassembleItem {
     const OPCODE: i16 = ClientPacketIds::DisassembleItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -489,7 +489,7 @@ pub struct DowngradeAwakening {
     pub unique_id: u64,
 }
 
-impl PacketMessage for DowngradeAwakening {
+impl Packet for DowngradeAwakening {
     const OPCODE: i16 = ClientPacketIds::DowngradeAwakening as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -509,7 +509,7 @@ pub struct ResetAddedItem {
     pub unique_id: u64,
 }
 
-impl PacketMessage for ResetAddedItem {
+impl Packet for ResetAddedItem {
     const OPCODE: i16 = ClientPacketIds::ResetAddedItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -531,7 +531,7 @@ pub struct RequestIntelligentCreatureUpdates {
     pub update: bool,
 }
 
-impl PacketMessage for RequestIntelligentCreatureUpdates {
+impl Packet for RequestIntelligentCreatureUpdates {
     const OPCODE: i16 = ClientPacketIds::RequestIntelligentCreatureUpdates as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -554,7 +554,7 @@ pub struct UpdateIntelligentCreature {
     pub release_me: bool,
 }
 
-impl PacketMessage for UpdateIntelligentCreature {
+impl Packet for UpdateIntelligentCreature {
     const OPCODE: i16 = ClientPacketIds::UpdateIntelligentCreature as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -581,7 +581,7 @@ pub struct IntelligentCreaturePickup {
     pub location: Point,
 }
 
-impl PacketMessage for IntelligentCreaturePickup {
+impl Packet for IntelligentCreaturePickup {
     const OPCODE: i16 = ClientPacketIds::IntelligentCreaturePickup as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -605,7 +605,7 @@ impl PacketMessage for IntelligentCreaturePickup {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GetRentedItems;
 
-impl PacketMessage for GetRentedItems {
+impl Packet for GetRentedItems {
     const OPCODE: i16 = ClientPacketIds::GetRentedItems as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -621,7 +621,7 @@ impl PacketMessage for GetRentedItems {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ItemRentalRequest;
 
-impl PacketMessage for ItemRentalRequest {
+impl Packet for ItemRentalRequest {
     const OPCODE: i16 = ClientPacketIds::ItemRentalRequest as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -639,7 +639,7 @@ pub struct ItemRentalFee {
     pub amount: u32,
 }
 
-impl PacketMessage for ItemRentalFee {
+impl Packet for ItemRentalFee {
     const OPCODE: i16 = ClientPacketIds::ItemRentalFee as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -659,7 +659,7 @@ pub struct ItemRentalPeriod {
     pub days: u32,
 }
 
-impl PacketMessage for ItemRentalPeriod {
+impl Packet for ItemRentalPeriod {
     const OPCODE: i16 = ClientPacketIds::ItemRentalPeriod as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -680,7 +680,7 @@ pub struct DepositRentalItem {
     pub to: i32,
 }
 
-impl PacketMessage for DepositRentalItem {
+impl Packet for DepositRentalItem {
     const OPCODE: i16 = ClientPacketIds::DepositRentalItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -703,7 +703,7 @@ pub struct RetrieveRentalItem {
     pub to: i32,
 }
 
-impl PacketMessage for RetrieveRentalItem {
+impl Packet for RetrieveRentalItem {
     const OPCODE: i16 = ClientPacketIds::RetrieveRentalItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -723,7 +723,7 @@ impl PacketMessage for RetrieveRentalItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CancelItemRental;
 
-impl PacketMessage for CancelItemRental {
+impl Packet for CancelItemRental {
     const OPCODE: i16 = ClientPacketIds::CancelItemRental as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -739,7 +739,7 @@ impl PacketMessage for CancelItemRental {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ItemRentalLockFee;
 
-impl PacketMessage for ItemRentalLockFee {
+impl Packet for ItemRentalLockFee {
     const OPCODE: i16 = ClientPacketIds::ItemRentalLockFee as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -755,7 +755,7 @@ impl PacketMessage for ItemRentalLockFee {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ItemRentalLockItem;
 
-impl PacketMessage for ItemRentalLockItem {
+impl Packet for ItemRentalLockItem {
     const OPCODE: i16 = ClientPacketIds::ItemRentalLockItem as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -771,7 +771,7 @@ impl PacketMessage for ItemRentalLockItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConfirmItemRental;
 
-impl PacketMessage for ConfirmItemRental {
+impl Packet for ConfirmItemRental {
     const OPCODE: i16 = ClientPacketIds::ConfirmItemRental as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -793,7 +793,7 @@ pub struct GameshopBuy {
     pub p_type: i32,
 }
 
-impl PacketMessage for GameshopBuy {
+impl Packet for GameshopBuy {
     const OPCODE: i16 = ClientPacketIds::GameshopBuy as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -817,7 +817,7 @@ pub struct ReportIssue {
     pub message: String,
 }
 
-impl PacketMessage for ReportIssue {
+impl Packet for ReportIssue {
     const OPCODE: i16 = ClientPacketIds::ReportIssue as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -839,7 +839,7 @@ pub struct GetRanking {
     pub rank_index: u8,
 }
 
-impl PacketMessage for GetRanking {
+impl Packet for GetRanking {
     const OPCODE: i16 = ClientPacketIds::GetRanking as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -859,7 +859,7 @@ pub struct Opendoor {
     pub door_index: u8,
 }
 
-impl PacketMessage for Opendoor {
+impl Packet for Opendoor {
     const OPCODE: i16 = ClientPacketIds::Opendoor as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -879,7 +879,7 @@ pub struct RequestUserName {
     pub user_id: u32,
 }
 
-impl PacketMessage for RequestUserName {
+impl Packet for RequestUserName {
     const OPCODE: i16 = ClientPacketIds::RequestUserName as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -899,7 +899,7 @@ pub struct RequestChatItem {
     pub chat_item_id: u64,
 }
 
-impl PacketMessage for RequestChatItem {
+impl Packet for RequestChatItem {
     const OPCODE: i16 = ClientPacketIds::RequestChatItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

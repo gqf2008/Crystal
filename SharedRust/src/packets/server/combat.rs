@@ -8,7 +8,7 @@ use crate::{
     enums::ServerPacketIds,
     data::stats::SharedResult,
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 
 
 #[derive(Debug, Clone)]
@@ -149,7 +149,7 @@ pub struct HeroHealthChanged {
 
 // ==================== 解析函数 ====================
 
-impl PacketMessage for ObjectAttack {
+impl Packet for ObjectAttack {
     const OPCODE: i16 = ServerPacketIds::ObjectAttack as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -176,7 +176,7 @@ impl PacketMessage for ObjectAttack {
     }
 }
 
-impl PacketMessage for Struck {
+impl Packet for Struck {
     const OPCODE: i16 = ServerPacketIds::Struck as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -191,7 +191,7 @@ impl PacketMessage for Struck {
     }
 }
 
-impl PacketMessage for ObjectStruck {
+impl Packet for ObjectStruck {
     const OPCODE: i16 = ServerPacketIds::ObjectStruck as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -214,7 +214,7 @@ impl PacketMessage for ObjectStruck {
     }
 }
 
-impl PacketMessage for DamageIndicator {
+impl Packet for DamageIndicator {
     const OPCODE: i16 = ServerPacketIds::DamageIndicator as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -233,7 +233,7 @@ impl PacketMessage for DamageIndicator {
     }
 }
 
-impl PacketMessage for Pushed {
+impl Packet for Pushed {
     const OPCODE: i16 = ServerPacketIds::Pushed as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -252,7 +252,7 @@ impl PacketMessage for Pushed {
     }
 }
 
-impl PacketMessage for ObjectPushed {
+impl Packet for ObjectPushed {
     const OPCODE: i16 = ServerPacketIds::ObjectPushed as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -273,7 +273,7 @@ impl PacketMessage for ObjectPushed {
     }
 }
 
-impl PacketMessage for RangeAttack {
+impl Packet for RangeAttack {
     const OPCODE: i16 = ServerPacketIds::RangeAttack as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -296,7 +296,7 @@ impl PacketMessage for RangeAttack {
     }
 }
 
-impl PacketMessage for ObjectRangeAttack {
+impl Packet for ObjectRangeAttack {
     const OPCODE: i16 = ServerPacketIds::ObjectRangeAttack as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -327,7 +327,7 @@ impl PacketMessage for ObjectRangeAttack {
     }
 }
 
-impl PacketMessage for UserDash {
+impl Packet for UserDash {
     const OPCODE: i16 = ServerPacketIds::UserDash as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -346,7 +346,7 @@ impl PacketMessage for UserDash {
     }
 }
 
-impl PacketMessage for ObjectDash {
+impl Packet for ObjectDash {
     const OPCODE: i16 = ServerPacketIds::ObjectDash as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -367,7 +367,7 @@ impl PacketMessage for ObjectDash {
     }
 }
 
-impl PacketMessage for UserDashFail {
+impl Packet for UserDashFail {
     const OPCODE: i16 = ServerPacketIds::UserDashFail as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -386,7 +386,7 @@ impl PacketMessage for UserDashFail {
     }
 }
 
-impl PacketMessage for ObjectDashFail {
+impl Packet for ObjectDashFail {
     const OPCODE: i16 = ServerPacketIds::ObjectDashFail as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -407,7 +407,7 @@ impl PacketMessage for ObjectDashFail {
     }
 }
 
-impl PacketMessage for Death {
+impl Packet for Death {
     const OPCODE: i16 = ServerPacketIds::Death as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -426,7 +426,7 @@ impl PacketMessage for Death {
     }
 }
 
-impl PacketMessage for ObjectDied {
+impl Packet for ObjectDied {
     const OPCODE: i16 = ServerPacketIds::ObjectDied as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -449,7 +449,7 @@ impl PacketMessage for ObjectDied {
     }
 }
 
-impl PacketMessage for Revived {
+impl Packet for Revived {
     const OPCODE: i16 = ServerPacketIds::Revived as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -461,7 +461,7 @@ impl PacketMessage for Revived {
     }
 }
 
-impl PacketMessage for ObjectRevived {
+impl Packet for ObjectRevived {
     const OPCODE: i16 = ServerPacketIds::ObjectRevived as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -478,7 +478,7 @@ impl PacketMessage for ObjectRevived {
     }
 }
 
-impl PacketMessage for HealthChanged {
+impl Packet for HealthChanged {
     const OPCODE: i16 = ServerPacketIds::HealthChanged as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -495,7 +495,7 @@ impl PacketMessage for HealthChanged {
     }
 }
 
-impl PacketMessage for HeroHealthChanged {
+impl Packet for HeroHealthChanged {
     const OPCODE: i16 = ServerPacketIds::HeroHealthChanged as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

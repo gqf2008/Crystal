@@ -8,7 +8,7 @@ use crate::{
     enums::ServerPacketIds,
     binary::{read_dotnet_string, write_dotnet_string},
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 #[derive(Debug, Clone)]
@@ -103,7 +103,7 @@ pub struct SearchMapResult {
 
 // ==================== 解析函数 ====================
 
-impl PacketMessage for MapInformation {
+impl Packet for MapInformation {
     const OPCODE: i16 = ServerPacketIds::MapInformation as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -150,7 +150,7 @@ impl PacketMessage for MapInformation {
     }
 }
 
-impl PacketMessage for NewMapInfo {
+impl Packet for NewMapInfo {
     const OPCODE: i16 = ServerPacketIds::NewMapInfo as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -185,7 +185,7 @@ impl PacketMessage for NewMapInfo {
     }
 }
 
-impl PacketMessage for MapChanged {
+impl Packet for MapChanged {
     const OPCODE: i16 = ServerPacketIds::MapChanged as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -218,7 +218,7 @@ impl PacketMessage for MapChanged {
     }
 }
 
-impl PacketMessage for ObjectHide {
+impl Packet for ObjectHide {
     const OPCODE: i16 = ServerPacketIds::ObjectHide as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -233,7 +233,7 @@ impl PacketMessage for ObjectHide {
     }
 }
 
-impl PacketMessage for ObjectShow {
+impl Packet for ObjectShow {
     const OPCODE: i16 = ServerPacketIds::ObjectShow as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -248,7 +248,7 @@ impl PacketMessage for ObjectShow {
     }
 }
 
-impl PacketMessage for ObjectTeleportOut {
+impl Packet for ObjectTeleportOut {
     const OPCODE: i16 = ServerPacketIds::ObjectTeleportOut as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -265,7 +265,7 @@ impl PacketMessage for ObjectTeleportOut {
     }
 }
 
-impl PacketMessage for ObjectTeleportIn {
+impl Packet for ObjectTeleportIn {
     const OPCODE: i16 = ServerPacketIds::ObjectTeleportIn as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -282,7 +282,7 @@ impl PacketMessage for ObjectTeleportIn {
     }
 }
 
-impl PacketMessage for TeleportIn {
+impl Packet for TeleportIn {
     const OPCODE: i16 = ServerPacketIds::TeleportIn as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -294,7 +294,7 @@ impl PacketMessage for TeleportIn {
     }
 }
 
-impl PacketMessage for WorldMapSetupInfo {
+impl Packet for WorldMapSetupInfo {
     const OPCODE: i16 = ServerPacketIds::WorldMapSetup as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -329,7 +329,7 @@ impl PacketMessage for WorldMapSetupInfo {
     }
 }
 
-impl PacketMessage for SearchMapResult {
+impl Packet for SearchMapResult {
     const OPCODE: i16 = ServerPacketIds::SearchMapResult as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

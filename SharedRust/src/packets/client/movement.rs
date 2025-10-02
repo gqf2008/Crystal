@@ -3,7 +3,7 @@
 use std::io::{Read, Write};
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use crate::enums::{ClientPacketIds, MirDirection};
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Client requests to turn in a direction
@@ -12,7 +12,7 @@ pub struct Turn {
     pub direction: MirDirection,
 }
 
-impl PacketMessage for Turn {
+impl Packet for Turn {
     const OPCODE: i16 = ClientPacketIds::Turn as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -32,7 +32,7 @@ pub struct Walk {
     pub direction: MirDirection,
 }
 
-impl PacketMessage for Walk {
+impl Packet for Walk {
     const OPCODE: i16 = ClientPacketIds::Walk as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -52,7 +52,7 @@ pub struct Run {
     pub direction: MirDirection,
 }
 
-impl PacketMessage for Run {
+impl Packet for Run {
     const OPCODE: i16 = ClientPacketIds::Run as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

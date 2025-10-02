@@ -3,14 +3,14 @@
 use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::enums::ClientPacketIds;
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Request trade with another player
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TradeRequest;
 
-impl PacketMessage for TradeRequest {
+impl Packet for TradeRequest {
     const OPCODE: i16 = ClientPacketIds::TradeRequest as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -28,7 +28,7 @@ pub struct TradeReply {
     pub accept_invite: bool,
 }
 
-impl PacketMessage for TradeReply {
+impl Packet for TradeReply {
     const OPCODE: i16 = ClientPacketIds::TradeReply as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -48,7 +48,7 @@ pub struct TradeGold {
     pub amount: u32,
 }
 
-impl PacketMessage for TradeGold {
+impl Packet for TradeGold {
     const OPCODE: i16 = ClientPacketIds::TradeGold as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -68,7 +68,7 @@ pub struct TradeConfirm {
     pub locked: bool,
 }
 
-impl PacketMessage for TradeConfirm {
+impl Packet for TradeConfirm {
     const OPCODE: i16 = ClientPacketIds::TradeConfirm as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -86,7 +86,7 @@ impl PacketMessage for TradeConfirm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TradeCancel;
 
-impl PacketMessage for TradeCancel {
+impl Packet for TradeCancel {
     const OPCODE: i16 = ClientPacketIds::TradeCancel as i16;
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {

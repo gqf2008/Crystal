@@ -11,7 +11,7 @@ use crate::{
     binary::{read_dotnet_string, write_dotnet_string},
     data::stats::{SharedResult, SharedError},
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 
 // ============================================================================
 // Packet Structures
@@ -83,7 +83,7 @@ pub struct UserStorage {
 // Parser Functions
 // ============================================================================
 
-impl PacketMessage for PlayerUpdate {
+impl Packet for PlayerUpdate {
     const OPCODE: i16 = ServerPacketIds::PlayerUpdate as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -108,7 +108,7 @@ impl PacketMessage for PlayerUpdate {
     }
 }
 
-impl PacketMessage for PlayerInspect {
+impl Packet for PlayerInspect {
     const OPCODE: i16 = ServerPacketIds::PlayerInspect as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -173,7 +173,7 @@ impl PacketMessage for PlayerInspect {
     }
 }
 
-impl PacketMessage for LogOutSuccess {
+impl Packet for LogOutSuccess {
     const OPCODE: i16 = ServerPacketIds::LogOutSuccess as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -231,7 +231,7 @@ impl PacketMessage for LogOutSuccess {
     }
 }
 
-impl PacketMessage for TimeOfDay {
+impl Packet for TimeOfDay {
     const OPCODE: i16 = ServerPacketIds::TimeOfDay as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -246,7 +246,7 @@ impl PacketMessage for TimeOfDay {
     }
 }
 
-impl PacketMessage for ChangeAMode {
+impl Packet for ChangeAMode {
     const OPCODE: i16 = ServerPacketIds::ChangeAMode as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -261,7 +261,7 @@ impl PacketMessage for ChangeAMode {
     }
 }
 
-impl PacketMessage for ChangePMode {
+impl Packet for ChangePMode {
     const OPCODE: i16 = ServerPacketIds::ChangePMode as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -276,7 +276,7 @@ impl PacketMessage for ChangePMode {
     }
 }
 
-impl PacketMessage for ObjectName {
+impl Packet for ObjectName {
     const OPCODE: i16 = ServerPacketIds::ObjectName as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -293,7 +293,7 @@ impl PacketMessage for ObjectName {
     }
 }
 
-impl PacketMessage for UserStorage {
+impl Packet for UserStorage {
     const OPCODE: i16 = ServerPacketIds::UserStorage as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

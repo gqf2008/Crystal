@@ -3,7 +3,7 @@
 use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::enums::ClientPacketIds;
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 /// Accept quest from NPC
@@ -13,7 +13,7 @@ pub struct AcceptQuest {
     pub quest_index: i32,
 }
 
-impl PacketMessage for AcceptQuest {
+impl Packet for AcceptQuest {
     const OPCODE: i16 = ClientPacketIds::AcceptQuest as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -36,7 +36,7 @@ pub struct FinishQuest {
     pub selected_item_index: i32,
 }
 
-impl PacketMessage for FinishQuest {
+impl Packet for FinishQuest {
     const OPCODE: i16 = ClientPacketIds::FinishQuest as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -58,7 +58,7 @@ pub struct AbandonQuest {
     pub quest_index: i32,
 }
 
-impl PacketMessage for AbandonQuest {
+impl Packet for AbandonQuest {
     const OPCODE: i16 = ClientPacketIds::AbandonQuest as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -78,7 +78,7 @@ pub struct ShareQuest {
     pub quest_index: i32,
 }
 
-impl PacketMessage for ShareQuest {
+impl Packet for ShareQuest {
     const OPCODE: i16 = ClientPacketIds::ShareQuest as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

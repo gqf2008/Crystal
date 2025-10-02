@@ -9,7 +9,7 @@ use crate::{
     enums::ServerPacketIds,
     binary::{read_dotnet_string, write_dotnet_string},
 };
-use super::super::base::PacketMessage;
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 // ============================================================================
@@ -22,7 +22,7 @@ pub struct SwitchGroup {
     pub allow_group: bool,
 }
 
-impl PacketMessage for SwitchGroup {
+impl Packet for SwitchGroup {
     const OPCODE: i16 = ServerPacketIds::SwitchGroup as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -42,7 +42,7 @@ pub struct GroupMembersMap {
     pub members: Vec<String>,
 }
 
-impl PacketMessage for GroupMembersMap {
+impl Packet for GroupMembersMap {
     const OPCODE: i16 = ServerPacketIds::GroupMembersMap as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -74,7 +74,7 @@ pub struct SendMemberLocation {
     pub location: Point,
 }
 
-impl PacketMessage for SendMemberLocation {
+impl Packet for SendMemberLocation {
     const OPCODE: i16 = ServerPacketIds::SendMemberLocation as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
