@@ -18,6 +18,7 @@ pub mod misc;
 pub mod movement;
 pub mod npc;
 pub mod quest;
+pub mod refine;
 pub mod trade;
 
 // Re-export all packet types for convenience
@@ -37,4 +38,5 @@ pub use misc::*;
 pub use movement::*;
 pub use npc::*;
 pub use quest::*;
+pub use refine::*;
 pub use trade::*;
