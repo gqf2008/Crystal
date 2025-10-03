@@ -30,31 +30,8 @@ impl ItemObject {
     /// Create a new item object
     pub fn new(object_id: u32) -> Self {
         Self {
-            map_object: MapObject::new_item(object_id),
-            item: UserItem {
-                unique_id: 0,
-                item_index: 0,
-                ac: 0,
-                mac: 0,
-                dc: 0,
-                mc: 0,
-                sc: 0,
-                hp: 0,
-                mp: 0,
-                attack_speed: 0,
-                accuracy: 0,
-                agility: 0,
-                luck: 0,
-                current_dura: 0,
-                max_dura: 0,
-                count: 1,
-                awake: 0,
-                slots: Vec::new(),
-                expire_time: None,
-                flags: 0,
-                weight: 0,
-                appearance: 0,
-            },
+            map_object: MapObject::for_monster(object_id, String::new()), // Items don't need full MapObject
+            item: UserItem::default(),
             gold_amount: 0,
             draw_effect: false,
             effect_index: 0,
@@ -66,11 +43,12 @@ impl ItemObject {
 
     /// Load item information from server
     pub fn load(&mut self, info: &ObjectItem) {
-        self.map_object.current_location = info.location;
-        self.map_object.map_location = info.location;
+        let location = Point::new(info.location_x, info.location_y);
+        self.map_object.set_location(location);
         
         self.item = info.item.clone();
-        self.gold_amount = info.gold;
+        // Note: ObjectItem doesn't have gold field, use ObjectGold packet instead
+        // self.gold_amount = info.gold;
         
         // TODO: Add to game scene map control
         // GameScene::Scene.MapControl.AddObject(self);
@@ -138,7 +116,7 @@ mod tests {
     #[test]
     fn test_item_object_creation() {
         let item = ItemObject::new(1);
-        assert_eq!(item.map_object.object_id, 1);
+        assert_eq!(item.map_object.object_id(), 1);
         assert!(!item.is_gold());
     }
 

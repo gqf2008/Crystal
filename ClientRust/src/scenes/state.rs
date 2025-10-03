@@ -15,9 +15,9 @@ use crate::objects::{
     ObjectDeathOutcome, ObjectStruckOutcome, ObjectUpdateOutcome,
 };
 
-// 使用新的数据包架构 - 直接从 packets 模块导入
-use crate::network::protocol::{packets, CharacterSummary, HeroObject, PlayerObject, 
-    ObjectItem, ObjectMonster, ObjectNpc};
+// 使用新的数据包架构 - 直接从 mir2_shared 导入
+use mir2_shared::packets::server::{ObjectPlayer, ObjectHero, ObjectItem, ObjectMonster, ObjectNpc};
+use crate::network::protocol::{packets, CharacterSummary};
 
 // 为了简化代码，创建类型别名 - 映射所有使用的数据包类型
 type UserInformation = packets::UserInformation;
@@ -171,7 +171,7 @@ impl ClientState {
         self.location = Some(info);
     }
 
-    pub fn upsert_player_object(&mut self, object: PlayerObject) -> ObjectUpdateOutcome {
+    pub fn upsert_player_object(&mut self, object: ObjectPlayer) -> ObjectUpdateOutcome {
         match self.objects.entry(object.object_id) {
             Entry::Occupied(mut entry) => {
                 let map_object = entry.get_mut();
@@ -195,7 +195,7 @@ impl ClientState {
         }
     }
 
-    pub fn upsert_hero_object(&mut self, object: HeroObject) -> ObjectUpdateOutcome {
+    pub fn upsert_hero_object(&mut self, object: ObjectHero) -> ObjectUpdateOutcome {
         let object_id = object.player.object_id;
         let hero_level = object.player.level;
         self.hero_object_id = Some(object_id);

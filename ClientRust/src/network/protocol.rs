@@ -40,8 +40,6 @@ pub mod packets {
 // ============================================================================
 
 // 这些类型别名映射到 SharedRust 的实际类型
-pub type PlayerObject = packets::ObjectPlayer;
-pub type HeroObject = packets::ObjectHero;
 pub type ObjectNpc = packets::ObjectNpc;
 pub type ObjectMonster = packets::ObjectMonster;
 pub type ObjectItem = packets::ObjectItem;
@@ -49,7 +47,7 @@ pub type UserInformation = packets::UserInformation;
 pub type CharacterSummary = packets::CharacterSummary;
 
 // 占位类型 - 需要进一步确定映射
-pub type HeroInformation = ();
+pub type HeroInformation = packets::HeroInformation;
 pub type ServerMessage = ();
 
 // ============================================================================

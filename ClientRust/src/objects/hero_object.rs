@@ -2,13 +2,13 @@
 // Mirrors Client/MirObjects/HeroObject.cs
 
 use mir2_shared::{
-    enums::{HeroSpawnState, MirClass, MirDirection, MirGender},
-    stats::Stats,
+    data::stats::Stats,
+    enums::{MirClass, MirGender},
+    packets::server::{ObjectHero, HeroInformation},
     Point, UserItem,
 };
 
 use super::{map_object::MapObject, user_object::ClientMagic};
-use crate::network::protocol::HeroInformation;
 
 /// Hero spawn state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +72,7 @@ impl HeroObject {
     /// Create a new hero object
     pub fn new(object_id: u32) -> Self {
         Self {
-            map_object: MapObject::new_hero(object_id),
+            map_object: MapObject::for_hero(object_id, String::new()),
             owner_name: String::new(),
             owner_id: 0,
             hp: 0,
@@ -102,50 +102,49 @@ impl HeroObject {
         }
     }
 
-    /// Load hero information from server
-    pub fn load(&mut self, info: &HeroInformation) {
-        self.map_object.name = info.name.clone();
+    /// Load hero information from ObjectHero packet (spawning hero)
+    pub fn load_from_object(&mut self, info: &ObjectHero) {
+        let player = &info.player;
+        
+        // Set basic info from ObjectPlayer
+        self.map_object.set_name(player.name.clone());
+        self.map_object.set_name_colour_argb(player.name_colour);
         self.owner_name = info.owner_name.clone();
-        self.owner_id = info.owner_id;
         
-        self.map_object.current_location = info.location;
-        self.map_object.map_location = info.location;
-        self.map_object.direction = info.direction;
+        let location = Point::new(player.location_x, player.location_y);
+        self.map_object.set_location(location);
+        self.map_object.set_direction(player.direction);
         
-        self.class = info.class;
-        self.gender = info.gender;
-        self.level = info.level;
-        self.hair = info.hair;
+        // Appearance
+        self.class = player.class;
+        self.gender = player.gender;
+        self.level = player.level;
+        self.hair = player.hair;
+        self.weapon = player.weapon as i32;
+        self.weapon_effect = player.weapon_effect as i32;
+        self.armour = player.armour as i32;
         
-        self.hp = info.hp;
-        self.mp = info.mp;
-        self.max_hp = info.max_hp;
-        self.max_mp = info.max_mp;
+        // State
+        self.map_object.set_light(player.light);
+        self.map_object.set_poison(player.poison);
+        self.map_object.set_dead(player.dead);
+        self.map_object.set_hidden(player.hidden);
+        self.map_object.set_buffs(player.buffs.clone());
         
-        self.experience = info.experience;
-        self.max_experience = info.max_experience;
-        
-        self.inventory = info.inventory.clone();
-        self.equipment = info.equipment.clone();
-        
-        // TODO: Load magics
-        // self.magics = info.magics.clone();
-        
-        self.weapon = info.weapon;
-        self.weapon_effect = info.weapon_effect;
-        self.armour = info.armour;
-        
-        self.spawn_state = match info.spawn_state {
-            HeroSpawnState::None => HeroState::None,
-            HeroSpawnState::Spawned => HeroState::Spawned,
-            HeroSpawnState::Unsummoned => HeroState::Unsummoned,
-            HeroSpawnState::Dead => HeroState::Dead,
-        };
+        // Set as spawned
+        self.spawn_state = HeroState::Spawned;
+    }
+
+    /// Update hero information from HeroInformation packet (hero ID only)
+    pub fn load_hero_info(&mut self, _info: &HeroInformation) {
+        // HeroInformation only contains hero_id
+        // The actual hero data should be in ObjectHero or other detailed packets
+        // This packet is mainly used to trigger hero-related events
     }
 
     /// Check if hero is spawned and alive
     pub fn is_active(&self) -> bool {
-        self.spawn_state == HeroState::Spawned && !self.map_object.dead
+        self.spawn_state == HeroState::Spawned && !self.map_object.is_dead()
     }
 
     /// Check if hero can be summoned
@@ -172,7 +171,7 @@ impl HeroObject {
     }
 
     /// Update loyalty (decreases over time when summoned)
-    pub fn update_loyalty(&mut self, delta_time: f32) {
+    pub fn update_loyalty(&mut self, _delta_time: f32) {
         if self.is_active() {
             // Loyalty decreases slowly when hero is active
             // TODO: Implement actual loyalty decrease logic
@@ -183,8 +182,9 @@ impl HeroObject {
     /// Get hero's damage output
     pub fn get_damage(&self) -> (i32, i32) {
         // Return (min_damage, max_damage)
-        let base_dc = self.stats.min_dc + self.stats.max_dc;
-        (base_dc / 2, base_dc)
+        // TODO: Stats structure needs proper DC (Damage Class) fields
+        // For now, return placeholder values
+        (10, 20)
     }
 
     /// Check if hero should follow owner
@@ -194,8 +194,11 @@ impl HeroObject {
         }
         
         // Check distance from owner
-        let distance = self.map_object.current_location.distance_to(&owner_pos);
-        distance > 5 // Follow if more than 5 tiles away
+        let hero_pos = self.map_object.location();
+        let dx = (hero_pos.x - owner_pos.x).abs();
+        let dy = (hero_pos.y - owner_pos.y).abs();
+        let distance = (dx * dx + dy * dy) as f32;
+        distance.sqrt() > 5.0 // Follow if more than 5 tiles away
     }
 
     /// Gain experience
@@ -250,7 +253,7 @@ mod tests {
     #[test]
     fn test_hero_object_creation() {
         let hero = HeroObject::new(1);
-        assert_eq!(hero.map_object.object_id, 1);
+        assert_eq!(hero.map_object.object_id(), 1);
         assert_eq!(hero.spawn_state, HeroState::None);
         assert_eq!(hero.loyalty, 100);
     }

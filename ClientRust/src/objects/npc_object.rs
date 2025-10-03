@@ -40,7 +40,7 @@ impl NPCObject {
     /// Create a new NPC object
     pub fn new(object_id: u32) -> Self {
         Self {
-            map_object: MapObject::new_npc(object_id),
+            map_object: MapObject::for_monster(object_id, String::new()),
             image: NpcImage::Guard,
             turn_time: 0,
         }

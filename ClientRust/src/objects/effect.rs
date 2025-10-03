@@ -90,7 +90,7 @@ impl Effect {
     /// Create an explosion effect
     pub fn explosion(location: Point, size: u32) -> Self {
         let mut effect = Self::new(
-            SpellEffect::Explosion,
+            SpellEffect::DelayedExplosion,
             location,
             100, // Start frame
             10,  // Frame count
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn test_effect_creation() {
         let effect = Effect::new(
-            SpellEffect::Explosion,
+            SpellEffect::DelayedExplosion,
             Point::new(10, 10),
             100,
             10,
@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn test_effect_update() {
         let mut effect = Effect::new(
-            SpellEffect::Explosion,
+            SpellEffect::DelayedExplosion,
             Point::new(10, 10),
             100,
             5,
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn test_effect_repeat() {
         let mut effect = Effect::new(
-            SpellEffect::Buff,
+            SpellEffect::None,
             Point::new(10, 10),
             100,
             3,
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn test_effect_duration() {
         let mut effect = Effect::new(
-            SpellEffect::Buff,
+            SpellEffect::None,
             Point::new(10, 10),
             100,
             10,
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn test_effect_helpers() {
         let explosion = Effect::explosion(Point::new(10, 10), 2);
-        assert_eq!(explosion.effect_type, SpellEffect::Explosion);
+        assert_eq!(explosion.effect_type, SpellEffect::DelayedExplosion);
         assert!(explosion.blend);
         assert_eq!(explosion.layer, EffectLayer::Front);
         

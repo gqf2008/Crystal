@@ -2,8 +2,8 @@
 // Mirrors Client/MirObjects/UserObject.cs
 
 use mir2_shared::{
-    enums::{MirClass, MirDirection, MirGender, Spell},
-    stats::Stats,
+    data::stats::Stats,
+    enums::{MirDirection, Spell},
     Point, UserItem,
 };
 
@@ -29,6 +29,11 @@ pub struct UserObject {
     pub mp: i32,
     pub attack_speed: i32,
     pub stats: Stats,
+    
+    // From PlayerObject (C# - since we don't have PlayerObject layer yet)
+    pub level: u16,
+    pub guild_name: String,
+    pub guild_rank_name: String,
     
     // Weight tracking
     pub current_hand_weight: i32,
@@ -219,12 +224,15 @@ impl UserObject {
     /// Create a new user object
     pub fn new(object_id: u32) -> Self {
         Self {
-            map_object: MapObject::new_player(object_id),
+            map_object: MapObject::for_user(object_id, String::new()),
             id: 0,
             hp: 0,
             mp: 0,
             attack_speed: 0,
             stats: Stats::default(),
+            level: 1,
+            guild_name: String::new(),
+            guild_rank_name: String::new(),
             current_hand_weight: 0,
             current_wear_weight: 0,
             current_bag_weight: 0,
@@ -274,20 +282,21 @@ impl UserObject {
     /// Load user information from server
     pub fn load(&mut self, info: &UserInformation) {
         self.id = info.real_id;
-        self.map_object.name = info.name.clone();
-        self.map_object.name_colour = info.name_colour;
-        self.map_object.guild_name = Some(info.guild_name.clone());
-        self.map_object.guild_rank_name = Some(info.guild_rank.clone());
+        self.map_object.set_name(info.name.clone());
+        self.map_object.set_name_colour_argb(info.name_colour);
         
-        self.map_object.class = info.class;
-        self.map_object.gender = info.gender;
-        self.map_object.level = info.level;
+        // PlayerObject fields (stored in UserObject since we don't have PlayerObject layer yet)
+        self.level = info.level;
+        self.guild_name = info.guild_name.clone();
+        self.guild_rank_name = info.guild_rank_name.clone();
         
-        self.map_object.current_location = info.location;
-        self.map_object.map_location = info.location;
+        // Note: class, gender, hair are player-specific fields
+        // They would be in PlayerObject layer when we add it
         
-        self.map_object.direction = info.direction;
-        self.map_object.hair = info.hair;
+        let location = Point::new(info.location_x, info.location_y);
+        self.map_object.set_location(location);
+        
+        self.map_object.set_direction(info.direction);
         
         self.hp = info.hp;
         self.mp = info.mp;
@@ -296,12 +305,18 @@ impl UserObject {
         self.max_experience = info.max_experience;
         
         // Load inventory arrays
-        self.inventory = info.inventory.clone();
-        self.equipment = info.equipment.clone();
-        self.quest_inventory = info.quest_inventory.clone();
+        self.inventory = info.inventory.clone().unwrap_or_default();
+        self.equipment = info.equipment.clone().unwrap_or_default();
+        self.quest_inventory = info.quest_inventory.clone().unwrap_or_default();
         
         self.has_expanded_storage = info.has_expanded_storage;
-        self.expanded_storage_expiry_time = info.expanded_storage_expiry_time;
+        // Convert i64 milliseconds to SystemTime
+        if info.expanded_storage_expiry_time > 0 {
+            let duration = std::time::Duration::from_millis(info.expanded_storage_expiry_time as u64);
+            self.expanded_storage_expiry_time = Some(std::time::UNIX_EPOCH + duration);
+        } else {
+            self.expanded_storage_expiry_time = None;
+        }
         
         // TODO: Load magics, item sets, etc. from info
     }
@@ -309,18 +324,19 @@ impl UserObject {
     /// Update user stats (called after equipment/buff changes)
     pub fn refresh_stats(&mut self) {
         // Start with core stats
-        let mut new_stats = self.core_stats;
+        let new_stats = self.core_stats.clone();
         
         // Add equipment stats
         for slot in &self.equipment {
-            if let Some(item) = slot {
+            if let Some(_item) = slot {
                 // TODO: Add item stats to new_stats
+                // This would require Stats to have methods like add_ac(), add_dc(), etc.
             }
         }
         
         // Add buff stats
-        for buff in &self.map_object.buffs {
-            // TODO: Add buff stats
+        for _buff in self.map_object.buffs() {
+            // TODO: Add buff stats based on buff type
         }
         
         self.stats = new_stats;
@@ -359,7 +375,7 @@ impl UserObject {
         let mut weight = 0;
         for slot in &self.inventory {
             if let Some(item) = slot {
-                weight += item.weight as i32 * item.count as i32;
+                weight += item.weight(None) as i32 * item.count as i32;
             }
         }
         weight
@@ -370,7 +386,7 @@ impl UserObject {
         let mut weight = 0;
         for slot in &self.equipment {
             if let Some(item) = slot {
-                weight += item.weight as i32;
+                weight += item.weight(None) as i32;
             }
         }
         weight
@@ -405,7 +421,7 @@ mod tests {
     #[test]
     fn test_user_object_creation() {
         let user = UserObject::new(1);
-        assert_eq!(user.map_object.object_id, 1);
+        assert_eq!(user.map_object.object_id(), 1);
         assert_eq!(user.inventory.len(), 46);
         assert_eq!(user.equipment.len(), 14);
     }

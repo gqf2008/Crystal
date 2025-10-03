@@ -3,8 +3,6 @@
 
 use mir2_shared::enums::MirAction;
 
-use crate::network::protocol::PlayerObject;
-
 #[derive(Debug, Default)]
 pub struct AnimationStep {
     pub frames_advanced: u32,
@@ -57,14 +55,22 @@ impl AnimationState {
         self.action
     }
 
-    pub(super) fn update_for_player(&mut self, player: &PlayerObject) -> bool {
-        let desired_action = if player.dead {
+    /// Update animation state based on object state flags.
+    /// Returns true if the action changed.
+    pub(super) fn update_from_state(
+        &mut self,
+        dead: bool,
+        hidden: bool,
+        fishing: bool,
+        riding_mount: bool,
+    ) -> bool {
+        let desired_action = if dead {
             MirAction::Dead
-        } else if player.hidden {
+        } else if hidden {
             MirAction::Hide
-        } else if player.fishing {
+        } else if fishing {
             MirAction::FishingWait
-        } else if player.riding_mount {
+        } else if riding_mount {
             MirAction::MountStanding
         } else {
             MirAction::Standing

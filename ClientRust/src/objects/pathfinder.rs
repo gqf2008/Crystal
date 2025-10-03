@@ -270,6 +270,8 @@ impl PathFinder {
         for radius in 1..=5 {
             for dy in -radius..=radius {
                 for dx in -radius..=radius {
+                    let dx: i32 = dx;
+                    let dy: i32 = dy;
                     if dx.abs() != radius && dy.abs() != radius {
                         continue; // Only check perimeter
                     }

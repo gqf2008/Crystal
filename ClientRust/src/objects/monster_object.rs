@@ -124,7 +124,7 @@ impl MonsterObject {
     /// Create a new monster object
     pub fn new(object_id: u32) -> Self {
         Self {
-            map_object: MapObject::new_monster(object_id),
+            map_object: MapObject::for_monster(object_id, String::new()),
             base_image: Monster::Guard,
             effect: 0,
             skeleton: false,

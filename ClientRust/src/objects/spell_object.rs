@@ -2,7 +2,7 @@
 // Mirrors Client/MirObjects/SpellObject.cs
 
 use mir2_shared::{
-    enums::{MirDirection, Spell, SpellEffect},
+    enums::{Spell, SpellEffect},
     Point,
 };
 
@@ -48,7 +48,7 @@ impl SpellObject {
     /// Create a new spell object
     pub fn new(object_id: u32, spell: Spell) -> Self {
         Self {
-            map_object: MapObject::new_spell(object_id),
+            map_object: MapObject::for_monster(object_id, String::new()), // Spells don't need full MapObject
             spell,
             effect: SpellEffect::None,
             caster_id: 0,
@@ -149,8 +149,10 @@ impl SpellObject {
         }
 
         // Move towards target
-        self.map_object.current_location.x += self.velocity.x;
-        self.map_object.current_location.y += self.velocity.y;
+        let mut loc = self.map_object.location();
+        loc.x += self.velocity.x;
+        loc.y += self.velocity.y;
+        self.map_object.set_location(loc);
 
         // Check if reached target
         if self.has_reached_target() {
@@ -163,8 +165,9 @@ impl SpellObject {
 
     /// Check if spell has reached target location
     fn has_reached_target(&self) -> bool {
-        let dx = (self.map_object.current_location.x - self.target_location.x).abs();
-        let dy = (self.map_object.current_location.y - self.target_location.y).abs();
+        let loc = self.map_object.location();
+        let dx = (loc.x - self.target_location.x).abs();
+        let dy = (loc.y - self.target_location.y).abs();
         dx <= self.speed && dy <= self.speed
     }
 
@@ -204,9 +207,10 @@ impl SpellObject {
     pub fn get_screen_position(&self) -> Point {
         // Convert tile position to pixel position
         // Assuming 48x32 tile size
+        let loc = self.map_object.location();
         Point::new(
-            self.map_object.current_location.x * 48,
-            self.map_object.current_location.y * 32,
+            loc.x * 48,
+            loc.y * 32,
         )
     }
 
@@ -216,8 +220,9 @@ impl SpellObject {
             return false;
         }
         
-        let dx = (self.map_object.current_location.x - target_location.x).abs();
-        let dy = (self.map_object.current_location.y - target_location.y).abs();
+        let loc = self.map_object.location();
+        let dx = (loc.x - target_location.x).abs();
+        let dy = (loc.y - target_location.y).abs();
         
         // Within 1 tile range
         dx <= 1 && dy <= 1
@@ -231,7 +236,7 @@ mod tests {
     #[test]
     fn test_spell_object_creation() {
         let spell = SpellObject::new(1, Spell::FireBall);
-        assert_eq!(spell.map_object.object_id, 1);
+        assert_eq!(spell.map_object.object_id(), 1);
         assert_eq!(spell.spell, Spell::FireBall);
         assert!(!spell.expired);
     }
