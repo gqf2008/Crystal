@@ -94,6 +94,8 @@ pub struct SkillBarDialog {
     // 位置和配置
     pub x: i32,
     pub y: i32,
+    pub width: i32,
+    pub height: i32,
     pub movable: bool,
 }
 
@@ -111,6 +113,8 @@ impl SkillBarDialog {
             slots,
             x: 0,
             y: bar_index as i32 * 28, // 每个技能栏垂直间隔28像素
+            width: 400,
+            height: 28,
             movable: true,
         }
     }
@@ -242,6 +246,23 @@ impl Dialog for SkillBarDialog {
 
     fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    fn name(&self) -> &str {
+        "SkillBarDialog"
+    }
+    
+    fn contains_point(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.width &&
+        y >= self.y && y < self.y + self.height
+    }
+    
+    fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+    
+    fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 }
 

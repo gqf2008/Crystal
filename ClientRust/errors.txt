@@ -1,0 +1,4559 @@
+﻿cargo : D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\pa
+ckets\server\mod.rs:61:9: warning: ambiguous glob re-exports: t
+he name `NPCRequestInput` in the type namespace is first re-exp
+orted here
+At line:1 char:1
++ cargo check 2>&1 | Out-File -FilePath "errors.txt" -Encoding 
+utf8
++ ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (D:\Users\gxh\Do.. 
+   .e-exported here:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `accoun
+t` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `chat` 
+in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `combat
+` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `connec
+tion` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `group`
+ in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `guild`
+ in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `hero` 
+in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `item` 
+in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `moveme
+nt` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `npc` i
+n the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `quest`
+ in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `trade`
+ in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `NewAcc
+ount` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Change
+Password` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Login`
+ in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `StartG
+ame` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `NewCha
+racter` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Delete
+Character` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Chat` 
+in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `RangeA
+ttack` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Magic`
+ in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `SpellT
+oggle` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Client
+Version` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Discon
+nect` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `KeepAl
+ive` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Switch
+Group` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `AddMem
+ber` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `GroupI
+nvite` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `GuildI
+nvite` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `GuildS
+torageGoldChange` in the type namespace is first re-exported he
+re
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `GuildS
+torageItemChange` in the type namespace is first re-exported he
+re
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `GuildT
+erritoryPage` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Purcha
+seGuildTerritory` in the type namespace is first re-exported he
+re
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `NewHer
+o` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `SetAut
+oPotValue` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `SetAut
+oPotItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `SetHer
+oBehaviour` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Change
+Hero` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `MoveIt
+em` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `StoreI
+tem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `TakeBa
+ckItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `MergeI
+tem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `EquipI
+tem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Remove
+Item` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Remove
+SlotItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `SplitI
+tem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `UseIte
+m` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `DropIt
+em` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `MailLo
+ckedItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `MailCo
+st` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Consig
+nItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Change
+AMode` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Change
+PMode` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Marria
+geRequest` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Divorc
+eRequest` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `EquipS
+lotItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Cancel
+Reincarnation` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Combin
+eItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Awaken
+ingNeedMaterials` in the type namespace is first re-exported he
+re
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Awaken
+ingLockedItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Awaken
+ing` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Intell
+igentCreaturePickup` in the type namespace is first re-exported
+ here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `GetRen
+tedItems` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `ItemRe
+ntalRequest` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `ItemRe
+ntalFee` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `ItemRe
+ntalPeriod` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Deposi
+tRentalItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Retrie
+veRentalItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Cancel
+ItemRental` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Confir
+mItemRental` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Opendo
+or` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `SellIt
+em` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `CraftI
+tem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Repair
+Item` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `ShareQ
+uest` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Deposi
+tRefineItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Retrie
+veRefineItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Refine
+Cancel` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Refine
+Item` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Deposi
+tTradeItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Retrie
+veTradeItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `TakeBa
+ckHeroItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `Transf
+erHeroItem` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `TradeR
+equest` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `TradeG
+old` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `TradeC
+onfirm` in the type namespace is first re-exported here
+D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packets\mo
+d.rs:28:9: warning: ambiguous glob re-exports: the name `TradeC
+ancel` in the type namespace is first re-exported here
+warning: `mir2_shared` (lib) generated 88 warnings
+    Checking mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\
+Crystal\ClientRust)
+error[E0432]: unresolved imports `crate::audio`, `crate::net`, 
+`crate::ui`
+ --> src\program.rs:6:13
+  |
+6 | use crate::{audio, net, ui, version};
+  |             ^^^^^  ^^^  ^^ no `ui` in the root
+  |             |      |
+  |             |      no `net` in the root
+  |             no `audio` in the root
+  |
+  = help: consider importing one of these modules instead:
+          std::net
+          tokio::net
+
+warning: unused import: `AnimationStep`
+  --> src\objects\mod.rs:16:43
+   |
+16 | pub use frames::{AnimationAdvanceSummary, AnimationStep};
+   |                                           ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused imports: `ActionResult`, `AttackOutcome`, `Buff
+Delta`, `StruckOutcome`, and `SyncResult`
+  --> src\objects\mod.rs:18:5
+   |
+18 |     ActionResult, AttackOutcome, BuffDelta, MapObject, Map
+ObjectType, ObjectActionOutcome,
+   |     ^^^^^^^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^
+19 |     ObjectAttackOutcome, ObjectDeathOutcome, ObjectStruckO
+utcome, ObjectUpdateOutcome,
+20 |     StruckOutcome, SyncResult,
+   |     ^^^^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `ClientIntelligentCreature`, `ClientMa
+gic`, `ClientMail`, `ClientQuestProgress`, `EquipmentSlot`, `In
+telligentCreatureType`, `ItemSets`, `QueuedActionType`, `Queued
+Action`, and `SpecialItemMode`
+  --> src\objects\mod.rs:23:17
+   |
+23 |     UserObject, ClientMagic, ItemSets, EquipmentSlot, Clie
+ntIntelligentCreature,
+   |                 ^^^^^^^^^^^  ^^^^^^^^  ^^^^^^^^^^^^^  ^^^^
+^^^^^^^^^^^^^^^^^^^^^
+24 |     IntelligentCreatureType, ClientQuestProgress, ClientMa
+il, QueuedAction,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^  ^^^^^^^^
+^^  ^^^^^^^^^^^^
+25 |     QueuedActionType, SpecialItemMode,
+   |     ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^
+
+warning: unused imports: `MonsterSoundType` and `Monster`
+  --> src\objects\mod.rs:27:41
+   |
+27 | pub use monster_object::{MonsterObject, Monster, MonsterSo
+undType};
+   |                                         ^^^^^^^  ^^^^^^^^^
+^^^^^^^
+
+warning: unused import: `NpcImage`
+  --> src\objects\mod.rs:28:33
+   |
+28 | pub use npc_object::{NPCObject, NpcImage};
+   |                                 ^^^^^^^^
+
+warning: unused import: `HeroState`
+  --> src\objects\mod.rs:30:35
+   |
+30 | pub use hero_object::{HeroObject, HeroState};
+   |                                   ^^^^^^^^^
+
+warning: unused imports: `BlendMode` and `EffectLayer`
+  --> src\objects\mod.rs:32:26
+   |
+32 | pub use effect::{Effect, EffectLayer, BlendMode};
+   |                          ^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `Color` and `DamageType`
+  --> src\objects\mod.rs:33:26
+   |
+33 | pub use damage::{Damage, DamageType, Color};
+   |                          ^^^^^^^^^^  ^^^^^
+
+warning: unused imports: `Point`, `Stats`, and `enums::*`
+ --> src\scenes\game_scene.rs:7:19
+  |
+7 | use mir2_shared::{enums::*, Stats, Point, UserItem};
+  |                   ^^^^^^^^  ^^^^^  ^^^^^
+
+warning: unused import: `std::collections::HashMap`
+  --> src\scenes\dialogs\keyboard_layout_dialog.rs:12:5
+   |
+12 | use std::collections::HashMap;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::collections::HashMap`
+ --> src\scenes\dialogs\guild_dialog.rs:6:5
+  |
+6 | use std::collections::HashMap;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `main_dialog::MainDialog`
+  --> src\scenes\dialogs\mod.rs:89:9
+   |
+89 | pub use main_dialog::MainDialog;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ChatDialog`, `ChatMessage`, and `Chat
+Type`
+  --> src\scenes\dialogs\mod.rs:90:23
+   |
+90 | pub use chat_dialog::{ChatDialog, ChatMessage, ChatType};
+   |                       ^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^
+
+warning: unused imports: `InventoryDialog` and `InventoryTab`
+  --> src\scenes\dialogs\mod.rs:91:28
+   |
+91 | pub use inventory_dialog::{InventoryDialog, InventoryTab};
+   |                            ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused imports: `CharacterDialog`, `CharacterPage`, `C
+haracterStats`, `EquipmentSlot`, and `MagicInfo`
+  --> src\scenes\dialogs\mod.rs:92:28
+   |
+92 | pub use character_dialog::{CharacterDialog, CharacterPage,
+ EquipmentSlot, CharacterStats, MagicInfo};
+   |                            ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^ 
+ ^^^^^^^^^^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `SkillBarDialog` and `SkillSlot`
+  --> src\scenes\dialogs\mod.rs:93:27
+   |
+93 | pub use skillbar_dialog::{SkillBarDialog, SkillSlot};
+   |                           ^^^^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `NPCDialogType`, `NPCDialog`, `NPCOpti
+on`, and `NPCPage`
+  --> src\scenes\dialogs\mod.rs:94:22
+   |
+94 | pub use npc_dialog::{NPCDialog, NPCDialogType, NPCOption, 
+NPCPage};
+   |                      ^^^^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^  
+^^^^^^^
+
+warning: unused imports: `StorageDialog` and `StorageType`
+  --> src\scenes\dialogs\mod.rs:95:26
+   |
+95 | pub use storage_dialog::{StorageDialog, StorageType};
+   |                          ^^^^^^^^^^^^^  ^^^^^^^^^^^
+
+warning: unused imports: `TradeDialog`, `TradeParty`, `TradeSta
+te`, and `TradeSummary`
+  --> src\scenes\dialogs\mod.rs:96:24
+   |
+96 | pub use trade_dialog::{TradeDialog, TradeState, TradeParty
+, TradeSummary};
+   |                        ^^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^
+  ^^^^^^^^^^^^
+
+warning: unused imports: `GuildBuff`, `GuildDialog`, `GuildMemb
+er`, `GuildPage`, `GuildRankOptions`, and `GuildRank`
+  --> src\scenes\dialogs\mod.rs:97:24
+   |
+97 | pub use guild_dialog::{GuildDialog, GuildPage, GuildMember
+, GuildRank, GuildRankOptions, GuildBuff};
+   |                        ^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^
+  ^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `FriendDialog`, `FriendStatus`, `Frien
+dTab`, and `Friend`
+  --> src\scenes\dialogs\mod.rs:98:25
+   |
+98 | pub use friend_dialog::{FriendDialog, FriendTab, Friend, F
+riendStatus};
+   |                         ^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^  ^
+^^^^^^^^^^^
+
+warning: unused imports: `GroupDialog` and `GroupMember`
+  --> src\scenes\dialogs\mod.rs:99:24
+   |
+99 | pub use group_dialog::{GroupDialog, GroupMember};
+   |                        ^^^^^^^^^^^  ^^^^^^^^^^^
+
+warning: unused imports: `BigMapDialog`, `MapImage`, `MapNPC`, 
+`MapRecord`, and `MapViewPort`
+   --> src\scenes\dialogs\mod.rs:100:25
+    |
+100 | pub use bigmap_dialog::{BigMapDialog, MapRecord, MapNPC, 
+MapImage, MapViewPort};
+    |                         ^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^  
+^^^^^^^^  ^^^^^^^^^^^
+
+warning: unused imports: `QuestInfo`, `QuestListDialog`, `Quest
+Progress`, `QuestRewards`, `QuestStatus`, and `QuestType`
+   --> src\scenes\dialogs\mod.rs:101:29
+    |
+101 | pub use quest_list_dialog::{QuestListDialog, QuestInfo, Q
+uestProgress, QuestStatus, QuestType, QuestRewards};
+    |                             ^^^^^^^^^^^^^^^  ^^^^^^^^^  ^
+^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused imports: `ClientMail`, `MailComposeDialog`, `Ma
+ilListDialog`, `MailStatus`, and `MailType`
+   --> src\scenes\dialogs\mod.rs:102:23
+    |
+102 | pub use mail_dialog::{MailListDialog, MailComposeDialog, 
+ClientMail, MailType, MailStatus};
+    |                       ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^  
+^^^^^^^^^^  ^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `BELT_SLOT_COUNT`, `BeltDialog`, and `
+BeltOrientation`
+   --> src\scenes\dialogs\mod.rs:105:23
+    |
+105 | pub use belt_dialog::{BeltDialog, BeltOrientation, BELT_S
+LOT_COUNT};
+    |                       ^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^
+^^^^^^^^^
+
+warning: unused imports: `ClientTimer`, `TimerDialog`, and `Tim
+erType`
+   --> src\scenes\dialogs\mod.rs:106:24
+    |
+106 | pub use timer_dialog::{TimerDialog, ClientTimer, TimerTyp
+e};
+    |                        ^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^
+^
+
+warning: unused imports: `MAX_SOCKET_SLOTS` and `SocketDialog`
+   --> src\scenes\dialogs\mod.rs:107:25
+    |
+107 | pub use socket_dialog::{SocketDialog, MAX_SOCKET_SLOTS};
+    |                         ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+warning: unused imports: `BuffDialog`, `BuffType`, and `ClientB
+uff`
+   --> src\scenes\dialogs\mod.rs:108:23
+    |
+108 | pub use buff_dialog::{BuffDialog, ClientBuff, BuffType};
+    |                       ^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^
+
+warning: unused imports: `MountDialog`, `MountSlot`, and `Mount
+Type`
+   --> src\scenes\dialogs\mod.rs:109:24
+    |
+109 | pub use mount_dialog::{MountDialog, MountSlot, MountType}
+;
+    |                        ^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `FishingDialog`, `FishingSlot`, and `F
+ishingStatusDialog`
+   --> src\scenes\dialogs\mod.rs:110:26
+    |
+110 | pub use fishing_dialog::{FishingDialog, FishingStatusDial
+og, FishingSlot};
+    |                          ^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^
+^^  ^^^^^^^^^^^
+
+warning: unused imports: `REFINE_SLOT_COUNT` and `RefineDialog`
+   --> src\scenes\dialogs\mod.rs:111:25
+    |
+111 | pub use refine_dialog::{RefineDialog, REFINE_SLOT_COUNT};
+    |                         ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ClientRecipeInfo`, `CraftDialog`, `IN
+GREDIENT_SLOT_COUNT`, and `TOOL_SLOT_COUNT`
+   --> src\scenes\dialogs\mod.rs:112:24
+    |
+112 | pub use craft_dialog::{CraftDialog, ClientRecipeInfo, TOO
+L_SLOT_COUNT, INGREDIENT_SLOT_COUNT};
+    |                        ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^
+^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `HelpDialog`, `HelpPageType`, and `Hel
+pPage`
+   --> src\scenes\dialogs\mod.rs:113:23
+    |
+113 | pub use help_dialog::{HelpDialog, HelpPage, HelpPageType}
+;
+    |                       ^^^^^^^^^^  ^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused imports: `MenuButton` and `MenuDialog`
+   --> src\scenes\dialogs\mod.rs:116:23
+    |
+116 | pub use menu_dialog::{MenuDialog, MenuButton};
+    |                       ^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `OptionDialog` and `OptionType`
+   --> src\scenes\dialogs\mod.rs:117:25
+    |
+117 | pub use option_dialog::{OptionDialog, OptionType};
+    |                         ^^^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `KeyBind`, `KeybindOption`, and `Keybo
+ardLayoutDialog`
+   --> src\scenes\dialogs\mod.rs:118:34
+    |
+118 | pub use keyboard_layout_dialog::{KeyboardLayoutDialog, Ke
+yBind, KeybindOption};
+    |                                  ^^^^^^^^^^^^^^^^^^^^  ^^
+^^^^^  ^^^^^^^^^^^^^
+
+warning: unused imports: `NoticeDialog` and `Notice`
+   --> src\scenes\dialogs\mod.rs:119:25
+    |
+119 | pub use notice_dialog::{NoticeDialog, Notice};
+    |                         ^^^^^^^^^^^^  ^^^^^^
+
+warning: unused imports: `InspectAction`, `InspectDialog`, `Mir
+Class`, and `MirGender`
+   --> src\scenes\dialogs\mod.rs:120:26
+    |
+120 | pub use inspect_dialog::{InspectDialog, InspectAction, Mi
+rClass, MirGender};
+    |                          ^^^^^^^^^^^^^  ^^^^^^^^^^^^^  ^^
+^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `ReportAction`, `ReportDialog`, and `R
+eportType`
+   --> src\scenes\dialogs\mod.rs:121:25
+    |
+121 | pub use report_dialog::{ReportDialog, ReportAction, Repor
+tType};
+    |                         ^^^^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^
+^^^^^
+
+warning: unused imports: `DialogManager`, `KeyCode`, and `Mouse
+Button`
+   --> src\scenes\dialogs\mod.rs:125:13
+    |
+125 |     Dialog, DialogManager, MouseButton, KeyCode
+    |             ^^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^
+
+warning: unused import: `state::ClientState`
+  --> src\scenes\mod.rs:12:9
+   |
+12 | pub use state::ClientState;
+   |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `KeyCode`, `MouseButton`, `SceneType`,
+ and `Scene`
+  --> src\scenes\mod.rs:13:23
+   |
+13 | pub use scene_trait::{Scene, SceneType, MouseButton, KeyCo
+de};
+   |                       ^^^^^  ^^^^^^^^^  ^^^^^^^^^^^  ^^^^^
+^^
+
+warning: unused import: `login_scene::LoginScene`
+  --> src\scenes\mod.rs:14:9
+   |
+14 | pub use login_scene::LoginScene;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `select_scene::SelectScene`
+  --> src\scenes\mod.rs:15:9
+   |
+15 | pub use select_scene::SelectScene;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `game_scene::GameScene`
+  --> src\scenes\mod.rs:16:9
+   |
+16 | pub use game_scene::GameScene;
+   |         ^^^^^^^^^^^^^^^^^^^^^
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+  --> src\scenes\dialogs\main_dialog.rs:99:1
+   |
+99 | impl Dialog for MainDialog {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_point
+`, `position`, `size` in implementation
+   |
+  ::: src\scenes\dialogs\dialog_manager.rs:43:5
+   |
+43 |     fn name(&self) -> &str;
+   |     ----------------------- `name` from trait
+...
+46 |     fn contains_point(&self, x: i32, y: i32) -> bool;
+   |     ------------------------------------------------- `con
+tains_point` from trait
+...
+69 |     fn position(&self) -> (i32, i32);
+   |     --------------------------------- `position` from trai
+t
+...
+72 |     fn size(&self) -> (i32, i32);
+   |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\chat_dialog.rs:134:1
+    |
+134 | impl Dialog for ChatDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_poin
+t`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\inventory_dialog.rs:178:1
+    |
+178 | impl Dialog for InventoryDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains
+_point`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\character_dialog.rs:220:1
+    |
+220 | impl Dialog for CharacterDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains
+_point`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\skillbar_dialog.rs:221:1
+    |
+221 | impl Dialog for SkillBarDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_
+point`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\npc_dialog.rs:306:1
+    |
+306 | impl Dialog for NPCDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_point
+`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\storage_dialog.rs:243:1
+    |
+243 | impl Dialog for StorageDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_p
+oint`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\trade_dialog.rs:270:1
+    |
+270 | impl Dialog for TradeDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_poi
+nt`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\guild_dialog.rs:327:1
+    |
+327 | impl Dialog for GuildDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_poi
+nt`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\friend_dialog.rs:271:1
+    |
+271 | impl Dialog for FriendDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_po
+int`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\group_dialog.rs:229:1
+    |
+229 | impl Dialog for GroupDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_poi
+nt`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\bigmap_dialog.rs:267:1
+    |
+267 | impl Dialog for BigMapDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_po
+int`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\quest_list_dialog.rs:366:1
+    |
+366 | impl Dialog for QuestListDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains
+_point`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\mail_dialog.rs:228:1
+    |
+228 | impl Dialog for MailListDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_
+point`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\mail_dialog.rs:321:1
+    |
+321 | impl Dialog for MailComposeDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contai
+ns_point`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0046]: not all trait items implemented, missing: `name`,
+ `contains_point`, `position`, `size`
+   --> src\scenes\dialogs\help_dialog.rs:256:1
+    |
+256 | impl Dialog for HelpDialog {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `name`, `contains_poin
+t`, `position`, `size` in implementation
+    |
+   ::: src\scenes\dialogs\dialog_manager.rs:43:5
+    |
+43  |     fn name(&self) -> &str;
+    |     ----------------------- `name` from trait
+...
+46  |     fn contains_point(&self, x: i32, y: i32) -> bool;
+    |     ------------------------------------------------- `co
+ntains_point` from trait
+...
+69  |     fn position(&self) -> (i32, i32);
+    |     --------------------------------- `position` from tra
+it
+...
+72  |     fn size(&self) -> (i32, i32);
+    |     ----------------------------- `size` from trait
+
+error[E0599]: no method named `next_event` found for struct `Ne
+tworkStack` in the current scope
+  --> src\controls\mod.rs:54:37
+   |
+54 |     while let Some(event) = network.next_event().await {
+   |                                     ^^^^^^^^^^ method not 
+found in `NetworkStack`
+   |
+  ::: src\network\network.rs:47:1
+   |
+47 | pub struct NetworkStack {
+   | ----------------------- method `next_event` not found for 
+this struct
+
+error[E0599]: no variant named `Packet` found for enum `Network
+Event`
+  --> src\controls\mod.rs:78:27
+   |
+78 |             NetworkEvent::Packet { header, payload } => {
+   |                           ^^^^^^ variant not found in `Net
+workEvent`
+   |
+  ::: src\network\network.rs:22:1
+   |
+22 | pub enum NetworkEvent {
+   | --------------------- variant `Packet` not found here
+
+error[E0425]: cannot find function `parse_server_message` in th
+is scope
+  --> src\controls\mod.rs:79:23
+   |
+79 |                 match parse_server_message(header, payload
+) {
+   |                       ^^^^^^^^^^^^^^^^^^^^ not found in th
+is scope
+
+error[E0599]: no associated item named `Connected` found for un
+it type `()` in the current scope
+  --> src\controls\mod.rs:80:36
+   |
+80 |                     ServerMessage::Connected => {
+   |                                    ^^^^^^^^^ associated it
+em not found in `()`
+
+error[E0223]: ambiguous associated type
+   --> src\controls\mod.rs:101:21
+    |
+101 |                     ServerMessage::ClientVersion { result
+ } => match result {
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: if there were a trait named `Example` with associated typ
+e `ClientVersion` implemented for `()`, you could use the fully
+-qualified path
+    |
+101 -                     ServerMessage::ClientVersion { result
+ } => match result {
+101 +                     <() as Example>::ClientVersion { resu
+lt } => match result {
+    |
+
+error[E0223]: ambiguous associated type
+   --> src\controls\mod.rs:145:21
+    |
+145 |                     ServerMessage::Login { result } => ma
+tch result {
+    |                     ^^^^^^^^^^^^^^^^^^^^
+    |
+help: if there were a trait named `Example` with associated typ
+e `Login` implemented for `()`, you could use the fully-qualifi
+ed path
+    |
+145 -                     ServerMessage::Login { result } => ma
+tch result {
+145 +                     <() as Example>::Login { result } => 
+match result {
+    |
+
+error[E0223]: ambiguous associated type
+   --> src\controls\mod.rs:176:21
+    |
+176 |                     ServerMessage::LoginBanned {
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: if there were a trait named `Example` with associated typ
+e `LoginBanned` implemented for `()`, you could use the fully-q
+ualified path
+    |
+176 -                     ServerMessage::LoginBanned {
+176 +                     <() as Example>::LoginBanned {
+    |
+
+error[E0223]: ambiguous associated type
+   --> src\controls\mod.rs:187:21
+    |
+187 |                     ServerMessage::LoginSuccess { charact
+ers } => {
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: if there were a trait named `Example` with associated typ
+e `LoginSuccess` implemented for `()`, you could use the fully-
+qualified path
+    |
+187 -                     ServerMessage::LoginSuccess { charact
+ers } => {
+187 +                     <() as Example>::LoginSuccess { chara
+cters } => {
+    |
+
+error[E0223]: ambiguous associated type
+   --> src\controls\mod.rs:241:21
+    |
+241 |                     ServerMessage::StartGame { result, re
+solution } => match result {
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: if there were a trait named `Example` with associated typ
+e `StartGame` implemented for `()`, you could use the fully-qua
+lified path
+    |
+241 -                     ServerMessage::StartGame { result, re
+solution } => match result {
+241 +                     <() as Example>::StartGame { result, 
+resolution } => match result {
+    |
+
+error[E0223]: ambiguous associated type
+   --> src\controls\mod.rs:266:21
+    |
+266 |                     ServerMessage::StartGameBanned {
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: if there were a trait named `Example` with associated typ
+e `StartGameBanned` implemented for `()`, you could use the ful
+ly-qualified path
+    |
+266 -                     ServerMessage::StartGameBanned {
+266 +                     <() as Example>::StartGameBanned {
+    |
+
+error[E0223]: ambiguous associated type
+   --> src\controls\mod.rs:277:21
+    |
+277 |                     ServerMessage::StartGameDelay { milli
+seconds } => {
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: if there were a trait named `Example` with associated typ
+e `StartGameDelay` implemented for `()`, you could use the full
+y-qualified path
+    |
+277 -                     ServerMessage::StartGameDelay { milli
+seconds } => {
+277 +                     <() as Example>::StartGameDelay { mil
+liseconds } => {
+    |
+
+error[E0599]: no associated item named `NewMapInfo` found for u
+nit type `()` in the current scope
+   --> src\controls\mod.rs:280:36
+    |
+280 |                     ServerMessage::NewMapInfo(info) => {
+    |                                    ^^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `MapInformation` found f
+or unit type `()` in the current scope
+   --> src\controls\mod.rs:295:36
+    |
+295 |                     ServerMessage::MapInformation(info) =
+> {
+    |                                    ^^^^^^^^^^^^^^ associa
+ted item not found in `()`
+
+error[E0599]: no associated item named `WorldMapSetup` found fo
+r unit type `()` in the current scope
+   --> src\controls\mod.rs:312:36
+    |
+312 |                     ServerMessage::WorldMapSetup(info) =>
+ {
+    |                                    ^^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `SearchMapResult` found 
+for unit type `()` in the current scope
+   --> src\controls\mod.rs:322:36
+    |
+322 |                     ServerMessage::SearchMapResult(result
+) => {
+    |                                    ^^^^^^^^^^^^^^^ associ
+ated item not found in `()`
+
+error[E0599]: no associated item named `UserInformation` found 
+for unit type `()` in the current scope
+   --> src\controls\mod.rs:330:36
+    |
+330 |                     ServerMessage::UserInformation(info) 
+=> {
+    |                                    ^^^^^^^^^^^^^^^ associ
+ated item not found in `()`
+
+error[E0599]: no associated item named `UserLocation` found for
+ unit type `()` in the current scope
+   --> src\controls\mod.rs:357:36
+    |
+357 |                     ServerMessage::UserLocation(info) => 
+{
+    |                                    ^^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `UserSlotsRefresh` found
+ for unit type `()` in the current scope
+   --> src\controls\mod.rs:366:36
+    |
+366 |                     ServerMessage::UserSlotsRefresh(slots
+) => {
+    |                                    ^^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `ObjectPlayer` found for
+ unit type `()` in the current scope
+   --> src\controls\mod.rs:387:36
+    |
+387 |                     ServerMessage::ObjectPlayer(object) =
+> {
+    |                                    ^^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `ObjectHero` found for u
+nit type `()` in the current scope
+   --> src\controls\mod.rs:417:36
+    |
+417 |                     ServerMessage::ObjectHero(object) => 
+{
+    |                                    ^^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `ObjectMonster` found fo
+r unit type `()` in the current scope
+   --> src\controls\mod.rs:447:36
+    |
+447 |                     ServerMessage::ObjectMonster(object) 
+=> {
+    |                                    ^^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `ObjectRemove` found for
+ unit type `()` in the current scope
+   --> src\controls\mod.rs:481:36
+    |
+481 |                     ServerMessage::ObjectRemove(packet) =
+> {
+    |                                    ^^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `ObjectTurn` found for u
+nit type `()` in the current scope
+   --> src\controls\mod.rs:533:36
+    |
+533 |                     ServerMessage::ObjectTurn(packet) => 
+{
+    |                                    ^^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `ObjectWalk` found for u
+nit type `()` in the current scope
+   --> src\controls\mod.rs:563:36
+    |
+563 |                     ServerMessage::ObjectWalk(packet) => 
+{
+    |                                    ^^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `ObjectRun` found for un
+it type `()` in the current scope
+   --> src\controls\mod.rs:595:36
+    |
+595 |                     ServerMessage::ObjectRun(packet) => {
+    |                                    ^^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `ObjectAttack` found for
+ unit type `()` in the current scope
+   --> src\controls\mod.rs:627:36
+    |
+627 |                     ServerMessage::ObjectAttack(packet) =
+> {
+    |                                    ^^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `Struck` found for unit 
+type `()` in the current scope
+   --> src\controls\mod.rs:671:36
+    |
+671 |                     ServerMessage::Struck(info) => {
+    |                                    ^^^^^^ associated item
+ not found in `()`
+
+error[E0599]: no associated item named `ObjectStruck` found for
+ unit type `()` in the current scope
+   --> src\controls\mod.rs:674:36
+    |
+674 |                     ServerMessage::ObjectStruck(packet) =
+> {
+    |                                    ^^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `ObjectItem` found for u
+nit type `()` in the current scope
+   --> src\controls\mod.rs:712:36
+    |
+712 |                     ServerMessage::ObjectItem(packet) => 
+{
+    |                                    ^^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `ObjectGold` found for u
+nit type `()` in the current scope
+   --> src\controls\mod.rs:729:36
+    |
+729 |                     ServerMessage::ObjectGold(packet) => 
+{
+    |                                    ^^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `ColourChanged` found fo
+r unit type `()` in the current scope
+   --> src\controls\mod.rs:743:36
+    |
+743 |                     ServerMessage::ColourChanged(packet) 
+=> {
+    |                                    ^^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `ObjectColourChanged` fo
+und for unit type `()` in the current scope
+   --> src\controls\mod.rs:750:36
+    |
+750 |                     ServerMessage::ObjectColourChanged(pa
+cket) => {
+    |                                    ^^^^^^^^^^^^^^^^^^^ as
+sociated item not found in `()`
+
+error[E0599]: no associated item named `ObjectGuildNameChanged`
+ found for unit type `()` in the current scope
+   --> src\controls\mod.rs:760:36
+    |
+760 |                     ServerMessage::ObjectGuildNameChanged
+(packet) => {
+    |                                    ^^^^^^^^^^^^^^^^^^^^^^
+ associated item not found in `()`
+
+error[E0599]: no associated item named `GainExperience` found f
+or unit type `()` in the current scope
+   --> src\controls\mod.rs:770:36
+    |
+770 |                     ServerMessage::GainExperience(packet)
+ => {
+    |                                    ^^^^^^^^^^^^^^ associa
+ted item not found in `()`
+
+error[E0599]: no associated item named `GainHeroExperience` fou
+nd for unit type `()` in the current scope
+   --> src\controls\mod.rs:779:36
+    |
+779 |                     ServerMessage::GainHeroExperience(pac
+ket) => {
+    |                                    ^^^^^^^^^^^^^^^^^^ ass
+ociated item not found in `()`
+
+error[E0599]: no associated item named `LevelChanged` found for
+ unit type `()` in the current scope
+   --> src\controls\mod.rs:788:36
+    |
+788 |                     ServerMessage::LevelChanged(packet) =
+> {
+    |                                    ^^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `HeroLevelChanged` found
+ for unit type `()` in the current scope
+   --> src\controls\mod.rs:797:36
+    |
+797 |                     ServerMessage::HeroLevelChanged(packe
+t) => {
+    |                                    ^^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `ObjectLeveled` found fo
+r unit type `()` in the current scope
+   --> src\controls\mod.rs:806:36
+    |
+806 |                     ServerMessage::ObjectLeveled(packet) 
+=> {
+    |                                    ^^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `ObjectHarvest` found fo
+r unit type `()` in the current scope
+   --> src\controls\mod.rs:816:36
+    |
+816 |                     ServerMessage::ObjectHarvest(packet) 
+=> {
+    |                                    ^^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `ObjectHarvested` found 
+for unit type `()` in the current scope
+   --> src\controls\mod.rs:846:36
+    |
+846 |                     ServerMessage::ObjectHarvested(packet
+) => {
+    |                                    ^^^^^^^^^^^^^^^ associ
+ated item not found in `()`
+
+error[E0599]: no associated item named `ObjectNpc` found for un
+it type `()` in the current scope
+   --> src\controls\mod.rs:876:36
+    |
+876 |                     ServerMessage::ObjectNpc(packet) => {
+    |                                    ^^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `NpcResponse` found for 
+unit type `()` in the current scope
+   --> src\controls\mod.rs:891:36
+    |
+891 |                     ServerMessage::NpcResponse(packet) =>
+ {
+    |                                    ^^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `Chat` found for unit ty
+pe `()` in the current scope
+   --> src\controls\mod.rs:898:36
+    |
+898 |                     ServerMessage::Chat(packet) => {
+    |                                    ^^^^ associated item n
+ot found in `()`
+
+error[E0599]: no associated item named `ObjectChat` found for u
+nit type `()` in the current scope
+   --> src\controls\mod.rs:905:36
+    |
+905 |                     ServerMessage::ObjectChat(packet) => 
+{
+    |                                    ^^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `Magic` found for unit t
+ype `()` in the current scope
+   --> src\controls\mod.rs:923:36
+    |
+923 |                     ServerMessage::Magic(packet) => {
+    |                                    ^^^^^ associated item 
+not found in `()`
+
+error[E0599]: no associated item named `MagicDelay` found for u
+nit type `()` in the current scope
+   --> src\controls\mod.rs:934:36
+    |
+934 |                     ServerMessage::MagicDelay(packet) => 
+{
+    |                                    ^^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `MagicCast` found for un
+it type `()` in the current scope
+   --> src\controls\mod.rs:942:36
+    |
+942 |                     ServerMessage::MagicCast(packet) => {
+    |                                    ^^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `ObjectMagic` found for 
+unit type `()` in the current scope
+   --> src\controls\mod.rs:948:36
+    |
+948 |                     ServerMessage::ObjectMagic(packet) =>
+ {
+    |                                    ^^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `ObjectEffect` found for
+ unit type `()` in the current scope
+   --> src\controls\mod.rs:972:36
+    |
+972 |                     ServerMessage::ObjectEffect(packet) =
+> {
+    |                                    ^^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `ObjectProjectile` found
+ for unit type `()` in the current scope
+   --> src\controls\mod.rs:991:36
+    |
+991 |                     ServerMessage::ObjectProjectile(packe
+t) => {
+    |                                    ^^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `RangeAttack` found for 
+unit type `()` in the current scope
+   --> src\controls\mod.rs:999:36
+    |
+999 |                     ServerMessage::RangeAttack(packet) =>
+ {
+    |                                    ^^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `MoveItem` found for uni
+t type `()` in the current scope
+    --> src\controls\mod.rs:1007:36
+     |
+1007 |                     ServerMessage::MoveItem(packet) => {
+     |                                    ^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `EquipItem` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1016:36
+     |
+1016 |                     ServerMessage::EquipItem(packet) => 
+{
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `MergeItem` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1025:36
+     |
+1025 |                     ServerMessage::MergeItem(packet) => 
+{
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `RemoveItem` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1035:36
+     |
+1035 |                     ServerMessage::RemoveItem(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `RemoveSlotItem` found f
+or unit type `()` in the current scope
+    --> src\controls\mod.rs:1044:36
+     |
+1044 |                     ServerMessage::RemoveSlotItem(packet
+) => {
+     |                                    ^^^^^^^^^^^^^^ associ
+ated item not found in `()`
+
+error[E0599]: no associated item named `TakeBackItem` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1054:36
+     |
+1054 |                     ServerMessage::TakeBackItem(packet) 
+=> {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `StoreItem` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1062:36
+     |
+1062 |                     ServerMessage::StoreItem(packet) => 
+{
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `UseItem` found for unit
+ type `()` in the current scope
+    --> src\controls\mod.rs:1070:36
+     |
+1070 |                     ServerMessage::UseItem(packet) => {
+     |                                    ^^^^^^^ associated it
+em not found in `()`
+
+error[E0599]: no associated item named `DropItem` found for uni
+t type `()` in the current scope
+    --> src\controls\mod.rs:1078:36
+     |
+1078 |                     ServerMessage::DropItem(packet) => {
+     |                                    ^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `Pushed` found for unit 
+type `()` in the current scope
+    --> src\controls\mod.rs:1087:36
+     |
+1087 |                     ServerMessage::Pushed(packet) => {
+     |                                    ^^^^^^ associated ite
+m not found in `()`
+
+error[E0599]: no associated item named `ObjectPushed` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1094:36
+     |
+1094 |                     ServerMessage::ObjectPushed(packet) 
+=> {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `AddBuff` found for unit
+ type `()` in the current scope
+    --> src\controls\mod.rs:1109:36
+     |
+1109 |                     ServerMessage::AddBuff(packet) => {
+     |                                    ^^^^^^^ associated it
+em not found in `()`
+
+error[E0599]: no associated item named `RemoveBuff` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1121:36
+     |
+1121 |                     ServerMessage::RemoveBuff(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `PauseBuff` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1128:36
+     |
+1128 |                     ServerMessage::PauseBuff(packet) => 
+{
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `TradeRequest` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1136:36
+     |
+1136 |                     ServerMessage::TradeRequest(packet) 
+=> {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `TradeAccept` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1139:36
+     |
+1139 |                     ServerMessage::TradeAccept(packet) =
+> {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `TradeGold` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1142:36
+     |
+1142 |                     ServerMessage::TradeGold(packet) => 
+{
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `TradeItem` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1145:36
+     |
+1145 |                     ServerMessage::TradeItem(packet) => 
+{
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `TradeConfirm` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1148:36
+     |
+1148 |                     ServerMessage::TradeConfirm(_) => {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `TradeCancel` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1151:36
+     |
+1151 |                     ServerMessage::TradeCancel(packet) =
+> {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `GroupInvite` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1154:36
+     |
+1154 |                     ServerMessage::GroupInvite(packet) =
+> {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `AddMember` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1157:36
+     |
+1157 |                     ServerMessage::AddMember(packet) => 
+{
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `DeleteGroup` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1160:36
+     |
+1160 |                     ServerMessage::DeleteGroup(_) => {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `DeleteMember` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1163:36
+     |
+1163 |                     ServerMessage::DeleteMember(packet) 
+=> {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `ShareQuest` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1166:36
+     |
+1166 |                     ServerMessage::ShareQuest(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `CompleteQuest` found fo
+r unit type `()` in the current scope
+    --> src\controls\mod.rs:1173:36
+     |
+1173 |                     ServerMessage::CompleteQuest(packet)
+ => {
+     |                                    ^^^^^^^^^^^^^ associa
+ted item not found in `()`
+
+error[E0599]: no associated item named `NPCGoods` found for uni
+t type `()` in the current scope
+    --> src\controls\mod.rs:1179:36
+     |
+1179 |                     ServerMessage::NPCGoods(packet) => {
+     |                                    ^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `ObjectHide` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1188:36
+     |
+1188 |                     ServerMessage::ObjectHide(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `ObjectShow` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1198:36
+     |
+1198 |                     ServerMessage::ObjectShow(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `Poisoned` found for uni
+t type `()` in the current scope
+    --> src\controls\mod.rs:1208:36
+     |
+1208 |                     ServerMessage::Poisoned(packet) => {
+     |                                    ^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `ObjectPoisoned` found f
+or unit type `()` in the current scope
+    --> src\controls\mod.rs:1211:36
+     |
+1211 |                     ServerMessage::ObjectPoisoned(packet
+) => {
+     |                                    ^^^^^^^^^^^^^^ associ
+ated item not found in `()`
+
+error[E0599]: no associated item named `Revived` found for unit
+ type `()` in the current scope
+    --> src\controls\mod.rs:1225:36
+     |
+1225 |                     ServerMessage::Revived(_) => {
+     |                                    ^^^^^^^ associated it
+em not found in `()`
+
+error[E0599]: no associated item named `ObjectRevived` found fo
+r unit type `()` in the current scope
+    --> src\controls\mod.rs:1228:36
+     |
+1228 |                     ServerMessage::ObjectRevived(packet)
+ => {
+     |                                    ^^^^^^^^^^^^^ associa
+ted item not found in `()`
+
+error[E0599]: no associated item named `GuildInvite` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1242:36
+     |
+1242 |                     ServerMessage::GuildInvite(packet) =
+> {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `GuildStatus` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1248:36
+     |
+1248 |                     ServerMessage::GuildStatus(packet) =
+> {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `GuildStorageGoldChange`
+ found for unit type `()` in the current scope
+    --> src\controls\mod.rs:1261:36
+     |
+1261 |                     ServerMessage::GuildStorageGoldChang
+e(packet) => {
+     |                                    ^^^^^^^^^^^^^^^^^^^^^
+^ associated item not found in `()`
+
+error[E0599]: no associated item named `GuildStorageItemChange`
+ found for unit type `()` in the current scope
+    --> src\controls\mod.rs:1269:36
+     |
+1269 |                     ServerMessage::GuildStorageItemChang
+e(packet) => {
+     |                                    ^^^^^^^^^^^^^^^^^^^^^
+^ associated item not found in `()`
+
+error[E0599]: no associated item named `NewHero` found for unit
+ type `()` in the current scope
+    --> src\controls\mod.rs:1280:36
+     |
+1280 |                     ServerMessage::NewHero(packet) => {
+     |                                    ^^^^^^^ associated it
+em not found in `()`
+
+error[E0599]: no associated item named `HeroInformation` found 
+for unit type `()` in the current scope
+    --> src\controls\mod.rs:1283:36
+     |
+1283 |                     ServerMessage::HeroInformation(packe
+t) => {
+     |                                    ^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `MapChanged` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1302:36
+     |
+1302 |                     ServerMessage::MapChanged(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `ObjectTeleportOut` foun
+d for unit type `()` in the current scope
+    --> src\controls\mod.rs:1317:36
+     |
+1317 |                     ServerMessage::ObjectTeleportOut(pac
+ket) => {
+     |                                    ^^^^^^^^^^^^^^^^^ ass
+ociated item not found in `()`
+
+error[E0599]: no associated item named `ObjectTeleportIn` found
+ for unit type `()` in the current scope
+    --> src\controls\mod.rs:1331:36
+     |
+1331 |                     ServerMessage::ObjectTeleportIn(pack
+et) => {
+     |                                    ^^^^^^^^^^^^^^^^ asso
+ciated item not found in `()`
+
+error[E0599]: no associated item named `TeleportIn` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1345:36
+     |
+1345 |                     ServerMessage::TeleportIn(_packet) =
+> {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+     |
+help: there is a method `report` with a similar name
+    --> C:\Users\gxh\.rustup\toolchains\stable-x86_64-pc-window
+s-msvc\lib/rustlib/src/rust\library\std\src\process.rs:2541:5
+     |
+2541 |     fn report(self) -> ExitCode;
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no associated item named `ObjectRangeAttack` foun
+d for unit type `()` in the current scope
+    --> src\controls\mod.rs:1348:36
+     |
+1348 |                     ServerMessage::ObjectRangeAttack(pac
+ket) => {
+     |                                    ^^^^^^^^^^^^^^^^^ ass
+ociated item not found in `()`
+
+error[E0599]: no associated item named `UserDash` found for uni
+t type `()` in the current scope
+    --> src\controls\mod.rs:1367:36
+     |
+1367 |                     ServerMessage::UserDash(packet) => {
+     |                                    ^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `ObjectDash` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1374:36
+     |
+1374 |                     ServerMessage::ObjectDash(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `UserDashFail` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1389:36
+     |
+1389 |                     ServerMessage::UserDashFail(packet) 
+=> {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `ObjectDashFail` found f
+or unit type `()` in the current scope
+    --> src\controls\mod.rs:1396:36
+     |
+1396 |                     ServerMessage::ObjectDashFail(packet
+) => {
+     |                                    ^^^^^^^^^^^^^^ associ
+ated item not found in `()`
+
+error[E0599]: no associated item named `NPCSell` found for unit
+ type `()` in the current scope
+    --> src\controls\mod.rs:1412:36
+     |
+1412 |                     ServerMessage::NPCSell(_) => tracing
+::trace!("NPC sell"),
+     |                                    ^^^^^^^ associated it
+em not found in `()`
+
+error[E0599]: no associated item named `NPCRepair` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1413:36
+     |
+1413 |                     ServerMessage::NPCRepair(p) => {
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `NPCSRepair` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1417:36
+     |
+1417 |                     ServerMessage::NPCSRepair(p) => {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `NPCRefine` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1420:36
+     |
+1420 |                     ServerMessage::NPCRefine(p) => {
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `NPCCheckRefine` found f
+or unit type `()` in the current scope
+    --> src\controls\mod.rs:1423:36
+     |
+1423 |                     ServerMessage::NPCCheckRefine(_) => 
+tracing::trace!("NPC check refine"),
+     |                                    ^^^^^^^^^^^^^^ associ
+ated item not found in `()`
+
+error[E0599]: no associated item named `NPCCollectRefine` found
+ for unit type `()` in the current scope
+    --> src\controls\mod.rs:1424:36
+     |
+1424 |                     ServerMessage::NPCCollectRefine(p) =
+> {
+     |                                    ^^^^^^^^^^^^^^^^ asso
+ciated item not found in `()`
+
+error[E0599]: no associated item named `NPCReplaceWedRing` foun
+d for unit type `()` in the current scope
+    --> src\controls\mod.rs:1427:36
+     |
+1427 |                     ServerMessage::NPCReplaceWedRing(p) 
+=> {
+     |                                    ^^^^^^^^^^^^^^^^^ ass
+ociated item not found in `()`
+
+error[E0599]: no associated item named `NPCStorage` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1430:36
+     |
+1430 |                     ServerMessage::NPCStorage(_) => trac
+ing::trace!("NPC storage"),
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `NPCRequestInput` found 
+for unit type `()` in the current scope
+    --> src\controls\mod.rs:1431:36
+     |
+1431 |                     ServerMessage::NPCRequestInput(p) =>
+ {
+     |                                    ^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `SellItem` found for uni
+t type `()` in the current scope
+    --> src\controls\mod.rs:1435:36
+     |
+1435 |                     ServerMessage::SellItem(p) => tracin
+g::debug!(
+     |                                    ^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `RepairItem` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1441:36
+     |
+1441 |                     ServerMessage::RepairItem(p) => {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `ItemRepaired` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1444:36
+     |
+1444 |                     ServerMessage::ItemRepaired(p) => tr
+acing::debug!(
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `SplitItem` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1450:36
+     |
+1450 |                     ServerMessage::SplitItem(p) => {
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `SplitItem1` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1453:36
+     |
+1453 |                     ServerMessage::SplitItem1(p) => {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `RefreshItem` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1456:36
+     |
+1456 |                     ServerMessage::RefreshItem(p) => {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `ItemSlotSizeChanged` fo
+und for unit type `()` in the current scope
+    --> src\controls\mod.rs:1459:36
+     |
+1459 |                     ServerMessage::ItemSlotSizeChanged(p
+) => tracing::debug!(
+     |                                    ^^^^^^^^^^^^^^^^^^^ a
+ssociated item not found in `()`
+
+error[E0599]: no associated item named `ItemSealChanged` found 
+for unit type `()` in the current scope
+    --> src\controls\mod.rs:1464:36
+     |
+1464 |                     ServerMessage::ItemSealChanged(p) =>
+ tracing::debug!(
+     |                                    ^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `CraftItem` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1469:36
+     |
+1469 |                     ServerMessage::CraftItem(p) => traci
+ng::debug!(
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `NewItemInfo` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1475:36
+     |
+1475 |                     ServerMessage::NewItemInfo(p) => {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `NewMagic` found for uni
+t type `()` in the current scope
+    --> src\controls\mod.rs:1479:36
+     |
+1479 |                     ServerMessage::NewMagic(p) => {
+     |                                    ^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `MagicLeveled` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1488:36
+     |
+1488 |                     ServerMessage::MagicLeveled(p) => {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `RemoveMagic` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1497:36
+     |
+1497 |                     ServerMessage::RemoveMagic(p) => {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `SpellToggle` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1513:36
+     |
+1513 |                     ServerMessage::SpellToggle(p) => {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `PlayerUpdate` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1523:36
+     |
+1523 |                     ServerMessage::PlayerUpdate(p) => tr
+acing::trace!(
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `PlayerInspect` found fo
+r unit type `()` in the current scope
+    --> src\controls\mod.rs:1529:36
+     |
+1529 |                     ServerMessage::PlayerInspect(p) => {
+     |                                    ^^^^^^^^^^^^^ associa
+ted item not found in `()`
+
+error[E0599]: no associated item named `LogOutSuccess` found fo
+r unit type `()` in the current scope
+    --> src\controls\mod.rs:1532:36
+     |
+1532 |                     ServerMessage::LogOutSuccess(p) => {
+     |                                    ^^^^^^^^^^^^^ associa
+ted item not found in `()`
+
+error[E0599]: no associated item named `TimeOfDay` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1541:36
+     |
+1541 |                     ServerMessage::TimeOfDay(p) => {
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `ChangeAMode` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1550:36
+     |
+1550 |                     ServerMessage::ChangeAMode(p) => {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `ChangePMode` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1554:36
+     |
+1554 |                     ServerMessage::ChangePMode(p) => {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `ObjectName` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1558:36
+     |
+1558 |                     ServerMessage::ObjectName(p) => {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `UserStorage` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1561:36
+     |
+1561 |                     ServerMessage::UserStorage(p) => {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `ObjectHealth` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1567:36
+     |
+1567 |                     ServerMessage::ObjectHealth(p) => {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `ObjectMana` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1571:36
+     |
+1571 |                     ServerMessage::ObjectMana(p) => {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `ObjectHidden` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1575:36
+     |
+1575 |                     ServerMessage::ObjectHidden(p) => {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `MapEffect` found for un
+it type `()` in the current scope
+    --> src\controls\mod.rs:1578:36
+     |
+1578 |                     ServerMessage::MapEffect(p) => {
+     |                                    ^^^^^^^^^ associated 
+item not found in `()`
+
+error[E0599]: no associated item named `SwitchGroup` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1582:36
+     |
+1582 |                     ServerMessage::SwitchGroup(p) => {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `GroupMembersMap` found 
+for unit type `()` in the current scope
+    --> src\controls\mod.rs:1585:36
+     |
+1585 |                     ServerMessage::GroupMembersMap(p) =>
+ {
+     |                                    ^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `SendMemberLocation` fou
+nd for unit type `()` in the current scope
+    --> src\controls\mod.rs:1588:36
+     |
+1588 |                     ServerMessage::SendMemberLocation(p)
+ => {
+     |                                    ^^^^^^^^^^^^^^^^^^ as
+sociated item not found in `()`
+
+error[E0599]: no associated item named `GuildStorageList` found
+ for unit type `()` in the current scope
+    --> src\controls\mod.rs:1592:36
+     |
+1592 |                     ServerMessage::GuildStorageList(p) =
+> {
+     |                                    ^^^^^^^^^^^^^^^^ asso
+ciated item not found in `()`
+
+error[E0599]: no associated item named `GuildNoticeChange` foun
+d for unit type `()` in the current scope
+    --> src\controls\mod.rs:1595:36
+     |
+1595 |                     ServerMessage::GuildNoticeChange(p) 
+=> tracing::info!(
+     |                                    ^^^^^^^^^^^^^^^^^ ass
+ociated item not found in `()`
+
+error[E0599]: no associated item named `GuildMemberChange` foun
+d for unit type `()` in the current scope
+    --> src\controls\mod.rs:1600:36
+     |
+1600 |                     ServerMessage::GuildMemberChange(p) 
+=> {
+     |                                    ^^^^^^^^^^^^^^^^^ ass
+ociated item not found in `()`
+
+error[E0599]: no associated item named `UpdateHeroSpawnState` f
+ound for unit type `()` in the current scope
+    --> src\controls\mod.rs:1604:36
+     |
+1604 |                     ServerMessage::UpdateHeroSpawnState(
+p) => {
+     |                                    ^^^^^^^^^^^^^^^^^^^^ 
+associated item not found in `()`
+
+error[E0599]: no associated item named `SetAutoPotValue` found 
+for unit type `()` in the current scope
+    --> src\controls\mod.rs:1608:36
+     |
+1608 |                     ServerMessage::SetAutoPotValue(p) =>
+ {
+     |                                    ^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `SetHeroBehaviour` found
+ for unit type `()` in the current scope
+    --> src\controls\mod.rs:1611:36
+     |
+1611 |                     ServerMessage::SetHeroBehaviour(p) =
+> {
+     |                                    ^^^^^^^^^^^^^^^^ asso
+ciated item not found in `()`
+
+error[E0599]: no associated item named `ManageHeroes` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1614:36
+     |
+1614 |                     ServerMessage::ManageHeroes(p) => {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `HeroCreateRequest` foun
+d for unit type `()` in the current scope
+    --> src\controls\mod.rs:1617:36
+     |
+1617 |                     ServerMessage::HeroCreateRequest(p) 
+=> {
+     |                                    ^^^^^^^^^^^^^^^^^ ass
+ociated item not found in `()`
+
+error[E0599]: no associated item named `ChangeQuest` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1621:36
+     |
+1621 |                     ServerMessage::ChangeQuest(p) => {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `NewQuestInfo` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1630:36
+     |
+1630 |                     ServerMessage::NewQuestInfo(p) => {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `NewCharacter` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1634:36
+     |
+1634 |                     ServerMessage::NewCharacter(p) => {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `NewCharacterSuccess` fo
+und for unit type `()` in the current scope
+    --> src\controls\mod.rs:1637:36
+     |
+1637 |                     ServerMessage::NewCharacterSuccess(p
+) => {
+     |                                    ^^^^^^^^^^^^^^^^^^^ a
+ssociated item not found in `()`
+
+error[E0599]: no associated item named `DeleteCharacter` found 
+for unit type `()` in the current scope
+    --> src\controls\mod.rs:1640:36
+     |
+1640 |                     ServerMessage::DeleteCharacter(p) =>
+ {
+     |                                    ^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `DeleteCharacterSuccess`
+ found for unit type `()` in the current scope
+    --> src\controls\mod.rs:1643:36
+     |
+1643 |                     ServerMessage::DeleteCharacterSucces
+s(p) => {
+     |                                    ^^^^^^^^^^^^^^^^^^^^^
+^ associated item not found in `()`
+
+error[E0599]: no associated item named `GainedItem` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1646:36
+     |
+1646 |                     ServerMessage::GainedItem(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `GainedQuestItem` found 
+for unit type `()` in the current scope
+    --> src\controls\mod.rs:1663:36
+     |
+1663 |                     ServerMessage::GainedQuestItem(packe
+t) => {
+     |                                    ^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `GainedGold` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1680:36
+     |
+1680 |                     ServerMessage::GainedGold(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `LoseGold` found for uni
+t type `()` in the current scope
+    --> src\controls\mod.rs:1689:36
+     |
+1689 |                     ServerMessage::LoseGold(packet) => {
+     |                                    ^^^^^^^^ associated i
+tem not found in `()`
+
+error[E0599]: no associated item named `GainedCredit` found for
+ unit type `()` in the current scope
+    --> src\controls\mod.rs:1698:36
+     |
+1698 |                     ServerMessage::GainedCredit(packet) 
+=> {
+     |                                    ^^^^^^^^^^^^ associat
+ed item not found in `()`
+
+error[E0599]: no associated item named `LoseCredit` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1707:36
+     |
+1707 |                     ServerMessage::LoseCredit(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `DamageIndicator` found 
+for unit type `()` in the current scope
+    --> src\controls\mod.rs:1716:36
+     |
+1716 |                     ServerMessage::DamageIndicator(packe
+t) => {
+     |                                    ^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `DuraChanged` found for 
+unit type `()` in the current scope
+    --> src\controls\mod.rs:1736:36
+     |
+1736 |                     ServerMessage::DuraChanged(packet) =
+> {
+     |                                    ^^^^^^^^^^^ associate
+d item not found in `()`
+
+error[E0599]: no associated item named `DeleteItem` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1755:36
+     |
+1755 |                     ServerMessage::DeleteItem(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `DeleteQuestItem` found 
+for unit type `()` in the current scope
+    --> src\controls\mod.rs:1766:36
+     |
+1766 |                     ServerMessage::DeleteQuestItem(packe
+t) => {
+     |                                    ^^^^^^^^^^^^^^^ assoc
+iated item not found in `()`
+
+error[E0599]: no associated item named `Death` found for unit t
+ype `()` in the current scope
+    --> src\controls\mod.rs:1777:36
+     |
+1777 |                     ServerMessage::Death(packet) => {
+     |                                    ^^^^^ associated item
+ not found in `()`
+
+error[E0599]: no associated item named `ObjectDied` found for u
+nit type `()` in the current scope
+    --> src\controls\mod.rs:1785:36
+     |
+1785 |                     ServerMessage::ObjectDied(packet) =>
+ {
+     |                                    ^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `HealthChanged` found fo
+r unit type `()` in the current scope
+    --> src\controls\mod.rs:1830:36
+     |
+1830 |                     ServerMessage::HealthChanged(packet)
+ => {
+     |                                    ^^^^^^^^^^^^^ associa
+ted item not found in `()`
+
+error[E0599]: no associated item named `HeroHealthChanged` foun
+d for unit type `()` in the current scope
+    --> src\controls\mod.rs:1839:36
+     |
+1839 |                     ServerMessage::HeroHealthChanged(pac
+ket) => {
+     |                                    ^^^^^^^^^^^^^^^^^ ass
+ociated item not found in `()`
+
+error[E0223]: ambiguous associated type
+    --> src\controls\mod.rs:1843:21
+     |
+1843 |                     ServerMessage::Disconnect { reason }
+ => {
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+help: if there were a trait named `Example` with associated typ
+e `Disconnect` implemented for `()`, you could use the fully-qu
+alified path
+     |
+1843 -                     ServerMessage::Disconnect { reason }
+ => {
+1843 +                     <() as Example>::Disconnect { reason
+ } => {
+     |
+
+error[E0223]: ambiguous associated type
+    --> src\controls\mod.rs:1847:21
+     |
+1847 |                     ServerMessage::KeepAlive { time } =>
+ {
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+help: if there were a trait named `Example` with associated typ
+e `KeepAlive` implemented for `()`, you could use the fully-qua
+lified path
+     |
+1847 -                     ServerMessage::KeepAlive { time } =>
+ {
+1847 +                     <() as Example>::KeepAlive { time } 
+=> {
+     |
+
+error[E0223]: ambiguous associated type
+    --> src\controls\mod.rs:1854:21
+     |
+1854 |                     ServerMessage::Unknown { opcode, pay
+load } => {
+     |                     ^^^^^^^^^^^^^^^^^^^^^^
+     |
+help: if there were a trait named `Example` with associated typ
+e `Unknown` implemented for `()`, you could use the fully-quali
+fied path
+     |
+1854 -                     ServerMessage::Unknown { opcode, pay
+load } => {
+1854 +                     <() as Example>::Unknown { opcode, p
+ayload } => {
+     |
+
+error[E0223]: ambiguous associated type
+    --> src\controls\mod.rs:1857:21
+     |
+1857 |                     ServerMessage::ParseError { opcode, 
+message } => {
+     |                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+help: if there were a trait named `Example` with associated typ
+e `ParseError` implemented for `()`, you could use the fully-qu
+alified path
+     |
+1857 -                     ServerMessage::ParseError { opcode, 
+message } => {
+1857 +                     <() as Example>::ParseError { opcode
+, message } => {
+     |
+
+error[E0599]: no method named `send_packet` found for struct `N
+etworkStack` in the current scope
+  --> src\controls\mod.rs:86:43
+   |
+86 | ...                   match network.send_packet(&packet).a
+wait {
+   |                                     ^^^^^^^^^^^ method not
+ found in `NetworkStack`
+   |
+  ::: src\network\network.rs:47:1
+   |
+47 | pub struct NetworkStack {
+   | ----------------------- method `send_packet` not found for
+ this struct
+
+error[E0599]: no method named `send_packet` found for struct `N
+etworkStack` in the current scope
+   --> src\controls\mod.rs:116:51
+    |
+116 | ...                   match network.send_packet(&packet).
+await {
+    |                                     ^^^^^^^^^^^ method no
+t found in `NetworkStack`
+    |
+   ::: src\network\network.rs:47:1
+    |
+47  | pub struct NetworkStack {
+    | ----------------------- method `send_packet` not found fo
+r this struct
+
+error[E0599]: no method named `send_packet` found for struct `N
+etworkStack` in the current scope
+   --> src\controls\mod.rs:217:47
+    |
+217 | ...                   match network.send_packet(&packet).
+await {
+    |                                     ^^^^^^^^^^^ method no
+t found in `NetworkStack`
+    |
+   ::: src\network\network.rs:47:1
+    |
+47  | pub struct NetworkStack {
+    | ----------------------- method `send_packet` not found fo
+r this struct
+
+error[E0609]: no field `info` on type `&mir2_shared::packets::N
+ewMapInfo`
+    --> src\controls\mod.rs:1885:30
+     |
+1885 |             map_title = %map.info.title,
+     |                              ^^^^ unknown field
+     |
+     = note: available fields are: `map_index`, `file_name`, `t
+itle`, `minimap`, `big_map` ... and 6 others
+
+error[E0609]: no field `location` on type `&mir2_shared::packet
+s::UserLocation`
+    --> src\controls\mod.rs:1889:26
+     |
+1889 |             x = position.location.x,
+     |                          ^^^^^^^^ unknown field
+     |
+help: a field with a similar name exists
+     |
+1889 |             x = position.location_x.x,
+     |                                  ++
+
+error[E0609]: no field `location` on type `&mir2_shared::packet
+s::UserLocation`
+    --> src\controls\mod.rs:1890:26
+     |
+1890 |             y = position.location.y,
+     |                          ^^^^^^^^ unknown field
+     |
+help: a field with a similar name exists
+     |
+1890 |             y = position.location_x.y,
+     |                                  ++
+
+error[E0609]: no field `info` on type `&mir2_shared::packets::N
+ewMapInfo`
+    --> src\controls\mod.rs:1896:27
+     |
+1896 |             title = %info.info.title,
+     |                           ^^^^ unknown field
+     |
+     = note: available fields are: `map_index`, `file_name`, `t
+itle`, `minimap`, `big_map` ... and 6 others
+
+error[E0609]: no field `info` on type `&mir2_shared::packets::N
+ewMapInfo`
+    --> src\controls\mod.rs:1897:26
+     |
+1897 |             width = info.info.width,
+     |                          ^^^^ unknown field
+     |
+     = note: available fields are: `map_index`, `file_name`, `t
+itle`, `minimap`, `big_map` ... and 6 others
+
+error[E0609]: no field `info` on type `&mir2_shared::packets::N
+ewMapInfo`
+    --> src\controls\mod.rs:1898:27
+     |
+1898 |             height = info.info.height,
+     |                           ^^^^ unknown field
+     |
+     = note: available fields are: `map_index`, `file_name`, `t
+itle`, `minimap`, `big_map` ... and 6 others
+
+error[E0609]: no field `guild_rank_name` on type `&mir2_shared:
+:packets::UserInformation`
+   --> src\objects\user_object.rs:291:37
+    |
+291 |         self.guild_rank_name = info.guild_rank_name.clone
+();
+    |                                     ^^^^^^^^^^^^^^^ unkno
+wn field
+    |
+help: a field with a similar name exists
+    |
+291 -         self.guild_rank_name = info.guild_rank_name.clone
+();
+291 +         self.guild_rank_name = info.guild_name.clone();
+    |
+
+error[E0599]: no method named `sync_player` found for mutable r
+eference `&mut MapObject` in the current scope
+   --> src\scenes\state.rs:178:39
+    |
+178 |                 let sync = map_object.sync_player(object)
+;
+    |                                       ^^^^^^^^^^^ method 
+not found in `&mut MapObject`
+
+error[E0599]: no function or associated item named `from_player
+` found for struct `MapObject` in the current scope
+   --> src\scenes\state.rs:186:53
+    |
+186 |                 let (map_object, sync) = MapObject::from_
+player(object);
+    |                                                     ^^^^^
+^^^^^^ function or associated item not found in `MapObject`
+    |
+   ::: src\objects\map_object.rs:33:1
+    |
+33  | pub struct MapObject {
+    | -------------------- function or associated item `from_pl
+ayer` not found for this struct
+    |
+note: if you're trying to build a new `MapObject` consider usin
+g one of the following associated functions:
+      MapObject::for_user
+      MapObject::for_hero
+      MapObject::for_monster
+   --> src\objects\map_object.rs:67:5
+    |
+67  |     pub fn for_user(object_id: u32, name: String) -> Self
+ {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+87  |     pub fn for_hero(object_id: u32, name: String) -> Self
+ {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+107 |     pub fn for_monster(object_id: u32, name: String) -> S
+elf {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^
+help: there is an associated function `from_player_packet` with
+ a similar name
+    |
+186 |                 let (map_object, sync) = MapObject::from_
+player_packet(object);
+    |                                                          
+      +++++++
+
+error[E0599]: no method named `sync_hero` found for mutable ref
+erence `&mut MapObject` in the current scope
+   --> src\scenes\state.rs:206:39
+    |
+206 |                 let sync = map_object.sync_hero(object);
+    |                                       ^^^^^^^^^ method no
+t found in `&mut MapObject`
+
+error[E0599]: no function or associated item named `from_hero` 
+found for struct `MapObject` in the current scope
+   --> src\scenes\state.rs:214:53
+    |
+214 |                 let (map_object, sync) = MapObject::from_
+hero(object);
+    |                                                     ^^^^^
+^^^^ function or associated item not found in `MapObject`
+    |
+   ::: src\objects\map_object.rs:33:1
+    |
+33  | pub struct MapObject {
+    | -------------------- function or associated item `from_he
+ro` not found for this struct
+    |
+note: if you're trying to build a new `MapObject` consider usin
+g one of the following associated functions:
+      MapObject::for_user
+      MapObject::for_hero
+      MapObject::for_monster
+   --> src\objects\map_object.rs:67:5
+    |
+67  |     pub fn for_user(object_id: u32, name: String) -> Self
+ {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+87  |     pub fn for_hero(object_id: u32, name: String) -> Self
+ {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+107 |     pub fn for_monster(object_id: u32, name: String) -> S
+elf {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^
+help: there is an associated function `from_hero_packet` with a
+ similar name
+    |
+214 |                 let (map_object, sync) = MapObject::from_
+hero_packet(object);
+    |                                                          
+    +++++++
+
+error[E0599]: no method named `sync_monster` found for mutable 
+reference `&mut MapObject` in the current scope
+   --> src\scenes\state.rs:231:39
+    |
+231 |                 let sync = map_object.sync_monster(object
+);
+    |                                       ^^^^^^^^^^^^
+    |
+help: there is a method `sync_from_monster_packet` with a simil
+ar name
+    |
+231 -                 let sync = map_object.sync_monster(object
+);
+231 +                 let sync = map_object.sync_from_monster_p
+acket(object);
+    |
+
+error[E0599]: no function or associated item named `from_monste
+r` found for struct `MapObject` in the current scope
+   --> src\scenes\state.rs:239:53
+    |
+239 |                 let (map_object, sync) = MapObject::from_
+monster(object);
+    |                                                     ^^^^^
+^^^^^^^ function or associated item not found in `MapObject`
+    |
+   ::: src\objects\map_object.rs:33:1
+    |
+33  | pub struct MapObject {
+    | -------------------- function or associated item `from_mo
+nster` not found for this struct
+    |
+note: if you're trying to build a new `MapObject` consider usin
+g one of the following associated functions:
+      MapObject::for_user
+      MapObject::for_hero
+      MapObject::for_monster
+   --> src\objects\map_object.rs:67:5
+    |
+67  |     pub fn for_user(object_id: u32, name: String) -> Self
+ {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+87  |     pub fn for_hero(object_id: u32, name: String) -> Self
+ {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+107 |     pub fn for_monster(object_id: u32, name: String) -> S
+elf {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^
+help: there is an associated function `from_monster_packet` wit
+h a similar name
+    |
+239 |                 let (map_object, sync) = MapObject::from_
+monster_packet(object);
+    |                                                          
+       +++++++
+
+error[E0609]: no field `name` on type `mir2_shared::packets::Ob
+jectItem`
+   --> src\scenes\state.rs:272:26
+    |
+272 |             name: packet.name,
+    |                          ^^^^ unknown field
+    |
+    = note: available fields are: `object_id`, `item`, `locatio
+n_x`, `location_y`
+
+error[E0609]: no field `name_colour_argb` on type `mir2_shared:
+:packets::ObjectItem`
+   --> src\scenes\state.rs:273:38
+    |
+273 |             name_colour_argb: packet.name_colour_argb,
+    |                                      ^^^^^^^^^^^^^^^^ unk
+nown field
+    |
+    = note: available fields are: `object_id`, `item`, `locatio
+n_x`, `location_y`
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::ObjectItem`
+   --> src\scenes\state.rs:274:30
+    |
+274 |             location: packet.location,
+    |                              ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+274 |             location: packet.location_x,
+    |                                      ++
+
+error[E0609]: no field `image` on type `mir2_shared::packets::O
+bjectItem`
+   --> src\scenes\state.rs:275:27
+    |
+275 |             image: packet.image,
+    |                           ^^^^^ unknown field
+    |
+    = note: available fields are: `object_id`, `item`, `locatio
+n_x`, `location_y`
+
+error[E0609]: no field `grade` on type `mir2_shared::packets::O
+bjectItem`
+   --> src\scenes\state.rs:276:27
+    |
+276 |             grade: packet.grade,
+    |                           ^^^^^ unknown field
+    |
+    = note: available fields are: `object_id`, `item`, `locatio
+n_x`, `location_y`
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::ObjectGold`
+   --> src\scenes\state.rs:289:30
+    |
+289 |             location: packet.location,
+    |                              ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+289 |             location: packet.location_x,
+    |                                      ++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:308:26
+    |
+308 |             damage_type: packet.damage_type,
+    |                          ^^^^^^^^^^^^^^^^^^ expected `Dam
+ageType`, found `u8`
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::Death`
+   --> src\scenes\state.rs:320:30
+    |
+320 |             location: packet.location,
+    |                              ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+320 |             location: packet.location_x,
+    |                                      ++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:321:24
+    |
+321 |             direction: packet.direction,
+    |                        ^^^^^^^^^^^^^^^^ expected `MirDire
+ction`, found `u8`
+
+error[E0609]: no field `location` on type `&mut mir2_shared::pa
+ckets::UserInformation`
+   --> src\scenes\state.rs:327:23
+    |
+327 |             character.location = packet.location;
+    |                       ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+327 |             character.location_x = packet.location;
+    |                               ++
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::Death`
+   --> src\scenes\state.rs:327:41
+    |
+327 |             character.location = packet.location;
+    |                                         ^^^^^^^^ unknown 
+field
+    |
+help: a field with a similar name exists
+    |
+327 |             character.location = packet.location_x;
+    |                                                 ++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:328:35
+    |
+328 |             character.direction = packet.direction;
+    |             -------------------   ^^^^^^^^^^^^^^^^ expect
+ed `MirDirection`, found `u8`
+    |             |
+    |             expected due to the type of this binding
+
+error[E0609]: no field `location` on type `&mut mir2_shared::pa
+ckets::UserLocation`
+   --> src\scenes\state.rs:331:22
+    |
+331 |             location.location = packet.location;
+    |                      ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+331 |             location.location_x = packet.location;
+    |                              ++
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::Death`
+   --> src\scenes\state.rs:331:40
+    |
+331 |             location.location = packet.location;
+    |                                        ^^^^^^^^ unknown f
+ield
+    |
+help: a field with a similar name exists
+    |
+331 |             location.location = packet.location_x;
+    |                                                ++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:332:34
+    |
+332 |             location.direction = packet.direction;
+    |             ------------------   ^^^^^^^^^^^^^^^^ expecte
+d `MirDirection`, found `u8`
+    |             |
+    |             expected due to the type of this binding
+
+error[E0308]: mismatched types
+    --> src\scenes\state.rs:408:13
+     |
+405  |         if let Some(result) = Self::remove_item_from_slo
+ts(
+     |                               --------------------------
+-- arguments to this function are incorrect
+...
+408  |             packet.count,
+     |             ^^^^^^^^^^^^ expected `u16`, found `u32`
+     |
+note: associated function defined here
+    --> src\scenes\state.rs:1283:8
+     |
+1283 |     fn remove_item_from_slots(
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+1286 |         count: u16,
+     |         ----------
+help: you can convert a `u32` to a `u16` and panic if the conve
+rted value doesn't fit
+     |
+408  |             packet.count.try_into().unwrap(),
+     |                         ++++++++++++++++++++
+
+error[E0308]: mismatched types
+    --> src\scenes\state.rs:416:13
+     |
+413  |         } else if let Some(result) = Self::remove_item_f
+rom_slots(
+     |                                      -------------------
+--------- arguments to this function are incorrect
+...
+416  |             packet.count,
+     |             ^^^^^^^^^^^^ expected `u16`, found `u32`
+     |
+note: associated function defined here
+    --> src\scenes\state.rs:1283:8
+     |
+1283 |     fn remove_item_from_slots(
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+1286 |         count: u16,
+     |         ----------
+help: you can convert a `u32` to a `u16` and panic if the conve
+rted value doesn't fit
+     |
+416  |             packet.count.try_into().unwrap(),
+     |                         ++++++++++++++++++++
+
+error[E0308]: mismatched types
+    --> src\scenes\state.rs:424:13
+     |
+421  |         } else if let Some(result) = Self::remove_item_f
+rom_slots(
+     |                                      -------------------
+--------- arguments to this function are incorrect
+...
+424  |             packet.count,
+     |             ^^^^^^^^^^^^ expected `u16`, found `u32`
+     |
+note: associated function defined here
+    --> src\scenes\state.rs:1283:8
+     |
+1283 |     fn remove_item_from_slots(
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+1286 |         count: u16,
+     |         ----------
+help: you can convert a `u32` to a `u16` and panic if the conve
+rted value doesn't fit
+     |
+424  |             packet.count.try_into().unwrap(),
+     |                         ++++++++++++++++++++
+
+error[E0308]: mismatched types
+    --> src\scenes\state.rs:436:21
+     |
+433  |                 Self::remove_item_from_slots(
+     |                 ---------------------------- arguments t
+o this function are incorrect
+...
+436  |                     packet.count,
+     |                     ^^^^^^^^^^^^ expected `u16`, found `
+u32`
+     |
+note: associated function defined here
+    --> src\scenes\state.rs:1283:8
+     |
+1283 |     fn remove_item_from_slots(
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+1286 |         count: u16,
+     |         ----------
+help: you can convert a `u32` to a `u16` and panic if the conve
+rted value doesn't fit
+     |
+436  |                     packet.count.try_into().unwrap(),
+     |                                 ++++++++++++++++++++
+
+error[E0308]: mismatched types
+    --> src\scenes\state.rs:443:21
+     |
+440  |                 Self::remove_item_from_slots(
+     |                 ---------------------------- arguments t
+o this function are incorrect
+...
+443  |                     packet.count,
+     |                     ^^^^^^^^^^^^ expected `u16`, found `
+u32`
+     |
+note: associated function defined here
+    --> src\scenes\state.rs:1283:8
+     |
+1283 |     fn remove_item_from_slots(
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+1286 |         count: u16,
+     |         ----------
+help: you can convert a `u32` to a `u16` and panic if the conve
+rted value doesn't fit
+     |
+443  |                     packet.count.try_into().unwrap(),
+     |                                 ++++++++++++++++++++
+
+error[E0308]: mismatched types
+    --> src\scenes\state.rs:450:21
+     |
+447  |                 Self::remove_item_from_slots(
+     |                 ---------------------------- arguments t
+o this function are incorrect
+...
+450  |                     packet.count,
+     |                     ^^^^^^^^^^^^ expected `u16`, found `
+u32`
+     |
+note: associated function defined here
+    --> src\scenes\state.rs:1283:8
+     |
+1283 |     fn remove_item_from_slots(
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+1286 |         count: u16,
+     |         ----------
+help: you can convert a `u32` to a `u16` and panic if the conve
+rted value doesn't fit
+     |
+450  |                     packet.count.try_into().unwrap(),
+     |                                 ++++++++++++++++++++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:457:28
+    |
+457 |             removed_count: packet.count,
+    |                            ^^^^^^^^^^^^ expected `u16`, f
+ound `u32`
+
+error[E0609]: no field `unique_id` on type `mir2_shared::packet
+s::DeleteQuestItem`
+   --> src\scenes\state.rs:479:20
+    |
+479 |             packet.unique_id,
+    |                    ^^^^^^^^^ unknown field
+    |
+    = note: available field is: `item_id`
+
+error[E0609]: no field `count` on type `mir2_shared::packets::D
+eleteQuestItem`
+   --> src\scenes\state.rs:480:20
+    |
+480 |             packet.count,
+    |                    ^^^^^ unknown field
+    |
+    = note: available field is: `item_id`
+
+error[E0609]: no field `unique_id` on type `mir2_shared::packet
+s::DeleteQuestItem`
+   --> src\scenes\state.rs:491:28
+    |
+491 |                     packet.unique_id,
+    |                            ^^^^^^^^^ unknown field
+    |
+    = note: available field is: `item_id`
+
+error[E0609]: no field `count` on type `mir2_shared::packets::D
+eleteQuestItem`
+   --> src\scenes\state.rs:492:28
+    |
+492 |                     packet.count,
+    |                            ^^^^^ unknown field
+    |
+    = note: available field is: `item_id`
+
+error[E0609]: no field `unique_id` on type `mir2_shared::packet
+s::DeleteQuestItem`
+   --> src\scenes\state.rs:498:31
+    |
+498 |             unique_id: packet.unique_id,
+    |                               ^^^^^^^^^ unknown field
+    |
+    = note: available field is: `item_id`
+
+error[E0609]: no field `count` on type `mir2_shared::packets::D
+eleteQuestItem`
+   --> src\scenes\state.rs:499:35
+    |
+499 |             removed_count: packet.count,
+    |                                   ^^^^^ unknown field
+    |
+    = note: available field is: `item_id`
+
+error[E0599]: no method named `set_level` found for mutable ref
+erence `&mut MapObject` in the current scope
+   --> src\scenes\state.rs:640:24
+    |
+640 |                 object.set_level(packet.level);
+    |                        ^^^^^^^^^ method not found in `&mu
+t MapObject`
+
+error[E0599]: no method named `set_level` found for mutable ref
+erence `&mut MapObject` in the current scope
+   --> src\scenes\state.rs:664:24
+    |
+664 |                 object.set_level(packet.level);
+    |                        ^^^^^^^^^ method not found in `&mu
+t MapObject`
+
+error[E0599]: no variant or associated item named `Player` foun
+d for enum `MapObjectType` in the current scope
+   --> src\scenes\state.rs:693:53
+    |
+693 |             if matches!(object_type, MapObjectType::Playe
+r)
+    |                                                     ^^^^^
+^ variant or associated item not found in `MapObjectType`
+    |
+   ::: src\objects\map_object.rs:22:1
+    |
+22  | pub enum MapObjectType {
+    | ---------------------- variant or associated item `Player
+` not found for this enum
+
+error[E0609]: no field `name_colour_argb` on type `&mut mir2_sh
+ared::packets::UserInformation`
+   --> src\scenes\state.rs:713:23
+    |
+713 |             character.name_colour_argb = packet.name_colo
+ur_argb;
+    |                       ^^^^^^^^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+713 -             character.name_colour_argb = packet.name_colo
+ur_argb;
+713 +             character.name_colour = packet.name_colour_ar
+gb;
+    |
+
+error[E0609]: no field `name_colour_argb` on type `&mut mir2_sh
+ared::packets::UserInformation`
+   --> src\scenes\state.rs:751:27
+    |
+751 |                 character.name_colour_argb = name_colour_
+argb;
+    |                           ^^^^^^^^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+751 -                 character.name_colour_argb = name_colour_
+argb;
+751 +                 character.name_colour = name_colour_argb;
+    |
+
+error[E0599]: no method named `set_guild_name` found for mutabl
+e reference `&mut MapObject` in the current scope
+   --> src\scenes\state.rs:779:35
+    |
+779 |             let previous = object.set_guild_name(guild_na
+me.clone());
+    |                                   ^^^^^^^^^^^^^^
+    |
+help: there is a method `set_name` with a similar name
+    |
+779 -             let previous = object.set_guild_name(guild_na
+me.clone());
+779 +             let previous = object.set_name(guild_name.clo
+ne());
+    |
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:799:17
+    |
+799 |             hp: packet.hp,
+    |                 ^^^^^^^^^ expected `i32`, found `u32`
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:800:17
+    |
+800 |             mp: packet.mp,
+    |                 ^^^^^^^^^ expected `i32`, found `u32`
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:802:31
+    |
+802 |         self.player_hp = Some(packet.hp);
+    |                          ---- ^^^^^^^^^ expected `i32`, f
+ound `u32`
+    |                          |
+    |                          arguments to this enum variant a
+re incorrect
+    |
+help: the type constructed contains `u32` due to the type of th
+e argument passed
+   --> src\scenes\state.rs:802:26
+    |
+802 |         self.player_hp = Some(packet.hp);
+    |                          ^^^^^---------^
+    |                               |
+    |                               this argument influences th
+e type of `Some`
+note: tuple variant defined here
+   --> C:\Users\gxh\.rustup\toolchains\stable-x86_64-pc-windows
+-msvc\lib/rustlib/src/rust\library\core\src\option.rs:599:5
+    |
+599 |     Some(#[stable(feature = "rust1", since = "1.0.0")] T)
+,
+    |     ^^^^
+help: you can convert a `u32` to an `i32` and panic if the conv
+erted value doesn't fit
+    |
+802 |         self.player_hp = Some(packet.hp.try_into().unwrap
+());
+    |                                        ++++++++++++++++++
+++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:803:31
+    |
+803 |         self.player_mp = Some(packet.mp);
+    |                          ---- ^^^^^^^^^ expected `i32`, f
+ound `u32`
+    |                          |
+    |                          arguments to this enum variant a
+re incorrect
+    |
+help: the type constructed contains `u32` due to the type of th
+e argument passed
+   --> src\scenes\state.rs:803:26
+    |
+803 |         self.player_mp = Some(packet.mp);
+    |                          ^^^^^---------^
+    |                               |
+    |                               this argument influences th
+e type of `Some`
+note: tuple variant defined here
+   --> C:\Users\gxh\.rustup\toolchains\stable-x86_64-pc-windows
+-msvc\lib/rustlib/src/rust\library\core\src\option.rs:599:5
+    |
+599 |     Some(#[stable(feature = "rust1", since = "1.0.0")] T)
+,
+    |     ^^^^
+help: you can convert a `u32` to an `i32` and panic if the conv
+erted value doesn't fit
+    |
+803 |         self.player_mp = Some(packet.mp.try_into().unwrap
+());
+    |                                        ++++++++++++++++++
+++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:808:28
+    |
+808 |             character.hp = packet.hp;
+    |             ------------   ^^^^^^^^^ expected `i32`, foun
+d `u32`
+    |             |
+    |             expected due to the type of this binding
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:809:28
+    |
+809 |             character.mp = packet.mp;
+    |             ------------   ^^^^^^^^^ expected `i32`, foun
+d `u32`
+    |             |
+    |             expected due to the type of this binding
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:820:17
+    |
+820 |             hp: packet.hp,
+    |                 ^^^^^^^^^ expected `i32`, found `u32`
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:821:17
+    |
+821 |             mp: packet.mp,
+    |                 ^^^^^^^^^ expected `i32`, found `u32`
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:823:29
+    |
+823 |         self.hero_hp = Some(packet.hp);
+    |                        ---- ^^^^^^^^^ expected `i32`, fou
+nd `u32`
+    |                        |
+    |                        arguments to this enum variant are
+ incorrect
+    |
+help: the type constructed contains `u32` due to the type of th
+e argument passed
+   --> src\scenes\state.rs:823:24
+    |
+823 |         self.hero_hp = Some(packet.hp);
+    |                        ^^^^^---------^
+    |                             |
+    |                             this argument influences the 
+type of `Some`
+note: tuple variant defined here
+   --> C:\Users\gxh\.rustup\toolchains\stable-x86_64-pc-windows
+-msvc\lib/rustlib/src/rust\library\core\src\option.rs:599:5
+    |
+599 |     Some(#[stable(feature = "rust1", since = "1.0.0")] T)
+,
+    |     ^^^^
+help: you can convert a `u32` to an `i32` and panic if the conv
+erted value doesn't fit
+    |
+823 |         self.hero_hp = Some(packet.hp.try_into().unwrap()
+);
+    |                                      ++++++++++++++++++++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:824:29
+    |
+824 |         self.hero_mp = Some(packet.mp);
+    |                        ---- ^^^^^^^^^ expected `i32`, fou
+nd `u32`
+    |                        |
+    |                        arguments to this enum variant are
+ incorrect
+    |
+help: the type constructed contains `u32` due to the type of th
+e argument passed
+   --> src\scenes\state.rs:824:24
+    |
+824 |         self.hero_mp = Some(packet.mp);
+    |                        ^^^^^---------^
+    |                             |
+    |                             this argument influences the 
+type of `Some`
+note: tuple variant defined here
+   --> C:\Users\gxh\.rustup\toolchains\stable-x86_64-pc-windows
+-msvc\lib/rustlib/src/rust\library\core\src\option.rs:599:5
+    |
+599 |     Some(#[stable(feature = "rust1", since = "1.0.0")] T)
+,
+    |     ^^^^
+help: you can convert a `u32` to an `i32` and panic if the conv
+erted value doesn't fit
+    |
+824 |         self.hero_mp = Some(packet.mp.try_into().unwrap()
+);
+    |                                      ++++++++++++++++++++
+
+error[E0609]: no field `name_colour_argb` on type `mir2_shared:
+:packets::ObjectNpc`
+   --> src\scenes\state.rs:834:38
+    |
+834 |             name_colour_argb: packet.name_colour_argb,
+    |                                      ^^^^^^^^^^^^^^^^ unk
+nown field
+    |
+help: a field with a similar name exists
+    |
+834 -             name_colour_argb: packet.name_colour_argb,
+834 +             name_colour_argb: packet.name_colour,
+    |
+
+error[E0609]: no field `colour_argb` on type `mir2_shared::pack
+ets::ObjectNpc`
+   --> src\scenes\state.rs:836:33
+    |
+836 |             colour_argb: packet.colour_argb,
+    |                                 ^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `object_id`, `name`, `name_co
+lour`, `image`, `colour` ... and 3 others
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::ObjectNpc`
+   --> src\scenes\state.rs:837:30
+    |
+837 |             location: packet.location,
+    |                              ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+837 |             location: packet.location_x,
+    |                                      ++
+
+error[E0609]: no field `quest_ids` on type `mir2_shared::packet
+s::ObjectNpc`
+   --> src\scenes\state.rs:839:31
+    |
+839 |             quest_ids: packet.quest_ids,
+    |                               ^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `object_id`, `name`, `name_co
+lour`, `image`, `colour` ... and 3 others
+
+error[E0609]: no field `page` on type `()`
+   --> src\scenes\state.rs:862:32
+    |
+862 |             line_count: packet.page.len(),
+    |                                ^^^^ unknown field
+
+error[E0609]: no field `page` on type `()`
+   --> src\scenes\state.rs:863:26
+    |
+863 |             page: packet.page,
+    |                          ^^^^ unknown field
+
+error[E0609]: no field `object_id` on type `()`
+   --> src\scenes\state.rs:877:51
+    |
+877 |         let object = self.objects.get_mut(&motion.object_
+id)?;
+    |                                                   ^^^^^^^
+^^ unknown field
+
+error[E0609]: no field `direction` on type `()`
+   --> src\scenes\state.rs:878:57
+    |
+878 |         let result = object.apply_action(action, motion.d
+irection, motion.location);
+    |                                                         ^
+^^^^^^^^ unknown field
+
+error[E0609]: no field `location` on type `()`
+   --> src\scenes\state.rs:878:75
+    |
+878 |         let result = object.apply_action(action, motion.d
+irection, motion.location);
+    |                                                          
+                 ^^^^^^^^ unknown field
+
+error[E0609]: no field `object_id` on type `()`
+   --> src\scenes\state.rs:880:31
+    |
+880 |             object_id: motion.object_id,
+    |                               ^^^^^^^^^ unknown field
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::ObjectAttack`
+   --> src\scenes\state.rs:890:20
+    |
+890 |             packet.location,
+    |                    ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+890 |             packet.location_x,
+    |                            ++
+
+error[E0308]: arguments to this method are incorrect
+   --> src\scenes\state.rs:888:29
+    |
+888 |         let attack = object.apply_attack(
+    |                             ^^^^^^^^^^^^
+889 |             packet.direction,
+    |             ---------------- argument #1 of type `MirDire
+ction` is missing
+890 |             packet.location,
+891 |             packet.spell,
+    |             ------------
+    |             |
+    |             unexpected argument #3 of type `u8`
+    |             argument #3 of type `mir2_shared::Spell` is m
+issing
+892 |             packet.level,
+    |             ------------ unexpected argument #4 of type `
+u16`
+    |
+note: method defined here
+   --> src\objects\map_object.rs:442:12
+    |
+442 |     pub fn apply_attack(
+    |            ^^^^^^^^^^^^
+443 |         &mut self,
+444 |         direction: MirDirection,
+    |         -----------------------
+445 |         location: Point,
+446 |         spell: Spell,
+    |         ------------
+help: did you mean
+    |
+888 -         let attack = object.apply_attack(
+889 -             packet.direction,
+890 -             packet.location,
+891 -             packet.spell,
+892 -             packet.level,
+893 -             packet.attack_type,
+894 -         );
+888 +         let attack = object.apply_attack(/* MirDirection 
+*/, packet.location, /* mir2_shared::Spell */, packet.direction
+, packet.attack_type);
+    |
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::ObjectHarvest`
+   --> src\scenes\state.rs:904:87
+    |
+904 |         let result = object.apply_action(MirAction::Harve
+st, packet.direction, packet.location);
+    |                                                          
+                             ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+904 |         let result = object.apply_action(MirAction::Harve
+st, packet.direction, packet.location_x);
+    |                                                          
+                                     ++
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::ObjectHarvested`
+   --> src\scenes\state.rs:917:88
+    |
+917 |         let result = object.apply_action(MirAction::Skele
+ton, packet.direction, packet.location);
+    |                                                          
+                              ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+917 |         let result = object.apply_action(MirAction::Skele
+ton, packet.direction, packet.location_x);
+    |                                                          
+                                      ++
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::ObjectStruck`
+   --> src\scenes\state.rs:927:67
+    |
+927 |         let struck = object.apply_struck(packet.direction
+, packet.location, packet.attacker_id);
+    |                                                          
+         ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+927 |         let struck = object.apply_struck(packet.direction
+, packet.location_x, packet.attacker_id);
+    |                                                          
+                 ++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:927:42
+    |
+927 |         let struck = object.apply_struck(packet.direction
+, packet.location, packet.attacker_id);
+    |                             ------------ ^^^^^^^^^^^^^^^^
+ expected `MirDirection`, found `u8`
+    |                             |
+    |                             arguments to this method are 
+incorrect
+    |
+note: method defined here
+   --> src\objects\map_object.rs:460:12
+    |
+460 |     pub fn apply_struck(
+    |            ^^^^^^^^^^^^
+461 |         &mut self,
+462 |         direction: MirDirection,
+    |         -----------------------
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::ObjectDied`
+   --> src\scenes\state.rs:942:63
+    |
+942 |                         .apply_death(packet.direction, pa
+cket.location);
+    |                                                          
+     ^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+942 |                         .apply_death(packet.direction, pa
+cket.location_x);
+    |                                                          
+             ++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:942:38
+    |
+942 |                         .apply_death(packet.direction, pa
+cket.location);
+    |                          ----------- ^^^^^^^^^^^^^^^^ exp
+ected `MirDirection`, found `u8`
+    |                          |
+    |                          arguments to this method are inc
+orrect
+    |
+note: method defined here
+   --> src\objects\map_object.rs:507:12
+    |
+507 |     pub fn apply_death(&mut self, direction: MirDirection
+, location: Point) -> ActionResult {
+    |            ^^^^^^^^^^^            -----------------------
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::ObjectDied`
+   --> src\scenes\state.rs:949:42
+    |
+949 |                         location: packet.location,
+    |                                          ^^^^^^^^ unknown
+ field
+    |
+help: a field with a similar name exists
+    |
+949 |                         location: packet.location_x,
+    |                                                  ++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:950:36
+    |
+950 |                         direction: packet.direction,
+    |                                    ^^^^^^^^^^^^^^^^ expec
+ted `MirDirection`, found `u8`
+
+error[E0609]: no field `location` on type `mir2_shared::packets
+::ObjectDied`
+   --> src\scenes\state.rs:961:42
+    |
+961 |                         location: packet.location,
+    |                                          ^^^^^^^^ unknown
+ field
+    |
+help: a field with a similar name exists
+    |
+961 |                         location: packet.location_x,
+    |                                                  ++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:962:36
+    |
+962 |                         direction: packet.direction,
+    |                                    ^^^^^^^^^^^^^^^^ expec
+ted `MirDirection`, found `u8`
+
+error[E0609]: no field `info` on type `&mir2_shared::packets::N
+ewMapInfo`
+   --> src\scenes\state.rs:984:56
+    |
+984 |             .map(|details| (details.map_index, details.in
+fo.title.clone()))
+    |                                                        ^^
+^^ unknown field
+    |
+    = note: available fields are: `map_index`, `file_name`, `ti
+tle`, `minimap`, `big_map` ... and 6 others
+
+error[E0609]: no field `setup` on type `&mir2_shared::packets::
+WorldMapSetupInfo`
+   --> src\scenes\state.rs:993:73
+    |
+993 |         let world_map_enabled = self.world_map.as_ref().m
+ap(|info| info.setup.enabled);
+    |                                                          
+               ^^^^^ unknown field
+    |
+    = note: available field is: `world_maps`
+
+error[E0609]: no field `setup` on type `&mir2_shared::packets::
+WorldMapSetupInfo`
+   --> src\scenes\state.rs:997:30
+    |
+997 |             .map(|info| info.setup.icons.len())
+    |                              ^^^^^ unknown field
+    |
+    = note: available field is: `world_maps`
+
+error[E0609]: no field `teleport_to_npc_cost` on type `&mir2_sh
+ared::packets::WorldMapSetupInfo`
+    --> src\scenes\state.rs:1002:30
+     |
+1002 |             .map(|info| info.teleport_to_npc_cost);
+     |                              ^^^^^^^^^^^^^^^^^^^^ unknow
+n field
+     |
+     = note: available field is: `world_maps`
+
+error[E0609]: no field `npc_index` on type `&mir2_shared::packe
+ts::SearchMapResult`
+    --> src\scenes\state.rs:1010:34
+     |
+1010 |             .map(|result| result.npc_index);
+     |                                  ^^^^^^^^^ unknown field
+     |
+help: a field with a similar name exists
+     |
+1010 -             .map(|result| result.npc_index);
+1010 +             .map(|result| result.map_index);
+     |
+
+error[E0599]: no variant or associated item named `Player` foun
+d for enum `MapObjectType` in the current scope
+    --> src\scenes\state.rs:1019:32
+     |
+1019 |                 MapObjectType::Player => {
+     |                                ^^^^^^ variant or associa
+ted item not found in `MapObjectType`
+     |
+    ::: src\objects\map_object.rs:22:1
+     |
+22   | pub enum MapObjectType {
+     | ---------------------- variant or associated item `Playe
+r` not found for this enum
+
+error[E0609]: no field `location` on type `&mir2_shared::packet
+s::UserLocation`
+    --> src\scenes\state.rs:1052:60
+     |
+1052 |             location: self.location.as_ref().map(|loc| l
+oc.location),
+     |                                                         
+   ^^^^^^^^ unknown field
+     |
+help: a field with a similar name exists
+     |
+1052 |             location: self.location.as_ref().map(|loc| l
+oc.location_x),
+     |                                                         
+           ++
+
+error[E0599]: no associated item named `Connected` found for un
+it type `()` in the current scope
+   --> src\scenes\login_scene.rs:101:28
+    |
+101 |             ServerMessage::Connected => {
+    |                            ^^^^^^^^^ associated item not 
+found in `()`
+
+error[E0599]: no associated item named `LoginSuccess` found for
+ unit type `()` in the current scope
+   --> src\scenes\login_scene.rs:105:28
+    |
+105 |             ServerMessage::LoginSuccess(_) => {
+    |                            ^^^^^^^^^^^^ associated item n
+ot found in `()`
+
+error[E0599]: no associated item named `LoginFailure` found for
+ unit type `()` in the current scope
+   --> src\scenes\login_scene.rs:109:28
+    |
+109 |             ServerMessage::LoginFailure(reason) => {
+    |                            ^^^^^^^^^^^^ associated item n
+ot found in `()`
+
+error[E0369]: binary operation `==` cannot be applied to type `
+std::option::Option<&std::option::Option<SelectCharacter>>`
+  --> src\scenes\select_scene.rs:75:53
+   |
+75 |         if self.characters.get(self.selected_index) == Som
+e(&None) {
+   |            ---------------------------------------- ^^ ---
+-------- std::option::Option<&std::option::Option<SelectCharact
+er>>
+   |            |
+   |            std::option::Option<&std::option::Option<Select
+Character>>
+   |
+note: an implementation of `PartialEq` might be missing for `Se
+lectCharacter`
+  --> src\scenes\select_scene.rs:10:1
+   |
+10 | pub struct SelectCharacter {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^ must implement `PartialEq`
+help: consider annotating `SelectCharacter` with `#[derive(Part
+ialEq)]`
+   |
+10 + #[derive(PartialEq)]
+11 | pub struct SelectCharacter {
+   |
+
+error[E0599]: no associated item named `NewCharacterSuccess` fo
+und for unit type `()` in the current scope
+   --> src\scenes\select_scene.rs:147:28
+    |
+147 |             ServerMessage::NewCharacterSuccess(info) => {
+    |                            ^^^^^^^^^^^^^^^^^^^ associated
+ item not found in `()`
+
+error[E0599]: no associated item named `DeleteCharacterSuccess`
+ found for unit type `()` in the current scope
+   --> src\scenes\select_scene.rs:166:28
+    |
+166 |             ServerMessage::DeleteCharacterSuccess(index) 
+=> {
+    |                            ^^^^^^^^^^^^^^^^^^^^^^ associa
+ted item not found in `()`
+
+error[E0277]: `pathfinder::PathFinder` doesn't implement `Debug
+`
+   --> src\scenes\game_scene.rs:111:5
+    |
+49  | #[derive(Debug)]
+    |          ----- in this derive macro expansion
+...
+111 |     pub pathfinder: Option<PathFinder>,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Debug` 
+is not implemented for `pathfinder::PathFinder`
+    |
+    = note: add `#[derive(Debug)]` to `pathfinder::PathFinder` 
+or manually `impl Debug for pathfinder::PathFinder`
+    = help: the trait `Debug` is implemented for `std::option::
+Option<T>`
+
+error[E0616]: field `object_id` of struct `MapObject` is privat
+e
+   --> src\scenes\game_scene.rs:175:37
+    |
+175 |         let id = monster.map_object.object_id;
+    |                                     ^^^^^^^^^ private fie
+ld
+    |
+help: a method `object_id` also exists, call it with parenthese
+s
+    |
+175 |         let id = monster.map_object.object_id();
+    |                                              ++
+
+error[E0616]: field `object_id` of struct `MapObject` is privat
+e
+   --> src\scenes\game_scene.rs:180:33
+    |
+180 |         let id = npc.map_object.object_id;
+    |                                 ^^^^^^^^^ private field
+    |
+help: a method `object_id` also exists, call it with parenthese
+s
+    |
+180 |         let id = npc.map_object.object_id();
+    |                                          ++
+
+error[E0616]: field `object_id` of struct `MapObject` is privat
+e
+   --> src\scenes\game_scene.rs:185:34
+    |
+185 |         let id = item.map_object.object_id;
+    |                                  ^^^^^^^^^ private field
+    |
+help: a method `object_id` also exists, call it with parenthese
+s
+    |
+185 |         let id = item.map_object.object_id();
+    |                                           ++
+
+error[E0616]: field `object_id` of struct `MapObject` is privat
+e
+   --> src\scenes\game_scene.rs:190:36
+    |
+190 |         let id = player.map_object.object_id;
+    |                                    ^^^^^^^^^ private fiel
+d
+    |
+help: a method `object_id` also exists, call it with parenthese
+s
+    |
+190 |         let id = player.map_object.object_id();
+    |                                             ++
+
+error[E0616]: field `object_id` of struct `MapObject` is privat
+e
+   --> src\scenes\game_scene.rs:200:45
+    |
+200 |         self.spells.retain(|s| s.map_object.object_id != 
+object_id);
+    |                                             ^^^^^^^^^ pri
+vate field
+    |
+help: a method `object_id` also exists, call it with parenthese
+s
+    |
+200 |         self.spells.retain(|s| s.map_object.object_id() !
+= object_id);
+    |                                                      ++
+
+error[E0599]: no associated item named `UserInformation` found 
+for unit type `()` in the current scope
+   --> src\scenes\game_scene.rs:340:28
+    |
+340 |             ServerMessage::UserInformation(info) => {
+    |                            ^^^^^^^^^^^^^^^ associated ite
+m not found in `()`
+
+error[E0599]: no associated item named `UserLocation` found for
+ unit type `()` in the current scope
+   --> src\scenes\game_scene.rs:351:28
+    |
+351 |             ServerMessage::UserLocation(location) => {
+    |                            ^^^^^^^^^^^^ associated item n
+ot found in `()`
+
+error[E0599]: no associated item named `ObjectMonster` found fo
+r unit type `()` in the current scope
+   --> src\scenes\game_scene.rs:357:28
+    |
+357 |             ServerMessage::ObjectMonster(info) => {
+    |                            ^^^^^^^^^^^^^ associated item 
+not found in `()`
+
+error[E0599]: no associated item named `ObjectRemove` found for
+ unit type `()` in the current scope
+   --> src\scenes\game_scene.rs:363:28
+    |
+363 |             ServerMessage::ObjectRemove(object_id) => {
+    |                            ^^^^^^^^^^^^ associated item n
+ot found in `()`
+
+error[E0599]: no associated item named `Chat` found for unit ty
+pe `()` in the current scope
+   --> src\scenes\game_scene.rs:368:28
+    |
+368 |             ServerMessage::Chat(message) => {
+    |                            ^^^^ associated item not found
+ in `()`
+
+error[E0599]: no associated item named `Gold` found for unit ty
+pe `()` in the current scope
+   --> src\scenes\game_scene.rs:372:28
+    |
+372 |             ServerMessage::Gold(amount) => {
+    |                            ^^^^ associated item not found
+ in `()`
+
+error[E0609]: no field `current_location` on type `MapObject`
+   --> src\scenes\game_scene.rs:353:37
+    |
+353 |                     user.map_object.current_location = lo
+cation;
+    |                                     ^^^^^^^^^^^^^^^^ unkn
+own field
+
+error[E0308]: mismatched types
+   --> src\scenes\dialogs\notice_dialog.rs:175:40
+    |
+175 |         self.scroll_bar_position = (x, y);
+    |                                        ^ expected `i32`, 
+found `usize`
+    |
+help: you can convert a `usize` to an `i32` and panic if the co
+nverted value doesn't fit
+    |
+175 |         self.scroll_bar_position = (x, y.try_into().unwra
+p());
+    |                                         +++++++++++++++++
++++
+
+error[E0609]: no field `name` on type `&mir2_shared::UserItem`
+   --> src\scenes\dialogs\inventory_dialog.rs:105:47
+    |
+105 |             println!("Using item: {:?}", item.name);
+    |                                               ^^^^ unknow
+n field
+    |
+    = note: available fields are: `unique_id`, `item_index`, `i
+nfo`, `current_dura`, `max_dura` ... and 19 others
+
+error[E0609]: no field `name` on type `&mir2_shared::UserItem`
+   --> src\scenes\dialogs\inventory_dialog.rs:118:54
+    |
+118 |             println!("Dropping item: {:?} x{}", item.name
+, amount);
+    |                                                      ^^^^
+ unknown field
+    |
+    = note: available fields are: `unique_id`, `item_index`, `i
+nfo`, `current_dura`, `max_dura` ... and 19 others
+
+error[E0615]: attempted to take value of method `weight` on typ
+e `&mir2_shared::UserItem`
+   --> src\scenes\dialogs\inventory_dialog.rs:167:30
+    |
+167 |             .map(|item| item.weight as i32 * item.count a
+s i32)
+    |                              ^^^^^^ method, not a field
+    |
+help: use parentheses to call the method
+    |
+167 |             .map(|item| item.weight(_) as i32 * item.coun
+t as i32)
+    |                                    +++
+
+error[E0609]: no field `name` on type `&mir2_shared::UserItem`
+   --> src\scenes\dialogs\socket_dialog.rs:220:53
+    |
+220 |         self.selected_item.as_ref().map(|item| item.name.
+clone())
+    |                                                     ^^^^ 
+unknown field
+    |
+    = note: available fields are: `unique_id`, `item_index`, `i
+nfo`, `current_dura`, `max_dura` ... and 19 others
+
+error[E0609]: no field `name` on type `&mir2_shared::UserItem`
+  --> src\scenes\dialogs\mount_dialog.rs:75:38
+   |
+75 |         self.mount_name = mount_item.name.clone();
+   |                                      ^^^^ unknown field
+   |
+   = note: available fields are: `unique_id`, `item_index`, `in
+fo`, `current_dura`, `max_dura` ... and 19 others
+
+error[E0308]: mismatched types
+  --> src\scenes\dialogs\mount_dialog.rs:76:32
+   |
+76 |         self.current_loyalty = mount_item.current_dura;
+   |         --------------------   ^^^^^^^^^^^^^^^^^^^^^^^ exp
+ected `u32`, found `u16`
+   |         |
+   |         expected due to the type of this binding
+
+error[E0308]: mismatched types
+  --> src\scenes\dialogs\mount_dialog.rs:77:28
+   |
+77 |         self.max_loyalty = mount_item.max_dura;
+   |         ----------------   ^^^^^^^^^^^^^^^^^^^ expected `u
+32`, found `u16`
+   |         |
+   |         expected due to the type of this binding
+
+error[E0609]: no field `name` on type `&mir2_shared::UserItem`
+  --> src\scenes\dialogs\fishing_dialog.rs:40:29
+   |
+40 |         self.rod_name = rod.name.clone();
+   |                             ^^^^ unknown field
+   |
+   = note: available fields are: `unique_id`, `item_index`, `in
+fo`, `current_dura`, `max_dura` ... and 19 others
+
+error[E0308]: mismatched types
+   --> src\scenes\dialogs\craft_dialog.rs:139:56
+    |
+139 |                         if item.count < shadow.count * co
+unt as u32 {
+    |                                                        ^^
+^^^^^^^^^^ expected `u16`, found `u32`
+
+error[E0277]: cannot multiply `u16` by `u32`
+   --> src\scenes\dialogs\craft_dialog.rs:139:54
+    |
+139 |                         if item.count < shadow.count * co
+unt as u32 {
+    |                                                      ^ no
+ implementation for `u16 * u32`
+    |
+    = help: the trait `Mul<u32>` is not implemented for `u16`
+    = help: the following other types implement trait `Mul<Rhs>
+`:
+              `&u16` implements `Mul<u16>`
+              `&u16` implements `Mul`
+              `u16` implements `Mul<&u16>`
+              `u16` implements `Mul<zerocopy::byteorder::U16<O>
+>`
+              `u16` implements `Mul`
+
+error[E0308]: mismatched types
+   --> src\scenes\dialogs\craft_dialog.rs:144:48
+    |
+144 |                         if item.current_dura < 1000 * cou
+nt as u32 {
+    |                            -----------------   ^^^^^^^^^^
+^^^^^^^^^ expected `u16`, found `u32`
+    |                            |
+    |                            expected because this is `u16`
+    |
+help: you can convert `item.current_dura` from `u16` to `u32`, 
+matching the type of `1000 * count as u32`
+    |
+144 |                         if u32::from(item.current_dura) <
+ 1000 * count as u32 {
+    |                            ++++++++++                 +
+
+warning: unused variable: `x`
+  --> src\scenes\dialogs\dialog_manager.rs:49:33
+   |
+49 |     fn on_mouse_move(&mut self, x: i32, y: i32) -> bool {
+   |                                 ^ help: if this is intenti
+onal, prefix it with an underscore: `_x`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `y`
+  --> src\scenes\dialogs\dialog_manager.rs:49:41
+   |
+49 |     fn on_mouse_move(&mut self, x: i32, y: i32) -> bool {
+   |                                         ^ help: if this is
+ intentional, prefix it with an underscore: `_y`
+
+warning: unused variable: `x`
+  --> src\scenes\dialogs\dialog_manager.rs:54:34
+   |
+54 |     fn on_mouse_click(&mut self, x: i32, y: i32, button: M
+ouseButton) -> bool {
+   |                                  ^ help: if this is intent
+ional, prefix it with an underscore: `_x`
+
+warning: unused variable: `y`
+  --> src\scenes\dialogs\dialog_manager.rs:54:42
+   |
+54 |     fn on_mouse_click(&mut self, x: i32, y: i32, button: M
+ouseButton) -> bool {
+   |                                          ^ help: if this i
+s intentional, prefix it with an underscore: `_y`
+
+warning: unused variable: `button`
+  --> src\scenes\dialogs\dialog_manager.rs:54:50
+   |
+54 |     fn on_mouse_click(&mut self, x: i32, y: i32, button: M
+ouseButton) -> bool {
+   |                                                  ^^^^^^ he
+lp: if this is intentional, prefix it with an underscore: `_but
+ton`
+
+warning: unused variable: `key`
+  --> src\scenes\dialogs\dialog_manager.rs:59:32
+   |
+59 |     fn on_key_press(&mut self, key: KeyCode) -> bool {
+   |                                ^^^ help: if this is intent
+ional, prefix it with an underscore: `_key`
+
+error: lifetime may not live long enough
+   --> src\scenes\dialogs\dialog_manager.rs:158:49
+    |
+157 |     pub fn get_dialog_mut(&mut self, id: usize) -> Option
+<&mut dyn Dialog> {
+    |                           - let's call the lifetime of th
+is reference `'1`
+158 |         self.dialog_storage.get_mut(id).map(|b| b.as_mut(
+))
+    |                                                 ^^^^^^^^^
+^ returning this value requires that `'1` must outlive `'static
+`
+    |
+help: to declare that the trait object captures data from argum
+ent `self`, you can add an explicit `'_` lifetime bound
+    |
+157 |     pub fn get_dialog_mut(&mut self, id: usize) -> Option
+<&mut dyn Dialog + '_> {
+    |                                                          
+                 ++++
+help: consider adding 'move' keyword before the nested closure
+    |
+158 |         self.dialog_storage.get_mut(id).map(move |b| b.as
+_mut())
+    |                                             ++++
+
+error[E0502]: cannot borrow `self.visible_dialogs` as immutable
+ because it is also borrowed as mutable
+   --> src\scenes\dialogs\dialog_manager.rs:168:21
+    |
+164 |             if let Some(dialog) = self.get_dialog_mut(id)
+ {
+    |                                   ---- mutable borrow occ
+urs here
+...
+168 |                 if !self.visible_dialogs.contains(&id) {
+    |                     ^^^^^^^^^^^^^^^^^^^^ immutable borrow
+ occurs here
+...
+173 |                 if dialog.is_modal() && !self.modal_stack
+.contains(&id) {
+    |                    ------ mutable borrow later used here
+
+error[E0499]: cannot borrow `self.visible_dialogs` as mutable m
+ore than once at a time
+   --> src\scenes\dialogs\dialog_manager.rs:169:21
+    |
+164 |             if let Some(dialog) = self.get_dialog_mut(id)
+ {
+    |                                   ---- first mutable borr
+ow occurs here
+...
+169 |                     self.visible_dialogs.push(id);
+    |                     ^^^^^^^^^^^^^^^^^^^^ second mutable b
+orrow occurs here
+...
+173 |                 if dialog.is_modal() && !self.modal_stack
+.contains(&id) {
+    |                    ------ first borrow later used here
+
+error[E0499]: cannot borrow `*self` as mutable more than once a
+t a time
+   --> src\scenes\dialogs\timer_dialog.rs:182:21
+    |
+177 |                 if let Some(current_timer) = self.active_
+timers.get_mut(self.current_timer_key.as_ref().unwrap()) {
+    |                                              ------------
+------ first mutable borrow occurs here
+...
+182 |                     self.update_time_graphic(current_time
+r.timer_type);
+    |                     ^^^^                     ------------
+------------ first borrow later used here
+    |                     |
+    |                     second mutable borrow occurs here
+
+warning: unused variable: `hours`
+   --> src\scenes\dialogs\timer_dialog.rs:224:13
+    |
+224 |         let hours = self.timer_counter / 3600;
+    |             ^^^^^ help: if this is intentional, prefix it
+ with an underscore: `_hours`
+
+warning: unused variable: `minutes`
+   --> src\scenes\dialogs\timer_dialog.rs:225:13
+    |
+225 |         let minutes = (self.timer_counter % 3600) / 60;
+    |             ^^^^^^^ help: if this is intentional, prefix 
+it with an underscore: `_minutes`
+
+warning: unused variable: `seconds`
+   --> src\scenes\dialogs\timer_dialog.rs:226:13
+    |
+226 |         let seconds = self.timer_counter % 60;
+    |             ^^^^^^^ help: if this is intentional, prefix 
+it with an underscore: `_seconds`
+
+error[E0382]: use of moved value: `gem`
+   --> src\scenes\dialogs\socket_dialog.rs:104:41
+    |
+89  |     pub fn socket_gem(&mut self, slot: usize, gem: UserIt
+em) -> bool {
+    |                                               --- move oc
+curs because `gem` has type `mir2_shared::UserItem`, which does
+ not implement the `Copy` trait
+...
+99  |         self.sockets[slot] = Some(gem);
+    |                                   --- value moved here
+...
+104 |                 item.slots[slot] = Some(gem);
+    |                                         ^^^ value used he
+re after move
+    |
+help: consider cloning the value if the performance cost is acc
+eptable
+    |
+99  |         self.sockets[slot] = Some(gem.clone());
+    |                                      ++++++++
+
+warning: unused variable: `inventory`
+   --> src\scenes\dialogs\craft_dialog.rs:127:33
+    |
+127 |     pub fn auto_fill(&mut self, inventory: &[Option<UserI
+tem>]) {
+    |                                 ^^^^^^^^^ help: if this i
+s intentional, prefix it with an underscore: `_inventory`
+
+error[E0433]: failed to resolve: use of undeclared type `Client
+VersionResult`
+   --> src\controls\mod.rs:102:25
+    |
+102 |                         ClientVersionResult::CorrectVersi
+on => {
+    |                         ^^^^^^^^^^^^^^^^^^^
+    |                         |
+    |                         use of undeclared type `ClientVer
+sionResult`
+    |                         help: a struct with a similar nam
+e exists: `ClientVersion`
+
+error[E0433]: failed to resolve: use of undeclared type `Client
+VersionResult`
+   --> src\controls\mod.rs:135:25
+    |
+135 |                         ClientVersionResult::WrongVersion
+ => {
+    |                         ^^^^^^^^^^^^^^^^^^^
+    |                         |
+    |                         use of undeclared type `ClientVer
+sionResult`
+    |                         help: a struct with a similar nam
+e exists: `ClientVersion`
+
+error[E0433]: failed to resolve: use of undeclared type `Client
+VersionResult`
+   --> src\controls\mod.rs:141:25
+    |
+141 |                         ClientVersionResult::Other(code) 
+=> {
+    |                         ^^^^^^^^^^^^^^^^^^^
+    |                         |
+    |                         use of undeclared type `ClientVer
+sionResult`
+    |                         help: a struct with a similar nam
+e exists: `ClientVersion`
+
+error[E0433]: failed to resolve: use of undeclared type `LoginR
+esult`
+   --> src\controls\mod.rs:146:25
+    |
+146 |                         LoginResult::Disabled => {
+    |                         ^^^^^^^^^^^ use of undeclared typ
+e `LoginResult`
+
+error[E0433]: failed to resolve: use of undeclared type `LoginR
+esult`
+   --> src\controls\mod.rs:150:25
+    |
+150 |                         LoginResult::BadAccountId => {
+    |                         ^^^^^^^^^^^ use of undeclared typ
+e `LoginResult`
+
+error[E0433]: failed to resolve: use of undeclared type `LoginR
+esult`
+   --> src\controls\mod.rs:154:25
+    |
+154 |                         LoginResult::BadPassword => {
+    |                         ^^^^^^^^^^^ use of undeclared typ
+e `LoginResult`
+
+error[E0433]: failed to resolve: use of undeclared type `LoginR
+esult`
+   --> src\controls\mod.rs:158:25
+    |
+158 |                         LoginResult::AccountNotExist => {
+    |                         ^^^^^^^^^^^ use of undeclared typ
+e `LoginResult`
+
+error[E0433]: failed to resolve: use of undeclared type `LoginR
+esult`
+   --> src\controls\mod.rs:162:25
+    |
+162 |                         LoginResult::WrongPassword => {
+    |                         ^^^^^^^^^^^ use of undeclared typ
+e `LoginResult`
+
+error[E0433]: failed to resolve: use of undeclared type `LoginR
+esult`
+   --> src\controls\mod.rs:166:25
+    |
+166 |                         LoginResult::PasswordMustChange =
+> {
+    |                         ^^^^^^^^^^^ use of undeclared typ
+e `LoginResult`
+
+error[E0433]: failed to resolve: use of undeclared type `LoginR
+esult`
+   --> src\controls\mod.rs:172:25
+    |
+172 |                         LoginResult::Unknown(code) => {
+    |                         ^^^^^^^^^^^ use of undeclared typ
+e `LoginResult`
+
+error[E0433]: failed to resolve: use of undeclared type `StartG
+ameResult`
+   --> src\controls\mod.rs:242:25
+    |
+242 |                         StartGameResult::Success => {
+    |                         ^^^^^^^^^^^^^^^ use of undeclared
+ type `StartGameResult`
+
+error[E0433]: failed to resolve: use of undeclared type `StartG
+ameResult`
+   --> src\controls\mod.rs:246:25
+    |
+246 |                         StartGameResult::Disabled => {
+    |                         ^^^^^^^^^^^^^^^ use of undeclared
+ type `StartGameResult`
+
+error[E0433]: failed to resolve: use of undeclared type `StartG
+ameResult`
+   --> src\controls\mod.rs:250:25
+    |
+250 |                         StartGameResult::NotLoggedIn => {
+    |                         ^^^^^^^^^^^^^^^ use of undeclared
+ type `StartGameResult`
+
+error[E0433]: failed to resolve: use of undeclared type `StartG
+ameResult`
+   --> src\controls\mod.rs:254:25
+    |
+254 |                         StartGameResult::CharacterNotFoun
+d => {
+    |                         ^^^^^^^^^^^^^^^ use of undeclared
+ type `StartGameResult`
+
+error[E0433]: failed to resolve: use of undeclared type `StartG
+ameResult`
+   --> src\controls\mod.rs:258:25
+    |
+258 |                         StartGameResult::NoStartPoint => 
+{
+    |                         ^^^^^^^^^^^^^^^ use of undeclared
+ type `StartGameResult`
+
+error[E0433]: failed to resolve: use of undeclared type `StartG
+ameResult`
+   --> src\controls\mod.rs:262:25
+    |
+262 |                         StartGameResult::Unknown(code) =>
+ {
+    |                         ^^^^^^^^^^^^^^^ use of undeclared
+ type `StartGameResult`
+
+Some errors have detailed explanations: E0046, E0223, E0277, E0
+308, E0369, E0382, E0425, E0432, E0433...
+For more information about an error, try `rustc --explain E0046
+`.
+warning: `mir2_client` (bin "mir2_client") generated 56 warning
+s
+error: could not compile `mir2_client` (bin "mir2_client") due 
+to 327 previous errors; 56 warnings emitted

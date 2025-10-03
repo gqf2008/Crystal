@@ -248,6 +248,11 @@ impl Dialog for MailListDialog {
     fn is_visible(&self) -> bool {
         self.visible
     }
+    
+    fn name(&self) -> &str { "MailListDialog" }
+    fn contains_point(&self, x: i32, y: i32) -> bool { x >= 0 && x < 450 && y >= 0 && y < 500 }
+    fn position(&self) -> (i32, i32) { (0, 0) }
+    fn size(&self) -> (i32, i32) { (450, 500) }
 }
 
 /// Mail Compose Dialog - Write new mail
@@ -342,6 +347,11 @@ impl Dialog for MailComposeDialog {
     fn is_visible(&self) -> bool {
         self.visible
     }
+    
+    fn name(&self) -> &str { "MailComposeDialog" }
+    fn contains_point(&self, x: i32, y: i32) -> bool { x >= 0 && x < 400 && y >= 0 && y < 350 }
+    fn position(&self) -> (i32, i32) { (0, 0) }
+    fn size(&self) -> (i32, i32) { (400, 350) }
 }
 
 #[cfg(test)]

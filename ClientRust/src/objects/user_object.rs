@@ -288,7 +288,7 @@ impl UserObject {
         // PlayerObject fields (stored in UserObject since we don't have PlayerObject layer yet)
         self.level = info.level;
         self.guild_name = info.guild_name.clone();
-        self.guild_rank_name = info.guild_rank_name.clone();
+        self.guild_rank_name = info.guild_rank.clone();
         
         // Note: class, gender, hair are player-specific fields
         // They would be in PlayerObject layer when we add it

@@ -30,6 +30,10 @@ pub struct ChatMessage {
 #[derive(Debug)]
 pub struct ChatDialog {
     pub visible: bool,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
     pub messages: VecDeque<ChatMessage>,
     pub max_messages: usize,
     pub input_text: String,
@@ -40,6 +44,10 @@ impl ChatDialog {
     pub fn new() -> Self {
         Self {
             visible: true,
+            x: 0,
+            y: 500,
+            width: 400,
+            height: 200,
             messages: VecDeque::new(),
             max_messages: 100,
             input_text: String::new(),
@@ -158,6 +166,23 @@ impl Dialog for ChatDialog {
     
     fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    fn name(&self) -> &str {
+        "ChatDialog"
+    }
+    
+    fn contains_point(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.width &&
+        y >= self.y && y < self.y + self.height
+    }
+    
+    fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+    
+    fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 }
 

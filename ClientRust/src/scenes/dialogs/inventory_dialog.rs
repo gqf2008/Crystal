@@ -16,6 +16,10 @@ pub enum InventoryTab {
 #[derive(Debug)]
 pub struct InventoryDialog {
     pub visible: bool,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
     pub current_tab: InventoryTab,
     
     // Inventory slots (46 slots)
@@ -40,6 +44,10 @@ impl InventoryDialog {
     pub fn new() -> Self {
         Self {
             visible: false, // Start hidden
+            x: 600,
+            y: 100,
+            width: 400,
+            height: 500,
             current_tab: InventoryTab::Inventory,
             inventory: vec![None; 46],
             equipment: vec![None; 14],
@@ -204,6 +212,23 @@ impl Dialog for InventoryDialog {
     
     fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    fn name(&self) -> &str {
+        "InventoryDialog"
+    }
+    
+    fn contains_point(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.width &&
+        y >= self.y && y < self.y + self.height
+    }
+    
+    fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+    
+    fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 }
 

@@ -250,6 +250,11 @@ impl Dialog for GroupDialog {
     fn is_visible(&self) -> bool {
         self.visible
     }
+    
+    fn name(&self) -> &str { "GroupDialog" }
+    fn contains_point(&self, x: i32, y: i32) -> bool { x >= 0 && x < 350 && y >= 0 && y < 400 }
+    fn position(&self) -> (i32, i32) { (0, 0) }
+    fn size(&self) -> (i32, i32) { (350, 400) }
 }
 
 #[cfg(test)]

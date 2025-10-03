@@ -92,6 +92,10 @@ pub struct CharacterStats {
 /// 角色对话框
 pub struct CharacterDialog {
     visible: bool,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
     current_page: CharacterPage,
 
     // 角色信息
@@ -131,6 +135,10 @@ impl CharacterDialog {
     pub fn new() -> Self {
         Self {
             visible: false,
+            x: 200,
+            y: 100,
+            width: 400,
+            height: 600,
             current_page: CharacterPage::Character,
             player_name: String::new(),
             guild_name: String::new(),
@@ -241,6 +249,23 @@ impl Dialog for CharacterDialog {
 
     fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    fn name(&self) -> &str {
+        "CharacterDialog"
+    }
+    
+    fn contains_point(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.width &&
+        y >= self.y && y < self.y + self.height
+    }
+    
+    fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+    
+    fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 }
 

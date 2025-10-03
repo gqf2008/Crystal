@@ -287,6 +287,11 @@ impl Dialog for BigMapDialog {
     fn is_visible(&self) -> bool {
         self.visible
     }
+    
+    fn name(&self) -> &str { "BigMapDialog" }
+    fn contains_point(&self, x: i32, y: i32) -> bool { x >= 0 && x < 600 && y >= 0 && y < 500 }
+    fn position(&self) -> (i32, i32) { (0, 0) }
+    fn size(&self) -> (i32, i32) { (600, 500) }
 }
 
 #[cfg(test)]

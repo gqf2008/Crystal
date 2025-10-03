@@ -386,6 +386,11 @@ impl Dialog for QuestListDialog {
     fn is_visible(&self) -> bool {
         self.visible
     }
+    
+    fn name(&self) -> &str { "QuestListDialog" }
+    fn contains_point(&self, x: i32, y: i32) -> bool { x >= 0 && x < 450 && y >= 0 && y < 550 }
+    fn position(&self) -> (i32, i32) { (0, 0) }
+    fn size(&self) -> (i32, i32) { (450, 550) }
 }
 
 #[cfg(test)]

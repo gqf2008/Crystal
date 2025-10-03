@@ -102,6 +102,10 @@ pub struct GuildBuff {
 /// 公会对话框
 pub struct GuildDialog {
     visible: bool,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
     current_page: GuildPage,
 
     // 公会信息
@@ -145,6 +149,10 @@ impl GuildDialog {
     pub fn new() -> Self {
         Self {
             visible: false,
+            x: 250,
+            y: 150,
+            width: 500,
+            height: 450,
             current_page: GuildPage::Notice,
             guild_name: String::new(),
             level: 1,
@@ -356,6 +364,23 @@ impl Dialog for GuildDialog {
 
     fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    fn name(&self) -> &str {
+        "GuildDialog"
+    }
+    
+    fn contains_point(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.width &&
+        y >= self.y && y < self.y + self.height
+    }
+    
+    fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+    
+    fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 }
 

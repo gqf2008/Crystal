@@ -3,7 +3,12 @@ use tokio::runtime::{Builder, Runtime};
 
 use crate::key_bind_settings::KeyBindSettings;
 use crate::settings::ClientSettings;
-use crate::{audio, net, ui, version};
+use crate::version;
+
+// TODO: Implement these modules
+// use crate::audio;  // Audio engine - not yet implemented
+// use crate::ui;     // UI layer - not yet implemented
+use crate::network as net;  // Use network module as 'net'
 
 pub struct ClientRuntime {
     settings: ClientSettings,
@@ -46,8 +51,11 @@ impl ClientRuntime {
         } = self;
 
         tokio.block_on(async move {
-            let audio = audio::AudioEngine::new(&settings.sound).context("initializing audio")?;
-            let net = net::NetworkStack::connect(&settings.network)
+            // TODO: Initialize audio engine (not yet implemented)
+            // let audio = audio::AudioEngine::new(&settings.sound).context("initializing audio")?;
+            
+            let mut net = net::NetworkStack::new(&settings.network);
+            net.connect(&settings.network)
                 .await
                 .context("initializing network")?;
 
@@ -68,9 +76,13 @@ impl ClientRuntime {
                 }
             };
 
-            ui::launch(&settings, &keybinds, audio, net, version_hash)
-                .await
-                .context("running ui")?;
+            // TODO: Launch UI (not yet implemented)
+            // ui::launch(&settings, &keybinds, audio, net, version_hash)
+            //     .await
+            //     .context("running ui")?;
+            
+            tracing::info!("Client runtime ready (audio and UI not yet implemented)");
+            
             keybinds.save().context("saving key bindings")
         })
     }

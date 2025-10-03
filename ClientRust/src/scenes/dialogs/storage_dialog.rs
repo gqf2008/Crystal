@@ -14,6 +14,10 @@ pub enum StorageType {
 /// 仓库对话框
 pub struct StorageDialog {
     visible: bool,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
     current_storage: StorageType,
 
     // 仓库槽位
@@ -37,6 +41,10 @@ impl StorageDialog {
     pub fn new() -> Self {
         Self {
             visible: false,
+            x: 100,
+            y: 100,
+            width: 450,
+            height: 550,
             current_storage: StorageType::Storage1,
             storage1: vec![None; 80],
             storage2: vec![None; 80],
@@ -266,6 +274,23 @@ impl Dialog for StorageDialog {
 
     fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    fn name(&self) -> &str {
+        "StorageDialog"
+    }
+    
+    fn contains_point(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.width &&
+        y >= self.y && y < self.y + self.height
+    }
+    
+    fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+    
+    fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 }
 

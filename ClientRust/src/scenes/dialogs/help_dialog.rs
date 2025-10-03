@@ -276,6 +276,11 @@ impl Dialog for HelpDialog {
     fn is_visible(&self) -> bool {
         self.visible
     }
+    
+    fn name(&self) -> &str { "HelpDialog" }
+    fn contains_point(&self, x: i32, y: i32) -> bool { x >= 0 && x < 500 && y >= 0 && y < 600 }
+    fn position(&self) -> (i32, i32) { (0, 0) }
+    fn size(&self) -> (i32, i32) { (500, 600) }
 }
 
 #[cfg(test)]

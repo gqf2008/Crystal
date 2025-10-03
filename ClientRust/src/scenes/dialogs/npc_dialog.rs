@@ -145,6 +145,10 @@ impl NPCPage {
 /// NPC对话框
 pub struct NPCDialog {
     visible: bool,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
     dialog_type: NPCDialogType,
 
     // 当前页面
@@ -168,6 +172,10 @@ impl NPCDialog {
     pub fn new() -> Self {
         Self {
             visible: false,
+            x: 300,
+            y: 200,
+            width: 500,
+            height: 400,
             dialog_type: NPCDialogType::Normal,
             current_page: None,
             page_history: VecDeque::new(),
@@ -329,6 +337,23 @@ impl Dialog for NPCDialog {
 
     fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    fn name(&self) -> &str {
+        "NPCDialog"
+    }
+    
+    fn contains_point(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.width &&
+        y >= self.y && y < self.y + self.height
+    }
+    
+    fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+    
+    fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 }
 

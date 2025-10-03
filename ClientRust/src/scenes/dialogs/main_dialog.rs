@@ -8,6 +8,12 @@ use super::Dialog;
 pub struct MainDialog {
     pub visible: bool,
     
+    // Position and size
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    
     // Health/Mana display
     pub hp: i32,
     pub max_hp: i32,
@@ -36,6 +42,10 @@ impl MainDialog {
     pub fn new() -> Self {
         Self {
             visible: true, // Main dialog usually always visible
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 100,
             hp: 100,
             max_hp: 100,
             mp: 50,
@@ -125,6 +135,23 @@ impl Dialog for MainDialog {
     
     fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    fn name(&self) -> &str {
+        "MainDialog"
+    }
+    
+    fn contains_point(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.width &&
+        y >= self.y && y < self.y + self.height
+    }
+    
+    fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+    
+    fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 }
 

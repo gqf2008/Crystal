@@ -88,6 +88,10 @@ impl TradeParty {
 /// 交易对话框
 pub struct TradeDialog {
     visible: bool,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
     state: TradeState,
 
     // 交易双方
@@ -103,6 +107,10 @@ impl TradeDialog {
     pub fn new() -> Self {
         Self {
             visible: false,
+            x: 200,
+            y: 150,
+            width: 600,
+            height: 400,
             state: TradeState::Pending,
             host: TradeParty::new(String::new()),
             guest: TradeParty::new(String::new()),
@@ -293,6 +301,23 @@ impl Dialog for TradeDialog {
 
     fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    fn name(&self) -> &str {
+        "TradeDialog"
+    }
+    
+    fn contains_point(&self, x: i32, y: i32) -> bool {
+        x >= self.x && x < self.x + self.width &&
+        y >= self.y && y < self.y + self.height
+    }
+    
+    fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+    
+    fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 }
 

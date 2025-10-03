@@ -293,6 +293,11 @@ impl Dialog for FriendDialog {
     fn is_visible(&self) -> bool {
         self.visible
     }
+    
+    fn name(&self) -> &str { "FriendDialog" }
+    fn contains_point(&self, x: i32, y: i32) -> bool { x >= 0 && x < 400 && y >= 0 && y < 500 }
+    fn position(&self) -> (i32, i32) { (0, 0) }
+    fn size(&self) -> (i32, i32) { (400, 500) }
 }
 
 #[cfg(test)]
