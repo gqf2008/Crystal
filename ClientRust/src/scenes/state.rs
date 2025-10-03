@@ -2,7 +2,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use mir2_shared::{
-    client_data::{ClientMagic, ClientQuestProgress},
+    ClientMagic, ClientQuestProgress,
     enums::{
         AttackMode, DamageType, HeroSpawnState, ItemGrade, LightSetting, MirAction, MirDirection,
         PetMode, Spell,
@@ -14,15 +14,44 @@ use crate::objects::{
     AnimationAdvanceSummary, MapObject, MapObjectType, ObjectActionOutcome, ObjectAttackOutcome,
     ObjectDeathOutcome, ObjectStruckOutcome, ObjectUpdateOutcome,
 };
-use crate::network::protocol::{
-    CharacterSummary, ColourChanged, DamageIndicator, Death, DeleteItem, DeleteQuestItem,
-    DuraChanged, GainExperience, GainHeroExperience, HealthChanged, HeroHealthChanged,
-    HeroLevelChanged, HeroObject, LevelChanged, MapInformation, NewMapInfo, NpcResponse,
-    ObjectAttack, ObjectColourChanged, ObjectDied, ObjectGold, ObjectGuildNameChanged,
-    ObjectHarvest, ObjectHarvested, ObjectItem, ObjectLeveled, ObjectMonster, ObjectMotion,
-    ObjectNpc, ObjectStruck, PlayerObject, SearchMapResult, UserInformation, UserLocation,
-    UserSlotsRefresh, WorldMapSetupInfo,
-};
+
+// 使用新的数据包架构 - 直接从 packets 模块导入
+use crate::network::protocol::{packets, CharacterSummary, HeroObject, PlayerObject, 
+    ObjectItem, ObjectMonster, ObjectNpc};
+
+// 为了简化代码，创建类型别名 - 映射所有使用的数据包类型
+type UserInformation = packets::UserInformation;
+type MapInformation = packets::MapInformation;
+type NewMapInfo = packets::NewMapInfo;
+type WorldMapSetupInfo = packets::WorldMapSetupInfo;
+type SearchMapResult = packets::SearchMapResult;
+type UserLocation = packets::UserLocation;
+type UserSlotsRefresh = packets::UserSlotsRefresh;
+type ObjectGold = packets::ObjectGold;
+type DamageIndicator = packets::DamageIndicator;
+type Death = packets::Death;
+type DuraChanged = packets::DuraChanged;
+type DeleteItem = packets::DeleteItem;
+type DeleteQuestItem = packets::DeleteQuestItem;
+type GainExperience = packets::GainExperience;
+type GainHeroExperience = packets::GainHeroExperience;
+type LevelChanged = packets::LevelChanged;
+type HeroLevelChanged = packets::HeroLevelChanged;
+type ObjectLeveled = packets::ObjectLeveled;
+type ColourChanged = packets::ColourChanged;
+type ObjectColourChanged = packets::ObjectColourChanged;
+type ObjectGuildNameChanged = packets::ObjectGuildNameChanged;
+type HealthChanged = packets::HealthChanged;
+type HeroHealthChanged = packets::HeroHealthChanged;
+type ObjectAttack = packets::ObjectAttack;
+type ObjectHarvest = packets::ObjectHarvest;
+type ObjectHarvested = packets::ObjectHarvested;
+type ObjectStruck = packets::ObjectStruck;
+type ObjectDied = packets::ObjectDied;
+
+// 占位类型 - 这些还需要找到正确的映射
+type NpcResponse = ();     // TODO: 找到正确的数据包类型
+type ObjectMotion = ();    // TODO: 找到正确的数据包类型
 
 #[derive(Debug, Default)]
 pub struct ClientState {

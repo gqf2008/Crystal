@@ -3,18 +3,17 @@ use std::time::Instant;
 use anyhow::Result;
 
 use crate::{
-    audio::AudioEngine,
-    keybinds::KeyBindSettings,
-    net::{NetworkEvent, NetworkStack},
-    protocol::{
-        parse_server_message, CharacterSummary, ClientVersionResult, LoginResult, ServerMessage,
-        StartGameResult,
+    sounds::AudioEngine,                   // ← 修复: audio → sounds
+    key_bind_settings::KeyBindSettings,    // ← 修复: keybinds → key_bind_settings
+    network::{NetworkEvent, NetworkStack}, // ← 修复: net → network
+    network::protocol::{                   // ← 修复: protocol → network::protocol
+        CharacterSummary, ServerMessage,
     },
     settings::ClientSettings,
-    state::{ClientState, GroundObject, GroundObjectRemoval},
+    scenes::state::{ClientState, GroundObject, GroundObjectRemoval}, // ← 修复: state → scenes::state
 };
 use mir2_shared::{
-    client_packets::{ClientVersion, Login, StartGame},
+    packets::client::{ClientVersion, Login, StartGame}, // ← 修复: client_packets → packets::client
     enums::MirAction,
 };
 
