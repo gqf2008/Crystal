@@ -96,3 +96,79 @@ impl Packet for SendMemberLocation {
         Ok(())
     }
 }
+
+/// Delete group - player has left the group
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeleteGroup;
+
+impl Packet for DeleteGroup {
+    const OPCODE: i16 = ServerPacketIds::DeleteGroup as i16;
+
+    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
+        Ok(Self)
+    }
+
+    fn write_body<W: Write>(&self, _writer: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
+}
+
+/// Delete member from group
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeleteMember {
+    pub name: String,
+}
+
+impl Packet for DeleteMember {
+    const OPCODE: i16 = ServerPacketIds::DeleteMember as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let name = read_dotnet_string(reader)?;
+        Ok(Self { name })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        write_dotnet_string(writer, &self.name)?;
+        Ok(())
+    }
+}
+
+/// Group invite from another player
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupInvite {
+    pub name: String,
+}
+
+impl Packet for GroupInvite {
+    const OPCODE: i16 = ServerPacketIds::GroupInvite as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let name = read_dotnet_string(reader)?;
+        Ok(Self { name })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        write_dotnet_string(writer, &self.name)?;
+        Ok(())
+    }
+}
+
+/// Add member to group
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddMember {
+    pub name: String,
+}
+
+impl Packet for AddMember {
+    const OPCODE: i16 = ServerPacketIds::AddMember as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let name = read_dotnet_string(reader)?;
+        Ok(Self { name })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        write_dotnet_string(writer, &self.name)?;
+        Ok(())
+    }
+}

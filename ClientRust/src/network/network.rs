@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context, Result};
 use byteorder::{ByteOrder, LittleEndian};
 use mir2_shared::packets::{serialize_packet, PacketHeader, Packet};
+use mir2_shared::packets::client; // For KeepAlive
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
@@ -79,11 +80,11 @@ impl NetworkStack {
             send_queue: VecDeque::new(),
             raw_data: Vec::new(),
             time_connected: None,
-            timeout_time: Instant::now() + Duration::from_millis(settings.timeout),
+            timeout_time: Instant::now() + Duration::from_millis(settings.timeout_ms),
             retry_time: Instant::now() + Duration::from_secs(5),
             connect_attempt: 0,
             max_attempts: 20,
-            timeout_duration: Duration::from_millis(settings.timeout),
+            timeout_duration: Duration::from_millis(settings.timeout_ms),
             bytes_sent: 0,
             bytes_received: 0,
         }
@@ -195,21 +196,34 @@ impl NetworkStack {
         }
 
         // Receive data
-        if let Some(stream) = &mut self.stream {
-            self.receive_data(stream).await?;
+        if self.stream.is_some() {
+            // Take ownership temporarily to avoid double borrow
+            let mut stream = self.stream.take().unwrap();
+            let result = self.receive_data(&mut stream).await;
+            self.stream = Some(stream);
+            result?;
         }
 
         // Send keepalive if needed
         if now > self.timeout_time && self.send_queue.is_empty() {
-            // Queue KeepAlive packet
-            // TODO: Implement KeepAlive packet type
-            // self.enqueue(&KeepAlive)?;
+            // Queue KeepAlive packet with current timestamp
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+            let keepalive = client::KeepAlive { time: timestamp };
+            self.enqueue(&keepalive)?;
+            tracing::debug!("Sent KeepAlive packet to maintain connection");
         }
 
         // Send queued packets
         if !self.send_queue.is_empty() {
-            if let Some(stream) = &mut self.stream {
-                self.send_data(stream).await?;
+            if self.stream.is_some() {
+                // Take ownership temporarily to avoid double borrow
+                let mut stream = self.stream.take().unwrap();
+                let result = self.send_data(&mut stream).await;
+                self.stream = Some(stream);
+                result?;
             }
             self.timeout_time = now + self.timeout_duration;
         }
@@ -309,5 +323,277 @@ impl NetworkStack {
     /// Check if there are pending events
     pub fn has_events(&self) -> bool {
         !self.receive_queue.is_empty()
+    }
+    
+    /// Get connection statistics
+    pub fn stats(&self) -> NetworkStats {
+        NetworkStats {
+            bytes_sent: self.bytes_sent,
+            bytes_received: self.bytes_received,
+            packets_queued: self.send_queue.len(),
+            events_queued: self.receive_queue.len(),
+            connected: self.is_connected(),
+        }
+    }
+}
+
+/// Network statistics
+#[derive(Debug, Clone, Copy)]
+pub struct NetworkStats {
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+    pub packets_queued: usize,
+    pub events_queued: usize,
+    pub connected: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    fn mock_settings() -> NetworkSettings {
+        NetworkSettings {
+            use_config: false,
+            ip_address: "127.0.0.1".to_string(),
+            port: 7000,
+            timeout_ms: 5000,
+        }
+    }
+    
+    #[test]
+    fn test_network_stack_creation() {
+        let settings = mock_settings();
+        let stack = NetworkStack::new(&settings);
+        
+        assert_eq!(stack.state, ConnectionState::Disconnected);
+        assert!(!stack.is_connected());
+        assert_eq!(stack.bytes_sent, 0);
+        assert_eq!(stack.bytes_received, 0);
+    }
+    
+    #[test]
+    fn test_disconnected_state() {
+        let settings = mock_settings();
+        let mut stack = NetworkStack::new(&settings);
+        
+        assert!(!stack.is_connected());
+        assert!(!stack.has_events());
+        assert!(stack.poll_event().is_none());
+    }
+    
+    #[test]
+    fn test_packet_enqueue() {
+        let settings = mock_settings();
+        let mut stack = NetworkStack::new(&settings);
+        
+        // Create a KeepAlive packet
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let keepalive = client::KeepAlive { time: timestamp };
+        
+        // Enqueue packet
+        let result = stack.enqueue(&keepalive);
+        assert!(result.is_ok());
+        
+        // Verify packet was queued
+        assert_eq!(stack.send_queue.len(), 1);
+    }
+    
+    #[test]
+    fn test_multiple_packet_enqueue() {
+        let settings = mock_settings();
+        let mut stack = NetworkStack::new(&settings);
+        
+        // Enqueue multiple packets
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        for _ in 0..5 {
+            let keepalive = client::KeepAlive { time: timestamp };
+            stack.enqueue(&keepalive).unwrap();
+        }
+        
+        assert_eq!(stack.send_queue.len(), 5);
+    }
+    
+    #[test]
+    fn test_disconnect() {
+        let settings = mock_settings();
+        let mut stack = NetworkStack::new(&settings);
+        
+        // Manually set connected state for testing
+        stack.state = ConnectionState::Connected;
+        stack.time_connected = Some(Instant::now());
+        
+        // Disconnect
+        stack.disconnect();
+        
+        assert_eq!(stack.state, ConnectionState::Disconnected);
+        assert!(stack.time_connected.is_none());
+        assert!(stack.stream.is_none());
+    }
+    
+    #[test]
+    fn test_process_received_data_incomplete() {
+        let settings = mock_settings();
+        let mut stack = NetworkStack::new(&settings);
+        
+        // Add incomplete header (less than 4 bytes)
+        stack.raw_data.extend_from_slice(&[0x01, 0x02]);
+        
+        // Should not process incomplete packet
+        let result = stack.process_received_data();
+        assert!(result.is_ok());
+        assert_eq!(stack.raw_data.len(), 2); // Data remains in buffer
+        assert_eq!(stack.receive_queue.len(), 0); // No events queued
+    }
+    
+    #[test]
+    fn test_process_received_data_invalid_length() {
+        let settings = mock_settings();
+        let mut stack = NetworkStack::new(&settings);
+        
+        // Add invalid packet (length = 0)
+        let mut data = vec![0u8; 4];
+        LittleEndian::write_u16(&mut data[0..2], 0); // Invalid length
+        LittleEndian::write_i16(&mut data[2..4], 1); // Opcode
+        stack.raw_data.extend_from_slice(&data);
+        
+        // Should return error for invalid length
+        let result = stack.process_received_data();
+        assert!(result.is_err());
+    }
+    
+    #[test]
+    fn test_process_received_data_complete_packet() {
+        let settings = mock_settings();
+        let mut stack = NetworkStack::new(&settings);
+        
+        // Create a valid packet
+        let packet_length = 6u16; // 4 bytes header + 2 bytes payload
+        let opcode = 100i16;
+        let payload = vec![0xAA, 0xBB];
+        
+        let mut data = vec![0u8; packet_length as usize];
+        LittleEndian::write_u16(&mut data[0..2], packet_length);
+        LittleEndian::write_i16(&mut data[2..4], opcode);
+        data[4..6].copy_from_slice(&payload);
+        
+        stack.raw_data.extend_from_slice(&data);
+        
+        // Process packet
+        let result = stack.process_received_data();
+        assert!(result.is_ok());
+        
+        // Verify packet was queued as event
+        assert_eq!(stack.receive_queue.len(), 1);
+        assert_eq!(stack.raw_data.len(), 0); // Buffer cleared
+        
+        // Check event contents
+        if let Some(NetworkEvent::ServerPacket { header, payload: p }) = stack.poll_event() {
+            assert_eq!(header.length, packet_length);
+            assert_eq!(header.opcode, opcode);
+            assert_eq!(p, payload);
+        } else {
+            panic!("Expected ServerPacket event");
+        }
+    }
+    
+    #[test]
+    fn test_process_multiple_packets() {
+        let settings = mock_settings();
+        let mut stack = NetworkStack::new(&settings);
+        
+        // Add two complete packets to buffer
+        for i in 0..2 {
+            let packet_length = 5u16;
+            let opcode = (100 + i) as i16;
+            let payload = vec![i as u8];
+            
+            let mut data = vec![0u8; packet_length as usize];
+            LittleEndian::write_u16(&mut data[0..2], packet_length);
+            LittleEndian::write_i16(&mut data[2..4], opcode);
+            data[4] = payload[0];
+            
+            stack.raw_data.extend_from_slice(&data);
+        }
+        
+        // Process packets
+        let result = stack.process_received_data();
+        assert!(result.is_ok());
+        
+        // Verify both packets were queued
+        assert_eq!(stack.receive_queue.len(), 2);
+        assert_eq!(stack.raw_data.len(), 0);
+    }
+    
+    #[test]
+    fn test_keepalive_packet_serialization() {
+        // Test that KeepAlive packet can be serialized
+        let keepalive = client::KeepAlive {
+            time: 1234567890,
+        };
+        
+        let mut buffer = Vec::new();
+        let result = serialize_packet(&mut buffer, &keepalive);
+        assert!(result.is_ok());
+        
+        // Header (4 bytes) + time (8 bytes) = 12 bytes
+        assert_eq!(buffer.len(), 12);
+        
+        // Verify opcode
+        let opcode = LittleEndian::read_i16(&buffer[2..4]);
+        assert_eq!(opcode, client::KeepAlive::OPCODE);
+    }
+    
+    #[test]
+    fn test_network_stats() {
+        let settings = mock_settings();
+        let mut stack = NetworkStack::new(&settings);
+        
+        // Set some values
+        stack.bytes_sent = 1024;
+        stack.bytes_received = 2048;
+        stack.state = ConnectionState::Connected;
+        
+        // Enqueue some packets
+        let keepalive = client::KeepAlive { time: 0 };
+        stack.enqueue(&keepalive).unwrap();
+        stack.enqueue(&keepalive).unwrap();
+        
+        // Add some events
+        stack.receive_queue.push_back(NetworkEvent::Connected);
+        
+        let stats = stack.stats();
+        assert_eq!(stats.bytes_sent, 1024);
+        assert_eq!(stats.bytes_received, 2048);
+        assert_eq!(stats.packets_queued, 2);
+        assert_eq!(stats.events_queued, 1);
+        assert!(stats.connected);
+    }
+    
+    #[test]
+    fn test_connection_state_transitions() {
+        let settings = mock_settings();
+        let mut stack = NetworkStack::new(&settings);
+        
+        // Initial state
+        assert_eq!(stack.state, ConnectionState::Disconnected);
+        
+        // Simulate connecting
+        stack.state = ConnectionState::Connecting;
+        assert_eq!(stack.state, ConnectionState::Connecting);
+        
+        // Simulate connected
+        stack.state = ConnectionState::Connected;
+        assert!(stack.is_connected());
+        
+        // Disconnect
+        stack.disconnect();
+        assert_eq!(stack.state, ConnectionState::Disconnected);
+        assert!(!stack.is_connected());
     }
 }

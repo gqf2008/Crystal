@@ -278,6 +278,10 @@ pub trait PacketHandler {
     
     // 组队系统
     fn on_switch_group(&mut self, _packet: packets::SwitchGroup) {}
+    fn on_delete_group(&mut self, _packet: packets::DeleteGroup) {}
+    fn on_delete_member(&mut self, _packet: packets::DeleteMember) {}
+    fn on_group_invite(&mut self, _packet: packets::GroupInvite) {}
+    fn on_add_member(&mut self, _packet: packets::AddMember) {}
     fn on_group_members_map(&mut self, _packet: packets::GroupMembersMap) {}
     fn on_send_member_location(&mut self, _packet: packets::SendMemberLocation) {}
     
@@ -899,6 +903,22 @@ pub fn dispatch_packet<H: PacketHandler>(
         x if x == ServerPacketIds::SwitchGroup as u16 => {
             let packet = packets::SwitchGroup::read_body(&mut cursor)?;
             handler.on_switch_group(packet);
+        }
+        x if x == ServerPacketIds::DeleteGroup as u16 => {
+            let packet = packets::DeleteGroup::read_body(&mut cursor)?;
+            handler.on_delete_group(packet);
+        }
+        x if x == ServerPacketIds::DeleteMember as u16 => {
+            let packet = packets::DeleteMember::read_body(&mut cursor)?;
+            handler.on_delete_member(packet);
+        }
+        x if x == ServerPacketIds::GroupInvite as u16 => {
+            let packet = packets::GroupInvite::read_body(&mut cursor)?;
+            handler.on_group_invite(packet);
+        }
+        x if x == ServerPacketIds::AddMember as u16 => {
+            let packet = packets::AddMember::read_body(&mut cursor)?;
+            handler.on_add_member(packet);
         }
         x if x == ServerPacketIds::GroupMembersMap as u16 => {
             let packet = packets::GroupMembersMap::read_body(&mut cursor)?;
