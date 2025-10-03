@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use mir2_shared::{
-    enums::{BuffType, MirAction, MirDirection, Spell},
+    enums::{BuffType, MirAction, MirDirection, PoisonType, Spell},
     Point,
 };
 
@@ -103,13 +103,137 @@ pub struct MapObject {
 }
 
 impl MapObject {
+    /// Create a new monster object with default values
+    pub fn new_monster(object_id: u32) -> Self {
+        let monster = ObjectMonster {
+            object_id,
+            name: String::new(),
+            name_colour: 0xFFFFFFFF_u32 as i32,
+            location_x: 0,
+            location_y: 0,
+            image: 0,
+            direction: MirDirection::Up,
+            effect: 0,
+            ai: 0,
+            light: 0,
+            dead: false,
+            skeleton: false,
+            poison: PoisonType::empty(),
+            hidden: false,
+            shock_time: 0,
+            binding_shot_center: false,
+            extra: false,
+            extra_byte: 0,
+            buffs: Vec::new(),
+        };
+        Self {
+            kind: MapObjectKind::Monster(monster),
+            buffs: BuffState::default(),
+            animation: AnimationState::default(),
+            location: Point::new(0, 0),
+            direction: MirDirection::Up,
+            last_update: Instant::now(),
+        }
+    }
+
+    /// Create a new NPC object with default values
+    pub fn new_npc(object_id: u32) -> Self {
+        use mir2_shared::packets::server::ObjectNpc;
+        let npc = ObjectNpc {
+            object_id,
+            name: String::new(),
+            name_colour: 0xFFFFFFFF_u32 as i32,
+            image: 0,
+            colour: 0xFFFFFFFF,
+            location_x: 0,
+            location_y: 0,
+            direction: MirDirection::Up,
+        };
+        // NPCs are similar to monsters but simpler - store as monster for now
+        let monster = ObjectMonster {
+            object_id: npc.object_id,
+            name: npc.name,
+            name_colour: npc.name_colour,
+            location_x: npc.location_x,
+            location_y: npc.location_y,
+            image: npc.image,
+            direction: npc.direction,
+            effect: 0,
+            ai: 0,
+            light: 0,
+            dead: false,
+            skeleton: false,
+            poison: PoisonType::empty(),
+            hidden: false,
+            shock_time: 0,
+            binding_shot_center: false,
+            extra: false,
+            extra_byte: 0,
+            buffs: Vec::new(),
+        };
+        Self {
+            kind: MapObjectKind::Monster(monster),
+            buffs: BuffState::default(),
+            animation: AnimationState::default(),
+            location: Point::new(0, 0),
+            direction: MirDirection::Up,
+            last_update: Instant::now(),
+        }
+    }
+
+    /// Create a new player object with default values
+    pub fn new_player(object_id: u32) -> Self {
+        use mir2_shared::enums::{MirClass, MirGender, SpellEffect, LevelEffects};
+        let player = PlayerObject {
+            object_id,
+            name: String::new(),
+            guild_name: String::new(),
+            guild_rank_name: String::new(),
+            name_colour: 0xFFFFFFFF_u32 as i32,
+            class: MirClass::Warrior,
+            gender: MirGender::Male,
+            level: 1,
+            location_x: 0,
+            location_y: 0,
+            direction: MirDirection::Up,
+            hair: 0,
+            light: 0,
+            weapon: 0,
+            weapon_effect: 0,
+            armour: 0,
+            poison: PoisonType::empty(),
+            dead: false,
+            hidden: false,
+            effect: SpellEffect::None,
+            wing_effect: 0,
+            extra: false,
+            mount_type: 0,
+            riding_mount: false,
+            fishing: false,
+            transform_type: 0,
+            element_orb_effect: 0,
+            element_orb_lvl: 0,
+            element_orb_max: 0,
+            buffs: Vec::new(),
+            level_effects: LevelEffects::empty(),
+        };
+        Self {
+            kind: MapObjectKind::Player(player),
+            buffs: BuffState::default(),
+            animation: AnimationState::default(),
+            location: Point::new(0, 0),
+            direction: MirDirection::Up,
+            last_update: Instant::now(),
+        }
+    }
+
     pub fn from_player(player: PlayerObject) -> (Self, SyncResult) {
         let mut buffs = BuffState::default();
         let buff_delta = buffs.replace(player.buffs.as_slice());
         let mut animation = AnimationState::default();
         animation.update_for_player(&player);
         let action = animation.current_action();
-        let location = player.location;
+        let location = Point::new(player.location_x, player.location_y);
         let direction = player.direction;
         let object = MapObject {
             kind: MapObjectKind::Player(player),
@@ -135,7 +259,7 @@ impl MapObject {
         let mut animation = AnimationState::default();
         animation.update_for_player(&hero.player);
         let action = animation.current_action();
-        let location = hero.player.location;
+        let location = Point::new(hero.player.location_x, hero.player.location_y);
         let direction = hero.player.direction;
         let object = MapObject {
             kind: MapObjectKind::Hero(hero),
@@ -165,7 +289,7 @@ impl MapObject {
             MirAction::Standing
         };
         animation.set_action(action);
-        let location = monster.location;
+        let location = Point::new(monster.location_x, monster.location_y);
         let direction = monster.direction;
         let object = MapObject {
             kind: MapObjectKind::Monster(monster),
@@ -233,18 +357,18 @@ impl MapObject {
 
     pub fn name_colour_argb(&self) -> i32 {
         match &self.kind {
-            MapObjectKind::Player(p) => p.name_colour_argb,
-            MapObjectKind::Hero(h) => h.player.name_colour_argb,
-            MapObjectKind::Monster(m) => m.name_colour_argb,
+            MapObjectKind::Player(p) => p.name_colour,
+            MapObjectKind::Hero(h) => h.player.name_colour,
+            MapObjectKind::Monster(m) => m.name_colour,
         }
     }
 
     pub fn set_name_colour_argb(&mut self, new_colour: i32) -> i32 {
         let previous = self.name_colour_argb();
         match &mut self.kind {
-            MapObjectKind::Player(p) => p.name_colour_argb = new_colour,
-            MapObjectKind::Hero(h) => h.player.name_colour_argb = new_colour,
-            MapObjectKind::Monster(m) => m.name_colour_argb = new_colour,
+            MapObjectKind::Player(p) => p.name_colour = new_colour,
+            MapObjectKind::Hero(h) => h.player.name_colour = new_colour,
+            MapObjectKind::Monster(m) => m.name_colour = new_colour,
         }
         previous
     }
@@ -298,7 +422,7 @@ impl MapObject {
             action_before
         };
         self.animation.set_action(new_action);
-        self.location = monster.location;
+        self.location = Point::new(monster.location_x, monster.location_y);
         self.direction = monster.direction;
         self.kind.replace_with_monster(monster);
         let action_after = self.animation.current_action();
@@ -411,11 +535,11 @@ impl MapObject {
     fn update_transform_from_kind(&mut self) {
         match &self.kind {
             MapObjectKind::Player(player) | MapObjectKind::Hero(HeroObject { player, .. }) => {
-                self.location = player.location;
+                self.location = Point::new(player.location_x, player.location_y);
                 self.direction = player.direction;
             }
             MapObjectKind::Monster(monster) => {
-                self.location = monster.location;
+                self.location = Point::new(monster.location_x, monster.location_y);
                 self.direction = monster.direction;
             }
         }
@@ -425,19 +549,150 @@ impl MapObject {
         match &mut self.kind {
             MapObjectKind::Player(player) => {
                 player.direction = direction;
-                player.location = location;
+                player.location_x = location.x;
+                player.location_y = location.y;
             }
             MapObjectKind::Hero(hero) => {
                 hero.player.direction = direction;
-                hero.player.location = location;
+                hero.player.location_x = location.x;
+                hero.player.location_y = location.y;
             }
             MapObjectKind::Monster(monster) => {
                 monster.direction = direction;
-                monster.location = location;
+                monster.location_x = location.x;
+                monster.location_y = location.y;
             }
         }
         self.direction = direction;
         self.location = location;
+    }
+
+    // Additional public API for MonsterObject and NPCObject
+
+    /// Get the name of the object
+    pub fn name(&self) -> &str {
+        match &self.kind {
+            MapObjectKind::Player(p) => &p.name,
+            MapObjectKind::Hero(h) => &h.player.name,
+            MapObjectKind::Monster(m) => &m.name,
+        }
+    }
+
+    /// Set the name of the object
+    pub fn set_name(&mut self, name: String) {
+        match &mut self.kind {
+            MapObjectKind::Player(p) => p.name = name,
+            MapObjectKind::Hero(h) => h.player.name = name,
+            MapObjectKind::Monster(m) => m.name = name,
+        }
+    }
+
+    /// Get AI type (for monsters)
+    pub fn ai(&self) -> u8 {
+        match &self.kind {
+            MapObjectKind::Monster(m) => m.ai,
+            _ => 0,
+        }
+    }
+
+    /// Set AI type (for monsters)
+    pub fn set_ai(&mut self, ai: u8) {
+        if let MapObjectKind::Monster(m) = &mut self.kind {
+            m.ai = ai;
+        }
+    }
+
+    /// Get light level
+    pub fn light(&self) -> u8 {
+        match &self.kind {
+            MapObjectKind::Player(p) => p.light,
+            MapObjectKind::Hero(h) => h.player.light,
+            MapObjectKind::Monster(m) => m.light,
+        }
+    }
+
+    /// Set light level
+    pub fn set_light(&mut self, light: u8) {
+        match &mut self.kind {
+            MapObjectKind::Player(p) => p.light = light,
+            MapObjectKind::Hero(h) => h.player.light = light,
+            MapObjectKind::Monster(m) => m.light = light,
+        }
+    }
+
+    /// Get poison status
+    pub fn poison(&self) -> PoisonType {
+        match &self.kind {
+            MapObjectKind::Player(p) => p.poison,
+            MapObjectKind::Hero(h) => h.player.poison,
+            MapObjectKind::Monster(m) => m.poison,
+        }
+    }
+
+    /// Set poison status
+    pub fn set_poison(&mut self, poison: PoisonType) {
+        match &mut self.kind {
+            MapObjectKind::Player(p) => p.poison = poison,
+            MapObjectKind::Hero(h) => h.player.poison = poison,
+            MapObjectKind::Monster(m) => m.poison = poison,
+        }
+    }
+
+    /// Set hidden state
+    pub fn set_hidden(&mut self, hidden: bool) {
+        match &mut self.kind {
+            MapObjectKind::Player(p) => p.hidden = hidden,
+            MapObjectKind::Hero(h) => h.player.hidden = hidden,
+            MapObjectKind::Monster(m) => m.hidden = hidden,
+        }
+    }
+
+    /// Set dead state
+    pub fn set_dead(&mut self, dead: bool) {
+        match &mut self.kind {
+            MapObjectKind::Player(p) => p.dead = dead,
+            MapObjectKind::Hero(h) => h.player.dead = dead,
+            MapObjectKind::Monster(m) => m.dead = dead,
+        }
+    }
+
+    /// Set direction
+    pub fn set_direction(&mut self, direction: MirDirection) {
+        match &mut self.kind {
+            MapObjectKind::Player(p) => p.direction = direction,
+            MapObjectKind::Hero(h) => h.player.direction = direction,
+            MapObjectKind::Monster(m) => m.direction = direction,
+        }
+        self.direction = direction;
+    }
+
+    /// Set location
+    pub fn set_location(&mut self, location: Point) {
+        match &mut self.kind {
+            MapObjectKind::Player(p) => {
+                p.location_x = location.x;
+                p.location_y = location.y;
+            }
+            MapObjectKind::Hero(h) => {
+                h.player.location_x = location.x;
+                h.player.location_y = location.y;
+            }
+            MapObjectKind::Monster(m) => {
+                m.location_x = location.x;
+                m.location_y = location.y;
+            }
+        }
+        self.location = location;
+    }
+
+    /// Get active buffs
+    pub fn buffs(&self) -> &[BuffType] {
+        &self.buffs.active
+    }
+
+    /// Set buffs (replaces existing buffs)
+    pub fn set_buffs(&mut self, buffs: Vec<BuffType>) {
+        self.buffs.replace(&buffs);
     }
 }
 

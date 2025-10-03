@@ -2,7 +2,7 @@
 // Mirrors Client/MirObjects/MonsterObject.cs
 
 use mir2_shared::{
-    enums::{MirDirection, PoisonType, Spell, SpellEffect},
+    enums::{MirDirection, SpellEffect},
     Point,
 };
 
@@ -145,15 +145,15 @@ impl MonsterObject {
     }
 
     /// Load monster information from server
-    pub fn load(&mut self, info: &ObjectMonster, update: bool) {
-        self.map_object.name = info.name.clone();
-        self.map_object.name_colour = info.name_colour;
+    pub fn load(&mut self, info: &ObjectMonster, _update: bool) {
+        self.map_object.set_name(info.name.clone());
+        self.map_object.set_name_colour_argb(info.name_colour);
         self.base_image = Monster::from_u16(info.image);
         
-        self.old_name_color = info.name_colour;
+        self.old_name_color = info.name_colour as u32;
         
-        self.map_object.current_location = info.location;
-        self.map_object.map_location = info.location;
+        let location = Point::new(info.location_x, info.location_y);
+        self.map_object.set_location(location);
         
         // Don't add to map if updating
         // if !update {
@@ -161,20 +161,20 @@ impl MonsterObject {
         // }
         
         self.effect = info.effect;
-        self.map_object.ai = info.ai;
-        self.map_object.light = info.light;
+        self.map_object.set_ai(info.ai);
+        self.map_object.set_light(info.light);
         
-        self.map_object.direction = info.direction;
-        self.map_object.dead = info.dead;
-        self.map_object.poison = info.poison;
+        self.map_object.set_direction(info.direction);
+        self.map_object.set_dead(info.dead);
+        self.map_object.set_poison(info.poison);
         self.skeleton = info.skeleton;
-        self.map_object.hidden = info.hidden;
+        self.map_object.set_hidden(info.hidden);
         
         // TODO: Calculate shock time properly
         // self.shock_time = CMain::Time + info.shock_time;
         self.binding_shot_center = info.binding_shot_center;
         
-        self.map_object.buffs = info.buffs.clone();
+        self.map_object.set_buffs(info.buffs.clone());
         
         // Handle stage changes for transforming monsters
         if self.stage != info.extra_byte {
@@ -194,14 +194,14 @@ impl MonsterObject {
     /// Check if monster is blocking (can't walk through)
     pub fn is_blocking(&self) -> bool {
         // AI 64 = non-blocking, AI 81 with direction 6 = non-blocking
-        if self.map_object.ai == 64 {
+        if self.map_object.ai() == 64 {
             return false;
         }
-        if self.map_object.ai == 81 && self.map_object.direction == MirDirection::Down {
+        if self.map_object.ai() == 81 && self.map_object.direction() == MirDirection::Down {
             // Direction 6 in C# maps to a specific direction
             return false;
         }
-        !self.map_object.dead
+        !self.map_object.is_dead()
     }
 
     /// Get location offset for rendering
@@ -210,7 +210,7 @@ impl MonsterObject {
     }
 
     /// Update monster animation
-    pub fn update_frame(&mut self, delta_time: f32) {
+    pub fn update_frame(&mut self, _delta_time: f32) {
         // TODO: Implement frame animation logic
         // This should update frame_index based on current action
     }
@@ -234,7 +234,7 @@ impl MonsterObject {
     /// Play monster sound
     pub fn play_sound(&self, sound_type: MonsterSoundType) {
         // TODO: Implement sound playing
-        let sound_index = match sound_type {
+        let _sound_index = match sound_type {
             MonsterSoundType::Attack => self.base_sound,
             MonsterSoundType::Struck => self.base_sound + 1,
             MonsterSoundType::Die => self.base_sound + 2,
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn test_monster_object_creation() {
         let monster = MonsterObject::new(1);
-        assert_eq!(monster.map_object.object_id, 1);
+        assert_eq!(monster.map_object.object_id(), 1);
         assert!(!monster.skeleton);
     }
 
@@ -281,7 +281,7 @@ mod tests {
         let mut monster = MonsterObject::new(1);
         assert!(monster.is_blocking());
         
-        monster.map_object.dead = true;
+        monster.map_object.set_dead(true);
         assert!(!monster.is_blocking());
     }
 }

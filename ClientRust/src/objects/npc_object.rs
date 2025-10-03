@@ -48,15 +48,15 @@ impl NPCObject {
 
     /// Load NPC information from server
     pub fn load(&mut self, info: &ObjectNpc) {
-        self.map_object.name = info.name.clone();
-        self.map_object.name_colour = info.name_colour;
+        self.map_object.set_name(info.name.clone());
+        self.map_object.set_name_colour_argb(info.name_colour);
         self.image = NpcImage::from_u16(info.image);
         
-        self.map_object.current_location = info.location;
-        self.map_object.map_location = info.location;
+        let location = Point::new(info.location_x, info.location_y);
+        self.map_object.set_location(location);
         
-        self.map_object.direction = info.direction;
-        self.map_object.light = 0; // NPCs typically don't have light
+        self.map_object.set_direction(info.direction);
+        self.map_object.set_light(0); // NPCs typically don't have light
         
         // TODO: Add to game scene map control
         // GameScene::Scene.MapControl.AddObject(self);
@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn test_npc_object_creation() {
         let npc = NPCObject::new(1);
-        assert_eq!(npc.map_object.object_id, 1);
+        assert_eq!(npc.map_object.object_id(), 1);
         assert!(npc.is_blocking());
     }
 }
