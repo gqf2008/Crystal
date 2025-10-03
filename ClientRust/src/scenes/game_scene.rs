@@ -3,8 +3,8 @@
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
 use crate::objects::*;
-use crate::network::protocol::ServerMessage;
-use mir2_shared::{enums::*, Stats, Point, UserItem};
+use crate::network::game_client::GameEvent;
+use mir2_shared::UserItem;
 use std::collections::{HashMap, VecDeque};
 
 /// Attack mode
@@ -172,22 +172,22 @@ impl GameScene {
     
     /// Add game object
     pub fn add_monster(&mut self, monster: MonsterObject) {
-        let id = monster.map_object.object_id;
+        let id = monster.map_object.object_id();
         self.monsters.insert(id, monster);
     }
     
     pub fn add_npc(&mut self, npc: NPCObject) {
-        let id = npc.map_object.object_id;
+        let id = npc.map_object.object_id();
         self.npcs.insert(id, npc);
     }
     
     pub fn add_item(&mut self, item: ItemObject) {
-        let id = item.map_object.object_id;
+        let id = item.map_object.object_id();
         self.items.insert(id, item);
     }
     
     pub fn add_player(&mut self, player: UserObject) {
-        let id = player.map_object.object_id;
+        let id = player.map_object.object_id();
         self.players.insert(id, player);
     }
     
@@ -197,7 +197,7 @@ impl GameScene {
         self.npcs.remove(&object_id);
         self.items.remove(&object_id);
         self.players.remove(&object_id);
-        self.spells.retain(|s| s.map_object.object_id != object_id);
+        self.spells.retain(|s| s.map_object.object_id() != object_id);
     }
     
     /// Get current time in milliseconds
@@ -335,46 +335,75 @@ impl Scene for GameScene {
         // TODO: Draw UI dialogs
     }
     
-    fn process_packet(&mut self, packet: ServerMessage) {
-        match packet {
-            ServerMessage::UserInformation(info) => {
-                println!("Received user information: {}", info.name);
-                if let Some(ref mut user) = self.user {
-                    user.load(&info);
-                } else {
-                    let mut user = UserObject::new(info.id);
-                    user.load(&info);
-                    self.user = Some(user);
+    /// Process game events from GameClient
+    fn process_event(&mut self, event: &GameEvent) {
+        match event {
+            GameEvent::PlayerSpawned { player } => {
+                println!("Player spawned: {}", player.name);
+                // TODO: Create UserObject from PlayerState
+                // For now, just log
+            }
+            
+            GameEvent::PlayerMoved { location } => {
+                if self.user.is_some() {
+                    // TODO: Update user position using public API
+                    println!("Player moved to: ({}, {})", location.x, location.y);
                 }
             }
             
-            ServerMessage::UserLocation(location) => {
-                if let Some(ref mut user) = self.user {
-                    user.map_object.current_location = location;
+            GameEvent::ObjectSpawned { object } => {
+                match object {
+                    crate::network::game_client::GameObject::Player { id, name, .. } => {
+                        println!("Player spawned: {} ({})", name, id);
+                    }
+                    crate::network::game_client::GameObject::Monster { id, name, .. } => {
+                        println!("Monster spawned: {} ({})", name, id);
+                    }
+                    crate::network::game_client::GameObject::Npc { id, name, .. } => {
+                        println!("NPC spawned: {} ({})", name, id);
+                    }
+                    crate::network::game_client::GameObject::Item { id, .. } => {
+                        println!("Item spawned: {}", id);
+                    }
                 }
+                // TODO: Create appropriate object type (Monster/NPC/Item/Player)
             }
             
-            ServerMessage::ObjectMonster(info) => {
-                let mut monster = MonsterObject::new(info.object_id);
-                monster.load(&info, false);
-                self.add_monster(monster);
-            }
-            
-            ServerMessage::ObjectRemove(object_id) => {
+            GameEvent::ObjectRemoved { object_id } => {
                 println!("Removing object {}", object_id);
-                self.remove_object(object_id);
+                self.remove_object(*object_id);
             }
             
-            ServerMessage::Chat(message) => {
-                self.add_output_message(message, (255, 255, 255));
+            GameEvent::ChatReceived { message } => {
+                self.add_output_message(
+                    message.text.clone(),
+                    (255, 255, 255),
+                );
             }
             
-            ServerMessage::Gold(amount) => {
-                self.gold = amount;
+            GameEvent::GoldChanged { gold } => {
+                self.gold = *gold;
+            }
+            
+            GameEvent::SystemMessage { message } => {
+                self.add_output_message(
+                    message.clone(),
+                    (255, 255, 0),
+                );
+            }
+            
+            GameEvent::ItemGained { item, grid_type } => {
+                println!("Item gained: {:?} in {}", item, grid_type);
+                // TODO: Add to appropriate inventory
+            }
+            
+            GameEvent::MagicCast { spell, target_id } => {
+                println!("Magic cast: {:?} on target {}", spell, target_id);
+                // TODO: Create spell effect
             }
             
             _ => {
-                // TODO: Handle other game packets
+                // TODO: Handle other game events
             }
         }
     }

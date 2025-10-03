@@ -1,0 +1,1853 @@
+﻿cargo : warning: ambiguous glob re-exports
+At line:1 char:54
++ ... cuments\GitHub\Crystal\ClientRust; cargo build --release 2
+>&1 | Out-F ...
++                                        ~~~~~~~~~~~~~~~~~~~~~~~
+~~~
+    + CategoryInfo          : NotSpecified: (warning: ambiguous 
+    glob re-exports:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\server\mod.rs:61:9
+   |
+61 | pub use npc::*;
+   |         ^^^^^^ the name `NPCRequestInput` in the type names
+pace is first re-exported here
+...
+69 | pub use special_systems::*;
+   |         ------------------ but the name `NPCRequestInput` i
+n the type namespace is also re-exported here
+   |
+   = note: `#[warn(ambiguous_glob_reexports)]` on by default
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `account` in the type namespace 
+is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `account` in the type namesp
+ace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `chat` in the type namespace is 
+first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `chat` in the type namespace
+ is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `combat` in the type namespace i
+s first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `combat` in the type namespa
+ce is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `connection` in the type namespa
+ce is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `connection` in the type nam
+espace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `group` in the type namespace is
+ first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `group` in the type namespac
+e is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `guild` in the type namespace is
+ first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `guild` in the type namespac
+e is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `hero` in the type namespace is 
+first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `hero` in the type namespace
+ is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `item` in the type namespace is 
+first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `item` in the type namespace
+ is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `movement` in the type namespace
+ is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `movement` in the type names
+pace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `npc` in the type namespace is f
+irst re-exported here
+29 | pub use server::*;
+   |         --------- but the name `npc` in the type namespace 
+is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `quest` in the type namespace is
+ first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `quest` in the type namespac
+e is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `trade` in the type namespace is
+ first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `trade` in the type namespac
+e is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `NewAccount` in the type namespa
+ce is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `NewAccount` in the type nam
+espace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ChangePassword` in the type nam
+espace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ChangePassword` in the type
+ namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `Login` in the type namespace is
+ first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `Login` in the type namespac
+e is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `StartGame` in the type namespac
+e is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `StartGame` in the type name
+space is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `NewCharacter` in the type names
+pace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `NewCharacter` in the type n
+amespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `DeleteCharacter` in the type na
+mespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `DeleteCharacter` in the typ
+e namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `Chat` in the type namespace is 
+first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `Chat` in the type namespace
+ is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `RangeAttack` in the type namesp
+ace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `RangeAttack` in the type na
+mespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `Magic` in the type namespace is
+ first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `Magic` in the type namespac
+e is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `SpellToggle` in the type namesp
+ace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `SpellToggle` in the type na
+mespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ClientVersion` in the type name
+space is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ClientVersion` in the type 
+namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `Disconnect` in the type namespa
+ce is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `Disconnect` in the type nam
+espace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `KeepAlive` in the type namespac
+e is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `KeepAlive` in the type name
+space is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `SwitchGroup` in the type namesp
+ace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `SwitchGroup` in the type na
+mespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `AddMember` in the type namespac
+e is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `AddMember` in the type name
+space is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `GroupInvite` in the type namesp
+ace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `GroupInvite` in the type na
+mespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `GuildInvite` in the type namesp
+ace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `GuildInvite` in the type na
+mespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `GuildStorageGoldChange` in the 
+type namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `GuildStorageGoldChange` in 
+the type namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `GuildStorageItemChange` in the 
+type namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `GuildStorageItemChange` in 
+the type namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `GuildTerritoryPage` in the type
+ namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `GuildTerritoryPage` in the 
+type namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `PurchaseGuildTerritory` in the 
+type namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `PurchaseGuildTerritory` in 
+the type namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `NewHero` in the type namespace 
+is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `NewHero` in the type namesp
+ace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `SetAutoPotValue` in the type na
+mespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `SetAutoPotValue` in the typ
+e namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `SetAutoPotItem` in the type nam
+espace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `SetAutoPotItem` in the type
+ namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `SetHeroBehaviour` in the type n
+amespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `SetHeroBehaviour` in the ty
+pe namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ChangeHero` in the type namespa
+ce is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ChangeHero` in the type nam
+espace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `MoveItem` in the type namespace
+ is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `MoveItem` in the type names
+pace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `StoreItem` in the type namespac
+e is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `StoreItem` in the type name
+space is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `TakeBackItem` in the type names
+pace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `TakeBackItem` in the type n
+amespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `MergeItem` in the type namespac
+e is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `MergeItem` in the type name
+space is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `EquipItem` in the type namespac
+e is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `EquipItem` in the type name
+space is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `RemoveItem` in the type namespa
+ce is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `RemoveItem` in the type nam
+espace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `RemoveSlotItem` in the type nam
+espace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `RemoveSlotItem` in the type
+ namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `SplitItem` in the type namespac
+e is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `SplitItem` in the type name
+space is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `UseItem` in the type namespace 
+is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `UseItem` in the type namesp
+ace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `DropItem` in the type namespace
+ is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `DropItem` in the type names
+pace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `MailLockedItem` in the type nam
+espace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `MailLockedItem` in the type
+ namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `MailCost` in the type namespace
+ is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `MailCost` in the type names
+pace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ConsignItem` in the type namesp
+ace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ConsignItem` in the type na
+mespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ChangeAMode` in the type namesp
+ace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ChangeAMode` in the type na
+mespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ChangePMode` in the type namesp
+ace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ChangePMode` in the type na
+mespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `MarriageRequest` in the type na
+mespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `MarriageRequest` in the typ
+e namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `DivorceRequest` in the type nam
+espace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `DivorceRequest` in the type
+ namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `EquipSlotItem` in the type name
+space is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `EquipSlotItem` in the type 
+namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `CancelReincarnation` in the typ
+e namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `CancelReincarnation` in the
+ type namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `CombineItem` in the type namesp
+ace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `CombineItem` in the type na
+mespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `AwakeningNeedMaterials` in the 
+type namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `AwakeningNeedMaterials` in 
+the type namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `AwakeningLockedItem` in the typ
+e namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `AwakeningLockedItem` in the
+ type namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `Awakening` in the type namespac
+e is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `Awakening` in the type name
+space is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `IntelligentCreaturePickup` in t
+he type namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `IntelligentCreaturePickup` 
+in the type namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `GetRentedItems` in the type nam
+espace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `GetRentedItems` in the type
+ namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ItemRentalRequest` in the type 
+namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ItemRentalRequest` in the t
+ype namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ItemRentalFee` in the type name
+space is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ItemRentalFee` in the type 
+namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ItemRentalPeriod` in the type n
+amespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ItemRentalPeriod` in the ty
+pe namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `DepositRentalItem` in the type 
+namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `DepositRentalItem` in the t
+ype namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `RetrieveRentalItem` in the type
+ namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `RetrieveRentalItem` in the 
+type namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `CancelItemRental` in the type n
+amespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `CancelItemRental` in the ty
+pe namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ConfirmItemRental` in the type 
+namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ConfirmItemRental` in the t
+ype namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `Opendoor` in the type namespace
+ is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `Opendoor` in the type names
+pace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `SellItem` in the type namespace
+ is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `SellItem` in the type names
+pace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `CraftItem` in the type namespac
+e is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `CraftItem` in the type name
+space is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `RepairItem` in the type namespa
+ce is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `RepairItem` in the type nam
+espace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `ShareQuest` in the type namespa
+ce is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `ShareQuest` in the type nam
+espace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `DepositRefineItem` in the type 
+namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `DepositRefineItem` in the t
+ype namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `RetrieveRefineItem` in the type
+ namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `RetrieveRefineItem` in the 
+type namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `RefineCancel` in the type names
+pace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `RefineCancel` in the type n
+amespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `RefineItem` in the type namespa
+ce is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `RefineItem` in the type nam
+espace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `DepositTradeItem` in the type n
+amespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `DepositTradeItem` in the ty
+pe namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `RetrieveTradeItem` in the type 
+namespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `RetrieveTradeItem` in the t
+ype namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `TakeBackHeroItem` in the type n
+amespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `TakeBackHeroItem` in the ty
+pe namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `TransferHeroItem` in the type n
+amespace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `TransferHeroItem` in the ty
+pe namespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `TradeRequest` in the type names
+pace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `TradeRequest` in the type n
+amespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `TradeGold` in the type namespac
+e is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `TradeGold` in the type name
+space is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `TradeConfirm` in the type names
+pace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `TradeConfirm` in the type n
+amespace is also re-exported here
+
+warning: ambiguous glob re-exports
+  --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\packe
+ts\mod.rs:28:9
+   |
+28 | pub use client::*;
+   |         ^^^^^^^^^ the name `TradeCancel` in the type namesp
+ace is first re-exported here
+29 | pub use server::*;
+   |         --------- but the name `TradeCancel` in the type na
+mespace is also re-exported here
+
+warning: `mir2_shared` (lib) generated 88 warnings
+   Compiling mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\C
+rystal\ClientRust)
+warning: unused import: `NetworkEvent`
+  --> src\network\mod.rs:10:33
+   |
+10 | pub use network::{NetworkStack, NetworkEvent};
+   |                                 ^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `AnimationStep`
+  --> src\objects\mod.rs:16:43
+   |
+16 | pub use frames::{AnimationAdvanceSummary, AnimationStep};
+   |                                           ^^^^^^^^^^^^^
+
+warning: unused imports: `ActionResult`, `AttackOutcome`, `BuffD
+elta`, `StruckOutcome`, and `SyncResult`
+  --> src\objects\mod.rs:18:5
+   |
+18 |     ActionResult, AttackOutcome, BuffDelta, MapObject, MapO
+bjectType, ObjectActionOutcome,
+   |     ^^^^^^^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^
+19 |     ObjectAttackOutcome, ObjectDeathOutcome, ObjectStruckOu
+tcome, ObjectUpdateOutcome,
+20 |     StruckOutcome, SyncResult,
+   |     ^^^^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `ClientIntelligentCreature`, `ClientMag
+ic`, `ClientMail`, `ClientQuestProgress`, `EquipmentSlot`, `Inte
+lligentCreatureType`, `ItemSets`, `QueuedActionType`, `QueuedAct
+ion`, and `SpecialItemMode`
+  --> src\objects\mod.rs:23:17
+   |
+23 |     UserObject, ClientMagic, ItemSets, EquipmentSlot, Clien
+tIntelligentCreature,
+   |                 ^^^^^^^^^^^  ^^^^^^^^  ^^^^^^^^^^^^^  ^^^^^
+^^^^^^^^^^^^^^^^^^^^
+24 |     IntelligentCreatureType, ClientQuestProgress, ClientMai
+l, QueuedAction,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^
+^  ^^^^^^^^^^^^
+25 |     QueuedActionType, SpecialItemMode,
+   |     ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^
+
+warning: unused imports: `MonsterSoundType` and `Monster`
+  --> src\objects\mod.rs:27:41
+   |
+27 | pub use monster_object::{MonsterObject, Monster, MonsterSou
+ndType};
+   |                                         ^^^^^^^  ^^^^^^^^^^
+^^^^^^
+
+warning: unused import: `NpcImage`
+  --> src\objects\mod.rs:28:33
+   |
+28 | pub use npc_object::{NPCObject, NpcImage};
+   |                                 ^^^^^^^^
+
+warning: unused import: `HeroState`
+  --> src\objects\mod.rs:30:35
+   |
+30 | pub use hero_object::{HeroObject, HeroState};
+   |                                   ^^^^^^^^^
+
+warning: unused imports: `BlendMode` and `EffectLayer`
+  --> src\objects\mod.rs:32:26
+   |
+32 | pub use effect::{Effect, EffectLayer, BlendMode};
+   |                          ^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `Color` and `DamageType`
+  --> src\objects\mod.rs:33:26
+   |
+33 | pub use damage::{Damage, DamageType, Color};
+   |                          ^^^^^^^^^^  ^^^^^
+
+warning: unused import: `std::collections::HashMap`
+  --> src\scenes\dialogs\keyboard_layout_dialog.rs:12:5
+   |
+12 | use std::collections::HashMap;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::collections::HashMap`
+ --> src\scenes\dialogs\guild_dialog.rs:6:5
+  |
+6 | use std::collections::HashMap;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `main_dialog::MainDialog`
+  --> src\scenes\dialogs\mod.rs:89:9
+   |
+89 | pub use main_dialog::MainDialog;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ChatDialog` and `ChatMessage`
+  --> src\scenes\dialogs\mod.rs:90:23
+   |
+90 | pub use chat_dialog::{ChatDialog, ChatMessage};
+   |                       ^^^^^^^^^^  ^^^^^^^^^^^
+
+warning: unused imports: `InventoryDialog` and `InventoryTab`
+  --> src\scenes\dialogs\mod.rs:91:28
+   |
+91 | pub use inventory_dialog::{InventoryDialog, InventoryTab};
+   |                            ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused imports: `CharacterDialog`, `CharacterPage`, `Ch
+aracterStats`, `EquipmentSlot`, and `MagicInfo`
+  --> src\scenes\dialogs\mod.rs:92:28
+   |
+92 | pub use character_dialog::{CharacterDialog, CharacterPage, 
+EquipmentSlot, CharacterStats, MagicInfo};
+   |                            ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^  
+^^^^^^^^^^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `SkillBarDialog` and `SkillSlot`
+  --> src\scenes\dialogs\mod.rs:93:27
+   |
+93 | pub use skillbar_dialog::{SkillBarDialog, SkillSlot};
+   |                           ^^^^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `NPCDialogType`, `NPCDialog`, `NPCOptio
+n`, and `NPCPage`
+  --> src\scenes\dialogs\mod.rs:94:22
+   |
+94 | pub use npc_dialog::{NPCDialog, NPCDialogType, NPCOption, N
+PCPage};
+   |                      ^^^^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^  ^
+^^^^^^
+
+warning: unused imports: `StorageDialog` and `StorageType`
+  --> src\scenes\dialogs\mod.rs:95:26
+   |
+95 | pub use storage_dialog::{StorageDialog, StorageType};
+   |                          ^^^^^^^^^^^^^  ^^^^^^^^^^^
+
+warning: unused imports: `TradeDialog`, `TradeParty`, `TradeStat
+e`, and `TradeSummary`
+  --> src\scenes\dialogs\mod.rs:96:24
+   |
+96 | pub use trade_dialog::{TradeDialog, TradeState, TradeParty,
+ TradeSummary};
+   |                        ^^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^ 
+ ^^^^^^^^^^^^
+
+warning: unused imports: `GuildBuff`, `GuildDialog`, `GuildMembe
+r`, `GuildPage`, `GuildRankOptions`, and `GuildRank`
+  --> src\scenes\dialogs\mod.rs:97:24
+   |
+97 | pub use guild_dialog::{GuildDialog, GuildPage, GuildMember,
+ GuildRank, GuildRankOptions, GuildBuff};
+   |                        ^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^ 
+ ^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `FriendDialog`, `FriendStatus`, `Friend
+Tab`, and `Friend`
+  --> src\scenes\dialogs\mod.rs:98:25
+   |
+98 | pub use friend_dialog::{FriendDialog, FriendTab, Friend, Fr
+iendStatus};
+   |                         ^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^  ^^
+^^^^^^^^^^
+
+warning: unused imports: `GroupDialog` and `GroupMember`
+  --> src\scenes\dialogs\mod.rs:99:24
+   |
+99 | pub use group_dialog::{GroupDialog, GroupMember};
+   |                        ^^^^^^^^^^^  ^^^^^^^^^^^
+
+warning: unused imports: `BigMapDialog`, `MapImage`, `MapNPC`, `
+MapRecord`, and `MapViewPort`
+   --> src\scenes\dialogs\mod.rs:101:25
+    |
+101 | pub use bigmap_dialog::{BigMapDialog, MapRecord, MapNPC, M
+apImage, MapViewPort};
+    |                         ^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^  ^
+^^^^^^^  ^^^^^^^^^^^
+
+warning: unused imports: `QuestInfo`, `QuestListDialog`, `QuestP
+rogress`, `QuestRewards`, `QuestStatus`, and `QuestType`
+   --> src\scenes\dialogs\mod.rs:102:29
+    |
+102 | pub use quest_list_dialog::{QuestListDialog, QuestInfo, Qu
+estProgress, QuestStatus, QuestType, QuestRewards};
+    |                             ^^^^^^^^^^^^^^^  ^^^^^^^^^  ^^
+^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused imports: `ClientMail`, `MailComposeDialog`, `Mai
+lListDialog`, `MailStatus`, and `MailType`
+   --> src\scenes\dialogs\mod.rs:103:23
+    |
+103 | pub use mail_dialog::{MailListDialog, MailComposeDialog, C
+lientMail, MailType, MailStatus};
+    |                       ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^  ^
+^^^^^^^^^  ^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `BELT_SLOT_COUNT`, `BeltDialog`, and `B
+eltOrientation`
+   --> src\scenes\dialogs\mod.rs:106:23
+    |
+106 | pub use belt_dialog::{BeltDialog, BeltOrientation, BELT_SL
+OT_COUNT};
+    |                       ^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^^
+^^^^^^^^
+
+warning: unused imports: `ClientTimer`, `TimerDialog`, and `Time
+rType`
+   --> src\scenes\dialogs\mod.rs:107:24
+    |
+107 | pub use timer_dialog::{TimerDialog, ClientTimer, TimerType
+};
+    |                        ^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `MAX_SOCKET_SLOTS` and `SocketDialog`
+   --> src\scenes\dialogs\mod.rs:108:25
+    |
+108 | pub use socket_dialog::{SocketDialog, MAX_SOCKET_SLOTS};
+    |                         ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+warning: unused imports: `BuffDialog`, `BuffType`, and `ClientBu
+ff`
+   --> src\scenes\dialogs\mod.rs:109:23
+    |
+109 | pub use buff_dialog::{BuffDialog, ClientBuff, BuffType};
+    |                       ^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^
+
+warning: unused imports: `MountDialog`, `MountSlot`, and `MountT
+ype`
+   --> src\scenes\dialogs\mod.rs:110:24
+    |
+110 | pub use mount_dialog::{MountDialog, MountSlot, MountType};
+    |                        ^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^
+
+warning: unused imports: `FishingDialog`, `FishingSlot`, and `Fi
+shingStatusDialog`
+   --> src\scenes\dialogs\mod.rs:111:26
+    |
+111 | pub use fishing_dialog::{FishingDialog, FishingStatusDialo
+g, FishingSlot};
+    |                          ^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^
+^  ^^^^^^^^^^^
+
+warning: unused imports: `REFINE_SLOT_COUNT` and `RefineDialog`
+   --> src\scenes\dialogs\mod.rs:112:25
+    |
+112 | pub use refine_dialog::{RefineDialog, REFINE_SLOT_COUNT};
+    |                         ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ClientRecipeInfo`, `CraftDialog`, `ING
+REDIENT_SLOT_COUNT`, and `TOOL_SLOT_COUNT`
+   --> src\scenes\dialogs\mod.rs:113:24
+    |
+113 | pub use craft_dialog::{CraftDialog, ClientRecipeInfo, TOOL
+_SLOT_COUNT, INGREDIENT_SLOT_COUNT};
+    |                        ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^  ^^^^
+^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `HelpDialog`, `HelpPageType`, and `Help
+Page`
+   --> src\scenes\dialogs\mod.rs:114:23
+    |
+114 | pub use help_dialog::{HelpDialog, HelpPage, HelpPageType};
+    |                       ^^^^^^^^^^  ^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused imports: `MenuButton` and `MenuDialog`
+   --> src\scenes\dialogs\mod.rs:117:23
+    |
+117 | pub use menu_dialog::{MenuDialog, MenuButton};
+    |                       ^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `OptionDialog` and `OptionType`
+   --> src\scenes\dialogs\mod.rs:118:25
+    |
+118 | pub use option_dialog::{OptionDialog, OptionType};
+    |                         ^^^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused imports: `KeyBind`, `KeybindOption`, and `Keyboa
+rdLayoutDialog`
+   --> src\scenes\dialogs\mod.rs:119:34
+    |
+119 | pub use keyboard_layout_dialog::{KeyboardLayoutDialog, Key
+Bind, KeybindOption};
+    |                                  ^^^^^^^^^^^^^^^^^^^^  ^^^
+^^^^  ^^^^^^^^^^^^^
+
+warning: unused imports: `NoticeDialog` and `Notice`
+   --> src\scenes\dialogs\mod.rs:120:25
+    |
+120 | pub use notice_dialog::{NoticeDialog, Notice};
+    |                         ^^^^^^^^^^^^  ^^^^^^
+
+warning: unused imports: `InspectAction`, `InspectDialog`, `MirC
+lass`, and `MirGender`
+   --> src\scenes\dialogs\mod.rs:121:26
+    |
+121 | pub use inspect_dialog::{InspectDialog, InspectAction, Mir
+Class, MirGender};
+    |                          ^^^^^^^^^^^^^  ^^^^^^^^^^^^^  ^^^
+^^^^^  ^^^^^^^^^
+
+warning: unused imports: `ReportAction`, `ReportDialog`, and `Re
+portType`
+   --> src\scenes\dialogs\mod.rs:122:25
+    |
+122 | pub use report_dialog::{ReportDialog, ReportAction, Report
+Type};
+    |                         ^^^^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^
+^^^^
+
+warning: unused imports: `DialogManager`, `KeyCode`, and `MouseB
+utton`
+   --> src\scenes\dialogs\mod.rs:126:13
+    |
+126 |     Dialog, DialogManager, MouseButton, KeyCode
+    |             ^^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^
+
+warning: unused import: `state::ClientState`
+  --> src\scenes\mod.rs:12:9
+   |
+12 | pub use state::ClientState;
+   |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `KeyCode`, `MouseButton`, `SceneType`, 
+and `Scene`
+  --> src\scenes\mod.rs:13:23
+   |
+13 | pub use scene_trait::{Scene, SceneType, MouseButton, KeyCod
+e};
+   |                       ^^^^^  ^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^
+^
+
+warning: unused import: `login_scene::LoginScene`
+  --> src\scenes\mod.rs:14:9
+   |
+14 | pub use login_scene::LoginScene;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `select_scene::SelectScene`
+  --> src\scenes\mod.rs:15:9
+   |
+15 | pub use select_scene::SelectScene;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `game_scene::GameScene`
+  --> src\scenes\mod.rs:16:9
+   |
+16 | pub use game_scene::GameScene;
+   |         ^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `set_level` found for mutable refe
+rence `&mut MapObject` in the current scope
+   --> src\scenes\state.rs:682:24
+    |
+682 |                 object.set_level(packet.level);
+    |                        ^^^^^^^^^ method not found in `&mut
+ MapObject`
+
+error[E0599]: no method named `set_level` found for mutable refe
+rence `&mut MapObject` in the current scope
+   --> src\scenes\state.rs:706:24
+    |
+706 |                 object.set_level(packet.level);
+    |                        ^^^^^^^^^ method not found in `&mut
+ MapObject`
+
+error[E0599]: no variant or associated item named `Player` found
+ for enum `MapObjectType` in the current scope
+   --> src\scenes\state.rs:735:53
+    |
+735 |             if matches!(object_type, MapObjectType::Player
+)
+    |                                                     ^^^^^^
+ variant or associated item not found in `MapObjectType`
+    |
+   ::: src\objects\map_object.rs:22:1
+    |
+22  | pub enum MapObjectType {
+    | ---------------------- variant or associated item `Player`
+ not found for this enum
+
+error[E0609]: no field `name_colour_argb` on type `&mut mir2_sha
+red::packets::UserInformation`
+   --> src\scenes\state.rs:755:23
+    |
+755 |             character.name_colour_argb = packet.name_colou
+r_argb;
+    |                       ^^^^^^^^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+755 -             character.name_colour_argb = packet.name_colou
+r_argb;
+755 +             character.name_colour = packet.name_colour_arg
+b;
+    |
+
+error[E0609]: no field `name_colour_argb` on type `&mut mir2_sha
+red::packets::UserInformation`
+   --> src\scenes\state.rs:793:27
+    |
+793 |                 character.name_colour_argb = name_colour_a
+rgb;
+    |                           ^^^^^^^^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+793 -                 character.name_colour_argb = name_colour_a
+rgb;
+793 +                 character.name_colour = name_colour_argb;
+    |
+
+error[E0599]: no method named `set_guild_name` found for mutable
+ reference `&mut MapObject` in the current scope
+   --> src\scenes\state.rs:821:35
+    |
+821 |             let previous = object.set_guild_name(guild_nam
+e.clone());
+    |                                   ^^^^^^^^^^^^^^
+    |
+help: there is a method `set_name` with a similar name
+    |
+821 -             let previous = object.set_guild_name(guild_nam
+e.clone());
+821 +             let previous = object.set_name(guild_name.clon
+e());
+    |
+
+error[E0308]: arguments to this function are incorrect
+   --> src\scenes\state.rs:942:24
+    |
+942 |         let location = Point::new(packet.location_x, packe
+t.location_y);
+    |                        ^^^^^^^^^^ -----------------  -----
+------------ expected `i32`, found `u32`
+    |                                   |
+    |                                   expected `i32`, found `u
+32`
+    |
+note: associated function defined here
+   --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\map.
+rs:20:12
+    |
+20  |     pub fn new(x: i32, y: i32) -> Self {
+    |            ^^^
+help: you can convert a `u32` to an `i32` and panic if the conve
+rted value doesn't fit
+    |
+942 |         let location = Point::new(packet.location_x.try_in
+to().unwrap(), packet.location_y);
+    |                                                    +++++++
++++++++++++++
+help: you can convert a `u32` to an `i32` and panic if the conve
+rted value doesn't fit
+    |
+942 |         let location = Point::new(packet.location_x, packe
+t.location_y.try_into().unwrap());
+    |                                                           
+            ++++++++++++++++++++
+
+error[E0308]: arguments to this method are incorrect
+   --> src\scenes\state.rs:943:29
+    |
+943 |         let attack = object.apply_attack(
+    |                             ^^^^^^^^^^^^
+944 |             packet.direction,
+    |             ---------------- argument #1 of type `MirDirec
+tion` is missing
+945 |             location,
+946 |             packet.spell,
+    |             ------------
+    |             |
+    |             unexpected argument #3 of type `u8`
+    |             argument #3 of type `mir2_shared::Spell` is mi
+ssing
+947 |             packet.level,
+    |             ------------ unexpected argument #4 of type `u
+16`
+    |
+note: method defined here
+   --> src\objects\map_object.rs:442:12
+    |
+442 |     pub fn apply_attack(
+    |            ^^^^^^^^^^^^
+443 |         &mut self,
+444 |         direction: MirDirection,
+    |         -----------------------
+445 |         location: Point,
+446 |         spell: Spell,
+    |         ------------
+help: did you mean
+    |
+943 -         let attack = object.apply_attack(
+944 -             packet.direction,
+945 -             location,
+946 -             packet.spell,
+947 -             packet.level,
+948 -             packet.attack_type,
+949 -         );
+943 +         let attack = object.apply_attack(/* MirDirection *
+/, location, /* mir2_shared::Spell */, packet.direction, packet.
+attack_type);
+    |
+
+error[E0308]: arguments to this function are incorrect
+   --> src\scenes\state.rs:987:24
+    |
+987 |         let location = Point::new(packet.location_x, packe
+t.location_y);
+    |                        ^^^^^^^^^^ -----------------  -----
+------------ expected `i32`, found `u32`
+    |                                   |
+    |                                   expected `i32`, found `u
+32`
+    |
+note: associated function defined here
+   --> D:\Users\gxh\Documents\GitHub\Crystal\SharedRust\src\map.
+rs:20:12
+    |
+20  |     pub fn new(x: i32, y: i32) -> Self {
+    |            ^^^
+help: you can convert a `u32` to an `i32` and panic if the conve
+rted value doesn't fit
+    |
+987 |         let location = Point::new(packet.location_x.try_in
+to().unwrap(), packet.location_y);
+    |                                                    +++++++
++++++++++++++
+help: you can convert a `u32` to an `i32` and panic if the conve
+rted value doesn't fit
+    |
+987 |         let location = Point::new(packet.location_x, packe
+t.location_y.try_into().unwrap());
+    |                                                           
+            ++++++++++++++++++++
+
+error[E0308]: mismatched types
+   --> src\scenes\state.rs:988:42
+    |
+988 |         let struck = object.apply_struck(packet.direction,
+ location, packet.attacker_id);
+    |                             ------------ ^^^^^^^^^^^^^^^^ 
+expected `MirDirection`, found `u8`
+    |                             |
+    |                             arguments to this method are i
+ncorrect
+    |
+note: method defined here
+   --> src\objects\map_object.rs:460:12
+    |
+460 |     pub fn apply_struck(
+    |            ^^^^^^^^^^^^
+461 |         &mut self,
+462 |         direction: MirDirection,
+    |         -----------------------
+
+error[E0308]: mismatched types
+    --> src\scenes\state.rs:1005:38
+     |
+1005 |                         .apply_death(packet.direction, lo
+cation);
+     |                          ----------- ^^^^^^^^^^^^^^^^ exp
+ected `MirDirection`, found `u8`
+     |                          |
+     |                          arguments to this method are inc
+orrect
+     |
+note: method defined here
+    --> src\objects\map_object.rs:507:12
+     |
+507  |     pub fn apply_death(&mut self, direction: MirDirection
+, location: Point) -> ActionResult {
+     |            ^^^^^^^^^^^            -----------------------
+
+error[E0308]: mismatched types
+    --> src\scenes\state.rs:1013:36
+     |
+1013 |                         direction: packet.direction,
+     |                                    ^^^^^^^^^^^^^^^^ expec
+ted `MirDirection`, found `u8`
+
+error[E0308]: mismatched types
+    --> src\scenes\state.rs:1025:36
+     |
+1025 |                         direction: packet.direction,
+     |                                    ^^^^^^^^^^^^^^^^ expec
+ted `MirDirection`, found `u8`
+
+error[E0609]: no field `info` on type `&mir2_shared::packets::Ne
+wMapInfo`
+    --> src\scenes\state.rs:1047:56
+     |
+1047 |             .map(|details| (details.map_index, details.in
+fo.title.clone()))
+     |                                                        ^^
+^^ unknown field
+     |
+     = note: available fields are: `map_index`, `file_name`, `ti
+tle`, `minimap`, `big_map` ... and 6 others
+
+error[E0609]: no field `setup` on type `&mir2_shared::packets::W
+orldMapSetupInfo`
+    --> src\scenes\state.rs:1056:73
+     |
+1056 |         let world_map_enabled = self.world_map.as_ref().m
+ap(|info| info.setup.enabled);
+     |                                                          
+               ^^^^^ unknown field
+     |
+     = note: available field is: `world_maps`
+
+error[E0609]: no field `setup` on type `&mir2_shared::packets::W
+orldMapSetupInfo`
+    --> src\scenes\state.rs:1060:30
+     |
+1060 |             .map(|info| info.setup.icons.len())
+     |                              ^^^^^ unknown field
+     |
+     = note: available field is: `world_maps`
+
+error[E0609]: no field `teleport_to_npc_cost` on type `&mir2_sha
+red::packets::WorldMapSetupInfo`
+    --> src\scenes\state.rs:1065:30
+     |
+1065 |             .map(|info| info.teleport_to_npc_cost);
+     |                              ^^^^^^^^^^^^^^^^^^^^ unknown
+ field
+     |
+     = note: available field is: `world_maps`
+
+error[E0609]: no field `npc_index` on type `&mir2_shared::packet
+s::SearchMapResult`
+    --> src\scenes\state.rs:1073:34
+     |
+1073 |             .map(|result| result.npc_index);
+     |                                  ^^^^^^^^^ unknown field
+     |
+help: a field with a similar name exists
+     |
+1073 -             .map(|result| result.npc_index);
+1073 +             .map(|result| result.map_index);
+     |
+
+error[E0599]: no variant or associated item named `Player` found
+ for enum `MapObjectType` in the current scope
+    --> src\scenes\state.rs:1082:32
+     |
+1082 |                 MapObjectType::Player => {
+     |                                ^^^^^^ variant or associat
+ed item not found in `MapObjectType`
+     |
+    ::: src\objects\map_object.rs:22:1
+     |
+22   | pub enum MapObjectType {
+     | ---------------------- variant or associated item `Player
+` not found for this enum
+
+error[E0609]: no field `location` on type `&mir2_shared::packets
+::UserLocation`
+    --> src\scenes\state.rs:1115:60
+     |
+1115 |             location: self.location.as_ref().map(|loc| lo
+c.location),
+     |                                                          
+  ^^^^^^^^ unknown field
+     |
+help: a field with a similar name exists
+     |
+1115 |             location: self.location.as_ref().map(|loc| lo
+c.location_x),
+     |                                                          
+          ++
+
+error[E0308]: mismatched types
+   --> src\scenes\dialogs\notice_dialog.rs:175:40
+    |
+175 |         self.scroll_bar_position = (x, y);
+    |                                        ^ expected `i32`, f
+ound `usize`
+    |
+help: you can convert a `usize` to an `i32` and panic if the con
+verted value doesn't fit
+    |
+175 |         self.scroll_bar_position = (x, y.try_into().unwrap
+());
+    |                                         ++++++++++++++++++
+++
+
+error[E0609]: no field `name` on type `&mir2_shared::UserItem`
+   --> src\scenes\dialogs\socket_dialog.rs:220:53
+    |
+220 |         self.selected_item.as_ref().map(|item| item.name.c
+lone())
+    |                                                     ^^^^ u
+nknown field
+    |
+    = note: available fields are: `unique_id`, `item_index`, `in
+fo`, `current_dura`, `max_dura` ... and 19 others
+
+error[E0609]: no field `name` on type `&mir2_shared::UserItem`
+  --> src\scenes\dialogs\mount_dialog.rs:75:38
+   |
+75 |         self.mount_name = mount_item.name.clone();
+   |                                      ^^^^ unknown field
+   |
+   = note: available fields are: `unique_id`, `item_index`, `inf
+o`, `current_dura`, `max_dura` ... and 19 others
+
+error[E0308]: mismatched types
+  --> src\scenes\dialogs\mount_dialog.rs:76:32
+   |
+76 |         self.current_loyalty = mount_item.current_dura;
+   |         --------------------   ^^^^^^^^^^^^^^^^^^^^^^^ expe
+cted `u32`, found `u16`
+   |         |
+   |         expected due to the type of this binding
+
+error[E0308]: mismatched types
+  --> src\scenes\dialogs\mount_dialog.rs:77:28
+   |
+77 |         self.max_loyalty = mount_item.max_dura;
+   |         ----------------   ^^^^^^^^^^^^^^^^^^^ expected `u3
+2`, found `u16`
+   |         |
+   |         expected due to the type of this binding
+
+error[E0609]: no field `name` on type `&mir2_shared::UserItem`
+  --> src\scenes\dialogs\fishing_dialog.rs:40:29
+   |
+40 |         self.rod_name = rod.name.clone();
+   |                             ^^^^ unknown field
+   |
+   = note: available fields are: `unique_id`, `item_index`, `inf
+o`, `current_dura`, `max_dura` ... and 19 others
+
+error[E0308]: mismatched types
+   --> src\scenes\dialogs\craft_dialog.rs:139:56
+    |
+139 |                         if item.count < shadow.count * cou
+nt as u32 {
+    |                                                        ^^^
+^^^^^^^^^ expected `u16`, found `u32`
+
+error[E0277]: cannot multiply `u16` by `u32`
+   --> src\scenes\dialogs\craft_dialog.rs:139:54
+    |
+139 |                         if item.count < shadow.count * cou
+nt as u32 {
+    |                                                      ^ no 
+implementation for `u16 * u32`
+    |
+    = help: the trait `Mul<u32>` is not implemented for `u16`
+    = help: the following other types implement trait `Mul<Rhs>`
+:
+              `&u16` implements `Mul<u16>`
+              `&u16` implements `Mul`
+              `u16` implements `Mul<&u16>`
+              `u16` implements `Mul<zerocopy::byteorder::U16<O>>
+`
+              `u16` implements `Mul`
+
+error[E0308]: mismatched types
+   --> src\scenes\dialogs\craft_dialog.rs:144:48
+    |
+144 |                         if item.current_dura < 1000 * coun
+t as u32 {
+    |                            -----------------   ^^^^^^^^^^^
+^^^^^^^^ expected `u16`, found `u32`
+    |                            |
+    |                            expected because this is `u16`
+    |
+help: you can convert `item.current_dura` from `u16` to `u32`, m
+atching the type of `1000 * count as u32`
+    |
+144 |                         if u32::from(item.current_dura) < 
+1000 * count as u32 {
+    |                            ++++++++++                 +
+
+warning: unused variable: `version_hash`
+  --> src\program.rs:62:17
+   |
+62 |             let version_hash = match version::client_binary
+_hash() {
+   |                 ^^^^^^^^^^^^ help: if this is intentional, 
+prefix it with an underscore: `_version_hash`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: variable does not need to be mutable
+   --> src\scenes\state.rs:500:13
+    |
+500 |         let mut remaining_count = None;
+    |             ----^^^^^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` on by default
+
+error[E0499]: cannot borrow `*self` as mutable more than once at
+ a time
+   --> src\scenes\dialogs\timer_dialog.rs:182:21
+    |
+177 |                 if let Some(current_timer) = self.active_t
+imers.get_mut(self.current_timer_key.as_ref().unwrap()) {
+    |                                              -------------
+----- first mutable borrow occurs here
+...
+182 |                     self.update_time_graphic(current_timer
+.timer_type);
+    |                     ^^^^                     -------------
+----------- first borrow later used here
+    |                     |
+    |                     second mutable borrow occurs here
+
+warning: unused variable: `hours`
+   --> src\scenes\dialogs\timer_dialog.rs:224:13
+    |
+224 |         let hours = self.timer_counter / 3600;
+    |             ^^^^^ help: if this is intentional, prefix it 
+with an underscore: `_hours`
+
+warning: unused variable: `minutes`
+   --> src\scenes\dialogs\timer_dialog.rs:225:13
+    |
+225 |         let minutes = (self.timer_counter % 3600) / 60;
+    |             ^^^^^^^ help: if this is intentional, prefix i
+t with an underscore: `_minutes`
+
+warning: unused variable: `seconds`
+   --> src\scenes\dialogs\timer_dialog.rs:226:13
+    |
+226 |         let seconds = self.timer_counter % 60;
+    |             ^^^^^^^ help: if this is intentional, prefix i
+t with an underscore: `_seconds`
+
+error[E0382]: use of moved value: `gem`
+   --> src\scenes\dialogs\socket_dialog.rs:104:41
+    |
+89  |     pub fn socket_gem(&mut self, slot: usize, gem: UserIte
+m) -> bool {
+    |                                               --- move occ
+urs because `gem` has type `mir2_shared::UserItem`, which does n
+ot implement the `Copy` trait
+...
+99  |         self.sockets[slot] = Some(gem);
+    |                                   --- value moved here
+...
+104 |                 item.slots[slot] = Some(gem);
+    |                                         ^^^ value used her
+e after move
+    |
+help: consider cloning the value if the performance cost is acce
+ptable
+    |
+99  |         self.sockets[slot] = Some(gem.clone());
+    |                                      ++++++++
+
+warning: unused variable: `inventory`
+   --> src\scenes\dialogs\craft_dialog.rs:127:33
+    |
+127 |     pub fn auto_fill(&mut self, inventory: &[Option<UserIt
+em>]) {
+    |                                 ^^^^^^^^^ help: if this is
+ intentional, prefix it with an underscore: `_inventory`
+
+Some errors have detailed explanations: E0277, E0308, E0382, E04
+99, E0599, E0609.
+For more information about an error, try `rustc --explain E0277`
+.
+warning: `mir2_client` (bin "mir2_client") generated 52 warnings
+error: could not compile `mir2_client` (bin "mir2_client") due t
+o 31 previous errors; 52 warnings emitted

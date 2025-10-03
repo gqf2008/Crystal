@@ -46,17 +46,17 @@ pub trait Dialog {
     fn contains_point(&self, x: i32, y: i32) -> bool;
     
     /// 鼠标移动事件
-    fn on_mouse_move(&mut self, x: i32, y: i32) -> bool {
+    fn on_mouse_move(&mut self, _x: i32, _y: i32) -> bool {
         false // 默认不处理
     }
     
     /// 鼠标点击事件
-    fn on_mouse_click(&mut self, x: i32, y: i32, button: MouseButton) -> bool {
+    fn on_mouse_click(&mut self, _x: i32, _y: i32, _button: MouseButton) -> bool {
         false // 默认不处理
     }
     
     /// 键盘按键事件
-    fn on_key_press(&mut self, key: KeyCode) -> bool {
+    fn on_key_press(&mut self, _key: KeyCode) -> bool {
         false // 默认不处理
     }
     
@@ -153,26 +153,30 @@ impl DialogManager {
         self.dialog_storage.get(id).map(|b| b.as_ref())
     }
     
-    /// 获取对话框（可变引用）
-    pub fn get_dialog_mut(&mut self, id: usize) -> Option<&mut dyn Dialog> {
-        self.dialog_storage.get_mut(id).map(|b| b.as_mut())
-    }
+    // 注意：get_dialog_mut 无法直接返回 &mut dyn Dialog 由于生命周期问题
+    // 需要在每个使用点直接访问 self.dialog_storage.get_mut(id)
     
     /// 显示对话框
     pub fn show_dialog(&mut self, name: &str) {
         if let Some(&id) = self.dialogs.get(name) {
-            if let Some(dialog) = self.get_dialog_mut(id) {
+            // 先检查状态
+            let is_modal = self.dialog_storage.get(id)
+                .map(|b| b.is_modal())
+                .unwrap_or(false);
+            
+            // 显示对话框
+            if let Some(dialog) = self.dialog_storage.get_mut(id) {
                 dialog.show();
-                
-                // 添加到可见列表（如果不存在）
-                if !self.visible_dialogs.contains(&id) {
-                    self.visible_dialogs.push(id);
-                }
-                
-                // 如果是模态对话框，添加到模态栈
-                if dialog.is_modal() && !self.modal_stack.contains(&id) {
-                    self.modal_stack.push(id);
-                }
+            }
+            
+            // 添加到可见列表（如果不存在）
+            if !self.visible_dialogs.contains(&id) {
+                self.visible_dialogs.push(id);
+            }
+            
+            // 如果是模态对话框，添加到模态栈
+            if is_modal && !self.modal_stack.contains(&id) {
+                self.modal_stack.push(id);
             }
         }
     }
@@ -180,15 +184,15 @@ impl DialogManager {
     /// 隐藏对话框
     pub fn hide_dialog(&mut self, name: &str) {
         if let Some(&id) = self.dialogs.get(name) {
-            if let Some(dialog) = self.get_dialog_mut(id) {
+            if let Some(dialog) = self.dialog_storage.get_mut(id) {
                 dialog.hide();
-                
-                // 从可见列表移除
-                self.visible_dialogs.retain(|&x| x != id);
-                
-                // 从模态栈移除
-                self.modal_stack.retain(|&x| x != id);
             }
+            
+            // 从可见列表移除
+            self.visible_dialogs.retain(|&x| x != id);
+            
+            // 从模态栈移除
+            self.modal_stack.retain(|&x| x != id);
         }
     }
     
@@ -211,7 +215,7 @@ impl DialogManager {
     pub fn hide_all(&mut self) {
         let dialog_ids: Vec<usize> = self.visible_dialogs.clone();
         for id in dialog_ids {
-            if let Some(dialog) = self.get_dialog_mut(id) {
+            if let Some(dialog) = self.dialog_storage.get_mut(id) {
                 dialog.hide();
             }
         }
@@ -229,7 +233,7 @@ impl DialogManager {
         let dialog_ids: Vec<usize> = self.visible_dialogs.clone();
         for id in dialog_ids {
             if !keep_ids.contains(&id) {
-                if let Some(dialog) = self.get_dialog_mut(id) {
+                if let Some(dialog) = self.dialog_storage.get_mut(id) {
                     dialog.hide();
                 }
                 self.visible_dialogs.retain(|&x| x != id);
@@ -276,7 +280,7 @@ impl DialogManager {
         
         // 更新所有可见对话框（按Z-order顺序）
         for &id in &self.visible_dialogs.clone() {
-            if let Some(dialog) = self.get_dialog_mut(id) {
+            if let Some(dialog) = self.dialog_storage.get_mut(id) {
                 dialog.update(delta_time);
             }
         }
@@ -306,7 +310,7 @@ impl DialogManager {
         
         // 如果有模态对话框，只处理模态对话框
         if let Some(modal_id) = self.current_modal_dialog() {
-            if let Some(dialog) = self.get_dialog_mut(modal_id) {
+            if let Some(dialog) = self.dialog_storage.get_mut(modal_id) {
                 return dialog.on_mouse_move(x, y);
             }
             return false;
@@ -319,7 +323,7 @@ impl DialogManager {
                     self.hover_dialog = Some(id);
                     
                     // 通知对话框鼠标移动（需要可变引用）
-                    if let Some(dialog_mut) = self.get_dialog_mut(id) {
+                    if let Some(dialog_mut) = self.dialog_storage.get_mut(id) {
                         if dialog_mut.on_mouse_move(x, y) {
                             return true; // 事件被处理
                         }
@@ -341,7 +345,7 @@ impl DialogManager {
         
         // 如果有模态对话框，只处理模态对话框
         if let Some(modal_id) = self.current_modal_dialog() {
-            if let Some(dialog) = self.get_dialog_mut(modal_id) {
+            if let Some(dialog) = self.dialog_storage.get_mut(modal_id) {
                 return dialog.on_mouse_click(x, y, button);
             }
             return false;
@@ -356,7 +360,7 @@ impl DialogManager {
                     self.bring_to_front(&name);
                     
                     // 通知对话框点击事件
-                    if let Some(dialog_mut) = self.get_dialog_mut(id) {
+                    if let Some(dialog_mut) = self.dialog_storage.get_mut(id) {
                         dialog_mut.on_mouse_click(x, y, button);
                     }
                     return true; // 事件被处理
@@ -376,7 +380,7 @@ impl DialogManager {
         // ESC 关闭最顶层对话框（或模态对话框）
         if key == KeyCode::Escape {
             if let Some(modal_id) = self.current_modal_dialog() {
-                if let Some(dialog) = self.get_dialog_mut(modal_id) {
+                if let Some(dialog) = self.dialog_storage.get_mut(modal_id) {
                     dialog.hide();
                 }
                 self.modal_stack.pop();
@@ -386,7 +390,7 @@ impl DialogManager {
             
             // 关闭最顶层对话框
             if let Some(&top_id) = self.visible_dialogs.last() {
-                if let Some(dialog) = self.get_dialog_mut(top_id) {
+                if let Some(dialog) = self.dialog_storage.get_mut(top_id) {
                     let name = dialog.name().to_string();
                     self.hide_dialog(&name);
                     return true;
@@ -396,7 +400,7 @@ impl DialogManager {
         
         // 如果有模态对话框，只传递给模态对话框
         if let Some(modal_id) = self.current_modal_dialog() {
-            if let Some(dialog) = self.get_dialog_mut(modal_id) {
+            if let Some(dialog) = self.dialog_storage.get_mut(modal_id) {
                 return dialog.on_key_press(key);
             }
             return false;
@@ -404,7 +408,7 @@ impl DialogManager {
         
         // 传递给最顶层对话框
         if let Some(&top_id) = self.visible_dialogs.last() {
-            if let Some(dialog) = self.get_dialog_mut(top_id) {
+            if let Some(dialog) = self.dialog_storage.get_mut(top_id) {
                 return dialog.on_key_press(key);
             }
         }
@@ -681,3 +685,4 @@ mod tests {
         assert!(!manager.on_key_press(KeyCode::Escape));
     }
 }
+

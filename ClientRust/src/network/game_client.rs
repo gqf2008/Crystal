@@ -14,6 +14,7 @@ use mir2_shared::{
 };
 
 use super::protocol::{PacketHandler, packets};
+use crate::scenes::dialogs::chat_dialog::ChatMessage;
 
 /// Game client state - implements packet handling logic
 /// 游戏客户端状态 - 实现数据包处理逻辑
@@ -95,13 +96,6 @@ pub enum GameObject {
     Item { id: u32, location: Point, item: UserItem },
 }
 
-#[derive(Debug, Clone)]
-pub struct ChatMessage {
-    pub text: String,
-    pub chat_type: ChatType,
-    pub timestamp: std::time::Instant,
-}
-
 // ==================== Game Systems ====================
 
 #[derive(Debug, Default)]
@@ -119,24 +113,12 @@ pub struct GroupMember {
 #[derive(Debug, Default)]
 pub struct GuildSystem {
     pub guild_name: Option<String>,
-    pub members: Vec<GuildMember>,
-}
-
-#[derive(Debug, Clone)]
-pub struct GuildMember {
-    pub name: String,
-    pub online: bool,
+    pub members: Vec<mir2_shared::GuildMember>,
 }
 
 #[derive(Debug, Default)]
 pub struct FriendSystem {
-    pub friends: Vec<FriendInfo>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FriendInfo {
-    pub name: String,
-    pub online: bool,
+    pub friends: Vec<mir2_shared::ClientFriend>,
 }
 
 #[derive(Debug, Default)]
@@ -225,10 +207,37 @@ impl GameClient {
     
     /// Add chat message
     fn add_chat_message(&mut self, text: String, chat_type: ChatType) {
+        self.add_chat_message_with_sender("System".to_string(), text, chat_type);
+    }
+    
+    /// Add chat message with sender
+    fn add_chat_message_with_sender(&mut self, sender: String, text: String, chat_type: ChatType) {
+        // Get color based on chat type (same logic as ChatDialog::get_chat_color)
+        let color = match chat_type {
+            ChatType::Normal => (255, 255, 255),      // White
+            ChatType::Shout | ChatType::Shout2 | ChatType::Shout3 => (255, 255, 0), // Yellow
+            ChatType::System | ChatType::System2 => (255, 100, 100), // Red
+            ChatType::Hint => (255, 200, 100),        // Light Orange
+            ChatType::Announcement => (255, 200, 0),  // Orange
+            ChatType::Group => (100, 255, 100),       // Green
+            ChatType::WhisperIn | ChatType::WhisperOut => (255, 100, 255), // Pink
+            ChatType::Guild => (100, 200, 255),       // Cyan
+            ChatType::Trainer => (200, 150, 255),     // Purple
+            ChatType::LevelUp => (255, 215, 0),       // Gold
+            ChatType::Relationship => (255, 105, 180), // Hot Pink
+            ChatType::Mentor => (147, 112, 219),      // Medium Purple
+            ChatType::LineMessage => (150, 150, 150), // Gray
+        };
+        
         let message = ChatMessage {
+            sender,
             text,
             chat_type,
-            timestamp: std::time::Instant::now(),
+            color,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64,
         };
         
         self.chat_messages.push_back(message.clone());
@@ -1655,9 +1664,12 @@ impl PacketHandler for GameClient {
             tracing::debug!("  - {} (ID: {}, Memo: '{}') [{}]", 
                 friend.name, friend.object_id, friend.memo, status);
             
-            // GameClient FriendInfo只存储核心字段
-            self.friends.friends.push(FriendInfo {
+            // Use SharedRust ClientFriend
+            self.friends.friends.push(mir2_shared::ClientFriend {
+                index: friend.object_id as i32,
                 name: friend.name,
+                memo: friend.memo,
+                blocked: false,  // Note: FriendInfo packet doesn't include blocked status
                 online: friend.online,
             });
         }

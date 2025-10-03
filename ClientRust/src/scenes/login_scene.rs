@@ -2,7 +2,7 @@
 // Mirrors Client/MirScenes/LoginScene.cs
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
-use crate::network::protocol::ServerMessage;
+use crate::network::game_client::GameEvent;
 
 /// Login scene state
 #[derive(Debug)]
@@ -96,22 +96,22 @@ impl Scene for LoginScene {
         // TODO: Draw version info
     }
     
-    fn process_packet(&mut self, packet: ServerMessage) {
-        match packet {
-            ServerMessage::Connected => {
+    fn process_event(&mut self, event: &GameEvent) {
+        match event {
+            GameEvent::Connected => {
                 println!("Connected to server!");
                 self.connecting = false;
             }
-            ServerMessage::LoginSuccess(_) => {
-                println!("Login successful! Switching to select scene...");
-                // TODO: Switch to select scene
-            }
-            ServerMessage::LoginFailure(reason) => {
-                println!("Login failed: {}", reason);
+            GameEvent::Disconnected { reason } => {
+                println!("Disconnected: {}", reason);
                 self.connecting = false;
             }
+            GameEvent::SystemMessage { message } => {
+                println!("System: {}", message);
+                // TODO: Display in UI
+            }
             _ => {
-                // Ignore other packets in login scene
+                // Ignore other events in login scene
             }
         }
     }

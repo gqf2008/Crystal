@@ -136,12 +136,12 @@ impl CraftDialog {
                 if let Some(item) = &self.slots[i] {
                     if i >= TOOL_SLOT_COUNT {
                         // 材料槽：检查数量
-                        if item.count < shadow.count * count as u32 {
+                        if item.count < shadow.count * count {
                             return false;
                         }
                     } else {
                         // 工具槽：检查耐久度
-                        if item.current_dura < 1000 * count as u32 {
+                        if item.current_dura < 1000 * count as u16 {
                             return false;
                         }
                     }

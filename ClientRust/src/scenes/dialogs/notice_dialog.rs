@@ -170,7 +170,7 @@ impl NoticeDialog {
         let interval = 400 / max_scroll;
         
         let x = 293;
-        let y = 46 + (self.scroll_index * interval).min(399);
+        let y = (46 + (self.scroll_index * interval).min(399)) as i32;
         
         self.scroll_bar_position = (x, y);
     }

@@ -87,7 +87,7 @@ pub mod craft_dialog;
 
 // Re-exports
 pub use main_dialog::MainDialog;
-pub use chat_dialog::{ChatDialog, ChatMessage, ChatType};
+pub use chat_dialog::{ChatDialog, ChatMessage};
 pub use inventory_dialog::{InventoryDialog, InventoryTab};
 pub use character_dialog::{CharacterDialog, CharacterPage, EquipmentSlot, CharacterStats, MagicInfo};
 pub use skillbar_dialog::{SkillBarDialog, SkillSlot};
@@ -97,6 +97,7 @@ pub use trade_dialog::{TradeDialog, TradeState, TradeParty, TradeSummary};
 pub use guild_dialog::{GuildDialog, GuildPage, GuildMember, GuildRank, GuildRankOptions, GuildBuff};
 pub use friend_dialog::{FriendDialog, FriendTab, Friend, FriendStatus};
 pub use group_dialog::{GroupDialog, GroupMember};
+// Note: GuildMember and Friend are UI wrappers around mir2_shared::{GuildMember, ClientFriend}
 pub use bigmap_dialog::{BigMapDialog, MapRecord, MapNPC, MapImage, MapViewPort};
 pub use quest_list_dialog::{QuestListDialog, QuestInfo, QuestProgress, QuestStatus, QuestType, QuestRewards};
 pub use mail_dialog::{MailListDialog, MailComposeDialog, ClientMail, MailType, MailStatus};

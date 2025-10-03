@@ -55,6 +55,19 @@ pub struct PathFinder {
     diagonal_movement: bool,
 }
 
+// Manual Debug implementation because closures don't implement Debug
+impl std::fmt::Debug for PathFinder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PathFinder")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("is_blocking_fn", &"<closure>")
+            .field("max_iterations", &self.max_iterations)
+            .field("diagonal_movement", &self.diagonal_movement)
+            .finish()
+    }
+}
+
 impl PathFinder {
     /// Create a new pathfinder
     pub fn new(

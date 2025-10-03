@@ -378,6 +378,19 @@ impl MapObject {
         previous
     }
     
+    /// Set the level (for display purposes - actual level stored in UserInformation)
+    pub fn set_level(&mut self, _level: u16) {
+        // Level is stored in UserInformation/character state, not in MapObject
+        // This is a stub method for UI compatibility
+    }
+    
+    /// Set the guild name
+    pub fn set_guild_name(&mut self, _guild_name: String) -> Option<String> {
+        // Guild name is not currently stored in MapObject
+        // This is a stub method for UI compatibility
+        None
+    }
+    
     // ========================================
     // Setters - State
     // ========================================

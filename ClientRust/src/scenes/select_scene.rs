@@ -2,7 +2,7 @@
 // Mirrors Client/MirScenes/SelectScene.cs
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
-use crate::network::protocol::ServerMessage;
+use crate::network::game_client::GameEvent;
 use mir2_shared::enums::{MirClass, MirGender};
 
 /// Character selection data
@@ -72,7 +72,7 @@ impl SelectScene {
     
     /// Open new character creation dialog
     pub fn create_new_character(&mut self) {
-        if self.characters.get(self.selected_index) == Some(&None) {
+        if matches!(self.characters.get(self.selected_index), Some(&None)) {
             println!("Opening character creation dialog");
             self.creating_character = true;
             // TODO: Show new character dialog
@@ -142,36 +142,19 @@ impl Scene for SelectScene {
         // TODO: Draw UI buttons
     }
     
-    fn process_packet(&mut self, packet: ServerMessage) {
-        match packet {
-            ServerMessage::NewCharacterSuccess(info) => {
-                println!("Character created: {}", info.name);
-                
-                // Add to character list
-                let character = SelectCharacter {
-                    index: info.index,
-                    name: info.name.clone(),
-                    level: info.level,
-                    class: info.class,
-                    gender: info.gender,
-                    exists: true,
-                };
-                
-                if (info.index as usize) < self.characters.len() {
-                    self.characters[info.index as usize] = Some(character);
-                }
-                
-                self.creating_character = false;
+    fn process_event(&mut self, event: &GameEvent) {
+        match event {
+            GameEvent::SystemMessage { message } => {
+                println!("System message: {}", message);
+                // TODO: Display in UI
             }
-            ServerMessage::DeleteCharacterSuccess(index) => {
-                println!("Character deleted at slot {}", index);
-                if (index as usize) < self.characters.len() {
-                    self.characters[index as usize] = None;
-                }
-                self.deleting_character = false;
+            GameEvent::Disconnected { reason } => {
+                println!("Disconnected: {}", reason);
+                // TODO: Return to login
             }
             _ => {
-                // Ignore other packets
+                // TODO: Handle character creation/deletion events when added to GameEvent
+                // For now, ignore other events
             }
         }
     }

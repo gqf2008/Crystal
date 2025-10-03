@@ -1,7 +1,7 @@
 // Scene trait - base interface for all scenes
 // Mirrors Client/MirScenes/MirScene.cs
 
-use crate::network::protocol::ServerMessage;
+use crate::network::game_client::GameEvent;
 
 /// Scene type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,8 +25,8 @@ pub trait Scene {
     /// Render scene
     fn draw(&self);
     
-    /// Process network packet
-    fn process_packet(&mut self, packet: ServerMessage);
+    /// Process game event from GameClient
+    fn process_event(&mut self, event: &GameEvent);
     
     /// Handle mouse move
     fn on_mouse_move(&mut self, x: i32, y: i32);

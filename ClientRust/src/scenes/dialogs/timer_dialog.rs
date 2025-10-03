@@ -179,7 +179,8 @@ impl TimerDialog {
                     self.timer_started = true;
                     self.timer_time = current_time_ms + 1000;
                     self.timer_counter = current_timer.get_remaining_seconds(current_time_ms);
-                    self.update_time_graphic(current_timer.timer_type);
+                    let timer_type = current_timer.timer_type;
+                    self.update_time_graphic(timer_type);
                 }
             }
         } else {

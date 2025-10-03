@@ -3,18 +3,7 @@
 
 use super::Dialog;
 use std::collections::VecDeque;
-
-/// Chat message type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChatType {
-    Normal,      // 普通聊天
-    Whisper,     // 私聊
-    Shout,       // 喊话
-    System,      // 系统消息
-    Group,       // 组队
-    Guild,       // 公会
-    Announcement, // 公告
-}
+use mir2_shared::ChatType;
 
 /// Chat message
 #[derive(Debug, Clone)]
@@ -53,7 +42,8 @@ impl ChatDialog {
             input_text: String::new(),
             chat_filter: vec![
                 ChatType::Normal,
-                ChatType::Whisper,
+                ChatType::WhisperIn,
+                ChatType::WhisperOut,
                 ChatType::Shout,
                 ChatType::System,
                 ChatType::Group,
@@ -86,12 +76,18 @@ impl ChatDialog {
     fn get_chat_color(chat_type: ChatType) -> (u8, u8, u8) {
         match chat_type {
             ChatType::Normal => (255, 255, 255),      // White
-            ChatType::Whisper => (255, 100, 255),     // Pink
-            ChatType::Shout => (255, 255, 0),         // Yellow
-            ChatType::System => (255, 100, 100),      // Red
+            ChatType::WhisperIn | ChatType::WhisperOut => (255, 100, 255), // Pink
+            ChatType::Shout | ChatType::Shout2 | ChatType::Shout3 => (255, 255, 0), // Yellow
+            ChatType::System | ChatType::System2 => (255, 100, 100), // Red
+            ChatType::Hint => (255, 200, 100),        // Light Orange
+            ChatType::Announcement => (255, 200, 0),  // Orange
             ChatType::Group => (100, 255, 100),       // Green
             ChatType::Guild => (100, 200, 255),       // Cyan
-            ChatType::Announcement => (255, 200, 0),  // Orange
+            ChatType::Trainer => (200, 150, 255),     // Purple
+            ChatType::LevelUp => (255, 215, 0),       // Gold
+            ChatType::Relationship => (255, 105, 180), // Hot Pink
+            ChatType::Mentor => (147, 112, 219),      // Medium Purple
+            ChatType::LineMessage => (150, 150, 150), // Gray
         }
     }
     

@@ -37,7 +37,9 @@ impl FishingDialog {
     }
 
     pub fn show(&mut self, rod: &UserItem) {
-        self.rod_name = rod.name.clone();
+        self.rod_name = rod.info.as_ref()
+            .map(|info| info.name.clone())
+            .unwrap_or_default();
         if rod.slots.len() >= 5 {
             for i in 0..5 {
                 self.slots[i] = rod.slots[i].clone();

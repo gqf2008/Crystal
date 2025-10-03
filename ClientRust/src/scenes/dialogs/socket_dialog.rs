@@ -96,7 +96,7 @@ impl SocketDialog {
             return false;
         }
 
-        self.sockets[slot] = Some(gem);
+        self.sockets[slot] = Some(gem.clone());
         
         // 更新选中装备的槽位
         if let Some(ref mut item) = self.selected_item {
@@ -217,7 +217,9 @@ impl SocketDialog {
 
     /// 获取选中装备的名称
     pub fn get_selected_item_name(&self) -> Option<String> {
-        self.selected_item.as_ref().map(|item| item.name.clone())
+        self.selected_item.as_ref().and_then(|item| {
+            item.info.as_ref().map(|info| info.name.clone())
+        })
     }
 }
 

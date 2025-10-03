@@ -110,7 +110,8 @@ impl InventoryDialog {
         }
         
         if let Some(ref item) = slots[slot] {
-            println!("Using item: {:?}", item.name);
+            let name = item.info.as_ref().map(|i| i.name.as_str()).unwrap_or("Unknown");
+            println!("Using item: {}", name);
             // TODO: Send use item packet to server
         }
     }
@@ -123,7 +124,8 @@ impl InventoryDialog {
         }
         
         if let Some(ref item) = slots[slot] {
-            println!("Dropping item: {:?} x{}", item.name, amount);
+            let name = item.info.as_ref().map(|i| i.name.as_str()).unwrap_or("Unknown");
+            println!("Dropping item: {} x{}", name, amount);
             // TODO: Send drop item packet to server
         }
     }
@@ -172,7 +174,7 @@ impl InventoryDialog {
         self.current_weight = self.inventory
             .iter()
             .filter_map(|item| item.as_ref())
-            .map(|item| item.weight as i32 * item.count as i32)
+            .map(|item| item.weight(item.info.as_ref()))
             .sum();
     }
 }

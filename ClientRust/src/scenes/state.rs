@@ -2,7 +2,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use mir2_shared::{
-    ClientMagic, ClientQuestProgress,
+    ClientMagic, ClientQuestProgress, Point,
     enums::{
         AttackMode, DamageType, HeroSpawnState, ItemGrade, LightSetting, MirAction, MirDirection,
         PetMode, Spell,
@@ -50,8 +50,10 @@ type ObjectStruck = packets::ObjectStruck;
 type ObjectDied = packets::ObjectDied;
 
 // 占位类型 - 这些还需要找到正确的映射
-type NpcResponse = ();     // TODO: 找到正确的数据包类型
-type ObjectMotion = ();    // TODO: 找到正确的数据包类型
+type NpcResponse = packets::NPCResponse;  // NPC对话响应
+// ObjectMotion 可能是 ObjectWalk, ObjectRun 等多种移动packet的统称
+// 暂时使用ObjectWalk作为代表，后续可能需要使用trait或enum来统一处理
+type ObjectMotion = packets::ObjectWalk;  // 对象移动 (临时使用ObjectWalk)
 
 #[derive(Debug, Default)]
 pub struct ClientState {
@@ -175,7 +177,7 @@ impl ClientState {
         match self.objects.entry(object.object_id) {
             Entry::Occupied(mut entry) => {
                 let map_object = entry.get_mut();
-                let sync = map_object.sync_player(object);
+                let sync = map_object.sync_from_player_packet(&object);
                 ObjectUpdateOutcome {
                     created: false,
                     object_type: map_object.object_type(),
@@ -183,7 +185,7 @@ impl ClientState {
                 }
             }
             Entry::Vacant(entry) => {
-                let (map_object, sync) = MapObject::from_player(object);
+                let (map_object, sync) = MapObject::from_player_packet(&object);
                 let object_type = map_object.object_type();
                 entry.insert(map_object);
                 ObjectUpdateOutcome {
@@ -203,7 +205,7 @@ impl ClientState {
         match self.objects.entry(object_id) {
             Entry::Occupied(mut entry) => {
                 let map_object = entry.get_mut();
-                let sync = map_object.sync_hero(object);
+                let sync = map_object.sync_from_hero_packet(&object);
                 ObjectUpdateOutcome {
                     created: false,
                     object_type: map_object.object_type(),
@@ -211,7 +213,7 @@ impl ClientState {
                 }
             }
             Entry::Vacant(entry) => {
-                let (map_object, sync) = MapObject::from_hero(object);
+                let (map_object, sync) = MapObject::from_hero_packet(&object);
                 let object_type = map_object.object_type();
                 entry.insert(map_object);
                 ObjectUpdateOutcome {
@@ -228,7 +230,7 @@ impl ClientState {
         match self.objects.entry(object_id) {
             Entry::Occupied(mut entry) => {
                 let map_object = entry.get_mut();
-                let sync = map_object.sync_monster(object);
+                let sync = map_object.sync_from_monster_packet(&object);
                 ObjectUpdateOutcome {
                     created: false,
                     object_type: map_object.object_type(),
@@ -236,7 +238,7 @@ impl ClientState {
                 }
             }
             Entry::Vacant(entry) => {
-                let (map_object, sync) = MapObject::from_monster(object);
+                let (map_object, sync) = MapObject::from_monster_packet(&object);
                 let object_type = map_object.object_type();
                 entry.insert(map_object);
                 ObjectUpdateOutcome {
@@ -267,13 +269,27 @@ impl ClientState {
     }
 
     pub fn spawn_object_item(&mut self, packet: ObjectItem) -> GroundObjectSpawn {
+        use mir2_shared::Point;
+        let item_info = packet.item.info.as_ref();
+        let name = item_info.map(|info| info.name.clone()).unwrap_or_default();
+        let image = item_info.map(|info| info.image).unwrap_or(0);
+        let grade = item_info.map(|info| info.grade).unwrap_or(mir2_shared::ItemGrade::None);
+        // 根据grade计算颜色 (临时实现)
+        let name_colour_argb = match grade {
+            mir2_shared::ItemGrade::None => 0xFFFFFFFF,
+            mir2_shared::ItemGrade::Common => 0xFFFFFFFF,
+            mir2_shared::ItemGrade::Rare => 0xFF00FF00,
+            mir2_shared::ItemGrade::Legendary => 0xFFFFAA00,
+            mir2_shared::ItemGrade::Mythical => 0xFF0080FF,
+            mir2_shared::ItemGrade::Heroic => 0xFFFF00FF,
+        };
         let object = GroundObject::Item(GroundItemEntry {
             object_id: packet.object_id,
-            name: packet.name,
-            name_colour_argb: packet.name_colour_argb,
-            location: packet.location,
-            image: packet.image,
-            grade: packet.grade,
+            name,
+            name_colour_argb,
+            location: Point::new(packet.location_x, packet.location_y),
+            image,
+            grade,
         });
         self.ground_objects.insert(packet.object_id, object.clone());
         GroundObjectSpawn {
@@ -283,10 +299,11 @@ impl ClientState {
     }
 
     pub fn spawn_object_gold(&mut self, packet: ObjectGold) -> GroundObjectSpawn {
+        use mir2_shared::Point;
         let object = GroundObject::Gold(GroundGoldEntry {
             object_id: packet.object_id,
             amount: packet.gold,
-            location: packet.location,
+            location: Point::new(packet.location_x, packet.location_y),
         });
         self.ground_objects.insert(packet.object_id, object.clone());
         GroundObjectSpawn {
@@ -296,16 +313,18 @@ impl ClientState {
     }
 
     pub fn apply_damage_indicator(&mut self, packet: DamageIndicator) -> DamageIndicatorOutcome {
+        use mir2_shared::DamageType;
         let object_type = self
             .objects
             .get(&packet.object_id)
             .map(|object| object.object_type());
 
+        let damage_type = DamageType::try_from(packet.damage_type).unwrap_or(DamageType::Hit);
         let event = DamageIndicatorEvent {
             object_id: packet.object_id,
             object_type,
             damage: packet.damage,
-            damage_type: packet.damage_type,
+            damage_type,
         };
         if self.damage_history.len() >= 100 {
             self.damage_history.remove(0);
@@ -316,20 +335,25 @@ impl ClientState {
     }
 
     pub fn apply_player_death(&mut self, packet: Death) -> PlayerDeathEvent {
+        use mir2_shared::{Point, MirDirection};
+        let location = Point::new(packet.location_x as i32, packet.location_y as i32);
+        let direction = MirDirection::try_from(packet.direction).unwrap_or(MirDirection::Up);
         let event = PlayerDeathEvent {
-            location: packet.location,
-            direction: packet.direction,
+            location,
+            direction,
         };
         self.player_dead = true;
         self.last_player_death = Some(event);
 
         if let Some(character) = self.character.as_mut() {
-            character.location = packet.location;
-            character.direction = packet.direction;
+            character.location_x = location.x;
+            character.location_y = location.y;
+            character.direction = direction;
         }
-        if let Some(location) = self.location.as_mut() {
-            location.location = packet.location;
-            location.direction = packet.direction;
+        if let Some(location_info) = self.location.as_mut() {
+            location_info.location_x = location.x;
+            location_info.location_y = location.y;
+            location_info.direction = direction;
         }
 
         event
@@ -401,11 +425,14 @@ impl ClientState {
         let mut location = None;
         let mut remaining_count = None;
         let mut removed_completely = false;
+        
+        // Convert u32 count to u16 (clamp if necessary)
+        let count = packet.count.min(u16::MAX as u32) as u16;
 
         if let Some(result) = Self::remove_item_from_slots(
             self.inventory.as_mut_slice(),
             packet.unique_id,
-            packet.count,
+            count,
         ) {
             location = Some(ItemContainer::Inventory);
             remaining_count = result.remaining_count;
@@ -413,7 +440,7 @@ impl ClientState {
         } else if let Some(result) = Self::remove_item_from_slots(
             self.equipment.as_mut_slice(),
             packet.unique_id,
-            packet.count,
+            count,
         ) {
             location = Some(ItemContainer::Equipment);
             remaining_count = result.remaining_count;
@@ -421,7 +448,7 @@ impl ClientState {
         } else if let Some(result) = Self::remove_item_from_slots(
             self.quest_inventory.as_mut_slice(),
             packet.unique_id,
-            packet.count,
+            count,
         ) {
             location = Some(ItemContainer::QuestInventory);
             remaining_count = result.remaining_count;
@@ -433,28 +460,28 @@ impl ClientState {
                 Self::remove_item_from_slots(
                     inventory.as_mut_slice(),
                     packet.unique_id,
-                    packet.count,
+                    count,
                 );
             }
             if let Some(ref mut equipment) = character.equipment {
                 Self::remove_item_from_slots(
                     equipment.as_mut_slice(),
                     packet.unique_id,
-                    packet.count,
+                    count,
                 );
             }
             if let Some(ref mut quest_inventory) = character.quest_inventory {
                 Self::remove_item_from_slots(
                     quest_inventory.as_mut_slice(),
                     packet.unique_id,
-                    packet.count,
+                    count,
                 );
             }
         }
 
         let event = ItemDeletionEvent {
             unique_id: packet.unique_id,
-            removed_count: packet.count,
+            removed_count: count,
             remaining_count,
             location,
             removed_completely,
@@ -473,30 +500,45 @@ impl ClientState {
         let mut remaining_count = None;
         let mut removed_completely = false;
         let mut location = None;
+        let mut unique_id = 0u64;
+        let mut removed_count = 0u16;
 
-        if let Some(result) = Self::remove_item_from_slots(
-            self.quest_inventory.as_mut_slice(),
-            packet.unique_id,
-            packet.count,
-        ) {
-            location = Some(ItemContainer::QuestInventory);
-            remaining_count = result.remaining_count;
-            removed_completely = result.removed_completely;
+        // Find and remove item by item_id (not unique_id)
+        // Since packet only has item_id, we need to find the first item with matching info.index
+        for slot in self.quest_inventory.iter_mut() {
+            if let Some(item) = slot {
+                if let Some(info) = &item.info {
+                    if info.index == packet.item_id {
+                        unique_id = item.unique_id;
+                        removed_count = item.count;
+                        *slot = None;
+                        location = Some(ItemContainer::QuestInventory);
+                        removed_completely = true;
+                        break;
+                    }
+                }
+            }
         }
 
+        // Also remove from character's quest inventory if present
         if let Some(character) = self.character.as_mut() {
             if let Some(ref mut quest_inventory) = character.quest_inventory {
-                Self::remove_item_from_slots(
-                    quest_inventory.as_mut_slice(),
-                    packet.unique_id,
-                    packet.count,
-                );
+                for slot in quest_inventory.iter_mut() {
+                    if let Some(item) = slot {
+                        if let Some(info) = &item.info {
+                            if info.index == packet.item_id {
+                                *slot = None;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
 
         let event = ItemDeletionEvent {
-            unique_id: packet.unique_id,
-            removed_count: packet.count,
+            unique_id,
+            removed_count,
             remaining_count,
             location,
             removed_completely,
@@ -690,7 +732,7 @@ impl ClientState {
         if let Some(object) = self.objects.get(&object_id) {
             let object_type = object.object_type();
             event.object_type = Some(object_type);
-            if matches!(object_type, MapObjectType::Player)
+            if matches!(object_type, MapObjectType::User)
                 && self.character.as_ref().map(|info| info.object_id) == Some(object_id)
             {
                 event.is_player = true;
@@ -710,7 +752,7 @@ impl ClientState {
 
     pub fn apply_colour_changed(&mut self, packet: ColourChanged) -> ColourChangeEvent {
         if let Some(character) = self.character.as_mut() {
-            character.name_colour_argb = packet.name_colour_argb;
+            character.name_colour = packet.name_colour_argb;
         }
 
         let event = ColourChangeEvent {
@@ -748,7 +790,7 @@ impl ClientState {
 
         if let Some(character) = self.character.as_mut() {
             if character.object_id == object_id {
-                character.name_colour_argb = name_colour_argb;
+                character.name_colour = name_colour_argb;
             }
         }
 
@@ -778,7 +820,7 @@ impl ClientState {
         if let Some(object) = self.objects.get_mut(&object_id) {
             let previous = object.set_guild_name(guild_name.clone());
             event.object_type = Some(object.object_type());
-            event.previous_guild_name = Some(previous);
+            event.previous_guild_name = previous;
         }
 
         if let Some(character) = self.character.as_mut() {
@@ -795,18 +837,22 @@ impl ClientState {
     }
 
     pub fn apply_health_changed(&mut self, packet: HealthChanged) -> HealthChangedEvent {
+        // Convert u32 to i32 (clamp if necessary)
+        let hp = packet.hp.min(i32::MAX as u32) as i32;
+        let mp = packet.mp.min(i32::MAX as u32) as i32;
+        
         let event = HealthChangedEvent {
-            hp: packet.hp,
-            mp: packet.mp,
+            hp,
+            mp,
         };
-        self.player_hp = Some(packet.hp);
-        self.player_mp = Some(packet.mp);
+        self.player_hp = Some(hp);
+        self.player_mp = Some(mp);
         self.last_health_change = Some(event);
-        self.player_dead = packet.hp <= 0;
+        self.player_dead = hp <= 0;
 
         if let Some(character) = self.character.as_mut() {
-            character.hp = packet.hp;
-            character.mp = packet.mp;
+            character.hp = hp;
+            character.mp = mp;
         }
 
         event
@@ -816,27 +862,32 @@ impl ClientState {
         &mut self,
         packet: HeroHealthChanged,
     ) -> HeroHealthChangedEvent {
+        // Convert u32 to i32 (clamp if necessary)
+        let hp = packet.hp.min(i32::MAX as u32) as i32;
+        let mp = packet.mp.min(i32::MAX as u32) as i32;
+        
         let event = HeroHealthChangedEvent {
-            hp: packet.hp,
-            mp: packet.mp,
+            hp,
+            mp,
         };
-        self.hero_hp = Some(packet.hp);
-        self.hero_mp = Some(packet.mp);
+        self.hero_hp = Some(hp);
+        self.hero_mp = Some(mp);
         self.last_hero_health_change = Some(event);
 
         event
     }
 
     pub fn upsert_npc(&mut self, packet: ObjectNpc) -> NpcUpdateOutcome {
+        use mir2_shared::Point;
         let entry = NpcEntry {
             object_id: packet.object_id,
             name: packet.name,
-            name_colour_argb: packet.name_colour_argb,
+            name_colour_argb: packet.name_colour,  // packet uses name_colour
             image: packet.image,
-            colour_argb: packet.colour_argb,
-            location: packet.location,
+            colour_argb: packet.colour,  // packet uses colour
+            location: Point::new(packet.location_x, packet.location_y),
             direction: packet.direction,
-            quest_ids: packet.quest_ids,
+            quest_ids: Vec::new(),  // packet doesn't include quest_ids, initialize empty
         };
 
         match self.npcs.entry(entry.object_id) {
@@ -874,8 +925,10 @@ impl ClientState {
         motion: ObjectMotion,
         action: MirAction,
     ) -> Option<ObjectActionOutcome> {
+        use mir2_shared::Point;
         let object = self.objects.get_mut(&motion.object_id)?;
-        let result = object.apply_action(action, motion.direction, motion.location);
+        let location = Point::new(motion.location_x, motion.location_y);
+        let result = object.apply_action(action, motion.direction, location);
         Some(ObjectActionOutcome {
             object_id: motion.object_id,
             object_type: object.object_type(),
@@ -884,12 +937,16 @@ impl ClientState {
     }
 
     pub fn apply_object_attack(&mut self, packet: ObjectAttack) -> Option<ObjectAttackOutcome> {
+        use mir2_shared::Point;
         let object = self.objects.get_mut(&packet.object_id)?;
+        let location = Point::new(packet.location_x as i32, packet.location_y as i32);
+        let direction = MirDirection::try_from(packet.direction).unwrap_or(MirDirection::Up);
+        let spell = Spell::try_from(packet.spell).unwrap_or(Spell::None);
         let attack = object.apply_attack(
-            packet.direction,
-            packet.location,
-            packet.spell,
-            packet.level,
+            direction,
+            location,
+            spell,
+            packet.level as u8,
             packet.attack_type,
         );
         Some(ObjectAttackOutcome {
@@ -900,8 +957,10 @@ impl ClientState {
     }
 
     pub fn apply_object_harvest(&mut self, packet: ObjectHarvest) -> Option<ObjectActionOutcome> {
+        use mir2_shared::Point;
         let object = self.objects.get_mut(&packet.object_id)?;
-        let result = object.apply_action(MirAction::Harvest, packet.direction, packet.location);
+        let location = Point::new(packet.location_x, packet.location_y);
+        let result = object.apply_action(MirAction::Harvest, packet.direction, location);
         Some(ObjectActionOutcome {
             object_id: packet.object_id,
             object_type: object.object_type(),
@@ -913,8 +972,10 @@ impl ClientState {
         &mut self,
         packet: ObjectHarvested,
     ) -> Option<ObjectActionOutcome> {
+        use mir2_shared::Point;
         let object = self.objects.get_mut(&packet.object_id)?;
-        let result = object.apply_action(MirAction::Skeleton, packet.direction, packet.location);
+        let location = Point::new(packet.location_x, packet.location_y);
+        let result = object.apply_action(MirAction::Skeleton, packet.direction, location);
         Some(ObjectActionOutcome {
             object_id: packet.object_id,
             object_type: object.object_type(),
@@ -923,8 +984,11 @@ impl ClientState {
     }
 
     pub fn apply_object_struck(&mut self, packet: ObjectStruck) -> Option<ObjectStruckOutcome> {
+        use mir2_shared::Point;
         let object = self.objects.get_mut(&packet.object_id)?;
-        let struck = object.apply_struck(packet.direction, packet.location, packet.attacker_id);
+        let location = Point::new(packet.location_x as i32, packet.location_y as i32);
+        let direction = MirDirection::try_from(packet.direction).unwrap_or(MirDirection::Up);
+        let struck = object.apply_struck(direction, location, packet.attacker_id);
         Some(ObjectStruckOutcome {
             object_id: packet.object_id,
             object_type: object.object_type(),
@@ -933,33 +997,37 @@ impl ClientState {
     }
 
     pub fn apply_object_died(&mut self, packet: ObjectDied) -> Option<ObjectDeathOutcome> {
+        use mir2_shared::Point;
+        let location = Point::new(packet.location_x as i32, packet.location_y as i32);
         match self.objects.entry(packet.object_id) {
             Entry::Occupied(mut entry) => {
                 if packet.death_type == 0 {
                     let object_type = entry.get().object_type();
+                    let direction = MirDirection::try_from(packet.direction).unwrap_or(MirDirection::Up);
                     let transition = entry
                         .get_mut()
-                        .apply_death(packet.direction, packet.location);
+                        .apply_death(direction, location);
                     Some(ObjectDeathOutcome {
                         object_id: packet.object_id,
                         object_type,
                         death_type: packet.death_type,
                         transition: Some(transition),
                         removed: false,
-                        location: packet.location,
-                        direction: packet.direction,
+                        location,
+                        direction,
                     })
                 } else {
                     let object = entry.remove();
                     let object_type = object.object_type();
+                    let direction = MirDirection::try_from(packet.direction).unwrap_or(MirDirection::Up);
                     Some(ObjectDeathOutcome {
                         object_id: packet.object_id,
                         object_type,
                         death_type: packet.death_type,
                         transition: None,
                         removed: true,
-                        location: packet.location,
-                        direction: packet.direction,
+                        location,
+                        direction,
                     })
                 }
             }
@@ -981,7 +1049,7 @@ impl ClientState {
         let map = self
             .map_details
             .as_ref()
-            .map(|details| (details.map_index, details.info.title.clone()))
+            .map(|details| (details.map_index, details.title.clone()))
             .or_else(|| {
                 self.map_information
                     .as_ref()
@@ -990,24 +1058,18 @@ impl ClientState {
 
         let (map_index, map_title) = map.unzip();
 
-        let world_map_enabled = self.world_map.as_ref().map(|info| info.setup.enabled);
+        let world_map_enabled = self.world_map.as_ref().map(|_info| true);
         let world_map_icon_count = self
             .world_map
             .as_ref()
-            .map(|info| info.setup.icons.len())
+            .map(|info| info.world_maps.len())
             .unwrap_or(0);
-        let teleport_to_npc_cost = self
-            .world_map
-            .as_ref()
-            .map(|info| info.teleport_to_npc_cost);
+        let teleport_to_npc_cost: Option<i32> = None;
         let last_search_map = self
             .search_map_result
             .as_ref()
             .map(|result| result.map_index);
-        let last_search_npc = self
-            .search_map_result
-            .as_ref()
-            .map(|result| result.npc_index);
+        let last_search_npc: Option<u32> = None;
 
         let map_object_count = self.objects.len();
         let mut hero_object_count = 0;
@@ -1016,7 +1078,7 @@ impl ClientState {
         let mut visible_monster_count = 0;
         for object in self.objects.values() {
             match object.object_type() {
-                MapObjectType::Player => {
+                MapObjectType::User => {
                     if !object.is_hidden() {
                         visible_player_count += 1;
                     }
@@ -1049,7 +1111,7 @@ impl ClientState {
             character_name,
             map_index,
             map_title,
-            location: self.location.as_ref().map(|loc| loc.location),
+            location: self.location.as_ref().map(|loc| Point::new(loc.location_x, loc.location_y)),
             inventory_slots: self.inventory.len(),
             equipment_slots: self.equipment.len(),
             gold: self.gold,

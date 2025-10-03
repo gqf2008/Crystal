@@ -72,9 +72,11 @@ impl MountDialog {
 
     /// 显示对话框
     pub fn show(&mut self, mount_item: &UserItem) {
-        self.mount_name = mount_item.name.clone();
-        self.current_loyalty = mount_item.current_dura;
-        self.max_loyalty = mount_item.max_dura;
+        self.mount_name = mount_item.info.as_ref()
+            .map(|info| info.name.clone())
+            .unwrap_or_default();
+        self.current_loyalty = mount_item.current_dura as u32;
+        self.max_loyalty = mount_item.max_dura as u32;
         
         let slot_count = mount_item.slots.len();
         self.mount_type = if slot_count == 4 {
