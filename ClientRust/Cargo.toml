@@ -42,7 +42,7 @@ rand = "0.8"
 mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
 byteorder = "1"
 md5 = "0.7"
-wgpu = "27.0.0"
+wgpu = "27.0.1"
 
 [dev-dependencies]
 criterion = "0.5"
