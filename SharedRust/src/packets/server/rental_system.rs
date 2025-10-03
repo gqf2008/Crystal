@@ -23,8 +23,19 @@ pub struct RentalItemInfo {
 impl Packet for GetRentedItems {
     const OPCODE: i16 = ServerPacketIds::GetRentedItems as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        writer.write_i32::<LittleEndian>(self.items.len() as i32)?;
+        
+        for info in &self.items {
+            info.item.write_to(writer)?;
+            writer.write_u32::<LittleEndian>(info.rental_fee)?;
+            writer.write_i32::<LittleEndian>(info.rental_period)?;
+            writer.write_i64::<LittleEndian>(info.expiry_date)?;
+        }
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -59,7 +70,8 @@ impl Packet for ItemRentalRequest {
     const OPCODE: i16 = ServerPacketIds::ItemRentalRequest as i16;
 
     fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+        // C# original implementation is empty
+        Ok(())
     }
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -76,8 +88,12 @@ pub struct ItemRentalFee {
 impl Packet for ItemRentalFee {
     const OPCODE: i16 = ServerPacketIds::ItemRentalFee as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        writer.write_u32::<LittleEndian>(self.fee)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -95,8 +111,13 @@ pub struct ItemRentalPeriod {
 impl Packet for ItemRentalPeriod {
     const OPCODE: i16 = ServerPacketIds::ItemRentalPeriod as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# uses Days(u32), but Rust uses period(i32)
+        writer.write_i32::<LittleEndian>(self.period)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -115,8 +136,14 @@ pub struct DepositRentalItem {
 impl Packet for DepositRentalItem {
     const OPCODE: i16 = ServerPacketIds::DepositRentalItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# uses From/To(i32), but Rust uses unique_id(u64)
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -136,8 +163,14 @@ pub struct RetrieveRentalItem {
 impl Packet for RetrieveRentalItem {
     const OPCODE: i16 = ServerPacketIds::RetrieveRentalItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# uses From/To(i32), but Rust uses unique_id(u64)
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -158,8 +191,17 @@ pub struct UpdateRentalItem {
 impl Packet for UpdateRentalItem {
     const OPCODE: i16 = ServerPacketIds::UpdateRentalItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: Rust always has item, C# can be null
+        // Writing as if always present
+        writer.write_u8(1)?; // HasData = true
+        self.item.write_to(writer)?;
+        writer.write_u32::<LittleEndian>(self.rental_fee)?;
+        writer.write_i32::<LittleEndian>(self.rental_period)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -184,8 +226,14 @@ pub struct CancelItemRental {
 impl Packet for CancelItemRental {
     const OPCODE: i16 = ServerPacketIds::CancelItemRental as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# is empty, but Rust has unique_id + success
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -205,8 +253,14 @@ pub struct ItemRentalLock {
 impl Packet for ItemRentalLock {
     const OPCODE: i16 = ServerPacketIds::ItemRentalLock as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# has Success/GoldLocked/ItemLocked, Rust has unique_id/locked
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u8(if self.locked { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -226,8 +280,14 @@ pub struct ItemRentalPartnerLock {
 impl Packet for ItemRentalPartnerLock {
     const OPCODE: i16 = ServerPacketIds::ItemRentalPartnerLock as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# has GoldLocked/ItemLocked, Rust has unique_id/locked
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u8(if self.locked { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -246,8 +306,13 @@ pub struct CanConfirmItemRental {
 impl Packet for CanConfirmItemRental {
     const OPCODE: i16 = ServerPacketIds::CanConfirmItemRental as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# is empty, but Rust has can_confirm
+        writer.write_u8(if self.can_confirm { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -265,8 +330,13 @@ pub struct ConfirmItemRental {
 impl Packet for ConfirmItemRental {
     const OPCODE: i16 = ServerPacketIds::ConfirmItemRental as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# is empty, but Rust has success
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

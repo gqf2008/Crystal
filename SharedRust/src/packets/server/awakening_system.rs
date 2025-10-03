@@ -15,7 +15,8 @@ impl Packet for NPCAwakening {
     const OPCODE: i16 = ServerPacketIds::NPCAwakening as i16;
 
     fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+        // Empty packet - no data to write
+        Ok(())
     }
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -33,7 +34,8 @@ impl Packet for NPCDisassemble {
     const OPCODE: i16 = ServerPacketIds::NPCDisassemble as i16;
 
     fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+        // Empty packet - no data to write
+        Ok(())
     }
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -51,7 +53,8 @@ impl Packet for NPCDowngrade {
     const OPCODE: i16 = ServerPacketIds::NPCDowngrade as i16;
 
     fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+        // Empty packet - no data to write
+        Ok(())
     }
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -69,7 +72,8 @@ impl Packet for NPCReset {
     const OPCODE: i16 = ServerPacketIds::NPCReset as i16;
 
     fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+        // Empty packet - no data to write
+        Ok(())
     }
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -93,8 +97,18 @@ pub struct MaterialInfo {
 impl Packet for AwakeningNeedMaterials {
     const OPCODE: i16 = ServerPacketIds::AwakeningNeedMaterials as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        writer.write_i32::<LittleEndian>(self.item_id)?;
+        writer.write_i32::<LittleEndian>(self.materials.len() as i32)?;
+        
+        for material in &self.materials {
+            writer.write_i32::<LittleEndian>(material.item_id)?;
+            writer.write_i32::<LittleEndian>(material.count)?;
+        }
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -125,8 +139,13 @@ pub struct AwakeningLockedItem {
 impl Packet for AwakeningLockedItem {
     const OPCODE: i16 = ServerPacketIds::AwakeningLockedItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u8(if self.locked { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -146,8 +165,13 @@ pub struct Awakening {
 impl Packet for Awakening {
     const OPCODE: i16 = ServerPacketIds::Awakening as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

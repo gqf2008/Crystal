@@ -14,8 +14,10 @@ pub struct CompleteQuest {
 impl Packet for CompleteQuest {
     const OPCODE: i16 = ServerPacketIds::CompleteQuest as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.quest_id)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -33,8 +35,10 @@ pub struct ShareQuest {
 impl Packet for ShareQuest {
     const OPCODE: i16 = ServerPacketIds::ShareQuest as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.quest_id)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -52,8 +56,10 @@ pub struct GainedQuestItem {
 impl Packet for GainedQuestItem {
     const OPCODE: i16 = ServerPacketIds::GainedQuestItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.item_id)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -71,8 +77,10 @@ pub struct DeleteQuestItem {
 impl Packet for DeleteQuestItem {
     const OPCODE: i16 = ServerPacketIds::DeleteQuestItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.item_id)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -91,7 +99,7 @@ impl Packet for CancelReincarnation {
     const OPCODE: i16 = ServerPacketIds::CancelReincarnation as i16;
 
     fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+        Ok(())
     }
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -109,7 +117,7 @@ impl Packet for RequestReincarnation {
     const OPCODE: i16 = ServerPacketIds::RequestReincarnation as i16;
 
     fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+        Ok(())
     }
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -126,8 +134,10 @@ pub struct MountUpdate {
 impl Packet for MountUpdate {
     const OPCODE: i16 = ServerPacketIds::MountUpdate as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.mount_type)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -146,8 +156,11 @@ pub struct FishingUpdate {
 impl Packet for FishingUpdate {
     const OPCODE: i16 = ServerPacketIds::FishingUpdate as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.fishing_progress)?;
+        writer.write_u8(if self.fishing_success { 1 } else { 0 })?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -171,8 +184,13 @@ pub struct ObjectSitDown {
 impl Packet for ObjectSitDown {
     const OPCODE: i16 = ServerPacketIds::ObjectSitDown as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u8(self.direction)?;
+        writer.write_i32::<LittleEndian>(self.location.0)?;
+        writer.write_i32::<LittleEndian>(self.location.1)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -197,8 +215,10 @@ pub struct InTrapRock {
 impl Packet for InTrapRock {
     const OPCODE: i16 = ServerPacketIds::InTrapRock as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(if self.in_trap { 1 } else { 0 })?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -216,8 +236,13 @@ pub struct BaseStatsInfo {
 impl Packet for BaseStatsInfo {
     const OPCODE: i16 = ServerPacketIds::BaseStatsInfo as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.stats.len() as i32)?;
+        for &stat in &self.stats {
+            writer.write_i32::<LittleEndian>(stat)?;
+        }
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -239,8 +264,13 @@ pub struct HeroBaseStatsInfo {
 impl Packet for HeroBaseStatsInfo {
     const OPCODE: i16 = ServerPacketIds::HeroBaseStatsInfo as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.stats.len() as i32)?;
+        for &stat in &self.stats {
+            writer.write_i32::<LittleEndian>(stat)?;
+        }
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -263,8 +293,12 @@ pub struct UserName {
 impl Packet for UserName {
     const OPCODE: i16 = ServerPacketIds::UserName as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        write_dotnet_string(writer, &self.name)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -287,8 +321,12 @@ pub struct ChatItemStats {
 impl Packet for ChatItemStats {
     const OPCODE: i16 = ServerPacketIds::ChatItemStats as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        write_dotnet_string(writer, &self.stats)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -311,8 +349,11 @@ pub struct GuildStatus {
 impl Packet for GuildStatus {
     const OPCODE: i16 = ServerPacketIds::GuildStatus as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use crate::binary::write_dotnet_string;
+        write_dotnet_string(writer, &self.guild_name)?;
+        write_dotnet_string(writer, &self.rank_name)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -342,8 +383,10 @@ pub struct GuildInvite {
 impl Packet for GuildInvite {
     const OPCODE: i16 = ServerPacketIds::GuildInvite as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use crate::binary::write_dotnet_string;
+        write_dotnet_string(writer, &self.guild_name)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -364,8 +407,10 @@ pub struct GuildExpGain {
 impl Packet for GuildExpGain {
     const OPCODE: i16 = ServerPacketIds::GuildExpGain as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u32::<LittleEndian>(self.amount)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -384,7 +429,7 @@ impl Packet for GuildNameRequest {
     const OPCODE: i16 = ServerPacketIds::GuildNameRequest as i16;
 
     fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+        Ok(())
     }
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -402,8 +447,11 @@ pub struct GuildStorageGoldChange {
 impl Packet for GuildStorageGoldChange {
     const OPCODE: i16 = ServerPacketIds::GuildStorageGoldChange as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.change)?;
+        writer.write_u32::<LittleEndian>(self.total)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -423,8 +471,11 @@ pub struct GuildStorageItemChange {
 impl Packet for GuildStorageItemChange {
     const OPCODE: i16 = ServerPacketIds::GuildStorageItemChange as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(self.change_type)?;
+        writer.write_i32::<LittleEndian>(self.slot)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -443,8 +494,10 @@ pub struct GuildRequestWar {
 impl Packet for GuildRequestWar {
     const OPCODE: i16 = ServerPacketIds::GuildRequestWar as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use crate::binary::write_dotnet_string;
+        write_dotnet_string(writer, &self.guild_name)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -465,8 +518,10 @@ pub struct NewHero {
 impl Packet for NewHero {
     const OPCODE: i16 = ServerPacketIds::NewHero as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use crate::binary::write_dotnet_string;
+        write_dotnet_string(writer, &self.hero_info)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -487,8 +542,10 @@ pub struct HeroInformation {
 impl Packet for HeroInformation {
     const OPCODE: i16 = ServerPacketIds::HeroInformation as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u32::<LittleEndian>(self.hero_id)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -506,8 +563,10 @@ pub struct UnlockHeroAutoPot {
 impl Packet for UnlockHeroAutoPot {
     const OPCODE: i16 = ServerPacketIds::UnlockHeroAutoPot as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(if self.unlocked { 1 } else { 0 })?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -526,8 +585,11 @@ pub struct SetAutoPotItem {
 impl Packet for SetAutoPotItem {
     const OPCODE: i16 = ServerPacketIds::SetAutoPotItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.slot)?;
+        writer.write_i32::<LittleEndian>(self.item_id)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -546,8 +608,10 @@ pub struct ChangeHero {
 impl Packet for ChangeHero {
     const OPCODE: i16 = ServerPacketIds::ChangeHero as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -567,8 +631,12 @@ pub struct TakeBackHeroItem {
 impl Packet for TakeBackHeroItem {
     const OPCODE: i16 = ServerPacketIds::TakeBackHeroItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -590,8 +658,12 @@ pub struct TransferHeroItem {
 impl Packet for TransferHeroItem {
     const OPCODE: i16 = ServerPacketIds::TransferHeroItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -611,8 +683,10 @@ pub struct NewChatItem {
 impl Packet for NewChatItem {
     const OPCODE: i16 = ServerPacketIds::NewChatItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.item_id)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -630,8 +704,10 @@ pub struct NewHeroInfo {
 impl Packet for NewHeroInfo {
     const OPCODE: i16 = ServerPacketIds::NewHeroInfo as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use crate::binary::write_dotnet_string;
+        write_dotnet_string(writer, &self.info)?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -652,8 +728,10 @@ pub struct AllowObserve {
 impl Packet for AllowObserve {
     const OPCODE: i16 = ServerPacketIds::AllowObserve as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(if self.allowed { 1 } else { 0 })?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -672,8 +750,11 @@ pub struct DepositTradeItem {
 impl Packet for DepositTradeItem {
     const OPCODE: i16 = ServerPacketIds::DepositTradeItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.from_slot)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -696,8 +777,11 @@ pub struct RetrieveTradeItem {
 impl Packet for RetrieveTradeItem {
     const OPCODE: i16 = ServerPacketIds::RetrieveTradeItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<LittleEndian>(self.from_slot)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

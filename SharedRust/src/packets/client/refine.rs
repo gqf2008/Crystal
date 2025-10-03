@@ -1,7 +1,7 @@
 // 精炼相关数据包
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
-use crate::enums::{ClientPacketIds, MirGridType};
+use crate::enums::ClientPacketIds;
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::io::Read;
 
@@ -21,8 +21,12 @@ impl Packet for DepositRefineItem {
         Ok(())
     }
 
-    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        unimplemented!("Client packets don't need read_body")
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            from: reader.read_i32::<LittleEndian>()?,
+            to: reader.read_i32::<LittleEndian>()?,
+        })
     }
 }
 
@@ -42,8 +46,12 @@ impl Packet for RetrieveRefineItem {
         Ok(())
     }
 
-    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        unimplemented!("Client packets don't need read_body")
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            from: reader.read_i32::<LittleEndian>()?,
+            to: reader.read_i32::<LittleEndian>()?,
+        })
     }
 }
 
@@ -59,7 +67,7 @@ impl Packet for RefineCancel {
     }
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        unimplemented!("Client packets don't need read_body")
+        Ok(Self {})
     }
 }
 
@@ -77,8 +85,11 @@ impl Packet for RefineItem {
         Ok(())
     }
 
-    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        unimplemented!("Client packets don't need read_body")
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            unique_id: reader.read_u64::<LittleEndian>()?,
+        })
     }
 }
 
@@ -96,8 +107,11 @@ impl Packet for CheckRefine {
         Ok(())
     }
 
-    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        unimplemented!("Client packets don't need read_body")
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            unique_id: reader.read_u64::<LittleEndian>()?,
+        })
     }
 }
 
@@ -115,46 +129,61 @@ impl Packet for ReplaceWedRing {
         Ok(())
     }
 
-    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        unimplemented!("Client packets don't need read_body")
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            unique_id: reader.read_u64::<LittleEndian>()?,
+        })
     }
 }
 
 /// DepositTradeItem - 存入交易物品 (30)
 #[derive(Debug, Clone)]
 pub struct DepositTradeItem {
-    pub from_slot: i32,             // 来源槽位
+    pub from: i32,                  // 来源槽位
+    pub to: i32,                    // 目标槽位
 }
 
 impl Packet for DepositTradeItem {
     const OPCODE: i16 = ClientPacketIds::DepositTradeItem as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        writer.write_i32::<LittleEndian>(self.from_slot)?;
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
         Ok(())
     }
 
-    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        unimplemented!("Client packets don't need read_body")
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            from: reader.read_i32::<LittleEndian>()?,
+            to: reader.read_i32::<LittleEndian>()?,
+        })
     }
 }
 
 /// RetrieveTradeItem - 取回交易物品 (31)
 #[derive(Debug, Clone)]
 pub struct RetrieveTradeItem {
-    pub from_slot: i32,             // 来源槽位
+    pub from: i32,                  // 来源槽位
+    pub to: i32,                    // 目标槽位
 }
 
 impl Packet for RetrieveTradeItem {
     const OPCODE: i16 = ClientPacketIds::RetrieveTradeItem as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        writer.write_i32::<LittleEndian>(self.from_slot)?;
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
         Ok(())
     }
 
-    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        unimplemented!("Client packets don't need read_body")
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            from: reader.read_i32::<LittleEndian>()?,
+            to: reader.read_i32::<LittleEndian>()?,
+        })
     }
 }
 
@@ -163,8 +192,6 @@ impl Packet for RetrieveTradeItem {
 pub struct TakeBackHeroItem {
     pub from: i32,                  // 来源槽位
     pub to: i32,                    // 目标槽位
-    pub grid_from: MirGridType,     // 来源网格类型
-    pub grid_to: MirGridType,       // 目标网格类型
 }
 
 impl Packet for TakeBackHeroItem {
@@ -173,13 +200,15 @@ impl Packet for TakeBackHeroItem {
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.from)?;
         writer.write_i32::<LittleEndian>(self.to)?;
-        writer.write_u8(self.grid_from as u8)?;
-        writer.write_u8(self.grid_to as u8)?;
         Ok(())
     }
 
-    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        unimplemented!("Client packets don't need read_body")
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            from: reader.read_i32::<LittleEndian>()?,
+            to: reader.read_i32::<LittleEndian>()?,
+        })
     }
 }
 
@@ -188,8 +217,6 @@ impl Packet for TakeBackHeroItem {
 pub struct TransferHeroItem {
     pub from: i32,                  // 来源槽位
     pub to: i32,                    // 目标槽位
-    pub grid_from: MirGridType,     // 来源网格类型
-    pub grid_to: MirGridType,       // 目标网格类型
 }
 
 impl Packet for TransferHeroItem {
@@ -198,12 +225,14 @@ impl Packet for TransferHeroItem {
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.from)?;
         writer.write_i32::<LittleEndian>(self.to)?;
-        writer.write_u8(self.grid_from as u8)?;
-        writer.write_u8(self.grid_to as u8)?;
         Ok(())
     }
 
-    fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
-        unimplemented!("Client packets don't need read_body")
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            from: reader.read_i32::<LittleEndian>()?,
+            to: reader.read_i32::<LittleEndian>()?,
+        })
     }
 }

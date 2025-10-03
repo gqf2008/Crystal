@@ -16,7 +16,8 @@ impl Packet for NPCConsign {
     const OPCODE: i16 = ServerPacketIds::NPCConsign as i16;
 
     fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+        // Empty packet - no data to write
+        Ok(())
     }
 
     fn read_body<R: Read>(_reader: &mut R) -> SharedResult<Self> {
@@ -33,8 +34,17 @@ pub struct NPCMarket {
 impl Packet for NPCMarket {
     const OPCODE: i16 = ServerPacketIds::NPCMarket as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        
+        writer.write_i32::<LittleEndian>(self.pages.len() as i32)?;
+        
+        for page in &self.pages {
+            write_dotnet_string(writer, page)?;
+        }
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -70,8 +80,21 @@ pub struct MarketListing {
 impl Packet for NPCMarketPage {
     const OPCODE: i16 = ServerPacketIds::NPCMarketPage as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        
+        writer.write_i32::<LittleEndian>(self.listings.len() as i32)?;
+        
+        for listing in &self.listings {
+            writer.write_u64::<LittleEndian>(listing.auction_id)?;
+            listing.item.write_to(writer)?;
+            write_dotnet_string(writer, &listing.seller_name)?;
+            writer.write_u32::<LittleEndian>(listing.price)?;
+            writer.write_i64::<LittleEndian>(listing.consignment_date)?;
+        }
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -113,8 +136,13 @@ pub struct ConsignItem {
 impl Packet for ConsignItem {
     const OPCODE: i16 = ServerPacketIds::ConsignItem as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -136,8 +164,12 @@ pub struct MarketFail {
 impl Packet for MarketFail {
     const OPCODE: i16 = ServerPacketIds::MarketFail as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        writer.write_u8(self.reason)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -155,8 +187,12 @@ pub struct MarketSuccess {
 impl Packet for MarketSuccess {
     const OPCODE: i16 = ServerPacketIds::MarketSuccess as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use crate::binary::write_dotnet_string;
+        
+        write_dotnet_string(writer, &self.message)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

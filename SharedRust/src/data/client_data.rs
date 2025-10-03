@@ -371,6 +371,21 @@ impl ClientQuestProgress {
             new,
         })
     }
+
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.id)?;
+        
+        writer.write_i32::<LittleEndian>(self.task_list.len() as i32)?;
+        for task in &self.task_list {
+            write_dotnet_string(writer, task)?;
+        }
+        
+        writer.write_u8(if self.taken { 1 } else { 0 })?;
+        writer.write_u8(if self.completed { 1 } else { 0 })?;
+        writer.write_u8(if self.new { 1 } else { 0 })?;
+        
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -483,6 +498,57 @@ impl ClientQuestInfo {
             rewards_select_item,
             finish_npc_index,
         })
+    }
+
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.index)?;
+        writer.write_u32::<LittleEndian>(self.npc_index)?;
+        write_dotnet_string(writer, &self.name)?;
+        write_dotnet_string(writer, &self.group)?;
+
+        writer.write_i32::<LittleEndian>(self.description.len() as i32)?;
+        for desc in &self.description {
+            write_dotnet_string(writer, desc)?;
+        }
+
+        writer.write_i32::<LittleEndian>(self.task_description.len() as i32)?;
+        for desc in &self.task_description {
+            write_dotnet_string(writer, desc)?;
+        }
+
+        writer.write_i32::<LittleEndian>(self.return_description.len() as i32)?;
+        for desc in &self.return_description {
+            write_dotnet_string(writer, desc)?;
+        }
+
+        writer.write_i32::<LittleEndian>(self.completion_description.len() as i32)?;
+        for desc in &self.completion_description {
+            write_dotnet_string(writer, desc)?;
+        }
+
+        writer.write_i32::<LittleEndian>(self.min_level_needed)?;
+        writer.write_i32::<LittleEndian>(self.max_level_needed)?;
+        writer.write_i32::<LittleEndian>(self.quest_needed)?;
+        writer.write_u8(self.class_needed.bits())?;
+        writer.write_u8(self.quest_type as u8)?;
+        writer.write_i32::<LittleEndian>(self.time_limit_in_seconds)?;
+        writer.write_u32::<LittleEndian>(self.reward_gold)?;
+        writer.write_u32::<LittleEndian>(self.reward_exp)?;
+        writer.write_u32::<LittleEndian>(self.reward_credit)?;
+
+        writer.write_i32::<LittleEndian>(self.rewards_fixed_item.len() as i32)?;
+        for reward in &self.rewards_fixed_item {
+            reward.write_to(writer)?;
+        }
+
+        writer.write_i32::<LittleEndian>(self.rewards_select_item.len() as i32)?;
+        for reward in &self.rewards_select_item {
+            reward.write_to(writer)?;
+        }
+
+        writer.write_u32::<LittleEndian>(self.finish_npc_index)?;
+
+        Ok(())
     }
 }
 

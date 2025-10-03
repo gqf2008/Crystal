@@ -29,17 +29,7 @@ impl Packet for ChangeQuest {
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        // Note: ClientQuestProgress doesn't have write_to yet, manual implementation
-        use byteorder::WriteBytesExt;
-        writer.write_i32::<byteorder::LittleEndian>(self.quest.id)?;
-        writer.write_i32::<byteorder::LittleEndian>(self.quest.task_list.len() as i32)?;
-        for task in &self.quest.task_list {
-            crate::binary::write_dotnet_string(writer, task)?;
-        }
-        writer.write_u8(if self.quest.taken { 1 } else { 0 })?;
-        writer.write_u8(if self.quest.completed { 1 } else { 0 })?;
-        writer.write_u8(if self.quest.new { 1 } else { 0 })?;
-        Ok(())
+        self.quest.write_to(writer)
     }
 }
 
@@ -58,9 +48,6 @@ impl Packet for NewQuestInfo {
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        // Note: ClientQuestInfo doesn't have write_to yet
-        // This is a complex structure that would need full implementation
-        // For now, return an error indicating not implemented
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "ClientQuestInfo write not implemented").into())
+        self.quest.write_to(writer)
     }
 }

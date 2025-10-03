@@ -14,8 +14,13 @@ pub struct NewIntelligentCreature {
 impl Packet for NewIntelligentCreature {
     const OPCODE: i16 = ServerPacketIds::NewIntelligentCreature as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // C# saves entire ClientIntelligentCreature, we only have type
+        writer.write_u8(self.creature_type as u8)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -44,8 +49,29 @@ pub struct IntelligentCreatureInfo {
 impl Packet for UpdateIntelligentCreatureList {
     const OPCODE: i16 = ServerPacketIds::UpdateIntelligentCreatureList as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        
+        writer.write_i32::<LittleEndian>(self.creatures.len() as i32)?;
+        
+        for creature in &self.creatures {
+            writer.write_i32::<LittleEndian>(creature.creature_id)?;
+            writer.write_u8(creature.creature_type as u8)?;
+            write_dotnet_string(writer, &creature.custom_name)?;
+            writer.write_u8(creature.petmode)?;
+            writer.write_i64::<LittleEndian>(creature.exp)?;
+            writer.write_i32::<LittleEndian>(creature.level)?;
+            writer.write_i32::<LittleEndian>(creature.slot_index)?;
+        }
+        
+        // C# also writes: CreatureSummoned, SummonedCreatureType, PearlCount
+        // But Rust struct doesn't have these, so we skip them or write defaults
+        writer.write_u8(0)?; // CreatureSummoned = false
+        writer.write_u8(0)?; // SummonedCreatureType = None
+        writer.write_i32::<LittleEndian>(0)?; // PearlCount = 0
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -90,8 +116,13 @@ pub struct IntelligentCreatureEnableRename {
 impl Packet for IntelligentCreatureEnableRename {
     const OPCODE: i16 = ServerPacketIds::IntelligentCreatureEnableRename as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# is empty, but Rust has can_rename field
+        writer.write_u8(if self.can_rename { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -109,8 +140,13 @@ pub struct IntelligentCreaturePickup {
 impl Packet for IntelligentCreaturePickup {
     const OPCODE: i16 = ServerPacketIds::IntelligentCreaturePickup as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# uses ObjectID(u32), Rust uses enabled(bool)
+        writer.write_u8(if self.enabled { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -129,8 +165,20 @@ pub struct NPCPearlGoods {
 impl Packet for NPCPearlGoods {
     const OPCODE: i16 = ServerPacketIds::NPCPearlGoods as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# writes List<UserItem> + Rate(f32) + Type(u8)
+        // Rust has rate(i32) + item_list(Vec<i32>)
+        writer.write_i32::<LittleEndian>(self.item_list.len() as i32)?;
+        
+        for &item_id in &self.item_list {
+            writer.write_i32::<LittleEndian>(item_id)?;
+        }
+        
+        writer.write_i32::<LittleEndian>(self.rate)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -155,8 +203,22 @@ pub struct GuildBuffList {
 impl Packet for GuildBuffList {
     const OPCODE: i16 = ServerPacketIds::GuildBuffList as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        // Note: C# has Remove(u8) + ActiveBuffs + GuildBuffs
+        // Rust only has active_buffs(Vec<i32>)
+        writer.write_u8(0)?; // Remove = 0
+        writer.write_i32::<LittleEndian>(self.active_buffs.len() as i32)?;
+        
+        for &buff_id in &self.active_buffs {
+            writer.write_i32::<LittleEndian>(buff_id)?;
+        }
+        
+        // GuildBuffs list (empty in Rust)
+        writer.write_i32::<LittleEndian>(0)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -181,8 +243,16 @@ pub struct NPCRequestInput {
 impl Packet for NPCRequestInput {
     const OPCODE: i16 = ServerPacketIds::NPCRequestInput as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        
+        // Note: C# has NPCID(u32) + PageName(string)
+        // Rust has message(string) + max_length(i32)
+        write_dotnet_string(writer, &self.message)?;
+        writer.write_i32::<LittleEndian>(self.max_length)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -222,8 +292,30 @@ pub struct GameShopItem {
 impl Packet for GameShopInfo {
     const OPCODE: i16 = ServerPacketIds::GameShopInfo as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        
+        // Note: C# has Item(GameShopItem) + StockLevel(i32)
+        // Rust has items(Vec<GameShopItem>) + credit + gold
+        writer.write_i32::<LittleEndian>(self.items.len() as i32)?;
+        
+        for item in &self.items {
+            writer.write_i32::<LittleEndian>(item.item_index)?;
+            writer.write_u32::<LittleEndian>(item.gold_price)?;
+            writer.write_u32::<LittleEndian>(item.credit_price)?;
+            writer.write_i32::<LittleEndian>(item.count)?;
+            writer.write_u8(item.class)?;
+            write_dotnet_string(writer, &item.category)?;
+            writer.write_i32::<LittleEndian>(item.stock)?;
+            writer.write_u8(if item.is_bought { 1 } else { 0 })?;
+            writer.write_u8(if item.deal { 1 } else { 0 })?;
+        }
+        
+        writer.write_u32::<LittleEndian>(self.credit)?;
+        writer.write_u32::<LittleEndian>(self.gold)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -280,8 +372,13 @@ pub struct GameShopStock {
 impl Packet for GameShopStock {
     const OPCODE: i16 = ServerPacketIds::GameShopStock as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        writer.write_i32::<LittleEndian>(self.item_index)?;
+        writer.write_i32::<LittleEndian>(self.stock)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -309,8 +406,32 @@ pub struct RankInfo {
 impl Packet for Rankings {
     const OPCODE: i16 = ServerPacketIds::Rankings as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        
+        // Note: C# has RankType(u8) + MyRank(i32) + ListingDetails + Listings(Vec<i64>) + Count
+        // Rust only has rankings(Vec<RankInfo>)
+        writer.write_u8(0)?; // RankType = 0
+        writer.write_i32::<LittleEndian>(0)?; // MyRank = 0
+        
+        writer.write_i32::<LittleEndian>(self.rankings.len() as i32)?;
+        
+        for rank in &self.rankings {
+            writer.write_i32::<LittleEndian>(rank.rank)?;
+            write_dotnet_string(writer, &rank.player_name)?;
+            writer.write_u8(rank.class)?;
+            writer.write_i32::<LittleEndian>(rank.level)?;
+            writer.write_i64::<LittleEndian>(rank.experience)?;
+        }
+        
+        // Listings(Vec<i64>)
+        writer.write_i32::<LittleEndian>(0)?;
+        
+        // Count
+        writer.write_i32::<LittleEndian>(self.rankings.len() as i32)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -361,8 +482,24 @@ pub struct TerritoryInfo {
 impl Packet for GuildTerritoryPage {
     const OPCODE: i16 = ServerPacketIds::GuildTerritoryPage as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        
+        // C# writes: length(i32) + Count + List[i].Save()
+        writer.write_i32::<LittleEndian>(self.territories.len() as i32)?; // length
+        writer.write_i32::<LittleEndian>(self.territories.len() as i32)?; // count
+        
+        for territory in &self.territories {
+            writer.write_i32::<LittleEndian>(territory.index)?;
+            write_dotnet_string(writer, &territory.name)?;
+            write_dotnet_string(writer, &territory.owner_guild)?;
+            writer.write_i64::<LittleEndian>(territory.start_time)?;
+            writer.write_i64::<LittleEndian>(territory.end_time)?;
+            writer.write_u32::<LittleEndian>(territory.war_fee)?;
+        }
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -409,8 +546,12 @@ pub struct PurchaseGuildTerritory {
 impl Packet for PurchaseGuildTerritory {
     const OPCODE: i16 = ServerPacketIds::PurchaseGuildTerritory as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {

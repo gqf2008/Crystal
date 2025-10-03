@@ -15,8 +15,13 @@ pub struct TransformUpdate {
 impl Packet for TransformUpdate {
     const OPCODE: i16 = ServerPacketIds::TransformUpdate as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_u8(self.transform_type)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -46,8 +51,20 @@ pub struct FriendInfo {
 impl Packet for FriendUpdate {
     const OPCODE: i16 = ServerPacketIds::FriendUpdate as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        
+        writer.write_i32::<LittleEndian>(self.friends.len() as i32)?;
+        
+        for friend in &self.friends {
+            writer.write_u32::<LittleEndian>(friend.object_id)?;
+            write_dotnet_string(writer, &friend.name)?;
+            write_dotnet_string(writer, &friend.memo)?;
+            writer.write_u8(if friend.online { 1 } else { 0 })?;
+        }
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -93,8 +110,17 @@ pub struct LoverUpdate {
 impl Packet for LoverUpdate {
     const OPCODE: i16 = ServerPacketIds::LoverUpdate as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        
+        write_dotnet_string(writer, &self.lover_name)?;
+        writer.write_i64::<LittleEndian>(self.date)?;
+        write_dotnet_string(writer, &self.map_name)?;
+        writer.write_i32::<LittleEndian>(self.location.0)?;
+        writer.write_i32::<LittleEndian>(self.location.1)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -133,8 +159,15 @@ pub struct MentorUpdate {
 impl Packet for MentorUpdate {
     const OPCODE: i16 = ServerPacketIds::MentorUpdate as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        use crate::binary::write_dotnet_string;
+        
+        write_dotnet_string(writer, &self.mentor_name)?;
+        writer.write_i32::<LittleEndian>(self.mentor_level)?;
+        writer.write_u8(if self.mentor_online { 1 } else { 0 })?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -163,8 +196,12 @@ pub struct MarriageRequest {
 impl Packet for MarriageRequest {
     const OPCODE: i16 = ServerPacketIds::MarriageRequest as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use crate::binary::write_dotnet_string;
+        
+        write_dotnet_string(writer, &self.lover_name)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -185,8 +222,12 @@ pub struct DivorceRequest {
 impl Packet for DivorceRequest {
     const OPCODE: i16 = ServerPacketIds::DivorceRequest as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use crate::binary::write_dotnet_string;
+        
+        write_dotnet_string(writer, &self.lover_name)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
@@ -207,8 +248,12 @@ pub struct MentorRequest {
 impl Packet for MentorRequest {
     const OPCODE: i16 = ServerPacketIds::MentorRequest as i16;
 
-    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> SharedResult<()> {
-        unimplemented!("Server packets don't need write_body")
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use crate::binary::write_dotnet_string;
+        
+        write_dotnet_string(writer, &self.mentor_name)?;
+        
+        Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
