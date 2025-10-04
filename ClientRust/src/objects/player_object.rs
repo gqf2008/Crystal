@@ -7,13 +7,14 @@
 use std::time::Instant;
 
 use mir2_shared::{
-    enums::{MirClass, MirGender, Spell, SpellEffect},
+    enums::{MirClass, MirDirection, MirGender, Spell, SpellEffect},
     Point,
 };
 
 use super::map_object::MapObject;
 use super::monster_object::FrameSet;
 use super::effect::Effect;
+use super::frames::Frame;
 
 /// Player object - base class for UserObject and HeroObject
 /// 
@@ -84,14 +85,13 @@ pub struct PlayerObject {
     /// Frame set for animations
     pub frames: FrameSet,
     
-    /// Current animation frame (TODO: Phase 2 - Define Frame struct)
+    /// Current animation frame
     /// C# has: public Frame Frame
-    /// For now, we'll use the frame indices below until Frame struct is defined
-    // pub frame: Option<Frame>,  // TODO: Phase 2
+    pub frame: Option<Frame>,
     
-    /// Wing animation frame (TODO: Phase 2)
+    /// Wing animation frame
     /// C# has: public Frame WingFrame
-    // pub wing_frame: Option<Frame>,  // TODO: Phase 2
+    pub wing_frame: Option<Frame>,
     
     /// Current frame index
     pub frame_index: i32,
@@ -264,6 +264,8 @@ impl PlayerObject {
             flinch_sound: 0,
             attack_sound: 0,
             frames: FrameSet::default(),
+            frame: None,  // Set by SetLibraries() or action changes
+            wing_frame: None,
             frame_index: 0,
             frame_interval: 0,
             effect_frame_index: 0,
@@ -430,6 +432,447 @@ impl PlayerObject {
         self.frame_index += delta;
         // TODO: Add frame wrapping logic based on current action
     }
+    
+    /// Update frame animation
+    /// 
+    /// Mirrors C# PlayerObject.ProcessFrames() (simplified version)
+    /// 
+    /// This method advances the animation frame based on elapsed time.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `delta_time` - Time elapsed since last update (in seconds)
+    /// 
+    /// # Phase 1 Implementation
+    /// 
+    /// This is a simplified version that:
+    /// - Updates frame_index based on frame_interval
+    /// - Wraps frame_index when reaching frame.count
+    /// - Updates effect_frame_index similarly
+    /// 
+    /// # TODO Phase 2
+    /// 
+    /// - Integrate with CurrentAction (from MapObject)
+    /// - Handle SkipFrameUpdate logic
+    /// - Implement FastRun/Sprint speed modifiers
+    /// - Handle Reverse animations
+    /// - Integrate with movement offsets
+    pub fn update_frame_animation(&mut self, delta_time: f32) {
+        // Convert delta_time to milliseconds
+        let delta_ms = (delta_time * 1000.0) as i32;
+        
+        // Update main frame
+        if let Some(frame) = &self.frame {
+            self.frame_interval += delta_ms;
+            
+            // Check if it's time to advance frame
+            while self.frame_interval >= frame.interval && frame.interval > 0 {
+                self.frame_interval -= frame.interval;
+                
+                // Advance frame index
+                if !frame.reverse {
+                    self.frame_index += 1;
+                    if self.frame_index >= frame.count {
+                        self.frame_index = 0; // Loop for now (TODO: check action repeat)
+                    }
+                } else {
+                    self.frame_index -= 1;
+                    if self.frame_index < 0 {
+                        self.frame_index = frame.count - 1;
+                    }
+                }
+            }
+        }
+        
+        // Update effect frame (wings, weapon effects, etc.)
+        if let Some(frame) = &self.wing_frame {
+            self.effect_frame_interval += delta_ms;
+            
+            while self.effect_frame_interval >= frame.effect_interval && frame.effect_interval > 0 {
+                self.effect_frame_interval -= frame.effect_interval;
+                
+                if !frame.reverse {
+                    self.effect_frame_index += 1;
+                    if self.effect_frame_index >= frame.effect_count {
+                        self.effect_frame_index = 0;
+                    }
+                } else {
+                    self.effect_frame_index -= 1;
+                    if self.effect_frame_index < 0 {
+                        self.effect_frame_index = frame.effect_count - 1;
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Calculate draw frame index
+    /// 
+    /// Mirrors C# PlayerObject.Process() DrawFrame calculation:
+    /// DrawFrame = Frame.Start + (Frame.OffSet * Direction) + FrameIndex
+    /// 
+    /// # Arguments
+    /// 
+    /// * `direction` - Current facing direction (0-7)
+    /// 
+    /// # Returns
+    /// 
+    /// The absolute frame index to draw from the sprite sheet
+    pub fn calc_draw_frame(&self, direction: u8) -> i32 {
+        if let Some(frame) = &self.frame {
+            frame.start + (frame.offset() * direction as i32) + self.frame_index
+        } else {
+            0
+        }
+    }
+    
+    /// Calculate wing/effect draw frame index
+    /// 
+    /// Mirrors C# PlayerObject.Process() DrawWingFrame calculation
+    pub fn calc_wing_frame(&self, direction: u8) -> i32 {
+        if let Some(frame) = &self.wing_frame {
+            frame.effect_start + (frame.effect_offset() * direction as i32) + self.effect_frame_index
+        } else {
+            0
+        }
+    }
+
+    // ==================== Spell Casting Methods ====================
+
+    /// Cast a spell
+    /// 
+    /// C# equivalent: PlayerObject.Process() - MirAction.Spell case
+    /// 
+    /// Phase 1 simplified: Basic spell setup without complex effects
+    /// TODO Phase 2: Add full spell effects, sound, missiles, etc.
+    pub fn cast_spell(
+        &mut self,
+        spell: Spell,
+        target_id: u32,
+        target_point: Point,
+        spell_level: u8,
+        secondary_targets: Vec<u32>,
+    ) {
+        self.spell = Some(spell);
+        self.target_id = target_id;
+        self.target_point = target_point;
+        self.spell_level = spell_level;
+        self.secondary_target_ids = secondary_targets;
+        self.cast = true;
+
+        // TODO Phase 2: Add spell-specific logic
+        // - Sound effects (SoundManager.PlaySound)
+        // - Visual effects (Effects.Add)
+        // - Missile creation (CreateProjectile)
+        // - Special spell mechanics (Blizzard, Reincarnation, etc.)
+        
+        // For now, just mark as casting
+        // The animation system will handle frame updates
+    }
+
+    /// Process next action after spell cast completes
+    /// 
+    /// C# equivalent: PlayerObject.NextSpellAction() (implied in C# Process)
+    /// 
+    /// This is called when spell animation completes
+    pub fn next_spell_action(&mut self) {
+        // Reset casting state
+        self.cast = false;
+        
+        // TODO Phase 2: Handle spell completion
+        // - Check if more actions in queue
+        // - Return to standing/stance
+        // - Process spell effects
+        
+        // For Phase 1, just clear the cast flag
+    }
+
+    /// Create spell effect (placeholder)
+    /// 
+    /// C# equivalent: Effects.Add(new Effect(...))
+    /// 
+    /// TODO Phase 2: Integrate with effect system
+    pub fn create_spell_effect(&mut self, _spell: Spell) -> Option<Effect> {
+        // TODO Phase 2: Create actual spell effects
+        // This requires integration with:
+        // - Effect system (Effect struct)
+        // - Library system (texture libraries)
+        // - Animation timing
+        
+        None
+    }
+
+    /// Check if player can cast spell
+    /// 
+    /// Helper method for validation
+    pub fn can_cast_spell(&self) -> bool {
+        // Basic checks
+        if self.cast {
+            return false; // Already casting
+        }
+        
+        // TODO Phase 2: Add more checks
+        // - Cooldown
+        // - Mana cost
+        // - Skill requirements
+        // - Stun/frozen status
+        
+        true
+    }
+
+    /// Clear spell state
+    /// 
+    /// Helper method to reset spell-related fields
+    pub fn clear_spell_state(&mut self) {
+        self.spell = None;
+        self.spell_level = 0;
+        self.cast = false;
+        self.target_id = 0;
+        self.target_point = Point { x: 0, y: 0 };
+        self.secondary_target_ids.clear();
+    }
+
+    // ==================== Drawing Methods ====================
+
+    /// Main draw method - draws the player character
+    /// 
+    /// C# equivalent: PlayerObject.Draw()
+    /// 
+    /// Drawing order:
+    /// 1. Behind effects
+    /// 2. Mount (if riding)
+    /// 3. Weapon (left side - drawn before body)
+    /// 4. Body
+    /// 5. Head/Hair
+    /// 6. Wings
+    /// 7. Weapon (right side - drawn after body)
+    /// 
+    /// Phase 1 simplified: Method framework without actual rendering
+    /// TODO Phase 2: Integrate with graphics/rendering system
+    pub fn draw(&self, _draw_location: Point) {
+        // TODO Phase 2: Implement actual drawing
+        // This requires:
+        // - Graphics system integration
+        // - Library/texture loading
+        // - Sprite rendering
+        // - Layer ordering
+        
+        // C# logic:
+        // DrawBehindEffects(Settings.Effect);
+        // DrawMount();
+        // if (!RidingMount) {
+        //     if (Direction == Left/Up/UpLeft/DownLeft) DrawWeapon();
+        //     else DrawWeapon2();
+        // }
+        // DrawBody();
+        // if (Direction == Up/UpLeft/UpRight/Right/Left) {
+        //     DrawHead();
+        //     DrawWings();
+        // } else {
+        //     DrawWings();
+        //     DrawHead();
+        // }
+        // if (!RidingMount) {
+        //     if (Direction == UpRight/Right/DownRight/Down) DrawWeapon();
+        //     else DrawWeapon2();
+        //     if (Class == Archer && HasClassWeapon) DrawWeapon2();
+        // }
+        
+        // For Phase 1, this is a placeholder
+    }
+
+    /// Draw player body
+    /// 
+    /// C# equivalent: PlayerObject.DrawBody()
+    /// 
+    /// Phase 1 simplified: Returns the draw parameters
+    /// TODO Phase 2: Actual rendering
+    pub fn draw_body(&self, _draw_location: Point) -> DrawParams {
+        // Calculate frame index
+        let direction = self.map_object.direction() as u8;
+        let frame_index = self.calc_draw_frame(direction);
+        
+        // C# logic:
+        // BodyLibrary.Draw(DrawFrame + ArmourOffSet, DrawLocation, drawColour, true);
+        
+        DrawParams {
+            library_type: LibraryType::Body,
+            frame_index: frame_index + self.armour_offset,
+            location: _draw_location,
+            color: 0xFFFFFF, // White (TODO: apply effects)
+            blend: false,
+        }
+    }
+
+    /// Draw player head/hair
+    /// 
+    /// C# equivalent: PlayerObject.DrawHead()
+    /// 
+    /// Phase 1 simplified: Returns the draw parameters
+    pub fn draw_head(&self, _draw_location: Point) -> DrawParams {
+        let direction = self.map_object.direction() as u8;
+        let frame_index = self.calc_draw_frame(direction);
+        
+        // C# logic:
+        // HairLibrary.Draw(DrawFrame + HairOffSet, DrawLocation, DrawColour, true);
+        
+        DrawParams {
+            library_type: LibraryType::Hair,
+            frame_index: frame_index + self.hair_offset,
+            location: _draw_location,
+            color: 0xFFFFFF,
+            blend: false,
+        }
+    }
+
+    /// Draw primary weapon
+    /// 
+    /// C# equivalent: PlayerObject.DrawWeapon()
+    /// 
+    /// Phase 1 simplified: Returns the draw parameters
+    pub fn draw_weapon(&self, _draw_location: Point) -> Option<DrawParams> {
+        if self.weapon < 0 {
+            return None;
+        }
+        
+        let direction = self.map_object.direction() as u8;
+        let frame_index = self.calc_draw_frame(direction);
+        
+        // C# logic:
+        // WeaponLibrary1.Draw(DrawFrame + WeaponOffSet, DrawLocation, DrawColour, true);
+        // if (WeaponEffectLibrary1 != null)
+        //     WeaponEffectLibrary1.DrawBlend(DrawFrame + WeaponOffSet, DrawLocation, DrawColour, true, 0.4F);
+        
+        Some(DrawParams {
+            library_type: LibraryType::Weapon,
+            frame_index: frame_index + self.weapon_offset,
+            location: _draw_location,
+            color: 0xFFFFFF,
+            blend: false,
+        })
+    }
+
+    /// Draw secondary weapon (off-hand or two-handed)
+    /// 
+    /// C# equivalent: PlayerObject.DrawWeapon2()
+    pub fn draw_weapon2(&self, _draw_location: Point) -> Option<DrawParams> {
+        if self.weapon == -1 {
+            return None;
+        }
+        
+        let direction = self.map_object.direction() as u8;
+        let frame_index = self.calc_draw_frame(direction);
+        
+        // C# logic:
+        // WeaponLibrary2.Draw(DrawFrame + WeaponOffSet, DrawLocation, DrawColour, true);
+        
+        Some(DrawParams {
+            library_type: LibraryType::Weapon,
+            frame_index: frame_index + self.weapon_offset,
+            location: _draw_location,
+            color: 0xFFFFFF,
+            blend: false,
+        })
+    }
+
+    /// Draw wings
+    /// 
+    /// C# equivalent: PlayerObject.DrawWings()
+    pub fn draw_wings(&self, _draw_location: Point) -> Option<DrawParams> {
+        if self.wing_effect == 0 || self.wing_effect >= 100 {
+            return None;
+        }
+        
+        let direction = self.map_object.direction() as u8;
+        let frame_index = self.calc_wing_frame(direction);
+        
+        // C# logic:
+        // WingLibrary.DrawBlend(DrawWingFrame + WingOffset, DrawLocation, DrawColour, true);
+        
+        Some(DrawParams {
+            library_type: LibraryType::Wing,
+            frame_index: frame_index + self.wing_offset,
+            location: _draw_location,
+            color: 0xFFFFFF,
+            blend: true, // Wings always use blend
+        })
+    }
+
+    /// Draw mount
+    /// 
+    /// C# equivalent: PlayerObject.DrawMount()
+    pub fn draw_mount(&self, _draw_location: Point) -> Option<DrawParams> {
+        if self.mount_type < 0 || !self.riding_mount {
+            return None;
+        }
+        
+        let direction = self.map_object.direction() as u8;
+        let frame_index = self.calc_draw_frame(direction);
+        
+        // C# logic:
+        // MountLibrary.Draw(DrawFrame - 416 + MountOffset, DrawLocation, DrawColour, true);
+        
+        Some(DrawParams {
+            library_type: LibraryType::Mount,
+            frame_index: frame_index - 416 + self.mount_offset,
+            location: _draw_location,
+            color: 0xFFFFFF,
+            blend: false,
+        })
+    }
+
+    /// Check if weapon should be drawn before body (left side)
+    /// 
+    /// Helper for draw order logic
+    pub fn weapon_drawn_before_body(&self) -> bool {
+        let dir = self.map_object.direction();
+        matches!(
+            dir,
+            MirDirection::Left | MirDirection::Up | MirDirection::UpLeft | MirDirection::DownLeft
+        )
+    }
+
+    /// Check if head should be drawn before wings
+    /// 
+    /// Helper for draw order logic
+    pub fn head_drawn_before_wings(&self) -> bool {
+        let dir = self.map_object.direction();
+        matches!(
+            dir,
+            MirDirection::Up
+                | MirDirection::UpLeft
+                | MirDirection::UpRight
+                | MirDirection::Right
+                | MirDirection::Left
+        )
+    }
+}
+
+// ==================== Drawing Support Types ====================
+
+/// Parameters for drawing a sprite
+/// 
+/// This is returned by draw methods in Phase 1
+/// TODO Phase 2: Replace with actual rendering calls
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawParams {
+    pub library_type: LibraryType,
+    pub frame_index: i32,
+    pub location: Point,
+    pub color: u32, // ARGB
+    pub blend: bool,
+}
+
+/// Library type for texture resources
+/// 
+/// C# has separate Library objects (BodyLibrary, HairLibrary, etc.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryType {
+    Body,
+    Hair,
+    Weapon,
+    Wing,
+    Mount,
 }
 
 // ==================== Unit Tests ====================
@@ -556,5 +999,320 @@ mod tests {
         assert_eq!(player.hair_offset, 0);
         assert_eq!(player.weapon_offset, 0);
         assert_eq!(player.wing_offset, 0);
+    }
+    
+    #[test]
+    fn test_frame_animation_basic() {
+        let mut player = PlayerObject::new(1, "Warrior".to_string(), MirClass::Warrior, MirGender::Male);
+        
+        // Set up a basic animation frame (4 frames, 100ms per frame)
+        player.frame = Some(Frame::basic(0, 4, 0, 100));
+        player.frame_index = 0;
+        player.frame_interval = 0;
+        
+        // Advance 50ms - should not change frame yet
+        player.update_frame_animation(0.05);
+        assert_eq!(player.frame_index, 0);
+        assert_eq!(player.frame_interval, 50);
+        
+        // Advance another 60ms - should advance to frame 1
+        player.update_frame_animation(0.06);
+        assert_eq!(player.frame_index, 1);
+        assert_eq!(player.frame_interval, 10); // 50 + 60 - 100 = 10
+        
+        // Advance 200ms - should advance 2 more frames
+        player.update_frame_animation(0.2);
+        assert_eq!(player.frame_index, 3);
+    }
+    
+    #[test]
+    fn test_frame_animation_loop() {
+        let mut player = PlayerObject::new(1, "Wizard".to_string(), MirClass::Wizard, MirGender::Female);
+        
+        // Set up animation at last frame
+        player.frame = Some(Frame::basic(0, 4, 0, 100));
+        player.frame_index = 3; // Last frame
+        player.frame_interval = 0;
+        
+        // Advance past interval - should loop back to 0
+        player.update_frame_animation(0.15);
+        assert_eq!(player.frame_index, 0);
+    }
+    
+    #[test]
+    fn test_calc_draw_frame() {
+        let mut player = PlayerObject::new(1, "Warrior".to_string(), MirClass::Warrior, MirGender::Male);
+        
+        // Set up frame: start=100, count=4, skip=2
+        // offset = count + skip = 6
+        player.frame = Some(Frame::basic(100, 4, 2, 100));
+        player.frame_index = 2;
+        
+        // Direction 0: 100 + (6 * 0) + 2 = 102
+        assert_eq!(player.calc_draw_frame(0), 102);
+        
+        // Direction 3: 100 + (6 * 3) + 2 = 120
+        assert_eq!(player.calc_draw_frame(3), 120);
+    }
+    
+    #[test]
+    fn test_calc_wing_frame() {
+        let mut player = PlayerObject::new(1, "Wizard".to_string(), MirClass::Wizard, MirGender::Male);
+        
+        // Set up wing frame with effect data
+        let mut frame = Frame::basic(0, 4, 0, 100);
+        frame.effect_start = 200;
+        frame.effect_count = 3;
+        frame.effect_skip = 1;
+        player.wing_frame = Some(frame);
+        player.effect_frame_index = 1;
+        
+        // effect_offset = 3 + 1 = 4
+        // Direction 0: 200 + (4 * 0) + 1 = 201
+        assert_eq!(player.calc_wing_frame(0), 201);
+        
+        // Direction 2: 200 + (4 * 2) + 1 = 209
+        assert_eq!(player.calc_wing_frame(2), 209);
+    }
+
+    // ==================== Spell Casting Tests ====================
+
+    #[test]
+    fn test_cast_spell_basic() {
+        let mut player = PlayerObject::new(1, "Wizard".to_string(), MirClass::Wizard, MirGender::Male);
+        
+        // Cast FireBall
+        let target = Point { x: 105, y: 105 };
+        player.cast_spell(Spell::FireBall, 123, target, 3, vec![]);
+        
+        assert_eq!(player.spell, Some(Spell::FireBall));
+        assert_eq!(player.target_id, 123);
+        assert_eq!(player.target_point, target);
+        assert_eq!(player.spell_level, 3);
+        assert!(player.cast);
+    }
+
+    #[test]
+    fn test_cast_spell_multi_target() {
+        let mut player = PlayerObject::new(1, "Wizard".to_string(), MirClass::Wizard, MirGender::Male);
+        
+        // Cast multi-target spell
+        let secondary_targets = vec![101, 102, 103];
+        player.cast_spell(
+            Spell::ThunderStorm,
+            0,
+            Point { x: 110, y: 110 },
+            5,
+            secondary_targets.clone(),
+        );
+        
+        assert_eq!(player.spell, Some(Spell::ThunderStorm));
+        assert_eq!(player.secondary_target_ids, secondary_targets);
+    }
+
+    #[test]
+    fn test_next_spell_action() {
+        let mut player = PlayerObject::new(1, "Wizard".to_string(), MirClass::Wizard, MirGender::Male);
+        
+        // Setup casting state
+        player.cast_spell(Spell::Healing, 0, Point { x: 0, y: 0 }, 2, vec![]);
+        assert!(player.cast);
+        
+        // Complete spell
+        player.next_spell_action();
+        assert!(!player.cast);
+    }
+
+    #[test]
+    fn test_can_cast_spell() {
+        let mut player = PlayerObject::new(1, "Taoist".to_string(), MirClass::Taoist, MirGender::Female);
+        
+        // Should be able to cast initially
+        assert!(player.can_cast_spell());
+        
+        // Start casting
+        player.cast_spell(Spell::Poisoning, 456, Point { x: 0, y: 0 }, 1, vec![]);
+        
+        // Should not be able to cast while already casting
+        assert!(!player.can_cast_spell());
+        
+        // Complete spell
+        player.next_spell_action();
+        
+        // Should be able to cast again
+        assert!(player.can_cast_spell());
+    }
+
+    #[test]
+    fn test_clear_spell_state() {
+        let mut player = PlayerObject::new(1, "Wizard".to_string(), MirClass::Wizard, MirGender::Male);
+        
+        // Setup spell state
+        player.cast_spell(
+            Spell::FireBall,
+            999,
+            Point { x: 200, y: 200 },
+            7,
+            vec![1, 2, 3],
+        );
+        
+        // Clear all spell state
+        player.clear_spell_state();
+        
+        assert_eq!(player.spell, None);
+        assert_eq!(player.spell_level, 0);
+        assert!(!player.cast);
+        assert_eq!(player.target_id, 0);
+        assert_eq!(player.target_point, Point { x: 0, y: 0 });
+        assert!(player.secondary_target_ids.is_empty());
+    }
+
+    // ==================== Drawing System Tests ====================
+
+    #[test]
+    fn test_draw_body() {
+        let mut player = PlayerObject::new(1, "Warrior".to_string(), MirClass::Warrior, MirGender::Male);
+        player.set_libraries();
+        
+        // Set up frame
+        player.frame = Some(Frame::basic(100, 4, 2, 100));
+        player.frame_index = 2;
+        
+        let draw_location = Point { x: 50, y: 50 };
+        let params = player.draw_body(draw_location);
+        
+        assert_eq!(params.library_type, LibraryType::Body);
+        assert_eq!(params.frame_index, 102); // 100 + (6 * 0) + 2 + armour_offset(0)
+        assert_eq!(params.location, draw_location);
+        assert!(!params.blend);
+    }
+
+    #[test]
+    fn test_draw_head() {
+        let mut player = PlayerObject::new(1, "Wizard".to_string(), MirClass::Wizard, MirGender::Female);
+        player.set_libraries();
+        
+        player.frame = Some(Frame::basic(200, 4, 2, 100));
+        player.frame_index = 1;
+        
+        let draw_location = Point { x: 100, y: 100 };
+        let params = player.draw_head(draw_location);
+        
+        assert_eq!(params.library_type, LibraryType::Hair);
+        // Female wizard has hair_offset = 808
+        assert_eq!(params.frame_index, 201 + 808); // 200 + (6*0) + 1 + hair_offset = 1009
+    }
+
+    #[test]
+    fn test_draw_weapon_none() {
+        let mut player = PlayerObject::new(1, "Warrior".to_string(), MirClass::Warrior, MirGender::Male);
+        player.weapon = -1; // No weapon
+        
+        let result = player.draw_weapon(Point { x: 0, y: 0 });
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_draw_weapon_equipped() {
+        let mut player = PlayerObject::new(1, "Warrior".to_string(), MirClass::Warrior, MirGender::Male);
+        player.weapon = 5;
+        player.frame = Some(Frame::basic(300, 4, 2, 100));
+        player.frame_index = 3;
+        
+        let draw_location = Point { x: 150, y: 150 };
+        let params = player.draw_weapon(draw_location).unwrap();
+        
+        assert_eq!(params.library_type, LibraryType::Weapon);
+        assert_eq!(params.frame_index, 303); // 300 + 3 + weapon_offset(0)
+        assert_eq!(params.location, draw_location);
+    }
+
+    #[test]
+    fn test_draw_wings() {
+        let mut player = PlayerObject::new(1, "Wizard".to_string(), MirClass::Wizard, MirGender::Male);
+        player.wing_effect = 5;
+        
+        // Set up wing frame
+        let mut frame = Frame::basic(0, 4, 0, 100);
+        frame.effect_start = 500;
+        frame.effect_count = 3;
+        frame.effect_skip = 1;
+        player.wing_frame = Some(frame);
+        player.effect_frame_index = 2;
+        
+        let draw_location = Point { x: 200, y: 200 };
+        let params = player.draw_wings(draw_location).unwrap();
+        
+        assert_eq!(params.library_type, LibraryType::Wing);
+        assert_eq!(params.frame_index, 502); // 500 + (4 * 0) + 2 + wing_offset(0)
+        assert!(params.blend); // Wings always blend
+    }
+
+    #[test]
+    fn test_draw_wings_none() {
+        let mut player = PlayerObject::new(1, "Warrior".to_string(), MirClass::Warrior, MirGender::Male);
+        player.wing_effect = 0; // No wings
+        
+        let result = player.draw_wings(Point { x: 0, y: 0 });
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_draw_mount() {
+        let mut player = PlayerObject::new(1, "Warrior".to_string(), MirClass::Warrior, MirGender::Male);
+        player.mount_type = 2;
+        player.riding_mount = true;
+        player.frame = Some(Frame::basic(1000, 4, 2, 100));
+        player.frame_index = 1;
+        
+        let draw_location = Point { x: 250, y: 250 };
+        let params = player.draw_mount(draw_location).unwrap();
+        
+        assert_eq!(params.library_type, LibraryType::Mount);
+        assert_eq!(params.frame_index, 1001 - 416); // 1000 + 1 - 416 + mount_offset(0)
+    }
+
+    #[test]
+    fn test_weapon_drawn_before_body() {
+        let mut player = PlayerObject::new(1, "Warrior".to_string(), MirClass::Warrior, MirGender::Male);
+        
+        // Test left-side directions
+        player.map_object.set_direction(MirDirection::Left);
+        assert!(player.weapon_drawn_before_body());
+        
+        player.map_object.set_direction(MirDirection::Up);
+        assert!(player.weapon_drawn_before_body());
+        
+        player.map_object.set_direction(MirDirection::UpLeft);
+        assert!(player.weapon_drawn_before_body());
+        
+        // Test right-side directions
+        player.map_object.set_direction(MirDirection::Right);
+        assert!(!player.weapon_drawn_before_body());
+        
+        player.map_object.set_direction(MirDirection::Down);
+        assert!(!player.weapon_drawn_before_body());
+    }
+
+    #[test]
+    fn test_head_drawn_before_wings() {
+        let mut player = PlayerObject::new(1, "Wizard".to_string(), MirClass::Wizard, MirGender::Female);
+        
+        // Test top-side directions (head before wings)
+        player.map_object.set_direction(MirDirection::Up);
+        assert!(player.head_drawn_before_wings());
+        
+        player.map_object.set_direction(MirDirection::UpLeft);
+        assert!(player.head_drawn_before_wings());
+        
+        player.map_object.set_direction(MirDirection::Right);
+        assert!(player.head_drawn_before_wings());
+        
+        // Test bottom-side directions (wings before head)
+        player.map_object.set_direction(MirDirection::Down);
+        assert!(!player.head_drawn_before_wings());
+        
+        player.map_object.set_direction(MirDirection::DownRight);
+        assert!(!player.head_drawn_before_wings());
     }
 }

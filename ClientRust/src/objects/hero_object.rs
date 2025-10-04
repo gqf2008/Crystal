@@ -3,12 +3,12 @@
 
 use mir2_shared::{
     data::stats::Stats,
-    enums::{MirClass, MirGender},
+    enums::{MirClass, MirGender, Spell},
     packets::server::{ObjectHero, HeroInformation},
     Point, UserItem,
 };
 
-use super::map_object::MapObject;
+use super::player_object::PlayerObject;
 use mir2_shared::data::client_data::ClientMagic;
 
 /// Hero spawn state
@@ -21,66 +21,91 @@ pub enum HeroState {
 }
 
 /// Hero object - represents the player's hero companion
+/// 
+/// Architecture: HeroObject composes PlayerObject (which composes MapObject)
+/// This mirrors C# inheritance: HeroObject : PlayerObject : MapObject
 #[derive(Debug, Clone)]
 pub struct HeroObject {
-    // Inherited from MapObject (via PlayerObject concept)
-    pub map_object: MapObject,
+    // ==================== PlayerObject Composition ====================
+    /// Player object containing all player-specific fields and methods
+    /// Includes: appearance, animation, spell casting, drawing, etc.
+    pub player: PlayerObject,
     
-    // Hero specific fields
+    // ==================== HeroObject Specific Fields ====================
+    
+    /// Owner's name
     pub owner_name: String,
+    
+    /// Owner's ID
     pub owner_id: u32,
     
-    // Stats
+    /// Current HP
     pub hp: i32,
+    
+    /// Current MP
     pub mp: i32,
+    
+    /// Max HP
     pub max_hp: i32,
+    
+    /// Max MP
     pub max_mp: i32,
-    pub level: u16,
+    
+    /// Current experience
     pub experience: i64,
+    
+    /// Experience needed for next level
     pub max_experience: i64,
     
-    // Hero state
+    /// Hero spawn state
     pub spawn_state: HeroState,
-    pub loyalty: u16, // 忠诚度
+    
+    /// Loyalty (忠诚度, 0-100)
+    pub loyalty: u16,
+    
+    /// Time when summoned (timestamp)
     pub summoned_time: i64,
     
-    // Inventory
-    pub inventory: Vec<Option<UserItem>>, // 40 slots
-    pub equipment: Vec<Option<UserItem>>, // 14 slots
+    /// Hero inventory (40 slots)
+    pub inventory: Vec<Option<UserItem>>,
     
-    // Skills
+    /// Hero equipment (14 slots)
+    pub equipment: Vec<Option<UserItem>>,
+    
+    /// Hero skills
     pub magics: Vec<ClientMagic>,
     
-    // Combat
+    /// Attack speed
     pub attack_speed: i32,
+    
+    /// Current stats (after equipment)
     pub stats: Stats,
     
-    // Appearance
-    pub class: MirClass,
-    pub gender: MirGender,
-    pub hair: u8,
-    pub weapon: i32,
-    pub weapon_effect: i32,
-    pub armour: i32,
-    
-    // Flags
+    /// Auto-attack flag
     pub auto_attack: bool,
+    
+    /// Auto-pickup flag
     pub auto_pickup: bool,
+    
+    /// Follow owner flag
     pub follow_owner: bool,
 }
 
 impl HeroObject {
     /// Create a new hero object
-    pub fn new(object_id: u32) -> Self {
+    pub fn new(object_id: u32, name: String, class: MirClass, gender: MirGender) -> Self {
+        // Create player object with default values
+        // Actual values will be set by load() method when server data arrives
+        let player = PlayerObject::new(object_id, name, class, gender);
+        
         Self {
-            map_object: MapObject::for_hero(object_id, String::new()),
+            player,
             owner_name: String::new(),
             owner_id: 0,
             hp: 0,
             mp: 0,
             max_hp: 0,
             max_mp: 0,
-            level: 1,
             experience: 0,
             max_experience: 0,
             spawn_state: HeroState::None,
@@ -91,12 +116,6 @@ impl HeroObject {
             magics: Vec::new(),
             attack_speed: 0,
             stats: Stats::default(),
-            class: MirClass::Warrior,
-            gender: MirGender::Male,
-            hair: 0,
-            weapon: 0,
-            weapon_effect: 0,
-            armour: 0,
             auto_attack: false,
             auto_pickup: false,
             follow_owner: true,
@@ -108,29 +127,30 @@ impl HeroObject {
         let player = &info.player;
         
         // Set basic info from ObjectPlayer
-        self.map_object.set_name(player.name.clone());
-        self.map_object.set_name_colour_argb(player.name_colour);
+        // Set PlayerObject fields
+        self.player.map_object.set_name(player.name.clone());
+        self.player.map_object.set_name_colour_argb(player.name_colour);
         self.owner_name = info.owner_name.clone();
         
         let location = Point::new(player.location_x, player.location_y);
-        self.map_object.set_location(location);
-        self.map_object.set_direction(player.direction);
+        self.player.map_object.set_location(location);
+        self.player.map_object.set_direction(player.direction);
         
-        // Appearance
-        self.class = player.class;
-        self.gender = player.gender;
-        self.level = player.level;
-        self.hair = player.hair;
-        self.weapon = player.weapon as i32;
-        self.weapon_effect = player.weapon_effect as i32;
-        self.armour = player.armour as i32;
+        // Appearance (PlayerObject fields)
+        self.player.class = player.class;
+        self.player.gender = player.gender;
+        self.player.level = player.level;
+        self.player.hair = player.hair;
+        self.player.weapon = player.weapon as i32;
+        self.player.weapon_effect = player.weapon_effect as i32;
+        self.player.armour = player.armour as i32;
         
         // State
-        self.map_object.set_light(player.light);
-        self.map_object.set_poison(player.poison);
-        self.map_object.set_dead(player.dead);
-        self.map_object.set_hidden(player.hidden);
-        self.map_object.set_buffs(player.buffs.clone());
+        self.player.map_object.set_light(player.light);
+        self.player.map_object.set_poison(player.poison);
+        self.player.map_object.set_dead(player.dead);
+        self.player.map_object.set_hidden(player.hidden);
+        self.player.map_object.set_buffs(player.buffs.clone());
         
         // Set as spawned
         self.spawn_state = HeroState::Spawned;
@@ -145,7 +165,7 @@ impl HeroObject {
 
     /// Check if hero is spawned and alive
     pub fn is_active(&self) -> bool {
-        self.spawn_state == HeroState::Spawned && !self.map_object.is_dead()
+        self.spawn_state == HeroState::Spawned && !self.player.map_object.is_dead()
     }
 
     /// Check if hero can be summoned
@@ -195,7 +215,7 @@ impl HeroObject {
         }
         
         // Check distance from owner
-        let hero_pos = self.map_object.location();
+        let hero_pos = self.player.map_object.location();
         let dx = (hero_pos.x - owner_pos.x).abs();
         let dy = (hero_pos.y - owner_pos.y).abs();
         let distance = (dx * dx + dy * dy) as f32;
@@ -207,18 +227,18 @@ impl HeroObject {
         self.experience += amount;
         
         // Check for level up
-        while self.experience >= self.max_experience && self.level < 255 {
+        while self.experience >= self.max_experience && self.player.level < 255 {
             self.level_up();
         }
     }
 
     /// Level up
     fn level_up(&mut self) {
-        self.level += 1;
+        self.player.level += 1;
         self.experience -= self.max_experience;
         
         // TODO: Calculate new max experience
-        // self.max_experience = calculate_next_level_exp(self.level);
+        // self.max_experience = calculate_next_level_exp(self.player.level);
         
         // TODO: Increase stats based on class
         // self.increase_stats();
@@ -237,6 +257,75 @@ impl HeroObject {
     pub fn find_empty_inventory_slot(&self) -> Option<usize> {
         self.inventory.iter().position(|slot| slot.is_none())
     }
+    
+    // ==================== Delegation Methods to PlayerObject ====================
+    
+    /// Get current level (delegates to PlayerObject)
+    pub fn level(&self) -> u16 {
+        self.player.level
+    }
+    
+    /// Set level (delegates to PlayerObject)
+    pub fn set_level(&mut self, level: u16) {
+        self.player.level = level;
+    }
+    
+    /// Get class (delegates to PlayerObject)
+    pub fn class(&self) -> MirClass {
+        self.player.class
+    }
+    
+    /// Get gender (delegates to PlayerObject)
+    pub fn gender(&self) -> MirGender {
+        self.player.gender
+    }
+    
+    /// Get object ID (delegates to MapObject via PlayerObject)
+    pub fn object_id(&self) -> u32 {
+        self.player.map_object.object_id()
+    }
+    
+    /// Get name (delegates to MapObject via PlayerObject)
+    pub fn name(&self) -> &str {
+        self.player.map_object.name()
+    }
+    
+    /// Get location (delegates to MapObject via PlayerObject)
+    pub fn location(&self) -> Point {
+        self.player.map_object.location()
+    }
+    
+    /// Get direction (delegates to MapObject via PlayerObject)
+    pub fn direction(&self) -> mir2_shared::enums::MirDirection {
+        self.player.map_object.direction()
+    }
+    
+    /// Draw the hero (delegates to PlayerObject)
+    pub fn draw(&self, draw_location: Point) {
+        self.player.draw(draw_location);
+    }
+    
+    /// Cast a spell (delegates to PlayerObject)
+    pub fn cast_spell(
+        &mut self, 
+        spell: Spell, 
+        target_id: u32, 
+        target_point: Point,
+        spell_level: u8,
+        secondary_targets: Vec<u32>,
+    ) {
+        self.player.cast_spell(spell, target_id, target_point, spell_level, secondary_targets);
+    }
+    
+    /// Update frame animation (delegates to PlayerObject)
+    pub fn update_frame_animation(&mut self, delta_time: f32) {
+        self.player.update_frame_animation(delta_time);
+    }
+    
+    /// Set appearance (delegates to PlayerObject)
+    pub fn set_libraries(&mut self) {
+        self.player.set_libraries();
+    }
 }
 
 /// Get current time in milliseconds
@@ -253,15 +342,15 @@ mod tests {
 
     #[test]
     fn test_hero_object_creation() {
-        let hero = HeroObject::new(1);
-        assert_eq!(hero.map_object.object_id(), 1);
+        let hero = HeroObject::new(1, "TestHero".to_string(), MirClass::Warrior, MirGender::Male);
+        assert_eq!(hero.player.map_object.object_id(), 1);
         assert_eq!(hero.spawn_state, HeroState::None);
         assert_eq!(hero.loyalty, 100);
     }
 
     #[test]
     fn test_hero_summon_unsummon() {
-        let mut hero = HeroObject::new(1);
+        let mut hero = HeroObject::new(1, "TestHero".to_string(), MirClass::Warrior, MirGender::Male);
         
         // Initially can summon
         assert!(hero.can_summon());
@@ -280,8 +369,8 @@ mod tests {
 
     #[test]
     fn test_hero_level_up() {
-        let mut hero = HeroObject::new(1);
-        hero.level = 1;
+        let mut hero = HeroObject::new(1, "TestHero".to_string(), MirClass::Warrior, MirGender::Male);
+        hero.player.level = 1;
         hero.experience = 0;
         hero.max_experience = 100;
         hero.max_hp = 100;
@@ -292,14 +381,14 @@ mod tests {
         // Gain enough exp to level up
         hero.gain_experience(100);
         
-        assert_eq!(hero.level, 2);
+        assert_eq!(hero.level(), 2);
         assert_eq!(hero.hp, hero.max_hp); // HP restored
         assert_eq!(hero.mp, hero.max_mp); // MP restored
     }
 
     #[test]
     fn test_hero_inventory() {
-        let hero = HeroObject::new(1);
+        let hero = HeroObject::new(1, "TestHero".to_string(), MirClass::Warrior, MirGender::Male);
         assert_eq!(hero.inventory.len(), 40);
         assert!(!hero.is_inventory_full());
         assert_eq!(hero.find_empty_inventory_slot(), Some(0));

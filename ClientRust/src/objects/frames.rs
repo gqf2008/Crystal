@@ -3,6 +3,130 @@
 
 use mir2_shared::enums::MirAction;
 
+/// Frame definition for animations
+/// 
+/// Mirrors C# Client/MirObjects/Frames.cs Frame class
+/// 
+/// A Frame defines how an animation plays:
+/// - start: Starting frame index in the sprite sheet
+/// - count: Number of frames to play
+/// - skip: Number of frames to skip after animation ends
+/// - interval: Time between frames (milliseconds)
+/// - effect_*: Same properties for effect layer (wings, weapons, etc.)
+/// - reverse: Play animation in reverse
+/// - blend: Use alpha blending
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Frame {
+    /// Starting frame index
+    pub start: i32,
+    
+    /// Number of frames in animation
+    pub count: i32,
+    
+    /// Number of frames to skip
+    pub skip: i32,
+    
+    /// Time between frames (milliseconds)
+    pub interval: i32,
+    
+    /// Starting frame for effect layer
+    pub effect_start: i32,
+    
+    /// Number of effect frames
+    pub effect_count: i32,
+    
+    /// Number of effect frames to skip
+    pub effect_skip: i32,
+    
+    /// Time between effect frames (milliseconds)
+    pub effect_interval: i32,
+    
+    /// Play animation in reverse
+    pub reverse: bool,
+    
+    /// Use alpha blending
+    pub blend: bool,
+}
+
+impl Frame {
+    /// Create a new Frame
+    /// 
+    /// Mirrors C# Frame(int start, int count, int skip, int interval, ...)
+    pub fn new(
+        start: i32,
+        count: i32,
+        skip: i32,
+        interval: i32,
+        effect_start: i32,
+        effect_count: i32,
+        effect_skip: i32,
+        effect_interval: i32,
+    ) -> Self {
+        Self {
+            start,
+            count,
+            skip,
+            interval,
+            effect_start,
+            effect_count,
+            effect_skip,
+            effect_interval,
+            reverse: false,
+            blend: false,
+        }
+    }
+    
+    /// Create a basic frame without effects
+    /// 
+    /// Simplified constructor for common case
+    pub fn basic(start: i32, count: i32, skip: i32, interval: i32) -> Self {
+        Self::new(start, count, skip, interval, 0, 0, 0, 0)
+    }
+    
+    /// Offset for frame iteration (count + skip)
+    /// 
+    /// Mirrors C# Frame.OffSet property
+    pub fn offset(&self) -> i32 {
+        self.count + self.skip
+    }
+    
+    /// Offset for effect frame iteration
+    /// 
+    /// Mirrors C# Frame.EffectOffSet property
+    pub fn effect_offset(&self) -> i32 {
+        self.effect_count + self.effect_skip
+    }
+    
+    /// Set reverse flag (builder pattern)
+    pub fn with_reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
+    }
+    
+    /// Set blend flag (builder pattern)
+    pub fn with_blend(mut self, blend: bool) -> Self {
+        self.blend = blend;
+        self
+    }
+}
+
+impl Default for Frame {
+    fn default() -> Self {
+        Self {
+            start: 0,
+            count: 1,
+            skip: 0,
+            interval: 100,
+            effect_start: 0,
+            effect_count: 0,
+            effect_skip: 0,
+            effect_interval: 0,
+            reverse: false,
+            blend: false,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct AnimationStep {
     pub frames_advanced: u32,

@@ -15,7 +15,7 @@ mod damage;
 mod pathfinder;
 mod map_code; // MapReader and CellInfo - 对应 Client/MirObjects/MapCode.cs
 
-pub use frames::{AnimationAdvanceSummary, AnimationStep};
+pub use frames::{AnimationAdvanceSummary, AnimationStep, Frame};
 pub use map_object::{
     ActionResult, AttackOutcome, BuffDelta, MapObject, MapObjectType, ObjectActionOutcome,
     ObjectAttackOutcome, ObjectDeathOutcome, ObjectStruckOutcome, ObjectUpdateOutcome,

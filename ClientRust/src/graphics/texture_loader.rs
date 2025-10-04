@@ -8,6 +8,45 @@ use std::path::{Path, PathBuf};
 use flate2::read::GzDecoder;
 use egui::{ColorImage, TextureHandle, Context as EguiContext};
 
+/// Library trait - generic interface for image libraries
+/// 
+/// This trait provides a common interface for different types of
+/// image libraries (MLibrary, WZL, etc.)
+/// 
+/// **Note**: This trait is a Rust design improvement over the original C# code.
+/// The C# version uses a concrete `MLibrary` sealed class without any interface.
+/// This trait-based design allows for:
+/// - Better abstraction and extensibility
+/// - Support for multiple library formats (e.g., future WZL support)
+/// - More idiomatic Rust code with trait bounds
+/// 
+/// C# equivalent: `MLibrary` class (no interface exists in original)
+pub trait Library {
+    /// Get the total number of frames in the library
+    /// 
+    /// C# equivalent: `MLibrary._count` field
+    fn frame_count(&self) -> usize;
+    
+    /// Check if a frame exists at the given index
+    /// 
+    /// C# equivalent: `MLibrary.CheckImage(int index)`
+    fn has_frame(&self, frame_index: i32) -> bool;
+    
+    /// Get the size of a frame (width, height)
+    /// 
+    /// Requires mutable access to load image info if not cached.
+    /// 
+    /// C# equivalent: `MLibrary.GetSize(int index)`
+    fn frame_size(&mut self, frame_index: i32) -> Option<(u32, u32)>;
+    
+    /// Get the offset of a frame (x, y)
+    /// 
+    /// Requires mutable access to load image info if not cached.
+    /// 
+    /// C# equivalent: `MLibrary.GetOffSet(int index)`
+    fn frame_offset(&mut self, frame_index: i32) -> Option<(i32, i32)>;
+}
+
 /// MIR2图像库文件头
 #[derive(Debug, Clone)]
 pub struct LibraryHeader {
@@ -297,6 +336,81 @@ fn read_u8<R: Read>(reader: &mut R) -> io::Result<u8> {
     Ok(buf[0])
 }
 
+// ===== Library trait implementation =====
+
+/// Implement Library trait for MLibrary
+/// 
+/// This allows MLibrary to be used with the generic rendering system.
+impl Library for MLibrary {
+    fn frame_count(&self) -> usize {
+        self.count()
+    }
+
+    fn has_frame(&self, frame_index: i32) -> bool {
+        frame_index >= 0 && (frame_index as usize) < self.count()
+    }
+
+    fn frame_size(&mut self, frame_index: i32) -> Option<(u32, u32)> {
+        if !self.has_frame(frame_index) {
+            return None;
+        }
+        
+        // Get image info (may load from disk if not cached)
+        let info = self.get_image_info(frame_index as usize).ok()?;
+        Some((info.width as u32, info.height as u32))
+    }
+
+    fn frame_offset(&mut self, frame_index: i32) -> Option<(i32, i32)> {
+        if !self.has_frame(frame_index) {
+            return None;
+        }
+        
+        // Get image info (may load from disk if not cached)
+        let info = self.get_image_info(frame_index as usize).ok()?;
+        Some((info.x as i32, info.y as i32))
+    }
+}
+
+/// Helper methods for MLibrary
+impl MLibrary {
+    /// Check if image index is valid
+    /// 
+    /// C# equivalent: MLibrary.CheckImage(int index)
+    pub fn check_image(&self, index: i32) -> bool {
+        self.has_frame(index)
+    }
+    
+    /// Get image bounds for drawing
+    /// 
+    /// Used for screen clipping optimization.
+    /// Returns None if image is invalid or info cannot be retrieved.
+    /// 
+    /// C# equivalent: Logic in MLibrary.Draw() for bounds checking
+    pub fn get_image_bounds_mut(
+        &mut self,
+        index: i32,
+        point: (i32, i32),
+        use_offset: bool,
+    ) -> Option<(i32, i32, i32, i32)> {
+        if !self.check_image(index) {
+            return None;
+        }
+        
+        let info = self.get_image_info(index as usize).ok()?;
+        
+        let (mut x, mut y) = point;
+        if use_offset {
+            x += info.x as i32;
+            y += info.y as i32;
+        }
+        
+        let width = info.width as i32;
+        let height = info.height as i32;
+        
+        Some((x, y, width, height))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,5 +419,11 @@ mod tests {
     fn test_library_open() {
         // 这个测试需要实际的.lib文件
         // 暂时跳过
+    }
+    
+    #[test]
+    fn test_library_check_image() {
+        // Mock test - in practice we'd need a real .lib file
+        // For now, we'll test the logic with a hypothetical library
     }
 }

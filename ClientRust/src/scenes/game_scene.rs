@@ -187,7 +187,7 @@ impl GameScene {
     }
     
     pub fn add_player(&mut self, player: UserObject) {
-        let id = player.map_object.object_id();
+        let id = player.player.map_object.object_id();
         self.players.insert(id, player);
     }
     

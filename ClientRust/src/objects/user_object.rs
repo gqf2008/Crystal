@@ -7,31 +7,39 @@ use mir2_shared::{packets::*,
         client_data::{ClientMagic, ClientIntelligentCreature, ClientQuestProgress, ClientMail},
         item::ItemSets,  // C# Shared/Data/ItemData.cs ItemSets
     },
-    enums::{MirDirection, MirAction, Spell, SpecialItemMode, EquipmentSlot, IntelligentCreatureType},
+    enums::{MirDirection, MirAction, Spell, SpecialItemMode, EquipmentSlot, IntelligentCreatureType, MirClass, MirGender},
     Point, UserItem,
 };
 
-use super::map_object::MapObject;
-
-
+use super::player_object::PlayerObject;
 
 /// User object - represents the current player
+/// 
+/// Architecture: UserObject composes PlayerObject (which composes MapObject)
+/// This mirrors C# inheritance: UserObject : PlayerObject : MapObject
 #[derive(Debug, Clone)]
 pub struct UserObject {
-    // Inherited from MapObject
-    pub map_object: MapObject,
+    // ==================== PlayerObject Composition ====================
+    /// Player object containing all player-specific fields and methods
+    /// Includes: appearance, animation, spell casting, drawing, etc.
+    pub player: PlayerObject,
     
-    // UserObject specific fields
+    // ==================== UserObject Specific Fields ====================
+    
+    /// User ID (different from ObjectID in MapObject)
     pub id: u32,
-    pub hp: i32,
-    pub mp: i32,
-    pub attack_speed: i32,
-    pub stats: Stats,
     
-    // From PlayerObject (C# - since we don't have PlayerObject layer yet)
-    pub level: u16,
-    pub guild_name: String,
-    pub guild_rank_name: String,
+    /// Current HP
+    pub hp: i32,
+    
+    /// Current MP
+    pub mp: i32,
+    
+    /// Attack speed
+    pub attack_speed: i32,
+    
+    /// Current stats (after equipment)
+    pub stats: Stats,
     
     // Weight tracking
     pub current_hand_weight: i32,
@@ -128,16 +136,22 @@ pub struct QueuedAction {
 impl UserObject {
     /// Create a new user object
     pub fn new(object_id: u32) -> Self {
+        // Create player object with default values
+        // Actual values will be set by load() method when server data arrives
+        let player = PlayerObject::new(
+            object_id,
+            String::new(),
+            MirClass::Warrior,  // Default, will be set by load()
+            MirGender::Male,    // Default, will be set by load()
+        );
+        
         Self {
-            map_object: MapObject::for_user(object_id, String::new()),
+            player,
             id: 0,
             hp: 0,
             mp: 0,
             attack_speed: 0,
             stats: Stats::default(),
-            level: 1,
-            guild_name: String::new(),
-            guild_rank_name: String::new(),
             current_hand_weight: 0,
             current_wear_weight: 0,
             current_bag_weight: 0,
@@ -187,21 +201,21 @@ impl UserObject {
     /// Load user information from server
     pub fn load(&mut self, info: &UserInformation) {
         self.id = info.real_id;
-        self.map_object.set_name(info.name.clone());
-        self.map_object.set_name_colour_argb(info.name_colour);
         
-        // PlayerObject fields (stored in UserObject since we don't have PlayerObject layer yet)
-        self.level = info.level;
-        self.guild_name = info.guild_name.clone();
-        self.guild_rank_name = info.guild_rank.clone();
+        // Set PlayerObject fields
+        self.player.map_object.set_name(info.name.clone());
+        self.player.map_object.set_name_colour_argb(info.name_colour);
+        self.player.level = info.level;
+        self.player.guild_name = info.guild_name.clone();
+        self.player.guild_rank_name = info.guild_rank.clone();
+        self.player.class = info.class;
+        self.player.gender = info.gender;
+        self.player.hair = info.hair;
         
-        // Note: class, gender, hair are player-specific fields
-        // They would be in PlayerObject layer when we add it
-        
+        // Set location and direction
         let location = Point::new(info.location_x, info.location_y);
-        self.map_object.set_location(location);
-        
-        self.map_object.set_direction(info.direction);
+        self.player.map_object.set_location(location);
+        self.player.map_object.set_direction(info.direction);
         
         self.hp = info.hp;
         self.mp = info.mp;
@@ -264,7 +278,8 @@ impl UserObject {
         // Set to standing action based on current direction
         // This will be implemented when MapObject's action system is complete
         // For now, just ensure the object is in a valid state
-        self.map_object.set_direction(self.map_object.direction());
+        let direction = self.player.map_object.direction();
+        self.player.map_object.set_direction(direction);
     }
     
     /// Update user stats (called after equipment/buff changes)
@@ -352,7 +367,7 @@ impl UserObject {
     fn refresh_buffs(&mut self) {
         // TODO: Iterate through active buffs
         // Add stats based on buff type
-        for _buff in self.map_object.buffs() {
+        for _buff in self.player.map_object.buffs() {
             // match buff.buff_type {
             //     BuffType::某种Buff => self.stats.add_hp(value),
             //     ...
@@ -366,7 +381,7 @@ impl UserObject {
         // if (AttackSpeed < 550) AttackSpeed = 550;
         
         let attack_speed_stat = 0; // TODO: self.stats.get(StatType::AttackSpeed);
-        let speed = 1400 - (attack_speed_stat * 60 + std::cmp::min(370, self.level as i32 * 14));
+        let speed = 1400 - (attack_speed_stat * 60 + std::cmp::min(370, self.player.level as i32 * 14));
         self.attack_speed = std::cmp::max(550, speed);
     }
 
@@ -447,7 +462,7 @@ impl UserObject {
     
     /// Level up the character
     fn level_up(&mut self) {
-        self.level += 1;
+        self.player.level += 1;
         self.experience -= self.max_experience;
         
         // TODO: Calculate new max_experience based on level
@@ -458,6 +473,81 @@ impl UserObject {
         // For now, just refresh stats
         self.refresh_stats();
     }
+    
+    // ==================== Delegation Methods to PlayerObject ====================
+    
+    /// Get current level (delegates to PlayerObject)
+    pub fn level(&self) -> u16 {
+        self.player.level
+    }
+    
+    /// Get class (delegates to PlayerObject)
+    pub fn class(&self) -> MirClass {
+        self.player.class
+    }
+    
+    /// Get gender (delegates to PlayerObject)
+    pub fn gender(&self) -> MirGender {
+        self.player.gender
+    }
+    
+    /// Get guild name (delegates to PlayerObject)
+    pub fn guild_name(&self) -> &str {
+        &self.player.guild_name
+    }
+    
+    /// Get guild rank name (delegates to PlayerObject)
+    pub fn guild_rank_name(&self) -> &str {
+        &self.player.guild_rank_name
+    }
+    
+    /// Get object ID (delegates to MapObject via PlayerObject)
+    pub fn object_id(&self) -> u32 {
+        self.player.map_object.object_id()
+    }
+    
+    /// Get name (delegates to MapObject via PlayerObject)
+    pub fn name(&self) -> &str {
+        self.player.map_object.name()
+    }
+    
+    /// Get location (delegates to MapObject via PlayerObject)
+    pub fn location(&self) -> Point {
+        self.player.map_object.location()
+    }
+    
+    /// Get direction (delegates to MapObject via PlayerObject)
+    pub fn direction(&self) -> MirDirection {
+        self.player.map_object.direction()
+    }
+    
+    /// Draw the user (delegates to PlayerObject)
+    pub fn draw(&self, draw_location: Point) {
+        self.player.draw(draw_location);
+    }
+    
+    /// Cast a spell (delegates to PlayerObject)
+    pub fn cast_spell(
+        &mut self, 
+        spell: Spell, 
+        target_id: u32, 
+        target_point: Point,
+        spell_level: u8,
+        secondary_targets: Vec<u32>,
+    ) {
+        self.player.cast_spell(spell, target_id, target_point, spell_level, secondary_targets);
+    }
+    
+    /// Update frame animation (delegates to PlayerObject)
+    pub fn update_frame_animation(&mut self, delta_time: f32) {
+        self.player.update_frame_animation(delta_time);
+    }
+    
+    /// Set appearance (delegates to PlayerObject)
+    /// Updates class, gender, armour, weapon fields and recalculates offsets
+    pub fn set_libraries(&mut self) {
+        self.player.set_libraries();
+    }
 }
 
 #[cfg(test)]
@@ -467,7 +557,7 @@ mod tests {
     #[test]
     fn test_user_object_creation() {
         let user = UserObject::new(1);
-        assert_eq!(user.map_object.object_id(), 1);
+        assert_eq!(user.player.map_object.object_id(), 1);
         assert_eq!(user.inventory.len(), 46);
         assert_eq!(user.equipment.len(), 14);
     }
