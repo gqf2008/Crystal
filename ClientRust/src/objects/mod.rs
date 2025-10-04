@@ -12,6 +12,7 @@ mod spell_object;
 mod effect;
 mod damage;
 mod pathfinder;
+mod map_code; // MapReader and CellInfo - 对应 Client/MirObjects/MapCode.cs
 
 pub use frames::{AnimationAdvanceSummary, AnimationStep};
 pub use map_object::{
@@ -32,3 +33,4 @@ pub use spell_object::SpellObject;
 pub use effect::{Effect, EffectLayer, BlendMode};
 pub use damage::{Damage, DamageType, Color};
 pub use pathfinder::PathFinder;
+pub use map_code::{MapReader, CellInfo}; // 对应 Client/MirObjects/MapCode.cs

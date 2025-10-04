@@ -2,8 +2,11 @@
 // Mirrors Client/MirScenes/SelectScene.cs
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
+use super::dialogs::character_creation_dialog::CharacterCreationDialog;
+use super::dialogs::character_deletion_dialog::CharacterDeletionDialog;
 use crate::network::game_client::GameEvent;
 use mir2_shared::enums::{MirClass, MirGender};
+use std::collections::HashMap;
 
 /// Character selection data
 #[derive(Debug, Clone)]
@@ -17,7 +20,6 @@ pub struct SelectCharacter {
 }
 
 /// Character selection scene
-#[derive(Debug)]
 pub struct SelectScene {
     // Character slots
     pub characters: Vec<Option<SelectCharacter>>,
@@ -27,14 +29,17 @@ pub struct SelectScene {
     pub creating_character: bool,
     pub deleting_character: bool,
     
-    // New character creation
+    // New character creation (legacy fields, deprecated)
     pub new_char_name: String,
     pub new_char_class: MirClass,
     pub new_char_gender: MirGender,
     
-    // Dialogs (TODO: implement when dialog system ready)
-    // new_character_dialog: Option<NewCharacterDialog>,
-    // delete_confirm_dialog: Option<MessageBox>,
+    // Dialogs
+    pub character_creation_dialog: CharacterCreationDialog,
+    pub character_deletion_dialog: CharacterDeletionDialog,
+    
+    // Character preview textures (cached)
+    pub character_preview_textures: HashMap<usize, egui::TextureHandle>,
 }
 
 impl SelectScene {
@@ -48,6 +53,9 @@ impl SelectScene {
             new_char_name: String::new(),
             new_char_class: MirClass::Warrior,
             new_char_gender: MirGender::Male,
+            character_creation_dialog: CharacterCreationDialog::new(),
+            character_deletion_dialog: CharacterDeletionDialog::new(),
+            character_preview_textures: HashMap::new(),
         }
     }
     

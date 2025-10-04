@@ -276,12 +276,12 @@ impl ClientState {
         let grade = item_info.map(|info| info.grade).unwrap_or(mir2_shared::ItemGrade::None);
         // 根据grade计算颜色 (临时实现)
         let name_colour_argb = match grade {
-            mir2_shared::ItemGrade::None => 0xFFFFFFFF,
-            mir2_shared::ItemGrade::Common => 0xFFFFFFFF,
-            mir2_shared::ItemGrade::Rare => 0xFF00FF00,
-            mir2_shared::ItemGrade::Legendary => 0xFFFFAA00,
-            mir2_shared::ItemGrade::Mythical => 0xFF0080FF,
-            mir2_shared::ItemGrade::Heroic => 0xFFFF00FF,
+            mir2_shared::ItemGrade::None => 0xFFFF_FFFFu32 as i32,
+            mir2_shared::ItemGrade::Common => 0xFFFF_FFFFu32 as i32,
+            mir2_shared::ItemGrade::Rare => 0xFF00_FF00u32 as i32,
+            mir2_shared::ItemGrade::Legendary => 0xFFFF_AA00u32 as i32,
+            mir2_shared::ItemGrade::Mythical => 0xFF00_80FFu32 as i32,
+            mir2_shared::ItemGrade::Heroic => 0xFFFF_00FFu32 as i32,
         };
         let object = GroundObject::Item(GroundItemEntry {
             object_id: packet.object_id,

@@ -32,6 +32,7 @@ tracing-subscriber = { version = "0.3", features = [
     "env-filter",
     "tracing-log",
 ] }
+env_logger = "0.11"
 url = "2"
 winit = { version = "0.28", features = ["serde"] }
 rodio = { version = "0.17", default-features = false, features = ["vorbis"] }
@@ -43,6 +44,13 @@ mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
 byteorder = "1"
 md5 = "0.7"
 wgpu = "27.0.1"
+bytemuck = { version = "1.14", features = ["derive"] }  # For wgpu vertex data
+flate2 = "1"  # GZip decompression for .lib files
+
+# GUI Framework - egui for immediate-mode UI
+egui = "0.29"
+eframe = { version = "0.29", default-features = true, features = ["wgpu"] }
+egui-wgpu = "0.29"
 
 [dev-dependencies]
 criterion = "0.5"

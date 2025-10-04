@@ -3,6 +3,9 @@ use rodio::{OutputStream, Sink};
 
 use crate::settings::SoundSettings;
 
+pub mod sound_loader;
+pub use sound_loader::{SoundManager, SoundType, SoundInfo};
+
 pub struct AudioEngine {
     _stream: OutputStream,
     settings: SoundSettings,

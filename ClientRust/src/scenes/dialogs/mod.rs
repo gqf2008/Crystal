@@ -4,6 +4,10 @@
 // Core infrastructure
 pub mod dialog_manager;
 
+// Character Management
+pub mod character_creation_dialog;
+pub mod character_deletion_dialog;
+
 // Management Dialogs (Option E)
 pub mod menu_dialog;
 pub mod option_dialog;

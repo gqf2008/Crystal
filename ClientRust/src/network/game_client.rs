@@ -13,7 +13,7 @@ use mir2_shared::{
     Point, UserItem, ClientQuestProgress, ClientMagic,
 };
 
-use super::protocol::{PacketHandler, packets};
+use super::protocol::{PacketHandler, packets, CharacterSummary};
 use crate::scenes::dialogs::chat_dialog::ChatMessage;
 
 /// Game client state - implements packet handling logic
@@ -30,6 +30,7 @@ pub struct GameClient {
     // ==================== UI State ====================
     pub chat_messages: VecDeque<ChatMessage>,
     pub max_chat_messages: usize,
+    pub login_characters: Vec<CharacterSummary>,
     
     // ==================== Game Systems ====================
     pub group: GroupSystem,
@@ -146,6 +147,19 @@ pub enum GameEvent {
     GroupInviteReceived { inviter: String },
     GuildInviteReceived { inviter: String },
     SystemMessage { message: String },
+    ClientVersionResponse { result: u8 },
+    LoginResponse { result: u8 },
+    LoginBanned { reason: String, expiry_date: i64 },
+    LoginSuccess { characters: Vec<CharacterSummary> },
+    NewAccountResponse { result: u8 },
+    ChangePasswordResponse { result: u8 },
+    ChangePasswordBanned { reason: String, expiry_date: i64 },
+    
+    // Character management events
+    NewCharacterResponse { result: u8 },
+    NewCharacterSuccess { character: mir2_shared::data::client_data::SelectInfo },
+    DeleteCharacterResponse { result: u8 },
+    DeleteCharacterSuccess { character_index: i32 },
     
     // Item events
     ItemGained { item: UserItem, grid_type: String },
@@ -176,6 +190,7 @@ impl GameClient {
             objects: HashMap::new(),
             chat_messages: VecDeque::new(),
             max_chat_messages: 100,
+            login_characters: Vec::new(),
             group: GroupSystem::default(),
             guild: GuildSystem::default(),
             friends: FriendSystem::default(),
@@ -292,6 +307,10 @@ impl PacketHandler for GameClient {
     
     fn on_login_success(&mut self, packet: packets::LoginSuccess) {
         tracing::info!("🎮 Login successful! {} characters available", packet.characters.len());
+        self.login_characters = packet.characters.clone();
+        self.send_event(GameEvent::LoginSuccess {
+            characters: packet.characters,
+        });
     }
     
     fn on_start_game_delay(&mut self, packet: packets::StartGameDelay) {
@@ -1957,38 +1976,55 @@ impl PacketHandler for GameClient {
     // Account Management (3 handlers)
     fn on_login(&mut self, packet: packets::Login) {
         tracing::debug!("Login response: result={}", packet.result);
-        // Result codes: 0=Success, 1=Invalid credentials, 2=Banned, 3=Server full
+        self.send_event(GameEvent::LoginResponse { result: packet.result });
+        // Result codes: 0=Disabled, 1=Bad AccountID, 2=Bad Password, 3=Account Not Exist,
+        // 4=Wrong Password, 5=Password Change Required
     }
 
     fn on_new_account(&mut self, packet: packets::NewAccount) {
         tracing::debug!("New account creation result: result={}", packet.result);
-        // Result codes: 0=Success, 1=Username taken, 2=Invalid format, 3=Disabled
+        self.send_event(GameEvent::NewAccountResponse { result: packet.result });
+        // Result codes: see mir2_shared::packets::server::login::NewAccount for full list
     }
 
     fn on_change_password(&mut self, packet: packets::ChangePassword) {
         tracing::debug!("Password change result: result={}", packet.result);
-        // Result codes: 0=Success, 1=Wrong old password, 2=Invalid new password
+        self.send_event(GameEvent::ChangePasswordResponse { result: packet.result });
+        // Result codes: see mir2_shared::packets::server::login::ChangePassword for full list
     }
 
     // Character Management (4 handlers)
     fn on_new_character(&mut self, packet: packets::NewCharacter) {
-        tracing::debug!("Character creation result: result={}", packet.result);
+        tracing::info!("📝 Character creation result: result={}", packet.result);
         // Result codes: 0=Success, 1=Name taken, 2=Invalid name, 3=Slot full
+        self.send_event(GameEvent::NewCharacterResponse {
+            result: packet.result,
+        });
     }
 
     fn on_new_character_success(&mut self, packet: packets::NewCharacterSuccess) {
-        tracing::debug!("Character created successfully: {} (class: {:?})", 
+        tracing::info!("✅ Character created successfully: {} (class: {:?})", 
             packet.character.name, packet.character.class);
+        // packet.character is SelectInfo which we need to convert/use directly
+        self.send_event(GameEvent::NewCharacterSuccess {
+            character: packet.character.clone(),
+        });
     }
 
     fn on_delete_character(&mut self, packet: packets::DeleteCharacter) {
-        tracing::debug!("Character deletion result: result={}", packet.result);
-        // Result codes: 0=Success, 1=Wrong password, 2=Has guild, 3=Cooldown
+        tracing::info!("📝 Character deletion result: result={}", packet.result);
+        // Result codes: 0=Disabled, 1=Character not found
+        self.send_event(GameEvent::DeleteCharacterResponse {
+            result: packet.result,
+        });
     }
 
     fn on_delete_character_success(&mut self, packet: packets::DeleteCharacterSuccess) {
-        tracing::debug!("Character deleted successfully: index {}", 
+        tracing::info!("✅ Character deleted successfully: index {}", 
             packet.character_index);
+        self.send_event(GameEvent::DeleteCharacterSuccess {
+            character_index: packet.character_index,
+        });
     }
 
     // ==================== Phase F.3: Advanced Game Systems (8 handlers) ====================
@@ -2434,15 +2470,20 @@ impl PacketHandler for GameClient {
     fn on_client_version(&mut self, packet: packets::ClientVersion) {
         tracing::debug!("Client version: result={}", packet.result);
         // Server verifying client version compatibility
-        // If mismatch: forced disconnect or update prompt
-        // Used for: preventing outdated clients, security patches
+        self.send_event(GameEvent::ClientVersionResponse { result: packet.result });
+        if packet.result == 0 {
+            self.send_event(GameEvent::SystemMessage {
+                message: "Wrong client version detected. Please update to continue.".to_string(),
+            });
+        }
     }
     
     fn on_login_banned(&mut self, packet: packets::LoginBanned) {
         tracing::debug!("Login banned: reason={:?}, duration={:?}", packet.reason, packet.expiry_date);
-        // Account banned notification
-        // Show: ban reason, expiration date, appeal contact
-        // Types: temp ban (hours/days), permanent, IP ban
+        self.send_event(GameEvent::LoginBanned {
+            reason: packet.reason.clone(),
+            expiry_date: packet.expiry_date,
+        });
     }
     
     fn on_logout_success(&mut self, _packet: packets::LogOutSuccess) {
@@ -2461,9 +2502,10 @@ impl PacketHandler for GameClient {
     
     fn on_change_password_banned(&mut self, packet: packets::ChangePasswordBanned) {
         tracing::debug!("Change password banned: reason={:?}, duration={:?}", packet.reason, packet.expiry_date);
-        // Password change locked temporarily
-        // Reasons: too many attempts, recent change, security flag
-        // Show cooldown timer, security recommendations
+        self.send_event(GameEvent::ChangePasswordBanned {
+            reason: packet.reason.clone(),
+            expiry_date: packet.expiry_date,
+        });
     }
     
     // Rental System Extensions (2 handlers)
