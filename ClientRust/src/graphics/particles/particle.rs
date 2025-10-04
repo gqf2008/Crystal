@@ -180,16 +180,21 @@ impl Particle {
     ///         ImageInfo.Library.Draw(ImageInfo.BaseIndex + ImageInfo.CurrentFrame, new Point(drawx, drawy), Color, true, BlendRate);
     /// }
     /// ```
-    pub fn draw(&self) {
-        // TODO: 集成 MLibrary 后实现
-        // let index = self.image_info.base_index + self.image_info.current_frame;
-        // let pos = (self.position.0 as i32, self.position.1 as i32);
-        // 
-        // if self.blend {
-        //     library.draw_blend(index, pos, self.color, true, self.blend_rate);
-        // } else {
-        //     library.draw(index, pos, self.color, true, self.blend_rate);
-        // }
+    pub fn draw(
+        &self,
+        library: &mut crate::graphics::mlibrary::MLibrary,
+        dx_manager: &mut crate::graphics::dx_manager::DXManager,
+    ) -> std::io::Result<()> {
+        let index = self.image_info.base_index + self.image_info.current_frame;
+        let pos = (self.position.0 as i32, self.position.1 as i32);
+        
+        if self.blend {
+            library.draw_blend(dx_manager, index, pos, self.color, true, self.blend_rate)?;
+        } else {
+            library.draw(dx_manager, index, pos, self.color, true, self.blend_rate)?;
+        }
+        
+        Ok(())
     }
     
     /// C# ProcessImage() 方法:
@@ -234,7 +239,11 @@ impl Particle {
 /// C# 用继承，Rust 用 trait，但保持最小化
 pub trait ParticleTrait {
     fn update(&mut self);
-    fn draw(&self);
+    fn draw(
+        &self,
+        library: &mut crate::graphics::mlibrary::MLibrary,
+        dx_manager: &mut crate::graphics::dx_manager::DXManager,
+    ) -> std::io::Result<()>;
     fn process_image(&mut self);
     fn on_particle_end(&mut self);
     fn get_alive_time(&self) -> i64;
@@ -248,8 +257,12 @@ impl ParticleTrait for Particle {
         Particle::update(self);
     }
     
-    fn draw(&self) {
-        Particle::draw(self);
+    fn draw(
+        &self,
+        library: &mut crate::graphics::mlibrary::MLibrary,
+        dx_manager: &mut crate::graphics::dx_manager::DXManager,
+    ) -> std::io::Result<()> {
+        Particle::draw(self, library, dx_manager)
     }
     
     fn process_image(&mut self) {

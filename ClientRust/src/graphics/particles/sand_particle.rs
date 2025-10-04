@@ -80,8 +80,12 @@ impl ParticleTrait for SandParticle {
         self.base.update();
     }
     
-    fn draw(&self) {
-        self.base.draw();
+    fn draw(
+        &self,
+        library: &mut crate::graphics::mlibrary::MLibrary,
+        dx_manager: &mut crate::graphics::dx_manager::DXManager,
+    ) -> std::io::Result<()> {
+        self.base.draw(library, dx_manager)
     }
     
     fn process_image(&mut self) {

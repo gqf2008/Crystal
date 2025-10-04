@@ -329,8 +329,87 @@ fn read_u8<R: Read>(reader: &mut R) -> io::Result<u8> {
     Ok(buf[0])
 }
 
-/// Helper methods for MLibrary
+/// Drawing and helper methods for MLibrary
 impl MLibrary {
+    /// Draw image without blending
+    /// 
+    /// C# equivalent:
+    /// ```csharp
+    /// public void Draw(int index, Point point, Color colour, bool offSet, float opacity) {
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     if (offSet) point.Offset(mi.X, mi.Y);
+    ///     if (point.X >= Settings.ScreenWidth || point.Y >= Settings.ScreenHeight || 
+    ///         point.X + mi.Width < 0 || point.Y + mi.Height < 0) return;
+    ///     DXManager.DrawOpaque(mi.Image, new Rectangle(0, 0, mi.Width, mi.Height), 
+    ///                          new Vector3((float)point.X, (float)point.Y, 0.0F), colour, opacity);
+    /// }
+    /// ```
+    pub fn draw(
+        &mut self,
+        _dx_manager: &mut super::dx_manager::DXManager,
+        index: i32,
+        _point: (i32, i32),
+        _color: [f32; 4],
+        _use_offset: bool,
+        _opacity: f32,
+    ) -> io::Result<()> {
+        if !self.check_image(index) {
+            return Ok(()); // C# 静默返回
+        }
+        
+        // TODO: 实现完整的渲染逻辑
+        // 1. 获取图像信息
+        // 2. 应用偏移
+        // 3. 屏幕裁剪检查
+        // 4. 加载/缓存纹理
+        // 5. 调用 DXManager.draw_opaque()
+        
+        Ok(())
+    }
+    
+    /// Draw image with blending
+    /// 
+    /// C# equivalent:
+    /// ```csharp
+    /// public void DrawBlend(int index, Point point, Color colour, bool offSet = false, float rate = 1) {
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     if (offSet) point.Offset(mi.X, mi.Y);
+    ///     if (point.X >= Settings.ScreenWidth || point.Y >= Settings.ScreenHeight || 
+    ///         point.X + mi.Width < 0 || point.Y + mi.Height < 0) return;
+    ///     bool oldBlend = DXManager.Blending;
+    ///     DXManager.SetBlend(true, rate);
+    ///     DXManager.Draw(mi.Image, new Rectangle(0, 0, mi.Width, mi.Height), 
+    ///                    new Vector3((float)point.X, (float)point.Y, 0.0F), colour);
+    ///     DXManager.SetBlend(oldBlend);
+    /// }
+    /// ```
+    pub fn draw_blend(
+        &mut self,
+        _dx_manager: &mut super::dx_manager::DXManager,
+        index: i32,
+        _point: (i32, i32),
+        _color: [f32; 4],
+        _use_offset: bool,
+        _rate: f32,
+    ) -> io::Result<()> {
+        if !self.check_image(index) {
+            return Ok(()); // C# 静默返回
+        }
+        
+        // TODO: 实现完整的渲染逻辑
+        // 1. 获取图像信息
+        // 2. 应用偏移
+        // 3. 屏幕裁剪检查
+        // 4. 保存旧混合状态
+        // 5. 设置新混合模式
+        // 6. 调用 DXManager.draw()
+        // 7. 恢复旧混合状态
+        
+        Ok(())
+    }
+    
     /// Check if image index is valid
     /// 
     /// C# equivalent: MLibrary.CheckImage(int index)

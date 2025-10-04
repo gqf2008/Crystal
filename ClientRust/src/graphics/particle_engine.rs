@@ -356,10 +356,17 @@ impl ParticleEngine {
     }
     
     /// C# Draw() 方法
-    pub fn draw(&self) {
+    /// 
+    /// 注意：需要传入 library 和 dx_manager 引用
+    pub fn draw(
+        &self,
+        library: &mut crate::graphics::mlibrary::MLibrary,
+        dx_manager: &mut crate::graphics::dx_manager::DXManager,
+    ) -> std::io::Result<()> {
         for particle in &self.particles {
-            particle.draw();
+            particle.draw(library, dx_manager)?;
         }
+        Ok(())
     }
     
     /// C# ParticlesOffSet 方法
