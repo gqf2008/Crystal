@@ -1076,4 +1076,200 @@ impl GuildStorageItem {
     }
 }
 
+/// Guild buff information
+/// Mirrors C# Shared/Data/GuildData.cs GuildBuffInfo
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GuildBuffInfo {
+    pub id: i32,
+    pub icon: i32,
+    pub name: String,
+    pub level_requirement: u8,
+    pub points_requirement: u8,
+    pub time_limit: i32,
+    pub activation_cost: i32,
+    pub stats: crate::data::stats::Stats,
+}
+
+impl GuildBuffInfo {
+    pub fn new() -> Self {
+        Self {
+            id: 0,
+            icon: 0,
+            name: String::new(),
+            level_requirement: 0,
+            points_requirement: 1,
+            time_limit: 0,
+            activation_cost: 0,
+            stats: crate::data::stats::Stats::new(),
+        }
+    }
+
+    pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let id = reader.read_i32::<LittleEndian>()?;
+        let icon = reader.read_i32::<LittleEndian>()?;
+        let name = read_dotnet_string(reader)?;
+        let level_requirement = reader.read_u8()?;
+        let points_requirement = reader.read_u8()?;
+        let time_limit = reader.read_i32::<LittleEndian>()?;
+        let activation_cost = reader.read_i32::<LittleEndian>()?;
+        let stats = crate::data::stats::Stats::read_from(reader)?;
+
+        Ok(Self {
+            id,
+            icon,
+            name,
+            level_requirement,
+            points_requirement,
+            time_limit,
+            activation_cost,
+            stats,
+        })
+    }
+
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.id)?;
+        writer.write_i32::<LittleEndian>(self.icon)?;
+        write_dotnet_string(writer, &self.name)?;
+        writer.write_u8(self.level_requirement)?;
+        writer.write_u8(self.points_requirement)?;
+        writer.write_i32::<LittleEndian>(self.time_limit)?;
+        writer.write_i32::<LittleEndian>(self.activation_cost)?;
+        self.stats.write_to(writer)?;
+        Ok(())
+    }
+}
+
+impl Default for GuildBuffInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Guild buff (active buff state)
+/// Mirrors C# Shared/Data/GuildData.cs GuildBuff
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuildBuff {
+    pub id: i32,
+    pub active: bool,
+    pub active_time_remaining: i32,
+}
+
+impl GuildBuff {
+    pub fn new() -> Self {
+        Self {
+            id: 0,
+            active: false,
+            active_time_remaining: 0,
+        }
+    }
+
+    pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let id = reader.read_i32::<LittleEndian>()?;
+        let active = reader.read_u8()? != 0;
+        let active_time_remaining = reader.read_i32::<LittleEndian>()?;
+
+        Ok(Self {
+            id,
+            active,
+            active_time_remaining,
+        })
+    }
+
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.id)?;
+        writer.write_u8(if self.active { 1 } else { 0 })?;
+        writer.write_i32::<LittleEndian>(self.active_time_remaining)?;
+        Ok(())
+    }
+}
+
+impl Default for GuildBuff {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Guild buff (old format - for backward compatibility)
+/// Mirrors C# Shared/Data/GuildData.cs GuildBuffOld
+/// Outdated but can't delete it or old databases won't load
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuildBuffOld;
+
+impl GuildBuffOld {
+    pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        // Read and discard old format data
+        reader.read_u8()?; // old byte field
+        reader.read_i64::<LittleEndian>()?; // old long field
+        Ok(Self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_guild_buff_info_roundtrip() {
+        let mut info = GuildBuffInfo::new();
+        info.id = 1;
+        info.icon = 100;
+        info.name = "Test Buff".to_string();
+        info.level_requirement = 5;
+        info.points_requirement = 3;
+        info.time_limit = 3600;
+        info.activation_cost = 1000;
+        info.stats.set(crate::enums::Stat::HP, 100);
+        info.stats.set(crate::enums::Stat::MP, 50);
+
+        let mut buffer = Vec::new();
+        info.write_to(&mut buffer).unwrap();
+
+        let mut cursor = Cursor::new(buffer);
+        let decoded = GuildBuffInfo::read_from(&mut cursor).unwrap();
+
+        assert_eq!(decoded.id, 1);
+        assert_eq!(decoded.icon, 100);
+        assert_eq!(decoded.name, "Test Buff");
+        assert_eq!(decoded.level_requirement, 5);
+        assert_eq!(decoded.points_requirement, 3);
+        assert_eq!(decoded.time_limit, 3600);
+        assert_eq!(decoded.activation_cost, 1000);
+        assert_eq!(decoded.stats.get(crate::enums::Stat::HP), 100);
+        assert_eq!(decoded.stats.get(crate::enums::Stat::MP), 50);
+    }
+
+    #[test]
+    fn test_guild_buff_roundtrip() {
+        let buff = GuildBuff {
+            id: 1,
+            active: true,
+            active_time_remaining: 1800,
+        };
+
+        let mut buffer = Vec::new();
+        buff.write_to(&mut buffer).unwrap();
+
+        let mut cursor = Cursor::new(buffer);
+        let decoded = GuildBuff::read_from(&mut cursor).unwrap();
+
+        assert_eq!(decoded.id, 1);
+        assert_eq!(decoded.active, true);
+        assert_eq!(decoded.active_time_remaining, 1800);
+    }
+
+    #[test]
+    fn test_guild_buff_old_read() {
+        // Simulate old format data
+        let mut buffer = Vec::new();
+        buffer.push(123u8); // old byte field
+        buffer.extend_from_slice(&456789i64.to_le_bytes()); // old long field
+
+        let mut cursor = Cursor::new(buffer);
+        let result = GuildBuffOld::read_from(&mut cursor);
+
+        assert!(result.is_ok());
+    }
+}
+
 

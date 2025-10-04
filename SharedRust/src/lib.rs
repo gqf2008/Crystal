@@ -17,8 +17,9 @@ pub use data::{
     // From client_data
     ClientAuction, ClientBuff, ClientFriend, ClientHeroInformation, ClientIntelligentCreature,
     ClientMagic, ClientMail, ClientMapInfo, ClientMovementInfo, ClientNPCInfo, ClientQuestInfo,
-    ClientQuestProgress, ClientRecipeInfo, GuildMember, GuildRank, GuildStorageItem,
-    IntelligentCreatureItemFilter, IntelligentCreatureRules, SelectInfo,
+    ClientQuestProgress, ClientRecipeInfo, GuildBuff, GuildBuffInfo, GuildBuffOld, GuildMember,
+    GuildRank, GuildStorageItem, IntelligentCreatureItemFilter, IntelligentCreatureRules,
+    SelectInfo,
     // From item
     GameShopItem, ItemInfo, ItemRentalInformation, ItemSets, UserItem,
     // From stats
