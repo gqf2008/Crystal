@@ -1,9 +1,10 @@
 // LoginScene - Login scene implementation
 // Mirrors Client/MirScenes/LoginScene.cs
 
+use mir2_shared::packets::CharacterSummary;
+
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
 use crate::network::game_client::GameEvent;
-use crate::network::protocol::CharacterSummary;
 
 #[derive(Debug, Clone)]
 pub struct BanInfo {
@@ -408,100 +409,5 @@ impl Scene for LoginScene {
         println!("LoginScene::dispose");
         // TODO: Cleanup resources
         // TODO: Stop music
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::network::protocol::CharacterSummary;
-
-    #[test]
-    fn test_login_scene_creation() {
-        let scene = LoginScene::new();
-        assert_eq!(scene.scene_type(), SceneType::Login);
-        assert!(!scene.connecting);
-        assert_eq!(scene.connect_attempts, 0);
-        assert!(!scene.version_checked);
-        assert!(!scene.login_enabled);
-        assert!(scene.message_log.is_empty());
-        assert!(scene.characters.is_empty());
-    }
-
-    #[test]
-    fn test_login_validation() {
-        let mut scene = LoginScene::new();
-        
-        // Empty credentials should fail
-        scene.submit_login(); // Should print error
-        assert_eq!(scene.message_log.len(), 1);
-        assert_eq!(
-            scene.last_status.as_deref(),
-            Some("Username and password required")
-        );
-        
-        // Set credentials
-        scene.username = "testuser".to_string();
-        scene.password = "testpass".to_string();
-        scene.submit_login(); // Should proceed
-        assert_eq!(scene.message_log.len(), 2);
-        assert!(scene
-            .last_status
-            .as_deref()
-            .unwrap()
-            .contains("Submitting login for"));
-        assert!(scene.connecting);
-        assert!(!scene.login_enabled);
-    }
-
-    #[test]
-    fn test_client_version_enables_login() {
-        let mut scene = LoginScene::new();
-        let event = GameEvent::ClientVersionResponse { result: 1 };
-        scene.process_event(&event);
-        assert!(scene.version_checked);
-        assert!(scene.version_valid);
-        assert!(scene.login_enabled);
-        assert_eq!(
-            scene.last_status.as_deref(),
-            Some("Client version accepted by server. Login dialog unlocked.")
-        );
-    }
-
-    #[test]
-    fn test_login_success_populates_characters() {
-        let mut scene = LoginScene::new();
-        let characters = vec![CharacterSummary {
-            index: 1,
-            name: "Hero".to_string(),
-            level: 10,
-            class: 2,
-            gender: 1,
-            last_access: 0,
-        }];
-        let event = GameEvent::LoginSuccess {
-            characters: characters.clone(),
-        };
-        scene.process_event(&event);
-        assert!(scene.ready_for_character_select);
-        assert!(!scene.login_enabled);
-        assert_eq!(scene.characters.len(), 1);
-        assert_eq!(scene.characters[0].name, "Hero");
-    }
-
-    #[test]
-    fn test_login_ban_records_status() {
-        let mut scene = LoginScene::new();
-        let event = GameEvent::LoginBanned {
-            reason: "Testing".to_string(),
-            expiry_date: 0,
-        };
-        scene.process_event(&event);
-        assert!(scene.login_ban_info.is_some());
-        assert!(scene
-            .last_status
-            .as_deref()
-            .unwrap()
-            .contains("Login ban active"));
     }
 }

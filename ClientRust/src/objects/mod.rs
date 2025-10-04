@@ -3,6 +3,7 @@
 
 mod frames;
 mod map_object;
+mod player_object;  // NEW: PlayerObject base class (Phase 1)
 mod user_object;
 mod monster_object;
 mod npc_object;
@@ -20,6 +21,10 @@ pub use map_object::{
     ObjectAttackOutcome, ObjectDeathOutcome, ObjectStruckOutcome, ObjectUpdateOutcome,
     StruckOutcome, SyncResult,
 };
+
+// NEW: Phase 1 - PlayerObject base class
+pub use player_object::PlayerObject;
+
 pub use user_object::{
     UserObject, QueuedAction,
 };

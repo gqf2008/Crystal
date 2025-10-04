@@ -1,11 +1,9 @@
 // NPCObject.rs - Non-player character object
 // Mirrors Client/MirObjects/NPCObject.cs
 
-use mir2_shared::Point;
+use mir2_shared::{Point,packets::*};
 
 use super::map_object::MapObject;
-use crate::network::protocol::ObjectNpc;
-
 /// NPC image types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]

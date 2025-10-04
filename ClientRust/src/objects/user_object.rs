@@ -1,7 +1,7 @@
 // UserObject.rs - Player character object (the user)
 // Mirrors Client/MirObjects/UserObject.cs
 
-use mir2_shared::{
+use mir2_shared::{packets::*,
     data::{
         stats::Stats, 
         client_data::{ClientMagic, ClientIntelligentCreature, ClientQuestProgress, ClientMail},
@@ -12,7 +12,6 @@ use mir2_shared::{
 };
 
 use super::map_object::MapObject;
-use crate::network::protocol::UserInformation;
 
 
 

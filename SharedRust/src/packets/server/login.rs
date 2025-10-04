@@ -4,6 +4,7 @@
 
 use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crate::SelectInfo;
 use crate::data::stats::SharedResult;
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::enums::ServerPacketIds;
@@ -139,49 +140,9 @@ impl Packet for LoginBanned {
 /// LoginSuccess packet - successful login with character list
 #[derive(Debug, Clone)]
 pub struct LoginSuccess {
-    pub characters: Vec<CharacterSummary>,
+    pub characters: Vec<SelectInfo>,
 }
 
-/// Character summary information for character selection
-#[derive(Debug, Clone)]
-pub struct CharacterSummary {
-    pub index: i32,
-    pub name: String,
-    pub level: u16,
-    pub class: u8,
-    pub gender: u8,
-    pub last_access: i64, // .NET DateTime ticks
-}
-
-impl CharacterSummary {
-    pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let index = reader.read_i32::<LittleEndian>()?;
-        let name = read_dotnet_string(reader)?;
-        let level = reader.read_u16::<LittleEndian>()?;
-        let class = reader.read_u8()?;
-        let gender = reader.read_u8()?;
-        let last_access = reader.read_i64::<LittleEndian>()?;
-        
-        Ok(Self {
-            index,
-            name,
-            level,
-            class,
-            gender,
-            last_access,
-        })
-    }
-
-    pub fn write_to<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        writer.write_i32::<LittleEndian>(self.index)?;
-        write_dotnet_string(writer, &self.name)?;
-        writer.write_u16::<LittleEndian>(self.level)?;
-        writer.write_u8(self.class)?;
-        writer.write_u8(self.gender)?;
-        writer.write_i64::<LittleEndian>(self.last_access)?;
-        Ok(())
-    }
-}
 
 impl Packet for LoginSuccess {
     const OPCODE: i16 = ServerPacketIds::LoginSuccess as i16;
@@ -191,7 +152,7 @@ impl Packet for LoginSuccess {
         let mut characters = Vec::with_capacity(count as usize);
         
         for _ in 0..count {
-            characters.push(CharacterSummary::read_from(reader)?);
+            characters.push(SelectInfo::read_from(reader)?);
         }
         
         Ok(Self { characters })

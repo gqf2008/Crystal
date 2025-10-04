@@ -2,12 +2,10 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use mir2_shared::{
-    ClientMagic, ClientQuestProgress, Point,
-    enums::{
+    ClientMagic, ClientQuestProgress, Point, SelectInfo, UserItem, enums::{
         AttackMode, DamageType, HeroSpawnState, ItemGrade, LightSetting, MirAction, MirDirection,
         PetMode, Spell,
-    },
-    UserItem,
+    }
 };
 
 use crate::objects::{
@@ -17,7 +15,7 @@ use crate::objects::{
 
 // 使用新的数据包架构 - 直接从 mir2_shared 导入
 use mir2_shared::packets::server::{ObjectPlayer, ObjectHero, ObjectItem, ObjectMonster, ObjectNpc};
-use crate::network::protocol::{packets, CharacterSummary};
+use crate::network::protocol::{packets};
 
 // 为了简化代码，创建类型别名 - 映射所有使用的数据包类型
 type UserInformation = packets::UserInformation;
@@ -125,7 +123,7 @@ pub struct ClientState {
     pub light_setting: Option<LightSetting>,
     pub hero_spawn_state: Option<HeroSpawnState>,
     pub npc_rate: f32,
-    pub logout_characters: Vec<CharacterSummary>,
+    pub logout_characters: Vec<SelectInfo>,
 }
 
 impl ClientState {
@@ -1657,7 +1655,7 @@ impl ClientState {
     }
 
     // Logout methods
-    pub fn store_logout_characters(&mut self, characters: Vec<CharacterSummary>) {
+    pub fn store_logout_characters(&mut self, characters: Vec<SelectInfo>) {
         self.logout_characters = characters;
     }
 }

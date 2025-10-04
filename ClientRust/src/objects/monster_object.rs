@@ -3,11 +3,10 @@
 
 use mir2_shared::{
     enums::{MirDirection, SpellEffect},
-    Point,
+    Point,packets::*
 };
 
 use super::map_object::MapObject;
-use crate::network::protocol::ObjectMonster;
 
 /// Monster image enum - corresponds to different monster graphics
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -10,10 +10,10 @@ use tokio::sync::RwLock;
 
 use mir2_shared::{
     enums::*,
-    Point, UserItem, ClientQuestProgress, ClientMagic,
+    Point, UserItem, ClientQuestProgress, ClientMagic,packets::*
 };
 
-use super::protocol::{PacketHandler, packets, CharacterSummary};
+use super::protocol::{PacketHandler, packets};
 use crate::scenes::dialogs::chat_dialog::ChatMessage;
 
 /// Game client state - implements packet handling logic

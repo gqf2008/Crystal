@@ -1,10 +1,9 @@
 // ItemObject.rs - Ground item object
 // Mirrors Client/MirObjects/ItemObject.cs
 
-use mir2_shared::{Point, UserItem};
+use mir2_shared::{Point, UserItem,packets::*};
 
 use super::map_object::MapObject;
-use crate::network::protocol::ObjectItem;
 
 /// Item object - represents items on the ground
 #[derive(Debug, Clone)]
