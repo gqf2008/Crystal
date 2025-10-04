@@ -1,18 +1,16 @@
 // Graphics module - Rendering and visual effects
 // Corresponds to: Client/MirGraphics/
+// 
+// C# 原版只有 3 个文件:
+// - DXManager.cs (Direct3D9 管理)
+// - MLibrary.cs (图像库)
+// - ParticleEngine.cs (粒子引擎)
 
-pub mod dx_manager;        // NEW: Phase 2 - DXManager (对应 DXManager.cs)
-pub mod sprite_pipeline;   // NEW: Phase 2 - SpritePipeline (对应 Sprite)
-pub mod texture_loader;
-pub mod sprite_renderer;
-pub mod character_renderer;
+pub mod dx_manager;        // 对应 DXManager.cs
+pub mod texture_loader;    // 对应 MLibrary.cs (改名为 texture_loader 更清晰)
 
-pub use dx_manager::{DXManager, TextureHandle, BlendMode};
-pub use sprite_pipeline::{SpritePipeline, SpriteVertex};
+pub use dx_manager::DXManager;
 pub use texture_loader::{MLibrary, TextureManager, ImageInfo, TextureKey};
-pub use sprite_renderer::{SpriteRenderer, SpriteInstance};
-pub use character_renderer::{CharacterRenderer, CharacterAppearance};
 
-// TODO: Add graphics modules as they are ported
-// pub mod animation;
-// pub mod effect;
+// TODO: 按需添加
+// pub mod particle_engine;  // 对应 ParticleEngine.cs
