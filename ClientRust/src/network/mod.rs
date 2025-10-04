@@ -6,7 +6,6 @@ pub mod protocol;
 pub mod game_client;
 pub mod network_manager;
 pub mod network_command;
-pub mod examples;
 
 // Re-exports for convenience
 pub use network::{NetworkStack, NetworkEvent};

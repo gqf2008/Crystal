@@ -7,10 +7,12 @@
 // 保持与 C# 相同的 API 设计
 
 use wgpu;
+use wgpu::util::DeviceExt;
 use winit::window::Window;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
+use super::sprite_renderer::SpriteRenderer;
 
 /// 纹理句柄
 /// 
@@ -29,6 +31,17 @@ pub struct TextureHandle {
 pub enum BlendMode {
     Normal,
     InvLight,
+}
+
+/// 绘制调用（用于批处理）
+/// 
+/// 对应 C# 的 Sprite.Draw() 调用参数
+#[derive(Clone)]
+struct DrawCall {
+    texture: Arc<TextureHandle>,
+    source_rect: Option<(i32, i32, u32, u32)>,
+    position: (f32, f32, f32),
+    color: [f32; 4],
 }
 
 /// DXManager - 图形设备管理器
@@ -83,6 +96,17 @@ pub struct DXManager {
     
     /// 屏幕高度
     screen_height: u32,
+    
+    /// 精灵渲染器 (对应 C# Sprite)
+    sprite_renderer: SpriteRenderer,
+    
+    /// 当前帧的 surface texture (仅在渲染期间有效)
+    /// 对应 C# 的 Sprite.Begin() 到 Sprite.End() 之间的状态
+    current_frame: RefCell<Option<wgpu::SurfaceTexture>>,
+    
+    /// 绘制调用队列 (批处理)
+    /// 对应 C# Sprite 内部的批处理队列
+    draw_queue: RefCell<Vec<DrawCall>>,
 }
 
 impl DXManager {
@@ -156,6 +180,12 @@ impl DXManager {
             surface.configure(&device, config);
         }
         
+        // 创建精灵渲染器
+        let surface_format = surface_config.as_ref()
+            .map(|config| config.format)
+            .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+        let sprite_renderer = SpriteRenderer::new(&device, surface_format);
+        
         Self {
             device,
             queue,
@@ -169,6 +199,9 @@ impl DXManager {
             grayscale: RefCell::new(false),
             screen_width: size.width,
             screen_height: size.height,
+            sprite_renderer,
+            current_frame: RefCell::new(None),
+            draw_queue: RefCell::new(Vec::new()),
         }
     }
     
@@ -411,6 +444,266 @@ impl DXManager {
                 surface.configure(&self.device, config);
             }
         }
+    }
+    
+    /// 绘制纹理（带透明度）
+    /// 
+    /// C# equivalent: DXManager.DrawOpaque(Texture texture, Rectangle? sourceRect, Vector3? position, Color4 color, float opacity)
+    /// Line: 246-250
+    /// 
+    /// ```csharp
+    /// public static void DrawOpaque(Texture texture, Rectangle? sourceRect, Vector3? position, Color4 color, float opacity)
+    /// {
+    ///     color.Alpha = opacity;
+    ///     Draw(texture, sourceRect, position, color);
+    /// }
+    /// ```
+    pub fn draw_opaque(
+        &self,
+        texture: &TextureHandle,
+        source_rect: Option<(i32, i32, u32, u32)>,  // (x, y, width, height)
+        position: Option<(f32, f32, f32)>,           // (x, y, z)
+        color: [f32; 4],                             // RGBA
+        opacity: f32,
+    ) {
+        let mut color_with_opacity = color;
+        color_with_opacity[3] = opacity;
+        self.draw(texture, source_rect, position, color_with_opacity);
+    }
+    
+    /// 绘制纹理（批处理模式）
+    /// 
+    /// 添加绘制命令到批处理队列，在 end_frame() 时统一执行
+    /// 
+    /// C# equivalent: DXManager.Draw(Texture texture, Rectangle? sourceRect, Vector3? position, Color4 color)
+    /// Line: 252-256
+    /// 
+    /// ```csharp
+    /// public static void Draw(Texture texture, Rectangle? sourceRect, Vector3? position, Color4 color)
+    /// {
+    ///     Sprite.Draw(texture, sourceRect, Vector3.Zero, position, color);
+    ///     CMain.DPSCounter++;
+    /// }
+    /// ```
+    /// 
+    /// 注意：必须在 begin_frame() 和 end_frame() 之间调用
+    /// 
+    /// 参数说明：
+    /// - texture: 纹理句柄
+    /// - source_rect: 源矩形区域 (x, y, width, height)，None 表示整个纹理
+    /// - position: 屏幕位置 (x, y, z)，None 表示 (0, 0, 0)
+    /// - color: RGBA 颜色值 [r, g, b, a]，范围 0.0-1.0
+    pub fn draw(
+        &self,
+        texture: &TextureHandle,
+        source_rect: Option<(i32, i32, u32, u32)>,
+        position: Option<(f32, f32, f32)>,
+        color: [f32; 4],
+    ) {
+        // 添加到批处理队列
+        self.draw_queue.borrow_mut().push(DrawCall {
+            texture: Arc::new(TextureHandle {
+                texture: texture.texture.clone(),  // wgpu::Texture 不支持 clone，需要使用 Arc
+                view: texture.view.clone(),        // wgpu::TextureView 支持 clone
+                width: texture.width,
+                height: texture.height,
+            }),
+            source_rect,
+            position: position.unwrap_or((0.0, 0.0, 0.0)),
+            color,
+        });
+        
+        // TODO: 计数器 (对应 CMain.DPSCounter++)
+    }
+    
+    /// 开始渲染帧（获取 surface texture 并清空屏幕）
+    /// 
+    /// C# equivalent: Device.BeginScene() + Device.Clear() + Sprite.Begin()
+    /// 
+    /// ```csharp
+    /// Device.BeginScene();
+    /// Device.Clear(ClearFlags.Target | ClearFlags.ZBuffer, Color.Black, 1.0f, 0);
+    /// Sprite.Begin(SpriteFlags.AlphaBlend);
+    /// ```
+    pub fn begin_frame(&self, clear_color: [f32; 4]) {
+        // 清空批处理队列
+        self.draw_queue.borrow_mut().clear();
+        
+        // 获取 surface texture
+        let surface = match self.surface.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
+        
+        let frame = match surface.get_current_texture() {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!("Failed to get surface texture: {:?}", e);
+                return;
+            }
+        };
+        
+        // 清空屏幕
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Clear Encoder"),
+        });
+        
+        {
+            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Clear Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: clear_color[0] as f64,
+                            g: clear_color[1] as f64,
+                            b: clear_color[2] as f64,
+                            a: clear_color[3] as f64,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+        }
+        
+        self.queue.submit(std::iter::once(encoder.finish()));
+        
+        // 更新渲染器屏幕尺寸
+        self.sprite_renderer.update_screen_size(&self.queue, self.screen_width, self.screen_height);
+        
+        // 存储当前帧
+        *self.current_frame.borrow_mut() = Some(frame);
+    }
+    
+    /// 结束渲染帧（执行所有绘制命令并 present）
+    /// 
+    /// C# equivalent: Sprite.End() + Device.EndScene() + Device.Present()
+    /// 
+    /// ```csharp
+    /// Sprite.End();
+    /// Device.EndScene();
+    /// Device.Present();
+    /// ```
+    pub fn end_frame(&self) {
+        // 获取当前帧
+        let frame = match self.current_frame.borrow_mut().take() {
+            Some(f) => f,
+            None => {
+                tracing::warn!("end_frame() called without begin_frame()");
+                return;
+            }
+        };
+        
+        // 如果没有绘制命令，直接 present
+        let draw_queue = self.draw_queue.borrow();
+        if draw_queue.is_empty() {
+            frame.present();
+            return;
+        }
+        
+        // 准备所有绘制资源（在 render_pass 之外创建以避免生命周期问题）
+        let mut draw_resources = Vec::new();
+        
+        for draw_call in draw_queue.iter() {
+            let texture = &draw_call.texture;
+            let source_rect = draw_call.source_rect;
+            let (pos_x, pos_y, _pos_z) = draw_call.position;
+            let color = draw_call.color;
+            
+            // 计算绘制参数
+            let src_rect = source_rect.map(|(x, y, w, h)| (x as f32, y as f32, w as f32, h as f32));
+            
+            let (width, height) = if let Some((_, _, w, h)) = src_rect {
+                (w, h)
+            } else {
+                (texture.width as f32, texture.height as f32)
+            };
+            
+            // 创建顶点数据
+            let vertices = super::sprite_renderer::create_sprite_vertices(
+                pos_x,
+                pos_y,
+                width,
+                height,
+                src_rect,
+                texture.width,
+                texture.height,
+            );
+            
+            // 创建顶点缓冲区
+            let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Sprite Vertex Buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            
+            // 更新片段着色器 uniforms
+            self.sprite_renderer.update_fragment_uniforms(
+                &self.queue,
+                color,
+                *self.opacity.borrow(),
+                *self.grayscale.borrow(),
+            );
+            
+            // 创建纹理绑定组
+            let texture_bind_group = self.sprite_renderer.create_texture_bind_group(&self.device, &texture.view);
+            
+            draw_resources.push((vertex_buffer, texture_bind_group, vertices.len()));
+        }
+        
+        // 执行所有绘制命令
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Batch Draw Encoder"),
+        });
+        
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Batch Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,  // 保留清屏后的内容
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            
+            // 绘制所有精灵
+            for (vertex_buffer, texture_bind_group, vertex_count) in &draw_resources {
+                self.sprite_renderer.draw(
+                    &self.device,
+                    &mut render_pass,
+                    vertex_buffer,
+                    texture_bind_group,
+                    *vertex_count as u32,
+                );
+            }
+        }
+        
+        // 提交命令
+        self.queue.submit(std::iter::once(encoder.finish()));
+        
+        // 呈现帧
+        frame.present();
+    }
+    
+    /// 获取窗口尺寸
+    /// 
+    /// 返回: (width, height)
+    pub fn window_size(&self) -> (u32, u32) {
+        (self.screen_width, self.screen_height)
     }
 }
 

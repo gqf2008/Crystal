@@ -7,10 +7,13 @@
 // - ParticleEngine.cs (粒子引擎)
 
 pub mod dx_manager;        // 对应 DXManager.cs
-pub mod texture_loader;    // 对应 MLibrary.cs (改名为 texture_loader 更清晰)
+pub mod mlibrary;          // 对应 MLibrary.cs
+pub mod sprite_renderer;   // 对应 SlimDX.Sprite (wgpu 实现)
+pub mod particle_engine;   // 对应 ParticleEngine.cs
+pub mod particles;         // 对应 Client/MirGraphics/Particles/
 
-pub use dx_manager::DXManager;
-pub use texture_loader::{MLibrary, TextureManager, ImageInfo, TextureKey};
-
-// TODO: 按需添加
-// pub mod particle_engine;  // 对应 ParticleEngine.cs
+pub use dx_manager::{DXManager, TextureHandle, BlendMode};
+pub use mlibrary::{MLibrary, TextureManager, ImageInfo, TextureKey};
+pub use sprite_renderer::{SpriteRenderer, SpriteVertex, create_sprite_vertices};
+pub use particle_engine::{ParticleEngine, ParticleType, ParticleImageInfo, get_time};
+pub use particles::{Particle, ParticleTrait, FogParticle};

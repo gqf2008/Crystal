@@ -14,7 +14,17 @@ use mir2_shared::{
 };
 
 use super::protocol::{PacketHandler, packets};
-use crate::scenes::dialogs::chat_dialog::ChatMessage;
+// use crate::scenes::dialogs::chat_dialog::ChatMessage;  // 暂时注释 - scenes 模块正在重构
+
+// 临时定义 - 等待 scenes 模块重构完成后移除
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub sender: String,
+    pub text: String,
+    pub chat_type: ChatType,
+    pub color: (u8, u8, u8),  // RGB color
+    pub timestamp: i64,  // Unix timestamp in milliseconds
+}
 
 /// Game client state - implements packet handling logic
 /// 游戏客户端状态 - 实现数据包处理逻辑

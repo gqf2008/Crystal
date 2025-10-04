@@ -4,26 +4,29 @@ mod version;
 mod settings;
 mod key_bind_settings; // Renamed from keybinds
 mod program;           // Renamed from runtime
-mod app;               // Main egui application
+// mod app;            // 暂时注释 - 依赖 eframe，待重构为 winit + wgpu
 
 // Main functional modules (matching C# Client directory structure)
-mod forms;       // ← Client/Forms/
-mod controls;    // ← Client/MirControls/ (renamed from ui)
-mod graphics;    // ← Client/MirGraphics/
+// 阶段 1: 专注于 MirGraphics 移植，暂时注释其他依赖 egui 的模块
+// mod forms;       // ← Client/Forms/ (依赖 egui，暂时注释)
+// mod controls;    // ← Client/MirControls/ (依赖 egui，暂时注释)
+mod graphics;    // ← Client/MirGraphics/ ✅ 当前移植目标
 // mod map;      // ← 已废弃，功能移至 objects/map_code.rs
 mod network;     // ← Client/MirNetwork/ (protocol, network moved here)
-mod objects;     // ← Client/MirObjects/ (包含 map_code.rs)
-mod scenes;      // ← Client/MirScenes/ (state moved here)
-mod sounds;      // ← Client/MirSounds/ (renamed from audio)
-mod resolution;  // ← Client/Resolution/
+// mod objects;     // ← Client/MirObjects/ (包含 map_code.rs) (依赖其他模块)
+// mod scenes;      // ← Client/MirScenes/ (依赖 egui，暂时注释)
+// mod sounds;      // ← Client/MirSounds/ (依赖 rodio API 变化，暂时注释)
+// mod resolution;  // ← Client/Resolution/
 mod utils;       // ← Client/Utils/
 
 use anyhow::Result;
 use settings::ClientSettings;
-use app::MirClientApp;
+// use app::MirClientApp;  // 暂时注释，等待重构
 use network::{NetworkManager, network_task};
 use std::sync::Arc;
 use parking_lot::RwLock;
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event::{Event, WindowEvent};
 
 fn main() -> Result<()> {
     // Initialize tracing
@@ -65,7 +68,7 @@ fn main() -> Result<()> {
     // Create network manager
     let settings_arc = Arc::new(RwLock::new(settings.clone()));
     let network_manager = NetworkManager::new(settings_arc.clone(), event_tx, command_rx);
-    let game_client = network_manager.game_client();
+    let _game_client = network_manager.game_client();
     
     // Spawn network task in background
     std::thread::spawn(move || {
@@ -75,18 +78,58 @@ fn main() -> Result<()> {
     
     tracing::info!("Network task started in background");
 
-    // Configure window options
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1024.0, 768.0])
-            .with_title("Legend of Mir 2"),
-        ..Default::default()
-    };
-
-    // Run the application
-    eframe::run_native(
-        "mir2_client",
-        native_options,
-        Box::new(move |cc| Ok(Box::new(MirClientApp::new(cc, settings, game_client, event_rx, command_tx)))),
-    ).map_err(|e| anyhow::anyhow!("Failed to run application: {}", e))
+    // TODO: 使用 winit + wgpu 27 实现窗口和渲染
+    // C# equivalent: Program.cs - Main() + Form creation
+    //
+    // 简单的 winit 窗口示例 (完整实现待后续添加)
+    let event_loop = EventLoop::new()?;
+    let window = event_loop.create_window(
+        winit::window::WindowAttributes::default()
+            .with_title("Legend of Mir 2")
+            .with_inner_size(winit::dpi::LogicalSize::new(1024.0, 768.0))
+    )?;
+    
+    // 创建 DXManager (wgpu)
+    let window_arc = Arc::new(window);
+    let dx_manager = pollster::block_on(graphics::DXManager::new(window_arc.clone()));
+    
+    tracing::info!("Graphics initialized (wgpu 27.0)");
+    
+    // 运行事件循环
+    event_loop.run(move |event, elwt| {
+        elwt.set_control_flow(ControlFlow::Poll);
+        
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                tracing::info!("Window close requested, exiting");
+                elwt.exit();
+            }
+            Event::WindowEvent {
+                event: WindowEvent::Resized(new_size),
+                ..
+            } => {
+                dx_manager.resize(new_size.width, new_size.height);
+            }
+            Event::AboutToWait => {
+                // TODO: 游戏主循环逻辑
+                // 1. 处理网络事件
+                // 2. 更新游戏状态
+                // 3. 渲染帧
+                window_arc.request_redraw();
+            }
+            Event::WindowEvent {
+                event: WindowEvent::RedrawRequested,
+                ..
+            } => {
+                // TODO: 渲染逻辑
+                // 类似 C# 的 CMain.Draw()
+            }
+            _ => {}
+        }
+    })?;
+    
+    Ok(())
 }

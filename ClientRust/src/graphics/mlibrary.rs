@@ -1,12 +1,17 @@
-// 纹理加载器 - 解析MIR2 .lib文件格式
-// 参考: Client/MirGraphics/MLibrary.cs
+// MLibrary - MIR2 图像库加载器
+// 对应: Client/MirGraphics/MLibrary.cs
+//
+// 负责解析和加载 .lib 文件格式（MIR2 专有的图像库格式）
 
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use flate2::read::GzDecoder;
-use egui::{ColorImage, TextureHandle, Context as EguiContext};
+
+// 移除 egui 依赖，使用自己的类型
+use super::dx_manager::TextureHandle;
 
 /// MIR2图像库文件头
 #[derive(Debug, Clone)]
@@ -169,11 +174,13 @@ impl MLibrary {
         Ok((info, decompressed))
     }
     
-    /// 加载图像为egui ColorImage
-    pub fn load_color_image(&mut self, index: usize) -> io::Result<(ImageInfo, ColorImage)> {
+    /// 加载图像数据为 RGBA 格式
+    /// 
+    /// C# equivalent: MLibrary 内部解压逻辑
+    /// 
+    /// 返回: (ImageInfo, RGBA字节数据)
+    pub fn load_rgba_data(&mut self, index: usize) -> io::Result<(ImageInfo, Vec<u8>)> {
         let (info, data) = self.load_image_data(index)?;
-        
-        let size = [info.width as usize, info.height as usize];
         
         // MIR2使用BGRA格式,需要转换为RGBA
         let mut rgba_data = Vec::with_capacity(data.len());
@@ -188,16 +195,17 @@ impl MLibrary {
             rgba_data.push(a);
         }
         
-        let color_image = ColorImage::from_rgba_unmultiplied(size, &rgba_data);
-        
-        Ok((info, color_image))
+        Ok((info, rgba_data))
     }
 }
 
 /// 纹理管理器 - 负责加载和缓存所有游戏纹理
+/// 
+/// C# equivalent: 部分对应 DXManager.TextureList + MLibrary 的组合使用
+/// C# 中纹理管理分散在多个地方，Rust 统一到这里
 pub struct TextureManager {
     libraries: HashMap<String, MLibrary>,
-    textures: HashMap<TextureKey, TextureHandle>,
+    textures: HashMap<TextureKey, Arc<TextureHandle>>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -215,6 +223,11 @@ impl TextureManager {
     }
     
     /// 加载图像库
+    /// 
+    /// C# equivalent: 
+    /// ```csharp
+    /// Libraries.Add(LibraryType.UI, new MLibrary(Path.Combine(Settings.DataPath, "UI")));
+    /// ```
     pub fn load_library(&mut self, name: &str, path: &Path) -> io::Result<()> {
         let lib = MLibrary::open(path)?;
         self.libraries.insert(name.to_string(), lib);
@@ -222,12 +235,21 @@ impl TextureManager {
     }
     
     /// 获取或加载纹理
+    /// 
+    /// C# equivalent: 内部逻辑类似 MLibrary.GetTexture() + DXManager caching
+    /// 
+    /// 参数:
+    /// - dx_manager: DXManager 引用，用于上传纹理到 GPU
+    /// - library: 库名称 (如 "UI", "Prguse", "Tiles" 等)
+    /// - index: 图像索引
+    /// 
+    /// 返回: (ImageInfo, Arc<TextureHandle>)
     pub fn get_texture(
         &mut self,
-        ctx: &EguiContext,
+        dx_manager: &super::dx_manager::DXManager,
         library: &str,
         index: usize,
-    ) -> io::Result<(ImageInfo, TextureHandle)> {
+    ) -> io::Result<(ImageInfo, Arc<TextureHandle>)> {
         let key = TextureKey {
             library: library.to_string(),
             index,
@@ -244,17 +266,23 @@ impl TextureManager {
             return Ok((info, handle.clone()));
         }
         
-        // 加载纹理
+        // 加载纹理数据
         let lib = self.libraries.get_mut(library)
             .ok_or_else(|| io::Error::new(
                 io::ErrorKind::NotFound,
                 format!("Library '{}' not loaded", library)
             ))?;
         
-        let (info, color_image) = lib.load_color_image(index)?;
+        let (info, rgba_data) = lib.load_rgba_data(index)?;
         
+        // 上传到 GPU
         let texture_name = format!("{}_{}", library, index);
-        let handle = ctx.load_texture(texture_name, color_image, Default::default());
+        let handle = dx_manager.load_texture(
+            texture_name,
+            info.width as u32,
+            info.height as u32,
+            &rgba_data,
+        );
         
         self.textures.insert(key, handle.clone());
         
@@ -262,6 +290,8 @@ impl TextureManager {
     }
     
     /// 获取图像信息(不加载纹理)
+    /// 
+    /// C# equivalent: MLibrary.GetImageInfo()
     pub fn get_image_info(&mut self, library: &str, index: usize) -> io::Result<ImageInfo> {
         let lib = self.libraries.get_mut(library)
             .ok_or_else(|| io::Error::new(
@@ -272,6 +302,8 @@ impl TextureManager {
     }
     
     /// 清除所有纹理缓存
+    /// 
+    /// C# equivalent: DXManager.Clean()
     pub fn clear_cache(&mut self) {
         self.textures.clear();
     }
@@ -303,7 +335,7 @@ impl MLibrary {
     /// 
     /// C# equivalent: MLibrary.CheckImage(int index)
     pub fn check_image(&self, index: i32) -> bool {
-        self.has_frame(index)
+        index >= 0 && (index as usize) < self.indices.len()
     }
     
     /// Get image bounds for drawing
@@ -339,17 +371,6 @@ impl MLibrary {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_library_open() {
-        // 这个测试需要实际的.lib文件
-        // 暂时跳过
-    }
-    
-    #[test]
-    fn test_library_check_image() {
-        // Mock test - in practice we'd need a real .lib file
-        // For now, we'll test the logic with a hypothetical library
-    }
+    // Tests require actual .lib files
+    // TODO: Add integration tests with sample data
 }

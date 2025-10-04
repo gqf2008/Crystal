@@ -35,7 +35,7 @@ tracing-subscriber = { version = "0.3", features = [
 env_logger = "0.11"
 url = "2"
 winit = { version = "0.30.12", features = ["serde"] }
-rodio = { version = "0.21.1", default-features = false, features = ["vorbis"] }
+rodio = { version = "0.21.1", features = ["vorbis"] }  # 启用 default features 以支持 OutputStream
 reqwest = { version = "0.12", features = ["json", "gzip", "stream"] }
 bytes = "1"
 parking_lot = "0.12"
@@ -43,14 +43,14 @@ rand = "0.9.2"
 mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
 byteorder = "1"
 md5 = "0.8.0"
-wgpu = "27.0"  # 升级到最新版本
+pollster = "0.4"  # 用于在同步代码中运行异步函数 (如 DXManager::new)
+wgpu = "27.0"  # 使用最新版本 - 对应 C# 的 DirectX 9
 bytemuck = { version = "1.14", features = ["derive"] }  # For wgpu vertex data
 flate2 = "1"  # GZip decompression for .lib files
 
-# GUI Framework - egui for immediate-mode UI (升级到 0.32 以支持 wgpu 27)
-egui = "0.32"
-eframe = { version = "0.32", default-features = true, features = ["wgpu"] }
-egui-wgpu = "0.32"
+# 完全移除 egui/eframe 依赖
+# C# 原版使用自己的 GUI 系统（MirControls + DirectX 9），不依赖第三方 UI 框架
+# Rust 版本也应该直接使用 wgpu + winit 实现，照搬原版设计
 
 [dev-dependencies]
 criterion = "0.7.0"
