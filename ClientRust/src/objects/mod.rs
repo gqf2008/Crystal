@@ -21,9 +21,17 @@ pub use map_object::{
     StruckOutcome, SyncResult,
 };
 pub use user_object::{
-    UserObject, ClientMagic, ItemSets, EquipmentSlot, ClientIntelligentCreature,
-    IntelligentCreatureType, ClientQuestProgress, ClientMail, QueuedAction,
-    QueuedActionType, SpecialItemMode,
+    UserObject, QueuedAction,
+};
+
+// Re-export SharedRust types used by UserObject
+// (follows C# dependency: Client depends on Shared)
+pub use mir2_shared::data::item::ItemSets;  // C# Shared/Data/ItemData.cs ItemSets
+
+// Re-export from mir2_shared (avoid duplication)
+pub use mir2_shared::{
+    data::client_data::{ClientMagic, ClientIntelligentCreature, ClientQuestProgress, ClientMail},
+    enums::{EquipmentSlot, IntelligentCreatureType},
 };
 pub use monster_object::{MonsterObject, Monster, MonsterSoundType};
 pub use npc_object::{NPCObject, NpcImage};

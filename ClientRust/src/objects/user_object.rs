@@ -2,20 +2,19 @@
 // Mirrors Client/MirObjects/UserObject.cs
 
 use mir2_shared::{
-    data::stats::Stats,
-    enums::{MirDirection, Spell},
+    data::{
+        stats::Stats, 
+        client_data::{ClientMagic, ClientIntelligentCreature, ClientQuestProgress, ClientMail},
+        item::ItemSets,  // C# Shared/Data/ItemData.cs ItemSets
+    },
+    enums::{MirDirection, MirAction, Spell, SpecialItemMode, EquipmentSlot, IntelligentCreatureType},
     Point, UserItem,
 };
 
 use super::map_object::MapObject;
 use crate::network::protocol::UserInformation;
 
-/// Special item mode for UI interaction
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SpecialItemMode {
-    None,
-    Parcel,
-}
+
 
 /// User object - represents the current player
 #[derive(Debug, Clone)]
@@ -75,7 +74,7 @@ pub struct UserObject {
     
     // Magic/Skills
     pub magics: Vec<ClientMagic>,
-    pub item_sets: Vec<ItemSets>,
+    pub item_sets: Vec<ItemSets>,  // C#: ItemSets (Shared/Data/ItemData.cs)
     pub mir_set: Vec<EquipmentSlot>,
     
     // Intelligent creatures (pets)
@@ -110,114 +109,21 @@ pub struct UserObject {
     pub queued_action: Option<QueuedAction>,
 }
 
-/// Client magic data
-#[derive(Debug, Clone)]
-pub struct ClientMagic {
-    pub spell: Spell,
-    pub key: u8,
-    pub level: u8,
-    pub experience: u16,
-    pub cooldown: u64,
-}
-
-/// Item set information
-#[derive(Debug, Clone)]
-pub struct ItemSets {
-    pub set_id: i32,
-    pub set_name: String,
-    pub parts_equipped: i32,
-    pub full_set: bool,
-}
-
-/// Equipment slot enum
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EquipmentSlot {
-    Weapon,
-    Armour,
-    Helmet,
-    Torch,
-    Necklace,
-    BraceletL,
-    BraceletR,
-    RingL,
-    RingR,
-    Amulet,
-    Belt,
-    Boots,
-    Stone,
-    Mount,
-}
-
-/// Intelligent creature (pet) data
-#[derive(Debug, Clone)]
-pub struct ClientIntelligentCreature {
-    pub creature_type: IntelligentCreatureType,
-    pub pet_name: String,
-    pub level: u16,
-    pub hp: i32,
-    pub max_hp: i32,
-    pub hunger: i32,
-    pub summoned: bool,
-}
-
-/// Intelligent creature types
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IntelligentCreatureType {
-    None,
-    BabyPig,
-    Chick,
-    Kitten,
-    BabySkeleton,
-    Baekdon,
-    Wimaen,
-    BlackKitten,
-    BabyDragon,
-    OlympicFlame,
-    BabySnowMan,
-    Frog,
-    BabyMonkey,
-    AngryBird,
-    Foxey,
-}
-
-/// Quest progress tracking
-#[derive(Debug, Clone)]
-pub struct ClientQuestProgress {
-    pub quest_id: i32,
-    pub quest_name: String,
-    pub quest_group: String,
-    pub task_type: String,
-    pub current_count: i32,
-    pub max_count: i32,
-}
-
-/// Mail message
-#[derive(Debug, Clone)]
-pub struct ClientMail {
-    pub mail_id: i64,
-    pub sender_name: String,
-    pub subject: String,
-    pub message: String,
-    pub date_sent: std::time::SystemTime,
-    pub opened: bool,
-    pub gold: u32,
-    pub items: Vec<UserItem>,
-}
+// Note: All data types imported from mir2_shared to maintain consistency:
+//   - ClientMagic, ClientIntelligentCreature, ClientQuestProgress, ClientMail (client_data)
+//   - EquipmentSlot, IntelligentCreatureType, MirAction (enums)
+//   - ItemSetStatus (item) - corresponds to C# ItemSets in Shared/Data/ItemData.cs
 
 /// Queued action for delayed execution
+/// Mirrors C#: Client/MirObjects/PlayerObject.cs QueuedAction class
 #[derive(Debug, Clone)]
 pub struct QueuedAction {
-    pub action_type: QueuedActionType,
+    pub action: MirAction,      // C# uses MirAction, not a separate enum
     pub location: Point,
     pub direction: MirDirection,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QueuedActionType {
-    Move,
-    Attack,
-    Spell,
-    Harvest,
+    // pub params: Vec<Box<dyn Any>>,  // C#: List<object> Params
+    // Note: C# rarely uses Params field, so we omit it for now
+    // Can be added later when needed with an enum for type-safe params
 }
 
 impl UserObject {
@@ -244,7 +150,7 @@ impl UserObject {
             rental_gold_locked: false,
             rental_item_locked: false,
             rental_gold_amount: 0,
-            item_mode: SpecialItemMode::None,
+            item_mode: SpecialItemMode::NONE,
             core_stats: Stats::default(),
             inventory: vec![None; 46],
             equipment: vec![None; 14],
@@ -318,28 +224,151 @@ impl UserObject {
             self.expanded_storage_expiry_time = None;
         }
         
-        // TODO: Load magics, item sets, etc. from info
-    }
-
-    /// Update user stats (called after equipment/buff changes)
-    pub fn refresh_stats(&mut self) {
-        // Start with core stats
-        let new_stats = self.core_stats.clone();
-        
-        // Add equipment stats
-        for slot in &self.equipment {
-            if let Some(_item) = slot {
-                // TODO: Add item stats to new_stats
-                // This would require Stats to have methods like add_ac(), add_dc(), etc.
+        // Load magics
+        self.magics = info.magics.clone();
+        // Adjust cooldown times (add current time)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        for magic in &mut self.magics {
+            if magic.delay > 0 {
+                magic.delay += now;
             }
         }
         
-        // Add buff stats
-        for _buff in self.map_object.buffs() {
-            // TODO: Add buff stats based on buff type
-        }
+        // Load intelligent creatures
+        self.summoned_creature_type = IntelligentCreatureType::try_from(info.summoned_creature_type)
+            .unwrap_or(IntelligentCreatureType::None);
+        self.creature_summoned = info.creature_summoned;
         
-        self.stats = new_stats;
+        // Bind items (associate with ItemInfo - TODO: implement fully)
+        self.bind_all_items();
+        
+        // Refresh stats
+        self.refresh_stats();
+        
+        // Set initial action
+        self.set_action();
+    }
+
+    /// Bind all items to their ItemInfo (associate item data)
+    fn bind_all_items(&mut self) {
+        // TODO: Implement item binding
+        // In C#, this looks up items in GameScene.ItemInfoList
+        // For now, we skip this as items already have their info embedded
+        // This will be needed when we have a centralized ItemInfo registry
+    }
+    
+    /// Set initial action (standing pose)
+    fn set_action(&mut self) {
+        // Set to standing action based on current direction
+        // This will be implemented when MapObject's action system is complete
+        // For now, just ensure the object is in a valid state
+        self.map_object.set_direction(self.map_object.direction());
+    }
+    
+    /// Update user stats (called after equipment/buff changes)
+    pub fn refresh_stats(&mut self) {
+        // Clear current stats
+        self.stats = Stats::default();
+        
+        // Start with level-based stats
+        self.refresh_level_stats();
+        
+        // Add equipment stats
+        self.refresh_equipment_stats();
+        
+        // Add item set bonuses
+        self.refresh_item_set_stats();
+        
+        // Add skill bonuses
+        self.refresh_skills();
+        
+        // Add buff stats
+        self.refresh_buffs();
+        
+        // TODO: Add guild buffs
+        // self.refresh_guild_buffs();
+        
+        // TODO: Apply percentage bonuses
+        // Stats[HP] += (Stats[HP] * Stats[HPRatePercent]) / 100
+        
+        // TODO: Apply stat caps
+        // self.refresh_stat_caps();
+        
+        // Calculate attack speed
+        self.calculate_attack_speed();
+    }
+    
+    /// Refresh stats based on character level
+    fn refresh_level_stats(&mut self) {
+        // TODO: Calculate level-based stats from CoreStats
+        // For now, use CoreStats directly
+        // In C#: Stats[stat.Type] = stat.Calculate(Class, Level)
+        self.stats = self.core_stats.clone();
+    }
+    
+    /// Refresh equipment stats
+    fn refresh_equipment_stats(&mut self) {
+        self.current_wear_weight = 0;
+        self.current_hand_weight = 0;
+        
+        // Clear equipment-specific fields
+        // TODO: Set weapon, armour, mount type, etc.
+        
+        for slot in &self.equipment {
+            if let Some(item) = slot {
+                // Add weight
+                let weight = item.weight(None) as i32;
+                // TODO: Distinguish hand weight vs wear weight based on item type
+                self.current_wear_weight += weight;
+                
+                // Add item stats
+                // TODO: self.stats.add(&item.stats);
+                // TODO: self.stats.add(&item.added_stats);
+                
+                // TODO: Handle durability check (skip if dura == 0)
+                // TODO: Handle awakening stats
+                // TODO: Handle sockets
+                // TODO: Track item sets
+            }
+        }
+    }
+    
+    /// Refresh item set bonuses
+    fn refresh_item_set_stats(&mut self) {
+        // TODO: Implement item set bonus system
+        // Check which set pieces are equipped
+        // Apply set bonuses based on item count
+    }
+    
+    /// Refresh skill bonuses
+    fn refresh_skills(&mut self) {
+        // TODO: Implement skill stat bonuses
+        // Some skills provide passive stat increases
+    }
+    
+    /// Refresh buff stats
+    fn refresh_buffs(&mut self) {
+        // TODO: Iterate through active buffs
+        // Add stats based on buff type
+        for _buff in self.map_object.buffs() {
+            // match buff.buff_type {
+            //     BuffType::某种Buff => self.stats.add_hp(value),
+            //     ...
+            // }
+        }
+    }
+    
+    /// Calculate attack speed based on stats and level
+    fn calculate_attack_speed(&mut self) {
+        // C#: AttackSpeed = 1400 - ((Stats[Stat.AttackSpeed] * 60) + Math.Min(370, (Level * 14)));
+        // if (AttackSpeed < 550) AttackSpeed = 550;
+        
+        let attack_speed_stat = 0; // TODO: self.stats.get(StatType::AttackSpeed);
+        let speed = 1400 - (attack_speed_stat * 60 + std::cmp::min(370, self.level as i32 * 14));
+        self.attack_speed = std::cmp::max(550, speed);
     }
 
     /// Get magic by spell type
@@ -353,8 +382,8 @@ impl UserObject {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_millis() as u64;
-            return now < magic.cooldown;
+                .as_millis() as i64;
+            return now < magic.delay;
         }
         false
     }
@@ -405,12 +434,30 @@ impl UserObject {
     /// Update experience
     pub fn gain_experience(&mut self, amount: i64) {
         self.experience += amount;
-        // TODO: Check for level up
+        
+        // Check for level up
+        while self.experience >= self.max_experience && self.max_experience > 0 {
+            self.level_up();
+        }
     }
 
     /// Check if can level up
     pub fn can_level_up(&self) -> bool {
-        self.experience >= self.max_experience
+        self.experience >= self.max_experience && self.max_experience > 0
+    }
+    
+    /// Level up the character
+    fn level_up(&mut self) {
+        self.level += 1;
+        self.experience -= self.max_experience;
+        
+        // TODO: Calculate new max_experience based on level
+        // TODO: Play level up effects
+        // TODO: Show level up message
+        // TODO: Update stats
+        
+        // For now, just refresh stats
+        self.refresh_stats();
     }
 }
 

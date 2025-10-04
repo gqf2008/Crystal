@@ -1340,13 +1340,13 @@ impl Default for ChatItem {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ItemSetStatus {
+pub struct ItemSets {
     pub set: ItemSet,
     pub types: Vec<ItemType>,
     pub count: u8,
 }
 
-impl ItemSetStatus {
+impl ItemSets {
     pub fn required_amount(&self) -> u8 {
         match self.set {
             ItemSet::Mundane
@@ -1390,7 +1390,7 @@ impl ItemSetStatus {
     }
 }
 
-impl Default for ItemSetStatus {
+impl Default for ItemSets {
     fn default() -> Self {
         Self {
             set: ItemSet::None,
@@ -1688,7 +1688,7 @@ mod tests {
 
     #[test]
     fn item_set_status_completion() {
-        let status = ItemSetStatus {
+        let status = ItemSets {
             set: ItemSet::Spirit,
             types: vec![ItemType::Weapon, ItemType::Armour],
             count: 5,
@@ -1696,7 +1696,7 @@ mod tests {
         assert_eq!(status.required_amount(), 5);
         assert!(status.is_complete());
 
-        let status2 = ItemSetStatus {
+        let status2 = ItemSets {
             set: ItemSet::RedOrchid,
             types: vec![ItemType::Bracelet],
             count: 2,

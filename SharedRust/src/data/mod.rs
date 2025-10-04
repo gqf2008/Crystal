@@ -11,5 +11,5 @@ pub use notice::*;
 pub use shared_data::*;
 
 // Export specific types from item and stats modules
-pub use item::{GameShopItem, ItemInfo, ItemRentalInformation, ItemSetStatus, UserItem};
+pub use item::{GameShopItem, ItemInfo, ItemRentalInformation, ItemSets, UserItem};
 pub use stats::{BaseStat, BaseStats, SharedError, SharedResult, Stats};

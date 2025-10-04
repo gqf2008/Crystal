@@ -20,7 +20,7 @@ pub use data::{
     ClientQuestProgress, ClientRecipeInfo, GuildMember, GuildRank, GuildStorageItem,
     IntelligentCreatureItemFilter, IntelligentCreatureRules, SelectInfo,
     // From item
-    GameShopItem, ItemInfo, ItemRentalInformation, ItemSetStatus, UserItem,
+    GameShopItem, ItemInfo, ItemRentalInformation, ItemSets, UserItem,
     // From stats
     BaseStat, BaseStats, SharedError, SharedResult, Stats,
     // From notice

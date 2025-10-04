@@ -8,7 +8,8 @@ use mir2_shared::{
     Point, UserItem,
 };
 
-use super::{map_object::MapObject, user_object::ClientMagic};
+use super::map_object::MapObject;
+use mir2_shared::data::client_data::ClientMagic;
 
 /// Hero spawn state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
