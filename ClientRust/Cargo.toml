@@ -48,7 +48,12 @@ regex = "1.11.3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"  # For Stream trait (used in downloader)
-ggez = "=0.10.0-rc0"
+ggez = "=0.10.0-rc0"  # Includes winit re-export (use ggez::winit::*)
+assets_manager = "0.13.3"
+ron = "0.11.0"
+tinyvec = {version = "1.10.0", features = ["alloc"]}
+shlex = "1.3.0"
+zerocopy = "0.8.27"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winuser", "wingdi"] }  # For Windows display resolution detection
@@ -61,12 +66,9 @@ winapi = { version = "0.3", features = ["winuser", "wingdi"] }  # For Windows di
 criterion = "0.7.0"
 tempfile = "3"
 
+# 主程序入口 - 使用 ggez 框架
 [[bin]]
 name = "mir2_client"
-path = "src/main.rs"
-
-[[bin]]
-name = "mir2_client_ggez"
 path = "src/main_ggez.rs"
 
 [features]

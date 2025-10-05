@@ -343,7 +343,7 @@ impl Scene for LoginScene {
         // TODO: Update animations
     }
     
-    fn draw(&self) {
+    fn draw(&self, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
         // TODO: Draw login background
         // TODO: Draw login dialogs
         // TODO: Draw version info
@@ -401,7 +401,7 @@ impl Scene for LoginScene {
         // TODO: Update hover states
     }
     
-    fn handle_mouse_button(&mut self, button: winit::event::MouseButton, pressed: bool, x: i32, y: i32) {
+    fn handle_mouse_button(&mut self, button: super::MouseButton, pressed: bool, x: i32, y: i32) {
         if pressed {
             tracing::debug!("LoginScene click at ({}, {}) with {:?}", x, y, button);
             // TODO: Handle dialog clicks

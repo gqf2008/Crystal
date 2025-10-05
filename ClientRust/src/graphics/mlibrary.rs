@@ -10,8 +10,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use flate2::read::GzDecoder;
 
-// 移除 egui 依赖，使用自己的类型
-use super::dx_manager::TextureHandle;
+// 移除 wgpu 依赖
+// TextureHandle 已废弃,MLibrary 直接返回像素数据
+// use super::dx_manager::TextureHandle;
+
+// Dummy TextureHandle 用于编译兼容性 (实际使用 ggez Image)
+#[derive(Debug, Clone)]
+pub struct TextureHandle {
+    pub width: u32,
+    pub height: u32,
+}
 
 /// MIR2图像库文件头
 #[derive(Debug, Clone)]
@@ -250,12 +258,22 @@ impl TextureManager {
     /// - index: 图像索引
     /// 
     /// 返回: (ImageInfo, Arc<TextureHandle>)
+    // 已废弃: 使用 ggez 替代
+    #[allow(dead_code)]
     pub fn get_texture(
         &mut self,
-        dx_manager: &super::dx_manager::DXManager,
+        _dx_manager: &TextureHandle, // Dummy type to avoid compilation error
         library: &str,
         index: usize,
     ) -> io::Result<(ImageInfo, Arc<TextureHandle>)> {
+        // 此函数已废弃,使用 get_image_data() 配合 ggez 渲染
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "get_texture() is deprecated, use get_image_data() with ggez instead"
+        ));
+        
+        #[allow(unreachable_code)]
+        {
         let key = TextureKey {
             library: library.to_string(),
             index,
@@ -281,18 +299,15 @@ impl TextureManager {
         
         let (info, rgba_data) = lib.load_rgba_data(index)?;
         
-        // 上传到 GPU
+        // 上传到 GPU (unreachable code - 保留用于参考)
         let texture_name = format!("{}_{}", library, index);
-        let handle = dx_manager.load_texture(
-            texture_name,
-            info.width as u32,
-            info.height as u32,
-            &rgba_data,
-        );
+        let handle = _dx_manager;  // Dummy - this code is unreachable
+        let handle = Arc::new(handle.clone());
         
         self.textures.insert(key, handle.clone());
         
         Ok((info, handle))
+        } // unreachable_code block
     }
     
     /// 获取图像信息(不加载纹理)
@@ -313,6 +328,10 @@ impl TextureManager {
     pub fn clear_cache(&mut self) {
         self.textures.clear();
     }
+    
+    // ===== 以下所有 draw 函数已废弃 (依赖 dx_manager) =====
+    // 请使用 MLibrary::load_rgba_data() 配合 ggez 直接渲染
+    
 }
 
 // ===== 辅助函数 =====
@@ -334,6 +353,9 @@ fn read_u8<R: Read>(reader: &mut R) -> io::Result<u8> {
     reader.read_exact(&mut buf)?;
     Ok(buf[0])
 }
+
+// ===== MLibrary draw functions (deprecated) =====
+/*  // All draw functions commented out - depend on dx_manager
 
 /// Drawing and helper methods for MLibrary
 impl MLibrary {
@@ -800,7 +822,8 @@ impl MLibrary {
         
         Some((x, y, width, height))
     }
-}
+    
+    */  // End of deprecated draw functions block
 
 #[cfg(test)]
 mod tests {

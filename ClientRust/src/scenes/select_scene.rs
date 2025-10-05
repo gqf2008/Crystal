@@ -176,7 +176,7 @@ impl Scene for SelectScene {
         // TODO: Update animations
     }
     
-    fn draw(&self) {
+    fn draw(&self, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
         // TODO: Draw selection background
         // TODO: Draw character previews
         // TODO: Draw UI buttons
@@ -203,7 +203,7 @@ impl Scene for SelectScene {
         // TODO: Update hover states
     }
     
-    fn handle_mouse_button(&mut self, button: winit::event::MouseButton, pressed: bool, x: i32, y: i32) {
+    fn handle_mouse_button(&mut self, button: super::MouseButton, pressed: bool, x: i32, y: i32) {
         if pressed {
             tracing::debug!("SelectScene click at ({}, {}) with {:?}", x, y, button);
             // TODO: Handle character slot clicks

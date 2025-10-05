@@ -21,14 +21,7 @@ pub mod resolution;        // ✅ 不依赖 winit/wgpu
 pub mod resources;         // ✅ 不依赖 winit/wgpu
 pub mod utils;             // ✅ 不依赖 winit/wgpu
 pub mod scenes;            // ⚠️ 部分使用 winit 类型(Scene trait)
-
-// 以下模块依赖 winit/wgpu/rodio，暂时禁用
-// 使用 main_ggez.rs 替代
-// pub mod program;        // 依赖 winit
-// pub mod ui;             // 依赖 winit
-// pub mod controls;       // 依赖 winit
-// pub mod forms;          // 依赖 winit
-// pub mod sounds;         // 依赖 rodio
+pub mod ui; // UI模块
 
 // 重新导出常用类型
 pub use error::{ClientError, ClientResult};

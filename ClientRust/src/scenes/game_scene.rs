@@ -1,5 +1,6 @@
 // GameScene - Main game scene (核心游戏场景)
 // Mirrors Client/MirScenes/GameScene.cs (12,297 lines)
+pub mod map_control;
 
 use super::{Scene, SceneType};
 use crate::objects::*;
@@ -298,7 +299,7 @@ impl Scene for GameScene {
         // TODO: Update map
     }
     
-    fn draw(&self) {
+    fn draw(&self, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
         // TODO: Draw map
         // TODO: Draw game objects (sorted by Y position)
         // TODO: Draw effects

@@ -9,7 +9,10 @@ use anyhow::Result;
 use ggez::{Context, ContextBuilder, GameResult};
 use ggez::event::{self, EventHandler};
 use ggez::conf::{WindowMode, WindowSetup, NumSamples};
-use ggez::graphics::{self, Color};
+use ggez::graphics::Color;
+use ggez::input::keyboard::KeyInput;
+use ggez::input::mouse::MouseButton as GgezMouseButton;
+use ggez::winit::keyboard::{KeyCode as WinitKeyCode, PhysicalKey, ModifiersState as WinitModifiers};
 use std::sync::Arc;
 use parking_lot::RwLock;
 
@@ -17,11 +20,19 @@ mod settings;
 mod graphics;
 mod scenes;
 mod network;
+mod objects;
 mod utils;
 mod downloader;
+mod error;
+mod resolution;
+mod resources;
+mod version;
 
-use crate::settings::Settings;
-use crate::graphics::{GgezManager, libraries};
+use settings::ClientSettings;
+
+// Settings 已废弃,使用默认配置
+// use crate::settings::Settings;
+use crate::graphics::GgezManager;
 use crate::scenes::{SceneManager, SceneType, KeyCode as SceneKeyCode, MouseButton as SceneMouseButton, ModifiersState};
 
 fn main() -> Result<()> {
@@ -33,20 +44,22 @@ fn main() -> Result<()> {
     tracing::info!("=== Crystal Mir2 Client (Ggez版本) ===");
     
     // 2. 加载配置
-    let settings = Settings::load()?;
-    tracing::info!("配置加载完成: {:?}", settings.game.server_name);
+    let settings = ClientSettings::load(false, None)?;
+    tracing::info!("配置加载完成: {:?}", settings.launcher.server_name);
     
     // 3. 设置数据路径
-    graphics::libraries::set_data_path(settings.paths.data_path.clone());
+    let data_path = settings.resources_path.to_string_lossy().to_string();
+    graphics::libraries::set_data_path(data_path);
     
     // 4. 创建 ggez Context
-    let window_width = settings.game.resolution.0 as f32;
-    let window_height = settings.game.resolution.1 as f32;
+    let res = settings.resolution();
+    let window_width = res.width as f32;
+    let window_height = res.height as f32;
     
     let (mut ctx, event_loop) = ContextBuilder::new("mir2_client", "Crystal")
         .window_setup(
             WindowSetup::default()
-                .title(&format!("Crystal - {}", settings.game.server_name))
+                .title(&format!("Crystal - {}", settings.launcher.server_name))
                 .samples(NumSamples::Four)  // 4x MSAA
                 .vsync(true)
         )
@@ -69,19 +82,20 @@ fn main() -> Result<()> {
 
 /// 游戏主状态 - 实现 ggez::EventHandler
 struct CrystalGame {
-    settings: Settings,
+    settings: ClientSettings,
     ggez_manager: GgezManager,
     scene_manager: Arc<RwLock<SceneManager>>,
     last_update_time: std::time::Instant,
 }
 
 impl CrystalGame {
-    fn new(ctx: &mut Context, settings: Settings) -> Result<Self> {
+    fn new(ctx: &mut Context, settings: ClientSettings) -> Result<Self> {
         tracing::info!("初始化游戏状态...");
         
         // 创建渲染管理器
-        let screen_width = settings.game.resolution.0 as f32;
-        let screen_height = settings.game.resolution.1 as f32;
+        let res = settings.resolution();
+        let screen_width = res.width as f32;
+        let screen_height = res.height as f32;
         let ggez_manager = GgezManager::new(screen_width, screen_height);
         
         // 加载核心图形库 (Data.lib, Prguse.lib 等)
@@ -141,21 +155,15 @@ impl EventHandler for CrystalGame {
             scene_manager.update(delta_time);
         }
         
-        // 检查退出请求 (Ctrl+Q)
-        if ctx.keyboard.is_key_pressed(ggez::input::keyboard::KeyCode::KeyQ) {
-            let mods = ctx.keyboard.active_mods();
-            if mods.contains(ggez::input::keyboard::KeyMods::CTRL) {
-                tracing::info!("用户请求退出 (Ctrl+Q)");
-                ctx.request_quit();
-            }
-        }
+        // 检查退出请求 (Ctrl+Q) - 使用 key_down_event 处理
+        // ggez 0.10 不提供直接查询按键状态的 API
         
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         // 开始帧
-        self.ggez_manager.begin_frame(ctx, Color::from_rgb(20, 30, 60))?;
+        self.ggez_manager.begin_frame();
         
         // 创建 canvas
         let mut canvas = graphics::Canvas::from_frame(ctx, Color::from_rgb(20, 30, 60));
@@ -175,20 +183,26 @@ impl EventHandler for CrystalGame {
     
     fn key_down_event(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,
         input: ggez::input::keyboard::KeyInput,
         _repeated: bool,
     ) -> GameResult {
-        if let Some(keycode) = input.keycode {
-            let modifiers = ggez::input::keyboard::KeyMods::from_bits_truncate(
-                input.mods.bits()
-            );
+        // ggez 0.10: KeyInput 结构变为 winit 事件
+        if let PhysicalKey::Code(keycode) = input.event.physical_key {
+            // 检查 Ctrl+Q 退出
+            if keycode == WinitKeyCode::KeyQ && input.mods.control_key() {
+                tracing::info!("用户请求退出 (Ctrl+Q)");
+                ctx.request_quit();
+                return Ok(());
+            }
+            
+            let modifiers = input.mods;
             
             // 转换为 Scene 自定义 ModifiersState
             let modifiers_state = ModifiersState {
-                shift: modifiers.contains(ggez::input::keyboard::KeyMods::SHIFT),
-                ctrl: modifiers.contains(ggez::input::keyboard::KeyMods::CTRL),
-                alt: modifiers.contains(ggez::input::keyboard::KeyMods::ALT),
+                shift: modifiers.shift_key(),
+                ctrl: modifiers.control_key(),
+                alt: modifiers.alt_key(),
             };
             
             // 转换 ggez KeyCode 到 Scene KeyCode
@@ -204,20 +218,21 @@ impl EventHandler for CrystalGame {
     fn mouse_button_down_event(
         &mut self,
         _ctx: &mut Context,
-        button: ggez::event::MouseButton,
+        button: GgezMouseButton,
         x: f32,
         y: f32,
     ) -> GameResult {
-        // 转换 ggez MouseButton 到 winit MouseButton
-        let winit_button = match button {
-            ggez::event::MouseButton::Left => winit::event::MouseButton::Left,
-            ggez::event::MouseButton::Right => winit::event::MouseButton::Right,
-            ggez::event::MouseButton::Middle => winit::event::MouseButton::Middle,
-            _ => return Ok(()),
+        // 转换 ggez MouseButton 到 Scene MouseButton
+        let scene_button = match button {
+            GgezMouseButton::Left => SceneMouseButton::Left,
+            GgezMouseButton::Right => SceneMouseButton::Right,
+            GgezMouseButton::Middle => SceneMouseButton::Middle,
+            GgezMouseButton::Back | GgezMouseButton::Forward => SceneMouseButton::Other(0),
+            GgezMouseButton::Other(v) => SceneMouseButton::Other(v),
         };
         
         let mut scene_manager = self.scene_manager.write();
-        scene_manager.handle_mouse_button(winit_button, true, x as i32, y as i32);
+        scene_manager.handle_mouse_button(scene_button, true, x as i32, y as i32);
         
         Ok(())
     }
@@ -225,19 +240,20 @@ impl EventHandler for CrystalGame {
     fn mouse_button_up_event(
         &mut self,
         _ctx: &mut Context,
-        button: ggez::event::MouseButton,
+        button: GgezMouseButton,
         x: f32,
         y: f32,
     ) -> GameResult {
-        let winit_button = match button {
-            ggez::event::MouseButton::Left => winit::event::MouseButton::Left,
-            ggez::event::MouseButton::Right => winit::event::MouseButton::Right,
-            ggez::event::MouseButton::Middle => winit::event::MouseButton::Middle,
-            _ => return Ok(()),
+        let scene_button = match button {
+            GgezMouseButton::Left => SceneMouseButton::Left,
+            GgezMouseButton::Right => SceneMouseButton::Right,
+            GgezMouseButton::Middle => SceneMouseButton::Middle,
+            GgezMouseButton::Back | GgezMouseButton::Forward => SceneMouseButton::Other(0),
+            GgezMouseButton::Other(v) => SceneMouseButton::Other(v),
         };
         
         let mut scene_manager = self.scene_manager.write();
-        scene_manager.handle_mouse_button(winit_button, false, x as i32, y as i32);
+        scene_manager.handle_mouse_button(scene_button, false, x as i32, y as i32);
         
         Ok(())
     }
@@ -257,69 +273,68 @@ impl EventHandler for CrystalGame {
     }
 }
 
-/// 转换 ggez KeyCode 到 winit KeyCode
-fn ggez_keycode_to_winit(key: ggez::input::keyboard::KeyCode) -> Option<winit::keyboard::KeyCode> {
-    use ggez::input::keyboard::KeyCode as GK;
-    use winit::keyboard::KeyCode as WK;
+/// 转换 winit KeyCode 到 Scene KeyCode
+fn ggez_keycode_to_scene(key: ggez::winit::keyboard::KeyCode) -> Option<SceneKeyCode> {
+    use ggez::winit::keyboard::KeyCode as GK;
     
     Some(match key {
-        GK::KeyA => WK::KeyA,
-        GK::KeyB => WK::KeyB,
-        GK::KeyC => WK::KeyC,
-        GK::KeyD => WK::KeyD,
-        GK::KeyE => WK::KeyE,
-        GK::KeyF => WK::KeyF,
-        GK::KeyG => WK::KeyG,
-        GK::KeyH => WK::KeyH,
-        GK::KeyI => WK::KeyI,
-        GK::KeyJ => WK::KeyJ,
-        GK::KeyK => WK::KeyK,
-        GK::KeyL => WK::KeyL,
-        GK::KeyM => WK::KeyM,
-        GK::KeyN => WK::KeyN,
-        GK::KeyO => WK::KeyO,
-        GK::KeyP => WK::KeyP,
-        GK::KeyQ => WK::KeyQ,
-        GK::KeyR => WK::KeyR,
-        GK::KeyS => WK::KeyS,
-        GK::KeyT => WK::KeyT,
-        GK::KeyU => WK::KeyU,
-        GK::KeyV => WK::KeyV,
-        GK::KeyW => WK::KeyW,
-        GK::KeyX => WK::KeyX,
-        GK::KeyY => WK::KeyY,
-        GK::KeyZ => WK::KeyZ,
-        GK::Key1 => WK::Digit1,
-        GK::Key2 => WK::Digit2,
-        GK::Key3 => WK::Digit3,
-        GK::Key4 => WK::Digit4,
-        GK::Key5 => WK::Digit5,
-        GK::Key6 => WK::Digit6,
-        GK::Key7 => WK::Digit7,
-        GK::Key8 => WK::Digit8,
-        GK::Key9 => WK::Digit9,
-        GK::Key0 => WK::Digit0,
-        GK::Return => WK::Enter,
-        GK::Escape => WK::Escape,
-        GK::Back => WK::Backspace,
-        GK::Tab => WK::Tab,
-        GK::Space => WK::Space,
-        GK::Left => WK::ArrowLeft,
-        GK::Right => WK::ArrowRight,
-        GK::Up => WK::ArrowUp,
-        GK::Down => WK::ArrowDown,
-        GK::F1 => WK::F1,
-        GK::F2 => WK::F2,
-        GK::F3 => WK::F3,
-        GK::F4 => WK::F4,
-        GK::F5 => WK::F5,
-        GK::F6 => WK::F6,
-        GK::F7 => WK::F7,
-        GK::F8 => WK::F8,
-        GK::F9 => WK::F9,
-        GK::F10 => WK::F10,
-        GK::F11 => WK::F11,
-        GK::F12 => WK::F12,
+        GK::KeyA => SceneKeyCode::KeyA,
+        GK::KeyB => SceneKeyCode::KeyB,
+        GK::KeyC => SceneKeyCode::KeyC,
+        GK::KeyD => SceneKeyCode::KeyD,
+        GK::KeyE => SceneKeyCode::KeyE,
+        GK::KeyF => SceneKeyCode::KeyF,
+        GK::KeyG => SceneKeyCode::KeyG,
+        GK::KeyH => SceneKeyCode::KeyH,
+        GK::KeyI => SceneKeyCode::KeyI,
+        GK::KeyJ => SceneKeyCode::KeyJ,
+        GK::KeyK => SceneKeyCode::KeyK,
+        GK::KeyL => SceneKeyCode::KeyL,
+        GK::KeyM => SceneKeyCode::KeyM,
+        GK::KeyN => SceneKeyCode::KeyN,
+        GK::KeyO => SceneKeyCode::KeyO,
+        GK::KeyP => SceneKeyCode::KeyP,
+        GK::KeyQ => SceneKeyCode::KeyQ,
+        GK::KeyR => SceneKeyCode::KeyR,
+        GK::KeyS => SceneKeyCode::KeyS,
+        GK::KeyT => SceneKeyCode::KeyT,
+        GK::KeyU => SceneKeyCode::KeyU,
+        GK::KeyV => SceneKeyCode::KeyV,
+        GK::KeyW => SceneKeyCode::KeyW,
+        GK::KeyX => SceneKeyCode::KeyX,
+        GK::KeyY => SceneKeyCode::KeyY,
+        GK::KeyZ => SceneKeyCode::KeyZ,
+        GK::Digit1 => SceneKeyCode::Digit1,
+        GK::Digit2 => SceneKeyCode::Digit2,
+        GK::Digit3 => SceneKeyCode::Digit3,
+        GK::Digit4 => SceneKeyCode::Digit4,
+        GK::Digit5 => SceneKeyCode::Digit5,
+        GK::Digit6 => SceneKeyCode::Digit6,
+        GK::Digit7 => SceneKeyCode::Digit7,
+        GK::Digit8 => SceneKeyCode::Digit8,
+        GK::Digit9 => SceneKeyCode::Digit9,
+        GK::Digit0 => SceneKeyCode::Digit0,
+        GK::Enter => SceneKeyCode::Enter,
+        GK::Escape => SceneKeyCode::Escape,
+        GK::Backspace => SceneKeyCode::Backspace,
+        GK::Tab => SceneKeyCode::Tab,
+        GK::Space => SceneKeyCode::Space,
+        GK::ArrowLeft => SceneKeyCode::ArrowLeft,
+        GK::ArrowRight => SceneKeyCode::ArrowRight,
+        GK::ArrowUp => SceneKeyCode::ArrowUp,
+        GK::ArrowDown => SceneKeyCode::ArrowDown,
+        GK::F1 => SceneKeyCode::F1,
+        GK::F2 => SceneKeyCode::F2,
+        GK::F3 => SceneKeyCode::F3,
+        GK::F4 => SceneKeyCode::F4,
+        GK::F5 => SceneKeyCode::F5,
+        GK::F6 => SceneKeyCode::F6,
+        GK::F7 => SceneKeyCode::F7,
+        GK::F8 => SceneKeyCode::F8,
+        GK::F9 => SceneKeyCode::F9,
+        GK::F10 => SceneKeyCode::F10,
+        GK::F11 => SceneKeyCode::F11,
+        GK::F12 => SceneKeyCode::F12,
         _ => return None,
     })
 }

@@ -6,7 +6,6 @@ pub mod scene_manager;
 pub mod login_scene;
 pub mod select_scene;
 pub mod game_scene;
-pub mod map_control;
 pub mod dialogs;
 
 // Re-export scene types
@@ -15,7 +14,7 @@ pub use scene_manager::{SceneManager, SharedSceneManager, create_shared_scene_ma
 pub use login_scene::{LoginScene, BanInfo};
 pub use select_scene::SelectScene;
 pub use game_scene::GameScene;
-pub use map_control::{MapControl, CellInfo, Door};
+pub use game_scene::map_control::{MapControl, CellInfo, Door};
 
 // Re-export enums from SharedRust
 pub use mir2_shared::enums::{LightSetting, WeatherSetting};

@@ -247,6 +247,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "assets_manager"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09b396149ce68ff932949ae1e80ad36fa4a24ac6034204c41ba62e2908c3073d"
+dependencies = [
+ "foldhash 0.2.0",
+ "hashbrown 0.16.0",
+ "log",
+]
+
+[[package]]
 name = "async-compression"
 version = "0.4.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -642,7 +653,7 @@ dependencies = [
  "convert_case",
  "json5",
  "pathdiff",
- "ron",
+ "ron 0.8.1",
  "rust-ini",
  "serde-untagged",
  "serde_core",
@@ -1188,6 +1199,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1635,7 +1652,7 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "foldhash",
+ "foldhash 0.1.5",
 ]
 
 [[package]]
@@ -2396,6 +2413,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "assets_manager",
  "bincode",
  "bitflags 2.9.4",
  "byteorder",
@@ -2416,16 +2434,20 @@ dependencies = [
  "rand",
  "regex",
  "reqwest",
+ "ron 0.11.0",
  "serde",
  "serde_json",
  "serde_yaml",
+ "shlex",
  "tempfile",
  "thiserror 2.0.17",
+ "tinyvec",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "url",
  "winapi",
+ "zerocopy",
 ]
 
 [[package]]
@@ -3553,6 +3575,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ron"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db09040cc89e461f1a265139777a2bde7f8d8c67c4936f700c63ce3e2904d468"
+dependencies = [
+ "base64 0.22.1",
+ "bitflags 2.9.4",
+ "serde",
+ "serde_derive",
+ "unicode-ident",
+]
+
+[[package]]
 name = "rust-ini"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4258,6 +4293,21 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "tinyvec"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfa5fdc3bce6191a1dbc8c02d5c8bffcf557bafa17c124c5264a458f1b0613fa"
+dependencies = [
+ "tinyvec_macros",
+]
+
+[[package]]
+name = "tinyvec_macros"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"

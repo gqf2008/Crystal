@@ -174,7 +174,7 @@ impl ClientState {
     pub fn upsert_player_object(&mut self, object: ObjectPlayer) -> ObjectUpdateOutcome {
         match self.objects.entry(object.object_id) {
             Entry::Occupied(mut entry) => {
-                let map_object = entry.get_mut();
+                let map_object: &mut MapObject = entry.get_mut();
                 let sync = map_object.sync_from_player_packet(&object);
                 ObjectUpdateOutcome {
                     created: false,
@@ -202,7 +202,7 @@ impl ClientState {
         self.hero_level = Some(hero_level);
         match self.objects.entry(object_id) {
             Entry::Occupied(mut entry) => {
-                let map_object = entry.get_mut();
+                let map_object: &mut MapObject = entry.get_mut();
                 let sync = map_object.sync_from_hero_packet(&object);
                 ObjectUpdateOutcome {
                     created: false,
@@ -227,7 +227,7 @@ impl ClientState {
         let object_id = object.object_id;
         match self.objects.entry(object_id) {
             Entry::Occupied(mut entry) => {
-                let map_object = entry.get_mut();
+                let map_object: &mut MapObject = entry.get_mut();
                 let sync = map_object.sync_from_monster_packet(&object);
                 ObjectUpdateOutcome {
                     created: false,
@@ -1000,7 +1000,8 @@ impl ClientState {
         match self.objects.entry(packet.object_id) {
             Entry::Occupied(mut entry) => {
                 if packet.death_type == 0 {
-                    let object_type = entry.get().object_type();
+                    let map_obj: &MapObject = entry.get();
+                    let object_type = map_obj.object_type();
                     let direction = MirDirection::try_from(packet.direction).unwrap_or(MirDirection::Up);
                     let transition = entry
                         .get_mut()
