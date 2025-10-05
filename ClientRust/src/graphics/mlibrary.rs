@@ -48,6 +48,10 @@ pub struct MLibrary {
     indices: Vec<ImageIndex>,
     // 缓存已加载的图像信息
     cached_info: HashMap<usize, ImageInfo>,
+    // 纹理缓存 - 避免重复加载
+    texture_cache: HashMap<usize, Arc<TextureHandle>>,
+    // 缓存清理时间戳
+    cache_timestamps: HashMap<usize, i64>,
 }
 
 impl MLibrary {
@@ -86,6 +90,8 @@ impl MLibrary {
             header,
             indices,
             cached_info: HashMap::new(),
+            texture_cache: HashMap::new(),
+            cache_timestamps: HashMap::new(),
         })
     }
     
@@ -347,23 +353,56 @@ impl MLibrary {
     /// ```
     pub fn draw(
         &mut self,
-        _dx_manager: &mut super::dx_manager::DXManager,
+        dx_manager: &mut super::dx_manager::DXManager,
         index: i32,
-        _point: (i32, i32),
-        _color: [f32; 4],
-        _use_offset: bool,
-        _opacity: f32,
+        point: (i32, i32),
+        color: [f32; 4],
+        use_offset: bool,
+        opacity: f32,
+        screen_width: i32,
+        screen_height: i32,
     ) -> io::Result<()> {
         if !self.check_image(index) {
             return Ok(()); // C# 静默返回
         }
         
-        // TODO: 实现完整的渲染逻辑
-        // 1. 获取图像信息
-        // 2. 应用偏移
-        // 3. 屏幕裁剪检查
-        // 4. 加载/缓存纹理
-        // 5. 调用 DXManager.draw_opaque()
+        // Step 1: 获取图像信息
+        let info = self.get_image_info(index as usize)?;
+        
+        // Step 2: 应用偏移
+        let (mut x, mut y) = point;
+        if use_offset {
+            x += info.x as i32;
+            y += info.y as i32;
+        }
+        
+        // Step 3: 屏幕裁剪检查 (照搬 C# 逻辑)
+        if x >= screen_width || y >= screen_height || 
+           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
+            return Ok(());
+        }
+        
+        // Step 4: 加载/缓存纹理
+        let texture = self.get_or_load_texture(dx_manager, index as usize)?;
+        
+        // Step 5: 调用 DXManager 渲染
+        // 应用 opacity 到 color alpha 通道
+        let mut render_color = color;
+        render_color[3] *= opacity;
+        
+        dx_manager.draw_sprite(
+            &texture,
+            (x, y),
+            (info.width as u32, info.height as u32),
+            render_color,
+        ).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        
+        // Step 6: 更新缓存时间戳 (对应 C# 的 mi.CleanTime)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        self.cache_timestamps.insert(index as usize, now);
         
         Ok(())
     }
@@ -387,27 +426,342 @@ impl MLibrary {
     /// ```
     pub fn draw_blend(
         &mut self,
-        _dx_manager: &mut super::dx_manager::DXManager,
+        dx_manager: &mut super::dx_manager::DXManager,
         index: i32,
-        _point: (i32, i32),
-        _color: [f32; 4],
-        _use_offset: bool,
-        _rate: f32,
+        point: (i32, i32),
+        color: [f32; 4],
+        use_offset: bool,
+        rate: f32,
+        screen_width: i32,
+        screen_height: i32,
     ) -> io::Result<()> {
         if !self.check_image(index) {
             return Ok(()); // C# 静默返回
         }
         
-        // TODO: 实现完整的渲染逻辑
-        // 1. 获取图像信息
-        // 2. 应用偏移
-        // 3. 屏幕裁剪检查
-        // 4. 保存旧混合状态
-        // 5. 设置新混合模式
-        // 6. 调用 DXManager.draw()
-        // 7. 恢复旧混合状态
+        // Step 1: 获取图像信息
+        let info = self.get_image_info(index as usize)?;
+        
+        // Step 2: 应用偏移
+        let (mut x, mut y) = point;
+        if use_offset {
+            x += info.x as i32;
+            y += info.y as i32;
+        }
+        
+        // Step 3: 屏幕裁剪检查
+        if x >= screen_width || y >= screen_height || 
+           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
+            return Ok(());
+        }
+        
+        // Step 4: 加载/缓存纹理
+        let texture = self.get_or_load_texture(dx_manager, index as usize)?;
+        
+        // Step 5: 应用混合率到 color alpha 通道
+        let mut render_color = color;
+        render_color[3] *= rate;
+        
+        // Step 6: 使用混合模式渲染
+        dx_manager.draw_sprite_blend(
+            &texture,
+            (x, y),
+            (info.width as u32, info.height as u32),
+            render_color,
+        ).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        
+        // Step 7: 更新缓存时间戳
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        self.cache_timestamps.insert(index as usize, now);
         
         Ok(())
+    }
+    
+    /// 批处理模式绘制(不立即提交GPU)
+    /// 
+    /// 用于粒子系统批量渲染优化
+    pub fn draw_batched(
+        &mut self,
+        dx_manager: &super::dx_manager::DXManager,
+        index: i32,
+        point: (i32, i32),
+        color: [f32; 4],
+        use_offset: bool,
+        opacity: f32,
+        screen_width: i32,
+        screen_height: i32,
+    ) -> io::Result<()> {
+        if !self.check_image(index) {
+            return Ok(());
+        }
+        
+        let info = self.get_image_info(index as usize)?;
+        let (mut x, mut y) = point;
+        if use_offset {
+            x += info.x as i32;
+            y += info.y as i32;
+        }
+        
+        if x >= screen_width || y >= screen_height || 
+           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
+            return Ok(());
+        }
+        
+        let texture = self.get_or_load_texture_readonly(dx_manager, index as usize)?;
+        
+        let mut render_color = color;
+        render_color[3] *= opacity;
+        
+        dx_manager.draw_sprite_batched(
+            &texture,
+            (x, y),
+            (info.width as u32, info.height as u32),
+            render_color,
+        );
+        
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        self.cache_timestamps.insert(index as usize, now);
+        
+        Ok(())
+    }
+    
+    /// 批处理模式混合绘制(不立即提交GPU)
+    pub fn draw_blend_batched(
+        &mut self,
+        dx_manager: &super::dx_manager::DXManager,
+        index: i32,
+        point: (i32, i32),
+        color: [f32; 4],
+        use_offset: bool,
+        rate: f32,
+        screen_width: i32,
+        screen_height: i32,
+    ) -> io::Result<()> {
+        if !self.check_image(index) {
+            return Ok(());
+        }
+        
+        let info = self.get_image_info(index as usize)?;
+        let (mut x, mut y) = point;
+        if use_offset {
+            x += info.x as i32;
+            y += info.y as i32;
+        }
+        
+        if x >= screen_width || y >= screen_height || 
+           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
+            return Ok(());
+        }
+        
+        let texture = self.get_or_load_texture_readonly(dx_manager, index as usize)?;
+        
+        let mut render_color = color;
+        render_color[3] *= rate;
+        
+        dx_manager.draw_sprite_batched(
+            &texture,
+            (x, y),
+            (info.width as u32, info.height as u32),
+            render_color,
+        );
+        
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        self.cache_timestamps.insert(index as usize, now);
+        
+        Ok(())
+    }
+    
+    /// GPU实例化渲染 (普通模式)
+    pub fn draw_instanced(
+        &mut self,
+        dx_manager: &super::dx_manager::DXManager,
+        index: i32,
+        point: (i32, i32),
+        color: [f32; 4],
+        use_offset: bool,
+        opacity: f32,
+        screen_width: i32,
+        screen_height: i32,
+    ) -> io::Result<()> {
+        if !self.check_image(index) {
+            return Ok(());
+        }
+        
+        let info = self.get_image_info(index as usize)?;
+        let (mut x, mut y) = point;
+        if use_offset {
+            x += info.x as i32;
+            y += info.y as i32;
+        }
+        
+        if x >= screen_width || y >= screen_height || 
+           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
+            return Ok(());
+        }
+        
+        let texture = self.get_or_load_texture_readonly(dx_manager, index as usize)?;
+        
+        let mut render_color = color;
+        render_color[3] *= opacity;
+        
+        dx_manager.draw_sprite_instanced(
+            &texture,
+            (x, y),
+            (info.width as u32, info.height as u32),
+            render_color,
+        );
+        
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        self.cache_timestamps.insert(index as usize, now);
+        
+        Ok(())
+    }
+    
+    /// GPU实例化渲染 (混合模式)
+    pub fn draw_blend_instanced(
+        &mut self,
+        dx_manager: &super::dx_manager::DXManager,
+        index: i32,
+        point: (i32, i32),
+        color: [f32; 4],
+        use_offset: bool,
+        rate: f32,
+        screen_width: i32,
+        screen_height: i32,
+    ) -> io::Result<()> {
+        if !self.check_image(index) {
+            return Ok(());
+        }
+        
+        let info = self.get_image_info(index as usize)?;
+        let (mut x, mut y) = point;
+        if use_offset {
+            x += info.x as i32;
+            y += info.y as i32;
+        }
+        
+        if x >= screen_width || y >= screen_height || 
+           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
+            return Ok(());
+        }
+        
+        let texture = self.get_or_load_texture_readonly(dx_manager, index as usize)?;
+        
+        let mut render_color = color;
+        render_color[3] *= rate;
+        
+        dx_manager.draw_sprite_instanced(
+            &texture,
+            (x, y),
+            (info.width as u32, info.height as u32),
+            render_color,
+        );
+        
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        self.cache_timestamps.insert(index as usize, now);
+        
+        Ok(())
+    }
+    
+    /// 获取已缓存的纹理(用于批处理)
+    /// 
+    /// 批处理模式要求纹理已预加载
+    /// 如果纹理未缓存,会尝试即时加载
+    fn get_or_load_texture_readonly(
+        &mut self,
+        dx_manager: &super::dx_manager::DXManager,
+        index: usize,
+    ) -> io::Result<Arc<TextureHandle>> {
+        // 如果已缓存则直接返回
+        if let Some(texture) = self.texture_cache.get(&index) {
+            return Ok(Arc::clone(texture));
+        }
+        
+        // 未缓存: 加载纹理
+        // load_rgba_data不需要&mut self,只读取数据
+        let (info, rgba_data) = self.load_rgba_data(index)?;
+        
+        // DXManager的load_texture使用内部可变性,&self即可
+        let texture_name = format!("{}_{}", self.path.display(), index);
+        let texture = dx_manager.load_texture(
+            texture_name,
+            info.width as u32,
+            info.height as u32,
+            &rgba_data,
+        );
+        
+        // 缓存纹理
+        self.texture_cache.insert(index, texture.clone());
+        
+        Ok(texture)
+    }
+    
+    /// 获取或加载纹理 (内部方法)
+    /// 
+    /// 对应 C# 的纹理缓存逻辑
+    fn get_or_load_texture(
+        &mut self,
+        dx_manager: &mut super::dx_manager::DXManager,
+        index: usize,
+    ) -> io::Result<Arc<TextureHandle>> {
+        // 检查缓存
+        if let Some(texture) = self.texture_cache.get(&index) {
+            return Ok(texture.clone());
+        }
+        
+        // 加载纹理数据
+        let (info, rgba_data) = self.load_rgba_data(index)?;
+        
+        // 上传到 GPU
+        let texture_name = format!("{}_{}", self.path.display(), index);
+        let texture = dx_manager.load_texture(
+            texture_name,
+            info.width as u32,
+            info.height as u32,
+            &rgba_data,
+        );
+        
+        // 缓存
+        self.texture_cache.insert(index, texture.clone());
+        
+        Ok(texture)
+    }
+    
+    /// 清理过期纹理缓存
+    /// 
+    /// C# equivalent: 定期清理 MImage.CleanTime
+    pub fn clean_cache(&mut self, max_age_ms: i64) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        
+        let mut to_remove = Vec::new();
+        for (index, &timestamp) in &self.cache_timestamps {
+            if now - timestamp > max_age_ms {
+                to_remove.push(*index);
+            }
+        }
+        
+        for index in to_remove {
+            self.texture_cache.remove(&index);
+            self.cache_timestamps.remove(&index);
+        }
     }
     
     /// Check if image index is valid

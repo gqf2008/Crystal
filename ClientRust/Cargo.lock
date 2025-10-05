@@ -2002,6 +2002,7 @@ dependencies = [
  "flate2",
  "md5",
  "mir2_shared",
+ "once_cell",
  "parking_lot",
  "pollster",
  "rand",

@@ -7,6 +7,8 @@
 // - 使用 long 时间戳而非 Instant（对应 CMain.Time）
 // - 直接翻译逻辑，不 Rust 化
 
+use crate::graphics::LibraryName;
+
 /// 粒子类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParticleType {
@@ -18,7 +20,6 @@ pub enum ParticleType {
     YellowFog,
     WhiteEmber,
     YellowEmber,
-    Test,
     Blizzard,
     BlizzardFrost,
     Bird,
@@ -50,8 +51,8 @@ pub enum ParticleType {
 /// ```
 #[derive(Clone)]
 pub struct ParticleImageInfo {
-    // 暂时用库名，后续集成 MLibrary 时替换
-    pub library_name: String,
+    /// 库名称（使用全局库管理器）
+    pub library: LibraryName,
     
     pub base_index: i32,
     pub duration: i32,
@@ -80,12 +81,12 @@ impl ParticleImageInfo {
     ///     Duration = drawMS * count;
     /// }
     /// ```
-    pub fn new(library_name: impl Into<String>, index: i32, count: i32, draw_ms: i32) -> Self {
+    pub fn new(library: LibraryName, index: i32, count: i32, draw_ms: i32) -> Self {
         let now = get_time();
         let duration = draw_ms * count;
         
         Self {
-            library_name: library_name.into(),
+            library,
             base_index: index,
             duration,
             start: now,
@@ -128,9 +129,8 @@ pub struct ParticleEngine {
     
     particle_type: ParticleType,
     
-    // 注意：C# 用 List<Particle>，这里先用 trait object
-    // 阶段 2 可能改为 enum Particle { Fog(..), Snow(..), ... }
-    particles: Vec<Box<dyn crate::graphics::particles::ParticleTrait>>,
+    // 直接使用 Vec<Particle>，与 C# List<Particle> 完全对应
+    particles: Vec<crate::graphics::particles::Particle>,
     
     screen_width: i32,
     screen_height: i32,
@@ -201,106 +201,165 @@ impl ParticleEngine {
         let texture = self.textures[texture_index].clone();
         let screen_size = (self.screen_width, self.screen_height);
         
+        // 直接创建 Particle 并根据类型设置参数
+        // 与 C# 的 GenerateNewParticle switch 逻辑完全对应
+        let mut particle = crate::graphics::particles::Particle::new(
+            texture, 
+            (rng.random_range(0..self.screen_width) as f32, 
+             rng.random_range(0..self.screen_height) as f32),
+            screen_size
+        );
+        
         match self.particle_type {
             ParticleType::Fog => {
-                let particle = crate::graphics::particles::FogParticle::new(texture, screen_size);
-                self.particles.push(Box::new(particle));
+                // C#: Color = Color.White, Size = 1F, BlendRate = 0.4F, AliveTime = DateTime.MaxValue, Blend = false
+                particle.color = [1.0, 1.0, 1.0, 1.0];
+                particle.size = 1.0;
+                particle.blend_rate = 0.4;
+                particle.alive_time = i64::MAX;
+                particle.blend = false;
+                particle.velocity = (
+                    0.2 * rng.random_range(0..=2) as f32,
+                    0.2 * rng.random_range(0..=2) as f32,
+                );
             }
             
             ParticleType::RedFog => {
-                let particle = crate::graphics::particles::FogParticle::with_color(
-                    texture, 
-                    screen_size, 
-                    [0.545, 0.0, 0.0, 1.0] // Color.DarkRed
+                particle.color = [0.545, 0.0, 0.0, 1.0]; // Color.DarkRed
+                particle.size = 1.0;
+                particle.alive_time = i64::MAX;
+                particle.blend_rate = 0.2;
+                particle.blend = false;
+                particle.velocity = (
+                    0.2 * rng.random_range(0..=2) as f32,
+                    0.2 * rng.random_range(0..=2) as f32,
                 );
-                self.particles.push(Box::new(particle));
             }
             
             ParticleType::BlueFog => {
-                let particle = crate::graphics::particles::FogParticle::with_color(
-                    texture, 
-                    screen_size, 
-                    [0.0, 0.749, 1.0, 1.0] // Color.DeepSkyBlue
+                particle.color = [0.0, 0.749, 1.0, 1.0]; // Color.DeepSkyBlue
+                particle.size = 1.0;
+                particle.alive_time = i64::MAX;
+                particle.blend_rate = 0.2;
+                particle.blend = false;
+                particle.velocity = (
+                    0.2 * rng.random_range(0..=2) as f32,
+                    0.2 * rng.random_range(0..=2) as f32,
                 );
-                self.particles.push(Box::new(particle));
             }
             
             ParticleType::YellowFog => {
-                let mut particle = crate::graphics::particles::FogParticle::with_color(
-                    texture, 
-                    screen_size, 
-                    [1.0, 1.0, 0.0, 1.0] // Color.Yellow
+                particle.color = [1.0, 1.0, 0.0, 1.0]; // Color.Yellow
+                particle.size = 1.0;
+                particle.blend_rate = 0.25;
+                particle.alive_time = i64::MAX;
+                particle.blend = false;
+                particle.velocity = (
+                    0.2 * rng.random_range(0..=2) as f32,
+                    0.2 * rng.random_range(0..=2) as f32,
                 );
-                particle.base_mut().blend_rate = 0.25;
-                self.particles.push(Box::new(particle));
             }
             
             ParticleType::FogCloud => {
-                let mut particle = crate::graphics::particles::FogParticle::with_color(
-                    texture, 
-                    screen_size, 
-                    [0.0, 0.0, 0.0, 0.0] // Color.Transparent
+                particle.color = [0.0, 0.0, 0.0, 0.0]; // Color.Transparent
+                particle.size = 1.0;
+                particle.blend_rate = 0.2;
+                particle.alive_time = i64::MAX;
+                particle.blend = false;
+                particle.velocity = (
+                    0.2 * rng.random_range(0..=2) as f32,
+                    0.2 * rng.random_range(0..=2) as f32,
                 );
-                particle.base_mut().blend_rate = 0.2;
-                self.particles.push(Box::new(particle));
             }
             
             ParticleType::Snow => {
-                let particle = crate::graphics::particles::SnowParticle::new(texture, screen_size);
-                self.particles.push(Box::new(particle));
+                // C#: Color = Color.White, Size = 1F, BlendRate = 1F, AliveTime = DateTime.MaxValue, Blend = true
+                particle.color = [1.0, 1.0, 1.0, 1.0];
+                particle.size = 1.0;
+                particle.blend_rate = 1.0;
+                particle.alive_time = i64::MAX;
+                particle.blend = true;
+                particle.velocity = (
+                    0.5 * rng.random_range(-2..=2) as f32,
+                    1.0 + rng.random_range(0..3) as f32,
+                );
             }
             
             ParticleType::Sand => {
-                let particle = crate::graphics::particles::SandParticle::new(texture, screen_size);
-                self.particles.push(Box::new(particle));
+                // C#: Color = Color.Yellow, Size = 1F, BlendRate = 0.2F, AliveTime = DateTime.MaxValue, Blend = false
+                particle.color = [1.0, 1.0, 0.0, 1.0];
+                particle.size = 1.0;
+                particle.blend_rate = 0.2;
+                particle.alive_time = i64::MAX;
+                particle.blend = false;
+                particle.velocity = (
+                    1.0 + rng.random_range(0..3) as f32,
+                    0.5 * rng.random_range(-1..=1) as f32,
+                );
             }
             
             ParticleType::FlowersRain => {
-                let particle = crate::graphics::particles::FlowerParticle::new(texture, screen_size);
-                self.particles.push(Box::new(particle));
+                // C#: Color = Color.White, Size = 1F, BlendRate = 0.5F, AliveTime = DateTime.MaxValue, Blend = false
+                particle.color = [1.0, 1.0, 1.0, 1.0];
+                particle.size = 1.0;
+                particle.blend_rate = 0.5;
+                particle.alive_time = i64::MAX;
+                particle.blend = false;
+                particle.velocity = (
+                    rng.random_range(-2..=2) as f32,
+                    2.0 + rng.random_range(0..3) as f32,
+                );
             }
             
             ParticleType::Leaves => {
-                let particle = crate::graphics::particles::FogParticle::with_color(
-                    texture, 
-                    screen_size, 
-                    [0.855, 0.647, 0.125, 1.0] // Color.Goldenrod
+                particle.color = [0.855, 0.647, 0.125, 1.0]; // Color.Goldenrod
+                particle.blend_rate = 0.1;
+                particle.alive_time = i64::MAX;
+                particle.blend = true;
+                particle.velocity = (
+                    0.2 * rng.random_range(0..=2) as f32,
+                    0.2 * rng.random_range(0..=2) as f32,
                 );
-                self.particles.push(Box::new(particle));
             }
             
             ParticleType::FireyLeaves => {
-                let particle = crate::graphics::particles::FogParticle::with_color(
-                    texture, 
-                    screen_size, 
-                    [0.698, 0.133, 0.133, 1.0] // Color.Firebrick
+                particle.color = [0.698, 0.133, 0.133, 1.0]; // Color.Firebrick
+                particle.blend_rate = 1.0;
+                particle.alive_time = i64::MAX;
+                particle.blend = true;
+                particle.velocity = (
+                    0.2 * rng.random_range(0..=2) as f32,
+                    0.2 * rng.random_range(0..=2) as f32,
                 );
-                self.particles.push(Box::new(particle));
             }
             
             ParticleType::PurpleLeaves => {
-                let particle = crate::graphics::particles::FogParticle::with_color(
-                    texture, 
-                    screen_size, 
-                    [0.502, 0.0, 0.502, 1.0] // Color.Purple
+                particle.color = [0.502, 0.0, 0.502, 1.0]; // Color.Purple
+                particle.blend_rate = 0.1;
+                particle.alive_time = i64::MAX;
+                particle.blend = true;
+                particle.velocity = (
+                    0.2 * rng.random_range(0..=2) as f32,
+                    0.2 * rng.random_range(0..=2) as f32,
                 );
-                self.particles.push(Box::new(particle));
             }
             
             ParticleType::Rain => {
-                // Rain 使用基础 Particle 类
-                let mut particle = crate::graphics::particles::Particle::new(texture, self.emitter_location, screen_size);
                 particle.color = [1.0, 1.0, 1.0, 0.522]; // #ffffff85
                 particle.size = 1.0;
                 particle.blend_rate = 1.0;
                 particle.alive_time = i64::MAX;
                 particle.blend = true;
-                self.particles.push(Box::new(particle));
+                particle.velocity = (0.0, 5.0 + rng.random_range(0..5) as f32);
             }
             
             // 其他类型暂时不实现
-            _ => {}
+            _ => {
+                return; // 不添加未实现的类型
+            }
         }
+        
+        self.particles.push(particle);
     }
     
     /// 提供公共访问 base 的方法
@@ -347,7 +406,7 @@ impl ParticleEngine {
         self.particles.retain_mut(|particle| {
             particle.update();
             
-            if now > particle.get_alive_time() {
+            if now > particle.alive_time {
                 particle.on_particle_end();
                 return false;
             }
@@ -357,22 +416,38 @@ impl ParticleEngine {
     
     /// C# Draw() 方法
     /// 
-    /// 注意：需要传入 library 和 dx_manager 引用
+    /// 使用全局库管理器，不再需要传入 library 参数
+    /// 
+    /// 优化版本:使用批处理渲染,大幅提升性能
     pub fn draw(
         &self,
-        library: &mut crate::graphics::mlibrary::MLibrary,
         dx_manager: &mut crate::graphics::dx_manager::DXManager,
+        screen_width: i32,
+        screen_height: i32,
     ) -> std::io::Result<()> {
+        use crate::graphics::get_library;
+        
+        // 使用GPU实例化模式收集所有粒子的实例数据
         for particle in &self.particles {
-            particle.draw(library, dx_manager)?;
+            // 从全局管理器获取对应的库
+            let library_name = particle.image_info.library;
+            if let Some(lib_arc) = get_library(library_name) {
+                let mut library = lib_arc.lock().unwrap();
+                particle.draw_instanced(&mut library, dx_manager, screen_width, screen_height)?;
+            }
         }
+        
+        // 一次性渲染所有收集的粒子 (GPU实例化)
+        dx_manager.flush_instanced_batch()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        
         Ok(())
     }
     
     /// C# ParticlesOffSet 方法
     pub fn particles_offset(&mut self, offset: (i32, i32)) {
         for particle in &mut self.particles {
-            let (x, y) = particle.get_position();
+            let (x, y) = particle.position;
             particle.set_position((x + offset.0 as f32, y + offset.1 as f32));
         }
     }
@@ -398,7 +473,7 @@ mod tests {
     
     #[test]
     fn test_particle_image_info() {
-        let info = ParticleImageInfo::new("Effects", 100, 5, 50);
+        let info = ParticleImageInfo::new(LibraryName::Effect, 100, 5, 50);
         assert_eq!(info.base_index, 100);
         assert_eq!(info.count, 5);
         assert_eq!(info.current_frame, 0);
@@ -407,7 +482,7 @@ mod tests {
     
     #[test]
     fn test_particle_engine_creation() {
-        let textures = vec![ParticleImageInfo::new("Effects", 100, 3, 50)];
+        let textures = vec![ParticleImageInfo::new(LibraryName::Effect, 100, 3, 50)];
         let engine = ParticleEngine::new(textures, (400.0, 300.0), ParticleType::Fog, 800, 600);
         
         assert_eq!(engine.particle_count(), 0);
@@ -416,7 +491,7 @@ mod tests {
     
     #[test]
     fn test_generate_fog_particle() {
-        let textures = vec![ParticleImageInfo::new("Effects", 100, 3, 50)];
+        let textures = vec![ParticleImageInfo::new(LibraryName::Effect, 100, 3, 50)];
         let mut engine = ParticleEngine::new(textures, (400.0, 300.0), ParticleType::Fog, 800, 600);
         
         // 生成粒子
@@ -432,8 +507,8 @@ mod tests {
     #[test]
     fn test_generate_different_particle_types() {
         let textures = vec![
-            ParticleImageInfo::new("Effects", 100, 3, 50),
-            ParticleImageInfo::new("Effects", 200, 5, 50),
+            ParticleImageInfo::new(LibraryName::Effect, 100, 3, 50),
+            ParticleImageInfo::new(LibraryName::Effect, 200, 5, 50),
         ];
         
         // 测试不同类型
@@ -462,7 +537,7 @@ mod tests {
     
     #[test]
     fn test_particle_engine_process() {
-        let textures = vec![ParticleImageInfo::new("Effects", 100, 3, 50)];
+        let textures = vec![ParticleImageInfo::new(LibraryName::Effect, 100, 3, 50)];
         let mut engine = ParticleEngine::new(textures, (400.0, 300.0), ParticleType::Snow, 800, 600);
         
         // 初始没有粒子

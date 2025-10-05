@@ -97,8 +97,11 @@ pub struct DXManager {
     /// 屏幕高度
     screen_height: u32,
     
-    /// 精灵渲染器 (对应 C# Sprite)
+    /// 精灵渲染器 (批处理模式)
     sprite_renderer: SpriteRenderer,
+    
+    /// 精灵实例化渲染器 (GPU实例化模式)
+    sprite_instanced_renderer: super::sprite_instanced_renderer::SpriteInstancedRenderer,
     
     /// 当前帧的 surface texture (仅在渲染期间有效)
     /// 对应 C# 的 Sprite.Begin() 到 Sprite.End() 之间的状态
@@ -107,6 +110,21 @@ pub struct DXManager {
     /// 绘制调用队列 (批处理)
     /// 对应 C# Sprite 内部的批处理队列
     draw_queue: RefCell<Vec<DrawCall>>,
+    
+    /// 批处理渲染: 顶点缓冲区
+    batch_vertices: RefCell<Vec<super::sprite_renderer::SpriteVertex>>,
+    
+    /// 批处理渲染: 当前纹理
+    batch_texture: RefCell<Option<Arc<TextureHandle>>>,
+    
+    /// 批处理渲染: 当前颜色
+    batch_color: RefCell<[f32; 4]>,
+    
+    /// GPU实例化渲染: 实例数据缓冲区
+    instance_data: RefCell<Vec<super::sprite_instanced_renderer::SpriteInstance>>,
+    
+    /// GPU实例化渲染: 当前纹理
+    instance_texture: RefCell<Option<Arc<TextureHandle>>>,
 }
 
 impl DXManager {
@@ -126,6 +144,7 @@ impl DXManager {
     /// ```
     pub async fn new(window: Arc<Window>) -> Self {
         let size = window.inner_size();
+        println!("  [DXManager] 窗口内部大小: {}x{}", size.width, size.height);
         
         // 创建 wgpu 实例
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -135,6 +154,7 @@ impl DXManager {
         
         // 创建渲染表面
         let surface = instance.create_surface(window.clone()).ok();
+        println!("  [DXManager] Surface创建: {}", if surface.is_some() { "成功" } else { "失败" });
         
         // 请求适配器
         let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -152,6 +172,12 @@ impl DXManager {
         })
         .await
         .expect("Failed to create device");
+        
+        // 设置自定义错误处理器,避免wgpu默认panic
+        device.on_uncaptured_error(Arc::new(|error| {
+            eprintln!("⚠️  wgpu uncaptured error: {:?}", error);
+            // 不panic,只记录错误,让程序继续运行
+        }));
         
         let device = Arc::new(device);
         let queue = Arc::new(queue);
@@ -177,7 +203,12 @@ impl DXManager {
         });
         
         if let (Some(surface), Some(config)) = (&surface, &surface_config) {
+            println!("  [DXManager] 配置 Surface: {}x{}, format: {:?}", 
+                config.width, config.height, config.format);
             surface.configure(&device, config);
+            println!("  [DXManager] Surface 配置完成");
+        } else {
+            println!("  [DXManager] 警告: Surface 或配置缺失!");
         }
         
         // 创建精灵渲染器
@@ -186,7 +217,10 @@ impl DXManager {
             .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
         let sprite_renderer = SpriteRenderer::new(&device, surface_format);
         
-        Self {
+        // 创建实例化渲染器
+        let sprite_instanced_renderer = super::sprite_instanced_renderer::SpriteInstancedRenderer::new(&device, surface_format);
+        
+        let dx_manager = Self {
             device,
             queue,
             surface,
@@ -200,9 +234,26 @@ impl DXManager {
             screen_width: size.width,
             screen_height: size.height,
             sprite_renderer,
+            sprite_instanced_renderer,
             current_frame: RefCell::new(None),
             draw_queue: RefCell::new(Vec::new()),
-        }
+            batch_vertices: RefCell::new(Vec::with_capacity(6000)), // 预分配1000个精灵的容量
+            batch_texture: RefCell::new(None),
+            batch_color: RefCell::new([1.0, 1.0, 1.0, 1.0]),
+            instance_data: RefCell::new(Vec::with_capacity(1000)), // 预分配1000个实例的容量
+            instance_texture: RefCell::new(None),
+        };
+        
+        // 初始化实例化渲染器的屏幕尺寸和片段uniforms
+        dx_manager.sprite_instanced_renderer.update_screen_size(&dx_manager.queue, size.width, size.height);
+        dx_manager.sprite_instanced_renderer.update_fragment_uniforms(
+            &dx_manager.queue,
+            [1.0, 1.0, 1.0, 1.0],
+            1.0,  // opacity
+            false, // grayscale
+        );
+        
+        dx_manager
     }
     
     /// 设置全局透明度
@@ -436,12 +487,25 @@ impl DXManager {
     /// 
     /// C# equivalent: DXManager.ResetDevice()
     pub fn resize(&self, new_width: u32, new_height: u32) {
+        // 忽略零尺寸
+        if new_width == 0 || new_height == 0 {
+            return;
+        }
+        
         if let Some(ref surface) = self.surface {
             let mut config_opt = self.surface_config.borrow_mut();
             if let Some(ref mut config) = *config_opt {
-                config.width = new_width;
-                config.height = new_height;
-                surface.configure(&self.device, config);
+                // 只在尺寸真正改变时才重新配置
+                if config.width != new_width || config.height != new_height {
+                    config.width = new_width;
+                    config.height = new_height;
+                    surface.configure(&self.device, config);
+                    
+                    // 更新实例化渲染器的屏幕尺寸
+                    self.sprite_instanced_renderer.update_screen_size(&self.queue, new_width, new_height);
+                    
+                    println!("  [DXManager] Surface 已重新配置: {}x{}", new_width, new_height);
+                }
             }
         }
     }
@@ -529,6 +593,22 @@ impl DXManager {
         // 清空批处理队列
         self.draw_queue.borrow_mut().clear();
         
+        // 清空批处理缓冲区
+        self.batch_vertices.borrow_mut().clear();
+        *self.batch_texture.borrow_mut() = None;
+        
+        // 清空实例化缓冲区
+        self.instance_data.borrow_mut().clear();
+        *self.instance_texture.borrow_mut() = None;
+        
+        // 更新实例化渲染器的片段uniforms (opacity和grayscale可能在帧间改变)
+        self.sprite_instanced_renderer.update_fragment_uniforms(
+            &self.queue,
+            [1.0, 1.0, 1.0, 1.0],
+            *self.opacity.borrow(),
+            *self.grayscale.borrow(),
+        );
+        
         // 获取 surface texture
         let surface = match self.surface.as_ref() {
             Some(s) => s,
@@ -537,48 +617,63 @@ impl DXManager {
         
         let frame = match surface.get_current_texture() {
             Ok(f) => f,
+            Err(wgpu::SurfaceError::Timeout) => {
+                // 超时,跳过这一帧
+                return;
+            }
+            Err(wgpu::SurfaceError::Outdated) | Err(wgpu::SurfaceError::Lost) => {
+                // Surface 已过时或丢失,尝试重新配置
+                eprintln!("begin_frame: Surface 错误,尝试重新配置...");
+                if let Some(config) = self.surface_config.borrow().as_ref() {
+                    surface.configure(&self.device, config);
+                }
+                return;
+            }
             Err(e) => {
-                tracing::warn!("Failed to get surface texture: {:?}", e);
+                eprintln!("Failed to get surface texture: {:?}", e);
                 return;
             }
         };
         
-        // 清空屏幕
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Clear Encoder"),
-        });
+        // ⚠️ 关键修复: 立即存储frame,防止被drop
+        // 必须在任何wgpu操作之前保存,否则semaphore会泄漏
+        *self.current_frame.borrow_mut() = Some(frame);
         
-        {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Clear Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: clear_color[0] as f64,
-                            g: clear_color[1] as f64,
-                            b: clear_color[2] as f64,
-                            a: clear_color[3] as f64,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
+        // 现在从current_frame借用来清空屏幕
+        if let Some(ref frame) = *self.current_frame.borrow() {
+            let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Clear Encoder"),
             });
+            
+            {
+                let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Clear Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: clear_color[0] as f64,
+                                g: clear_color[1] as f64,
+                                b: clear_color[2] as f64,
+                                a: clear_color[3] as f64,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            }
+            
+            self.queue.submit(std::iter::once(encoder.finish()));
         }
-        
-        self.queue.submit(std::iter::once(encoder.finish()));
         
         // 更新渲染器屏幕尺寸
         self.sprite_renderer.update_screen_size(&self.queue, self.screen_width, self.screen_height);
-        
-        // 存储当前帧
-        *self.current_frame.borrow_mut() = Some(frame);
     }
     
     /// 结束渲染帧（执行所有绘制命令并 present）
@@ -704,6 +799,393 @@ impl DXManager {
     /// 返回: (width, height)
     pub fn window_size(&self) -> (u32, u32) {
         (self.screen_width, self.screen_height)
+    }
+    
+    /// 添加精灵到批处理队列(不立即渲染)
+    /// 
+    /// 用于粒子系统等需要渲染大量相同纹理的精灵的场景
+    /// 
+    /// 参数:
+    /// - texture: 纹理句柄
+    /// - position: 屏幕位置 (x, y)
+    /// - size: 纹理尺寸 (width, height)
+    /// - color: 颜色调制 RGBA
+    pub fn draw_sprite_batched(
+        &self,
+        texture: &Arc<TextureHandle>,
+        position: (i32, i32),
+        size: (u32, u32),
+        color: [f32; 4],
+    ) {
+        // 如果纹理变化,先flush之前的批次
+        let mut batch_texture = self.batch_texture.borrow_mut();
+        if let Some(ref current_tex) = *batch_texture {
+            // 比较纹理ID(简单判断:如果Arc指针不同则认为纹理不同)
+            if !Arc::ptr_eq(current_tex, texture) {
+                drop(batch_texture); // 释放借用
+                self.flush_batch().ok(); // flush旧批次
+                batch_texture = self.batch_texture.borrow_mut();
+                *batch_texture = Some(Arc::clone(texture));
+                *self.batch_color.borrow_mut() = color;
+            }
+        } else {
+            *batch_texture = Some(Arc::clone(texture));
+            *self.batch_color.borrow_mut() = color;
+        }
+        drop(batch_texture);
+        
+        // 创建顶点数据并添加到批处理缓冲区
+        let vertices = super::sprite_renderer::create_sprite_vertices(
+            position.0 as f32,
+            position.1 as f32,
+            size.0 as f32,
+            size.1 as f32,
+            None, // 使用整个纹理
+            texture.width,
+            texture.height,
+        );
+        
+        self.batch_vertices.borrow_mut().extend_from_slice(&vertices);
+    }
+    
+    /// 渲染批处理队列中的所有精灵
+    /// 
+    /// 将所有收集的顶点一次性提交GPU渲染
+    pub fn flush_batch(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let batch_vertices = self.batch_vertices.borrow();
+        
+        // 如果批处理队列为空,直接返回
+        if batch_vertices.is_empty() {
+            return Ok(());
+        }
+        
+        let batch_texture = self.batch_texture.borrow();
+        let texture = match batch_texture.as_ref() {
+            Some(tex) => tex,
+            None => return Ok(()), // 没有纹理,跳过
+        };
+        
+        // 获取当前帧
+        let current_frame = self.current_frame.borrow();
+        let frame = match current_frame.as_ref() {
+            Some(f) => f,
+            None => return Ok(()), // 如果没有调用begin_frame,跳过
+        };
+        
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        
+        // 创建命令编码器
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Batch Sprite Encoder"),
+        });
+        
+        // 创建顶点缓冲区(包含所有批处理的顶点)
+        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Batch Sprite Vertex Buffer"),
+            contents: bytemuck::cast_slice(&batch_vertices[..]),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        
+        // 更新片段uniforms
+        let color = *self.batch_color.borrow();
+        self.sprite_renderer.update_fragment_uniforms(
+            &self.queue,
+            color,
+            1.0,
+            *self.grayscale.borrow(),
+        );
+        
+        // 创建纹理绑定组
+        let texture_bind_group = self.sprite_renderer.create_texture_bind_group(&self.device, &texture.view);
+        
+        // 开始渲染通道
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Batch Sprite Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // 保留之前的内容
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            
+            // 一次性绘制所有顶点
+            let vertex_count = batch_vertices.len() as u32;
+            self.sprite_renderer.draw(&self.device, &mut render_pass, &vertex_buffer, &texture_bind_group, vertex_count);
+        }
+        
+        // 提交命令
+        self.queue.submit(std::iter::once(encoder.finish()));
+        
+        Ok(())
+    }
+    
+    /// 添加精灵到GPU实例化队列
+    /// 
+    /// 与 draw_sprite_batched 类似,但使用GPU实例化技术:
+    /// - 每个精灵只存储一个实例数据 (24字节: position + size + color)
+    /// - GPU自动将单个quad模板复制多次并应用实例数据
+    /// - 相比批处理进一步减少CPU开销和内存占用
+    pub fn draw_sprite_instanced(
+        &self,
+        texture: &Arc<TextureHandle>,
+        position: (i32, i32),
+        size: (u32, u32),
+        color: [f32; 4],
+    ) {
+        // 检查纹理是否变化,如果变化则刷新当前批次
+        let mut instance_texture = self.instance_texture.borrow_mut();
+        if let Some(ref current_tex) = *instance_texture {
+            if !Arc::ptr_eq(current_tex, texture) {
+                drop(instance_texture);
+                self.flush_instanced_batch().ok();
+                instance_texture = self.instance_texture.borrow_mut();
+                *instance_texture = Some(Arc::clone(texture));
+            }
+        } else {
+            *instance_texture = Some(Arc::clone(texture));
+        }
+        drop(instance_texture);
+        
+        // 创建实例数据
+        let instance = super::sprite_instanced_renderer::SpriteInstance {
+            position: [position.0 as f32, position.1 as f32],
+            size: [size.0 as f32, size.1 as f32],
+            color,
+        };
+        
+        // 添加到实例数据缓冲区
+        self.instance_data.borrow_mut().push(instance);
+    }
+    
+    /// 刷新GPU实例化批次
+    /// 
+    /// 将所有收集的实例数据提交到GPU进行绘制
+    /// 使用GPU实例化技术: 1个quad模板 + N个实例数据 → GPU自动复制N次
+    pub fn flush_instanced_batch(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // 检查是否有实例数据
+        let instance_data = self.instance_data.borrow();
+        if instance_data.is_empty() {
+            return Ok(());
+        }
+        
+        // 获取当前帧 (在 begin_frame 中已经获取)
+        let current_frame = self.current_frame.borrow();
+        let frame = match current_frame.as_ref() {
+            Some(f) => f,
+            None => {
+                return Ok(());
+            }
+        };
+        
+        // 获取纹理并克隆Arc以便后续使用
+        let texture = {
+            let instance_texture = self.instance_texture.borrow();
+            match instance_texture.as_ref() {
+                Some(tex) => Arc::clone(tex),
+                None => {
+                    return Ok(());
+                }
+            }
+        };
+        
+        // 创建实例缓冲区
+        let instance_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&*instance_data),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        
+        let instance_count = instance_data.len() as u32;
+        
+        // 释放借用以便后续操作
+        drop(instance_data);
+        
+        // 创建纹理绑定组 (在encoder创建之前,避免借用冲突)
+        let texture_bind_group = self.sprite_instanced_renderer.create_texture_bind_group(&self.device, &texture.view);
+        
+        // 创建命令编码器
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Sprite Instanced Render Encoder"),
+        });
+        
+        // 创建渲染通道
+        {
+            let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Sprite Instanced Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            
+            // 使用GPU实例化绘制
+            self.sprite_instanced_renderer.draw_instanced(
+                &self.device,
+                &mut render_pass,
+                &instance_buffer,
+                &texture_bind_group,
+                instance_count,
+            );
+        }
+        
+        // 提交命令
+        self.queue.submit(std::iter::once(encoder.finish()));
+        
+        Ok(())
+    }
+    
+    /// 绘制精灵 (不透明模式)
+    /// 
+    /// C# equivalent: DXManager.DrawOpaque()
+    /// 
+    /// C# 调用链:
+    /// ```csharp
+    /// DXManager.DrawOpaque(mi.Image, new Rectangle(0, 0, mi.Width, mi.Height), 
+    ///                      new Vector3((float)point.X, (float)point.Y, 0.0F), colour, opacity);
+    /// // 内部实际调用:
+    /// Sprite.Draw(image, sourceRect, Vector3.Zero, position, color);
+    /// ```
+    /// 
+    /// 参数:
+    /// - texture: 纹理句柄
+    /// - position: 屏幕位置 (x, y)
+    /// - size: 纹理尺寸 (width, height)
+    /// - color: 颜色调制 RGBA (alpha 已包含 opacity)
+    pub fn draw_sprite(
+        &mut self,
+        texture: &Arc<TextureHandle>,
+        position: (i32, i32),
+        size: (u32, u32),
+        color: [f32; 4],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // 使用 SpriteRenderer 立即模式渲染
+        // 
+        // 注意: C# SlimDX.Sprite 也是立即模式，每次 Draw() 立即提交
+        // 不是批处理。我们照搬这个行为。
+        
+        // ⚠️ 关键修复: 使用begin_frame()已获取的surface texture,而不是重新获取
+        // 重新获取会导致 "Surface image is already acquired" 错误
+        let current_frame = self.current_frame.borrow();
+        let frame = match current_frame.as_ref() {
+            Some(f) => f,
+            None => {
+                // 如果没有调用begin_frame,跳过此次绘制
+                return Ok(());
+            }
+        };
+        
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        
+        // 创建命令编码器
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Sprite Draw Encoder"),
+        });
+        
+        // 创建顶点数据
+        let vertices = super::sprite_renderer::create_sprite_vertices(
+            position.0 as f32,
+            position.1 as f32,
+            size.0 as f32,
+            size.1 as f32,
+            None, // 使用整个纹理
+            texture.width,
+            texture.height,
+        );
+        
+        // 创建顶点缓冲区
+        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Sprite Vertex Buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        
+        // 更新片段 uniforms
+        self.sprite_renderer.update_fragment_uniforms(
+            &self.queue,
+            color,
+            1.0, // 不透明模式，opacity 已在 color.alpha 中
+            *self.grayscale.borrow(),
+        );
+        
+        // 创建纹理绑定组
+        let texture_bind_group = self.sprite_renderer.create_texture_bind_group(&self.device, &texture.view);
+        
+        // 开始渲染通道
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Sprite Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // 保留之前的内容
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            
+            self.sprite_renderer.draw(&self.device, &mut render_pass, &vertex_buffer, &texture_bind_group, 6);
+        }
+        
+        // 提交命令
+        self.queue.submit(std::iter::once(encoder.finish()));
+        
+        // ⚠️ 不要在这里present! frame是借用的,present会在end_frame()中统一调用
+        
+        Ok(())
+    }
+    
+    /// 绘制精灵 (混合模式)
+    /// 
+    /// C# equivalent:
+    /// ```csharp
+    /// bool oldBlend = DXManager.Blending;
+    /// DXManager.SetBlend(true, rate);
+    /// DXManager.Draw(mi.Image, new Rectangle(0, 0, mi.Width, mi.Height), 
+    ///                new Vector3((float)point.X, (float)point.Y, 0.0F), colour);
+    /// DXManager.SetBlend(oldBlend);
+    /// ```
+    /// 
+    /// 参数:
+    /// - texture: 纹理句柄
+    /// - position: 屏幕位置 (x, y)
+    /// - size: 纹理尺寸 (width, height)
+    /// - color: 颜色调制 RGBA (alpha 已包含 blend_rate)
+    pub fn draw_sprite_blend(
+        &mut self,
+        texture: &Arc<TextureHandle>,
+        position: (i32, i32),
+        size: (u32, u32),
+        color: [f32; 4],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // 混合模式与普通模式的唯一区别是渲染管线配置
+        // C# 通过 SetBlend() 切换状态，我们直接在 color.alpha 中处理
+        // 
+        // 因为 wgpu 渲染管线在创建时就固定了混合模式，
+        // 而 color.alpha 已经包含了 blend_rate，所以直接调用 draw_sprite 即可
+        
+        self.draw_sprite(texture, position, size, color)
     }
 }
 

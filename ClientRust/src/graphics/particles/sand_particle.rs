@@ -84,8 +84,10 @@ impl ParticleTrait for SandParticle {
         &self,
         library: &mut crate::graphics::mlibrary::MLibrary,
         dx_manager: &mut crate::graphics::dx_manager::DXManager,
+        screen_width: i32,
+        screen_height: i32,
     ) -> std::io::Result<()> {
-        self.base.draw(library, dx_manager)
+        self.base.draw(library, dx_manager, screen_width, screen_height)
     }
     
     fn process_image(&mut self) {

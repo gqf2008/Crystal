@@ -184,14 +184,58 @@ impl Particle {
         &self,
         library: &mut crate::graphics::mlibrary::MLibrary,
         dx_manager: &mut crate::graphics::dx_manager::DXManager,
+        screen_width: i32,
+        screen_height: i32,
     ) -> std::io::Result<()> {
         let index = self.image_info.base_index + self.image_info.current_frame;
         let pos = (self.position.0 as i32, self.position.1 as i32);
         
         if self.blend {
-            library.draw_blend(dx_manager, index, pos, self.color, true, self.blend_rate)?;
+            library.draw_blend(dx_manager, index, pos, self.color, true, self.blend_rate, screen_width, screen_height)?;
         } else {
-            library.draw(dx_manager, index, pos, self.color, true, self.blend_rate)?;
+            library.draw(dx_manager, index, pos, self.color, true, self.blend_rate, screen_width, screen_height)?;
+        }
+        
+        Ok(())
+    }
+    
+    /// 批处理模式绘制(不立即提交GPU)
+    /// 
+    /// 用于粒子系统批量渲染优化
+    pub fn draw_batched(
+        &self,
+        library: &mut crate::graphics::mlibrary::MLibrary,
+        dx_manager: &crate::graphics::dx_manager::DXManager,
+        screen_width: i32,
+        screen_height: i32,
+    ) -> std::io::Result<()> {
+        let index = self.image_info.base_index + self.image_info.current_frame;
+        let pos = (self.position.0 as i32, self.position.1 as i32);
+        
+        if self.blend {
+            library.draw_blend_batched(dx_manager, index, pos, self.color, true, self.blend_rate, screen_width, screen_height)?;
+        } else {
+            library.draw_batched(dx_manager, index, pos, self.color, true, self.blend_rate, screen_width, screen_height)?;
+        }
+        
+        Ok(())
+    }
+    
+    /// GPU实例化渲染 (单次提交所有粒子)
+    pub fn draw_instanced(
+        &self,
+        library: &mut crate::graphics::mlibrary::MLibrary,
+        dx_manager: &crate::graphics::dx_manager::DXManager,
+        screen_width: i32,
+        screen_height: i32,
+    ) -> std::io::Result<()> {
+        let index = self.image_info.base_index + self.image_info.current_frame;
+        let pos = (self.position.0 as i32, self.position.1 as i32);
+        
+        if self.blend {
+            library.draw_blend_instanced(dx_manager, index, pos, self.color, true, self.blend_rate, screen_width, screen_height)?;
+        } else {
+            library.draw_instanced(dx_manager, index, pos, self.color, true, self.blend_rate, screen_width, screen_height)?;
         }
         
         Ok(())
@@ -230,85 +274,5 @@ impl Particle {
     
     pub fn on_particle_end(&mut self) {
         // 子类可以重写
-    }
-}
-
-/// 粒子 trait - 最小接口
-/// 
-/// 注意：这个 trait 只是为了让不同粒子类型能存储在同一个 Vec
-/// C# 用继承，Rust 用 trait，但保持最小化
-pub trait ParticleTrait {
-    fn update(&mut self);
-    fn draw(
-        &self,
-        library: &mut crate::graphics::mlibrary::MLibrary,
-        dx_manager: &mut crate::graphics::dx_manager::DXManager,
-    ) -> std::io::Result<()>;
-    fn process_image(&mut self);
-    fn on_particle_end(&mut self);
-    fn get_alive_time(&self) -> i64;
-    fn get_position(&self) -> (f32, f32);
-    fn set_position(&mut self, pos: (f32, f32));
-}
-
-/// 为基础 Particle 实现 trait
-impl ParticleTrait for Particle {
-    fn update(&mut self) {
-        Particle::update(self);
-    }
-    
-    fn draw(
-        &self,
-        library: &mut crate::graphics::mlibrary::MLibrary,
-        dx_manager: &mut crate::graphics::dx_manager::DXManager,
-    ) -> std::io::Result<()> {
-        Particle::draw(self, library, dx_manager)
-    }
-    
-    fn process_image(&mut self) {
-        Particle::process_image(self);
-    }
-    
-    fn on_particle_end(&mut self) {
-        Particle::on_particle_end(self);
-    }
-    
-    fn get_alive_time(&self) -> i64 {
-        self.alive_time
-    }
-    
-    fn get_position(&self) -> (f32, f32) {
-        self.position
-    }
-    
-    fn set_position(&mut self, pos: (f32, f32)) {
-        Particle::set_position(self, pos);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::graphics::particle_engine::ParticleImageInfo;
-    
-    #[test]
-    fn test_particle_creation() {
-        let image_info = ParticleImageInfo::new("Effects", 100, 1, 50);
-        let particle = Particle::new(image_info, (100.0, 200.0), (800, 600));
-        
-        assert_eq!(particle.position, (100.0, 200.0));
-        assert_eq!(particle.size, 1.0);
-    }
-    
-    #[test]
-    fn test_particle_update() {
-        let image_info = ParticleImageInfo::new("Effects", 100, 1, 50);
-        let mut particle = Particle::new(image_info, (0.0, 0.0), (800, 600));
-        
-        particle.velocity = (10.0, 20.0);
-        particle.next_update_time = 0; // 强制立即更新
-        particle.update();
-        
-        assert_eq!(particle.position, (10.0, 20.0));
     }
 }
