@@ -1,7 +1,7 @@
 // GameScene - Main game scene (核心游戏场景)
 // Mirrors Client/MirScenes/GameScene.cs (12,297 lines)
 
-use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
+use super::{Scene, SceneType};
 use crate::objects::*;
 use crate::network::game_client::GameEvent;
 use mir2_shared::UserItem;
@@ -379,95 +379,86 @@ impl Scene for GameScene {
         }
     }
     
-    fn on_mouse_move(&mut self, _x: i32, _y: i32) {
+    fn handle_mouse_move(&mut self, _x: i32, _y: i32) {
         // TODO: Update hover states
         // TODO: Update cursor
     }
     
-    fn on_mouse_click(&mut self, x: i32, y: i32, button: MouseButton) {
-        println!("GameScene click at ({}, {}) with {:?}", x, y, button);
+    fn handle_mouse_button(&mut self, button: winit::event::MouseButton, pressed: bool, x: i32, y: i32) {
+        use winit::event::MouseButton;
         
-        match button {
-            MouseButton::Left => {
-                // TODO: Handle left click (move, attack, interact)
-            }
-            MouseButton::Right => {
-                // TODO: Handle right click (pickup item)
-            }
-            MouseButton::Middle => {
-                // TODO: Handle middle click
+        if pressed {
+            tracing::debug!("GameScene click at ({}, {}) with {:?}", x, y, button);
+            
+            match button {
+                MouseButton::Left => {
+                    // TODO: Handle left click (move, attack, interact)
+                }
+                MouseButton::Right => {
+                    // TODO: Handle right click (pickup item)
+                }
+                MouseButton::Middle => {
+                    // TODO: Handle middle click
+                }
+                _ => {}
             }
         }
     }
     
-    fn on_key_press(&mut self, key: KeyCode) {
+    fn handle_key_press(&mut self, key: winit::keyboard::KeyCode, modifiers: winit::keyboard::ModifiersState) -> bool {
+        use winit::keyboard::KeyCode;
+        
         match key {
             // Movement keys handled separately
-            KeyCode::Up | KeyCode::Down | KeyCode::Left | KeyCode::Right => {
+            KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::ArrowLeft | KeyCode::ArrowRight => {
                 // TODO: Handle movement
+                true
             }
             
             // Attack mode (Ctrl+H)
-            KeyCode::H => {
+            KeyCode::KeyH if modifiers.control_key() => {
                 // TODO: Cycle through attack modes
+                true
             }
             
             // Pet mode (Ctrl+E)
-            KeyCode::E => {
+            KeyCode::KeyE if modifiers.control_key() => {
                 // TODO: Cycle through pet modes
+                true
             }
             
             // Inventory (Tab)
             KeyCode::Tab => {
                 // TODO: Toggle inventory
+                true
             }
             
             // Character (C)
-            KeyCode::C => {
+            KeyCode::KeyC => {
                 // TODO: Toggle character dialog
+                true
             }
             
             // Skills (S)
-            KeyCode::S => {
+            KeyCode::KeyS => {
                 // TODO: Toggle skills dialog
+                true
             }
             
             // Quest (Q)
-            KeyCode::Q => {
+            KeyCode::KeyQ => {
                 // TODO: Toggle quest dialog
+                true
             }
             
             // Guild (G)
-            KeyCode::G => {
+            KeyCode::KeyG => {
                 // TODO: Toggle guild dialog
+                true
             }
             
-            _ => {}
+            _ => false
         }
-    }
-    
-    fn show(&mut self) {
-        println!("GameScene::show");
-        // TODO: Show game UI
-        // TODO: Play game music
-    }
-    
-    fn hide(&mut self) {
-        println!("GameScene::hide");
-        // TODO: Hide game UI
-    }
-    
-    fn dispose(&mut self) {
-        println!("GameScene::dispose");
-        // TODO: Cleanup all resources
-        // TODO: Clear all objects
-        self.monsters.clear();
-        self.npcs.clear();
-        self.items.clear();
-        self.players.clear();
-        self.spells.clear();
-        self.effects.clear();
-        self.damages.clear();
     }
 }
 

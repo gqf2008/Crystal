@@ -3,7 +3,7 @@
 
 use mir2_shared::packets::CharacterSummary;
 
-use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
+use super::{Scene, SceneType};
 use crate::network::game_client::GameEvent;
 
 // LoginScene 的内嵌对话框（对应 C# LoginScene 的内嵌类）
@@ -397,41 +397,30 @@ impl Scene for LoginScene {
         }
     }
     
-    fn on_mouse_move(&mut self, _x: i32, _y: i32) {
+    fn handle_mouse_move(&mut self, _x: i32, _y: i32) {
         // TODO: Update hover states
     }
     
-    fn on_mouse_click(&mut self, x: i32, y: i32, button: MouseButton) {
-        println!("LoginScene click at ({}, {}) with {:?}", x, y, button);
-        // TODO: Handle dialog clicks
-    }
-    
-    fn on_key_press(&mut self, key: KeyCode) {
-        match key {
-            KeyCode::Enter => {
-                self.submit_login();
-            }
-            KeyCode::Escape => {
-                // TODO: Close dialog or exit
-            }
-            _ => {}
+    fn handle_mouse_button(&mut self, button: winit::event::MouseButton, pressed: bool, x: i32, y: i32) {
+        if pressed {
+            tracing::debug!("LoginScene click at ({}, {}) with {:?}", x, y, button);
+            // TODO: Handle dialog clicks
         }
     }
     
-    fn show(&mut self) {
-        println!("LoginScene::show");
-        // TODO: Show login UI
-        // TODO: Start music
-    }
-    
-    fn hide(&mut self) {
-        println!("LoginScene::hide");
-        // TODO: Hide login UI
-    }
-    
-    fn dispose(&mut self) {
-        println!("LoginScene::dispose");
-        // TODO: Cleanup resources
-        // TODO: Stop music
+    fn handle_key_press(&mut self, key: winit::keyboard::KeyCode, _modifiers: winit::keyboard::ModifiersState) -> bool {
+        use winit::keyboard::KeyCode;
+        
+        match key {
+            KeyCode::Enter => {
+                self.submit_login();
+                true
+            }
+            KeyCode::Escape => {
+                // TODO: Close dialog or exit
+                true
+            }
+            _ => false
+        }
     }
 }

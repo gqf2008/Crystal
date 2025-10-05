@@ -1,41 +1,19 @@
+// MirSounds - Sound and music playback system
+// Mirrors Client.MirSounds
+
 use anyhow::Result;
-use rodio::{OutputStream, Sink};
 
-use crate::settings::SoundSettings;
+pub mod sound_list;
+// pub mod sound_loader;  // TODO: Legacy, to be replaced by libraries
+pub mod sound_manager;
+pub mod libraries;
 
-pub mod sound_loader;
-pub use sound_loader::{SoundManager, SoundType, SoundInfo};
+// Re-export commonly used items
+pub use sound_list::{SoundId, load_sound_list, generate_filename};
+pub use sound_manager::SoundManager;
 
-pub struct AudioEngine {
-    _stream: OutputStream,
-    settings: SoundSettings,
-    master_sink: Sink,
-}
+// Legacy exports for compatibility (disabled for now)
+// pub use sound_loader::{SoundType, SoundInfo};
 
-#[allow(dead_code)]
-impl AudioEngine {
-    pub fn new(sound: &SoundSettings) -> Result<Self> {
-        // 暂时禁用音频初始化以修复编译问题
-        // TODO: 修复rodio API兼容性问题
-        Err(anyhow::anyhow!("Audio system temporarily disabled"))
-    }
-
-    fn apply_volume(&mut self) {
-        let volume = self.settings.master_volume_scalar();
-        self.master_sink.set_volume(volume);
-    }
-
-    pub fn play_effect(&self, _id: &str) -> Result<()> {
-        // TODO: Load and play effect from resource library.
-        Ok(())
-    }
-
-    pub fn play_music(&self, _id: &str) -> Result<()> {
-        // TODO: Differentiate between music and effect playback.
-        Ok(())
-    }
-
-    pub fn stop_music(&self) {
-        self.master_sink.stop();
-    }
-}
+// Re-export libraries
+pub use libraries::{CachedSound, SoundLibrary, OneShotProvider, LoopProvider};

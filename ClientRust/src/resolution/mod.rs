@@ -1,5 +1,9 @@
 // Resolution module - Screen resolution management
-// Corresponds to: Client/Resolution/
+// Mirrors Client/Resolution/
 
-// TODO: Add resolution modules as they are ported
-// pub mod resolution_manager;
+pub mod supported_resolution;
+pub mod display_resolutions;
+
+// Re-export main types
+pub use supported_resolution::SupportedResolution;
+pub use display_resolutions::DisplayResolutions;

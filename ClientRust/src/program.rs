@@ -76,14 +76,29 @@ impl ClientRuntime {
                 }
             };
 
-            // TODO: Launch UI (not yet implemented)
-            // ui::launch(&settings, &keybinds, audio, net, version_hash)
-            //     .await
-            //     .context("running ui")?;
+            // Launch UI (Forms-based windows)
+            let launch_result = crate::ui::launch(&settings, &keybinds)
+                .await
+                .context("running ui")?;
             
-            tracing::info!("Client runtime ready (audio and UI not yet implemented)");
+            tracing::info!("Client UI completed: {:?}", launch_result);
             
-            keybinds.save().context("saving key bindings")
+            // Save settings and keybinds
+            settings.save().context("saving settings")?;
+            keybinds.save().context("saving key bindings")?;
+            
+            // Handle restart request
+            match launch_result {
+                crate::ui::LaunchResult::Restart => {
+                    tracing::info!("Restart requested, client will restart");
+                    // TODO: Implement restart mechanism
+                }
+                crate::ui::LaunchResult::Exit => {
+                    tracing::info!("Normal exit");
+                }
+            }
+            
+            Ok(())
         })
     }
 }

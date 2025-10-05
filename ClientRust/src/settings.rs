@@ -269,6 +269,23 @@ impl ClientSettings {
     pub fn save_quest_tracking(&self, character: &str, quests: &QuestTracking) -> Result<()> {
         quests.save_to(&self.root_path, character)
     }
+    
+    /// Save settings to file
+    pub fn save(&self) -> Result<()> {
+        let config_path = self.root_path.join("config").join("client.yaml");
+        
+        // Create config directory if it doesn't exist
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        
+        // Serialize to YAML
+        let yaml = serde_yaml::to_string(self)?;
+        std::fs::write(&config_path, yaml)?;
+        
+        tracing::info!("Settings saved to {:?}", config_path);
+        Ok(())
+    }
 }
 
 fn add_optional_file(
@@ -373,6 +390,8 @@ impl Default for LogSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct SoundSettings {
+    #[serde(rename = "SoundPath")]
+    pub sound_path: String,
     #[serde(rename = "Volume")]
     pub volume: u8,
     #[serde(rename = "Music")]
@@ -388,6 +407,7 @@ pub struct SoundSettings {
 impl Default for SoundSettings {
     fn default() -> Self {
         Self {
+            sound_path: "./Sound/".to_string(),
             volume: 100,
             music: 100,
             sound_overlap: 3,

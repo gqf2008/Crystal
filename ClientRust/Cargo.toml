@@ -35,7 +35,7 @@ tracing-subscriber = { version = "0.3", features = [
 env_logger = "0.11"
 url = "2"
 winit = { version = "0.30.12", features = ["serde"] }
-rodio = { version = "0.21.1", features = ["vorbis"] }  # 启用 default features 以支持 OutputStream
+rodio = "0.21.1"  # 使用更稳定的版本
 reqwest = { version = "0.12", features = ["json", "gzip", "stream"] }
 bytes = "1"
 parking_lot = "0.12"
@@ -46,9 +46,16 @@ md5 = "0.8.0"
 pollster = "0.4"  # 用于在同步代码中运行异步函数 (如 DXManager::new)
 wgpu = "27.0"  # 使用最新版本 - 对应 C# 的 DirectX 9
 bytemuck = { version = "1.14", features = ["derive"] }  # For wgpu vertex data
-flate2 = "1"  # GZip decompression for .lib files
+flate2 = "1.1.3"  # GZip decompression for .lib files
 once_cell = "1.21.3"
 regex = "1.11.3"
+image = { version = "0.25", default-features = false, features = ["png"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures-util = "0.3"  # For Stream trait (used in downloader)
+ggez = "=0.10.0-rc0"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "wingdi"] }  # For Windows display resolution detection
 
 # 完全移除 egui/eframe 依赖
 # C# 原版使用自己的 GUI 系统（MirControls + DirectX 9），不依赖第三方 UI 框架

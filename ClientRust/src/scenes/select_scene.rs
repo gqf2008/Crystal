@@ -1,12 +1,9 @@
 // SelectScene - Character selection scene
 // Mirrors Client/MirScenes/SelectScene.cs
 
-use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
+use super::{Scene, SceneType};
+use super::dialogs::NewCharacterDialog;
 use crate::network::game_client::GameEvent;
-
-
-pub mod character_creation_dialog;
-pub use character_creation_dialog::CharacterCreationDialog;
 use mir2_shared::SelectInfo;
 
 /// Character selection scene
@@ -31,7 +28,7 @@ pub struct SelectScene {
     
     // Dialogs
     /// Mirrors C# `private NewCharacterDialog _character`
-    pub character_creation_dialog: Option<CharacterCreationDialog>,
+    pub new_character_dialog: Option<NewCharacterDialog>,
     
     // TODO Phase 3: Add UI controls
     // - Background: MirImageControl
@@ -62,7 +59,7 @@ impl SelectScene {
         let mut scene = Self {
             characters,
             selected_index: 0,
-            character_creation_dialog: None,
+            new_character_dialog: None,
         };
         scene.sort_list();
         scene
@@ -130,9 +127,9 @@ impl SelectScene {
     /// }
     /// ```
     pub fn open_new_character_dialog(&mut self) {
-        if self.character_creation_dialog.is_none() {
+        if self.new_character_dialog.is_none() {
             println!("Opening character creation dialog");
-            self.character_creation_dialog = Some(CharacterCreationDialog::new());
+            self.new_character_dialog = Some(NewCharacterDialog::new());
             // TODO: Show dialog UI
         }
     }
@@ -202,43 +199,33 @@ impl Scene for SelectScene {
         }
     }
     
-    fn on_mouse_move(&mut self, _x: i32, _y: i32) {
+    fn handle_mouse_move(&mut self, _x: i32, _y: i32) {
         // TODO: Update hover states
     }
     
-    fn on_mouse_click(&mut self, x: i32, y: i32, button: MouseButton) {
-        println!("SelectScene click at ({}, {}) with {:?}", x, y, button);
-        // TODO: Handle character slot clicks
-        // TODO: Handle button clicks
-    }
-    
-    fn on_key_press(&mut self, key: KeyCode) {
-        match key {
-            KeyCode::Enter => {
-                self.start_game();
-            }
-            KeyCode::Escape => {
-                // TODO: Return to login scene
-                println!("Escape pressed - would return to login");
-            }
-            _ => {}
+    fn handle_mouse_button(&mut self, button: winit::event::MouseButton, pressed: bool, x: i32, y: i32) {
+        if pressed {
+            tracing::debug!("SelectScene click at ({}, {}) with {:?}", x, y, button);
+            // TODO: Handle character slot clicks
+            // TODO: Handle button clicks
         }
     }
     
-    fn show(&mut self) {
-        println!("SelectScene::show");
-        // TODO: Show selection UI
-        // TODO: Play select music
-    }
-    
-    fn hide(&mut self) {
-        println!("SelectScene::hide");
-        // TODO: Hide selection UI
-    }
-    
-    fn dispose(&mut self) {
-        println!("SelectScene::dispose");
-        // TODO: Cleanup resources
+    fn handle_key_press(&mut self, key: winit::keyboard::KeyCode, _modifiers: winit::keyboard::ModifiersState) -> bool {
+        use winit::keyboard::KeyCode;
+        
+        match key {
+            KeyCode::Enter => {
+                self.start_game();
+                true
+            }
+            KeyCode::Escape => {
+                // TODO: Return to login scene
+                tracing::info!("Escape pressed - would return to login");
+                true
+            }
+            _ => false
+        }
     }
 }
 

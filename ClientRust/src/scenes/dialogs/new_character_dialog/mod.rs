@@ -25,7 +25,7 @@ pub struct NewCharacterDialog {
     pub creating: bool,
 }
 
-impl Default for CharacterCreationDialog {
+impl Default for NewCharacterDialog {
     fn default() -> Self {
         Self {
             visible: false,
@@ -38,8 +38,8 @@ impl Default for CharacterCreationDialog {
     }
 }
 
-impl CharacterCreationDialog {
-    /// 创建新对话框
+impl NewCharacterDialog {
+    /// Create new dialog
     pub fn new() -> Self {
         Self::default()
     }

@@ -5,7 +5,7 @@ use eframe::egui;
 use std::sync::Arc;
 use parking_lot::RwLock;
 
-use crate::scenes::scene_trait::{Scene, SceneType};
+use crate::scenes::{Scene, SceneType};
 use crate::scenes::login_scene::LoginScene;
 use crate::scenes::select_scene::{SelectScene, SelectCharacter};
 use crate::scenes::game_scene::GameScene;
@@ -228,26 +228,26 @@ impl MirClientApp {
                             GameEvent::NewCharacterResponse { result } => {
                                 // Handle character creation response
                                 if let Some(scene) = &mut self.select_scene {
-                                    scene.character_creation_dialog.creating = false;
+                                    scene.new_character_dialog.creating = false;
                                     match result {
                                         0 => {
                                             // Success - will receive NewCharacterSuccess next
                                             tracing::info!("Character creation request accepted");
                                         }
                                         1 => {
-                                            scene.character_creation_dialog.error_message = 
+                                            scene.new_character_dialog.error_message = 
                                                 Some("角色名称已被使用".to_string());
                                         }
                                         2 => {
-                                            scene.character_creation_dialog.error_message = 
+                                            scene.new_character_dialog.error_message = 
                                                 Some("角色名称不合法".to_string());
                                         }
                                         3 => {
-                                            scene.character_creation_dialog.error_message = 
+                                            scene.new_character_dialog.error_message = 
                                                 Some("角色槽位已满".to_string());
                                         }
                                         _ => {
-                                            scene.character_creation_dialog.error_message = 
+                                            scene.new_character_dialog.error_message = 
                                                 Some(format!("创建失败 (错误码: {})", result));
                                         }
                                     }
@@ -279,7 +279,7 @@ impl MirClientApp {
                                     }
                                     
                                     // Close dialog
-                                    scene.character_creation_dialog.hide();
+                                    scene.new_character_dialog.hide();
                                 }
                             }
                             GameEvent::DeleteCharacterResponse { result } => {
@@ -564,7 +564,7 @@ impl MirClientApp {
                                             .size(16.0)
                                     ).min_size(egui::vec2(250.0, 40.0))).clicked() {
                                         tracing::info!("Create first character clicked");
-                                        scene.character_creation_dialog.show();
+                                        scene.new_character_dialog.show();
                                     }
                                 });
                             });
@@ -783,7 +783,7 @@ impl MirClientApp {
                                         .size(16.0)
                                 ).min_size(egui::vec2(160.0, 35.0))).clicked() {
                                     tracing::info!("Create character in slot {}", scene.selected_index);
-                                    scene.character_creation_dialog.show();
+                                    scene.new_character_dialog.show();
                                 }
                             });
                             
@@ -825,8 +825,8 @@ impl MirClientApp {
         // Render dialogs outside vertical_centered (to avoid borrow conflict)
         let command_tx = self.command_tx.clone();
         if let Some(scene) = &mut self.select_scene {
-            if scene.character_creation_dialog.visible {
-                Self::render_character_creation_dialog_static(ui, scene, &command_tx);
+            if scene.new_character_dialog.visible {
+                Self::render_new_character_dialog_static(ui, scene, &command_tx);
             }
             if scene.character_deletion_dialog.visible {
                 Self::render_character_deletion_dialog_static(ui, scene, &command_tx);
@@ -835,7 +835,7 @@ impl MirClientApp {
     }
     
     /// Render character creation dialog (modal) - static version to avoid borrow issues
-    fn render_character_creation_dialog_static(
+    fn render_new_character_dialog_static(
         ui: &mut egui::Ui, 
         scene: &mut crate::scenes::select_scene::SelectScene,
         command_tx: &tokio::sync::mpsc::UnboundedSender<NetworkCommand>,
@@ -848,7 +848,7 @@ impl MirClientApp {
             .resizable(false)
             .fixed_size([600.0, 500.0])
             .show(ui.ctx(), |ui| {
-                let dialog = &mut scene.character_creation_dialog;
+                let dialog = &mut scene.new_character_dialog;
                 
                 ui.vertical(|ui| {
                     ui.add_space(10.0);
