@@ -14,6 +14,7 @@ mod effect;
 mod damage;
 mod pathfinder;
 mod map_code; // MapReader and CellInfo - 对应 Client/MirObjects/MapCode.cs
+mod stats_ext;  // NEW: Stats system extensions
 
 pub use frames::{AnimationAdvanceSummary, AnimationStep, Frame};
 pub use map_object::{
@@ -28,6 +29,9 @@ pub use player_object::PlayerObject;
 pub use user_object::{
     UserObject, QueuedAction,
 };
+
+// NEW: Stats extensions
+pub use stats_ext::StatsExt;
 
 // Re-export SharedRust types used by UserObject
 // (follows C# dependency: Client depends on Shared)
