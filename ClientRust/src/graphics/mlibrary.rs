@@ -329,8 +329,75 @@ impl TextureManager {
         self.textures.clear();
     }
     
-    // ===== 以下所有 draw 函数已废弃 (依赖 dx_manager) =====
-    // 请使用 MLibrary::load_rgba_data() 配合 ggez 直接渲染
+    // ===== Ggez 渲染函数 =====
+    
+    /// 使用 ggez 渲染图像到 Canvas
+    /// 
+    /// # 参数
+    /// - `ctx`: ggez Context
+    /// - `canvas`: 目标 Canvas
+    /// - `index`: 图像索引
+    /// - `x`, `y`: 屏幕坐标
+    /// - `blend`: 是否使用混合模式
+    /// 
+    /// # 返回
+    /// - `Ok(())`: 成功
+    /// - `Err`: 图像不存在或渲染失败
+    pub fn draw_to_canvas(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        x: f32,
+        y: f32,
+        blend: bool,
+    ) -> io::Result<()> {
+        use ggez::graphics::{Image, DrawParam, BlendMode};
+        
+        // 加载 RGBA 数据
+        let (info, rgba_data) = self.load_rgba_data(index)?;
+        
+        // 创建 ggez Image
+        let image = Image::from_rgba8(
+            ctx,
+            info.width as u16,
+            info.height as u16,
+            &rgba_data,
+        ).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        
+        // 设置绘制参数
+        let mut draw_param = DrawParam::default()
+            .dest([x, y]);
+        
+        // 设置混合模式
+        if blend {
+            draw_param = draw_param.blend_mode(BlendMode::ALPHA);
+        }
+        
+        // 绘制
+        canvas.draw(&image, draw_param);
+        
+        Ok(())
+    }
+    
+    /// 使用 ggez 渲染图像到 Canvas (带偏移)
+    /// 
+    /// 用于处理 ImageInfo 中的 offset_x/offset_y
+    pub fn draw_to_canvas_with_offset(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        x: f32,
+        y: f32,
+        blend: bool,
+    ) -> io::Result<()> {
+        let info = self.get_image_info(index)?;
+        let offset_x = info.offset_x as f32;
+        let offset_y = info.offset_y as f32;
+        
+        self.draw_to_canvas(ctx, canvas, index, x + offset_x, y + offset_y, blend)
+    }
     
 }
 
