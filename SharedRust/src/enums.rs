@@ -1238,6 +1238,7 @@ pub enum Monster {
     Debug,
     PartialEq,
     Eq,
+    Hash,
     Serialize_repr,
     Deserialize_repr,
     IntoPrimitive,

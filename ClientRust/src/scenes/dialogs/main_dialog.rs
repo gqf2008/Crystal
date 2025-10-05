@@ -7,35 +7,61 @@ use super::Dialog;
 #[derive(Debug)]
 pub struct MainDialog {
     pub visible: bool,
-    
+
     // Position and size
     pub x: i32,
     pub y: i32,
     pub width: i32,
     pub height: i32,
-    
+
     // Health/Mana display
     pub hp: i32,
     pub max_hp: i32,
     pub mp: i32,
     pub max_mp: i32,
-    
+
     // Experience
     pub experience: i64,
     pub max_experience: i64,
-    
+
     // Level
     pub level: u16,
-    
+
     // Gold display
     pub gold: u32,
-    
-    // TODO: Button states
-    // pub inventory_button: Button,
-    // pub character_button: Button,
-    // pub skills_button: Button,
-    // pub guild_button: Button,
-    // pub quest_button: Button,
+
+    // Character info
+    pub character_name: String,
+
+    // Weight info
+    pub current_bag_weight: i32,
+    pub max_bag_weight: i32,
+
+    // Inventory space
+    pub inventory_slots: usize,
+    pub used_inventory_slots: usize,
+
+    // UI Elements (simplified for now)
+    pub inventory_button_pressed: bool,
+    pub character_button_pressed: bool,
+    pub skill_button_pressed: bool,
+    pub quest_button_pressed: bool,
+    pub option_button_pressed: bool,
+    pub menu_button_pressed: bool,
+    pub game_shop_button_pressed: bool,
+
+    // Hero system
+    pub hero_menu_button_visible: bool,
+    pub hero_summon_button_visible: bool,
+
+    // Mode display
+    pub attack_mode_text: String,
+    pub pet_mode_text: String,
+    pub skill_mode_text: String,
+
+    // HP display mode
+    pub hp_view: bool,
+    pub hp_only: bool, // Warrior level < 26
 }
 
 impl MainDialog {
@@ -54,6 +80,25 @@ impl MainDialog {
             max_experience: 100,
             level: 1,
             gold: 0,
+            character_name: String::new(),
+            current_bag_weight: 0,
+            max_bag_weight: 100,
+            inventory_slots: 46, // Default inventory size
+            used_inventory_slots: 0,
+            inventory_button_pressed: false,
+            character_button_pressed: false,
+            skill_button_pressed: false,
+            quest_button_pressed: false,
+            option_button_pressed: false,
+            menu_button_pressed: false,
+            game_shop_button_pressed: false,
+            hero_menu_button_visible: false,
+            hero_summon_button_visible: false,
+            attack_mode_text: String::new(),
+            pet_mode_text: String::new(),
+            skill_mode_text: String::new(),
+            hp_view: true,
+            hp_only: false,
         }
     }
     
@@ -62,17 +107,85 @@ impl MainDialog {
         self.hp = hp;
         self.max_hp = max_hp;
     }
-    
+
     /// Update MP display
     pub fn set_mp(&mut self, mp: i32, max_mp: i32) {
         self.mp = mp;
         self.max_mp = max_mp;
     }
-    
+
     /// Update experience display
     pub fn set_experience(&mut self, exp: i64, max_exp: i64) {
         self.experience = exp;
         self.max_experience = max_exp;
+    }
+
+    /// Update level
+    pub fn set_level(&mut self, level: u16) {
+        self.level = level;
+    }
+
+    /// Update gold
+    pub fn set_gold(&mut self, gold: u32) {
+        self.gold = gold;
+    }
+
+    /// Update character name
+    pub fn set_character_name(&mut self, name: String) {
+        self.character_name = name;
+    }
+
+    /// Update weight info
+    pub fn set_weight(&mut self, current: i32, max: i32) {
+        self.current_bag_weight = current;
+        self.max_bag_weight = max;
+    }
+
+    /// Update inventory space
+    pub fn set_inventory_space(&mut self, used: usize, total: usize) {
+        self.used_inventory_slots = used;
+        self.inventory_slots = total;
+    }
+
+    /// Set HP view mode
+    pub fn set_hp_view(&mut self, hp_view: bool) {
+        self.hp_view = hp_view;
+    }
+
+    /// Set HP only mode (for warriors level < 26)
+    pub fn set_hp_only(&mut self, hp_only: bool) {
+        self.hp_only = hp_only;
+    }
+
+    /// Update attack mode text
+    pub fn set_attack_mode_text(&mut self, text: String) {
+        self.attack_mode_text = text;
+    }
+
+    /// Update pet mode text
+    pub fn set_pet_mode_text(&mut self, text: String) {
+        self.pet_mode_text = text;
+    }
+
+    /// Update skill mode text
+    pub fn set_skill_mode_text(&mut self, text: String) {
+        self.skill_mode_text = text;
+    }
+
+    /// Set hero buttons visibility
+    pub fn set_hero_buttons_visible(&mut self, visible: bool) {
+        self.hero_menu_button_visible = visible;
+        self.hero_summon_button_visible = visible;
+    }
+
+    /// Get available inventory space
+    pub fn get_available_inventory_space(&self) -> usize {
+        self.inventory_slots - self.used_inventory_slots
+    }
+
+    /// Get available weight
+    pub fn get_available_weight(&self) -> i32 {
+        self.max_bag_weight - self.current_bag_weight
     }
     
     /// Get HP percentage
@@ -164,18 +277,82 @@ mod tests {
         let dialog = MainDialog::new();
         assert!(dialog.visible);
         assert_eq!(dialog.level, 1);
+        assert_eq!(dialog.inventory_slots, 46);
+        assert!(dialog.hp_view);
+        assert!(!dialog.hp_only);
     }
 
     #[test]
     fn test_hp_mp_updates() {
         let mut dialog = MainDialog::new();
-        
+
         dialog.set_hp(50, 100);
         assert_eq!(dialog.hp, 50);
         assert_eq!(dialog.get_hp_percent(), 50.0);
-        
+
         dialog.set_mp(25, 100);
         assert_eq!(dialog.mp, 25);
         assert_eq!(dialog.get_mp_percent(), 25.0);
+    }
+
+    #[test]
+    fn test_character_info_updates() {
+        let mut dialog = MainDialog::new();
+
+        dialog.set_level(15);
+        assert_eq!(dialog.level, 15);
+
+        dialog.set_character_name("TestPlayer".to_string());
+        assert_eq!(dialog.character_name, "TestPlayer");
+
+        dialog.set_gold(12345);
+        assert_eq!(dialog.gold, 12345);
+    }
+
+    #[test]
+    fn test_weight_and_inventory() {
+        let mut dialog = MainDialog::new();
+
+        dialog.set_weight(75, 100);
+        assert_eq!(dialog.current_bag_weight, 75);
+        assert_eq!(dialog.max_bag_weight, 100);
+        assert_eq!(dialog.get_available_weight(), 25);
+
+        dialog.set_inventory_space(20, 46);
+        assert_eq!(dialog.used_inventory_slots, 20);
+        assert_eq!(dialog.inventory_slots, 46);
+        assert_eq!(dialog.get_available_inventory_space(), 26);
+    }
+
+    #[test]
+    fn test_mode_settings() {
+        let mut dialog = MainDialog::new();
+
+        dialog.set_attack_mode_text("Peace".to_string());
+        assert_eq!(dialog.attack_mode_text, "Peace");
+
+        dialog.set_pet_mode_text("Both".to_string());
+        assert_eq!(dialog.pet_mode_text, "Both");
+
+        dialog.set_skill_mode_text("Ctrl".to_string());
+        assert_eq!(dialog.skill_mode_text, "Ctrl");
+
+        dialog.set_hp_view(false);
+        assert!(!dialog.hp_view);
+
+        dialog.set_hp_only(true);
+        assert!(dialog.hp_only);
+    }
+
+    #[test]
+    fn test_hero_buttons() {
+        let mut dialog = MainDialog::new();
+
+        assert!(!dialog.hero_menu_button_visible);
+        assert!(!dialog.hero_summon_button_visible);
+
+        dialog.set_hero_buttons_visible(true);
+        assert!(dialog.hero_menu_button_visible);
+        assert!(dialog.hero_summon_button_visible);
     }
 }

@@ -73,7 +73,12 @@ pub mod storage_dialog;
 pub mod trade_dialog;
 pub mod guild_dialog;
 pub mod friend_dialog;
+pub mod mentor_dialog;
+pub mod ranking_dialog;
+pub mod relationship_dialog;
 pub mod group_dialog;
+pub mod roll_dialog;
+pub mod chat_option_dialog;
 pub mod bigmap_dialog;
 pub mod quest_list_dialog;
 pub mod mail_dialog;
@@ -89,9 +94,23 @@ pub mod fishing_dialog;
 pub mod refine_dialog;
 pub mod craft_dialog;
 
+// Login Scene Dialogs
+pub mod login_dialog;
+pub mod new_account_dialog;
+pub mod change_password_dialog;
+
+// Layer 1 Basic Dialogs (Batch 1)
+pub mod compass_dialog;
+pub mod chat_notice_dialog;
+
+// Layer 2 Trading Dialogs (Batch 4)
+pub mod item_rental_dialog;
+pub mod item_rent_dialog;
+pub mod item_renting_dialog;
+
 // Re-exports
 pub use main_dialog::MainDialog;
-pub use chat_dialog::{ChatDialog, ChatMessage};
+pub use chat_dialog::{ChatDialog, ChatMessage, ChatHistory, ChatItem};
 pub use inventory_dialog::{InventoryDialog, InventoryTab};
 pub use character_dialog::{CharacterDialog, CharacterPage, EquipmentSlot, CharacterStats, MagicInfo};
 pub use skillbar_dialog::{SkillBarDialog, SkillSlot};
@@ -100,7 +119,12 @@ pub use storage_dialog::{StorageDialog, StorageType};
 pub use trade_dialog::{TradeDialog, TradeState, TradeParty, TradeSummary};
 pub use guild_dialog::{GuildDialog, GuildPage, GuildMember, GuildRank, GuildRankOptions, GuildBuff};
 pub use friend_dialog::{FriendDialog, FriendTab, Friend, FriendStatus};
+pub use mentor_dialog::MentorDialog;
+pub use ranking_dialog::{RankingDialog, RankClass, RankCharacterInfo, RankingRow};
+pub use relationship_dialog::RelationshipDialog;
 pub use group_dialog::{GroupDialog, GroupMember};
+pub use roll_dialog::{RollDialog, RollType};
+pub use chat_option_dialog::{ChatOptionDialog, ChatOptionTab};
 // Note: GuildMember and Friend are UI wrappers around mir2_shared::{GuildMember, ClientFriend}
 pub use bigmap_dialog::{BigMapDialog, MapRecord, MapNPC, MapImage, MapViewPort};
 pub use quest_list_dialog::{QuestListDialog, QuestInfo, QuestProgress, QuestStatus, QuestType, QuestRewards};
@@ -129,3 +153,17 @@ pub use report_dialog::{ReportDialog, ReportAction, ReportType};
 pub use dialog_manager::{
     Dialog, DialogManager, MouseButton, KeyCode
 };
+
+// Login Scene Dialogs
+pub use login_dialog::LoginDialog;
+pub use new_account_dialog::{NewAccountDialog, NewAccountResult, AccountRegistration};
+pub use change_password_dialog::{ChangePasswordDialog, ChangePasswordResult};
+
+// Layer 1 Basic Dialogs
+pub use compass_dialog::CompassDialog;
+pub use chat_notice_dialog::{ChatNoticeDialog, ChatNoticeType};
+
+// Layer 2 Trading Dialogs (Batch 4)
+pub use item_rental_dialog::{ItemRentalDialog, ItemRow};
+pub use item_rent_dialog::{ItemRentDialog, GuestItemRentDialog};
+pub use item_renting_dialog::{ItemRentingDialog, GuestItemRentingDialog};

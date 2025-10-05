@@ -24,11 +24,9 @@ pub use map_object::{
 };
 
 // NEW: Phase 1 - PlayerObject base class
-pub use player_object::PlayerObject;
+pub use player_object::{PlayerObject, QueuedAction};
 
-pub use user_object::{
-    UserObject, QueuedAction,
-};
+pub use user_object::UserObject;
 
 // NEW: Stats extensions
 pub use stats_ext::StatsExt;

@@ -48,6 +48,7 @@ wgpu = "27.0"  # 使用最新版本 - 对应 C# 的 DirectX 9
 bytemuck = { version = "1.14", features = ["derive"] }  # For wgpu vertex data
 flate2 = "1"  # GZip decompression for .lib files
 once_cell = "1.21.3"
+regex = "1.11.3"
 
 # 完全移除 egui/eframe 依赖
 # C# 原版使用自己的 GUI 系统（MirControls + DirectX 9），不依赖第三方 UI 框架

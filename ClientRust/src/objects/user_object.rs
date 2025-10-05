@@ -1,17 +1,23 @@
 // UserObject.rs - Player character object (the user)
 // Mirrors Client/MirObjects/UserObject.cs
 
-use mir2_shared::{packets::*,
+use std::convert::TryFrom;
+
+use mir2_shared::{
     data::{
-        stats::Stats, 
-        client_data::{ClientMagic, ClientIntelligentCreature, ClientQuestProgress, ClientMail},
-        item::ItemSets,  // C# Shared/Data/ItemData.cs ItemSets
+        client_data::{ClientIntelligentCreature, ClientMail, ClientMagic, ClientQuestProgress},
+        item::ItemSets,
+        stats::Stats,
     },
-    enums::{MirDirection, MirAction, Spell, SpecialItemMode, EquipmentSlot, IntelligentCreatureType, MirClass, MirGender},
+    enums::{
+        EquipmentSlot, IntelligentCreatureType, ItemSet, ItemType, MirAction, MirClass,
+        MirDirection, MirGender, SpecialItemMode, Spell, Stat,
+    },
+    packets::*,
     Point, UserItem,
 };
 
-use super::player_object::PlayerObject;
+use super::player_object::{PlayerObject, QueuedAction};
 use super::stats_ext::StatsExt;  // Import Stats extensions
 
 /// User object - represents the current player
@@ -50,6 +56,10 @@ pub struct UserObject {
     // Experience
     pub experience: i64,
     pub max_experience: i64,
+    
+    // Currency
+    pub gold: u32,
+    pub credit: u32,
     
     // Trading
     pub trade_locked: bool,
@@ -121,18 +131,7 @@ pub struct UserObject {
 //   - ClientMagic, ClientIntelligentCreature, ClientQuestProgress, ClientMail (client_data)
 //   - EquipmentSlot, IntelligentCreatureType, MirAction (enums)
 //   - ItemSetStatus (item) - corresponds to C# ItemSets in Shared/Data/ItemData.cs
-
-/// Queued action for delayed execution
-/// Mirrors C#: Client/MirObjects/PlayerObject.cs QueuedAction class
-#[derive(Debug, Clone)]
-pub struct QueuedAction {
-    pub action: MirAction,      // C# uses MirAction, not a separate enum
-    pub location: Point,
-    pub direction: MirDirection,
-    // pub params: Vec<Box<dyn Any>>,  // C#: List<object> Params
-    // Note: C# rarely uses Params field, so we omit it for now
-    // Can be added later when needed with an enum for type-safe params
-}
+// QueuedAction is defined in player_object.rs (mirrors C# PlayerObject.QueuedAction)
 
 impl UserObject {
     /// Create a new user object
@@ -158,6 +157,8 @@ impl UserObject {
             current_bag_weight: 0,
             experience: 0,
             max_experience: 0,
+            gold: 0,
+            credit: 0,
             trade_locked: false,
             trade_gold_amount: 0,
             allow_trade: false,
@@ -266,7 +267,8 @@ impl UserObject {
         }
         
         // Load intelligent creatures (C# lines 121-123)
-        self.intelligent_creatures = info.intelligent_creatures.clone();
+        // TODO: Implement when IntelligentCreatures is added to UserInformation packet
+        // self.intelligent_creatures = info.intelligent_creatures.clone();
         self.summoned_creature_type = IntelligentCreatureType::try_from(info.summoned_creature_type)
             .unwrap_or(IntelligentCreatureType::None);
         self.creature_summoned = info.creature_summoned;
@@ -293,20 +295,106 @@ impl UserObject {
     }
 
     /// Bind all items to their ItemInfo (associate item data)
-    fn bind_all_items(&mut self) {
+    /// Binds all items (inventory, equipment, quest inventory) to the game scene
+    /// 
+    /// Mirrors C# BindAllItems(), lines 696-717
+    pub fn bind_all_items(&mut self) {
         // TODO: Implement item binding
         // In C#, this looks up items in GameScene.ItemInfoList
         // For now, we skip this as items already have their info embedded
         // This will be needed when we have a centralized ItemInfo registry
     }
     
-    /// Set initial action (standing pose)
-    fn set_action(&mut self) {
-        // Set to standing action based on current direction
-        // This will be implemented when MapObject's action system is complete
-        // For now, just ensure the object is in a valid state
-        let direction = self.player.map_object.direction();
-        self.player.map_object.set_direction(direction);
+    /// Override SetAction to handle QueuedAction
+    /// 
+    /// Mirrors C# UserObject.SetAction() override, lines 787-799
+    /// 
+    /// C# Logic:
+    /// ```csharp
+    /// public override void SetAction()
+    /// {
+    ///     if (QueuedAction != null && !GameScene.Observing)
+    ///     {
+    ///         if ((ActionFeed.Count == 0) || (ActionFeed.Count == 1 && NextAction.Action == MirAction.Stance))
+    ///         {
+    ///             ActionFeed.Clear();
+    ///             ActionFeed.Add(QueuedAction);
+    ///             QueuedAction = null;
+    ///         }
+    ///     }
+    ///     base.SetAction();
+    /// }
+    /// ```
+    pub fn set_action(&mut self) {
+        // Handle QueuedAction (C# lines 789-797)
+        if let Some(queued) = self.queued_action.take() {
+            // TODO Phase 2: Add GameScene.Observing check
+            // if !GameScene.Observing {
+            
+            // Check if action feed is empty or only has stance (C# line 791)
+            let should_add = self.player.action_feed.is_empty() 
+                || (self.player.action_feed.len() == 1 
+                    && self.player.next_action().map(|a| a.action) == Some(MirAction::Stance));
+            
+            if should_add {
+                // Clear and add queued action (C# lines 793-794)
+                self.player.action_feed.clear();
+                self.player.action_feed.push(queued);
+            } else {
+                // Put it back if we can't add it
+                self.queued_action = Some(queued);
+            }
+            
+            // }  // End GameScene.Observing check
+        }
+        
+        // Call base implementation (C# line 798)
+        self.player.set_action();
+    }
+    
+    /// Override ProcessFrames to clear QueuedAction and trigger next action
+    /// 
+    /// Mirrors C# UserObject.ProcessFrames() override, lines 800-809
+    /// 
+    /// C# Logic:
+    /// ```csharp
+    /// public override void ProcessFrames()
+    /// {
+    ///     bool clear = CMain.Time >= NextMotion;
+    ///     base.ProcessFrames();
+    ///     if (clear) QueuedAction = null;
+    ///     if ((CurrentAction == MirAction.Standing || CurrentAction == MirAction.MountStanding || 
+    ///          CurrentAction == MirAction.Stance || CurrentAction == MirAction.Stance2 || 
+    ///          CurrentAction == MirAction.DashFail) && (QueuedAction != null || NextAction != null))
+    ///         SetAction();
+    /// }
+    /// ```
+    /// 
+    /// Phase 2 Update: Now accepts current_time parameter for proper motion timing
+    pub fn process_frames(&mut self, current_time: u64) {
+        // Check if motion time has passed (C# line 802)
+        let clear = current_time >= self.player.next_motion;
+        
+        // Call base implementation (C# line 803)
+        self.player.process_frames(current_time);
+        
+        // Clear queued action if motion completed (C# line 804)
+        if clear {
+            self.queued_action = None;
+        }
+        
+        // Trigger next action if in idle state (C# lines 805-807)
+        let is_idle = matches!(
+            self.player.current_action,
+            MirAction::Standing | MirAction::MountStanding | 
+            MirAction::Stance | MirAction::Stance2 | MirAction::DashFail
+        );
+        
+        let has_next = self.queued_action.is_some() || self.player.next_action().is_some();
+        
+        if is_idle && has_next {
+            self.set_action();
+        }
     }
     
     /// Update user stats (called after equipment/buff changes)
@@ -408,10 +496,10 @@ impl UserObject {
         self.stats.add_attack_speed(aspd_bonus);
     }
     
-    /// Apply stat caps
+    /// Applies stat caps to prevent values from exceeding limits
     /// 
-    /// Mirrors C# RefreshStatCaps(), lines 665-687
-    fn refresh_stat_caps(&mut self) {
+    /// Mirrors C# RefreshStatCaps(), lines 670-694
+    pub fn refresh_stat_caps(&mut self) {
         use mir2_shared::enums::Stat;
         
         // C# lines 667-670: Apply custom caps from CoreStats.Caps
@@ -490,33 +578,151 @@ impl UserObject {
     /// 
     /// Mirrors C# RefreshEquipmentStats(), lines 204-296
     fn refresh_equipment_stats(&mut self) {
-        // C# lines 206-215: Reset equipment-related fields
-        // Weapon = -1; WeaponEffect = 0; Armour = 0; WingEffect = 0;
-        // MountType = -1; CurrentWearWeight = 0; CurrentHandWeight = 0;
-        // ItemMode = SpecialItemMode.None; FastRun = false;
+        self.player.weapon = -1;
+        self.player.weapon_effect = 0;
+        self.player.armour = 0;
+        self.player.wing_effect = 0;
+        self.player.mount_type = -1;
+        self.player.fast_run = false;
+        self.item_mode = SpecialItemMode::NONE;
         self.current_wear_weight = 0;
         self.current_hand_weight = 0;
-        
-        // C# lines 217-218: Clear item set tracking
-        // ItemSets.Clear(); MirSet.Clear();
-        // TODO: Set weapon, armour, mount type, etc.
-        
-        for slot in &self.equipment {
-            if let Some(item) = slot {
-                // Add weight
-                let weight = item.weight(None) as i32;
-                // TODO: Distinguish hand weight vs wear weight based on item type
-                self.current_wear_weight += weight;
-                
-                // Add item stats
-                // TODO: self.stats.add(&item.stats);
-                // TODO: self.stats.add(&item.added_stats);
-                
-                // TODO: Handle durability check (skip if dura == 0)
-                // TODO: Handle awakening stats
-                // TODO: Handle sockets
-                // TODO: Track item sets
+        self.item_sets.clear();
+        self.mir_set.clear();
+
+        for (index, slot) in self.equipment.iter().enumerate() {
+            let Some(item) = slot.as_ref() else { continue; };
+            let Some(info) = item.info.as_ref() else { continue; };
+
+            let weight = item.weight(Some(info));
+            if matches!(info.item_type, ItemType::Weapon | ItemType::Torch) {
+                self.current_hand_weight = self.current_hand_weight.saturating_add(weight);
+            } else {
+                self.current_wear_weight = self.current_wear_weight.saturating_add(weight);
             }
+
+            if item.current_dura == 0 && info.durability > 0 {
+                continue;
+            }
+
+            match info.item_type {
+                ItemType::Armour => {
+                    self.player.armour = info.shape as i32;
+                    self.player.wing_effect = info.effect;
+                }
+                ItemType::Weapon => {
+                    self.player.weapon = info.shape as i32;
+                    self.player.weapon_effect = info.effect as i32;
+                }
+                ItemType::Mount => {
+                    self.player.mount_type = info.shape;
+                }
+                _ => {}
+            }
+
+            if info.item_type == ItemType::Weapon && info.is_fishing_rod() {
+                continue;
+            }
+
+            self.stats.add_assign(&info.stats);
+            self.stats.add_assign(&item.added_stats);
+
+            let awake_ac = item.awake.get_ac();
+            self.stats.add_min_ac(awake_ac);
+            self.stats.add_max_ac(awake_ac);
+
+            let awake_mac = item.awake.get_mac();
+            self.stats.add_min_mac(awake_mac);
+            self.stats.add_max_mac(awake_mac);
+
+            let awake_dc = item.awake.get_dc();
+            self.stats.add_min_dc(awake_dc);
+            self.stats.add_max_dc(awake_dc);
+
+            let awake_mc = item.awake.get_mc();
+            self.stats.add_min_mc(awake_mc);
+            self.stats.add_max_mc(awake_mc);
+
+            let awake_sc = item.awake.get_sc();
+            self.stats.add_min_sc(awake_sc);
+            self.stats.add_max_sc(awake_sc);
+
+            let awake_hp_mp = item.awake.get_hp_mp();
+            self.stats.add_max_hp(awake_hp_mp);
+            self.stats.add_max_mp(awake_hp_mp);
+
+            self.player.map_object.light =
+                self.player.map_object.light.max(info.light as i32);
+            self.item_mode |= info.unique;
+
+            if info.can_fast_run {
+                self.player.fast_run = true;
+            }
+
+            if !(info.item_type == ItemType::Mount && !self.player.riding_mount) {
+                for socket in &item.slots {
+                    let Some(socket_item) = socket.as_ref() else { continue; };
+                    let Some(socket_info) = socket_item.info.as_ref() else { continue; };
+
+                    let socket_weight = socket_item.weight(Some(socket_info));
+                    if matches!(socket_info.item_type, ItemType::Weapon | ItemType::Torch) {
+                        self.current_hand_weight =
+                            self.current_hand_weight.saturating_add(socket_weight);
+                    } else {
+                        self.current_wear_weight =
+                            self.current_wear_weight.saturating_add(socket_weight);
+                    }
+
+                    if socket_item.current_dura == 0 && socket_info.durability > 0 {
+                        continue;
+                    }
+
+                    self.stats.add_assign(&socket_info.stats);
+                    self.stats.add_assign(&socket_item.added_stats);
+
+                    self.player.map_object.light =
+                        self.player.map_object.light.max(socket_info.light as i32);
+                    self.item_mode |= socket_info.unique;
+                }
+            }
+
+            if info.set == ItemSet::None {
+                continue;
+            }
+
+            let item_type = info.item_type;
+            if let Some(existing) = self
+                .item_sets
+                .iter_mut()
+                .find(|set| set.set == info.set && !set.is_complete() && !set.types.contains(&item_type))
+            {
+                existing.types.push(item_type);
+                existing.count = existing.count.saturating_add(1);
+            } else {
+                self.item_sets.push(ItemSets {
+                    set: info.set,
+                    types: vec![item_type],
+                    count: 1,
+                });
+            }
+
+            if info.set == ItemSet::Mir {
+                if let Ok(slot_enum) = EquipmentSlot::try_from(index as u8) {
+                    if !self.mir_set.contains(&slot_enum) {
+                        self.mir_set.push(slot_enum);
+                    }
+                }
+            }
+        }
+
+        if self.item_mode.contains(SpecialItemMode::MUSCLE) {
+            let bag = self.stats.get(Stat::BagWeight) * 2;
+            let wear = self.stats.get(Stat::WearWeight) * 2;
+            let hand = self.stats.get(Stat::HandWeight) * 2;
+
+            self.stats.set(Stat::BagWeight, bag);
+            self.stats.set(Stat::WearWeight, wear);
+            self.stats.set(Stat::HandWeight, hand);
         }
     }
     
@@ -805,10 +1011,10 @@ impl UserObject {
         }
     }
     
-    /// Refresh guild buff bonuses
+    /// Refreshes guild buffs and applies them to stats
     /// 
-    /// Mirrors C# RefreshGuildBuffs(), lines 645-663
-    fn refresh_guild_buffs(&mut self) {
+    /// Mirrors C# RefreshGuildBuffs(), lines 649-667
+    pub fn refresh_guild_buffs(&mut self) {
         // TODO: Implement when guild system is ready
         // C# checks GameScene.Scene.GuildDialog.EnabledBuffs
         // and adds each active buff's stats to the player
@@ -897,12 +1103,10 @@ impl UserObject {
     
     /// Calculate attack speed based on stats and level
     fn calculate_attack_speed(&mut self) {
-        // C#: AttackSpeed = 1400 - ((Stats[Stat.AttackSpeed] * 60) + Math.Min(370, (Level * 14)));
-        // if (AttackSpeed < 550) AttackSpeed = 550;
-        
-        let attack_speed_stat = 0; // TODO: self.stats.get(StatType::AttackSpeed);
-        let speed = 1400 - (attack_speed_stat * 60 + std::cmp::min(370, self.player.level as i32 * 14));
-        self.attack_speed = std::cmp::max(550, speed);
+        let attack_speed_stat = self.stats.get_attack_speed();
+        let level_component = std::cmp::min(370, self.player.level as i32 * 14);
+        let calculated = 1400 - (attack_speed_stat * 60 + level_component);
+        self.attack_speed = std::cmp::max(550, calculated);
     }
 
     /// Get magic by spell type
@@ -996,6 +1200,74 @@ impl UserObject {
         // For now, just refresh stats
         self.refresh_stats();
     }
+
+    /// Count free slots in an inventory array
+    /// 
+    /// Mirrors C# UserObject.FreeSpace(UserItem[] array), lines 772-785
+    fn free_space(array: &[Option<UserItem>]) -> usize {
+        array.iter().filter(|slot| slot.is_none()).count()
+    }
+
+    /// Calculate how many of an item can be gained based on free space and stack limits
+    /// 
+    /// Mirrors C# UserObject.GetMaxGain(UserItem item), lines 731-768
+    /// 
+    /// Modifies `item.count` to the maximum amount that can be gained.
+    /// If nothing can be gained, sets count to 0.
+    pub fn get_max_gain(&self, item: &mut UserItem) {
+        let free_slots = Self::free_space(&self.inventory);
+        
+        // If there are free slots, can gain full amount
+        if free_slots > 0 {
+            return;
+        }
+        
+        // No free slots - check for stackable items
+        let mut can_gain: u16 = 0;
+        let item_info = match &item.info {
+            Some(info) => info,
+            None => {
+                item.count = 0;
+                return;
+            }
+        };
+        
+        for slot in &self.inventory {
+            let Some(inv_item) = slot.as_ref() else { continue; };
+            let Some(inv_info) = inv_item.info.as_ref() else { continue; };
+            
+            // Check if same item type
+            if inv_info.index != item_info.index {
+                continue;
+            }
+            
+            // Calculate available stack space
+            let available_stack = inv_info.stack_size.saturating_sub(inv_item.count);
+            
+            if available_stack == 0 {
+                continue;
+            }
+            
+            can_gain = can_gain.saturating_add(available_stack);
+            
+            if can_gain >= item.count {
+                return;
+            }
+        }
+        
+        // Can't gain anything or partial amount
+        item.count = can_gain;
+    }
+
+    /// Clear next magic casting state
+    /// 
+    /// Mirrors C# UserObject.ClearMagic(), lines 812-817
+    pub fn clear_magic(&mut self) {
+        self.next_magic = None;
+        self.next_magic_direction = MirDirection::Up;
+        self.next_magic_location = Point::new(0, 0);
+        self.next_magic_object = None;
+    }
     
     // ==================== Delegation Methods to PlayerObject ====================
     
@@ -1068,14 +1340,282 @@ impl UserObject {
     
     /// Set appearance (delegates to PlayerObject)
     /// Updates class, gender, armour, weapon fields and recalculates offsets
+    /// 
+    /// Mirrors C# SetLibraries(), lines 128-131
     pub fn set_libraries(&mut self) {
         self.player.set_libraries();
+    }
+    
+    /// Sets visual effects based on current state (buffs, equipment, level effects)
+    /// 
+    /// Mirrors C# SetEffects(), lines 133-136 (UserObject), 631-741 (PlayerObject base implementation)
+    pub fn set_effects(&mut self) {
+        // TODO: This requires Effect system integration
+        // The C# implementation (in PlayerObject.SetEffects):
+        // 1. Clears all existing SpecialEffects (line 633-636)
+        // 2. Returns early if riding mount (line 638)
+        // 3. Adds magic shield effect if CurrentEffect == MagicShieldUp (line 640-648)
+        // 4. Adds wing effects based on WingEffect value (line 650-666)
+        // 5. Adds level effects based on LevelEffects flags (line 670-741):
+        //    - BlueDragon: Libraries.Effect, 1210, 20 frames, 3200ms
+        //    - RedDragon: Libraries.Effect, 990, 20 frames, 3200ms + secondary effect
+        //    - Mist: Libraries.Effect, 296, 32 frames, 3600ms
+        //    - Rebirth1: Libraries.Magic3, 6800, 20 frames, 3600ms
+        //    - Rebirth2: Libraries.Magic3, 6870, 19 frames, 3600ms + secondary effect
+        //    - Rebirth3: Libraries.Magic3, 6906, 19 frames, 3600ms + secondary effect
+        //    - NewBlue: Libraries.Magic3, 7040, 31 frames, 3600ms + secondary effect
+        //    - YellowDragon: Libraries.Magic3, 7120, 31 frames, 3600ms + secondary effect
+        //    - Phoenix: Libraries.Magic3, 6970, 26 frames, 3600ms + secondary effect
+        // Each effect uses SpecialEffect with repeat, delay, and specific animation parameters
+        
+        // For now, this is a placeholder that would delegate to PlayerObject
+        // Once the Effect system is implemented, this will:
+        // - Call self.player.set_effects() for base implementation
+        // - Add any UserObject-specific effects
+    }
+    
+    // ==================== Additional Helper Methods ====================
+    
+    /// Find an item in inventory by unique ID
+    pub fn find_inventory_item(&self, unique_id: u64) -> Option<(usize, &UserItem)> {
+        self.inventory.iter()
+            .enumerate()
+            .find_map(|(index, slot)| {
+                slot.as_ref().and_then(|item| {
+                    if item.unique_id == unique_id {
+                        Some((index, item))
+                    } else {
+                        None
+                    }
+                })
+            })
+    }
+    
+    /// Find an item in equipment by unique ID
+    pub fn find_equipment_item(&self, unique_id: u64) -> Option<(usize, &UserItem)> {
+        self.equipment.iter()
+            .enumerate()
+            .find_map(|(index, slot)| {
+                slot.as_ref().and_then(|item| {
+                    if item.unique_id == unique_id {
+                        Some((index, item))
+                    } else {
+                        None
+                    }
+                })
+            })
+    }
+    
+    /// Find an item in quest inventory by unique ID
+    pub fn find_quest_item(&self, unique_id: u64) -> Option<(usize, &UserItem)> {
+        self.quest_inventory.iter()
+            .enumerate()
+            .find_map(|(index, slot)| {
+                slot.as_ref().and_then(|item| {
+                    if item.unique_id == unique_id {
+                        Some((index, item))
+                    } else {
+                        None
+                    }
+                })
+            })
+    }
+    
+    /// Check if player has a specific spell/magic learned
+    pub fn has_magic(&self, spell: Spell) -> bool {
+        self.magics.iter().any(|m| m.spell == spell)
+    }
+    
+    /// Get the count of a specific item type in inventory
+    pub fn count_item(&self, item_index: i32) -> u16 {
+        self.inventory.iter()
+            .filter_map(|slot| slot.as_ref())
+            .filter(|item| {
+                item.info.as_ref().map_or(false, |info| info.index == item_index)
+            })
+            .map(|item| item.count)
+            .sum()
+    }
+    
+    /// Check if inventory has enough free space for n items
+    pub fn has_space_for(&self, count: usize) -> bool {
+        let free_slots = Self::free_space(&self.inventory);
+        free_slots >= count
+    }
+    
+    /// Get current HP percentage (0-100)
+    pub fn hp_percent(&self) -> u8 {
+        let max_hp = self.stats.get_max_hp();
+        if max_hp <= 0 {
+            return 0;
+        }
+        ((self.hp as f32 / max_hp as f32) * 100.0).min(100.0) as u8
+    }
+    
+    /// Get current MP percentage (0-100)
+    pub fn mp_percent(&self) -> u8 {
+        let max_mp = self.stats.get_max_mp();
+        if max_mp <= 0 {
+            return 0;
+        }
+        ((self.mp as f32 / max_mp as f32) * 100.0).min(100.0) as u8
+    }
+    
+    /// Check if player is overweight
+    pub fn is_overweight(&self) -> bool {
+        let max_bag_weight = self.stats.get(Stat::BagWeight);
+        let max_wear_weight = self.stats.get(Stat::WearWeight);
+        let max_hand_weight = self.stats.get(Stat::HandWeight);
+        
+        self.current_bag_weight > max_bag_weight ||
+        self.current_wear_weight > max_wear_weight ||
+        self.current_hand_weight > max_hand_weight
+    }
+    
+    /// Get total gold amount
+    pub fn gold(&self) -> u32 {
+        self.gold
+    }
+    
+    /// Get total credit amount
+    pub fn credit(&self) -> u32 {
+        self.credit
+    }
+    
+    /// Check if player can trade
+    pub fn can_trade(&self) -> bool {
+        self.allow_trade && !self.trade_locked
+    }
+    
+    /// Get a mutable reference to inventory item at slot
+    pub fn get_inventory_item_mut(&mut self, slot: usize) -> Option<&mut UserItem> {
+        self.inventory.get_mut(slot).and_then(|s| s.as_mut())
+    }
+    
+    /// Get a mutable reference to equipment item at slot
+    pub fn get_equipment_item_mut(&mut self, slot: EquipmentSlot) -> Option<&mut UserItem> {
+        self.equipment.get_mut(slot as usize).and_then(|s| s.as_mut())
+    }
+    
+    /// Get a mutable reference to quest inventory item at slot
+    pub fn get_quest_item_mut(&mut self, slot: usize) -> Option<&mut UserItem> {
+        self.quest_inventory.get_mut(slot).and_then(|s| s.as_mut())
+    }
+    
+    /// Check if a quest is completed
+    pub fn is_quest_completed(&self, quest_id: i32) -> bool {
+        self.completed_quests.contains(&quest_id)
+    }
+    
+    /// Check if a quest is active
+    pub fn has_active_quest(&self, quest_id: i32) -> bool {
+        self.current_quests.iter().any(|q| q.id == quest_id)
+    }
+    
+    // ==================== Action & Animation System ====================
+    
+    /// Set the current action with queued action handling
+    /// 
+    /// Mirrors C# UserObject.SetAction(), lines 787-800
+    /// This is a public wrapper around the private set_action that handles queued actions
+    pub fn perform_action(&mut self) {
+        // C# lines 789-797: Handle queued actions before setting action
+        // if (QueuedAction != null && !GameScene.Observing)
+        if let Some(queued) = self.queued_action.take() {
+            // Check if action feed is empty or only contains a stance action
+            let should_add_queued = self.player.map_object.action_feed.is_empty() || 
+                (self.player.map_object.action_feed.len() == 1 && 
+                 self.player.map_object.action_feed.first()
+                    .map_or(false, |a| a.action == MirAction::Stance));
+            
+            if should_add_queued {
+                self.player.map_object.action_feed.clear();
+                self.player.map_object.action_feed.push(queued);
+                // Queued action is consumed (already taken above)
+            } else {
+                // Put it back if we can't use it yet
+                self.queued_action = Some(queued);
+            }
+        }
+        
+        // C# line 799: Call base.SetAction()
+        // Call the private set_action which sets initial standing pose
+        self.set_action();
+    }
+    
+    /// Process animation frames with user-specific logic
+    /// 
+    /// Mirrors C# UserObject.ProcessFrames(), lines 801-810
+    pub fn process_animation(&mut self, delta_time: f32) {
+        // C# line 803: bool clear = CMain.Time >= NextMotion;
+        // In Rust, we track motion completion through the animation system
+        // For now, we'll update animation and check if frame completed
+        let motion_complete = {
+            // Update frame animation
+            self.player.update_frame_animation(delta_time);
+            // Check if animation cycle completed (simplified check)
+            // TODO: Proper motion timing when animation system is complete
+            false // Placeholder
+        };
+        
+        // C# line 807: if (clear) QueuedAction = null;
+        if motion_complete {
+            self.queued_action = None;
+        }
+        
+        // C# line 808: Check if should set action when in standing/idle states
+        let current_action = self.player.map_object.current_action();
+        let is_standing = matches!(
+            current_action,
+            MirAction::Standing | MirAction::MountStanding | 
+            MirAction::Stance | MirAction::Stance2 | MirAction::DashFail
+        );
+        
+        let has_pending_action = self.queued_action.is_some() || 
+            !self.player.map_object.action_feed.is_empty();
+        
+        if is_standing && has_pending_action {
+            self.perform_action();
+        }
+    }
+    
+    /// Queue an action to be performed next
+    /// 
+    /// Used for combo attacks and delayed actions
+    pub fn queue_action(&mut self, action: QueuedAction) {
+        self.queued_action = Some(action);
+    }
+    
+    /// Check if there's a queued action
+    pub fn has_queued_action(&self) -> bool {
+        self.queued_action.is_some()
+    }
+    
+    /// Take the queued action (consumes it)
+    pub fn take_queued_action(&mut self) -> Option<QueuedAction> {
+        self.queued_action.take()
+    }
+    
+    /// Add an action to the action feed
+    pub fn add_action(&mut self, action: QueuedAction) {
+        self.player.map_object.action_feed.push(action);
+    }
+    
+    /// Clear all queued actions
+    pub fn clear_actions(&mut self) {
+        self.player.map_object.action_feed.clear();
+        self.queued_action = None;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::objects::stats_ext::StatsExt;
+    use mir2_shared::{
+        data::item::ItemInfo,
+        enums::{AwakeType, EquipmentSlot, ItemType, SpecialItemMode, Stat},
+    };
 
     #[test]
     fn test_user_object_creation() {
@@ -1091,4 +1631,235 @@ mod tests {
         assert!(user.is_inventory_full() == false);
         assert_eq!(user.find_empty_inventory_slot(), Some(0));
     }
+
+    #[test]
+    fn refresh_equipment_stats_applies_item_and_awake_bonuses() {
+        let mut user = UserObject::new(1);
+        user.stats = Stats::default();
+
+        let mut armour_info = ItemInfo::default();
+        armour_info.item_type = ItemType::Armour;
+        armour_info.shape = 5;
+        armour_info.effect = 3;
+        armour_info.weight = 10;
+        armour_info.durability = 10;
+        armour_info.light = 5;
+        armour_info.can_fast_run = true;
+        armour_info.stats.set(Stat::MinAC, 2);
+        armour_info.stats.set(Stat::MaxAC, 5);
+
+        let mut armour_item = UserItem::with_info(armour_info);
+        armour_item.current_dura = 10;
+        armour_item.max_dura = 10;
+        armour_item.added_stats.set(Stat::MinAC, 1);
+        armour_item.added_stats.set(Stat::MaxAC, 2);
+        armour_item.awake.awake_type = AwakeType::Ac;
+        armour_item.awake.levels = vec![1, 1];
+
+        user.equipment[EquipmentSlot::Armour as usize] = Some(armour_item);
+
+        let mut ring_info = ItemInfo::default();
+        ring_info.item_type = ItemType::Ring;
+        ring_info.weight = 1;
+        ring_info.durability = 1;
+        ring_info.unique = SpecialItemMode::MUSCLE;
+        ring_info.stats.set(Stat::BagWeight, 10);
+        ring_info.stats.set(Stat::HandWeight, 5);
+        ring_info.stats.set(Stat::WearWeight, 6);
+
+        let mut ring_item = UserItem::with_info(ring_info);
+        ring_item.current_dura = 1;
+        ring_item.max_dura = 1;
+
+        user.equipment[EquipmentSlot::RingL as usize] = Some(ring_item);
+
+        user.refresh_equipment_stats();
+
+        assert_eq!(user.current_wear_weight, 11);
+        assert_eq!(user.current_hand_weight, 0);
+        assert_eq!(user.player.armour, 5);
+        assert_eq!(user.player.wing_effect, 3);
+        assert!(user.player.fast_run);
+        assert_eq!(user.player.map_object.light, 5);
+        assert_eq!(user.stats.get_min_ac(), 5);
+        assert_eq!(user.stats.get_max_ac(), 9);
+        assert!(user.item_mode.contains(SpecialItemMode::MUSCLE));
+        assert_eq!(user.stats.get_bag_weight(), 20);
+        assert_eq!(user.stats.get_hand_weight(), 10);
+        assert_eq!(user.stats.get_wear_weight(), 12);
+    }
+
+    #[test]
+    fn calculate_attack_speed_matches_csharp_logic() {
+        let mut user = UserObject::new(1);
+        user.stats.set(Stat::AttackSpeed, 5);
+        user.player.level = 10;
+
+        user.calculate_attack_speed();
+        assert_eq!(user.attack_speed, 960);
+
+        user.stats.set(Stat::AttackSpeed, 20);
+        user.player.level = 90;
+        user.calculate_attack_speed();
+        assert_eq!(user.attack_speed, 550);
+    }
+
+    #[test]
+    fn test_free_space() {
+        let mut user = UserObject::new(1);
+        // Initially all slots are empty (46 slots)
+        assert_eq!(UserObject::free_space(&user.inventory), 46);
+
+        // Fill some slots
+        let mut item_info = ItemInfo::default();
+        item_info.stack_size = 10;
+        let item = UserItem::with_info(item_info);
+        
+        user.inventory[0] = Some(item.clone());
+        user.inventory[1] = Some(item.clone());
+        user.inventory[2] = Some(item.clone());
+        
+        assert_eq!(UserObject::free_space(&user.inventory), 43);
+    }
+
+    #[test]
+    fn test_get_max_gain() {
+        let mut user = UserObject::new(1);
+        
+        // Stackable items with no existing stacks - returns early
+        let mut stackable = ItemInfo::default();
+        stackable.index = 100;
+        stackable.stack_size = 10;
+        stackable.item_type = ItemType::Potion;
+        stackable.shape = 1;
+        
+        let mut test_item = UserItem::with_info(stackable.clone());
+        test_item.count = 10;
+        
+        // With free space, count remains unchanged
+        user.get_max_gain(&mut test_item);
+        assert_eq!(test_item.count, 10);
+
+        // Fill all inventory slots
+        for i in 0..46 {
+            let mut filler = ItemInfo::default();
+            filler.index = 999; // Different item
+            filler.stack_size = 1;
+            user.inventory[i] = Some(UserItem::with_info(filler));
+        }
+        
+        // Now with no free space and no matching items, count = 0
+        test_item.count = 10;
+        user.get_max_gain(&mut test_item);
+        assert_eq!(test_item.count, 0);
+
+        // Add some partial stacks of the same item
+        let mut item = UserItem::with_info(stackable.clone());
+        item.count = 5; // Partial stack (can add 5 more)
+        user.inventory[0] = Some(item.clone());
+        
+        test_item.count = 10;
+        user.get_max_gain(&mut test_item);
+        assert_eq!(test_item.count, 5); // Can gain 5
+
+        item.count = 3; // Another partial stack (can add 7 more)
+        user.inventory[1] = Some(item.clone());
+        
+        test_item.count = 20;
+        user.get_max_gain(&mut test_item);
+        assert_eq!(test_item.count, 12); // Can gain 5 + 7 = 12
+
+        // Add a full stack - no change
+        item.count = 10;
+        user.inventory[2] = Some(item.clone());
+        
+        test_item.count = 20;
+        user.get_max_gain(&mut test_item);
+        assert_eq!(test_item.count, 12); // Still 12, no change from full stack
+    }
+
+    #[test]
+    fn test_clear_magic() {
+        use mir2_shared::enums::MirDirection;
+        let mut user = UserObject::new(1);
+        
+        // Set up magic state - note: would need to properly create ClientMagic
+        // For now just test the fields we can set
+        user.next_magic_location = Point::new(10, 20);
+        user.next_magic_object = Some(123);
+        user.next_magic_direction = MirDirection::Up;
+        
+        // Clear magic
+        user.clear_magic();
+        
+        // Verify all fields are cleared
+        assert!(user.next_magic.is_none());
+        assert_eq!(user.next_magic_location.x, 0);
+        assert_eq!(user.next_magic_location.y, 0);
+        assert!(user.next_magic_object.is_none());
+        assert_eq!(user.next_magic_direction, MirDirection::Up); // Direction unchanged
+    }
+
+    #[test]
+    fn test_process_frames_with_time() {
+        use mir2_shared::enums::MirAction;
+        
+        let mut user = UserObject::new(1);
+        
+        // Set up action with timing
+        user.player.current_action = MirAction::Standing;
+        user.player.next_motion = 1000; // Next motion at time 1000
+        user.player.frame_interval = 100;
+        
+        // Create a simple frame
+        let mut frame = crate::objects::Frame::default();
+        frame.count = 4;
+        frame.interval = 100;
+        user.player.frame = Some(frame);
+        
+        // Time before next_motion - should not update
+        user.process_frames(500);
+        assert_eq!(user.player.frame_index, 0);
+        
+        // Time at next_motion - should update frame
+        user.player.frame_index = 0;
+        user.process_frames(1000);
+        assert_eq!(user.player.frame_index, 1);
+        
+        // Continue updating
+        user.process_frames(1100);
+        assert_eq!(user.player.frame_index, 2);
+    }
+
+    #[test]
+    fn test_action_queue_processing() {
+        use mir2_shared::enums::{MirAction, MirDirection};
+        
+        let mut user = UserObject::new(1);
+        
+        // Add actions to queue
+        user.player.action_feed.push(crate::objects::QueuedAction {
+            action: MirAction::Walking,
+            direction: MirDirection::Up,
+            location: Point::new(100, 100),
+        });
+        
+        user.player.action_feed.push(crate::objects::QueuedAction {
+            action: MirAction::Standing,
+            direction: MirDirection::Up,
+            location: Point::new(100, 101),
+        });
+        
+        // Set action should process first queued action
+        assert_eq!(user.player.action_feed.len(), 2);
+        user.set_action();
+        assert_eq!(user.player.current_action, MirAction::Walking);
+        assert_eq!(user.player.action_feed.len(), 1);
+        
+        // Set action again should process second
+        user.set_action();
+        assert_eq!(user.player.current_action, MirAction::Standing);
+        assert_eq!(user.player.action_feed.len(), 0);
+    }
+
 }

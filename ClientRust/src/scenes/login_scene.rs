@@ -4,6 +4,7 @@
 use mir2_shared::packets::CharacterSummary;
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
+use super::dialogs::{LoginDialog, NewAccountDialog, ChangePasswordDialog};
 use crate::network::game_client::GameEvent;
 
 #[derive(Debug, Clone)]
@@ -19,10 +20,7 @@ pub struct LoginScene {
     pub connecting: bool,
     pub connect_attempts: u32,
     
-    // UI state
-    pub username: String,
-    pub password: String,
-    pub remember_account: bool,
+    // UI state  
     pub version_checked: bool,
     pub version_valid: bool,
     pub login_enabled: bool,
@@ -39,10 +37,10 @@ pub struct LoginScene {
     pub password_change_ban_info: Option<BanInfo>,
     pub characters: Vec<CharacterSummary>,
     
-    // Dialogs (TODO: implement when dialog system ready)
-    // login_dialog: LoginDialog,
-    // new_account_dialog: Option<NewAccountDialog>,
-    // change_password_dialog: Option<ChangePasswordDialog>,
+    // Dialogs
+    pub login_dialog: LoginDialog,
+    pub new_account_dialog: Option<NewAccountDialog>,
+    pub change_password_dialog: Option<ChangePasswordDialog>,
 }
 
 impl LoginScene {
@@ -51,9 +49,6 @@ impl LoginScene {
         Self {
             connecting: false,
             connect_attempts: 0,
-            username: String::new(),
-            password: String::new(),
-            remember_account: false,
             version_checked: false,
             version_valid: false,
             login_enabled: false,
@@ -67,7 +62,15 @@ impl LoginScene {
             login_ban_info: None,
             password_change_ban_info: None,
             characters: Vec::new(),
+            login_dialog: LoginDialog::default(),
+            new_account_dialog: None,
+            change_password_dialog: None,
         }
+    }
+    
+    /// Load settings
+    pub fn load_settings(&mut self, account_id: String, password: String) {
+        self.login_dialog.load_from_settings(account_id, password);
     }
     
     pub fn record_status<S: Into<String>>(&mut self, message: S) {
@@ -261,38 +264,51 @@ impl LoginScene {
     
     /// Submit login credentials
     pub fn submit_login(&mut self) {
-        if self.username.is_empty() || self.password.is_empty() {
+        if let Some((username, _password)) = self.login_dialog.get_credentials() {
+            // TODO: Send login packet with username and password
+            self.connecting = true;
+            self.login_enabled = false;
+            self.ready_for_character_select = false;
+            self.last_login_result = None;
+            self.require_password_change = false;
+            let status = format!("Submitting login for {}", username);
+            println!("{}", status);
+            self.record_status(status);
+        } else {
             let status = "Username and password required";
             println!("{}", status);
             self.record_status(status);
-            return;
         }
-        
-        // TODO: Send login packet
-        self.connecting = true;
-        self.login_enabled = false;
-        self.ready_for_character_select = false;
-        self.last_login_result = None;
-        self.require_password_change = false;
-        let status = format!("Submitting login for {}", self.username);
-        println!("{}", status);
-        self.record_status(status);
     }
     
     /// Open new account dialog
     pub fn open_new_account_dialog(&mut self) {
-        let status = "Opening new account dialog";
-        println!("{}", status);
-        self.record_status(status);
-        // TODO: Show new account dialog
+        self.login_dialog.hide();
+        let mut dialog = NewAccountDialog::default();
+        dialog.show();
+        self.new_account_dialog = Some(dialog);
+        self.record_status("Opening new account dialog");
     }
     
     /// Open change password dialog
-    pub fn open_change_password_dialog(&mut self) {
-        let status = "Opening change password dialog";
-        println!("{}", status);
-        self.record_status(status);
-        // TODO: Show change password dialog
+    pub fn open_change_password_dialog(&mut self, autofill_id: Option<String>, autofill_password: Option<String>) {
+        self.login_dialog.hide();
+        let mut dialog = ChangePasswordDialog::default();
+        dialog.show(autofill_id, autofill_password);
+        self.change_password_dialog = Some(dialog);
+        self.record_status("Opening change password dialog");
+    }
+    
+    /// Close new account dialog
+    pub fn close_new_account_dialog(&mut self) {
+        self.new_account_dialog = None;
+        self.login_dialog.show();
+    }
+    
+    /// Close change password dialog
+    pub fn close_change_password_dialog(&mut self) {
+        self.change_password_dialog = None;
+        self.login_dialog.show();
     }
 }
 

@@ -1,7 +1,7 @@
 // Character Deletion Dialog - 角色删除确认对话框
 // 对应 C# 版本: Client/MirScenes/SelectScene.cs DeleteCharacter()
 
-use crate::scenes::select_scene::SelectCharacter;
+use crate::scenes::SelectCharacter;
 
 /// 角色删除确认对话框状态
 #[derive(Debug, Clone)]

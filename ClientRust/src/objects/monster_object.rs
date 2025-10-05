@@ -161,7 +161,7 @@ impl MonsterObject {
         
         self.effect = info.effect;
         self.map_object.set_ai(info.ai);
-        self.map_object.set_light(info.light);
+        self.map_object.set_light(info.light as i32);
         
         self.map_object.set_direction(info.direction);
         self.map_object.set_dead(info.dead);

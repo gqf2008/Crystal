@@ -16,7 +16,10 @@ pub mod program;
 // 主要功能模块
 pub mod graphics;
 pub mod network;
+pub mod objects;
 pub mod utils;
+pub mod scenes;
+pub mod sounds;
 
 // 重新导出常用类型
 pub use error::{ClientError, ClientResult};

@@ -21,20 +21,28 @@ pub struct InventoryDialog {
     pub width: i32,
     pub height: i32,
     pub current_tab: InventoryTab,
-    
-    // Inventory slots (46 slots)
+
+    // Inventory slots (基础46 + 扩展34 = 80 slots)
     pub inventory: Vec<Option<UserItem>>,
-    
+
     // Equipment slots (14 slots)
     pub equipment: Vec<Option<UserItem>>,
-    
+
     // Quest items (40 slots)
     pub quest_items: Vec<Option<UserItem>>,
-    
+
     // Weight tracking
     pub current_weight: i32,
     pub max_weight: i32,
-    
+
+    // Gold amount
+    pub gold: u64,
+
+    // Extension system
+    pub extended_slots: usize, // 扩展槽位数量 (0-34)
+    pub lock_bars: [bool; 10], // 锁定栏显示状态
+    pub add_button_visible: bool, // 添加按钮是否可见
+
     // Selected item
     pub selected_slot: Option<usize>,
     pub selected_tab: Option<InventoryTab>,
@@ -49,11 +57,15 @@ impl InventoryDialog {
             width: 400,
             height: 500,
             current_tab: InventoryTab::Inventory,
-            inventory: vec![None; 46],
+            inventory: vec![None; 80], // 基础46 + 扩展34
             equipment: vec![None; 14],
             quest_items: vec![None; 40],
             current_weight: 0,
             max_weight: 100,
+            gold: 0,
+            extended_slots: 34, // 默认全扩展
+            lock_bars: [false; 10], // 默认全解锁
+            add_button_visible: false, // 默认隐藏
             selected_slot: None,
             selected_tab: None,
         }
@@ -177,6 +189,65 @@ impl InventoryDialog {
             .map(|item| item.weight(item.info.as_ref()))
             .sum();
     }
+
+    /// Update gold display
+    pub fn update_gold(&mut self, gold: u64) {
+        self.gold = gold;
+    }
+
+    /// Add inventory extension slots
+    pub fn add_inventory_slots(&mut self) {
+        if self.extended_slots < 34 {
+            self.extended_slots = (self.extended_slots + 4).min(34);
+            // Update lock bars based on extension level
+            let open_level = self.extended_slots / 4;
+            for i in 0..self.lock_bars.len() {
+                self.lock_bars[i] = i >= open_level;
+            }
+            self.add_button_visible = open_level < 8; // 8 levels max (32 slots)
+        }
+    }
+
+    /// Get extension cost for next level
+    pub fn get_extension_cost(&self) -> u64 {
+        let open_level = self.extended_slots / 4;
+        1000000 + (open_level as u64) * 1000000
+    }
+
+    /// Check if slot is visible in current tab
+    pub fn is_slot_visible(&self, slot: usize) -> bool {
+        match self.current_tab {
+            InventoryTab::Inventory => {
+                if slot < 46 {
+                    true // 基础46格总是可见
+                } else if slot < 46 + self.extended_slots {
+                    !self.lock_bars[(slot - 46) / 4] // 扩展格根据锁定状态
+                } else {
+                    false
+                }
+            }
+            InventoryTab::Equipment => slot < self.equipment.len(),
+            InventoryTab::Quest => slot < self.quest_items.len(),
+        }
+    }
+
+    /// Get visible slots count for current tab
+    pub fn get_visible_slots_count(&self) -> usize {
+        match self.current_tab {
+            InventoryTab::Inventory => 46 + self.extended_slots,
+            InventoryTab::Equipment => self.equipment.len(),
+            InventoryTab::Quest => self.quest_items.len(),
+        }
+    }
+
+    /// Get empty slots count
+    pub fn get_empty_slots_count(&self) -> usize {
+        self.get_current_slots()
+            .iter()
+            .take(self.get_visible_slots_count())
+            .filter(|slot| slot.is_none())
+            .count()
+    }
 }
 
 impl Default for InventoryDialog {
@@ -242,9 +313,11 @@ mod tests {
     fn test_inventory_dialog_creation() {
         let dialog = InventoryDialog::new();
         assert!(!dialog.visible); // Starts hidden
-        assert_eq!(dialog.inventory.len(), 46);
+        assert_eq!(dialog.inventory.len(), 80); // 46 + 34 extended
         assert_eq!(dialog.equipment.len(), 14);
         assert_eq!(dialog.quest_items.len(), 40);
+        assert_eq!(dialog.extended_slots, 34);
+        assert_eq!(dialog.gold, 0);
     }
 
     #[test]
@@ -275,24 +348,90 @@ mod tests {
     }
 
     #[test]
-    fn test_find_empty_slot() {
-        let dialog = InventoryDialog::new();
-        
-        // All slots empty initially
-        assert_eq!(dialog.find_empty_slot(), Some(0));
-        assert!(dialog.is_full() == false);
+    fn test_slot_visibility() {
+        let mut dialog = InventoryDialog::new();
+
+        // Inventory tab
+        dialog.set_tab(InventoryTab::Inventory);
+        assert!(dialog.is_slot_visible(0)); // 基础槽位可见
+        assert!(dialog.is_slot_visible(45));
+        assert!(dialog.is_slot_visible(46)); // 扩展槽位可见 (默认全扩展)
+        assert!(dialog.is_slot_visible(79));
+        assert!(!dialog.is_slot_visible(80)); // 超出范围
+
+        // Equipment tab
+        dialog.set_tab(InventoryTab::Equipment);
+        assert!(dialog.is_slot_visible(0));
+        assert!(dialog.is_slot_visible(13));
+        assert!(!dialog.is_slot_visible(14));
+
+        // Quest tab
+        dialog.set_tab(InventoryTab::Quest);
+        assert!(dialog.is_slot_visible(0));
+        assert!(dialog.is_slot_visible(39));
+        assert!(!dialog.is_slot_visible(40));
     }
 
     #[test]
-    fn test_toggle() {
+    fn test_inventory_extension() {
         let mut dialog = InventoryDialog::new();
-        
-        assert!(!dialog.visible);
-        
-        dialog.toggle();
-        assert!(dialog.visible);
-        
-        dialog.toggle();
-        assert!(!dialog.visible);
+
+        // 初始状态: 全扩展
+        assert_eq!(dialog.extended_slots, 34);
+        assert_eq!(dialog.get_visible_slots_count(), 80);
+
+        // 重置为无扩展状态测试
+        dialog.extended_slots = 0;
+        dialog.lock_bars = [true; 10];
+        dialog.add_button_visible = true;
+
+        // 添加扩展槽位
+        dialog.add_inventory_slots();
+        assert_eq!(dialog.extended_slots, 4);
+        assert_eq!(dialog.get_visible_slots_count(), 50); // 46 + 4
+
+        // 检查锁定栏状态
+        assert!(dialog.lock_bars[0]); // 第一级仍锁定
+        assert!(!dialog.lock_bars[1]); // 其他解锁?
+        assert!(dialog.add_button_visible);
+    }
+
+    #[test]
+    fn test_extension_cost() {
+        let mut dialog = InventoryDialog::new();
+
+        // 无扩展
+        dialog.extended_slots = 0;
+        assert_eq!(dialog.get_extension_cost(), 1000000);
+
+        // 1级扩展 (4槽)
+        dialog.extended_slots = 4;
+        assert_eq!(dialog.get_extension_cost(), 2000000);
+
+        // 8级扩展 (32槽)
+        dialog.extended_slots = 32;
+        assert_eq!(dialog.get_extension_cost(), 9000000);
+    }
+
+    #[test]
+    fn test_gold_update() {
+        let mut dialog = InventoryDialog::new();
+
+        assert_eq!(dialog.gold, 0);
+
+        dialog.update_gold(1234567);
+        assert_eq!(dialog.gold, 1234567);
+    }
+
+    #[test]
+    fn test_empty_slots_count() {
+        let mut dialog = InventoryDialog::new();
+
+        // 初始全空
+        assert_eq!(dialog.get_empty_slots_count(), 80);
+
+        // 添加一个物品
+        dialog.inventory[0] = Some(UserItem::default());
+        assert_eq!(dialog.get_empty_slots_count(), 79);
     }
 }

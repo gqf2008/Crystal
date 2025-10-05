@@ -88,7 +88,7 @@ pub struct MapObject {
     
     // ==================== Action System (CORE!) ====================
     // C# line 97: public List<QueuedAction> ActionFeed = new List<QueuedAction>();
-    pub action_feed: Vec<super::user_object::QueuedAction>,  // NEW
+    pub action_feed: Vec<super::player_object::QueuedAction>,  // NEW
     
     // ==================== Effects & Buffs ====================
     // C# line 104: public List<Effect> Effects = new List<Effect>();
@@ -473,7 +473,7 @@ impl MapObject {
     }
     
     /// Get light radius
-    pub fn light(&self) -> u8 {
+    pub fn light(&self) -> i32 {
         self.light
     }
     
@@ -642,7 +642,7 @@ impl MapObject {
     }
     
     /// Set light radius
-    pub fn set_light(&mut self, light: u8) {
+    pub fn set_light(&mut self, light: i32) {
         self.light = light;
     }
     

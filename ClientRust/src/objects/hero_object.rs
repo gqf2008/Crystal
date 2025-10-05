@@ -146,7 +146,7 @@ impl HeroObject {
         self.player.armour = player.armour as i32;
         
         // State
-        self.player.map_object.set_light(player.light);
+        self.player.map_object.set_light(player.light as i32);
         self.player.map_object.set_poison(player.poison);
         self.player.map_object.set_dead(player.dead);
         self.player.map_object.set_hidden(player.hidden);

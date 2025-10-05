@@ -295,3 +295,185 @@ impl Packet for PickUp {
         Ok(())
     }
 }
+
+/// Client requests rented items list
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GetRentedItems;
+
+impl Packet for GetRentedItems {
+    const OPCODE: i16 = ClientPacketIds::GetRentedItems as i16;
+
+    fn read_body<R: Read>(_: &mut R) -> SharedResult<Self> {
+        Ok(Self)
+    }
+
+    fn write_body<W: Write>(&self, _: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
+}
+
+/// Client requests item rental
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ItemRentalRequest;
+
+impl Packet for ItemRentalRequest {
+    const OPCODE: i16 = ClientPacketIds::ItemRentalRequest as i16;
+
+    fn read_body<R: Read>(_: &mut R) -> SharedResult<Self> {
+        Ok(Self)
+    }
+
+    fn write_body<W: Write>(&self, _: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
+}
+
+/// Client sets rental fee amount
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemRentalFee {
+    pub amount: u32,
+}
+
+impl Packet for ItemRentalFee {
+    const OPCODE: i16 = ClientPacketIds::ItemRentalFee as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let amount = reader.read_u32::<LittleEndian>()?;
+        Ok(Self { amount })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.amount)?;
+        Ok(())
+    }
+}
+
+/// Client sets rental period in days
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemRentalPeriod {
+    pub days: u32,
+}
+
+impl Packet for ItemRentalPeriod {
+    const OPCODE: i16 = ClientPacketIds::ItemRentalPeriod as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let days = reader.read_u32::<LittleEndian>()?;
+        Ok(Self { days })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.days)?;
+        Ok(())
+    }
+}
+
+/// Client deposits item for rental
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DepositRentalItem {
+    pub from: i32,
+    pub to: i32,
+}
+
+impl Packet for DepositRentalItem {
+    const OPCODE: i16 = ClientPacketIds::DepositRentalItem as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let from = reader.read_i32::<LittleEndian>()?;
+        let to = reader.read_i32::<LittleEndian>()?;
+        Ok(Self { from, to })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
+        Ok(())
+    }
+}
+
+/// Client retrieves rental item
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetrieveRentalItem {
+    pub from: i32,
+    pub to: i32,
+}
+
+impl Packet for RetrieveRentalItem {
+    const OPCODE: i16 = ClientPacketIds::RetrieveRentalItem as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let from = reader.read_i32::<LittleEndian>()?;
+        let to = reader.read_i32::<LittleEndian>()?;
+        Ok(Self { from, to })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
+        Ok(())
+    }
+}
+
+/// Client cancels item rental
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CancelItemRental;
+
+impl Packet for CancelItemRental {
+    const OPCODE: i16 = ClientPacketIds::CancelItemRental as i16;
+
+    fn read_body<R: Read>(_: &mut R) -> SharedResult<Self> {
+        Ok(Self)
+    }
+
+    fn write_body<W: Write>(&self, _: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
+}
+
+/// Client locks rental fee
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ItemRentalLockFee;
+
+impl Packet for ItemRentalLockFee {
+    const OPCODE: i16 = ClientPacketIds::ItemRentalLockFee as i16;
+
+    fn read_body<R: Read>(_: &mut R) -> SharedResult<Self> {
+        Ok(Self)
+    }
+
+    fn write_body<W: Write>(&self, _: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
+}
+
+/// Client locks rental item
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ItemRentalLockItem;
+
+impl Packet for ItemRentalLockItem {
+    const OPCODE: i16 = ClientPacketIds::ItemRentalLockItem as i16;
+
+    fn read_body<R: Read>(_: &mut R) -> SharedResult<Self> {
+        Ok(Self)
+    }
+
+    fn write_body<W: Write>(&self, _: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
+}
+
+/// Client confirms item rental
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfirmItemRental;
+
+impl Packet for ConfirmItemRental {
+    const OPCODE: i16 = ClientPacketIds::ConfirmItemRental as i16;
+
+    fn read_body<R: Read>(_: &mut R) -> SharedResult<Self> {
+        Ok(Self)
+    }
+
+    fn write_body<W: Write>(&self, _: &mut W) -> SharedResult<()> {
+        Ok(())
+    }
+}

@@ -5,14 +5,14 @@
 // It contains all player-specific fields and methods.
 
 use std::time::Instant;
+use std::collections::HashMap;
 
 use mir2_shared::{
-    enums::{MirClass, MirDirection, MirGender, Spell, SpellEffect},
+    enums::{MirAction, MirClass, MirDirection, MirGender, Spell, SpellEffect},
     Point,
 };
 
 use super::map_object::MapObject;
-use super::monster_object::FrameSet;
 use super::effect::Effect;
 use super::frames::Frame;
 
@@ -83,7 +83,8 @@ pub struct PlayerObject {
     
     // ==================== Animation ====================
     /// Frame set for animations
-    pub frames: FrameSet,
+    /// C# equivalent: public FrameSet Frames (which is Dictionary<MirAction, Frame>)
+    pub frames: HashMap<MirAction, Frame>,
     
     /// Current animation frame
     /// C# has: public Frame Frame
@@ -234,6 +235,19 @@ pub struct PlayerObject {
     /// Guild rank name
     pub guild_rank_name: String,
     
+    // ==================== Action System ====================
+    /// Action queue for delayed/queued actions
+    /// C# equivalent: public List<QueuedAction> ActionFeed
+    pub action_feed: Vec<QueuedAction>,
+    
+    /// Current action being performed
+    /// C# equivalent: public MirAction CurrentAction (in MapObject)
+    pub current_action: MirAction,
+    
+    /// Time when next motion update should occur
+    /// C# equivalent: public long NextMotion (in MapObject)
+    pub next_motion: u64,
+    
     // ==================== Level Effects (TODO: Phase 3) ====================
     // Level effects flags (visual effects for high-level players)
     // C# has: public LevelEffects LevelEffects
@@ -263,7 +277,7 @@ impl PlayerObject {
             die_sound: 0,
             flinch_sound: 0,
             attack_sound: 0,
-            frames: FrameSet::default(),
+            frames: HashMap::new(),
             frame: None,  // Set by SetLibraries() or action changes
             wing_frame: None,
             frame_index: 0,
@@ -309,6 +323,9 @@ impl PlayerObject {
             slashing_burst_time: Instant::now(),
             guild_name: String::new(),
             guild_rank_name: String::new(),
+            action_feed: Vec::new(),
+            current_action: MirAction::Standing,
+            next_motion: 0,
         }
     }
     
@@ -348,13 +365,13 @@ impl PlayerObject {
     /// Mirrors C# PlayerObject.Load(S.ObjectPlayer info), lines 113-168
     /// 
     /// This method syncs all player data from the server and initializes the player object.
-    pub fn load(&mut self, packet: &mir2_shared::packets::server::S_ObjectPlayer) {
+    pub fn load(&mut self, packet: &mir2_shared::packets::server::ObjectPlayer) {
         // Sync base MapObject fields
         self.map_object.sync_from_player_packet(packet);
         
         // Guild information (C# lines 118-119)
-        self.guild_name = packet.guild_name.clone().unwrap_or_default();
-        self.guild_rank_name = packet.guild_rank_name.clone().unwrap_or_default();
+        self.guild_name = packet.guild_name.clone();
+        self.guild_rank_name = packet.guild_rank_name.clone();
         
         // Basic stats (C# lines 120-122)
         self.class = packet.class;
@@ -424,17 +441,17 @@ impl PlayerObject {
     /// Update player appearance from network packet
     /// 
     /// Mirrors C# PlayerObject.Update(S.PlayerUpdate info), lines 170-180
-    pub fn update(&mut self, packet: &mir2_shared::packets::server::S_PlayerUpdate) {
+    pub fn update(&mut self, packet: &mir2_shared::packets::server::PlayerUpdate) {
         // Update equipment (C# lines 172-174)
         self.weapon = packet.weapon as i32;
         self.weapon_effect = packet.weapon_effect as i32;
-        self.armour = packet.armour as i32;
+        self.armour = packet.armor as i32;
         
         // Update light (C# line 175)
         self.map_object.light = packet.light as i32;
         
         // Update wing effect (C# line 176)
-        self.wing_effect = packet.wing_effect;
+        self.wing_effect = packet.wings_effect;
         
         // Reload libraries (C# line 178)
         self.set_libraries();
@@ -959,6 +976,428 @@ impl PlayerObject {
                 | MirDirection::Left
         )
     }
+    
+    // ==================== Action System Methods ====================
+    
+    /// Get next action from action feed
+    /// 
+    /// C# equivalent: public QueuedAction NextAction { get { return ActionFeed.Count > 0 ? ActionFeed[0] : null; } }
+    pub fn next_action(&self) -> Option<&QueuedAction> {
+        self.action_feed.first()
+    }
+    
+    /// Set current action from action feed
+    /// 
+    /// Mirrors C# PlayerObject.SetAction(), lines 885-975
+    /// 
+    /// This is the base implementation that processes the action queue and sets up
+    /// the current animation frame. UserObject overrides this to handle QueuedAction.
+    /// 
+    /// # Phase 1 Implementation
+    /// 
+    /// This is a simplified version that:
+    /// - Processes action_feed queue
+    /// - Sets current_action and frame_index
+    /// - Handles mount transformations
+    /// - Sets up frame intervals
+    /// 
+    /// # TODO Phase 2
+    /// 
+    /// - Integrate with GameScene.CanMove
+    /// - Handle MapControl.NextAction timing
+    /// - Integrate with actual frame system
+    /// - Handle stance/fishing animations
+    /// - MapObject location updates
+    pub fn set_action(&mut self) {
+        // Check if we should skip due to movement restrictions
+        // C# lines 887-903: if (NextAction != null && !GameScene.CanMove) { ... }\n        // TODO Phase 2: Add GameScene.CanMove check
+        
+        if self.action_feed.is_empty() {
+            // No queued actions - set to standing/idle (C# lines 909-913)
+            self.current_action = MirAction::Standing;
+            
+            // Check for blizzard effect (C# line 913)
+            // TODO Phase 2: Implement blizzard stop time check
+            // if current_time <= self.blizzard_stop_time { self.current_action = MirAction::Stance2; }
+            
+            // Transform standing action if riding mount (C# lines 915-934)
+            if self.riding_mount {
+                self.current_action = match self.current_action {
+                    MirAction::Standing => MirAction::MountStanding,
+                    MirAction::Walking => MirAction::MountWalking,
+                    MirAction::Running => MirAction::MountRunning,
+                    MirAction::Struck => MirAction::MountStruck,
+                    MirAction::Attack1 => MirAction::MountAttack,
+                    _ => self.current_action,
+                };
+            }
+            
+            // Handle stance timing (C# lines 936-942)
+            // TODO Phase 2: Implement stance time check
+            // if self.current_action == MirAction::Standing {
+            //     if self.class == MirClass::Archer && self.has_class_weapon() {
+            //         self.current_action = MirAction::Standing;
+            //     } else if current_time <= self.stance_time {
+            //         self.current_action = MirAction::Stance;
+            //     }
+            // }
+            
+            // Handle fishing (C# line 944)
+            if self.fishing {
+                self.current_action = MirAction::FishingWait;
+            }
+            
+            // Get frame for current action (C# lines 946-948)
+            self.frame = self.frames.get(&self.current_action).cloned();
+            self.frame_index = 0;
+            self.effect_frame_index = 0;
+            
+            // Set frame intervals (C# lines 957-958)
+            if let Some(ref frame) = self.frame {
+                self.frame_interval = frame.interval;
+                self.effect_frame_interval = frame.effect_interval;
+            }
+            
+            // Update libraries (C# line 960)
+            self.set_libraries();
+        } else {
+            // Process next action from queue (C# lines 963-975)
+            let action = self.action_feed.remove(0);
+            
+            self.current_action = action.action;
+            
+            // Transform action if riding mount (C# lines 967-985)
+            if self.riding_mount {
+                self.current_action = match self.current_action {
+                    MirAction::Standing => MirAction::MountStanding,
+                    MirAction::Walking => MirAction::MountWalking,
+                    MirAction::Running => MirAction::MountRunning,
+                    MirAction::Struck => MirAction::MountStruck,
+                    MirAction::Attack1 => MirAction::MountAttack,
+                    _ => self.current_action,
+                };
+            }
+            
+            // TODO Phase 2: Handle direction, location updates (C# lines 988-997)
+            // self.map_object.set_direction(action.direction);
+            // self.map_object.set_current_location(action.location);
+            
+            // Get frame for action (C# line 999)
+            self.frame = self.frames.get(&self.current_action).cloned();
+            self.frame_index = 0;
+            self.effect_frame_index = 0;
+            
+            // Set frame intervals
+            if let Some(ref frame) = self.frame {
+                self.frame_interval = frame.interval;
+                self.effect_frame_interval = frame.effect_interval;
+            }
+            
+            // Update libraries
+            self.set_libraries();
+        }
+    }
+    
+    /// Process animation frames
+    /// 
+    /// Mirrors C# PlayerObject.ProcessFrames(), lines 2300-2724
+    /// 
+    /// This is the base implementation that advances animation frames based on time.
+    /// UserObject overrides this to handle QueuedAction clearing.
+    /// 
+    /// # Phase 1 Implementation
+    /// 
+    /// This is a highly simplified placeholder that:\n    /// - Updates frame_index when time passes
+    /// - Calls SetAction() when animation completes
+    /// 
+    /// # TODO Phase 2
+    /// 
+    /// The full C# implementation is 400+ lines and handles:
+    /// - Walking/Running with movement offsets (lines 2303-2337)
+    /// - Jump animations (lines 2339-2359)
+    /// - Dash animations (lines 2360-2397)
+    /// - Standing/Idle animations (lines 2407-2428)
+    /// - Fishing animations (lines 2430-2500)
+    /// - Attack animations (lines 2502-2545)
+    /// - Range attack animations (lines 2547-2724)
+    /// - Spell casting animations
+    /// - Sound effects (footsteps, attacks)
+    /// - Movement validation (GameScene.CanMove)
+    /// - Map texture invalidation
+    /// 
+    /// Each action type has specific frame handling logic:
+    /// - Frame count checks
+    /// - SkipFrames logic
+    /// - Sound triggers at specific frames
+    /// - Effect spawning
+    /// - Movement offset updates
+    /// 
+    /// Phase 2 Implementation: Basic frame processing with time system integration
+    /// Full implementation requires:
+    /// - GameScene (CanMove, MapControl) - TODO Phase 3
+    /// - Sound system (SoundManager) - TODO Phase 3
+    /// - Effect system (MapControl.Effects) - TODO Phase 3
+    pub fn process_frames(&mut self, current_time: u64) {
+        // C#: if (Frame == null) return; (line 2302)
+        if self.frame.is_none() {
+            return;
+        }
+        
+        let frame_count = self.frame.as_ref().map(|f| f.count).unwrap_or(0);
+        
+        match self.current_action {
+            // Movement actions (C# lines 2305-2333)
+            MirAction::Walking
+            | MirAction::Running
+            | MirAction::MountWalking
+            | MirAction::MountRunning
+            | MirAction::Sneek
+            | MirAction::DashAttack => {
+                // TODO Phase 3: Check GameScene.CanMove
+                // TODO Phase 3: Invalidate texture/floor
+                
+                // Handle skip frames (C# line 2312)
+                if self.map_object.skip_frames {
+                    self.frame_index = frame_count;
+                }
+                
+                // Update frame (C# line 2314)
+                self.update_frame();
+                
+                if self.frame_index >= frame_count {
+                    self.frame_index = frame_count - 1;
+                    // Will call set_action in parent (UserObject)
+                } else {
+                    // TODO Phase 3: Play step sound at frames 1 and 4 for user
+                }
+                
+                // TODO Phase 3: UpdateWingEffect()
+            }
+            
+            // Jump action (C# lines 2335-2356)
+            MirAction::Jump => {
+                // TODO Phase 3: Check GameScene.CanMove
+                // TODO Phase 3: Invalidate texture/floor
+                
+                if self.map_object.skip_frames {
+                    self.update_frame();
+                }
+                
+                self.update_frame();
+                
+                if self.frame_index >= frame_count {
+                    self.frame_index = frame_count - 1;
+                    // Will call set_action in parent
+                } else {
+                    // TODO Phase 3: Play jump sounds at frames 1 and 7
+                }
+                
+                // TODO Phase 3: UpdateWingEffect()
+            }
+            
+            // Dash left (C# lines 2357-2368)
+            MirAction::DashL => {
+                // TODO Phase 3: Check GameScene.CanMove
+                // TODO Phase 3: Invalidate texture/floor
+                
+                self.update_frame();
+                if self.frame_index >= 3 {
+                    self.frame_index = 2;
+                    // Will call set_action in parent
+                }
+                
+                self.update_frame_2();
+                if self.effect_frame_index >= 3 {
+                    self.effect_frame_index = 2;
+                }
+            }
+            
+            // Dash right (C# lines 2369-2381)
+            MirAction::DashR => {
+                // TODO Phase 3: Check GameScene.CanMove
+                // TODO Phase 3: Invalidate texture/floor
+                
+                self.update_frame();
+                if self.frame_index >= 6 {
+                    self.frame_index = 5;
+                    // Will call set_action in parent
+                }
+                
+                self.update_frame_2();
+                if self.effect_frame_index >= 6 {
+                    self.effect_frame_index = 5;
+                }
+            }
+            
+            // Pushed back (C# lines 2382-2398)
+            MirAction::Pushed => {
+                // TODO Phase 3: Check GameScene.CanMove
+                // TODO Phase 3: Invalidate texture/floor
+                
+                self.frame_index -= 2;
+                self.effect_frame_index -= 2;
+                
+                if self.frame_index < 0 {
+                    self.frame_index = 0;
+                    // Will call set_action in parent
+                }
+                
+                if self.effect_frame_index < 0 {
+                    self.effect_frame_index = 0;
+                }
+            }
+            
+            // Standing and idle actions (C# lines 2400-2420)
+            MirAction::Standing
+            | MirAction::MountStanding
+            | MirAction::DashFail
+            | MirAction::Harvest
+            | MirAction::Stance
+            | MirAction::Stance2 => {
+                if current_time >= self.next_motion {
+                    // TODO Phase 3: Invalidate texture
+                    
+                    if self.map_object.skip_frames {
+                        self.update_frame();
+                    }
+                    
+                    self.update_frame();
+                    
+                    if self.frame_index >= frame_count {
+                        self.frame_index = frame_count - 1;
+                        // Will call set_action in parent
+                    } else {
+                        self.next_motion += self.frame_interval as u64;
+                    }
+                }
+                
+                // TODO Phase 3: UpdateWingEffect()
+            }
+            
+            // Fishing actions (C# lines 2423-2485)
+            MirAction::FishingCast
+            | MirAction::FishingReel
+            | MirAction::FishingWait => {
+                if current_time >= self.next_motion {
+                    // TODO Phase 3: Invalidate texture
+                    
+                    if self.map_object.skip_frames {
+                        self.update_frame();
+                    }
+                    
+                    self.update_frame();
+                    
+                    if self.frame_index >= frame_count {
+                        self.frame_index = frame_count - 1;
+                        // Will call set_action in parent
+                    } else {
+                        // TODO Phase 3: Play fishing sounds and effects at frame 1
+                        self.next_motion += self.frame_interval as u64;
+                    }
+                }
+                
+                // TODO Phase 3: UpdateWingEffect()
+            }
+            
+            // Attack actions (C# lines 2487-2508)
+            MirAction::Attack1
+            | MirAction::Attack2
+            | MirAction::Attack3
+            | MirAction::Attack4
+            | MirAction::MountAttack
+            | MirAction::Mine => {
+                if current_time >= self.next_motion {
+                    // TODO Phase 3: Invalidate texture
+                    
+                    if self.map_object.skip_frames {
+                        self.update_frame();
+                    }
+                    
+                    self.update_frame();
+                    
+                    if self.frame_index >= frame_count {
+                        // Set stance time (C# line 2498)
+                        // TODO Phase 3: stance_time uses Instant type, needs conversion
+                        // self.stance_time = current_time + self.stance_delay;
+                        self.frame_index = frame_count - 1;
+                        // Will call set_action in parent
+                    } else {
+                        // TODO Phase 3: Play attack sound at frame 1
+                        self.next_motion += self.frame_interval as u64;
+                    }
+                }
+                
+                // TODO Phase 3: UpdateWingEffect()
+            }
+            
+            // Ranged attack actions (C# lines 2510-2900+)
+            MirAction::AttackRange1
+            | MirAction::AttackRange2
+            | MirAction::AttackRange3 => {
+                if current_time >= self.next_motion {
+                    // TODO Phase 3: Invalidate texture
+                    
+                    if self.map_object.skip_frames {
+                        self.update_frame();
+                    }
+                    
+                    self.update_frame();
+                    
+                    if self.frame_index >= frame_count {
+                        self.frame_index = frame_count - 1;
+                        // Will call set_action in parent
+                    } else {
+                        // TODO Phase 3: Spell-specific logic and projectile creation
+                        self.next_motion += self.frame_interval as u64;
+                    }
+                }
+                
+                // TODO Phase 3: UpdateWingEffect()
+            }
+            
+            // Spell casting (C# lines 2900+)
+            MirAction::Spell => {
+                if current_time >= self.next_motion {
+                    // TODO Phase 3: Invalidate texture
+                    
+                    if self.map_object.skip_frames {
+                        self.update_frame();
+                    }
+                    
+                    self.update_frame();
+                    
+                    if self.frame_index >= frame_count {
+                        self.frame_index = frame_count - 1;
+                        // Will call set_action in parent
+                    } else {
+                        // TODO Phase 3: Spell-specific effects
+                        self.next_motion += self.frame_interval as u64;
+                    }
+                }
+                
+                // TODO Phase 3: UpdateWingEffect()
+            }
+            
+            // Other actions - no frame updates needed
+            _ => {
+                // Actions like Dead, Struck, etc. handled elsewhere
+            }
+        }
+    }
+    
+    /// Update main frame index
+    /// C#: UpdateFrame(), line ~3400
+    fn update_frame(&mut self) -> i32 {
+        self.frame_index += 1;
+        self.frame_index
+    }
+    
+    /// Update effect frame index (for dual-frame animations)
+    /// C#: UpdateFrame2(), line ~3410
+    fn update_frame_2(&mut self) -> i32 {
+        self.effect_frame_index += 1;
+        self.effect_frame_index
+    }
 }
 
 // ==================== Drawing Support Types ====================
@@ -1428,4 +1867,24 @@ mod tests {
         player.map_object.set_direction(MirDirection::DownRight);
         assert!(!player.head_drawn_before_wings());
     }
+}
+
+/// Queued action for delayed execution
+/// 
+/// Mirrors C# Client/MirObjects/PlayerObject.cs, lines 5277-5286
+#[derive(Debug, Clone)]
+pub struct QueuedAction {
+    /// C#: public MirAction Action;
+    pub action: MirAction,
+    
+    /// C#: public Point Location;
+    pub location: Point,
+    
+    /// C#: public MirDirection Direction;
+    pub direction: MirDirection,
+    
+    // C#: public List<object> Params;
+    // Note: Rarely used in C#, omitted for now
+    // Can be added later with an enum for type-safe params if needed
+    // pub params: Vec<Box<dyn Any>>,
 }

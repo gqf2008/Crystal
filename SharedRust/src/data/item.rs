@@ -865,6 +865,38 @@ impl Awake {
     pub fn awake_value(&self) -> u8 {
         self.levels.iter().copied().sum()
     }
+
+    fn value_for_type(&self, target: AwakeType) -> i32 {
+        if self.awake_type == target {
+            self.awake_value() as i32
+        } else {
+            0
+        }
+    }
+
+    pub fn get_dc(&self) -> i32 {
+        self.value_for_type(AwakeType::Dc)
+    }
+
+    pub fn get_mc(&self) -> i32 {
+        self.value_for_type(AwakeType::Mc)
+    }
+
+    pub fn get_sc(&self) -> i32 {
+        self.value_for_type(AwakeType::Sc)
+    }
+
+    pub fn get_ac(&self) -> i32 {
+        self.value_for_type(AwakeType::Ac)
+    }
+
+    pub fn get_mac(&self) -> i32 {
+        self.value_for_type(AwakeType::Mac)
+    }
+
+    pub fn get_hp_mp(&self) -> i32 {
+        self.value_for_type(AwakeType::HpMp)
+    }
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -1557,6 +1589,24 @@ mod tests {
         assert_eq!(decoded.rental_information, item.rental_information);
         assert_eq!(decoded.sealed_info, item.sealed_info);
         Ok(())
+    }
+
+    #[test]
+    fn awake_getters_return_expected_values() {
+        let mut awake = Awake::default();
+        awake.awake_type = AwakeType::Dc;
+        awake.levels = vec![1, 2];
+
+        assert_eq!(awake.get_dc(), 3);
+        assert_eq!(awake.get_mc(), 0);
+        assert_eq!(awake.get_sc(), 0);
+
+        awake.awake_type = AwakeType::HpMp;
+        awake.levels = vec![4];
+
+        assert_eq!(awake.get_hp_mp(), 4);
+        assert_eq!(awake.get_ac(), 0);
+        assert_eq!(awake.get_mac(), 0);
     }
 
     #[test]
