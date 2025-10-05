@@ -13,6 +13,9 @@ pub mod dialogs;
 pub use state::ClientState;
 pub use scene_trait::{Scene, SceneType, MouseButton, KeyCode};
 pub use login_scene::{LoginScene, BanInfo};
-pub use select_scene::{SelectScene, SelectCharacter};
+pub use select_scene::SelectScene;
 pub use game_scene::GameScene;
-pub use map_control::{MapControl, CellInfo, Door, LightSetting, WeatherSetting};
+pub use map_control::{MapControl, CellInfo, Door};
+
+// Re-export enums from SharedRust
+pub use mir2_shared::enums::{LightSetting, WeatherSetting};

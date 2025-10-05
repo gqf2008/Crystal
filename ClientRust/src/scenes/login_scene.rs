@@ -4,8 +4,16 @@
 use mir2_shared::packets::CharacterSummary;
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
-use super::dialogs::{LoginDialog, NewAccountDialog, ChangePasswordDialog};
 use crate::network::game_client::GameEvent;
+
+// LoginScene 的内嵌对话框（对应 C# LoginScene 的内嵌类）
+pub mod login_dialog;
+pub mod new_account_dialog;
+pub mod change_password_dialog;
+
+pub use login_dialog::LoginDialog;
+pub use new_account_dialog::{NewAccountDialog, NewAccountResult, AccountRegistration};
+pub use change_password_dialog::{ChangePasswordDialog, ChangePasswordResult};
 
 #[derive(Debug, Clone)]
 pub struct BanInfo {

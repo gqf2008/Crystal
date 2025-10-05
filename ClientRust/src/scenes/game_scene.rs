@@ -5,37 +5,8 @@ use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
 use crate::objects::*;
 use crate::network::game_client::GameEvent;
 use mir2_shared::UserItem;
+use mir2_shared::enums::{AttackMode, PetMode, LightSetting};
 use std::collections::{HashMap, VecDeque};
-
-/// Attack mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttackMode {
-    Peace,      // 和平模式
-    Group,      // 组队模式
-    Guild,      // 公会模式
-    EnemyGuild, // 敌对公会模式
-    RedBrown,   // 红名模式
-    All,        // 全体模式
-}
-
-/// Pet mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PetMode {
-    Both,         // 同时攻击
-    MoveOnly,     // 只移动
-    AttackOnly,   // 只攻击
-    None,         // 不动
-}
-
-/// Light setting
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LightSetting {
-    Normal,  // 正常
-    Dawn,    // 黎明
-    Day,     // 白天
-    Evening, // 傍晚
-    Night,   // 夜晚
-}
 
 /// Output message (chat/system messages)
 #[derive(Debug, Clone)]

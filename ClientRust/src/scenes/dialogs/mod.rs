@@ -4,9 +4,15 @@
 // Core infrastructure
 pub mod dialog_manager;
 
+// Main UI Dialogs
+pub mod main_dialog;
+
 // Character Management
-pub mod character_creation_dialog;
-pub mod character_deletion_dialog;
+pub mod hero_dialog;
+pub mod mail_dialog;
+pub mod trade_dialog;
+pub mod quest_dialog;
+pub mod intelligent_creature_dialog;
 
 // Management Dialogs (Option E)
 pub mod menu_dialog;
@@ -63,14 +69,10 @@ pub mod report_dialog;
 // - DuraStatusDialog (equipment durability)
 // - ChatNoticeDialog (chat notifications)
 
-pub mod main_dialog;
-pub mod chat_dialog;
 pub mod inventory_dialog;
 pub mod character_dialog;
 pub mod skillbar_dialog;
 pub mod npc_dialog;
-pub mod storage_dialog;
-pub mod trade_dialog;
 pub mod guild_dialog;
 pub mod friend_dialog;
 pub mod mentor_dialog;
@@ -80,24 +82,17 @@ pub mod group_dialog;
 pub mod roll_dialog;
 pub mod chat_option_dialog;
 pub mod bigmap_dialog;
-pub mod quest_list_dialog;
-pub mod mail_dialog;
 pub mod help_dialog;
 
 // Game System Dialogs (Option D)
-pub mod belt_dialog;
 pub mod timer_dialog;
 pub mod socket_dialog;
+pub mod trust_merchant_dialog;
 pub mod buff_dialog;
 pub mod mount_dialog;
 pub mod fishing_dialog;
 pub mod refine_dialog;
 pub mod craft_dialog;
-
-// Login Scene Dialogs
-pub mod login_dialog;
-pub mod new_account_dialog;
-pub mod change_password_dialog;
 
 // Layer 1 Basic Dialogs (Batch 1)
 pub mod compass_dialog;
@@ -109,42 +104,60 @@ pub mod item_rent_dialog;
 pub mod item_renting_dialog;
 
 // Re-exports
-pub use main_dialog::MainDialog;
-pub use chat_dialog::{ChatDialog, ChatMessage, ChatHistory, ChatItem};
 pub use inventory_dialog::{InventoryDialog, InventoryTab};
 pub use character_dialog::{CharacterDialog, CharacterPage, EquipmentSlot, CharacterStats, MagicInfo};
+pub use hero_dialog::{HeroInventoryDialog, HeroBeltDialog, HeroMenuPanel, HeroInfoPanel, HeroAutoPotPreview, HeroBehaviourPanel, HeroManageDialog, HeroManageAvatar};
 pub use skillbar_dialog::{SkillBarDialog, SkillSlot};
-pub use npc_dialog::{NPCDialog, NPCDialogType, NPCOption, NPCPage};
-pub use storage_dialog::{StorageDialog, StorageType};
-pub use trade_dialog::{TradeDialog, TradeState, TradeParty, TradeSummary};
-pub use guild_dialog::{GuildDialog, GuildPage, GuildMember, GuildRank, GuildRankOptions, GuildBuff};
-pub use friend_dialog::{FriendDialog, FriendTab, Friend, FriendStatus};
+pub use npc_dialog::{NPCDialog, NPCDialogType, NPCOption, NPCPage, NPCGoodsDialog, NPCDropDialog, NPCAwakeDialog, CraftDialog, RefineDialog, StorageDialog, StorageType, BigButtonDialog, BigButton};
+pub use trade_dialog::{TradeDialog, GuestTradeDialog};
+pub use guild_dialog::{GuildDialog, GuildBuffButton};
+pub use friend_dialog::{FriendDialog, FriendRow, MemoDialog};
 pub use mentor_dialog::MentorDialog;
 pub use ranking_dialog::{RankingDialog, RankClass, RankCharacterInfo, RankingRow};
 pub use relationship_dialog::RelationshipDialog;
 pub use group_dialog::{GroupDialog, GroupMember};
 pub use roll_dialog::{RollDialog, RollType};
 pub use chat_option_dialog::{ChatOptionDialog, ChatOptionTab};
-// Note: GuildMember and Friend are UI wrappers around mir2_shared::{GuildMember, ClientFriend}
-pub use bigmap_dialog::{BigMapDialog, MapRecord, MapNPC, MapImage, MapViewPort};
-pub use quest_list_dialog::{QuestListDialog, QuestInfo, QuestProgress, QuestStatus, QuestType, QuestRewards};
-pub use mail_dialog::{MailListDialog, MailComposeDialog, ClientMail, MailType, MailStatus};
+pub use bigmap_dialog::{BigMapDialog, BigMapViewPort};
+pub use mail_dialog::{MailListDialog, MailComposeLetterDialog, ClientMail, MailType, MailStatus};
 
 // Game System Dialogs (Option D)
-pub use belt_dialog::{BeltDialog, BeltOrientation, BELT_SLOT_COUNT};
+pub use inventory_dialog::{BeltDialog, BeltOrientation, BELT_SLOT_COUNT};
 pub use timer_dialog::{TimerDialog, ClientTimer, TimerType};
 pub use socket_dialog::{SocketDialog, MAX_SOCKET_SLOTS};
-pub use buff_dialog::{BuffDialog, ClientBuff, BuffType};
+pub use buff_dialog::{BuffDialog, ClientBuff, BuffType, PoisonBuffDialog, ClientPoisonBuff, PoisonType};
 pub use mount_dialog::{MountDialog, MountSlot, MountType};
 pub use fishing_dialog::{FishingDialog, FishingStatusDialog, FishingSlot};
-pub use refine_dialog::{RefineDialog, REFINE_SLOT_COUNT};
-pub use craft_dialog::{CraftDialog, ClientRecipeInfo, TOOL_SLOT_COUNT, INGREDIENT_SLOT_COUNT};
+pub use trust_merchant_dialog::{TrustMerchantDialog, AuctionRow};
 pub use help_dialog::{HelpDialog, HelpPage, HelpPageType};
+pub use refine_dialog::{REFINE_SLOT_COUNT, REFINE_ROWS, REFINE_COLS};
+
+// Re-exports for quest_dialog module
+pub use quest_dialog::{
+    QuestListDialog,
+    QuestDetailDialog,
+    QuestDiaryDialog,
+    QuestTrackingDialog,
+    QuestRow,
+    QuestMessage,
+    QuestRewards,
+    QuestCell,
+    QuestGroupQuestItem,
+    QuestSingleQuestItem,
+};
+
+// Re-exports for intelligent_creature_dialog module
+pub use intelligent_creature_dialog::{
+    IntelligentCreatureDialog,
+    CreatureButton,
+    IntelligentCreatureOptionsDialog,
+    IntelligentCreatureOptionsGradeDialog,
+};
 
 // Management Dialogs (Option E)
 pub use menu_dialog::{MenuDialog, MenuButton};
 pub use option_dialog::{OptionDialog, OptionType};
-pub use keyboard_layout_dialog::{KeyboardLayoutDialog, KeyBind, KeybindOption};
+pub use keyboard_layout_dialog::{KeyboardLayoutDialog, KeybindOption, KeybindInfo, KeybindMode, KeybindRow, KeybindHeadingRow};
 pub use notice_dialog::{NoticeDialog, Notice};
 pub use inspect_dialog::{InspectDialog, InspectAction, MirClass, MirGender};
 pub use report_dialog::{ReportDialog, ReportAction, ReportType};
@@ -154,10 +167,13 @@ pub use dialog_manager::{
     Dialog, DialogManager, MouseButton, KeyCode
 };
 
-// Login Scene Dialogs
-pub use login_dialog::LoginDialog;
-pub use new_account_dialog::{NewAccountDialog, NewAccountResult, AccountRegistration};
-pub use change_password_dialog::{ChangePasswordDialog, ChangePasswordResult};
+// Main UI Dialogs
+pub use main_dialog::{
+    MainDialog, MiniMapDialog, DuraStatusDialog, ChatDialog,
+    ChatControlBar, SkillBarDialog as MainSkillBarDialog, InspectDialog as MainInspectDialog,
+    OptionDialog as MainOptionDialog, MenuDialog as MainMenuDialog, MagicButton,
+    AssignKeyPanel, CharacterDuraPanel
+};
 
 // Layer 1 Basic Dialogs
 pub use compass_dialog::CompassDialog;

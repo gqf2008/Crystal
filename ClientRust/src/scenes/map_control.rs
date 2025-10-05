@@ -1,7 +1,7 @@
 // MapControl - Map rendering and interaction control
 // Mirrors Client/MirScenes/GameScene.cs::MapControl (lines 10062-12294)
 
-// Map control module
+use mir2_shared::enums::{LightSetting, WeatherSetting};
 
 /// Cell information for map tiles
 #[derive(Debug, Clone, Default)]
@@ -22,25 +22,6 @@ pub struct Door {
     pub location: (i32, i32),
     pub opened: bool,
     pub image_index: i32,
-}
-
-/// Map lighting settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LightSetting {
-    Normal = 0,
-    Dawn = 1,
-    Day = 2,
-    Evening = 3,
-    Night = 4,
-}
-
-/// Weather settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WeatherSetting {
-    None = 0,
-    Rain = 1,
-    Snow = 2,
-    Fog = 3,
 }
 
 /// Map control - handles map rendering, pathfinding, and interaction
@@ -116,7 +97,7 @@ impl MapControl {
             music: 0,
             set_music: 0,
             lights: LightSetting::Normal,
-            weather: WeatherSetting::None,
+            weather: WeatherSetting::NONE,
             map_dark_light: 0,
             lightning: false,
             fire: false,

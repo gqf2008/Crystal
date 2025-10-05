@@ -2,21 +2,12 @@
 // Mirrors Client/MirScenes/SelectScene.cs
 
 use super::scene_trait::{Scene, SceneType, MouseButton, KeyCode};
-use super::dialogs::character_creation_dialog::CharacterCreationDialog;
-use super::dialogs::character_deletion_dialog::CharacterDeletionDialog;
 use crate::network::game_client::GameEvent;
-use mir2_shared::SelectInfo; // ✅ 使用 SharedRust 中已定义的 SelectInfo
 
-/// Character information for selection/deletion operations
-#[derive(Debug, Clone)]
-pub struct SelectCharacter {
-    pub index: u32,
-    pub name: String,
-    pub level: u16,
-    pub class: mir2_shared::enums::MirClass,
-    pub gender: mir2_shared::enums::MirGender,
-    pub exists: bool,
-}
+
+pub mod character_creation_dialog;
+pub use character_creation_dialog::CharacterCreationDialog;
+use mir2_shared::SelectInfo;
 
 /// Character selection scene
 /// 
@@ -41,7 +32,6 @@ pub struct SelectScene {
     // Dialogs
     /// Mirrors C# `private NewCharacterDialog _character`
     pub character_creation_dialog: Option<CharacterCreationDialog>,
-    pub character_deletion_dialog: Option<CharacterDeletionDialog>,
     
     // TODO Phase 3: Add UI controls
     // - Background: MirImageControl
@@ -73,7 +63,6 @@ impl SelectScene {
             characters,
             selected_index: 0,
             character_creation_dialog: None,
-            character_deletion_dialog: None,
         };
         scene.sort_list();
         scene
