@@ -71,6 +71,11 @@ tempfile = "3"
 name = "mir2_client"
 path = "src/main_ggez.rs"
 
+# .lib 文件检查工具
+[[bin]]
+name = "lib_inspector"
+path = "lib_inspector.rs"
+
 [features]
 default = ["client"]
 client = []

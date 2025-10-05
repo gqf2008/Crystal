@@ -81,9 +81,9 @@ impl SceneManager {
     }
     
     /// Render current scene (ggez版本)
-    pub fn draw(&self, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager) {
+    pub fn draw(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager) {
         if let Some(scene) = &self.current_scene {
-            scene.draw(canvas, ggez_manager);
+            scene.draw(ctx, canvas, ggez_manager);
         }
     }
     

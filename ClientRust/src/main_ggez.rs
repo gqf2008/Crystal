@@ -47,9 +47,10 @@ fn main() -> Result<()> {
     let settings = ClientSettings::load(false, None)?;
     tracing::info!("配置加载完成: {:?}", settings.launcher.server_name);
     
-    // 3. 设置数据路径
-    let data_path = settings.resources_path.to_string_lossy().to_string();
+    // 3. 设置数据路径 - 使用 Data 目录(包含 .lib 文件)
+    let data_path = "Data".to_string();
     graphics::libraries::set_data_path(data_path);
+    tracing::info!("数据路径设置为: Data/");
     
     // 4. 创建 ggez Context
     let res = settings.resolution();
@@ -90,6 +91,9 @@ struct CrystalGame {
 
 impl CrystalGame {
     fn new(ctx: &mut Context, settings: ClientSettings) -> Result<Self> {
+        println!("\n========================================");
+        println!("🎮 Crystal Mir2 Client - Ggez版本");
+        println!("========================================\n");
         tracing::info!("初始化游戏状态...");
         
         // 创建渲染管理器
@@ -97,11 +101,16 @@ impl CrystalGame {
         let screen_width = res.width as f32;
         let screen_height = res.height as f32;
         let ggez_manager = GgezManager::new(screen_width, screen_height);
+        println!("✓ Ggez 渲染管理器已创建: {}x{}", screen_width, screen_height);
         
         // 加载核心图形库 (Data.lib, Prguse.lib 等)
+        println!("📦 正在加载图形库...");
         tracing::info!("加载图形库...");
         if let Err(e) = graphics::libraries::load_core_libraries() {
+            println!("⚠ 加载图形库失败: {}", e);
             tracing::warn!("加载图形库失败: {}, 将在需要时按需加载", e);
+        } else {
+            println!("✓ 所有图形库加载成功!");
         }
         
         // 创建场景管理器
@@ -165,13 +174,13 @@ impl EventHandler for CrystalGame {
         // 开始帧
         self.ggez_manager.begin_frame();
         
-        // 创建 canvas
-        let mut canvas = graphics::Canvas::from_frame(ctx, Color::from_rgb(20, 30, 60));
+        // 创建 canvas (黑色背景 - 场景会绘制自己的背景)
+        let mut canvas = graphics::Canvas::from_frame(ctx, Color::BLACK);
         
         // 绘制当前场景
         {
             let scene_manager = self.scene_manager.read();
-            scene_manager.draw(&mut canvas, &self.ggez_manager);
+            scene_manager.draw(ctx, &mut canvas, &self.ggez_manager);
         }
         
         // 结束帧

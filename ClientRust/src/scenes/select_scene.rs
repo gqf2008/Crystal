@@ -176,7 +176,7 @@ impl Scene for SelectScene {
         // TODO: Update animations
     }
     
-    fn draw(&self, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
+    fn draw(&self, _ctx: &mut ggez::Context, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
         // TODO: Draw selection background
         // TODO: Draw character previews
         // TODO: Draw UI buttons

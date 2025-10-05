@@ -291,6 +291,8 @@ pub fn load_core_libraries() -> std::io::Result<()> {
     
     // 计算需要加载的库数量
     let core_libs = vec![
+        LibraryName::ChrSel,     // 角色选择/登录背景
+        LibraryName::Title,      // 标题和按钮
         LibraryName::Prguse,
         LibraryName::Prguse2,
         LibraryName::Magic,

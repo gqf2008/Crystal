@@ -81,7 +81,7 @@ pub trait Scene {
     fn update(&mut self, delta_time: f32);
     
     /// Render scene (ggez版本)
-    fn draw(&self, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
+    fn draw(&self, _ctx: &mut ggez::Context, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
         // Default: do nothing
     }
     

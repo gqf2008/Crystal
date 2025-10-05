@@ -299,7 +299,7 @@ impl Scene for GameScene {
         // TODO: Update map
     }
     
-    fn draw(&self, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
+    fn draw(&self, _ctx: &mut ggez::Context, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
         // TODO: Draw map
         // TODO: Draw game objects (sorted by Y position)
         // TODO: Draw effects

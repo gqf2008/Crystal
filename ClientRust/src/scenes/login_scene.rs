@@ -343,10 +343,102 @@ impl Scene for LoginScene {
         // TODO: Update animations
     }
     
-    fn draw(&self, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
-        // TODO: Draw login background
-        // TODO: Draw login dialogs
-        // TODO: Draw version info
+    fn draw(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
+        use crate::graphics::libraries::{get_library, LibraryName};
+        use ggez::graphics::{Text, DrawParam, Color as GgezColor};
+        
+        // 1. 绘制登录背景 (C# 原版使用 ChrSel.lib 索引 0)
+        // ChrSel.lib 索引 0-17 是 1024x768 的登录背景动画 (19帧)
+        if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                // 暂时使用静态背景 (索引 0),后续可以实现动画
+                let _ = lib.draw_to_canvas(ctx, canvas, 0, 0.0, 0.0, false);
+            }
+        }
+        
+        // 2. 绘制登录对话框 (C# 原版: Prguse.lib 索引 1084)
+        // 对话框大小: 328x220, 居中显示
+        if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                let center_x = 1024.0 / 2.0; // 屏幕中心 = 512
+                let center_y = 768.0 / 2.0;  // 屏幕中心 = 384
+                
+                // 登录对话框 (328x220)
+                let dialog_x = center_x - 164.0; // 328/2 = 164
+                let dialog_y = center_y - 110.0; // 220/2 = 110
+                let _ = lib.draw_to_canvas(ctx, canvas, 1084, dialog_x, dialog_y, false);
+            }
+        }
+        
+        // 3. 绘制 UI 元素 (C# 原版: Title.lib)
+        if let Some(lib_arc) = get_library(LibraryName::Title) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                let center_x = 1024.0 / 2.0;
+                let center_y = 768.0 / 2.0;
+                let dialog_x = center_x - 164.0;
+                let dialog_y = center_y - 110.0;
+                
+                // 标题 "登录" (索引 30)
+                // C# 原版位置: (Size.Width - TitleLabel.Size.Width)/2, 12
+                // 假设标题宽度约 100px, 对话框宽 328
+                let _ = lib.draw_to_canvas(ctx, canvas, 30, dialog_x + 114.0, dialog_y + 12.0, false);
+                
+                // "账号ID" 标签 (索引 31)
+                // C# 位置: (52, 83)
+                let _ = lib.draw_to_canvas(ctx, canvas, 31, dialog_x + 52.0, dialog_y + 83.0, false);
+                
+                // "密码" 标签 (索引 32)
+                // C# 位置: (43, 105)
+                let _ = lib.draw_to_canvas(ctx, canvas, 32, dialog_x + 43.0, dialog_y + 105.0, false);
+                
+                // OK/登录按钮 (索引 320, 大小 42x42)
+                // C# 位置: (227, 81)
+                let _ = lib.draw_to_canvas(ctx, canvas, 320, dialog_x + 227.0, dialog_y + 81.0, false);
+                
+                // "新建账号" 按钮 (索引 323)
+                // C# 位置: (60, 163)
+                let _ = lib.draw_to_canvas(ctx, canvas, 323, dialog_x + 60.0, dialog_y + 163.0, false);
+                
+                // "修改密码" 按钮 (索引 326)
+                // C# 位置: (166, 163)
+                let _ = lib.draw_to_canvas(ctx, canvas, 326, dialog_x + 166.0, dialog_y + 163.0, false);
+                
+                // "关闭" 按钮 (索引 329)
+                // C# 位置: (166, 189)
+                let _ = lib.draw_to_canvas(ctx, canvas, 329, dialog_x + 166.0, dialog_y + 189.0, false);
+            }
+        }
+        
+        // 3. 绘制文本信息
+        // 版本信息
+        let version_text = Text::new("Crystal v1.0 - Ggez Edition");
+        let version_params = DrawParam::default()
+            .dest([10.0, 10.0])
+            .color(GgezColor::from_rgb(200, 200, 255));
+        canvas.draw(&version_text, version_params);
+        
+        // 连接状态
+        if self.connecting {
+            let status_text = Text::new(format!("正在连接服务器... (尝试 {})", self.connect_attempts));
+            let status_params = DrawParam::default()
+                .dest([10.0, 740.0]) // 底部
+                .color(GgezColor::from_rgb(255, 255, 100));
+            canvas.draw(&status_text, status_params);
+        } else if let Some(status) = &self.last_status {
+            let status_text = Text::new(status.as_str());
+            let status_params = DrawParam::default()
+                .dest([10.0, 740.0])
+                .color(GgezColor::from_rgb(100, 255, 100));
+            canvas.draw(&status_text, status_params);
+        }
+        
+        // FPS 和调试信息 (可选)
+        let fps = ctx.time.fps();
+        let debug_text = Text::new(format!("FPS: {:.1}", fps));
+        let debug_params = DrawParam::default()
+            .dest([950.0, 10.0])
+            .color(GgezColor::from_rgb(255, 255, 255));
+        canvas.draw(&debug_text, debug_params);
     }
     
     fn process_event(&mut self, event: &GameEvent) {
