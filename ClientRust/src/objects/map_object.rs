@@ -26,36 +26,132 @@ pub enum MapObjectType {
 }
 
 /// Base game object that appears on the map.
-/// This is a flattened structure containing only common fields shared by all object types.
-/// Type-specific data (e.g., player class, monster image) is stored in the wrapping objects
-/// (UserObject, HeroObject, MonsterObject, etc.).
+/// Mirrors C# Client/MirObjects/MapObject.cs
+/// 
+/// C# Reference: MapObject.cs lines 11-141
 #[derive(Debug, Clone)]
 pub struct MapObject {
-    // === Identity ===
-    object_id: u32,
-    object_type: MapObjectType,
+    // ==================== Identity ==================== 
+    // C# line 60: public uint ObjectID;
+    pub object_id: u32,
+    object_type: MapObjectType,  // Internal type marker
     
-    // === Position and Direction ===
-    location: Point,
-    direction: MirDirection,
+    // C# line 61: public string Name = string.Empty;
+    pub name: String,
     
-    // === Display Information ===
-    name: String,
-    name_colour: i32,  // ARGB color
+    // ==================== Position ====================
+    // C# line 62: public Point CurrentLocation, MapLocation;
+    pub current_location: Point,  // 当前显示位置 (用于插值)
+    pub map_location: Point,      // 地图格子位置 (服务器同步)
     
-    // === State Flags (common to all objects) ===
-    dead: bool,
-    hidden: bool,
-    poison: PoisonType,
+    // C# line 63: public MirDirection Direction;
+    pub direction: MirDirection,
     
-    // === Monster/NPC specific (default for players) ===
-    ai: u8,      // AI type for monsters, 0 for players
-    light: u8,   // Light radius
+    // ==================== State Flags ====================
+    // C# line 64: public bool Dead, Hidden, SitDown, Sneaking;
+    pub dead: bool,
+    pub hidden: bool,
+    pub sit_down: bool,   // NEW
+    pub sneaking: bool,   // NEW
     
-    // === Private State ===
-    buffs: BuffState,
-    animation: AnimationState,
-    last_update: Instant,
+    // C# line 65: public PoisonType Poison;
+    pub poison: PoisonType,
+    
+    // C# line 66: public long DeadTime;
+    pub dead_time: i64,   // NEW
+    
+    // C# line 67: public byte AI;
+    pub ai: u8,
+    
+    // C# line 68: public bool InTrapRock;
+    pub in_trap_rock: bool,  // NEW
+    
+    // C# line 69: public int JumpDistance;
+    pub jump_distance: i32,  // NEW
+    
+    // ==================== Visual Blend ====================
+    // C# line 71: public bool Blend = true;
+    pub blend: bool,
+    
+    // ==================== Blind System ====================
+    // C# line 73-74: public long BlindTime; public byte BlindCount;
+    pub blind_time: i64,   // NEW
+    pub blind_count: u8,   // NEW
+    
+    // ==================== Health/Mana Display ====================
+    // C# line 76-89: public byte PercentHealth, PercentMana;
+    pub percent_health: u8,  // NEW
+    pub percent_mana: u8,    // NEW
+    
+    // C# line 88: public long HealthTime;
+    pub health_time: i64,    // NEW
+    
+    // ==================== Action System (CORE!) ====================
+    // C# line 97: public List<QueuedAction> ActionFeed = new List<QueuedAction>();
+    pub action_feed: Vec<super::user_object::QueuedAction>,  // NEW
+    
+    // ==================== Effects & Buffs ====================
+    // C# line 104: public List<Effect> Effects = new List<Effect>();
+    pub effects: Vec<super::effect::Effect>,  // NEW
+    
+    // C# line 105: public List<BuffType> Buffs = new List<BuffType>();
+    pub buffs: Vec<BuffType>,  // NEW (replaces BuffState abstraction)
+    
+    // ==================== Display Information ====================
+    // C# line 109: public Color DrawColour, NameColour, LightColour;
+    pub draw_colour: i32,   // NEW - ARGB
+    pub name_colour: i32,   // Existing but renamed from name_colour
+    pub light_colour: i32,  // NEW - ARGB
+    
+    // C# line 111-112: public long ChatTime;
+    pub chat_time: i64,     // NEW
+    
+    // ==================== Drawing State ====================
+    // C# line 113: public int DrawFrame, DrawWingFrame;
+    pub draw_frame: i32,      // NEW
+    pub draw_wing_frame: i32, // NEW
+    
+    // C# line 114: public Point DrawLocation, Movement, FinalDrawLocation, OffSetMove;
+    pub draw_location: Point,       // NEW
+    pub movement: Point,            // NEW
+    pub final_draw_location: Point, // NEW
+    pub offset_move: Point,         // NEW
+    
+    // C# line 115: public Rectangle DisplayRectangle;
+    // Note: Rectangle will be calculated on-demand, not stored
+    
+    // C# line 116: public int Light, DrawY;
+    pub light: i32,    // Changed from u8 to i32 to match C#
+    pub draw_y: i32,   // NEW
+    
+    // ==================== Animation Timing ====================
+    // C# line 117: public long NextMotion, NextMotion2;
+    pub next_motion: i64,   // NEW
+    pub next_motion2: i64,  // NEW
+    
+    // C# line 118: public MirAction CurrentAction;
+    pub current_action: MirAction,  // NEW
+    
+    // C# line 119: public byte CurrentActionLevel;
+    pub current_action_level: u8,  // NEW
+    
+    // C# line 120: public bool SkipFrames;
+    pub skip_frames: bool,   // NEW
+    
+    // C# line 121: public FrameLoop FrameLoop = null;
+    // FrameLoop will be handled separately
+    
+    // ==================== Sound ====================
+    // C# line 124: public int StruckWeapon;
+    pub struck_weapon: i32,  // NEW
+    
+    // ==================== Damage Display ====================
+    // C# line 128: public List<Damage> Damages = new List<Damage>();
+    pub damages: Vec<super::damage::Damage>,  // NEW
+    
+    // ==================== Internal State (not in C#) ====================
+    animation: AnimationState,  // Keep for now, will migrate later
+    last_update: Instant,       // Keep for Rust timing
 }
 
 impl MapObject {
@@ -64,63 +160,96 @@ impl MapObject {
     // ========================================
     
     /// Create a new user (player) map object with basic initialization
+    /// C# reference: MapObject constructor (implicit)
     pub fn for_user(object_id: u32, name: String) -> Self {
         Self {
+            // Identity
             object_id,
             object_type: MapObjectType::User,
-            location: Point::new(0, 0),
-            direction: MirDirection::Up,
             name,
-            name_colour: 0xFFFFFF_u32 as i32, // White by default
+            
+            // Position
+            current_location: Point::new(0, 0),
+            map_location: Point::new(0, 0),
+            direction: MirDirection::Up,
+            
+            // State flags
             dead: false,
             hidden: false,
+            sit_down: false,
+            sneaking: false,
             poison: PoisonType::empty(),
+            dead_time: 0,
             ai: 0,
+            in_trap_rock: false,
+            jump_distance: 0,
+            
+            // Visual
+            blend: true,  // C# default
+            blind_time: 0,
+            blind_count: 0,
+            
+            // Health/Mana
+            percent_health: 0,
+            percent_mana: 0,
+            health_time: 0,
+            
+            // Action system
+            action_feed: Vec::new(),
+            
+            // Effects & Buffs
+            effects: Vec::new(),
+            buffs: Vec::new(),
+            
+            // Display
+            draw_colour: 0xFFFFFFFF_u32 as i32,  // White
+            name_colour: 0xFFFFFFFF_u32 as i32,  // White
+            light_colour: 0xFFFFFFFF_u32 as i32, // White
+            chat_time: 0,
+            
+            // Drawing state
+            draw_frame: 0,
+            draw_wing_frame: 0,
+            draw_location: Point::new(0, 0),
+            movement: Point::new(0, 0),
+            final_draw_location: Point::new(0, 0),
+            offset_move: Point::new(0, 0),
             light: 0,
-            buffs: BuffState::default(),
+            draw_y: 0,
+            
+            // Animation timing
+            next_motion: 0,
+            next_motion2: 0,
+            current_action: MirAction::Standing,
+            current_action_level: 0,
+            skip_frames: false,
+            
+            // Sound
+            struck_weapon: 0,
+            
+            // Damage display
+            damages: Vec::new(),
+            
+            // Internal state
             animation: AnimationState::default(),
             last_update: Instant::now(),
         }
     }
     
     /// Create a new hero map object with basic initialization
+    /// C# reference: HeroObject constructor
     pub fn for_hero(object_id: u32, name: String) -> Self {
-        Self {
-            object_id,
-            object_type: MapObjectType::Hero,
-            location: Point::new(0, 0),
-            direction: MirDirection::Up,
-            name,
-            name_colour: 0xFFFFFF_u32 as i32,
-            dead: false,
-            hidden: false,
-            poison: PoisonType::empty(),
-            ai: 0,
-            light: 0,
-            buffs: BuffState::default(),
-            animation: AnimationState::default(),
-            last_update: Instant::now(),
-        }
+        let mut hero = Self::for_user(object_id, name);
+        hero.object_type = MapObjectType::Hero;
+        hero
     }
     
     /// Create a new monster/NPC map object with basic initialization
+    /// C# reference: MonsterObject constructor
     pub fn for_monster(object_id: u32, name: String) -> Self {
-        Self {
-            object_id,
-            object_type: MapObjectType::Monster,
-            location: Point::new(0, 0),
-            direction: MirDirection::Up,
-            name,
-            name_colour: 0xFFFFFF_u32 as i32,
-            dead: false,
-            hidden: false,
-            poison: PoisonType::empty(),
-            ai: 0,
-            light: 0,
-            buffs: BuffState::default(),
-            animation: AnimationState::default(),
-            last_update: Instant::now(),
-        }
+        let mut monster = Self::for_user(object_id, name);
+        monster.object_type = MapObjectType::Monster;
+        monster
     }
     
     // ========================================
@@ -149,9 +278,11 @@ impl MapObject {
     }
     
     /// Create a MapObject from an ObjectNpc network packet
+    /// C# reference: NPCObject.Load()
     pub fn from_npc_packet(packet: &ObjectNpc) -> (Self, SyncResult) {
         let mut obj = Self::for_monster(packet.object_id, packet.name.clone());
-        obj.location = Point::new(packet.location_x, packet.location_y);
+        obj.current_location = Point::new(packet.location_x, packet.location_y);
+        obj.map_location = Point::new(packet.location_x, packet.location_y);
         obj.direction = packet.direction;
         obj.name_colour = packet.name_colour;
         // NPCs have no animation, buffs, or special states
@@ -168,21 +299,27 @@ impl MapObject {
     
     /// Sync MapObject state from an ObjectPlayer network packet.
     /// This is the ONLY place where ObjectPlayer data enters the game object layer.
+    /// C# reference: PlayerObject.Load() - MapObject.cs line 98
     pub fn sync_from_player_packet(&mut self, packet: &ObjectPlayer) -> SyncResult {
-        let action_before = self.animation.current_action();
+        let action_before = self.current_action;
         
-        // Update basic fields
-        self.location = Point::new(packet.location_x, packet.location_y);
-        self.direction = packet.direction;
+        // Update identity and display
         self.name = packet.name.clone();
         self.name_colour = packet.name_colour;
+        
+        // Update position
+        self.current_location = Point::new(packet.location_x, packet.location_y);
+        self.map_location = Point::new(packet.location_x, packet.location_y);
+        self.direction = packet.direction;
+        
+        // Update state flags
         self.dead = packet.dead;
         self.hidden = packet.hidden;
         self.poison = packet.poison;
-        self.light = packet.light;
+        self.light = packet.light as i32;
         
-        // Update buffs
-        let buff_delta = self.buffs.replace(&packet.buffs);
+        // Update buffs (compare old vs new)
+        let buff_delta = self.update_buffs_internal(&packet.buffs);
         
         // Update animation based on state
         self.animation.update_from_state(
@@ -193,6 +330,7 @@ impl MapObject {
         );
         
         let action_after = self.animation.current_action();
+        self.current_action = action_after;
         self.last_update = Instant::now();
         
         SyncResult {
@@ -209,22 +347,28 @@ impl MapObject {
     }
     
     /// Sync MapObject state from an ObjectMonster network packet
+    /// C# reference: MonsterObject.Load()
     pub fn sync_from_monster_packet(&mut self, packet: &ObjectMonster) -> SyncResult {
-        let action_before = self.animation.current_action();
+        let action_before = self.current_action;
         
-        // Update basic fields
-        self.location = Point::new(packet.location_x, packet.location_y);
-        self.direction = packet.direction;
+        // Update identity and display
         self.name = packet.name.clone();
         self.name_colour = packet.name_colour;
+        
+        // Update position
+        self.current_location = Point::new(packet.location_x, packet.location_y);
+        self.map_location = Point::new(packet.location_x, packet.location_y);
+        self.direction = packet.direction;
+        
+        // Update state flags
         self.dead = packet.dead;
         self.hidden = packet.hidden;
         self.poison = packet.poison;
         self.ai = packet.ai;
-        self.light = packet.light;
+        self.light = packet.light as i32;
         
         // Update buffs
-        let buff_delta = self.buffs.replace(&packet.buffs);
+        let buff_delta = self.update_buffs_internal(&packet.buffs);
         
         // Update animation
         let new_action = if packet.dead {
@@ -235,6 +379,7 @@ impl MapObject {
         self.animation.set_action(new_action);
         
         let action_after = self.animation.current_action();
+        self.current_action = action_after;
         self.last_update = Instant::now();
         
         SyncResult {
@@ -262,9 +407,21 @@ impl MapObject {
     // Getters - Position and Direction
     // ========================================
 
-    /// Get the current location on the map
+    /// Get the current display location (for rendering with interpolation)
+    /// C# reference: CurrentLocation
+    pub fn current_location(&self) -> Point {
+        self.current_location
+    }
+    
+    /// Get the map grid location (server-synchronized position)
+    /// C# reference: MapLocation
+    pub fn map_location(&self) -> Point {
+        self.map_location
+    }
+    
+    /// Legacy compatibility - returns current_location
     pub fn location(&self) -> Point {
-        self.location
+        self.current_location
     }
 
     /// Get the current facing direction
@@ -334,27 +491,96 @@ impl MapObject {
     // ========================================
     
     /// Get active buffs
+    /// C# reference: public List<BuffType> Buffs
     pub fn buffs(&self) -> &[BuffType] {
-        &self.buffs.active
+        &self.buffs
     }
     
     /// Check if a specific buff is active
     pub fn has_buff(&self, buff_type: BuffType) -> bool {
-        self.buffs.active.contains(&buff_type)
+        self.buffs.contains(&buff_type)
+    }
+    
+    // ========================================
+    // Getters - Health/Mana
+    // ========================================
+    
+    /// Get health percentage (0-100)
+    /// C# reference: public byte PercentHealth
+    pub fn percent_health(&self) -> u8 {
+        self.percent_health
+    }
+    
+    /// Get mana percentage (0-100)
+    /// C# reference: public byte PercentMana
+    pub fn percent_mana(&self) -> u8 {
+        self.percent_mana
+    }
+    
+    // ========================================
+    // Getters - Drawing
+    // ========================================
+    
+    /// Get draw location (for rendering)
+    /// C# reference: public Point DrawLocation
+    pub fn draw_location(&self) -> Point {
+        self.draw_location
+    }
+    
+    /// Get current draw frame
+    /// C# reference: public int DrawFrame
+    pub fn draw_frame(&self) -> i32 {
+        self.draw_frame
+    }
+    
+    /// Get current action
+    /// C# reference: public MirAction CurrentAction
+    pub fn get_current_action(&self) -> MirAction {
+        self.current_action
     }
 
     // ========================================
     // Setters - Position and Direction
     // ========================================
     
-    /// Set the location on the map
+    /// Set the current display location
+    pub fn set_current_location(&mut self, location: Point) {
+        self.current_location = location;
+    }
+    
+    /// Set the map grid location
+    pub fn set_map_location(&mut self, location: Point) {
+        self.map_location = location;
+    }
+    
+    /// Legacy compatibility - sets current_location
     pub fn set_location(&mut self, location: Point) {
-        self.location = location;
+        self.current_location = location;
     }
     
     /// Set the facing direction
     pub fn set_direction(&mut self, direction: MirDirection) {
         self.direction = direction;
+    }
+    
+    // ========================================
+    // Setters - Health/Mana
+    // ========================================
+    
+    /// Set health percentage
+    /// C# reference: public virtual byte PercentHealth { set; }
+    pub fn set_percent_health(&mut self, percent: u8) {
+        if self.percent_health != percent {
+            self.percent_health = percent;
+        }
+    }
+    
+    /// Set mana percentage
+    /// C# reference: public virtual byte PercentMana { set; }
+    pub fn set_percent_mana(&mut self, percent: u8) {
+        if self.percent_mana != percent {
+            self.percent_mana = percent;
+        }
     }
     
     // ========================================
@@ -443,13 +669,35 @@ impl MapObject {
     // ========================================
     
     /// Update buffs from a list, returns the delta (added/removed)
+    /// C# reference: Buffs property setter (implicit comparison)
     pub fn update_buffs(&mut self, buffs: &[BuffType]) -> BuffDelta {
-        self.buffs.replace(buffs)
+        self.update_buffs_internal(buffs)
     }
     
     /// Set buffs (replaces existing buffs) - legacy compatibility
     pub fn set_buffs(&mut self, buffs: Vec<BuffType>) {
-        self.buffs.replace(&buffs);
+        self.buffs = buffs;
+    }
+    
+    /// Internal method to update buffs and calculate delta
+    fn update_buffs_internal(&mut self, incoming: &[BuffType]) -> BuffDelta {
+        let mut added = Vec::new();
+        for buff in incoming {
+            if !self.buffs.contains(buff) {
+                added.push(*buff);
+            }
+        }
+
+        let mut removed = Vec::new();
+        for buff in &self.buffs {
+            if !incoming.contains(buff) {
+                removed.push(*buff);
+            }
+        }
+
+        self.buffs = incoming.to_vec();
+
+        BuffDelta { added, removed }
     }
 
     pub fn apply_attack(
@@ -484,25 +732,103 @@ impl MapObject {
     }
 
     // ========================================
+    // Lifecycle Management
+    // ========================================
+    
+    /// C#: Remove(), lines 153-176
+    /// Remove this object from the game world.
+    /// 
+    /// Note: The caller is responsible for:
+    /// - Clearing static references (MouseObject, TargetObject, MagicObject, etc)
+    /// - Removing from MapControl.Objects and MapControl.ObjectsList
+    /// - Calling GameScene.Scene.MapControl.RemoveObject(this)
+    /// - Clearing HeroObject if this is the hero
+    /// - Clearing NPCID if this is an NPC
+    /// 
+    /// These responsibilities are handled by the caller in Rust (typically ObjectManager).
+    pub fn remove(&mut self) {
+        // Clear any pending actions (C# line 97: ActionFeed)
+        self.action_feed.clear();
+        
+        // Clear effects (C# line 104: Effects)
+        self.effects.clear();
+        
+        // Clear buffs (C# line 105: Buffs)
+        self.buffs.clear();
+        
+        // Reset state
+        self.dead_time = 0;
+    }
+
+    // Buff Effect Management
+    // ========================================
+    
+    /// C#: AddBuffEffect(), lines 213-352 (140 lines!)
+    /// Add visual effect for a buff type
+    /// 
+    /// TODO: Implement when Effect system is complete
+    /// Dependencies:
+    /// - Effect::new_buff() method
+    /// - Libraries resource manager (Magic3, etc)
+    /// - Sound system integration
+    /// 
+    /// C# Implementation summary:
+    /// - 30+ buff types with unique effects
+    /// - Each buff has specific library, frame range, duration
+    /// - Some buffs trigger sounds
+    /// - Some buffs modify object state (Sprint, Sneaking, etc)
+    pub fn add_buff_effect(&mut self, _buff_type: BuffType) {
+        // TODO: Implement
+        // Example from C#:
+        // case BuffType.Fury:
+        //     Effects.Add(new BuffEffect(Libraries.Magic3, 190, 7, 1400, this, true, type) { Repeat = true });
+        //     break;
+    }
+    
+    /// C#: RemoveBuffEffect(), lines 353-445 (93 lines)
+    /// Remove visual effect for a buff type
+    /// 
+    /// TODO: Implement when Effect system is complete
+    /// Dependencies: Same as add_buff_effect()
+    /// 
+    /// C# Implementation summary:
+    /// - Searches Effects list for matching BuffType
+    /// - Removes matching effects
+    /// - Some buffs modify object state on removal (Sprint=false, Sneaking=false, etc)
+    pub fn remove_buff_effect(&mut self, _buff_type: BuffType) {
+        // TODO: Implement
+        // Example from C#:
+        // for (int i = Effects.Count - 1; i >= 0; i--)
+        // {
+        //     BuffEffect effect = Effects[i] as BuffEffect;
+        //     if (effect == null || effect.BuffType != type) continue;
+        //     effect.Clear();
+        //     Effects.RemoveAt(i);
+        // }
+    }
+
     // Action Application
     // ========================================
     
     /// Apply a generic action to the object
+    /// C# reference: SetAction() and related methods
     pub fn apply_action(
         &mut self,
         action: MirAction,
         direction: MirDirection,
         location: Point,
     ) -> ActionResult {
-        let action_before = self.animation.current_action();
+        let action_before = self.current_action;
         let direction_before = self.direction;
-        let location_before = self.location;
+        let location_before = self.current_location;
         
         let action_changed = self.animation.ensure_action(action);
+        self.current_action = action;
         self.direction = direction;
-        self.location = location;
+        self.current_location = location;
+        self.map_location = location;
         
-        let action_after = self.animation.current_action();
+        let action_after = self.current_action;
         self.last_update = Instant::now();
 
         ActionResult {
@@ -511,7 +837,7 @@ impl MapObject {
             direction_before,
             direction_after: self.direction,
             location_before,
-            location_after: self.location,
+            location_after: self.current_location,
             action_changed,
         }
     }
@@ -540,34 +866,6 @@ impl MapObject {
                 _ => MirAction::Attack1,
             },
         }
-    }
-}
-
-// Buff management
-#[derive(Debug, Clone, Default)]
-struct BuffState {
-    active: Vec<BuffType>,
-}
-
-impl BuffState {
-    fn replace(&mut self, incoming: &[BuffType]) -> BuffDelta {
-        let mut added = Vec::new();
-        for buff in incoming {
-            if !self.active.contains(buff) {
-                added.push(*buff);
-            }
-        }
-
-        let mut removed = Vec::new();
-        for buff in &self.active {
-            if !incoming.contains(buff) {
-                removed.push(*buff);
-            }
-        }
-
-        self.active = incoming.to_vec();
-
-        BuffDelta { added, removed }
     }
 }
 

@@ -343,6 +343,119 @@ impl PlayerObject {
     
     // ==================== Methods ====================
     
+    /// Load player data from network packet
+    /// 
+    /// Mirrors C# PlayerObject.Load(S.ObjectPlayer info), lines 113-168
+    /// 
+    /// This method syncs all player data from the server and initializes the player object.
+    pub fn load(&mut self, packet: &mir2_shared::packets::server::S_ObjectPlayer) {
+        // Sync base MapObject fields
+        self.map_object.sync_from_player_packet(packet);
+        
+        // Guild information (C# lines 118-119)
+        self.guild_name = packet.guild_name.clone().unwrap_or_default();
+        self.guild_rank_name = packet.guild_rank_name.clone().unwrap_or_default();
+        
+        // Basic stats (C# lines 120-122)
+        self.class = packet.class;
+        self.gender = packet.gender;
+        self.level = packet.level;
+        
+        // Hair (C# line 126)
+        self.hair = packet.hair;
+        
+        // Equipment appearance (C# lines 128-130)
+        self.weapon = packet.weapon as i32;
+        self.weapon_effect = packet.weapon_effect as i32;
+        self.armour = packet.armour as i32;
+        
+        // Wing effect (C# line 142)
+        self.wing_effect = packet.wing_effect;
+        
+        // Current effect (C# line 143)
+        self.current_effect = packet.effect;
+        
+        // Mount (C# lines 145-146)
+        self.mount_type = packet.mount_type;
+        self.riding_mount = packet.riding_mount;
+        
+        // Fishing (C# line 148)
+        self.fishing = packet.fishing;
+        
+        // Transform (C# line 150)
+        self.transform_type = packet.transform_type;
+        
+        // Set texture libraries (C# line 152)
+        self.set_libraries();
+        
+        // If dead, add death action to queue (C# line 154)
+        // TODO: Implement ActionFeed
+        // if self.map_object.dead {
+        //     self.map_object.action_feed.push(QueuedAction {
+        //         action: MirAction::Dead,
+        //         direction: self.map_object.direction,
+        //         location: self.map_object.current_location,
+        //     });
+        // }
+        
+        // Extra effect (C# line 155)
+        // TODO: Implement when Effect system is complete
+        // if packet.extra {
+        //     self.map_object.effects.push(Effect::new(...));
+        // }
+        
+        // Elemental system (C# lines 157-159)
+        self.element_effect = packet.element_orb_effect as i32;
+        self.elements_level = packet.element_orb_lvl as i32;
+        self.element_orb_max = packet.element_orb_max as i32;
+        
+        // Process buffs (C# lines 163-165)
+        self.process_buffs();
+        
+        // Set action (C# line 167)
+        // TODO: Implement SetAction()
+        // self.set_action();
+        
+        // Set effects (C# line 169)
+        // TODO: Implement SetEffects()
+        // self.set_effects();
+    }
+    
+    /// Update player appearance from network packet
+    /// 
+    /// Mirrors C# PlayerObject.Update(S.PlayerUpdate info), lines 170-180
+    pub fn update(&mut self, packet: &mir2_shared::packets::server::S_PlayerUpdate) {
+        // Update equipment (C# lines 172-174)
+        self.weapon = packet.weapon as i32;
+        self.weapon_effect = packet.weapon_effect as i32;
+        self.armour = packet.armour as i32;
+        
+        // Update light (C# line 175)
+        self.map_object.light = packet.light as i32;
+        
+        // Update wing effect (C# line 176)
+        self.wing_effect = packet.wing_effect;
+        
+        // Reload libraries (C# line 178)
+        self.set_libraries();
+        
+        // Reload effects (C# line 179)
+        // TODO: Implement SetEffects()
+        // self.set_effects();
+    }
+    
+    /// Process all active buffs and add their visual effects
+    /// 
+    /// Mirrors C# PlayerObject.ProcessBuffs(), lines 182-186
+    pub fn process_buffs(&mut self) {
+        // Clone buffs to avoid borrow checker issues
+        let buffs = self.map_object.buffs.clone();
+        
+        for buff_type in &buffs {
+            self.map_object.add_buff_effect(*buff_type);
+        }
+    }
+    
     /// Set libraries based on class, gender, armour, weapon, mount, transform
     /// 
     /// Mirrors C# PlayerObject.SetLibraries()
