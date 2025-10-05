@@ -384,8 +384,8 @@ impl Scene for GameScene {
         // TODO: Update cursor
     }
     
-    fn handle_mouse_button(&mut self, button: winit::event::MouseButton, pressed: bool, x: i32, y: i32) {
-        use winit::event::MouseButton;
+    fn handle_mouse_button(&mut self, button: super::MouseButton, pressed: bool, x: i32, y: i32) {
+        use super::MouseButton;
         
         if pressed {
             tracing::debug!("GameScene click at ({}, {}) with {:?}", x, y, button);
@@ -405,8 +405,8 @@ impl Scene for GameScene {
         }
     }
     
-    fn handle_key_press(&mut self, key: winit::keyboard::KeyCode, modifiers: winit::keyboard::ModifiersState) -> bool {
-        use winit::keyboard::KeyCode;
+    fn handle_key_press(&mut self, key: super::KeyCode, modifiers: super::ModifiersState) -> bool {
+        use super::KeyCode;
         
         match key {
             // Movement keys handled separately

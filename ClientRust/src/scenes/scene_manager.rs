@@ -80,10 +80,10 @@ impl SceneManager {
         }
     }
     
-    /// Render current scene
-    pub fn draw(&self) {
+    /// Render current scene (ggez版本)
+    pub fn draw(&self, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager) {
         if let Some(scene) = &self.current_scene {
-            scene.draw();
+            scene.draw(canvas, ggez_manager);
         }
     }
     
@@ -94,8 +94,8 @@ impl SceneManager {
         }
     }
     
-    /// Handle keyboard input
-    pub fn handle_key_press(&mut self, key: winit::keyboard::KeyCode, modifiers: winit::keyboard::ModifiersState) -> bool {
+    /// Handle keyboard input (使用Scene自定义KeyCode)
+    pub fn handle_key_press(&mut self, key: super::KeyCode, modifiers: super::ModifiersState) -> bool {
         if let Some(scene) = &mut self.current_scene {
             return scene.handle_key_press(key, modifiers);
         }
@@ -109,8 +109,8 @@ impl SceneManager {
         }
     }
     
-    /// Handle mouse button
-    pub fn handle_mouse_button(&mut self, button: winit::event::MouseButton, pressed: bool, x: i32, y: i32) {
+    /// Handle mouse button (使用Scene自定义MouseButton)
+    pub fn handle_mouse_button(&mut self, button: super::MouseButton, pressed: bool, x: i32, y: i32) {
         if let Some(scene) = &mut self.current_scene {
             scene.handle_mouse_button(button, pressed, x, y);
         }

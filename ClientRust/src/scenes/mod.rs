@@ -33,6 +33,43 @@ pub enum SceneType {
     Game,
 }
 
+/// Mouse button (ggez compatible)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    Other(u16),
+}
+
+/// Key code (ggez compatible)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyCode {
+    KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ,
+    KeyK, KeyL, KeyM, KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT,
+    KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
+    Digit1, Digit2, Digit3, Digit4, Digit5,
+    Digit6, Digit7, Digit8, Digit9, Digit0,
+    Enter, Escape, Backspace, Tab, Space,
+    ArrowLeft, ArrowRight, ArrowUp, ArrowDown,
+    F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+    // 可根据需要添加更多
+}
+
+/// Modifier state
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ModifiersState {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+}
+
+impl ModifiersState {
+    pub fn control_key(&self) -> bool {
+        self.ctrl
+    }
+}
+
 /// Scene trait - all scenes must implement this
 pub trait Scene {
     /// Get scene type
@@ -44,8 +81,10 @@ pub trait Scene {
     /// Process per-frame logic
     fn update(&mut self, delta_time: f32);
     
-    /// Render scene
-    fn draw(&self);
+    /// Render scene (ggez版本)
+    fn draw(&self, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
+        // Default: do nothing
+    }
     
     /// Process game event from GameClient
     fn process_event(&mut self, event: &GameEvent);
@@ -56,12 +95,12 @@ pub trait Scene {
     }
     
     /// Handle mouse button
-    fn handle_mouse_button(&mut self, _button: winit::event::MouseButton, _pressed: bool, _x: i32, _y: i32) {
+    fn handle_mouse_button(&mut self, _button: MouseButton, _pressed: bool, _x: i32, _y: i32) {
         // Default implementation: do nothing
     }
     
     /// Handle key press (returns true if handled)
-    fn handle_key_press(&mut self, _key: winit::keyboard::KeyCode, _modifiers: winit::keyboard::ModifiersState) -> bool {
+    fn handle_key_press(&mut self, _key: KeyCode, _modifiers: ModifiersState) -> bool {
         // Default implementation: not handled
         false
     }

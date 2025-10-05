@@ -211,8 +211,8 @@ impl Scene for SelectScene {
         }
     }
     
-    fn handle_key_press(&mut self, key: winit::keyboard::KeyCode, _modifiers: winit::keyboard::ModifiersState) -> bool {
-        use winit::keyboard::KeyCode;
+    fn handle_key_press(&mut self, key: super::KeyCode, _modifiers: super::ModifiersState) -> bool {
+        use super::KeyCode;
         
         match key {
             KeyCode::Enter => {
