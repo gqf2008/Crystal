@@ -530,11 +530,15 @@ impl LoginScene {
                 
                 // 3. 绘制输入框标签和内容
                 // C# 原版位置: AccountIDTextBox: Location = new Point(226, 103), Size = new Size(136, 18)
+                // 显示所有 8 个输入框
                 let input_fields = [
                     ("账号ID:", box_x + 226.0, box_y + 103.0, &dialog.registration.account_id, InputField::AccountId, dialog.account_id_valid),
                     ("密码:", box_x + 226.0, box_y + 129.0, &"*".repeat(dialog.registration.password.len()), InputField::Password, dialog.password1_valid),
                     ("确认密码:", box_x + 226.0, box_y + 155.0, &"*".repeat(dialog.registration.password_confirm.len()), InputField::PasswordConfirm, dialog.password2_valid),
                     ("用户名:", box_x + 226.0, box_y + 189.0, &dialog.registration.username, InputField::Username, dialog.username_valid),
+                    ("生日:", box_x + 226.0, box_y + 215.0, &dialog.registration.birth_date, InputField::BirthDate, dialog.birth_date_valid),
+                    ("安全问题:", box_x + 226.0, box_y + 250.0, &dialog.registration.secret_question, InputField::Question, dialog.question_valid),
+                    ("安全答案:", box_x + 226.0, box_y + 276.0, &dialog.registration.secret_answer, InputField::Answer, dialog.answer_valid),
                     ("电子邮箱:", box_x + 226.0, box_y + 311.0, &dialog.registration.email, InputField::Email, dialog.email_valid),
                 ];
                 
@@ -1284,12 +1288,15 @@ impl Scene for LoginScene {
                         return;
                     }
                     
-                    // 检查是否点击了输入框
+                    // 检查是否点击了输入框 (所有 8 个字段)
                     let input_fields = [
                         (box_x + 226.0, box_y + 103.0, 150.0, 20.0, NewAccountInputField::AccountId),
                         (box_x + 226.0, box_y + 129.0, 150.0, 20.0, NewAccountInputField::Password),
                         (box_x + 226.0, box_y + 155.0, 150.0, 20.0, NewAccountInputField::PasswordConfirm),
                         (box_x + 226.0, box_y + 189.0, 150.0, 20.0, NewAccountInputField::Username),
+                        (box_x + 226.0, box_y + 215.0, 150.0, 20.0, NewAccountInputField::BirthDate),
+                        (box_x + 226.0, box_y + 250.0, 150.0, 20.0, NewAccountInputField::Question),
+                        (box_x + 226.0, box_y + 276.0, 150.0, 20.0, NewAccountInputField::Answer),
                         (box_x + 226.0, box_y + 311.0, 150.0, 20.0, NewAccountInputField::Email),
                     ];
                     
@@ -1507,11 +1514,13 @@ impl Scene for LoginScene {
                     }
                     KeyCode::Enter => {
                         // Enter键: 如果所有必填字段都有效,提交注册请求;否则显示提示
+                        // C# 原版: 所有 8 个字段都是必填的
                         if dialog.account_id_valid && dialog.password1_valid && dialog.password2_valid 
-                            && dialog.username_valid && dialog.email_valid {
-                            tracing::info!("新建账号: Enter键提交注册请求");
+                            && dialog.username_valid && dialog.birth_date_valid && dialog.question_valid 
+                            && dialog.answer_valid && dialog.email_valid {
+                            tracing::info!("新建账号: Enter键提交注册请求 (所有8个字段已验证)");
                             // TODO: 实际提交到服务器
-                            self.show_message("注册功能开发中...\n\n账号信息已验证通过!\n网络集成完成后将提交到服务器。");
+                            self.show_message("注册功能开发中...\n\n所有账号信息已验证通过!\n网络集成完成后将提交到服务器。");
                         } else {
                             // 显示哪些字段需要填写
                             let mut missing = Vec::new();
@@ -1519,6 +1528,9 @@ impl Scene for LoginScene {
                             if !dialog.password1_valid { missing.push("密码"); }
                             if !dialog.password2_valid { missing.push("确认密码"); }
                             if !dialog.username_valid { missing.push("用户名"); }
+                            if !dialog.birth_date_valid { missing.push("生日"); }
+                            if !dialog.question_valid { missing.push("安全问题"); }
+                            if !dialog.answer_valid { missing.push("安全答案"); }
                             if !dialog.email_valid { missing.push("电子邮箱"); }
                             
                             let msg = format!("请完善以下必填字段:\n\n{}", missing.join("\n"));

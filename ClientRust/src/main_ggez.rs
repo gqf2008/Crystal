@@ -73,6 +73,25 @@ fn main() -> Result<()> {
     
     tracing::info!("Ggez Context 创建成功: {}x{}", window_width, window_height);
     
+    // 添加中文字体支持
+    let font_path = std::path::Path::new("resources/font/AlibabaPuHuiTi-3-55-Regular.ttf");
+    if font_path.exists() {
+        match std::fs::read(font_path) {
+            Ok(font_bytes) => {
+                ctx.gfx.add_font(
+                    "AlibabaPuHuiTi",
+                    ggez::graphics::FontData::from_vec(font_bytes)?,
+                );
+                tracing::info!("✓ 中文字体加载成功: AlibabaPuHuiTi");
+            }
+            Err(e) => {
+                tracing::warn!("⚠ 中文字体加载失败: {}", e);
+            }
+        }
+    } else {
+        tracing::warn!("⚠ 字体文件不存在: {:?}", font_path);
+    }
+   
     // 启用文本输入 (IME) - ggez 0.10 / winit 0.30
     ctx.gfx.window().set_ime_allowed(true);
     tracing::info!("IME 文本输入已启用");
