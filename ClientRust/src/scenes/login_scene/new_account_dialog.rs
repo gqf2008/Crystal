@@ -61,6 +61,19 @@ pub struct AccountRegistration {
     pub secret_answer: String,
 }
 
+/// Input field enum for focus management
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputField {
+    AccountId,
+    Password,
+    PasswordConfirm,
+    Email,
+    Username,
+    BirthDate,
+    Question,
+    Answer,
+}
+
 /// New account dialog for creating new accounts
 #[derive(Debug)]
 pub struct NewAccountDialog {
@@ -73,20 +86,31 @@ pub struct NewAccountDialog {
     pub registration: AccountRegistration,
 
     // Validation state
-    account_id_valid: bool,
-    password1_valid: bool,
-    password2_valid: bool,
-    email_valid: bool,
-    username_valid: bool,
-    birth_date_valid: bool,
-    question_valid: bool,
-    answer_valid: bool,
+    pub account_id_valid: bool,
+    pub password1_valid: bool,
+    pub password2_valid: bool,
+    pub email_valid: bool,
+    pub username_valid: bool,
+    pub birth_date_valid: bool,
+    pub question_valid: bool,
+    pub answer_valid: bool,
 
     // Validation rules
     min_account_length: usize,
     max_account_length: usize,
     min_password_length: usize,
     max_password_length: usize,
+    
+    // Input focus state
+    pub focused_field: InputField,
+    
+    // Cursor state
+    pub cursor_visible: bool,
+    pub cursor_blink_timer: f32,
+    
+    // Button hover states
+    pub ok_button_hovered: bool,
+    pub cancel_button_hovered: bool,
 }
 
 impl NewAccountDialog {
@@ -114,6 +138,11 @@ impl NewAccountDialog {
             max_account_length,
             min_password_length,
             max_password_length,
+            focused_field: InputField::AccountId, // 默认聚焦账号输入框
+            cursor_visible: true,
+            cursor_blink_timer: 0.0,
+            ok_button_hovered: false,
+            cancel_button_hovered: false,
         }
     }
 
@@ -128,9 +157,94 @@ impl NewAccountDialog {
     }
     
     /// Update dialog (for cursor blinking, etc.)
-    pub fn update(&mut self, _delta_time: f32) {
-        // TODO: 添加光标闪烁逻辑
-        // TODO: 添加输入焦点管理
+    pub fn update(&mut self, delta_time: f32) {
+        // 光标闪烁逻辑 (每0.5秒切换一次)
+        self.cursor_blink_timer += delta_time;
+        if self.cursor_blink_timer >= 0.5 {
+            self.cursor_blink_timer = 0.0;
+            self.cursor_visible = !self.cursor_visible;
+        }
+    }
+    
+    /// Handle Tab key (switch to next field)
+    pub fn handle_tab(&mut self) {
+        self.focused_field = match self.focused_field {
+            InputField::AccountId => InputField::Password,
+            InputField::Password => InputField::PasswordConfirm,
+            InputField::PasswordConfirm => InputField::Email,
+            InputField::Email => InputField::Username,
+            InputField::Username => InputField::BirthDate,
+            InputField::BirthDate => InputField::Question,
+            InputField::Question => InputField::Answer,
+            InputField::Answer => InputField::AccountId, // 循环回到第一个
+        };
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Handle Backspace key (delete last character from focused field)
+    pub fn handle_backspace(&mut self) {
+        let text = match self.focused_field {
+            InputField::AccountId => &mut self.registration.account_id,
+            InputField::Password => &mut self.registration.password,
+            InputField::PasswordConfirm => &mut self.registration.password_confirm,
+            InputField::Email => &mut self.registration.email,
+            InputField::Username => &mut self.registration.username,
+            InputField::BirthDate => &mut self.registration.birth_date,
+            InputField::Question => &mut self.registration.secret_question,
+            InputField::Answer => &mut self.registration.secret_answer,
+        };
+        
+        if !text.is_empty() {
+            text.pop();
+            self.validate_current_field();
+        }
+    }
+    
+    /// Handle text input (add character to focused field)
+    pub fn handle_text_input(&mut self, ch: char) {
+        let text = match self.focused_field {
+            InputField::AccountId => &mut self.registration.account_id,
+            InputField::Password => &mut self.registration.password,
+            InputField::PasswordConfirm => &mut self.registration.password_confirm,
+            InputField::Email => &mut self.registration.email,
+            InputField::Username => &mut self.registration.username,
+            InputField::BirthDate => &mut self.registration.birth_date,
+            InputField::Question => &mut self.registration.secret_question,
+            InputField::Answer => &mut self.registration.secret_answer,
+        };
+        
+        // 检查长度限制
+        let max_len = match self.focused_field {
+            InputField::AccountId => self.max_account_length,
+            InputField::Password | InputField::PasswordConfirm => self.max_password_length,
+            InputField::Email => 50,
+            InputField::Username => 20,
+            InputField::BirthDate => 10,
+            InputField::Question | InputField::Answer => 30,
+        };
+        
+        if text.len() < max_len {
+            text.push(ch);
+            self.validate_current_field();
+        }
+    }
+    
+    /// Validate the currently focused field
+    fn validate_current_field(&mut self) {
+        match self.focused_field {
+            InputField::AccountId => self.validate_account_id(),
+            InputField::Password => {
+                self.validate_password1();
+                self.validate_password2(); // 也重新验证确认密码
+            }
+            InputField::PasswordConfirm => self.validate_password2(),
+            InputField::Email => self.validate_email(),
+            InputField::Username => self.validate_username(),
+            InputField::BirthDate => self.validate_birth_date(),
+            InputField::Question => self.validate_question(),
+            InputField::Answer => self.validate_answer(),
+        }
     }
 
     /// Close dialog and clear data

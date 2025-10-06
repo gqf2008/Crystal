@@ -13,8 +13,8 @@ pub mod change_password_dialog;
 pub mod message_box;
 
 pub use login_dialog::LoginDialog;
-pub use new_account_dialog::{NewAccountDialog, NewAccountResult, AccountRegistration};
-pub use change_password_dialog::{ChangePasswordDialog, ChangePasswordResult};
+pub use new_account_dialog::{NewAccountDialog, NewAccountResult, AccountRegistration, InputField as NewAccountInputField};
+pub use change_password_dialog::{ChangePasswordDialog, ChangePasswordResult, PasswordInputField};
 pub use message_box::MessageBox;
 
 #[derive(Debug, Clone)]
@@ -314,20 +314,32 @@ impl LoginScene {
     
     /// Submit login credentials
     pub fn submit_login(&mut self) {
-        if let Some((username, _password)) = self.login_dialog.get_credentials() {
-            // TODO: Send login packet with username and password
+        if let Some((username, password)) = self.login_dialog.get_credentials() {
+            // 验证账号和密码格式
+            if !self.login_dialog.is_account_id_valid() {
+                self.show_message("您的账号格式不正确");
+                return;
+            }
+            if !self.login_dialog.is_password_valid() {
+                self.show_message("您的密码格式不正确");
+                return;
+            }
+            
+            // TODO: 发送登录数据包到服务器
+            // 需要通过网络层发送 ClientPackets::Login { AccountID, Password }
+            // 暂时显示消息提示功能正在开发中
+            self.show_message(&format!("登录功能开发中...\n\n账号: {}\n密码: {}", username, "*".repeat(password.len())));
+            
             self.connecting = true;
             self.login_enabled = false;
             self.ready_for_character_select = false;
             self.last_login_result = None;
             self.require_password_change = false;
-            let status = format!("Submitting login for {}", username);
-            println!("{}", status);
+            let status = format!("正在提交登录请求: {}", username);
+            tracing::info!("{}", status);
             self.record_status(status);
         } else {
-            let status = "Username and password required";
-            println!("{}", status);
-            self.record_status(status);
+            self.show_message("请输入账号和密码");
         }
     }
     
@@ -478,6 +490,233 @@ impl LoginScene {
                         let _ = title_lib.draw_to_canvas(ctx, canvas, button_index, button_x, button_y, false);
                     }
                 }
+            }
+        }
+    }
+    
+    /// 绘制新建账号对话框
+    fn draw_new_account_dialog(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, dialog: &NewAccountDialog) {
+        use ggez::graphics::{Text, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
+        use crate::graphics::{get_library, LibraryName};
+        use crate::scenes::login_scene::new_account_dialog::InputField;
+        
+        // 1. 绘制半透明背景遮罩
+        if let Ok(bg_mesh) = Mesh::new_rectangle(
+            ctx,
+            DrawMode::fill(),
+            Rect::new(0.0, 0.0, 1024.0, 768.0),
+            GgezColor::from_rgba(0, 0, 0, 128),
+        ) {
+            canvas.draw(&bg_mesh, DrawParam::default());
+        }
+        
+        // 2. 绘制新建账号对话框背景
+        // C# 原版: Index = 63, Library = Libraries.Prguse
+        if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                // 获取对话框尺寸
+                let (box_width, box_height) = if let Ok(info) = lib.get_image_info(63) {
+                    (info.width as f32, info.height as f32)
+                } else {
+                    (500.0, 480.0)  // 默认尺寸
+                };
+                
+                // 对话框位置 (居中)
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                
+                // 绘制背景
+                let _ = lib.draw_to_canvas(ctx, canvas, 63, box_x, box_y, false);
+                
+                // 3. 绘制输入框标签和内容
+                // C# 原版位置: AccountIDTextBox: Location = new Point(226, 103), Size = new Size(136, 18)
+                let input_fields = [
+                    ("账号ID:", box_x + 226.0, box_y + 103.0, &dialog.registration.account_id, InputField::AccountId, dialog.account_id_valid),
+                    ("密码:", box_x + 226.0, box_y + 129.0, &"*".repeat(dialog.registration.password.len()), InputField::Password, dialog.password1_valid),
+                    ("确认密码:", box_x + 226.0, box_y + 155.0, &"*".repeat(dialog.registration.password_confirm.len()), InputField::PasswordConfirm, dialog.password2_valid),
+                    ("用户名:", box_x + 226.0, box_y + 189.0, &dialog.registration.username, InputField::Username, dialog.username_valid),
+                    ("电子邮箱:", box_x + 226.0, box_y + 311.0, &dialog.registration.email, InputField::Email, dialog.email_valid),
+                ];
+                
+                for (label, x, y, text, field, valid) in &input_fields {
+                    // 绘制标签
+                    let label_text = Text::new(*label);
+                    canvas.draw(&label_text, DrawParam::default()
+                        .dest([x - 80.0, *y])
+                        .color(GgezColor::WHITE));
+                    
+                    // 绘制输入框背景 (边框)
+                    let border_color = if !valid {
+                        GgezColor::from_rgb(255, 0, 0) // 红色表示无效
+                    } else if *valid {
+                        GgezColor::from_rgb(0, 255, 0) // 绿色表示有效
+                    } else {
+                        GgezColor::from_rgb(128, 128, 128) // 灰色表示未验证
+                    };
+                    
+                    if let Ok(border) = Mesh::new_rectangle(
+                        ctx,
+                        DrawMode::stroke(1.0),
+                        Rect::new(*x, *y, 136.0, 18.0),
+                        border_color,
+                    ) {
+                        canvas.draw(&border, DrawParam::default());
+                    }
+                    
+                    // 绘制文本内容
+                    let content_text = Text::new(text.to_string());
+                    canvas.draw(&content_text, DrawParam::default()
+                        .dest([x + 2.0, *y + 2.0])
+                        .color(GgezColor::WHITE));
+                    
+                    // 如果是当前聚焦的输入框,绘制光标
+                    if dialog.focused_field == *field && dialog.cursor_visible {
+                        let cursor_x = x + 2.0 + (text.len() as f32 * 8.0);
+                        if let Ok(cursor) = Mesh::new_rectangle(
+                            ctx,
+                            DrawMode::fill(),
+                            Rect::new(cursor_x, *y + 2.0, 2.0, 14.0),
+                            GgezColor::WHITE,
+                        ) {
+                            canvas.draw(&cursor, DrawParam::default());
+                        }
+                    }
+                }
+                
+                // 4. 绘制按钮 (使用Title库)
+                if let Some(title_arc) = get_library(LibraryName::Title) {
+                    if let Ok(mut title_lib) = title_arc.try_lock() {
+                        // OK按钮 (C# Location: (135, 425))
+                        let ok_index = if dialog.ok_button_hovered { 201 } else { 200 };
+                        let _ = title_lib.draw_to_canvas(ctx, canvas, ok_index, box_x + 135.0, box_y + 425.0, false);
+                        
+                        // Cancel按钮 (C# Location: (409, 425))
+                        let cancel_index = if dialog.cancel_button_hovered { 204 } else { 203 };
+                        let _ = title_lib.draw_to_canvas(ctx, canvas, cancel_index, box_x + 409.0, box_y + 425.0, false);
+                    }
+                }
+                
+                // 5. 绘制提示信息
+                let hint_text = Text::new("按Tab切换输入框 | 按ESC关闭");
+                canvas.draw(&hint_text, DrawParam::default()
+                    .dest([box_x + 150.0, box_y + 460.0])
+                    .color(GgezColor::from_rgb(200, 200, 200)));
+            }
+        }
+    }
+    
+    /// 绘制修改密码对话框
+    fn draw_change_password_dialog(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, dialog: &ChangePasswordDialog) {
+        use ggez::graphics::{Text, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
+        use crate::graphics::{get_library, LibraryName};
+        
+        // 1. 绘制半透明背景遮罩
+        if let Ok(bg_mesh) = Mesh::new_rectangle(
+            ctx,
+            DrawMode::fill(),
+            Rect::new(0.0, 0.0, 1024.0, 768.0),
+            GgezColor::from_rgba(0, 0, 0, 128),
+        ) {
+            canvas.draw(&bg_mesh, DrawParam::default());
+        }
+        
+        // 2. 绘制修改密码对话框背景
+        // C# 原版: Index = 50, Library = Libraries.Prguse
+        if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                // 获取对话框尺寸
+                let (box_width, box_height) = if let Ok(info) = lib.get_image_info(50) {
+                    (info.width as f32, info.height as f32)
+                } else {
+                    (360.0, 310.0)  // 默认尺寸
+                };
+                
+                // 对话框位置 (居中)
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                
+                // 绘制背景
+                let _ = lib.draw_to_canvas(ctx, canvas, 50, box_x, box_y, false);
+                
+                // 3. 绘制输入框和标签
+                // C# 坐标:
+                // AccountID: (178, 75)
+                // CurrentPassword: (178, 113)
+                // NewPassword1: (178, 151)
+                // NewPassword2: (178, 188)
+                
+                let input_fields = [
+                    ("账号ID:", box_x + 178.0, box_y + 75.0, &dialog.account_id, PasswordInputField::AccountId, dialog.account_id_valid),
+                    ("当前密码:", box_x + 178.0, box_y + 113.0, &"*".repeat(dialog.current_password.len()), PasswordInputField::CurrentPassword, dialog.current_password_valid),
+                    ("新密码:", box_x + 178.0, box_y + 151.0, &"*".repeat(dialog.new_password.len()), PasswordInputField::NewPassword, dialog.new_password1_valid),
+                    ("确认新密码:", box_x + 178.0, box_y + 188.0, &"*".repeat(dialog.new_password_confirm.len()), PasswordInputField::NewPasswordConfirm, dialog.new_password2_valid),
+                ];
+                
+                for (label, x, y, text, field, valid) in &input_fields {
+                    // 绘制标签 (在输入框左侧)
+                    let label_text = Text::new(*label);
+                    canvas.draw(&label_text, DrawParam::default()
+                        .dest([x - 90.0, *y])
+                        .color(GgezColor::from_rgb(200, 200, 150)));
+                    
+                    // 绘制输入框边框 (C# Size: 136x18)
+                    let border_color = if !valid {
+                        GgezColor::from_rgb(255, 0, 0)  // 红色: 无效
+                    } else if *valid {
+                        GgezColor::from_rgb(0, 255, 0)  // 绿色: 有效
+                    } else {
+                        GgezColor::from_rgb(128, 128, 128)  // 灰色: 未验证
+                    };
+                    
+                    if let Ok(border) = Mesh::new_rectangle(
+                        ctx,
+                        DrawMode::stroke(1.0),
+                        Rect::new(*x, *y, 136.0, 18.0),
+                        border_color,
+                    ) {
+                        canvas.draw(&border, DrawParam::default());
+                    }
+                    
+                    // 绘制输入框内容
+                    let content_text = Text::new(text.to_string());
+                    canvas.draw(&content_text, DrawParam::default()
+                        .dest([x + 2.0, *y + 2.0])
+                        .color(GgezColor::WHITE));
+                    
+                    // 绘制光标 (如果该输入框获得焦点)
+                    if dialog.focused_field == *field && dialog.cursor_visible {
+                        let cursor_x = x + 2.0 + (text.len() as f32 * 8.0);  // 8像素每字符
+                        if let Ok(cursor) = Mesh::new_rectangle(
+                            ctx,
+                            DrawMode::fill(),
+                            Rect::new(cursor_x, *y + 2.0, 2.0, 14.0),
+                            GgezColor::WHITE,
+                        ) {
+                            canvas.draw(&cursor, DrawParam::default());
+                        }
+                    }
+                }
+                
+                // 4. 绘制按钮 (使用Title库)
+                if let Some(title_arc) = get_library(LibraryName::Title) {
+                    if let Ok(mut title_lib) = title_arc.try_lock() {
+                        // OK按钮 (C# Location: (80, 236))
+                        // C# 使用: Index 107 (normal), 108 (hover), 109 (pressed)
+                        let ok_index = if dialog.ok_button_hovered { 108 } else { 107 };
+                        let _ = title_lib.draw_to_canvas(ctx, canvas, ok_index, box_x + 80.0, box_y + 236.0, false);
+                        
+                        // Cancel按钮 (C# Location: (222, 236))
+                        // C# 使用: Index 110 (normal), 111 (hover), 112 (pressed)
+                        let cancel_index = if dialog.cancel_button_hovered { 111 } else { 110 };
+                        let _ = title_lib.draw_to_canvas(ctx, canvas, cancel_index, box_x + 222.0, box_y + 236.0, false);
+                    }
+                }
+                
+                // 5. 绘制提示文本
+                let hint_text = Text::new("按Tab切换输入框 | 按ESC关闭");
+                canvas.draw(&hint_text, DrawParam::default()
+                    .dest([box_x + 80.0, box_y + 280.0])
+                    .color(GgezColor::from_rgb(200, 200, 200)));
             }
         }
     }
@@ -649,6 +888,20 @@ impl Scene for LoginScene {
             self.draw_login_input(ctx, canvas);
         }
         
+        // 3.6 绘制新建账号对话框
+        if let Some(new_account) = &self.new_account_dialog {
+            if new_account.visible {
+                self.draw_new_account_dialog(ctx, canvas, new_account);
+            }
+        }
+        
+        // 3.7 绘制修改密码对话框
+        if let Some(change_pass) = &self.change_password_dialog {
+            if change_pass.visible {
+                self.draw_change_password_dialog(ctx, canvas, change_pass);
+            }
+        }
+        
         // 4. 绘制消息框 (MessageBox) - 最后绘制，显示在最上层
         if let Some(msg_box) = &self.message_box {
             if msg_box.visible {
@@ -761,6 +1014,118 @@ impl Scene for LoginScene {
             }
         }
         
+        // 处理新建账号对话框悬停
+        if let Some(dialog) = &mut self.new_account_dialog {
+            if dialog.visible {
+                use crate::graphics::{get_library, LibraryName};
+                let fx = x as f32;
+                let fy = y as f32;
+                
+                // 获取对话框背景尺寸 (Prguse index 63)
+                let (box_width, box_height) = if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+                    if let Ok(mut lib) = lib_arc.try_lock() {
+                        if let Ok(info) = lib.get_image_info(63) {
+                            (info.width as f32, info.height as f32)
+                        } else {
+                            (576.0, 460.0)
+                        }
+                    } else {
+                        (576.0, 460.0)
+                    }
+                } else {
+                    (576.0, 460.0)
+                };
+                
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                
+                // OK按钮位置 (135, 425)
+                let ok_btn_x = box_x + 135.0;
+                let ok_btn_y = box_y + 425.0;
+                
+                // Cancel按钮位置 (409, 425)
+                let cancel_btn_x = box_x + 409.0;
+                let cancel_btn_y = box_y + 425.0;
+                
+                // 获取按钮尺寸
+                let (button_w, button_h) = if let Some(title_arc) = get_library(LibraryName::Title) {
+                    if let Ok(mut title_lib) = title_arc.try_lock() {
+                        if let Ok(info) = title_lib.get_image_info(200) {
+                            (info.width as f32, info.height as f32)
+                        } else {
+                            (42.0, 42.0)
+                        }
+                    } else {
+                        (42.0, 42.0)
+                    }
+                } else {
+                    (42.0, 42.0)
+                };
+                
+                dialog.ok_button_hovered = fx >= ok_btn_x && fx < ok_btn_x + button_w
+                                        && fy >= ok_btn_y && fy < ok_btn_y + button_h;
+                dialog.cancel_button_hovered = fx >= cancel_btn_x && fx < cancel_btn_x + button_w
+                                             && fy >= cancel_btn_y && fy < cancel_btn_y + button_h;
+                return; // 阻止穿透
+            }
+        }
+        
+        // 处理修改密码对话框悬停
+        if let Some(dialog) = &mut self.change_password_dialog {
+            if dialog.visible {
+                use crate::graphics::{get_library, LibraryName};
+                let fx = x as f32;
+                let fy = y as f32;
+                
+                // 获取对话框背景尺寸 (Prguse index 50)
+                let (box_width, box_height) = if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+                    if let Ok(mut lib) = lib_arc.try_lock() {
+                        if let Ok(info) = lib.get_image_info(50) {
+                            (info.width as f32, info.height as f32)
+                        } else {
+                            (360.0, 310.0)
+                        }
+                    } else {
+                        (360.0, 310.0)
+                    }
+                } else {
+                    (360.0, 310.0)
+                };
+                
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                
+                // OK按钮位置 (80, 236)
+                let ok_btn_x = box_x + 80.0;
+                let ok_btn_y = box_y + 236.0;
+                
+                // Cancel按钮位置 (222, 236)
+                let cancel_btn_x = box_x + 222.0;
+                let cancel_btn_y = box_y + 236.0;
+                
+                // 获取按钮尺寸
+                let (button_w, button_h) = if let Some(title_arc) = get_library(LibraryName::Title) {
+                    if let Ok(mut title_lib) = title_arc.try_lock() {
+                        if let Ok(info) = title_lib.get_image_info(200) {
+                            (info.width as f32, info.height as f32)
+                        } else {
+                            (42.0, 42.0)
+                        }
+                    } else {
+                        (42.0, 42.0)
+                    }
+                } else {
+                    (42.0, 42.0)
+                };
+                
+                dialog.ok_button_hovered = fx >= ok_btn_x && fx < ok_btn_x + button_w
+                                        && fy >= ok_btn_y && fy < ok_btn_y + button_h;
+                dialog.cancel_button_hovered = fx >= cancel_btn_x && fx < cancel_btn_x + button_w
+                                             && fy >= cancel_btn_y && fy < cancel_btn_y + button_h;
+                return; // 阻止穿透
+            }
+        }
+        
         if self.login_dialog.visible {
             let center_x = 1024.0 / 2.0;
             let center_y = 768.0 / 2.0;
@@ -854,6 +1219,183 @@ impl Scene for LoginScene {
             
             tracing::debug!("LoginScene click at ({}, {}) with {:?}", x, y, button);
             
+            // 处理新建账号对话框点击
+            if let Some(dialog) = &mut self.new_account_dialog {
+                if dialog.visible {
+                    use crate::graphics::{get_library, LibraryName};
+                    let fx = x as f32;
+                    let fy = y as f32;
+                    
+                    // 获取对话框背景尺寸 (Prguse index 63)
+                    let (box_width, box_height) = if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+                        if let Ok(mut lib) = lib_arc.try_lock() {
+                            if let Ok(info) = lib.get_image_info(63) {
+                                (info.width as f32, info.height as f32)
+                            } else {
+                                (576.0, 460.0) // 默认值
+                            }
+                        } else {
+                            (576.0, 460.0)
+                        }
+                    } else {
+                        (576.0, 460.0)
+                    };
+                    
+                    let box_x = (1024.0 - box_width) / 2.0;
+                    let box_y = (768.0 - box_height) / 2.0;
+                    
+                    // OK按钮位置 (135, 425) 相对于对话框
+                    let ok_btn_x = box_x + 135.0;
+                    let ok_btn_y = box_y + 425.0;
+                    
+                    // Cancel按钮位置 (409, 425) 相对于对话框
+                    let cancel_btn_x = box_x + 409.0;
+                    let cancel_btn_y = box_y + 425.0;
+                    
+                    // 获取按钮尺寸 (Title库索引200)
+                    let (button_w, button_h) = if let Some(title_arc) = get_library(LibraryName::Title) {
+                        if let Ok(mut title_lib) = title_arc.try_lock() {
+                            if let Ok(info) = title_lib.get_image_info(200) {
+                                (info.width as f32, info.height as f32)
+                            } else {
+                                (42.0, 42.0)
+                            }
+                        } else {
+                            (42.0, 42.0)
+                        }
+                    } else {
+                        (42.0, 42.0)
+                    };
+                    
+                    // 检查是否点击了OK按钮
+                    if fx >= ok_btn_x && fx < ok_btn_x + button_w
+                        && fy >= ok_btn_y && fy < ok_btn_y + button_h {
+                        tracing::debug!("NewAccountDialog OK button clicked");
+                        // TODO: 提交注册
+                        return;
+                    }
+                    
+                    // 检查是否点击了Cancel按钮
+                    if fx >= cancel_btn_x && fx < cancel_btn_x + button_w
+                        && fy >= cancel_btn_y && fy < cancel_btn_y + button_h {
+                        tracing::debug!("NewAccountDialog Cancel button clicked");
+                        self.new_account_dialog = None;
+                        self.login_dialog.show();
+                        return;
+                    }
+                    
+                    // 检查是否点击了输入框
+                    let input_fields = [
+                        (box_x + 226.0, box_y + 103.0, 150.0, 20.0, NewAccountInputField::AccountId),
+                        (box_x + 226.0, box_y + 129.0, 150.0, 20.0, NewAccountInputField::Password),
+                        (box_x + 226.0, box_y + 155.0, 150.0, 20.0, NewAccountInputField::PasswordConfirm),
+                        (box_x + 226.0, box_y + 189.0, 150.0, 20.0, NewAccountInputField::Username),
+                        (box_x + 226.0, box_y + 311.0, 150.0, 20.0, NewAccountInputField::Email),
+                    ];
+                    
+                    for (field_x, field_y, field_w, field_h, field_type) in &input_fields {
+                        if fx >= *field_x && fx < field_x + field_w
+                            && fy >= *field_y && fy < field_y + field_h {
+                            dialog.focused_field = *field_type;
+                            dialog.cursor_blink_timer = 0.0;
+                            dialog.cursor_visible = true;
+                            tracing::debug!("NewAccountDialog field {:?} focused", field_type);
+                            return;
+                        }
+                    }
+                    
+                    return; // 阻止点击穿透
+                }
+            }
+            
+            // 处理修改密码对话框点击
+            if let Some(dialog) = &mut self.change_password_dialog {
+                if dialog.visible {
+                    use crate::graphics::{get_library, LibraryName};
+                    let fx = x as f32;
+                    let fy = y as f32;
+                    
+                    // 获取对话框背景尺寸 (Prguse index 50)
+                    let (box_width, box_height) = if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+                        if let Ok(mut lib) = lib_arc.try_lock() {
+                            if let Ok(info) = lib.get_image_info(50) {
+                                (info.width as f32, info.height as f32)
+                            } else {
+                                (360.0, 310.0) // 默认值
+                            }
+                        } else {
+                            (360.0, 310.0)
+                        }
+                    } else {
+                        (360.0, 310.0)
+                    };
+                    
+                    let box_x = (1024.0 - box_width) / 2.0;
+                    let box_y = (768.0 - box_height) / 2.0;
+                    
+                    // OK按钮位置 (80, 236) 相对于对话框
+                    let ok_btn_x = box_x + 80.0;
+                    let ok_btn_y = box_y + 236.0;
+                    
+                    // Cancel按钮位置 (222, 236) 相对于对话框
+                    let cancel_btn_x = box_x + 222.0;
+                    let cancel_btn_y = box_y + 236.0;
+                    
+                    // 获取按钮尺寸 (Title库索引200)
+                    let (button_w, button_h) = if let Some(title_arc) = get_library(LibraryName::Title) {
+                        if let Ok(mut title_lib) = title_arc.try_lock() {
+                            if let Ok(info) = title_lib.get_image_info(200) {
+                                (info.width as f32, info.height as f32)
+                            } else {
+                                (42.0, 42.0)
+                            }
+                        } else {
+                            (42.0, 42.0)
+                        }
+                    } else {
+                        (42.0, 42.0)
+                    };
+                    
+                    // 检查是否点击了OK按钮
+                    if fx >= ok_btn_x && fx < ok_btn_x + button_w
+                        && fy >= ok_btn_y && fy < ok_btn_y + button_h {
+                        tracing::debug!("ChangePasswordDialog OK button clicked");
+                        // TODO: 提交修改密码
+                        return;
+                    }
+                    
+                    // 检查是否点击了Cancel按钮
+                    if fx >= cancel_btn_x && fx < cancel_btn_x + button_w
+                        && fy >= cancel_btn_y && fy < cancel_btn_y + button_h {
+                        tracing::debug!("ChangePasswordDialog Cancel button clicked");
+                        self.change_password_dialog = None;
+                        self.login_dialog.show();
+                        return;
+                    }
+                    
+                    // 检查是否点击了输入框
+                    let input_fields = [
+                        (box_x + 178.0, box_y + 75.0, 150.0, 20.0, PasswordInputField::AccountId),
+                        (box_x + 178.0, box_y + 113.0, 150.0, 20.0, PasswordInputField::CurrentPassword),
+                        (box_x + 178.0, box_y + 151.0, 150.0, 20.0, PasswordInputField::NewPassword),
+                        (box_x + 178.0, box_y + 188.0, 150.0, 20.0, PasswordInputField::NewPasswordConfirm),
+                    ];
+                    
+                    for (field_x, field_y, field_w, field_h, field_type) in &input_fields {
+                        if fx >= *field_x && fx < field_x + field_w
+                            && fy >= *field_y && fy < field_y + field_h {
+                            dialog.focused_field = *field_type;
+                            dialog.cursor_blink_timer = 0.0;
+                            dialog.cursor_visible = true;
+                            tracing::debug!("ChangePasswordDialog field {:?} focused", field_type);
+                            return;
+                        }
+                    }
+                    
+                    return; // 阻止点击穿透
+                }
+            }
+            
             // 处理登录对话框点击
             if self.login_dialog.visible {
                 let center_x = 1024.0 / 2.0;
@@ -876,8 +1418,46 @@ impl Scene for LoginScene {
                 let fx = x as f32;
                 let fy = y as f32;
                 
+                // OK按钮 (227, 81) size 42x42 - C# 原版坐标
+                let ok_btn_x = dialog_x + 227.0;
+                let ok_btn_y = dialog_y + 81.0;
+                let ok_btn_w = 42.0;
+                let ok_btn_h = 42.0;
+                
+                // 新建账号按钮 (60, 163) - C# 原版坐标
+                let new_account_btn_x = dialog_x + 60.0;
+                let new_account_btn_y = dialog_y + 163.0;
+                
+                // 修改密码按钮 (166, 163) - C# 原版坐标
+                let change_pass_btn_x = dialog_x + 166.0;
+                let change_pass_btn_y = dialog_y + 163.0;
+                
+                // 检查是否点击了OK按钮
+                if fx >= ok_btn_x && fx < ok_btn_x + ok_btn_w
+                    && fy >= ok_btn_y && fy < ok_btn_y + ok_btn_h {
+                    tracing::debug!("Login OK button clicked");
+                    self.submit_login();
+                    return;
+                }
+                
+                // 检查是否点击了新建账号按钮(假设按钮大小约60x20)
+                else if fx >= new_account_btn_x && fx < new_account_btn_x + 60.0
+                    && fy >= new_account_btn_y && fy < new_account_btn_y + 20.0 {
+                    tracing::debug!("New account button clicked");
+                    self.open_new_account_dialog();
+                    return;
+                }
+                
+                // 检查是否点击了修改密码按钮(假设按钮大小约60x20)
+                else if fx >= change_pass_btn_x && fx < change_pass_btn_x + 60.0
+                    && fy >= change_pass_btn_y && fy < change_pass_btn_y + 20.0 {
+                    tracing::debug!("Change password button clicked");
+                    self.open_change_password_dialog(None, None);
+                    return;
+                }
+                
                 // 检查是否点击了账号输入框
-                if fx >= account_box_x && fx <= account_box_x + account_box_w
+                else if fx >= account_box_x && fx <= account_box_x + account_box_w
                     && fy >= account_box_y && fy <= account_box_y + account_box_h {
                     self.login_dialog.account_focused = true;
                     self.login_dialog.password_focused = false;
@@ -908,7 +1488,98 @@ impl Scene for LoginScene {
             }
         }
         
-        // 处理 LoginDialog 按键
+        // 处理新建账号对话框按键
+        if let Some(dialog) = &mut self.new_account_dialog {
+            if dialog.visible {
+                match key {
+                    KeyCode::Escape => {
+                        self.new_account_dialog = None;
+                        self.login_dialog.show();
+                        return true;
+                    }
+                    KeyCode::Tab => {
+                        dialog.handle_tab();
+                        return true;
+                    }
+                    KeyCode::Backspace => {
+                        dialog.handle_backspace();
+                        return true;
+                    }
+                    KeyCode::Enter => {
+                        // Enter键: 如果所有必填字段都有效,提交注册请求;否则显示提示
+                        if dialog.account_id_valid && dialog.password1_valid && dialog.password2_valid 
+                            && dialog.username_valid && dialog.email_valid {
+                            tracing::info!("新建账号: Enter键提交注册请求");
+                            // TODO: 实际提交到服务器
+                            self.show_message("注册功能开发中...\n\n账号信息已验证通过!\n网络集成完成后将提交到服务器。");
+                        } else {
+                            // 显示哪些字段需要填写
+                            let mut missing = Vec::new();
+                            if !dialog.account_id_valid { missing.push("账号ID"); }
+                            if !dialog.password1_valid { missing.push("密码"); }
+                            if !dialog.password2_valid { missing.push("确认密码"); }
+                            if !dialog.username_valid { missing.push("用户名"); }
+                            if !dialog.email_valid { missing.push("电子邮箱"); }
+                            
+                            let msg = format!("请完善以下必填字段:\n\n{}", missing.join("\n"));
+                            self.show_message(&msg);
+                        }
+                        return true;
+                    }
+                    _ => {
+                        // 对于其他按键(包括字母数字等),返回false让文本输入系统处理
+                        return false;
+                    }
+                }
+            }
+        }
+        
+        // 处理修改密码对话框按键
+        if let Some(dialog) = &mut self.change_password_dialog {
+            if dialog.visible {
+                match key {
+                    KeyCode::Escape => {
+                        self.change_password_dialog = None;
+                        self.login_dialog.show();
+                        return true;
+                    }
+                    KeyCode::Tab => {
+                        dialog.handle_tab();
+                        return true;
+                    }
+                    KeyCode::Backspace => {
+                        dialog.handle_backspace();
+                        return true;
+                    }
+                    KeyCode::Enter => {
+                        // Enter键: 如果所有必填字段都有效,提交修改密码请求;否则显示提示
+                        if dialog.account_id_valid && dialog.current_password_valid 
+                            && dialog.new_password1_valid && dialog.new_password2_valid {
+                            tracing::info!("修改密码: Enter键提交修改请求");
+                            // TODO: 实际提交到服务器
+                            self.show_message("修改密码功能开发中...\n\n密码信息已验证通过!\n网络集成完成后将提交到服务器。");
+                        } else {
+                            // 显示哪些字段需要填写
+                            let mut missing = Vec::new();
+                            if !dialog.account_id_valid { missing.push("账号ID"); }
+                            if !dialog.current_password_valid { missing.push("当前密码"); }
+                            if !dialog.new_password1_valid { missing.push("新密码"); }
+                            if !dialog.new_password2_valid { missing.push("确认新密码"); }
+                            
+                            let msg = format!("请完善以下必填字段:\n\n{}", missing.join("\n"));
+                            self.show_message(&msg);
+                        }
+                        return true;
+                    }
+                    _ => {
+                        // 对于其他按键(包括字母数字等),返回false让文本输入系统处理
+                        return false;
+                    }
+                }
+            }
+        }
+        
+        // 处理登录对话框按键
         if self.login_dialog.visible {
             match key {
                 KeyCode::Enter => {
@@ -943,8 +1614,6 @@ impl Scene for LoginScene {
             }
         }
         
-        // TODO: 处理其他对话框的按键
-        
         false
     }
     
@@ -954,11 +1623,25 @@ impl Scene for LoginScene {
             return;
         }
         
+        // 处理新建账号对话框文本输入
+        if let Some(dialog) = &mut self.new_account_dialog {
+            if dialog.visible {
+                dialog.handle_text_input(character);
+                return;
+            }
+        }
+        
+        // 处理修改密码对话框文本输入
+        if let Some(dialog) = &mut self.change_password_dialog {
+            if dialog.visible {
+                dialog.handle_text_input(character);
+                return;
+            }
+        }
+        
         // 处理 LoginDialog 文本输入
         if self.login_dialog.visible {
             self.login_dialog.handle_text_input(character);
         }
-        
-        // TODO: 处理其他对话框的文本输入
     }
 }

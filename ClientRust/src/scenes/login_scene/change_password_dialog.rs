@@ -42,6 +42,15 @@ impl ChangePasswordResult {
     }
 }
 
+/// Input field enum for focus management
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordInputField {
+    AccountId,
+    CurrentPassword,
+    NewPassword,
+    NewPasswordConfirm,
+}
+
 /// Change password dialog
 #[derive(Debug)]
 pub struct ChangePasswordDialog {
@@ -57,16 +66,27 @@ pub struct ChangePasswordDialog {
     pub new_password_confirm: String,
 
     // Validation state
-    account_id_valid: bool,
-    current_password_valid: bool,
-    new_password1_valid: bool,
-    new_password2_valid: bool,
+    pub account_id_valid: bool,
+    pub current_password_valid: bool,
+    pub new_password1_valid: bool,
+    pub new_password2_valid: bool,
 
     // Validation rules
     min_account_length: usize,
     max_account_length: usize,
     min_password_length: usize,
     max_password_length: usize,
+    
+    // Input focus state
+    pub focused_field: PasswordInputField,
+    
+    // Cursor state
+    pub cursor_visible: bool,
+    pub cursor_blink_timer: f32,
+    
+    // Button hover states
+    pub ok_button_hovered: bool,
+    pub cancel_button_hovered: bool,
 }
 
 impl ChangePasswordDialog {
@@ -93,6 +113,11 @@ impl ChangePasswordDialog {
             max_account_length,
             min_password_length,
             max_password_length,
+            focused_field: PasswordInputField::AccountId, // 默认聚焦账号输入框
+            cursor_visible: true,
+            cursor_blink_timer: 0.0,
+            ok_button_hovered: false,
+            cancel_button_hovered: false,
         }
     }
 
@@ -115,9 +140,74 @@ impl ChangePasswordDialog {
     }
     
     /// Update dialog (for cursor blinking, etc.)
-    pub fn update(&mut self, _delta_time: f32) {
-        // TODO: 添加光标闪烁逻辑
-        // TODO: 添加输入焦点管理
+    pub fn update(&mut self, delta_time: f32) {
+        // 光标闪烁逻辑 (每0.5秒切换一次)
+        self.cursor_blink_timer += delta_time;
+        if self.cursor_blink_timer >= 0.5 {
+            self.cursor_blink_timer = 0.0;
+            self.cursor_visible = !self.cursor_visible;
+        }
+    }
+    
+    /// Handle Tab key (switch to next field)
+    pub fn handle_tab(&mut self) {
+        self.focused_field = match self.focused_field {
+            PasswordInputField::AccountId => PasswordInputField::CurrentPassword,
+            PasswordInputField::CurrentPassword => PasswordInputField::NewPassword,
+            PasswordInputField::NewPassword => PasswordInputField::NewPasswordConfirm,
+            PasswordInputField::NewPasswordConfirm => PasswordInputField::AccountId, // 循环回到第一个
+        };
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Handle Backspace key (delete last character from focused field)
+    pub fn handle_backspace(&mut self) {
+        let text = match self.focused_field {
+            PasswordInputField::AccountId => &mut self.account_id,
+            PasswordInputField::CurrentPassword => &mut self.current_password,
+            PasswordInputField::NewPassword => &mut self.new_password,
+            PasswordInputField::NewPasswordConfirm => &mut self.new_password_confirm,
+        };
+        
+        if !text.is_empty() {
+            text.pop();
+            self.validate_current_field();
+        }
+    }
+    
+    /// Handle text input (add character to focused field)
+    pub fn handle_text_input(&mut self, ch: char) {
+        let text = match self.focused_field {
+            PasswordInputField::AccountId => &mut self.account_id,
+            PasswordInputField::CurrentPassword => &mut self.current_password,
+            PasswordInputField::NewPassword => &mut self.new_password,
+            PasswordInputField::NewPasswordConfirm => &mut self.new_password_confirm,
+        };
+        
+        // 检查长度限制
+        let max_len = match self.focused_field {
+            PasswordInputField::AccountId => self.max_account_length,
+            _ => self.max_password_length,
+        };
+        
+        if text.len() < max_len {
+            text.push(ch);
+            self.validate_current_field();
+        }
+    }
+    
+    /// Validate the currently focused field
+    fn validate_current_field(&mut self) {
+        match self.focused_field {
+            PasswordInputField::AccountId => self.validate_account_id(),
+            PasswordInputField::CurrentPassword => self.validate_current_password(),
+            PasswordInputField::NewPassword => {
+                self.validate_new_password1();
+                self.validate_new_password2(); // 也重新验证确认密码
+            }
+            PasswordInputField::NewPasswordConfirm => self.validate_new_password2(),
+        }
     }
 
     /// Close dialog and clear data
