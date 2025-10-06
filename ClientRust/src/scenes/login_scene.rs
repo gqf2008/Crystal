@@ -706,19 +706,6 @@ impl Scene for LoginScene {
     }
     
     fn handle_mouse_move(&mut self, x: i32, y: i32) {
-        // 优先处理 MessageBox (如果显示)
-        if let Some(msg_box) = &mut self.message_box {
-            if msg_box.visible {
-                let box_width = 400.0;
-                let box_height = 200.0;
-                let box_x = (1024.0 - box_width) / 2.0;
-                let box_y = (768.0 - box_height) / 2.0;
-                msg_box.update_button_hover(x as f32, y as f32, box_x, box_y);
-                return; // MessageBox 阻止其他交互
-            }
-        }
-        
-        // 检测登录对话框按钮悬停
         // 优先处理 MessageBox 悬停
         if let Some(msg_box) = &mut self.message_box {
             if msg_box.visible {
@@ -758,8 +745,18 @@ impl Scene for LoginScene {
                     (42.0, 42.0)
                 };
                 
-                msg_box.ok_button_hovered = fx >= button_x && fx < button_x + button_w 
-                                         && fy >= button_y && fy < button_y + button_h;
+                let hovered = fx >= button_x && fx < button_x + button_w 
+                           && fy >= button_y && fy < button_y + button_h;
+                
+                // 调试信息:只在悬停状态变化时打印
+                if hovered != msg_box.ok_button_hovered {
+                    tracing::debug!(
+                        "OK button hover changed: {} -> {} | Mouse: ({:.1}, {:.1}) | Button: ({:.1}, {:.1}) size: ({:.1}, {:.1})",
+                        msg_box.ok_button_hovered, hovered, fx, fy, button_x, button_y, button_w, button_h
+                    );
+                }
+                
+                msg_box.ok_button_hovered = hovered;
                 return; // MessageBox 阻止其他交互
             }
         }
