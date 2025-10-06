@@ -126,6 +126,12 @@ impl NewAccountDialog {
     pub fn hide(&mut self) {
         self.visible = false;
     }
+    
+    /// Update dialog (for cursor blinking, etc.)
+    pub fn update(&mut self, _delta_time: f32) {
+        // TODO: 添加光标闪烁逻辑
+        // TODO: 添加输入焦点管理
+    }
 
     /// Close dialog and clear data
     pub fn close(&mut self) {

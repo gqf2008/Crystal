@@ -37,6 +37,17 @@ pub struct LoginScene {
     pub require_password_change: bool,
     pub ready_for_character_select: bool,
     
+    // Animation state
+    pub background_frame: usize,
+    pub animation_timer: f32,
+    pub animation_paused: bool,  // 动画暂停标志
+    
+    // Button hover states
+    pub ok_button_hovered: bool,
+    pub account_button_hovered: bool,
+    pub pass_button_hovered: bool,
+    pub close_button_hovered: bool,
+    
     // Status tracking
     pub last_status: Option<String>,
     pub message_log: Vec<String>,
@@ -65,6 +76,13 @@ impl LoginScene {
             login_enabled: false,
             require_password_change: false,
             ready_for_character_select: false,
+            background_frame: 0,
+            animation_timer: 0.0,
+            animation_paused: false,
+            ok_button_hovered: false,
+            account_button_hovered: false,
+            pass_button_hovered: false,
+            close_button_hovered: false,
             last_status: None,
             message_log: Vec::new(),
             last_login_result: None,
@@ -343,17 +361,71 @@ impl LoginScene {
         self.login_dialog.show();
     }
     
+    /// 绘制登录输入框的文本和光标
+    fn draw_login_input(&self, _ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas) {
+        use ggez::graphics::{Text, DrawParam, Color as GgezColor};
+        
+        let center_x = 1024.0 / 2.0;
+        let center_y = 768.0 / 2.0;
+        let dialog_x = center_x - 164.0;
+        let dialog_y = center_y - 110.0;
+        
+        // 账号输入框文本位置 (C# 原版: AccountIDTextBox.Location = (85, 85))
+        let account_text_x = dialog_x + 85.0;
+        let account_text_y = dialog_y + 85.0;
+        
+        // 密码输入框文本位置 (C# 原版: PasswordTextBox.Location = (85, 108))
+        let password_text_x = dialog_x + 85.0;
+        let password_text_y = dialog_y + 108.0;
+        
+        // 绘制账号文本
+        if !self.login_dialog.account_id.is_empty() {
+            let account_text = Text::new(&self.login_dialog.account_id);
+            let account_params = DrawParam::default()
+                .dest([account_text_x, account_text_y])
+                .color(GgezColor::from_rgb(255, 255, 255));
+            canvas.draw(&account_text, account_params);
+        }
+        
+        // 绘制密码文本 (用 * 替代)
+        if !self.login_dialog.password.is_empty() {
+            let password_masked = "*".repeat(self.login_dialog.password.len());
+            let password_text = Text::new(&password_masked);
+            let password_params = DrawParam::default()
+                .dest([password_text_x, password_text_y])
+                .color(GgezColor::from_rgb(255, 255, 255));
+            canvas.draw(&password_text, password_params);
+        }
+        
+        // 绘制光标
+        if self.login_dialog.cursor_visible {
+            let cursor_text = Text::new("|");
+            let cursor_color = GgezColor::from_rgb(255, 255, 255);
+            
+            if self.login_dialog.account_focused {
+                // 账号输入框光标 (使用6像素每字符，更接近实际字体宽度)
+                let cursor_x = account_text_x + (self.login_dialog.account_id.len() as f32 * 6.0);
+                let cursor_params = DrawParam::default()
+                    .dest([cursor_x, account_text_y])
+                    .color(cursor_color);
+                canvas.draw(&cursor_text, cursor_params);
+            } else if self.login_dialog.password_focused {
+                // 密码输入框光标 (密码用*替代，每个*也是6像素宽)
+                let cursor_x = password_text_x + (self.login_dialog.password.len() as f32 * 6.0);
+                let cursor_params = DrawParam::default()
+                    .dest([cursor_x, password_text_y])
+                    .color(cursor_color);
+                canvas.draw(&cursor_text, cursor_params);
+            }
+        }
+    }
+    
     /// 绘制消息框
     fn draw_message_box(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, msg_box: &MessageBox) {
         use ggez::graphics::{Text, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
+        use crate::graphics::{get_library, LibraryName};
         
-        // 消息框尺寸和位置 (居中显示)
-        let box_width = 400.0;
-        let box_height = 200.0;
-        let box_x = (1024.0 - box_width) / 2.0;  // 312
-        let box_y = (768.0 - box_height) / 2.0;  // 284
-        
-        // 1. 绘制半透明背景遮罩
+        // 1. 绘制半透明背景遮罩 (让用户聚焦在消息框上)
         if let Ok(bg_mesh) = Mesh::new_rectangle(
             ctx,
             DrawMode::fill(),
@@ -363,84 +435,51 @@ impl LoginScene {
             canvas.draw(&bg_mesh, DrawParam::default());
         }
         
-        // 2. 绘制消息框背景
-        if let Ok(box_bg) = Mesh::new_rectangle(
-            ctx,
-            DrawMode::fill(),
-            Rect::new(box_x, box_y, box_width, box_height),
-            GgezColor::from_rgb(50, 50, 80),  // 深蓝色背景
-        ) {
-            canvas.draw(&box_bg, DrawParam::default());
+        // 2. 获取 Prguse 库以绘制消息框背景
+        // 对应 C# MirMessageBox: Index = 360, Library = Libraries.Prguse
+        if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                let msg_box_index = 360;
+                
+                // 获取消息框背景图片尺寸
+                let (box_width, box_height) = if let Ok(info) = lib.get_image_info(msg_box_index) {
+                    (info.width as f32, info.height as f32)
+                } else {
+                    tracing::warn!("无法获取消息框背景图片 (索引 360)");
+                    (460.0, 200.0)  // 默认尺寸
+                };
+                
+                // 消息框位置 (居中显示，对应 C# Location = new Point((Settings.ScreenWidth - Size.Width) / 2, ...))
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                
+                // 绘制消息框背景图片 (对应 C# DrawImage = true)
+                let _ = lib.draw_to_canvas(ctx, canvas, msg_box_index, box_x, box_y, false);
+                
+                // 3. 绘制消息内容 (对应 C# Label: Location = new Point(35, 35), Size = new Size(390, 110))
+                let text_x = box_x + 35.0;
+                let text_y = box_y + 35.0;
+                let message_lines: Vec<&str> = msg_box.message.lines().collect();
+                for (i, line) in message_lines.iter().enumerate() {
+                    let line_text = Text::new(*line);
+                    let line_params = DrawParam::default()
+                        .dest([text_x, text_y + (i as f32 * 20.0)])
+                        .color(GgezColor::WHITE);
+                    canvas.draw(&line_text, line_params);
+                }
+                
+                // 4. 绘制 OK 按钮 (对应 C# OKButton: Location = new Point(360, 157))
+                // Index = 200 (Normal), HoverIndex = 201, PressedIndex = 202, Library = Libraries.Title
+                if let Some(title_arc) = get_library(LibraryName::Title) {
+                    if let Ok(mut title_lib) = title_arc.try_lock() {
+                        let button_index = if msg_box.ok_button_hovered { 201 } else { 200 };
+                        let button_x = box_x + 360.0;
+                        let button_y = box_y + 157.0;
+                        let _ = title_lib.draw_to_canvas(ctx, canvas, button_index, button_x, button_y, false);
+                    }
+                }
+            }
         }
-        
-        // 绘制边框
-        if let Ok(box_border) = Mesh::new_rectangle(
-            ctx,
-            DrawMode::stroke(2.0),
-            Rect::new(box_x, box_y, box_width, box_height),
-            GgezColor::from_rgb(150, 150, 200),  // 浅蓝色边框
-        ) {
-            canvas.draw(&box_border, DrawParam::default());
-        }
-        
-        // 3. 绘制标题
-        let title_text = Text::new(&msg_box.title);
-        let title_params = DrawParam::default()
-            .dest([box_x + 20.0, box_y + 15.0])
-            .color(GgezColor::from_rgb(255, 255, 100));  // 黄色标题
-        canvas.draw(&title_text, title_params);
-        
-        // 4. 绘制消息内容 (支持多行)
-        let message_lines: Vec<&str> = msg_box.message.lines().collect();
-        for (i, line) in message_lines.iter().enumerate() {
-            let line_text = Text::new(*line);
-            let line_params = DrawParam::default()
-                .dest([box_x + 20.0, box_y + 50.0 + (i as f32 * 20.0)])
-                .color(GgezColor::WHITE);
-            canvas.draw(&line_text, line_params);
-        }
-        
-        // 5. 绘制 OK 按钮
-        let button_width = 80.0;
-        let button_height = 30.0;
-        let button_x = box_x + (box_width - button_width) / 2.0;  // 居中
-        let button_y = box_y + box_height - 50.0;  // 底部
-        
-        // 按钮背景 (根据悬停状态改变颜色)
-        let button_color = if msg_box.ok_button_hovered {
-            GgezColor::from_rgb(100, 100, 200)  // 悬停时更亮
-        } else {
-            GgezColor::from_rgb(70, 70, 150)  // 正常状态
-        };
-        
-        if let Ok(button_bg) = Mesh::new_rectangle(
-            ctx,
-            DrawMode::fill(),
-            Rect::new(button_x, button_y, button_width, button_height),
-            button_color,
-        ) {
-            canvas.draw(&button_bg, DrawParam::default());
-        }
-        
-        // 按钮边框
-        if let Ok(button_border) = Mesh::new_rectangle(
-            ctx,
-            DrawMode::stroke(2.0),
-            Rect::new(button_x, button_y, button_width, button_height),
-            GgezColor::from_rgb(200, 200, 255),
-        ) {
-            canvas.draw(&button_border, DrawParam::default());
-        }
-        
-        // 按钮文字 "OK"
-        let button_text = Text::new("OK");
-        // 简化文字居中计算
-        let text_x = button_x + 25.0;  // 手动调整到按钮中心
-        let text_y = button_y + 5.0;
-        let button_text_params = DrawParam::default()
-            .dest([text_x, text_y])
-            .color(GgezColor::WHITE);
-        canvas.draw(&button_text, button_text_params);
     }
 }
 
@@ -457,26 +496,63 @@ impl Scene for LoginScene {
     
     fn initialize(&mut self) {
         println!("LoginScene::initialize");
-        // TODO: Load login UI
+        
+        // 显示登录对话框
+        self.login_dialog.show();
+        
         // TODO: Play intro music
         self.connect_to_server();
     }
     
-    fn update(&mut self, _delta_time: f32) {
-        // TODO: Update connection status
-        // TODO: Update animations
+    fn update(&mut self, delta_time: f32) {
+        // 更新背景动画 (C# 原版: AnimationCount=19, AnimationDelay=100ms)
+        // 如果没有暂停，则更新动画
+        if !self.animation_paused {
+            self.animation_timer += delta_time;
+            if self.animation_timer >= 0.1 {  // 100ms per frame
+                self.animation_timer = 0.0;
+                self.background_frame = (self.background_frame + 1) % 19;  // 19 frames loop
+            }
+        }
+        
+        // 更新登录对话框 (光标闪烁)
+        if self.login_dialog.visible {
+            self.login_dialog.update(delta_time);
+        }
+        
+        // 更新新建账号对话框
+        if let Some(dialog) = &mut self.new_account_dialog {
+            if dialog.visible {
+                dialog.update(delta_time);
+            }
+        }
+        
+        // 更新修改密码对话框
+        if let Some(dialog) = &mut self.change_password_dialog {
+            if dialog.visible {
+                dialog.update(delta_time);
+            }
+        }
+        
+        // 更新消息框 (自动关闭计时器)
+        if let Some(msg_box) = &mut self.message_box {
+            if msg_box.update(delta_time) {
+                // 自动关闭
+                self.message_box = None;
+            }
+        }
     }
     
     fn draw(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
         use crate::graphics::libraries::{get_library, LibraryName};
         use ggez::graphics::{Text, DrawParam, Color as GgezColor};
         
-        // 1. 绘制登录背景 (C# 原版使用 ChrSel.lib 索引 0)
-        // ChrSel.lib 索引 0-17 是 1024x768 的登录背景动画 (19帧)
+        // 1. 绘制登录背景动画 (C# 原版: ChrSel.lib 索引 0-18, 共19帧)
         if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
             if let Ok(mut lib) = lib_arc.try_lock() {
-                // 暂时使用静态背景 (索引 0),后续可以实现动画
-                let _ = lib.draw_to_canvas(ctx, canvas, 0, 0.0, 0.0, false);
+                // 使用动画帧索引 (0-18)
+                let frame_index = self.background_frame.min(18);
+                let _ = lib.draw_to_canvas(ctx, canvas, frame_index, 0.0, 0.0, false);
             }
         }
         
@@ -515,21 +591,25 @@ impl Scene for LoginScene {
                 // C# 位置: (43, 105)
                 let _ = lib.draw_to_canvas(ctx, canvas, 32, dialog_x + 43.0, dialog_y + 105.0, false);
                 
-                // OK/登录按钮 (索引 320, 大小 42x42)
-                // C# 位置: (227, 81)
-                let _ = lib.draw_to_canvas(ctx, canvas, 320, dialog_x + 227.0, dialog_y + 81.0, false);
+                // OK/登录按钮 (索引 320/321/322 = normal/hover/pressed)
+                // C# 位置: (227, 81), 大小: 42x42
+                let ok_index = if self.ok_button_hovered { 321 } else { 320 };
+                let _ = lib.draw_to_canvas(ctx, canvas, ok_index, dialog_x + 227.0, dialog_y + 81.0, false);
                 
-                // "新建账号" 按钮 (索引 323)
+                // "新建账号" 按钮 (索引 323/324/325)
                 // C# 位置: (60, 163)
-                let _ = lib.draw_to_canvas(ctx, canvas, 323, dialog_x + 60.0, dialog_y + 163.0, false);
+                let account_index = if self.account_button_hovered { 324 } else { 323 };
+                let _ = lib.draw_to_canvas(ctx, canvas, account_index, dialog_x + 60.0, dialog_y + 163.0, false);
                 
-                // "修改密码" 按钮 (索引 326)
+                // "修改密码" 按钮 (索引 326/327/328)
                 // C# 位置: (166, 163)
-                let _ = lib.draw_to_canvas(ctx, canvas, 326, dialog_x + 166.0, dialog_y + 163.0, false);
+                let pass_index = if self.pass_button_hovered { 327 } else { 326 };
+                let _ = lib.draw_to_canvas(ctx, canvas, pass_index, dialog_x + 166.0, dialog_y + 163.0, false);
                 
-                // "关闭" 按钮 (索引 329)
+                // "关闭" 按钮 (索引 329/330/331)
                 // C# 位置: (166, 189)
-                let _ = lib.draw_to_canvas(ctx, canvas, 329, dialog_x + 166.0, dialog_y + 189.0, false);
+                let close_index = if self.close_button_hovered { 330 } else { 329 };
+                let _ = lib.draw_to_canvas(ctx, canvas, close_index, dialog_x + 166.0, dialog_y + 189.0, false);
             }
         }
         
@@ -563,6 +643,11 @@ impl Scene for LoginScene {
             .dest([950.0, 10.0])
             .color(GgezColor::from_rgb(255, 255, 255));
         canvas.draw(&debug_text, debug_params);
+        
+        // 3.5 绘制登录对话框的输入框文本和光标
+        if self.login_dialog.visible {
+            self.draw_login_input(ctx, canvas);
+        }
         
         // 4. 绘制消息框 (MessageBox) - 最后绘制，显示在最上层
         if let Some(msg_box) = &self.message_box {
@@ -620,30 +705,263 @@ impl Scene for LoginScene {
         }
     }
     
-    fn handle_mouse_move(&mut self, _x: i32, _y: i32) {
-        // TODO: Update hover states
+    fn handle_mouse_move(&mut self, x: i32, y: i32) {
+        // 优先处理 MessageBox (如果显示)
+        if let Some(msg_box) = &mut self.message_box {
+            if msg_box.visible {
+                let box_width = 400.0;
+                let box_height = 200.0;
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                msg_box.update_button_hover(x as f32, y as f32, box_x, box_y);
+                return; // MessageBox 阻止其他交互
+            }
+        }
+        
+        // 检测登录对话框按钮悬停
+        // 优先处理 MessageBox 悬停
+        if let Some(msg_box) = &mut self.message_box {
+            if msg_box.visible {
+                use crate::graphics::{get_library, LibraryName};
+                let (box_width, box_height) = if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+                    if let Ok(mut lib) = lib_arc.try_lock() {
+                        if let Ok(info) = lib.get_image_info(360) {
+                            (info.width as f32, info.height as f32)
+                        } else {
+                            (460.0, 200.0)
+                        }
+                    } else {
+                        (460.0, 200.0)
+                    }
+                } else {
+                    (460.0, 200.0)
+                };
+                
+                let fx = x as f32;
+                let fy = y as f32;
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                let button_x = box_x + 360.0;
+                let button_y = box_y + 157.0;
+                
+                let (button_w, button_h) = if let Some(title_arc) = get_library(LibraryName::Title) {
+                    if let Ok(mut title_lib) = title_arc.try_lock() {
+                        if let Ok(info) = title_lib.get_image_info(200) {
+                            (info.width as f32, info.height as f32)
+                        } else {
+                            (42.0, 42.0)
+                        }
+                    } else {
+                        (42.0, 42.0)
+                    }
+                } else {
+                    (42.0, 42.0)
+                };
+                
+                msg_box.ok_button_hovered = fx >= button_x && fx < button_x + button_w 
+                                         && fy >= button_y && fy < button_y + button_h;
+                return; // MessageBox 阻止其他交互
+            }
+        }
+        
+        if self.login_dialog.visible {
+            let center_x = 1024.0 / 2.0;
+            let center_y = 768.0 / 2.0;
+            let dialog_x = center_x - 164.0;
+            let dialog_y = center_y - 110.0;
+            
+            let fx = x as f32;
+            let fy = y as f32;
+            
+            // OK 按钮区域: (227, 81, 42, 42)
+            let ok_btn_x = dialog_x + 227.0;
+            let ok_btn_y = dialog_y + 81.0;
+            self.ok_button_hovered = fx >= ok_btn_x && fx <= ok_btn_x + 42.0
+                                  && fy >= ok_btn_y && fy <= ok_btn_y + 42.0;
+            
+            // 新建账号按钮区域 - 需要从图像获取实际尺寸，暂时假设 ~100x30
+            let acc_btn_x = dialog_x + 60.0;
+            let acc_btn_y = dialog_y + 163.0;
+            self.account_button_hovered = fx >= acc_btn_x && fx <= acc_btn_x + 100.0
+                                       && fy >= acc_btn_y && fy <= acc_btn_y + 30.0;
+            
+            // 修改密码按钮区域
+            let pass_btn_x = dialog_x + 166.0;
+            let pass_btn_y = dialog_y + 163.0;
+            self.pass_button_hovered = fx >= pass_btn_x && fx <= pass_btn_x + 100.0
+                                    && fy >= pass_btn_y && fy <= pass_btn_y + 30.0;
+            
+            // 关闭按钮区域
+            let close_btn_x = dialog_x + 166.0;
+            let close_btn_y = dialog_y + 189.0;
+            self.close_button_hovered = fx >= close_btn_x && fx <= close_btn_x + 100.0
+                                     && fy >= close_btn_y && fy <= close_btn_y + 30.0;
+        }
     }
     
     fn handle_mouse_button(&mut self, button: super::MouseButton, pressed: bool, x: i32, y: i32) {
-        if pressed {
+        if pressed && button == super::MouseButton::Left {
+            // 优先处理 MessageBox (如果显示)
+            if let Some(msg_box) = &mut self.message_box {
+                if msg_box.visible {
+                    // 获取消息框实际尺寸 (对应 C# Index=360 的图片尺寸)
+                    // 使用与绘制时相同的计算方式
+                    use crate::graphics::{get_library, LibraryName};
+                    let (box_width, box_height) = if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+                        if let Ok(mut lib) = lib_arc.try_lock() {
+                            if let Ok(info) = lib.get_image_info(360) {
+                                (info.width as f32, info.height as f32)
+                            } else {
+                                (460.0, 200.0) // 默认值
+                            }
+                        } else {
+                            (460.0, 200.0)
+                        }
+                    } else {
+                        (460.0, 200.0)
+                    };
+                    
+                    let box_x = (1024.0 - box_width) / 2.0;
+                    let box_y = (768.0 - box_height) / 2.0;
+                    
+                    // OK按钮位置: (360, 157) 相对于消息框
+                    let button_x = box_x + 360.0;
+                    let button_y = box_y + 157.0;
+                    
+                    // 获取按钮尺寸 (Title库索引200)
+                    let (button_w, button_h) = if let Some(title_arc) = get_library(LibraryName::Title) {
+                        if let Ok(mut title_lib) = title_arc.try_lock() {
+                            if let Ok(info) = title_lib.get_image_info(200) {
+                                (info.width as f32, info.height as f32)
+                            } else {
+                                (42.0, 42.0) // C# 按钮默认尺寸
+                            }
+                        } else {
+                            (42.0, 42.0)
+                        }
+                    } else {
+                        (42.0, 42.0)
+                    };
+                    
+                    let fx = x as f32;
+                    let fy = y as f32;
+                    
+                    // 检查是否点击了OK按钮
+                    if fx >= button_x && fx < button_x + button_w && fy >= button_y && fy < button_y + button_h {
+                        tracing::debug!("MessageBox OK button clicked");
+                        self.message_box = None;
+                    }
+                    return; // MessageBox 阻止其他交互
+                }
+            }
+            
             tracing::debug!("LoginScene click at ({}, {}) with {:?}", x, y, button);
-            // TODO: Handle dialog clicks
+            
+            // 处理登录对话框点击
+            if self.login_dialog.visible {
+                let center_x = 1024.0 / 2.0;
+                let center_y = 768.0 / 2.0;
+                let dialog_x = center_x - 164.0;
+                let dialog_y = center_y - 110.0;
+                
+                // 账号输入框区域: (85, 85, 136, 15) - C# 原版坐标
+                let account_box_x = dialog_x + 85.0;
+                let account_box_y = dialog_y + 85.0;
+                let account_box_w = 136.0;
+                let account_box_h = 15.0;
+                
+                // 密码输入框区域: (85, 108, 136, 15) - C# 原版坐标
+                let password_box_x = dialog_x + 85.0;
+                let password_box_y = dialog_y + 108.0;
+                let password_box_w = 136.0;
+                let password_box_h = 15.0;
+                
+                let fx = x as f32;
+                let fy = y as f32;
+                
+                // 检查是否点击了账号输入框
+                if fx >= account_box_x && fx <= account_box_x + account_box_w
+                    && fy >= account_box_y && fy <= account_box_y + account_box_h {
+                    self.login_dialog.account_focused = true;
+                    self.login_dialog.password_focused = false;
+                    tracing::debug!("Account input box focused");
+                }
+                // 检查是否点击了密码输入框
+                else if fx >= password_box_x && fx <= password_box_x + password_box_w
+                    && fy >= password_box_y && fy <= password_box_y + password_box_h {
+                    self.login_dialog.account_focused = false;
+                    self.login_dialog.password_focused = true;
+                    tracing::debug!("Password input box focused");
+                }
+            }
         }
     }
     
     fn handle_key_press(&mut self, key: super::KeyCode, _modifiers: super::ModifiersState) -> bool {
         use super::KeyCode;
         
-        match key {
-            KeyCode::Enter => {
-                self.submit_login();
-                true
+        // 优先处理 MessageBox
+        if self.message_box.is_some() {
+            match key {
+                KeyCode::Escape => {
+                    self.message_box = None;
+                    return true;
+                }
+                _ => return true, // MessageBox 显示时阻止其他按键
             }
-            KeyCode::Escape => {
-                // TODO: Close dialog or exit
-                true
+        }
+        
+        // 处理 LoginDialog 按键
+        if self.login_dialog.visible {
+            match key {
+                KeyCode::Enter => {
+                    self.submit_login();
+                    return true;
+                }
+                KeyCode::Tab => {
+                    self.login_dialog.handle_tab();
+                    return true;
+                }
+                KeyCode::Backspace => {
+                    self.login_dialog.handle_backspace();
+                    return true;
+                }
+                KeyCode::KeyM => {
+                    // 测试：按 M 键显示消息框
+                    self.show_message("这是一个测试消息框!\n\n您可以点击 OK 按钮关闭它。\n或按 ESC 键关闭。");
+                    return true;
+                }
+                KeyCode::Space => {
+                    // 空格键：暂停/播放背景动画
+                    self.animation_paused = !self.animation_paused;
+                    let status = if self.animation_paused {
+                        "背景动画已暂停 (再按空格继续)"
+                    } else {
+                        "背景动画已恢复播放"
+                    };
+                    tracing::debug!("{}", status);
+                    return true;
+                }
+                _ => {}
             }
-            _ => false
-       }
+        }
+        
+        // TODO: 处理其他对话框的按键
+        
+        false
+    }
+    
+    fn handle_text_input(&mut self, character: char) {
+        // MessageBox 显示时不处理文本输入
+        if self.message_box.is_some() {
+            return;
+        }
+        
+        // 处理 LoginDialog 文本输入
+        if self.login_dialog.visible {
+            self.login_dialog.handle_text_input(character);
+        }
+        
+        // TODO: 处理其他对话框的文本输入
     }
 }

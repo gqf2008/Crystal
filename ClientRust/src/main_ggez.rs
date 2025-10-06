@@ -200,20 +200,9 @@ impl EventHandler for CrystalGame {
         input: ggez::input::keyboard::KeyInput,
         _repeated: bool,
     ) -> GameResult {
-        // 如果按键有关联的文本（如字母、数字），处理文本输入
-        // winit 0.30: 文本在 KeyEvent.text 字段中
-        if let Some(text) = &input.event.text {
-            for ch in text.chars() {
-                // 调试输出（可选，生产环境可以移除）
-                if ch != '\r' && ch != '\n' && ch != '\t' {  // 跳过特殊字符
-                    tracing::trace!("Text input: '{}'", ch);
-                }
-                let mut scene_manager = self.scene_manager.write();
-                scene_manager.handle_text_input(ch);
-            }
-        }
-        
         // ggez 0.10: KeyInput 结构变为 winit 事件
+        let mut key_consumed = false;
+        
         if let PhysicalKey::Code(keycode) = input.event.physical_key {
             // 检查 Ctrl+Q 退出
             if keycode == WinitKeyCode::KeyQ && input.mods.control_key() {
@@ -234,7 +223,22 @@ impl EventHandler for CrystalGame {
             // 转换 ggez KeyCode 到 Scene KeyCode
             if let Some(scene_keycode) = ggez_keycode_to_scene(keycode) {
                 let mut scene_manager = self.scene_manager.write();
-                scene_manager.handle_key_press(scene_keycode, modifiers_state);
+                key_consumed = scene_manager.handle_key_press(scene_keycode, modifiers_state);
+            }
+        }
+        
+        // 只有在按键未被消费时才处理文本输入
+        // 这样可以防止空格、M等功能键的文本被输入到文本框
+        if !key_consumed {
+            if let Some(text) = &input.event.text {
+                for ch in text.chars() {
+                    // 过滤掉特殊控制字符（Tab、回车、换行等）
+                    if ch != '\r' && ch != '\n' && ch != '\t' && ch != '\x08' && !ch.is_control() {
+                        tracing::trace!("Text input: '{}'", ch);
+                        let mut scene_manager = self.scene_manager.write();
+                        scene_manager.handle_text_input(ch);
+                    }
+                }
             }
         }
         
