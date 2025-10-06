@@ -23,6 +23,20 @@ pub struct LoginDialog {
     max_account_length: usize,
     min_password_length: usize,
     max_password_length: usize,
+    
+    // Input focus state
+    pub account_focused: bool,
+    pub password_focused: bool,
+    
+    // Cursor state
+    pub cursor_visible: bool,
+    pub cursor_blink_timer: f32,
+    
+    // Button hover states
+    pub ok_button_hovered: bool,
+    pub new_account_button_hovered: bool,
+    pub change_password_button_hovered: bool,
+    pub close_button_hovered: bool,
 }
 
 impl LoginDialog {
@@ -44,6 +58,14 @@ impl LoginDialog {
             max_account_length,
             min_password_length,
             max_password_length,
+            account_focused: true,  // 默认聚焦账号输入框
+            password_focused: false,
+            cursor_visible: true,
+            cursor_blink_timer: 0.0,
+            ok_button_hovered: false,
+            new_account_button_hovered: false,
+            change_password_button_hovered: false,
+            close_button_hovered: false,
         }
     }
 
@@ -171,6 +193,170 @@ impl LoginDialog {
             None
         }
     }
+    
+    /// Update cursor blink animation
+    pub fn update(&mut self, delta_time: f32) {
+        // 光标闪烁 (每 0.5 秒切换)
+        self.cursor_blink_timer += delta_time;
+        if self.cursor_blink_timer >= 0.5 {
+            self.cursor_visible = !self.cursor_visible;
+            self.cursor_blink_timer = 0.0;
+        }
+    }
+    
+    /// Handle text input (for account or password based on focus)
+    pub fn handle_text_input(&mut self, character: char) {
+        if self.account_focused {
+            if self.account_id.len() < self.max_account_length {
+                self.account_id.push(character);
+                self.validate_account_id();
+            }
+        } else if self.password_focused {
+            if self.password.len() < self.max_password_length {
+                self.password.push(character);
+                self.validate_password();
+            }
+        }
+    }
+    
+    /// Handle backspace key
+    pub fn handle_backspace(&mut self) {
+        if self.account_focused && !self.account_id.is_empty() {
+            self.account_id.pop();
+            self.validate_account_id();
+        } else if self.password_focused && !self.password.is_empty() {
+            self.password.pop();
+            self.validate_password();
+        }
+    }
+    
+    /// Handle Tab key (switch focus between fields)
+    pub fn handle_tab(&mut self) {
+        if self.account_focused {
+            self.account_focused = false;
+            self.password_focused = true;
+        } else if self.password_focused {
+            self.account_focused = true;
+            self.password_focused = false;
+        } else {
+            // If no focus, focus on account
+            self.account_focused = true;
+            self.password_focused = false;
+        }
+        // Reset cursor blink when switching focus
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Set focus to account field
+    pub fn focus_account(&mut self) {
+        self.account_focused = true;
+        self.password_focused = false;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Set focus to password field
+    pub fn focus_password(&mut self) {
+        self.account_focused = false;
+        self.password_focused = true;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Clear focus from both fields
+    pub fn clear_focus(&mut self) {
+        self.account_focused = false;
+        self.password_focused = false;
+    }
+    
+    /// Check if mouse is over a button (given dialog position)
+    pub fn update_button_hover(&mut self, mouse_x: f32, mouse_y: f32, dialog_x: f32, dialog_y: f32) {
+        // OK 按钮区域: (227, 81), 大小 42x42
+        let ok_x = dialog_x + 227.0;
+        let ok_y = dialog_y + 81.0;
+        self.ok_button_hovered = 
+            mouse_x >= ok_x && mouse_x <= ok_x + 42.0 &&
+            mouse_y >= ok_y && mouse_y <= ok_y + 42.0;
+        
+        // 新建账号按钮: (60, 163), 大小约 102x21
+        let new_account_x = dialog_x + 60.0;
+        let new_account_y = dialog_y + 163.0;
+        self.new_account_button_hovered =
+            mouse_x >= new_account_x && mouse_x <= new_account_x + 102.0 &&
+            mouse_y >= new_account_y && mouse_y <= new_account_y + 21.0;
+        
+        // 修改密码按钮: (166, 163), 大小约 102x21
+        let change_pass_x = dialog_x + 166.0;
+        let change_pass_y = dialog_y + 163.0;
+        self.change_password_button_hovered =
+            mouse_x >= change_pass_x && mouse_x <= change_pass_x + 102.0 &&
+            mouse_y >= change_pass_y && mouse_y <= change_pass_y + 21.0;
+        
+        // 关闭按钮: (166, 189), 大小约 102x21
+        let close_x = dialog_x + 166.0;
+        let close_y = dialog_y + 189.0;
+        self.close_button_hovered =
+            mouse_x >= close_x && mouse_x <= close_x + 102.0 &&
+            mouse_y >= close_y && mouse_y <= close_y + 21.0;
+    }
+    
+    /// Handle mouse click on dialog (returns action)
+    pub fn handle_click(&mut self, mouse_x: f32, mouse_y: f32, dialog_x: f32, dialog_y: f32) -> DialogAction {
+        // 检查输入框点击 (设置焦点)
+        let account_box_x = dialog_x + 85.0;
+        let account_box_y = dialog_y + 85.0;
+        let account_box_clicked = 
+            mouse_x >= account_box_x && mouse_x <= account_box_x + 136.0 &&
+            mouse_y >= account_box_y && mouse_y <= account_box_y + 15.0;
+        
+        if account_box_clicked {
+            self.focus_account();
+            return DialogAction::None;
+        }
+        
+        let password_box_x = dialog_x + 85.0;
+        let password_box_y = dialog_y + 108.0;
+        let password_box_clicked =
+            mouse_x >= password_box_x && mouse_x <= password_box_x + 136.0 &&
+            mouse_y >= password_box_y && mouse_y <= password_box_y + 15.0;
+        
+        if password_box_clicked {
+            self.focus_password();
+            return DialogAction::None;
+        }
+        
+        // 检查按钮点击
+        if self.ok_button_hovered {
+            return DialogAction::Login;
+        }
+        
+        if self.new_account_button_hovered {
+            return DialogAction::NewAccount;
+        }
+        
+        if self.change_password_button_hovered {
+            return DialogAction::ChangePassword;
+        }
+        
+        if self.close_button_hovered {
+            return DialogAction::Close;
+        }
+        
+        // 点击对话框其他区域，清除焦点
+        self.clear_focus();
+        DialogAction::None
+    }
+}
+
+/// Actions that can be triggered from the login dialog
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogAction {
+    None,
+    Login,
+    NewAccount,
+    ChangePassword,
+    Close,
 }
 
 impl Default for LoginDialog {

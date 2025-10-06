@@ -10,10 +10,12 @@ use crate::network::game_client::GameEvent;
 pub mod login_dialog;
 pub mod new_account_dialog;
 pub mod change_password_dialog;
+pub mod message_box;
 
 pub use login_dialog::LoginDialog;
 pub use new_account_dialog::{NewAccountDialog, NewAccountResult, AccountRegistration};
 pub use change_password_dialog::{ChangePasswordDialog, ChangePasswordResult};
+pub use message_box::MessageBox;
 
 #[derive(Debug, Clone)]
 pub struct BanInfo {
@@ -49,6 +51,7 @@ pub struct LoginScene {
     pub login_dialog: LoginDialog,
     pub new_account_dialog: Option<NewAccountDialog>,
     pub change_password_dialog: Option<ChangePasswordDialog>,
+    pub message_box: Option<MessageBox>,
 }
 
 impl LoginScene {
@@ -73,6 +76,7 @@ impl LoginScene {
             login_dialog: LoginDialog::default(),
             new_account_dialog: None,
             change_password_dialog: None,
+            message_box: None,
         }
     }
     
@@ -85,6 +89,20 @@ impl LoginScene {
         let message = message.into();
         self.last_status = Some(message.clone());
         self.message_log.push(message);
+    }
+    
+    /// Show a message box
+    pub fn show_message<S: Into<String>>(&mut self, message: S) {
+        let mut msg_box = MessageBox::new(message.into());
+        msg_box.show();
+        self.message_box = Some(msg_box);
+    }
+    
+    /// Show a message box with custom title
+    pub fn show_message_with_title<S: Into<String>, T: Into<String>>(&mut self, message: S, title: T) {
+        let mut msg_box = MessageBox::with_title(message.into(), title.into());
+        msg_box.show();
+        self.message_box = Some(msg_box);
     }
 
     fn handle_client_version_response(&mut self, result: u8) {
@@ -118,8 +136,14 @@ impl LoginScene {
         self.characters.clear();
         if let Some(message) = Self::login_result_message(result) {
             self.record_status(message);
+            // 显示错误消息框（除了成功状态）
+            if result != 0 {
+                self.show_message(message);
+            }
         } else {
-            self.record_status(format!("Unknown login result code {}", result));
+            let msg = format!("Unknown login result code {}", result);
+            self.record_status(msg.clone());
+            self.show_message(msg);
         }
     }
 
@@ -318,6 +342,106 @@ impl LoginScene {
         self.change_password_dialog = None;
         self.login_dialog.show();
     }
+    
+    /// 绘制消息框
+    fn draw_message_box(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, msg_box: &MessageBox) {
+        use ggez::graphics::{Text, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
+        
+        // 消息框尺寸和位置 (居中显示)
+        let box_width = 400.0;
+        let box_height = 200.0;
+        let box_x = (1024.0 - box_width) / 2.0;  // 312
+        let box_y = (768.0 - box_height) / 2.0;  // 284
+        
+        // 1. 绘制半透明背景遮罩
+        if let Ok(bg_mesh) = Mesh::new_rectangle(
+            ctx,
+            DrawMode::fill(),
+            Rect::new(0.0, 0.0, 1024.0, 768.0),
+            GgezColor::from_rgba(0, 0, 0, 128),  // 半透明黑色
+        ) {
+            canvas.draw(&bg_mesh, DrawParam::default());
+        }
+        
+        // 2. 绘制消息框背景
+        if let Ok(box_bg) = Mesh::new_rectangle(
+            ctx,
+            DrawMode::fill(),
+            Rect::new(box_x, box_y, box_width, box_height),
+            GgezColor::from_rgb(50, 50, 80),  // 深蓝色背景
+        ) {
+            canvas.draw(&box_bg, DrawParam::default());
+        }
+        
+        // 绘制边框
+        if let Ok(box_border) = Mesh::new_rectangle(
+            ctx,
+            DrawMode::stroke(2.0),
+            Rect::new(box_x, box_y, box_width, box_height),
+            GgezColor::from_rgb(150, 150, 200),  // 浅蓝色边框
+        ) {
+            canvas.draw(&box_border, DrawParam::default());
+        }
+        
+        // 3. 绘制标题
+        let title_text = Text::new(&msg_box.title);
+        let title_params = DrawParam::default()
+            .dest([box_x + 20.0, box_y + 15.0])
+            .color(GgezColor::from_rgb(255, 255, 100));  // 黄色标题
+        canvas.draw(&title_text, title_params);
+        
+        // 4. 绘制消息内容 (支持多行)
+        let message_lines: Vec<&str> = msg_box.message.lines().collect();
+        for (i, line) in message_lines.iter().enumerate() {
+            let line_text = Text::new(*line);
+            let line_params = DrawParam::default()
+                .dest([box_x + 20.0, box_y + 50.0 + (i as f32 * 20.0)])
+                .color(GgezColor::WHITE);
+            canvas.draw(&line_text, line_params);
+        }
+        
+        // 5. 绘制 OK 按钮
+        let button_width = 80.0;
+        let button_height = 30.0;
+        let button_x = box_x + (box_width - button_width) / 2.0;  // 居中
+        let button_y = box_y + box_height - 50.0;  // 底部
+        
+        // 按钮背景 (根据悬停状态改变颜色)
+        let button_color = if msg_box.ok_button_hovered {
+            GgezColor::from_rgb(100, 100, 200)  // 悬停时更亮
+        } else {
+            GgezColor::from_rgb(70, 70, 150)  // 正常状态
+        };
+        
+        if let Ok(button_bg) = Mesh::new_rectangle(
+            ctx,
+            DrawMode::fill(),
+            Rect::new(button_x, button_y, button_width, button_height),
+            button_color,
+        ) {
+            canvas.draw(&button_bg, DrawParam::default());
+        }
+        
+        // 按钮边框
+        if let Ok(button_border) = Mesh::new_rectangle(
+            ctx,
+            DrawMode::stroke(2.0),
+            Rect::new(button_x, button_y, button_width, button_height),
+            GgezColor::from_rgb(200, 200, 255),
+        ) {
+            canvas.draw(&button_border, DrawParam::default());
+        }
+        
+        // 按钮文字 "OK"
+        let button_text = Text::new("OK");
+        // 简化文字居中计算
+        let text_x = button_x + 25.0;  // 手动调整到按钮中心
+        let text_y = button_y + 5.0;
+        let button_text_params = DrawParam::default()
+            .dest([text_x, text_y])
+            .color(GgezColor::WHITE);
+        canvas.draw(&button_text, button_text_params);
+    }
 }
 
 impl Default for LoginScene {
@@ -439,6 +563,13 @@ impl Scene for LoginScene {
             .dest([950.0, 10.0])
             .color(GgezColor::from_rgb(255, 255, 255));
         canvas.draw(&debug_text, debug_params);
+        
+        // 4. 绘制消息框 (MessageBox) - 最后绘制，显示在最上层
+        if let Some(msg_box) = &self.message_box {
+            if msg_box.visible {
+                self.draw_message_box(ctx, canvas, msg_box);
+            }
+        }
     }
     
     fn process_event(&mut self, event: &GameEvent) {
@@ -513,6 +644,6 @@ impl Scene for LoginScene {
                 true
             }
             _ => false
-        }
+       }
     }
 }

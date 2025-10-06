@@ -103,4 +103,9 @@ pub trait Scene {
         // Default implementation: not handled
         false
     }
+    
+    /// Handle text input (for typing in text fields)
+    fn handle_text_input(&mut self, _character: char) {
+        // Default implementation: do nothing
+    }
 }

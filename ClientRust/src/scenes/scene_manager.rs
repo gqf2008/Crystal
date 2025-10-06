@@ -115,6 +115,13 @@ impl SceneManager {
             scene.handle_mouse_button(button, pressed, x, y);
         }
     }
+    
+    /// Handle text input
+    pub fn handle_text_input(&mut self, character: char) {
+        if let Some(scene) = &mut self.current_scene {
+            scene.handle_text_input(character);
+        }
+    }
 }
 
 impl Default for SceneManager {

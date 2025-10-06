@@ -73,6 +73,10 @@ fn main() -> Result<()> {
     
     tracing::info!("Ggez Context 创建成功: {}x{}", window_width, window_height);
     
+    // 启用文本输入 (IME) - ggez 0.10 / winit 0.30
+    ctx.gfx.window().set_ime_allowed(true);
+    tracing::info!("IME 文本输入已启用");
+    
     // 5. 创建游戏状态
     let game = CrystalGame::new(&mut ctx, settings)?;
     
@@ -196,6 +200,19 @@ impl EventHandler for CrystalGame {
         input: ggez::input::keyboard::KeyInput,
         _repeated: bool,
     ) -> GameResult {
+        // 如果按键有关联的文本（如字母、数字），处理文本输入
+        // winit 0.30: 文本在 KeyEvent.text 字段中
+        if let Some(text) = &input.event.text {
+            for ch in text.chars() {
+                // 调试输出（可选，生产环境可以移除）
+                if ch != '\r' && ch != '\n' && ch != '\t' {  // 跳过特殊字符
+                    tracing::trace!("Text input: '{}'", ch);
+                }
+                let mut scene_manager = self.scene_manager.write();
+                scene_manager.handle_text_input(ch);
+            }
+        }
+        
         // ggez 0.10: KeyInput 结构变为 winit 事件
         if let PhysicalKey::Code(keycode) = input.event.physical_key {
             // 检查 Ctrl+Q 退出
