@@ -37,6 +37,9 @@ pub struct LoginDialog {
     pub new_account_button_hovered: bool,
     pub change_password_button_hovered: bool,
     pub close_button_hovered: bool,
+    
+    // IME support
+    pub ime_preedit: String,  // 拼音编辑中的文本
 }
 
 impl LoginDialog {
@@ -66,6 +69,7 @@ impl LoginDialog {
             new_account_button_hovered: false,
             change_password_button_hovered: false,
             close_button_hovered: false,
+            ime_preedit: String::new(),
         }
     }
 
@@ -346,6 +350,24 @@ impl LoginDialog {
         // 点击对话框其他区域，清除焦点
         self.clear_focus();
         DialogAction::None
+    }
+    
+    /// Handle IME preedit (拼音编辑中)
+    pub fn handle_ime_preedit(&mut self, text: String) {
+        self.ime_preedit = text;
+    }
+    
+    /// Handle IME commit (中文确认输入)
+    pub fn handle_ime_commit(&mut self, text: String) {
+        // 清除拼音编辑状态
+        self.ime_preedit.clear();
+        
+        // 将中文字符添加到当前聚焦的输入框
+        for ch in text.chars() {
+            if !ch.is_control() {
+                self.handle_text_input(ch);
+            }
+        }
     }
 }
 

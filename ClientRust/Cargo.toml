@@ -42,13 +42,15 @@ mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
 byteorder = "1"
 md5 = "0.8.0"
 pollster = "0.4"  # 用于在同步代码中运行异步函数
-flate2 = "1.1.3"  # GZip decompression for .lib files
+flate2 = "1.1.4"  # GZip decompression for .lib files
 once_cell = "1.21.3"
 regex = "1.11.3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"  # For Stream trait (used in downloader)
 ggez = "=0.10.0-rc0"  # Includes winit re-export (use ggez::winit::*)
+# egui = "0.27"  # 暂时禁用,egui_ggez 不兼容 ggez 0.10-rc0
+# egui_ggez = "0.3"  # 在 crates.io 上不存在或不兼容
 assets_manager = "0.13.3"
 ron = "0.11.0"
 tinyvec = {version = "1.10.0", features = ["alloc"]}
@@ -75,6 +77,33 @@ path = "src/main_ggez.rs"
 [[bin]]
 name = "lib_inspector"
 path = "lib_inspector.rs"
+
+# 中文输入法测试程序
+[[bin]]
+name = "test_chinese_ime"
+path = "src/bin/test_chinese_ime.rs"
+
+# 最小化 IME 测试(诊断用)
+[[bin]]
+name = "test_ime_minimal"
+path = "src/bin/test_ime_minimal.rs"
+
+[[bin]]
+name = "test_ime_fixed"
+path = "src/bin/test_ime_fixed.rs"
+
+[[bin]]
+name = "test_egui_ime"
+path = "src/bin/test_egui_ime.rs"
+
+[[bin]]
+name = "test_clipboard"
+path = "src/bin/test_clipboard.rs"
+
+# 完整 IME 支持 - 使用自定义事件循环
+[[bin]]
+name = "test_ime_custom_loop"
+path = "src/bin/test_ime_custom_loop.rs"
 
 [features]
 default = ["client"]

@@ -374,8 +374,8 @@ impl LoginScene {
     }
     
     /// 绘制登录输入框的文本和光标
-    fn draw_login_input(&self, _ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas) {
-        use ggez::graphics::{Text, DrawParam, Color as GgezColor};
+    fn draw_login_input(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas) {
+        use ggez::graphics::{Text, TextFragment, DrawParam, Color as GgezColor};
         
         let center_x = 1024.0 / 2.0;
         let center_y = 768.0 / 2.0;
@@ -390,40 +390,71 @@ impl LoginScene {
         let password_text_x = dialog_x + 85.0;
         let password_text_y = dialog_y + 108.0;
         
-        // 绘制账号文本
+        // 绘制账号文本 (使用中文字体)
         if !self.login_dialog.account_id.is_empty() {
-            let account_text = Text::new(&self.login_dialog.account_id);
+            let account_text = Text::new(
+                TextFragment::new(&self.login_dialog.account_id)
+                    .font("AlibabaPuHuiTi")
+                    .scale(21.0)
+            );
             let account_params = DrawParam::default()
                 .dest([account_text_x, account_text_y])
                 .color(GgezColor::from_rgb(255, 255, 255));
             canvas.draw(&account_text, account_params);
         }
         
-        // 绘制密码文本 (用 * 替代)
+        // 绘制密码文本 (用 * 替代, 使用中文字体)
         if !self.login_dialog.password.is_empty() {
             let password_masked = "*".repeat(self.login_dialog.password.len());
-            let password_text = Text::new(&password_masked);
+            let password_text = Text::new(
+                TextFragment::new(&password_masked)
+                    .font("AlibabaPuHuiTi")
+                    .scale(21.0)
+            );
             let password_params = DrawParam::default()
                 .dest([password_text_x, password_text_y])
                 .color(GgezColor::from_rgb(255, 255, 255));
             canvas.draw(&password_text, password_params);
         }
         
-        // 绘制光标
+        // 绘制光标 (使用中文字体)
         if self.login_dialog.cursor_visible {
-            let cursor_text = Text::new("|");
+            let cursor_text = Text::new(
+                TextFragment::new("|")
+                    .font("AlibabaPuHuiTi")
+                    .scale(21.0)
+            );
             let cursor_color = GgezColor::from_rgb(255, 255, 255);
             
             if self.login_dialog.account_focused {
-                // 账号输入框光标 (使用6像素每字符，更接近实际字体宽度)
-                let cursor_x = account_text_x + (self.login_dialog.account_id.len() as f32 * 6.0);
+                // 使用 ggez 的文本测量功能精确计算光标位置
+                let account_text = Text::new(
+                    TextFragment::new(self.login_dialog.account_id.clone())
+                        .font("AlibabaPuHuiTi")
+                        .scale(21.0)
+                );
+                let text_width = account_text.measure(ctx)
+                    .map(|m| m.x)
+                    .unwrap_or(0.0);
+                let cursor_x = account_text_x + text_width;
+                
                 let cursor_params = DrawParam::default()
                     .dest([cursor_x, account_text_y])
                     .color(cursor_color);
                 canvas.draw(&cursor_text, cursor_params);
             } else if self.login_dialog.password_focused {
-                // 密码输入框光标 (密码用*替代，每个*也是6像素宽)
-                let cursor_x = password_text_x + (self.login_dialog.password.len() as f32 * 6.0);
+                // 密码显示为 *,也需要测量宽度
+                let password_display: String = "*".repeat(self.login_dialog.password.len());
+                let password_text = Text::new(
+                    TextFragment::new(password_display)
+                        .font("AlibabaPuHuiTi")
+                        .scale(21.0)
+                );
+                let text_width = password_text.measure(ctx)
+                    .map(|m| m.x)
+                    .unwrap_or(0.0);
+                let cursor_x = password_text_x + text_width;
+                
                 let cursor_params = DrawParam::default()
                     .dest([cursor_x, password_text_y])
                     .color(cursor_color);
@@ -434,7 +465,7 @@ impl LoginScene {
     
     /// 绘制消息框
     fn draw_message_box(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, msg_box: &MessageBox) {
-        use ggez::graphics::{Text, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
+        use ggez::graphics::{Text, TextFragment, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
         use crate::graphics::{get_library, LibraryName};
         
         // 1. 绘制半透明背景遮罩 (让用户聚焦在消息框上)
@@ -473,9 +504,13 @@ impl LoginScene {
                 let text_y = box_y + 35.0;
                 let message_lines: Vec<&str> = msg_box.message.lines().collect();
                 for (i, line) in message_lines.iter().enumerate() {
-                    let line_text = Text::new(*line);
+                    let line_text = Text::new(
+                        TextFragment::new(*line)
+                            .font("AlibabaPuHuiTi")
+                            .scale(16.0)
+                    );
                     let line_params = DrawParam::default()
-                        .dest([text_x, text_y + (i as f32 * 20.0)])
+                        .dest([text_x, text_y + (i as f32 * 24.0)])
                         .color(GgezColor::WHITE);
                     canvas.draw(&line_text, line_params);
                 }
@@ -496,7 +531,7 @@ impl LoginScene {
     
     /// 绘制新建账号对话框
     fn draw_new_account_dialog(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, dialog: &NewAccountDialog) {
-        use ggez::graphics::{Text, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
+        use ggez::graphics::{Text, TextFragment, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
         use crate::graphics::{get_library, LibraryName};
         use crate::scenes::login_scene::new_account_dialog::InputField;
         
@@ -543,8 +578,12 @@ impl LoginScene {
                 ];
                 
                 for (label, x, y, text, field, valid) in &input_fields {
-                    // 绘制标签
-                    let label_text = Text::new(*label);
+                    // 绘制标签 (使用中文字体)
+                    let label_text = Text::new(
+                        TextFragment::new(*label)
+                            .font("AlibabaPuHuiTi")
+                            .scale(16.0)
+                    );
                     canvas.draw(&label_text, DrawParam::default()
                         .dest([x - 80.0, *y])
                         .color(GgezColor::WHITE));
@@ -567,15 +606,24 @@ impl LoginScene {
                         canvas.draw(&border, DrawParam::default());
                     }
                     
-                    // 绘制文本内容
-                    let content_text = Text::new(text.to_string());
+                    // 绘制文本内容 (使用中文字体)
+                    let content_text = Text::new(
+                        TextFragment::new(text.to_string())
+                            .font("AlibabaPuHuiTi")
+                            .scale(21.0)
+                    );
                     canvas.draw(&content_text, DrawParam::default()
                         .dest([x + 2.0, *y + 2.0])
                         .color(GgezColor::WHITE));
                     
                     // 如果是当前聚焦的输入框,绘制光标
                     if dialog.focused_field == *field && dialog.cursor_visible {
-                        let cursor_x = x + 2.0 + (text.len() as f32 * 8.0);
+                        // 使用 ggez 的文本测量功能精确计算光标位置
+                        let text_width = content_text.measure(ctx)
+                            .map(|m| m.x)
+                            .unwrap_or(0.0);
+                        let cursor_x = x + 2.0 + text_width;
+                        
                         if let Ok(cursor) = Mesh::new_rectangle(
                             ctx,
                             DrawMode::fill(),
@@ -600,8 +648,12 @@ impl LoginScene {
                     }
                 }
                 
-                // 5. 绘制提示信息
-                let hint_text = Text::new("按Tab切换输入框 | 按ESC关闭");
+                // 5. 绘制提示信息 (使用中文字体)
+                let hint_text = Text::new(
+                    TextFragment::new("按Tab切换输入框 | 按ESC关闭")
+                        .font("AlibabaPuHuiTi")
+                        .scale(21.0)
+                );
                 canvas.draw(&hint_text, DrawParam::default()
                     .dest([box_x + 150.0, box_y + 460.0])
                     .color(GgezColor::from_rgb(200, 200, 200)));
@@ -611,7 +663,7 @@ impl LoginScene {
     
     /// 绘制修改密码对话框
     fn draw_change_password_dialog(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, dialog: &ChangePasswordDialog) {
-        use ggez::graphics::{Text, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
+        use ggez::graphics::{Text, TextFragment, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
         use crate::graphics::{get_library, LibraryName};
         
         // 1. 绘制半透明背景遮罩
@@ -657,8 +709,12 @@ impl LoginScene {
                 ];
                 
                 for (label, x, y, text, field, valid) in &input_fields {
-                    // 绘制标签 (在输入框左侧)
-                    let label_text = Text::new(*label);
+                    // 绘制标签 (在输入框左侧, 使用中文字体)
+                    let label_text = Text::new(
+                        TextFragment::new(*label)
+                            .font("AlibabaPuHuiTi")
+                            .scale(16.0)
+                    );
                     canvas.draw(&label_text, DrawParam::default()
                         .dest([x - 90.0, *y])
                         .color(GgezColor::from_rgb(200, 200, 150)));
@@ -681,8 +737,12 @@ impl LoginScene {
                         canvas.draw(&border, DrawParam::default());
                     }
                     
-                    // 绘制输入框内容
-                    let content_text = Text::new(text.to_string());
+                    // 绘制输入框内容 (使用中文字体)
+                    let content_text = Text::new(
+                        TextFragment::new(text.to_string())
+                            .font("AlibabaPuHuiTi")
+                            .scale(21.0)
+                    );
                     canvas.draw(&content_text, DrawParam::default()
                         .dest([x + 2.0, *y + 2.0])
                         .color(GgezColor::WHITE));
@@ -716,8 +776,12 @@ impl LoginScene {
                     }
                 }
                 
-                // 5. 绘制提示文本
-                let hint_text = Text::new("按Tab切换输入框 | 按ESC关闭");
+                // 5. 绘制提示文本 (使用中文字体)
+                let hint_text = Text::new(
+                    TextFragment::new("按Tab切换输入框 | 按ESC关闭")
+                        .font("AlibabaPuHuiTi")
+                        .scale(21.0)
+                );
                 canvas.draw(&hint_text, DrawParam::default()
                     .dest([box_x + 80.0, box_y + 280.0])
                     .color(GgezColor::from_rgb(200, 200, 200)));
@@ -788,15 +852,21 @@ impl Scene for LoginScene {
     
     fn draw(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
         use crate::graphics::libraries::{get_library, LibraryName};
-        use ggez::graphics::{Text, DrawParam, Color as GgezColor};
+        use ggez::graphics::{Text, TextFragment, DrawParam, Color as GgezColor};
         
         // 1. 绘制登录背景动画 (C# 原版: ChrSel.lib 索引 0-18, 共19帧)
         if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
             if let Ok(mut lib) = lib_arc.try_lock() {
                 // 使用动画帧索引 (0-18)
                 let frame_index = self.background_frame.min(18);
-                let _ = lib.draw_to_canvas(ctx, canvas, frame_index, 0.0, 0.0, false);
+                if let Err(e) = lib.draw_to_canvas(ctx, canvas, frame_index, 0.0, 0.0, false) {
+                    tracing::error!("❌ 绘制背景失败 (帧{}): {}", frame_index, e);
+                }
+            } else {
+                tracing::warn!("⚠ 无法锁定 ChrSel 库");
             }
+        } else {
+            tracing::warn!("⚠ ChrSel 库未加载");
         }
         
         // 2. 绘制登录对话框 (C# 原版: Prguse.lib 索引 1084)
@@ -856,9 +926,13 @@ impl Scene for LoginScene {
             }
         }
         
-        // 3. 绘制文本信息
+        // 3. 绘制文本信息 (使用中文字体)
         // 版本信息
-        let version_text = Text::new("Crystal v1.0 - Ggez Edition");
+        let version_text = Text::new(
+            TextFragment::new("Crystal v1.0 - Ggez Edition")
+                .font("AlibabaPuHuiTi")
+                .scale(21.0)
+        );
         let version_params = DrawParam::default()
             .dest([10.0, 10.0])
             .color(GgezColor::from_rgb(200, 200, 255));
@@ -1654,6 +1728,62 @@ impl Scene for LoginScene {
         // 处理 LoginDialog 文本输入
         if self.login_dialog.visible {
             self.login_dialog.handle_text_input(character);
+        }
+    }
+    
+    fn handle_ime_preedit(&mut self, text: String) {
+        // MessageBox 显示时不处理 IME
+        if self.message_box.is_some() {
+            return;
+        }
+        
+        // 处理新建账号对话框 IME
+        if let Some(dialog) = &mut self.new_account_dialog {
+            if dialog.visible {
+                dialog.handle_ime_preedit(text);
+                return;
+            }
+        }
+        
+        // 处理修改密码对话框 IME
+        if let Some(dialog) = &mut self.change_password_dialog {
+            if dialog.visible {
+                dialog.handle_ime_preedit(text);
+                return;
+            }
+        }
+        
+        // 处理 LoginDialog IME
+        if self.login_dialog.visible {
+            self.login_dialog.handle_ime_preedit(text);
+        }
+    }
+    
+    fn handle_ime_commit(&mut self, text: String) {
+        // MessageBox 显示时不处理 IME
+        if self.message_box.is_some() {
+            return;
+        }
+        
+        // 处理新建账号对话框 IME
+        if let Some(dialog) = &mut self.new_account_dialog {
+            if dialog.visible {
+                dialog.handle_ime_commit(text);
+                return;
+            }
+        }
+        
+        // 处理修改密码对话框 IME
+        if let Some(dialog) = &mut self.change_password_dialog {
+            if dialog.visible {
+                dialog.handle_ime_commit(text);
+                return;
+            }
+        }
+        
+        // 处理 LoginDialog IME
+        if self.login_dialog.visible {
+            self.login_dialog.handle_ime_commit(text);
         }
     }
 }

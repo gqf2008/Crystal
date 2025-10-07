@@ -87,6 +87,9 @@ pub struct ChangePasswordDialog {
     // Button hover states
     pub ok_button_hovered: bool,
     pub cancel_button_hovered: bool,
+    
+    // IME support
+    pub ime_preedit: String,
 }
 
 impl ChangePasswordDialog {
@@ -118,6 +121,7 @@ impl ChangePasswordDialog {
             cursor_blink_timer: 0.0,
             ok_button_hovered: false,
             cancel_button_hovered: false,
+            ime_preedit: String::new(),
         }
     }
 
@@ -199,6 +203,24 @@ impl ChangePasswordDialog {
         if text.len() < max_len {
             text.push(ch);
             self.validate_current_field();
+        }
+    }
+    
+    /// Handle IME preedit (拼音编辑中)
+    pub fn handle_ime_preedit(&mut self, text: String) {
+        self.ime_preedit = text;
+    }
+    
+    /// Handle IME commit (中文确认输入)
+    pub fn handle_ime_commit(&mut self, text: String) {
+        // 清除拼音编辑状态
+        self.ime_preedit.clear();
+        
+        // 将中文字符添加到当前聚焦的输入框
+        for ch in text.chars() {
+            if !ch.is_control() {
+                self.handle_text_input(ch);
+            }
         }
     }
     

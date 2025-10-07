@@ -108,4 +108,14 @@ pub trait Scene {
     fn handle_text_input(&mut self, _character: char) {
         // Default implementation: do nothing
     }
+    
+    /// Handle IME preedit (拼音编辑中)
+    fn handle_ime_preedit(&mut self, _text: String) {
+        // Default implementation: do nothing
+    }
+    
+    /// Handle IME commit (中文确认输入)
+    fn handle_ime_commit(&mut self, _text: String) {
+        // Default implementation: do nothing
+    }
 }

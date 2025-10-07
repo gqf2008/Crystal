@@ -108,9 +108,18 @@ pub struct NewAccountDialog {
     pub cursor_visible: bool,
     pub cursor_blink_timer: f32,
     
+    // Text selection state
+    pub selection_start: Option<usize>,  // 选择起始位置 (字符索引)
+    pub selection_end: Option<usize>,    // 选择结束位置
+    pub is_selecting: bool,               // 是否正在选择
+    pub last_click_time: f32,             // 用于双击检测
+    
     // Button hover states
     pub ok_button_hovered: bool,
     pub cancel_button_hovered: bool,
+    
+    // IME support
+    pub ime_preedit: String,
 }
 
 impl NewAccountDialog {
@@ -141,8 +150,15 @@ impl NewAccountDialog {
             focused_field: InputField::AccountId, // 默认聚焦账号输入框
             cursor_visible: true,
             cursor_blink_timer: 0.0,
+            
+            // Text selection
+            selection_start: None,
+            selection_end: None,
+            is_selecting: false,
+            last_click_time: 0.0,
             ok_button_hovered: false,
             cancel_button_hovered: false,
+            ime_preedit: String::new(),
         }
     }
 
@@ -253,6 +269,42 @@ impl NewAccountDialog {
             text.push(ch);
             self.validate_current_field();
         }
+    }
+    
+    /// Handle IME preedit (拼音编辑中)
+    pub fn handle_ime_preedit(&mut self, text: String) {
+        self.ime_preedit = text;
+    }
+    
+    /// Handle IME commit (中文确认输入)
+    pub fn handle_ime_commit(&mut self, text: String) {
+        tracing::info!("NewAccountDialog IME commit - 收到文本: '{}' ({} 字符)", text, text.chars().count());
+        
+        // 清除拼音编辑状态
+        self.ime_preedit.clear();
+        
+        // 将中文字符添加到当前聚焦的输入框
+        for ch in text.chars() {
+            tracing::debug!("处理字符: '{}' (U+{:04X})", ch, ch as u32);
+            if !ch.is_control() {
+                self.handle_text_input(ch);
+            } else {
+                tracing::debug!("跳过控制字符: U+{:04X}", ch as u32);
+            }
+        }
+        
+        // 打印当前输入框内容
+        let current_text = match self.focused_field {
+            InputField::AccountId => &self.registration.account_id,
+            InputField::Password => &self.registration.password,
+            InputField::PasswordConfirm => &self.registration.password_confirm,
+            InputField::Email => &self.registration.email,
+            InputField::Username => &self.registration.username,
+            InputField::BirthDate => &self.registration.birth_date,
+            InputField::Question => &self.registration.secret_question,
+            InputField::Answer => &self.registration.secret_answer,
+        };
+        tracing::info!("IME commit 后,输入框内容: '{}'", current_text);
     }
     
     /// Validate the currently focused field

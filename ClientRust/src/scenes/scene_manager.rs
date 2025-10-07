@@ -122,6 +122,20 @@ impl SceneManager {
             scene.handle_text_input(character);
         }
     }
+    
+    /// Handle IME preedit (拼音编辑中)
+    pub fn handle_ime_preedit(&mut self, text: String) {
+        if let Some(scene) = &mut self.current_scene {
+            scene.handle_ime_preedit(text);
+        }
+    }
+    
+    /// Handle IME commit (中文确认输入)
+    pub fn handle_ime_commit(&mut self, text: String) {
+        if let Some(scene) = &mut self.current_scene {
+            scene.handle_ime_commit(text);
+        }
+    }
 }
 
 impl Default for SceneManager {

@@ -7,12 +7,11 @@
 
 use anyhow::Result;
 use ggez::{Context, ContextBuilder, GameResult};
-use ggez::event::{self, EventHandler};
+use ggez::event::EventHandler;
 use ggez::conf::{WindowMode, WindowSetup, NumSamples};
 use ggez::graphics::Color;
-use ggez::input::keyboard::KeyInput;
 use ggez::input::mouse::MouseButton as GgezMouseButton;
-use ggez::winit::keyboard::{KeyCode as WinitKeyCode, PhysicalKey, ModifiersState as WinitModifiers};
+use ggez::winit::keyboard::{KeyCode as WinitKeyCode, PhysicalKey};
 use std::sync::Arc;
 use parking_lot::RwLock;
 
@@ -35,7 +34,7 @@ use settings::ClientSettings;
 use crate::graphics::GgezManager;
 use crate::scenes::{SceneManager, SceneType, KeyCode as SceneKeyCode, MouseButton as SceneMouseButton, ModifiersState};
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. 初始化日志
     tracing_subscriber::fmt()
         .with_env_filter("info,mir2_client=debug")
@@ -54,8 +53,10 @@ fn main() -> Result<()> {
     
     // 4. 创建 ggez Context
     let res = settings.resolution();
-    let window_width = res.width as f32;
-    let window_height = res.height as f32;
+    // 放大1.5倍以便更容易看清
+    let scale_factor = 1.5;
+    let window_width = (res.width as f32) * scale_factor;
+    let window_height = (res.height as f32) * scale_factor;
     
     let (mut ctx, event_loop) = ContextBuilder::new("mir2_client", "Crystal")
         .window_setup(
@@ -99,9 +100,201 @@ fn main() -> Result<()> {
     // 5. 创建游戏状态
     let game = CrystalGame::new(&mut ctx, settings)?;
     
-    // 6. 运行事件循环
-    event::run(ctx, event_loop, game)
-        .map_err(|e| anyhow::anyhow!("游戏循环错误: {}", e))
+    // 6. 运行自定义事件循环 (支持 IME)
+    // 注意: 必须使用自定义循环,因为 ggez 0.10 不支持 WindowEvent::Ime
+    run_custom_event_loop(ctx, event_loop, game)
+}
+
+/// Custom ApplicationHandler that captures IME events
+struct CustomAppHandler {
+    ctx: Context,
+    game: CrystalGame,
+}
+
+impl ggez::winit::application::ApplicationHandler<()> for CustomAppHandler {
+    fn new_events(&mut self, event_loop: &ggez::winit::event_loop::ActiveEventLoop, _: ggez::winit::event::StartCause) {
+        use ggez::context::HasMut;
+        use ggez::context::ContextFields;
+        
+        if HasMut::<ContextFields>::retrieve_mut(&mut self.ctx).quit_requested {
+            HasMut::<ContextFields>::retrieve_mut(&mut self.ctx).continuing = false;
+        }
+        if !HasMut::<ContextFields>::retrieve_mut(&mut self.ctx).continuing {
+            event_loop.exit();
+            return;
+        }
+        
+        event_loop.set_control_flow(ggez::winit::event_loop::ControlFlow::Poll);
+    }
+    
+    fn resumed(&mut self, _event_loop: &ggez::winit::event_loop::ActiveEventLoop) {}
+    
+    fn window_event(
+        &mut self,
+        event_loop: &ggez::winit::event_loop::ActiveEventLoop,
+        mut window_id: ggez::winit::window::WindowId,
+        mut event: ggez::winit::event::WindowEvent,
+    ) {
+        use ggez::context::HasMut;
+        use ggez::input::keyboard::KeyboardContext;
+        use ggez::input::mouse::MouseContext;
+        use ggez::winit::event::ElementState;
+        use ggez::event::EventHandler;
+        
+        // ===== 首先检查 IME 事件 (这是获取中文的唯一方法!) =====
+        if let ggez::winit::event::WindowEvent::Ime(ref ime_event) = event {
+            use ggez::winit::event::Ime;
+            match ime_event {
+                Ime::Enabled => {
+                    tracing::debug!("IME 已启用");
+                }
+                Ime::Disabled => {
+                    tracing::debug!("IME 已禁用");
+                }
+                Ime::Preedit(text, _) => {
+                    tracing::debug!("IME 拼音: {}", text);
+                    let mut scene_mgr = self.game.scene_manager.write();
+                    scene_mgr.handle_ime_preedit(text.clone());
+                }
+                Ime::Commit(text) => {
+                    tracing::info!("✓ IME 确认中文: {}", text);
+                    let mut scene_mgr = self.game.scene_manager.write();
+                    scene_mgr.handle_ime_commit(text.clone());
+                }
+            }
+            // IME 事件不转发给 ggez
+            return;
+        }
+        
+        // ===== 转发事件给 ggez 更新内部状态 =====
+        ggez::event::process_window_event(&mut self.ctx, &mut window_id, &mut event);
+        
+        // ===== 手动调用 EventHandler 方法 =====
+        match event {
+            ggez::winit::event::WindowEvent::CloseRequested => {
+                if let Ok(true) = self.game.quit_event(&mut self.ctx) {
+                    // 用户取消退出
+                } else {
+                    event_loop.exit();
+                }
+            }
+            ggez::winit::event::WindowEvent::Focused(gained) => {
+                let _ = self.game.focus_event(&mut self.ctx, gained);
+            }
+            ggez::winit::event::WindowEvent::Resized(size) => {
+                let _ = self.game.resize_event(&mut self.ctx, size.width as f32, size.height as f32);
+            }
+            ggez::winit::event::WindowEvent::KeyboardInput { event: key_event, .. } => {
+                use ggez::input::keyboard::KeyInput;
+                let mods = HasMut::<KeyboardContext>::retrieve_mut(&mut self.ctx).active_modifiers;
+                let repeat = HasMut::<KeyboardContext>::retrieve_mut(&mut self.ctx).is_key_repeated();
+                let input = KeyInput { event: key_event, mods };
+                
+                match input.event.state {
+                    ElementState::Pressed => {
+                        let _ = self.game.key_down_event(&mut self.ctx, input, repeat);
+                    }
+                    ElementState::Released => {
+                        let _ = self.game.key_up_event(&mut self.ctx, input);
+                    }
+                }
+            }
+            ggez::winit::event::WindowEvent::MouseInput { state, button, .. } => {
+                let position = HasMut::<MouseContext>::retrieve_mut(&mut self.ctx).position();
+                match state {
+                    ElementState::Pressed => {
+                        let _ = self.game.mouse_button_down_event(&mut self.ctx, button, position.x, position.y);
+                    }
+                    ElementState::Released => {
+                        let _ = self.game.mouse_button_up_event(&mut self.ctx, button, position.x, position.y);
+                    }
+                }
+            }
+            ggez::winit::event::WindowEvent::CursorMoved { .. } => {
+                let position = HasMut::<MouseContext>::retrieve_mut(&mut self.ctx).position();
+                let delta = HasMut::<MouseContext>::retrieve_mut(&mut self.ctx).last_delta();
+                let _ = self.game.mouse_motion_event(&mut self.ctx, position.x, position.y, delta.x, delta.y);
+            }
+            ggez::winit::event::WindowEvent::MouseWheel { delta, .. } => {
+                let (x, y) = match delta {
+                    ggez::winit::event::MouseScrollDelta::LineDelta(x, y) => (x, y),
+                    ggez::winit::event::MouseScrollDelta::PixelDelta(pos) => {
+                        // 简单处理:直接使用像素值
+                        (pos.x as f32, pos.y as f32)
+                    }
+                };
+                let _ = self.game.mouse_wheel_event(&mut self.ctx, x, y);
+            }
+            _ => {}
+        }
+    }
+    
+    fn device_event(
+        &mut self,
+        _event_loop: &ggez::winit::event_loop::ActiveEventLoop,
+        mut device_id: ggez::winit::event::DeviceId,
+        mut event: ggez::winit::event::DeviceEvent,
+    ) {
+        // 转发设备事件给 ggez
+        ggez::event::process_device_event(&mut self.ctx, &mut device_id, &mut event);
+    }
+    
+    fn about_to_wait(&mut self, event_loop: &ggez::winit::event_loop::ActiveEventLoop) {
+        use ggez::context::HasMut;
+        use ggez::graphics::GraphicsContext;
+        
+        // 更新定时器
+        HasMut::<ggez::timer::TimeContext>::retrieve_mut(&mut self.ctx).tick();
+        
+        // 更新游戏逻辑
+        if let Err(e) = self.game.update(&mut self.ctx) {
+            tracing::error!("Update error: {}", e);
+            event_loop.exit();
+            return;
+        }
+        
+        // 开始绘制帧
+        if let Err(e) = HasMut::<GraphicsContext>::retrieve_mut(&mut self.ctx).begin_frame() {
+            tracing::error!("Begin frame error: {}", e);
+            event_loop.exit();
+            return;
+        }
+        
+        // 绘制游戏画面
+        if let Err(e) = self.game.draw(&mut self.ctx) {
+            tracing::error!("Draw error: {}", e);
+            event_loop.exit();
+            return;
+        }
+        
+        // 结束绘制帧
+        if let Err(e) = HasMut::<GraphicsContext>::retrieve_mut(&mut self.ctx).end_frame() {
+            tracing::error!("End frame error: {}", e);
+            event_loop.exit();
+            return;
+        }
+        
+        // 保存输入状态
+        use ggez::input::keyboard::KeyboardContext;
+        use ggez::input::mouse::MouseContext;
+        
+        HasMut::<MouseContext>::retrieve_mut(&mut self.ctx).reset_delta();
+        HasMut::<KeyboardContext>::retrieve_mut(&mut self.ctx).save_keyboard_state();
+        HasMut::<MouseContext>::retrieve_mut(&mut self.ctx).save_mouse_state();
+    }
+}
+
+/// 自定义事件循环 - 完整支持 IME
+fn run_custom_event_loop(
+    ctx: Context,
+    event_loop: ggez::winit::event_loop::EventLoop<()>,
+    game: CrystalGame,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut app = CustomAppHandler { ctx, game };
+    
+    event_loop
+        .run_app(&mut app)
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
 }
 
 /// 游戏主状态 - 实现 ggez::EventHandler
@@ -113,7 +306,7 @@ struct CrystalGame {
 }
 
 impl CrystalGame {
-    fn new(ctx: &mut Context, settings: ClientSettings) -> Result<Self> {
+    fn new(_ctx: &mut Context, settings: ClientSettings) -> Result<Self> {
         println!("\n========================================");
         println!("🎮 Crystal Mir2 Client - Ggez版本");
         println!("========================================\n");
@@ -197,7 +390,7 @@ impl EventHandler for CrystalGame {
         // 开始帧
         self.ggez_manager.begin_frame();
         
-        // 创建 canvas (黑色背景 - 场景会绘制自己的背景)
+        // 创建 canvas
         let mut canvas = graphics::Canvas::from_frame(ctx, Color::BLACK);
         
         // 绘制当前场景
@@ -219,6 +412,8 @@ impl EventHandler for CrystalGame {
         input: ggez::input::keyboard::KeyInput,
         _repeated: bool,
     ) -> GameResult {
+        tracing::info!("🔑 key_down_event 被调用!");
+        
         // ggez 0.10: KeyInput 结构变为 winit 事件
         let mut key_consumed = false;
         
@@ -249,16 +444,26 @@ impl EventHandler for CrystalGame {
         // 只有在按键未被消费时才处理文本输入
         // 这样可以防止空格、M等功能键的文本被输入到文本框
         if !key_consumed {
+            // 调试: 检查 text 字段
+            tracing::debug!("KeyEvent - text field: {:?}", input.event.text);
+            
             if let Some(text) = &input.event.text {
+                tracing::info!("✓ 收到文本: '{}'", text);
                 for ch in text.chars() {
                     // 过滤掉特殊控制字符（Tab、回车、换行等）
                     if ch != '\r' && ch != '\n' && ch != '\t' && ch != '\x08' && !ch.is_control() {
-                        tracing::trace!("Text input: '{}'", ch);
+                        tracing::info!("→ 处理字符: '{}'", ch);
                         let mut scene_manager = self.scene_manager.write();
                         scene_manager.handle_text_input(ch);
+                    } else {
+                        tracing::debug!("✗ 过滤控制字符: {:?}", ch);
                     }
                 }
+            } else {
+                tracing::debug!("✗ text 字段为 None");
             }
+        } else {
+            tracing::debug!("✗ 按键被消费,跳过文本输入");
         }
         
         Ok(())
@@ -317,6 +522,18 @@ impl EventHandler for CrystalGame {
     ) -> GameResult {
         let mut scene_manager = self.scene_manager.write();
         scene_manager.handle_mouse_move(x as i32, y as i32);
+        
+        Ok(())
+    }
+    
+    /// 处理文本输入事件 (包括 IME 中文输入)
+    /// ggez 会自动处理 IME，并将最终确认的字符通过此方法传递
+    fn text_input_event(&mut self, _ctx: &mut Context, character: char) -> GameResult {
+        tracing::debug!("收到文本输入: '{}'", character);
+        
+        // 将字符传递给场景管理器
+        let mut scene_manager = self.scene_manager.write();
+        scene_manager.handle_text_input(character);
         
         Ok(())
     }
