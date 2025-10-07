@@ -200,6 +200,12 @@ impl NewAccountDialog {
     
     /// Handle Backspace key (delete last character from focused field)
     pub fn handle_backspace(&mut self) {
+        // If there's a selection, delete it instead of deleting one character
+        if self.get_selection_range().is_some() {
+            self.delete_selection();
+            return;
+        }
+        
         let text = match self.focused_field {
             InputField::AccountId => &mut self.registration.account_id,
             InputField::Password => &mut self.registration.password,
@@ -219,6 +225,11 @@ impl NewAccountDialog {
     
     /// Handle text input (add character to focused field with validation)
     pub fn handle_text_input(&mut self, ch: char) {
+        // 如果有选中的文本,先删除它
+        if self.get_selection_range().is_some() {
+            self.delete_selection();
+        }
+        
         // 字符过滤: 根据字段类型只接受特定字符
         let is_valid_char = match self.focused_field {
             InputField::AccountId | InputField::Password | InputField::PasswordConfirm => {
@@ -306,6 +317,146 @@ impl NewAccountDialog {
         };
         tracing::info!("IME commit 后,输入框内容: '{}'", current_text);
     }
+    
+    // ========== 文本选择功能 ==========
+    
+    /// 开始文本选择 (鼠标按下时)
+    pub fn start_selection(&mut self, char_index: usize) {
+        self.selection_start = Some(char_index);
+        self.selection_end = Some(char_index);
+        self.is_selecting = true;
+    }
+    
+    /// 更新选择范围 (鼠标拖动时)
+    pub fn update_selection(&mut self, char_index: usize) {
+        if self.is_selecting {
+            self.selection_end = Some(char_index);
+        }
+    }
+    
+    /// 结束选择 (鼠标释放时)
+    pub fn end_selection(&mut self) {
+        self.is_selecting = false;
+    }
+    
+    /// 清除选择
+    pub fn clear_selection(&mut self) {
+        self.selection_start = None;
+        self.selection_end = None;
+        self.is_selecting = false;
+    }
+    
+    /// 获取选择的文本
+    pub fn get_selected_text(&self) -> Option<String> {
+        let (start, end) = self.get_selection_range()?;
+        let text = self.get_current_field_text();
+        let chars: Vec<char> = text.chars().collect();
+        
+        if end > start && end <= chars.len() {
+            Some(chars[start..end].iter().collect())
+        } else {
+            None
+        }
+    }
+    
+    /// 获取标准化的选择范围 (start < end)
+    pub fn get_selection_range(&self) -> Option<(usize, usize)> {
+        match (self.selection_start, self.selection_end) {
+            (Some(start), Some(end)) => {
+                if start == end {
+                    None // 没有选择
+                } else if start < end {
+                    Some((start, end))
+                } else {
+                    Some((end, start)) // 反向选择,交换顺序
+                }
+            }
+            _ => None,
+        }
+    }
+    
+    /// 删除选中的文本
+    pub fn delete_selection(&mut self) {
+        if let Some((start, end)) = self.get_selection_range() {
+            let text = self.get_current_field_text();
+            let mut chars: Vec<char> = text.chars().collect();
+            
+            // 删除选中的字符
+            chars.drain(start..end);
+            let new_text: String = chars.into_iter().collect();
+            
+            // 更新字段
+            self.set_current_field_text(new_text);
+            
+            // 清除选择并将光标移到删除位置
+            self.clear_selection();
+        }
+    }
+    
+    /// 全选当前字段
+    pub fn select_all(&mut self) {
+        let text = self.get_current_field_text();
+        let len = text.chars().count();
+        if len > 0 {
+            self.selection_start = Some(0);
+            self.selection_end = Some(len);
+        }
+    }
+    
+    /// 复制选中文本到剪贴板 (需要 clipboard crate)
+    pub fn copy_selection(&self) -> Option<String> {
+        self.get_selected_text()
+    }
+    
+    /// Handle mouse click on input field (for text selection)
+    /// Returns true if the click was handled
+    pub fn handle_mouse_click(&mut self, x: f32, y: f32, pressed: bool) -> bool {
+        // 简化版本:点击输入框时清除选择,将光标移到末尾
+        // TODO: 实现精确的字符索引计算来支持点击定位光标
+        
+        if pressed {
+            // 点击时清除现有选择
+            self.clear_selection();
+            return true;
+        }
+        false
+    }
+    
+    /// Handle mouse drag for text selection
+    pub fn handle_mouse_drag(&mut self, x: f32, y: f32) {
+        // TODO: 实现拖拽选择功能
+        // 需要计算鼠标位置对应的字符索引,然后调用 update_selection()
+    }
+    
+    /// 获取当前字段的文本
+    fn get_current_field_text(&self) -> String {
+        match self.focused_field {
+            InputField::AccountId => self.registration.account_id.clone(),
+            InputField::Password => self.registration.password.clone(),
+            InputField::PasswordConfirm => self.registration.password_confirm.clone(),
+            InputField::Email => self.registration.email.clone(),
+            InputField::Username => self.registration.username.clone(),
+            InputField::BirthDate => self.registration.birth_date.clone(),
+            InputField::Question => self.registration.secret_question.clone(),
+            InputField::Answer => self.registration.secret_answer.clone(),
+        }
+    }
+    
+    /// 设置当前字段的文本
+    fn set_current_field_text(&mut self, text: String) {
+        match self.focused_field {
+            InputField::AccountId => self.set_account_id(text),
+            InputField::Password => self.set_password(text),
+            InputField::PasswordConfirm => self.set_password_confirm(text),
+            InputField::Email => self.set_email(text),
+            InputField::Username => self.set_username(text),
+            InputField::BirthDate => self.set_birth_date(text),
+            InputField::Question => self.set_secret_question(text),
+            InputField::Answer => self.set_secret_answer(text),
+        }
+    }
+    
+    // ========== 文本选择功能结束 ==========
     
     /// Validate the currently focused field
     fn validate_current_field(&mut self) {

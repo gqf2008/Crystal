@@ -392,27 +392,95 @@ impl LoginScene {
         
         // 绘制账号文本 (使用中文字体)
         if !self.login_dialog.account_id.is_empty() {
-            let account_text = Text::new(
+            let input_box_width = 110.0; // 输入框可见宽度
+            
+            // 计算完整文本宽度
+            let full_text = Text::new(
                 TextFragment::new(&self.login_dialog.account_id)
                     .font("AlibabaPuHuiTi")
                     .scale(21.0)
             );
+            let full_width = full_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
+            
+            // 如果文本超长，从右往左截取可见部分
+            let visible_text = if full_width > input_box_width {
+                let chars: Vec<char> = self.login_dialog.account_id.chars().collect();
+                let mut visible_chars = chars.clone();
+                
+                // 从左边逐个删除字符直到文本能完全显示
+                while visible_chars.len() > 0 {
+                    let test_text = Text::new(
+                        TextFragment::new(visible_chars.iter().collect::<String>())
+                            .font("AlibabaPuHuiTi")
+                            .scale(21.0)
+                    );
+                    let test_width = test_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
+                    
+                    if test_width <= input_box_width - 5.0 {
+                        break;
+                    }
+                    visible_chars.remove(0);
+                }
+                visible_chars.iter().collect::<String>()
+            } else {
+                self.login_dialog.account_id.clone()
+            };
+            
+            let account_text = Text::new(
+                TextFragment::new(&visible_text)
+                    .font("AlibabaPuHuiTi")
+                    .scale(21.0)
+            );
+            
             let account_params = DrawParam::default()
-                .dest([account_text_x, account_text_y])
+                .dest([account_text_x, account_text_y - 3.0])  // 向上移3像素使其居中
                 .color(GgezColor::from_rgb(255, 255, 255));
             canvas.draw(&account_text, account_params);
         }
         
         // 绘制密码文本 (用 * 替代, 使用中文字体)
         if !self.login_dialog.password.is_empty() {
+            let input_box_width = 110.0; // 输入框可见宽度
             let password_masked = "*".repeat(self.login_dialog.password.len());
-            let password_text = Text::new(
+            
+            // 计算完整密码文本宽度
+            let full_text = Text::new(
                 TextFragment::new(&password_masked)
                     .font("AlibabaPuHuiTi")
                     .scale(21.0)
             );
+            let full_width = full_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
+            
+            // 如果文本超长，只显示右侧可见部分
+            let visible_text = if full_width > input_box_width {
+                let mut visible_count = password_masked.len();
+                
+                while visible_count > 0 {
+                    let test_text = Text::new(
+                        TextFragment::new("*".repeat(visible_count))
+                            .font("AlibabaPuHuiTi")
+                            .scale(21.0)
+                    );
+                    let test_width = test_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
+                    
+                    if test_width <= input_box_width - 5.0 {
+                        break;
+                    }
+                    visible_count -= 1;
+                }
+                "*".repeat(visible_count)
+            } else {
+                password_masked
+            };
+            
+            let password_text = Text::new(
+                TextFragment::new(&visible_text)
+                    .font("AlibabaPuHuiTi")
+                    .scale(21.0)
+            );
+            
             let password_params = DrawParam::default()
-                .dest([password_text_x, password_text_y])
+                .dest([password_text_x, password_text_y - 3.0])  // 向上移3像素使其居中
                 .color(GgezColor::from_rgb(255, 255, 255));
             canvas.draw(&password_text, password_params);
         }
@@ -436,10 +504,19 @@ impl LoginScene {
                 let text_width = account_text.measure(ctx)
                     .map(|m| m.x)
                     .unwrap_or(0.0);
-                let cursor_x = account_text_x + text_width;
+                
+                // 计算文本滚动偏移
+                let input_box_width = 110.0;
+                let text_offset = if text_width > input_box_width {
+                    input_box_width - text_width - 5.0
+                } else {
+                    0.0
+                };
+                
+                let cursor_x = account_text_x + text_width + text_offset;
                 
                 let cursor_params = DrawParam::default()
-                    .dest([cursor_x, account_text_y])
+                    .dest([cursor_x, account_text_y - 3.0])  // 和文本保持相同的Y坐标
                     .color(cursor_color);
                 canvas.draw(&cursor_text, cursor_params);
             } else if self.login_dialog.password_focused {
@@ -453,10 +530,19 @@ impl LoginScene {
                 let text_width = password_text.measure(ctx)
                     .map(|m| m.x)
                     .unwrap_or(0.0);
-                let cursor_x = password_text_x + text_width;
+                
+                // 计算文本滚动偏移
+                let input_box_width = 110.0;
+                let text_offset = if text_width > input_box_width {
+                    input_box_width - text_width - 5.0
+                } else {
+                    0.0
+                };
+                
+                let cursor_x = password_text_x + text_width + text_offset;
                 
                 let cursor_params = DrawParam::default()
-                    .dest([cursor_x, password_text_y])
+                    .dest([cursor_x, password_text_y - 3.0])  // 和文本保持相同的Y坐标
                     .color(cursor_color);
                 canvas.draw(&cursor_text, cursor_params);
             }
@@ -606,28 +692,94 @@ impl LoginScene {
                         canvas.draw(&border, DrawParam::default());
                     }
                     
+                    // 绘制文本选择高亮 (如果有选择且是当前字段)
+                    if dialog.focused_field == *field {
+                        if let Some((sel_start, sel_end)) = dialog.get_selection_range() {
+                            // 创建临时文本来测量选择区域的宽度
+                            let chars: Vec<char> = text.chars().collect();
+                            
+                            // 测量选择开始之前的文本宽度
+                            let before_text: String = chars.iter().take(sel_start).collect();
+                            let before_width = Text::new(
+                                TextFragment::new(before_text)
+                                    .font("AlibabaPuHuiTi")
+                                    .scale(21.0)
+                            ).measure(ctx).map(|m| m.x).unwrap_or(0.0);
+                            
+                            // 测量选择的文本宽度
+                            let selected_text: String = chars.iter().skip(sel_start).take(sel_end - sel_start).collect();
+                            let selected_width = Text::new(
+                                TextFragment::new(selected_text)
+                                    .font("AlibabaPuHuiTi")
+                                    .scale(21.0)
+                            ).measure(ctx).map(|m| m.x).unwrap_or(0.0);
+                            
+                            // 绘制选择高亮背景（文本已被截断，不需要滚动偏移）
+                            if let Ok(highlight) = Mesh::new_rectangle(
+                                ctx,
+                                DrawMode::fill(),
+                                Rect::new(x + 2.0 + before_width, *y + 1.0, selected_width, 16.0),  // Y坐标和高度与文本对齐
+                                GgezColor::from_rgba(100, 150, 255, 128), // 半透明蓝色
+                            ) {
+                                canvas.draw(&highlight, DrawParam::default());
+                            }
+                        }
+                    }
+                    
                     // 绘制文本内容 (使用中文字体)
-                    let content_text = Text::new(
+                    let input_box_width = 132.0; // 输入框可见宽度 (136 - 4像素边距)
+                    
+                    // 计算完整文本宽度
+                    let full_text = Text::new(
                         TextFragment::new(text.to_string())
                             .font("AlibabaPuHuiTi")
                             .scale(21.0)
                     );
+                    let full_width = full_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
+                    
+                    // 如果文本超长，从右往左截取可见部分
+                    let visible_text = if full_width > input_box_width {
+                        let chars: Vec<char> = text.chars().collect();
+                        let mut visible_chars = chars.clone();
+                        
+                        while visible_chars.len() > 0 {
+                            let test_text = Text::new(
+                                TextFragment::new(visible_chars.iter().collect::<String>())
+                                    .font("AlibabaPuHuiTi")
+                                    .scale(21.0)
+                            );
+                            let test_width = test_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
+                            
+                            if test_width <= input_box_width - 5.0 {
+                                break;
+                            }
+                            visible_chars.remove(0);
+                        }
+                        visible_chars.iter().collect::<String>()
+                    } else {
+                        text.to_string()
+                    };
+                    
+                    let content_text = Text::new(
+                        TextFragment::new(&visible_text)
+                            .font("AlibabaPuHuiTi")
+                            .scale(21.0)
+                    );
+                    
                     canvas.draw(&content_text, DrawParam::default()
-                        .dest([x + 2.0, *y + 2.0])
+                        .dest([x + 2.0, *y - 1.0])  // 向上移1像素使其在18px输入框中居中
                         .color(GgezColor::WHITE));
                     
                     // 如果是当前聚焦的输入框,绘制光标
                     if dialog.focused_field == *field && dialog.cursor_visible {
-                        // 使用 ggez 的文本测量功能精确计算光标位置
-                        let text_width = content_text.measure(ctx)
-                            .map(|m| m.x)
-                            .unwrap_or(0.0);
-                        let cursor_x = x + 2.0 + text_width;
+                        // 使用可见文本宽度计算光标位置
+                        let visible_width = content_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
+                        let cursor_x = x + 2.0 + visible_width;
                         
                         if let Ok(cursor) = Mesh::new_rectangle(
                             ctx,
                             DrawMode::fill(),
-                            Rect::new(cursor_x, *y + 2.0, 2.0, 14.0),
+                            Rect::new(cursor_x, *y + 1.0, 2.0, 16.0),  // 高度改为16px,Y坐标+1
                             GgezColor::WHITE,
                         ) {
                             canvas.draw(&cursor, DrawParam::default());
@@ -738,22 +890,59 @@ impl LoginScene {
                     }
                     
                     // 绘制输入框内容 (使用中文字体)
-                    let content_text = Text::new(
+                    let input_box_width = 132.0; // 输入框可见宽度 (136 - 4像素边距)
+                    
+                    // 计算完整文本宽度
+                    let full_text = Text::new(
                         TextFragment::new(text.to_string())
                             .font("AlibabaPuHuiTi")
                             .scale(21.0)
                     );
+                    let full_width = full_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
+                    
+                    // 如果文本超长，从右往左截取可见部分
+                    let visible_text = if full_width > input_box_width {
+                        let chars: Vec<char> = text.chars().collect();
+                        let mut visible_chars = chars.clone();
+                        
+                        while visible_chars.len() > 0 {
+                            let test_text = Text::new(
+                                TextFragment::new(visible_chars.iter().collect::<String>())
+                                    .font("AlibabaPuHuiTi")
+                                    .scale(21.0)
+                            );
+                            let test_width = test_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
+                            
+                            if test_width <= input_box_width - 5.0 {
+                                break;
+                            }
+                            visible_chars.remove(0);
+                        }
+                        visible_chars.iter().collect::<String>()
+                    } else {
+                        text.to_string()
+                    };
+                    
+                    let content_text = Text::new(
+                        TextFragment::new(&visible_text)
+                            .font("AlibabaPuHuiTi")
+                            .scale(21.0)
+                    );
+                    
                     canvas.draw(&content_text, DrawParam::default()
-                        .dest([x + 2.0, *y + 2.0])
+                        .dest([x + 2.0, *y - 1.0])  // 向上移1像素使其在18px输入框中居中
                         .color(GgezColor::WHITE));
                     
                     // 绘制光标 (如果该输入框获得焦点)
                     if dialog.focused_field == *field && dialog.cursor_visible {
-                        let cursor_x = x + 2.0 + (text.len() as f32 * 8.0);  // 8像素每字符
+                        // 使用可见文本宽度计算光标位置
+                        let visible_width = content_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
+                        let cursor_x = x + 2.0 + visible_width;
+                        
                         if let Ok(cursor) = Mesh::new_rectangle(
                             ctx,
                             DrawMode::fill(),
-                            Rect::new(cursor_x, *y + 2.0, 2.0, 14.0),
+                            Rect::new(cursor_x, *y + 1.0, 2.0, 16.0),  // 高度改为16px,Y坐标+1
                             GgezColor::WHITE,
                         ) {
                             canvas.draw(&cursor, DrawParam::default());
@@ -1380,6 +1569,10 @@ impl Scene for LoginScene {
                             dialog.focused_field = *field_type;
                             dialog.cursor_blink_timer = 0.0;
                             dialog.cursor_visible = true;
+                            
+                            // Handle mouse click for text selection
+                            dialog.handle_mouse_click(fx, fy, true);
+                            
                             tracing::debug!("NewAccountDialog field {:?} focused", field_type);
                             return;
                         }
@@ -1555,7 +1748,7 @@ impl Scene for LoginScene {
         }
     }
     
-    fn handle_key_press(&mut self, key: super::KeyCode, _modifiers: super::ModifiersState) -> bool {
+    fn handle_key_press(&mut self, key: super::KeyCode, modifiers: super::ModifiersState) -> bool {
         use super::KeyCode;
         
         // 优先处理 MessageBox
@@ -1572,6 +1765,12 @@ impl Scene for LoginScene {
         // 处理新建账号对话框按键
         if let Some(dialog) = &mut self.new_account_dialog {
             if dialog.visible {
+                // Handle Ctrl+A (Select All)
+                if modifiers.control_key() && matches!(key, KeyCode::KeyA) {
+                    dialog.select_all();
+                    return true;
+                }
+                
                 match key {
                     KeyCode::Escape => {
                         self.new_account_dialog = None;
@@ -1623,6 +1822,12 @@ impl Scene for LoginScene {
         // 处理修改密码对话框按键
         if let Some(dialog) = &mut self.change_password_dialog {
             if dialog.visible {
+                // Handle Ctrl+A (Select All) - TODO: implement for change_password_dialog
+                // if modifiers.control() && matches!(key, KeyCode::KeyA) {
+                //     dialog.select_all();
+                //     return true;
+                // }
+                
                 match key {
                     KeyCode::Escape => {
                         self.change_password_dialog = None;

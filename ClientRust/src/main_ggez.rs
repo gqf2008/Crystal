@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             WindowSetup::default()
                 .title(&format!("Crystal - {}", settings.launcher.server_name))
                 .samples(NumSamples::Four)  // 4x MSAA
-                .vsync(true)
+                .vsync(false)  // 关闭垂直同步以提高帧率
         )
         .window_mode(
             WindowMode::default()
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .build()?;
     
-    tracing::info!("Ggez Context 创建成功: {}x{}", window_width, window_height);
+    tracing::info!("Ggez Context 创建成功: {}x{} (vsync关闭,最大帧率运行)", window_width, window_height);
     
     // 添加中文字体支持
     let font_path = std::path::Path::new("resources/font/AlibabaPuHuiTi-3-55-Regular.ttf");
@@ -303,6 +303,7 @@ struct CrystalGame {
     ggez_manager: GgezManager,
     scene_manager: Arc<RwLock<SceneManager>>,
     last_update_time: std::time::Instant,
+    scale_factor: f32,  // 窗口缩放因子
 }
 
 impl CrystalGame {
@@ -353,6 +354,7 @@ impl CrystalGame {
             ggez_manager,
             scene_manager,
             last_update_time: std::time::Instant::now(),
+            scale_factor: 1.5,  // 与main函数中的scale_factor保持一致
         })
     }
 }
@@ -392,6 +394,10 @@ impl EventHandler for CrystalGame {
         
         // 创建 canvas
         let mut canvas = graphics::Canvas::from_frame(ctx, Color::BLACK);
+        
+        // 设置逻辑坐标系为原始分辨率 (1024x768)
+        // 这样所有绘制代码使用 1024x768 坐标,但会自动缩放到实际窗口大小
+        canvas.set_screen_coordinates(graphics::Rect::new(0.0, 0.0, 1024.0, 768.0));
         
         // 绘制当前场景
         {
@@ -485,8 +491,12 @@ impl EventHandler for CrystalGame {
             GgezMouseButton::Other(v) => SceneMouseButton::Other(v),
         };
         
+        // 将实际窗口坐标转换为逻辑坐标
+        let logical_x = x / self.scale_factor;
+        let logical_y = y / self.scale_factor;
+        
         let mut scene_manager = self.scene_manager.write();
-        scene_manager.handle_mouse_button(scene_button, true, x as i32, y as i32);
+        scene_manager.handle_mouse_button(scene_button, true, logical_x as i32, logical_y as i32);
         
         Ok(())
     }
@@ -506,8 +516,12 @@ impl EventHandler for CrystalGame {
             GgezMouseButton::Other(v) => SceneMouseButton::Other(v),
         };
         
+        // 将实际窗口坐标转换为逻辑坐标
+        let logical_x = x / self.scale_factor;
+        let logical_y = y / self.scale_factor;
+        
         let mut scene_manager = self.scene_manager.write();
-        scene_manager.handle_mouse_button(scene_button, false, x as i32, y as i32);
+        scene_manager.handle_mouse_button(scene_button, false, logical_x as i32, logical_y as i32);
         
         Ok(())
     }
@@ -520,8 +534,12 @@ impl EventHandler for CrystalGame {
         _dx: f32,
         _dy: f32,
     ) -> GameResult {
+        // 将实际窗口坐标转换为逻辑坐标
+        let logical_x = x / self.scale_factor;
+        let logical_y = y / self.scale_factor;
+        
         let mut scene_manager = self.scene_manager.write();
-        scene_manager.handle_mouse_move(x as i32, y as i32);
+        scene_manager.handle_mouse_move(logical_x as i32, logical_y as i32);
         
         Ok(())
     }
