@@ -77,6 +77,12 @@ pub trait Scene {
     /// Initialize scene (called once when scene is created)
     fn initialize(&mut self);
     
+    /// Downcast to concrete type (for accessing scene-specific methods)
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+    
+    /// Downcast to concrete type (immutable)
+    fn as_any(&self) -> &dyn std::any::Any;
+    
     /// Process per-frame logic
     fn update(&mut self, delta_time: f32);
     

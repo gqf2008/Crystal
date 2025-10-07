@@ -78,32 +78,32 @@ path = "src/main_ggez.rs"
 name = "lib_inspector"
 path = "lib_inspector.rs"
 
-# 中文输入法测试程序
-[[bin]]
-name = "test_chinese_ime"
-path = "src/bin/test_chinese_ime.rs"
+# # 中文输入法测试程序
+# [[bin]]
+# name = "test_chinese_ime"
+# path = "src/bin/test_chinese_ime.rs"
 
-# 最小化 IME 测试(诊断用)
-[[bin]]
-name = "test_ime_minimal"
-path = "src/bin/test_ime_minimal.rs"
+# # 最小化 IME 测试(诊断用)
+# [[bin]]
+# name = "test_ime_minimal"
+# path = "src/bin/test_ime_minimal.rs"
 
-[[bin]]
-name = "test_ime_fixed"
-path = "src/bin/test_ime_fixed.rs"
+# [[bin]]
+# name = "test_ime_fixed"
+# path = "src/bin/test_ime_fixed.rs"
 
-[[bin]]
-name = "test_egui_ime"
-path = "src/bin/test_egui_ime.rs"
+# [[bin]]
+# name = "test_egui_ime"
+# path = "src/bin/test_egui_ime.rs"
 
-[[bin]]
-name = "test_clipboard"
-path = "src/bin/test_clipboard.rs"
+# [[bin]]
+# name = "test_clipboard"
+# path = "src/bin/test_clipboard.rs"
 
-# 完整 IME 支持 - 使用自定义事件循环
-[[bin]]
-name = "test_ime_custom_loop"
-path = "src/bin/test_ime_custom_loop.rs"
+# # 完整 IME 支持 - 使用自定义事件循环
+# [[bin]]
+# name = "test_ime_custom_loop"
+# path = "src/bin/test_ime_custom_loop.rs"
 
 [features]
 default = ["client"]

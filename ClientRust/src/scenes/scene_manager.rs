@@ -14,6 +14,12 @@ pub struct SceneManager {
     
     /// Pending scene transition (if any)
     pending_scene: Option<SceneType>,
+    
+    /// Shared game client for network communication
+    game_client: Option<crate::network::game_client::SharedGameClient>,
+    
+    /// Command sender for network commands
+    command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
 }
 
 impl SceneManager {
@@ -22,12 +28,57 @@ impl SceneManager {
         Self {
             current_scene: None,
             pending_scene: None,
+            game_client: None,
+            command_tx: None,
+        }
+    }
+    
+    /// Set game client for network communication
+    pub fn set_game_client(&mut self, client: crate::network::game_client::SharedGameClient) {
+        self.game_client = Some(client);
+        
+        // 如果当前场景是 LoginScene, 传递 game_client
+        if let Some(scene) = &mut self.current_scene {
+            if scene.scene_type() == SceneType::Login {
+                if let Some(login_scene) = scene.as_any_mut().downcast_mut::<LoginScene>() {
+                    login_scene.set_game_client(self.game_client.clone());
+                }
+            }
+        }
+    }
+    
+    /// Set command sender for network commands
+    pub fn set_command_sender(&mut self, tx: tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>) {
+        self.command_tx = Some(tx);
+        
+        // 如果当前场景是 LoginScene, 传递 command_tx
+        if let Some(scene) = &mut self.current_scene {
+            if scene.scene_type() == SceneType::Login {
+                if let Some(login_scene) = scene.as_any_mut().downcast_mut::<LoginScene>() {
+                    login_scene.set_command_sender(self.command_tx.clone());
+                }
+            }
         }
     }
     
     /// Get current scene type
     pub fn current_scene_type(&self) -> Option<SceneType> {
         self.current_scene.as_ref().map(|s| s.scene_type())
+    }
+    
+    /// Get immutable reference to current scene
+    pub fn current_scene(&self) -> Option<&Box<dyn Scene>> {
+        self.current_scene.as_ref()
+    }
+    
+    /// Get mutable reference to current scene
+    pub fn current_scene_mut(&mut self) -> Option<&mut Box<dyn Scene>> {
+        self.current_scene.as_mut()
+    }
+    
+    /// Set current scene (用于直接替换场景)
+    pub fn set_current_scene(&mut self, scene: Box<dyn Scene>) {
+        self.current_scene = Some(scene);
     }
     
     /// Check if a scene is active

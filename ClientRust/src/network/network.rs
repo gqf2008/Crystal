@@ -284,9 +284,9 @@ impl NetworkStack {
                 break;
             }
 
-            // Extract packet
+            // Extract complete packet (including 4-byte header)
             let opcode = LittleEndian::read_i16(&self.raw_data[2..4]);
-            let payload = self.raw_data[4..length].to_vec();
+            let full_packet = self.raw_data[..length].to_vec();  // ✅ 包含完整数据: [length][opcode][body...]
             
             // Remove processed data
             self.raw_data.drain(..length);
@@ -295,7 +295,7 @@ impl NetworkStack {
             let header = PacketHeader::new(length as u16, opcode);
             self.receive_queue.push_back(NetworkEvent::ServerPacket {
                 header,
-                payload,
+                payload: full_packet,  // payload包含完整的包数据(4字节头+包体)
             });
         }
 

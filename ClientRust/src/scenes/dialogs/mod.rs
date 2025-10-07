@@ -94,9 +94,6 @@ pub mod fishing_dialog;
 pub mod refine_dialog;
 pub mod craft_dialog;
 
-// Character Management Dialogs
-pub mod new_character_dialog;
-
 // Layer 1 Basic Dialogs (Batch 1)
 pub mod compass_dialog;
 pub mod chat_notice_dialog;
@@ -177,9 +174,6 @@ pub use main_dialog::{
     OptionDialog as MainOptionDialog, MenuDialog as MainMenuDialog, MagicButton,
     AssignKeyPanel, CharacterDuraPanel
 };
-
-// Character Management Dialogs
-pub use new_character_dialog::NewCharacterDialog;
 
 // Layer 1 Basic Dialogs
 pub use compass_dialog::CompassDialog;

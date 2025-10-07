@@ -110,11 +110,28 @@ pub fn parse_packet_header(data: &[u8]) -> Result<PacketHeader> {
 /// # 返回
 /// - `Ok(&[u8])`: 数据包体的切片
 /// - `Err`: 数据不足
+/// 从完整的包数据中提取包体
+/// 
+/// # 参数
+/// - `data`: 完整的包数据,格式为: [length(2字节)][opcode(2字节)][body...]
+/// 
+/// # 返回
+/// 包体数据 (跳过前4字节的包头)
+/// 
+/// # 注意
+/// 有些包可能没有包体(如Connected),这时会返回空slice,这是正常的
 pub fn get_packet_body(data: &[u8]) -> Result<&[u8]> {
     if data.len() < 4 {
-        return Err(anyhow!("数据不足: 需要至少4字节"));
+        return Err(anyhow!(
+            "数据不足: 需要至少4字节 (包头), 实际收到 {} 字节",
+            data.len()
+        ));
     }
-    Ok(&data[4..])
+    
+    // 跳过4字节包头 (2字节长度 + 2字节opcode)
+    let body = &data[4..];
+    
+    Ok(body)
 }
 
 // ============================================================================

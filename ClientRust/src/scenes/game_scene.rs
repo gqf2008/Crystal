@@ -284,6 +284,14 @@ impl Scene for GameScene {
         SceneType::Game
     }
     
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
     fn initialize(&mut self) {
         println!("GameScene::initialize");
         // TODO: Initialize pathfinder

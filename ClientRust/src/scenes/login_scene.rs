@@ -24,8 +24,13 @@ pub struct BanInfo {
 }
 
 /// Login scene state
-#[derive(Debug)]
 pub struct LoginScene {
+    // Network client (不包含在Debug输出中,因为复杂类型)
+    #[allow(dead_code)]
+    pub game_client: Option<crate::network::game_client::SharedGameClient>,
+    #[allow(dead_code)]
+    pub command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
+    
     // Network connection
     pub connecting: bool,
     pub connect_attempts: u32,
@@ -69,6 +74,8 @@ impl LoginScene {
     /// Create new login scene
     pub fn new() -> Self {
         Self {
+            game_client: None,
+            command_tx: None,
             connecting: false,
             connect_attempts: 0,
             version_checked: false,
@@ -96,6 +103,56 @@ impl LoginScene {
             change_password_dialog: None,
             message_box: None,
         }
+    }
+    
+    /// Set game client for network communication
+    pub fn set_game_client(&mut self, client: Option<crate::network::game_client::SharedGameClient>) {
+        self.game_client = client;
+    }
+    
+    /// Set command sender for network commands
+    pub fn set_command_sender(&mut self, tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>) {
+        self.command_tx = tx;
+    }
+    
+    /// Send client version to server for verification
+    fn send_client_version(&mut self) {
+        use std::fs::File;
+        use std::io::Read;
+        
+        tracing::info!("发送客户端版本验证...");
+        self.record_status("Sending client version...");
+        
+        // 计算可执行文件的 MD5 哈希
+        let version_hash = if let Ok(exe_path) = std::env::current_exe() {
+            if let Ok(mut file) = File::open(exe_path) {
+                let mut buffer = Vec::new();
+                if file.read_to_end(&mut buffer).is_ok() {
+                    use md5::compute;
+                    let digest = compute(&buffer);
+                    digest.0.to_vec()
+                } else {
+                    vec![0u8; 16]  // 空哈希
+                }
+            } else {
+                vec![0u8; 16]
+            }
+        } else {
+            vec![0u8; 16]
+        };
+        
+        // TODO: 发送ClientVersion包到网络线程
+        // 注意: ClientVersion验证目前需要通过NetworkManager的send_packet方法
+        // 这里暂时跳过,等待版本验证响应后启用登录对话框
+        tracing::info!("✅ 已连接到服务器,ClientVersion包准备完成");
+        tracing::info!("版本哈希: {:?}", &version_hash[0..8.min(version_hash.len())]);
+        
+        // 临时方案: 直接启用登录对话框 (跳过版本验证)
+        self.version_checked = true;
+        self.version_valid = true;
+        self.login_enabled = true;
+        self.record_status("Connected! Ready to login.");
+        tracing::info!("⚠ 临时跳过客户端版本验证,登录对话框已启用");
     }
     
     /// Load settings
@@ -325,19 +382,32 @@ impl LoginScene {
                 return;
             }
             
-            // TODO: 发送登录数据包到服务器
-            // 需要通过网络层发送 ClientPackets::Login { AccountID, Password }
-            // 暂时显示消息提示功能正在开发中
-            self.show_message(&format!("登录功能开发中...\n\n账号: {}\n密码: {}", username, "*".repeat(password.len())));
+            // 发送登录命令到网络线程
+            if let Some(tx) = &self.command_tx {
+                let command = crate::network::NetworkCommand::Login {
+                    username: username.clone(),
+                    password: password.clone(),
+                };
+                
+                if let Err(e) = tx.send(command) {
+                    tracing::error!("发送登录命令失败: {}", e);
+                    self.show_message("网络错误,无法发送登录请求");
+                    return;
+                }
+                
+                tracing::info!("✅ 已发送登录请求: {}", username);
+                self.record_status(format!("正在提交登录请求: {}", username));
+            } else {
+                tracing::error!("command_tx 未初始化");
+                self.show_message("网络未初始化,请稍后再试");
+                return;
+            }
             
             self.connecting = true;
             self.login_enabled = false;
             self.ready_for_character_select = false;
             self.last_login_result = None;
             self.require_password_change = false;
-            let status = format!("正在提交登录请求: {}", username);
-            tracing::info!("{}", status);
-            self.record_status(status);
         } else {
             self.show_message("请输入账号和密码");
         }
@@ -990,6 +1060,14 @@ impl Scene for LoginScene {
         SceneType::Login
     }
     
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
     fn initialize(&mut self) {
         println!("LoginScene::initialize");
         
@@ -997,7 +1075,8 @@ impl Scene for LoginScene {
         self.login_dialog.show();
         
         // TODO: Play intro music
-        self.connect_to_server();
+        // 注意: 连接服务器已在main中自动完成,这里不需要再次连接
+        tracing::info!("LoginScene 初始化完成,等待网络连接...");
     }
     
     fn update(&mut self, delta_time: f32) {
@@ -1180,10 +1259,13 @@ impl Scene for LoginScene {
     fn process_event(&mut self, event: &GameEvent) {
         match event {
             GameEvent::Connected => {
-                let status = "Connected to server!";
-                println!("{}", status);
+                let status = "Connected to server successfully!";
+                println!("✅ {}", status);
                 self.connecting = false;
                 self.record_status(status);
+                
+                // 发送客户端版本验证
+                self.send_client_version();
             }
             GameEvent::Disconnected { reason } => {
                 let status = format!("Disconnected: {}", reason);

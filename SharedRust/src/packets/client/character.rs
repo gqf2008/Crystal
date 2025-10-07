@@ -11,8 +11,8 @@ use crate::data::stats::SharedResult;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewCharacter {
     pub name: String,
+    pub gender: MirGender,  // C# 顺序: Name, Gender, Class
     pub class: MirClass,
-    pub gender: MirGender,
 }
 
 impl Packet for NewCharacter {
@@ -21,15 +21,15 @@ impl Packet for NewCharacter {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         Ok(Self {
             name: read_dotnet_string(reader)?,
-            class: MirClass::try_from(reader.read_u8()?).unwrap_or(MirClass::Warrior),
-            gender: MirGender::try_from(reader.read_u8()?).unwrap_or(MirGender::Male),
+            gender: MirGender::try_from(reader.read_u8()?).unwrap_or(MirGender::Male),  // 先读gender
+            class: MirClass::try_from(reader.read_u8()?).unwrap_or(MirClass::Warrior),   // 再读class
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         write_dotnet_string(writer, &self.name)?;
-        writer.write_u8(self.class as u8)?;
-        writer.write_u8(self.gender as u8)?;
+        writer.write_u8(self.gender as u8)?;  // 先写gender
+        writer.write_u8(self.class as u8)?;   // 再写class
         Ok(())
     }
 }

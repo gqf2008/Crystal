@@ -150,10 +150,14 @@ impl NetworkManager {
             
             NetworkCommand::NewCharacter { name, class, gender } => {
                 tracing::info!("Handling new character command: name={}, class={}, gender={}", name, class, gender);
+                let class_enum = mir2_shared::enums::MirClass::try_from(class).unwrap_or(mir2_shared::enums::MirClass::Warrior);
+                let gender_enum = mir2_shared::enums::MirGender::try_from(gender).unwrap_or(mir2_shared::enums::MirGender::Male);
+                tracing::info!("📦 Sending NewCharacter: name={}, class={:?} ({}), gender={:?} ({})", 
+                    name, class_enum, class_enum as u8, gender_enum, gender_enum as u8);
                 let packet = client::NewCharacter {
                     name,
-                    class: mir2_shared::enums::MirClass::try_from(class).unwrap_or(mir2_shared::enums::MirClass::Warrior),
-                    gender: mir2_shared::enums::MirGender::try_from(gender).unwrap_or(mir2_shared::enums::MirGender::Male),
+                    class: class_enum,
+                    gender: gender_enum,
                 };
                 self.send_packet(&packet)?;
             }
@@ -250,6 +254,10 @@ impl NetworkManager {
     }
     
     /// Dispatch server packet to GameClient
+    /// 
+    /// # 参数
+    /// - `header`: 包头信息 (length + opcode)
+    /// - `payload`: 完整的包数据,包括4字节头部 [length(2)][opcode(2)][body...]
     fn dispatch_server_packet(&self, header: mir2_shared::packets::PacketHeader, payload: &[u8]) {
         let mut client = self.game_client.write();
         
@@ -259,9 +267,23 @@ impl NetworkManager {
             opcode: header.opcode,
         };
         
+        // Log packet details for debugging
+        tracing::debug!(
+            "📦 Received packet: opcode={}, length={}, payload_len={}",
+            header.opcode,
+            header.length,
+            payload.len()
+        );
+        
         // Dispatch packet using protocol module
         if let Err(e) = dispatch_packet(protocol_header, payload, &mut *client) {
-            tracing::error!("Failed to dispatch packet (opcode={}): {}", header.opcode, e);
+            tracing::error!(
+                "❌ Failed to dispatch packet (opcode={}, length={}, payload_len={}): {}",
+                header.opcode,
+                header.length,
+                payload.len(),
+                e
+            );
         }
     }
 }

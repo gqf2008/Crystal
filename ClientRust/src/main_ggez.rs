@@ -32,17 +32,20 @@ use settings::ClientSettings;
 // Settings 已废弃,使用默认配置
 // use crate::settings::Settings;
 use crate::graphics::GgezManager;
-use crate::scenes::{SceneManager, SceneType, KeyCode as SceneKeyCode, MouseButton as SceneMouseButton, ModifiersState};
+use crate::scenes::{Scene, SceneManager, SceneType, LoginScene, SelectScene, KeyCode as SceneKeyCode, MouseButton as SceneMouseButton, ModifiersState};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. 初始化日志
+    // 1. 创建 Tokio runtime (用于网络系统)
+    let runtime = tokio::runtime::Runtime::new()?;
+    
+    // 2. 初始化日志
     tracing_subscriber::fmt()
         .with_env_filter("info,mir2_client=debug")
         .init();
     
     tracing::info!("=== Crystal Mir2 Client (Ggez版本) ===");
     
-    // 2. 加载配置
+    // 3. 加载配置
     let settings = ClientSettings::load(false, None)?;
     tracing::info!("配置加载完成: {:?}", settings.launcher.server_name);
     
@@ -97,8 +100,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ctx.gfx.window().set_ime_allowed(true);
     tracing::info!("IME 文本输入已启用");
     
-    // 5. 创建游戏状态
-    let game = CrystalGame::new(&mut ctx, settings)?;
+    // 5. 创建游戏状态 (传入runtime)
+    let game = CrystalGame::new(&mut ctx, settings, runtime)?;
     
     // 6. 运行自定义事件循环 (支持 IME)
     // 注意: 必须使用自定义循环,因为 ggez 0.10 不支持 WindowEvent::Ime
@@ -304,14 +307,58 @@ struct CrystalGame {
     scene_manager: Arc<RwLock<SceneManager>>,
     last_update_time: std::time::Instant,
     scale_factor: f32,  // 窗口缩放因子
+    
+    // 网络系统
+    game_client: crate::network::game_client::SharedGameClient,
+    event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::network::game_client::GameEvent>,
+    command_tx: tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>,
+    network_task: Option<tokio::task::JoinHandle<()>>,
+    
+    // Tokio runtime (保持网络任务运行)
+    #[allow(dead_code)]
+    runtime: tokio::runtime::Runtime,
 }
 
 impl CrystalGame {
-    fn new(_ctx: &mut Context, settings: ClientSettings) -> Result<Self> {
+    fn new(_ctx: &mut Context, settings: ClientSettings, runtime: tokio::runtime::Runtime) -> Result<Self> {
+        // 确保runtime可用
+        let _guard = runtime.enter();
         println!("\n========================================");
         println!("🎮 Crystal Mir2 Client - Ggez版本");
         println!("========================================\n");
         tracing::info!("初始化游戏状态...");
+        
+        // 创建网络系统
+        println!("🌐 初始化网络系统...");
+        let game_client = crate::network::game_client::new_shared_client();
+        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        
+        // 启动网络任务 (Tokio runtime)
+        println!("🚀 启动网络管理器...");
+        let settings_arc = Arc::new(RwLock::new(settings.clone()));
+        let gc = game_client.clone();
+        
+        let network_task = Some(tokio::spawn(async move {
+            // 设置事件通道 (tokio::sync::RwLock 是异步的,需要await)
+            gc.write().await.set_event_channel(event_tx.clone());
+            
+            use crate::network::NetworkManager;
+            let mut network_manager = NetworkManager::new(settings_arc, event_tx, command_rx);
+            
+            // 自动连接到服务器
+            tracing::info!("🔌 正在连接服务器...");
+            if let Err(e) = network_manager.connect().await {
+                tracing::error!("❌ 连接服务器失败: {}", e);
+            } else {
+                tracing::info!("✅ 已连接到服务器");
+            }
+            
+            // 进入消息循环 (不返回Result)
+            crate::network::network_task(network_manager).await;
+        }));
+        
+        println!("✓ 网络系统初始化完成");
         
         // 创建渲染管理器
         let res = settings.resolution();
@@ -347,7 +394,15 @@ impl CrystalGame {
         
         let scene_manager = Arc::new(RwLock::new(scene_manager));
         
+        // 将 GameClient 和 CommandTx 传递给场景
+        {
+            let mut mgr = scene_manager.write();
+            mgr.set_game_client(game_client.clone());
+            mgr.set_command_sender(command_tx.clone());
+        }
+        
         tracing::info!("游戏初始化完成");
+        println!("\n✅ 所有系统启动完毕!\n");
         
         Ok(Self {
             settings,
@@ -355,6 +410,11 @@ impl CrystalGame {
             scene_manager,
             last_update_time: std::time::Instant::now(),
             scale_factor: 1.5,  // 与main函数中的scale_factor保持一致
+            game_client,
+            event_rx,
+            command_tx,
+            network_task,
+            runtime,
         })
     }
 }
@@ -369,6 +429,66 @@ impl EventHandler for CrystalGame {
         // 限制 delta_time (防止卡顿时跳跃过大)
         let delta_time = delta_time.min(0.1);
         
+        // 处理网络事件
+        while let Ok(event) = self.event_rx.try_recv() {
+            tracing::debug!("收到网络事件: {:?}", event);
+            let mut scene_manager = self.scene_manager.write();
+            scene_manager.process_event(&event);
+        }
+        
+        // 检查 LoginScene 是否需要切换到 SelectScene
+        let should_switch_to_select = {
+            let scene_manager = self.scene_manager.read();
+            if scene_manager.current_scene_type() == Some(SceneType::Login) {
+                if let Some(scene) = scene_manager.current_scene() {
+                    if let Some(login_scene) = scene.as_any().downcast_ref::<LoginScene>() {
+                        login_scene.ready_for_character_select
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+        
+        if should_switch_to_select {
+            // 获取角色列表
+            let characters = {
+                let scene_manager = self.scene_manager.read();
+                if let Some(scene) = scene_manager.current_scene() {
+                    if let Some(login_scene) = scene.as_any().downcast_ref::<LoginScene>() {
+                        login_scene.characters.clone()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                }
+            };
+            
+            tracing::info!("✅ 登录成功,切换到角色选择场景 ({} 个角色)", characters.len());
+            
+            // 🎨 预加载 SelectScene 所需的纹理 (不持有任何锁)
+            tracing::info!("📦 预加载 SelectScene 纹理...");
+            self.load_select_scene_textures(ctx);
+            
+            // 创建 SelectScene
+            let mut select_scene = Box::new(SelectScene::new(characters));
+            
+            // 设置网络命令发送器
+            select_scene.set_command_sender(self.command_tx.clone());
+            
+            // 初始化并替换当前场景
+            select_scene.initialize();
+            
+            let mut scene_manager = self.scene_manager.write();
+            scene_manager.set_current_scene(select_scene);
+            tracing::info!("场景切换完成: Select");
+        }
+        
         // 处理场景切换
         {
             let mut scene_manager = self.scene_manager.write();
@@ -380,6 +500,17 @@ impl EventHandler for CrystalGame {
             
             // 更新当前场景
             scene_manager.update(delta_time);
+            
+            // TODO: 检查场景是否请求退出
+            // if let Some(scene) = scene_manager.current_scene() {
+            //     if let Some(select_scene) = scene.as_any().downcast_ref::<SelectScene>() {
+            //         if select_scene.should_exit {
+            //             tracing::info!("SelectScene 请求退出游戏");
+            //             ctx.request_quit();
+            //             return Ok(());
+            //         }
+            //     }
+            // }
         }
         
         // 检查退出请求 (Ctrl+Q) - 使用 key_down_event 处理
@@ -621,4 +752,127 @@ fn ggez_keycode_to_scene(key: ggez::winit::keyboard::KeyCode) -> Option<SceneKey
         GK::F12 => SceneKeyCode::F12,
         _ => return None,
     })
+}
+
+/// CrystalGame 辅助方法
+impl CrystalGame {
+    /// 预加载 SelectScene 所需的纹理
+    fn load_select_scene_textures(&mut self, ctx: &mut Context) {
+        use crate::graphics::libraries::{get_library, LibraryName};
+        
+        // SelectScene 需要的纹理列表
+        let mut textures_to_load = vec![
+            (LibraryName::Prguse, 65),   // 背景
+            (LibraryName::Title, 40),     // 标题
+            (LibraryName::Prguse, 44),   // 空角色槽位
+        ];
+        
+        // 添加按钮纹理 Title_340-354 (StartGame, NewCharacter, DeleteCharacter, Credits, ExitGame)
+        for i in 340..=354 {
+            textures_to_load.push((LibraryName::Title, i));
+        }
+        
+        // 添加角色槽位纹理 Title_660-669 (职业槽位: 660-664未选中, 665-669选中)
+        for i in 660..=669 {
+            textures_to_load.push((LibraryName::Title, i));
+        }
+        
+        // 添加角色预览纹理 ChrSel_220 和混合纹理 ChrSel_780 (220+560)
+        textures_to_load.push((LibraryName::ChrSel, 220));
+        textures_to_load.push((LibraryName::ChrSel, 780));  // 220 + 560 混合效果
+        
+        // NewCharacterDialog 纹理
+        textures_to_load.push((LibraryName::Prguse, 73));   // 对话框背景
+        textures_to_load.push((LibraryName::Title, 20));    // 标题标签
+        textures_to_load.push((LibraryName::Title, 280));   // 取消按钮 (Normal)
+        textures_to_load.push((LibraryName::Title, 281));   // 取消按钮 (Hover)
+        textures_to_load.push((LibraryName::Title, 282));   // 取消按钮 (Pressed)
+        textures_to_load.push((LibraryName::Title, 360));   // 确认按钮 (Normal)
+        textures_to_load.push((LibraryName::Title, 361));   // 确认按钮 (Hover)
+        textures_to_load.push((LibraryName::Title, 362));   // 确认按钮 (Pressed)
+        
+        // DeleteCharacterDialog / MessageBox / InputBox 纹理
+        textures_to_load.push((LibraryName::Prguse, 360));  // MessageBox 背景
+        textures_to_load.push((LibraryName::Prguse, 660));  // InputBox 背景
+        // OK 按钮 (200-202)
+        textures_to_load.push((LibraryName::Title, 200));   // OK (Normal)
+        textures_to_load.push((LibraryName::Title, 201));   // OK (Hover)
+        textures_to_load.push((LibraryName::Title, 202));   // OK (Pressed)
+        // Cancel 按钮 (203-205)
+        textures_to_load.push((LibraryName::Title, 203));   // Cancel (Normal)
+        textures_to_load.push((LibraryName::Title, 204));   // Cancel (Hover)
+        textures_to_load.push((LibraryName::Title, 205));   // Cancel (Pressed)
+        // Yes 按钮 (206-208)
+        textures_to_load.push((LibraryName::Title, 206));   // Yes (Normal)
+        textures_to_load.push((LibraryName::Title, 207));   // Yes (Hover)
+        textures_to_load.push((LibraryName::Title, 208));   // Yes (Pressed)
+        // No 按钮 (210-212)
+        textures_to_load.push((LibraryName::Title, 210));   // No (Normal)
+        textures_to_load.push((LibraryName::Title, 211));   // No (Hover)
+        textures_to_load.push((LibraryName::Title, 212));   // No (Pressed)
+        
+        // 职业按钮 (战士、法师、道士、刺客、弓箭手)
+        for i in 2426..=2440 {  // 2426-2428 (战士), 2429-2431 (法师), 2432-2434 (道士), 2435-2437 (刺客), 2438-2440 (弓箭手)
+            textures_to_load.push((LibraryName::Prguse, i));
+        }
+        
+        // 性别按钮 (男、女)
+        for i in 2420..=2425 {  // 2420-2422 (男), 2423-2425 (女)
+            textures_to_load.push((LibraryName::Prguse, i));
+        }
+        
+        // 角色预览动画 (所有职业和性别组合)
+        // 战士男 20-35, 法师男 40-55, 道士男 60-75, 刺客男 80-95, 弓箭手男 100-115
+        // 战士女 300-315, 法师女 320-335, 道士女 340-355, 刺客女 360-375, 弓箭手女 140-155 (注意:不是380!)
+        for base in [20, 40, 60, 80, 100, 300, 320, 340, 360, 140] {
+            for i in base..base+16 {  // 16帧动画
+                textures_to_load.push((LibraryName::ChrSel, i));
+            }
+        }
+        
+        // 法师混合效果纹理 (基础索引 + 560)
+        // 法师男: 40-55 + 560 = 600-615
+        // 法师女: 320-335 + 560 = 880-895
+        for base in [40, 320] {
+            for i in (base+560)..(base+560+16) {
+                textures_to_load.push((LibraryName::ChrSel, i));
+            }
+        }
+        
+        for (lib_name, index) in textures_to_load {
+            let key = format!("{}_{}", lib_name.default_path(), index);
+            
+            // 检查是否已缓存
+            if self.ggez_manager.get_texture(&key).is_some() {
+                continue;
+            }
+            
+            // 从 MLibrary 加载
+            if let Some(lib_arc) = get_library(lib_name) {
+                let mut lib = lib_arc.lock().unwrap();
+                if let Ok((info, pixels)) = lib.load_rgba_data(index) {
+                    let width = info.width as u16;  // i16 -> u16
+                    let height = info.height as u16;  // i16 -> u16
+                    drop(lib);  // 释放锁
+                    if let Err(e) = self.ggez_manager.create_texture_from_rgba(
+                        ctx,
+                        width,
+                        height,
+                        pixels.as_slice(),
+                        key.clone(),
+                    ) {
+                        tracing::warn!("⚠️ 创建纹理失败 {}: {}", key, e);
+                    } else {
+                        tracing::debug!("✓ 纹理已加载: {}", key);
+                    }
+                } else {
+                    tracing::warn!("⚠️ 无法从库 {} 获取图像 {}", lib_name.default_path(), index);
+                }
+            } else {
+                tracing::warn!("⚠️ 库未加载: {:?}", lib_name);
+            }
+        }
+        
+        tracing::info!("✓ SelectScene 纹理预加载完成");
+    }
 }
