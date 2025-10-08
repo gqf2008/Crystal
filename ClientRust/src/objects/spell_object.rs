@@ -1,12 +1,15 @@
 // SpellObject.rs - Flying spell projectiles
 // Mirrors Client/MirObjects/SpellObject.cs
 
+use ggez::{Context, GameResult};
+use ggez::graphics::Canvas;
 use mir2_shared::{
     enums::{Spell, SpellEffect},
     Point,
 };
 
 use super::map_object::MapObject;
+use super::drawable::DrawableMapObject;
 // TODO: ObjectSpell not yet implemented in protocol.rs
 // use crate::network::protocol::ObjectSpell;
 
@@ -226,6 +229,35 @@ impl SpellObject {
         
         // Within 1 tile range
         dx <= 1 && dy <= 1
+    }
+}
+
+// Implement DrawableMapObject trait for SpellObject
+impl DrawableMapObject for SpellObject {
+    fn draw(&self, _ctx: &mut Context, _canvas: &mut Canvas, _draw_location: Point) -> GameResult {
+        // TODO: Implement spell drawing
+        // C# Reference: Client/MirObjects/SpellObject.cs Draw() method
+        // Need to:
+        // 1. Get spell effect texture from library
+        // 2. Apply animation frame
+        // 3. Draw at current position
+        Ok(())
+    }
+    
+    fn object_id(&self) -> u32 {
+        self.map_object.object_id()
+    }
+    
+    fn is_dead(&self) -> bool {
+        self.expired
+    }
+    
+    fn is_hidden(&self) -> bool {
+        self.map_object.is_hidden()
+    }
+    
+    fn draw_priority(&self) -> i32 {
+        1 // Spells draw after items but before creatures
     }
 }
 

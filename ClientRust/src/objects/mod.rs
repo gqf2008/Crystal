@@ -1,6 +1,7 @@
 // MirObjects - Game object system
 // Mirrors the structure of Client/MirObjects/
 
+mod drawable;  // NEW: DrawableMapObject trait for all drawable objects
 mod frames;
 mod map_object;
 mod player_object;  // NEW: PlayerObject base class (Phase 1)
@@ -15,7 +16,9 @@ mod damage;
 mod pathfinder;
 mod map_code; // MapReader and CellInfo - 对应 Client/MirObjects/MapCode.cs
 mod stats_ext;  // NEW: Stats system extensions
+mod object_factory; // NEW: Factory for creating objects from server packets
 
+pub use drawable::DrawableMapObject;  // NEW: Drawable trait
 pub use frames::{AnimationAdvanceSummary, AnimationStep, Frame};
 pub use map_object::{
     ActionResult, AttackOutcome, BuffDelta, MapObject, MapObjectType, ObjectActionOutcome,
@@ -48,4 +51,5 @@ pub use spell_object::SpellObject;
 pub use effect::{Effect, EffectLayer, BlendMode};
 pub use damage::{Damage, DamageType, Color};
 pub use pathfinder::PathFinder;
-pub use map_code::{MapReader, CellInfo}; // 对应 Client/MirObjects/MapCode.cs
+pub use map_code::{CellInfo, MapReader}; // 对应 Client/MirObjects/MapCode.cs
+pub use object_factory::ObjectFactory; // NEW: Object creation from packets

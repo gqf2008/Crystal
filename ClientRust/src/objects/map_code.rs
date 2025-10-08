@@ -6,6 +6,12 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
+use ggez::{Context, GameResult};
+use ggez::graphics::Canvas;
+use mir2_shared::Point;
+
+use super::drawable::DrawableMapObject;
+
 // ============================================================================
 // CellInfo - 对应 C# 的 CellInfo 类
 // ============================================================================
@@ -113,6 +119,50 @@ impl CellInfo {
         // TODO: 实现对象排序逻辑
         // 注意：C# 中的排序逻辑比较复杂，涉及对象类型、死亡状态等
         // 暂时保留简单版本，后续在 GameScene 中实现完整排序
+    }
+    
+    /// Draw all live objects in this cell
+    /// C# Reference: Client/MirObjects/MapCode.cs lines 55-82
+    pub fn draw_objects(
+        &self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        objects_map: &HashMap<u32, Box<dyn DrawableMapObject>>,
+        draw_location: Point,
+    ) -> GameResult {
+        if let Some(ref cell_objects) = self.cell_objects {
+            for &object_id in cell_objects.iter() {
+                if let Some(obj) = objects_map.get(&object_id) {
+                    if !obj.is_dead() && !obj.is_hidden() {
+                        obj.draw(ctx, canvas, draw_location)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    /// Draw all dead objects in this cell (corpses, etc.)
+    /// C# Reference: Client/MirObjects/MapCode.cs lines 85-113
+    pub fn draw_dead_objects(
+        &self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        objects_map: &HashMap<u32, Box<dyn DrawableMapObject>>,
+        draw_location: Point,
+    ) -> GameResult {
+        if let Some(ref cell_objects) = self.cell_objects {
+            for &object_id in cell_objects.iter() {
+                if let Some(obj) = objects_map.get(&object_id) {
+                    if obj.is_dead() && !obj.is_hidden() {
+                        // TODO: Add special handling for dead monsters (walls, HellLord, etc.)
+                        // C# checks for ((MonsterObject)CellObjects[i]).EternalStatue
+                        obj.draw(ctx, canvas, draw_location)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
     
     // 辅助方法：检查是否可行走

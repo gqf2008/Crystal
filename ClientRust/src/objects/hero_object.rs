@@ -1,6 +1,8 @@
 // HeroObject.rs - Hero character object (player's companion)
 // Mirrors Client/MirObjects/HeroObject.cs
 
+use ggez::{Context, GameResult};
+use ggez::graphics::Canvas;
 use mir2_shared::{
     data::stats::Stats,
     enums::{MirClass, MirGender, Spell},
@@ -9,6 +11,7 @@ use mir2_shared::{
 };
 
 use super::player_object::PlayerObject;
+use super::drawable::DrawableMapObject;
 use mir2_shared::data::client_data::ClientMagic;
 
 /// Hero spawn state
@@ -97,10 +100,15 @@ impl HeroObject {
         // Create player object with default values
         // Actual values will be set by load() method when server data arrives
         let player = PlayerObject::new(object_id, name, class, gender);
-        
+        Self::new_from_player(player, String::new())
+    }
+    
+    /// Create HeroObject from an existing PlayerObject
+    /// Used by ObjectFactory when creating from server packets
+    pub fn new_from_player(player: PlayerObject, owner_name: String) -> Self {
         Self {
             player,
-            owner_name: String::new(),
+            owner_name,
             owner_id: 0,
             hp: 0,
             mp: 0,
@@ -392,5 +400,30 @@ mod tests {
         assert_eq!(hero.inventory.len(), 40);
         assert!(!hero.is_inventory_full());
         assert_eq!(hero.find_empty_inventory_slot(), Some(0));
+    }
+}
+
+// Implement DrawableMapObject trait for HeroObject
+impl DrawableMapObject for HeroObject {
+    fn draw(&self, _ctx: &mut Context, _canvas: &mut Canvas, draw_location: Point) -> GameResult {
+        // Call PlayerObject's existing draw method
+        self.player.draw(draw_location);
+        Ok(())
+    }
+    
+    fn object_id(&self) -> u32 {
+        self.player.map_object.object_id()
+    }
+    
+    fn is_dead(&self) -> bool {
+        self.spawn_state == HeroState::Dead
+    }
+    
+    fn is_hidden(&self) -> bool {
+        self.player.map_object.is_hidden() || self.spawn_state == HeroState::Unsummoned
+    }
+    
+    fn draw_priority(&self) -> i32 {
+        2 // Heroes draw after items and spells
     }
 }

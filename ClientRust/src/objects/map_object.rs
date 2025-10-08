@@ -665,6 +665,115 @@ impl MapObject {
     }
     
     // ========================================
+    // Movement Control
+    // ========================================
+    
+    /// Check if the object is currently moving
+    pub fn is_moving(&self) -> bool {
+        self.current_location != self.map_location
+    }
+    
+    /// Start moving to a new location
+    /// This sets up the movement interpolation
+    pub fn start_move(&mut self, target: Point) {
+        if self.map_location != target {
+            self.current_location = self.map_location; // Start from current position
+            self.map_location = target;
+            
+            // Calculate movement vector for interpolation
+            self.movement = Point::new(
+                target.x - self.current_location.x,
+                target.y - self.current_location.y,
+            );
+            
+            tracing::trace!("Object {} starting move from ({},{}) to ({},{})",
+                self.object_id, 
+                self.current_location.x, self.current_location.y,
+                target.x, target.y
+            );
+        }
+    }
+    
+    /// Update movement interpolation
+    /// Returns true if the object reached its destination
+    /// 
+    /// C# Reference: MapObject.cs ProcessMovement() and MoveTo()
+    pub fn update_movement(&mut self, delta_time: f32) -> bool {
+        if !self.is_moving() {
+            return false;
+        }
+        
+        // Movement speed in cells per second
+        const MOVEMENT_SPEED: f32 = 4.0; // Adjust this for desired speed
+        
+        // Calculate distance to move this frame
+        let distance_to_move = MOVEMENT_SPEED * delta_time;
+        
+        // Calculate total distance to target
+        let dx = (self.map_location.x - self.current_location.x) as f32;
+        let dy = (self.map_location.y - self.current_location.y) as f32;
+        let total_distance = (dx * dx + dy * dy).sqrt();
+        
+        if total_distance <= distance_to_move {
+            // Reached destination
+            self.current_location = self.map_location;
+            self.movement = Point::new(0, 0);
+            
+            tracing::trace!("Object {} reached destination ({},{})",
+                self.object_id, self.map_location.x, self.map_location.y
+            );
+            
+            true
+        } else {
+            // Continue interpolating
+            let progress = distance_to_move / total_distance;
+            let new_x = self.current_location.x as f32 + dx * progress;
+            let new_y = self.current_location.y as f32 + dy * progress;
+            
+            self.current_location = Point::new(new_x as i32, new_y as i32);
+            false
+        }
+    }
+    
+    /// Update draw location based on current location
+    /// This should be called after movement updates to ensure correct rendering position
+    /// 
+    /// C# Reference: MapObject.cs SetLibraries() and DrawLocation calculation
+    pub fn update_draw_location(&mut self) {
+        // In the original C# code, DrawLocation is calculated based on:
+        // - CurrentLocation (grid position)
+        // - OffSetMove (pixel offset for smooth movement)
+        // - FinalDrawLocation (adjusted for object height/size)
+        
+        // For now, we'll use a simple mapping from grid to pixel coordinates
+        // Each grid cell is typically 48x32 pixels in isometric view
+        const CELL_WIDTH: i32 = 48;
+        const CELL_HEIGHT: i32 = 32;
+        
+        // Convert grid coordinates to isometric screen coordinates
+        let screen_x = (self.current_location.x - self.current_location.y) * (CELL_WIDTH / 2);
+        let screen_y = (self.current_location.x + self.current_location.y) * (CELL_HEIGHT / 2);
+        
+        self.draw_location = Point::new(screen_x, screen_y);
+        self.final_draw_location = self.draw_location; // Will be adjusted by object-specific rendering
+        
+        // Update DrawY for depth sorting
+        self.draw_y = screen_y;
+    }
+    
+    /// Teleport to a location instantly (no interpolation)
+    pub fn teleport_to(&mut self, location: Point) {
+        self.map_location = location;
+        self.current_location = location;
+        self.movement = Point::new(0, 0);
+        self.update_draw_location();
+        
+        tracing::debug!("Object {} teleported to ({},{})",
+            self.object_id, location.x, location.y
+        );
+    }
+    
+    // ========================================
     // Buff Management
     // ========================================
     
@@ -677,6 +786,32 @@ impl MapObject {
     /// Set buffs (replaces existing buffs) - legacy compatibility
     pub fn set_buffs(&mut self, buffs: Vec<BuffType>) {
         self.buffs = buffs;
+    }
+    
+    /// Add a single buff to the object
+    /// If the buff already exists, this is a no-op
+    pub fn add_buff(&mut self, buff: BuffType) {
+        if !self.buffs.contains(&buff) {
+            self.buffs.push(buff);
+            tracing::debug!("Added buff {:?} to object {}", buff, self.object_id);
+        }
+    }
+    
+    /// Remove a single buff from the object
+    /// If the buff doesn't exist, this is a no-op
+    pub fn remove_buff(&mut self, buff: BuffType) {
+        if let Some(pos) = self.buffs.iter().position(|b| *b == buff) {
+            self.buffs.remove(pos);
+            tracing::debug!("Removed buff {:?} from object {}", buff, self.object_id);
+        }
+    }
+    
+    /// Clear all buffs
+    pub fn clear_buffs(&mut self) {
+        if !self.buffs.is_empty() {
+            self.buffs.clear();
+            tracing::debug!("Cleared all buffs from object {}", self.object_id);
+        }
     }
     
     /// Internal method to update buffs and calculate delta

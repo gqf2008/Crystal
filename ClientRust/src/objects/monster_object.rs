@@ -1,12 +1,15 @@
 // MonsterObject.rs - Monster/NPC enemy object
 // Mirrors Client/MirObjects/MonsterObject.cs
 
+use ggez::{Context, GameResult};
+use ggez::graphics::Canvas;
 use mir2_shared::{
     enums::{MirDirection, SpellEffect},
     Point,packets::*
 };
 
 use super::map_object::MapObject;
+use super::drawable::DrawableMapObject;
 
 /// Monster image enum - corresponds to different monster graphics
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,6 +258,131 @@ pub enum MonsterSoundType {
     Attack,
     Struck,
     Die,
+}
+
+// Implement DrawableMapObject trait for MonsterObject
+impl DrawableMapObject for MonsterObject {
+    fn draw(&self, ctx: &mut Context, canvas: &mut Canvas, draw_location: Point) -> GameResult {
+        // C# Reference: Client/MirObjects/MonsterObject.cs Draw() method
+        // Monsters have complex rendering with animation, effects, and special cases
+        
+        use ggez::graphics::{Color, DrawParam, Text, PxScale, DrawMode};
+        use ggez::mint::Point2;
+        
+        let x = draw_location.x as f32;
+        let y = draw_location.y as f32;
+        
+        // Draw monster body (red rectangle as placeholder)
+        let body_color = if self.map_object.is_dead() {
+            Color::from_rgb(100, 0, 0) // Dark red for dead
+        } else {
+            Color::from_rgb(255, 0, 0) // Bright red for alive
+        };
+        
+        let rect = ggez::graphics::Mesh::new_rectangle(
+            ctx,
+            DrawMode::fill(),
+            ggez::graphics::Rect::new(0.0, -32.0, 32.0, 32.0),
+            body_color,
+        )?;
+        
+        canvas.draw(&rect, DrawParam::default().dest(Point2 { x, y }));
+        
+        // Draw health bar if alive
+        if !self.map_object.is_dead() {
+            let health_pct = self.map_object.percent_health() as f32 / 100.0;
+            
+            // Health bar background (dark red)
+            let bg_rect = ggez::graphics::Mesh::new_rectangle(
+                ctx,
+                DrawMode::fill(),
+                ggez::graphics::Rect::new(0.0, -40.0, 32.0, 4.0),
+                Color::from_rgb(100, 0, 0),
+            )?;
+            canvas.draw(&bg_rect, DrawParam::default().dest(Point2 { x, y }));
+            
+            // Health bar foreground (green)
+            let fg_rect = ggez::graphics::Mesh::new_rectangle(
+                ctx,
+                DrawMode::fill(),
+                ggez::graphics::Rect::new(0.0, -40.0, 32.0 * health_pct, 4.0),
+                Color::from_rgb(0, 255, 0),
+            )?;
+            canvas.draw(&fg_rect, DrawParam::default().dest(Point2 { x, y }));
+        }
+        
+        // Draw name
+        if !self.map_object.name.is_empty() {
+            let mut text = Text::new(&self.map_object.name);
+            text.set_scale(PxScale::from(10.0));
+            
+            let text_pos = Point2 {
+                x: x - 16.0,
+                y: y - 48.0,
+            };
+            
+            canvas.draw(&text, DrawParam::default()
+                .dest(text_pos)
+                .color(Color::from_rgb(255, 255, 255))
+            );
+        }
+        
+        let action = self.map_object.get_current_action();
+        let frame = self.map_object.draw_frame();
+        let direction = self.map_object.direction();
+        
+        tracing::trace!("Drawing MonsterObject {} '{}' at ({}, {}) action={:?} frame={} dir={:?}", 
+            self.map_object.object_id(), 
+            self.map_object.name,
+            draw_location.x, draw_location.y,
+            action, frame, direction);
+        
+        Ok(())
+        
+        /* TODO: Full implementation
+        // 1. Get texture from Monsters library
+        let texture = libraries::get_monster_texture(
+            ctx, 
+            self.base_image, 
+            action, 
+            direction, 
+            frame
+        )?;
+        
+        // 2. Apply offsets for special monsters (walls/gates)
+        let offset = if self.base_image.manual_location_offset() {
+            self.calculate_location_offset()
+        } else {
+            Point::new(0, 0)
+        };
+        
+        // 3. Draw sprite
+        let final_pos = Point2 {
+            x: (draw_location.x + offset.x) as f32,
+            y: (draw_location.y + offset.y) as f32,
+        };
+        canvas.draw(&texture, DrawParam::default().dest(final_pos));
+        
+        // 4. Draw effects
+        self.draw_effects(ctx, canvas, final_pos)?;
+        */
+    }
+    
+    fn object_id(&self) -> u32 {
+        self.map_object.object_id()
+    }
+    
+    fn is_dead(&self) -> bool {
+        self.map_object.is_dead()
+    }
+    
+    fn is_hidden(&self) -> bool {
+        self.map_object.is_hidden()
+    }
+    
+    fn draw_priority(&self) -> i32 {
+        2 // Monsters draw after items and spells
+    }
 }
 
 #[cfg(test)]

@@ -7,6 +7,8 @@
 use std::time::Instant;
 use std::collections::HashMap;
 
+use ggez::{Context, GameResult};
+use ggez::graphics::Canvas;
 use mir2_shared::{
     enums::{MirAction, MirClass, MirDirection, MirGender, Spell, SpellEffect},
     Point,
@@ -15,6 +17,7 @@ use mir2_shared::{
 use super::map_object::MapObject;
 use super::effect::Effect;
 use super::frames::Frame;
+use super::drawable::DrawableMapObject;
 
 /// Player object - base class for UserObject and HeroObject
 /// 
@@ -1887,4 +1890,61 @@ pub struct QueuedAction {
     // Note: Rarely used in C#, omitted for now
     // Can be added later with an enum for type-safe params if needed
     // pub params: Vec<Box<dyn Any>>,
+}
+
+// Implement DrawableMapObject trait for PlayerObject
+impl DrawableMapObject for PlayerObject {
+    fn draw(&self, _ctx: &mut Context, _canvas: &mut Canvas, draw_location: Point) -> GameResult {
+        // C# Reference: Client/MirObjects/PlayerObject.cs Draw() method
+        // Players have the most complex rendering: body, head, weapon, wings, mount, effects
+        
+        // TODO Phase 2: Implement actual player rendering
+        // Real implementation needs:
+        // 1. Draw behind effects
+        // 2. Draw mount (if riding)
+        // 3. Draw weapon (left side based on direction)
+        // 4. Draw body (main character sprite)
+        // 5. Draw head and wings (order depends on direction)
+        // 6. Draw weapon (right side based on direction)
+        // 7. Draw front effects
+        // 8. Draw name and guild labels
+        
+        // Layer order (C# DrawPlayer method):
+        // - DrawBehindEffects()
+        // - DrawMount()
+        // - DrawWeapon() or DrawWeapon2() (direction-dependent)
+        // - DrawBody()
+        // - DrawHead() / DrawWings() (order varies by direction)
+        // - DrawWeapon() or DrawWeapon2() (other side)
+        // - DrawFrontEffects()
+        
+        let action = self.map_object.get_current_action();
+        let frame = self.map_object.draw_frame();
+        
+        tracing::trace!("Drawing PlayerObject {} '{}' at ({}, {}) class={:?} action={:?} frame={}", 
+            self.map_object.object_id(), 
+            self.map_object.name,
+            draw_location.x, draw_location.y,
+            self.class, action, frame);
+        
+        // Call the placeholder draw method for now
+        self.draw(draw_location);
+        Ok(())
+    }
+    
+    fn object_id(&self) -> u32 {
+        self.map_object.object_id()
+    }
+    
+    fn is_dead(&self) -> bool {
+        self.map_object.is_dead()
+    }
+    
+    fn is_hidden(&self) -> bool {
+        self.map_object.is_hidden()
+    }
+    
+    fn draw_priority(&self) -> i32 {
+        2 // Players draw after items and spells
+    }
 }

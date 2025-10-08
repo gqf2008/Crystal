@@ -3,6 +3,8 @@
 
 use std::convert::TryFrom;
 
+use ggez::{Context, GameResult};
+use ggez::graphics::Canvas;
 use mir2_shared::{
     data::{
         client_data::{ClientIntelligentCreature, ClientMail, ClientMagic, ClientQuestProgress},
@@ -19,6 +21,7 @@ use mir2_shared::{
 
 use super::player_object::{PlayerObject, QueuedAction};
 use super::stats_ext::StatsExt;  // Import Stats extensions
+use super::drawable::DrawableMapObject;
 
 /// User object - represents the current player
 /// 
@@ -145,6 +148,12 @@ impl UserObject {
             MirGender::Male,    // Default, will be set by load()
         );
         
+        Self::new_from_player(player)
+    }
+    
+    /// Create UserObject from an existing PlayerObject
+    /// Used by ObjectFactory when creating from server packets
+    pub fn new_from_player(player: PlayerObject) -> Self {
         Self {
             player,
             id: 0,
@@ -1862,4 +1871,75 @@ mod tests {
         assert_eq!(user.player.action_feed.len(), 0);
     }
 
+}
+
+// Implement DrawableMapObject trait for UserObject
+impl DrawableMapObject for UserObject {
+    fn draw(&self, ctx: &mut Context, canvas: &mut Canvas, draw_location: Point) -> GameResult {
+        use ggez::graphics::{Color, DrawMode, Mesh, Text, PxScale, DrawParam};
+        use ggez::mint::Point2;
+        
+        // 🎨 占位符: 绘制蓝色矩形代表玩家
+        let x = draw_location.x as f32;
+        let y = draw_location.y as f32;
+        
+        let draw_pos = Point2 { x, y };
+        
+        // 绘制身体 (蓝色矩形, 32x48像素)
+        let body_color = if self.player.map_object.is_dead() {
+            Color::from_rgb(50, 50, 100)  // 死亡: 暗蓝色
+        } else {
+            Color::from_rgb(0, 100, 255)  // 活着: 亮蓝色
+        };
+        
+        let body = Mesh::new_rectangle(
+            ctx,
+            DrawMode::fill(),
+            ggez::graphics::Rect::new(0.0, -48.0, 32.0, 48.0),
+            body_color,
+        )?;
+        
+        canvas.draw(&body, DrawParam::default().dest(draw_pos));
+        
+        // 绘制名字 (白色文字)
+        let name_pos = Point2 { x: x, y: y - 60.0 };
+        let mut text = Text::new(&self.player.map_object.name);
+        text.set_scale(PxScale::from(12.0));
+        canvas.draw(
+            &text,
+            DrawParam::default()
+                .dest(name_pos)
+                .color(Color::WHITE),
+        );
+        
+        // 绘制等级标签
+        let level_text = format!("Lv.{}", self.player.level);
+        let level_pos = Point2 { x: x, y: y - 75.0 };
+        let mut level_label = Text::new(&level_text);
+        level_label.set_scale(PxScale::from(10.0));
+        canvas.draw(
+            &level_label,
+            DrawParam::default()
+                .dest(level_pos)
+                .color(Color::from_rgb(255, 255, 0)), // 黄色
+        );
+        
+        Ok(())
+    }
+    
+    fn object_id(&self) -> u32 {
+        self.player.map_object.object_id()
+    }
+    
+    fn is_dead(&self) -> bool {
+        self.player.map_object.is_dead()
+    }
+    
+    fn is_hidden(&self) -> bool {
+        self.player.map_object.is_hidden()
+    }
+    
+    fn draw_priority(&self) -> i32 {
+        2 // Users draw after items and spells
+    }
 }
