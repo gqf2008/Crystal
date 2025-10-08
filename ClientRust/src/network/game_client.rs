@@ -171,6 +171,11 @@ pub enum GameEvent {
     DeleteCharacterResponse { result: u8 },
     DeleteCharacterSuccess { character_index: i32 },
     
+    // Start game events
+    StartGameResponse { result: u8 },
+    StartGameBanned { reason: String, expiry_date: i64 },
+    StartGameDelay { milliseconds: i64 },
+    
     // Item events
     ItemGained { item: UserItem, grid_type: String },
     ItemLost { unique_id: u64, count: u16 },
@@ -324,7 +329,10 @@ impl PacketHandler for GameClient {
     }
     
     fn on_start_game_delay(&mut self, packet: packets::StartGameDelay) {
-        tracing::info!("⏳ Start game delay: {} ms", packet.milliseconds);
+        tracing::info!("⏱️ Start game delayed: {}ms", packet.milliseconds);
+        self.send_event(GameEvent::StartGameDelay {
+            milliseconds: packet.milliseconds,
+        });
     }
     
     // ==================== Map & World ====================
@@ -2535,17 +2543,26 @@ impl PacketHandler for GameClient {
     
     // Game Flow Control (2 handlers)
     fn on_start_game(&mut self, packet: packets::StartGame) {
-        tracing::debug!("Start game: result={}", packet.result);
-        // Enter game world approved
-        // Load map, spawn player, initialize UI
-        // Transition from character select to in-game
+        tracing::info!("🎮 Start game response received: result={}", packet.result);
+        /*
+         * Result codes:
+         * 0: Disabled
+         * 1: Not logged in
+         * 2: Character not found
+         * 3: Start Game Error
+         */
+        self.send_event(GameEvent::StartGameResponse {
+            result: packet.result,
+        });
     }
     
     fn on_start_game_banned(&mut self, packet: packets::StartGameBanned) {
-        tracing::debug!("Start game banned: reason={:?}, duration={:?}", packet.reason, packet.expiry_date);
-        // Cannot enter game (maintenance, ban, level restriction)
-        // Show: maintenance schedule, ban reason, or event requirement
-        // Types: server maintenance, temporary ban, event-only access
+        tracing::warn!("🚫 Start game banned: reason={}, expiry_date={}", 
+            packet.reason, packet.expiry_date);
+        self.send_event(GameEvent::StartGameBanned {
+            reason: packet.reason,
+            expiry_date: packet.expiry_date,
+        });
     }
     
     // Combat & Effects (5 handlers)

@@ -2,9 +2,11 @@
 // Mirrors Client/MirScenes/SelectScene.cs
 pub mod new_character_dialog;
 pub mod delete_character_dialog;
+pub mod credits_dialog;
 
 pub use new_character_dialog::NewCharacterDialog;
 pub use delete_character_dialog::DeleteCharacterDialog;
+pub use credits_dialog::CreditsDialog;
 
 use crate::scenes::{Scene, SceneType};
 use crate::network::game_client::GameEvent;
@@ -35,6 +37,8 @@ pub struct SelectScene {
     pub new_character_dialog: Option<NewCharacterDialog>,
     /// Delete character dialog
     pub delete_character_dialog: Option<DeleteCharacterDialog>,
+    /// Credits dialog
+    pub credits_dialog: Option<CreditsDialog>,
     
     // Network
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
@@ -79,6 +83,7 @@ impl SelectScene {
             selected_index: 0,
             new_character_dialog: None,
             delete_character_dialog: None,
+            credits_dialog: None,
             command_tx: None,
             hovered_button: None,
             pressed_button: None,
@@ -138,9 +143,24 @@ impl SelectScene {
     pub fn start_game(&mut self) {
         if self.selected_index >= 0 && (self.selected_index as usize) < self.characters.len() {
             let character = &self.characters[self.selected_index as usize];
-            println!("Starting game with character: {}", character.name);
-            // TODO: Send StartGame packet
-            // TODO: Switch to game scene
+            tracing::info!("🎮 Starting game with character: {} (index={})", character.name, character.index);
+            
+            // Send StartGame command to network thread
+            if let Some(command_tx) = &self.command_tx {
+                use crate::network::NetworkCommand;
+                
+                if command_tx.send(NetworkCommand::StartGame {
+                    character_index: character.index,
+                }).is_ok() {
+                    tracing::info!("📤 Sent StartGame command for character index {}", character.index);
+                } else {
+                    tracing::error!("❌ Failed to send StartGame command");
+                }
+            } else {
+                tracing::error!("❌ Network command channel not available");
+            }
+        } else {
+            tracing::warn!("⚠️ Cannot start game: No character selected");
         }
     }
     
@@ -199,6 +219,16 @@ impl SelectScene {
         );
         
         self.delete_character_dialog = Some(dialog);
+    }
+    
+    /// Open credits dialog
+    pub fn open_credits_dialog(&mut self) {
+        tracing::info!("📜 打开Credits对话框");
+        let dialog = CreditsDialog::new();
+        self.credits_dialog = Some(dialog);
+        if let Some(d) = &mut self.credits_dialog {
+            d.show();
+        }
     }
     
     /// Submit delete character request
@@ -739,7 +769,13 @@ impl Scene for SelectScene {
         self.character_animation_timer += delta_time;
         if self.character_animation_timer >= 0.25 {
             self.character_animation_timer -= 0.25;
+            let old_frame = self.character_animation_frame;
             self.character_animation_frame = (self.character_animation_frame + 1) % 16;
+            
+            // 调试：监控帧15→0的循环重启
+            if old_frame == 15 && self.character_animation_frame == 0 {
+                tracing::debug!("Animation loop restart: frame 15 -> 0");
+            }
         }
     }
     
@@ -884,12 +920,6 @@ impl Scene for SelectScene {
             let anim_index = base_index + self.character_animation_frame as i32;
             let anim_key = format!("ChrSel_{}", anim_index);
             
-            // 调试：记录纹理获取尝试（只在帧0记录，避免刷屏）
-            if self.character_animation_frame == 0 {
-                tracing::debug!("Character animation loop restart: frame={}, base_index={}, anim_index={}, key={}", 
-                    self.character_animation_frame, base_index, anim_index, anim_key);
-            }
-            
             // 角色预览位置（左侧中央，C#原始坐标）
             let preview_x = 260.0;
             let preview_y = 420.0;
@@ -909,23 +939,28 @@ impl Scene for SelectScene {
             
             if let Some(texture) = ggez_manager.get_texture(&anim_key) {
                 // 应用偏移量（C# UseOffSet = true）
-                canvas.draw(texture, DrawParam::default().dest([preview_x + offset_x, preview_y + offset_y]));
+                // 注意：C#版本的DisplayLocation已经包含了偏移量
+                // 但我们需要显式添加，因为我们直接从MLibrary获取偏移
+                let final_x = preview_x + offset_x;
+                let final_y = preview_y + offset_y;
                 
-                // 法师需要绘制混合效果
+                canvas.draw(texture, DrawParam::default().dest([final_x, final_y]));
+                
+                // 法师需要绘制混合效果（C# AfterDraw事件）
                 if character.class == mir2_shared::enums::MirClass::Wizard {
                     let blend_key = format!("ChrSel_{}", anim_index + 560);
                     if let Some(blend_texture) = ggez_manager.get_texture(&blend_key) {
+                        // C#: DrawBlend with Color.White and opacity ~0.7
                         canvas.draw(blend_texture, DrawParam::default()
-                            .dest([preview_x + offset_x, preview_y + offset_y])
+                            .dest([final_x, final_y])
                             .color(Color::from_rgba(255, 255, 255, 180)));
-                    } else if self.character_animation_frame == 0 {
-                        tracing::warn!("Wizard blend texture not found: {}", blend_key);
                     }
                 }
             } else {
-                // 纹理缺失！这会导致角色不显示（闪烁）
-                if self.character_animation_frame == 0 {
-                    tracing::error!("Character texture not found at loop restart: {}", anim_key);
+                // 纹理未找到 - 这会导致角色不显示
+                // 在帧0或15时记录，因为这是循环边界
+                if self.character_animation_frame == 0 || self.character_animation_frame == 15 {
+                    tracing::warn!("Character texture not found: {} (frame {})", anim_key, self.character_animation_frame);
                 }
             }
             
@@ -1015,6 +1050,13 @@ impl Scene for SelectScene {
                 self.draw_delete_character_dialog(ctx, canvas, ggez_manager, dialog);
             }
         }
+        
+        // 8. 绘制 CreditsDialog (最上层)
+        if let Some(dialog) = &self.credits_dialog {
+            if dialog.is_visible() {
+                dialog.draw(ctx, canvas, ggez_manager, self.window_width, self.window_height);
+            }
+        }
     }
     
     fn process_event(&mut self, event: &GameEvent) {
@@ -1027,9 +1069,107 @@ impl Scene for SelectScene {
                 println!("Disconnected: {}", reason);
                 // TODO: Return to login
             }
+            GameEvent::DeleteCharacterSuccess { character_index } => {
+                tracing::info!("✅ 角色删除成功: index={}", character_index);
+                
+                // 1. 关闭删除对话框
+                self.delete_character_dialog = None;
+                
+                // 2. 从角色列表移除已删除的角色
+                if let Some(pos) = self.characters.iter().position(|c| c.index == *character_index) {
+                    self.characters.remove(pos);
+                    tracing::info!("📋 已从列表移除角色 (index={}), 剩余角色数: {}", 
+                        character_index, self.characters.len());
+                    
+                    // 3. 更新选中索引
+                    if self.selected_index >= self.characters.len() as i32 {
+                        self.selected_index = if self.characters.is_empty() {
+                            -1
+                        } else {
+                            (self.characters.len() - 1) as i32
+                        };
+                    }
+                }
+                
+                // TODO: 显示成功消息框 "Your character was deleted successfully."
+            }
+            GameEvent::DeleteCharacterResponse { result } => {
+                tracing::info!("⚠️ 删除角色响应: result={}", result);
+                if let Some(dialog) = &mut self.delete_character_dialog {
+                    dialog.deleting = false;
+                    if *result != 0 {
+                        // 删除失败
+                        dialog.error_message = Some(format!("删除失败 (错误代码: {})", result));
+                    }
+                }
+            }
+            GameEvent::NewCharacterResponse { result } => {
+                tracing::info!("📝 创建角色响应: result={}", result);
+                if let Some(dialog) = &mut self.new_character_dialog {
+                    dialog.creating = false;
+                    
+                    // C# SelectScene.NewCharacter(S.NewCharacter p)
+                    let error_msg = match *result {
+                        0 => Some("Creating new characters is currently disabled.".to_string()),
+                        1 => Some("Your Character Name is not acceptable.".to_string()),
+                        2 => Some("The gender you selected does not exist.\nContact a GM for assistance.".to_string()),
+                        3 => Some("The class you selected does not exist.\nContact a GM for assistance.".to_string()),
+                        4 => Some("You cannot make more than 4 Characters.".to_string()),
+                        5 => Some("A Character with this name already exists.".to_string()),
+                        _ => Some(format!("Unknown error (code: {})", result)),
+                    };
+                    
+                    if let Some(msg) = error_msg {
+                        tracing::warn!("❌ 创建角色失败: {}", msg);
+                        dialog.error_message = Some(msg);
+                    }
+                }
+            }
+            GameEvent::NewCharacterSuccess { character } => {
+                tracing::info!("✅ 角色创建成功: {}", character.name);
+                
+                // 1. 关闭新建角色对话框
+                self.new_character_dialog = None;
+                
+                // 2. 将新角色添加到列表开头
+                self.characters.insert(0, character.clone());
+                
+                // 3. 选中新创建的角色
+                self.selected_index = 0;
+                
+                tracing::info!("📋 新角色已添加到列表, 总角色数: {}", self.characters.len());
+                
+                // TODO: 显示成功消息框 "Your character was created successfully."
+            }
+            GameEvent::StartGameResponse { result } => {
+                tracing::info!("🎮 进入游戏响应: result={}", result);
+                if *result == 0 {
+                    // Success - switch to game scene
+                    tracing::info!("✅ 进入游戏成功! 准备切换到游戏场景...");
+                    // TODO: 切换到GameScene
+                    // return Some(SceneType::Game);
+                } else {
+                    // Error
+                    let error_msg = match *result {
+                        1 => "You are not logged in.",
+                        2 => "Character not found.",
+                        3 => "Failed to start game.",
+                        _ => "Unknown error occurred.",
+                    };
+                    tracing::error!("❌ 进入游戏失败: {}", error_msg);
+                    // TODO: 显示错误消息框
+                }
+            }
+            GameEvent::StartGameBanned { reason, expiry_date } => {
+                tracing::warn!("🚫 进入游戏被禁止: reason={}, expiry={}", reason, expiry_date);
+                // TODO: 显示封禁消息框
+            }
+            GameEvent::StartGameDelay { milliseconds } => {
+                tracing::info!("⏱️ 进入游戏延迟: {}ms", milliseconds);
+                // TODO: 显示延迟提示
+            }
             _ => {
-                // TODO: Handle character creation/deletion events when added to GameEvent
-                // For now, ignore other events
+                // TODO: Handle other events
             }
         }
     }
@@ -1077,7 +1217,15 @@ impl Scene for SelectScene {
             return;
         }
         
-        // 1. 如果删除对话框可见,优先处理 (最上层)
+        // 0. 如果Credits对话框可见,点击任意位置关闭 (最上层)
+        if let Some(dialog) = &mut self.credits_dialog {
+            if dialog.is_visible() && pressed {
+                dialog.handle_click(x as f32, y as f32, self.window_width, self.window_height);
+                return;
+            }
+        }
+        
+        // 1. 如果删除对话框可见,优先处理
         if let Some(dialog) = &mut self.delete_character_dialog {
             if dialog.is_visible() && pressed {
                 let (confirm, cancel, submit) = dialog.handle_click(
@@ -1164,8 +1312,7 @@ impl Scene for SelectScene {
                     }
                     BottomButton::Credits => {
                         tracing::info!("📜 Credits clicked - 显示制作人员名单");
-                        // TODO: 显示制作人员对话框
-                        tracing::info!("制作人员:\n  原作: Wemade Entertainment\n  Rust版本: Crystal Project Team");
+                        self.open_credits_dialog();
                     }
                     BottomButton::ExitGame => {
                         tracing::info!("🚪 Exit Game clicked - 退出游戏");
@@ -1251,6 +1398,16 @@ impl Scene for SelectScene {
     
     fn handle_key_press(&mut self, key: crate::scenes::KeyCode, _modifiers: crate::scenes::ModifiersState) -> bool {
         use crate::scenes::KeyCode;
+        
+        // 0. Credits对话框优先处理
+        if let Some(dialog) = &mut self.credits_dialog {
+            if dialog.is_visible() {
+                if key == KeyCode::Escape {
+                    dialog.hide();
+                    return true;
+                }
+            }
+        }
         
         // 1. 删除对话框优先处理
         if let Some(dialog) = &mut self.delete_character_dialog {
