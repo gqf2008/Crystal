@@ -27,6 +27,7 @@ mod error;
 mod resolution;
 mod resources;
 mod version;
+mod controls;
 
 use settings::ClientSettings;
 
@@ -384,6 +385,13 @@ impl CrystalGame {
             println!("✓ 所有图形库加载成功!");
         }
         
+        // 加载地图库 (Map.lib)
+        println!("📦 正在加载地图库...");
+        tracing::info!("加载地图库...");
+        let map_libs_loaded = graphics::libraries::load_all_map_libraries();
+        println!("✓ 地图库加载完成: {} 个", map_libs_loaded);
+        tracing::info!("✓ 地图库加载完成: {} 个", map_libs_loaded);
+        
         // 创建场景管理器
         let mut scene_manager = SceneManager::new();
         
@@ -525,6 +533,9 @@ impl EventHandler for CrystalGame {
         if should_switch_to_game {
             tracing::info!("✅ 开始游戏,切换到 GameScene");
             
+            // 检查是否有缓存的地图信息
+            let cached_map = self.cached_map_info.clone();
+            
             // 切换到 GameScene
             let mut scene_manager = self.scene_manager.write();
             if let Err(e) = scene_manager.switch_scene(SceneType::Game) {
@@ -533,19 +544,19 @@ impl EventHandler for CrystalGame {
                 tracing::info!("🎮 场景切换完成: Game");
                 
                 // 如果有缓存的地图信息,立即发送到 GameScene
-                if let Some((map_index, file_name, title)) = &self.cached_map_info {
+                if let Some((map_index, file_name, title)) = cached_map {
                     tracing::info!("🔄 Resending cached MapInformation to GameScene: {} ({})", title, file_name);
                     
                     // 重新创建 MapInformation 事件并发送到 GameScene
                     let event = crate::network::game_client::GameEvent::MapInformation {
-                        map_index: *map_index,
+                        map_index,
                         file_name: file_name.clone(),
                         title: title.clone(),
                     };
                     
-                    drop(scene_manager); // 释放写锁
-                    let mut scene_manager = self.scene_manager.write();
+                    // 直接在持有锁的情况下发送事件
                     scene_manager.process_event(&event);
+                    tracing::info!("✅ MapInformation event resent to GameScene");
                 } else {
                     tracing::warn!("⚠️  No cached map information available");
                 }
@@ -596,9 +607,11 @@ impl EventHandler for CrystalGame {
         };
         
         // 创建 canvas
-        let mut canvas = graphics::Canvas::from_frame(ctx, bg_color);        // 绘制当前场景
+        let mut canvas = graphics::Canvas::from_frame(ctx, bg_color);
+        
+        // 绘制当前场景
         {
-            let scene_manager = self.scene_manager.read();
+            let mut scene_manager = self.scene_manager.write();
             scene_manager.draw(ctx, &mut canvas, &mut self.ggez_manager);
         }
         

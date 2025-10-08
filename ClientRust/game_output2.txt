@@ -1,0 +1,190 @@
+[2m2025-10-08T16:16:27.817636Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m === Crystal Mir2 Client (Ggez版本) ===
+[2m2025-10-08T16:16:27.819144Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m 配置加载完成: ""
+[2m2025-10-08T16:16:27.819950Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m 数据路径设置为: Data/
+[2m2025-10-08T16:16:28.324372Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m Ggez Context 创建成功: 1024x768 (vsync关闭)
+[2m2025-10-08T16:16:28.327683Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m ✓ 中文字体加载成功: AlibabaPuHuiTi
+[2m2025-10-08T16:16:28.363814Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m IME 文本输入已启用
+
+========================================
+🎮 Crystal Mir2 Client - Ggez版本
+========================================
+
+[2m2025-10-08T16:16:28.365395Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m 初始化游戏状态...
+🌐 初始化网络系统...
+🚀 启动网络管理器...
+✓ 网络系统初始化完成
+[2m2025-10-08T16:16:28.365869Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m 🔌 正在连接服务器...
+[2m2025-10-08T16:16:28.366000Z[0m [32m INFO[0m [2mmir2_client::graphics::ggez_manager_simple[0m[2m:[0m Initializing GgezManager (1024x768)
+✓ Ggez 渲染管理器已创建: 1024x768
+📦 正在加载图形库...
+[2m2025-10-08T16:16:28.366163Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Connecting to server: 127.0.0.1:7000
+[2m2025-10-08T16:16:28.366580Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m 加载图形库...
+[2m2025-10-08T16:16:28.366886Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 开始加载核心库 (11 个)...
+[2m2025-10-08T16:16:28.367037Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: ChrSel (Data/ChrSel)
+[2m2025-10-08T16:16:28.367323Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 ChrSel (1146 张图像)
+[2m2025-10-08T16:16:28.367475Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: Title (Data/Title)
+[2m2025-10-08T16:16:28.367720Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 Title (899 张图像)
+[2m2025-10-08T16:16:28.367868Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: Prguse (Data/Prguse)
+[2m2025-10-08T16:16:28.368221Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 Prguse (2447 张图像)
+[2m2025-10-08T16:16:28.368416Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: Prguse2 (Data/Prguse2)
+[2m2025-10-08T16:16:28.368636Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 Prguse2 (1602 张图像)
+[2m2025-10-08T16:16:28.368816Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: Magic (Data/Magic)
+[2m2025-10-08T16:16:28.368812Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Connected to server (attempt 1)
+[2m2025-10-08T16:16:28.369098Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 Magic (4038 张图像)
+[2m2025-10-08T16:16:28.369142Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m ✅ 已连接到服务器
+[2m2025-10-08T16:16:28.369307Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: Magic2 (Data/Magic2)
+[2m2025-10-08T16:16:28.369468Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Network task started
+[2m2025-10-08T16:16:28.369717Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 Magic2 (2790 张图像)
+[2m2025-10-08T16:16:28.369770Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Connecting to server: 127.0.0.1:7000
+[2m2025-10-08T16:16:28.369931Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: Weather (Data/Weather)
+[2m2025-10-08T16:16:28.370318Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 Weather (788 张图像)
+[2m2025-10-08T16:16:28.370335Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Connected to server (attempt 2)
+[2m2025-10-08T16:16:28.370548Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: Effect (Data/Effect)
+[2m2025-10-08T16:16:28.370714Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Network connected event
+[2m2025-10-08T16:16:28.370914Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 Effect (1271 张图像)
+[2m2025-10-08T16:16:28.371155Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: Items (Data/Items)
+[2m2025-10-08T16:16:28.371395Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 Items (5380 张图像)
+[2m2025-10-08T16:16:28.371541Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: MagIcon (Data/MagIcon)
+[2m2025-10-08T16:16:28.371735Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 MagIcon (224 张图像)
+[2m2025-10-08T16:16:28.371889Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 加载库: BuffIcon (Data/BuffIcon)
+[2m2025-10-08T16:16:28.372110Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 成功加载 BuffIcon (265 张图像)
+[2m2025-10-08T16:16:28.372251Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 所有核心库加载完成 (11/11)
+✓ 所有图形库加载成功!
+📦 正在加载地图库...
+[2m2025-10-08T16:16:28.372663Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m 加载地图库...
+[2m2025-10-08T16:16:28.372811Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m 开始加载地图资源库...
+[2m2025-10-08T16:16:28.373587Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[0]: Data/Map/WemadeMir2/Tiles (155305 张)
+[2m2025-10-08T16:16:28.373808Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[1]: Data/Map/WemadeMir2/Smtiles (1040 张)
+[2m2025-10-08T16:16:28.374061Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[2]: Data/Map/WemadeMir2/Objects (9999 张)
+[2m2025-10-08T16:16:28.374315Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[3]: Data/Map/WemadeMir2/Objects2 (10024 张)
+[2m2025-10-08T16:16:28.374565Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[4]: Data/Map/WemadeMir2/Objects3 (9229 张)
+[2m2025-10-08T16:16:28.374821Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[5]: Data/Map/WemadeMir2/Objects4 (10062 张)
+[2m2025-10-08T16:16:28.375085Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[6]: Data/Map/WemadeMir2/Objects5 (9919 张)
+[2m2025-10-08T16:16:28.375332Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[7]: Data/Map/WemadeMir2/Objects6 (7751 张)
+[2m2025-10-08T16:16:28.375573Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[8]: Data/Map/WemadeMir2/Objects7 (9984 张)
+[2m2025-10-08T16:16:28.375822Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[9]: Data/Map/WemadeMir2/Objects8 (9919 张)
+[2m2025-10-08T16:16:28.376075Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[10]: Data/Map/WemadeMir2/Objects9 (9124 张)
+[2m2025-10-08T16:16:28.376320Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[11]: Data/Map/WemadeMir2/Objects10 (8006 张)
+[2m2025-10-08T16:16:28.376609Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[12]: Data/Map/WemadeMir2/Objects11 (6140 张)
+[2m2025-10-08T16:16:28.376897Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[13]: Data/Map/WemadeMir2/Objects12 (5381 张)
+[2m2025-10-08T16:16:28.377153Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[14]: Data/Map/WemadeMir2/Objects13 (8713 张)
+[2m2025-10-08T16:16:28.377478Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[15]: Data/Map/WemadeMir2/Objects14 (4202 张)
+[2m2025-10-08T16:16:28.377735Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[16]: Data/Map/WemadeMir2/Objects15 (4961 张)
+[2m2025-10-08T16:16:28.377977Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[17]: Data/Map/WemadeMir2/Objects16 (5622 张)
+[2m2025-10-08T16:16:28.378231Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[18]: Data/Map/WemadeMir2/Objects17 (10093 张)
+[2m2025-10-08T16:16:28.378487Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[19]: Data/Map/WemadeMir2/Objects18 (10081 张)
+[2m2025-10-08T16:16:28.378743Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[20]: Data/Map/WemadeMir2/Objects19 (9998 张)
+[2m2025-10-08T16:16:28.379010Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[21]: Data/Map/WemadeMir2/Objects20 (9538 张)
+[2m2025-10-08T16:16:28.379260Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[22]: Data/Map/WemadeMir2/Objects21 (9965 张)
+[2m2025-10-08T16:16:28.379624Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[23]: Data/Map/WemadeMir2/Objects22 (9939 张)
+[2m2025-10-08T16:16:28.379913Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[24]: Data/Map/WemadeMir2/Objects23 (9974 张)
+[2m2025-10-08T16:16:28.380159Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[25]: Data/Map/WemadeMir2/Objects24 (9999 张)
+[2m2025-10-08T16:16:28.380416Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[26]: Data/Map/WemadeMir2/Objects25 (10168 张)
+[2m2025-10-08T16:16:28.380705Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[27]: Data/Map/WemadeMir2/Objects26 (9981 张)
+[2m2025-10-08T16:16:28.380996Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[28]: Data/Map/WemadeMir2/Objects27 (9164 张)
+[2m2025-10-08T16:16:28.381235Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[90]: Data/Map/WemadeMir2/Objects_32bit (637 张)
+[2m2025-10-08T16:16:28.381378Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ WemadeMir2: 加载了 30 个地图库
+[2m2025-10-08T16:16:28.381753Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[100]: Data/Map/ShandaMir2/Tiles (31775 张)
+[2m2025-10-08T16:16:28.382033Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[101]: Data/Map/ShandaMir2/Tiles2 (6297 张)
+[2m2025-10-08T16:16:28.382251Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[102]: Data/Map/ShandaMir2/Tiles3 (2654 张)
+[2m2025-10-08T16:16:28.382529Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[103]: Data/Map/ShandaMir2/Tiles4 (13535 张)
+[2m2025-10-08T16:16:28.382784Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[104]: Data/Map/ShandaMir2/Tiles5 (8550 张)
+[2m2025-10-08T16:16:28.382998Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[105]: Data/Map/ShandaMir2/Tiles6 (2369 张)
+[2m2025-10-08T16:16:28.383225Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[106]: Data/Map/ShandaMir2/Tiles7 (3311 张)
+[2m2025-10-08T16:16:28.383472Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[107]: Data/Map/ShandaMir2/Tiles8 (1216 张)
+[2m2025-10-08T16:16:28.383719Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✗ MapLibs[108]: Data/Map/ShandaMir2/Tiles9 (系统找不到指定的文件。 (os error 2))
+[2m2025-10-08T16:16:28.384334Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✗ MapLibs[109]: Data/Map/ShandaMir2/Tiles10 (系统找不到指定的文件。 (os error 2))
+[2m2025-10-08T16:16:28.384587Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[110]: Data/Map/ShandaMir2/SmTiles (1176 张)
+[2m2025-10-08T16:16:28.384848Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[111]: Data/Map/ShandaMir2/SmTiles2 (9915 张)
+[2m2025-10-08T16:16:28.385184Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[112]: Data/Map/ShandaMir2/SmTiles3 (31704 张)
+[2m2025-10-08T16:16:28.385533Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[113]: Data/Map/ShandaMir2/SmTiles4 (32913 张)
+[2m2025-10-08T16:16:28.385875Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[114]: Data/Map/ShandaMir2/SmTiles5 (31303 张)
+[2m2025-10-08T16:16:28.386212Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[115]: Data/Map/ShandaMir2/SmTiles6 (30724 张)
+[2m2025-10-08T16:16:28.386536Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[116]: Data/Map/ShandaMir2/SmTiles7 (26120 张)
+[2m2025-10-08T16:16:28.386858Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[117]: Data/Map/ShandaMir2/SmTiles8 (30083 张)
+[2m2025-10-08T16:16:28.387135Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[118]: Data/Map/ShandaMir2/SmTiles9 (17992 张)
+[2m2025-10-08T16:16:28.387328Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✗ MapLibs[119]: Data/Map/ShandaMir2/SmTiles10 (系统找不到指定的文件。 (os error 2))
+[2m2025-10-08T16:16:28.387600Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[120]: Data/Map/ShandaMir2/Objects (9999 张)
+[2m2025-10-08T16:16:28.387858Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[121]: Data/Map/ShandaMir2/Objects2 (10024 张)
+[2m2025-10-08T16:16:28.388107Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[122]: Data/Map/ShandaMir2/Objects3 (9229 张)
+[2m2025-10-08T16:16:28.388357Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[123]: Data/Map/ShandaMir2/Objects4 (10062 张)
+[2m2025-10-08T16:16:28.388610Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[124]: Data/Map/ShandaMir2/Objects5 (11196 张)
+[2m2025-10-08T16:16:28.388855Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[125]: Data/Map/ShandaMir2/Objects6 (7751 张)
+[2m2025-10-08T16:16:28.389106Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[126]: Data/Map/ShandaMir2/Objects7 (10055 张)
+[2m2025-10-08T16:16:28.389359Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[127]: Data/Map/ShandaMir2/Objects8 (9919 张)
+[2m2025-10-08T16:16:28.389609Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[128]: Data/Map/ShandaMir2/Objects9 (9067 张)
+[2m2025-10-08T16:16:28.389853Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[129]: Data/Map/ShandaMir2/Objects10 (8014 张)
+[2m2025-10-08T16:16:28.390020Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✗ MapLibs[130]: Data/Map/ShandaMir2/Objects11 (系统找不到指定的文件。 (os error 2))
+[2m2025-10-08T16:16:28.390197Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✗ MapLibs[131]: Data/Map/ShandaMir2/Objects12 (系统找不到指定的文件。 (os error 2))
+[2m2025-10-08T16:16:28.390439Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[132]: Data/Map/ShandaMir2/Objects13 (7032 张)
+[2m2025-10-08T16:16:28.390665Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[133]: Data/Map/ShandaMir2/Objects14 (3648 张)
+[2m2025-10-08T16:16:28.390945Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[134]: Data/Map/ShandaMir2/Objects15 (26 张)
+[2m2025-10-08T16:16:28.391178Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[135]: Data/Map/ShandaMir2/Objects16 (4252 张)
+[2m2025-10-08T16:16:28.391417Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[136]: Data/Map/ShandaMir2/Objects17 (5012 张)
+[2m2025-10-08T16:16:28.391678Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[137]: Data/Map/ShandaMir2/Objects18 (10402 张)
+[2m2025-10-08T16:16:28.391852Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✗ MapLibs[138]: Data/Map/ShandaMir2/Objects19 (系统找不到指定的文件。 (os error 2))
+[2m2025-10-08T16:16:28.392111Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[139]: Data/Map/ShandaMir2/Objects20 (7312 张)
+[2m2025-10-08T16:16:28.392382Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[140]: Data/Map/ShandaMir2/Objects21 (16372 张)
+[2m2025-10-08T16:16:28.392635Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[141]: Data/Map/ShandaMir2/Objects22 (10094 张)
+[2m2025-10-08T16:16:28.392848Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[142]: Data/Map/ShandaMir2/Objects23 (4387 张)
+[2m2025-10-08T16:16:28.393103Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[143]: Data/Map/ShandaMir2/Objects24 (10440 张)
+[2m2025-10-08T16:16:28.393394Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[144]: Data/Map/ShandaMir2/Objects25 (19965 张)
+[2m2025-10-08T16:16:28.393637Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[145]: Data/Map/ShandaMir2/Objects26 (5752 张)
+[2m2025-10-08T16:16:28.393900Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[146]: Data/Map/ShandaMir2/Objects27 (11512 张)
+[2m2025-10-08T16:16:28.394157Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[147]: Data/Map/ShandaMir2/Objects28 (10081 张)
+[2m2025-10-08T16:16:28.394410Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[148]: Data/Map/ShandaMir2/Objects29 (8712 张)
+[2m2025-10-08T16:16:28.394641Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[149]: Data/Map/ShandaMir2/Objects30 (4201 张)
+[2m2025-10-08T16:16:28.394816Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✗ MapLibs[150]: Data/Map/ShandaMir2/Objects31 (系统找不到指定的文件。 (os error 2))
+[2m2025-10-08T16:16:28.395050Z[0m [34mDEBUG[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ MapLibs[190]: Data/Map/ShandaMir2/AniTiles1 (2280 张)
+[2m2025-10-08T16:16:28.395195Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ ShandaMir2: 加载了 45 个地图库
+[2m2025-10-08T16:16:28.395329Z[0m [32m INFO[0m [2mmir2_client::graphics::libraries[0m[2m:[0m ✓ 地图库加载完成: 75 个 (WemadeMir2: 30, ShandaMir2: 45)
+✓ 地图库加载完成: 75 个
+[2m2025-10-08T16:16:28.395696Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m ✓ 地图库加载完成: 75 个
+[2m2025-10-08T16:16:28.395844Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m 启动器模式: 显示 LauncherWindow
+[2m2025-10-08T16:16:28.395973Z[0m [32m INFO[0m [2mmir2_client::scenes::scene_manager[0m[2m:[0m Switching to scene: Login
+LoginScene::initialize
+[2m2025-10-08T16:16:28.396453Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m LoginScene 初始化完成,等待网络连接...
+[2m2025-10-08T16:16:28.396659Z[0m [32m INFO[0m [2mmir2_client::scenes::scene_manager[0m[2m:[0m Scene switch completed: Login
+[2m2025-10-08T16:16:28.396821Z[0m [32m INFO[0m [2mmir2_client[0m[2m:[0m 游戏初始化完成
+
+✅ 所有系统启动完毕!
+
+[2m2025-10-08T16:16:28.402146Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Sending ClientVersion: hash=99d7ba0f437bdfaa3424b0b60dc72e98
+[2m2025-10-08T16:16:28.402421Z[0m [34mDEBUG[0m [2mmir2_client::network::network_manager[0m[2m:[0m Enqueued packet: mir2_shared::packets::client::connection::ClientVersion
+[2m2025-10-08T16:16:28.402584Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Network connected event
+[2m2025-10-08T16:16:28.411412Z[0m [34mDEBUG[0m [2mmir2_client[0m[2m:[0m 收到网络事件: Connected
+✅ Connected to server successfully!
+[2m2025-10-08T16:16:28.411807Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m 发送客户端版本验证...
+[2m2025-10-08T16:16:28.432910Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Sending ClientVersion: hash=99d7ba0f437bdfaa3424b0b60dc72e98
+[2m2025-10-08T16:16:28.433164Z[0m [34mDEBUG[0m [2mmir2_client::network::network_manager[0m[2m:[0m Enqueued packet: mir2_shared::packets::client::connection::ClientVersion
+[2m2025-10-08T16:16:28.438250Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m ✅ 已连接到服务器,ClientVersion包准备完成
+[2m2025-10-08T16:16:28.438496Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m 版本哈希: [153, 215, 186, 15, 67, 123, 223, 170]
+[2m2025-10-08T16:16:28.438659Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m ⚠ 临时跳过客户端版本验证,登录对话框已启用
+[2m2025-10-08T16:16:28.438810Z[0m [34mDEBUG[0m [2mmir2_client[0m[2m:[0m 收到网络事件: Connected
+✅ Connected to server successfully!
+[2m2025-10-08T16:16:28.439083Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m 发送客户端版本验证...
+[2m2025-10-08T16:16:28.464982Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m ✅ 已连接到服务器,ClientVersion包准备完成
+[2m2025-10-08T16:16:28.465241Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m 版本哈希: [153, 215, 186, 15, 67, 123, 223, 170]
+[2m2025-10-08T16:16:28.465396Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m ⚠ 临时跳过客户端版本验证,登录对话框已启用
+[2m2025-10-08T16:16:33.389169Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Network connected event
+[2m2025-10-08T16:16:33.399389Z[0m [34mDEBUG[0m [2mmir2_client[0m[2m:[0m 收到网络事件: Connected
+✅ Connected to server successfully!
+[2m2025-10-08T16:16:33.399758Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m 发送客户端版本验证...
+[2m2025-10-08T16:16:33.418745Z[0m [32m INFO[0m [2mmir2_client::network::network_manager[0m[2m:[0m Sending ClientVersion: hash=99d7ba0f437bdfaa3424b0b60dc72e98
+[2m2025-10-08T16:16:33.418999Z[0m [34mDEBUG[0m [2mmir2_client::network::network_manager[0m[2m:[0m Enqueued packet: mir2_shared::packets::client::connection::ClientVersion
+[2m2025-10-08T16:16:33.425186Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m ✅ 已连接到服务器,ClientVersion包准备完成
+[2m2025-10-08T16:16:33.425436Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m 版本哈希: [153, 215, 186, 15, 67, 123, 223, 170]
+[2m2025-10-08T16:16:33.425593Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m ⚠ 临时跳过客户端版本验证,登录对话框已启用
+[2m2025-10-08T16:16:33.437013Z[0m [34mDEBUG[0m [2mmir2_client::network::network_manager[0m[2m:[0m 📦 Received packet: opcode=0, length=4, payload_len=4
+[2m2025-10-08T16:16:33.437321Z[0m [32m INFO[0m [2mmir2_client::network::game_client[0m[2m:[0m ✅ Connected to server
+[2m2025-10-08T16:16:33.441616Z[0m [34mDEBUG[0m [2mmir2_client[0m[2m:[0m 收到网络事件: Connected
+✅ Connected to server successfully!
+[2m2025-10-08T16:16:33.441959Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m 发送客户端版本验证...
+[2m2025-10-08T16:16:33.467093Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m ✅ 已连接到服务器,ClientVersion包准备完成
+[2m2025-10-08T16:16:33.467337Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m 版本哈希: [153, 215, 186, 15, 67, 123, 223, 170]
+[2m2025-10-08T16:16:33.467490Z[0m [32m INFO[0m [2mmir2_client::scenes::login_scene[0m[2m:[0m ⚠ 临时跳过客户端版本验证,登录对话框已启用
+[2m2025-10-08T16:16:33.468875Z[0m [34mDEBUG[0m [2mmir2_client::network::network_manager[0m[2m:[0m 📦 Received packet: opcode=1, length=5, payload_len=5
+[2m2025-10-08T16:16:33.469165Z[0m [34mDEBUG[0m [2mmir2_client::network::game_client[0m[2m:[0m Client version: result=1
+[2m2025-10-08T16:16:33.483548Z[0m [34mDEBUG[0m [2mmir2_client[0m[2m:[0m 收到网络事件: ClientVersionResponse { result: 1 }
+[2m2025-10-08T16:16:38.445674Z[0m [34mDEBUG[0m [2mmir2_client::network::network[0m[2m:[0m Sent KeepAlive packet to maintain connection
+[2m2025-10-08T16:16:38.466794Z[0m [34mDEBUG[0m [2mmir2_client::network::network_manager[0m[2m:[0m 📦 Received packet: opcode=3, length=12, payload_len=12

@@ -1118,7 +1118,7 @@ impl Scene for LoginScene {
         }
     }
     
-    fn draw(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, _ggez_manager: &mut crate::graphics::GgezManager) {
+    fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, _ggez_manager: &mut crate::graphics::GgezManager) {
         use crate::graphics::libraries::{get_library, LibraryName};
         use ggez::graphics::{Text, TextFragment, DrawParam, Color as GgezColor};
         

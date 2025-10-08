@@ -57,10 +57,14 @@ pub struct MLibrary {
     indices: Vec<ImageIndex>,
     // 缓存已加载的图像信息
     cached_info: HashMap<usize, ImageInfo>,
-    // 纹理缓存 - 避免重复加载
+    // 纹理缓存 - 避免重复加载 (旧版,已废弃)
     texture_cache: HashMap<usize, Arc<TextureHandle>>,
     // 缓存清理时间戳
     cache_timestamps: HashMap<usize, i64>,
+    // ggez Image 缓存 - 用于实际渲染 (对应 C# DXManager.TextureList)
+    ggez_texture_cache: HashMap<usize, ggez::graphics::Image>,
+    // 缓存访问时间 - 用于 LRU 清理
+    ggez_cache_access_time: HashMap<usize, std::time::Instant>,
 }
 
 impl MLibrary {
@@ -101,6 +105,8 @@ impl MLibrary {
             cached_info: HashMap::new(),
             texture_cache: HashMap::new(),
             cache_timestamps: HashMap::new(),
+            ggez_texture_cache: HashMap::new(),
+            ggez_cache_access_time: HashMap::new(),
         })
     }
     
@@ -158,32 +164,60 @@ impl MLibrary {
     pub fn load_image_data(&mut self, index: usize) -> io::Result<(ImageInfo, Vec<u8>)> {
         let info = self.get_image_info(index)?;
         
+        // ✅ C# CheckImage 检查: if (Width == 0 || Height == 0) return false;
+        if info.width == 0 || info.height == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("图像 {} 无效: width={}, height={}", index, info.width, info.height)
+            ));
+        }
+        
+        // ✅ 检查 Length 是否有效
+        if info.length <= 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("图像 {} 无效: length={}", index, info.length)
+            ));
+        }
+        
         let offset = self.indices[index].offset as u64;
         let mut file = File::open(&self.path)?;
         
         // 跳过图像信息头(17字节)
         file.seek(SeekFrom::Start(offset + 17))?;
         
+        // Length 字段就是压缩数据的实际长度 (对应 C# 的 reader.ReadBytes(Length))
+        let compressed_size = info.length as usize;
+        
         // 读取压缩数据
-        let mut compressed = vec![0u8; info.length as usize];
+        let mut compressed = vec![0u8; compressed_size];
         file.read_exact(&mut compressed)?;
         
         // 解压(GZip格式)
         let mut decompressor = GzDecoder::new(&compressed[..]);
         let mut decompressed = Vec::new();
-        decompressor.read_to_end(&mut decompressed)?;
+        match decompressor.read_to_end(&mut decompressed) {
+            Ok(_) => {},
+            Err(e) => {
+                tracing::error!("⚠️ 图像 {} 解压失败: width={}, height={}, length={}, offset={}, error={:?}", 
+                    index, info.width, info.height, info.length, offset, e);
+                return Err(e);
+            }
+        }
         
         // 验证解压后的大小
         let expected_size = (info.width as usize) * (info.height as usize) * 4;
         if decompressed.len() != expected_size {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Decompressed size mismatch: expected {}, got {}",
-                    expected_size,
-                    decompressed.len()
-                )
-            ));
+            // 尝试修正数据大小
+            if decompressed.len() > expected_size {
+                // 数据过长,截断
+                tracing::warn!("⚠️ 图像 {} 数据过长 ({} > {}), 截断", index, decompressed.len(), expected_size);
+                decompressed.truncate(expected_size);
+            } else {
+                // 数据过短,填充透明像素
+                tracing::warn!("⚠️ 图像 {} 数据过短 ({} < {}), 填充", index, decompressed.len(), expected_size);
+                decompressed.resize(expected_size, 0);
+            }
         }
         
         Ok((info, decompressed))
@@ -211,6 +245,106 @@ impl MLibrary {
         }
         
         Ok((info, rgba_data))
+    }
+    
+    // ===== 纹理缓存系统 (对应 C# MImage.CreateTexture + DXManager.TextureList) =====
+    
+    /// 获取或创建缓存的 ggez 纹理
+    /// 
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 898-927
+    /// public unsafe void CreateTexture(BinaryReader reader) {
+    ///     // ... create texture once ...
+    ///     DXManager.TextureList.Add(this); // Cache for reuse
+    /// }
+    /// ```
+    /// 
+    /// # 参数
+    /// - `ctx`: ggez Context
+    /// - `index`: 图像索引
+    /// 
+    /// # 返回
+    /// - `Ok(&Image)`: 缓存的纹理引用
+    /// - `Err`: 加载失败
+    pub fn get_or_create_texture(
+        &mut self,
+        ctx: &mut ggez::Context,
+        index: usize,
+    ) -> io::Result<&ggez::graphics::Image> {
+        use ggez::graphics::{Image, ImageFormat};
+        use std::time::Instant;
+        
+        // 检查缓存
+        if !self.ggez_texture_cache.contains_key(&index) {
+            // 缓存未命中 - 加载并创建纹理
+            let (info, rgba_data) = self.load_rgba_data(index)?;
+            
+            let image = Image::from_pixels(
+                ctx,
+                &rgba_data,
+                ImageFormat::Rgba8UnormSrgb,
+                info.width as u32,
+                info.height as u32,
+            );
+            
+            self.ggez_texture_cache.insert(index, image);
+            tracing::debug!("✅ Texture cached: index={}, size={}x{}", index, info.width, info.height);
+        }
+        
+        // 更新访问时间 (用于 LRU 清理)
+        self.ggez_cache_access_time.insert(index, Instant::now());
+        
+        // 返回缓存的纹理
+        Ok(self.ggez_texture_cache.get(&index).unwrap())
+    }
+    
+    /// 清理长时间未使用的纹理缓存
+    /// 
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // DXManager.cs - CleanUp()
+    /// for (int i = TextureList.Count - 1; i >= 0; i--) {
+    ///     if (CMain.Time >= TextureList[i].CleanTime)
+    ///         TextureList[i].DisposeTexture();
+    /// }
+    /// ```
+    /// 
+    /// # 参数
+    /// - `max_age`: 最大未使用时间 (超过此时间的纹理将被清理)
+    pub fn cleanup_old_textures(&mut self, max_age: std::time::Duration) {
+        use std::time::Instant;
+        
+        let now = Instant::now();
+        let mut removed = 0;
+        
+        self.ggez_texture_cache.retain(|&idx, _| {
+            if let Some(access_time) = self.ggez_cache_access_time.get(&idx) {
+                let age = now.duration_since(*access_time);
+                if age > max_age {
+                    removed += 1;
+                    false // 移除
+                } else {
+                    true // 保留
+                }
+            } else {
+                false // 没有访问记录,移除
+            }
+        });
+        
+        // 同步清理访问时间记录
+        self.ggez_cache_access_time.retain(|idx, _| {
+            self.ggez_texture_cache.contains_key(idx)
+        });
+        
+        if removed > 0 {
+            tracing::info!("🧹 Cleaned {} old textures from cache", removed);
+        }
+    }
+    
+    /// 获取缓存统计信息
+    pub fn get_cache_stats(&self) -> (usize, usize) {
+        (self.ggez_texture_cache.len(), self.indices.len())
     }
     
     // ===== Ggez 渲染函数 =====
@@ -875,8 +1009,22 @@ impl MLibrary {
     /// Check if image index is valid
     /// 
     /// C# equivalent: MLibrary.CheckImage(int index)
-    pub fn check_image(&self, index: i32) -> bool {
-        index >= 0 && (index as usize) < self.indices.len()
+    /// 
+    /// 检查图像是否有效:
+    /// 1. 索引在范围内
+    /// 2. 图像信息已加载且Width/Height不为0
+    pub fn check_image(&mut self, index: i32) -> bool {
+        if index < 0 || (index as usize) >= self.indices.len() {
+            return false;
+        }
+        
+        // 尝试获取图像信息
+        if let Ok(info) = self.get_image_info(index as usize) {
+            // C#检查: if ((mi.Width == 0) || (mi.Height == 0)) return false;
+            info.width > 0 && info.height > 0
+        } else {
+            false
+        }
     }
     
     /// Get image bounds for drawing

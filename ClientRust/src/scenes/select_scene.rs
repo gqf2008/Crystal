@@ -788,7 +788,7 @@ impl Scene for SelectScene {
         }
     }
     
-    fn draw(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &mut crate::graphics::GgezManager) {
+    fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &mut crate::graphics::GgezManager) {
         use ggez::graphics::{DrawParam, Color, PxScale, Text};
         
         // 1. 绘制背景 Prguse_65

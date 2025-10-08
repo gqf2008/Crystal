@@ -409,6 +409,245 @@ pub fn load_all_libraries() -> std::io::Result<()> {
     Ok(())
 }
 
+// ==================== MapLibs 地图资源库 ====================
+//
+// 对应 C# Libraries.MapLibs[400] 数组
+// C# 原版位置: Client/MirGraphics/MLibrary.cs line 41, 120-178
+
+/// MapLibs 管理器
+/// 
+/// C# equivalent: `public static readonly MLibrary[] MapLibs = new MLibrary[400];`
+/// 
+/// 索引分布:
+/// - 0-99: WemadeMir2 (Tiles, SmTiles, Objects, Objects2-27, Objects_32bit)
+/// - 100-199: ShandaMir2 (Tiles1-9, SmTiles1-9, Objects1-30, AniTiles1)
+/// - 200-299: WemadeMir3 (各地形: 空/wood/sand/snow/forest)
+/// - 300-399: ShandaMir3 (各地形)
+pub struct MapLibs {
+    /// 地图库数组 (稀疏数组,大部分索引为空)
+    libraries: HashMap<i32, Arc<Mutex<MLibrary>>>,
+    
+    /// 数据根目录
+    data_path: String,
+    
+    /// 已加载数量
+    loaded_count: usize,
+}
+
+impl MapLibs {
+    /// 创建新的 MapLibs 管理器
+    fn new() -> Self {
+        Self {
+            libraries: HashMap::new(),
+            data_path: "Data".to_string(),
+            loaded_count: 0,
+        }
+    }
+    
+    /// 设置数据根目录
+    pub fn set_data_path(&mut self, path: impl Into<String>) {
+        self.data_path = path.into();
+    }
+    
+    /// 加载单个地图库
+    /// 
+    /// C# equivalent: `MapLibs[index] = new MLibrary(path);`
+    pub fn load(&mut self, index: i32, path: impl AsRef<Path>) -> std::io::Result<()> {
+        let path_str = path.as_ref().display().to_string();
+        
+        match MLibrary::open(path) {
+            Ok(lib) => {
+                let count = lib.count();
+                self.libraries.insert(index, Arc::new(Mutex::new(lib)));
+                self.loaded_count += 1;
+                tracing::debug!("✓ MapLibs[{}]: {} ({} 张)", index, path_str, count);
+                Ok(())
+            }
+            Err(e) => {
+                tracing::debug!("✗ MapLibs[{}]: {} ({})", index, path_str, e);
+                Err(e)
+            }
+        }
+    }
+    
+    /// 获取地图库引用
+    /// 
+    /// C# equivalent: `MapLibs[index]`
+    pub fn get(&self, index: i32) -> Option<Arc<Mutex<MLibrary>>> {
+        self.libraries.get(&index).cloned()
+    }
+    
+    /// 检查索引是否已加载
+    pub fn is_loaded(&self, index: i32) -> bool {
+        self.libraries.contains_key(&index)
+    }
+    
+    /// 加载所有 WemadeMir2 地图库
+    /// 
+    /// C# equivalent: 对应 MLibrary.cs line 122-129
+    pub fn load_wemade_mir2(&mut self) -> usize {
+        let base_path = format!("{}/Map/WemadeMir2", self.data_path);
+        let mut loaded = 0;
+        
+        // MapLibs[0] = Tiles
+        if self.load(0, format!("{}/Tiles", base_path)).is_ok() {
+            loaded += 1;
+        }
+        
+        // MapLibs[1] = SmTiles
+        if self.load(1, format!("{}/Smtiles", base_path)).is_ok() {
+            loaded += 1;
+        }
+        
+        // MapLibs[2] = Objects
+        if self.load(2, format!("{}/Objects", base_path)).is_ok() {
+            loaded += 1;
+        }
+        
+        // MapLibs[3-29] = Objects2-27
+        for i in 2..28 {
+            if self.load(i + 1, format!("{}/Objects{}", base_path, i)).is_ok() {
+                loaded += 1;
+            }
+        }
+        
+        // MapLibs[90] = Objects_32bit
+        if self.load(90, format!("{}/Objects_32bit", base_path)).is_ok() {
+            loaded += 1;
+        }
+        
+        tracing::info!("✓ WemadeMir2: 加载了 {} 个地图库", loaded);
+        loaded
+    }
+    
+    /// 加载所有 ShandaMir2 地图库
+    /// 
+    /// C# equivalent: 对应 MLibrary.cs line 132-147
+    pub fn load_shanda_mir2(&mut self) -> usize {
+        let base_path = format!("{}/Map/ShandaMir2", self.data_path);
+        let mut loaded = 0;
+        
+        // MapLibs[100] = Tiles
+        if self.load(100, format!("{}/Tiles", base_path)).is_ok() {
+            loaded += 1;
+        }
+        
+        // MapLibs[101-109] = Tiles2-9
+        for i in 1..10 {
+            if self.load(100 + i, format!("{}/Tiles{}", base_path, i + 1)).is_ok() {
+                loaded += 1;
+            }
+        }
+        
+        // MapLibs[110] = SmTiles
+        if self.load(110, format!("{}/SmTiles", base_path)).is_ok() {
+            loaded += 1;
+        }
+        
+        // MapLibs[111-119] = SmTiles2-9
+        for i in 1..10 {
+            if self.load(110 + i, format!("{}/SmTiles{}", base_path, i + 1)).is_ok() {
+                loaded += 1;
+            }
+        }
+        
+        // MapLibs[120] = Objects
+        if self.load(120, format!("{}/Objects", base_path)).is_ok() {
+            loaded += 1;
+        }
+        
+        // MapLibs[121-150] = Objects2-30
+        for i in 1..31 {
+            if self.load(120 + i, format!("{}/Objects{}", base_path, i + 1)).is_ok() {
+                loaded += 1;
+            }
+        }
+        
+        // MapLibs[190] = AniTiles1
+        if self.load(190, format!("{}/AniTiles1", base_path)).is_ok() {
+            loaded += 1;
+        }
+        
+        tracing::info!("✓ ShandaMir2: 加载了 {} 个地图库", loaded);
+        loaded
+    }
+    
+    /// 加载所有地图库
+    /// 
+    /// C# equivalent: Libraries 静态构造函数中的 MapLibs 初始化
+    pub fn load_all(&mut self) -> usize {
+        tracing::info!("开始加载地图资源库...");
+        
+        let wemade = self.load_wemade_mir2();
+        let shanda = self.load_shanda_mir2();
+        
+        let total = wemade + shanda;
+        tracing::info!("✓ 地图库加载完成: {} 个 (WemadeMir2: {}, ShandaMir2: {})", 
+            total, wemade, shanda);
+        
+        total
+    }
+    
+    /// 获取已加载的地图库数量
+    pub fn count(&self) -> usize {
+        self.loaded_count
+    }
+    
+    /// 获取所有已加载的地图库
+    /// 
+    /// 用于纹理缓存清理
+    pub fn get_all_loaded(&self) -> Vec<Arc<Mutex<MLibrary>>> {
+        self.libraries.values()
+            .map(Arc::clone)
+            .collect()
+    }
+    
+    /// 清空所有地图库
+    pub fn clear(&mut self) {
+        self.libraries.clear();
+        self.loaded_count = 0;
+    }
+}
+
+/// 全局 MapLibs 单例
+/// 
+/// C# equivalent: `public static readonly MLibrary[] MapLibs`
+pub static MAP_LIBS: Lazy<Mutex<MapLibs>> = Lazy::new(|| {
+    Mutex::new(MapLibs::new())
+});
+
+/// 便捷函数: 设置 MapLibs 数据路径
+pub fn set_maplibs_data_path(path: impl Into<String>) {
+    MAP_LIBS.lock().unwrap().set_data_path(path);
+}
+
+/// 便捷函数: 加载所有地图库
+pub fn load_all_map_libraries() -> usize {
+    MAP_LIBS.lock().unwrap().load_all()
+}
+
+/// 便捷函数: 获取地图库
+pub fn get_map_library(index: i32) -> Option<Arc<Mutex<MLibrary>>> {
+    MAP_LIBS.lock().unwrap().get(index)
+}
+
+/// 便捷函数: 获取所有已加载的地图库
+/// 
+/// 用于纹理缓存清理
+pub fn get_all_map_libraries() -> Vec<Arc<Mutex<MLibrary>>> {
+    MAP_LIBS.lock().unwrap().get_all_loaded()
+}
+
+/// 便捷函数: 检查地图库是否已加载
+pub fn is_map_library_loaded(index: i32) -> bool {
+    MAP_LIBS.lock().unwrap().is_loaded(index)
+}
+
+/// 便捷函数: 获取已加载的地图库数量
+pub fn map_libraries_count() -> usize {
+    MAP_LIBS.lock().unwrap().count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

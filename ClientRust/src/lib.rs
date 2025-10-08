@@ -22,6 +22,7 @@ pub mod resources;         // ✅ 不依赖 winit/wgpu
 // pub mod utils;             // ✅ 不依赖 winit/wgpu
 pub mod scenes;            // ⚠️ 部分使用 winit 类型(Scene trait)
 pub mod ui; // UI模块
+pub mod controls;          // ⚠️ 部分使用 winit 类型(Control trait)
 
 // 重新导出常用类型
 pub use error::{ClientError, ClientResult};

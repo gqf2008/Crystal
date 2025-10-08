@@ -8,6 +8,7 @@ pub mod select_scene;
 pub mod game_scene;
 pub mod dialogs;
 
+
 // Re-export scene types
 pub use state::ClientState;
 pub use scene_manager::{SceneManager, SharedSceneManager, create_shared_scene_manager};
@@ -88,7 +89,7 @@ pub trait Scene {
     fn update(&mut self, delta_time: f32);
     
     /// Render scene (ggez版本)
-    fn draw(&self, _ctx: &mut ggez::Context, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &mut crate::graphics::GgezManager) {
+    fn draw(&mut self, _ctx: &mut ggez::Context, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &mut crate::graphics::GgezManager) {
         // Default: do nothing
     }
     

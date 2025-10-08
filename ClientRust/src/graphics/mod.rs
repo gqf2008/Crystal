@@ -36,4 +36,19 @@ pub use ggez_manager_simple::{Canvas, DrawParam, Color, Rect, Text, Mesh, DrawMo
 pub use mlibrary::{MLibrary, TextureManager, ImageInfo, TextureKey};
 // pub use particle_engine::{ParticleEngine, ParticleType, ParticleImageInfo, get_time};
 // pub use particles::Particle;
-pub use libraries::{LibraryName, load_library, get_library, set_data_path, load_core_libraries, load_all_libraries};
+pub use libraries::{
+    LibraryName, 
+    load_library, 
+    get_library, 
+    set_data_path, 
+    load_core_libraries, 
+    load_all_libraries,
+    // MapLibs 相关导出 (对应 C# Libraries.MapLibs)
+    MapLibs,
+    set_maplibs_data_path,
+    load_all_map_libraries,
+    get_map_library,
+    get_all_map_libraries,
+    is_map_library_loaded,
+    map_libraries_count,
+};
