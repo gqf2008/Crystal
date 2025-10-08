@@ -43,6 +43,9 @@ pub struct SelectScene {
     // Network
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
     
+    // Scene transition
+    pub pending_scene_change: Option<SceneType>,
+    
     // UI state
     hovered_button: Option<BottomButton>,
     pressed_button: Option<BottomButton>,
@@ -85,6 +88,7 @@ impl SelectScene {
             delete_character_dialog: None,
             credits_dialog: None,
             command_tx: None,
+            pending_scene_change: None,
             hovered_button: None,
             pressed_button: None,
             character_animation_frame: 0,
@@ -141,6 +145,9 @@ impl SelectScene {
     /// }
     /// ```
     pub fn start_game(&mut self) {
+        tracing::info!("🎮 start_game() called - selected_index={}, characters.len()={}", 
+            self.selected_index, self.characters.len());
+        
         if self.selected_index >= 0 && (self.selected_index as usize) < self.characters.len() {
             let character = &self.characters[self.selected_index as usize];
             tracing::info!("🎮 Starting game with character: {} (index={})", character.name, character.index);
@@ -149,18 +156,20 @@ impl SelectScene {
             if let Some(command_tx) = &self.command_tx {
                 use crate::network::NetworkCommand;
                 
+                tracing::info!("📡 Network command channel available, sending StartGame...");
                 if command_tx.send(NetworkCommand::StartGame {
                     character_index: character.index,
                 }).is_ok() {
-                    tracing::info!("📤 Sent StartGame command for character index {}", character.index);
+                    tracing::info!("✅ Sent StartGame command for character index {}", character.index);
                 } else {
-                    tracing::error!("❌ Failed to send StartGame command");
+                    tracing::error!("❌ Failed to send StartGame command (channel send error)");
                 }
             } else {
-                tracing::error!("❌ Network command channel not available");
+                tracing::error!("❌ Network command channel not available (command_tx is None)");
             }
         } else {
-            tracing::warn!("⚠️ Cannot start game: No character selected");
+            tracing::warn!("⚠️ Cannot start game: No character selected (selected_index={}, len={})", 
+                self.selected_index, self.characters.len());
         }
     }
     
@@ -779,7 +788,7 @@ impl Scene for SelectScene {
         }
     }
     
-    fn draw(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager) {
+    fn draw(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &mut crate::graphics::GgezManager) {
         use ggez::graphics::{DrawParam, Color, PxScale, Text};
         
         // 1. 绘制背景 Prguse_65
@@ -1141,13 +1150,22 @@ impl Scene for SelectScene {
                 
                 // TODO: 显示成功消息框 "Your character was created successfully."
             }
+            GameEvent::PlayerSpawned { player } => {
+                // 🎉 玩家已生成,切换到游戏场景!
+                // 注意: 某些服务器实现不发送 StartGameResponse,而是直接发送 PlayerSpawned
+                tracing::info!("🎮 玩家已生成: {} (Lv.{}, HP:{}/{}, MP:{}/{})", 
+                    player.name, player.level, player.health, player.max_health, player.mana, player.max_mana);
+                tracing::info!("📍 位置: ({}, {})", 
+                    player.location.x, player.location.y);
+                tracing::info!("✅ 切换到游戏场景...");
+                self.pending_scene_change = Some(SceneType::Game);
+            }
             GameEvent::StartGameResponse { result } => {
                 tracing::info!("🎮 进入游戏响应: result={}", result);
                 if *result == 0 {
-                    // Success - switch to game scene
-                    tracing::info!("✅ 进入游戏成功! 准备切换到游戏场景...");
-                    // TODO: 切换到GameScene
-                    // return Some(SceneType::Game);
+                    // Success - queue scene transition to game
+                    tracing::info!("✅ 进入游戏成功! 切换到游戏场景...");
+                    self.pending_scene_change = Some(SceneType::Game);
                 } else {
                     // Error
                     let error_msg = match *result {
@@ -1296,10 +1314,12 @@ impl Scene for SelectScene {
             }
             
             // 检查底部按钮点击
+            tracing::debug!("Checking bottom button click - hovered_button={:?}", self.hovered_button);
             if let Some(clicked_button) = self.hovered_button {
+                tracing::info!("✅ Bottom button clicked: {:?}", clicked_button);
                 match clicked_button {
                     BottomButton::StartGame => {
-                        tracing::info!("Start Game clicked");
+                        tracing::info!("🎮 Start Game clicked");
                         self.start_game();
                     }
                     BottomButton::NewCharacter => {

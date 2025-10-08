@@ -19,11 +19,11 @@ pub struct MapInformation {
     pub minimap: u16,
     pub big_map: u16,
     pub lights: u8,
-    pub location_x: u32,
-    pub location_y: u32,
-    pub direction: u8,
+    pub lightning: bool,
+    pub fire: bool,
     pub map_dark_light: u8,
     pub music: u16,
+    pub weather_particles: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -113,11 +113,15 @@ impl Packet for MapInformation {
         let minimap = reader.read_u16::<LittleEndian>()?;
         let big_map = reader.read_u16::<LittleEndian>()?;
         let lights = reader.read_u8()?;
-        let location_x = reader.read_u32::<LittleEndian>()?;
-        let location_y = reader.read_u32::<LittleEndian>()?;
-        let direction = reader.read_u8()?;
+        
+        // 读取 Lightning 和 Fire 布尔标志位 (打包在一个字节中)
+        let bools = reader.read_u8()?;
+        let lightning = (bools & 0x01) == 0x01;
+        let fire = (bools & 0x02) == 0x02;
+        
         let map_dark_light = reader.read_u8()?;
         let music = reader.read_u16::<LittleEndian>()?;
+        let weather_particles = reader.read_u16::<LittleEndian>()?;
 
         Ok(MapInformation {
             map_index,
@@ -126,11 +130,11 @@ impl Packet for MapInformation {
             minimap,
             big_map,
             lights,
-            location_x,
-            location_y,
-            direction,
+            lightning,
+            fire,
             map_dark_light,
             music,
+            weather_particles,
         })
     }
 
@@ -141,11 +145,16 @@ impl Packet for MapInformation {
         writer.write_u16::<LittleEndian>(self.minimap)?;
         writer.write_u16::<LittleEndian>(self.big_map)?;
         writer.write_u8(self.lights)?;
-        writer.write_u32::<LittleEndian>(self.location_x)?;
-        writer.write_u32::<LittleEndian>(self.location_y)?;
-        writer.write_u8(self.direction)?;
+        
+        // 写入 Lightning 和 Fire 布尔标志位 (打包在一个字节中)
+        let mut bools: u8 = 0;
+        if self.lightning { bools |= 0x01; }
+        if self.fire { bools |= 0x02; }
+        writer.write_u8(bools)?;
+        
         writer.write_u8(self.map_dark_light)?;
         writer.write_u16::<LittleEndian>(self.music)?;
+        writer.write_u16::<LittleEndian>(self.weather_particles)?;
         Ok(())
     }
 }

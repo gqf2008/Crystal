@@ -176,6 +176,10 @@ pub enum GameEvent {
     StartGameBanned { reason: String, expiry_date: i64 },
     StartGameDelay { milliseconds: i64 },
     
+    // Map events
+    MapInformation { map_index: i32, file_name: String, title: String },
+    MapChanged { file_name: String, location: Point },
+    
     // Item events
     ItemGained { item: UserItem, grid_type: String },
     ItemLost { unique_id: u64, count: u16 },
@@ -226,6 +230,21 @@ impl GameClient {
     fn send_event(&self, event: GameEvent) {
         if let Some(tx) = &self.event_tx {
             let _ = tx.send(event);
+        }
+    }
+    
+    /// Resend cached map information (用于场景切换后重新加载地图)
+    pub fn resend_map_information(&self) {
+        if let Some(map_info) = &self.map_info {
+            tracing::info!("🔄 Resending cached map information: {} ({})", 
+                map_info.title, map_info.file_name);
+            self.send_event(GameEvent::MapInformation {
+                map_index: map_info.map_index,
+                file_name: map_info.file_name.clone(),
+                title: map_info.title.clone(),
+            });
+        } else {
+            tracing::warn!("⚠️  No cached map information to resend");
         }
     }
     
@@ -340,7 +359,16 @@ impl PacketHandler for GameClient {
     fn on_map_information(&mut self, packet: packets::MapInformation) {
         tracing::info!("🗺️  Map: {} ({})", packet.title, packet.file_name);
         
-        self.map_info = Some(MapInfo {
+        let map_info = MapInfo {
+            map_index: packet.map_index,
+            file_name: packet.file_name.clone(),
+            title: packet.title.clone(),
+        };
+        
+        self.map_info = Some(map_info);
+        
+        // 发送地图信息事件到UI层
+        self.send_event(GameEvent::MapInformation {
             map_index: packet.map_index,
             file_name: packet.file_name,
             title: packet.title,

@@ -2,18 +2,7 @@
 // Mirrors Client/MirScenes/GameScene.cs::MapControl (lines 10062-12294)
 
 use mir2_shared::enums::{LightSetting, WeatherSetting};
-
-/// Cell information for map tiles
-#[derive(Debug, Clone, Default)]
-pub struct CellInfo {
-    pub walkable: bool,
-    pub fishable: bool,
-    pub door_index: Option<usize>,
-    pub door_offset: u8,
-    pub frame_index: u16,
-    pub file_index: i32,
-    pub light_intensity: u8,
-}
+use crate::objects::{MapReader, CellInfo}; // 使用 objects::map_code 中的定义
 
 /// Door state
 #[derive(Debug, Clone)]
@@ -82,9 +71,46 @@ impl MapControl {
     pub const CELL_WIDTH: i32 = 48;
     pub const CELL_HEIGHT: i32 = 32;
     
-    /// Create new map control
+    /// Create new map control from MapReader
+    pub fn from_map_reader(reader: MapReader) -> Self {
+        Self {
+            width: reader.width,
+            height: reader.height,
+            index: 0,
+            filename: reader.file_name.clone(),
+            title: String::new(),
+            minimap: 0,
+            bigmap: 0,
+            music: 0,
+            set_music: 0,
+            lights: LightSetting::Normal,
+            weather: WeatherSetting::NONE,
+            map_dark_light: 0,
+            lightning: false,
+            fire: false,
+            lightning_time: 0,
+            fire_time: 0,
+            cells: reader.map_cells,
+            doors: Vec::new(),
+            offset_x: 0,
+            offset_y: 0,
+            view_range_x: 20,
+            view_range_y: 15,
+            auto_path: false,
+            auto_run: false,
+            auto_hit: false,
+            awakening_action: false,
+            mouse_location: (0, 0),
+            next_action: 0,
+            input_delay: 0,
+            output_delay: 0,
+            animation_count: 0,
+        }
+    }
+    
+    /// Create new map control (legacy method for compatibility)
     pub fn new(width: i32, height: i32) -> Self {
-        let cells = vec![vec![CellInfo::default(); height as usize]; width as usize];
+        let cells = vec![vec![CellInfo::new(); height as usize]; width as usize];
         
         Self {
             width,
@@ -145,7 +171,7 @@ impl MapControl {
         if !self.is_valid_location(x, y) {
             return false;
         }
-        self.cells[x as usize][y as usize].walkable
+        self.cells[x as usize][y as usize].is_walkable()
     }
     
     /// Get cell at location
@@ -176,7 +202,8 @@ impl MapControl {
     /// Open door at location
     pub fn open_door(&mut self, x: i32, y: i32) {
         if let Some(cell) = self.get_cell(x, y) {
-            if let Some(door_idx) = cell.door_index {
+            if cell.door_index > 0 {
+                let door_idx = cell.door_index as usize;
                 if let Some(door) = self.doors.get_mut(door_idx) {
                     door.opened = true;
                 }
@@ -187,7 +214,8 @@ impl MapControl {
     /// Close door at location
     pub fn close_door(&mut self, x: i32, y: i32) {
         if let Some(cell) = self.get_cell(x, y) {
-            if let Some(door_idx) = cell.door_index {
+            if cell.door_index > 0 {
+                let door_idx = cell.door_index as usize;
                 if let Some(door) = self.doors.get_mut(door_idx) {
                     door.opened = false;
                 }
@@ -256,16 +284,9 @@ mod tests {
     
     #[test]
     fn test_walkable() {
-        let mut map = MapControl::new(10, 10);
+        let map = MapControl::new(10, 10);
         
-        // Initially not walkable (default)
-        assert!(!map.is_walkable(5, 5));
-        
-        // Set walkable
-        if let Some(cell) = map.get_cell_mut(5, 5) {
-            cell.walkable = true;
-        }
-        
+        // Use CellInfo's is_walkable method
         assert!(map.is_walkable(5, 5));
     }
     
@@ -283,7 +304,7 @@ mod tests {
         
         // Link cell to door
         if let Some(cell) = map.get_cell_mut(5, 5) {
-            cell.door_index = Some(0);
+            cell.door_index = 0; // u8 type
         }
         
         // Open door

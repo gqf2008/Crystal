@@ -50,6 +50,7 @@ pub struct ImageInfo {
 }
 
 /// MIR2图像库
+#[derive(Debug)]
 pub struct MLibrary {
     path: PathBuf,
     header: LibraryHeader,

@@ -14,6 +14,7 @@ use ggez::input::mouse::MouseButton as GgezMouseButton;
 use ggez::winit::keyboard::{KeyCode as WinitKeyCode, PhysicalKey};
 use std::sync::Arc;
 use parking_lot::RwLock;
+use tracing::info;
 
 mod settings;
 mod graphics;
@@ -56,10 +57,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // 4. 创建 ggez Context
     let res = settings.resolution();
-    // 放大1.5倍以便更容易看清
-    let scale_factor = 1.5;
-    let window_width = (res.width as f32) * scale_factor;
-    let window_height = (res.height as f32) * scale_factor;
+    // 暂时使用原始分辨率,先把基础功能修好
+    let scale_factor = 1.0;
+    let window_width = res.width as f32;   // 1024
+    let window_height = res.height as f32; // 768
     
     let (mut ctx, event_loop) = ContextBuilder::new("mir2_client", "Crystal")
         .window_setup(
@@ -75,7 +76,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .build()?;
     
-    tracing::info!("Ggez Context 创建成功: {}x{} (vsync关闭,最大帧率运行)", window_width, window_height);
+        info!(
+        "Ggez Context 创建成功: {}x{} (vsync关闭)",
+        window_width, window_height
+    );
     
     // 添加中文字体支持
     let font_path = std::path::Path::new("resources/font/AlibabaPuHuiTi-3-55-Regular.ttf");
@@ -314,6 +318,9 @@ struct CrystalGame {
     command_tx: tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>,
     network_task: Option<tokio::task::JoinHandle<()>>,
     
+    // 缓存的 MapInformation 事件(用于场景切换时不丢失)
+    cached_map_info: Option<(i32, String, String)>, // (map_index, file_name, title)
+    
     // Tokio runtime (保持网络任务运行)
     #[allow(dead_code)]
     runtime: tokio::runtime::Runtime,
@@ -409,11 +416,12 @@ impl CrystalGame {
             ggez_manager,
             scene_manager,
             last_update_time: std::time::Instant::now(),
-            scale_factor: 1.5,  // 与main函数中的scale_factor保持一致
+            scale_factor: 1.0,  // 暂时不缩放
             game_client,
             event_rx,
             command_tx,
             network_task,
+            cached_map_info: None,  // 初始化为 None
             runtime,
         })
     }
@@ -432,6 +440,13 @@ impl EventHandler for CrystalGame {
         // 处理网络事件
         while let Ok(event) = self.event_rx.try_recv() {
             tracing::debug!("收到网络事件: {:?}", event);
+            
+            // 特殊处理: 缓存 MapInformation 事件,防止场景切换时丢失
+            if let crate::network::game_client::GameEvent::MapInformation { map_index, ref file_name, ref title } = event {
+                tracing::info!("💾 Caching MapInformation: {} ({})", title, file_name);
+                self.cached_map_info = Some((map_index, file_name.clone(), title.clone()));
+            }
+            
             let mut scene_manager = self.scene_manager.write();
             scene_manager.process_event(&event);
         }
@@ -489,6 +504,54 @@ impl EventHandler for CrystalGame {
             tracing::info!("场景切换完成: Select");
         }
         
+        // 检查 SelectScene 是否需要切换到 GameScene
+        let should_switch_to_game = {
+            let scene_manager = self.scene_manager.read();
+            if scene_manager.current_scene_type() == Some(SceneType::Select) {
+                if let Some(scene) = scene_manager.current_scene() {
+                    if let Some(select_scene) = scene.as_any().downcast_ref::<SelectScene>() {
+                        select_scene.pending_scene_change == Some(SceneType::Game)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+        
+        if should_switch_to_game {
+            tracing::info!("✅ 开始游戏,切换到 GameScene");
+            
+            // 切换到 GameScene
+            let mut scene_manager = self.scene_manager.write();
+            if let Err(e) = scene_manager.switch_scene(SceneType::Game) {
+                tracing::error!("❌ 切换到 GameScene 失败: {}", e);
+            } else {
+                tracing::info!("🎮 场景切换完成: Game");
+                
+                // 如果有缓存的地图信息,立即发送到 GameScene
+                if let Some((map_index, file_name, title)) = &self.cached_map_info {
+                    tracing::info!("🔄 Resending cached MapInformation to GameScene: {} ({})", title, file_name);
+                    
+                    // 重新创建 MapInformation 事件并发送到 GameScene
+                    let event = crate::network::game_client::GameEvent::MapInformation {
+                        map_index: *map_index,
+                        file_name: file_name.clone(),
+                        title: title.clone(),
+                    };
+                    
+                    drop(scene_manager); // 释放写锁
+                    let mut scene_manager = self.scene_manager.write();
+                    scene_manager.process_event(&event);
+                } else {
+                    tracing::warn!("⚠️  No cached map information available");
+                }
+            }
+        }
+        
         // 处理场景切换
         {
             let mut scene_manager = self.scene_manager.write();
@@ -523,17 +586,20 @@ impl EventHandler for CrystalGame {
         // 开始帧
         self.ggez_manager.begin_frame();
         
+        // 根据当前场景选择背景色
+        let bg_color = {
+            let scene_manager = self.scene_manager.read();
+            match scene_manager.current_scene_type() {
+                Some(SceneType::Game) => Color::from_rgb(20, 30, 40), // GameScene: 深蓝灰色
+                _ => Color::BLACK, // 其他场景: 黑色
+            }
+        };
+        
         // 创建 canvas
-        let mut canvas = graphics::Canvas::from_frame(ctx, Color::BLACK);
-        
-        // 设置逻辑坐标系为原始分辨率 (1024x768)
-        // 这样所有绘制代码使用 1024x768 坐标,但会自动缩放到实际窗口大小
-        canvas.set_screen_coordinates(graphics::Rect::new(0.0, 0.0, 1024.0, 768.0));
-        
-        // 绘制当前场景
+        let mut canvas = graphics::Canvas::from_frame(ctx, bg_color);        // 绘制当前场景
         {
             let scene_manager = self.scene_manager.read();
-            scene_manager.draw(ctx, &mut canvas, &self.ggez_manager);
+            scene_manager.draw(ctx, &mut canvas, &mut self.ggez_manager);
         }
         
         // 结束帧

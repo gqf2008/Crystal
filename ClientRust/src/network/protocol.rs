@@ -591,7 +591,9 @@ pub fn dispatch_packet<H: PacketHandler>(
         
         // 地图相关
         x if x == ServerPacketIds::MapInformation as u16 => {
+            tracing::debug!("📥 Received MapInformation packet (opcode=17)");
             let packet = packets::MapInformation::read_body(&mut cursor)?;
+            tracing::debug!("📥 MapInformation parsed: {} ({})", packet.title, packet.file_name);
             handler.on_map_information(packet);
         }
         x if x == ServerPacketIds::NewMapInfo as u16 => {

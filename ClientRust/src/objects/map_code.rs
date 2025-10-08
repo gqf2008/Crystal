@@ -130,7 +130,7 @@ pub struct MapReader {
     pub width: i32,
     pub height: i32,
     pub map_cells: Vec<Vec<CellInfo>>, // 使用 Vec<Vec> 而非 C# 的二维数组
-    file_name: String,
+    pub file_name: String,
     bytes: Vec<u8>,
 }
 
@@ -288,30 +288,54 @@ impl MapReader {
         let bytes = &self.bytes;
         let mut offset = 21;
         
-        self.width = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+        // Type1 uses XOR encryption for dimensions
+        let w = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
         offset += 2;
-        self.height = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+        let xor = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+        offset += 2;
+        let h = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+        
+        // Decrypt dimensions
+        self.width = (w ^ xor) as i32;
+        self.height = (h ^ xor) as i32;
         offset = 54;
         
+        // Validate dimensions to prevent capacity overflow
+        if self.width <= 0 || self.height <= 0 || self.width > 10000 || self.height > 10000 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Invalid map dimensions: {}x{}", self.width, self.height),
+            ));
+        }
+        
+        tracing::debug!("📐 Map dimensions: {}x{} (XOR key: 0x{:04X})", self.width, self.height, xor);
         self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
         
         for x in 0..self.width as usize {
             for y in 0..self.height as usize {
                 let cell = &mut self.map_cells[x][y];
                 
-                cell.back_index = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+                cell.back_index = 0;
+                cell.middle_index = 1;
+                
+                // BackImage: 4 bytes XOR 0xAA38AA38
+                let back_raw = i32::from_le_bytes([
+                    bytes[offset],
+                    bytes[offset + 1],
+                    bytes[offset + 2],
+                    bytes[offset + 3],
+                ]);
+                cell.back_image = back_raw ^ 0xAA38AA38u32 as i32;
+                offset += 4;
+                
+                // MiddleImage: 2 bytes XOR xor
+                let middle_raw = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+                cell.middle_image = (middle_raw ^ xor) as i32;
                 offset += 2;
                 
-                cell.middle_index = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
-                offset += 2;
-                
-                cell.back_image = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
-                offset += 2;
-                
-                cell.middle_image = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
-                offset += 2;
-                
-                cell.front_image = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+                // FrontImage: 2 bytes XOR xor
+                let front_raw = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+                cell.front_image = (front_raw ^ xor) as i32;
                 offset += 2;
                 
                 cell.door_index = bytes[offset] & 0x7F;
@@ -324,6 +348,17 @@ impl MapReader {
                 offset += 1;
                 
                 cell.front_animation_tick = bytes[offset];
+                offset += 1;
+                
+                // FrontIndex (C# code: Bytes[++offSet] + 2)
+                let front_idx = bytes[offset] as i16 + 2;
+                cell.front_index = if front_idx == 102 { 90 } else if front_idx >= 255 { 2 } else { front_idx };
+                offset += 1;
+                
+                cell.light = bytes[offset];
+                offset += 1;
+                
+                // Skip unknown byte
                 offset += 1;
             }
         }

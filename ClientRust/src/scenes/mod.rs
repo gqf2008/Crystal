@@ -14,7 +14,8 @@ pub use scene_manager::{SceneManager, SharedSceneManager, create_shared_scene_ma
 pub use login_scene::{LoginScene, BanInfo};
 pub use select_scene::SelectScene;
 pub use game_scene::GameScene;
-pub use game_scene::map_control::{MapControl, CellInfo, Door};
+pub use game_scene::map_control::{MapControl, Door};
+pub use crate::objects::CellInfo; // 从 objects::map_code 导出
 
 // Re-export enums from SharedRust
 pub use mir2_shared::enums::{LightSetting, WeatherSetting};
@@ -87,7 +88,7 @@ pub trait Scene {
     fn update(&mut self, delta_time: f32);
     
     /// Render scene (ggez版本)
-    fn draw(&self, _ctx: &mut ggez::Context, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &crate::graphics::GgezManager) {
+    fn draw(&self, _ctx: &mut ggez::Context, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &mut crate::graphics::GgezManager) {
         // Default: do nothing
     }
     
