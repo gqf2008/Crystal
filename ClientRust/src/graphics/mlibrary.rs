@@ -211,11 +211,12 @@ impl MLibrary {
             // 尝试修正数据大小
             if decompressed.len() > expected_size {
                 // 数据过长,截断
-                tracing::warn!("⚠️ 图像 {} 数据过长 ({} > {}), 截断", index, decompressed.len(), expected_size);
+                // 降级到DEBUG,避免每帧重复警告
+                tracing::debug!("⚠️ 图像 {} 数据过长 ({} > {}), 截断", index, decompressed.len(), expected_size);
                 decompressed.truncate(expected_size);
             } else {
                 // 数据过短,填充透明像素
-                tracing::warn!("⚠️ 图像 {} 数据过短 ({} < {}), 填充", index, decompressed.len(), expected_size);
+                tracing::debug!("⚠️ 图像 {} 数据过短 ({} < {}), 填充", index, decompressed.len(), expected_size);
                 decompressed.resize(expected_size, 0);
             }
         }

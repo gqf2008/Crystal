@@ -684,6 +684,10 @@ impl GameScene {
     /// 
     /// 清理所有 MapLibs 中超过指定时间未使用的纹理
     fn cleanup_texture_cache(&mut self) {
+        // TODO: 实现纹理缓存清理
+        // 新的架构中,纹理由 ggez 自动管理
+        // 暂时禁用此功能
+        /*
         use crate::graphics::get_all_map_libraries;
         use std::time::Duration;
         
@@ -709,6 +713,7 @@ impl GameScene {
         if total_cleaned > 0 {
             tracing::info!("🧹 Texture cache cleanup complete: removed {} old textures", total_cleaned);
         }
+        */
     }
     
     // ==================== 网络协议处理 ====================

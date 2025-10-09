@@ -51,10 +51,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = ClientSettings::load(false, None)?;
     tracing::info!("配置加载完成: {:?}", settings.launcher.server_name);
     
-    // 3. 设置数据路径 - 使用 Data 目录(包含 .lib 文件)
-    let data_path = "Data".to_string();
-    graphics::libraries::set_data_path(data_path);
-    tracing::info!("数据路径设置为: Data/");
+    // 3.5 初始化图像库系统 (包括 MapLibs[0-399])
+    tracing::info!("=== 初始化图像库系统 ===");
+    if let Err(e) = graphics::initialize_all_libraries("Data") {
+        tracing::error!("图像库初始化失败: {}", e);
+        tracing::warn!("将继续运行,但部分图像可能无法显示");
+    }
     
     // 4. 创建 ggez Context
     let res = settings.resolution();
@@ -385,12 +387,7 @@ impl CrystalGame {
             println!("✓ 所有图形库加载成功!");
         }
         
-        // 加载地图库 (Map.lib)
-        println!("📦 正在加载地图库...");
-        tracing::info!("加载地图库...");
-        let map_libs_loaded = graphics::libraries::load_all_map_libraries();
-        println!("✓ 地图库加载完成: {} 个", map_libs_loaded);
-        tracing::info!("✓ 地图库加载完成: {} 个", map_libs_loaded);
+        // 注意: 地图库 (MapLibs) 已在 initialize_all_libraries() 中加载
         
         // 创建场景管理器
         let mut scene_manager = SceneManager::new();

@@ -276,8 +276,11 @@ impl MapReader {
     
     // ========================================================================
     // Map Type 0 - 老格式 (12 bytes per cell)
+    // C# Reference: Client/MirObjects/MapCode.cs lines 224-268
     // ========================================================================
     fn load_map_type_0(&mut self) -> io::Result<()> {
+        tracing::info!("🗺️  加载地图格式: Type 0 (老格式, 12 bytes/cell)");
+        
         let bytes = &self.bytes;
         let mut offset = 0;
         
@@ -286,6 +289,10 @@ impl MapReader {
         self.height = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
         offset = 52; // 跳过头部
         
+        tracing::info!("📐 地图尺寸: {}x{}", self.width, self.height);
+        
+        // C#: MapCells = new CellInfo[Width, Height]
+        // Rust: map_cells[x][y] where outer vec has Width elements, inner has Height
         self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
         
         for x in 0..self.width as usize {
@@ -316,15 +323,22 @@ impl MapReader {
                 cell.front_animation_tick = bytes[offset];
                 offset += 1;
                 
+                // C# reads FrontIndex here
+                cell.front_index = (bytes[offset] as i16) + 2;
+                offset += 1;
+                
                 cell.light = bytes[offset];
                 offset += 1;
                 
-                // Light 和 Unknown 的特殊处理
-                if (cell.light & 0x0F) > 0 {
-                    cell.light = cell.light + 150;
+                // C#: BackImage flag processing
+                if (cell.back_image & 0x8000) != 0 {
+                    cell.back_image = (cell.back_image & 0x7FFF) | 0x20000000;
                 }
-                cell.unknown = bytes[offset];
-                offset += 1;
+                
+                // C#: Fishing cell detection
+                if cell.light >= 100 && cell.light <= 119 {
+                    cell.fishing_cell = true;
+                }
             }
         }
         
@@ -335,6 +349,8 @@ impl MapReader {
     // Map Type 1 - Map 2010 Ver 1.0 (14 bytes per cell)
     // ========================================================================
     fn load_map_type_1(&mut self) -> io::Result<()> {
+        tracing::info!("🗺️  加载地图格式: Type 1 (Map 2010 Ver 1.0, 14 bytes/cell)");
+        
         let bytes = &self.bytes;
         let mut offset = 21;
         
@@ -402,14 +418,19 @@ impl MapReader {
                 
                 // FrontIndex (C# code: Bytes[++offSet] + 2)
                 let front_idx = bytes[offset] as i16 + 2;
-                cell.front_index = if front_idx == 102 { 90 } else if front_idx >= 255 { 2 } else { front_idx };
+                cell.front_index = if front_idx == 102 { 90 } else if front_idx >= 255 { -1 } else { front_idx };
                 offset += 1;
                 
                 cell.light = bytes[offset];
                 offset += 1;
                 
-                // Skip unknown byte
+                cell.unknown = bytes[offset];
                 offset += 1;
+                
+                // C#: Fishing cell detection
+                if cell.light >= 100 && cell.light <= 119 {
+                    cell.fishing_cell = true;
+                }
             }
         }
         
@@ -417,7 +438,8 @@ impl MapReader {
     }
     
     // ========================================================================
-    // Map Type 2 - 旧 Shanda 格式 (10 bytes per cell)
+    // Map Type 2 - 旧 Shanda 格式 (14 bytes per cell)
+    // C# Reference: Client/MirObjects/MapCode.cs lines 320-362
     // ========================================================================
     fn load_map_type_2(&mut self) -> io::Result<()> {
         let bytes = &self.bytes;
@@ -426,7 +448,7 @@ impl MapReader {
         self.width = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
         offset += 2;
         self.height = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
-        offset = 28;
+        offset = 52; // C# starts at 52, not 28!
         
         self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
         
@@ -434,58 +456,7 @@ impl MapReader {
             for y in 0..self.height as usize {
                 let cell = &mut self.map_cells[x][y];
                 
-                cell.back_index = 0;
-                cell.middle_index = 0;
-                cell.back_image = (bytes[offset] as i32) | ((bytes[offset + 1] as i32 & 0x0F) << 8);
-                offset += 2;
-                
-                cell.middle_image = (bytes[offset] as i32) | ((bytes[offset + 1] as i32 & 0x0F) << 8);
-                offset += 2;
-                
-                cell.front_image = (bytes[offset] as i32) | ((bytes[offset + 1] as i32 & 0x0F) << 8);
-                offset += 2;
-                
-                cell.door_index = bytes[offset];
-                offset += 1;
-                
-                cell.door_offset = bytes[offset];
-                offset += 1;
-                
-                cell.front_animation_frame = bytes[offset];
-                offset += 1;
-                
-                cell.front_animation_tick = bytes[offset];
-                offset += 1;
-            }
-        }
-        
-        Ok(())
-    }
-    
-    // ========================================================================
-    // Map Type 3 - Shanda 2012 格式 (14 bytes per cell)
-    // ========================================================================
-    fn load_map_type_3(&mut self) -> io::Result<()> {
-        let bytes = &self.bytes;
-        let mut offset = 0;
-        
-        self.width = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
-        offset += 2;
-        self.height = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
-        offset = 20;
-        
-        self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
-        
-        for x in 0..self.width as usize {
-            for y in 0..self.height as usize {
-                let cell = &mut self.map_cells[x][y];
-                
-                cell.back_index = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
-                offset += 2;
-                
-                cell.middle_index = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
-                offset += 2;
-                
+                // Read images (2 bytes each, standard i16)
                 cell.back_image = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
                 offset += 2;
                 
@@ -506,6 +477,110 @@ impl MapReader {
                 
                 cell.front_animation_tick = bytes[offset];
                 offset += 1;
+                
+                // C# reads indices here (+ 120, + 100, + 110)
+                cell.front_index = (bytes[offset] as i16) + 120;
+                offset += 1;
+                
+                cell.light = bytes[offset];
+                offset += 1;
+                
+                cell.back_index = (bytes[offset] as i16) + 100;
+                offset += 1;
+                
+                cell.middle_index = (bytes[offset] as i16) + 110;
+                offset += 1;
+                
+                // C#: BackImage flag processing
+                if (cell.back_image & 0x8000) != 0 {
+                    cell.back_image = (cell.back_image & 0x7FFF) | 0x20000000;
+                }
+                
+                // C#: Fishing cell detection
+                if cell.light >= 100 && cell.light <= 119 {
+                    cell.fishing_cell = true;
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    // ========================================================================
+    // Map Type 3 - Shanda 2012 格式 (36 bytes per cell)
+    // C# Reference: Client/MirObjects/MapCode.cs lines 364-407
+    // ========================================================================
+    fn load_map_type_3(&mut self) -> io::Result<()> {
+        let bytes = &self.bytes;
+        let mut offset = 0;
+        
+        self.width = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+        offset += 2;
+        self.height = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+        offset = 52; // C# starts at 52, not 20!
+        
+        self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
+        
+        for x in 0..self.width as usize {
+            for y in 0..self.height as usize {
+                let cell = &mut self.map_cells[x][y];
+                
+                // Read images first (not indices)
+                cell.back_image = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+                offset += 2;
+                
+                cell.middle_image = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+                offset += 2;
+                
+                cell.front_image = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+                offset += 2;
+                
+                cell.door_index = bytes[offset] & 0x7F;
+                offset += 1;
+                
+                cell.door_offset = bytes[offset];
+                offset += 1;
+                
+                cell.front_animation_frame = bytes[offset];
+                offset += 1;
+                
+                cell.front_animation_tick = bytes[offset];
+                offset += 1;
+                
+                // C# reads indices here (+ 120, + 100, + 110)
+                cell.front_index = (bytes[offset] as i16) + 120;
+                offset += 1;
+                
+                cell.light = bytes[offset];
+                offset += 1;
+                
+                cell.back_index = (bytes[offset] as i16) + 100;
+                offset += 1;
+                
+                cell.middle_index = (bytes[offset] as i16) + 110;
+                offset += 1;
+                
+                // TileAnimationImage (2 bytes)
+                cell.tile_animation_image = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+                offset += 7; // 2 bytes from tileanimframe + 5 bytes unknown
+                
+                // TileAnimationFrames (1 byte)
+                cell.tile_animation_frames = bytes[offset];
+                offset += 1;
+                
+                // TileAnimationOffset (2 bytes)
+                cell.tile_animation_offset = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+                offset += 14; // Skip light/blending options
+                
+                // C#: BackImage flag processing
+                if (cell.back_image & 0x8000) != 0 {
+                    cell.back_image = (cell.back_image & 0x7FFF) | 0x20000000;
+                }
+                
+                // C#: Fishing cell detection
+                if cell.light >= 100 && cell.light <= 119 {
+                    cell.fishing_cell = true;
+                }
             }
         }
         

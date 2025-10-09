@@ -15,8 +15,23 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use super::mlibrary::MLibrary;
+
+// 字符串填充辅助 trait
+trait StringPadding {
+    fn pad_to_width_with_char(&self, width: usize, ch: char) -> String;
+}
+
+impl StringPadding for String {
+    fn pad_to_width_with_char(&self, width: usize, ch: char) -> String {
+        if self.len() >= width {
+            self.clone()
+        } else {
+            format!("{}{}", ch.to_string().repeat(width - self.len()), self)
+        }
+    }
+}
 
 /// 库名称枚举
 /// 
@@ -131,14 +146,123 @@ impl std::fmt::Display for LibraryName {
     }
 }
 
+/// 数组库类型枚举
+/// 
+/// 对应 C# Libraries 类中的所有数组字段
+/// C# Reference: Client/MirGraphics/MLibrary.cs lines 44-70
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LibraryArray {
+    // 地图瓦片 (C#: MapLibs[400])
+    MapLibs,
+    
+    // 战士/法师/道士 (C# CArmours, CWeapons, etc.)
+    CArmours,      // 护甲
+    CWeapons,      // 武器
+    CWeaponEffect, // 武器特效
+    CHair,         // 发型
+    CHumEffect,    // 人物特效
+    
+    // 刺客 (C# AArmours, AWeaponsL, etc.)
+    AArmours,      // 刺客护甲
+    AWeaponsL,     // 刺客左手武器
+    AWeaponsR,     // 刺客右手武器
+    AHair,         // 刺客发型
+    AHumEffect,    // 刺客特效
+    
+    // 弓箭手 (C# ARArmours, ARWeapons, etc.)
+    ARArmours,     // 弓箭手护甲
+    ARWeapons,     // 弓箭手武器
+    ARWeaponsS,    // 弓箭手特殊武器
+    ARHair,        // 弓箭手发型
+    ARHumEffect,   // 弓箭手特效
+    
+    // 生物和对象 (C# Monsters, Gates, etc.)
+    Monsters,      // 怪物 (1000+)
+    Gates,         // 门
+    Flags,         // 旗帜
+    Siege,         // 攻城器械
+    Mounts,        // 坐骑
+    NPCs,          // NPC
+    Fishing,       // 钓鱼
+    Pets,          // 宠物
+    
+    // 变身系统 (C# Transform, TransformMounts, etc.)
+    Transform,              // 变身
+    TransformMounts,        // 变身坐骑
+    TransformEffect,        // 变身特效
+    TransformWeaponEffect,  // 变身武器特效
+    
+    // 怪物装备 (C# MArmours, MWeapons, etc.)
+    MArmours,      // 怪物护甲
+    MWeapons,      // 怪物武器
+    MWeaponEffect, // 怪物武器特效
+    
+    // 其他 (C# Title, Deco, Wings)
+    Title,         // 称号
+    Deco,          // 装饰
+    Wings,         // 翅膀
+}
+
+impl LibraryArray {
+    /// 获取数组库的名称（用于日志）
+    pub fn name(&self) -> &'static str {
+        match self {
+            LibraryArray::MapLibs => "MapLibs",
+            LibraryArray::CArmours => "CArmours",
+            LibraryArray::CWeapons => "CWeapons",
+            LibraryArray::CWeaponEffect => "CWeaponEffect",
+            LibraryArray::CHair => "CHair",
+            LibraryArray::CHumEffect => "CHumEffect",
+            LibraryArray::AArmours => "AArmours",
+            LibraryArray::AWeaponsL => "AWeaponsL",
+            LibraryArray::AWeaponsR => "AWeaponsR",
+            LibraryArray::AHair => "AHair",
+            LibraryArray::AHumEffect => "AHumEffect",
+            LibraryArray::ARArmours => "ARArmours",
+            LibraryArray::ARWeapons => "ARWeapons",
+            LibraryArray::ARWeaponsS => "ARWeaponsS",
+            LibraryArray::ARHair => "ARHair",
+            LibraryArray::ARHumEffect => "ARHumEffect",
+            LibraryArray::Monsters => "Monsters",
+            LibraryArray::Gates => "Gates",
+            LibraryArray::Flags => "Flags",
+            LibraryArray::Siege => "Siege",
+            LibraryArray::Mounts => "Mounts",
+            LibraryArray::NPCs => "NPCs",
+            LibraryArray::Fishing => "Fishing",
+            LibraryArray::Pets => "Pets",
+            LibraryArray::Transform => "Transform",
+            LibraryArray::TransformMounts => "TransformMounts",
+            LibraryArray::TransformEffect => "TransformEffect",
+            LibraryArray::TransformWeaponEffect => "TransformWeaponEffect",
+            LibraryArray::MArmours => "MArmours",
+            LibraryArray::MWeapons => "MWeapons",
+            LibraryArray::MWeaponEffect => "MWeaponEffect",
+            LibraryArray::Title => "Title",
+            LibraryArray::Deco => "Deco",
+            LibraryArray::Wings => "Wings",
+        }
+    }
+}
+
+impl std::fmt::Display for LibraryArray {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
 /// 全局库管理器
 /// 
 /// C# equivalent: Libraries static class
 /// 
 /// C# 使用静态类 + 静态字段，Rust 使用 Lazy 单例
 pub struct Libraries {
-    /// 已加载的库
+    /// 单体库 (C# 的静态字段)
     libraries: HashMap<LibraryName, Arc<Mutex<MLibrary>>>,
+    
+    /// 数组库 (C# 的静态数组字段)
+    /// 每个数组元素可能为 None (文件不存在)
+    array_libraries: HashMap<LibraryArray, Vec<Option<Arc<Mutex<MLibrary>>>>>,
     
     /// 数据根目录
     data_path: String,
@@ -154,6 +278,7 @@ impl Libraries {
     fn new() -> Self {
         Self {
             libraries: HashMap::new(),
+            array_libraries: HashMap::new(),
             data_path: "Data".to_string(),
             loaded: false,
             count: 0,
@@ -164,6 +289,102 @@ impl Libraries {
     /// 设置数据根目录
     pub fn set_data_path(&mut self, path: impl Into<String>) {
         self.data_path = path.into();
+    }
+    
+    // ===== 数组库管理方法 =====
+    
+    /// 初始化数组库（分配空间）
+    /// 
+    /// C# equivalent: `public static readonly MLibrary[] MapLibs = new MLibrary[400];`
+    /// 
+    /// # 参数
+    /// - `array_type`: 数组库类型
+    /// - `size`: 数组大小
+    pub fn init_array(&mut self, array_type: LibraryArray, size: usize) {
+        tracing::debug!("初始化数组库 {} [0..{}]", array_type, size);
+        self.array_libraries.insert(array_type, vec![None; size]);
+    }
+    
+    /// 加载库到数组指定位置
+    /// 
+    /// C# equivalent: `MapLibs[index] = new MLibrary(path);`
+    /// 
+    /// # 参数
+    /// - `array_type`: 数组库类型
+    /// - `index`: 数组索引
+    /// - `path`: 库文件路径
+    pub fn load_to_array(
+        &mut self,
+        array_type: LibraryArray,
+        index: usize,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<()> {
+        let array = self.array_libraries.get_mut(&array_type)
+            .ok_or_else(|| std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("数组库 {} 未初始化", array_type)
+            ))?;
+        
+        if index >= array.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("索引 {} 超出范围 [0..{})", index, array.len())
+            ));
+        }
+        
+        let path_ref = path.as_ref();
+        match MLibrary::open(path_ref) {
+            Ok(lib) => {
+                let count = lib.count();
+                tracing::debug!("✓ {}[{}] = {} ({} 张图像)", 
+                    array_type, index, path_ref.display(), count);
+                array[index] = Some(Arc::new(Mutex::new(lib)));
+                self.progress += 1;
+                Ok(())
+            }
+            Err(e) => {
+                // 文件不存在不是错误，只记录警告
+                tracing::warn!("✗ {}[{}] = {} 失败: {}", 
+                    array_type, index, path_ref.display(), e);
+                array[index] = None;
+                Ok(()) // 返回 Ok，允许继续加载其他库
+            }
+        }
+    }
+    
+    /// 从数组库获取指定索引的库
+    /// 
+    /// C# equivalent: `Libraries.MapLibs[index]`
+    /// 
+    /// # 参数
+    /// - `array_type`: 数组库类型
+    /// - `index`: 数组索引
+    /// 
+    /// # 返回
+    /// - `Some(Arc<Mutex<MLibrary>>)`: 库引用
+    /// - `None`: 索引无效或库未加载
+    pub fn get_from_array(
+        &self,
+        array_type: LibraryArray,
+        index: usize,
+    ) -> Option<Arc<Mutex<MLibrary>>> {
+        self.array_libraries.get(&array_type)?
+            .get(index)?
+            .clone()
+    }
+    
+    /// 获取数组库的大小
+    pub fn get_array_size(&self, array_type: LibraryArray) -> usize {
+        self.array_libraries.get(&array_type)
+            .map(|arr| arr.len())
+            .unwrap_or(0)
+    }
+    
+    /// 获取数组库中已加载库的数量
+    pub fn get_array_loaded_count(&self, array_type: LibraryArray) -> usize {
+        self.array_libraries.get(&array_type)
+            .map(|arr| arr.iter().filter(|lib| lib.is_some()).count())
+            .unwrap_or(0)
     }
     
     /// 加载单个库
@@ -239,6 +460,513 @@ impl Libraries {
     pub fn loaded_count(&self) -> usize {
         self.libraries.len()
     }
+    
+    // ===== MapLibs 专用初始化方法 =====
+    
+    /// 初始化所有 MapLibs[0-399]
+    /// 
+    /// C# Reference: Client/MirGraphics/MLibrary.cs lines 122-201
+    /// 
+    /// MapLibs 索引分配:
+    /// - 0-99: WeMade Mir2
+    /// - 100-199: Shanda Mir2
+    /// - 200-299: WeMade Mir3
+    /// - 300-399: Shanda Mir3
+    pub fn init_map_libraries(&mut self) -> std::io::Result<()> {
+        tracing::info!("初始化 MapLibs[0-399]...");
+        
+        // 初始化数组
+        self.init_array(LibraryArray::MapLibs, 400);
+        
+        // WeMade Mir2 (0-99)
+        self.init_wemade_mir2_maps()?;
+        
+        // Shanda Mir2 (100-199)
+        self.init_shanda_mir2_maps()?;
+        
+        // WeMade Mir3 (200-299)
+        self.init_wemade_mir3_maps()?;
+        
+        // Shanda Mir3 (300-399)
+        self.init_shanda_mir3_maps()?;
+        
+        let loaded = self.get_array_loaded_count(LibraryArray::MapLibs);
+        tracing::info!("✓ MapLibs 初始化完成: {}/400 个库已加载", loaded);
+        
+        Ok(())
+    }
+    
+    /// 初始化 WeMade Mir2 地图库 (0-99)
+    /// C# Reference: lines 122-131
+    fn init_wemade_mir2_maps(&mut self) -> std::io::Result<()> {
+        let base = format!("{}/Map/WemadeMir2", self.data_path);
+        
+        // MapLibs[0] = Tiles
+        self.load_to_array(LibraryArray::MapLibs, 0, format!("{}/Tiles", base))?;
+        
+        // MapLibs[1] = Smtiles
+        self.load_to_array(LibraryArray::MapLibs, 1, format!("{}/Smtiles", base))?;
+        
+        // MapLibs[2] = Objects
+        self.load_to_array(LibraryArray::MapLibs, 2, format!("{}/Objects", base))?;
+        
+        // MapLibs[3-29] = Objects2-Objects28
+        for i in 2..28 {
+            self.load_to_array(
+                LibraryArray::MapLibs, 
+                i + 1, 
+                format!("{}/Objects{}", base, i)
+            )?;
+        }
+        
+        // MapLibs[90] = Objects_32bit
+        self.load_to_array(LibraryArray::MapLibs, 90, format!("{}/Objects_32bit", base))?;
+        
+        Ok(())
+    }
+    
+    /// 初始化 Shanda Mir2 地图库 (100-199)
+    /// C# Reference: lines 133-151
+    fn init_shanda_mir2_maps(&mut self) -> std::io::Result<()> {
+        let base = format!("{}/Map/ShandaMir2", self.data_path);
+        
+        // MapLibs[100] = Tiles
+        self.load_to_array(LibraryArray::MapLibs, 100, format!("{}/Tiles", base))?;
+        
+        // MapLibs[101-109] = Tiles2-Tiles10
+        for i in 1..10 {
+            self.load_to_array(
+                LibraryArray::MapLibs, 
+                100 + i, 
+                format!("{}/Tiles{}", base, i + 1)
+            )?;
+        }
+        
+        // MapLibs[110] = SmTiles
+        self.load_to_array(LibraryArray::MapLibs, 110, format!("{}/SmTiles", base))?;
+        
+        // MapLibs[111-119] = SmTiles2-SmTiles10
+        for i in 1..10 {
+            self.load_to_array(
+                LibraryArray::MapLibs, 
+                110 + i, 
+                format!("{}/SmTiles{}", base, i + 1)
+            )?;
+        }
+        
+        // MapLibs[120] = Objects
+        self.load_to_array(LibraryArray::MapLibs, 120, format!("{}/Objects", base))?;
+        
+        // MapLibs[121-150] = Objects2-Objects31
+        for i in 1..31 {
+            self.load_to_array(
+                LibraryArray::MapLibs, 
+                120 + i, 
+                format!("{}/Objects{}", base, i + 1)
+            )?;
+        }
+        
+        // MapLibs[190] = AniTiles1
+        self.load_to_array(LibraryArray::MapLibs, 190, format!("{}/AniTiles1", base))?;
+        
+        Ok(())
+    }
+    
+    /// 初始化 WeMade Mir3 地图库 (200-299)
+    /// C# Reference: lines 152-168
+    fn init_wemade_mir3_maps(&mut self) -> std::io::Result<()> {
+        let base = format!("{}/Map/WemadeMir3", self.data_path);
+        let map_states = ["", "wood/", "sand/", "snow/", "forest/"];
+        
+        for (state_idx, state) in map_states.iter().enumerate() {
+            let state_base = format!("{}/{}", base, state);
+            let offset = 200 + (state_idx * 15);
+            
+            // 每个状态15个库
+            let tiles = [
+                "Tilesc", "Tiles30c", "Tiles5c", "Smtilesc",
+                "Housesc", "Cliffsc", "Dungeonsc", "Innersc",
+                "Furnituresc", "Wallsc", "smObjectsc", "Animationsc",
+                "Object1c", "Object2c"
+            ];
+            
+            for (i, tile_name) in tiles.iter().enumerate() {
+                self.load_to_array(
+                    LibraryArray::MapLibs,
+                    offset + i,
+                    format!("{}{}", state_base, tile_name)
+                )?;
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// 初始化 Shanda Mir3 地图库 (300-399)
+    /// C# Reference: lines 169-184
+    fn init_shanda_mir3_maps(&mut self) -> std::io::Result<()> {
+        let base = format!("{}/Map/ShandaMir3", self.data_path);
+        let map_states = ["", "wood", "sand", "snow", "forest"];
+        
+        for (state_idx, state) in map_states.iter().enumerate() {
+            let offset = 300 + (state_idx * 15);
+            
+            // 每个状态15个库（注意文件名格式与 WeMade 不同）
+            let tiles = [
+                "Tilesc", "Tiles30c", "Tiles5c", "Smtilesc",
+                "Housesc", "Cliffsc", "Dungeonsc", "Innersc",
+                "Furnituresc", "Wallsc", "smObjectsc", "Animationsc",
+                "Object1c", "Object2c"
+            ];
+            
+            for (i, tile_name) in tiles.iter().enumerate() {
+                let full_name = if state.is_empty() {
+                    tile_name.to_string()
+                } else {
+                    format!("{}{}", tile_name, state)
+                };
+                
+                self.load_to_array(
+                    LibraryArray::MapLibs,
+                    offset + i,
+                    format!("{}/{}", base, full_name)
+                )?;
+            }
+        }
+        
+        Ok(())
+    }
+    
+    // ==================== 其他数组库初始化 ====================
+    
+    /// 通用方法: 从目录自动扫描并初始化数组库
+    /// 
+    /// C# Reference: InitLibrary() (line 197-212)
+    /// 
+    /// # Arguments
+    /// * `array_type` - 数组库类型
+    /// * `dir_path` - 目录路径 (相对于 data_path)
+    /// * `padding` - 文件名数字填充 (如 "000" 表示3位填充)
+    /// * `suffix` - 文件名后缀 (可选)
+    pub fn init_library_from_directory(
+        &mut self,
+        array_type: LibraryArray,
+        dir_path: impl AsRef<Path>,
+        padding: &str,
+        suffix: &str,
+    ) -> std::io::Result<()> {
+        let full_path = PathBuf::from(&self.data_path).join(dir_path.as_ref());
+        
+        // 如果目录不存在,创建空数组
+        if !full_path.exists() {
+            tracing::warn!("✗ 目录不存在,创建空数组: {:?} - {:?}", array_type, full_path);
+            self.init_array(array_type, 0);
+            return Ok(());
+        }
+        
+        // 扫描目录中的所有 .lib 文件
+        let pattern = format!("*{}.lib", suffix);
+        let mut lib_files: Vec<_> = std::fs::read_dir(&full_path)?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                let path = entry.path();
+                path.is_file() && 
+                path.extension().and_then(|s| s.to_str()) == Some("lib")
+            })
+            .collect();
+        
+        if lib_files.is_empty() {
+            tracing::warn!("✗ 目录中无 .lib 文件: {:?}", full_path);
+            self.init_array(array_type, 0);
+            return Ok(());
+        }
+        
+        // 提取文件名中的数字并排序
+        lib_files.sort_by_key(|entry| {
+            let filename = entry.file_name();
+            let name_str = filename.to_string_lossy();
+            
+            // 提取数字部分
+            name_str
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<usize>()
+                .unwrap_or(0)
+        });
+        
+        // 找到最大的索引号
+        let last_file = lib_files.last().unwrap();
+        let last_filename = last_file.file_name();
+        let last_name = last_filename.to_string_lossy();
+        let max_index = last_name
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse::<usize>()
+            .unwrap_or(0);
+        
+        let array_size = max_index + 1;
+        
+        tracing::info!(
+            "📚 初始化 {:?}: 扫描到 {} 个文件, 数组大小 {}",
+            array_type, lib_files.len(), array_size
+        );
+        
+        // 初始化数组
+        self.init_array(array_type, array_size);
+        
+        // 加载所有文件
+        let mut loaded_count = 0;
+        for i in 0..array_size {
+            let filename = format!("{}{}.lib", i.to_string().pad_to_width_with_char(padding.len(), '0'), suffix);
+            let file_path = full_path.join(&filename);
+            
+            if file_path.exists() {
+                match self.load_to_array(array_type, i, &file_path) {
+                    Ok(_) => {
+                        loaded_count += 1;
+                    }
+                    Err(e) => {
+                        tracing::debug!("  ✗ 加载失败 [{}]: {} - {}", i, filename, e);
+                    }
+                }
+            }
+        }
+        
+        tracing::info!("✓ {:?} 初始化完成: {}/{} 个库已加载", array_type, loaded_count, array_size);
+        
+        Ok(())
+    }
+    
+    /// 初始化所有游戏内容数组库
+    /// 
+    /// C# Reference: LoadGameLibraries() (line 241-289)
+    pub fn init_game_libraries(&mut self) -> std::io::Result<()> {
+        tracing::info!("🎮 开始初始化游戏内容库...");
+        
+        // Monsters (怪物)
+        self.init_library_from_directory(
+            LibraryArray::Monsters,
+            "Monster",
+            "000",
+            ""
+        )?;
+        
+        // Gates (传送门)
+        self.init_library_from_directory(
+            LibraryArray::Gates,
+            "Gate",
+            "00",
+            ""
+        )?;
+        
+        // NPCs
+        self.init_library_from_directory(
+            LibraryArray::NPCs,
+            "NPC",
+            "00",
+            ""
+        )?;
+        
+        // Mounts (坐骑)
+        self.init_library_from_directory(
+            LibraryArray::Mounts,
+            "Mount",
+            "00",
+            ""
+        )?;
+        
+        // Fishing (钓鱼)
+        self.init_library_from_directory(
+            LibraryArray::Fishing,
+            "Fishing",
+            "00",
+            ""
+        )?;
+        
+        // Pets (宠物)
+        self.init_library_from_directory(
+            LibraryArray::Pets,
+            "Pets",
+            "00",
+            ""
+        )?;
+        
+        // Transform (变身)
+        self.init_library_from_directory(
+            LibraryArray::Transform,
+            "Transform",
+            "00",
+            ""
+        )?;
+        
+        // Transform Mounts (坐骑变身)
+        self.init_library_from_directory(
+            LibraryArray::TransformMounts,
+            "TransformMount",
+            "00",
+            ""
+        )?;
+        
+        // Transform Effect (变身特效)
+        self.init_library_from_directory(
+            LibraryArray::TransformEffect,
+            "TransformEffect",
+            "00",
+            ""
+        )?;
+        
+        // Transform Weapon Effect (武器变身特效)
+        self.init_library_from_directory(
+            LibraryArray::TransformWeaponEffect,
+            "TransformWeaponEffect",
+            "00",
+            ""
+        )?;
+        
+        // Character Armours (人物盔甲 - 8方向)
+        self.init_library_from_directory(
+            LibraryArray::CArmours,
+            "CArmour",
+            "000",
+            ""
+        )?;
+        
+        // Character Weapons (人物武器 - 8方向)
+        self.init_library_from_directory(
+            LibraryArray::CWeapons,
+            "CWeapon",
+            "000",
+            ""
+        )?;
+        
+        // Character Hair (人物发型)
+        self.init_library_from_directory(
+            LibraryArray::CHair,
+            "CHair",
+            "000",
+            ""
+        )?;
+        
+        // Character Weapon Effects (人物武器特效)
+        self.init_library_from_directory(
+            LibraryArray::CWeaponEffect,
+            "CWeaponEffect",
+            "00",
+            ""
+        )?;
+        
+        // Assistant Armours (助手/英雄盔甲 - 3方向)
+        self.init_library_from_directory(
+            LibraryArray::AArmours,
+            "AArmour",
+            "000",
+            ""
+        )?;
+        
+        // Assistant Weapons Left (助手/英雄左手武器 - 3方向)
+        self.init_library_from_directory(
+            LibraryArray::AWeaponsL,
+            "AWeaponL",
+            "000",
+            ""
+        )?;
+        
+        // Assistant Weapons Right (助手/英雄右手武器 - 3方向)
+        self.init_library_from_directory(
+            LibraryArray::AWeaponsR,
+            "AWeaponR",
+            "000",
+            ""
+        )?;
+        
+        // Assistant Hair (助手/英雄发型)
+        self.init_library_from_directory(
+            LibraryArray::AHair,
+            "AHair",
+            "000",
+            ""
+        )?;
+        
+        // Assistant Riding Armours (助手/英雄骑乘盔甲)
+        self.init_library_from_directory(
+            LibraryArray::ARArmours,
+            "ARArmour",
+            "000",
+            ""
+        )?;
+        
+        // Assistant Riding Weapons (助手/英雄骑乘武器)
+        self.init_library_from_directory(
+            LibraryArray::ARWeapons,
+            "ARWeapon",
+            "000",
+            ""
+        )?;
+        
+        // Assistant Riding Hair (助手/英雄骑乘发型)
+        self.init_library_from_directory(
+            LibraryArray::ARHair,
+            "ARHair",
+            "000",
+            ""
+        )?;
+        
+        // Title (称号)
+        self.init_library_from_directory(
+            LibraryArray::Title,
+            "Title",
+            "000",
+            ""
+        )?;
+        
+        // Deco (装饰)
+        self.init_library_from_directory(
+            LibraryArray::Deco,
+            "Deco",
+            "00",
+            ""
+        )?;
+        
+        // Monster Armours (怪物盔甲)
+        self.init_library_from_directory(
+            LibraryArray::MArmours,
+            "MArmour",
+            "000",
+            ""
+        )?;
+        
+        // Monster Weapons (怪物武器)
+        self.init_library_from_directory(
+            LibraryArray::MWeapons,
+            "MWeapon",
+            "000",
+            ""
+        )?;
+        
+        // Monster Weapon Effects (怪物武器特效)
+        self.init_library_from_directory(
+            LibraryArray::MWeaponEffect,
+            "MWeaponEffect",
+            "00",
+            ""
+        )?;
+        
+        // Wings (翅膀)
+        self.init_library_from_directory(
+            LibraryArray::Wings,
+            "Wing",
+            "00",
+            ""
+        )?;
+        
+        tracing::info!("✓ 游戏内容库初始化完成");
+        
+        Ok(())
+    }
+    
+    // get_array_loaded_count 和 get_array_size 已在上面定义 (第368-380行附近)
 }
 
 /// 全局库管理器单例
@@ -247,6 +975,78 @@ impl Libraries {
 pub static LIBRARIES: Lazy<Mutex<Libraries>> = Lazy::new(|| {
     Mutex::new(Libraries::new())
 });
+
+// ===== 便捷访问函数 =====
+
+/// 便捷函数: 获取单体库
+pub fn get_library(name: LibraryName) -> Option<Arc<Mutex<MLibrary>>> {
+    LIBRARIES.lock().unwrap().get(name)
+}
+
+/// 便捷函数: 获取数组库中的某个元素
+pub fn get_library_from_array(array_type: LibraryArray, index: usize) -> Option<Arc<Mutex<MLibrary>>> {
+    LIBRARIES.lock().unwrap().get_from_array(array_type, index)
+}
+
+/// 便捷函数: 获取 MapLibs[index]
+/// 
+/// 这是最常用的访问方式，专门为地图渲染优化
+pub fn get_map_library(index: i16) -> Option<Arc<Mutex<MLibrary>>> {
+    if index < 0 || index >= 400 {
+        return None;
+    }
+    get_library_from_array(LibraryArray::MapLibs, index as usize)
+}
+
+/// 便捷函数: 初始化所有库（包括 MapLibs）
+/// 
+/// C# equivalent: Libraries static constructor
+/// 
+/// 这是推荐的初始化方式，一次性完成所有准备工作
+pub fn initialize_all_libraries(data_path: &str) -> std::io::Result<()> {
+    let mut libs = LIBRARIES.lock().unwrap();
+    libs.set_data_path(data_path);
+    
+    tracing::info!("=== 开始初始化所有库 ===");
+    
+    // 1. 初始化 MapLibs[0-399]
+    libs.init_map_libraries()?;
+    
+    // 2. 加载核心 UI 库 (同步)
+    let core_libs = [
+        LibraryName::ChrSel,
+        LibraryName::Prguse,
+        LibraryName::Prguse2,
+        LibraryName::Prguse3,
+        LibraryName::Title,
+    ];
+    
+    for lib_name in core_libs {
+        if let Err(e) = libs.load(lib_name) {
+            tracing::warn!("核心库 {} 加载失败: {}", lib_name, e);
+        }
+    }
+    
+    // 3. 初始化游戏内容数组库 (异步/延迟加载)
+    // 这些库在后台加载，不会阻塞主线程
+    if let Err(e) = libs.init_game_libraries() {
+        tracing::warn!("游戏内容库初始化部分失败: {}", e);
+    }
+    
+    tracing::info!("=== 库初始化完成 ===");
+    tracing::info!("  - MapLibs: {}/{} 个已加载", 
+        libs.get_array_loaded_count(LibraryArray::MapLibs),
+        libs.get_array_size(LibraryArray::MapLibs));
+    tracing::info!("  - Monsters: {}/{} 个已加载",
+        libs.get_array_loaded_count(LibraryArray::Monsters),
+        libs.get_array_size(LibraryArray::Monsters));
+    tracing::info!("  - NPCs: {}/{} 个已加载",
+        libs.get_array_loaded_count(LibraryArray::NPCs),
+        libs.get_array_size(LibraryArray::NPCs));
+    tracing::info!("  - 单体库: {} 个已加载", libs.loaded_count());
+    
+    Ok(())
+}
 
 /// 便捷函数: 初始化数据路径
 pub fn set_data_path(path: impl Into<String>) {
@@ -263,10 +1063,7 @@ pub fn load_library_custom(name: LibraryName, path: impl AsRef<Path>) -> std::io
     LIBRARIES.lock().unwrap().load_custom(name, path)
 }
 
-/// 便捷函数: 获取库
-pub fn get_library(name: LibraryName) -> Option<Arc<Mutex<MLibrary>>> {
-    LIBRARIES.lock().unwrap().get(name)
-}
+// get_library 已在上面定义 (第620行附近)
 
 /// 便捷函数: 检查库是否已加载
 pub fn is_library_loaded(name: LibraryName) -> bool {
@@ -412,241 +1209,8 @@ pub fn load_all_libraries() -> std::io::Result<()> {
 // ==================== MapLibs 地图资源库 ====================
 //
 // 对应 C# Libraries.MapLibs[400] 数组
-// C# 原版位置: Client/MirGraphics/MLibrary.cs line 41, 120-178
-
-/// MapLibs 管理器
-/// 
-/// C# equivalent: `public static readonly MLibrary[] MapLibs = new MLibrary[400];`
-/// 
-/// 索引分布:
-/// - 0-99: WemadeMir2 (Tiles, SmTiles, Objects, Objects2-27, Objects_32bit)
-/// - 100-199: ShandaMir2 (Tiles1-9, SmTiles1-9, Objects1-30, AniTiles1)
-/// - 200-299: WemadeMir3 (各地形: 空/wood/sand/snow/forest)
-/// - 300-399: ShandaMir3 (各地形)
-pub struct MapLibs {
-    /// 地图库数组 (稀疏数组,大部分索引为空)
-    libraries: HashMap<i32, Arc<Mutex<MLibrary>>>,
-    
-    /// 数据根目录
-    data_path: String,
-    
-    /// 已加载数量
-    loaded_count: usize,
-}
-
-impl MapLibs {
-    /// 创建新的 MapLibs 管理器
-    fn new() -> Self {
-        Self {
-            libraries: HashMap::new(),
-            data_path: "Data".to_string(),
-            loaded_count: 0,
-        }
-    }
-    
-    /// 设置数据根目录
-    pub fn set_data_path(&mut self, path: impl Into<String>) {
-        self.data_path = path.into();
-    }
-    
-    /// 加载单个地图库
-    /// 
-    /// C# equivalent: `MapLibs[index] = new MLibrary(path);`
-    pub fn load(&mut self, index: i32, path: impl AsRef<Path>) -> std::io::Result<()> {
-        let path_str = path.as_ref().display().to_string();
-        
-        match MLibrary::open(path) {
-            Ok(lib) => {
-                let count = lib.count();
-                self.libraries.insert(index, Arc::new(Mutex::new(lib)));
-                self.loaded_count += 1;
-                tracing::debug!("✓ MapLibs[{}]: {} ({} 张)", index, path_str, count);
-                Ok(())
-            }
-            Err(e) => {
-                tracing::debug!("✗ MapLibs[{}]: {} ({})", index, path_str, e);
-                Err(e)
-            }
-        }
-    }
-    
-    /// 获取地图库引用
-    /// 
-    /// C# equivalent: `MapLibs[index]`
-    pub fn get(&self, index: i32) -> Option<Arc<Mutex<MLibrary>>> {
-        self.libraries.get(&index).cloned()
-    }
-    
-    /// 检查索引是否已加载
-    pub fn is_loaded(&self, index: i32) -> bool {
-        self.libraries.contains_key(&index)
-    }
-    
-    /// 加载所有 WemadeMir2 地图库
-    /// 
-    /// C# equivalent: 对应 MLibrary.cs line 122-129
-    pub fn load_wemade_mir2(&mut self) -> usize {
-        let base_path = format!("{}/Map/WemadeMir2", self.data_path);
-        let mut loaded = 0;
-        
-        // MapLibs[0] = Tiles
-        if self.load(0, format!("{}/Tiles", base_path)).is_ok() {
-            loaded += 1;
-        }
-        
-        // MapLibs[1] = SmTiles
-        if self.load(1, format!("{}/Smtiles", base_path)).is_ok() {
-            loaded += 1;
-        }
-        
-        // MapLibs[2] = Objects
-        if self.load(2, format!("{}/Objects", base_path)).is_ok() {
-            loaded += 1;
-        }
-        
-        // MapLibs[3-29] = Objects2-27
-        for i in 2..28 {
-            if self.load(i + 1, format!("{}/Objects{}", base_path, i)).is_ok() {
-                loaded += 1;
-            }
-        }
-        
-        // MapLibs[90] = Objects_32bit
-        if self.load(90, format!("{}/Objects_32bit", base_path)).is_ok() {
-            loaded += 1;
-        }
-        
-        tracing::info!("✓ WemadeMir2: 加载了 {} 个地图库", loaded);
-        loaded
-    }
-    
-    /// 加载所有 ShandaMir2 地图库
-    /// 
-    /// C# equivalent: 对应 MLibrary.cs line 132-147
-    pub fn load_shanda_mir2(&mut self) -> usize {
-        let base_path = format!("{}/Map/ShandaMir2", self.data_path);
-        let mut loaded = 0;
-        
-        // MapLibs[100] = Tiles
-        if self.load(100, format!("{}/Tiles", base_path)).is_ok() {
-            loaded += 1;
-        }
-        
-        // MapLibs[101-109] = Tiles2-9
-        for i in 1..10 {
-            if self.load(100 + i, format!("{}/Tiles{}", base_path, i + 1)).is_ok() {
-                loaded += 1;
-            }
-        }
-        
-        // MapLibs[110] = SmTiles
-        if self.load(110, format!("{}/SmTiles", base_path)).is_ok() {
-            loaded += 1;
-        }
-        
-        // MapLibs[111-119] = SmTiles2-9
-        for i in 1..10 {
-            if self.load(110 + i, format!("{}/SmTiles{}", base_path, i + 1)).is_ok() {
-                loaded += 1;
-            }
-        }
-        
-        // MapLibs[120] = Objects
-        if self.load(120, format!("{}/Objects", base_path)).is_ok() {
-            loaded += 1;
-        }
-        
-        // MapLibs[121-150] = Objects2-30
-        for i in 1..31 {
-            if self.load(120 + i, format!("{}/Objects{}", base_path, i + 1)).is_ok() {
-                loaded += 1;
-            }
-        }
-        
-        // MapLibs[190] = AniTiles1
-        if self.load(190, format!("{}/AniTiles1", base_path)).is_ok() {
-            loaded += 1;
-        }
-        
-        tracing::info!("✓ ShandaMir2: 加载了 {} 个地图库", loaded);
-        loaded
-    }
-    
-    /// 加载所有地图库
-    /// 
-    /// C# equivalent: Libraries 静态构造函数中的 MapLibs 初始化
-    pub fn load_all(&mut self) -> usize {
-        tracing::info!("开始加载地图资源库...");
-        
-        let wemade = self.load_wemade_mir2();
-        let shanda = self.load_shanda_mir2();
-        
-        let total = wemade + shanda;
-        tracing::info!("✓ 地图库加载完成: {} 个 (WemadeMir2: {}, ShandaMir2: {})", 
-            total, wemade, shanda);
-        
-        total
-    }
-    
-    /// 获取已加载的地图库数量
-    pub fn count(&self) -> usize {
-        self.loaded_count
-    }
-    
-    /// 获取所有已加载的地图库
-    /// 
-    /// 用于纹理缓存清理
-    pub fn get_all_loaded(&self) -> Vec<Arc<Mutex<MLibrary>>> {
-        self.libraries.values()
-            .map(Arc::clone)
-            .collect()
-    }
-    
-    /// 清空所有地图库
-    pub fn clear(&mut self) {
-        self.libraries.clear();
-        self.loaded_count = 0;
-    }
-}
-
-/// 全局 MapLibs 单例
-/// 
-/// C# equivalent: `public static readonly MLibrary[] MapLibs`
-pub static MAP_LIBS: Lazy<Mutex<MapLibs>> = Lazy::new(|| {
-    Mutex::new(MapLibs::new())
-});
-
-/// 便捷函数: 设置 MapLibs 数据路径
-pub fn set_maplibs_data_path(path: impl Into<String>) {
-    MAP_LIBS.lock().unwrap().set_data_path(path);
-}
-
-/// 便捷函数: 加载所有地图库
-pub fn load_all_map_libraries() -> usize {
-    MAP_LIBS.lock().unwrap().load_all()
-}
-
-/// 便捷函数: 获取地图库
-pub fn get_map_library(index: i32) -> Option<Arc<Mutex<MLibrary>>> {
-    MAP_LIBS.lock().unwrap().get(index)
-}
-
-/// 便捷函数: 获取所有已加载的地图库
-/// 
-/// 用于纹理缓存清理
-pub fn get_all_map_libraries() -> Vec<Arc<Mutex<MLibrary>>> {
-    MAP_LIBS.lock().unwrap().get_all_loaded()
-}
-
-/// 便捷函数: 检查地图库是否已加载
-pub fn is_map_library_loaded(index: i32) -> bool {
-    MAP_LIBS.lock().unwrap().is_loaded(index)
-}
-
-/// 便捷函数: 获取已加载的地图库数量
-pub fn map_libraries_count() -> usize {
-    MAP_LIBS.lock().unwrap().count()
-}
+// 旧的 MapLibs 结构体已被移除
+// 现在使用统一的 Libraries.array_libraries[LibraryArray::MapLibs] 系统
 
 #[cfg(test)]
 mod tests {

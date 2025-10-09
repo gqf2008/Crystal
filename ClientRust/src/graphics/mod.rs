@@ -23,6 +23,18 @@ pub mod mlibrary;                  // 对应 MLibrary.cs
 // pub mod particles;                 // 对应 Client/MirGraphics/Particles/ - 暂时禁用(依赖 dx_manager)
 pub mod libraries;                 // 对应 Libraries static class
 
+// === 库管理导出 ===
+pub use libraries::{
+    LibraryName, LibraryArray, Libraries, LIBRARIES,
+    get_library, get_library_from_array, get_map_library,
+    initialize_all_libraries,
+    load_library,
+    set_data_path,
+    load_core_libraries,
+    load_all_libraries,
+    is_library_loaded,
+};
+
 // === ggez 导出 (推荐使用) ===
 pub use ggez_manager_simple::GgezManager;
 pub use ggez_manager_simple::{Canvas, DrawParam, Color, Rect, Text, Mesh, DrawMode};
@@ -36,19 +48,3 @@ pub use ggez_manager_simple::{Canvas, DrawParam, Color, Rect, Text, Mesh, DrawMo
 pub use mlibrary::{MLibrary, TextureManager, ImageInfo, TextureKey};
 // pub use particle_engine::{ParticleEngine, ParticleType, ParticleImageInfo, get_time};
 // pub use particles::Particle;
-pub use libraries::{
-    LibraryName, 
-    load_library, 
-    get_library, 
-    set_data_path, 
-    load_core_libraries, 
-    load_all_libraries,
-    // MapLibs 相关导出 (对应 C# Libraries.MapLibs)
-    MapLibs,
-    set_maplibs_data_path,
-    load_all_map_libraries,
-    get_map_library,
-    get_all_map_libraries,
-    is_map_library_loaded,
-    map_libraries_count,
-};
