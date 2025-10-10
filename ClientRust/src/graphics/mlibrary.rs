@@ -51,7 +51,7 @@ pub struct ImageInfo {
     pub image: Option<ggez::graphics::Image>,      // 解压后的纹理数据 (RGBA格式)
     pub mask_image: Option<ggez::graphics::Image>, // 解压后的遮罩纹理数据 (RGBA格式)
     pub last_access_time: Option<Instant>,         // 最后访问时间 (用于缓存清理)
-    rgba_data: Option<Vec<u8>>,                    // 原始解压数据 (RGBA格式)
+    bgra_data: Option<Vec<u8>>,                    // 原始解压数据 (RGBA格式)
 }
 
 impl ImageInfo {
@@ -107,7 +107,7 @@ impl ImageInfo {
             image: None,
             mask_image: None,
             last_access_time: None,
-            rgba_data: None,
+            bgra_data: None,
         })
     }
 
@@ -163,13 +163,13 @@ impl ImageInfo {
 
         // 解压主图像（已转换为RGBA并处理黑色背景）
         let main_image = Self::decompress_image(&compressed_data, self.width, self.height)?;
-        self.rgba_data = Some(main_image.clone()); // 保存原始数据副本
+        self.bgra_data = Some(main_image.clone()); // 保存原始数据副本
         
         // 🔧 使用RGBA格式创建纹理（已从BGRA转换）
         self.image = Some(ggez::graphics::Image::from_pixels(
             ctx,
             &main_image,
-            ImageFormat::Rgba8UnormSrgb,  // ← 使用标准RGBA格式
+            ImageFormat::Bgra8UnormSrgb,  // ← 使用标准RGBA格式
             self.width as u32,
             self.height as u32,
         ));
@@ -193,7 +193,7 @@ impl ImageInfo {
             self.mask_image = Some(ggez::graphics::Image::from_pixels(
                 ctx,
                 &mask_data,
-                ImageFormat::Rgba8UnormSrgb,  // ← 使用标准RGBA格式
+                ImageFormat::Bgra8UnormSrgb,  // ← 使用标准RGBA格式
                 self.width as u32,
                 self.height as u32,
             ));
@@ -207,7 +207,7 @@ impl ImageInfo {
         self.image.take();
         self.mask_image.take();
         self.last_access_time.take();
-        self.rgba_data.take();
+        self.bgra_data.take();
         self.texture_valid = false;
     }
 
@@ -230,7 +230,7 @@ impl ImageInfo {
     /// - `height`: 图像高度
     ///
     /// # 返回
-    /// - `Ok(Vec<u8>)`: RGBA格式的图像数据
+    /// - `Ok(Vec<u8>)`:BGRA格式的图像数据
     /// - `Err`: 解压失败
     fn decompress_image(
         compressed: &[u8],
@@ -263,36 +263,28 @@ impl ImageInfo {
                 decompressed.resize(expected_size, 0);
             }
         }
-
-        // 🔧 新方案: BGRA → RGBA 转换 + 黑色背景透明化
-        // MIR2 格式: B G R A (每个像素4字节)
-        // OpenGL 需要: R G B A
-        // 
-        // 关键问题：DirectX的黑色背景（0,0,0,255）需要转为透明（0,0,0,0）
-        Self::bgra_to_rgba_with_black_to_transparent(&mut decompressed);
+        Self::bgra_to_transparent(&mut decompressed);
         Ok(decompressed)
     }
 
     
-    /// BGRA转RGBA
-    /// 不做额外的透明处理，保持原始alpha值
-    fn bgra_to_rgba_with_black_to_transparent(data: &mut [u8]) {
+    /// BGRA黑色背景透明化
+    /// DirectX的alpha值已经正确：alpha=0透明，alpha>0可见
+    /// 但某些库文件的黑色背景alpha可能是255，需要转为0
+    fn bgra_to_transparent(data: &mut [u8]) {
         for chunk in data.chunks_exact_mut(4) {
             let b = chunk[0];
             let g = chunk[1];
             let r = chunk[2];
             let a = chunk[3];
             
-            // BGRA → RGBA：只交换R和B通道
-            chunk[0] = r;
-            chunk[2] = b;
-            
-            // � 不修改alpha通道！
-            // DirectX的alpha值已经是正确的：
-            // - alpha=0 表示透明（黑色背景）
-            // - alpha>0 表示可见（包括火焰等带黑色的效果）
-            // 
-            // 之前的错误：将所有黑色转为透明，导致火焰变成"黑中带黄"
+            // 🔧 关键修复：只处理纯黑色+不透明的像素
+            // 如果是黑色（RGB都为0）且alpha为255（不透明），则将alpha设为0（透明）
+            // 其他情况保持原始alpha值不变
+            if r == 0 && g == 0 && b == 0 && a == 255 {
+                chunk[3] = 0;  // 黑色背景 → 透明
+            }
+            // 否则保持原始alpha值（包括火焰的半透明效果）
         }
     }
 
@@ -354,7 +346,7 @@ impl ImageInfo {
     /// - 坐标越界返回 false
     /// - 检查 alpha 通道（第4字节）是否为0
     pub fn visible_pixel(&self, x: i32, y: i32) -> bool {
-        if let Some(ref rgba_data) = self.rgba_data {
+        if let Some(ref rgba_data) = self.bgra_data {
             // 边界检查
             if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
                 return false;
@@ -695,9 +687,7 @@ impl MLibrary {
             if let Some(access_time) = image.last_access_time {
                 let age = now.duration_since(access_time);
                 if age > max_age {
-                    image.image = None; // 释放主纹理
-                    image.mask_image = None; // 释放遮罩纹理
-                    image.last_access_time = None; // 清除访问时间
+                    image.dispose_texture();
                     removed += 1;
                 }
             }
@@ -1559,7 +1549,7 @@ mod tests {
             mask_image: None,
             has_mask: false,
             last_access_time: None,
-            rgba_data: None,
+            bgra_data: None,
         };
         
         assert_eq!(info.width, 48);

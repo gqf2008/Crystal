@@ -237,12 +237,12 @@ impl MapControl {
         // 更新动画计数器
         self.animation_count = (self.animation_count + 1) % 1000;
         
-        // 1. 绘制背景图（远景山脉/沙漠等）
-        self.draw_background(ctx, canvas)?;
-        
-        // 2. 渲染地板（Back/Middle/Front三层）
+        // 1. 渲染地板（Back/Middle/Front三层）
         self.draw_floor(ctx, canvas, user_pos)?;
         
+          // 2. 绘制背景图（远景山脉/沙漠等）
+        self.draw_background(ctx, canvas)?;
+
         // 3. 🚧 临时：绘制角色位置标记（红色方块）
         self.draw_player_marker(ctx, canvas, user_pos)?;
         

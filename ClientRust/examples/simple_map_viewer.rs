@@ -2,8 +2,6 @@
 //!
 //! 尝试保持与 C# `GameScene.DrawFloor` 相同的绘制顺序与坐标体系，便于对比调试。
 
-use std::sync::{Arc, Mutex};
-
 use ggez::conf::{WindowMode, WindowSetup};
 use ggez::event::{self, EventHandler};
 use ggez::input::keyboard::{KeyCode, KeyInput};
@@ -11,7 +9,7 @@ use ggez::input::mouse::MouseButton;
 use ggez::graphics::{self, Canvas, Color, DrawParam};
 use ggez::{Context, ContextBuilder, GameResult};
 
-use mir2_client::graphics::mlibrary::MLibrary;
+use mir2_client::graphics::libraries::{initialize_all_libraries, get_map_library};
 use mir2_client::objects::{CellInfo, MapReader};
 
 /// 绘制视窗一次显示 50x50 个格子，便于与 C# 客户端截图对比。
@@ -25,7 +23,7 @@ struct SimpleMapViewer {
     cells: Vec<Vec<CellInfo>>,
     width: i32,
     height: i32,
-    libs: Vec<Option<Arc<Mutex<MLibrary>>>>,
+    // 不再需要本地libraries字段，使用全局LIBRARIES
     offset_x: i32,
     offset_y: i32,
     printed_debug_once: bool,
@@ -42,35 +40,16 @@ impl SimpleMapViewer {
 
         println!("✅ 地图尺寸: {} x {}", reader.width, reader.height);
 
-        // 预加载常用库。加载更多库以避免缺失地砖
-        let mut libs: Vec<Option<Arc<Mutex<MLibrary>>>> = vec![None; 400];
-        let lib_configs = [
-            (0, "Data/Map/WemadeMir2/Tiles"),
-            (1, "Data/Map/WemadeMir2/SmTiles"),
-            (2, "Data/Map/WemadeMir2/Objects"),
-            (3, "Data/Map/WemadeMir2/Objects2"),
-            (4, "Data/Map/WemadeMir2/Objects3"),
-            (5, "Data/Map/WemadeMir2/Objects4"),
-            (6, "Data/Map/WemadeMir2/Objects5"),
-        ];
-
-        for (lib_index, path) in lib_configs {
-            match MLibrary::open(path) {
-                Ok(lib) => {
-                    println!("  ✅ 库[{lib_index}] -> {path}");
-                    libs[lib_index] = Some(Arc::new(Mutex::new(lib)));
-                }
-                Err(err) => {
-                    println!("  ⚠️ 库[{lib_index}] -> {path} 加载失败: {err}");
-                }
-            }
-        }
+        // 🔧 使用全局 LIBRARIES 初始化所有地图库
+        println!("📚 正在初始化地图库...");
+        initialize_all_libraries("Data")
+            .map_err(|err| ggez::GameError::ResourceLoadError(format!("初始化地图库失败: {}", err)))?;
+        println!("✅ 地图库初始化完成");
 
         Ok(Self {
             cells: reader.map_cells,
             width: reader.width,
             height: reader.height,
-            libs,
             offset_x: 0,
             offset_y: 0,
             printed_debug_once: false,
@@ -88,30 +67,40 @@ impl SimpleMapViewer {
     fn draw_back_layer(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
         let mut draw_count = 0;
 
+        // 🔧 修复：根据C#官方代码，Back层只绘制偶数格子，使用REPLACE模式
+        canvas.set_blend_mode(graphics::BlendMode::REPLACE);
+
         // 扩展绘制范围，避免边缘出现黑边
         let start_x = (self.offset_x - 2).max(0);
         let start_y = (self.offset_y - 2).max(0);
         let end_x = (self.offset_x + VIEW_RANGE + 2).min(self.width);
         let end_y = (self.offset_y + VIEW_RANGE + 2).min(self.height);
 
-        // 参考代码：先绘制奇数坐标（填充缝隙）
+        // C#代码：只绘制偶数行和偶数列，并跳过0行0列
+        // for (int y ...) { if (y <= 0 || y % 2 == 1) continue; ...
+        // for (int x ...) { if (x <= 0 || x % 2 == 1) continue; ...
         for map_y in start_y..end_y {
+            // ⚠️ C#原版：跳过 y<=0 和所有奇数行
+            if map_y <= 0 || map_y % 2 != 0 {
+                continue;
+            }
+            
             for map_x in start_x..end_x {
-                // 只绘制奇数行或奇数列
-                if map_x % 2 == 0 && map_y % 2 == 0 {
+                // ⚠️ C#原版：跳过 x<=0 和所有奇数列
+                if map_x <= 0 || map_x % 2 != 0 {
                     continue;
                 }
+
                 let Some(cell) = self.cell(map_x, map_y) else { continue };
                 if cell.back_image <= 0 || cell.back_index < 0 {
                     continue;
                 }
 
-                let lib_index = cell.back_index as usize;
-                let Some(lib_arc) = self.libs.get(lib_index).and_then(|o| o.as_ref()) else {
+                let lib_index = cell.back_index;
+                let Some(lib_arc) = get_map_library(lib_index) else {
                     continue;
                 };
 
-                // C# 中 `BackImage` 最高位保存标记，需要去掉。
                 let image_index = ((cell.back_image & 0x1FFF_FFFF) as usize).saturating_sub(1);
 
                 let mut lib = lib_arc.lock().unwrap();
@@ -127,8 +116,6 @@ impl SimpleMapViewer {
                     );
                 }
 
-                // C# 中: Libraries.MapLibs[index].Draw(index, drawX, drawY)
-                // Back层直接在格子坐标绘制
                 let screen_x = ((map_x - self.offset_x) * TILE_WIDTH) as f32;
                 let screen_y = ((map_y - self.offset_y) * TILE_HEIGHT) as f32;
 
@@ -136,51 +123,13 @@ impl SimpleMapViewer {
                     if let Some(ref texture) = image_info.image {
                         canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
                         draw_count += 1;
-                    }
-                }
-            }
-        }
-
-        // 参考代码：第二次绘制偶数坐标，使用REPLACE模式（不混合，直接覆盖）
-        canvas.set_blend_mode(graphics::BlendMode::REPLACE);
-        
-        for map_y in start_y..end_y {
-            // 只绘制偶数行
-            if map_y % 2 != 0 {
-                continue;
-            }
-            
-            for map_x in start_x..end_x {
-                // 只绘制偶数列
-                if map_x % 2 != 0 {
-                    continue;
-                }
-
-                let Some(cell) = self.cell(map_x, map_y) else { continue };
-                if cell.back_image <= 0 || cell.back_index < 0 {
-                    continue;
-                }
-
-                let lib_index = cell.back_index as usize;
-                let Some(lib_arc) = self.libs.get(lib_index).and_then(|o| o.as_ref()) else {
-                    continue;
-                };
-
-                let image_index = ((cell.back_image & 0x1FFF_FFFF) as usize).saturating_sub(1);
-
-                let mut lib = lib_arc.lock().unwrap();
-                let info = match lib.get_image_info(image_index) {
-                    Ok(info) => info,
-                    Err(_) => continue,
-                };
-
-                let screen_x = ((map_x - self.offset_x) * TILE_WIDTH) as f32;
-                let screen_y = ((map_y - self.offset_y) * TILE_HEIGHT) as f32;
-
-                if let Ok(image_info) = lib.get_or_create_texture(ctx, image_index) {
-                    if let Some(ref texture) = image_info.image {
-                        canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
-                        draw_count += 1;
+                        
+                        // 🔧 绘制遮罩层 (Mask)
+                        if image_info.has_mask {
+                            if let Some(ref mask_texture) = image_info.mask_image {
+                                canvas.draw(mask_texture, DrawParam::default().dest([screen_x, screen_y]));
+                            }
+                        }
                     }
                 }
             }
@@ -213,8 +162,8 @@ impl SimpleMapViewer {
                     continue;
                 }
 
-                let lib_index = cell.middle_index as usize;
-                let Some(lib_arc) = self.libs.get(lib_index).and_then(|o| o.as_ref()) else {
+                let lib_index = cell.middle_index;
+                let Some(lib_arc) = get_map_library(lib_index) else {
                     continue;
                 };
 
@@ -230,8 +179,8 @@ impl SimpleMapViewer {
                 // 🔧 关键修复：Middle层尺寸过滤（参考C#代码）
                 // 只允许单格 (48x32) 或双格 (96x64) 尺寸
                 // 防止绘制错误的瓦片条带
-                let valid_size = (info.width == TILE_WIDTH && info.height == TILE_HEIGHT) ||
-                                 (info.width == TILE_WIDTH * 2 && info.height == TILE_HEIGHT * 2);
+                let valid_size = (info.width == TILE_WIDTH as i16 && info.height == TILE_HEIGHT as i16) ||
+                                 (info.width == (TILE_WIDTH * 2) as i16 && info.height == (TILE_HEIGHT * 2) as i16);
                 if !valid_size {
                     continue;
                 }
@@ -252,6 +201,13 @@ impl SimpleMapViewer {
                     if let Some(ref texture) = image_info.image {
                         canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
                         draw_count += 1;
+                        
+                        // 🔧 绘制遮罩层 (Mask)
+                        if image_info.has_mask {
+                            if let Some(ref mask_texture) = image_info.mask_image {
+                                canvas.draw(mask_texture, DrawParam::default().dest([screen_x, screen_y]));
+                            }
+                        }
                     }
                 }
             }
@@ -266,6 +222,9 @@ impl SimpleMapViewer {
 
     fn draw_front_layer(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
         let mut draw_count = 0;
+        let mut skip_no_lib = 0;
+        let mut skip_no_info = 0;
+        let mut skip_no_texture = 0;
 
         // 参考代码：Front层使用ALPHA模式（正常alpha混合）
         canvas.set_blend_mode(graphics::BlendMode::ALPHA);
@@ -286,8 +245,12 @@ impl SimpleMapViewer {
                     continue;
                 }
 
-                let lib_index = cell.front_index as usize;
-                let Some(lib_arc) = self.libs.get(lib_index).and_then(|o| o.as_ref()) else {
+                let lib_index = cell.front_index;
+                let Some(lib_arc) = get_map_library(lib_index) else {
+                    skip_no_lib += 1;
+                    if !self.printed_debug_once && skip_no_lib <= 3 {
+                        println!("  ⚠️ Front ({map_x},{map_y}) 库[{lib_index}]不存在");
+                    }
                     continue;
                 };
 
@@ -296,7 +259,13 @@ impl SimpleMapViewer {
                 let mut lib = lib_arc.lock().unwrap();
                 let info = match lib.get_image_info(image_index) {
                     Ok(info) => info,
-                    Err(_) => continue,
+                    Err(_) => {
+                        skip_no_info += 1;
+                        if !self.printed_debug_once && skip_no_info <= 3 {
+                            println!("  ⚠️ Front ({map_x},{map_y}) 库[{lib_index}] 图像[{image_index}]不存在");
+                        }
+                        continue;
+                    }
                 };
 
                 if !self.printed_debug_once && draw_count < 5 {
@@ -317,13 +286,40 @@ impl SimpleMapViewer {
                     if let Some(ref texture) = image_info.image {
                         canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
                         draw_count += 1;
+                        
+                        // 🔧 绘制遮罩层 (Mask)
+                        // C#: if (mi.HasMask) { DXManager.Draw(mi.MaskImage, ..., Tint); }
+                        if image_info.has_mask {
+                            if let Some(ref mask_texture) = image_info.mask_image {
+                                if !self.printed_debug_once && draw_count <= 5 {
+                                    println!("    🎭 绘制Mask层 ({map_x},{map_y}) idx={image_index}");
+                                }
+                                canvas.draw(mask_texture, DrawParam::default().dest([screen_x, screen_y]));
+                            }
+                        }
+                    } else {
+                        skip_no_texture += 1;
+                        if !self.printed_debug_once && skip_no_texture <= 3 {
+                            println!("  ⚠️ Front ({map_x},{map_y}) 库[{lib_index}] 图像[{image_index}] 纹理创建失败");
+                        }
                     }
+                } else {
+                    skip_no_texture += 1;
                 }
             }
         }
 
         if !self.printed_debug_once {
             println!("  Front 层绘制数量: {draw_count}");
+            if skip_no_lib > 0 {
+                println!("  ⚠️ 跳过（库不存在）: {skip_no_lib}");
+            }
+            if skip_no_info > 0 {
+                println!("  ⚠️ 跳过（图像不存在）: {skip_no_info}");
+            }
+            if skip_no_texture > 0 {
+                println!("  ⚠️ 跳过（纹理失败）: {skip_no_texture}");
+            }
         }
 
         Ok(())
