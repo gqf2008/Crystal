@@ -6,14 +6,40 @@ using S = ServerPackets;
 
 namespace Client.MirControls
 {
+    /// <summary>
+    /// 场景基类 - 所有游戏场景的抽象基类
+    /// 场景是全屏的顶层UI容器，管理整个屏幕的显示和交互
+    /// 主要场景包括:
+    /// - LoginScene: 登录界面
+    /// - SelectScene: 角色选择界面
+    /// - GameScene: 游戏主界面
+    /// 负责:
+    /// - 全屏渲染管理
+    /// - 子控件的统一管理
+    /// - 场景级别的事件处理
+    /// - 场景切换
+    /// </summary>
     public abstract class MirScene : MirControl
     {
+        /// <summary>当前活动场景 - 全局唯一的当前显示场景，默认为登录场景</summary>
         public static MirScene ActiveScene = new LoginScene();
 
+        // ==================== 鼠标点击管理 ====================
+        /// <summary>鼠标按钮状态 - 当前按下的鼠标按钮</summary>
         private static MouseButtons _buttons;
+        
+        /// <summary>上次点击时间 - 用于双击检测</summary>
         private static long _lastClickTime;
+        
+        /// <summary>点击的控件 - 鼠标按下时点击的控件(用于拖拽)</summary>
         private static MirControl _clickedControl;
 
+        /// <summary>
+        /// 场景构造函数 - 初始化场景基础设置
+        /// - 启用纹理绘制
+        /// - 设置背景色为品红(调试用)
+        /// - 设置尺寸为屏幕大小
+        /// </summary>
         protected MirScene()
         {
             DrawControlTexture = true;
@@ -21,6 +47,10 @@ namespace Client.MirControls
             Size = new Size(Settings.ScreenWidth, Settings.ScreenHeight);
         }
 
+        /// <summary>
+        /// 场景尺寸 - 场景的尺寸固定为屏幕大小，不可修改
+        /// sealed 关键字防止子类重写
+        /// </summary>
         public override sealed Size Size
         {
             get { return base.Size; }

@@ -623,12 +623,156 @@ impl MapReader {
         ))
     }
     
+    /// Map Type 100 - C# 自定义格式
+    /// 参考: Server/MirEnvir/Map.cs LoadMapCellsV100()
+    /// 
+    /// C# 代码逻辑:
+    /// ```csharp
+    /// offset += 2;                           // Skip BackImage (2 bytes)
+    /// if ((BitConverter.ToInt32(Bytes, offset) & 0x20000000) != 0)
+    ///     Cells[x, y] = Cell.HighWall;       // Check MiddleImage (4 bytes)
+    /// offset += 10;                          // Skip MiddleImage(4) + MiddleIndex(2) + Animation(4)
+    /// if ((BitConverter.ToInt16(Bytes, offset) & 0x8000) != 0)
+    ///     Cells[x, y] = Cell.LowWall;        // Check FrontImage (2 bytes)
+    /// offset += 2;                           // Skip FrontImage
+    /// if (Bytes[offset] > 0)
+    ///     DoorIndex[x, y] = AddDoor(...);    // Read Door (1 byte)
+    /// offset += 11;                          // Skip Door(1) + Rest(10)
+    /// byte light = Bytes[offset++];          // Read Light (1 byte)
+    /// ```
+    /// 
+    /// 总计: 2+4+10+2+2+1+10+1 = 32 bytes per cell
     fn load_map_type_100(&mut self) -> io::Result<()> {
-        // TODO: 实现 C# 自定义格式
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Map Type 100 not yet implemented",
-        ))
+        // 检查版本 (只支持 version 1)
+        if self.bytes[0] != 1 || self.bytes[1] != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Map Type 100: Only version 1 is supported",
+            ));
+        }
+        
+        // 读取宽度和高度 (offset 4-7)
+        let mut offset = 4;
+        self.width = i16::from_le_bytes([
+            self.bytes[offset],
+            self.bytes[offset + 1],
+        ]) as i32;
+        offset += 2;
+        
+        self.height = i16::from_le_bytes([
+            self.bytes[offset],
+            self.bytes[offset + 1],
+        ]) as i32;
+        offset += 2;
+        
+        // 初始化地图格子数组
+        self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
+        // offset 现在是 8，开始读取格子数据
+        // 🔧 修复：严格按照 C# LoadMapCellsV100 的逻辑实现
+        // 参考: Client/MirObjects/MapCode.cs line 707-730
+        for x in 0..self.width {
+            for y in 0..self.height {
+                let cell = &mut self.map_cells[x as usize][y as usize];
+                
+                // BackIndex (2字节)
+                cell.back_index = i16::from_le_bytes([
+                    self.bytes[offset],
+                    self.bytes[offset + 1],
+                ]) as i16;
+                offset += 2;
+                
+                // BackImage (4字节) - 注意：这里是4字节int32
+                cell.back_image = i32::from_le_bytes([
+                    self.bytes[offset],
+                    self.bytes[offset + 1],
+                    self.bytes[offset + 2],
+                    self.bytes[offset + 3],
+                ]);
+                offset += 4;
+                
+                // MiddleIndex (2字节) - 🔧 之前漏掉了！
+                cell.middle_index = i16::from_le_bytes([
+                    self.bytes[offset],
+                    self.bytes[offset + 1],
+                ]) as i16;
+                offset += 2;
+                
+                // MiddleImage (2字节) - 🔧 之前错误地读成4字节！
+                cell.middle_image = i16::from_le_bytes([
+                    self.bytes[offset],
+                    self.bytes[offset + 1],
+                ]) as i32;
+                offset += 2;
+                
+                // FrontIndex (2字节)
+                cell.front_index = i16::from_le_bytes([
+                    self.bytes[offset],
+                    self.bytes[offset + 1],
+                ]) as i16;
+                offset += 2;
+                
+                // FrontImage (2字节)
+                cell.front_image = i16::from_le_bytes([
+                    self.bytes[offset],
+                    self.bytes[offset + 1],
+                ]) as i32;
+                offset += 2;
+                
+                // DoorIndex (1字节，低7位)
+                cell.door_index = self.bytes[offset] & 0x7F;
+                offset += 1;
+                
+                // DoorOffset (1字节)
+                cell.door_offset = self.bytes[offset];
+                offset += 1;
+                
+                // FrontAnimationFrame (1字节)
+                cell.front_animation_frame = self.bytes[offset];
+                offset += 1;
+                
+                // FrontAnimationTick (1字节)
+                cell.front_animation_tick = self.bytes[offset];
+                offset += 1;
+                
+                // MiddleAnimationFrame (1字节)
+                cell.middle_animation_frame = self.bytes[offset];
+                offset += 1;
+                
+                // MiddleAnimationTick (1字节)
+                cell.middle_animation_tick = self.bytes[offset];
+                offset += 1;
+                
+                // TileAnimationImage (2字节)
+                cell.tile_animation_image = i16::from_le_bytes([
+                    self.bytes[offset],
+                    self.bytes[offset + 1],
+                ]) as i16;
+                offset += 2;
+                
+                // TileAnimationOffset (2字节)
+                cell.tile_animation_offset = i16::from_le_bytes([
+                    self.bytes[offset],
+                    self.bytes[offset + 1],
+                ]) as i16;
+                offset += 2;
+                
+                // TileAnimationFrames (1字节)
+                cell.tile_animation_frames = self.bytes[offset];
+                offset += 1;
+                
+                // Light (1字节)
+                cell.light = self.bytes[offset];
+                offset += 1;
+                
+                // C#: if (light >= 100 && light <= 119)
+                //         Cells[x, y].FishingAttribute = (sbyte)(light - 100);
+                if cell.light >= 100 && cell.light <= 119 {
+                    cell.fishing_cell = true;
+                }
+            }
+        }
+        
+        Ok(())
     }
     
     // 辅助方法：获取指定位置的 CellInfo

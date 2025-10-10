@@ -387,6 +387,23 @@ impl Libraries {
             .unwrap_or(0)
     }
     
+    /// 获取数组库中所有已加载的库 (用于纹理缓存清理)
+    /// 
+    /// # 参数
+    /// - `array_type`: 数组库类型
+    /// 
+    /// # 返回
+    /// - Vec<Arc<Mutex<MLibrary>>>: 所有已加载的库引用
+    pub fn get_all_from_array(&self, array_type: LibraryArray) -> Vec<Arc<Mutex<MLibrary>>> {
+        self.array_libraries.get(&array_type)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|lib| lib.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    
     /// 加载单个库
     /// 
     /// C# equivalent: 在静态构造函数中直接 new MLibrary()
@@ -1211,6 +1228,16 @@ pub fn load_all_libraries() -> std::io::Result<()> {
 // 对应 C# Libraries.MapLibs[400] 数组
 // 旧的 MapLibs 结构体已被移除
 // 现在使用统一的 Libraries.array_libraries[LibraryArray::MapLibs] 系统
+
+/// 便捷函数: 获取所有 MapLibs (用于纹理缓存清理)
+/// 
+/// 对应 C# 中遍历 MapLibs 数组清理纹理的操作
+/// 
+/// # 返回
+/// - Vec<Arc<Mutex<MLibrary>>>: 所有已加载的 MapLibs
+pub fn get_all_map_libraries() -> Vec<Arc<Mutex<MLibrary>>> {
+    LIBRARIES.lock().unwrap().get_all_from_array(LibraryArray::MapLibs)
+}
 
 #[cfg(test)]
 mod tests {

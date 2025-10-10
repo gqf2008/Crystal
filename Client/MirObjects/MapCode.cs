@@ -1,31 +1,74 @@
 ﻿namespace Client.MirObjects
 {
+    /// <summary>
+    /// 地图格子信息 - 存储单个地图格子(48x32像素)的所有瓦片和对象信息
+    /// 每个格子包含三层静态瓦片(Back/Middle/Front)、动画信息、光照和对象列表
+    /// </summary>
     public class CellInfo
     {
+        // ==================== Back Layer (地表层) ====================
+        /// <summary>地表图库索引 - 指向 Libraries.MapLibs 数组的索引(0-399)</summary>
         public short BackIndex;
+        
+        /// <summary>地表图像索引 - 图库中的图像ID (高3位用于特殊标记，需屏蔽: BackImage & 0x1FFFFFFF)</summary>
         public int BackImage;
+        
+        // ==================== Middle Layer (建筑层) ====================
+        /// <summary>建筑图库索引 - 指向 Libraries.MapLibs 数组的索引</summary>
         public short MiddleIndex;
+        
+        /// <summary>建筑图像索引 - 建筑物/树木/山体等的图像ID</summary>
         public int MiddleImage;
+        
+        // ==================== Front Layer (前景层) ====================
+        /// <summary>前景图库索引 - 指向 Libraries.MapLibs 数组的索引</summary>
         public short FrontIndex;
+        
+        /// <summary>前景图像索引 - 建筑顶部/树冠等的图像ID (高位用于标记: FrontImage & 0x7FFF)</summary>
         public int FrontImage;
 
+        // ==================== 门系统 ====================
+        /// <summary>门索引 - 门对象的唯一ID (0表示无门)</summary>
         public byte DoorIndex;
+        
+        /// <summary>门偏移量 - 门动画的帧偏移 (计算公式: baseIndex + (doorFrame + 1) * DoorOffset)</summary>
         public byte DoorOffset;
 
+        // ==================== Front层动画 ====================
+        /// <summary>前景动画帧数 - 总帧数(低4位) + 动画速度(高4位)</summary>
         public byte FrontAnimationFrame;
+        
+        /// <summary>前景动画间隔 - 每帧持续的tick数</summary>
         public byte FrontAnimationTick;
 
+        // ==================== Middle层动画 ====================
+        /// <summary>建筑动画帧数 - 旋转风车、飘动旗帜等的动画帧数</summary>
         public byte MiddleAnimationFrame;
+        
+        /// <summary>建筑动画间隔 - 每帧持续的tick数</summary>
         public byte MiddleAnimationTick;
 
+        // ==================== Shanda瓦片动画 (流水/岩浆等) ====================
+        /// <summary>瓦片动画图像索引 - Shanda动画层的图像ID (通常使用MapLibs[190])</summary>
         public short TileAnimationImage;
+        
+        /// <summary>瓦片动画偏移 - 动画帧偏移量 (计算时需要: offset ^ 0x2000)</summary>
         public short TileAnimationOffset;
+        
+        /// <summary>瓦片动画总帧数 - 动画循环的总帧数</summary>
         public byte  TileAnimationFrames;
 
+        // ==================== 其他属性 ====================
+        /// <summary>光照强度 - 该格子的光源强度(0-255, 0表示无光源, 路灯/火盆等会设置此值)</summary>
         public byte Light;
+        
+        /// <summary>未知字段 - 保留字段</summary>
         public byte Unknown;
+        
+        /// <summary>格子对象列表 - 站在此格子上的所有对象(玩家/怪物/NPC/掉落物等)</summary>
         public List<MapObject> CellObjects;
 
+        /// <summary>是否为钓鱼点 - 该格子是否可以钓鱼(水域格子)</summary>
         public bool FishingCell;
 
         public void AddObject(MapObject ob)
@@ -129,13 +172,40 @@
         }
     }
 
+    /// <summary>
+    /// 地图文件读取器 - 负责加载和解析各种版本的传奇地图文件
+    /// 支持8种不同的地图格式:
+    /// - Type0: 旧版传奇2地图 (原始格式)
+    /// - Type1: Wemade 2010年地图格式
+    /// - Type2: Shanda老版本地图
+    /// - Type3: Shanda 2012年地图 (含瓦片动画)
+    /// - Type4: Wemade防hack地图 (迷宫地图)
+    /// - Type5: Wemade传奇3地图 (木/沙/雪/森林风格)
+    /// - Type6: Shanda传奇3地图
+    /// - Type7: 3/4英雄地图格式 (Myth/Lifcos)
+    /// - Type100: C#自定义地图格式
+    /// </summary>
     class MapReader
     {
-        public int Width, Height;
+        /// <summary>地图宽度 - X方向的格子数</summary>
+        public int Width;
+        
+        /// <summary>地图高度 - Y方向的格子数</summary>
+        public int Height;
+        
+        /// <summary>地图格子数组 - [X, Y]坐标索引的二维数组</summary>
         public CellInfo[,] MapCells;
+        
+        /// <summary>地图文件路径</summary>
         private string FileName;
+        
+        /// <summary>地图文件字节数据 - 完整的地图文件内容</summary>
         private byte[] Bytes;
         
+        /// <summary>
+        /// 构造函数 - 加载指定路径的地图文件
+        /// </summary>
+        /// <param name="FileName">地图文件完整路径</param>
         public MapReader(string FileName)
         {
             this.FileName = FileName;

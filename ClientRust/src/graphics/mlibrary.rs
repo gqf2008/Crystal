@@ -3,23 +3,18 @@
 //
 // 负责解析和加载 .lib 文件格式（MIR2 专有的图像库格式）
 
+use crate::objects::frames::{Frame, FrameSet};
+use byteorder::LittleEndian;
+use byteorder::{ByteOrder, ReadBytesExt};
+use flate2::read::GzDecoder;
+use ggez::graphics::{Image, ImageFormat};
+use ggez::Context;
+use mir2_shared::MirAction;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, BufReader};
+use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use flate2::read::GzDecoder;
-
-// 移除 wgpu 依赖
-// TextureHandle 已废弃,MLibrary 直接返回像素数据
-// use super::dx_manager::TextureHandle;
-
-// Dummy TextureHandle 用于编译兼容性 (实际使用 ggez Image)
-#[derive(Debug, Clone)]
-pub struct TextureHandle {
-    pub width: u32,
-    pub height: u32,
-}
+use std::time::Instant;
 
 /// MIR2图像库文件头
 #[derive(Debug, Clone)]
@@ -32,7 +27,7 @@ pub struct LibraryHeader {
 /// 图像索引项
 #[derive(Debug, Clone)]
 pub struct ImageIndex {
-    pub offset: i32,  // 文件中的偏移量
+    pub offset: i32, // 文件中的偏移量
 }
 
 /// 图像元数据(不包含纹理数据)
@@ -40,111 +35,60 @@ pub struct ImageIndex {
 pub struct ImageInfo {
     pub width: i16,
     pub height: i16,
-    pub x: i16,  // 偏移量X
-    pub y: i16,  // 偏移量Y
+    pub x: i16, // 偏移量X
+    pub y: i16, // 偏移量Y
     pub shadow_x: i16,
     pub shadow_y: i16,
     pub shadow: u8,
-    pub length: i32,  // 压缩数据长度
-    pub has_mask: bool,  // 是否有第二层
+    pub length: i32,    // 压缩数据长度
+    pub has_mask: bool, // 是否有第二层
+    pub mask_width: i16,
+    pub mask_height: i16,
+    pub mask_x: i16,
+    pub mask_y: i16,
+    pub mask_length: i32,
+    pub texture_valid: bool,                       // 纹理是否有效
+    pub image: Option<ggez::graphics::Image>,      // 解压后的纹理数据 (RGBA格式)
+    pub mask_image: Option<ggez::graphics::Image>, // 解压后的遮罩纹理数据 (RGBA格式)
+    pub last_access_time: Option<Instant>,         // 最后访问时间 (用于缓存清理)
+    rgba_data: Option<Vec<u8>>,                    // 原始解压数据 (RGBA格式)
 }
 
-/// MIR2图像库
-#[derive(Debug)]
-pub struct MLibrary {
-    path: PathBuf,
-    header: LibraryHeader,
-    indices: Vec<ImageIndex>,
-    // 缓存已加载的图像信息
-    cached_info: HashMap<usize, ImageInfo>,
-    // 纹理缓存 - 避免重复加载 (旧版,已废弃)
-    texture_cache: HashMap<usize, Arc<TextureHandle>>,
-    // 缓存清理时间戳
-    cache_timestamps: HashMap<usize, i64>,
-    // ggez Image 缓存 - 用于实际渲染 (对应 C# DXManager.TextureList)
-    ggez_texture_cache: HashMap<usize, ggez::graphics::Image>,
-    // 缓存访问时间 - 用于 LRU 清理
-    ggez_cache_access_time: HashMap<usize, std::time::Instant>,
-}
-
-impl MLibrary {
-    /// 打开.lib文件
-    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let mut path_buf = path.as_ref().to_path_buf();
-        
-        // 尝试.Lib扩展名
-        if !path_buf.exists() {
-            path_buf.set_extension("Lib");
-        }
-        
-        let mut file = File::open(&path_buf)?;
-        let mut reader = BufReader::new(&mut file);
-        
-        // 读取文件头
-        let version = read_i32(&mut reader)?;
-        let count = read_i32(&mut reader)?;
-        let frame_seek = read_i32(&mut reader)?;
-        
-        let header = LibraryHeader {
-            version,
-            count,
-            frame_seek,
-        };
-        
-        // 读取索引表
-        let mut indices = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            let offset = read_i32(&mut reader)?;
-            indices.push(ImageIndex { offset });
-        }
-        
-        Ok(Self {
-            path: path_buf,
-            header,
-            indices,
-            cached_info: HashMap::new(),
-            texture_cache: HashMap::new(),
-            cache_timestamps: HashMap::new(),
-            ggez_texture_cache: HashMap::new(),
-            ggez_cache_access_time: HashMap::new(),
-        })
-    }
-    
-    /// 获取图像数量
-    pub fn count(&self) -> usize {
-        self.indices.len()
-    }
-    
-    /// 读取图像信息(不解压纹理数据)
-    pub fn get_image_info(&mut self, index: usize) -> io::Result<ImageInfo> {
-        if index >= self.indices.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("Image index {} out of range (max: {})", index, self.indices.len())
-            ));
-        }
-        
-        // 检查缓存
-        if let Some(info) = self.cached_info.get(&index) {
-            return Ok(info.clone());
-        }
-        
-        let offset = self.indices[index].offset as u64;
-        let mut file = File::open(&self.path)?;
-        file.seek(SeekFrom::Start(offset))?;
-        
-        let width = read_i16(&mut file)?;
-        let height = read_i16(&mut file)?;
-        let x = read_i16(&mut file)?;
-        let y = read_i16(&mut file)?;
-        let shadow_x = read_i16(&mut file)?;
-        let shadow_y = read_i16(&mut file)?;
-        let shadow = read_u8(&mut file)?;
-        let length = read_i32(&mut file)?;
-        
+impl ImageInfo {
+    /// 从读取器中解析 ImageInfo (17字节)
+    ///
+    /// 注意: 这里不读取纹理数据,只读取元数据
+    ///
+    /// # 参数
+    /// - `r`: 可读的字节流
+    ///
+    /// # 返回
+    /// - `Ok(ImageInfo)`: 成功解析
+    /// - `Err(io::Error)`: 读取失败
+    pub fn from_reader<R: std::io::Read + Seek>(r: &mut R) -> Result<Self, std::io::Error> {
+        let width = r.read_i16::<LittleEndian>()?;
+        let height = r.read_i16::<LittleEndian>()?;
+        let x = r.read_i16::<LittleEndian>()?;
+        let y = r.read_i16::<LittleEndian>()?;
+        let shadow_x = r.read_i16::<LittleEndian>()?;
+        let shadow_y = r.read_i16::<LittleEndian>()?;
+        let shadow = r.read_u8()?;
+        let length = r.read_i32::<LittleEndian>()?;
         let has_mask = (shadow >> 7) == 1;
-        
-        let info = ImageInfo {
+        let mut mask_width = 0;
+        let mut mask_height = 0;
+        let mut mask_x = 0;
+        let mut mask_y = 0;
+        let mut mask_length = 0;
+        if has_mask {
+            r.seek(SeekFrom::Current(length as i64))?;
+            mask_width = r.read_i16::<LittleEndian>()?;
+            mask_height = r.read_i16::<LittleEndian>()?;
+            mask_x = r.read_i16::<LittleEndian>()?;
+            mask_y = r.read_i16::<LittleEndian>()?;
+            mask_length = r.read_i32::<LittleEndian>()?;
+        }
+        Ok(Self {
             width,
             height,
             x,
@@ -154,104 +98,583 @@ impl MLibrary {
             shadow,
             length,
             has_mask,
-        };
-        
-        self.cached_info.insert(index, info.clone());
-        Ok(info)
+            mask_width,
+            mask_height,
+            mask_x,
+            mask_y,
+            mask_length,
+            texture_valid: false,
+            image: None,
+            mask_image: None,
+            last_access_time: None,
+            rgba_data: None,
+        })
     }
-    
-    /// 加载图像数据为RGBA8像素数组
-    pub fn load_image_data(&mut self, index: usize) -> io::Result<(ImageInfo, Vec<u8>)> {
-        let info = self.get_image_info(index)?;
-        
-        // ✅ C# CheckImage 检查: if (Width == 0 || Height == 0) return false;
-        if info.width == 0 || info.height == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("图像 {} 无效: width={}, height={}", index, info.width, info.height)
+
+    /// 创建纹理数据 - 从reader中读取并解压图像数据
+    ///
+    /// 对应 C# MImage.CreateTexture
+    /// ```csharp
+    /// public unsafe void CreateTexture(BinaryReader reader)
+    /// {
+    ///     int w = Width;
+    ///     int h = Height;
+    ///     Image = new Texture(DXManager.Device, w, h, 1, Usage.None, Format.A8R8G8B8, Pool.Managed);
+    ///     DataRectangle stream = Image.LockRectangle(0, LockFlags.Discard);
+    ///     Data = (byte*)stream.Data.DataPointer;
+    ///     DecompressImage(reader.ReadBytes(Length), stream.Data);
+    ///     stream.Data.Dispose();
+    ///     Image.UnlockRectangle(0);
+    ///     if (HasMask) {
+    ///         reader.ReadBytes(12);
+    ///         w = Width;
+    ///         h = Height;
+    ///         MaskImage = new Texture(DXManager.Device, w, h, 1, Usage.None, Format.A8R8G8B8, Pool.Managed);
+    ///         stream = MaskImage.LockRectangle(0, LockFlags.Discard);
+    ///         DecompressImage(reader.ReadBytes(Length), stream.Data);
+    ///         stream.Data.Dispose();
+    ///         MaskImage.UnlockRectangle(0);
+    ///     }
+    ///     DXManager.TextureList.Add(this);
+    ///     TextureValid = true;
+    ///     CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    ///
+    /// # 参数
+    /// - `reader`: 二进制读取器，当前位置应该在压缩数据的开始处
+    ///
+    /// # 返回
+    /// - `Ok((main_image_data, mask_image_data))`: 主图像数据和可选的遮罩图像数据（RGBA格式）
+    /// - `Err`: 读取或解压失败
+    ///
+    /// # 注意
+    /// - 返回的数据是RGBA格式（4字节/像素）
+    /// - 黑色像素(0,0,0)会被转换为透明(0,0,0,0)
+    /// - 如果has_mask为true，会读取第二层图像数据
+    pub fn create_texture<R: std::io::Read + Seek>(
+        &mut self,
+        ctx: &mut ggez::Context,
+        reader: &mut R,
+    ) -> Result<(), std::io::Error> {
+        // 读取主图像的压缩数据
+        let mut compressed_data = vec![0u8; self.length as usize];
+        reader.read_exact(&mut compressed_data)?;
+
+        // 解压主图像
+        let main_image = Self::decompress_image(&compressed_data, self.width, self.height)?;
+        self.rgba_data = Some(main_image.clone()); // 保存原始数据副本
+        self.image = Some(ggez::graphics::Image::from_pixels(
+            ctx,
+            &main_image,
+            ImageFormat::Rgba8Unorm,
+            self.width as u32,
+            self.height as u32,
+        ));
+
+        // 处理遮罩层
+        if self.has_mask {
+            // 跳过12字节的遮罩头信息（C#: reader.ReadBytes(12)）
+            // 这12字节包含: MaskWidth(2) + MaskHeight(2) + MaskX(2) + MaskY(2) + MaskLength(4)
+            // 但这些信息在ImageInfo构造时已经读取，所以这里只是跳过
+            // let mut skip_buffer = [0u8; 12];
+            // reader.read_exact(&mut skip_buffer)?;
+            reader.seek(SeekFrom::Current(12))?;
+            // 读取遮罩层的压缩数据
+            let mut mask_compressed = vec![0u8; self.mask_length as usize];
+            reader.read_exact(&mut mask_compressed)?;
+
+            // 解压遮罩层（使用主图像的宽高，因为C#代码中遮罩使用Width/Height）
+            let mask_data = Self::decompress_image(&mask_compressed, self.width, self.height)?;
+            self.mask_image = Some(ggez::graphics::Image::from_pixels(
+                ctx,
+                &mask_data,
+                ImageFormat::Rgba8Unorm,
+                self.width as u32,
+                self.height as u32,
             ));
         }
-        
-        // ✅ 检查 Length 是否有效
-        if info.length <= 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("图像 {} 无效: length={}", index, info.length)
-            ));
-        }
-        
-        let offset = self.indices[index].offset as u64;
-        let mut file = File::open(&self.path)?;
-        
-        // 跳过图像信息头(17字节)
-        file.seek(SeekFrom::Start(offset + 17))?;
-        
-        // Length 字段就是压缩数据的实际长度 (对应 C# 的 reader.ReadBytes(Length))
-        let compressed_size = info.length as usize;
-        
-        // 读取压缩数据
-        let mut compressed = vec![0u8; compressed_size];
-        file.read_exact(&mut compressed)?;
-        
-        // 解压(GZip格式)
-        let mut decompressor = GzDecoder::new(&compressed[..]);
+        self.last_access_time = Some(Instant::now());
+        self.texture_valid = true;
+        Ok(())
+    }
+
+    pub fn dispose_texture(&mut self) {
+        self.image.take();
+        self.mask_image.take();
+        self.last_access_time.take();
+        self.rgba_data.take();
+        self.texture_valid = false;
+    }
+
+    /// 解压图像数据并转换为RGBA格式
+    ///
+    /// 对应 C# MImage.DecompressImage
+    /// ```csharp
+    /// private static void DecompressImage(byte[] data, Stream destination)
+    /// {
+    ///     using (var stream = new GZipStream(new MemoryStream(data), CompressionMode.Decompress))
+    ///     {
+    ///         stream.CopyTo(destination);
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # 参数
+    /// - `compressed`: 压缩的图像数据（GZip格式）
+    /// - `width`: 图像宽度
+    /// - `height`: 图像高度
+    ///
+    /// # 返回
+    /// - `Ok(Vec<u8>)`: RGBA格式的图像数据
+    /// - `Err`: 解压失败
+    fn decompress_image(
+        compressed: &[u8],
+        width: i16,
+        height: i16,
+    ) -> Result<Vec<u8>, std::io::Error> {
+        // 使用GZip解压
+        let mut decoder = GzDecoder::new(compressed);
         let mut decompressed = Vec::new();
-        match decompressor.read_to_end(&mut decompressed) {
-            Ok(_) => {},
-            Err(e) => {
-                tracing::error!("⚠️ 图像 {} 解压失败: width={}, height={}, length={}, offset={}, error={:?}", 
-                    index, info.width, info.height, info.length, offset, e);
-                return Err(e);
-            }
-        }
-        
-        // 验证解压后的大小
-        let expected_size = (info.width as usize) * (info.height as usize) * 4;
+        decoder.read_to_end(&mut decompressed)?;
+
+        // 验证解压后的数据大小
+        let expected_size = (width as usize) * (height as usize) * 4;
         if decompressed.len() != expected_size {
-            // 尝试修正数据大小
             if decompressed.len() > expected_size {
-                // 数据过长,截断
-                // 降级到DEBUG,避免每帧重复警告
-                tracing::debug!("⚠️ 图像 {} 数据过长 ({} > {}), 截断", index, decompressed.len(), expected_size);
+                // 数据过长，截断
+                tracing::debug!(
+                    "⚠️ 图像数据过长 ({} > {}), 截断",
+                    decompressed.len(),
+                    expected_size
+                );
                 decompressed.truncate(expected_size);
             } else {
-                // 数据过短,填充透明像素
-                tracing::debug!("⚠️ 图像 {} 数据过短 ({} < {}), 填充", index, decompressed.len(), expected_size);
+                // 数据过短，填充透明像素
+                tracing::debug!(
+                    "⚠️ 图像数据过短 ({} < {}), 填充",
+                    decompressed.len(),
+                    expected_size
+                );
                 decompressed.resize(expected_size, 0);
             }
         }
-        
-        Ok((info, decompressed))
-    }
-    
-    /// 加载图像数据为 RGBA 格式
-    /// 
-    /// C# equivalent: MLibrary 内部解压逻辑
-    /// 
-    /// 返回: (ImageInfo, RGBA字节数据)
-    pub fn load_rgba_data(&mut self, index: usize) -> io::Result<(ImageInfo, Vec<u8>)> {
-        let (info, data) = self.load_image_data(index)?;
-        
-        // MIR2使用BGRA格式,需要转换为RGBA
-        let mut rgba_data = Vec::with_capacity(data.len());
-        for chunk in data.chunks_exact(4) {
+
+        // 转换 BGRA -> RGBA，并处理透明色
+        // MIR2 格式: B G R A (每个像素4字节)
+        // 目标格式: R G B A
+        let mut rgba_data = Vec::with_capacity(decompressed.len());
+
+        for chunk in decompressed.chunks_exact(4) {
             let b = chunk[0];
             let g = chunk[1];
             let r = chunk[2];
-            let a = chunk[3];
+            let mut a = chunk[3];
+
+            // 🔧 传奇2关键特性: 黑色被视为透明色
+            // 对应 C# 中的隐式行为
+            if r == 0 && g == 0 && b == 0 {
+                a = 0;
+            }
+
             rgba_data.push(r);
             rgba_data.push(g);
             rgba_data.push(b);
             rgba_data.push(a);
         }
-        
-        Ok((info, rgba_data))
+
+        Ok(rgba_data)
     }
-    
+
+    /// 检查指定像素是否可见（非透明）
+    ///
+    /// 对应 C# MImage.VisiblePixel
+    /// ```csharp
+    /// public unsafe bool VisiblePixel(Point p)
+    /// {
+    ///     if (p.X < 0 || p.Y < 0 || p.X >= Width || p.Y >= Height)
+    ///         return false;
+    ///     int w = Width;
+    ///     bool result = false;
+    ///     if (Data != null)
+    ///     {
+    ///         int x = p.X;
+    ///         int y = p.Y;
+    ///         int index = (y * (w << 2)) + (x << 2) + 3;
+    ///         byte col = Data[index];
+    ///         if (col == 0) return false;
+    ///         else return true;
+    ///     }
+    ///     return result;
+    /// }
+    /// ```
+    ///
+    /// # 参数
+    /// - `x`: 像素X坐标
+    /// - `y`: 像素Y坐标
+    /// - `rgba_data`: RGBA格式的图像数据（可选）
+    ///
+    /// # 返回
+    /// - `true`: 像素可见（alpha > 0）
+    /// - `false`: 像素透明或坐标越界
+    ///
+    /// # 注意
+    /// - 坐标越界返回 false
+    /// - 检查 alpha 通道（第4字节）是否为0
+    pub fn visible_pixel(&self, x: i32, y: i32) -> bool {
+        if let Some(ref rgba_data) = self.rgba_data {
+            // 边界检查
+            if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+                return false;
+            }
+            let w = self.width as usize;
+            // 使用我们保存的数据副本
+            // 计算索引: (y * width * 4) + (x * 4) + 3
+            let index = ((y as usize) * (w << 2)) + ((x as usize) << 2) + 3;
+            if index < rgba_data.len() {
+                return rgba_data[index] != 0;
+            }
+        }
+        false
+    }
+
+    /// 获取图像的实际显示尺寸（去除透明边缘）
+    ///
+    /// 对应 C# MImage.GetTrueSize
+    /// ```csharp
+    /// public Size GetTrueSize()
+    /// {
+    ///     if (TrueSize != Size.Empty) return TrueSize;
+    ///     int l = 0, t = 0, r = Width, b = Height;
+    ///     // ... 四个方向扫描找到非透明边界 ...
+    ///     TrueSize = Rectangle.FromLTRB(l, t, r, b).Size;
+    ///     return TrueSize;
+    /// }
+    /// ```
+    ///
+    /// # 参数
+    /// - `rgba_data`: RGBA格式的图像数据
+    ///
+    /// # 返回
+    /// - `(width, height)`: 实际显示尺寸（像素）
+    ///
+    /// # 算法
+    /// 从四个方向扫描找到第一个非透明像素：
+    /// 1. 从左到右 -> 找到左边界 (l)
+    /// 2. 从上到下 -> 找到上边界 (t)
+    /// 3. 从右到左 -> 找到右边界 (r)
+    /// 4. 从下到上 -> 找到下边界 (b)
+    ///
+    /// # 性能
+    /// - 最坏情况: O(width * height)
+    /// - 会缓存结果，避免重复计算
+    pub fn get_true_size(&self) -> (i16, i16) {
+        let mut l = 0i32;
+        let mut t = 0i32;
+        let mut r = self.width as i32;
+        let mut b = self.height as i32;
+
+        // 1. 从左到右扫描，找到第一列包含可见像素
+        let mut visible = false;
+        for x in 0..r {
+            for y in 0..b {
+                if !self.visible_pixel(x, y) {
+                    continue;
+                }
+                visible = true;
+                break;
+            }
+            if !visible {
+                continue;
+            }
+            l = x;
+            break;
+        }
+
+        // 2. 从上到下扫描，找到第一行包含可见像素
+        visible = false;
+        for y in 0..b {
+            for x in l..r {
+                if !self.visible_pixel(x, y) {
+                    continue;
+                }
+                visible = true;
+                break;
+            }
+            if !visible {
+                continue;
+            }
+            t = y;
+            break;
+        }
+
+        // 3. 从右到左扫描，找到最后一列包含可见像素
+        visible = false;
+        for x in (l..r).rev() {
+            for y in 0..b {
+                if !self.visible_pixel(x, y) {
+                    continue;
+                }
+                visible = true;
+                break;
+            }
+            if !visible {
+                continue;
+            }
+            r = x + 1;
+            break;
+        }
+
+        // 4. 从下到上扫描，找到最后一行包含可见像素
+        visible = false;
+        for y in (t..b).rev() {
+            for x in l..r {
+                if !self.visible_pixel(x, y) {
+                    continue;
+                }
+                visible = true;
+                break;
+            }
+            if !visible {
+                continue;
+            }
+            b = y + 1;
+            break;
+        }
+
+        // 返回宽度和高度
+        let width = (r - l) as i16;
+        let height = (b - t) as i16;
+
+        (width, height)
+    }
+}
+
+/// MIR2图像库
+#[derive(Debug)]
+pub struct MLibrary {
+    path: PathBuf,
+    header: LibraryHeader,
+    indices: Vec<ImageIndex>,
+    frames: FrameSet,
+    cached_info: Vec<ImageInfo>,
+    reader: BufReader<File>,
+}
+
+impl MLibrary {
+    /// 打开.lib文件
+    pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let mut path_buf = path.as_ref().to_path_buf();
+        // 尝试.Lib扩展名
+        if !path_buf.exists() {
+            path_buf.set_extension("Lib");
+        }
+        let mut reader = BufReader::new(File::open(&path_buf)?);
+        let version = reader.read_i32::<LittleEndian>()?;
+        if version < 2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Unsupported .lib version: {}", version),
+            ));
+        }
+        let count = reader.read_i32::<LittleEndian>()?;
+        let mut frame_seek = 0;
+        if version >= 3 {
+            frame_seek = reader.read_i32::<LittleEndian>()?;
+        }
+        let header = LibraryHeader {
+            version,
+            count,
+            frame_seek,
+        };
+        let mut indices = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let offset = reader.read_i32::<LittleEndian>()?;
+            indices.push(ImageIndex { offset });
+        }
+        let mut frames = FrameSet::new();
+        if version >= 3 {
+            reader.seek(SeekFrom::Start(frame_seek as u64))?;
+            let frame_count = reader.read_i32::<LittleEndian>()?;
+
+            for _ in 0..frame_count {
+                let action_byte = reader.read_u8()?;
+                let action = MirAction::try_from(action_byte).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Invalid MirAction value: {}", action_byte),
+                    )
+                })?;
+                let frame = Frame::from_reader(&mut reader)?;
+                frames.insert(action, frame);
+            }
+        }
+        Ok(Self {
+            path: path_buf,
+            header,
+            indices,
+            frames,
+            cached_info: Vec::new(),
+            reader,
+        })
+    }
+
+    /// 获取图像数量
+    pub fn count(&self) -> usize {
+        self.indices.len()
+    }
+
+    pub fn frames(&self) -> &FrameSet {
+        &self.frames
+    }
+
+    /// 读取图像信息(不解压纹理数据)
+    pub fn get_image_info(&mut self, index: usize) -> io::Result<ImageInfo> {
+        if index >= self.indices.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Image index {} out of range (max: {})",
+                    index,
+                    self.indices.len()
+                ),
+            ));
+        }
+
+        // 检查缓存
+        if let Some(info) = self.cached_info.get(index) {
+            return Ok(info.clone());
+        }
+        let offset = self.indices[index].offset as u64;
+        self.reader.seek(SeekFrom::Start(offset))?;
+        let info = ImageInfo::from_reader(&mut self.reader)?;
+        self.cached_info.insert(index, info.clone());
+        Ok(info)
+    }
+
+    // /// 加载图像数据为RGBA8像素数组
+    // pub fn load_image_data(&mut self, index: usize) -> io::Result<(ImageInfo, Vec<u8>)> {
+    //     let info = self.get_image_info(index)?;
+
+    //     // ✅ C# CheckImage 检查: if (Width == 0 || Height == 0) return false;
+    //     if info.width == 0 || info.height == 0 {
+    //         return Err(io::Error::new(
+    //             io::ErrorKind::InvalidData,
+    //             format!(
+    //                 "图像 {} 无效: width={}, height={}",
+    //                 index, info.width, info.height
+    //             ),
+    //         ));
+    //     }
+
+    //     // ✅ 检查 Length 是否有效
+    //     if info.length <= 0 {
+    //         return Err(io::Error::new(
+    //             io::ErrorKind::InvalidData,
+    //             format!("图像 {} 无效: length={}", index, info.length),
+    //         ));
+    //     }
+
+    //     let offset = self.indices[index].offset as u64;
+    //     let mut file = File::open(&self.path)?;
+
+    //     // 跳过图像信息头(17字节)
+    //     file.seek(SeekFrom::Start(offset + 17))?;
+
+    //     // Length 字段就是压缩数据的实际长度 (对应 C# 的 reader.ReadBytes(Length))
+    //     let compressed_size = info.length as usize;
+
+    //     // 读取压缩数据
+    //     let mut compressed = vec![0u8; compressed_size];
+    //     file.read_exact(&mut compressed)?;
+
+    //     // 解压(GZip格式)
+    //     let mut decompressor = GzDecoder::new(&compressed[..]);
+    //     let mut decompressed = Vec::new();
+    //     match decompressor.read_to_end(&mut decompressed) {
+    //         Ok(_) => {}
+    //         Err(e) => {
+    //             tracing::error!(
+    //                 "⚠️ 图像 {} 解压失败: width={}, height={}, length={}, offset={}, error={:?}",
+    //                 index,
+    //                 info.width,
+    //                 info.height,
+    //                 info.length,
+    //                 offset,
+    //                 e
+    //             );
+    //             return Err(e);
+    //         }
+    //     }
+
+    //     // 验证解压后的大小
+    //     let expected_size = (info.width as usize) * (info.height as usize) * 4;
+    //     if decompressed.len() != expected_size {
+    //         // 尝试修正数据大小
+    //         if decompressed.len() > expected_size {
+    //             // 数据过长,截断
+    //             // 降级到DEBUG,避免每帧重复警告
+    //             tracing::debug!(
+    //                 "⚠️ 图像 {} 数据过长 ({} > {}), 截断",
+    //                 index,
+    //                 decompressed.len(),
+    //                 expected_size
+    //             );
+    //             decompressed.truncate(expected_size);
+    //         } else {
+    //             // 数据过短,填充透明像素
+    //             tracing::debug!(
+    //                 "⚠️ 图像 {} 数据过短 ({} < {}), 填充",
+    //                 index,
+    //                 decompressed.len(),
+    //                 expected_size
+    //             );
+    //             decompressed.resize(expected_size, 0);
+    //         }
+    //     }
+
+    //     Ok((info, decompressed))
+    // }
+
+    // /// 加载图像数据为 RGBA 格式
+    // ///
+    // /// C# equivalent: MLibrary 内部解压逻辑
+    // ///
+    // /// 返回: (ImageInfo, RGBA字节数据)
+    // pub fn load_rgba_data(&mut self, index: usize) -> io::Result<(ImageInfo, Vec<u8>)> {
+    //     let (info, data) = self.load_image_data(index)?;
+
+    //     let width = info.width as usize;
+    //     let height = info.height as usize;
+
+    //     // MIR2使用BGRA格式,需要转换为RGBA
+    //     // 关键修复: 将黑色像素(0,0,0)转换为透明色(0,0,0,0)
+    //     let mut rgba_data = Vec::with_capacity(data.len());
+
+    //     for chunk in data.chunks_exact(4) {
+    //         let b = chunk[0];
+    //         let g = chunk[1];
+    //         let r = chunk[2];
+    //         let mut a = chunk[3];
+
+    //         // 🔧 传奇2关键特性: 黑色被视为透明色
+    //         if r == 0 && g == 0 && b == 0 {
+    //             a = 0;
+    //         }
+
+    //         rgba_data.push(r);
+    //         rgba_data.push(g);
+    //         rgba_data.push(b);
+    //         rgba_data.push(a);
+    //     }
+
+    //     Ok((info, rgba_data))
+    // }
+
     // ===== 纹理缓存系统 (对应 C# MImage.CreateTexture + DXManager.TextureList) =====
-    
+
     /// 获取或创建缓存的 ggez 纹理
-    /// 
+    ///
     /// 对应 C# 实现:
     /// ```csharp
     /// // MLibrary.cs line 898-927
@@ -260,11 +683,11 @@ impl MLibrary {
     ///     DXManager.TextureList.Add(this); // Cache for reuse
     /// }
     /// ```
-    /// 
+    ///
     /// # 参数
     /// - `ctx`: ggez Context
     /// - `index`: 图像索引
-    /// 
+    ///
     /// # 返回
     /// - `Ok(&Image)`: 缓存的纹理引用
     /// - `Err`: 加载失败
@@ -272,36 +695,56 @@ impl MLibrary {
         &mut self,
         ctx: &mut ggez::Context,
         index: usize,
-    ) -> io::Result<&ggez::graphics::Image> {
-        use ggez::graphics::{Image, ImageFormat};
-        use std::time::Instant;
-        
-        // 检查缓存
-        if !self.ggez_texture_cache.contains_key(&index) {
-            // 缓存未命中 - 加载并创建纹理
-            let (info, rgba_data) = self.load_rgba_data(index)?;
-            
-            let image = Image::from_pixels(
-                ctx,
-                &rgba_data,
-                ImageFormat::Rgba8UnormSrgb,
-                info.width as u32,
-                info.height as u32,
-            );
-            
-            self.ggez_texture_cache.insert(index, image);
-            tracing::debug!("✅ Texture cached: index={}, size={}x{}", index, info.width, info.height);
+    ) -> io::Result<ImageInfo> {
+        // // 尝试从缓存读取（仅共享借用，避免与后续可变借用冲突）
+        // 读取图像信息（必要时从文件解析）
+        let mut info = self.get_image_info(index)?;
+        if info.width == 0 || info.height == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "图像 {} 无效: width={}, height={}",
+                    index, info.width, info.height
+                ),
+            ));
         }
-        
-        // 更新访问时间 (用于 LRU 清理)
-        self.ggez_cache_access_time.insert(index, Instant::now());
-        
-        // 返回缓存的纹理
-        Ok(self.ggez_texture_cache.get(&index).unwrap())
+        if info.image.is_some() {
+            // 已有纹理，更新访问时间并返回
+            info.last_access_time = Some(Instant::now());
+            self.cached_info[index] = info.clone();
+            return Ok(info);
+        }
+        // 将文件指针定位到压缩数据起始位置（跳过17字节的头）
+        let offset = self.indices[index].offset as u64;
+        self.reader.seek(SeekFrom::Start(offset + 17))?;
+        // 创建纹理（内部会更新 last_access_time）
+        info.create_texture(ctx, &mut self.reader)?;
+        // 写回缓存
+        self.cached_info.insert(index, info.clone());
+        Ok(info)
     }
-    
+
+    // /// 垂直翻转纹理数据
+    // ///
+    // /// 用于在 DirectX (Y轴向下) 和 OpenGL (Y轴向上) 之间转换
+    // #[allow(dead_code)]
+    // fn flip_texture_vertically(data: &mut [u8], width: usize, height: usize) {
+    //     let row_size = width * 4; // RGBA, 4 bytes per pixel
+    //     let mut row_buffer = vec![0u8; row_size];
+
+    //     for y in 0..(height / 2) {
+    //         let top_offset = y * row_size;
+    //         let bottom_offset = (height - 1 - y) * row_size;
+
+    //         // 交换两行
+    //         row_buffer.copy_from_slice(&data[top_offset..top_offset + row_size]);
+    //         data.copy_within(bottom_offset..bottom_offset + row_size, top_offset);
+    //         data[bottom_offset..bottom_offset + row_size].copy_from_slice(&row_buffer);
+    //     }
+    // }
+
     /// 清理长时间未使用的纹理缓存
-    /// 
+    ///
     /// 对应 C# 实现:
     /// ```csharp
     /// // DXManager.cs - CleanUp()
@@ -310,55 +753,185 @@ impl MLibrary {
     ///         TextureList[i].DisposeTexture();
     /// }
     /// ```
-    /// 
+    ///
     /// # 参数
     /// - `max_age`: 最大未使用时间 (超过此时间的纹理将被清理)
     pub fn cleanup_old_textures(&mut self, max_age: std::time::Duration) {
         use std::time::Instant;
-        
         let now = Instant::now();
         let mut removed = 0;
-        
-        self.ggez_texture_cache.retain(|&idx, _| {
-            if let Some(access_time) = self.ggez_cache_access_time.get(&idx) {
-                let age = now.duration_since(*access_time);
+        self.cached_info.iter_mut().for_each(|image| {
+            if let Some(access_time) = image.last_access_time {
+                let age = now.duration_since(access_time);
                 if age > max_age {
+                    image.image = None; // 释放主纹理
+                    image.mask_image = None; // 释放遮罩纹理
+                    image.last_access_time = None; // 清除访问时间
                     removed += 1;
-                    false // 移除
-                } else {
-                    true // 保留
                 }
-            } else {
-                false // 没有访问记录,移除
             }
         });
-        
-        // 同步清理访问时间记录
-        self.ggez_cache_access_time.retain(|idx, _| {
-            self.ggez_texture_cache.contains_key(idx)
-        });
-        
+
         if removed > 0 {
             tracing::info!("🧹 Cleaned {} old textures from cache", removed);
         }
     }
-    
+
     /// 获取缓存统计信息
     pub fn get_cache_stats(&self) -> (usize, usize) {
-        (self.ggez_texture_cache.len(), self.indices.len())
+        let total = self.cached_info.len();
+        let used = self
+            .cached_info
+            .iter()
+            .filter(|info| info.image.is_some())
+            .count();
+        (total, used)
     }
-    
+
+    // ===== 图像属性访问方法 (对应 C# GetOffSet/GetSize/GetTrueSize) =====
+
+    /// 获取图像偏移量
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 641-654
+    /// public Point GetOffSet(int index) {
+    ///     if (!_initialized) Initialize();
+    ///     if (_images == null || index < 0 || index >= _images.Length)
+    ///         return Point.Empty;
+    ///     if (_images[index] == null) {
+    ///         _fStream.Seek(_indexList[index], SeekOrigin.Begin);
+    ///         _images[index] = new MImage(_reader);
+    ///     }
+    ///     return new Point(_images[index].X, _images[index].Y);
+    /// }
+    /// ```
+    ///
+    /// # 参数
+    /// - `index`: 图像索引
+    ///
+    /// # 返回
+    /// - `Ok((x, y))`: 图像偏移量 (x, y)
+    /// - `Err`: 索引无效或读取失败
+    pub fn get_offset(&mut self, index: usize) -> io::Result<(i16, i16)> {
+        // 检查索引范围
+        if index >= self.indices.len() {
+            return Ok((0, 0)); // 对应 C# 的 Point.Empty
+        }
+
+        // 获取或读取图像信息
+        let info = self.get_image_info(index)?;
+
+        Ok((info.x, info.y))
+    }
+
+    /// 获取图像尺寸
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 655-667
+    /// public Size GetSize(int index) {
+    ///     if (!_initialized) Initialize();
+    ///     if (_images == null || index < 0 || index >= _images.Length)
+    ///         return Size.Empty;
+    ///     if (_images[index] == null) {
+    ///         _fStream.Seek(_indexList[index], SeekOrigin.Begin);
+    ///         _images[index] = new MImage(_reader);
+    ///     }
+    ///     return new Size(_images[index].Width, _images[index].Height);
+    /// }
+    /// ```
+    ///
+    /// # 参数
+    /// - `index`: 图像索引
+    ///
+    /// # 返回
+    /// - `Ok((width, height))`: 图像尺寸 (width, height)
+    /// - `Err`: 索引无效或读取失败
+    pub fn get_size(&mut self, index: usize) -> io::Result<(i16, i16)> {
+        // 检查索引范围
+        if index >= self.indices.len() {
+            return Ok((0, 0)); // 对应 C# 的 Size.Empty
+        }
+
+        // 获取或读取图像信息
+        let info = self.get_image_info(index)?;
+
+        Ok((info.width, info.height))
+    }
+
+    /// 获取图像实际尺寸（排除透明边缘）
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 668-699
+    /// public Size GetTrueSize(int index) {
+    ///     if (!_initialized) Initialize();
+    ///     if (_images == null || index < 0 || index >= _images.Length)
+    ///         return Size.Empty;
+    ///     if (_images[index] == null) {
+    ///         _fStream.Position = _indexList[index];
+    ///         _images[index] = new MImage(_reader);
+    ///     }
+    ///     MImage mi = _images[index];
+    ///     if (mi.TrueSize.IsEmpty) {
+    ///         if (!mi.TextureValid) {
+    ///             if ((mi.Width == 0) || (mi.Height == 0))
+    ///                 return Size.Empty;
+    ///             _fStream.Seek(_indexList[index] + 17, SeekOrigin.Begin);
+    ///             mi.CreateTexture(_reader);
+    ///         }
+    ///         return mi.GetTrueSize();
+    ///     }
+    ///     return mi.TrueSize;
+    /// }
+    /// ```
+    ///
+    /// # 参数
+    /// - `ctx`: ggez Context (用于创建纹理)
+    /// - `index`: 图像索引
+    ///
+    /// # 返回
+    /// - `Ok((width, height))`: 实际尺寸 (width, height)
+    /// - `Err`: 索引无效、图像无效或读取失败
+    ///
+    /// # 说明
+    /// - 如果已经计算过，直接返回缓存的值
+    /// - 如果还没有纹理数据，会先加载纹理
+    /// - 然后调用 `ImageInfo::get_true_size()` 计算实际边界
+    pub fn get_true_size(
+        &mut self,
+        ctx: &mut ggez::Context,
+        index: usize,
+    ) -> io::Result<(i16, i16)> {
+        // 检查索引范围
+        if index >= self.indices.len() {
+            return Ok((0, 0)); // 对应 C# 的 Size.Empty
+        }
+        // 获取或读取图像信息
+        let  info = self.get_or_create_texture(ctx,index)?;
+
+        // 检查图像是否有效
+        if info.width == 0 || info.height == 0 {
+            return Ok((0, 0)); // 对应 C# 的 Size.Empty
+        }
+        // 计算实际尺寸
+        let true_size = info.get_true_size();
+
+        Ok(true_size)
+    }
+
     // ===== Ggez 渲染函数 =====
-    
+
     /// 使用 ggez 渲染图像到 Canvas
-    /// 
+    ///
     /// # 参数
     /// - `ctx`: ggez Context
     /// - `canvas`: 目标 Canvas
     /// - `index`: 图像索引
     /// - `x`, `y`: 屏幕坐标
     /// - `blend`: 是否使用混合模式
-    /// 
+    ///
     /// # 返回
     /// - `Ok(())`: 成功
     /// - `Err`: 图像不存在或渲染失败
@@ -371,35 +944,11 @@ impl MLibrary {
         y: f32,
         blend: bool,
     ) -> io::Result<()> {
-        use ggez::graphics::{Image, DrawParam, BlendMode};
-        
-        // 加载 RGBA 数据
-        let (info, rgba_data) = self.load_rgba_data(index)?;
-        
-        // 创建 ggez Image (ggez 0.10 API)
-        let image = Image::from_pixels(
-            ctx,
-            &rgba_data,
-            ggez::graphics::ImageFormat::Rgba8UnormSrgb,
-            info.width as u32,
-            info.height as u32,
-        );
-        
-        // 设置绘制参数
-        let draw_param = DrawParam::default()
-            .dest([x, y]);
-        
-        // blend 模式在 ggez 0.10 中通过 Canvas 设置,这里暂时忽略
-        let _ = blend; // 避免未使用警告
-        
-        // 绘制
-        canvas.draw(&image, draw_param);
-        
         Ok(())
     }
-    
+
     /// 使用 ggez 渲染图像到 Canvas (带偏移)
-    /// 
+    ///
     /// 用于处理 ImageInfo 中的 offset_x/offset_y
     pub fn draw_to_canvas_with_offset(
         &mut self,
@@ -410,658 +959,6 @@ impl MLibrary {
         y: f32,
         blend: bool,
     ) -> io::Result<()> {
-        // 先加载 RGBA 数据以获取 ImageInfo
-        let (info, rgba_data) = self.load_rgba_data(index)?;
-        let offset_x = info.x as f32; // 使用正确的字段名
-        let offset_y = info.y as f32;
-        
-        // 创建并绘制 Image
-        use ggez::graphics::{Image, DrawParam};
-        
-        let image = Image::from_pixels(
-            ctx,
-            &rgba_data,
-            ggez::graphics::ImageFormat::Rgba8UnormSrgb,
-            info.width as u32,
-            info.height as u32,
-        );
-        
-        let draw_param = DrawParam::default()
-            .dest([x + offset_x, y + offset_y]);
-        
-        let _ = blend; // blend 模式暂时忽略
-        
-        canvas.draw(&image, draw_param);
-        
         Ok(())
     }
-}
-
-/// 纹理管理器 - 负责加载和缓存所有游戏纹理
-/// 
-/// C# equivalent: 部分对应 DXManager.TextureList + MLibrary 的组合使用
-/// C# 中纹理管理分散在多个地方，Rust 统一到这里
-pub struct TextureManager {
-    libraries: HashMap<String, MLibrary>,
-    textures: HashMap<TextureKey, Arc<TextureHandle>>,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct TextureKey {
-    pub library: String,
-    pub index: usize,
-}
-
-impl TextureManager {
-    pub fn new() -> Self {
-        Self {
-            libraries: HashMap::new(),
-            textures: HashMap::new(),
-        }
-    }
-    
-    /// 加载图像库
-    /// 
-    /// C# equivalent: 
-    /// ```csharp
-    /// Libraries.Add(LibraryType.UI, new MLibrary(Path.Combine(Settings.DataPath, "UI")));
-    /// ```
-    pub fn load_library(&mut self, name: &str, path: &Path) -> io::Result<()> {
-        let lib = MLibrary::open(path)?;
-        self.libraries.insert(name.to_string(), lib);
-        Ok(())
-    }
-    
-    /// 获取或加载纹理
-    /// 
-    /// C# equivalent: 内部逻辑类似 MLibrary.GetTexture() + DXManager caching
-    /// 
-    /// 参数:
-    /// - dx_manager: DXManager 引用，用于上传纹理到 GPU
-    /// - library: 库名称 (如 "UI", "Prguse", "Tiles" 等)
-    /// - index: 图像索引
-    /// 
-    /// 返回: (ImageInfo, Arc<TextureHandle>)
-    // 已废弃: 使用 ggez 替代
-    #[allow(dead_code)]
-    pub fn get_texture(
-        &mut self,
-        _dx_manager: &TextureHandle, // Dummy type to avoid compilation error
-        library: &str,
-        index: usize,
-    ) -> io::Result<(ImageInfo, Arc<TextureHandle>)> {
-        // 此函数已废弃,使用 get_image_data() 配合 ggez 渲染
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "get_texture() is deprecated, use get_image_data() with ggez instead"
-        ));
-        
-        #[allow(unreachable_code)]
-        {
-        let key = TextureKey {
-            library: library.to_string(),
-            index,
-        };
-        
-        // 检查缓存
-        if let Some(handle) = self.textures.get(&key) {
-            let lib = self.libraries.get_mut(library)
-                .ok_or_else(|| io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("Library '{}' not loaded", library)
-                ))?;
-            let info = lib.get_image_info(index)?;
-            return Ok((info, handle.clone()));
-        }
-        
-        // 加载纹理数据
-        let lib = self.libraries.get_mut(library)
-            .ok_or_else(|| io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Library '{}' not loaded", library)
-            ))?;
-        
-        let (info, rgba_data) = lib.load_rgba_data(index)?;
-        
-        // 上传到 GPU (unreachable code - 保留用于参考)
-        let texture_name = format!("{}_{}", library, index);
-        let handle = _dx_manager;  // Dummy - this code is unreachable
-        let handle = Arc::new(handle.clone());
-        
-        self.textures.insert(key, handle.clone());
-        
-        Ok((info, handle))
-        } // unreachable_code block
-    }
-    
-    /// 获取图像信息(不加载纹理)
-    /// 
-    /// C# equivalent: MLibrary.GetImageInfo()
-    pub fn get_image_info(&mut self, library: &str, index: usize) -> io::Result<ImageInfo> {
-        let lib = self.libraries.get_mut(library)
-            .ok_or_else(|| io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Library '{}' not loaded", library)
-            ))?;
-        lib.get_image_info(index)
-    }
-    
-    /// 清除所有纹理缓存
-    /// 
-    /// C# equivalent: DXManager.Clean()
-    pub fn clear_cache(&mut self) {
-        self.textures.clear();
-    }
-    
-}
-
-// ===== 辅助函数 =====
-
-fn read_i32<R: Read>(reader: &mut R) -> io::Result<i32> {
-    let mut buf = [0u8; 4];
-    reader.read_exact(&mut buf)?;
-    Ok(i32::from_le_bytes(buf))
-}
-
-fn read_i16<R: Read>(reader: &mut R) -> io::Result<i16> {
-    let mut buf = [0u8; 2];
-    reader.read_exact(&mut buf)?;
-    Ok(i16::from_le_bytes(buf))
-}
-
-fn read_u8<R: Read>(reader: &mut R) -> io::Result<u8> {
-    let mut buf = [0u8; 1];
-    reader.read_exact(&mut buf)?;
-    Ok(buf[0])
-}
-
-// ===== MLibrary draw functions (deprecated) =====
-/*  // All draw functions commented out - depend on dx_manager
-
-/// Drawing and helper methods for MLibrary
-impl MLibrary {
-    /// Draw image without blending
-    /// 
-    /// C# equivalent:
-    /// ```csharp
-    /// public void Draw(int index, Point point, Color colour, bool offSet, float opacity) {
-    ///     if (!CheckImage(index)) return;
-    ///     MImage mi = _images[index];
-    ///     if (offSet) point.Offset(mi.X, mi.Y);
-    ///     if (point.X >= Settings.ScreenWidth || point.Y >= Settings.ScreenHeight || 
-    ///         point.X + mi.Width < 0 || point.Y + mi.Height < 0) return;
-    ///     DXManager.DrawOpaque(mi.Image, new Rectangle(0, 0, mi.Width, mi.Height), 
-    ///                          new Vector3((float)point.X, (float)point.Y, 0.0F), colour, opacity);
-    /// }
-    /// ```
-    pub fn draw(
-        &mut self,
-        dx_manager: &mut super::dx_manager::DXManager,
-        index: i32,
-        point: (i32, i32),
-        color: [f32; 4],
-        use_offset: bool,
-        opacity: f32,
-        screen_width: i32,
-        screen_height: i32,
-    ) -> io::Result<()> {
-        if !self.check_image(index) {
-            return Ok(()); // C# 静默返回
-        }
-        
-        // Step 1: 获取图像信息
-        let info = self.get_image_info(index as usize)?;
-        
-        // Step 2: 应用偏移
-        let (mut x, mut y) = point;
-        if use_offset {
-            x += info.x as i32;
-            y += info.y as i32;
-        }
-        
-        // Step 3: 屏幕裁剪检查 (照搬 C# 逻辑)
-        if x >= screen_width || y >= screen_height || 
-           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
-            return Ok(());
-        }
-        
-        // Step 4: 加载/缓存纹理
-        let texture = self.get_or_load_texture(dx_manager, index as usize)?;
-        
-        // Step 5: 调用 DXManager 渲染
-        // 应用 opacity 到 color alpha 通道
-        let mut render_color = color;
-        render_color[3] *= opacity;
-        
-        dx_manager.draw_sprite(
-            &texture,
-            (x, y),
-            (info.width as u32, info.height as u32),
-            render_color,
-        ).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-        
-        // Step 6: 更新缓存时间戳 (对应 C# 的 mi.CleanTime)
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-        self.cache_timestamps.insert(index as usize, now);
-        
-        Ok(())
-    }
-    
-    /// Draw image with blending
-    /// 
-    /// C# equivalent:
-    /// ```csharp
-    /// public void DrawBlend(int index, Point point, Color colour, bool offSet = false, float rate = 1) {
-    ///     if (!CheckImage(index)) return;
-    ///     MImage mi = _images[index];
-    ///     if (offSet) point.Offset(mi.X, mi.Y);
-    ///     if (point.X >= Settings.ScreenWidth || point.Y >= Settings.ScreenHeight || 
-    ///         point.X + mi.Width < 0 || point.Y + mi.Height < 0) return;
-    ///     bool oldBlend = DXManager.Blending;
-    ///     DXManager.SetBlend(true, rate);
-    ///     DXManager.Draw(mi.Image, new Rectangle(0, 0, mi.Width, mi.Height), 
-    ///                    new Vector3((float)point.X, (float)point.Y, 0.0F), colour);
-    ///     DXManager.SetBlend(oldBlend);
-    /// }
-    /// ```
-    pub fn draw_blend(
-        &mut self,
-        dx_manager: &mut super::dx_manager::DXManager,
-        index: i32,
-        point: (i32, i32),
-        color: [f32; 4],
-        use_offset: bool,
-        rate: f32,
-        screen_width: i32,
-        screen_height: i32,
-    ) -> io::Result<()> {
-        if !self.check_image(index) {
-            return Ok(()); // C# 静默返回
-        }
-        
-        // Step 1: 获取图像信息
-        let info = self.get_image_info(index as usize)?;
-        
-        // Step 2: 应用偏移
-        let (mut x, mut y) = point;
-        if use_offset {
-            x += info.x as i32;
-            y += info.y as i32;
-        }
-        
-        // Step 3: 屏幕裁剪检查
-        if x >= screen_width || y >= screen_height || 
-           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
-            return Ok(());
-        }
-        
-        // Step 4: 加载/缓存纹理
-        let texture = self.get_or_load_texture(dx_manager, index as usize)?;
-        
-        // Step 5: 应用混合率到 color alpha 通道
-        let mut render_color = color;
-        render_color[3] *= rate;
-        
-        // Step 6: 使用混合模式渲染
-        dx_manager.draw_sprite_blend(
-            &texture,
-            (x, y),
-            (info.width as u32, info.height as u32),
-            render_color,
-        ).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-        
-        // Step 7: 更新缓存时间戳
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-        self.cache_timestamps.insert(index as usize, now);
-        
-        Ok(())
-    }
-    
-    /// 批处理模式绘制(不立即提交GPU)
-    /// 
-    /// 用于粒子系统批量渲染优化
-    pub fn draw_batched(
-        &mut self,
-        dx_manager: &super::dx_manager::DXManager,
-        index: i32,
-        point: (i32, i32),
-        color: [f32; 4],
-        use_offset: bool,
-        opacity: f32,
-        screen_width: i32,
-        screen_height: i32,
-    ) -> io::Result<()> {
-        if !self.check_image(index) {
-            return Ok(());
-        }
-        
-        let info = self.get_image_info(index as usize)?;
-        let (mut x, mut y) = point;
-        if use_offset {
-            x += info.x as i32;
-            y += info.y as i32;
-        }
-        
-        if x >= screen_width || y >= screen_height || 
-           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
-            return Ok(());
-        }
-        
-        let texture = self.get_or_load_texture_readonly(dx_manager, index as usize)?;
-        
-        let mut render_color = color;
-        render_color[3] *= opacity;
-        
-        dx_manager.draw_sprite_batched(
-            &texture,
-            (x, y),
-            (info.width as u32, info.height as u32),
-            render_color,
-        );
-        
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-        self.cache_timestamps.insert(index as usize, now);
-        
-        Ok(())
-    }
-    
-    /// 批处理模式混合绘制(不立即提交GPU)
-    pub fn draw_blend_batched(
-        &mut self,
-        dx_manager: &super::dx_manager::DXManager,
-        index: i32,
-        point: (i32, i32),
-        color: [f32; 4],
-        use_offset: bool,
-        rate: f32,
-        screen_width: i32,
-        screen_height: i32,
-    ) -> io::Result<()> {
-        if !self.check_image(index) {
-            return Ok(());
-        }
-        
-        let info = self.get_image_info(index as usize)?;
-        let (mut x, mut y) = point;
-        if use_offset {
-            x += info.x as i32;
-            y += info.y as i32;
-        }
-        
-        if x >= screen_width || y >= screen_height || 
-           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
-            return Ok(());
-        }
-        
-        let texture = self.get_or_load_texture_readonly(dx_manager, index as usize)?;
-        
-        let mut render_color = color;
-        render_color[3] *= rate;
-        
-        dx_manager.draw_sprite_batched(
-            &texture,
-            (x, y),
-            (info.width as u32, info.height as u32),
-            render_color,
-        );
-        
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-        self.cache_timestamps.insert(index as usize, now);
-        
-        Ok(())
-    }
-    
-    /// GPU实例化渲染 (普通模式)
-    pub fn draw_instanced(
-        &mut self,
-        dx_manager: &super::dx_manager::DXManager,
-        index: i32,
-        point: (i32, i32),
-        color: [f32; 4],
-        use_offset: bool,
-        opacity: f32,
-        screen_width: i32,
-        screen_height: i32,
-    ) -> io::Result<()> {
-        if !self.check_image(index) {
-            return Ok(());
-        }
-        
-        let info = self.get_image_info(index as usize)?;
-        let (mut x, mut y) = point;
-        if use_offset {
-            x += info.x as i32;
-            y += info.y as i32;
-        }
-        
-        if x >= screen_width || y >= screen_height || 
-           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
-            return Ok(());
-        }
-        
-        let texture = self.get_or_load_texture_readonly(dx_manager, index as usize)?;
-        
-        let mut render_color = color;
-        render_color[3] *= opacity;
-        
-        dx_manager.draw_sprite_instanced(
-            &texture,
-            (x, y),
-            (info.width as u32, info.height as u32),
-            render_color,
-        );
-        
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-        self.cache_timestamps.insert(index as usize, now);
-        
-        Ok(())
-    }
-    
-    /// GPU实例化渲染 (混合模式)
-    pub fn draw_blend_instanced(
-        &mut self,
-        dx_manager: &super::dx_manager::DXManager,
-        index: i32,
-        point: (i32, i32),
-        color: [f32; 4],
-        use_offset: bool,
-        rate: f32,
-        screen_width: i32,
-        screen_height: i32,
-    ) -> io::Result<()> {
-        if !self.check_image(index) {
-            return Ok(());
-        }
-        
-        let info = self.get_image_info(index as usize)?;
-        let (mut x, mut y) = point;
-        if use_offset {
-            x += info.x as i32;
-            y += info.y as i32;
-        }
-        
-        if x >= screen_width || y >= screen_height || 
-           (x + info.width as i32) < 0 || (y + info.height as i32) < 0 {
-            return Ok(());
-        }
-        
-        let texture = self.get_or_load_texture_readonly(dx_manager, index as usize)?;
-        
-        let mut render_color = color;
-        render_color[3] *= rate;
-        
-        dx_manager.draw_sprite_instanced(
-            &texture,
-            (x, y),
-            (info.width as u32, info.height as u32),
-            render_color,
-        );
-        
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-        self.cache_timestamps.insert(index as usize, now);
-        
-        Ok(())
-    }
-    
-    /// 获取已缓存的纹理(用于批处理)
-    /// 
-    /// 批处理模式要求纹理已预加载
-    /// 如果纹理未缓存,会尝试即时加载
-    fn get_or_load_texture_readonly(
-        &mut self,
-        dx_manager: &super::dx_manager::DXManager,
-        index: usize,
-    ) -> io::Result<Arc<TextureHandle>> {
-        // 如果已缓存则直接返回
-        if let Some(texture) = self.texture_cache.get(&index) {
-            return Ok(Arc::clone(texture));
-        }
-        
-        // 未缓存: 加载纹理
-        // load_rgba_data不需要&mut self,只读取数据
-        let (info, rgba_data) = self.load_rgba_data(index)?;
-        
-        // DXManager的load_texture使用内部可变性,&self即可
-        let texture_name = format!("{}_{}", self.path.display(), index);
-        let texture = dx_manager.load_texture(
-            texture_name,
-            info.width as u32,
-            info.height as u32,
-            &rgba_data,
-        );
-        
-        // 缓存纹理
-        self.texture_cache.insert(index, texture.clone());
-        
-        Ok(texture)
-    }
-    
-    /// 获取或加载纹理 (内部方法)
-    /// 
-    /// 对应 C# 的纹理缓存逻辑
-    fn get_or_load_texture(
-        &mut self,
-        dx_manager: &mut super::dx_manager::DXManager,
-        index: usize,
-    ) -> io::Result<Arc<TextureHandle>> {
-        // 检查缓存
-        if let Some(texture) = self.texture_cache.get(&index) {
-            return Ok(texture.clone());
-        }
-        
-        // 加载纹理数据
-        let (info, rgba_data) = self.load_rgba_data(index)?;
-        
-        // 上传到 GPU
-        let texture_name = format!("{}_{}", self.path.display(), index);
-        let texture = dx_manager.load_texture(
-            texture_name,
-            info.width as u32,
-            info.height as u32,
-            &rgba_data,
-        );
-        
-        // 缓存
-        self.texture_cache.insert(index, texture.clone());
-        
-        Ok(texture)
-    }
-    
-    /// 清理过期纹理缓存
-    /// 
-    /// C# equivalent: 定期清理 MImage.CleanTime
-    pub fn clean_cache(&mut self, max_age_ms: i64) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
-        
-        let mut to_remove = Vec::new();
-        for (index, &timestamp) in &self.cache_timestamps {
-            if now - timestamp > max_age_ms {
-                to_remove.push(*index);
-            }
-        }
-        
-        for index in to_remove {
-            self.texture_cache.remove(&index);
-            self.cache_timestamps.remove(&index);
-        }
-    }
-    
-    /// Check if image index is valid
-    /// 
-    /// C# equivalent: MLibrary.CheckImage(int index)
-    /// 
-    /// 检查图像是否有效:
-    /// 1. 索引在范围内
-    /// 2. 图像信息已加载且Width/Height不为0
-    pub fn check_image(&mut self, index: i32) -> bool {
-        if index < 0 || (index as usize) >= self.indices.len() {
-            return false;
-        }
-        
-        // 尝试获取图像信息
-        if let Ok(info) = self.get_image_info(index as usize) {
-            // C#检查: if ((mi.Width == 0) || (mi.Height == 0)) return false;
-            info.width > 0 && info.height > 0
-        } else {
-            false
-        }
-    }
-    
-    /// Get image bounds for drawing
-    /// 
-    /// Used for screen clipping optimization.
-    /// Returns None if image is invalid or info cannot be retrieved.
-    /// 
-    /// C# equivalent: Logic in MLibrary.Draw() for bounds checking
-    pub fn get_image_bounds_mut(
-        &mut self,
-        index: i32,
-        point: (i32, i32),
-        use_offset: bool,
-    ) -> Option<(i32, i32, i32, i32)> {
-        if !self.check_image(index) {
-            return None;
-        }
-        
-        let info = self.get_image_info(index as usize).ok()?;
-        
-        let (mut x, mut y) = point;
-        if use_offset {
-            x += info.x as i32;
-            y += info.y as i32;
-        }
-        
-        let width = info.width as i32;
-        let height = info.height as i32;
-        
-        Some((x, y, width, height))
-    }
-    
-    */  // End of deprecated draw functions block
-
-#[cfg(test)]
-mod tests {
-    // Tests require actual .lib files
-    // TODO: Add integration tests with sample data
 }

@@ -7,17 +7,41 @@ using SlimDX;
 
 namespace Client.MirObjects
 {
+    /// <summary>
+    /// 地图对象基类 - 所有地图上可见对象的抽象基类
+    /// 包括: 玩家(User)、怪物(Monster)、NPC、掉落物(Item)、特效(Effect)等
+    /// 负责对象的位置管理、动画渲染、状态更新、交互处理等核心功能
+    /// </summary>
     public abstract class MapObject
     {
+        // ==================== 静态共享资源 ====================
+        /// <summary>聊天字体 - 所有对象共享的聊天消息字体</summary>
         public static Font ChatFont = new Font(Settings.FontName, 10F);
+        
+        /// <summary>标签列表 - 管理所有对象的文字标签(名字/聊天/血条等)</summary>
         public static List<MirLabel> LabelList = new List<MirLabel>();
 
+        // ==================== 静态对象引用 ====================
+        /// <summary>当前玩家对象 - 全局唯一的玩家角色</summary>
         public static UserObject User;
+        
+        /// <summary>玩家英雄对象 - 玩家召唤的英雄伙伴</summary>
         public static UserHeroObject Hero;
+        
+        /// <summary>英雄对象实例 - 地图上的英雄实体</summary>
         public static HeroObject HeroObject;
+        
+        /// <summary>鼠标指向对象 - 当前鼠标悬停的对象</summary>
+        /// <summary>目标对象 - 当前选中的攻击目标</summary>
+        /// <summary>魔法目标对象 - 施法时选中的目标</summary>
         public static MapObject MouseObject, TargetObject, MagicObject;
 
+        // ==================== 鼠标对象ID管理 ====================
         private static uint mouseObjectID;
+        /// <summary>
+        /// 鼠标对象ID - 鼠标悬停对象的唯一ID
+        /// 设置时自动从 MapControl.Objects 查找并更新 MouseObject
+        /// </summary>
         public static uint MouseObjectID
         {
             get => mouseObjectID;
@@ -29,8 +53,14 @@ namespace Client.MirObjects
             }
         }
 
+        // ==================== 目标对象ID管理 ====================
         private static uint lastTargetObjectId;
         private static uint targetObjectID;
+        /// <summary>
+        /// 目标对象ID - 当前选中目标的唯一ID
+        /// 设置时自动保存上一个目标ID到 lastTargetObjectId，并更新 TargetObject
+        /// 用于攻击、查看、交互等需要锁定目标的操作
+        /// </summary>
         public static uint TargetObjectID
         {
             get => targetObjectID;
@@ -43,7 +73,13 @@ namespace Client.MirObjects
             }
         }
 
+        // ==================== 魔法目标ID管理 ====================
         private static uint magicObjectID;
+        /// <summary>
+        /// 魔法对象ID - 施法时锁定的目标ID
+        /// 设置时自动从 MapControl.Objects 查找并更新 MagicObject
+        /// 用于技能施放、治疗、辅助等魔法操作
+        /// </summary>
         public static uint MagicObjectID
         {
             get => magicObjectID;
@@ -55,83 +91,185 @@ namespace Client.MirObjects
             }
         }
 
+        // ==================== 抽象属性 ====================
+        /// <summary>对象种族类型 - 玩家/怪物/NPC/物品等 (子类必须实现)</summary>
         public abstract ObjectType Race { get; }
+        
+        /// <summary>是否阻挡移动 - 是否阻止其他对象通过 (子类必须实现)</summary>
         public abstract bool Blocking { get; }
 
+        // ==================== 基础属性 ====================
+        /// <summary>对象唯一ID - 服务器分配的全局唯一标识</summary>
         public uint ObjectID;
+        
+        /// <summary>对象名称 - 显示在对象头顶的名字</summary>
         public string Name = string.Empty;
+        
+        /// <summary>当前位置 - 对象的实际地图坐标(整数格子坐标)</summary>
+        /// <summary>地图位置 - 对象在地图上的坐标(用于某些特殊计算)</summary>
         public Point CurrentLocation, MapLocation;
+        
+        /// <summary>朝向 - 对象面朝的方向(上下左右及斜向8个方向)</summary>
         public MirDirection Direction;
+        
+        /// <summary>是否死亡 - 对象是否处于死亡状态</summary>
+        /// <summary>是否隐藏 - 对象是否不可见(隐身/潜行)</summary>
+        /// <summary>是否坐下 - 对象是否处于坐下状态</summary>
+        /// <summary>是否潜行 - 对象是否处于潜行状态(刺客技能)</summary>
         public bool Dead, Hidden, SitDown, Sneaking;
+        
+        /// <summary>中毒类型 - 对象当前中毒状态(绿毒/红毒/冰冻等)</summary>
         public PoisonType Poison;
+        
+        /// <summary>死亡时间 - 对象死亡的时间戳</summary>
         public long DeadTime;
+        
+        /// <summary>AI类型 - 怪物的AI行为类型</summary>
         public byte AI;
+        
+        /// <summary>是否在陷阱石中 - 对象是否被陷阱石困住</summary>
         public bool InTrapRock;
+        
+        /// <summary>跳跃距离 - 对象跳跃/位移技能的距离</summary>
         public int JumpDistance;
 
+        /// <summary>是否混合渲染 - 控制对象的透明度混合</summary>
         public bool Blend = true;
 
+        // ==================== 失明状态 ====================
+        /// <summary>失明时间 - 失明状态的结束时间</summary>
         public long BlindTime;
+        
+        /// <summary>失明计数 - 失明效果的叠加层数</summary>
         public byte BlindCount;
 
+        // ==================== 生命值管理 ====================
         private byte percentHealth;
+        /// <summary>
+        /// 生命值百分比 - 对象当前生命值占最大值的百分比(0-100)
+        /// 用于显示血条，变化时触发UI更新
+        /// </summary>
         public virtual byte PercentHealth
         {
             get { return percentHealth; }
             set
             {
                 if (percentHealth == value) return;
-
                 percentHealth = value;
             }
         }
+        
+        /// <summary>生命值时间戳 - 生命值最后更新的时间(用于血条显示时长)</summary>
         public long HealthTime;
 
+        // ==================== 魔法值管理 ====================
         private byte percentMana;
+        /// <summary>
+        /// 魔法值百分比 - 对象当前魔法值占最大值的百分比(0-100)
+        /// 用于显示蓝条
+        /// </summary>
         public virtual byte PercentMana
         {
             get { return percentMana; }
             set
             {
                 if (percentMana == value) return;
-
                 percentMana = value;
             }
         }
 
+        /// <summary>上一个目标ID - 记录上一次选中的目标(用于重新锁定)</summary>
         public uint LastTargetObjectId => lastTargetObjectId;
 
+        // ==================== 动作系统 ====================
+        /// <summary>动作队列 - 对象待执行的动作序列(移动/攻击/施法等)</summary>
         public List<QueuedAction> ActionFeed = new List<QueuedAction>();
+        
+        /// <summary>
+        /// 下一个动作 - 获取队列中的第一个待执行动作
+        /// 返回null表示队列为空
+        /// </summary>
         public QueuedAction NextAction
         {
             get { return ActionFeed.Count > 0 ? ActionFeed[0] : null; }
         }
 
+        // ==================== 特效和增益 ====================
+        /// <summary>特效列表 - 对象身上的所有视觉特效(火焰/冰冻/光环等)</summary>
         public List<Effect> Effects = new List<Effect>();
+        
+        /// <summary>Buff列表 - 对象的所有增益/减益状态(攻击加成/防御加成/减速等)</summary>
         public List<BuffType> Buffs = new List<BuffType>();
 
+        // ==================== 渲染相关 ====================
+        /// <summary>身体图库 - 对象身体外观使用的图像库</summary>
         public MLibrary BodyLibrary;
+        
+        /// <summary>绘制颜色 - 对象的着色(白色=正常, 红色=受击, 灰色=死亡等)</summary>
+        /// <summary>名字颜色 - 对象名称的颜色(白色=友好, 红色=敌对, 黄色=NPC等)</summary>
+        /// <summary>光照颜色 - 对象发出的光照颜色</summary>
         public Color DrawColour = Color.White, NameColour = Color.White, LightColour = Color.White;
+        
+        /// <summary>名字标签 - 显示对象名称的UI标签</summary>
+        /// <summary>聊天标签 - 显示对象聊天内容的UI标签</summary>
+        /// <summary>公会标签 - 显示对象公会名称的UI标签</summary>
         public MirLabel NameLabel, ChatLabel, GuildLabel;
+        
+        /// <summary>聊天时间 - 聊天消息显示的时间戳(用于自动隐藏)</summary>
         public long ChatTime;
+        
+        /// <summary>绘制帧 - 当前渲染的动画帧索引</summary>
+        /// <summary>翅膀绘制帧 - 翅膀动画的帧索引</summary>
         public int DrawFrame, DrawWingFrame;
+        
+        /// <summary>绘制位置 - 屏幕上的绘制坐标(像素)</summary>
+        /// <summary>移动位置 - 对象移动时的渲染位置(平滑插值)</summary>
+        /// <summary>最终绘制位置 - 考虑所有偏移后的最终屏幕坐标</summary>
+        /// <summary>偏移移动 - 像素级移动偏移(0-47横向, 0-31纵向)</summary>
         public Point DrawLocation, Movement, FinalDrawLocation, OffSetMove;
+        
+        /// <summary>显示矩形 - 对象在屏幕上占据的矩形区域(用于鼠标点击检测)</summary>
         public Rectangle DisplayRectangle;
+        
+        /// <summary>光照强度 - 对象发出的光照强度(0-255)</summary>
+        /// <summary>绘制Y坐标 - Y轴排序用的坐标(用于正确的遮挡关系)</summary>
         public int Light, DrawY;
+        
+        /// <summary>下次动作时间 - 下一次动画帧更新的时间戳</summary>
+        /// <summary>下次动作时间2 - 第二个动画计时器(用于复杂动画)</summary>
         public long NextMotion, NextMotion2;
+        
+        /// <summary>当前动作 - 对象当前执行的动作类型(站立/行走/攻击/施法/死亡等)</summary>
         public MirAction CurrentAction;
+        
+        /// <summary>当前动作等级 - 动作的变种等级(如不同的攻击动作)</summary>
         public byte CurrentActionLevel;
+        
+        /// <summary>是否跳帧 - 动画是否跳过某些帧以加快播放</summary>
         public bool SkipFrames;
+        
+        /// <summary>帧循环 - 动画帧的循环控制器</summary>
         public FrameLoop FrameLoop = null;
 
-        //Sound
+        // ==================== 音效 ====================
+        /// <summary>受击武器 - 被什么武器击中(用于播放对应的受击音效)</summary>
         public int StruckWeapon;
 
+        // ==================== 临时标签 ====================
+        /// <summary>临时标签 - 用于临时显示信息的UI标签</summary>
         public MirLabel TempLabel;
 
+        // ==================== 伤害显示 ====================
+        /// <summary>伤害标签列表 - 管理所有伤害数字的UI标签(飘字效果)</summary>
         public static List<MirLabel> DamageLabelList = new List<MirLabel>();
+        
+        /// <summary>伤害列表 - 对象受到的伤害记录(用于显示伤害数字)</summary>
         public List<Damage> Damages = new List<Damage>();
 
+        /// <summary>
+        /// 全局显示位置偏移 - 子类可以重写此属性来调整对象的绘制偏移
+        /// 默认返回(0, 0)无偏移
+        /// </summary>
         protected Point GlobalDisplayLocationOffset
         {
             get { return new Point(0, 0); }

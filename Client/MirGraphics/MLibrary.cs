@@ -7,11 +7,39 @@ using System.Text.RegularExpressions;
 
 namespace Client.MirGraphics
 {
+    /// <summary>
+    /// 图像库管理类 - 管理所有游戏资源的图像库
+    /// 负责加载、缓存和访问所有游戏图像资源(UI/角色/怪物/特效/地图等)
+    /// 使用静态字段存储所有图库实例，全局可访问
+    /// </summary>
     public static class Libraries
     {
+        /// <summary>是否已加载 - 所有图库是否加载完成</summary>
         public static bool Loaded;
+        
+        /// <summary>总数量 - 需要加载的图库总数</summary>
+        /// <summary>加载进度 - 当前已加载的图库数量</summary>
         public static int Count, Progress;
 
+        // ==================== UI 界面图库 ====================
+        /// <summary>角色选择界面 - 登录时的角色选择画面</summary>
+        /// <summary>UI界面1 - 主要UI元素(按钮/边框/对话框等)</summary>
+        /// <summary>UI界面2 - 扩展UI元素</summary>
+        /// <summary>UI界面3 - 附加UI元素</summary>
+        /// <summary>Buff图标 - 各种增益/减益状态的图标</summary>
+        /// <summary>帮助界面 - 游戏帮助和说明图像</summary>
+        /// <summary>小地图 - 小地图的背景图像</summary>
+        /// <summary>地图链接图标 - 地图传送点图标</summary>
+        /// <summary>标题界面 - 游戏标题画面</summary>
+        /// <summary>技能图标1 - 技能图标资源</summary>
+        /// <summary>技能图标2 - 扩展技能图标</summary>
+        /// <summary>魔法特效 - 技能特效动画</summary>
+        /// <summary>魔法特效2 - 扩展技能特效</summary>
+        /// <summary>魔法特效3 - 附加技能特效</summary>
+        /// <summary>普通特效 - 通用特效动画</summary>
+        /// <summary>魔法特效C - 自定义魔法特效</summary>
+        /// <summary>公会技能 - 公会技能图标和特效</summary>
+        /// <summary>天气特效 - 雨雪雾等天气效果</summary>
         public static readonly MLibrary
             ChrSel = new MLibrary(Settings.DataPath + "ChrSel"),
             Prguse = new MLibrary(Settings.DataPath + "Prguse"),
@@ -32,41 +60,80 @@ namespace Client.MirGraphics
             GuildSkill = new MLibrary(Settings.DataPath + "GuildSkill"),
             Weather = new MLibrary(Settings.DataPath + "Weather");
 
+        // ==================== 背景图库 ====================
+        /// <summary>背景图库 - 地图的远景背景(山脉/沙漠/长城等)</summary>
         public static readonly MLibrary
             Background = new MLibrary(Settings.DataPath + "Background");
 
-
+        // ==================== 特殊图库 ====================
+        /// <summary>龙图库 - 龙族相关的特殊图像</summary>
         public static readonly MLibrary
             Dragon = new MLibrary(Settings.DataPath + "Dragon");
 
-        //Map
+        // ==================== 地图瓦片图库 ====================
+        /// <summary>地图图库数组 - 400个地图瓦片图库(Wemade/Shanda不同版本)</summary>
         public static readonly MLibrary[] MapLibs = new MLibrary[400];
 
-        //Items
+        // ==================== 物品图库 ====================
+        /// <summary>物品图库 - 所有物品的图标</summary>
+        /// <summary>状态物品图库 - 特殊状态下的物品图标</summary>
+        /// <summary>地面物品图库 - 掉落在地上的物品外观</summary>
         public static readonly MLibrary
             Items = new MLibrary(Settings.DataPath + "Items"),
             StateItems = new MLibrary(Settings.DataPath + "StateItem"),
             FloorItems = new MLibrary(Settings.DataPath + "DNItems");
 
-        //Deco
+        // ==================== 装饰图库 ====================
+        /// <summary>装饰图库 - 地图装饰元素</summary>
         public static readonly MLibrary
             Deco = new MLibrary(Settings.DataPath + "Deco");
 
+        // ==================== 角色外观图库数组 ====================
+        /// <summary>战士/法师/道士衣服 - 三职业的衣服外观数组</summary>
+        /// <summary>战士/法师/道士武器 - 三职业的武器外观数组</summary>
+        /// <summary>战士/法师/道士武器特效 - 三职业的武器特效数组</summary>
+        /// <summary>战士/法师/道士发型 - 三职业的发型外观数组</summary>
+        /// <summary>战士/法师/道士特效 - 三职业的人物特效数组</summary>
         public static MLibrary[] CArmours,
                                           CWeapons,
 										  CWeaponEffect,
 										  CHair,
                                           CHumEffect,
+        // ==================== 刺客外观图库数组 ====================
+        /// <summary>刺客衣服 - 刺客的衣服外观数组</summary>
+        /// <summary>刺客左手武器 - 刺客左手武器外观数组</summary>
+        /// <summary>刺客右手武器 - 刺客右手武器外观数组</summary>
+        /// <summary>刺客发型 - 刺客的发型外观数组</summary>
+        /// <summary>刺客特效 - 刺客的人物特效数组</summary>
                                           AArmours,
                                           AWeaponsL,
                                           AWeaponsR,
                                           AHair,
                                           AHumEffect,
+        // ==================== 弓箭手外观图库数组 ====================
+        /// <summary>弓箭手衣服 - 弓箭手的衣服外观数组</summary>
+        /// <summary>弓箭手武器 - 弓箭手的弓箭外观数组</summary>
+        /// <summary>弓箭手武器S - 弓箭手的特殊武器外观数组</summary>
+        /// <summary>弓箭手发型 - 弓箭手的发型外观数组</summary>
+        /// <summary>弓箭手特效 - 弓箭手的人物特效数组</summary>
                                           ARArmours,
                                           ARWeapons,
                                           ARWeaponsS,
                                           ARHair,
                                           ARHumEffect,
+        // ==================== 怪物和环境对象图库数组 ====================
+        /// <summary>怪物图库数组 - 所有怪物的外观和动画</summary>
+        /// <summary>传送门图库数组 - 各种传送门的外观</summary>
+        /// <summary>旗帜图库数组 - 各种旗帜和标记</summary>
+        /// <summary>攻城器械图库数组 - 攻城战的器械外观</summary>
+        /// <summary>坐骑图库数组 - 各种坐骑的外观</summary>
+        /// <summary>NPC图库数组 - 所有NPC的外观</summary>
+        /// <summary>钓鱼图库数组 - 钓鱼相关的图像</summary>
+        /// <summary>宠物图库数组 - 各种宠物的外观</summary>
+        /// <summary>变身图库数组 - 变身形态的外观</summary>
+        /// <summary>变身坐骑图库数组 - 变身后的坐骑外观</summary>
+        /// <summary>变身特效图库数组 - 变身特效</summary>
+        /// <summary>变身武器特效图库数组 - 变身后的武器特效</summary>
                                           Monsters,
                                           Gates,
                                           Flags,

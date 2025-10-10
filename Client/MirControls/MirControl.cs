@@ -5,16 +5,47 @@ using SlimDX.Direct3D9;
 
 namespace Client.MirControls
 {
+    /// <summary>
+    /// UI控件基类 - 所有游戏UI控件的基础类
+    /// 提供通用的UI功能:
+    /// - 位置和尺寸管理
+    /// - 显示/隐藏控制
+    /// - 鼠标事件处理
+    /// - 纹理渲染和缓存
+    /// - 父子控件层级
+    /// - 边框和背景色
+    /// 所有对话框、按钮、标签等UI元素都继承自此类
+    /// </summary>
     public class MirControl : IDisposable
     {
+        /// <summary>活动控件 - 当前获得焦点的控件(可接收键盘输入)</summary>
+        /// <summary>鼠标控件 - 当前鼠标指向的控件</summary>
         public static MirControl ActiveControl, MouseControl;
         
+        /// <summary>
+        /// 显示位置 - 控件在屏幕上的绝对坐标(像素)
+        /// 如果有父控件，则为父控件位置+相对位置
+        /// 如果无父控件，则直接返回相对位置
+        /// </summary>
         public virtual Point DisplayLocation { get { return Parent == null ? Location : Parent.DisplayLocation.Add(Location); } }
+        
+        /// <summary>
+        /// 显示矩形 - 控件在屏幕上占据的矩形区域
+        /// 用于碰撞检测、鼠标点击判断等
+        /// </summary>
         public Rectangle DisplayRectangle { get { return new Rectangle(DisplayLocation, Size); } }
 
+        // ==================== 渲染选项 ====================
+        /// <summary>灰度显示 - 是否以灰色显示控件(禁用状态)</summary>
         public bool GrayScale { get; set; }
+        
+        /// <summary>是否混合 - 是否启用透明度混合</summary>
         public bool Blending { get; set; }
+        
+        /// <summary>混合率 - 透明度混合的比率(0.0-1.0)</summary>
         public float BlendingRate { get; set; }
+        
+        /// <summary>混合模式 - 渲染时的混合模式(加法/乘法/Alpha等)</summary>
         public BlendMode BlendMode { get; set; }
 
         #region Back Colour

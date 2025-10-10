@@ -2,7 +2,9 @@
 // Mirrors the structure of Client/MirObjects/
 
 mod drawable;  // NEW: DrawableMapObject trait for all drawable objects
-mod frames;
+pub(crate) mod frames;
+#[cfg(test)]
+mod frames_test;
 mod map_object;
 mod player_object;  // NEW: PlayerObject base class (Phase 1)
 mod user_object;

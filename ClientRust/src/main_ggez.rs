@@ -40,9 +40,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. 创建 Tokio runtime (用于网络系统)
     let runtime = tokio::runtime::Runtime::new()?;
     
-    // 2. 初始化日志
+    // 2. 初始化日志 (设为ERROR级别以减少网络日志)
     tracing_subscriber::fmt()
-        .with_env_filter("info,mir2_client=debug")
+        .with_env_filter("error")
         .init();
     
     tracing::info!("=== Crystal Mir2 Client (Ggez版本) ===");
@@ -594,14 +594,9 @@ impl EventHandler for CrystalGame {
         // 开始帧
         self.ggez_manager.begin_frame();
         
-        // 根据当前场景选择背景色
-        let bg_color = {
-            let scene_manager = self.scene_manager.read();
-            match scene_manager.current_scene_type() {
-                Some(SceneType::Game) => Color::from_rgb(20, 30, 40), // GameScene: 深蓝灰色
-                _ => Color::BLACK, // 其他场景: 黑色
-            }
-        };
+        // 使用深绿色背景 (传奇2地图底色)
+        // C# 使用 Color.Empty (透明), 但为了可见性使用深绿色
+        let bg_color = Color::from_rgb(0, 32, 0); // 深绿色
         
         // 创建 canvas
         let mut canvas = graphics::Canvas::from_frame(ctx, bg_color);

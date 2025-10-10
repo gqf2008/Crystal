@@ -2,6 +2,10 @@
 // Mirrors Client/MirObjects/Frames.cs
 
 use mir2_shared::enums::MirAction;
+use std::collections::HashMap;
+use std::sync::LazyLock;
+use std::io::{Read, Result as IoResult};
+use byteorder::{LittleEndian, ReadBytesExt};
 
 /// Frame definition for animations
 /// 
@@ -107,6 +111,50 @@ impl Frame {
     pub fn with_blend(mut self, blend: bool) -> Self {
         self.blend = blend;
         self
+    }
+    
+    /// Read Frame from a binary reader
+    /// 
+    /// Mirrors C# Frame(BinaryReader reader) constructor
+    /// 
+    /// # Format
+    /// The binary format is:
+    /// - Start: i32 (4 bytes)
+    /// - Count: i32 (4 bytes)
+    /// - Skip: i32 (4 bytes)
+    /// - Interval: i32 (4 bytes)
+    /// - EffectStart: i32 (4 bytes)
+    /// - EffectCount: i32 (4 bytes)
+    /// - EffectSkip: i32 (4 bytes)
+    /// - EffectInterval: i32 (4 bytes)
+    /// - Reverse: bool (1 byte)
+    /// - Blend: bool (1 byte)
+    /// 
+    /// Total: 34 bytes
+    pub fn from_reader<R: Read>(reader: &mut R) -> IoResult<Self> {
+        let start = reader.read_i32::<LittleEndian>()?;
+        let count = reader.read_i32::<LittleEndian>()?;
+        let skip = reader.read_i32::<LittleEndian>()?;
+        let interval = reader.read_i32::<LittleEndian>()?;
+        let effect_start = reader.read_i32::<LittleEndian>()?;
+        let effect_count = reader.read_i32::<LittleEndian>()?;
+        let effect_skip = reader.read_i32::<LittleEndian>()?;
+        let effect_interval = reader.read_i32::<LittleEndian>()?;
+        let reverse = reader.read_u8()? != 0;  // C# bool is 1 byte
+        let blend = reader.read_u8()? != 0;
+        
+        Ok(Self {
+            start,
+            count,
+            skip,
+            interval,
+            effect_start,
+            effect_count,
+            effect_skip,
+            effect_interval,
+            reverse,
+            blend,
+        })
     }
 }
 
@@ -316,4 +364,274 @@ fn animation_spec(action: MirAction) -> AnimationSpec {
             repeat: true,
         },
     }
+}
+
+/// FrameSet - Collection of frames for different actions
+/// 
+/// Mirrors C# Client/MirObjects/Frames.cs FrameSet class
+/// Contains frame definitions for all actions of a character/monster/NPC
+pub type FrameSet = HashMap<MirAction, Frame>;
+
+/// Static frame data for Player
+/// 
+/// Mirrors C# FrameSet.Player
+pub static PLAYER_FRAMES: LazyLock<FrameSet> = LazyLock::new(|| {
+    let mut frames = HashMap::new();
+    
+    // Common actions
+    frames.insert(MirAction::Standing, Frame::new(0, 4, 0, 500, 0, 8, 0, 250));
+    frames.insert(MirAction::Walking, Frame::new(32, 6, 0, 100, 64, 6, 0, 100));
+    frames.insert(MirAction::Running, Frame::new(80, 6, 0, 100, 112, 6, 0, 100));
+    frames.insert(MirAction::Stance, Frame::new(128, 1, 0, 1000, 160, 1, 0, 1000));
+    frames.insert(MirAction::Stance2, Frame::new(300, 1, 5, 1000, 332, 1, 5, 1000));
+    frames.insert(MirAction::Attack1, Frame::new(136, 6, 0, 100, 168, 6, 0, 100));
+    frames.insert(MirAction::Attack2, Frame::new(184, 6, 0, 100, 216, 6, 0, 100));
+    frames.insert(MirAction::Attack3, Frame::new(232, 8, 0, 100, 264, 8, 0, 100));
+    frames.insert(MirAction::Attack4, Frame::new(416, 6, 0, 100, 448, 6, 0, 100));
+    frames.insert(MirAction::Spell, Frame::new(296, 6, 0, 100, 328, 6, 0, 100));
+    frames.insert(MirAction::Harvest, Frame::new(344, 2, 0, 300, 376, 2, 0, 300));
+    frames.insert(MirAction::Struck, Frame::new(360, 3, 0, 100, 392, 3, 0, 100));
+    frames.insert(MirAction::Die, Frame::new(384, 4, 0, 100, 416, 4, 0, 100));
+    frames.insert(MirAction::Dead, Frame::new(387, 1, 3, 1000, 419, 1, 3, 1000));
+    frames.insert(MirAction::Revive, Frame::new(384, 4, 0, 100, 416, 4, 0, 100).with_reverse(true));
+    frames.insert(MirAction::Mine, Frame::new(184, 6, 0, 100, 216, 6, 0, 100));
+    frames.insert(MirAction::Lunge, Frame::new(139, 1, 5, 1000, 300, 1, 5, 1000));
+    
+    // Assassin
+    frames.insert(MirAction::Sneek, Frame::new(464, 6, 0, 100, 496, 6, 0, 100));
+    frames.insert(MirAction::DashAttack, Frame::new(80, 3, 3, 100, 112, 3, 3, 100));
+    
+    // Archer
+    frames.insert(MirAction::WalkingBow, Frame::new(0, 6, 0, 100, 0, 6, 0, 100));
+    frames.insert(MirAction::RunningBow, Frame::new(48, 6, 0, 100, 48, 6, 0, 100));
+    frames.insert(MirAction::AttackRange1, Frame::new(96, 8, 0, 100, 96, 8, 0, 100));
+    frames.insert(MirAction::AttackRange2, Frame::new(160, 8, 0, 100, 160, 8, 0, 100));
+    frames.insert(MirAction::AttackRange3, Frame::new(224, 8, 0, 100, 224, 8, 0, 100));
+    frames.insert(MirAction::Jump, Frame::new(288, 8, 0, 100, 288, 8, 0, 100));
+    
+    // Mounts
+    frames.insert(MirAction::MountStanding, Frame::new(416, 4, 0, 500, 448, 4, 0, 500));
+    frames.insert(MirAction::MountWalking, Frame::new(448, 8, 0, 100, 480, 8, 0, 500));
+    frames.insert(MirAction::MountRunning, Frame::new(512, 6, 0, 100, 544, 6, 0, 100));
+    frames.insert(MirAction::MountStruck, Frame::new(560, 3, 0, 100, 592, 3, 0, 100));
+    frames.insert(MirAction::MountAttack, Frame::new(584, 6, 0, 100, 616, 6, 0, 100));
+    
+    // Fishing
+    frames.insert(MirAction::FishingCast, Frame::new(632, 8, 0, 100, 0, 0, 0, 0));
+    frames.insert(MirAction::FishingWait, Frame::new(696, 6, 0, 120, 0, 0, 0, 0));
+    frames.insert(MirAction::FishingReel, Frame::new(744, 8, 0, 100, 0, 0, 0, 0));
+    
+    frames
+});
+
+/// Static frame data for Default NPC
+/// 
+/// Mirrors C# FrameSet.DefaultNPC
+pub static DEFAULT_NPC_FRAMES: LazyLock<FrameSet> = LazyLock::new(|| {
+    let mut frames = HashMap::new();
+    frames.insert(MirAction::Standing, Frame::basic(0, 4, 0, 450));
+    frames.insert(MirAction::Harvest, Frame::basic(12, 10, 0, 200));
+    frames
+});
+
+/// Static frame data for Default Monster
+/// 
+/// Mirrors C# FrameSet.DefaultMonster
+pub static DEFAULT_MONSTER_FRAMES: LazyLock<FrameSet> = LazyLock::new(|| {
+    let mut frames = HashMap::new();
+    frames.insert(MirAction::Standing, Frame::basic(0, 4, 0, 500));
+    frames.insert(MirAction::Walking, Frame::basic(32, 6, 0, 100));
+    frames.insert(MirAction::Attack1, Frame::basic(80, 6, 0, 100));
+    frames.insert(MirAction::Struck, Frame::basic(128, 2, 0, 200));
+    frames.insert(MirAction::Die, Frame::basic(144, 10, 0, 100));
+    frames.insert(MirAction::Dead, Frame::basic(153, 1, 9, 1000));
+    frames.insert(MirAction::Revive, Frame::basic(144, 10, 0, 100).with_reverse(true));
+    frames
+});
+
+/// Static frame data for DragonStatue variations
+/// 
+/// Mirrors C# FrameSet.DragonStatue
+pub static DRAGON_STATUE_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
+    let mut variations = Vec::new();
+    
+    // DragonStatue 1
+    let mut frames1 = HashMap::new();
+    frames1.insert(MirAction::Standing, Frame::basic(300, 1, -1, 1000));
+    frames1.insert(MirAction::AttackRange1, Frame::basic(300, 1, -1, 120));
+    frames1.insert(MirAction::Struck, Frame::basic(300, 1, -1, 200));
+    variations.push(frames1);
+    
+    // DragonStatue 2
+    let mut frames2 = HashMap::new();
+    frames2.insert(MirAction::Standing, Frame::basic(301, 1, -1, 1000));
+    frames2.insert(MirAction::AttackRange1, Frame::basic(301, 1, -1, 120));
+    frames2.insert(MirAction::Struck, Frame::basic(301, 1, -1, 200));
+    variations.push(frames2);
+    
+    // DragonStatue 3
+    let mut frames3 = HashMap::new();
+    frames3.insert(MirAction::Standing, Frame::basic(302, 1, -1, 1000));
+    frames3.insert(MirAction::AttackRange1, Frame::basic(302, 1, -1, 120));
+    frames3.insert(MirAction::Struck, Frame::basic(302, 1, -1, 200));
+    variations.push(frames3);
+    
+    // DragonStatue 4
+    let mut frames4 = HashMap::new();
+    frames4.insert(MirAction::Standing, Frame::basic(320, 1, -1, 1000));
+    frames4.insert(MirAction::AttackRange1, Frame::basic(320, 1, -1, 120));
+    frames4.insert(MirAction::Struck, Frame::basic(320, 1, -1, 200));
+    variations.push(frames4);
+    
+    // DragonStatue 5
+    let mut frames5 = HashMap::new();
+    frames5.insert(MirAction::Standing, Frame::basic(321, 1, -1, 1000));
+    frames5.insert(MirAction::AttackRange1, Frame::basic(321, 1, -1, 120));
+    frames5.insert(MirAction::Struck, Frame::basic(321, 1, -1, 200));
+    variations.push(frames5);
+    
+    // DragonStatue 6
+    let mut frames6 = HashMap::new();
+    frames6.insert(MirAction::Standing, Frame::basic(322, 1, -1, 1000));
+    frames6.insert(MirAction::AttackRange1, Frame::basic(322, 1, -1, 120));
+    frames6.insert(MirAction::Struck, Frame::basic(322, 1, -1, 200));
+    variations.push(frames6);
+    
+    variations
+});
+
+/// Static frame data for GreatFoxSpirit variations
+/// 
+/// Mirrors C# FrameSet.GreatFoxSpirit
+pub static GREAT_FOX_SPIRIT_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
+    let mut variations = Vec::new();
+    
+    // GreatFoxSpirit level 0
+    let mut frames0 = HashMap::new();
+    frames0.insert(MirAction::Standing, Frame::basic(0, 20, -20, 100));
+    frames0.insert(MirAction::Attack1, Frame::basic(22, 8, -8, 120));
+    frames0.insert(MirAction::Struck, Frame::basic(20, 2, -2, 200));
+    frames0.insert(MirAction::Die, Frame::basic(300, 18, -18, 120));
+    frames0.insert(MirAction::Dead, Frame::basic(317, 1, -1, 1000));
+    frames0.insert(MirAction::Revive, Frame::basic(300, 18, -18, 150).with_reverse(true));
+    variations.push(frames0);
+    
+    // GreatFoxSpirit level 1
+    let mut frames1 = HashMap::new();
+    frames1.insert(MirAction::Standing, Frame::basic(60, 20, -20, 100));
+    frames1.insert(MirAction::Attack1, Frame::basic(82, 8, -8, 120));
+    frames1.insert(MirAction::Struck, Frame::basic(80, 2, -2, 200));
+    frames1.insert(MirAction::Die, Frame::basic(300, 18, -18, 120));
+    frames1.insert(MirAction::Dead, Frame::basic(317, 1, -1, 1000));
+    frames1.insert(MirAction::Revive, Frame::basic(300, 18, -18, 150).with_reverse(true));
+    variations.push(frames1);
+    
+    // GreatFoxSpirit level 2
+    let mut frames2 = HashMap::new();
+    frames2.insert(MirAction::Standing, Frame::basic(120, 20, -20, 100));
+    frames2.insert(MirAction::Attack1, Frame::basic(142, 8, -8, 120));
+    frames2.insert(MirAction::Struck, Frame::basic(140, 2, -2, 200));
+    frames2.insert(MirAction::Die, Frame::basic(300, 18, -18, 120));
+    frames2.insert(MirAction::Dead, Frame::basic(317, 1, -1, 1000));
+    frames2.insert(MirAction::Revive, Frame::basic(300, 18, -18, 150).with_reverse(true));
+    variations.push(frames2);
+    
+    // GreatFoxSpirit level 3
+    let mut frames3 = HashMap::new();
+    frames3.insert(MirAction::Standing, Frame::basic(180, 20, -20, 100));
+    frames3.insert(MirAction::Attack1, Frame::basic(202, 8, -8, 120));
+    frames3.insert(MirAction::Struck, Frame::basic(200, 2, -2, 200));
+    frames3.insert(MirAction::Die, Frame::basic(300, 18, -18, 120));
+    frames3.insert(MirAction::Dead, Frame::basic(317, 1, -1, 1000));
+    frames3.insert(MirAction::Revive, Frame::basic(300, 18, -18, 150).with_reverse(true));
+    variations.push(frames3);
+    
+    // GreatFoxSpirit level 4
+    let mut frames4 = HashMap::new();
+    frames4.insert(MirAction::Standing, Frame::basic(240, 20, -20, 100));
+    frames4.insert(MirAction::Attack1, Frame::basic(262, 8, -8, 120));
+    frames4.insert(MirAction::Struck, Frame::basic(260, 2, -2, 200));
+    frames4.insert(MirAction::Die, Frame::basic(300, 18, -18, 120));
+    frames4.insert(MirAction::Dead, Frame::basic(317, 1, -1, 1000));
+    frames4.insert(MirAction::Revive, Frame::basic(300, 18, -18, 150).with_reverse(true));
+    variations.push(frames4);
+    
+    variations
+});
+
+/// Static frame data for HellBomb variations
+/// 
+/// Mirrors C# FrameSet.HellBomb
+pub static HELL_BOMB_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
+    let mut variations = Vec::new();
+    
+    // HellBomb1
+    let mut frames1 = HashMap::new();
+    frames1.insert(MirAction::Standing, Frame::basic(52, 9, -9, 100).with_blend(true));
+    frames1.insert(MirAction::Attack1, Frame::basic(999, 1, -1, 120).with_blend(true));
+    frames1.insert(MirAction::Struck, Frame::basic(52, 9, -9, 100).with_blend(true));
+    variations.push(frames1);
+    
+    // HellBomb2
+    let mut frames2 = HashMap::new();
+    frames2.insert(MirAction::Standing, Frame::basic(70, 9, -9, 100).with_blend(true));
+    frames2.insert(MirAction::Attack1, Frame::basic(999, 1, -1, 120).with_blend(true));
+    frames2.insert(MirAction::Struck, Frame::basic(70, 9, -9, 100).with_blend(true));
+    variations.push(frames2);
+    
+    // HellBomb3
+    let mut frames3 = HashMap::new();
+    frames3.insert(MirAction::Standing, Frame::basic(88, 9, -9, 100).with_blend(true));
+    frames3.insert(MirAction::Attack1, Frame::basic(999, 1, -1, 120).with_blend(true));
+    frames3.insert(MirAction::Struck, Frame::basic(88, 9, -9, 100).with_blend(true));
+    variations.push(frames3);
+    
+    variations
+});
+
+/// Static frame data for CaveStatue variations
+/// 
+/// Mirrors C# FrameSet.CaveStatue
+pub static CAVE_STATUE_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
+    let mut variations = Vec::new();
+    
+    // CaveStatue1
+    let mut frames1 = HashMap::new();
+    frames1.insert(MirAction::Standing, Frame::basic(0, 1, -1, 100).with_blend(false));
+    frames1.insert(MirAction::Struck, Frame::basic(0, 1, -1, 100).with_blend(false));
+    frames1.insert(MirAction::Die, Frame::basic(2, 8, -8, 100).with_blend(false));
+    frames1.insert(MirAction::Dead, Frame::basic(9, 1, -1, 100).with_blend(false));
+    variations.push(frames1);
+    
+    // CaveStatue2
+    let mut frames2 = HashMap::new();
+    frames2.insert(MirAction::Standing, Frame::basic(18, 1, -1, 100).with_blend(false));
+    frames2.insert(MirAction::Struck, Frame::basic(18, 1, -1, 100).with_blend(false));
+    frames2.insert(MirAction::Die, Frame::basic(20, 8, -8, 100).with_blend(false));
+    frames2.insert(MirAction::Dead, Frame::basic(27, 1, -1, 100).with_blend(false));
+    variations.push(frames2);
+    
+    variations
+});
+
+/// Get frame for a specific action from a frameset
+/// 
+/// Helper function to safely retrieve frame data
+pub fn get_frame(frameset: &FrameSet, action: MirAction) -> Option<&Frame> {
+    frameset.get(&action)
+}
+
+/// Get player frame for a specific action
+pub fn get_player_frame(action: MirAction) -> Option<&'static Frame> {
+    PLAYER_FRAMES.get(&action)
+}
+
+/// Get default NPC frame for a specific action
+pub fn get_default_npc_frame(action: MirAction) -> Option<&'static Frame> {
+    DEFAULT_NPC_FRAMES.get(&action)
+}
+
+/// Get default monster frame for a specific action
+pub fn get_default_monster_frame(action: MirAction) -> Option<&'static Frame> {
+    DEFAULT_MONSTER_FRAMES.get(&action)
 }

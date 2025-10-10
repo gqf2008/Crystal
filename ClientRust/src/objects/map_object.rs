@@ -211,7 +211,7 @@ impl MapObject {
             draw_frame: 0,
             draw_wing_frame: 0,
             draw_location: Point::new(0, 0),
-            movement: Point::new(0, 0),
+            movement: Point::new(0, 0), // Will be synced by set_current_location
             final_draw_location: Point::new(0, 0),
             offset_move: Point::new(0, 0),
             light: 0,
@@ -281,8 +281,10 @@ impl MapObject {
     /// C# reference: NPCObject.Load()
     pub fn from_npc_packet(packet: &ObjectNpc) -> (Self, SyncResult) {
         let mut obj = Self::for_monster(packet.object_id, packet.name.clone());
-        obj.current_location = Point::new(packet.location_x, packet.location_y);
-        obj.map_location = Point::new(packet.location_x, packet.location_y);
+        let location = Point::new(packet.location_x, packet.location_y);
+        obj.current_location = location;
+        obj.map_location = location;
+        obj.movement = location; // 🔧 Sync movement with current_location
         obj.direction = packet.direction;
         obj.name_colour = packet.name_colour;
         // NPCs have no animation, buffs, or special states
@@ -308,8 +310,10 @@ impl MapObject {
         self.name_colour = packet.name_colour;
         
         // Update position
-        self.current_location = Point::new(packet.location_x, packet.location_y);
-        self.map_location = Point::new(packet.location_x, packet.location_y);
+        let location = Point::new(packet.location_x, packet.location_y);
+        self.current_location = location;
+        self.map_location = location;
+        self.movement = location; // 🔧 Sync movement with current_location
         self.direction = packet.direction;
         
         // Update state flags
@@ -356,8 +360,10 @@ impl MapObject {
         self.name_colour = packet.name_colour;
         
         // Update position
-        self.current_location = Point::new(packet.location_x, packet.location_y);
-        self.map_location = Point::new(packet.location_x, packet.location_y);
+        let location = Point::new(packet.location_x, packet.location_y);
+        self.current_location = location;
+        self.map_location = location;
+        self.movement = location; // 🔧 Sync movement with current_location
         self.direction = packet.direction;
         
         // Update state flags
@@ -546,6 +552,10 @@ impl MapObject {
     /// Set the current display location
     pub fn set_current_location(&mut self, location: Point) {
         self.current_location = location;
+        // 🔧 CRITICAL FIX: Synchronize movement with current_location
+        // When not actively moving, movement should equal current_location for proper rendering
+        // C# Reference: PlayerObject.cs line 838 - "Movement = CurrentLocation" in default case
+        self.movement = location;
     }
     
     /// Set the map grid location
@@ -556,6 +566,8 @@ impl MapObject {
     /// Legacy compatibility - sets current_location
     pub fn set_location(&mut self, location: Point) {
         self.current_location = location;
+        // 🔧 Sync movement with current_location (same as set_current_location)
+        self.movement = location;
     }
     
     /// Set the facing direction
@@ -680,11 +692,10 @@ impl MapObject {
             self.current_location = self.map_location; // Start from current position
             self.map_location = target;
             
-            // Calculate movement vector for interpolation
-            self.movement = Point::new(
-                target.x - self.current_location.x,
-                target.y - self.current_location.y,
-            );
+            // 🔧 CRITICAL: Movement is the rendering position, not a delta vector
+            // It should be set to current_location at start, then interpolate towards map_location
+            // C# Reference: PlayerObject.cs line 838 - Movement = CurrentLocation
+            self.movement = self.current_location;
             
             tracing::trace!("Object {} starting move from ({},{}) to ({},{})",
                 self.object_id, 
@@ -717,7 +728,7 @@ impl MapObject {
         if total_distance <= distance_to_move {
             // Reached destination
             self.current_location = self.map_location;
-            self.movement = Point::new(0, 0);
+            self.movement = self.map_location; // 🔧 Sync movement with destination
             
             tracing::trace!("Object {} reached destination ({},{})",
                 self.object_id, self.map_location.x, self.map_location.y
@@ -730,7 +741,9 @@ impl MapObject {
             let new_x = self.current_location.x as f32 + dx * progress;
             let new_y = self.current_location.y as f32 + dy * progress;
             
-            self.current_location = Point::new(new_x as i32, new_y as i32);
+            let new_current = Point::new(new_x as i32, new_y as i32);
+            self.current_location = new_current;
+            self.movement = new_current; // 🔧 Sync movement during interpolation
             false
         }
     }
@@ -765,7 +778,7 @@ impl MapObject {
     pub fn teleport_to(&mut self, location: Point) {
         self.map_location = location;
         self.current_location = location;
-        self.movement = Point::new(0, 0);
+        self.movement = location; // 🔧 Sync movement with location
         self.update_draw_location();
         
         tracing::debug!("Object {} teleported to ({},{})",

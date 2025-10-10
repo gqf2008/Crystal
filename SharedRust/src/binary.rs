@@ -4,7 +4,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt};
 
 use crate::data::stats::{SharedError, SharedResult};
 
-pub const DOTNET_STRING_MAX: usize = i32::MAX as usize;
+pub const DOTNET_STRING_MAX: usize = 10000; // Maximum 10KB strings to prevent buffer overflow attacks
 
 pub fn read_bool<R: Read>(reader: &mut R) -> SharedResult<bool> {
     Ok(reader.read_u8()? != 0)
@@ -17,6 +17,9 @@ pub fn write_bool<W: Write>(writer: &mut W, value: bool) -> SharedResult<()> {
 
 pub fn read_dotnet_string<R: Read>(reader: &mut R) -> SharedResult<String> {
     let length = read_7bit_encoded_int(reader)?;
+    if length > DOTNET_STRING_MAX {
+        return Err(SharedError::StringTooLong { length });
+    }
     let mut buffer = vec![0u8; length];
     reader.read_exact(&mut buffer)?;
     let value = String::from_utf8(buffer)?;

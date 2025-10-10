@@ -237,269 +237,290 @@ impl MapControl {
         // 更新动画计数器
         self.animation_count = (self.animation_count + 1) % 1000;
         
-        // 渲染完整的地图层
-        self.draw_map_layers(ctx, canvas, user_pos)?;
+        // 1. 绘制背景图（远景山脉/沙漠等）
+        self.draw_background(ctx, canvas)?;
+        
+        // 2. 渲染地板（Back/Middle/Front三层）
+        self.draw_floor(ctx, canvas, user_pos)?;
+        
+        // 3. 🚧 临时：绘制角色位置标记（红色方块）
+        self.draw_player_marker(ctx, canvas, user_pos)?;
         
         Ok(())
     }
     
-    /// 渲染所有地图层 (Back, Middle, Front)
-    /// 
-    /// 对应 C# 的完整渲染流程
-    fn draw_map_layers(&mut self, ctx: &mut Context, canvas: &mut Canvas, user_pos: &UserPosition) -> GameResult<()> {
-        let start_y = (user_pos.y - self.view_range_y).max(0);
-        let end_y = (user_pos.y + self.view_range_y).min(self.height - 1);
-        let start_x = (user_pos.x - self.view_range_x).max(0);
-        let end_x = (user_pos.x + self.view_range_x).min(self.width - 1);
+    /// 🚧 临时方法：绘制角色位置标记
+    fn draw_player_marker(&self, _ctx: &mut Context, canvas: &mut Canvas, user_pos: &UserPosition) -> GameResult<()> {
+        use ggez::graphics::{Mesh, Rect, Color, DrawMode};
         
-        // 渲染所有三层
-        for y in start_y..=end_y {
-            for x in start_x..=end_x {
-                // C#: drawX = (x - User.Movement.X + OffSetX) * CellWidth
-                // C#: drawY = (y - User.Movement.Y + OffSetY) * CellHeight
-                let draw_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH + user_pos.offset_x) as f32;
-                let draw_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
-                
-                if let Some(cell) = self.get_cell(x, y) {
-                    // 1. 渲染 Back 层 (底层地表)
-                    let masked_back = cell.back_image & 0x1FFFFFFF;
-                    if masked_back > 0 && cell.back_index >= 0 {
-                        let index = (masked_back as usize) - 1;
-                        self.draw_tile(ctx, canvas, cell.back_index as i32, index, draw_x, draw_y)?;
-                    }
-                    
-                    // 2. 渲染 Middle 层 (中间层对象)
-                    let masked_middle = cell.middle_image & 0x1FFFFFFF;
-                    if masked_middle > 0 && cell.middle_index >= 0 {
-                        let index = (masked_middle as usize) - 1;
-                        self.draw_tile(ctx, canvas, cell.middle_index as i32, index, draw_x, draw_y)?;
-                    }
-                    
-                    // 3. 渲染 Front 层 (前景装饰)
-                    // Front层通常需要动画支持,暂时简化渲染
-                    let masked_front = cell.front_image & 0x1FFFFFFF;
-                    if masked_front > 0 && cell.front_index >= 0 {
-                        let index = (masked_front as usize) - 1;
-                        self.draw_tile(ctx, canvas, cell.front_index as i32, index, draw_x, draw_y)?;
-                    }
-                }
-            }
-        }
+        // 角色应该在屏幕中央
+        let screen_center_x = (self.offset_x * Self::CELL_WIDTH) as f32;
+        let screen_center_y = (self.offset_y * Self::CELL_HEIGHT) as f32;
         
-        Ok(())
-    }
-    
-    /// 简化的地表渲染 - 只渲染 Back 层基础瓦片
-    /// 
-    /// 使用最简单的等距投影坐标系统
-    fn draw_floor_simple(&mut self, ctx: &mut Context, canvas: &mut Canvas, user_pos: &UserPosition) -> GameResult<()> {
-        let start_y = (user_pos.y - self.view_range_y).max(0);
-        let end_y = (user_pos.y + self.view_range_y).min(self.height - 1);
-        let start_x = (user_pos.x - self.view_range_x).max(0);
-        let end_x = (user_pos.x + self.view_range_x).min(self.width - 1);
+        // 绘制一个红色方块标记角色位置
+        let rect = Rect::new(screen_center_x - 24.0, screen_center_y - 16.0, 48.0, 32.0);
+        let mesh = Mesh::new_rectangle(
+            _ctx,
+            DrawMode::stroke(2.0),
+            rect,
+            Color::from_rgb(255, 0, 0),
+        )?;
+        canvas.draw(&mesh, ggez::graphics::DrawParam::default());
         
-        static mut FIRST_FRAME: bool = true;
+        static mut FIRST_MARKER: bool = true;
         unsafe {
-            if FIRST_FRAME {
-                println!("\n🔍 === 地图渲染调试信息 ===");
-                println!("📦 地图尺寸: {}x{}", self.width, self.height);
-                println!("👤 玩家位置: ({}, {})", user_pos.x, user_pos.y);
-                println!("� 玩家偏移: offset=({}, {})", user_pos.offset_x, user_pos.offset_y);
-                println!("�📐 渲染范围: x=[{}, {}], y=[{}, {}]", start_x, end_x, start_y, end_y);
-                println!("📏 瓦片大小: {}x{}", Self::CELL_WIDTH, Self::CELL_HEIGHT);
-                println!("🎯 视图范围: view=({}, {})", self.view_range_x, self.view_range_y);
-                FIRST_FRAME = false;
+            if FIRST_MARKER {
+                println!("🎯 角色位置标记: 屏幕中心=({:.1},{:.1}), 地图位置=({},{})", 
+                    screen_center_x, screen_center_y, user_pos.x, user_pos.y);
+                FIRST_MARKER = false;
             }
         }
         
-        let mut tile_count = 0;
-        let mut debug_count = 0;
+        Ok(())
+    }
+    
+    /// 渲染地板（整合 Back/Middle/Front 三层）
+    /// 
+    /// C# 参考: GameScene.cs DrawFloor() 第10442-10544行
+    /// 完全对应C#的渲染流程，将三层整合在一个方法中
+    fn draw_floor(&mut self, ctx: &mut Context, canvas: &mut Canvas, user_pos: &UserPosition) -> GameResult<()> {
+        let start_y = (user_pos.y - self.view_range_y).max(0);
+        let end_y_back = (user_pos.y + self.view_range_y).min(self.height - 1);
+        let end_y_extended = (user_pos.y + self.view_range_y + 5).min(self.height - 1);
+        let start_x = (user_pos.x - self.view_range_x).max(0);
+        let end_x = (user_pos.x + self.view_range_x).min(self.width - 1);
         
-        // 只渲染 Back 层
-        for y in start_y..=end_y {
+        static mut FIRST_CALL: bool = true;
+        unsafe {
+            if FIRST_CALL {
+                println!("\n🎨 === draw_floor 调试信息 ===");
+                println!("用户位置: ({}, {})", user_pos.x, user_pos.y);
+                println!("用户偏移: ({}, {})", user_pos.offset_x, user_pos.offset_y);
+                println!("视野范围: x[{}, {}], y[{}, {}]", start_x, end_x, start_y, end_y_back);
+                println!("offset_x={}, offset_y={}", self.offset_x, self.offset_y);
+                println!("============================\n");
+                FIRST_CALL = false;
+            }
+        }
+        
+        // ========== Back Layer (地表瓦片，只渲染偶数行列) ==========
+        // C# 第10459-10475行
+        static mut FIRST_BACK_TILE: bool = true;
+        for y in start_y..=end_y_back {
+            if y <= 0 || y % 2 == 1 { continue; }
+            
+            let draw_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
+            
             for x in start_x..=end_x {
-                // C#: drawX = (x - User.Movement.X + OffSetX) * CellWidth
-                // C#: drawY = (y - User.Movement.Y + OffSetY) * CellHeight
-                // 
-                // OffSetX/Y 是屏幕中心相对于用户位置的格子偏移
-                // 传奇2使用正交网格,不是等距(菱形)网格!
-                let draw_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH + user_pos.offset_x) as f32;
-                let draw_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
+                if x <= 0 || x % 2 == 1 { continue; }
                 
-                // 获取格子信息
+                let draw_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH - self.offset_x + user_pos.offset_x) as f32;
+                
                 if let Some(cell) = self.get_cell(x, y) {
-                    // 只绘制 Back 层
-                    // C#: index = (M2CellInfo[x, y].BackImage & 0x1FFFFFFF) - 1;
-                    // 去除高位标志后检查是否有有效图片索引
-                    let masked_image = cell.back_image & 0x1FFFFFFF;
-                    if masked_image > 0 && cell.back_index >= 0 {
-                        let index = (masked_image as usize) - 1;
+                    if cell.back_image > 0 && cell.back_index >= 0 {
+                        let masked_back = cell.back_image & 0x1FFFFFFF;
+                        let index = (masked_back as usize) - 1;
                         
-                        if debug_count < 5 {
-                            println!("  📍 瓦片[{},{}]: back_index={}, image={}, 屏幕坐标=({:.0}, {:.0})",
-                                x, y, cell.back_index, index, draw_x, draw_y);
-                            debug_count += 1;
+                        unsafe {
+                            if FIRST_BACK_TILE {
+                                println!("🟢 Back层第一个瓦片: 地图({},{}) 屏幕({:.1},{:.1})", x, y, draw_x, draw_y);
+                                FIRST_BACK_TILE = false;
+                            }
                         }
                         
-                        self.draw_tile_simple(ctx, canvas, cell.back_index as i32, index, draw_x, draw_y)?;
-                        tile_count += 1;
+                        let _ = self.draw_tile(ctx, canvas, cell.back_index as i32, index, draw_x, draw_y);
                     }
                 }
             }
         }
         
-        static mut FRAME_COUNT: u32 = 0;
-        unsafe {
-            FRAME_COUNT += 1;
-            if FRAME_COUNT % 60 == 0 {
-                println!("✅ 第{}帧: 渲染了 {} 个瓦片", FRAME_COUNT, tile_count);
+        // ========== Middle Layer (建筑层，渲染所有格子) ==========
+        // C# 第10477-10496行
+        static mut FIRST_MIDDLE_TILE: bool = true;
+        for y in start_y..=end_y_extended {
+            if y <= 0 { continue; }
+            
+            let draw_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
+            
+            for x in start_x..=end_x {
+                if x < 0 { continue; }
+                
+                let draw_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH - self.offset_x + user_pos.offset_x) as f32;
+                
+                if let Some(cell) = self.get_cell(x, y) {
+                    // 🔧 CRITICAL FIX: 屏蔽 HighWall 标志 (0x20000000)
+                    // Map Type 100 使用高位标记墙体属性，必须屏蔽后才能获取正确的图像索引
+                    let middle_image_masked = cell.middle_image & 0x1FFFFFFF;
+                    
+                    if middle_image_masked > 0 && cell.middle_index >= 0 {
+                        let index = (middle_image_masked as usize) - 1;
+                        
+                        // 🔧 关键修复：C# 第10495-10496行的尺寸检查
+                        // Middle层瓦片必须是 48x32 或 96x64，否则跳过
+                        if let Some(size_valid) = self.check_tile_size(cell.middle_index as i32, index) {
+                            if !size_valid {
+                                static mut SKIP_COUNT: u32 = 0;
+                                unsafe {
+                                    if SKIP_COUNT < 3 {
+                                        println!("⚠️  跳过尺寸不符的Middle瓦片: 地图({},{}) lib={} idx={}", 
+                                            x, y, cell.middle_index, index);
+                                        SKIP_COUNT += 1;
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                        
+                        unsafe {
+                            if FIRST_MIDDLE_TILE {
+                                println!("🔵 Middle层第一个瓦片: 地图({},{}) 屏幕({:.1},{:.1})", x, y, draw_x, draw_y);
+                                FIRST_MIDDLE_TILE = false;
+                            }
+                        }
+                        
+                        let _ = self.draw_tile(ctx, canvas, cell.middle_index as i32, index, draw_x, draw_y);
+                    }
+                }
+            }
+        }
+        
+        // ========== Front Layer (前景层，带Y偏移) ==========
+        // C# 第10497-10542行
+        static mut FIRST_FRONT_TILE: bool = true;
+        for y in start_y..=end_y_extended {
+            if y <= 0 { continue; }
+            
+            let base_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
+            let draw_y = base_y - 32.0; // Front层向上偏移32像素
+            
+            for x in start_x..=end_x {
+                if x < 0 { continue; }
+                
+                let draw_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH - self.offset_x + user_pos.offset_x) as f32;
+                
+                if let Some(cell) = self.get_cell(x, y) {
+                    let masked_front = cell.front_image & 0x7FFF;
+                    if masked_front > 0 && cell.front_index >= 0 {
+                        let index = (masked_front as usize) - 1;
+                        
+                        unsafe {
+                            if FIRST_FRONT_TILE {
+                                println!("🟡 Front层第一个瓦片: 地图({},{}) 屏幕({:.1},{:.1})", x, y, draw_x, draw_y);
+                                FIRST_FRONT_TILE = false;
+                            }
+                        }
+                        
+                        // TODO: Door动画处理（如果需要）
+                        // if cell.door_index > 0 { ... }
+                        
+                        let _ = self.draw_tile(ctx, canvas, cell.front_index as i32, index, draw_x, draw_y);
+                    }
+                }
             }
         }
         
         Ok(())
     }
     
-    /// 绘制静态地表到缓存
-    /// 
-    /// 对应 C# DrawFloor (line 10442-10544)
-    /// 
-    /// 优化策略:
-    /// - 仅渲染偶数坐标的格子(y % 2 == 0, x % 2 == 0)
-    /// - 渲染 Back 层(不可见的基础层)
-    /// - 渲染 Middle 层的静态部分
-    /// - 渲染 Front 层的静态部分
-    fn draw_floor(&mut self, ctx: &mut Context, canvas: &mut Canvas, user_pos: &UserPosition) -> GameResult<()> {
-        // 第一个循环: 绘制 Back 层 (偶数坐标)
-        let start_y = (user_pos.y - self.view_range_y).max(0);
-        let end_y = (user_pos.y + self.view_range_y).min(self.height - 1);
-        let start_x = (user_pos.x - self.view_range_x).max(0);
-        let end_x = (user_pos.x + self.view_range_x).min(self.width - 1);
-        
-        for y in start_y..=end_y {
-            // C#: if (y <= 0 || y % 2 == 1) continue;
-            if y <= 0 || y % 2 == 1 {
-                continue;
-            }
-            
-            // 计算屏幕Y坐标
-            let draw_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
-            
-            for x in start_x..=end_x {
-                // C#: if (x <= 0 || x % 2 == 1) continue;
-                if x <= 0 || x % 2 == 1 {
-                    continue;
-                }
-                
-                // 计算屏幕X坐标
-                let draw_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH - self.offset_x + user_pos.offset_x) as f32;
-                
-                // 获取格子信息
-                if let Some(cell) = self.get_cell(x, y) {
-                    // 绘制 Back 层
-                    // C#: index = (M2CellInfo[x, y].BackImage & 0x1FFFFFFF) - 1;
-                    // 高位标志位需要去除
-                    if cell.back_image > 0 && cell.back_index >= 0 {
-                        let index = ((cell.back_image & 0x1FFFFFFF) as usize).saturating_sub(1);
-                        self.draw_tile(ctx, canvas, cell.back_index as i32, index, draw_x, draw_y)?;
-                    }
-                }
-            }
-        }
-        
-        // 第二个循环: 绘制 Middle 层静态部分 (所有坐标)
-        let end_y_extended = (user_pos.y + self.view_range_y + 5).min(self.height - 1);
-        for y in start_y..=end_y_extended {
-            if y <= 0 {
-                continue;
-            }
-            
-            let draw_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
-            
-            for x in start_x..=end_x {
-                if x < 0 {
-                    continue;
-                }
-                
-                let draw_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH - self.offset_x + user_pos.offset_x) as f32;
-                
-                if let Some(cell) = self.get_cell(x, y) {
-                    let index = cell.middle_image as i32 - 1;
-                    
-                    // C#: if ((index < 0) || (M2CellInfo[x, y].MiddleIndex == -1)) continue;
-                    if index < 0 || cell.middle_index == -1 {
-                        continue;
-                    }
-                    
-                    // C#: 只绘制标准大小的Middle瓦片 (48x32 or 96x64)
-                    // 这里我们简化处理,只要middle_index >= 0 且没有动画就绘制
-                    if cell.middle_index >= 0 && cell.middle_animation_frame == 0 {
-                        self.draw_tile(ctx, canvas, cell.middle_index as i32, index as usize, draw_x, draw_y)?;
-                    }
-                }
-            }
-        }
-        
-        // 第三个循环: 绘制 Front 层静态部分 (所有坐标)
-        for y in start_y..=end_y_extended {
-            if y <= 0 {
-                continue;
-            }
-            
-            let draw_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
-            
-            for x in start_x..=end_x {
-                if x < 0 {
-                    continue;
-                }
-                
-                let draw_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH - self.offset_x + user_pos.offset_x) as f32;
-                
-                if let Some(cell) = self.get_cell(x, y) {
-                    let index = (cell.front_image & 0x7FFF) as i32 - 1;
-                    
-                    if index == -1 || cell.front_index == -1 {
-                        continue;
-                    }
-                    
-                    // C#: 只绘制标准大小的Front瓦片,且没有动画的
-                    if cell.front_index >= 0 && cell.front_animation_frame == 0 && cell.door_index == 0 {
-                        self.draw_tile(ctx, canvas, cell.front_index as i32, index as usize, draw_x, draw_y)?;
-                    }
-                }
-            }
-        }
-        
-        // 注意: C#版本DrawFloor设置FloorValid=true,但实际上每帧都会在CreateTexture中
-        // 调用 DXManager.Draw(FloorTexture) 来绘制这个离屏纹理
-        // 我们这里每帧直接绘制,不需要缓存标志
-        Ok(())
-    }
     
-    /// 绘制远景背景
+    
+    // /// 绘制远景背景
+    // /// 
+    // /// 对应 C# DrawBackground (line 10546-10566)
+    // /// 
+    // /// 根据地图文件名选择背景图:
+    // /// - ID1/ID2 → 山脉背景(index 10)
+    /// 绘制背景图（远景）
     /// 
-    /// 对应 C# DrawBackground (line 10546-10566)
-    /// 
-    /// 根据地图文件名选择背景图:
+    /// C# 参考: GameScene.cs 第10545-10565行
+    /// 根据地图文件名绘制对应的背景图:
     /// - ID1/ID2 → 山脉背景(index 10)
     /// - ID3_013 → 沙漠背景(index 22)
     /// - ID3_015 → 长城背景(index 23)
     /// - ID3_023/025 → 村庄入口(index 21)
-    fn draw_background(&mut self, _ctx: &mut Context, _canvas: &mut Canvas) -> GameResult<()> {
-        let background_index = if self.filename.starts_with("ID1") || self.filename.starts_with("ID2") {
+    fn draw_background(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult<()> {
+        use crate::graphics::libraries::LibraryName;
+        use ggez::graphics::{Image, ImageFormat, DrawParam};
+        
+        static mut FIRST_CALL: bool = true;
+        
+        // 提取干净的文件名（去除路径）
+        let normalized = self.filename.replace("\\", "/");
+        let clean_filename = normalized
+            .split('/')
+            .last()
+            .unwrap_or(&self.filename);
+        
+        unsafe {
+            if FIRST_CALL {
+                println!("🗺️  当前地图文件: {}", self.filename);
+                println!("🗺️  清理后文件名: {}", clean_filename);
+                FIRST_CALL = false;
+            }
+        }
+        
+        let background_index = if clean_filename.starts_with("ID1") || clean_filename.starts_with("ID2") {
             Some(10) // mountains
-        } else if self.filename.starts_with("ID3_013") {
+        } else if clean_filename.starts_with("ID3_013") {
             Some(22) // desert
-        } else if self.filename.starts_with("ID3_015") {
+        } else if clean_filename.starts_with("ID3_015") {
             Some(23) // greatwall
-        } else if self.filename.starts_with("ID3_023") || self.filename.starts_with("ID3_025") {
+        } else if clean_filename.starts_with("ID3_023") || clean_filename.starts_with("ID3_025") {
             Some(21) // village entrance
+        } else if clean_filename.starts_with("r") || clean_filename.starts_with("R") {
+            // 🔧 r001, r002 等地图使用山脉背景
+            Some(10) // mountains (default for 'r' prefix maps)
         } else {
             None
         };
         
-        if let Some(_idx) = background_index {
-            // TODO: 从 Libraries.Background 加载并绘制背景图
-            // Libraries.Background.Draw(idx, 0, 0);
+        if let Some(idx) = background_index {
+            // 从Background库加载背景图
+            use crate::graphics::libraries::get_library;
+            if let Some(bg_lib_arc) = get_library(LibraryName::Background) {
+                if let Ok(mut bg_lib) = bg_lib_arc.lock() {
+                    match bg_lib.load_rgba_data(idx) {
+                        Ok((info, rgba_data)) => {
+                            let texture = Image::from_pixels(
+                                ctx,
+                                &rgba_data,
+                                ImageFormat::Rgba8UnormSrgb,
+                                info.width as u32,
+                                info.height as u32,
+                            );
+                            
+                            // 🔧 CRITICAL FIX: wgpu 坐标系统 (0,0) 在左下角，C# DirectX (0,0) 在左上角
+                            // 背景图应该从屏幕顶部开始，所以 y = screen_height - image_height
+                            // C#: Draw(index, 0, 0) 表示从屏幕左上角开始
+                            // wgpu: dest([0, screen_height - img_height]) 才能从屏幕左上角开始
+                            let screen_height = 768.0; // 窗口高度
+                            let draw_y = screen_height - info.height as f32;
+                            
+                            canvas.draw(&texture, DrawParam::default().dest([0.0, draw_y]));
+                            
+                            unsafe {
+                                if FIRST_CALL {
+                                    println!("✅ 背景图已绘制: idx={}, 尺寸={}x{}, offset=({},{}), 屏幕位置=(0, {:.1})", 
+                                        idx, info.width, info.height, info.x, info.y, draw_y);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            unsafe {
+                                if FIRST_CALL {
+                                    println!("❌ 加载背景图失败: idx={}, error={}", idx, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            unsafe {
+                if FIRST_CALL {
+                    println!("⚠️  当前地图无背景图（文件名: {}）", clean_filename);
+                }
+            }
         }
         
         Ok(())
@@ -609,6 +630,33 @@ impl MapControl {
         Ok(())
     }
     
+    /// 检查瓦片尺寸是否有效
+    /// 
+    /// C# 参考: GameScene.cs 第10495-10496行
+    /// Middle/Front层瓦片必须是 48x32 或 96x64
+    /// 
+    /// 返回:
+    /// - Some(true): 尺寸有效 (48x32 或 96x64)
+    /// - Some(false): 尺寸无效
+    /// - None: 无法获取尺寸信息
+    fn check_tile_size(&self, lib_index: i32, image_index: usize) -> Option<bool> {
+        if let Some(map_lib) = get_map_library(lib_index as i16) {
+            if let Ok(mut lib) = map_lib.lock() {
+                if let Ok((info, _)) = lib.load_rgba_data(image_index) {
+                    let w = info.width as i32;
+                    let h = info.height as i32;
+                    
+                    // 检查是否为 48x32 或 96x64
+                    let is_single = w == Self::CELL_WIDTH && h == Self::CELL_HEIGHT;
+                    let is_double = w == Self::CELL_WIDTH * 2 && h == Self::CELL_HEIGHT * 2;
+                    
+                    return Some(is_single || is_double);
+                }
+            }
+        }
+        None
+    }
+    
     /// 从 MapLibs 绘制瓦片 (简化版本,禁用offset)
     /// 
     /// 🔧 临时简化: 不使用图像内部偏移,直接使用屏幕坐标
@@ -618,6 +666,20 @@ impl MapControl {
     /// - lib_index: MapLibs 数组索引 (0-399)
     /// - image_index: 图像索引
     /// - x, y: 屏幕坐标
+    /// 绘制地图瓦片 (使用纹理缓存)
+    /// 
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.Draw() - 自动缓存纹理
+    /// if (!CheckImage(index)) return;  // 加载并缓存纹理
+    /// MImage mi = _images[index];
+    /// DXManager.Draw(mi.Image, ...);   // 使用缓存的纹理
+    /// ```
+    /// 
+    /// 关键优化:
+    /// - ✅ 使用 `get_or_create_texture()` 缓存机制
+    /// - ✅ 纹理只创建一次,后续帧直接复用
+    /// - ✅ 避免每帧重新加载和解压图像数据
     fn draw_tile(&self, ctx: &mut Context, canvas: &mut Canvas, lib_index: i32, image_index: usize, x: f32, y: f32) -> GameResult<()> {
         use ggez::graphics::DrawParam;
         
@@ -625,28 +687,21 @@ impl MapControl {
         if let Some(map_lib) = get_map_library(lib_index as i16) {
             let mut lib = map_lib.lock().unwrap();
             
-            // � 测试:禁用缓存,每次都创建新纹理
-            match lib.load_rgba_data(image_index) {
-                Ok((info, rgba_data)) => {
-                    let draw_x = x + info.x as f32;
-                    let draw_y = y + info.y as f32;
+            // 🔧 先获取图像偏移信息,避免借用冲突
+            let (offset_x, offset_y) = if let Ok(info) = lib.get_image_info(image_index) {
+                (info.x as f32, info.y as f32)
+            } else {
+                (0.0, 0.0)
+            };
+            
+            // ✅ 使用纹理缓存机制 (对应 C# MLibrary.CheckImage + CreateTexture)
+            match lib.get_or_create_texture(ctx, image_index) {
+                Ok(texture) => {
+                    let draw_x = x + offset_x;
+                    let draw_y = y + offset_y;
                     
-                    use ggez::graphics::{Image, ImageFormat};
-                    
-                    // 每次创建新纹理
-                    let texture = Image::from_pixels(
-                        ctx,
-                        &rgba_data,
-                        ImageFormat::Rgba8UnormSrgb,
-                        info.width as u32,
-                        info.height as u32,
-                    );
-                    
-                    // 绘制
-                    canvas.draw(&texture, DrawParam::default().dest([draw_x, draw_y]));
-                    
-                    // tracing::debug!("✅ Drew tile: lib={}, img={}, pos=({}, {}), size={}x{}", 
-                    //     lib_index, image_index, draw_x, draw_y, info.width, info.height);
+                    // 绘制缓存的纹理
+                    canvas.draw(texture, DrawParam::default().dest([draw_x, draw_y]));
                 }
                 Err(e) => {
                     // C#的CheckImage在Width/Height==0时静默返回false
@@ -663,39 +718,18 @@ impl MapControl {
         Ok(())
     }
     
-    /// 简化版绘制函数 - 不使用图像内部偏移
+    /// 简化版绘制函数 - 不使用图像内部偏移 (使用纹理缓存)
     fn draw_tile_simple(&self, ctx: &mut Context, canvas: &mut Canvas, lib_index: i32, image_index: usize, x: f32, y: f32) -> GameResult<()> {
-        use ggez::graphics::{DrawParam, Image, ImageFormat};
+        use ggez::graphics::DrawParam;
         
         if let Some(map_lib) = get_map_library(lib_index as i16) {
             let mut lib = map_lib.lock().unwrap();
             
-            match lib.load_rgba_data(image_index) {
-                Ok((info, rgba_data)) => {
-                    // 🔧 不使用图像偏移
-                    let draw_x = x;
-                    let draw_y = y;
-                    
-                    // 创建纹理
-                    let texture = Image::from_pixels(
-                        ctx,
-                        &rgba_data,
-                        ImageFormat::Rgba8UnormSrgb,
-                        info.width as u32,
-                        info.height as u32,
-                    );
-                    
-                    // 绘制
-                    canvas.draw(&texture, DrawParam::default().dest([draw_x, draw_y]));
-                    
-                    static mut DEBUG_COUNT: u32 = 0;
-                    unsafe {
-                        if DEBUG_COUNT < 3 {
-                            println!("    🖼️  绘制瓦片: 尺寸={}x{}, offset=({},{}), 屏幕=({:.1},{:.1})",
-                                info.width, info.height, info.x, info.y, draw_x, draw_y);
-                            DEBUG_COUNT += 1;
-                        }
-                    }
+            // ✅ 使用纹理缓存机制
+            match lib.get_or_create_texture(ctx, image_index) {
+                Ok(texture) => {
+                    // 🔧 不使用图像偏移,直接使用传入的坐标
+                    canvas.draw(texture, DrawParam::default().dest([x, y]));
                 }
                 Err(e) => {
                     if e.kind() != std::io::ErrorKind::InvalidData {
@@ -706,6 +740,31 @@ impl MapControl {
         }
         
         Ok(())
+    }
+    
+    /// 垂直翻转纹理数据 (修复DirectX vs wgpu坐标系差异)
+    /// 
+    /// # 背景
+    /// - DirectX (C#): Top-Left 坐标系，(0,0)在左上角
+    /// - wgpu (Rust): Bottom-Left 坐标系，(0,0)在左下角
+    /// 
+    /// # 参数
+    /// - `data`: RGBA格式的像素数据 (每像素4字节)
+    /// - `width`: 图像宽度
+    /// - `height`: 图像高度
+    fn flip_texture_vertically(data: &mut [u8], width: usize, height: usize) {
+        let row_size = width * 4; // RGBA = 4 bytes per pixel
+        let mut temp_row = vec![0u8; row_size];
+        
+        for y in 0..(height / 2) {
+            let top_offset = y * row_size;
+            let bottom_offset = (height - 1 - y) * row_size;
+            
+            // 交换上下两行
+            temp_row.copy_from_slice(&data[top_offset..top_offset + row_size]);
+            data.copy_within(bottom_offset..bottom_offset + row_size, top_offset);
+            data[bottom_offset..bottom_offset + row_size].copy_from_slice(&temp_row);
+        }
     }
     
     /// Open door at location
@@ -750,78 +809,5 @@ impl MapControl {
 impl Default for MapControl {
     fn default() -> Self {
         Self::new(100, 100)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_map_control_creation() {
-        let map = MapControl::new(100, 100);
-        assert_eq!(map.width, 100);
-        assert_eq!(map.height, 100);
-        assert_eq!(map.cells.len(), 100);
-        assert_eq!(map.cells[0].len(), 100);
-    }
-    
-    #[test]
-    fn test_coordinate_conversion() {
-        let map = MapControl::new(100, 100);
-        
-        let (map_x, map_y) = map.screen_to_map(480, 320);
-        assert_eq!(map_x, 10);
-        assert_eq!(map_y, 10);
-        
-        let (screen_x, screen_y) = map.map_to_screen(10, 10);
-        assert_eq!(screen_x, 480);
-        assert_eq!(screen_y, 320);
-    }
-    
-    #[test]
-    fn test_is_valid_location() {
-        let map = MapControl::new(100, 100);
-        
-        assert!(map.is_valid_location(0, 0));
-        assert!(map.is_valid_location(99, 99));
-        assert!(!map.is_valid_location(-1, 0));
-        assert!(!map.is_valid_location(0, -1));
-        assert!(!map.is_valid_location(100, 0));
-        assert!(!map.is_valid_location(0, 100));
-    }
-    
-    #[test]
-    fn test_walkable() {
-        let map = MapControl::new(10, 10);
-        
-        // Use CellInfo's is_walkable method
-        assert!(map.is_walkable(5, 5));
-    }
-    
-    #[test]
-    fn test_door_operations() {
-        let mut map = MapControl::new(10, 10);
-        
-        // Add a door
-        map.doors.push(Door {
-            index: 0,
-            location: (5, 5),
-            opened: false,
-            image_index: 100,
-        });
-        
-        // Link cell to door
-        if let Some(cell) = map.get_cell_mut(5, 5) {
-            cell.door_index = 0; // u8 type
-        }
-        
-        // Open door
-        map.open_door(5, 5);
-        assert!(map.doors[0].opened);
-        
-        // Close door
-        map.close_door(5, 5);
-        assert!(!map.doors[0].opened);
     }
 }

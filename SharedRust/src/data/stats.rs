@@ -33,6 +33,8 @@ pub enum SharedError {
     StringTooLong { length: usize },
     #[error("{field} length {length} cannot be negative")]
     NegativeLength { field: &'static str, length: i32 },
+    #[error("{field} length {length} exceeds maximum allowed {max}")]
+    LengthTooLarge { field: &'static str, length: i32, max: i32 },
     #[error("invalid UTF-8 string data")]
     InvalidUtf8(#[from] FromUtf8Error),
     #[error("invalid DateTime value")]

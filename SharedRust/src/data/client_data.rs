@@ -416,30 +416,84 @@ impl ClientQuestInfo {
     pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use crate::enums::{RequiredClass, QuestType};
         
+        const MAX_QUEST_STRINGS: i32 = 100; // Maximum 100 strings per description vector
+        
         let index = reader.read_i32::<LittleEndian>()?;
         let npc_index = reader.read_u32::<LittleEndian>()?;
         let name = read_dotnet_string(reader)?;
         let group = read_dotnet_string(reader)?;
 
         let count = reader.read_i32::<LittleEndian>()?;
+        if count < 0 {
+            return Err(SharedError::NegativeLength {
+                field: "description",
+                length: count,
+            });
+        }
+        if count > MAX_QUEST_STRINGS {
+            return Err(SharedError::LengthTooLarge {
+                field: "description",
+                length: count,
+                max: MAX_QUEST_STRINGS,
+            });
+        }
         let mut description = Vec::with_capacity(count as usize);
         for _ in 0..count {
             description.push(read_dotnet_string(reader)?);
         }
 
         let count = reader.read_i32::<LittleEndian>()?;
+        if count < 0 {
+            return Err(SharedError::NegativeLength {
+                field: "task_description",
+                length: count,
+            });
+        }
+        if count > MAX_QUEST_STRINGS {
+            return Err(SharedError::LengthTooLarge {
+                field: "task_description",
+                length: count,
+                max: MAX_QUEST_STRINGS,
+            });
+        }
         let mut task_description = Vec::with_capacity(count as usize);
         for _ in 0..count {
             task_description.push(read_dotnet_string(reader)?);
         }
 
         let count = reader.read_i32::<LittleEndian>()?;
+        if count < 0 {
+            return Err(SharedError::NegativeLength {
+                field: "return_description",
+                length: count,
+            });
+        }
+        if count > MAX_QUEST_STRINGS {
+            return Err(SharedError::LengthTooLarge {
+                field: "return_description",
+                length: count,
+                max: MAX_QUEST_STRINGS,
+            });
+        }
         let mut return_description = Vec::with_capacity(count as usize);
         for _ in 0..count {
             return_description.push(read_dotnet_string(reader)?);
         }
 
         let count = reader.read_i32::<LittleEndian>()?;
+        if count < 0 {
+            return Err(SharedError::NegativeLength {
+                field: "completion_description",
+                length: count,
+            });
+        }
+        if count > MAX_QUEST_STRINGS {
+            return Err(SharedError::LengthTooLarge {
+                field: "completion_description",
+                length: count,
+                max: MAX_QUEST_STRINGS,
+            });
+        }
         let mut completion_description = Vec::with_capacity(count as usize);
         for _ in 0..count {
             completion_description.push(read_dotnet_string(reader)?);
@@ -463,12 +517,38 @@ impl ClientQuestInfo {
         let reward_credit = reader.read_u32::<LittleEndian>()?;
 
         let count = reader.read_i32::<LittleEndian>()?;
+        if count < 0 {
+            return Err(SharedError::NegativeLength {
+                field: "rewards_fixed_item",
+                length: count,
+            });
+        }
+        if count > MAX_QUEST_STRINGS {
+            return Err(SharedError::LengthTooLarge {
+                field: "rewards_fixed_item",
+                length: count,
+                max: MAX_QUEST_STRINGS,
+            });
+        }
         let mut rewards_fixed_item = Vec::with_capacity(count as usize);
         for _ in 0..count {
             rewards_fixed_item.push(crate::data::shared_data::QuestItemReward::read_from(reader)?);
         }
 
         let count = reader.read_i32::<LittleEndian>()?;
+        if count < 0 {
+            return Err(SharedError::NegativeLength {
+                field: "rewards_select_item",
+                length: count,
+            });
+        }
+        if count > MAX_QUEST_STRINGS {
+            return Err(SharedError::LengthTooLarge {
+                field: "rewards_select_item",
+                length: count,
+                max: MAX_QUEST_STRINGS,
+            });
+        }
         let mut rewards_select_item = Vec::with_capacity(count as usize);
         for _ in 0..count {
             rewards_select_item.push(crate::data::shared_data::QuestItemReward::read_from(reader)?);

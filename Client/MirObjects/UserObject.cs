@@ -4,59 +4,149 @@ using S = ServerPackets;
 
 namespace Client.MirObjects
 {
+    /// <summary>
+    /// 玩家对象 - 代表当前控制的玩家角色
+    /// 继承自 PlayerObject，包含玩家特有的属性和功能:
+    /// - 背包/装备/仓库管理
+    /// - 技能/任务/邮件系统
+    /// - 属性计算/装备加成/套装效果
+    /// - 智能生物(宠物)管理
+    /// - 交易/租赁/制作功能
+    /// </summary>
     public class UserObject : PlayerObject
     {
+        // ==================== 基础属性 ====================
+        /// <summary>玩家真实ID - 服务器数据库中的玩家唯一ID</summary>
         public uint Id;
 
+        /// <summary>当前生命值 - 玩家当前HP</summary>
+        /// <summary>当前魔法值 - 玩家当前MP</summary>
         public int HP, MP;
 
+        /// <summary>攻击速度 - 计算后的实际攻击间隔(毫秒) 最小550ms</summary>
         public int AttackSpeed;
 
+        /// <summary>属性系统 - 玩家的所有属性(攻击/防御/生命/魔法等)</summary>
         public Stats Stats;
 
+        // ==================== 负重系统 ====================
+        /// <summary>手持负重 - 当前手持物品的重量</summary>
+        /// <summary>穿戴负重 - 当前装备的重量</summary>
+        /// <summary>背包负重 - 背包中物品的总重量</summary>
         public int CurrentHandWeight,
                       CurrentWearWeight,
                       CurrentBagWeight;
 
+        // ==================== 经验系统 ====================
+        /// <summary>当前经验值 - 当前等级的经验进度</summary>
+        /// <summary>最大经验值 - 升到下一级所需的总经验</summary>
         public long Experience, MaxExperience;
 
+        // ==================== 交易系统 ====================
+        /// <summary>交易金币锁定 - 交易时金币是否已确认</summary>
         public bool TradeLocked;
+        
+        /// <summary>交易金币数量 - 交易中放入的金币数量</summary>
         public uint TradeGoldAmount;
+        
+        /// <summary>是否允许交易 - 玩家是否开启交易功能</summary>
         public bool AllowTrade;
 
+        // ==================== 租赁系统 ====================
+        /// <summary>租赁金币锁定 - 租赁时金币是否已确认</summary>
         public bool RentalGoldLocked;
+        
+        /// <summary>租赁物品锁定 - 租赁时物品是否已确认</summary>
         public bool RentalItemLocked;
+        
+        /// <summary>租赁金币数量 - 租赁费用</summary>
         public uint RentalGoldAmount;
 
+        // ==================== 特殊物品模式 ====================
+        /// <summary>物品模式 - 当前特殊物品的使用模式(探测/传送/复活等)</summary>
         public SpecialItemMode ItemMode;
 
+        // ==================== 属性计算 ====================
+        /// <summary>核心属性 - 基础属性模板(随等级成长的属性)</summary>
         public BaseStats CoreStats = new BaseStats(0);
 
+        /// <summary>获取Buff对话框 - 返回玩家的Buff显示界面</summary>
         public virtual BuffDialog GetBuffDialog => GameScene.Scene.BuffsDialog;
 
+        // ==================== 物品栏系统 ====================
+        /// <summary>背包 - 46格背包空间</summary>
+        /// <summary>装备栏 - 14个装备槽位(武器/衣服/头盔/项链/手镯*2/戒指*2/腰带/靴子/宝石/坐骑/勋章/飘带)</summary>
+        /// <summary>交易栏 - 10格交易物品栏</summary>
+        /// <summary>任务背包 - 40格任务物品专用背包</summary>
         public UserItem[] Inventory = new UserItem[46], Equipment = new UserItem[14], Trade = new UserItem[10], QuestInventory = new UserItem[40];
+        
+        /// <summary>腰带索引 - 当前使用的腰带页(6页)</summary>
+        /// <summary>英雄腰带索引 - 英雄的腰带页(2页)</summary>
         public int BeltIdx = 6, HeroBeltIdx = 2;
+        
+        /// <summary>是否拥有扩展仓库 - 是否购买了仓库扩容</summary>
         public bool HasExpandedStorage = false;
+        
+        /// <summary>扩展仓库过期时间 - 扩容仓库的到期时间</summary>
         public DateTime ExpandedStorageExpiryTime;
 
+        // ==================== 技能和套装系统 ====================
+        /// <summary>技能列表 - 玩家已学习的所有技能</summary>
         public List<ClientMagic> Magics = new List<ClientMagic>();
+        
+        /// <summary>套装列表 - 玩家装备的套装信息</summary>
         public List<ItemSets> ItemSets = new List<ItemSets>();
+        
+        /// <summary>传奇套装 - 特殊的传奇套装部位</summary>
         public List<EquipmentSlot> MirSet = new List<EquipmentSlot>();
 
+        // ==================== 智能生物(宠物)系统 ====================
+        /// <summary>智能生物列表 - 玩家拥有的所有宠物</summary>
         public List<ClientIntelligentCreature> IntelligentCreatures = new List<ClientIntelligentCreature>();
+        
+        /// <summary>召唤生物类型 - 当前召唤的宠物类型</summary>
         public IntelligentCreatureType SummonedCreatureType = IntelligentCreatureType.None;
+        
+        /// <summary>生物已召唤 - 当前是否有召唤中的宠物</summary>
         public bool CreatureSummoned;
+        
+        /// <summary>珍珠数量 - 宠物强化用的珍珠数量</summary>
         public int PearlCount = 0;
 
+        // ==================== 任务和邮件系统 ====================
+        /// <summary>当前任务列表 - 正在进行的任务</summary>
         public List<ClientQuestProgress> CurrentQuests = new List<ClientQuestProgress>();
+        
+        /// <summary>已完成任务列表 - 已完成任务的ID列表</summary>
         public List<int> CompletedQuests = new List<int>();
+        
+        /// <summary>邮件列表 - 玩家收到的所有邮件</summary>
         public List<ClientMail> Mail = new List<ClientMail>();
 
+        // ==================== 战士技能状态 ====================
+        /// <summary>是否刺杀 - 刺杀剑术激活状态</summary>
+        /// <summary>是否突刺 - 突刺技能激活状态</summary>
+        /// <summary>是否半月 - 半月弯刀激活状态</summary>
+        /// <summary>是否十字半月 - 十字半月激活状态</summary>
+        /// <summary>是否双斩 - 双龙斩激活状态</summary>
+        /// <summary>是否双龙 - 双龙剑激活状态</summary>
+        /// <summary>是否烈火 - 烈火剑法激活状态</summary>
         public bool Slaying, Thrusting, HalfMoon, CrossHalfMoon, DoubleSlash, TwinDrakeBlade, FlamingSword;
+        
+        // ==================== 下一次施法信息 ====================
+        /// <summary>下次施法技能 - 即将释放的技能</summary>
         public ClientMagic NextMagic;
+        
+        /// <summary>下次施法位置 - 技能施放的目标位置</summary>
         public Point NextMagicLocation;
+        
+        /// <summary>下次施法目标 - 技能施放的目标对象</summary>
         public MapObject NextMagicObject;
+        
+        /// <summary>下次施法方向 - 技能施放的朝向</summary>
         public MirDirection NextMagicDirection;
+        
+        /// <summary>队列动作 - 待执行的队列动作</summary>
         public QueuedAction QueuedAction;
 
         public UserObject() { }

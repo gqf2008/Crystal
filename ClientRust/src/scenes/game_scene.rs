@@ -613,11 +613,13 @@ impl GameScene {
         
         // Phase 1: 地图与对象
         if let Some(map_control) = &mut self.map_control {
-            // 从 user 对象获取实际位置
+            // 🔧 关键修复：使用 Movement 而不是 CurrentLocation
+            // C# 参考: DrawFloor() 使用 User.Movement.X/Y (line 10463)
+            // Movement 是当前移动中的位置，CurrentLocation 是最终目标位置
             let user_pos = if let Some(user) = &self.user {
                 map_control::UserPosition {
-                    x: user.player.map_object.current_location.x,
-                    y: user.player.map_object.current_location.y,
+                    x: user.player.map_object.movement.x,
+                    y: user.player.map_object.movement.y,
                     offset_x: user.player.map_object.offset_move.x,
                     offset_y: user.player.map_object.offset_move.y,
                 }
@@ -683,15 +685,23 @@ impl GameScene {
     /// 对应 C# DXManager.CleanUp() 方法
     /// 
     /// 清理所有 MapLibs 中超过指定时间未使用的纹理
+    /// 清理纹理缓存 (对应 C# DXManager.CleanUp)
+    /// 
+    /// C# 参考:
+    /// ```csharp
+    /// // DXManager.cs - CleanUp()
+    /// for (int i = TextureList.Count - 1; i >= 0; i--) {
+    ///     if (CMain.Time >= TextureList[i].CleanTime)
+    ///         TextureList[i].DisposeTexture();
+    /// }
+    /// ```
     fn cleanup_texture_cache(&mut self) {
-        // TODO: 实现纹理缓存清理
-        // 新的架构中,纹理由 ggez 自动管理
-        // 暂时禁用此功能
-        /*
         use crate::graphics::get_all_map_libraries;
         use std::time::Duration;
         
-        let max_age = Duration::from_secs(600); // 10 分钟
+        // 清理超过 30 秒未使用的纹理 (C# 使用 CleanDelay = 600000ms = 10分钟)
+        // Rust 使用更激进的清理策略以节省内存
+        let max_age = Duration::from_secs(30);
         let libs = get_all_map_libraries();
         let mut total_cleaned = 0;
         
@@ -711,9 +721,8 @@ impl GameScene {
         }
         
         if total_cleaned > 0 {
-            tracing::info!("🧹 Texture cache cleanup complete: removed {} old textures", total_cleaned);
+            tracing::info!("🧹 Texture cache cleanup: removed {} old textures", total_cleaned);
         }
-        */
     }
     
     // ==================== 网络协议处理 ====================
@@ -854,6 +863,17 @@ impl Scene for GameScene {
     }
     
     fn update(&mut self, _delta_time: f32) {
+        // 定期清理纹理缓存 (每 5 秒检查一次,清理超过 30 秒未使用的纹理)
+        // 对应 C# DXManager.CleanUp() 
+        static mut LAST_CLEANUP_TIME: Option<std::time::Instant> = None;
+        unsafe {
+            let now = std::time::Instant::now();
+            if LAST_CLEANUP_TIME.is_none() || now.duration_since(LAST_CLEANUP_TIME.unwrap()) > std::time::Duration::from_secs(5) {
+                self.cleanup_texture_cache();
+                LAST_CLEANUP_TIME = Some(now);
+            }
+        }
+        
         // TODO: 实现更新逻辑 (对应 C# Process)
         // 更新动画计数器
         // 更新对象
@@ -864,12 +884,12 @@ impl Scene for GameScene {
     fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, _ggez_manager: &mut crate::graphics::GgezManager) {
         // Phase 1: 地图与对象渲染
         if let Some(ref mut map_control) = self.map_control {
-            tracing::debug!("🎨 Drawing map: {} ({}x{})", map_control.title, map_control.width, map_control.height);
-            // 构造用户位置
+           // tracing::debug!("🎨 Drawing map: {} ({}x{})", map_control.title, map_control.width, map_control.height);
+            // 🔧 关键修复：使用 Movement 而不是 CurrentLocation
             let user_pos = if let Some(ref user) = self.user {
                 map_control::UserPosition {
-                    x: user.player.map_object.current_location.x,
-                    y: user.player.map_object.current_location.y,
+                    x: user.player.map_object.movement.x,
+                    y: user.player.map_object.movement.y,
                     offset_x: user.player.map_object.offset_move.x,
                     offset_y: user.player.map_object.offset_move.y,
                 }
@@ -925,15 +945,104 @@ impl Scene for GameScene {
                 }
             }
             
+            GameEvent::UserInformation { user_info } => {
+                tracing::info!("👤 UserInformation received: {} at ({}, {}), class={:?}, level={}",
+                    user_info.name, user_info.location_x, user_info.location_y, user_info.class, user_info.level);
+                
+                // 🔧 CRITICAL FIX: Create user object from UserInformation packet
+                // This is the PRIMARY way to create the player object
+                use mir2_shared::packets::server::ObjectPlayer;
+                
+                let object_player = ObjectPlayer {
+                    object_id: user_info.object_id,
+                    name: user_info.name.clone(),
+                    guild_name: user_info.guild_name.clone(),
+                    guild_rank_name: user_info.guild_rank.clone(),
+                    name_colour: user_info.name_colour,
+                    class: user_info.class,
+                    gender: user_info.gender,
+                    level: user_info.level,
+                    location_x: user_info.location_x,
+                    location_y: user_info.location_y,
+                    direction: user_info.direction,
+                    hair: user_info.hair,
+                    light: 0,
+                    weapon: -1,  // Will be set from equipment
+                    weapon_effect: 0,
+                    armour: -1,  // Will be set from equipment
+                    poison: mir2_shared::PoisonType::empty(),
+                    dead: false,
+                    hidden: false,
+                    effect: mir2_shared::enums::SpellEffect::None,
+                    wing_effect: 0,
+                    extra: false,
+                    mount_type: -1,
+                    riding_mount: false,
+                    fishing: false,
+                    transform_type: 0,
+                    element_orb_effect: 0,
+                    element_orb_lvl: 0,
+                    element_orb_max: 0,
+                    buffs: Vec::new(),
+                    level_effects: user_info.level_effects,
+                };
+                
+                // 使用 ObjectFactory 创建玩家对象
+                let user_obj = crate::objects::ObjectFactory::create_player(&object_player);
+                
+                tracing::info!("✅ User object created from UserInformation:");
+                tracing::info!("   - ObjectID: {}", user_obj.player.map_object.object_id());
+                tracing::info!("   - Name: {}", user_obj.player.map_object.name);
+                tracing::info!("   - Location: ({}, {})", user_obj.player.map_object.current_location.x, user_obj.player.map_object.current_location.y);
+                tracing::info!("   - Movement: ({}, {})", user_obj.player.map_object.movement.x, user_obj.player.map_object.movement.y);
+                tracing::info!("   - Class: {:?}, Level: {}", user_obj.player.class, user_obj.player.level);
+                
+                self.user = Some(user_obj);
+                
+                // Update inventory, equipment, gold, etc.
+                self.gold = user_info.gold;
+                self.credit = user_info.credit;
+                if let Some(ref inv) = user_info.inventory {
+                    // Convert Vec to array, fallback to empty array if length mismatch
+                    if inv.len() == 46 {
+                        self.inventory = inv.clone().try_into().unwrap();
+                    }
+                }
+                if let Some(ref equip) = user_info.equipment {
+                    if equip.len() == 14 {
+                        self.equipment = equip.clone().try_into().unwrap();
+                    }
+                }
+                
+                tracing::info!("✅ User state fully initialized!");
+            }
+            
             GameEvent::PlayerSpawned { player } => {
-                tracing::info!("👤 Player spawned: {}", player.name);
-                // TODO: 创建 UserObject
+                tracing::info!("👤 Player spawned: {} at ({}, {})", player.name, player.location.x, player.location.y);
+                
+                // 🔧 CRITICAL: Update user object position if it exists
+                if let Some(ref mut user) = self.user {
+                    tracing::info!("✅ Updating user position from PlayerSpawned: ({}, {})", player.location.x, player.location.y);
+                    user.player.map_object.set_current_location(player.location);
+                    tracing::info!("✅ User object synced: current_location=({}, {}), movement=({}, {})",
+                        user.player.map_object.current_location.x,
+                        user.player.map_object.current_location.y,
+                        user.player.map_object.movement.x,
+                        user.player.map_object.movement.y);
+                } else {
+                    tracing::warn!("⚠️  PlayerSpawned received but user object doesn't exist yet (will be created from UserInformation)");
+                }
             }
             
             GameEvent::PlayerMoved { location } => {
-                if let Some(ref mut _user) = self.user {
+                if let Some(ref mut user) = self.user {
                     tracing::debug!("🚶 Player moved to: ({}, {})", location.x, location.y);
-                    // TODO: 更新玩家位置
+                    // 🔧 CRITICAL FIX: Update both current_location AND movement
+                    // This synchronizes the rendering position with the actual map position
+                    user.player.map_object.set_current_location(*location);
+                    tracing::debug!("✅ User position synced: current_location={:?}, movement={:?}", 
+                        user.player.map_object.current_location, 
+                        user.player.map_object.movement);
                 }
             }
             

@@ -45,6 +45,8 @@ pub use ggez_manager_simple::{Canvas, DrawParam, Color, Rect, Text, Mesh, DrawMo
 // pub use sprite_instanced_renderer::{SpriteInstancedRenderer, SpriteInstance, QuadVertex};
 
 // === 核心导出 ===
-pub use mlibrary::{MLibrary, TextureManager, ImageInfo, TextureKey};
+pub use mlibrary::{MLibrary, ImageInfo};
+// get_library, get_map_library 已在上面的 libraries 导出中定义
+pub use libraries::get_all_map_libraries;
 // pub use particle_engine::{ParticleEngine, ParticleType, ParticleImageInfo, get_time};
 // pub use particles::Particle;

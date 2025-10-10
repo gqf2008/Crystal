@@ -180,6 +180,9 @@ pub enum GameEvent {
     MapInformation { map_index: i32, file_name: String, title: String },
     MapChanged { file_name: String, location: Point },
     
+    // User state events
+    UserInformation { user_info: Box<mir2_shared::packets::server::UserInformation> },
+    
     // Item events
     ItemGained { item: UserItem, grid_type: String },
     ItemLost { unique_id: u64, count: u16 },
@@ -388,6 +391,12 @@ impl PacketHandler for GameClient {
             packet.level
         );
         
+        // 🔧 CRITICAL FIX: Send UserInformation event FIRST before moving packet
+        // This allows GameScene to create the user object with complete information
+        self.send_event(GameEvent::UserInformation {
+            user_info: Box::new(packet.clone()),
+        });
+        
         let player = PlayerState {
             object_id: packet.object_id,
             name: packet.name.clone(),
@@ -405,17 +414,19 @@ impl PacketHandler for GameClient {
             gold: packet.gold,
             credit: packet.credit,
             
-            // Initialize inventory from packet
-            inventory: packet.inventory.unwrap_or_else(Vec::new),
-            equipment: packet.equipment.unwrap_or_else(Vec::new),
+            // Initialize inventory from packet (clone to avoid move)
+            inventory: packet.inventory.clone().unwrap_or_else(Vec::new),
+            equipment: packet.equipment.clone().unwrap_or_else(Vec::new),
             storage: Vec::new(),
-            quest_inventory: packet.quest_inventory.unwrap_or_else(Vec::new),
+            quest_inventory: packet.quest_inventory.clone().unwrap_or_else(Vec::new),
             
             // Initialize magic list (will be populated by NewMagic packets)
             magics: Vec::new(),
         };
         
         self.player = Some(player.clone());
+        
+        // Also send PlayerSpawned for compatibility
         self.send_event(GameEvent::PlayerSpawned { player });
     }
     
@@ -425,11 +436,15 @@ impl PacketHandler for GameClient {
             y: packet.location_y,
         };
         
+        tracing::info!("📍 UserLocation received: ({}, {})", location.x, location.y);
+        
         if let Some(player) = &mut self.player {
             player.location = location;
+            tracing::debug!("✅ Player state updated: location={:?}", player.location);
         }
         
         self.send_event(GameEvent::PlayerMoved { location });
+        tracing::debug!("📤 PlayerMoved event sent");
     }
     
     // ==================== Chat ====================

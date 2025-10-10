@@ -10,34 +10,88 @@ using System.Reflection;
 
 namespace Client.MirObjects
 {
+    /// <summary>
+    /// 玩家对象类 - 所有玩家角色的基类(包括本地玩家、其他玩家、英雄)
+    /// 继承自 MapObject，实现玩家特有的外观、装备、动画、技能等功能
+    /// 子类包括: UserObject(本地玩家), HeroObject(英雄), 其他在线玩家
+    /// </summary>
     public class PlayerObject : MapObject
     {
+        /// <summary>对象种族 - 始终返回 ObjectType.Player (玩家类型)</summary>
         public override ObjectType Race
         {
             get { return ObjectType.Player; }
         }
 
+        /// <summary>
+        /// 是否阻挡 - 活着的玩家会阻挡其他对象移动
+        /// 死亡后不阻挡
+        /// </summary>
         public override bool Blocking
         {
             get { return !Dead; }
         }
 
+        // ==================== 角色基础属性 ====================
+        /// <summary>性别 - 男性或女性(影响外观和某些装备)</summary>
         public MirGender Gender;
+        
+        /// <summary>职业 - 战士/法师/道士/刺客/弓箭手</summary>
         public MirClass Class;
+        
+        /// <summary>发型 - 发型编号(0-9等不同发型)</summary>
         public byte Hair;
+        
+        /// <summary>等级 - 角色当前等级</summary>
         public ushort Level;
 
+        // ==================== 外观图库 ====================
+        /// <summary>武器图库1 - 主武器的图像库</summary>
+        /// <summary>武器特效图库1 - 主武器特效的图像库</summary>
+        /// <summary>武器图库2 - 副武器的图像库(刺客双持)</summary>
+        /// <summary>发型图库 - 头发外观的图像库</summary>
+        /// <summary>翅膀图库 - 翅膀外观的图像库</summary>
+        /// <summary>坐骑图库 - 坐骑外观的图像库</summary>
         public MLibrary WeaponLibrary1, WeaponEffectLibrary1, WeaponLibrary2, HairLibrary, WingLibrary, MountLibrary;
+        
+        /// <summary>衣服编号 - 当前穿戴的衣服ID</summary>
+        /// <summary>武器编号 - 当前装备的武器ID</summary>
+        /// <summary>武器特效编号 - 武器特效ID</summary>
+        /// <summary>衣服偏移 - 衣服图像在数组中的索引偏移</summary>
+        /// <summary>发型偏移 - 发型图像在数组中的索引偏移</summary>
+        /// <summary>武器偏移 - 武器图像在数组中的索引偏移</summary>
+        /// <summary>翅膀偏移 - 翅膀图像在数组中的索引偏移</summary>
+        /// <summary>坐骑偏移 - 坐骑图像在数组中的索引偏移</summary>
         public int Armour, Weapon, WeaponEffect, ArmourOffSet, HairOffSet, WeaponOffSet, WingOffset, MountOffset;
 
+        // ==================== 音效 ====================
+        /// <summary>死亡音效 - 角色死亡时播放的音效ID</summary>
+        /// <summary>受击音效 - 角色受到攻击时的音效ID</summary>
+        /// <summary>攻击音效 - 角色攻击时的音效ID</summary>
         public int DieSound, FlinchSound, AttackSound;
 
-
+        // ==================== 动画系统 ====================
+        /// <summary>帧集合 - 角色的所有动作帧数据(站立/行走/攻击等)</summary>
         public FrameSet Frames;
+        
+        /// <summary>当前帧 - 当前渲染的身体动画帧</summary>
+        /// <summary>翅膀帧 - 当前渲染的翅膀动画帧</summary>
         public Frame Frame, WingFrame;
+        
+        /// <summary>帧索引 - 当前动画帧的索引</summary>
+        /// <summary>帧间隔 - 动画帧之间的时间间隔(毫秒)</summary>
+        /// <summary>特效帧索引 - 特效动画的帧索引</summary>
+        /// <summary>特效帧间隔 - 特效动画的帧间隔</summary>
+        /// <summary>慢速帧索引 - 慢动作动画的帧索引</summary>
         public int FrameIndex, FrameInterval, EffectFrameIndex, EffectFrameInterval, SlowFrameIndex;
+        
+        /// <summary>跳过帧更新 - 连续跳过几帧更新(优化性能)</summary>
         public byte SkipFrameUpdate = 0;
 
+        /// <summary>
+        /// 是否有职业武器 - 判断当前武器是否为该职业专属武器
+        /// 战士/法师/道士使用默认武器, 刺客使用刺客武器, 弓箭手使用弓箭
+        /// </summary>
         public bool HasClassWeapon
         {
             get
@@ -54,6 +108,10 @@ namespace Client.MirObjects
             }
         }
 
+        /// <summary>
+        /// 是否有钓鱼竿 - 判断当前武器是否为钓鱼竿
+        /// 用于启用钓鱼功能
+        /// </summary>
         public bool HasFishingRod
         {
             get
@@ -62,47 +120,113 @@ namespace Client.MirObjects
             }
         }
 
+        // ==================== 技能施法信息 ====================
+        /// <summary>施放技能 - 当前正在施放的技能类型</summary>
         public Spell Spell;
+        
+        /// <summary>技能等级 - 当前技能的等级</summary>
         public byte SpellLevel;
+        
+        /// <summary>是否施法 - 是否正在施法过程中</summary>
         public bool Cast;
+        
+        /// <summary>目标ID - 技能的目标对象ID</summary>
         public uint TargetID;
+        
+        /// <summary>次要目标ID列表 - 群体技能的额外目标(如群体雷电)</summary>
         public List<uint> SecondaryTargetIDs;
+        
+        /// <summary>目标点 - 技能施放的地图坐标</summary>
         public Point TargetPoint;
 
+        // ==================== 护盾效果 ====================
+        /// <summary>是否有魔法盾 - 法师的魔法盾技能是否激活</summary>
         public bool MagicShield;
+        
+        /// <summary>护盾特效 - 魔法盾的视觉特效对象</summary>
         public Effect ShieldEffect;
 
+        /// <summary>是否有元素屏障 - 元素屏障技能是否激活</summary>
         public bool ElementalBarrier;
+        
+        /// <summary>元素屏障特效 - 元素屏障的视觉特效对象</summary>
         public Effect ElementalBarrierEffect;
 
+        // ==================== 外观特效 ====================
+        /// <summary>翅膀特效 - 翅膀的特效类型(光翼/火翼等)</summary>
         public byte WingEffect;
+        
+        /// <summary>姿态延迟 - 动作姿态的延迟时间(毫秒)</summary>
         private short StanceDelay = 2500;
 
-        //ArcherSpells - Elemental system
+        // ==================== 弓箭手元素系统 ====================
+        /// <summary>是否有元素Buff - 弓箭手的元素增益是否激活</summary>
         public bool ElementalBuff;
+        
+        /// <summary>是否专注 - 弓箭手的专注状态(蓄力)</summary>
         public bool Concentrating;
+        
+        /// <summary>专注特效 - 专注状态的视觉特效</summary>
         public InterruptionEffect ConcentratingEffect;
+        
+        /// <summary>专注被打断 - 专注状态是否被打断</summary>
         public bool ConcentrateInterrupted;
+        
+        /// <summary>是否有元素 - 弓箭手是否有元素球</summary>
         public bool HasElements;
+        
+        /// <summary>元素已施放 - 元素球是否已经释放</summary>
         public bool ElementCasted;
-        public int ElementEffect;//hold orb count for player(object) load
+        
+        /// <summary>元素特效 - 元素球的数量(用于对象加载时保存)</summary>
+        public int ElementEffect;
+        
+        /// <summary>元素等级 - 元素球的等级</summary>
         public int ElementsLevel;
+        
+        /// <summary>元素球最大值 - 最多可以积累的元素球数量</summary>
         public int ElementOrbMax;
-        //Elemental system END
 
+        // ==================== 当前特效状态 ====================
+        /// <summary>当前技能特效 - 角色身上的技能特效(变身/隐身/加速等)</summary>
         public SpellEffect CurrentEffect;
 
+        // ==================== 坐骑和特殊状态 ====================
+        /// <summary>是否骑乘 - 是否正在骑坐骑</summary>
+        /// <summary>是否疾跑 - 是否处于疾跑状态</summary>
+        /// <summary>是否快跑 - 是否处于快跑状态</summary>
+        /// <summary>是否钓鱼 - 是否正在钓鱼</summary>
+        /// <summary>是否发现鱼 - 钓鱼时是否有鱼上钩</summary>
         public bool RidingMount, Sprint, FastRun, Fishing, FoundFish;
+        
+        /// <summary>姿态时间 - 姿态动作的时间戳</summary>
+        /// <summary>坐骑时间 - 骑乘状态的时间戳</summary>
+        /// <summary>钓鱼时间 - 钓鱼开始的时间戳</summary>
         public long StanceTime, MountTime, FishingTime;
+        
+        /// <summary>暴风雪停止时间 - 暴风雪技能的停止时间</summary>
+        /// <summary>转生停止时间 - 转生技能的停止时间</summary>
+        /// <summary>斩击爆发时间 - 斩击爆发技能的时间</summary>
         public long BlizzardStopTime, ReincarnationStopTime, SlashingBurstTime;
 
+        // ==================== 变身系统 ====================
+        /// <summary>坐骑类型 - 当前骑乘的坐骑ID (-1表示无坐骑)</summary>
+        /// <summary>变身类型 - 当前变身的形态ID (-1表示未变身)</summary>
         public short MountType = -1, TransformType = -1;
 
+        // ==================== 公会信息 ====================
+        /// <summary>公会名称 - 角色所属公会的名称</summary>
         public string GuildName;
+        
+        /// <summary>公会职位 - 角色在公会中的职位名称</summary>
         public string GuildRankName;
 
+        // ==================== 钓鱼系统 ====================
+        /// <summary>钓鱼点 - 钓鱼时鱼漂的位置坐标</summary>
         public Point FishingPoint;
 
+        // ==================== 等级特效 ====================
+        /// <summary>等级特效 - 角色的等级特效(满级光环/称号等)</summary>
         public LevelEffects LevelEffects;
 
         public PlayerObject() { }
