@@ -119,6 +119,7 @@ impl SimpleMapViewer {
                     );
                 }
 
+                // C#中Draw函数直接使用坐标，不加图像偏移量
                 let screen_x = ((map_x - self.offset_x) * TILE_WIDTH) as f32;
                 let screen_y = ((map_y - self.offset_y) * TILE_HEIGHT) as f32;
 
@@ -290,12 +291,12 @@ impl SimpleMapViewer {
                     );
                 }
 
-                // C# 中: Libraries.MapLibs[fileIndex].Draw(index, drawX, drawY - s.Height)
-                // Front层需要减去图像高度（从底部向上绘制）
+                // 🔧 Front层：需要减去图像高度，让建筑物"站"在格子上
+                // 原因：48x32格子只是地面位置，高大建筑需要向上延伸
                 let draw_x = ((map_x - self.offset_x) * TILE_WIDTH) as f32;
                 let draw_y = ((map_y - self.offset_y) * TILE_HEIGHT) as f32;
                 let screen_x = draw_x;
-                let screen_y = draw_y - info.height as f32;
+                let screen_y = draw_y - info.height as f32 + TILE_HEIGHT as f32;
 
                 if let Ok(image_info) = lib.get_or_create_texture(ctx, image_index) {
                     if let Some(ref texture) = image_info.image {
@@ -362,14 +363,18 @@ impl EventHandler for SimpleMapViewer {
         let step = 2; // 与 C# 客户端一致，两格为单位移动视口。
 
         if let PhysicalKey::Code(code) = input.event.physical_key {
+            // 🔧 计算实际可移动的最大值（如果地图比视窗小，则为0）
+            let max_offset_x = (self.width - VIEW_RANGE).max(0);
+            let max_offset_y = (self.height - VIEW_RANGE).max(0);
+            
             match code {
                 KeyCode::ArrowLeft => self.offset_x = (self.offset_x - step).max(0),
                 KeyCode::ArrowRight => {
-                    self.offset_x = (self.offset_x + step).min(self.width - VIEW_RANGE)
+                    self.offset_x = (self.offset_x + step).min(max_offset_x)
                 }
                 KeyCode::ArrowUp => self.offset_y = (self.offset_y - step).max(0),
                 KeyCode::ArrowDown => {
-                    self.offset_y = (self.offset_y + step).min(self.height - VIEW_RANGE)
+                    self.offset_y = (self.offset_y + step).min(max_offset_y)
                 }
                 _ => {}
             }
@@ -440,16 +445,19 @@ impl EventHandler for SimpleMapViewer {
             let delta_x = x - self.last_mouse_pos.0;
             let delta_y = y - self.last_mouse_pos.1;
 
+            // 🔧 关键修复：立即更新鼠标位置，防止delta累积
+            self.last_mouse_pos = (x, y);
+
             let step_x = (-delta_x / TILE_WIDTH as f32) as i32;
             let step_y = (-delta_y / TILE_HEIGHT as f32) as i32;
 
             if step_x != 0 || step_y != 0 {
-                self.offset_x = (self.offset_x + step_x).clamp(0, self.width - VIEW_RANGE);
-                self.offset_y = (self.offset_y + step_y).clamp(0, self.height - VIEW_RANGE);
+                let max_offset_x = (self.width - VIEW_RANGE).max(0);
+                let max_offset_y = (self.height - VIEW_RANGE).max(0);
+                self.offset_x = (self.offset_x + step_x).clamp(0, max_offset_x);
+                self.offset_y = (self.offset_y + step_y).clamp(0, max_offset_y);
                 self.printed_debug_once = false;
             }
-
-            self.last_mouse_pos = (x, y);
         }
 
         Ok(())
