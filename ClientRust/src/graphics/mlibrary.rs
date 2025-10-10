@@ -263,7 +263,7 @@ impl ImageInfo {
                 decompressed.resize(expected_size, 0);
             }
         }
-        Self::bgra_to_transparent(&mut decompressed);
+       // Self::bgra_to_transparent(&mut decompressed);
         Ok(decompressed)
     }
 

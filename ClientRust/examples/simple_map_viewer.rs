@@ -4,12 +4,12 @@
 
 use ggez::conf::{WindowMode, WindowSetup};
 use ggez::event::{self, EventHandler};
+use ggez::graphics::{self, Canvas, Color, DrawParam};
 use ggez::input::keyboard::{KeyCode, KeyInput};
 use ggez::input::mouse::MouseButton;
-use ggez::graphics::{self, Canvas, Color, DrawParam};
 use ggez::{Context, ContextBuilder, GameResult};
 
-use mir2_client::graphics::libraries::{initialize_all_libraries, get_map_library};
+use mir2_client::graphics::libraries::{get_map_library, initialize_all_libraries};
 use mir2_client::objects::{CellInfo, MapReader};
 
 /// 绘制视窗一次显示 50x50 个格子，便于与 C# 客户端截图对比。
@@ -42,8 +42,9 @@ impl SimpleMapViewer {
 
         // 🔧 使用全局 LIBRARIES 初始化所有地图库
         println!("📚 正在初始化地图库...");
-        initialize_all_libraries("Data")
-            .map_err(|err| ggez::GameError::ResourceLoadError(format!("初始化地图库失败: {}", err)))?;
+        initialize_all_libraries("Data").map_err(|err| {
+            ggez::GameError::ResourceLoadError(format!("初始化地图库失败: {}", err))
+        })?;
         println!("✅ 地图库初始化完成");
 
         Ok(Self {
@@ -68,7 +69,7 @@ impl SimpleMapViewer {
         let mut draw_count = 0;
 
         // 🔧 修复：根据C#官方代码，Back层只绘制偶数格子，使用REPLACE模式
-        canvas.set_blend_mode(graphics::BlendMode::REPLACE);
+         canvas.set_blend_mode(graphics::BlendMode::REPLACE);
 
         // 扩展绘制范围，避免边缘出现黑边
         let start_x = (self.offset_x - 2).max(0);
@@ -84,14 +85,16 @@ impl SimpleMapViewer {
             if map_y <= 0 || map_y % 2 != 0 {
                 continue;
             }
-            
+
             for map_x in start_x..end_x {
                 // ⚠️ C#原版：跳过 x<=0 和所有奇数列
                 if map_x <= 0 || map_x % 2 != 0 {
                     continue;
                 }
 
-                let Some(cell) = self.cell(map_x, map_y) else { continue };
+                let Some(cell) = self.cell(map_x, map_y) else {
+                    continue;
+                };
                 if cell.back_image <= 0 || cell.back_index < 0 {
                     continue;
                 }
@@ -123,11 +126,14 @@ impl SimpleMapViewer {
                     if let Some(ref texture) = image_info.image {
                         canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
                         draw_count += 1;
-                        
+
                         // 🔧 绘制遮罩层 (Mask)
                         if image_info.has_mask {
                             if let Some(ref mask_texture) = image_info.mask_image {
-                                canvas.draw(mask_texture, DrawParam::default().dest([screen_x, screen_y]));
+                                canvas.draw(
+                                    mask_texture,
+                                    DrawParam::default().dest([screen_x, screen_y]),
+                                );
                             }
                         }
                     }
@@ -146,7 +152,7 @@ impl SimpleMapViewer {
         let mut draw_count = 0;
 
         // 参考代码：Middle层使用REPLACE模式
-        canvas.set_blend_mode(graphics::BlendMode::REPLACE);
+         canvas.set_blend_mode(graphics::BlendMode::REPLACE);
 
         // 扩展绘制范围，避免边缘物体被裁剪
         let start_x = (self.offset_x - 2).max(0);
@@ -156,7 +162,9 @@ impl SimpleMapViewer {
 
         for map_y in start_y..end_y {
             for map_x in start_x..end_x {
-                let Some(cell) = self.cell(map_x, map_y) else { continue };
+                let Some(cell) = self.cell(map_x, map_y) else {
+                    continue;
+                };
 
                 if cell.middle_image <= 0 || cell.middle_index < 0 {
                     continue;
@@ -179,8 +187,10 @@ impl SimpleMapViewer {
                 // 🔧 关键修复：Middle层尺寸过滤（参考C#代码）
                 // 只允许单格 (48x32) 或双格 (96x64) 尺寸
                 // 防止绘制错误的瓦片条带
-                let valid_size = (info.width == TILE_WIDTH as i16 && info.height == TILE_HEIGHT as i16) ||
-                                 (info.width == (TILE_WIDTH * 2) as i16 && info.height == (TILE_HEIGHT * 2) as i16);
+                let valid_size = (info.width == TILE_WIDTH as i16
+                    && info.height == TILE_HEIGHT as i16)
+                    || (info.width == (TILE_WIDTH * 2) as i16
+                        && info.height == (TILE_HEIGHT * 2) as i16);
                 if !valid_size {
                     continue;
                 }
@@ -201,11 +211,14 @@ impl SimpleMapViewer {
                     if let Some(ref texture) = image_info.image {
                         canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
                         draw_count += 1;
-                        
+
                         // 🔧 绘制遮罩层 (Mask)
                         if image_info.has_mask {
                             if let Some(ref mask_texture) = image_info.mask_image {
-                                canvas.draw(mask_texture, DrawParam::default().dest([screen_x, screen_y]));
+                                canvas.draw(
+                                    mask_texture,
+                                    DrawParam::default().dest([screen_x, screen_y]),
+                                );
                             }
                         }
                     }
@@ -227,17 +240,19 @@ impl SimpleMapViewer {
         let mut skip_no_texture = 0;
 
         // 参考代码：Front层使用ALPHA模式（正常alpha混合）
-        canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+         canvas.set_blend_mode(graphics::BlendMode::ALPHA);
 
         // 扩展绘制范围，高大物体（树木、建筑）需要更大的范围
         let start_x = (self.offset_x - 5).max(0);
-        let start_y = (self.offset_y - 10).max(0);  // 向上扩展更多，因为建筑物很高
+        let start_y = (self.offset_y - 10).max(0); // 向上扩展更多，因为建筑物很高
         let end_x = (self.offset_x + VIEW_RANGE + 5).min(self.width);
         let end_y = (self.offset_y + VIEW_RANGE + 5).min(self.height);
 
         for map_y in start_y..end_y {
             for map_x in start_x..end_x {
-                let Some(cell) = self.cell(map_x, map_y) else { continue };
+                let Some(cell) = self.cell(map_x, map_y) else {
+                    continue;
+                };
 
                 // 低位 15 bits 才是真正的图片索引。
                 let front_image = cell.front_image & 0x7FFF;
@@ -281,20 +296,25 @@ impl SimpleMapViewer {
                 let draw_y = ((map_y - self.offset_y) * TILE_HEIGHT) as f32;
                 let screen_x = draw_x;
                 let screen_y = draw_y - info.height as f32;
-                
+
                 if let Ok(image_info) = lib.get_or_create_texture(ctx, image_index) {
                     if let Some(ref texture) = image_info.image {
                         canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
                         draw_count += 1;
-                        
+
                         // 🔧 绘制遮罩层 (Mask)
                         // C#: if (mi.HasMask) { DXManager.Draw(mi.MaskImage, ..., Tint); }
                         if image_info.has_mask {
                             if let Some(ref mask_texture) = image_info.mask_image {
                                 if !self.printed_debug_once && draw_count <= 5 {
-                                    println!("    🎭 绘制Mask层 ({map_x},{map_y}) idx={image_index}");
+                                    println!(
+                                        "    🎭 绘制Mask层 ({map_x},{map_y}) idx={image_index}"
+                                    );
                                 }
-                                canvas.draw(mask_texture, DrawParam::default().dest([screen_x, screen_y]));
+                                canvas.draw(
+                                    mask_texture,
+                                    DrawParam::default().dest([screen_x, screen_y]),
+                                );
                             }
                         }
                     } else {
@@ -362,7 +382,7 @@ impl EventHandler for SimpleMapViewer {
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
+        let mut canvas = Canvas::from_frame(ctx, Color::WHITE);
 
         if !self.printed_debug_once {
             println!(
@@ -444,6 +464,6 @@ fn main() -> GameResult {
         .window_mode(WindowMode::default().dimensions(1280.0, 960.0))
         .build()?;
 
-    let state = SimpleMapViewer::new("Map/0.map")?;
+    let state = SimpleMapViewer::new("Map/0122.map")?;
     event::run(ctx, event_loop, state)
 }
