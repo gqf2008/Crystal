@@ -161,15 +161,15 @@ impl ImageInfo {
         let mut compressed_data = vec![0u8; self.length as usize];
         reader.read_exact(&mut compressed_data)?;
 
-        // 解压主图像
+        // 解压主图像（已转换为RGBA并处理黑色背景）
         let main_image = Self::decompress_image(&compressed_data, self.width, self.height)?;
         self.rgba_data = Some(main_image.clone()); // 保存原始数据副本
         
-        // 🔧 使用BGRA格式创建纹理（匹配DirectX的A8R8G8B8格式）
+        // 🔧 使用RGBA格式创建纹理（已从BGRA转换）
         self.image = Some(ggez::graphics::Image::from_pixels(
             ctx,
             &main_image,
-            ImageFormat::Bgra8Unorm,  // ← 改用BGRA格式
+            ImageFormat::Rgba8UnormSrgb,  // ← 使用标准RGBA格式
             self.width as u32,
             self.height as u32,
         ));
@@ -189,11 +189,11 @@ impl ImageInfo {
             // 解压遮罩层（使用主图像的宽高，因为C#代码中遮罩使用Width/Height）
             let mask_data = Self::decompress_image(&mask_compressed, self.width, self.height)?;
             
-            // 🔧 使用BGRA格式创建遮罩纹理
+            // 🔧 使用RGBA格式创建遮罩纹理（已从BGRA转换）
             self.mask_image = Some(ggez::graphics::Image::from_pixels(
                 ctx,
                 &mask_data,
-                ImageFormat::Bgra8Unorm,  // ← 改用BGRA格式
+                ImageFormat::Rgba8UnormSrgb,  // ← 使用标准RGBA格式
                 self.width as u32,
                 self.height as u32,
             ));
@@ -264,28 +264,35 @@ impl ImageInfo {
             }
         }
 
-        // ✅ 保持BGRA格式不变！
+        // 🔧 新方案: BGRA → RGBA 转换 + 黑色背景透明化
         // MIR2 格式: B G R A (每个像素4字节)
-        // DirectX使用 Format.A8R8G8B8 = BGRA顺序
+        // OpenGL 需要: R G B A
         // 
-        // 🔧 尝试: 不进行颜色通道转换，直接返回BGRA数据
-        // 让ggez按照BGRA格式理解（可能需要在创建纹理时指定格式）
-
-        // 🔧 简单的alpha修正：确保所有非透明像素的alpha都是255
-        Self::fix_alpha(&mut decompressed);
+        // 关键问题：DirectX的黑色背景（0,0,0,255）需要转为透明（0,0,0,0）
+        Self::bgra_to_rgba_with_black_to_transparent(&mut decompressed);
         Ok(decompressed)
     }
 
     
-    /// 简单的alpha修正：确保所有非透明像素的alpha都是255（完全不透明）
-    /// 这解决了树木等对象看起来半透明的问题
-    fn fix_alpha(bgra: &mut [u8]) {
-        for chunk in bgra.chunks_exact_mut(4) {
-            let alpha = chunk[3];
-            // 如果alpha不是0（透明），则设为255（完全不透明）
-            if alpha > 0 {
-                chunk[3] = 255;
-            }
+    /// BGRA转RGBA
+    /// 不做额外的透明处理，保持原始alpha值
+    fn bgra_to_rgba_with_black_to_transparent(data: &mut [u8]) {
+        for chunk in data.chunks_exact_mut(4) {
+            let b = chunk[0];
+            let g = chunk[1];
+            let r = chunk[2];
+            let a = chunk[3];
+            
+            // BGRA → RGBA：只交换R和B通道
+            chunk[0] = r;
+            chunk[2] = b;
+            
+            // � 不修改alpha通道！
+            // DirectX的alpha值已经是正确的：
+            // - alpha=0 表示透明（黑色背景）
+            // - alpha>0 表示可见（包括火焰等带黑色的效果）
+            // 
+            // 之前的错误：将所有黑色转为透明，导致火焰变成"黑中带黄"
         }
     }
 

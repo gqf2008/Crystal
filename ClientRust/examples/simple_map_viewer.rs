@@ -88,21 +88,19 @@ impl SimpleMapViewer {
     fn draw_back_layer(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
         let mut draw_count = 0;
 
-        let start_x = if self.offset_x % 2 == 0 {
-            self.offset_x
-        } else {
-            self.offset_x - 1
-        };
-        let start_y = if self.offset_y % 2 == 0 {
-            self.offset_y
-        } else {
-            self.offset_y - 1
-        };
-        let end_x = (self.offset_x + VIEW_RANGE).min(self.width);
-        let end_y = (self.offset_y + VIEW_RANGE).min(self.height);
+        // 扩展绘制范围，避免边缘出现黑边
+        let start_x = (self.offset_x - 2).max(0);
+        let start_y = (self.offset_y - 2).max(0);
+        let end_x = (self.offset_x + VIEW_RANGE + 2).min(self.width);
+        let end_y = (self.offset_y + VIEW_RANGE + 2).min(self.height);
 
-        for map_y in (start_y..end_y).step_by(2) {
-            for map_x in (start_x..end_x).step_by(2) {
+        // 参考代码：先绘制奇数坐标（填充缝隙）
+        for map_y in start_y..end_y {
+            for map_x in start_x..end_x {
+                // 只绘制奇数行或奇数列
+                if map_x % 2 == 0 && map_y % 2 == 0 {
+                    continue;
+                }
                 let Some(cell) = self.cell(map_x, map_y) else { continue };
                 if cell.back_image <= 0 || cell.back_index < 0 {
                     continue;
@@ -143,6 +141,51 @@ impl SimpleMapViewer {
             }
         }
 
+        // 参考代码：第二次绘制偶数坐标，使用REPLACE模式（不混合，直接覆盖）
+        canvas.set_blend_mode(graphics::BlendMode::REPLACE);
+        
+        for map_y in start_y..end_y {
+            // 只绘制偶数行
+            if map_y % 2 != 0 {
+                continue;
+            }
+            
+            for map_x in start_x..end_x {
+                // 只绘制偶数列
+                if map_x % 2 != 0 {
+                    continue;
+                }
+
+                let Some(cell) = self.cell(map_x, map_y) else { continue };
+                if cell.back_image <= 0 || cell.back_index < 0 {
+                    continue;
+                }
+
+                let lib_index = cell.back_index as usize;
+                let Some(lib_arc) = self.libs.get(lib_index).and_then(|o| o.as_ref()) else {
+                    continue;
+                };
+
+                let image_index = ((cell.back_image & 0x1FFF_FFFF) as usize).saturating_sub(1);
+
+                let mut lib = lib_arc.lock().unwrap();
+                let info = match lib.get_image_info(image_index) {
+                    Ok(info) => info,
+                    Err(_) => continue,
+                };
+
+                let screen_x = ((map_x - self.offset_x) * TILE_WIDTH) as f32;
+                let screen_y = ((map_y - self.offset_y) * TILE_HEIGHT) as f32;
+
+                if let Ok(image_info) = lib.get_or_create_texture(ctx, image_index) {
+                    if let Some(ref texture) = image_info.image {
+                        canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
+                        draw_count += 1;
+                    }
+                }
+            }
+        }
+
         if !self.printed_debug_once {
             println!("  Back 层绘制数量: {draw_count}");
         }
@@ -153,10 +196,17 @@ impl SimpleMapViewer {
     fn draw_middle_layer(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
         let mut draw_count = 0;
 
-        for vy in 0..VIEW_RANGE {
-            for vx in 0..VIEW_RANGE {
-                let map_x = self.offset_x + vx;
-                let map_y = self.offset_y + vy;
+        // 参考代码：Middle层使用REPLACE模式
+        canvas.set_blend_mode(graphics::BlendMode::REPLACE);
+
+        // 扩展绘制范围，避免边缘物体被裁剪
+        let start_x = (self.offset_x - 2).max(0);
+        let start_y = (self.offset_y - 2).max(0);
+        let end_x = (self.offset_x + VIEW_RANGE + 2).min(self.width);
+        let end_y = (self.offset_y + VIEW_RANGE + 2).min(self.height);
+
+        for map_y in start_y..end_y {
+            for map_x in start_x..end_x {
                 let Some(cell) = self.cell(map_x, map_y) else { continue };
 
                 if cell.middle_image <= 0 || cell.middle_index < 0 {
@@ -176,6 +226,15 @@ impl SimpleMapViewer {
                     Ok(info) => info,
                     Err(_) => continue,
                 };
+
+                // 🔧 关键修复：Middle层尺寸过滤（参考C#代码）
+                // 只允许单格 (48x32) 或双格 (96x64) 尺寸
+                // 防止绘制错误的瓦片条带
+                let valid_size = (info.width == TILE_WIDTH && info.height == TILE_HEIGHT) ||
+                                 (info.width == TILE_WIDTH * 2 && info.height == TILE_HEIGHT * 2);
+                if !valid_size {
+                    continue;
+                }
 
                 if !self.printed_debug_once && draw_count < 5 {
                     println!(
@@ -208,10 +267,17 @@ impl SimpleMapViewer {
     fn draw_front_layer(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
         let mut draw_count = 0;
 
-        for vy in 0..VIEW_RANGE {
-            for vx in 0..VIEW_RANGE {
-                let map_x = self.offset_x + vx;
-                let map_y = self.offset_y + vy;
+        // 参考代码：Front层使用ALPHA模式（正常alpha混合）
+        canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+
+        // 扩展绘制范围，高大物体（树木、建筑）需要更大的范围
+        let start_x = (self.offset_x - 5).max(0);
+        let start_y = (self.offset_y - 10).max(0);  // 向上扩展更多，因为建筑物很高
+        let end_x = (self.offset_x + VIEW_RANGE + 5).min(self.width);
+        let end_y = (self.offset_y + VIEW_RANGE + 5).min(self.height);
+
+        for map_y in start_y..end_y {
+            for map_x in start_x..end_x {
                 let Some(cell) = self.cell(map_x, map_y) else { continue };
 
                 // 低位 15 bits 才是真正的图片索引。
@@ -301,7 +367,6 @@ impl EventHandler for SimpleMapViewer {
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
-        canvas.set_blend_mode(graphics::BlendMode::ALPHA);
 
         if !self.printed_debug_once {
             println!(
@@ -310,6 +375,7 @@ impl EventHandler for SimpleMapViewer {
             );
         }
 
+        // 参考代码：Back层绘制两次，先奇数后偶数，使用REPLACE模式
         self.draw_back_layer(ctx, &mut canvas)?;
         self.draw_middle_layer(ctx, &mut canvas)?;
         self.draw_front_layer(ctx, &mut canvas)?;
