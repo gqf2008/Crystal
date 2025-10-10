@@ -164,10 +164,12 @@ impl ImageInfo {
         // 解压主图像
         let main_image = Self::decompress_image(&compressed_data, self.width, self.height)?;
         self.rgba_data = Some(main_image.clone()); // 保存原始数据副本
+        
+        // 🔧 使用BGRA格式创建纹理（匹配DirectX的A8R8G8B8格式）
         self.image = Some(ggez::graphics::Image::from_pixels(
             ctx,
             &main_image,
-            ImageFormat::Rgba8Unorm,
+            ImageFormat::Bgra8Unorm,  // ← 改用BGRA格式
             self.width as u32,
             self.height as u32,
         ));
@@ -186,10 +188,12 @@ impl ImageInfo {
 
             // 解压遮罩层（使用主图像的宽高，因为C#代码中遮罩使用Width/Height）
             let mask_data = Self::decompress_image(&mask_compressed, self.width, self.height)?;
+            
+            // 🔧 使用BGRA格式创建遮罩纹理
             self.mask_image = Some(ggez::graphics::Image::from_pixels(
                 ctx,
                 &mask_data,
-                ImageFormat::Rgba8Unorm,
+                ImageFormat::Bgra8Unorm,  // ← 改用BGRA格式
                 self.width as u32,
                 self.height as u32,
             ));
@@ -260,31 +264,40 @@ impl ImageInfo {
             }
         }
 
-        // 转换 BGRA -> RGBA，并处理透明色
+        // ✅ 保持BGRA格式不变！
         // MIR2 格式: B G R A (每个像素4字节)
-        // 目标格式: R G B A
-        let mut rgba_data = Vec::with_capacity(decompressed.len());
+        // DirectX使用 Format.A8R8G8B8 = BGRA顺序
+        // 
+        // 🔧 尝试: 不进行颜色通道转换，直接返回BGRA数据
+        // 让ggez按照BGRA格式理解（可能需要在创建纹理时指定格式）
 
-        for chunk in decompressed.chunks_exact(4) {
-            let b = chunk[0];
-            let g = chunk[1];
-            let r = chunk[2];
-            let mut a = chunk[3];
+        // 🔧 禁用 apply_auto_alpha - 导致建筑物透明
+        // Self::apply_auto_alpha(&mut decompressed);
+        Ok(decompressed)
+    }
 
-            // 🔧 传奇2关键特性: 黑色被视为透明色
-            // 对应 C# 中的隐式行为
-            if r == 0 && g == 0 && b == 0 {
-                a = 0;
-            }
-
-            rgba_data.push(r);
-            rgba_data.push(g);
-            rgba_data.push(b);
-            rgba_data.push(a);
+    
+fn apply_auto_alpha(rgba: &mut [u8]) {
+    for chunk in rgba.chunks_exact_mut(4) {
+        let alpha = chunk[3];
+        if alpha == 0 {
+            chunk.copy_from_slice(&[0, 0, 0, 0]);
+            continue;
         }
 
-        Ok(rgba_data)
+        let max_rgb = chunk[0].max(chunk[1]).max(chunk[2]);
+        if max_rgb == 0 {
+            chunk.copy_from_slice(&[0, 0, 0, 0]);
+            continue;
+        }
+
+        let scale = max_rgb as u16;
+        chunk[0] = ((u16::from(chunk[0]) * 255 + scale / 2) / scale).min(255) as u8;
+        chunk[1] = ((u16::from(chunk[1]) * 255 + scale / 2) / scale).min(255) as u8;
+        chunk[2] = ((u16::from(chunk[2]) * 255 + scale / 2) / scale).min(255) as u8;
+        chunk[3] = max_rgb;
     }
+}
 
     /// 检查指定像素是否可见（非透明）
     ///
@@ -1492,6 +1505,8 @@ impl MLibrary {
         }
     }
 }
+
+
 
 // ============================================================================
 // 单元测试

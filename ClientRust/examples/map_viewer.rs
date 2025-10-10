@@ -317,17 +317,24 @@ impl MapRenderer {
             
             // 使用纹理缓存（先获取纹理再读取 info，避免重复 lock）
             match lib.get_or_create_texture(ctx, image_index) {
-                Ok(texture) => {
-                    // 转换到屏幕坐标（不应用 offset）
-                    // C# 逻辑：MLibrary.Draw(index, x, y) 直接绘制，不应用 mi.X/mi.Y
-                    // 只有 Draw(index, point, color, offSet=true) 才应用 offset
-                    let screen_x = camera.world_to_screen_x(world_x, screen_width);
-                    let screen_y = camera.world_to_screen_y(world_y, screen_height);
-                    
-                    // 绘制纹理（使用 Alpha 混合）
-                    canvas.draw(texture, DrawParam::default()
-                        .dest([screen_x, screen_y])
-                        .scale([camera.zoom, camera.zoom]));
+                Ok(info) => {
+                    // 从ImageInfo获取实际的纹理
+                    if let Some(ref texture) = info.image {
+                        // 🔧 简化调试：直接计算屏幕坐标
+                        // 世界坐标转屏幕坐标（简化版）
+                        let screen_x = world_x - camera.x + screen_width / 2.0;
+                        let screen_y = world_y - camera.y + screen_height / 2.0;
+                        
+                        // 应用图像offset
+                        let final_x = screen_x + info.x as f32;
+                        let final_y = screen_y + info.y as f32;
+                        
+                        // 🔧 测试Y轴翻转：DirectX(Y向下) vs OpenGL(Y向上)
+                        // 方案1: 使用负Y缩放翻转图像，并调整Y坐标补偿高度
+                        canvas.draw(texture, DrawParam::default()
+                            .dest([final_x, final_y + info.height as f32])  // Y坐标向下移动图像高度
+                            .scale([1.0, -1.0]));  // Y轴翻转
+                    }
                 }
                 Err(_e) => {
                     // 忽略加载错误（避免日志刷屏）
@@ -367,13 +374,13 @@ impl MapViewerState {
         
         let map_renderer = MapRenderer::new(reader);
         
-        // 相机初始位置设置为地图左上角附近（可以看到内容的位置）
+        // 🔧 相机初始位置：世界坐标原点(0,0)，这样屏幕中心显示世界(0,0)
         let mut camera = Camera::new();
-        camera.x =screen_width/2.0;  // 屏幕宽度的一半
-        camera.y = screen_height/2.0;  // 屏幕高度的一半
+        camera.x = 0.0;  // 世界坐标X
+        camera.y = 0.0;  // 世界坐标Y
         camera.zoom = 1.0;
         
-        println!("📍 相机初始位置: ({}, {})", camera.x, camera.y);
+        println!("📍 相机初始位置: 世界坐标({}, {})", camera.x, camera.y);
         println!("🎯 地图像素尺寸: {}x{} 像素", 
             map_renderer.width * MapRenderer::CELL_WIDTH,
             map_renderer.height * MapRenderer::CELL_HEIGHT);
@@ -415,8 +422,8 @@ impl EventHandler for MapViewerState {
         // 使用深灰色背景，更容易看清地图边界
         let mut canvas = Canvas::from_frame(ctx, Color::from_rgb(32, 32, 32));
         
-        // 设置混合模式为标准 Alpha 混合
-        canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+        // // 设置混合模式为标准 Alpha 混合
+        // canvas.set_blend_mode(graphics::BlendMode::ALPHA);
         
         // 绘制地图
         self.map_renderer.draw(ctx, &mut canvas, &self.camera, self.screen_width, self.screen_height)?;
@@ -447,11 +454,8 @@ impl EventHandler for MapViewerState {
         Ok(())
     }
     
-    fn mouse_wheel_event(&mut self, ctx: &mut Context, _x: f32, y: f32) -> GameResult {
-        let mouse_pos = ctx.mouse.position();
-        let mouse_x = mouse_pos.x;
-        let mouse_y = mouse_pos.y;
-        self.camera.zoom_by(y, mouse_x, mouse_y, self.screen_width, self.screen_height);
+    fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, _y: f32) -> GameResult {
+        // 🔧 禁用缩放功能，便于调试
         Ok(())
     }
 }

@@ -213,11 +213,35 @@ fn test_map_files(map_dir: &str) -> TestStats {
                         match MapReader::new(file_path) {
                             Ok(map) => {
                                 stats.add_success(0, file_size);
-                                println!("  ✅ {} - {}x{} ({:.2} KB)", 
+                                
+                                // 统计各层的非空格子数量
+                                let mut back_count = 0;
+                                let mut middle_count = 0;
+                                let mut front_count = 0;
+                                
+                                for x in 0..map.width as usize {
+                                    for y in 0..map.height as usize {
+                                        let cell = &map.map_cells[x][y];
+                                        if cell.back_image != 0 {
+                                            back_count += 1;
+                                        }
+                                        if cell.middle_image != 0 {
+                                            middle_count += 1;
+                                        }
+                                        if cell.front_image != 0 {
+                                            front_count += 1;
+                                        }
+                                    }
+                                }
+                                
+                                println!("  ✅ {} - {}x{} ({:.2} KB) | Back:{} Mid:{} Front:{}", 
                                     file_name,
                                     map.width,
                                     map.height,
-                                    file_size as f64 / 1024.0
+                                    file_size as f64 / 1024.0,
+                                    back_count,
+                                    middle_count,
+                                    front_count
                                 );
                             }
                             Err(e) => {

@@ -228,7 +228,9 @@ impl MapReader {
             ));
         }
         
-        // C# 自定义格式 (C#)
+        // C# 自定义格式 (C#) - 必须在Type 5之前检查！
+        // Type 100 格式特征：bytes[2]='C' (0x43), bytes[3]='#' (0x23)
+        // 参考: Client/MirObjects/MapCode.cs line 198
         if bytes[2] == 0x43 && bytes[3] == 0x23 {
             return self.load_map_type_100();
         }
@@ -987,32 +989,32 @@ impl MapReader {
     }
     
     /// Map Type 100 - C# 自定义格式
-    /// 参考: Server/MirEnvir/Map.cs LoadMapCellsV100()
+    /// 参考: Client/MirObjects/MapCode.cs line 700-733
     /// 
-    /// C# 代码逻辑:
-    /// ```csharp
-    /// offset += 2;                           // Skip BackImage (2 bytes)
-    /// if ((BitConverter.ToInt32(Bytes, offset) & 0x20000000) != 0)
-    ///     Cells[x, y] = Cell.HighWall;       // Check MiddleImage (4 bytes)
-    /// offset += 10;                          // Skip MiddleImage(4) + MiddleIndex(2) + Animation(4)
-    /// if ((BitConverter.ToInt16(Bytes, offset) & 0x8000) != 0)
-    ///     Cells[x, y] = Cell.LowWall;        // Check FrontImage (2 bytes)
-    /// offset += 2;                           // Skip FrontImage
-    /// if (Bytes[offset] > 0)
-    ///     DoorIndex[x, y] = AddDoor(...);    // Read Door (1 byte)
-    /// offset += 11;                          // Skip Door(1) + Rest(10)
-    /// byte light = Bytes[offset++];          // Read Light (1 byte)
-    /// ```
+    /// 格式说明:
+    /// - offset 4-5: Width (2 bytes)
+    /// - offset 6-7: Height (2 bytes)
+    /// - offset 8: 数据开始
     /// 
-    /// 总计: 2+4+10+2+2+1+10+1 = 32 bytes per cell
+    /// 每个格子 24 bytes:
+    /// - BackIndex (2 bytes)
+    /// - BackImage (4 bytes)
+    /// - MiddleIndex (2 bytes)
+    /// - MiddleImage (2 bytes)
+    /// - FrontIndex (2 bytes)
+    /// - FrontImage (2 bytes)
+    /// - DoorIndex (1 byte)
+    /// - DoorOffset (1 byte)
+    /// - FrontAnimationFrame (1 byte)
+    /// - FrontAnimationTick (1 byte)
+    /// - MiddleAnimationFrame (1 byte)
+    /// - MiddleAnimationTick (1 byte)
+    /// - TileAnimationImage (2 bytes)
+    /// - TileAnimationOffset (2 bytes)
+    /// - TileAnimationFrames (1 byte)
+    /// - Light (1 byte)
     fn load_map_type_100(&mut self) -> io::Result<()> {
-        // 检查版本 (只支持 version 1)
-        if self.bytes[0] != 1 || self.bytes[1] != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Map Type 100: Only version 1 is supported",
-            ));
-        }
+        tracing::info!("🗺️  加载地图格式: Type 100 (C# 自定义格式, 24 bytes/cell)");
         
         // 读取宽度和高度 (offset 4-7)
         let mut offset = 4;
@@ -1028,10 +1030,12 @@ impl MapReader {
         ]) as i32;
         offset += 2;
         
+        tracing::info!("📐 地图尺寸: {}x{}", self.width, self.height);
+        
         // 初始化地图格子数组
         self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
+        
         // offset 现在是 8，开始读取格子数据
-        // 🔧 修复：严格按照 C# LoadMapCellsV100 的逻辑实现
         // 参考: Client/MirObjects/MapCode.cs line 707-730
         for x in 0..self.width {
             for y in 0..self.height {
@@ -1041,7 +1045,7 @@ impl MapReader {
                 cell.back_index = i16::from_le_bytes([
                     self.bytes[offset],
                     self.bytes[offset + 1],
-                ]) as i16;
+                ]);
                 offset += 2;
                 
                 // BackImage (4字节) - 注意：这里是4字节int32
@@ -1053,14 +1057,14 @@ impl MapReader {
                 ]);
                 offset += 4;
                 
-                // MiddleIndex (2字节) - 🔧 之前漏掉了！
+                // MiddleIndex (2字节)
                 cell.middle_index = i16::from_le_bytes([
                     self.bytes[offset],
                     self.bytes[offset + 1],
-                ]) as i16;
+                ]);
                 offset += 2;
                 
-                // MiddleImage (2字节) - 🔧 之前错误地读成4字节！
+                // MiddleImage (2字节)
                 cell.middle_image = i16::from_le_bytes([
                     self.bytes[offset],
                     self.bytes[offset + 1],
@@ -1071,7 +1075,7 @@ impl MapReader {
                 cell.front_index = i16::from_le_bytes([
                     self.bytes[offset],
                     self.bytes[offset + 1],
-                ]) as i16;
+                ]);
                 offset += 2;
                 
                 // FrontImage (2字节)
@@ -1109,14 +1113,14 @@ impl MapReader {
                 cell.tile_animation_image = i16::from_le_bytes([
                     self.bytes[offset],
                     self.bytes[offset + 1],
-                ]) as i16;
+                ]);
                 offset += 2;
                 
                 // TileAnimationOffset (2字节)
                 cell.tile_animation_offset = i16::from_le_bytes([
                     self.bytes[offset],
                     self.bytes[offset + 1],
-                ]) as i16;
+                ]);
                 offset += 2;
                 
                 // TileAnimationFrames (1字节)
@@ -1127,8 +1131,7 @@ impl MapReader {
                 cell.light = self.bytes[offset];
                 offset += 1;
                 
-                // C#: if (light >= 100 && light <= 119)
-                //         Cells[x, y].FishingAttribute = (sbyte)(light - 100);
+                // 钓鱼点检测
                 if cell.light >= 100 && cell.light <= 119 {
                     cell.fishing_cell = true;
                 }

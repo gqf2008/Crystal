@@ -126,8 +126,10 @@ impl SimpleMapViewer {
                     );
                 }
 
-                let screen_x = ((map_x - self.offset_x) * TILE_WIDTH + info.x as i32) as f32;
-                let screen_y = ((map_y - self.offset_y) * TILE_HEIGHT + info.y as i32) as f32;
+                // C# 中: Libraries.MapLibs[index].Draw(index, drawX, drawY)
+                // Back层直接在格子坐标绘制
+                let screen_x = ((map_x - self.offset_x) * TILE_WIDTH) as f32;
+                let screen_y = ((map_y - self.offset_y) * TILE_HEIGHT) as f32;
 
                 if let Ok(image_info) = lib.get_or_create_texture(ctx, image_index) {
                     if let Some(ref texture) = image_info.image {
@@ -179,8 +181,10 @@ impl SimpleMapViewer {
                     );
                 }
 
-                let screen_x = ((vx - vy) * (TILE_WIDTH / 2) as i32 + info.x as i32) as f32;
-                let screen_y = ((vx + vy) * (TILE_HEIGHT / 2) as i32 + info.y as i32) as f32;
+                // C# 中: Libraries.MapLibs[index].Draw(index, drawX, drawY)
+                // Middle层直接在格子坐标绘制
+                let screen_x = ((map_x - self.offset_x) * TILE_WIDTH) as f32;
+                let screen_y = ((map_y - self.offset_y) * TILE_HEIGHT) as f32;
 
                 if let Ok(image_info) = lib.get_or_create_texture(ctx, image_index) {
                     if let Some(ref texture) = image_info.image {
@@ -233,8 +237,12 @@ impl SimpleMapViewer {
                     );
                 }
 
-                let screen_x = ((map_x - map_y) * (TILE_WIDTH / 2) as i32 + info.x as i32 - self.offset_x) as f32;
-                let screen_y = ((map_x + map_y) * (TILE_HEIGHT / 2) as i32 + info.y as i32 - self.offset_y) as f32;
+                // C# 中: Libraries.MapLibs[fileIndex].Draw(index, drawX, drawY - s.Height)
+                // Front层需要减去图像高度（从底部向上绘制）
+                let draw_x = ((map_x - self.offset_x) * TILE_WIDTH) as f32;
+                let draw_y = ((map_y - self.offset_y) * TILE_HEIGHT) as f32;
+                let screen_x = draw_x;
+                let screen_y = draw_y - info.height as f32;
                 
                 if let Ok(image_info) = lib.get_or_create_texture(ctx, image_index) {
                     if let Some(ref texture) = image_info.image {
