@@ -271,33 +271,45 @@ impl ImageInfo {
         // 🔧 尝试: 不进行颜色通道转换，直接返回BGRA数据
         // 让ggez按照BGRA格式理解（可能需要在创建纹理时指定格式）
 
-        // 🔧 禁用 apply_auto_alpha - 导致建筑物透明
-        // Self::apply_auto_alpha(&mut decompressed);
+        // 🔧 简单的alpha修正：确保所有非透明像素的alpha都是255
+        Self::fix_alpha(&mut decompressed);
         Ok(decompressed)
     }
 
     
-fn apply_auto_alpha(rgba: &mut [u8]) {
-    for chunk in rgba.chunks_exact_mut(4) {
-        let alpha = chunk[3];
-        if alpha == 0 {
-            chunk.copy_from_slice(&[0, 0, 0, 0]);
-            continue;
+    /// 简单的alpha修正：确保所有非透明像素的alpha都是255（完全不透明）
+    /// 这解决了树木等对象看起来半透明的问题
+    fn fix_alpha(bgra: &mut [u8]) {
+        for chunk in bgra.chunks_exact_mut(4) {
+            let alpha = chunk[3];
+            // 如果alpha不是0（透明），则设为255（完全不透明）
+            if alpha > 0 {
+                chunk[3] = 255;
+            }
         }
-
-        let max_rgb = chunk[0].max(chunk[1]).max(chunk[2]);
-        if max_rgb == 0 {
-            chunk.copy_from_slice(&[0, 0, 0, 0]);
-            continue;
-        }
-
-        let scale = max_rgb as u16;
-        chunk[0] = ((u16::from(chunk[0]) * 255 + scale / 2) / scale).min(255) as u8;
-        chunk[1] = ((u16::from(chunk[1]) * 255 + scale / 2) / scale).min(255) as u8;
-        chunk[2] = ((u16::from(chunk[2]) * 255 + scale / 2) / scale).min(255) as u8;
-        chunk[3] = max_rgb;
     }
-}
+
+    fn apply_auto_alpha(rgba: &mut [u8]) {
+        for chunk in rgba.chunks_exact_mut(4) {
+            let alpha = chunk[3];
+            if alpha == 0 {
+                chunk.copy_from_slice(&[0, 0, 0, 0]);
+                continue;
+            }
+
+            let max_rgb = chunk[0].max(chunk[1]).max(chunk[2]);
+            if max_rgb == 0 {
+                chunk.copy_from_slice(&[0, 0, 0, 0]);
+                continue;
+            }
+
+            let scale = max_rgb as u16;
+            chunk[0] = ((u16::from(chunk[0]) * 255 + scale / 2) / scale).min(255) as u8;
+            chunk[1] = ((u16::from(chunk[1]) * 255 + scale / 2) / scale).min(255) as u8;
+            chunk[2] = ((u16::from(chunk[2]) * 255 + scale / 2) / scale).min(255) as u8;
+            chunk[3] = max_rgb;
+        }
+    }
 
     /// 检查指定像素是否可见（非透明）
     ///

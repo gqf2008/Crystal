@@ -42,13 +42,16 @@ impl SimpleMapViewer {
 
         println!("✅ 地图尺寸: {} x {}", reader.width, reader.height);
 
-        // 预加载常用库。为了避免缺库导致渲染失败，只加载最关键的 0、1、2。
+        // 预加载常用库。加载更多库以避免缺失地砖
         let mut libs: Vec<Option<Arc<Mutex<MLibrary>>>> = vec![None; 400];
         let lib_configs = [
             (0, "Data/Map/WemadeMir2/Tiles"),
-            // SmTiles 太小，直接复用 Tiles 以便观察。
-            (1, "Data/Map/WemadeMir2/Tiles"),
+            (1, "Data/Map/WemadeMir2/SmTiles"),
             (2, "Data/Map/WemadeMir2/Objects"),
+            (3, "Data/Map/WemadeMir2/Objects2"),
+            (4, "Data/Map/WemadeMir2/Objects3"),
+            (5, "Data/Map/WemadeMir2/Objects4"),
+            (6, "Data/Map/WemadeMir2/Objects5"),
         ];
 
         for (lib_index, path) in lib_configs {
