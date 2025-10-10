@@ -61,7 +61,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. 创建 ggez Context
     let res = settings.resolution();
     // 暂时使用原始分辨率,先把基础功能修好
-    let scale_factor = 1.0;
     let window_width = res.width as f32;   // 1024
     let window_height = res.height as f32; // 768
     
@@ -911,33 +910,17 @@ impl CrystalGame {
         }
         
         for (lib_name, index) in textures_to_load {
-            let key = format!("{}_{}", lib_name.default_path(), index);
-            
-            // 检查是否已缓存
-            if self.ggez_manager.get_texture(&key).is_some() {
-                continue;
-            }
-            
-            // 从 MLibrary 加载
+            // 从 MLibrary 预加载纹理（MLibrary 内部会缓存）
             if let Some(lib_arc) = get_library(lib_name) {
                 let mut lib = lib_arc.lock().unwrap();
-                if let Ok((info, pixels)) = lib.load_rgba_data(index) {
-                    let width = info.width as u16;  // i16 -> u16
-                    let height = info.height as u16;  // i16 -> u16
-                    drop(lib);  // 释放锁
-                    if let Err(e) = self.ggez_manager.create_texture_from_rgba(
-                        ctx,
-                        width,
-                        height,
-                        pixels.as_slice(),
-                        key.clone(),
-                    ) {
-                        tracing::warn!("⚠️ 创建纹理失败 {}: {}", key, e);
-                    } else {
-                        tracing::debug!("✓ 纹理已加载: {}", key);
+                // 调用 get_or_create_texture 会自动创建并缓存纹理
+                match lib.get_or_create_texture(ctx, index) {
+                    Ok(_info) => {
+                        tracing::debug!("✓ 预加载纹理: {}_{}", lib_name.default_path(), index);
                     }
-                } else {
-                    tracing::warn!("⚠️ 无法从库 {} 获取图像 {}", lib_name.default_path(), index);
+                    Err(e) => {
+                        tracing::warn!("⚠️ 预加载纹理失败 {}_{}: {}", lib_name.default_path(), index, e);
+                    }
                 }
             } else {
                 tracing::warn!("⚠️ 库未加载: {:?}", lib_name);

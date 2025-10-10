@@ -440,7 +440,7 @@ impl MapControl {
     /// - ID3_023/025 → 村庄入口(index 21)
     fn draw_background(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult<()> {
         use crate::graphics::libraries::LibraryName;
-        use ggez::graphics::{Image, ImageFormat, DrawParam};
+        use ggez::graphics::DrawParam;
         
         static mut FIRST_CALL: bool = true;
         
@@ -479,29 +479,23 @@ impl MapControl {
             use crate::graphics::libraries::get_library;
             if let Some(bg_lib_arc) = get_library(LibraryName::Background) {
                 if let Ok(mut bg_lib) = bg_lib_arc.lock() {
-                    match bg_lib.load_rgba_data(idx) {
-                        Ok((info, rgba_data)) => {
-                            let texture = Image::from_pixels(
-                                ctx,
-                                &rgba_data,
-                                ImageFormat::Rgba8UnormSrgb,
-                                info.width as u32,
-                                info.height as u32,
-                            );
-                            
-                            // 🔧 CRITICAL FIX: wgpu 坐标系统 (0,0) 在左下角，C# DirectX (0,0) 在左上角
-                            // 背景图应该从屏幕顶部开始，所以 y = screen_height - image_height
-                            // C#: Draw(index, 0, 0) 表示从屏幕左上角开始
-                            // wgpu: dest([0, screen_height - img_height]) 才能从屏幕左上角开始
-                            let screen_height = 768.0; // 窗口高度
-                            let draw_y = screen_height - info.height as f32;
-                            
-                            canvas.draw(&texture, DrawParam::default().dest([0.0, draw_y]));
-                            
-                            unsafe {
-                                if FIRST_CALL {
-                                    println!("✅ 背景图已绘制: idx={}, 尺寸={}x{}, offset=({},{}), 屏幕位置=(0, {:.1})", 
-                                        idx, info.width, info.height, info.x, info.y, draw_y);
+                    match bg_lib.get_or_create_texture(ctx, idx) {
+                        Ok(info) => {
+                            if let Some(ref texture) = info.image {
+                                // 🔧 CRITICAL FIX: wgpu 坐标系统 (0,0) 在左下角，C# DirectX (0,0) 在左上角
+                                // 背景图应该从屏幕顶部开始，所以 y = screen_height - image_height
+                                // C#: Draw(index, 0, 0) 表示从屏幕左上角开始
+                                // wgpu: dest([0, screen_height - img_height]) 才能从屏幕左上角开始
+                                let screen_height = 768.0; // 窗口高度
+                                let draw_y = screen_height - info.height as f32;
+                                
+                                canvas.draw(texture, DrawParam::default().dest([0.0, draw_y]));
+                                
+                                unsafe {
+                                    if FIRST_CALL {
+                                        println!("✅ 背景图已绘制: idx={}, 尺寸={}x{}, offset=({},{}), 屏幕位置=(0, {:.1})", 
+                                            idx, info.width, info.height, info.x, info.y, draw_y);
+                                    }
                                 }
                             }
                         }
@@ -642,7 +636,7 @@ impl MapControl {
     fn check_tile_size(&self, lib_index: i32, image_index: usize) -> Option<bool> {
         if let Some(map_lib) = get_map_library(lib_index as i16) {
             if let Ok(mut lib) = map_lib.lock() {
-                if let Ok((info, _)) = lib.load_rgba_data(image_index) {
+                if let Ok(info) = lib.get_image_info(image_index) {
                     let w = info.width as i32;
                     let h = info.height as i32;
                     
@@ -696,12 +690,14 @@ impl MapControl {
             
             // ✅ 使用纹理缓存机制 (对应 C# MLibrary.CheckImage + CreateTexture)
             match lib.get_or_create_texture(ctx, image_index) {
-                Ok(texture) => {
-                    let draw_x = x + offset_x;
-                    let draw_y = y + offset_y;
-                    
-                    // 绘制缓存的纹理
-                    canvas.draw(texture, DrawParam::default().dest([draw_x, draw_y]));
+                Ok(info) => {
+                    if let Some(ref image) = info.image {
+                        let draw_x = x + offset_x;
+                        let draw_y = y + offset_y;
+                        
+                        // 绘制缓存的纹理
+                        canvas.draw(image, DrawParam::default().dest([draw_x, draw_y]));
+                    }
                 }
                 Err(e) => {
                     // C#的CheckImage在Width/Height==0时静默返回false
@@ -727,9 +723,11 @@ impl MapControl {
             
             // ✅ 使用纹理缓存机制
             match lib.get_or_create_texture(ctx, image_index) {
-                Ok(texture) => {
-                    // 🔧 不使用图像偏移,直接使用传入的坐标
-                    canvas.draw(texture, DrawParam::default().dest([x, y]));
+                Ok(info) => {
+                    if let Some(ref image) = info.image {
+                        // 🔧 不使用图像偏移,直接使用传入的坐标
+                        canvas.draw(image, DrawParam::default().dest([x, y]));
+                    }
                 }
                 Err(e) => {
                     if e.kind() != std::io::ErrorKind::InvalidData {

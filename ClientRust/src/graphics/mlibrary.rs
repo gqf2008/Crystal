@@ -5,12 +5,11 @@
 
 use crate::objects::frames::{Frame, FrameSet};
 use byteorder::LittleEndian;
-use byteorder::{ByteOrder, ReadBytesExt};
+use byteorder::ReadBytesExt;
 use flate2::read::GzDecoder;
-use ggez::graphics::{Image, ImageFormat};
-use ggez::Context;
+use ggez::graphics::ImageFormat;
+use ggez::graphics::{Color, DrawParam, Rect};
 use mir2_shared::MirAction;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -540,7 +539,6 @@ impl MLibrary {
                 ),
             ));
         }
-
         // 检查缓存
         if let Some(info) = self.cached_info.get(index) {
             return Ok(info.clone());
@@ -551,127 +549,6 @@ impl MLibrary {
         self.cached_info.insert(index, info.clone());
         Ok(info)
     }
-
-    // /// 加载图像数据为RGBA8像素数组
-    // pub fn load_image_data(&mut self, index: usize) -> io::Result<(ImageInfo, Vec<u8>)> {
-    //     let info = self.get_image_info(index)?;
-
-    //     // ✅ C# CheckImage 检查: if (Width == 0 || Height == 0) return false;
-    //     if info.width == 0 || info.height == 0 {
-    //         return Err(io::Error::new(
-    //             io::ErrorKind::InvalidData,
-    //             format!(
-    //                 "图像 {} 无效: width={}, height={}",
-    //                 index, info.width, info.height
-    //             ),
-    //         ));
-    //     }
-
-    //     // ✅ 检查 Length 是否有效
-    //     if info.length <= 0 {
-    //         return Err(io::Error::new(
-    //             io::ErrorKind::InvalidData,
-    //             format!("图像 {} 无效: length={}", index, info.length),
-    //         ));
-    //     }
-
-    //     let offset = self.indices[index].offset as u64;
-    //     let mut file = File::open(&self.path)?;
-
-    //     // 跳过图像信息头(17字节)
-    //     file.seek(SeekFrom::Start(offset + 17))?;
-
-    //     // Length 字段就是压缩数据的实际长度 (对应 C# 的 reader.ReadBytes(Length))
-    //     let compressed_size = info.length as usize;
-
-    //     // 读取压缩数据
-    //     let mut compressed = vec![0u8; compressed_size];
-    //     file.read_exact(&mut compressed)?;
-
-    //     // 解压(GZip格式)
-    //     let mut decompressor = GzDecoder::new(&compressed[..]);
-    //     let mut decompressed = Vec::new();
-    //     match decompressor.read_to_end(&mut decompressed) {
-    //         Ok(_) => {}
-    //         Err(e) => {
-    //             tracing::error!(
-    //                 "⚠️ 图像 {} 解压失败: width={}, height={}, length={}, offset={}, error={:?}",
-    //                 index,
-    //                 info.width,
-    //                 info.height,
-    //                 info.length,
-    //                 offset,
-    //                 e
-    //             );
-    //             return Err(e);
-    //         }
-    //     }
-
-    //     // 验证解压后的大小
-    //     let expected_size = (info.width as usize) * (info.height as usize) * 4;
-    //     if decompressed.len() != expected_size {
-    //         // 尝试修正数据大小
-    //         if decompressed.len() > expected_size {
-    //             // 数据过长,截断
-    //             // 降级到DEBUG,避免每帧重复警告
-    //             tracing::debug!(
-    //                 "⚠️ 图像 {} 数据过长 ({} > {}), 截断",
-    //                 index,
-    //                 decompressed.len(),
-    //                 expected_size
-    //             );
-    //             decompressed.truncate(expected_size);
-    //         } else {
-    //             // 数据过短,填充透明像素
-    //             tracing::debug!(
-    //                 "⚠️ 图像 {} 数据过短 ({} < {}), 填充",
-    //                 index,
-    //                 decompressed.len(),
-    //                 expected_size
-    //             );
-    //             decompressed.resize(expected_size, 0);
-    //         }
-    //     }
-
-    //     Ok((info, decompressed))
-    // }
-
-    // /// 加载图像数据为 RGBA 格式
-    // ///
-    // /// C# equivalent: MLibrary 内部解压逻辑
-    // ///
-    // /// 返回: (ImageInfo, RGBA字节数据)
-    // pub fn load_rgba_data(&mut self, index: usize) -> io::Result<(ImageInfo, Vec<u8>)> {
-    //     let (info, data) = self.load_image_data(index)?;
-
-    //     let width = info.width as usize;
-    //     let height = info.height as usize;
-
-    //     // MIR2使用BGRA格式,需要转换为RGBA
-    //     // 关键修复: 将黑色像素(0,0,0)转换为透明色(0,0,0,0)
-    //     let mut rgba_data = Vec::with_capacity(data.len());
-
-    //     for chunk in data.chunks_exact(4) {
-    //         let b = chunk[0];
-    //         let g = chunk[1];
-    //         let r = chunk[2];
-    //         let mut a = chunk[3];
-
-    //         // 🔧 传奇2关键特性: 黑色被视为透明色
-    //         if r == 0 && g == 0 && b == 0 {
-    //             a = 0;
-    //         }
-
-    //         rgba_data.push(r);
-    //         rgba_data.push(g);
-    //         rgba_data.push(b);
-    //         rgba_data.push(a);
-    //     }
-
-    //     Ok((info, rgba_data))
-    // }
-
-    // ===== 纹理缓存系统 (对应 C# MImage.CreateTexture + DXManager.TextureList) =====
 
     /// 获取或创建缓存的 ggez 纹理
     ///
@@ -689,16 +566,67 @@ impl MLibrary {
     /// - `index`: 图像索引
     ///
     /// # 返回
-    /// - `Ok(&Image)`: 缓存的纹理引用
+    /// - `Ok(&ImageInfo)`: 缓存的纹理引用（零拷贝）
     /// - `Err`: 加载失败
+    ///
+    /// # 性能优化
+    /// - ✅ 返回引用而非克隆，避免大块内存拷贝
+    /// - ✅ 自动缓存纹理，重复调用零开销
     pub fn get_or_create_texture(
         &mut self,
         ctx: &mut ggez::Context,
         index: usize,
-    ) -> io::Result<ImageInfo> {
-        // // 尝试从缓存读取（仅共享借用，避免与后续可变借用冲突）
-        // 读取图像信息（必要时从文件解析）
-        let mut info = self.get_image_info(index)?;
+    ) -> io::Result<&ImageInfo> {
+        // 检查索引范围
+        if index >= self.indices.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("图像索引 {} 超出范围 (max: {})", index, self.indices.len()),
+            ));
+        }
+
+        // 确保缓存数组足够大
+        while self.cached_info.len() <= index {
+            self.cached_info.push(ImageInfo {
+                width: 0,
+                height: 0,
+                x: 0,
+                y: 0,
+                shadow_x: 0,
+                shadow_y: 0,
+                shadow: 0,
+                length: 0,
+                has_mask: false,
+                mask_width: 0,
+                mask_height: 0,
+                mask_x: 0,
+                mask_y: 0,
+                mask_length: 0,
+                texture_valid: false,
+                image: None,
+                mask_image: None,
+                last_access_time: None,
+                rgba_data: None,
+            });
+        }
+
+        // 检查是否已有纹理
+        if self.cached_info[index].texture_valid {
+            // 更新访问时间
+            self.cached_info[index].last_access_time = Some(Instant::now());
+            return Ok(&self.cached_info[index]);
+        }
+
+        // 读取图像元数据（如果还没有）
+        if self.cached_info[index].width == 0 {
+            let offset = self.indices[index].offset as u64;
+            self.reader.seek(SeekFrom::Start(offset))?;
+            let info = ImageInfo::from_reader(&mut self.reader)?;
+            self.cached_info[index] = info;
+        }
+
+        // 验证图像有效性
+        let info = &self.cached_info[index];
         if info.width == 0 || info.height == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -708,40 +636,15 @@ impl MLibrary {
                 ),
             ));
         }
-        if info.image.is_some() {
-            // 已有纹理，更新访问时间并返回
-            info.last_access_time = Some(Instant::now());
-            self.cached_info[index] = info.clone();
-            return Ok(info);
-        }
-        // 将文件指针定位到压缩数据起始位置（跳过17字节的头）
+
+        // 创建纹理
         let offset = self.indices[index].offset as u64;
         self.reader.seek(SeekFrom::Start(offset + 17))?;
-        // 创建纹理（内部会更新 last_access_time）
-        info.create_texture(ctx, &mut self.reader)?;
-        // 写回缓存
-        self.cached_info.insert(index, info.clone());
-        Ok(info)
+        self.cached_info[index].create_texture(ctx, &mut self.reader)?;
+
+        // 返回引用
+        Ok(&self.cached_info[index])
     }
-
-    // /// 垂直翻转纹理数据
-    // ///
-    // /// 用于在 DirectX (Y轴向下) 和 OpenGL (Y轴向上) 之间转换
-    // #[allow(dead_code)]
-    // fn flip_texture_vertically(data: &mut [u8], width: usize, height: usize) {
-    //     let row_size = width * 4; // RGBA, 4 bytes per pixel
-    //     let mut row_buffer = vec![0u8; row_size];
-
-    //     for y in 0..(height / 2) {
-    //         let top_offset = y * row_size;
-    //         let bottom_offset = (height - 1 - y) * row_size;
-
-    //         // 交换两行
-    //         row_buffer.copy_from_slice(&data[top_offset..top_offset + row_size]);
-    //         data.copy_within(bottom_offset..bottom_offset + row_size, top_offset);
-    //         data[bottom_offset..bottom_offset + row_size].copy_from_slice(&row_buffer);
-    //     }
-    // }
 
     /// 清理长时间未使用的纹理缓存
     ///
@@ -909,7 +812,7 @@ impl MLibrary {
             return Ok((0, 0)); // 对应 C# 的 Size.Empty
         }
         // 获取或读取图像信息
-        let  info = self.get_or_create_texture(ctx,index)?;
+        let info = self.get_or_create_texture(ctx, index)?;
 
         // 检查图像是否有效
         if info.width == 0 || info.height == 0 {
@@ -923,42 +826,673 @@ impl MLibrary {
 
     // ===== Ggez 渲染函数 =====
 
-    /// 使用 ggez 渲染图像到 Canvas
+    /// 基础绘制方法 - Draw(index, x, y)
     ///
-    /// # 参数
-    /// - `ctx`: ggez Context
-    /// - `canvas`: 目标 Canvas
-    /// - `index`: 图像索引
-    /// - `x`, `y`: 屏幕坐标
-    /// - `blend`: 是否使用混合模式
-    ///
-    /// # 返回
-    /// - `Ok(())`: 成功
-    /// - `Err`: 图像不存在或渲染失败
-    pub fn draw_to_canvas(
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 701-716
+    /// public void Draw(int index, int x, int y) {
+    ///     if (x >= Settings.ScreenWidth || y >= Settings.ScreenHeight) return;
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     if (x + mi.Width < 0 || y + mi.Height < 0) return;
+    ///     DXManager.Draw(mi.Image, new Rectangle(0, 0, mi.Width, mi.Height),
+    ///                    new Vector3((float)x, (float)y, 0.0F), Color.White);
+    ///     mi.CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    pub fn draw(
         &mut self,
         ctx: &mut ggez::Context,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
         y: f32,
-        blend: bool,
     ) -> io::Result<()> {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        // 屏幕裁剪检查
+        if x >= screen_width || y >= screen_height {
+            return Ok(());
+        }
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // 边界检查
+        if x + (info.width as f32) < 0.0 || y + (info.height as f32) < 0.0 {
+            return Ok(());
+        }
+
+        // 获取纹理
+        if let Some(ref image) = info.image {
+            canvas.draw(image, DrawParam::default().dest([x, y]).color(Color::WHITE));
+        }
+
         Ok(())
     }
 
-    /// 使用 ggez 渲染图像到 Canvas (带偏移)
+    /// 带颜色和偏移的绘制 - Draw(index, point, colour, offSet)
     ///
-    /// 用于处理 ImageInfo 中的 offset_x/offset_y
-    pub fn draw_to_canvas_with_offset(
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 717-730
+    /// public void Draw(int index, Point point, Color colour, bool offSet = false) {
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     if (offSet) point.Offset(mi.X, mi.Y);
+    ///     if (point.X >= Settings.ScreenWidth || ...) return;
+    ///     DXManager.Draw(mi.Image, new Rectangle(0, 0, mi.Width, mi.Height),
+    ///                    new Vector3((float)point.X, (float)point.Y, 0.0F), colour);
+    ///     mi.CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    pub fn draw_with_color(
         &mut self,
         ctx: &mut ggez::Context,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
         y: f32,
-        blend: bool,
+        color: ggez::graphics::Color,
+        offset: bool,
     ) -> io::Result<()> {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // 应用偏移
+        let (draw_x, draw_y) = if offset {
+            (x + info.x as f32, y + info.y as f32)
+        } else {
+            (x, y)
+        };
+
+        // 屏幕裁剪检查
+        if draw_x >= screen_width
+            || draw_y >= screen_height
+            || draw_x + (info.width as f32) < 0.0
+            || draw_y + (info.height as f32) < 0.0
+        {
+            return Ok(());
+        }
+
+        // 绘制
+        if let Some(ref image) = info.image {
+            canvas.draw(
+                image,
+                DrawParam::default().dest([draw_x, draw_y]).color(color),
+            );
+        }
+
         Ok(())
+    }
+
+    /// 带透明度的绘制 - Draw(index, point, colour, offSet, opacity)
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 735-750
+    /// public void Draw(int index, Point point, Color colour, bool offSet, float opacity) {
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     if (offSet) point.Offset(mi.X, mi.Y);
+    ///     if (point.X >= Settings.ScreenWidth || ...) return;
+    ///     DXManager.DrawOpaque(mi.Image, ..., colour, opacity);
+    ///     mi.CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    pub fn draw_with_opacity(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        x: f32,
+        y: f32,
+        color: ggez::graphics::Color,
+        offset: bool,
+        opacity: f32,
+    ) -> io::Result<()> {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // 应用偏移
+        let (draw_x, draw_y) = if offset {
+            (x + info.x as f32, y + info.y as f32)
+        } else {
+            (x, y)
+        };
+
+        // 屏幕裁剪检查
+        if draw_x >= screen_width
+            || draw_y >= screen_height
+            || draw_x + (info.width as f32) < 0.0
+            || draw_y + (info.height as f32) < 0.0
+        {
+            return Ok(());
+        }
+
+        // 应用透明度到颜色
+        let mut color_with_opacity = color;
+        color_with_opacity.a *= opacity;
+
+        // 绘制
+        if let Some(ref image) = info.image {
+            canvas.draw(
+                image,
+                DrawParam::default()
+                    .dest([draw_x, draw_y])
+                    .color(color_with_opacity),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 混合模式绘制 - DrawBlend(index, point, colour, offSet, rate)
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 752-768
+    /// public void DrawBlend(int index, Point point, Color colour, bool offSet = false, float rate = 1) {
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     if (offSet) point.Offset(mi.X, mi.Y);
+    ///     if (point.X >= Settings.ScreenWidth || ...) return;
+    ///     bool oldBlend = DXManager.Blending;
+    ///     DXManager.SetBlend(true, rate);
+    ///     DXManager.Draw(mi.Image, ..., colour);
+    ///     DXManager.SetBlend(oldBlend);
+    ///     mi.CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    pub fn draw_blend(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        x: f32,
+        y: f32,
+        color: ggez::graphics::Color,
+        offset: bool,
+        rate: f32,
+    ) -> io::Result<()> {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // 应用偏移
+        let (draw_x, draw_y) = if offset {
+            (x + info.x as f32, y + info.y as f32)
+        } else {
+            (x, y)
+        };
+
+        // 屏幕裁剪检查
+        if draw_x >= screen_width
+            || draw_y >= screen_height
+            || draw_x + (info.width as f32) < 0.0
+            || draw_y + (info.height as f32) < 0.0
+        {
+            return Ok(());
+        }
+
+        // 应用混合率到颜色
+        let mut blend_color = color;
+        blend_color.a *= rate;
+
+        // 绘制 (ggez 默认使用 alpha blending)
+        if let Some(ref image) = info.image {
+            canvas.draw(
+                image,
+                DrawParam::default()
+                    .dest([draw_x, draw_y])
+                    .color(blend_color),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 部分区域绘制 - Draw(index, section, point, colour, offSet)
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 769-789
+    /// public void Draw(int index, Rectangle section, Point point, Color colour, bool offSet) {
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     if (offSet) point.Offset(mi.X, mi.Y);
+    ///     if (point.X >= Settings.ScreenWidth || ...) return;
+    ///     if (section.Right > mi.Width) section.Width -= section.Right - mi.Width;
+    ///     if (section.Bottom > mi.Height) section.Height -= section.Bottom - mi.Height;
+    ///     DXManager.Draw(mi.Image, section, new Vector3(...), colour);
+    ///     mi.CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    pub fn draw_section(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        section_x: f32,
+        section_y: f32,
+        section_width: f32,
+        section_height: f32,
+        x: f32,
+        y: f32,
+        color: ggez::graphics::Color,
+        offset: bool,
+    ) -> io::Result<()> {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // 应用偏移
+        let (draw_x, draw_y) = if offset {
+            (x + info.x as f32, y + info.y as f32)
+        } else {
+            (x, y)
+        };
+
+        // 屏幕裁剪检查
+        if draw_x >= screen_width
+            || draw_y >= screen_height
+            || draw_x + (info.width as f32) < 0.0
+            || draw_y + (info.height as f32) < 0.0
+        {
+            return Ok(());
+        }
+
+        // 修正区域大小
+        let mut adj_width = section_width;
+        let mut adj_height = section_height;
+
+        if section_x + section_width > info.width as f32 {
+            adj_width = info.width as f32 - section_x;
+        }
+        if section_y + section_height > info.height as f32 {
+            adj_height = info.height as f32 - section_y;
+        }
+
+        // 绘制
+        if let Some(ref image) = info.image {
+            canvas.draw(
+                image,
+                DrawParam::default()
+                    .src(Rect::new(
+                        section_x / info.width as f32,
+                        section_y / info.height as f32,
+                        adj_width / info.width as f32,
+                        adj_height / info.height as f32,
+                    ))
+                    .dest([draw_x, draw_y])
+                    .color(color),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 部分区域带透明度绘制 - Draw(index, section, point, colour, opacity)
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 790-807
+    /// public void Draw(int index, Rectangle section, Point point, Color colour, float opacity) {
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     if (point.X >= Settings.ScreenWidth || ...) return;
+    ///     if (section.Right > mi.Width) section.Width -= section.Right - mi.Width;
+    ///     if (section.Bottom > mi.Height) section.Height -= section.Bottom - mi.Height;
+    ///     DXManager.DrawOpaque(mi.Image, section, ..., colour, opacity);
+    ///     mi.CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    pub fn draw_section_with_opacity(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        section_x: f32,
+        section_y: f32,
+        section_width: f32,
+        section_height: f32,
+        x: f32,
+        y: f32,
+        color: ggez::graphics::Color,
+        opacity: f32,
+    ) -> io::Result<()> {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // 屏幕裁剪检查
+        if x >= screen_width
+            || y >= screen_height
+            || x + (info.width as f32) < 0.0
+            || y + (info.height as f32) < 0.0
+        {
+            return Ok(());
+        }
+
+        // 修正区域大小
+        let mut adj_width = section_width;
+        let mut adj_height = section_height;
+
+        if section_x + section_width > info.width as f32 {
+            adj_width = info.width as f32 - section_x;
+        }
+        if section_y + section_height > info.height as f32 {
+            adj_height = info.height as f32 - section_y;
+        }
+
+        // 应用透明度
+        let mut color_with_opacity = color;
+        color_with_opacity.a *= opacity;
+
+        // 绘制
+        if let Some(ref image) = info.image {
+            canvas.draw(
+                image,
+                DrawParam::default()
+                    .src(Rect::new(
+                        section_x / info.width as f32,
+                        section_y / info.height as f32,
+                        adj_width / info.width as f32,
+                        adj_height / info.height as f32,
+                    ))
+                    .dest([x, y])
+                    .color(color_with_opacity),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 缩放绘制 - Draw(index, point, size, colour)
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 808-827
+    /// public void Draw(int index, Point point, Size size, Color colour) {
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     if (point.X >= Settings.ScreenWidth || ...) return;
+    ///     float scaleX = (float)size.Width / mi.Width;
+    ///     float scaleY = (float)size.Height / mi.Height;
+    ///     Matrix matrix = Matrix.Scaling(scaleX, scaleY, 0);
+    ///     DXManager.Sprite.Transform = matrix;
+    ///     DXManager.Draw(mi.Image, ..., Color.White);
+    ///     DXManager.Sprite.Transform = Matrix.Identity;
+    ///     mi.CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    pub fn draw_scaled(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: ggez::graphics::Color,
+    ) -> io::Result<()> {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // 屏幕裁剪检查
+        if x >= screen_width || y >= screen_height || x + width < 0.0 || y + height < 0.0 {
+            return Ok(());
+        }
+
+        // 计算缩放比例
+        let scale_x = width / info.width as f32;
+        let scale_y = height / info.height as f32;
+
+        // 绘制
+        if let Some(ref image) = info.image {
+            canvas.draw(
+                image,
+                DrawParam::default()
+                    .dest([x, y])
+                    .scale([scale_x, scale_y])
+                    .color(color),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 着色绘制（双层） - DrawTinted(index, point, colour, Tint, offSet)
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 829-845
+    /// public void DrawTinted(int index, Point point, Color colour, Color Tint, bool offSet = false) {
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     if (offSet) point.Offset(mi.X, mi.Y);
+    ///     if (point.X >= Settings.ScreenWidth || ...) return;
+    ///     DXManager.Draw(mi.Image, ..., colour);
+    ///     if (mi.HasMask) {
+    ///         DXManager.Draw(mi.MaskImage, ..., Tint);
+    ///     }
+    ///     mi.CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    pub fn draw_tinted(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        x: f32,
+        y: f32,
+        color: ggez::graphics::Color,
+        tint: ggez::graphics::Color,
+        offset: bool,
+    ) -> io::Result<()> {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // 应用偏移
+        let (draw_x, draw_y) = if offset {
+            (x + info.x as f32, y + info.y as f32)
+        } else {
+            (x, y)
+        };
+
+        // 屏幕裁剪检查
+        if draw_x >= screen_width
+            || draw_y >= screen_height
+            || draw_x + (info.width as f32) < 0.0
+            || draw_y + (info.height as f32) < 0.0
+        {
+            return Ok(());
+        }
+
+        // 绘制主图像
+        if let Some(ref image) = info.image {
+            canvas.draw(
+                image,
+                DrawParam::default().dest([draw_x, draw_y]).color(color),
+            );
+        }
+
+        // 如果有遮罩层，绘制着色层
+        if info.has_mask {
+            if let Some(ref mask_image) = info.mask_image {
+                canvas.draw(
+                    mask_image,
+                    DrawParam::default().dest([draw_x, draw_y]).color(tint),
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 向上绘制（Y坐标减去高度） - DrawUp(index, x, y)
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 847-862
+    /// public void DrawUp(int index, int x, int y) {
+    ///     if (x >= Settings.ScreenWidth) return;
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     y -= mi.Height;
+    ///     if (y >= Settings.ScreenHeight) return;
+    ///     if (x + mi.Width < 0 || y + mi.Height < 0) return;
+    ///     DXManager.Draw(mi.Image, ..., Color.White);
+    ///     mi.CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    pub fn draw_up(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        x: f32,
+        y: f32,
+    ) -> io::Result<()> {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+
+        // 屏幕裁剪检查
+        if x >= screen_width {
+            return Ok(());
+        }
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // Y坐标减去高度
+        let draw_y = y - info.height as f32;
+
+        // 边界检查
+        if draw_y >= screen_height
+            || x + (info.width as f32) < 0.0
+            || draw_y + (info.height as f32) < 0.0
+        {
+            return Ok(());
+        }
+
+        // 绘制
+        if let Some(ref image) = info.image {
+            canvas.draw(
+                image,
+                DrawParam::default().dest([x, draw_y]).color(Color::WHITE),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 向上混合绘制 - DrawUpBlend(index, point)
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 863-880
+    /// public void DrawUpBlend(int index, Point point) {
+    ///     if (!CheckImage(index)) return;
+    ///     MImage mi = _images[index];
+    ///     point.Y -= mi.Height;
+    ///     if (point.X >= Settings.ScreenWidth || ...) return;
+    ///     bool oldBlend = DXManager.Blending;
+    ///     DXManager.SetBlend(true, 1);
+    ///     DXManager.Draw(mi.Image, ..., Color.White);
+    ///     DXManager.SetBlend(oldBlend);
+    ///     mi.CleanTime = CMain.Time + Settings.CleanDelay;
+    /// }
+    /// ```
+    pub fn draw_up_blend(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        x: f32,
+        y: f32,
+    ) -> io::Result<()> {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // Y坐标减去高度
+        let draw_y = y - info.height as f32;
+
+        // 屏幕裁剪检查
+        if x >= screen_width
+            || draw_y >= screen_height
+            || x + (info.width as f32) < 0.0
+            || draw_y + (info.height as f32) < 0.0
+        {
+            return Ok(());
+        }
+
+        // 绘制 (ggez 默认使用 alpha blending)
+        if let Some(ref image) = info.image {
+            canvas.draw(
+                image,
+                DrawParam::default().dest([x, draw_y]).color(Color::WHITE),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// 像素可见性检测（带精度控制） - VisiblePixel(index, point, accurate)
+    ///
+    /// 对应 C# 实现:
+    /// ```csharp
+    /// // MLibrary.cs line 882-897
+    /// public bool VisiblePixel(int index, Point point, bool accuate) {
+    ///     if (!CheckImage(index)) return false;
+    ///     if (accuate)
+    ///         return _images[index].VisiblePixel(point);
+    ///     int accuracy = 2;
+    ///     for (int x = -accuracy; x <= accuracy; x++)
+    ///         for (int y = -accuracy; y <= accuracy; y++)
+    ///             if (_images[index].VisiblePixel(new Point(point.X + x, point.Y + y)))
+    ///                 return true;
+    ///     return false;
+    /// }
+    /// ```
+    pub fn visible_pixel(
+        &mut self,
+        ctx: &mut ggez::Context,
+        index: usize,
+        x: i32,
+        y: i32,
+        accurate: bool,
+    ) -> io::Result<bool> {
+        // 获取或创建纹理（确保 rgba_data 已加载）
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        if accurate {
+            // 精确模式：直接检测指定像素
+            Ok(info.visible_pixel(x, y))
+        } else {
+            // 模糊模式：检测周围 5x5 区域
+            let accuracy = 2;
+            for dx in -accuracy..=accuracy {
+                for dy in -accuracy..=accuracy {
+                    if info.visible_pixel(x + dx, y + dy) {
+                        return Ok(true);
+                    }
+                }
+            }
+            Ok(false)
+        }
     }
 }

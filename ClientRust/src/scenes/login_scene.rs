@@ -653,7 +653,7 @@ impl LoginScene {
                 let box_y = (768.0 - box_height) / 2.0;
                 
                 // 绘制消息框背景图片 (对应 C# DrawImage = true)
-                let _ = lib.draw_to_canvas(ctx, canvas, msg_box_index, box_x, box_y, false);
+                let _ = lib.draw_with_color(ctx, canvas, msg_box_index, box_x, box_y, ggez::graphics::Color::WHITE, false);
                 
                 // 3. 绘制消息内容 (对应 C# Label: Location = new Point(35, 35), Size = new Size(390, 110))
                 let text_x = box_x + 35.0;
@@ -678,7 +678,7 @@ impl LoginScene {
                         let button_index = if msg_box.ok_button_hovered { 201 } else { 200 };
                         let button_x = box_x + 360.0;
                         let button_y = box_y + 157.0;
-                        let _ = title_lib.draw_to_canvas(ctx, canvas, button_index, button_x, button_y, false);
+                        let _ = title_lib.draw_with_color(ctx, canvas, button_index, button_x, button_y, ggez::graphics::Color::WHITE, false);
                     }
                 }
             }
@@ -717,7 +717,7 @@ impl LoginScene {
                 let box_y = (768.0 - box_height) / 2.0;
                 
                 // 绘制背景
-                let _ = lib.draw_to_canvas(ctx, canvas, 63, box_x, box_y, false);
+                let _ = lib.draw_with_color(ctx, canvas, 63, box_x, box_y, ggez::graphics::Color::WHITE, false);
                 
                 // 3. 绘制输入框标签和内容
                 // C# 原版位置: AccountIDTextBox: Location = new Point(226, 103), Size = new Size(136, 18)
@@ -862,11 +862,11 @@ impl LoginScene {
                     if let Ok(mut title_lib) = title_arc.try_lock() {
                         // OK按钮 (C# Location: (135, 425))
                         let ok_index = if dialog.ok_button_hovered { 201 } else { 200 };
-                        let _ = title_lib.draw_to_canvas(ctx, canvas, ok_index, box_x + 135.0, box_y + 425.0, false);
+                        let _ = title_lib.draw_with_color(ctx, canvas, ok_index, box_x + 135.0, box_y + 425.0, ggez::graphics::Color::WHITE, false);
                         
                         // Cancel按钮 (C# Location: (409, 425))
                         let cancel_index = if dialog.cancel_button_hovered { 204 } else { 203 };
-                        let _ = title_lib.draw_to_canvas(ctx, canvas, cancel_index, box_x + 409.0, box_y + 425.0, false);
+                        let _ = title_lib.draw_with_color(ctx, canvas, cancel_index, box_x + 409.0, box_y + 425.0, ggez::graphics::Color::WHITE, false);
                     }
                 }
                 
@@ -914,7 +914,7 @@ impl LoginScene {
                 let box_y = (768.0 - box_height) / 2.0;
                 
                 // 绘制背景
-                let _ = lib.draw_to_canvas(ctx, canvas, 50, box_x, box_y, false);
+                let _ = lib.draw_with_color(ctx, canvas, 50, box_x, box_y, ggez::graphics::Color::WHITE, false);
                 
                 // 3. 绘制输入框和标签
                 // C# 坐标:
@@ -1026,12 +1026,12 @@ impl LoginScene {
                         // OK按钮 (C# Location: (80, 236))
                         // C# 使用: Index 107 (normal), 108 (hover), 109 (pressed)
                         let ok_index = if dialog.ok_button_hovered { 108 } else { 107 };
-                        let _ = title_lib.draw_to_canvas(ctx, canvas, ok_index, box_x + 80.0, box_y + 236.0, false);
+                        let _ = title_lib.draw_with_color(ctx, canvas, ok_index, box_x + 80.0, box_y + 236.0, ggez::graphics::Color::WHITE, false);
                         
                         // Cancel按钮 (C# Location: (222, 236))
                         // C# 使用: Index 110 (normal), 111 (hover), 112 (pressed)
                         let cancel_index = if dialog.cancel_button_hovered { 111 } else { 110 };
-                        let _ = title_lib.draw_to_canvas(ctx, canvas, cancel_index, box_x + 222.0, box_y + 236.0, false);
+                        let _ = title_lib.draw_with_color(ctx, canvas, cancel_index, box_x + 222.0, box_y + 236.0, ggez::graphics::Color::WHITE, false);
                     }
                 }
                 
@@ -1127,7 +1127,7 @@ impl Scene for LoginScene {
             if let Ok(mut lib) = lib_arc.try_lock() {
                 // 使用动画帧索引 (0-18)
                 let frame_index = self.background_frame.min(18);
-                if let Err(e) = lib.draw_to_canvas(ctx, canvas, frame_index, 0.0, 0.0, false) {
+                if let Err(e) = lib.draw_with_color(ctx, canvas, frame_index, 0.0, 0.0, ggez::graphics::Color::WHITE, false) {
                     tracing::error!("❌ 绘制背景失败 (帧{}): {}", frame_index, e);
                 }
             } else {
@@ -1147,7 +1147,7 @@ impl Scene for LoginScene {
                 // 登录对话框 (328x220)
                 let dialog_x = center_x - 164.0; // 328/2 = 164
                 let dialog_y = center_y - 110.0; // 220/2 = 110
-                let _ = lib.draw_to_canvas(ctx, canvas, 1084, dialog_x, dialog_y, false);
+                let _ = lib.draw_with_color(ctx, canvas, 1084, dialog_x, dialog_y, ggez::graphics::Color::WHITE, false);
             }
         }
         
@@ -1162,35 +1162,35 @@ impl Scene for LoginScene {
                 // 标题 "登录" (索引 30)
                 // C# 原版位置: (Size.Width - TitleLabel.Size.Width)/2, 12
                 // 假设标题宽度约 100px, 对话框宽 328
-                let _ = lib.draw_to_canvas(ctx, canvas, 30, dialog_x + 114.0, dialog_y + 12.0, false);
+                let _ = lib.draw_with_color(ctx, canvas, 30, dialog_x + 114.0, dialog_y + 12.0, ggez::graphics::Color::WHITE, false);
                 
                 // "账号ID" 标签 (索引 31)
                 // C# 位置: (52, 83)
-                let _ = lib.draw_to_canvas(ctx, canvas, 31, dialog_x + 52.0, dialog_y + 83.0, false);
+                let _ = lib.draw_with_color(ctx, canvas, 31, dialog_x + 52.0, dialog_y + 83.0, ggez::graphics::Color::WHITE, false);
                 
                 // "密码" 标签 (索引 32)
                 // C# 位置: (43, 105)
-                let _ = lib.draw_to_canvas(ctx, canvas, 32, dialog_x + 43.0, dialog_y + 105.0, false);
+                let _ = lib.draw_with_color(ctx, canvas, 32, dialog_x + 43.0, dialog_y + 105.0, ggez::graphics::Color::WHITE, false);
                 
                 // OK/登录按钮 (索引 320/321/322 = normal/hover/pressed)
                 // C# 位置: (227, 81), 大小: 42x42
                 let ok_index = if self.ok_button_hovered { 321 } else { 320 };
-                let _ = lib.draw_to_canvas(ctx, canvas, ok_index, dialog_x + 227.0, dialog_y + 81.0, false);
+                let _ = lib.draw_with_color(ctx, canvas, ok_index, dialog_x + 227.0, dialog_y + 81.0, ggez::graphics::Color::WHITE, false);
                 
                 // "新建账号" 按钮 (索引 323/324/325)
                 // C# 位置: (60, 163)
                 let account_index = if self.account_button_hovered { 324 } else { 323 };
-                let _ = lib.draw_to_canvas(ctx, canvas, account_index, dialog_x + 60.0, dialog_y + 163.0, false);
+                let _ = lib.draw_with_color(ctx, canvas, account_index, dialog_x + 60.0, dialog_y + 163.0, ggez::graphics::Color::WHITE, false);
                 
                 // "修改密码" 按钮 (索引 326/327/328)
                 // C# 位置: (166, 163)
                 let pass_index = if self.pass_button_hovered { 327 } else { 326 };
-                let _ = lib.draw_to_canvas(ctx, canvas, pass_index, dialog_x + 166.0, dialog_y + 163.0, false);
+                let _ = lib.draw_with_color(ctx, canvas, pass_index, dialog_x + 166.0, dialog_y + 163.0, ggez::graphics::Color::WHITE, false);
                 
                 // "关闭" 按钮 (索引 329/330/331)
                 // C# 位置: (166, 189)
                 let close_index = if self.close_button_hovered { 330 } else { 329 };
-                let _ = lib.draw_to_canvas(ctx, canvas, close_index, dialog_x + 166.0, dialog_y + 189.0, false);
+                let _ = lib.draw_with_color(ctx, canvas, close_index, dialog_x + 166.0, dialog_y + 189.0, ggez::graphics::Color::WHITE, false);
             }
         }
         
