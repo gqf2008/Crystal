@@ -129,9 +129,11 @@ impl SimpleMapViewer {
                 let screen_x = ((map_x - self.offset_x) * TILE_WIDTH + info.x as i32) as f32;
                 let screen_y = ((map_y - self.offset_y) * TILE_HEIGHT + info.y as i32) as f32;
 
-                if let Ok(texture) = lib.get_or_create_texture(ctx, image_index) {
-                    canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
-                    draw_count += 1;
+                if let Ok(image_info) = lib.get_or_create_texture(ctx, image_index) {
+                    if let Some(ref texture) = image_info.image {
+                        canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
+                        draw_count += 1;
+                    }
                 }
             }
         }
@@ -180,9 +182,11 @@ impl SimpleMapViewer {
                 let screen_x = ((vx - vy) * (TILE_WIDTH / 2) as i32 + info.x as i32) as f32;
                 let screen_y = ((vx + vy) * (TILE_HEIGHT / 2) as i32 + info.y as i32) as f32;
 
-                if let Ok(texture) = lib.get_or_create_texture(ctx, image_index) {
-                    canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
-                    draw_count += 1;
+                if let Ok(image_info) = lib.get_or_create_texture(ctx, image_index) {
+                    if let Some(ref texture) = image_info.image {
+                        canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
+                        draw_count += 1;
+                    }
                 }
             }
         }
@@ -232,9 +236,11 @@ impl SimpleMapViewer {
                 let screen_x = ((map_x - map_y) * (TILE_WIDTH / 2) as i32 + info.x as i32 - self.offset_x) as f32;
                 let screen_y = ((map_x + map_y) * (TILE_HEIGHT / 2) as i32 + info.y as i32 - self.offset_y) as f32;
                 
-                if let Ok(texture) = lib.get_or_create_texture(ctx, image_index) {
-                    canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
-                    draw_count += 1;
+                if let Ok(image_info) = lib.get_or_create_texture(ctx, image_index) {
+                    if let Some(ref texture) = image_info.image {
+                        canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
+                        draw_count += 1;
+                    }
                 }
             }
         }

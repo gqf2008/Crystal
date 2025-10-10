@@ -591,36 +591,399 @@ impl MapReader {
     // Map Type 4-7, 100 的存根实现
     // ========================================================================
     
+    // ========================================================================
+    // Map Type 4 - Wemade AntiHack 迷宫地图 (12 bytes per cell)
+    // C# Reference: Client/MirObjects/MapCode.cs lines 409-445
+    // ========================================================================
     fn load_map_type_4(&mut self) -> io::Result<()> {
-        // TODO: 实现 Wemade AntiHack 格式
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Map Type 4 not yet implemented",
-        ))
+        tracing::info!("🗺️  加载地图格式: Type 4 (Wemade AntiHack, 12 bytes/cell)");
+        
+        let bytes = &self.bytes;
+        let mut offset = 31;
+        
+        // XOR 加密的尺寸
+        let w = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+        offset += 2;
+        let xor = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+        offset += 2;
+        let h = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+        
+        // 解密尺寸
+        self.width = (w ^ xor) as i32;
+        self.height = (h ^ xor) as i32;
+        offset = 64; // 头部 64 字节
+        
+        // 验证尺寸
+        if self.width <= 0 || self.height <= 0 || self.width > 10000 || self.height > 10000 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Invalid map dimensions: {}x{}", self.width, self.height),
+            ));
+        }
+        
+        tracing::info!("📐 地图尺寸: {}x{} (XOR key: 0x{:04X})", self.width, self.height, xor);
+        self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
+        
+        for x in 0..self.width as usize {
+            for y in 0..self.height as usize {
+                let cell = &mut self.map_cells[x][y];
+                
+                cell.back_index = 0;
+                cell.middle_index = 1;
+                
+                // BackImage: XOR 加密
+                let back_raw = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+                cell.back_image = (back_raw ^ xor) as i32;
+                offset += 2;
+                
+                // MiddleImage: XOR 加密
+                let middle_raw = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+                cell.middle_image = (middle_raw ^ xor) as i32;
+                offset += 2;
+                
+                // FrontImage: XOR 加密
+                let front_raw = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+                cell.front_image = (front_raw ^ xor) as i32;
+                offset += 2;
+                
+                // Door
+                cell.door_index = bytes[offset] & 0x7F;
+                offset += 1;
+                cell.door_offset = bytes[offset];
+                offset += 1;
+                
+                // Animation
+                cell.front_animation_frame = bytes[offset];
+                offset += 1;
+                cell.front_animation_tick = bytes[offset];
+                offset += 1;
+                
+                // FrontIndex
+                cell.front_index = (bytes[offset] as i16) + 2;
+                offset += 1;
+                
+                // Light
+                cell.light = bytes[offset];
+                offset += 1;
+                
+                // C# 逻辑: BackImage 高位标记处理
+                if (cell.back_image & 0x8000) != 0 {
+                    cell.back_image = (cell.back_image & 0x7FFF) | 0x20000000;
+                }
+                
+                // 钓鱼点检测
+                if cell.light >= 100 && cell.light <= 119 {
+                    cell.fishing_cell = true;
+                }
+            }
+        }
+        
+        Ok(())
     }
     
+    // ========================================================================
+    // Map Type 5 - Wemade Mir3 格式 (木/沙/雪/森林风格)
+    // C# Reference: Client/MirObjects/MapCode.cs lines 447-525
+    // ========================================================================
     fn load_map_type_5(&mut self) -> io::Result<()> {
-        // TODO: 实现 Wemade Mir3 格式
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Map Type 5 not yet implemented",
-        ))
+        tracing::info!("🗺️  加载地图格式: Type 5 (Wemade Mir3)");
+        
+        let bytes = &self.bytes;
+        let mut offset = 20;
+        
+        // 读取属性和尺寸
+        let _attribute = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+        offset += 2;
+        self.width = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+        offset += 2;
+        self.height = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+        // offset += 2; // EventFile 和 FogColor 暂时忽略
+        
+        tracing::info!("📐 地图尺寸: {}x{}", self.width, self.height);
+        
+        offset = 28;
+        
+        // 初始化所有格子
+        self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
+        
+        // 读取所有 BackTiles (2x2 格子共享，压缩存储)
+        for x in 0..(self.width / 2) as usize {
+            for y in 0..(self.height / 2) as usize {
+                // 每 3 字节存储 4 个格子的 BackTile 信息
+                let back_index = if bytes[offset] != 255 {
+                    (bytes[offset] as i16) + 200
+                } else {
+                    -1
+                };
+                
+                let back_image = (u16::from_le_bytes([bytes[offset + 1], bytes[offset + 2]]) as i32) + 1;
+                
+                // 分配给 4 个格子 (2x2)
+                for i in 0..4 {
+                    let cell_x = (x * 2) + (i % 2);
+                    let cell_y = (y * 2) + (i / 2);
+                    if cell_x < self.width as usize && cell_y < self.height as usize {
+                        self.map_cells[cell_x][cell_y].back_index = back_index;
+                        self.map_cells[cell_x][cell_y].back_image = back_image;
+                    }
+                }
+                
+                offset += 3;
+            }
+        }
+        
+        // 读取剩余数据
+        offset = 28 + (3 * (((self.width / 2) + (self.width % 2)) as usize) * ((self.height / 2) as usize));
+        
+        for x in 0..self.width as usize {
+            for y in 0..self.height as usize {
+                let cell = &mut self.map_cells[x][y];
+                
+                let flag = bytes[offset];
+                offset += 1;
+                
+                cell.middle_animation_frame = bytes[offset];
+                offset += 1;
+                
+                let front_anim_raw = bytes[offset];
+                cell.front_animation_frame = if front_anim_raw == 255 { 
+                    0 
+                } else { 
+                    front_anim_raw & 0x8F 
+                };
+                offset += 1;
+                
+                cell.middle_animation_tick = 0;
+                cell.front_animation_tick = 0;
+                
+                cell.front_index = if bytes[offset] != 255 {
+                    (bytes[offset] as i16) + 200
+                } else {
+                    -1
+                };
+                offset += 1;
+                
+                cell.middle_index = if bytes[offset] != 255 {
+                    (bytes[offset] as i16) + 200
+                } else {
+                    -1
+                };
+                offset += 1;
+                
+                cell.middle_image = (u16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32) + 1;
+                offset += 2;
+                
+                cell.front_image = (u16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32) + 1;
+                offset += 2;
+                
+                // 特殊处理: FrontImage==1 且 FrontIndex==200 表示无前景
+                if cell.front_image == 1 && cell.front_index == 200 {
+                    cell.front_index = -1;
+                }
+                
+                offset += 3; // Mir3 地图没有门，跳过
+                
+                cell.light = bytes[offset] & 0x0F;
+                offset += 2;
+                
+                // Flag 处理
+                if (flag & 0x01) != 1 {
+                    cell.back_image |= 0x20000000;
+                }
+                if (flag & 0x02) != 2 {
+                    cell.front_image = (cell.front_image as u16 | 0x8000) as i32;
+                }
+                
+                // 钓鱼点检测
+                if cell.light >= 100 && cell.light <= 119 {
+                    cell.fishing_cell = true;
+                } else {
+                    // 扩展 Mir3 光照范围（默认范围较小）
+                    cell.light *= 2;
+                }
+            }
+        }
+        
+        Ok(())
     }
     
+    // ========================================================================
+    // Map Type 6 - Shanda Mir3 格式
+    // C# Reference: Client/MirObjects/MapCode.cs lines 527-576
+    // ========================================================================
     fn load_map_type_6(&mut self) -> io::Result<()> {
-        // TODO: 实现 Shanda Mir3 格式
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Map Type 6 not yet implemented",
-        ))
+        tracing::info!("🗺️  加载地图格式: Type 6 (Shanda Mir3)");
+        
+        let bytes = &self.bytes;
+        let mut offset = 16;
+        
+        self.width = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+        offset += 2;
+        self.height = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+        offset = 40; // 头部 40 字节
+        
+        tracing::info!("📐 地图尺寸: {}x{}", self.width, self.height);
+        
+        self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
+        
+        for x in 0..self.width as usize {
+            for y in 0..self.height as usize {
+                let cell = &mut self.map_cells[x][y];
+                
+                let flag = bytes[offset];
+                offset += 1;
+                
+                // 图库索引 (+ 300 偏移)
+                cell.back_index = if bytes[offset] != 255 {
+                    (bytes[offset] as i16) + 300
+                } else {
+                    -1
+                };
+                offset += 1;
+                
+                cell.middle_index = if bytes[offset] != 255 {
+                    (bytes[offset] as i16) + 300
+                } else {
+                    -1
+                };
+                offset += 1;
+                
+                cell.front_index = if bytes[offset] != 255 {
+                    (bytes[offset] as i16) + 300
+                } else {
+                    -1
+                };
+                offset += 1;
+                
+                // 图像索引
+                cell.back_image = (i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32) + 1;
+                offset += 2;
+                
+                cell.middle_image = (i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32) + 1;
+                offset += 2;
+                
+                cell.front_image = (i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32) + 1;
+                offset += 2;
+                
+                // 特殊处理: FrontImage==1 且 FrontIndex==200 表示无前景
+                if cell.front_image == 1 && cell.front_index == 200 {
+                    cell.front_index = -1;
+                }
+                
+                // 动画
+                cell.middle_animation_frame = bytes[offset];
+                offset += 1;
+                
+                let front_anim_raw = bytes[offset];
+                cell.front_animation_frame = if front_anim_raw == 255 { 0 } else { front_anim_raw };
+                
+                // 混合模式检测 (Shanda 使用相同的值)
+                if cell.front_animation_frame > 0x0F {
+                    cell.front_animation_frame = cell.front_animation_frame & 0x0F;
+                }
+                offset += 1;
+                
+                cell.middle_animation_tick = 1;
+                cell.front_animation_tick = 1;
+                
+                // 光照
+                cell.light = bytes[offset] & 0x0F;
+                cell.light *= 4; // Shanda Mir3 光照需要放大
+                offset += 8;
+                
+                // Flag 处理
+                if (flag & 0x01) != 1 {
+                    cell.back_image |= 0x20000000;
+                }
+                if (flag & 0x02) != 2 {
+                    cell.front_image = (cell.front_image as u16 | 0x8000) as i32;
+                }
+            }
+        }
+        
+        Ok(())
     }
     
+    // ========================================================================
+    // Map Type 7 - 3/4 Heroes 格式
+    // C# Reference: Client/MirObjects/MapCode.cs lines 578-621
+    // 类似 Type 1，但每格 15 字节（多 1 字节）
+    // ========================================================================
     fn load_map_type_7(&mut self) -> io::Result<()> {
-        // TODO: 实现 3/4 Heroes 格式
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Map Type 7 not yet implemented",
-        ))
+        tracing::info!("🗺️  加载地图格式: Type 7 (3/4 Heroes)");
+        
+        let bytes = &self.bytes;
+        let mut offset = 16;
+        
+        self.width = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+        offset += 2;
+        self.height = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32;
+        offset = 40; // 头部 40 字节
+        
+        tracing::info!("📐 地图尺寸: {}x{}", self.width, self.height);
+        
+        self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
+        
+        for x in 0..self.width as usize {
+            for y in 0..self.height as usize {
+                let cell = &mut self.map_cells[x][y];
+                
+                // 图库索引 (+ 1 偏移)
+                cell.back_index = bytes[offset] as i16;
+                if cell.back_index == 0 {
+                    cell.back_index = -1;
+                }
+                offset += 1;
+                
+                cell.middle_index = bytes[offset] as i16;
+                if cell.middle_index == 0 {
+                    cell.middle_index = -1;
+                }
+                offset += 1;
+                
+                cell.front_index = bytes[offset] as i16;
+                if cell.front_index == 0 {
+                    cell.front_index = -1;
+                }
+                offset += 1;
+                
+                // 图像索引
+                cell.back_image = (bytes[offset] as i32) + 1;
+                offset += 1;
+                
+                cell.middle_image = (bytes[offset] as i32) + 1;
+                offset += 1;
+                
+                cell.front_image = (i16::from_le_bytes([bytes[offset], bytes[offset + 1]]) as i32) + 1;
+                offset += 2;
+                
+                // 动画
+                cell.middle_animation_frame = bytes[offset];
+                offset += 1;
+                
+                let front_anim_raw = bytes[offset];
+                cell.front_animation_frame = if front_anim_raw == 255 { 0 } else { front_anim_raw };
+                
+                // 混合模式检测 (与 Type 1 相同)
+                if cell.front_animation_frame > 0x0F {
+                    cell.front_animation_frame = cell.front_animation_frame & 0x0F;
+                }
+                offset += 1;
+                
+                cell.middle_animation_tick = 1;
+                cell.front_animation_tick = 1;
+                
+                // 光照
+                cell.light = bytes[offset] & 0x0F;
+                offset += 1;
+                
+                // 未知字段 (Type 7 特有)
+                cell.unknown = bytes[offset];
+                offset += 5; // Type 7 每格 15 字节，最后 5 字节跳过
+            }
+        }
+        
+        Ok(())
     }
     
     /// Map Type 100 - C# 自定义格式
@@ -800,6 +1163,7 @@ impl MapReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     
     #[test]
     fn test_cell_info_creation() {
@@ -826,5 +1190,193 @@ mod tests {
         
         cell.remove_object(456);
         assert!(cell.cell_objects.is_none());
+    }
+    
+    // ============================================================================
+    // 测试 Type 0 地图格式
+    // ============================================================================
+    #[test]
+    fn test_map_type0_basic() {
+        let mut bytes = vec![0u8; 52 + 12]; // 头部52字节 + 1个格子(12字节)
+        
+        // 写入宽度和高度
+        bytes[0..2].copy_from_slice(&1i16.to_le_bytes()); // width = 1
+        bytes[2..4].copy_from_slice(&1i16.to_le_bytes()); // height = 1
+        
+        // 写入第一个格子的数据 (offset 52)
+        bytes[52..54].copy_from_slice(&100i16.to_le_bytes()); // BackImage
+        bytes[54..56].copy_from_slice(&200i16.to_le_bytes()); // MiddleImage
+        bytes[56..58].copy_from_slice(&300i16.to_le_bytes()); // FrontImage
+        bytes[58] = 0; // DoorIndex
+        bytes[59] = 0; // DoorOffset
+        bytes[60] = 0; // FrontAnimationFrame
+        bytes[61] = 0; // FrontAnimationTick
+        bytes[62] = 2; // FrontIndex (会被转换为 2+2=4)
+        bytes[63] = 50; // Light
+        
+        // 保存到临时文件
+        let temp_path = "test_type0.map";
+        std::fs::write(temp_path, &bytes).unwrap();
+        
+        // 执行测试
+        let reader = MapReader::new(temp_path).unwrap();
+        
+        // 验证
+        assert_eq!(reader.width, 1);
+        assert_eq!(reader.height, 1);
+        assert_eq!(reader.map_cells[0][0].back_image, 100);
+        assert_eq!(reader.map_cells[0][0].middle_image, 200);
+        assert_eq!(reader.map_cells[0][0].front_image, 300);
+        assert_eq!(reader.map_cells[0][0].front_index, 4); // 2 + 2
+        assert_eq!(reader.map_cells[0][0].light, 50);
+        
+        // 清理
+        std::fs::remove_file(temp_path).unwrap();
+    }
+    
+    // ============================================================================
+    // 测试 Type 100 地图格式
+    // ============================================================================
+    #[test]
+    fn test_map_type100_structure() {
+        let mut bytes = vec![0u8; 8 + 26]; // 头部8字节 + 1个格子(26字节)
+        
+        // 魔术字节: C# (0x43, 0x23)
+        bytes[2] = 0x43;
+        bytes[3] = 0x23;
+        
+        // 版本号
+        bytes[0] = 1; // version 1
+        bytes[1] = 0;
+        
+        // 尺寸
+        bytes[4..6].copy_from_slice(&1i16.to_le_bytes()); // width = 1
+        bytes[6..8].copy_from_slice(&1i16.to_le_bytes()); // height = 1
+        
+        // 第一个格子 (offset 8)
+        let offset = 8;
+        bytes[offset..offset+2].copy_from_slice(&5i16.to_le_bytes()); // BackIndex
+        bytes[offset+2..offset+6].copy_from_slice(&1000i32.to_le_bytes()); // BackImage
+        bytes[offset+6..offset+8].copy_from_slice(&6i16.to_le_bytes()); // MiddleIndex
+        bytes[offset+8..offset+10].copy_from_slice(&2000i16.to_le_bytes()); // MiddleImage
+        bytes[offset+10..offset+12].copy_from_slice(&7i16.to_le_bytes()); // FrontIndex
+        bytes[offset+12..offset+14].copy_from_slice(&3000i16.to_le_bytes()); // FrontImage
+        bytes[offset+14] = 10; // DoorIndex
+        bytes[offset+15] = 5;  // DoorOffset
+        bytes[offset+16] = 2;  // FrontAnimationFrame
+        bytes[offset+17] = 1;  // FrontAnimationTick
+        bytes[offset+18] = 3;  // MiddleAnimationFrame
+        bytes[offset+19] = 2;  // MiddleAnimationTick
+        bytes[offset+20..offset+22].copy_from_slice(&100i16.to_le_bytes()); // TileAnimationImage
+        bytes[offset+22..offset+24].copy_from_slice(&0x2000i16.to_le_bytes()); // TileAnimationOffset
+        bytes[offset+24] = 8; // TileAnimationFrames
+        bytes[offset+25] = 128; // Light
+        
+        let temp_path = "test_type100.map";
+        std::fs::write(temp_path, &bytes).unwrap();
+        
+        let reader = MapReader::new(temp_path).unwrap();
+        
+        // 验证头部
+        assert_eq!(reader.width, 1);
+        assert_eq!(reader.height, 1);
+        
+        // 验证第一个格子
+        let cell = &reader.map_cells[0][0];
+        assert_eq!(cell.back_index, 5);
+        assert_eq!(cell.back_image, 1000);
+        assert_eq!(cell.middle_index, 6);
+        assert_eq!(cell.middle_image, 2000);
+        assert_eq!(cell.front_index, 7);
+        assert_eq!(cell.front_image, 3000);
+        assert_eq!(cell.door_index, 10);
+        assert_eq!(cell.door_offset, 5);
+        assert_eq!(cell.front_animation_frame, 2);
+        assert_eq!(cell.front_animation_tick, 1);
+        assert_eq!(cell.middle_animation_frame, 3);
+        assert_eq!(cell.middle_animation_tick, 2);
+        assert_eq!(cell.tile_animation_image, 100);
+        assert_eq!(cell.tile_animation_offset, 0x2000);
+        assert_eq!(cell.tile_animation_frames, 8);
+        assert_eq!(cell.light, 128);
+        
+        std::fs::remove_file(temp_path).unwrap();
+    }
+    
+    // ============================================================================
+    // 测试 BackImage 高位标记处理
+    // ============================================================================
+    #[test]
+    fn test_back_image_flag_processing() {
+        // Type 0 格式: 如果 BackImage & 0x8000 != 0，需要转换为 0x20000000 标记
+        let mut bytes = vec![0u8; 52 + 12];
+        bytes[0..2].copy_from_slice(&1i16.to_le_bytes());
+        bytes[2..4].copy_from_slice(&1i16.to_le_bytes());
+        
+        // BackImage = 0x8001 (设置了高位标记)
+        let back_with_flag = 0x8001u16 as i16;
+        bytes[52..54].copy_from_slice(&back_with_flag.to_le_bytes());
+        
+        let temp_path = "test_back_flag.map";
+        std::fs::write(temp_path, &bytes).unwrap();
+        
+        let reader = MapReader::new(temp_path).unwrap();
+        
+        // C# 逻辑: if ((BackImage & 0x8000) != 0)
+        //              BackImage = (BackImage & 0x7FFF) | 0x20000000;
+        let expected = (0x8001 & 0x7FFF) | 0x20000000;
+        assert_eq!(reader.map_cells[0][0].back_image, expected);
+        
+        std::fs::remove_file(temp_path).unwrap();
+    }
+    
+    // ============================================================================
+    // 测试钓鱼格子检测
+    // ============================================================================
+    #[test]
+    fn test_fishing_cell_detection() {
+        let mut bytes = vec![0u8; 52 + 12];
+        bytes[0..2].copy_from_slice(&1i16.to_le_bytes());
+        bytes[2..4].copy_from_slice(&1i16.to_le_bytes());
+        
+        // Light = 105 (100-119 范围表示钓鱼点)
+        bytes[52 + 11] = 105;
+        
+        let temp_path = "test_fishing.map";
+        std::fs::write(temp_path, &bytes).unwrap();
+        
+        let reader = MapReader::new(temp_path).unwrap();
+        
+        assert_eq!(reader.map_cells[0][0].light, 105);
+        assert!(reader.map_cells[0][0].fishing_cell);
+        
+        std::fs::remove_file(temp_path).unwrap();
+    }
+    
+    // ============================================================================
+    // 测试 get_cell 边界检查
+    // ============================================================================
+    #[test]
+    fn test_get_cell_bounds() {
+        let mut bytes = vec![0u8; 52 + 12 * 4]; // 2x2 地图
+        bytes[0..2].copy_from_slice(&2i16.to_le_bytes());
+        bytes[2..4].copy_from_slice(&2i16.to_le_bytes());
+        
+        let temp_path = "test_bounds.map";
+        std::fs::write(temp_path, &bytes).unwrap();
+        
+        let reader = MapReader::new(temp_path).unwrap();
+        
+        // 有效坐标
+        assert!(reader.get_cell(0, 0).is_some());
+        assert!(reader.get_cell(1, 1).is_some());
+        
+        // 无效坐标
+        assert!(reader.get_cell(-1, 0).is_none());
+        assert!(reader.get_cell(0, -1).is_none());
+        assert!(reader.get_cell(2, 0).is_none());
+        assert!(reader.get_cell(0, 2).is_none());
+        
+        std::fs::remove_file(temp_path).unwrap();
     }
 }

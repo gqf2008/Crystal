@@ -10,6 +10,7 @@ use flate2::read::GzDecoder;
 use ggez::graphics::ImageFormat;
 use ggez::graphics::{Color, DrawParam, Rect};
 use mir2_shared::MirAction;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -456,7 +457,7 @@ pub struct MLibrary {
     header: LibraryHeader,
     indices: Vec<ImageIndex>,
     frames: FrameSet,
-    cached_info: Vec<ImageInfo>,
+    cached_info: HashMap<usize, ImageInfo>,
     reader: BufReader<File>,
 }
 
@@ -508,12 +509,17 @@ impl MLibrary {
                 frames.insert(action, frame);
             }
         }
+        
+        // 使用 HashMap 缓存图像信息，稀疏访问模式更高效
+        // 预分配容量避免动态扩容
+        let cached_info = HashMap::with_capacity(count as usize);
+        
         Ok(Self {
             path: path_buf,
             header,
             indices,
             frames,
-            cached_info: Vec::new(),
+            cached_info,
             reader,
         })
     }
@@ -539,13 +545,18 @@ impl MLibrary {
                 ),
             ));
         }
-        // 检查缓存
-        if let Some(info) = self.cached_info.get(index) {
-            return Ok(info.clone());
+        
+        // 检查缓存 (如果已缓存则直接返回)
+        if let Some(cached) = self.cached_info.get(&index) {
+            return Ok(cached.clone());
         }
+        
+        // 读取图像信息
         let offset = self.indices[index].offset as u64;
         self.reader.seek(SeekFrom::Start(offset))?;
         let info = ImageInfo::from_reader(&mut self.reader)?;
+        
+        // 缓存结果
         self.cached_info.insert(index, info.clone());
         Ok(info)
     }
@@ -585,65 +596,50 @@ impl MLibrary {
             ));
         }
 
-        // 确保缓存数组足够大
-        while self.cached_info.len() <= index {
-            self.cached_info.push(ImageInfo {
-                width: 0,
-                height: 0,
-                x: 0,
-                y: 0,
-                shadow_x: 0,
-                shadow_y: 0,
-                shadow: 0,
-                length: 0,
-                has_mask: false,
-                mask_width: 0,
-                mask_height: 0,
-                mask_x: 0,
-                mask_y: 0,
-                mask_length: 0,
-                texture_valid: false,
-                image: None,
-                mask_image: None,
-                last_access_time: None,
-                rgba_data: None,
-            });
-        }
-
-        // 检查是否已有纹理
-        if self.cached_info[index].texture_valid {
-            // 更新访问时间
-            self.cached_info[index].last_access_time = Some(Instant::now());
-            return Ok(&self.cached_info[index]);
-        }
-
-        // 读取图像元数据（如果还没有）
-        if self.cached_info[index].width == 0 {
-            let offset = self.indices[index].offset as u64;
-            self.reader.seek(SeekFrom::Start(offset))?;
-            let info = ImageInfo::from_reader(&mut self.reader)?;
-            self.cached_info[index] = info;
-        }
-
-        // 验证图像有效性
-        let info = &self.cached_info[index];
-        if info.width == 0 || info.height == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "图像 {} 无效: width={}, height={}",
-                    index, info.width, info.height
-                ),
-            ));
-        }
-
-        // 创建纹理
+        // 使用 entry API 统一处理
+        use std::collections::hash_map::Entry;
         let offset = self.indices[index].offset as u64;
-        self.reader.seek(SeekFrom::Start(offset + 17))?;
-        self.cached_info[index].create_texture(ctx, &mut self.reader)?;
+        
+        // 先处理 Entry，确保数据在 HashMap 中
+        match self.cached_info.entry(index) {
+            Entry::Occupied(mut e) => {
+                let cached = e.get_mut();
+                // 检查是否已有纹理
+                if !cached.texture_valid {
+                    // 已有 info 但没有纹理，创建纹理
+                    self.reader.seek(SeekFrom::Start(offset + 17))?;
+                    cached.create_texture(ctx, &mut self.reader)?;
+                }
+                // 更新访问时间
+                cached.last_access_time = Some(Instant::now());
+            }
+            Entry::Vacant(e) => {
+                // 缓存中没有，读取图像元数据
+                self.reader.seek(SeekFrom::Start(offset))?;
+                let mut info = ImageInfo::from_reader(&mut self.reader)?;
 
-        // 返回引用
-        Ok(&self.cached_info[index])
+                // 验证图像有效性
+                if info.width == 0 || info.height == 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "图像 {} 无效: width={}, height={}",
+                            index, info.width, info.height
+                        ),
+                    ));
+                }
+
+                // 创建纹理
+                self.reader.seek(SeekFrom::Start(offset + 17))?;
+                info.create_texture(ctx, &mut self.reader)?;
+
+                // 插入
+                e.insert(info);
+            }
+        }
+        
+        // 现在返回引用（Entry 已经释放）
+        Ok(self.cached_info.get_mut(&index).unwrap())
     }
 
     /// 清理长时间未使用的纹理缓存
@@ -663,7 +659,7 @@ impl MLibrary {
         use std::time::Instant;
         let now = Instant::now();
         let mut removed = 0;
-        self.cached_info.iter_mut().for_each(|image| {
+        self.cached_info.iter_mut().for_each(|(_index, image)| {
             if let Some(access_time) = image.last_access_time {
                 let age = now.duration_since(access_time);
                 if age > max_age {
@@ -685,7 +681,7 @@ impl MLibrary {
         let total = self.cached_info.len();
         let used = self
             .cached_info
-            .iter()
+            .values()
             .filter(|info| info.image.is_some())
             .count();
         (total, used)
@@ -1494,5 +1490,251 @@ impl MLibrary {
             }
             Ok(false)
         }
+    }
+}
+
+// ============================================================================
+// 单元测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    // ============================================================================
+    // 测试 ImageInfo 结构
+    // ============================================================================
+    #[test]
+    fn test_image_info_creation() {
+        let info = ImageInfo {
+            width: 48,
+            height: 32,
+            x: -24,
+            y: -16,
+            shadow_x: 0,
+            shadow_y: 0,
+            shadow: 0,
+            length: 0,
+            mask_width: 48,
+            mask_height: 32,
+            mask_x: -24,
+            mask_y: -16,
+            mask_length: 0,
+            texture_valid: false,
+            image: None,
+            mask_image: None,
+            has_mask: false,
+            last_access_time: None,
+            rgba_data: None,
+        };
+        
+        assert_eq!(info.width, 48);
+        assert_eq!(info.height, 32);
+        assert_eq!(info.x, -24);
+        assert_eq!(info.y, -16);
+        assert!(!info.has_mask);
+        assert!(!info.texture_valid);
+    }
+    
+    // ============================================================================
+    // 测试偏移量应用逻辑
+    // ============================================================================
+    #[test]
+    fn test_offset_calculation() {
+        // 模拟 C# 的偏移逻辑
+        let info_x = -24i16;
+        let info_y = -16i16;
+        
+        let base_x = 100f32;
+        let base_y = 200f32;
+        
+        // 不使用 offset (C#: 直接使用 point)
+        let (x1, y1) = (base_x, base_y);
+        assert_eq!(x1, 100.0);
+        assert_eq!(y1, 200.0);
+        
+        // 使用 offset (C#: if (offSet) point.Offset(mi.X, mi.Y))
+        let (x2, y2) = (base_x + info_x as f32, base_y + info_y as f32);
+        assert_eq!(x2, 76.0);  // 100 + (-24)
+        assert_eq!(y2, 184.0); // 200 + (-16)
+    }
+    
+    // ============================================================================
+    // 测试屏幕裁剪逻辑
+    // ============================================================================
+    #[test]
+    fn test_screen_clipping() {
+        let screen_width = 800.0;
+        let screen_height = 600.0;
+        
+        // C# 逻辑: 
+        // if (x >= ScreenWidth || y >= ScreenHeight || 
+        //     x + width < 0 || y + height < 0) return;
+        
+        let test_cases = [
+            // (x, y, width, height, should_cull, description)
+            (850.0, 300.0, 48, 32, true, "x >= screen_width"),
+            (400.0, 650.0, 48, 32, true, "y >= screen_height"),
+            (-50.0, 300.0, 48, 32, true, "x + width < 0"),
+            (400.0, -40.0, 48, 32, true, "y + height < 0"),
+            (100.0, 100.0, 48, 32, false, "正常范围内"),
+            (770.0, 580.0, 48, 32, false, "边界情况（部分可见）"),
+            (-10.0, 100.0, 48, 32, false, "左边缘部分可见"),
+            (100.0, -10.0, 48, 32, false, "上边缘部分可见"),
+        ];
+        
+        for (x, y, width, height, should_cull, desc) in test_cases {
+            let culled = x >= screen_width || y >= screen_height || 
+                        x + (width as f32) < 0.0 || y + (height as f32) < 0.0;
+            assert_eq!(culled, should_cull, 
+                      "Failed for case '{}': ({}, {}) with size {}x{}", 
+                      desc, x, y, width, height);
+        }
+    }
+    
+    // ============================================================================
+    // 测试图像索引边界检查
+    // ============================================================================
+    #[test]
+    fn test_index_bounds_check() {
+        // 模拟 C# 的边界检查逻辑
+        let image_count = 100;
+        
+        // C#: if (index < 0 || index >= _images.Length) return false;
+        let test_cases = [
+            (-1, true, "负数索引应该被拒绝"),
+            (0, false, "索引 0 应该通过"),
+            (50, false, "中间索引应该通过"),
+            (99, false, "最大有效索引应该通过"),
+            (100, true, "等于长度的索引应该被拒绝"),
+            (200, true, "超大索引应该被拒绝"),
+        ];
+        
+        for (index, should_fail, desc) in test_cases {
+            let failed = index < 0 || index >= image_count;
+            assert_eq!(failed, should_fail, "Failed for case '{}': index {}", desc, index);
+        }
+    }
+    
+    // ============================================================================
+    // 测试 BackImage 标记处理（与 MapCode 配合）
+    // ============================================================================
+    #[test]
+    fn test_back_image_masking() {
+        // C# 中 BackImage 的高3位用于标记
+        // 绘制时需要屏蔽: index = (BackImage & 0x1FFFFFFF) - 1
+        
+        let test_cases = [
+            (0x00000001, 0),           // 普通图像索引 1 -> 0
+            (0x00000064, 99),          // 普通图像索引 100 -> 99
+            (0x20000001, 0),           // 带标记的索引 1 -> 0
+            (0x20000064, 99),          // 带标记的索引 100 -> 99
+            (0xE0000001u32 as i32, 0), // 多个标记位 -> 0
+        ];
+        
+        for (back_image, expected_index) in test_cases {
+            let index = ((back_image & 0x1FFFFFFF) - 1) as usize;
+            assert_eq!(index, expected_index, 
+                      "BackImage 0x{:08X} should yield index {}", back_image, expected_index);
+        }
+    }
+    
+    // ============================================================================
+    // 测试 FrontImage 标记处理
+    // ============================================================================
+    #[test]
+    fn test_front_image_masking() {
+        // C# 中 FrontImage 的高位用于标记
+        // 绘制时需要屏蔽: index = (FrontImage & 0x7FFF) - 1
+        
+        let test_cases = [
+            (0x0001, 0),      // 普通索引 1 -> 0
+            (0x0064, 99),     // 普通索引 100 -> 99
+            (0x8001, 0),      // 带标记的索引 1 -> 0
+            (0x8064, 99),     // 带标记的索引 100 -> 99
+        ];
+        
+        for (front_image, expected_index) in test_cases {
+            let index = ((front_image & 0x7FFF) - 1) as usize;
+            assert_eq!(index, expected_index,
+                      "FrontImage 0x{:04X} should yield index {}", front_image, expected_index);
+        }
+    }
+    
+    // ============================================================================
+    // 测试瓦片动画计算
+    // ============================================================================
+    #[test]
+    fn test_tile_animation_calculation() {
+        // C# 逻辑:
+        // int animationoffset = M2CellInfo[x, y].TileAnimationOffset ^ 0x2000;
+        // index += animationoffset * (AnimationCount % animation);
+        
+        let base_index = 100;
+        let animation_offset = 0x2000i16 ^ 0x2000; // 结果为 0
+        let animation_frames = 8u8;
+        let animation_count = 15u32;
+        
+        // 计算当前帧
+        let current_frame = animation_count % animation_frames as u32;
+        let final_index = base_index + (animation_offset as i32) * (current_frame as i32);
+        
+        assert_eq!(final_index, 100); // offset=0 时索引不变
+        
+        // 测试非零偏移
+        let animation_offset2 = 0x2100i16 ^ 0x2000; // 0x0100 = 256
+        let final_index2 = base_index + (animation_offset2 as i32) * (current_frame as i32);
+        // current_frame = 15 % 8 = 7
+        // final_index = 100 + 256 * 7 = 1892
+        assert_eq!(final_index2, 1892);
+    }
+    
+    // ============================================================================
+    // 测试混合模式标记
+    // ============================================================================
+    #[test]
+    fn test_animation_blend_flag() {
+        // C# 中动画帧数可能包含混合标记
+        // if ((animation & 0x80) > 0) blend = true;
+        // animation &= 0x7F;
+        
+        let test_cases = [
+            (0x00, false, 0x00, "无混合，帧数 0"),
+            (0x08, false, 0x08, "无混合，帧数 8"),
+            (0x80, true, 0x00, "有混合，帧数 0"),
+            (0x88, true, 0x08, "有混合，帧数 8"),
+            (0xFF, true, 0x7F, "有混合，帧数 127"),
+        ];
+        
+        for (raw_value, expected_blend, expected_frames, desc) in test_cases {
+            let blend = (raw_value & 0x80) > 0;
+            let frames = raw_value & 0x7F;
+            
+            assert_eq!(blend, expected_blend, "Blend flag mismatch for case '{}'", desc);
+            assert_eq!(frames, expected_frames, "Frame count mismatch for case '{}'", desc);
+        }
+    }
+    
+    // ============================================================================
+    // 测试门动画索引计算
+    // ============================================================================
+    #[test]
+    fn test_door_animation_calculation() {
+        // C# 逻辑:
+        // if (DoorInfo.DoorState != 0) {
+        //     index += (DoorInfo.ImageIndex + 1) * M2CellInfo[x, y].DoorOffset;
+        // }
+        
+        let base_index = 1000;
+        let door_image_index = 3;   // 门动画第3帧
+        let door_offset = 10;       // 每帧偏移10
+        
+        // 门关闭状态（DoorState = 0）
+        let closed_index = base_index;
+        assert_eq!(closed_index, 1000);
+        
+        // 门打开状态（DoorState != 0）
+        let open_index = base_index + (door_image_index + 1) * door_offset;
+        assert_eq!(open_index, 1040); // 1000 + 4 * 10
     }
 }

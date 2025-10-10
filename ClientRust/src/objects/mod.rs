@@ -16,7 +16,7 @@ mod spell_object;
 mod effect;
 mod damage;
 mod pathfinder;
-mod map_code; // MapReader and CellInfo - 对应 Client/MirObjects/MapCode.cs
+pub mod map_code; // MapReader and CellInfo - 对应 Client/MirObjects/MapCode.cs (公开用于测试)
 mod stats_ext;  // NEW: Stats system extensions
 mod object_factory; // NEW: Factory for creating objects from server packets
 
