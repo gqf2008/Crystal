@@ -12,8 +12,8 @@ use ggez::{Context, ContextBuilder, GameResult};
 use mir2_client::graphics::libraries::{get_map_library, initialize_all_libraries};
 use mir2_client::objects::{CellInfo, MapReader};
 
-/// 绘制视窗一次显示 50x50 个格子，便于与 C# 客户端截图对比。
-const VIEW_RANGE: i32 = 50;
+/// 绘制视窗一次显示 25x25 个格子，适合中小型地图测试拖拽。
+const VIEW_RANGE: i32 = 25;
 
 /// Type 100 地图的基础瓦片尺寸。
 const TILE_WIDTH: i32 = 48;
@@ -29,6 +29,9 @@ struct SimpleMapViewer {
     printed_debug_once: bool,
     dragging: bool,
     last_mouse_pos: (f32, f32),
+    // 累积的鼠标拖拽偏移（像素），用于处理小范围移动
+    accumulated_drag_x: f32,
+    accumulated_drag_y: f32,
 }
 
 impl SimpleMapViewer {
@@ -39,6 +42,14 @@ impl SimpleMapViewer {
             .map_err(|err| ggez::GameError::ResourceLoadError(err.to_string()))?;
 
         println!("✅ 地图尺寸: {} x {}", reader.width, reader.height);
+
+        // 计算可移动范围
+        let max_offset_x = (reader.width - VIEW_RANGE).max(0);
+        let max_offset_y = (reader.height - VIEW_RANGE).max(0);
+        println!(
+            "🎯 视窗: {}x{}, 可移动范围: {}x{}",
+            VIEW_RANGE, VIEW_RANGE, max_offset_x, max_offset_y
+        );
 
         // 🔧 使用全局 LIBRARIES 初始化所有地图库
         println!("📚 正在初始化地图库...");
@@ -56,6 +67,8 @@ impl SimpleMapViewer {
             printed_debug_once: false,
             dragging: false,
             last_mouse_pos: (0.0, 0.0),
+            accumulated_drag_x: 0.0,
+            accumulated_drag_y: 0.0,
         })
     }
 
@@ -67,28 +80,28 @@ impl SimpleMapViewer {
 
     fn draw_back_layer(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
         let mut draw_count = 0;
+        let mut skip_count = 0; // 统计跳过的格子
 
-        // 🔧 修复：根据C#官方代码，Back层只绘制偶数格子，使用REPLACE模式
-         canvas.set_blend_mode(graphics::BlendMode::REPLACE);
+        // ✅ 恢复C#原版逻辑：Back层只绘制偶数行列（96x64瓦片覆盖2x2格子）
+        canvas.set_blend_mode(graphics::BlendMode::REPLACE);
 
-        // 扩展绘制范围，避免边缘出现黑边
+        // 🔧 扩展绘制范围，避免边缘黑边（96x64瓦片需要额外空间）
+        // 右下边缘需要更大扩展（+4），确保最右下角的瓦片完整渲染
         let start_x = (self.offset_x - 2).max(0);
         let start_y = (self.offset_y - 2).max(0);
-        let end_x = (self.offset_x + VIEW_RANGE + 2).min(self.width);
-        let end_y = (self.offset_y + VIEW_RANGE + 2).min(self.height);
+        let end_x = (self.offset_x + VIEW_RANGE + 4).min(self.width);
+        let end_y = (self.offset_y + VIEW_RANGE + 4).min(self.height);
 
-        // C#代码：只绘制偶数行和偶数列，并跳过0行0列
-        // for (int y ...) { if (y <= 0 || y % 2 == 1) continue; ...
-        // for (int x ...) { if (x <= 0 || x % 2 == 1) continue; ...
+        // ✅ C#原版：只绘制偶数行列（减少绘制量，96x64瓦片自动覆盖）
         for map_y in start_y..end_y {
-            // ⚠️ C#原版：跳过 y<=0 和所有奇数行
-            if map_y <= 0 || map_y % 2 != 0 {
+            // 跳过奇数行（不检查<=0，允许绘制第0行）
+            if map_y % 2 != 0 {
                 continue;
             }
 
             for map_x in start_x..end_x {
-                // ⚠️ C#原版：跳过 x<=0 和所有奇数列
-                if map_x <= 0 || map_x % 2 != 0 {
+                // 跳过奇数列（不检查<=0，允许绘制第0列）
+                if map_x % 2 != 0 {
                     continue;
                 }
 
@@ -96,11 +109,13 @@ impl SimpleMapViewer {
                     continue;
                 };
                 if cell.back_image <= 0 || cell.back_index < 0 {
+                    skip_count += 1; // 计数空格子
                     continue;
                 }
 
                 let lib_index = cell.back_index;
                 let Some(lib_arc) = get_map_library(lib_index) else {
+                    skip_count += 1; // 计数缺失库
                     continue;
                 };
 
@@ -129,7 +144,7 @@ impl SimpleMapViewer {
                         draw_count += 1;
 
                         // 🔧 绘制遮罩层 (Mask)
-                        if image_info.has_mask {
+                         if image_info.has_mask {
                             if let Some(ref mask_texture) = image_info.mask_image {
                                 canvas.draw(
                                     mask_texture,
@@ -143,7 +158,7 @@ impl SimpleMapViewer {
         }
 
         if !self.printed_debug_once {
-            println!("  Back 层绘制数量: {draw_count}");
+            println!("  Back 层绘制数量: {draw_count}, 跳过: {skip_count}");
         }
 
         Ok(())
@@ -153,13 +168,13 @@ impl SimpleMapViewer {
         let mut draw_count = 0;
 
         // 参考代码：Middle层使用REPLACE模式
-         canvas.set_blend_mode(graphics::BlendMode::REPLACE);
+        canvas.set_blend_mode(graphics::BlendMode::REPLACE);
 
-        // 扩展绘制范围，避免边缘物体被裁剪
+        // 扩展绘制范围，避免边缘物体被裁剪（右下边缘+4）
         let start_x = (self.offset_x - 2).max(0);
         let start_y = (self.offset_y - 2).max(0);
-        let end_x = (self.offset_x + VIEW_RANGE + 2).min(self.width);
-        let end_y = (self.offset_y + VIEW_RANGE + 2).min(self.height);
+        let end_x = (self.offset_x + VIEW_RANGE + 4).min(self.width);
+        let end_y = (self.offset_y + VIEW_RANGE + 4).min(self.height);
 
         for map_y in start_y..end_y {
             for map_x in start_x..end_x {
@@ -213,7 +228,7 @@ impl SimpleMapViewer {
                         canvas.draw(texture, DrawParam::default().dest([screen_x, screen_y]));
                         draw_count += 1;
 
-                        // 🔧 绘制遮罩层 (Mask)
+                        //🔧 绘制遮罩层 (Mask)
                         if image_info.has_mask {
                             if let Some(ref mask_texture) = image_info.mask_image {
                                 canvas.draw(
@@ -241,13 +256,13 @@ impl SimpleMapViewer {
         let mut skip_no_texture = 0;
 
         // 参考代码：Front层使用ALPHA模式（正常alpha混合）
-         canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+        canvas.set_blend_mode(graphics::BlendMode::ALPHA);
 
         // 扩展绘制范围，高大物体（树木、建筑）需要更大的范围
         let start_x = (self.offset_x - 5).max(0);
         let start_y = (self.offset_y - 10).max(0); // 向上扩展更多，因为建筑物很高
-        let end_x = (self.offset_x + VIEW_RANGE + 5).min(self.width);
-        let end_y = (self.offset_y + VIEW_RANGE + 5).min(self.height);
+        let end_x = (self.offset_x + VIEW_RANGE + 8).min(self.width); // 右侧扩展更多
+        let end_y = (self.offset_y + VIEW_RANGE + 8).min(self.height); // 下方扩展更多
 
         for map_y in start_y..end_y {
             for map_x in start_x..end_x {
@@ -304,7 +319,7 @@ impl SimpleMapViewer {
                         draw_count += 1;
 
                         // 🔧 绘制遮罩层 (Mask)
-                        // C#: if (mi.HasMask) { DXManager.Draw(mi.MaskImage, ..., Tint); }
+                       // C#: if (mi.HasMask) { DXManager.Draw(mi.MaskImage, ..., Tint); }
                         if image_info.has_mask {
                             if let Some(ref mask_texture) = image_info.mask_image {
                                 if !self.printed_debug_once && draw_count <= 5 {
@@ -366,16 +381,12 @@ impl EventHandler for SimpleMapViewer {
             // 🔧 计算实际可移动的最大值（如果地图比视窗小，则为0）
             let max_offset_x = (self.width - VIEW_RANGE).max(0);
             let max_offset_y = (self.height - VIEW_RANGE).max(0);
-            
+
             match code {
                 KeyCode::ArrowLeft => self.offset_x = (self.offset_x - step).max(0),
-                KeyCode::ArrowRight => {
-                    self.offset_x = (self.offset_x + step).min(max_offset_x)
-                }
+                KeyCode::ArrowRight => self.offset_x = (self.offset_x + step).min(max_offset_x),
                 KeyCode::ArrowUp => self.offset_y = (self.offset_y - step).max(0),
-                KeyCode::ArrowDown => {
-                    self.offset_y = (self.offset_y + step).min(max_offset_y)
-                }
+                KeyCode::ArrowDown => self.offset_y = (self.offset_y + step).min(max_offset_y),
                 _ => {}
             }
 
@@ -383,26 +394,6 @@ impl EventHandler for SimpleMapViewer {
             println!("🧭 视口偏移 -> ({}, {})", self.offset_x, self.offset_y);
         }
 
-        Ok(())
-    }
-
-    fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        let mut canvas = Canvas::from_frame(ctx, Color::WHITE);
-
-        if !self.printed_debug_once {
-            println!(
-                "\n🎨 绘制 offset=({}, {}), 视窗 {}x{}",
-                self.offset_x, self.offset_y, VIEW_RANGE, VIEW_RANGE
-            );
-        }
-
-        // 参考代码：Back层绘制两次，先奇数后偶数，使用REPLACE模式
-        self.draw_back_layer(ctx, &mut canvas)?;
-        self.draw_middle_layer(ctx, &mut canvas)?;
-        self.draw_front_layer(ctx, &mut canvas)?;
-
-        self.printed_debug_once = true;
-        canvas.finish(ctx)?;
         Ok(())
     }
 
@@ -445,21 +436,52 @@ impl EventHandler for SimpleMapViewer {
             let delta_x = x - self.last_mouse_pos.0;
             let delta_y = y - self.last_mouse_pos.1;
 
-            // 🔧 关键修复：立即更新鼠标位置，防止delta累积
+            // 🔧 立即更新鼠标位置
             self.last_mouse_pos = (x, y);
 
-            let step_x = (-delta_x / TILE_WIDTH as f32) as i32;
-            let step_y = (-delta_y / TILE_HEIGHT as f32) as i32;
+            // ✅ 优化：降低移动阈值，提高灵敏度（从48像素降为24像素）
+            self.accumulated_drag_x += -delta_x;
+            self.accumulated_drag_y += -delta_y;
+
+            // 当累积偏移超过半个格子时就移动（更流畅）
+            let step_x = (self.accumulated_drag_x / 24.0) as i32;
+            let step_y = (self.accumulated_drag_y / 16.0) as i32;
 
             if step_x != 0 || step_y != 0 {
                 let max_offset_x = (self.width - VIEW_RANGE).max(0);
                 let max_offset_y = (self.height - VIEW_RANGE).max(0);
                 self.offset_x = (self.offset_x + step_x).clamp(0, max_offset_x);
                 self.offset_y = (self.offset_y + step_y).clamp(0, max_offset_y);
+
+                // 减去已经移动的格子数对应的像素
+                self.accumulated_drag_x -= step_x as f32 * 24.0;
+                self.accumulated_drag_y -= step_y as f32 * 16.0;
+
                 self.printed_debug_once = false;
             }
         }
 
+        Ok(())
+    }
+
+    fn draw(&mut self, ctx: &mut Context) -> GameResult {
+        // ✅ 使用深灰色背景，接近原版效果（比纯黑更柔和）
+        let mut canvas = Canvas::from_frame(ctx, Color::from_rgb(16, 16, 16));
+
+        if !self.printed_debug_once {
+            println!(
+                "\n🎨 绘制 offset=({}, {}), 视窗 {}x{}",
+                self.offset_x, self.offset_y, VIEW_RANGE, VIEW_RANGE
+            );
+        }
+
+        // 参考代码：Back层绘制两次，先奇数后偶数，使用REPLACE模式
+        self.draw_back_layer(ctx, &mut canvas)?;
+        self.draw_middle_layer(ctx, &mut canvas)?;
+        self.draw_front_layer(ctx, &mut canvas)?;
+
+        self.printed_debug_once = true;
+        canvas.finish(ctx)?;
         Ok(())
     }
 }

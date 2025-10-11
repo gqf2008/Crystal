@@ -263,7 +263,7 @@ impl ImageInfo {
                 decompressed.resize(expected_size, 0);
             }
         }
-       // Self::bgra_to_transparent(&mut decompressed);
+       // Self::apply_auto_alpha(&mut decompressed);
         Ok(decompressed)
     }
 
@@ -296,7 +296,7 @@ impl ImageInfo {
                 continue;
             }
 
-            let max_rgb = chunk[0].max(chunk[1]).max(chunk[2]);
+            let max_rgb = chunk[2].max(chunk[1]).max(chunk[0]);
             if max_rgb == 0 {
                 chunk.copy_from_slice(&[0, 0, 0, 0]);
                 continue;
