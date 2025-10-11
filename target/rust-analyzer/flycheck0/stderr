@@ -1,5 +1,5 @@
-   0.430032300s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="debug_map_render"}: cargo::core::compiler::fingerprint: fingerprint error for mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust)/Check { test: false }/TargetInner { kind: "example", name: "debug_map_render", tested: false, benched: false, ..: with_path("D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\debug_map_render.rs", Edition2021) }
-   0.430066600s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="debug_map_render"}: cargo::core::compiler::fingerprint:     err: failed to read `D:\Users\gxh\Documents\GitHub\Crystal\ClientRust\target\debug\.fingerprint\mir2_client-6f8b569298e8685d\example-debug_map_render`
+   0.457800400s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="debug_map_render"}: cargo::core::compiler::fingerprint: fingerprint error for mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust)/Check { test: false }/TargetInner { kind: "example", name: "debug_map_render", tested: false, benched: false, ..: with_path("D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\debug_map_render.rs", Edition2021) }
+   0.457830700s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="debug_map_render"}: cargo::core::compiler::fingerprint:     err: failed to read `D:\Users\gxh\Documents\GitHub\Crystal\ClientRust\target\debug\.fingerprint\mir2_client-6f8b569298e8685d\example-debug_map_render`
 
 Caused by:
     系统找不到指定的文件。 (os error 2)
@@ -26,19 +26,69 @@ Stack backtrace:
   18: git_midx_writer_dump
   19: BaseThreadInitThunk
   20: RtlUserThreadStart
-   0.436525200s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="debug_texture"}: cargo::core::compiler::fingerprint: dependency on `mir2_client` is newer than we are 13404637310.713101400s > 13404547046.774504900s "D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust"
-   0.436701000s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="debug_texture"}: cargo::core::compiler::fingerprint: fingerprint dirty for mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust)/Check { test: false }/TargetInner { kind: "example", name: "debug_texture", tested: false, benched: false, ..: with_path("D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\debug_texture.rs", Edition2021) }
-   0.436712100s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="debug_texture"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleDependency { name: "mir2_client", dep_mtime: FileTime { seconds: 13404637310, nanos: 713101400 }, max_mtime: FileTime { seconds: 13404547046, nanos: 774504900 } })
-   0.438205900s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="simple_map_viewer"}: cargo::core::compiler::fingerprint: stale: changed "D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\simple_map_viewer.rs"
-   0.438215500s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="simple_map_viewer"}: cargo::core::compiler::fingerprint:           (vs) "D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\target\\debug\\.fingerprint\\mir2_client-8a71b2c6fe5c7a3d\\dep-example-simple_map_viewer"
-   0.438219000s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="simple_map_viewer"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 13404638593, nanos: 394555700 } < FileTime { seconds: 13404638613, nanos: 971640100 }
-   0.438352300s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="simple_map_viewer"}: cargo::core::compiler::fingerprint: fingerprint dirty for mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust)/Check { test: false }/TargetInner { kind: "example", name: "simple_map_viewer", tested: false, benched: false, ..: with_path("D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\simple_map_viewer.rs", Edition2021) }
-   0.438359900s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="simple_map_viewer"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\target\\debug\\.fingerprint\\mir2_client-8a71b2c6fe5c7a3d\\dep-example-simple_map_viewer", reference_mtime: FileTime { seconds: 13404638593, nanos: 394555700 }, stale: "D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\simple_map_viewer.rs", stale_mtime: FileTime { seconds: 13404638613, nanos: 971640100 } }))
-   0.439898300s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="test_texture"}: cargo::core::compiler::fingerprint: dependency on `mir2_client` is newer than we are 13404637310.713101400s > 13404547047.068420700s "D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust"
-   0.440099900s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="test_texture"}: cargo::core::compiler::fingerprint: fingerprint dirty for mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust)/Check { test: false }/TargetInner { kind: "example", name: "test_texture", tested: false, benched: false, ..: with_path("D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\test_texture.rs", Edition2021) }
-   0.440112000s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="test_texture"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleDependency { name: "mir2_client", dep_mtime: FileTime { seconds: 13404637310, nanos: 713101400 }, max_mtime: FileTime { seconds: 13404547047, nanos: 68420700 } })
+   0.464364400s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="debug_texture"}: cargo::core::compiler::fingerprint: fingerprint error for mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust)/Check { test: false }/TargetInner { kind: "example", name: "debug_texture", tested: false, benched: false, ..: with_path("D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\debug_texture.rs", Edition2021) }
+   0.464383400s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="debug_texture"}: cargo::core::compiler::fingerprint:     err: failed to read `D:\Users\gxh\Documents\GitHub\Crystal\ClientRust\target\debug\.fingerprint\mir2_client-7d5d07a1b47f211e\example-debug_texture`
+
+Caused by:
+    系统找不到指定的文件。 (os error 2)
+
+Stack backtrace:
+   0: git_midx_writer_dump
+   1: git_midx_writer_dump
+   2: git_midx_writer_dump
+   3: git_midx_writer_dump
+   4: git_filter_source_repo
+   5: git_filter_source_path
+   6: git_filter_source_path
+   7: git_filter_source_path
+   8: git_filter_source_path
+   9: git_filter_source_repo
+  10: git_filter_source_repo
+  11: git_filter_source_repo
+  12: git_filter_source_repo
+  13: git_filter_source_repo
+  14: <unknown>
+  15: <unknown>
+  16: git_midx_writer_dump
+  17: git_filter_source_repo
+  18: git_midx_writer_dump
+  19: BaseThreadInitThunk
+  20: RtlUserThreadStart
+   0.465647500s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="simple_map_viewer"}: cargo::core::compiler::fingerprint: stale: changed "D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\simple_map_viewer.rs"
+   0.465658100s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="simple_map_viewer"}: cargo::core::compiler::fingerprint:           (vs) "D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\target\\debug\\.fingerprint\\mir2_client-8a71b2c6fe5c7a3d\\dep-example-simple_map_viewer"
+   0.465661100s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="simple_map_viewer"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 13404651018, nanos: 252993000 } < FileTime { seconds: 13404651117, nanos: 520487000 }
+   0.465805300s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="simple_map_viewer"}: cargo::core::compiler::fingerprint: fingerprint dirty for mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust)/Check { test: false }/TargetInner { kind: "example", name: "simple_map_viewer", tested: false, benched: false, ..: with_path("D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\simple_map_viewer.rs", Edition2021) }
+   0.465813000s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="simple_map_viewer"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\target\\debug\\.fingerprint\\mir2_client-8a71b2c6fe5c7a3d\\dep-example-simple_map_viewer", reference_mtime: FileTime { seconds: 13404651018, nanos: 252993000 }, stale: "D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\simple_map_viewer.rs", stale_mtime: FileTime { seconds: 13404651117, nanos: 520487000 } }))
+   0.467271100s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="test_texture"}: cargo::core::compiler::fingerprint: fingerprint error for mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust)/Check { test: false }/TargetInner { kind: "example", name: "test_texture", tested: false, benched: false, ..: with_path("D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\ClientRust\\examples\\test_texture.rs", Edition2021) }
+   0.467290700s  INFO prepare_target{force=false package_id=mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust) target="test_texture"}: cargo::core::compiler::fingerprint:     err: failed to read `D:\Users\gxh\Documents\GitHub\Crystal\ClientRust\target\debug\.fingerprint\mir2_client-457cf99858d7b51d\example-test_texture`
+
+Caused by:
+    系统找不到指定的文件。 (os error 2)
+
+Stack backtrace:
+   0: git_midx_writer_dump
+   1: git_midx_writer_dump
+   2: git_midx_writer_dump
+   3: git_midx_writer_dump
+   4: git_filter_source_repo
+   5: git_filter_source_path
+   6: git_filter_source_path
+   7: git_filter_source_path
+   8: git_filter_source_path
+   9: git_filter_source_repo
+  10: git_filter_source_repo
+  11: git_filter_source_repo
+  12: git_filter_source_repo
+  13: git_filter_source_repo
+  14: <unknown>
+  15: <unknown>
+  16: git_midx_writer_dump
+  17: git_filter_source_repo
+  18: git_midx_writer_dump
+  19: BaseThreadInitThunk
+  20: RtlUserThreadStart
     Checking mir2_client v0.1.0 (D:\Users\gxh\Documents\GitHub\Crystal\ClientRust)
 error: could not compile `mir2_client` (example "debug_map_render") due to 5 previous errors
 warning: build failed, waiting for other jobs to finish...
-error: could not compile `mir2_client` (example "test_texture") due to 1 previous error
 error: could not compile `mir2_client` (example "debug_texture") due to 2 previous errors
+error: could not compile `mir2_client` (example "test_texture") due to 1 previous error
