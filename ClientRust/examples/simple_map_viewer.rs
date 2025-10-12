@@ -44,7 +44,7 @@ const OFFSET_Y: i32 = ((SCREEN_HEIGHT as i32 / 2) / TILE_HEIGHT - 1) & !1; // 10
 // 屏幕宽度1920需要至少40格(1920/48),高度1080需要至少34格(1080/32)
 // 从中心offset=20向左右扩展,需要至少20+缓冲格才能覆盖到屏幕边缘
 const VIEW_RANGE_X: i32 = 26;  // 20+26=46,足够覆盖屏幕宽度并有余量
-const VIEW_RANGE_Y: i32 = 22;  // 16+22=38,足够覆盖屏幕高度并有余量
+const VIEW_RANGE_Y: i32 = 24;  // 16+24=40,增加2格以完全消除底部黑边
 
 /// 绘制视窗 (横向)
 const VIEW_RANGE: i32 = VIEW_RANGE_X;
@@ -158,17 +158,26 @@ impl SimpleMapViewer {
         let end_y = (self.offset_y + VIEW_RANGE_Y + 1).min(self.height);
 
         // ✅ C#原版：只绘制偶数行列（减少绘制量,96x64瓦片自动覆盖）
-        // C#: if (y <= 0 || y % 2 == 1) continue; - 跳过负数和奇数坐标
-        // C#: if (x <= 0 || x % 2 == 1) continue;
-        // 注意:0是偶数,应该绘制!
+        // C#: if (y <= 0 || y % 2 == 1) continue; - 跳过 y<=0 和奇数坐标
+        // C#: if (x <= 0 || x % 2 == 1) continue; - 跳过 x<=0 和奇数坐标
+        // ⚠️ C#从1开始计数,所以y<=0表示跳过0和负数,即从y=2开始绘制
         for map_y in start_y..end_y {
-            // 只跳过奇数行(0是偶数,不跳过)
+            // 跳过 y<=0 (即 0, -1, -2...)
+            if map_y <= 0 {
+                continue;
+            }
+            // 只跳过奇数行
             if map_y % 2 != 0 {
                 continue;
             }
 
             for map_x in start_x..end_x {
-                // 只跳过奇数列(0是偶数,不跳过)
+                // 跳过 x<=0 (即 0, -1, -2...)
+                if map_x <= 0 {
+                    skip_count += 1;
+                    continue;
+                }
+                // 只跳过奇数列
                 if map_x % 2 != 0 {
                     skip_count += 1;
                     continue;
@@ -208,12 +217,13 @@ impl SimpleMapViewer {
                     );
                 }
 
-                // 🔧 C#原版屏幕坐标计算公式:
-                // drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
-                // drawY = (y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y;
-                // 注意X坐标有额外的 -OffSetX 调整！
-                let screen_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH - OFFSET_X) as f32;
-                let screen_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
+                // 🔧 Back层坐标计算:
+                // C#从(2,2)开始绘制96x64瓦片,但应该覆盖(0,0)~(1,1)
+                // 所以需要减去2格的偏移: -2 * TILE_WIDTH, -2 * TILE_HEIGHT
+                let base_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
+                let base_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
+                let screen_x = base_x - (TILE_WIDTH * 2) as f32 - info.x as f32;
+                let screen_y = base_y - (TILE_HEIGHT * 2) as f32 - info.y as f32;
 
                 // C#: Libraries.MapLibs[lib_index].Draw(image_index, screen_x, screen_y);
                 if lib.draw(ctx, canvas, image_index, screen_x, screen_y).is_ok() {
@@ -309,9 +319,8 @@ impl SimpleMapViewer {
                     );
                 }
 
-                // 🔧 C#原版屏幕坐标计算公式（与Back层相同）
-                // drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
-                let screen_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH - OFFSET_X) as f32;
+                // 🔧 简化坐标计算,与网格对齐(与Back层相同)
+                let screen_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
                 let screen_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
 
                 // C#: Libraries.MapLibs[lib_index].Draw(image_index, screen_x, screen_y);
@@ -407,10 +416,9 @@ impl SimpleMapViewer {
                     );
                 }
 
-                // 🔧 C#原版屏幕坐标计算（与Back/Middle层相同）
-                // drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
+                // 🔧 简化坐标计算,与网格对齐(与Back/Middle层相同)
                 // Front层需要额外减去图像高度，让建筑物"站"在格子上
-                let draw_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH - OFFSET_X) as f32;
+                let draw_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
                 let draw_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
                 let screen_x = draw_x;
                 let screen_y = draw_y - info.height as f32 + TILE_HEIGHT as f32;
@@ -491,10 +499,10 @@ impl SimpleMapViewer {
         let grid_color = Color::from_rgba(0, 255, 0, 100);
         
         // 绘制垂直线和水平线
-        // 🔧 网格线使用简化坐标公式（不需要瓦片绘制的 -OFFSET_X 偏移）
-        // 网格线标记格子边界，而不是瓦片图像位置
+        // 🔧 网格线标记格子边界,使用简化坐标公式(不含 -OFFSET_X)
+        // 而瓦片图像会根据纹理offset调整位置对齐网格
         for map_x in start_x..=end_x {
-            // 简化公式：直接计算格子边界的屏幕位置
+            // 简化公式：直接计算格子边界位置
             let screen_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
             
             // 垂直线
@@ -511,6 +519,7 @@ impl SimpleMapViewer {
         }
 
         for map_y in start_y..=end_y {
+            // Y方向不需要额外偏移（与瓦片Y坐标基准一致）
             let screen_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
             
             // 水平线
@@ -564,7 +573,6 @@ impl SimpleMapViewer {
         use ggez::graphics::{Text, DrawParam, PxScale};
         
         // 🔧 计算鼠标对应的地图坐标（使用与网格线一致的公式）
-        // ⚠️ 注意：鼠标应该对应网格格子，不是瓦片图像位置！
         // 网格线绘制公式: screen_x = (map_x - offset_x + OFFSET_X) * TILE_WIDTH
         // 逆向推导:
         //   screen_x / TILE_WIDTH = map_x - offset_x + OFFSET_X
@@ -572,7 +580,7 @@ impl SimpleMapViewer {
         let map_x = ((self.mouse_x / TILE_WIDTH as f32).floor() as i32 + self.offset_x - OFFSET_X)
             .clamp(0, self.width - 1);
         
-        // Y方向同理：使用网格线公式，并限制在有效范围内
+        // Y方向：使用网格线公式，并限制在有效范围内
         // screen_y = (map_y - offset_y + OFFSET_Y) * TILE_HEIGHT
         // map_y = screen_y / TILE_HEIGHT + offset_y - OFFSET_Y
         let map_y = ((self.mouse_y / TILE_HEIGHT as f32).floor() as i32 + self.offset_y - OFFSET_Y)
