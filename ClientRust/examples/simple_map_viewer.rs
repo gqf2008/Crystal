@@ -4,13 +4,24 @@
 
 use ggez::conf::{WindowMode, WindowSetup};
 use ggez::event::{self, EventHandler};
-use ggez::graphics::{self, Canvas, Color};
+use ggez::graphics::{self, Canvas, Color, FontData};
 use ggez::input::keyboard::{KeyCode, KeyInput};
 use ggez::input::mouse::MouseButton;
 use ggez::{Context, ContextBuilder, GameResult};
 
 use mir2_client::graphics::libraries::{get_map_library, initialize_all_libraries};
 use mir2_client::objects::{CellInfo, MapReader};
+
+// 📚 MapLibs 索引说明 (与C#原版一致)
+// MapLibs[400] 数组虽然定义了400个元素,但只有部分索引被初始化:
+//   0-29, 90              - WeMade Mir2
+//   100-119, 190          - Shanda Mir2  
+//   200-213, 215-228, ... - WeMade Mir3 (每15个为一组,5组)
+//   300-313, 315-328, ... - Shanda Mir3 (每15个为一组,5组)
+// 
+// ⚠️ 索引范围 214-299, 314-399 中有很多**未初始化的空位**
+// 地图文件可能引用这些空索引(如257),这是**正常现象**,会被跳过绘制
+// C#中 MapLibs[257] == null,不会崩溃,Rust返回None同样安全
 
 /// Type 100 地图的基础瓦片尺寸。
 const TILE_WIDTH: i32 = 48;
@@ -51,8 +62,13 @@ struct SimpleMapViewer {
     // 累积的鼠标拖拽偏移（像素），用于处理小范围移动
     accumulated_drag_x: f32,
     accumulated_drag_y: f32,
-    // 🔍 调试网格开关(按G键切换)
-    show_grid: bool,
+    // 🔍 调试显示开关
+    show_tile_grid: bool,      // T键：地图网格（绿色坐标网格）
+    show_image_border: bool,   // B键：图片边框（彩色瓦片边框）
+    // 🎨 图层渲染开关
+    render_back: bool,         // 1键：Back层
+    render_middle: bool,       // 2键：Middle层
+    render_front: bool,        // 3键：Front层
     // 🖱️ 鼠标当前位置(用于显示悬停信息)
     mouse_x: f32,
     mouse_y: f32,
@@ -67,13 +83,21 @@ impl SimpleMapViewer {
 
         println!("✅ 地图尺寸: {} x {}", reader.width, reader.height);
 
-        // 🔧 计算可移动范围：确保视窗不超出地图边界
-        // 最大偏移 = 地图大小 - 视野范围（不能让视窗右下角超出地图）
-        let max_offset_x = (reader.width - VIEW_RANGE_X).max(0);
-        let max_offset_y = (reader.height - VIEW_RANGE_Y).max(0);
+        // 🔧 计算可移动范围：让offset能移动到使屏幕完全覆盖地图
+        // 绘制范围: [offset-VIEW_RANGE, offset+VIEW_RANGE+1)
+        // 要让地图最右下角可见，max_offset应该是地图尺寸减去OFFSET
+        // 这样当offset=max时，绘制end = max + VIEW_RANGE + 1 能覆盖到地图边界
+        let max_offset_x = (reader.width - OFFSET_X).max(OFFSET_X);
+        let max_offset_y = (reader.height - OFFSET_Y).max(OFFSET_Y);
         println!(
-            "🎯 视野范围: X={}(左右各{}格) Y={}(上下{}格), 最大偏移: offset_x≤{}, offset_y≤{}",
-            VIEW_RANGE_X, OFFSET_X, VIEW_RANGE_Y, OFFSET_Y, max_offset_x, max_offset_y
+            "🎯 视野范围: 绘制区域 offset±[{},{}] 格 [总宽度≈{}格]",
+            VIEW_RANGE_X, VIEW_RANGE_Y,
+            VIEW_RANGE_X * 2 + 1
+        );
+        println!(
+            "🎯 可移动范围: offset_x={}~{}, offset_y={}~{} (地图:{}x{})",
+            OFFSET_X, max_offset_x, OFFSET_Y, max_offset_y,
+            reader.width, reader.height
         );
 
         // 🔧 使用全局 LIBRARIES 初始化所有地图库
@@ -96,7 +120,11 @@ impl SimpleMapViewer {
             last_mouse_pos: (0.0, 0.0),
             accumulated_drag_x: 0.0,
             accumulated_drag_y: 0.0,
-            show_grid: true, // 🔍 默认开启网格
+            show_tile_grid: true,      // 🔍 默认开启地图网格
+            show_image_border: true,   // 🔍 默认开启图片边框
+            render_back: true,         // 🎨 默认渲染Back层
+            render_middle: true,       // 🎨 默认渲染Middle层
+            render_front: true,        // 🎨 默认渲染Front层
             mouse_x: 0.0,
             mouse_y: 0.0,
         })
@@ -109,6 +137,11 @@ impl SimpleMapViewer {
     }
 
     fn draw_back_layer(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+        // 🎨 如果Back层被禁用，直接返回
+        if !self.render_back {
+            return Ok(());
+        }
+        
         let mut draw_count = 0;
         let mut skip_count = 0; // 统计跳过的格子
 
@@ -146,6 +179,11 @@ impl SimpleMapViewer {
                 };
                 if cell.back_image <= 0 || cell.back_index < 0 {
                     skip_count += 1; // 计数空格子
+                    // 🔍 调试输出：检查黑色区域 (10-20, 38-46)
+                    if !self.printed_debug_once && map_x >= 10 && map_x <= 20 && map_y >= 38 && map_y <= 46 {
+                        println!("  ⚫ Back ({map_x},{map_y}) SKIPPED: back_image={}, back_index={}", 
+                            cell.back_image, cell.back_index);
+                    }
                     continue;
                 }
 
@@ -180,18 +218,38 @@ impl SimpleMapViewer {
                 // C#: Libraries.MapLibs[lib_index].Draw(image_index, screen_x, screen_y);
                 if lib.draw(ctx, canvas, image_index, screen_x, screen_y).is_ok() {
                     draw_count += 1;
+                    
+                    // 🔴 调试：绘制红色边框显示Back层瓦片范围
+                    if self.show_image_border {
+                        use ggez::graphics::{Mesh, DrawMode, Rect};
+                        let border = Mesh::new_rectangle(
+                            ctx,
+                            DrawMode::stroke(1.0),
+                            Rect::new(screen_x, screen_y, info.width as f32, info.height as f32),
+                            Color::from_rgb(255, 0, 0), // 红色
+                        );
+                        if let Ok(rect) = border {
+                            canvas.draw(&rect, graphics::DrawParam::default());
+                        }
+                    }
                 }
             }
         }
 
         if !self.printed_debug_once {
             println!("  Back 层绘制数量: {draw_count}, 跳过: {skip_count}");
+            println!("  🔍 视野范围: start=({},{}) end=({},{})", start_x, start_y, end_x, end_y);
         }
 
         Ok(())
     }
 
     fn draw_middle_layer(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+        // 🎨 如果Middle层被禁用，直接返回
+        if !self.render_middle {
+            return Ok(());
+        }
+        
         let mut draw_count = 0;
 
         // 参考代码：Middle层使用REPLACE模式
@@ -259,6 +317,20 @@ impl SimpleMapViewer {
                 // C#: Libraries.MapLibs[lib_index].Draw(image_index, screen_x, screen_y);
                 if lib.draw(ctx, canvas, image_index, screen_x, screen_y).is_ok() {
                     draw_count += 1;
+                    
+                    // 🟧 调试：绘制橙色边框显示Middle层瓦片范围
+                    if self.show_image_border {
+                        use ggez::graphics::{Mesh, DrawMode, Rect};
+                        let border = Mesh::new_rectangle(
+                            ctx,
+                            DrawMode::stroke(1.0),
+                            Rect::new(screen_x, screen_y, info.width as f32, info.height as f32),
+                            Color::from_rgb(255, 165, 0), // 橙色
+                        );
+                        if let Ok(rect) = border {
+                            canvas.draw(&rect, graphics::DrawParam::default());
+                        }
+                    }
                 }
             }
         }
@@ -271,6 +343,11 @@ impl SimpleMapViewer {
     }
 
     fn draw_front_layer(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+        // 🎨 如果Front层被禁用，直接返回
+        if !self.render_front {
+            return Ok(());
+        }
+        
         let mut draw_count = 0;
         let mut skip_no_lib = 0;
         let mut skip_no_info = 0;
@@ -306,9 +383,9 @@ impl SimpleMapViewer {
                 let lib_index = cell.front_index;
                 let Some(lib_arc) = get_map_library(lib_index) else {
                     skip_no_lib += 1;
-                    if !self.printed_debug_once && skip_no_lib <= 3 {
-                        println!("  ⚠️ Front ({map_x},{map_y}) 库[{lib_index}]不存在");
-                    }
+                    // 🔇 只在首次绘制时输出3条示例,避免刷屏
+                    // 这是正常现象:地图文件可能引用未初始化的库索引(如257在214-299空隙中)
+                    // C#中MapLibs[257]为null也会跳过,不会报错
                     continue;
                 };
 
@@ -319,9 +396,6 @@ impl SimpleMapViewer {
                     Ok(info) => info,
                     Err(_) => {
                         skip_no_info += 1;
-                        if !self.printed_debug_once && skip_no_info <= 3 {
-                            println!("  ⚠️ Front ({map_x},{map_y}) 库[{lib_index}] 图像[{image_index}]不存在");
-                        }
                         continue;
                     }
                 };
@@ -358,6 +432,21 @@ impl SimpleMapViewer {
                     .is_ok()
                 {
                     draw_count += 1;
+                    
+                    // 🔵 调试：绘制蓝色边框显示Front层瓦片范围
+                    if self.show_image_border {
+                        use ggez::graphics::{Mesh, DrawMode, Rect};
+                        let border = Mesh::new_rectangle(
+                            ctx,
+                            DrawMode::stroke(1.0),
+                            Rect::new(screen_x, screen_y, info.width as f32, info.height as f32),
+                            Color::from_rgb(0, 150, 255), // 蓝色
+                        );
+                        if let Ok(rect) = border {
+                            canvas.draw(&rect, graphics::DrawParam::default());
+                        }
+                    }
+                    
                     if !self.printed_debug_once && draw_count <= 5 {
                         // 检查是否有Mask层
                         if let Ok(img_info) = lib.get_or_create_texture(ctx, image_index) {
@@ -368,9 +457,6 @@ impl SimpleMapViewer {
                     }
                 } else {
                     skip_no_texture += 1;
-                    if !self.printed_debug_once && skip_no_texture <= 3 {
-                        println!("  ⚠️ Front ({map_x},{map_y}) 库[{lib_index}] 图像[{image_index}] 绘制失败");
-                    }
                 }
             }
         }
@@ -378,13 +464,13 @@ impl SimpleMapViewer {
         if !self.printed_debug_once {
             println!("  Front 层绘制数量: {draw_count}");
             if skip_no_lib > 0 {
-                println!("  ⚠️ 跳过（库不存在）: {skip_no_lib}");
+                println!("  ℹ️ 跳过（库未初始化）: {skip_no_lib} - 正常现象,地图引用了MapLibs空索引");
             }
             if skip_no_info > 0 {
-                println!("  ⚠️ 跳过（图像不存在）: {skip_no_info}");
+                println!("  ℹ️ 跳过（图像索引超出范围）: {skip_no_info}");
             }
             if skip_no_texture > 0 {
-                println!("  ⚠️ 跳过（纹理失败）: {skip_no_texture}");
+                println!("  ⚠️ 跳过（纹理解码失败）: {skip_no_texture} - 需检查.lib文件完整性");
             }
         }
 
@@ -395,9 +481,9 @@ impl SimpleMapViewer {
     fn draw_debug_grid(&self, ctx: &Context, canvas: &mut Canvas) -> GameResult {
         use ggez::graphics::{Mesh, DrawMode, Color};
         
-        // 绘制范围：屏幕可见区域
-        let start_x = (self.offset_x - VIEW_RANGE_X).max(2);
-        let start_y = (self.offset_y - VIEW_RANGE_Y).max(2);
+        // 绘制范围：屏幕可见区域（从0开始，不跳过任何坐标）
+        let start_x = (self.offset_x - VIEW_RANGE_X).max(0);
+        let start_y = (self.offset_y - VIEW_RANGE_Y).max(0);
         let end_x = (self.offset_x + VIEW_RANGE_X + 1).min(self.width);
         let end_y = (self.offset_y + VIEW_RANGE_Y + 1).min(self.height);
 
@@ -405,8 +491,11 @@ impl SimpleMapViewer {
         let grid_color = Color::from_rgba(0, 255, 0, 100);
         
         // 绘制垂直线和水平线
+        // 🔧 网格线使用简化坐标公式（不需要瓦片绘制的 -OFFSET_X 偏移）
+        // 网格线标记格子边界，而不是瓦片图像位置
         for map_x in start_x..=end_x {
-            let screen_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH - OFFSET_X) as f32;
+            // 简化公式：直接计算格子边界的屏幕位置
+            let screen_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
             
             // 垂直线
             let line = Mesh::new_line(
@@ -440,9 +529,11 @@ impl SimpleMapViewer {
         // 🔍 在每个格子中心绘制坐标文本（每4格显示一次，避免太密集）
         for map_x in (start_x..=end_x).step_by(4) {
             for map_y in (start_y..=end_y).step_by(4) {
-                let screen_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH - OFFSET_X) as f32;
+                // 使用与网格线一致的简化坐标公式
+                let screen_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
                 let screen_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
                 let mut text = graphics::Text::new(format!("({},{})", map_x, map_y));
+                text.set_font("AlibabaPuHui"); // 🔧 设置中文字体
                 text.set_scale(12.0);
                 canvas.draw(
                     &text,
@@ -472,17 +563,23 @@ impl SimpleMapViewer {
     fn draw_hover_info(&self, ctx: &Context, canvas: &mut Canvas) -> GameResult {
         use ggez::graphics::{Text, DrawParam, PxScale};
         
-        // 计算鼠标对应的地图坐标
-        // 屏幕坐标 → 地图坐标的逆向计算
-        // screen_x = (map_x - offset_x + OFFSET_X) * TILE_WIDTH - OFFSET_X
-        // → map_x = (screen_x + OFFSET_X) / TILE_WIDTH + offset_x - OFFSET_X
-        let map_x = ((self.mouse_x + OFFSET_X as f32) / TILE_WIDTH as f32).floor() as i32 + self.offset_x - OFFSET_X;
-        let map_y = (self.mouse_y / TILE_HEIGHT as f32).floor() as i32 + self.offset_y - OFFSET_Y;
+        // 🔧 计算鼠标对应的地图坐标（使用与网格线一致的公式）
+        // ⚠️ 注意：鼠标应该对应网格格子，不是瓦片图像位置！
+        // 网格线绘制公式: screen_x = (map_x - offset_x + OFFSET_X) * TILE_WIDTH
+        // 逆向推导:
+        //   screen_x / TILE_WIDTH = map_x - offset_x + OFFSET_X
+        //   map_x = screen_x / TILE_WIDTH + offset_x - OFFSET_X
+        let map_x = ((self.mouse_x / TILE_WIDTH as f32).floor() as i32 + self.offset_x - OFFSET_X)
+            .clamp(0, self.width - 1);
+        
+        // Y方向同理：使用网格线公式，并限制在有效范围内
+        // screen_y = (map_y - offset_y + OFFSET_Y) * TILE_HEIGHT
+        // map_y = screen_y / TILE_HEIGHT + offset_y - OFFSET_Y
+        let map_y = ((self.mouse_y / TILE_HEIGHT as f32).floor() as i32 + self.offset_y - OFFSET_Y)
+            .clamp(0, self.height - 1);
 
-        // 检查坐标是否在地图范围内
-        if map_x < 0 || map_x >= self.width || map_y < 0 || map_y >= self.height {
-            return Ok(());
-        }
+        // 🔧 坐标已经通过 clamp 限制在有效范围内，无需额外检查
+        // 这样可以确保鼠标在最后一格的边缘也能显示信息
 
         // 获取该位置的单元格信息
         let cell = &self.cells[map_x as usize][map_y as usize];
@@ -516,8 +613,32 @@ impl SimpleMapViewer {
         // 绘制半透明背景框
         let box_width = 280.0;
         let box_height = (info_lines.len() as f32 * 22.0) + 10.0;
-        let box_x = self.mouse_x + 15.0;
-        let box_y = self.mouse_y + 15.0;
+        
+        // 🔧 计算信息框位置，确保不超出屏幕边界
+        let mut box_x = self.mouse_x + 15.0;
+        let mut box_y = self.mouse_y + 15.0;
+        
+        // 检查右边界：如果信息框右边超出屏幕，则显示在鼠标左侧
+        if box_x + box_width > SCREEN_WIDTH {
+            box_x = self.mouse_x - box_width - 15.0;
+            // 如果左侧也放不下，则贴着右边界
+            if box_x < 0.0 {
+                box_x = SCREEN_WIDTH - box_width - 5.0;
+            }
+        }
+        
+        // 检查下边界：如果信息框底部超出屏幕，则显示在鼠标上方
+        if box_y + box_height > SCREEN_HEIGHT {
+            box_y = self.mouse_y - box_height - 15.0;
+            // 如果上方也放不下，则贴着下边界
+            if box_y < 0.0 {
+                box_y = SCREEN_HEIGHT - box_height - 5.0;
+            }
+        }
+        
+        // 确保不会超出左边界和上边界
+        box_x = box_x.max(5.0);
+        box_y = box_y.max(5.0);
 
         use ggez::graphics::{Mesh, DrawMode, Rect};
         let bg_rect = Mesh::new_rectangle(
@@ -540,6 +661,7 @@ impl SimpleMapViewer {
         // 绘制文本
         for (i, line) in info_lines.iter().enumerate() {
             let mut text = Text::new(line);
+            text.set_font("AlibabaPuHui"); // 🔧 设置中文字体
             text.set_scale(PxScale::from(16.0));
             canvas.draw(
                 &text,
@@ -569,36 +691,62 @@ impl EventHandler for SimpleMapViewer {
         let step = 2; // 与 C# 客户端一致,两格为单位移动视口。
 
         if let PhysicalKey::Code(code) = input.event.physical_key {
-            // 🔧 使用正确的视野范围计算边界
-            // 最小offset = OFFSET_X/Y (防止地图(0,0)移到屏幕中间导致左上黑边)
-            // 最大offset = 地图大小 - VIEW_RANGE (防止右下超出地图)
-            // ⚠️ max_offset也必须是偶数,否则边界处会变成奇数!
-            let max_offset_x = ((self.width - VIEW_RANGE_X).max(OFFSET_X)) & !1;
-            let max_offset_y = ((self.height - VIEW_RANGE_Y).max(OFFSET_Y)) & !1;
+            // 🔧 边界计算：与初始化保持一致
+            let max_offset_x = (self.width - OFFSET_X).max(OFFSET_X);
+            let max_offset_y = (self.height - OFFSET_Y).max(OFFSET_Y);
 
             match code {
                 KeyCode::ArrowLeft => {
-                    self.offset_x = ((self.offset_x - step).max(OFFSET_X)) & !1;
+                    self.offset_x = (self.offset_x - step).max(OFFSET_X);
                 }
                 KeyCode::ArrowRight => {
-                    self.offset_x = ((self.offset_x + step).min(max_offset_x)) & !1;
+                    self.offset_x = (self.offset_x + step).min(max_offset_x);
                 }
                 KeyCode::ArrowUp => {
-                    self.offset_y = ((self.offset_y - step).max(OFFSET_Y)) & !1;
+                    self.offset_y = (self.offset_y - step).max(OFFSET_Y);
                 }
                 KeyCode::ArrowDown => {
-                    self.offset_y = ((self.offset_y + step).min(max_offset_y)) & !1;
+                    self.offset_y = (self.offset_y + step).min(max_offset_y);
                 }
-                KeyCode::KeyG => {
-                    // 🔍 按G键切换网格显示
-                    self.show_grid = !self.show_grid;
-                    println!("🔍 调试网格: {}", if self.show_grid { "开启" } else { "关闭" });
+                KeyCode::KeyT => {
+                    // 🔍 T键：切换地图网格显示（绿色坐标网格）
+                    self.show_tile_grid = !self.show_tile_grid;
+                    println!("🔍 地图网格: {}", if self.show_tile_grid { "✅ 开启" } else { "❌ 关闭" });
+                }
+                KeyCode::KeyB => {
+                    // 🔍 B键：切换图片边框显示（彩色瓦片边框）
+                    self.show_image_border = !self.show_image_border;
+                    println!("🔍 图片边框: {}", if self.show_image_border { "✅ 开启" } else { "❌ 关闭" });
+                }
+                KeyCode::Digit1 => {
+                    // 🎨 1键：切换Back层渲染
+                    self.render_back = !self.render_back;
+                    println!("🎨 Back层: {}", if self.render_back { "✅ 显示" } else { "❌ 隐藏" });
+                    self.printed_debug_once = false;
+                }
+                KeyCode::Digit2 => {
+                    // 🎨 2键：切换Middle层渲染
+                    self.render_middle = !self.render_middle;
+                    println!("🎨 Middle层: {}", if self.render_middle { "✅ 显示" } else { "❌ 隐藏" });
+                    self.printed_debug_once = false;
+                }
+                KeyCode::Digit3 => {
+                    // 🎨 3键：切换Front层渲染
+                    self.render_front = !self.render_front;
+                    println!("🎨 Front层: {}", if self.render_front { "✅ 显示" } else { "❌ 隐藏" });
+                    self.printed_debug_once = false;
                 }
                 _ => {}
             }
 
-            self.printed_debug_once = false;
-            println!("🧭 视口偏移 -> ({}, {})", self.offset_x, self.offset_y);
+            // 只有移动视口时才输出offset信息
+            match code {
+                KeyCode::ArrowLeft | KeyCode::ArrowRight | KeyCode::ArrowUp | KeyCode::ArrowDown => {
+                    self.printed_debug_once = false;
+                    println!("🧭 视口偏移 -> ({}, {})", self.offset_x, self.offset_y);
+                }
+                _ => {}
+            }
         }
 
         Ok(())
@@ -650,26 +798,28 @@ impl EventHandler for SimpleMapViewer {
             // 🔧 立即更新鼠标位置
             self.last_mouse_pos = (x, y);
 
-            // 🎮 更丝滑的拖动:每移动8像素就响应(之前24像素)
+            // 🎮 鼠标拖动：使用与瓦片宽度匹配的像素比例
+            // 每移动 TILE_WIDTH(48) 像素 = 地图移动 1 格
+            // 为了更流畅的体验，使用 TILE_WIDTH/2 = 24 像素移动1格
             self.accumulated_drag_x += -delta_x;
             self.accumulated_drag_y += -delta_y;
 
-            // 降低阈值提升响应速度,同时保持2格对齐(偶数)
-            let step_x = ((self.accumulated_drag_x / 8.0) as i32) & !1;  // 强制偶数步进
-            let step_y = ((self.accumulated_drag_y / 8.0) as i32) & !1;
+            // 🔧 使用更合理的像素比例：24像素 = 1格地图移动
+            let step_x = (self.accumulated_drag_x / 24.0) as i32;
+            let step_y = (self.accumulated_drag_y / 24.0) as i32;
 
             if step_x != 0 || step_y != 0 {
-                // 🔧 边界也必须是偶数
-                let max_offset_x = ((self.width - VIEW_RANGE_X).max(OFFSET_X)) & !1;
-                let max_offset_y = ((self.height - VIEW_RANGE_Y).max(OFFSET_Y)) & !1;
+                // 🔧 使用与键盘一致的边界计算
+                let max_offset_x = (self.width - OFFSET_X).max(OFFSET_X);
+                let max_offset_y = (self.height - OFFSET_Y).max(OFFSET_Y);
                 
-                // 先计算新位置,再偶数对齐,最后clamp到边界
-                self.offset_x = ((self.offset_x + step_x).clamp(OFFSET_X, max_offset_x)) & !1;
-                self.offset_y = ((self.offset_y + step_y).clamp(OFFSET_Y, max_offset_y)) & !1;
+                // 计算新位置并clamp到边界
+                self.offset_x = (self.offset_x + step_x).clamp(OFFSET_X, max_offset_x);
+                self.offset_y = (self.offset_y + step_y).clamp(OFFSET_Y, max_offset_y);
 
                 // 减去已经移动的格子数对应的像素
-                self.accumulated_drag_x -= step_x as f32 * 8.0;
-                self.accumulated_drag_y -= step_y as f32 * 8.0;
+                self.accumulated_drag_x -= step_x as f32 * 24.0;
+                self.accumulated_drag_y -= step_y as f32 * 24.0;
 
                 self.printed_debug_once = false;
             }
@@ -694,8 +844,8 @@ impl EventHandler for SimpleMapViewer {
         self.draw_middle_layer(ctx, &mut canvas)?;
         self.draw_front_layer(ctx, &mut canvas)?;
 
-        // 🔍 绘制调试网格(按G键切换)
-        if self.show_grid {
+        // 🔍 绘制调试网格(按T键切换)
+        if self.show_tile_grid {
             self.draw_debug_grid(ctx, &mut canvas)?;
         }
 
@@ -707,15 +857,29 @@ impl EventHandler for SimpleMapViewer {
         Ok(())
     }
 }
+static FONT: &[u8] = include_bytes!("../resources/font/AlibabaPuHuiTi-3-55-Regular.ttf");
 
 fn main() -> GameResult {
-    println!("\n🔧 Simple Type 100 地图查看器，方向键或拖拽移动视角\n");
+    println!("\n🔧 Simple Type 100 地图查看器");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("📍 视角控制:");
+    println!("   方向键 / 鼠标拖拽 - 移动视角");
+    println!("\n🔍 显示控制:");
+    println!("   T键 - 切换地图网格（绿色坐标网格）");
+    println!("   B键 - 切换图片边框（彩色瓦片边框）");
+    println!("\n🎨 图层控制:");
+    println!("   1键 - 切换Back层显示（地表砖 - 红色边框）");
+    println!("   2键 - 切换Middle层显示（装饰 - 橙色边框）");
+    println!("   3键 - 切换Front层显示（建筑物 - 蓝色边框）");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
-    let (ctx, event_loop) = ContextBuilder::new("simple_map_viewer", "Mir2")
+    let (mut ctx, event_loop) = ContextBuilder::new("simple_map_viewer", "Mir2")
         .window_setup(WindowSetup::default().title("Simple Map Viewer"))
         .window_mode(WindowMode::default().dimensions(SCREEN_WIDTH, SCREEN_HEIGHT))
         .build()?;
-
-    let state = SimpleMapViewer::new("Map/0.map")?;
+    
+    ctx.gfx.add_font("AlibabaPuHui", FontData::from_slice(FONT)?);
+    ctx.gfx.window().set_ime_allowed(true);
+    let state = SimpleMapViewer::new("Map/0122.map")?;
     event::run(ctx, event_loop, state)
 }
