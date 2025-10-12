@@ -210,20 +210,29 @@ impl SimpleMapViewer {
                     Err(_) => continue,
                 };
 
-                if !self.printed_debug_once && draw_count < 3 {
+                if !self.printed_debug_once && draw_count < 10 {
                     println!(
                         "  ⬜ Back ({map_x},{map_y}) idx={} size={}x{} offset=({}, {})",
                         image_index, info.width, info.height, info.x, info.y
+                    );
+                }
+                
+                // 🔍 检查offset不为0的瓦片
+                if !self.printed_debug_once && (info.x != 0 || info.y != 0) && draw_count < 20 {
+                    println!(
+                        "  ⚠️ Back ({map_x},{map_y}) 有非零offset: idx={} offset=({}, {})",
+                        image_index, info.x, info.y
                     );
                 }
 
                 // 🔧 Back层坐标计算:
                 // C#从(2,2)开始绘制96x64瓦片,但应该覆盖(0,0)~(1,1)
                 // 所以需要减去2格的偏移: -2 * TILE_WIDTH, -2 * TILE_HEIGHT
+                // ⚠️ 不要手动加减info.x/info.y,纹理图像已经包含了这些偏移
                 let base_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
                 let base_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
-                let screen_x = base_x - (TILE_WIDTH * 2) as f32 - info.x as f32;
-                let screen_y = base_y - (TILE_HEIGHT * 2) as f32 - info.y as f32;
+                let screen_x = base_x - (TILE_WIDTH * 2) as f32;
+                let screen_y = base_y - (TILE_HEIGHT * 2) as f32;
 
                 // C#: Libraries.MapLibs[lib_index].Draw(image_index, screen_x, screen_y);
                 if lib.draw(ctx, canvas, image_index, screen_x, screen_y).is_ok() {
