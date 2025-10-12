@@ -450,7 +450,7 @@ impl MapRenderer {
         if let Some(map_lib) = get_map_library(lib_index as i16) {
             let mut lib = map_lib.lock().unwrap();
 
-            
+
             // 使用纹理缓存（先获取纹理再读取 info，避免重复 lock）
             match lib.get_or_create_texture(ctx, image_index) {
                 Ok(info) => {
@@ -941,6 +941,17 @@ impl MapViewerState {
             };
 
             // 构建详细信息（按图片格式）
+            // 
+            // 三层绘制逻辑中的索引计算：
+            // Back:   index = (back_image & 0x1FFFFFFF) - 1
+            // Middle: index = middle_image - 1  
+            // Front:  index = (front_image & 0x7FFF) - 1
+            //
+            // 注意：显示的是原始值（去掉标志位），不是减1后的索引
+            let back_image_value = cell.back_image & 0x1FFFFFFF;
+            let middle_image_value = cell.middle_image;
+            let front_image_value = cell.front_image & 0x7FFF;
+            
             let cell_info = format!(
                 "X: {}        Y: {}     Version        LibName    LibIndex\n\
                 BackImage:   {}       WemadeMir2     {}      {}\n\
@@ -953,42 +964,44 @@ impl MapViewerState {
                 Light: {}     Fishing: {}",
                 grid_x,
                 grid_y,
-                // index = (M2CellInfo[x, y].BackImage & 0x1FFFFFFF) - 1;
-                // BackImage
-                cell.back_image & 0x1FFFFFFF - 1,
+                // BackImage: 显示去掉高位标志后的原始值
+                back_image_value,
                 back_lib,
                 cell.back_index,
-                // MiddleImage
-                cell.middle_image & 0x1FFFFFFF,
+                // MiddleImage: 直接显示原始值（没有高位标志需要屏蔽）
+                middle_image_value,
                 middle_lib,
                 cell.middle_index,
-                // FrontImage
-                cell.front_image & 0x7FFF,
+                // FrontImage: 显示去掉高位标志后的原始值
+                front_image_value,
                 front_lib,
                 cell.front_index,
-                // Limit
+                // Limit: Back层的HighWall标记 (0x20000000)
                 if (cell.back_image & 0x20000000) != 0 {
                     "True"
                 } else {
                     "False"
                 },
+                // Limit: Front层的LowWall/MiddleBlock标记 (0x8000)
                 if (cell.front_image & 0x8000) != 0 {
                     "True"
                 } else {
                     "False"
                 },
-                // Door
+                // Door: DoorOffset的低7位
                 cell.door_offset & 0x7F,
+                // Door: DoorIndex的低7位
                 cell.door_index & 0x7F,
+                // Door: Entity - DoorClosed标记(door_offset.bit7) 或 Block标记(door_index.bit7)
                 if (cell.door_offset & 0x80) != 0 || (cell.door_index & 0x80) != 0 {
                     "True"
                 } else {
                     "False"
                 },
-                // Light
+                // Light: 光照强度
                 cell.light,
-                // Fishing
-                "False" // 地图文件中没有Fishing字段，默认False
+                // Fishing: 地图文件中没有此字段
+                "False"
             );
 
             // 🖱️ CellInfo 面板尺寸
