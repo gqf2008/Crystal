@@ -450,6 +450,7 @@ impl MapRenderer {
         if let Some(map_lib) = get_map_library(lib_index as i16) {
             let mut lib = map_lib.lock().unwrap();
 
+            
             // 使用纹理缓存（先获取纹理再读取 info，避免重复 lock）
             match lib.get_or_create_texture(ctx, image_index) {
                 Ok(info) => {
