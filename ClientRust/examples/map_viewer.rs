@@ -8,17 +8,11 @@
 // 运行: cargo run --example map_viewer --release
 
 use ggez::{
-    Context, ContextBuilder, GameResult,
-    event::{self, EventHandler},
-    graphics::{self, Canvas, Color, DrawParam, Text, TextFragment},
-    conf::{WindowMode, WindowSetup},
+    Context, ContextBuilder, GameResult, conf::{WindowMode, WindowSetup}, event::{self, EventHandler}, graphics::{self, Canvas, Color, DrawParam, FontData, Text}
 };
 use ggez::winit::event::MouseButton;
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
-
-// 引入项目中的模块
-use mir2_client::graphics::mlibrary::MLibrary;
+use mir2_client::graphics::libraries::{get_map_library, initialize_all_libraries};
 use mir2_client::objects::{MapReader, CellInfo};
 
 /// 相机系统
@@ -109,7 +103,6 @@ struct MapRenderer {
     cells: Vec<Vec<CellInfo>>,
     width: i32,
     height: i32,
-    map_libraries: Vec<Option<Arc<Mutex<MLibrary>>>>,
     animation_count: i32,
 }
 
@@ -121,54 +114,16 @@ impl MapRenderer {
     const CELL_HEIGHT: i32 = 32;  // 单个格子高度
     
     fn new(reader: MapReader) -> Self {
-        // 初始化地图库 (0-399)
-        let mut map_libraries = vec![None; 400];
-        
-        // 加载常用的地图库
-        Self::load_map_library(&mut map_libraries, "WemadeMir2/Tiles", 0);
-        Self::load_map_library(&mut map_libraries, "WemadeMir2/SmTiles", 1);
-        Self::load_map_library(&mut map_libraries, "WemadeMir3/Tiles", 2);
-        Self::load_map_library(&mut map_libraries, "Shanda/Tiles", 4);
-        Self::load_map_library(&mut map_libraries, "Shanda/SmTiles", 5);
-        
-        // 加载扩展库 (6-199)
-        for i in 6..=199 {
-            let path = format!("WemadeMir2/Tiles{}", i);
-            Self::load_map_library(&mut map_libraries, &path, i);
-        }
+        // 🔧 使用全局 LIBRARIES 初始化所有地图库
+        println!("📚 正在初始化地图库...");
+        initialize_all_libraries("Data").expect("初始化地图库失败");
+        println!("✅ 地图库初始化完成");
         
         Self {
             cells: reader.map_cells,
             width: reader.width,
             height: reader.height,
-            map_libraries,
             animation_count: 0,
-        }
-    }
-    
-    fn load_map_library(libraries: &mut Vec<Option<Arc<Mutex<MLibrary>>>>, name: &str, index: usize) {
-        let path = format!("Data/Map/{}", name);
-        match MLibrary::open(&path) {
-            Ok(lib) => {
-                println!("✅ [{}] {}", index, name);
-                libraries[index] = Some(Arc::new(Mutex::new(lib)));
-            }
-            Err(e) => {
-                // 只在非 NotFound 错误时打印
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    println!("⚠️  [{}] {} - {}", index, name, e);
-                }
-            }
-        }
-    }
-    
-    /// 获取地图库
-    fn get_library(&self, index: i16) -> Option<Arc<Mutex<MLibrary>>> {
-        let idx = index as usize;
-        if idx < self.map_libraries.len() {
-            self.map_libraries[idx].clone()
-        } else {
-            None
         }
     }
     
@@ -312,7 +267,7 @@ impl MapRenderer {
                  screen_width: f32, screen_height: f32,
                  lib_index: i32, image_index: usize, 
                  world_x: f32, world_y: f32) -> GameResult<()> {
-        if let Some(map_lib) = self.get_library(lib_index as i16) {
+        if let Some(map_lib) = get_map_library(lib_index as i16) {
             let mut lib = map_lib.lock().unwrap();
             
             // 使用纹理缓存（先获取纹理再读取 info，避免重复 lock）
@@ -471,19 +426,58 @@ impl MapViewerState {
         let grid_x = (world_x / MapRenderer::CELL_WIDTH as f32).floor() as i32;
         let grid_y = (world_y / MapRenderer::CELL_HEIGHT as f32).floor() as i32;
         
+        // 🖱️ 获取鼠标悬停单元格的详细信息
+        let mut cell_info = String::new();
+        if let Some(cell) = self.map_renderer.get_cell(grid_x, grid_y) {
+            cell_info.push_str(&format!("\n📍 地图坐标: ({}, {})\n", grid_x, grid_y));
+            
+            // Back层信息
+            if cell.back_index > 0 && cell.back_image > 0 {
+                cell_info.push_str(&format!(
+                    "⬜ Back: 库[{}] 图像[{}]\n",
+                    cell.back_index, cell.back_image
+                ));
+            } else {
+                cell_info.push_str("⬜ Back: 无\n");
+            }
+            
+            // Middle层信息
+            if cell.middle_index > 0 && cell.middle_image > 0 {
+                cell_info.push_str(&format!(
+                    "🟦 Middle: 库[{}] 图像[{}]\n",
+                    cell.middle_index, cell.middle_image
+                ));
+            } else {
+                cell_info.push_str("🟦 Middle: 无\n");
+            }
+            
+            // Front层信息
+            if cell.front_index > 0 && cell.front_image > 0 {
+                cell_info.push_str(&format!(
+                    "🟥 Front: 库[{}] 图像[{}]\n",
+                    cell.front_index, cell.front_image
+                ));
+            } else {
+                cell_info.push_str("🟥 Front: 无\n");
+            }
+        } else {
+            cell_info.push_str(&format!("\n📍 地图坐标: ({}, {}) - 超出范围\n", grid_x, grid_y));
+        }
+        
         // 构建UI文本
         let ui_text = format!(
-            "Map: {}\nSize: {}x{}\nFPS: {}\nZoom: {:.2}x\nCamera: ({:.0}, {:.0})\nGrid: ({}, {})\n\n按住左键拖拽 | 滚轮缩放",
+            "Map: {}\nSize: {}x{}\nFPS: {}\nZoom: {:.2}x\nCamera: ({:.0}, {:.0})\nGrid: ({}, {}){}\n按住左键拖拽 | 滚轮缩放",
             self.map_name,
             self.map_renderer.width, self.map_renderer.height,
             self.fps,
             self.camera.zoom,
             self.camera.x, self.camera.y,
-            grid_x, grid_y
+            grid_x, grid_y,
+            cell_info
         );
         
-        // 绘制半透明背景
-        let bg_rect = graphics::Rect::new(10.0, 10.0, 300.0, 180.0);
+        // 绘制半透明背景 (增加高度以容纳更多信息)
+        let bg_rect = graphics::Rect::new(10.0, 10.0, 350.0, 280.0);
         let bg_mesh = graphics::Mesh::new_rectangle(
             ctx,
             graphics::DrawMode::fill(),
@@ -493,14 +487,11 @@ impl MapViewerState {
         canvas.draw(&bg_mesh, DrawParam::default());
         
         // 绘制文本
-        let text = Text::new(TextFragment {
-            text: ui_text,
-            color: Some(Color::WHITE),
-            font: Some("LiberationMono-Regular".into()),
-            scale: Some(graphics::PxScale::from(16.0)),
-        });
+        let mut text = Text::new(ui_text);
+        text.set_font("AlibabaPuHui"); // 🔧 设置中文字体
+        text.set_scale(16.0);
         
-        canvas.draw(&text, DrawParam::default().dest([20.0, 20.0]));
+        canvas.draw(&text, DrawParam::default().dest([20.0, 20.0]).color(Color::WHITE));
         
         Ok(())
     }
@@ -513,7 +504,7 @@ fn main() -> GameResult {
         args[1].clone()
     } else {
         // 默认地图
-        "Map/0.map".to_string()
+        "Map/0122.map".to_string()
     };
     
     println!("\n╔══════════════════════════════════════════╗");
@@ -533,7 +524,10 @@ fn main() -> GameResult {
             .dimensions(1280.0, 960.0)
             .resizable(true))
         .build()?;
-    
+    static FONT: &[u8] = include_bytes!("../resources/font/AlibabaPuHuiTi-3-55-Regular.ttf");
+     ctx.gfx
+        .add_font("AlibabaPuHui", FontData::from_slice(FONT)?);
+    ctx.gfx.window().set_ime_allowed(true);
     // 创建状态
     let state = MapViewerState::new(&mut ctx, &map_path)?;
     

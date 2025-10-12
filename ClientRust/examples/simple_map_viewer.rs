@@ -15,10 +15,10 @@ use mir2_client::objects::{CellInfo, MapReader};
 // 📚 MapLibs 索引说明 (与C#原版一致)
 // MapLibs[400] 数组虽然定义了400个元素,但只有部分索引被初始化:
 //   0-29, 90              - WeMade Mir2
-//   100-119, 190          - Shanda Mir2  
+//   100-119, 190          - Shanda Mir2
 //   200-213, 215-228, ... - WeMade Mir3 (每15个为一组,5组)
 //   300-313, 315-328, ... - Shanda Mir3 (每15个为一组,5组)
-// 
+//
 // ⚠️ 索引范围 214-299, 314-399 中有很多**未初始化的空位**
 // 地图文件可能引用这些空索引(如257),这是**正常现象**,会被跳过绘制
 // C#中 MapLibs[257] == null,不会崩溃,Rust返回None同样安全
@@ -38,13 +38,18 @@ const SCREEN_HEIGHT: f32 = 1080.0;
 /// ViewRangeX = OffSetX + 6 = 20 + 6 = 26
 /// ViewRangeY = OffSetY + 6 = 16 + 6 = 22
 // ⚠️ 由于Back层只绘制偶数坐标,offset也必须是偶数以保持对齐
-const OFFSET_X: i32 = ((SCREEN_WIDTH as i32 / 2) / TILE_WIDTH) & !1;        // 1920/2/48 = 20 (偶数)
+const OFFSET_X: i32 = ((SCREEN_WIDTH as i32 / 2) / TILE_WIDTH) & !1; // 1920/2/48 = 20 (偶数)
 const OFFSET_Y: i32 = ((SCREEN_HEIGHT as i32 / 2) / TILE_HEIGHT - 1) & !1; // 1080/2/32-1 = 16 (偶数)
-// 🔧 VIEW_RANGE需要足够大以覆盖整个屏幕+额外缓冲
-// 屏幕宽度1920需要至少40格(1920/48),高度1080需要至少34格(1080/32)
-// 从中心offset=20向左右扩展,需要至少20+缓冲格才能覆盖到屏幕边缘
-const VIEW_RANGE_X: i32 = 26;  // 20+26=46,足够覆盖屏幕宽度并有余量
-const VIEW_RANGE_Y: i32 = 24;  // 16+24=40,增加2格以完全消除底部黑边
+
+/// 🎯 坐标微调参数 - 用于调试和修正渲染偏移
+/// C# 公式中的 "- OffSetX" 可能需要额外调整,这些常量用于手动微调
+const FINE_TUNE_X: i32 = 0; // 水平微调(像素) - 正值向右偏移
+const FINE_TUNE_Y: i32 = 0; // 垂直微调(像素) - 正值向下偏移
+                                                                           // 🔧 VIEW_RANGE需要足够大以覆盖整个屏幕+额外缓冲
+                                                                           // 屏幕宽度1920需要至少40格(1920/48),高度1080需要至少34格(1080/32)
+                                                                           // 从中心offset=20向左右扩展,需要至少20+缓冲格才能覆盖到屏幕边缘
+const VIEW_RANGE_X: i32 = OFFSET_X + 6; // 20+26=46,足够覆盖屏幕宽度并有余量
+const VIEW_RANGE_Y: i32 = OFFSET_Y + 6; // 16+24=40,增加2格以完全消除底部黑边
 
 /// 绘制视窗 (横向)
 const VIEW_RANGE: i32 = VIEW_RANGE_X;
@@ -63,12 +68,12 @@ struct SimpleMapViewer {
     accumulated_drag_x: f32,
     accumulated_drag_y: f32,
     // 🔍 调试显示开关
-    show_tile_grid: bool,      // T键：地图网格（绿色坐标网格）
-    show_image_border: bool,   // B键：图片边框（彩色瓦片边框）
+    show_tile_grid: bool,    // T键：地图网格（绿色坐标网格）
+    show_image_border: bool, // B键：图片边框（彩色瓦片边框）
     // 🎨 图层渲染开关
-    render_back: bool,         // 1键：Back层
-    render_middle: bool,       // 2键：Middle层
-    render_front: bool,        // 3键：Front层
+    render_back: bool,   // 1键：Back层
+    render_middle: bool, // 2键：Middle层
+    render_front: bool,  // 3键：Front层
     // 🖱️ 鼠标当前位置(用于显示悬停信息)
     mouse_x: f32,
     mouse_y: f32,
@@ -91,13 +96,13 @@ impl SimpleMapViewer {
         let max_offset_y = (reader.height - OFFSET_Y).max(OFFSET_Y);
         println!(
             "🎯 视野范围: 绘制区域 offset±[{},{}] 格 [总宽度≈{}格]",
-            VIEW_RANGE_X, VIEW_RANGE_Y,
+            VIEW_RANGE_X,
+            VIEW_RANGE_Y,
             VIEW_RANGE_X * 2 + 1
         );
         println!(
             "🎯 可移动范围: offset_x={}~{}, offset_y={}~{} (地图:{}x{})",
-            OFFSET_X, max_offset_x, OFFSET_Y, max_offset_y,
-            reader.width, reader.height
+            OFFSET_X, max_offset_x, OFFSET_Y, max_offset_y, reader.width, reader.height
         );
 
         // 🔧 使用全局 LIBRARIES 初始化所有地图库
@@ -120,11 +125,11 @@ impl SimpleMapViewer {
             last_mouse_pos: (0.0, 0.0),
             accumulated_drag_x: 0.0,
             accumulated_drag_y: 0.0,
-            show_tile_grid: true,      // 🔍 默认开启地图网格
-            show_image_border: true,   // 🔍 默认开启图片边框
-            render_back: true,         // 🎨 默认渲染Back层
-            render_middle: true,       // 🎨 默认渲染Middle层
-            render_front: true,        // 🎨 默认渲染Front层
+            show_tile_grid: true,    // 🔍 默认开启地图网格
+            show_image_border: true, // 🔍 默认开启图片边框
+            render_back: true,       // 🎨 默认渲染Back层
+            render_middle: true,     // 🎨 默认渲染Middle层
+            render_front: true,      // 🎨 默认渲染Front层
             mouse_x: 0.0,
             mouse_y: 0.0,
         })
@@ -141,7 +146,7 @@ impl SimpleMapViewer {
         if !self.render_back {
             return Ok(());
         }
-        
+
         let mut draw_count = 0;
         let mut skip_count = 0; // 统计跳过的格子
 
@@ -188,10 +193,17 @@ impl SimpleMapViewer {
                 };
                 if cell.back_image <= 0 || cell.back_index < 0 {
                     skip_count += 1; // 计数空格子
-                    // 🔍 调试输出：检查黑色区域 (10-20, 38-46)
-                    if !self.printed_debug_once && map_x >= 10 && map_x <= 20 && map_y >= 38 && map_y <= 46 {
-                        println!("  ⚫ Back ({map_x},{map_y}) SKIPPED: back_image={}, back_index={}", 
-                            cell.back_image, cell.back_index);
+                                     // 🔍 调试输出：检查黑色区域 (10-20, 38-46)
+                    if !self.printed_debug_once
+                        && map_x >= 10
+                        && map_x <= 20
+                        && map_y >= 38
+                        && map_y <= 46
+                    {
+                        println!(
+                            "  ⚫ Back ({map_x},{map_y}) SKIPPED: back_image={}, back_index={}",
+                            cell.back_image, cell.back_index
+                        );
                     }
                     continue;
                 }
@@ -216,7 +228,7 @@ impl SimpleMapViewer {
                         image_index, info.width, info.height, info.x, info.y
                     );
                 }
-                
+
                 // 🔍 检查offset不为0的瓦片
                 if !self.printed_debug_once && (info.x != 0 || info.y != 0) && draw_count < 20 {
                     println!(
@@ -225,22 +237,37 @@ impl SimpleMapViewer {
                     );
                 }
 
-                // 🔧 Back层坐标计算:
-                // C#从(2,2)开始绘制96x64瓦片,但应该覆盖(0,0)~(1,1)
-                // 所以需要减去2格的偏移: -2 * TILE_WIDTH, -2 * TILE_HEIGHT
-                // ⚠️ 不要手动加减info.x/info.y,纹理图像已经包含了这些偏移
-                let base_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
-                let base_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
-                let screen_x = base_x - (TILE_WIDTH * 2) as f32;
-                let screen_y = base_y - (TILE_HEIGHT * 2) as f32;
+                // 🎯 Back层坐标计算 - 完全匹配C#公式+可调微调
+                // 
+                // C# 公式: drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X
+                //
+                // 参数说明:
+                // - map_x, map_y: 地图瓦片坐标 (如 24, 8)
+                // - offset_x, offset_y: 当前视口中心坐标 (初始为 OFFSET_X, OFFSET_Y)
+                // - OFFSET_X, OFFSET_Y: 屏幕中心偏移常量 (20格, 16格)
+                // - FINE_TUNE_X/Y: 额外的像素级微调 (可通过按键调整)
+                //
+                // 坐标转换步骤:
+                // 1. (map_x - offset_x) → 相对于视口中心的格子偏移
+                // 2. + OFFSET_X → 移动到屏幕中心位置
+                // 3. * TILE_WIDTH → 转换为像素坐标
+                // 4. - OFFSET_X → C#中的微调(减去20像素,不是20*48!)
+                // 5. + FINE_TUNE_X → 额外的手动微调
+                let screen_x =
+                    ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH - OFFSET_X + FINE_TUNE_X)
+                        as f32;
+                let screen_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT + FINE_TUNE_Y) as f32;
 
                 // C#: Libraries.MapLibs[lib_index].Draw(image_index, screen_x, screen_y);
-                if lib.draw(ctx, canvas, image_index, screen_x, screen_y).is_ok() {
+                if lib
+                    .draw(ctx, canvas, image_index, screen_x, screen_y)
+                    .is_ok()
+                {
                     draw_count += 1;
-                    
+
                     // 🔴 调试：绘制红色边框显示Back层瓦片范围
                     if self.show_image_border {
-                        use ggez::graphics::{Mesh, DrawMode, Rect};
+                        use ggez::graphics::{DrawMode, Mesh, Rect};
                         let border = Mesh::new_rectangle(
                             ctx,
                             DrawMode::stroke(1.0),
@@ -257,7 +284,10 @@ impl SimpleMapViewer {
 
         if !self.printed_debug_once {
             println!("  Back 层绘制数量: {draw_count}, 跳过: {skip_count}");
-            println!("  🔍 视野范围: start=({},{}) end=({},{})", start_x, start_y, end_x, end_y);
+            println!(
+                "  🔍 视野范围: start=({},{}) end=({},{})",
+                start_x, start_y, end_x, end_y
+            );
         }
 
         Ok(())
@@ -268,7 +298,7 @@ impl SimpleMapViewer {
         if !self.render_middle {
             return Ok(());
         }
-        
+
         let mut draw_count = 0;
 
         // 参考代码：Middle层使用REPLACE模式
@@ -328,17 +358,24 @@ impl SimpleMapViewer {
                     );
                 }
 
-                // 🔧 简化坐标计算,与网格对齐(与Back层相同)
-                let screen_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
-                let screen_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
+                // 🔧 Middle层坐标计算 - 与Back层相同
+                // C# line 11678: drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
+                // C# line 11673: drawY = (y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y;
+                let screen_x =
+                    ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH - OFFSET_X + FINE_TUNE_X)
+                        as f32;
+                let screen_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT + FINE_TUNE_Y) as f32;
 
                 // C#: Libraries.MapLibs[lib_index].Draw(image_index, screen_x, screen_y);
-                if lib.draw(ctx, canvas, image_index, screen_x, screen_y).is_ok() {
+                if lib
+                    .draw(ctx, canvas, image_index, screen_x, screen_y)
+                    .is_ok()
+                {
                     draw_count += 1;
-                    
+
                     // 🟧 调试：绘制橙色边框显示Middle层瓦片范围
                     if self.show_image_border {
-                        use ggez::graphics::{Mesh, DrawMode, Rect};
+                        use ggez::graphics::{DrawMode, Mesh, Rect};
                         let border = Mesh::new_rectangle(
                             ctx,
                             DrawMode::stroke(1.0),
@@ -365,7 +402,7 @@ impl SimpleMapViewer {
         if !self.render_front {
             return Ok(());
         }
-        
+
         let mut draw_count = 0;
         let mut skip_no_lib = 0;
         let mut skip_no_info = 0;
@@ -425,12 +462,16 @@ impl SimpleMapViewer {
                     );
                 }
 
-                // 🔧 简化坐标计算,与网格对齐(与Back/Middle层相同)
+                // 🔧 Front层坐标计算 - 与Back/Middle层相同
+                // C# line 11718: drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
+                // C# line 11705: drawY = (y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y;
                 // Front层需要额外减去图像高度，让建筑物"站"在格子上
-                let draw_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
-                let draw_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
+                let draw_x =
+                    ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH - OFFSET_X + FINE_TUNE_X)
+                        as f32;
+                let draw_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT + FINE_TUNE_Y) as f32;
                 let screen_x = draw_x;
-                let screen_y = draw_y - info.height as f32 + TILE_HEIGHT as f32;
+                let screen_y = draw_y;
 
                 // 🔧 使用 MLibrary 的 draw_tinted 方法绘制（支持 Mask 层）
                 // C#: Libraries.MapLibs[lib_index].DrawTinted(image_index, point, Color.White, Tint, false);
@@ -441,7 +482,7 @@ impl SimpleMapViewer {
                         canvas,
                         image_index,
                         screen_x,
-                        screen_y,
+                        screen_y - info.height as f32,
                         Color::WHITE,
                         Color::WHITE, // Tint颜色（光照效果）
                         false,        // offset = false
@@ -449,10 +490,10 @@ impl SimpleMapViewer {
                     .is_ok()
                 {
                     draw_count += 1;
-                    
+
                     // 🔵 调试：绘制蓝色边框显示Front层瓦片范围
                     if self.show_image_border {
-                        use ggez::graphics::{Mesh, DrawMode, Rect};
+                        use ggez::graphics::{DrawMode, Mesh, Rect};
                         let border = Mesh::new_rectangle(
                             ctx,
                             DrawMode::stroke(1.0),
@@ -463,7 +504,7 @@ impl SimpleMapViewer {
                             canvas.draw(&rect, graphics::DrawParam::default());
                         }
                     }
-                    
+
                     if !self.printed_debug_once && draw_count <= 5 {
                         // 检查是否有Mask层
                         if let Ok(img_info) = lib.get_or_create_texture(ctx, image_index) {
@@ -481,7 +522,9 @@ impl SimpleMapViewer {
         if !self.printed_debug_once {
             println!("  Front 层绘制数量: {draw_count}");
             if skip_no_lib > 0 {
-                println!("  ℹ️ 跳过（库未初始化）: {skip_no_lib} - 正常现象,地图引用了MapLibs空索引");
+                println!(
+                    "  ℹ️ 跳过（库未初始化）: {skip_no_lib} - 正常现象,地图引用了MapLibs空索引"
+                );
             }
             if skip_no_info > 0 {
                 println!("  ℹ️ 跳过（图像索引超出范围）: {skip_no_info}");
@@ -496,8 +539,8 @@ impl SimpleMapViewer {
 
     /// 🔍 绘制调试网格：显示瓦片坐标和边界
     fn draw_debug_grid(&self, ctx: &Context, canvas: &mut Canvas) -> GameResult {
-        use ggez::graphics::{Mesh, DrawMode, Color};
-        
+        use ggez::graphics::{Color, DrawMode, Mesh};
+
         // 绘制范围：屏幕可见区域（从0开始，不跳过任何坐标）
         let start_x = (self.offset_x - VIEW_RANGE_X).max(0);
         let start_y = (self.offset_y - VIEW_RANGE_Y).max(0);
@@ -506,21 +549,18 @@ impl SimpleMapViewer {
 
         // 网格颜色：半透明绿色
         let grid_color = Color::from_rgba(0, 255, 0, 100);
-        
+
         // 绘制垂直线和水平线
         // 🔧 网格线标记格子边界,使用简化坐标公式(不含 -OFFSET_X)
         // 而瓦片图像会根据纹理offset调整位置对齐网格
         for map_x in start_x..=end_x {
             // 简化公式：直接计算格子边界位置
             let screen_x = ((map_x - self.offset_x + OFFSET_X) * TILE_WIDTH) as f32;
-            
+
             // 垂直线
             let line = Mesh::new_line(
                 ctx,
-                &[
-                    [screen_x, 0.0],
-                    [screen_x, SCREEN_HEIGHT as f32],
-                ],
+                &[[screen_x, 0.0], [screen_x, SCREEN_HEIGHT as f32]],
                 1.0,
                 grid_color,
             )?;
@@ -530,20 +570,17 @@ impl SimpleMapViewer {
         for map_y in start_y..=end_y {
             // Y方向不需要额外偏移（与瓦片Y坐标基准一致）
             let screen_y = ((map_y - self.offset_y + OFFSET_Y) * TILE_HEIGHT) as f32;
-            
+
             // 水平线
             let line = Mesh::new_line(
                 ctx,
-                &[
-                    [0.0, screen_y],
-                    [SCREEN_WIDTH as f32, screen_y],
-                ],
+                &[[0.0, screen_y], [SCREEN_WIDTH as f32, screen_y]],
                 1.0,
                 grid_color,
             )?;
             canvas.draw(&line, graphics::DrawParam::default());
         }
-        
+
         // 🔍 在每个格子中心绘制坐标文本（每4格显示一次，避免太密集）
         for map_x in (start_x..=end_x).step_by(4) {
             for map_y in (start_y..=end_y).step_by(4) {
@@ -579,8 +616,8 @@ impl SimpleMapViewer {
 
     /// 🖱️ 绘制鼠标悬停信息:显示当前坐标和资源编号
     fn draw_hover_info(&self, ctx: &Context, canvas: &mut Canvas) -> GameResult {
-        use ggez::graphics::{Text, DrawParam, PxScale};
-        
+        use ggez::graphics::{DrawParam, PxScale, Text};
+
         // 🔧 计算鼠标对应的地图坐标（使用与网格线一致的公式）
         // 网格线绘制公式: screen_x = (map_x - offset_x + OFFSET_X) * TILE_WIDTH
         // 逆向推导:
@@ -588,7 +625,7 @@ impl SimpleMapViewer {
         //   map_x = screen_x / TILE_WIDTH + offset_x - OFFSET_X
         let map_x = ((self.mouse_x / TILE_WIDTH as f32).floor() as i32 + self.offset_x - OFFSET_X)
             .clamp(0, self.width - 1);
-        
+
         // Y方向：使用网格线公式，并限制在有效范围内
         // screen_y = (map_y - offset_y + OFFSET_Y) * TILE_HEIGHT
         // map_y = screen_y / TILE_HEIGHT + offset_y - OFFSET_Y
@@ -602,27 +639,34 @@ impl SimpleMapViewer {
         let cell = &self.cells[map_x as usize][map_y as usize];
 
         // 构建信息文本
-        let mut info_lines = vec![
-            format!("📍 地图坐标: ({}, {})", map_x, map_y),
-        ];
+        let mut info_lines = vec![format!("📍 地图坐标: ({}, {})", map_x, map_y)];
 
         // Back层信息
         if cell.back_index > 0 && cell.back_image > 0 {
-            info_lines.push(format!("⬜ Back: 库[{}] 图像[{}]", cell.back_index, cell.back_image));
+            info_lines.push(format!(
+                "⬜ Back: 库[{}] 图像[{}]",
+                cell.back_index, cell.back_image
+            ));
         } else {
             info_lines.push("⬜ Back: 无".to_string());
         }
 
         // Middle层信息
         if cell.middle_index > 0 && cell.middle_image > 0 {
-            info_lines.push(format!("🟦 Middle: 库[{}] 图像[{}]", cell.middle_index, cell.middle_image));
+            info_lines.push(format!(
+                "🟦 Middle: 库[{}] 图像[{}]",
+                cell.middle_index, cell.middle_image
+            ));
         } else {
             info_lines.push("🟦 Middle: 无".to_string());
         }
 
         // Front层信息
         if cell.front_index > 0 && cell.front_image > 0 {
-            info_lines.push(format!("🟥 Front: 库[{}] 图像[{}]", cell.front_index, cell.front_image));
+            info_lines.push(format!(
+                "🟥 Front: 库[{}] 图像[{}]",
+                cell.front_index, cell.front_image
+            ));
         } else {
             info_lines.push("🟥 Front: 无".to_string());
         }
@@ -630,11 +674,11 @@ impl SimpleMapViewer {
         // 绘制半透明背景框
         let box_width = 280.0;
         let box_height = (info_lines.len() as f32 * 22.0) + 10.0;
-        
+
         // 🔧 计算信息框位置，确保不超出屏幕边界
         let mut box_x = self.mouse_x + 15.0;
         let mut box_y = self.mouse_y + 15.0;
-        
+
         // 检查右边界：如果信息框右边超出屏幕，则显示在鼠标左侧
         if box_x + box_width > SCREEN_WIDTH {
             box_x = self.mouse_x - box_width - 15.0;
@@ -643,7 +687,7 @@ impl SimpleMapViewer {
                 box_x = SCREEN_WIDTH - box_width - 5.0;
             }
         }
-        
+
         // 检查下边界：如果信息框底部超出屏幕，则显示在鼠标上方
         if box_y + box_height > SCREEN_HEIGHT {
             box_y = self.mouse_y - box_height - 15.0;
@@ -652,12 +696,12 @@ impl SimpleMapViewer {
                 box_y = SCREEN_HEIGHT - box_height - 5.0;
             }
         }
-        
+
         // 确保不会超出左边界和上边界
         box_x = box_x.max(5.0);
         box_y = box_y.max(5.0);
 
-        use ggez::graphics::{Mesh, DrawMode, Rect};
+        use ggez::graphics::{DrawMode, Mesh, Rect};
         let bg_rect = Mesh::new_rectangle(
             ctx,
             DrawMode::fill(),
@@ -728,29 +772,64 @@ impl EventHandler for SimpleMapViewer {
                 KeyCode::KeyT => {
                     // 🔍 T键：切换地图网格显示（绿色坐标网格）
                     self.show_tile_grid = !self.show_tile_grid;
-                    println!("🔍 地图网格: {}", if self.show_tile_grid { "✅ 开启" } else { "❌ 关闭" });
+                    println!(
+                        "🔍 地图网格: {}",
+                        if self.show_tile_grid {
+                            "✅ 开启"
+                        } else {
+                            "❌ 关闭"
+                        }
+                    );
                 }
                 KeyCode::KeyB => {
                     // 🔍 B键：切换图片边框显示（彩色瓦片边框）
                     self.show_image_border = !self.show_image_border;
-                    println!("🔍 图片边框: {}", if self.show_image_border { "✅ 开启" } else { "❌ 关闭" });
+                    println!(
+                        "🔍 图片边框: {}",
+                        if self.show_image_border {
+                            "✅ 开启"
+                        } else {
+                            "❌ 关闭"
+                        }
+                    );
                 }
                 KeyCode::Digit1 => {
                     // 🎨 1键：切换Back层渲染
                     self.render_back = !self.render_back;
-                    println!("🎨 Back层: {}", if self.render_back { "✅ 显示" } else { "❌ 隐藏" });
+                    println!(
+                        "🎨 Back层: {}",
+                        if self.render_back {
+                            "✅ 显示"
+                        } else {
+                            "❌ 隐藏"
+                        }
+                    );
                     self.printed_debug_once = false;
                 }
                 KeyCode::Digit2 => {
                     // 🎨 2键：切换Middle层渲染
                     self.render_middle = !self.render_middle;
-                    println!("🎨 Middle层: {}", if self.render_middle { "✅ 显示" } else { "❌ 隐藏" });
+                    println!(
+                        "🎨 Middle层: {}",
+                        if self.render_middle {
+                            "✅ 显示"
+                        } else {
+                            "❌ 隐藏"
+                        }
+                    );
                     self.printed_debug_once = false;
                 }
                 KeyCode::Digit3 => {
                     // 🎨 3键：切换Front层渲染
                     self.render_front = !self.render_front;
-                    println!("🎨 Front层: {}", if self.render_front { "✅ 显示" } else { "❌ 隐藏" });
+                    println!(
+                        "🎨 Front层: {}",
+                        if self.render_front {
+                            "✅ 显示"
+                        } else {
+                            "❌ 隐藏"
+                        }
+                    );
                     self.printed_debug_once = false;
                 }
                 _ => {}
@@ -758,7 +837,10 @@ impl EventHandler for SimpleMapViewer {
 
             // 只有移动视口时才输出offset信息
             match code {
-                KeyCode::ArrowLeft | KeyCode::ArrowRight | KeyCode::ArrowUp | KeyCode::ArrowDown => {
+                KeyCode::ArrowLeft
+                | KeyCode::ArrowRight
+                | KeyCode::ArrowUp
+                | KeyCode::ArrowDown => {
                     self.printed_debug_once = false;
                     println!("🧭 视口偏移 -> ({}, {})", self.offset_x, self.offset_y);
                 }
@@ -807,7 +889,7 @@ impl EventHandler for SimpleMapViewer {
         // 🖱️ 更新鼠标位置(用于悬停显示)
         self.mouse_x = x;
         self.mouse_y = y;
-        
+
         if self.dragging {
             let delta_x = x - self.last_mouse_pos.0;
             let delta_y = y - self.last_mouse_pos.1;
@@ -829,7 +911,7 @@ impl EventHandler for SimpleMapViewer {
                 // 🔧 使用与键盘一致的边界计算
                 let max_offset_x = (self.width - OFFSET_X).max(OFFSET_X);
                 let max_offset_y = (self.height - OFFSET_Y).max(OFFSET_Y);
-                
+
                 // 计算新位置并clamp到边界
                 self.offset_x = (self.offset_x + step_x).clamp(OFFSET_X, max_offset_x);
                 self.offset_y = (self.offset_y + step_y).clamp(OFFSET_Y, max_offset_y);
@@ -894,8 +976,9 @@ fn main() -> GameResult {
         .window_setup(WindowSetup::default().title("Simple Map Viewer"))
         .window_mode(WindowMode::default().dimensions(SCREEN_WIDTH, SCREEN_HEIGHT))
         .build()?;
-    
-    ctx.gfx.add_font("AlibabaPuHui", FontData::from_slice(FONT)?);
+
+    ctx.gfx
+        .add_font("AlibabaPuHui", FontData::from_slice(FONT)?);
     ctx.gfx.window().set_ime_allowed(true);
     let state = SimpleMapViewer::new("Map/0122.map")?;
     event::run(ctx, event_loop, state)
