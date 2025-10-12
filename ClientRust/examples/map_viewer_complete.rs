@@ -23,8 +23,8 @@ const SCREEN_WIDTH: f32 = 1920.0;
 const SCREEN_HEIGHT: f32 = 1080.0;
 
 /// 视野参数（与 C# 客户端保持一致）
-const OFFSET_X: i32 = ((SCREEN_WIDTH as i32 / 2) / TILE_WIDTH) & !1; // 20（偶数）
-const OFFSET_Y: i32 = ((SCREEN_HEIGHT as i32 / 2) / TILE_HEIGHT - 1) & !1; // 16（偶数）
+const OFFSET_X: i32 = ((SCREEN_WIDTH as i32 / 2) / TILE_WIDTH); // 20（偶数）
+const OFFSET_Y: i32 = ((SCREEN_HEIGHT as i32 / 2) / TILE_HEIGHT - 1); // 16（偶数）
 const VIEW_RANGE_X: i32 = OFFSET_X + 6; // 26，覆盖屏幕宽度并留缓冲
 const VIEW_RANGE_Y: i32 = OFFSET_Y + 6; // 22，覆盖屏幕高度并留缓冲
 
@@ -57,15 +57,17 @@ struct MapViewer {
 
 impl MapViewer {
     fn new(map_path: &str) -> GameResult<Self> {
+         println!("📚 正在初始化地图库...");
+        initialize_all_libraries("Data")
+            .map_err(|err| ggez::GameError::ResourceLoadError(format!("初始化地图库失败: {err}")))?;
+        println!("✅ 地图库初始化完成");
+
         println!("📂 正在加载地图: {map_path}");
         let reader = MapReader::new(map_path)
             .map_err(|err| ggez::GameError::ResourceLoadError(err.to_string()))?;
         println!("✅ 地图尺寸: {} x {}", reader.width, reader.height);
 
-        println!("📚 正在初始化地图库...");
-        initialize_all_libraries("Data")
-            .map_err(|err| ggez::GameError::ResourceLoadError(format!("初始化地图库失败: {err}")))?;
-        println!("✅ 地图库初始化完成");
+       
 
         println!("🎮 控制说明:");
         println!("  ↑↓←→ / WASD     - 平移视口 (两格为单位)");
@@ -81,8 +83,6 @@ impl MapViewer {
             cells: reader.map_cells,
             width: reader.width,
             height: reader.height,
-            // 🔧 初始offset设置为(OFFSET_X, OFFSET_Y),使视窗左上角对齐地图(0,0)
-            // 这样地图(0,0)就会出现在屏幕左上角,而不是中心
             offset_x: OFFSET_X,
             offset_y: OFFSET_Y,
             dragging: false,

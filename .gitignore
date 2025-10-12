@@ -366,3 +366,4 @@ FodyWeavers.xsd
 /SharedRust/target
 /ClientRust/target
 /ClientRust/Data
+/target
