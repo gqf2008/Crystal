@@ -177,10 +177,14 @@ impl MapRenderer {
         // BACK LAYER (大地砖)
         // ========================================
         if show_back {
-            // 传奇地图特点：Back层只渲染偶数行列，通过大瓦片(48x32)覆盖相邻格子
-            for y in (start_y..=end_y).step_by(2) {
+            // 传奇地图特点：Back层只渲染偶数行列，通过大瓦片(96x64)覆盖4个格子
+            // 🔧 关键修复：必须从偶数坐标开始，不能直接用 step_by(2)
+            let back_start_y = if start_y % 2 == 0 { start_y } else { start_y + 1 };
+            let back_start_x = if start_x % 2 == 0 { start_x } else { start_x + 1 };
+            
+            for y in (back_start_y..=end_y).step_by(2) {
                 // 只处理偶数行
-                for x in (start_x..=end_x).step_by(2) {
+                for x in (back_start_x..=end_x).step_by(2) {
                     // 只处理偶数列
                     if let Some(cell) = self.get_cell(x, y) {
                         //     if ((M2CellInfo[x, y].BackImage == 0) || (M2CellInfo[x, y].BackIndex == -1)) continue;
@@ -389,12 +393,12 @@ impl MapRenderer {
                 Ok(info) => {
                     // 从ImageInfo获取实际的纹理
                     if let Some(ref texture) = info.image {
-                        // 🔧 简化调试：直接计算屏幕坐标
-                        // 世界坐标转屏幕坐标（简化版）
-                        let screen_x = world_x - camera.x + screen_width / 2.0;
-                        let screen_y = world_y - camera.y + screen_height / 2.0;
+                        // 🔧 修复坐标计算：正确的世界坐标转屏幕坐标
+                        // 必须考虑相机缩放系数
+                        let screen_x = (world_x - camera.x) * camera.zoom + screen_width / 2.0;
+                        let screen_y = (world_y - camera.y) * camera.zoom + screen_height / 2.0;
 
-                        // 应用图像offset
+                        // 应用图像offset（如果需要的话）
                         let final_x = screen_x;
                         let final_y = screen_y;
 
@@ -456,14 +460,14 @@ impl MapRenderer {
                 Ok(info) => {
                     // 从ImageInfo获取实际的纹理
                     if let Some(ref texture) = info.image {
-                        // 🔧 简化调试：直接计算屏幕坐标
-                        // 世界坐标转屏幕坐标（简化版）
-                        let screen_x = world_x - camera.x + screen_width / 2.0;
-                        let screen_y = world_y - camera.y + screen_height / 2.0;
+                        // 🔧 修复坐标计算：正确的世界坐标转屏幕坐标
+                        // 必须考虑相机缩放系数
+                        let screen_x = (world_x - camera.x) * camera.zoom + screen_width / 2.0;
+                        let screen_y = (world_y - camera.y) * camera.zoom + screen_height / 2.0;
 
-                        // 应用图像offset
+                        // 应用图像offset和Front层特殊的Y偏移
                         let final_x = screen_x;
-                        let final_y = screen_y - info.height as f32 + Self::CELL_HEIGHT as f32;
+                        let final_y = screen_y - (info.height as f32 - Self::CELL_HEIGHT as f32) * camera.zoom;
 
                         // 🔧 测试Y轴翻转：DirectX(Y向下) vs OpenGL(Y向上)
                         // 方案1: 使用负Y缩放翻转图像，并调整Y坐标补偿高度
