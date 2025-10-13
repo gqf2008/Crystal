@@ -263,7 +263,9 @@ impl ImageInfo {
                 decompressed.resize(expected_size, 0);
             }
         }
-       // Self::apply_auto_alpha(&mut decompressed);
+        // 🔧 关键修复：处理黑色背景透明化
+        // Back层的地砖有纯黑色背景(RGB=0,0,0,alpha=255)，需要转为透明
+        Self::bgra_to_transparent(&mut decompressed);
         Ok(decompressed)
     }
 
@@ -278,11 +280,16 @@ impl ImageInfo {
             let r = chunk[2];
             let a = chunk[3];
             
-            // 🔧 关键修复：只处理纯黑色+不透明的像素
-            // 如果是黑色（RGB都为0）且alpha为255（不透明），则将alpha设为0（透明）
-            // 其他情况保持原始alpha值不变
-            if r == 0 && g == 0 && b == 0 && a == 255 {
-                chunk[3] = 0;  // 黑色背景 → 透明
+            // 🔧 修复闪烁: 处理所有暗色背景像素
+            // 原因: 地砖可能有各种深色背景(不仅仅是纯黑色)
+            // 策略: 检测总亮度较低且不透明的像素，将其转为透明
+            
+            let brightness = (r as u16 + g as u16 + b as u16) / 3;
+            let is_dark = brightness < 10;  // 平均亮度 < 10 (很暗)
+            let is_mostly_opaque = a > 240; // alpha > 240 (基本不透明)
+            
+            if is_dark && is_mostly_opaque {
+                chunk[3] = 0;  // 暗色背景 → 完全透明
             }
             // 否则保持原始alpha值（包括火焰的半透明效果）
         }

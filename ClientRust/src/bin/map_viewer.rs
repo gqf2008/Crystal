@@ -703,11 +703,11 @@ impl EventHandler for MapViewerState {
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        // 使用深灰色背景，更容易看清地图边界
-        let mut canvas = Canvas::from_frame(ctx, Color::from_rgb(32, 32, 32));
+        // 使用完全透明背景，避免透明度处理不完全时露出背景色
+        let mut canvas = Canvas::from_frame(ctx, Color::from_rgba(0, 0, 0, 0));
 
-        // // 设置混合模式为标准 Alpha 混合
-        // canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+        // 设置混合模式为标准 Alpha 混合 (修复黑块闪烁问题)
+        canvas.set_blend_mode(graphics::BlendMode::ALPHA);
 
         // 绘制地图
         self.map_renderer.draw(
