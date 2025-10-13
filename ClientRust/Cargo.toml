@@ -52,6 +52,7 @@ ggez = "=0.10.0-rc0"  # Includes winit re-export (use ggez::winit::*)
 # egui = "0.27"  # 暂时禁用,egui_ggez 不兼容 ggez 0.10-rc0
 # egui_ggez = "0.3"  # 在 crates.io 上不存在或不兼容
 assets_manager = "0.13.3"
+rfd = "0.15"  # File dialog for map selection
 ron = "0.11.0"
 tinyvec = {version = "1.10.0", features = ["alloc"]}
 shlex = "1.3.0"

@@ -4,6 +4,7 @@
 // - 鼠标拖拽移动相机
 // - 鼠标滚轮缩放
 // - 显示坐标和FPS
+// - M键选择地图文件
 //
 // 运行: cargo run --bin map_viewer --release
 
@@ -16,6 +17,7 @@ use ggez::{
 };
 use mir2_client::graphics::libraries::{get_map_library, initialize_all_libraries};
 use mir2_client::objects::{CellInfo, MapReader};
+use rfd::FileDialog;
 use std::time::Instant;
 
 /// 相机系统
@@ -734,6 +736,51 @@ impl MapViewerState {
             show_obstacles: false,
         })
     }
+
+    /// 重新加载地图
+    fn reload_map(&mut self, map_path: &str) -> GameResult<()> {
+        println!("\n🔄 重新加载地图: {}", map_path);
+        
+        let reader = MapReader::new(map_path).map_err(|e| {
+            eprintln!("❌ 加载地图失败: {}", e);
+            ggez::GameError::ResourceLoadError(format!("Failed to load map: {}", e))
+        })?;
+
+        println!("✅ 地图加载成功: {}x{}", reader.width, reader.height);
+
+        self.map_renderer = MapRenderer::new(reader);
+
+        // 重置相机到新地图中心
+        let map_center_x = (self.map_renderer.width / 2) as f32 * MapRenderer::CELL_WIDTH as f32;
+        let map_center_y = (self.map_renderer.height / 2) as f32 * MapRenderer::CELL_HEIGHT as f32;
+        self.camera.x = map_center_x;
+        self.camera.y = map_center_y;
+        self.camera.zoom = 1.0;
+
+        self.map_name = map_path.to_string();
+
+        println!("📍 相机重置到地图中心: 世界坐标({:.1}, {:.1})", self.camera.x, self.camera.y);
+        println!(
+            "🎯 地图像素尺寸: {}x{} 像素",
+            self.map_renderer.width * MapRenderer::CELL_WIDTH,
+            self.map_renderer.height * MapRenderer::CELL_HEIGHT
+        );
+
+        Ok(())
+    }
+
+    /// 打开文件选择对话框
+    fn open_map_dialog(&mut self) {
+        if let Some(path) = FileDialog::new()
+            .add_filter("地图文件", &["map"])
+            .set_title("选择地图文件")
+            .pick_file()
+        {
+            if let Err(e) = self.reload_map(path.to_str().unwrap_or("")) {
+                eprintln!("❌ 加载地图失败: {}", e);
+            }
+        }
+    }
 }
 
 impl EventHandler for MapViewerState {
@@ -928,6 +975,10 @@ impl EventHandler for MapViewerState {
                         }
                     );
                 }
+                KeyCode::KeyM => {
+                    println!("📂 打开地图选择对话框...");
+                    self.open_map_dialog();
+                }
                 KeyCode::Escape => {
                     std::process::exit(0);
                 }
@@ -952,7 +1003,7 @@ impl MapViewerState {
 
         // 构建顶部状态栏
         let status_text = format!(
-            "Map: {} | Size: {}x{} | FPS: {} | Zoom: {:.2}x | Camera: ({:.0}, {:.0}) | Grid: ({}, {})\nG-网格 | B-边框 | 1/2/3-图层 | O-障碍",
+            "Map: {} | Size: {}x{} | FPS: {} | Zoom: {:.2}x | Camera: ({:.0}, {:.0}) | Grid: ({}, {})\nG-网格 | B-边框 | 1/2/3-图层 | O-障碍 | M-选择地图",
             self.map_name,
             self.map_renderer.width, self.map_renderer.height,
             self.fps,
@@ -1151,6 +1202,7 @@ fn main() -> GameResult {
     println!("  - B键 - 切换纹理边框");
     println!("  - O键 - 切换障碍层");
     println!("  - 1/2/3键 - 切换Back/Middle/Front层");
+    println!("  - M键 - 选择地图文件");
     println!("  - ESC 退出");
     println!("\n🎮 启动参数: cargo run --bin map_viewer [地图路径]");
     println!("   示例: cargo run --bin map_viewer Map/0.map\n");
