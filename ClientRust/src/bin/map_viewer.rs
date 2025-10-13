@@ -168,10 +168,18 @@ impl MapRenderer {
         let top = camera.screen_to_world_y(0.0, screen_height);
         let bottom = camera.screen_to_world_y(screen_height, screen_height);
 
+        // Back/Middle层：标准边距
         let start_x = ((left / Self::CELL_WIDTH as f32).floor() as i32 - 2).max(0);
         let end_x = ((right / Self::CELL_WIDTH as f32).ceil() as i32 + 2).min(self.width - 1);
         let start_y = ((top / Self::CELL_HEIGHT as f32).floor() as i32 - 2).max(0);
         let end_y = ((bottom / Self::CELL_HEIGHT as f32).ceil() as i32 + 2).min(self.height - 1);
+
+        // 🎨 Front层特殊处理：向下扩展更多格子
+        // 原因：长纹理(树木、建筑)底部可能在屏幕下方很远的格子
+        // 假设最高纹理为640像素(20个格子高度)，那么需要向下看20格
+        let front_extra_cells = 20; // 向下额外扩展的格子数
+        let front_start_y = start_y; // 上边界不变
+        let front_end_y = (end_y + front_extra_cells).min(self.height - 1); // 下边界扩展
 
         // 🚀 性能优化：计算可见格子数量并限制渲染范围
         let visible_width = end_x - start_x + 1;
@@ -288,8 +296,8 @@ impl MapRenderer {
         // FRONT LAYER (前景层)
         // ========================================
         if show_front && draw_front {  // 🚀 大范围时跳过Front层
-            // 渲染建筑顶部、树冠等前景物体
-            for y in start_y..=end_y {
+            // 🎨 使用扩展后的Y范围，确保屏幕下方的长纹理能被绘制
+            for y in front_start_y..=front_end_y {
                 for x in start_x..=end_x {
                     if let Some(cell) = self.get_cell(x, y) {
                         // index = (M2CellInfo[x, y].FrontImage & 0x7FFF) - 1;
@@ -478,9 +486,13 @@ impl MapRenderer {
                         let screen_x = (world_x - camera.x) * camera.zoom + screen_width / 2.0;
                         let screen_y = (world_y - camera.y) * camera.zoom + screen_height / 2.0;
 
-                        // 应用图像offset和Front层特殊的Y偏移
+                        // Front层特殊处理：让纹理底部对齐到格子底部
+                        // world_y是格子顶部，格子底部 = world_y + CELL_HEIGHT
+                        // 纹理应该从 (格子底部 - 纹理高度) 开始绘制
                         let final_x = screen_x;
-                        let final_y = screen_y - (info.height as f32 - Self::CELL_HEIGHT as f32) * camera.zoom;
+                        // 注意：info.height是未缩放的纹理高度，需要乘以zoom
+                        let cell_bottom_y = screen_y + Self::CELL_HEIGHT as f32 * camera.zoom;
+                        let final_y = cell_bottom_y - info.height as f32 * camera.zoom;
 
                         // 🔧 应用缩放到瓦片绘制
                         canvas.draw(
