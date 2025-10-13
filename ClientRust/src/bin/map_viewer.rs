@@ -173,6 +173,20 @@ impl MapRenderer {
         let start_y = ((top / Self::CELL_HEIGHT as f32).floor() as i32 - 2).max(0);
         let end_y = ((bottom / Self::CELL_HEIGHT as f32).ceil() as i32 + 2).min(self.height - 1);
 
+        // 🚀 性能优化：计算可见格子数量并限制渲染范围
+        let visible_width = end_x - start_x + 1;
+        let visible_height = end_y - start_y + 1;
+        let total_cells = visible_width * visible_height;
+        
+        // 根据可见格子数量动态调整图层绘制策略
+        let (draw_middle, draw_front) = if total_cells > 50000 {
+            (false, false)  // 超大范围：只绘制Back层
+        } else if total_cells > 20000 {
+            (false, true)   // 大范围：Back + Front
+        } else {
+            (true, true)    // 正常范围：绘制所有层
+        };
+
         // ========================================
         // BACK LAYER (大地砖)
         // ========================================
@@ -222,7 +236,7 @@ impl MapRenderer {
         // ========================================
         // MIDDLE LAYER (小地砖)
         // ========================================
-        if show_middle {
+        if show_middle && draw_middle {  // 🚀 大范围时跳过Middle层
             // 渲染所有格子，不限奇偶
             for y in start_y..=end_y {
                 for x in start_x..=end_x {
@@ -273,7 +287,7 @@ impl MapRenderer {
         // ========================================
         // FRONT LAYER (前景层)
         // ========================================
-        if show_front {
+        if show_front && draw_front {  // 🚀 大范围时跳过Front层
             // 渲染建筑顶部、树冠等前景物体
             for y in start_y..=end_y {
                 for x in start_x..=end_x {
