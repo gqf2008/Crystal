@@ -79,7 +79,7 @@ impl Camera {
         screen_width: f32,
         screen_height: f32,
     ) {
-        self.zoom = (self.zoom * (1.0 + delta * 0.1)).clamp(0.25, 4.0);
+        self.zoom = (self.zoom * (1.0 + delta * 0.1)).clamp(0.1, 4.0);
 
         // 以鼠标位置为中心缩放
         let world_x = self.screen_to_world_x(mouse_x, screen_width);
@@ -527,7 +527,8 @@ impl MapRenderer {
         // 绘制垂直线
         for x in start_x..=end_x {
             let world_x = (x * Self::CELL_WIDTH) as f32;
-            let screen_x = world_x - camera.x + screen_width / 2.0;
+            // 应用缩放到网格线坐标
+            let screen_x = (world_x - camera.x) * camera.zoom + screen_width / 2.0;
 
             if screen_x >= 0.0 && screen_x <= screen_width {
                 let line = graphics::Mesh::new_line(
@@ -543,7 +544,8 @@ impl MapRenderer {
         // 绘制水平线
         for y in start_y..=end_y {
             let world_y = (y * Self::CELL_HEIGHT) as f32;
-            let screen_y = world_y - camera.y + screen_height / 2.0;
+            // 应用缩放到网格线坐标
+            let screen_y = (world_y - camera.y) * camera.zoom + screen_height / 2.0;
 
             if screen_y >= 0.0 && screen_y <= screen_height {
                 let line = graphics::Mesh::new_line(
