@@ -427,7 +427,7 @@ impl MapRenderer {
                         // 应用图像offset（如果需要的话）
                         let final_x = screen_x;
                         let final_y = screen_y;
-
+ canvas.set_blend_mode(graphics::BlendMode::REPLACE);
                         // 🔧 应用缩放到瓦片绘制
                         canvas.draw(
                             texture,
@@ -502,6 +502,8 @@ impl MapRenderer {
                         // � 根据动画标志决定是否使用加法混合
                         if use_blend {
                             canvas.set_blend_mode(graphics::BlendMode::ADD);
+                        }else{
+                             canvas.set_blend_mode(graphics::BlendMode::ALPHA);
                         }
                         
                         // �🔧 应用缩放到瓦片绘制
@@ -512,10 +514,9 @@ impl MapRenderer {
                                 .scale([camera.zoom, camera.zoom]),
                         );
                         
-                        // 🔥 恢复标准混合
-                        if use_blend {
-                            canvas.set_blend_mode(graphics::BlendMode::ALPHA);
-                        }
+                        // if use_blend {
+                        //     canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+                        // }
 
                         // 绘制纹理边框
                         if show_border {
@@ -629,26 +630,29 @@ impl MapRenderer {
         for y in start_y..=end_y {
             for x in start_x..=end_x {
                 if let Some(cell) = self.get_cell(x, y) {
-                    // 检查是否有障碍物 (DoorClosed、Block 或 MiddleBlock 标记)
-                    let has_obstacle = (cell.door_offset & 0x80) != 0  // DoorClosed
-                        || (cell.door_index & 0x80) != 0               // Block
-                        || (cell.front_image & 0x8000) != 0; // MiddleBlock (LowWall)
+                    // 检查是否有障碍物
+                    let has_obstacle = (cell.back_image & 0x20000000) != 0  // HighWall (山、水等不可行走地形)
+                        || (cell.door_offset & 0x80) != 0                   // DoorClosed
+                        || (cell.door_index & 0x80) != 0                    // Block
+                        || (cell.front_image & 0x8000) != 0;                // MiddleBlock (LowWall)
 
                     if has_obstacle {
                         let world_x = (x * Self::CELL_WIDTH) as f32;
                         let world_y = (y * Self::CELL_HEIGHT) as f32;
-                        let screen_x = world_x - camera.x + screen_width / 2.0;
-                        let screen_y = world_y - camera.y + screen_height / 2.0;
+                        
+                        // 🔧 应用缩放到障碍物坐标计算
+                        let screen_x = (world_x - camera.x) * camera.zoom + screen_width / 2.0;
+                        let screen_y = (world_y - camera.y) * camera.zoom + screen_height / 2.0;
 
-                        // 绘制半透明矩形表示障碍
+                        // 🔧 绘制半透明矩形表示障碍，尺寸也要缩放
                         let obstacle_rect = graphics::Mesh::new_rectangle(
                             ctx,
                             graphics::DrawMode::fill(),
                             graphics::Rect::new(
                                 screen_x,
                                 screen_y,
-                                Self::CELL_WIDTH as f32,
-                                Self::CELL_HEIGHT as f32,
+                                Self::CELL_WIDTH as f32 * camera.zoom,
+                                Self::CELL_HEIGHT as f32 * camera.zoom,
                             ),
                             obstacle_color,
                         )?;
@@ -748,11 +752,12 @@ impl EventHandler for MapViewerState {
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        // 使用完全透明背景，避免透明度处理不完全时露出背景色
-        let mut canvas = Canvas::from_frame(ctx, Color::from_rgba(0, 0, 0, 0));
+        // 使用黑色背景
+        let mut canvas = Canvas::from_frame(ctx, Color::from_rgb(0, 0, 0));
 
-        // 设置混合模式为标准 Alpha 混合 (修复黑块闪烁问题)
-        canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+        // 🎨 使用REPLACE混合模式 - 直接替换像素,不混合,避免发白
+        // REPLACE: 完全不透明的纹理直接覆盖背景
+        // 适合地图瓦片这种不需要半透明混合的场景
 
         // 绘制地图
         self.map_renderer.draw(

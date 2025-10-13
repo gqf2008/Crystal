@@ -265,7 +265,7 @@ impl ImageInfo {
         }
         // 🔧 关键修复：处理黑色背景透明化
         // Back层的地砖有纯黑色背景(RGB=0,0,0,alpha=255)，需要转为透明
-        Self::bgra_to_transparent(&mut decompressed);
+       // Self::bgra_to_transparent(&mut decompressed);
         Ok(decompressed)
     }
 
