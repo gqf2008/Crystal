@@ -701,13 +701,16 @@ impl MapViewerState {
 
         let map_renderer = MapRenderer::new(reader);
 
-        // 🔧 相机初始位置：世界坐标原点(0,0)，这样屏幕中心显示世界(0,0)
+        // 🔧 相机初始位置：地图中心
         let mut camera = Camera::new();
-        camera.x = 0.0; // 世界坐标X
-        camera.y = 0.0; // 世界坐标Y
+        // 计算地图中心的世界坐标
+        let map_center_x = (map_renderer.width / 2) as f32 * MapRenderer::CELL_WIDTH as f32;
+        let map_center_y = (map_renderer.height / 2) as f32 * MapRenderer::CELL_HEIGHT as f32;
+        camera.x = map_center_x;
+        camera.y = map_center_y;
         camera.zoom = 1.0;
 
-        println!("📍 相机初始位置: 世界坐标({}, {})", camera.x, camera.y);
+        println!("📍 相机初始位置: 地图中心 世界坐标({:.1}, {:.1})", camera.x, camera.y);
         println!(
             "🎯 地图像素尺寸: {}x{} 像素",
             map_renderer.width * MapRenderer::CELL_WIDTH,
@@ -723,7 +726,7 @@ impl MapViewerState {
             frame_count: 0,
             fps: 0,
             map_name: map_path.to_string(),
-            show_grid: true,
+            show_grid: false,
             show_borders: false,
             show_layer_back: true,
             show_layer_middle: true,
@@ -1136,7 +1139,7 @@ fn main() -> GameResult {
         args[1].clone()
     } else {
         // 默认地图
-        "Map/0.map".to_string()
+        "Map/0122.map".to_string()
     };
 
     println!("\n╔══════════════════════════════════════════╗");
