@@ -402,14 +402,13 @@ impl MapRenderer {
                         let final_x = screen_x;
                         let final_y = screen_y;
 
-                        // 🔧 测试Y轴翻转：DirectX(Y向下) vs OpenGL(Y向上)
-                        // 方案1: 使用负Y缩放翻转图像，并调整Y坐标补偿高度
+                        // 🔧 应用缩放到瓦片绘制
                         canvas.draw(
                             texture,
                             DrawParam::default()
-                                .dest([final_x, final_y]) // Y坐标向下移动图像高度
-                                .scale([1.0, 1.0]),
-                        ); // Y轴翻转
+                                .dest([final_x, final_y])
+                                .scale([camera.zoom, camera.zoom]),
+                        );
 
                         // 绘制纹理边框
                         if show_border {
@@ -419,8 +418,8 @@ impl MapRenderer {
                                 graphics::Rect::new(
                                     final_x,
                                     final_y,
-                                    info.width as f32,
-                                    info.height as f32,
+                                    info.width as f32 * camera.zoom,
+                                    info.height as f32 * camera.zoom,
                                 ),
                                 border_color,
                             )?;
@@ -469,14 +468,13 @@ impl MapRenderer {
                         let final_x = screen_x;
                         let final_y = screen_y - (info.height as f32 - Self::CELL_HEIGHT as f32) * camera.zoom;
 
-                        // 🔧 测试Y轴翻转：DirectX(Y向下) vs OpenGL(Y向上)
-                        // 方案1: 使用负Y缩放翻转图像，并调整Y坐标补偿高度
+                        // 🔧 应用缩放到瓦片绘制
                         canvas.draw(
                             texture,
                             DrawParam::default()
-                                .dest([final_x, final_y]) // Y坐标向下移动图像高度
-                                .scale([1.0, 1.0]),
-                        ); // Y轴翻转
+                                .dest([final_x, final_y])
+                                .scale([camera.zoom, camera.zoom]),
+                        );
 
                         // 绘制纹理边框
                         if show_border {
@@ -486,8 +484,8 @@ impl MapRenderer {
                                 graphics::Rect::new(
                                     final_x,
                                     final_y,
-                                    info.width as f32,
-                                    info.height as f32,
+                                    info.width as f32 * camera.zoom,
+                                    info.height as f32 * camera.zoom,
                                 ),
                                 border_color,
                             )?;
@@ -793,8 +791,16 @@ impl EventHandler for MapViewerState {
         Ok(())
     }
 
-    fn mouse_wheel_event(&mut self, _ctx: &mut Context, _x: f32, _y: f32) -> GameResult {
-        // 🔧 禁用缩放功能，便于调试
+    fn mouse_wheel_event(&mut self, ctx: &mut Context, _x: f32, y: f32) -> GameResult {
+        // 鼠标滚轮缩放：向上放大，向下缩小
+        let mouse_pos = ctx.mouse.position();
+        self.camera.zoom_by(
+            y,
+            mouse_pos.x,
+            mouse_pos.y,
+            self.screen_width,
+            self.screen_height,
+        );
         Ok(())
     }
 
