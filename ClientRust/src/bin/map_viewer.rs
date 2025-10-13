@@ -311,6 +311,9 @@ impl MapRenderer {
                             continue;
                         }
 
+                        // 🔥 检查是否需要加法混合 (FrontAnimationFrame的最高位0x80)
+                        let use_blend = (cell.front_animation_frame & 0x80) != 0;
+
                         //TODO 门动画处理
                         // if (M2CellInfo[x, y].DoorIndex > 0)
                         // {
@@ -364,6 +367,7 @@ impl MapRenderer {
                             world_y,
                             show_borders,
                             Color::from_rgb(0, 150, 255),
+                            use_blend,  // 🔥 传递blend标志
                         )?;
                     }
                 }
@@ -471,6 +475,7 @@ impl MapRenderer {
         world_y: f32,
         show_border: bool,
         border_color: Color,
+        use_blend: bool,  // 🔥 是否使用加法混合
     ) -> GameResult<()> {
         if let Some(map_lib) = get_map_library(lib_index as i16) {
             let mut lib = map_lib.lock().unwrap();
@@ -494,13 +499,23 @@ impl MapRenderer {
                         let cell_bottom_y = screen_y + Self::CELL_HEIGHT as f32 * camera.zoom;
                         let final_y = cell_bottom_y - info.height as f32 * camera.zoom;
 
-                        // 🔧 应用缩放到瓦片绘制
+                        // � 根据动画标志决定是否使用加法混合
+                        if use_blend {
+                            canvas.set_blend_mode(graphics::BlendMode::ADD);
+                        }
+                        
+                        // �🔧 应用缩放到瓦片绘制
                         canvas.draw(
                             texture,
                             DrawParam::default()
                                 .dest([final_x, final_y])
                                 .scale([camera.zoom, camera.zoom]),
                         );
+                        
+                        // 🔥 恢复标准混合
+                        if use_blend {
+                            canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+                        }
 
                         // 绘制纹理边框
                         if show_border {

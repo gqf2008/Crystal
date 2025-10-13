@@ -280,18 +280,17 @@ impl ImageInfo {
             let r = chunk[2];
             let a = chunk[3];
             
-            // 🔧 修复闪烁: 处理所有暗色背景像素
-            // 原因: 地砖可能有各种深色背景(不仅仅是纯黑色)
-            // 策略: 检测总亮度较低且不透明的像素，将其转为透明
-            
+            // 🔧 只处理纯黑背景
+            // 原因: 火焰的阴影已经有正确的alpha值,不应该被修改
+            // 只有地砖的纯黑背景需要转透明
             let brightness = (r as u16 + g as u16 + b as u16) / 3;
-            let is_dark = brightness < 10;  // 平均亮度 < 10 (很暗)
-            let is_mostly_opaque = a > 240; // alpha > 240 (基本不透明)
+            let is_pure_black = brightness < 5;  // 几乎纯黑
+            let is_opaque = a > 250; // 完全不透明
             
-            if is_dark && is_mostly_opaque {
-                chunk[3] = 0;  // 暗色背景 → 完全透明
+            if is_pure_black && is_opaque {
+                chunk[3] = 0;  // 纯黑背景 → 完全透明
             }
-            // 否则保持原始alpha值（包括火焰的半透明效果）
+            // 其他所有情况保持原始alpha值
         }
     }
 
