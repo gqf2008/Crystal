@@ -15,7 +15,8 @@ pub use scene_manager::{SceneManager, SharedSceneManager, create_shared_scene_ma
 pub use login_scene::{LoginScene, BanInfo};
 pub use select_scene::SelectScene;
 pub use game_scene::GameScene;
-pub use game_scene::map_control::{MapControl, Door};
+pub use game_scene::map_renderer::{MapRenderer, Door};  // ✅ 重构后：MapRenderer 拥有数据
+pub use game_scene::UserPosition;                       // ✅ UserPosition 移至 game_scene.rs
 pub use crate::objects::CellInfo; // 从 objects::map_code 导出
 
 // Re-export enums from SharedRust
@@ -89,7 +90,7 @@ pub trait Scene {
     fn update(&mut self, delta_time: f32);
     
     /// Render scene (ggez版本)
-    fn draw(&mut self, _ctx: &mut ggez::Context, _canvas: &mut crate::graphics::Canvas, _ggez_manager: &mut crate::graphics::GgezManager) {
+    fn draw(&mut self, _ctx: &mut ggez::Context, _canvas: &mut crate::graphics::Canvas) {
         // Default: do nothing
     }
     
@@ -103,6 +104,11 @@ pub trait Scene {
     
     /// Handle mouse button
     fn handle_mouse_button(&mut self, _button: MouseButton, _pressed: bool, _x: i32, _y: i32) {
+        // Default implementation: do nothing
+    }
+    
+    /// Handle mouse wheel (for zooming and scrolling)
+    fn handle_mouse_wheel(&mut self, _delta_x: f32, _delta_y: f32) {
         // Default implementation: do nothing
     }
     

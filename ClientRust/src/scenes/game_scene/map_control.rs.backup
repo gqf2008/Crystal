@@ -87,18 +87,22 @@ impl MapControl {
     pub const CELL_WIDTH: i32 = 48;
     pub const CELL_HEIGHT: i32 = 32;
     
-    /// Create new map control from MapReader
-    pub fn from_map_reader(reader: MapReader) -> Self {
+    /// Create new map control from MapReader with screen dimensions
+    /// 
+    /// # 参数
+    /// - `reader`: 地图数据读取器
+    /// - `screen_width`: 屏幕宽度（像素）
+    /// - `screen_height`: 屏幕高度（像素）
+    pub fn from_map_reader_with_screen(reader: MapReader, screen_width: f32, screen_height: f32) -> Self {
         // C#: OffSetX = Settings.ScreenWidth / 2 / CellWidth;
         // C#: OffSetY = Settings.ScreenHeight / 2 / CellHeight - 1;
-        // 窗口大小: 1024x768
-        let offset_x = 1024 / 2 / Self::CELL_WIDTH;  // 512 / 48 = 10
-        let offset_y = 768 / 2 / Self::CELL_HEIGHT - 1;  // 384 / 32 - 1 = 11
+        let offset_x = (screen_width as i32) / 2 / Self::CELL_WIDTH;
+        let offset_y = (screen_height as i32) / 2 / Self::CELL_HEIGHT - 1;
         
         // C#: ViewRangeX = OffSetX + 6;
         // C#: ViewRangeY = OffSetY + 6;
-        let view_range_x = offset_x + 6;  // 10 + 6 = 16
-        let view_range_y = offset_y + 6;  // 11 + 6 = 17
+        let view_range_x = offset_x + 6;
+        let view_range_y = offset_y + 6;
         
         Self {
             width: reader.width,
@@ -134,6 +138,14 @@ impl MapControl {
             animation_count: 0,
             floor_valid: false,
         }
+    }
+    
+    /// Create new map control from MapReader (使用默认屏幕尺寸)
+    /// 
+    /// 为了兼容性，提供使用默认屏幕尺寸的版本
+    pub fn from_map_reader(reader: MapReader) -> Self {
+        // 默认使用 1024x768，实际应用中应该使用 from_map_reader_with_screen
+        Self::from_map_reader_with_screen(reader, 1024.0, 768.0)
     }
     
     /// Create new map control (legacy method for compatibility)
@@ -228,29 +240,69 @@ impl MapControl {
         self.offset_y = center_y - (y * Self::CELL_HEIGHT);
     }
     
-    /// Draw map - 简化版本,只渲染基础瓦片
+    /// Draw map - 完整渲染系统
     /// 
-    /// 🔧 临时简化模式: 禁用所有高级渲染,只显示最基础的地表瓦片
-    /// 用于调试瓦片错位和黑块问题
+    /// 🎨 完整三层渲染 + TileAnimation + 门动画
+    /// 从 map_viewer.rs 移植的完整渲染管线
     /// 
-    pub fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, user_pos: &UserPosition) -> GameResult<()> {
+    pub fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, user_pos: &UserPosition, zoom: f32) -> GameResult<()> {
         // 更新动画计数器
         self.animation_count = (self.animation_count + 1) % 1000;
         
-        // 1. 渲染地板（Back/Middle/Front三层）
-        self.draw_floor(ctx, canvas, user_pos)?;
-        
-          // 2. 绘制背景图（远景山脉/沙漠等）
-        self.draw_background(ctx, canvas)?;
+        // 计算可见区域（基于用户位置）
+        let start_x = (user_pos.x - self.view_range_x).max(0);
+        let end_x = (user_pos.x + self.view_range_x).min(self.width - 1);
+        let start_y = (user_pos.y - self.view_range_y).max(0);
+        let end_y = (user_pos.y + self.view_range_y).min(self.height - 1);
 
-        // 3. 🚧 临时：绘制角色位置标记（红色方块）
-        self.draw_player_marker(ctx, canvas, user_pos)?;
+        // 🐛 调试：首帧打印地图信息
+        static mut FIRST_DRAW: bool = true;
+        unsafe {
+            if FIRST_DRAW {
+                println!("\n🎨 === MapControl::draw 首帧调试 ===");
+                println!("地图尺寸: {}x{}", self.width, self.height);
+                println!("用户位置: ({}, {})", user_pos.x, user_pos.y);
+                println!("视野范围: X[{}, {}], Y[{}, {}]", start_x, end_x, start_y, end_y);
+                println!("视野设置: view_range_x={}, view_range_y={}", self.view_range_x, self.view_range_y);
+                println!("偏移设置: offset_x={}, offset_y={}", self.offset_x, self.offset_y);
+                
+                // 检查中心格子数据
+                if let Some(cell) = self.get_cell(user_pos.x, user_pos.y) {
+                    println!("中心格子({},{})数据:", user_pos.x, user_pos.y);
+                    println!("  - back_image={}, back_index={}", cell.back_image, cell.back_index);
+                    println!("  - middle_image={}, middle_index={}", cell.middle_image, cell.middle_index);
+                    println!("  - front_image={}, front_index={}", cell.front_image, cell.front_index);
+                } else {
+                    println!("⚠️  中心格子({},{})无数据!", user_pos.x, user_pos.y);
+                }
+                println!("=============================\n");
+                FIRST_DRAW = false;
+            }
+        }
+
+        // 1. 绘制背景图（远景山脉/沙漠等）
+        self.draw_background(ctx, canvas, zoom)?;
+
+        // 2. TileAnimation层（库190 - Shanda动画）
+        self.draw_tile_animations(ctx, canvas, start_x, end_x, start_y, end_y, user_pos, zoom)?;
+
+        // 3. Back层（大地砖层 - 仅静态，偶数行列）
+        self.draw_back_layer(ctx, canvas, start_x, end_x, start_y, end_y, user_pos, zoom)?;
+
+        // 4. Middle层（小地砖层 - 静态 + 动画）
+        self.draw_middle_layer(ctx, canvas, start_x, end_x, start_y, end_y, user_pos, zoom)?;
+
+        // 5. Front层（前景层 - 静态 + 动画 + 门）
+        self.draw_front_layer(ctx, canvas, start_x, end_x, start_y, end_y, user_pos, zoom)?;
+
+        // 6. 🚧 临时：绘制角色位置标记（红色方块）
+        self.draw_player_marker(ctx, canvas, user_pos, zoom)?;
         
         Ok(())
     }
     
     /// 🚧 临时方法：绘制角色位置标记
-    fn draw_player_marker(&self, _ctx: &mut Context, canvas: &mut Canvas, user_pos: &UserPosition) -> GameResult<()> {
+    fn draw_player_marker(&self, _ctx: &mut Context, canvas: &mut Canvas, user_pos: &UserPosition, zoom: f32) -> GameResult<()> {
         use ggez::graphics::{Mesh, Rect, Color, DrawMode};
         
         // 角色应该在屏幕中央
@@ -438,7 +490,7 @@ impl MapControl {
     /// - ID3_013 → 沙漠背景(index 22)
     /// - ID3_015 → 长城背景(index 23)
     /// - ID3_023/025 → 村庄入口(index 21)
-    fn draw_background(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult<()> {
+    fn draw_background(&mut self, ctx: &mut Context, canvas: &mut Canvas, zoom: f32) -> GameResult<()> {
         use crate::graphics::libraries::LibraryName;
         use ggez::graphics::DrawParam;
         
@@ -486,10 +538,12 @@ impl MapControl {
                                 // 背景图应该从屏幕顶部开始，所以 y = screen_height - image_height
                                 // C#: Draw(index, 0, 0) 表示从屏幕左上角开始
                                 // wgpu: dest([0, screen_height - img_height]) 才能从屏幕左上角开始
-                                let screen_height = 768.0; // 窗口高度
-                                let draw_y = screen_height - info.height as f32;
+                                let (_, screen_height) = ctx.gfx.drawable_size();
+                                let draw_y = screen_height - info.height as f32 * zoom;
                                 
-                                canvas.draw(texture, DrawParam::default().dest([0.0, draw_y]));
+                                canvas.draw(texture, DrawParam::default()
+                                    .dest([0.0, draw_y])
+                                    .scale([zoom, zoom]));
                                 
                                 unsafe {
                                     if FIRST_CALL {
@@ -792,6 +846,428 @@ impl MapControl {
     /// Update animation
     pub fn update_animation(&mut self) {
         self.animation_count = (self.animation_count + 1) % 100;
+    }
+
+    // ============================================================================
+    // 🎨 完整渲染系统 - 从 map_viewer.rs 移植
+    // ============================================================================
+
+    /// 🔥 创建自定义混合模式（火焰发光效果）
+    /// 
+    /// 公式: src_color * 1 + dst_color * 1 (纯ADD混合)
+    /// - 源纹理的所有颜色值都全量添加到背景上
+    /// - 黑色像素(0,0,0)才是真正透明
+    /// - 产生最大范围的光晕效果
+    fn create_blend_mode() -> ggez::graphics::BlendMode {
+        use ggez::graphics::{BlendMode, BlendComponent, BlendFactor, BlendOperation};
+        
+        BlendMode {
+            color: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            },
+            alpha: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::One,
+                operation: BlendOperation::Add,
+            },
+        }
+    }
+
+    /// 🎨 标准瓦片绘制（使用 REPLACE 混合模式）
+    fn draw_tile_normal(
+        &self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        lib_index: i32,
+        image_index: usize,
+        screen_x: f32,
+        screen_y: f32,
+        zoom: f32,
+    ) -> GameResult<()> {
+        use ggez::graphics::{Color, DrawParam};
+        
+        if let Some(map_lib) = get_map_library(lib_index as i16) {
+            let mut lib = map_lib.lock().unwrap();
+
+            match lib.get_or_create_texture(ctx, image_index) {
+                Ok(info) => {
+                    if let Some(ref texture) = info.image {
+                        canvas.set_blend_mode(ggez::graphics::BlendMode::REPLACE);
+                        canvas.draw(
+                            texture,
+                            DrawParam::default()
+                                .dest([screen_x * zoom, screen_y * zoom])
+                                .scale([zoom, zoom])
+                                .color(Color::WHITE),
+                        );
+                    }
+                }
+                Err(_) => {
+                    // 忽略加载错误
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 🎨 特效瓦片绘制（支持自定义混合模式和亮度）
+    fn draw_tile_blend(
+        &self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        lib_index: i32,
+        image_index: usize,
+        screen_x: f32,
+        screen_y: f32,
+        use_blend: bool,
+        brightness: f32,
+    ) -> GameResult<()> {
+        use ggez::graphics::{Color, DrawParam};
+        
+        if let Some(map_lib) = get_map_library(lib_index as i16) {
+            let mut lib = map_lib.lock().unwrap();
+
+            match lib.get_or_create_texture(ctx, image_index) {
+                Ok(info) => {
+                    if let Some(ref texture) = info.image {
+                        // 设置混合模式
+                        if use_blend {
+                            canvas.set_blend_mode(Self::create_blend_mode());
+                        } else {
+                            canvas.set_blend_mode(ggez::graphics::BlendMode::ALPHA);
+                        }
+
+                        // 亮度控制
+                        let draw_color = if brightness > 1.0 {
+                            Color::new(brightness, brightness, brightness, 1.0)
+                        } else {
+                            Color::WHITE
+                        };
+
+                        canvas.draw(
+                            texture,
+                            DrawParam::default()
+                                .dest([screen_x, screen_y])
+                                .color(draw_color),
+                        );
+                    }
+                }
+                Err(_) => {
+                    // 忽略加载错误
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 🎨 Back层绘制（大地砖层 - 仅静态，偶数行列）
+    fn draw_back_layer(
+        &mut self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        start_x: i32,
+        end_x: i32,
+        start_y: i32,
+        end_y: i32,
+        user_pos: &UserPosition,
+        zoom: f32,
+    ) -> GameResult<()> {
+        // Back层只渲染偶数行列，通过大瓦片(96x64)覆盖4个格子
+        let back_start_y = if start_y % 2 == 0 { start_y } else { start_y + 1 };
+        let back_start_x = if start_x % 2 == 0 { start_x } else { start_x + 1 };
+
+        for y in (back_start_y..=end_y).step_by(2) {
+            for x in (back_start_x..=end_x).step_by(2) {
+                if let Some(cell) = self.get_cell(x, y) {
+                    let index = (cell.back_image & 0x1FFFFFFF) - 1;
+                    if cell.back_image == 0 || cell.back_index == -1 || index < 0 {
+                        continue;
+                    }
+
+                    // 🔧 修复：计算相对于用户的屏幕坐标
+                    let screen_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH + user_pos.offset_x) as f32;
+                    let screen_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
+
+                    self.draw_tile_normal(
+                        ctx,
+                        canvas,
+                        cell.back_index as i32,
+                        index as usize,
+                        screen_x,
+                        screen_y,
+                        zoom,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 🎨 Middle层绘制（小地砖层 - 静态 + 动画）
+    fn draw_middle_layer(
+        &mut self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        start_x: i32,
+        end_x: i32,
+        start_y: i32,
+        end_y: i32,
+        user_pos: &UserPosition,
+        zoom: f32,
+    ) -> GameResult<()> {
+        for y in start_y..=end_y {
+            for x in start_x..=end_x {
+                if let Some(cell) = self.get_cell(x, y) {
+                    let mut index = cell.middle_image - 1;
+                    if index < 0 || cell.middle_index == -1 {
+                        continue;
+                    }
+
+                    let mut animation = cell.middle_animation_frame;
+                    let has_animation = animation > 0 && animation < 255;
+
+                    // 静态瓦片
+                    if !has_animation {
+                        // 尺寸过滤：只渲染标准尺寸瓦片
+                        if let Some(mlib) = get_map_library(cell.middle_index) {
+                            if let Ok(mut mlib) = mlib.lock() {
+                                if let Ok((w, h)) = mlib.get_size(index as usize) {
+                                    if (w as i32 != Self::CELL_WIDTH || h as i32 != Self::CELL_HEIGHT)
+                                        && (w as i32 != Self::CELL_WIDTH * 2 || h as i32 != Self::CELL_HEIGHT * 2)
+                                    {
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+
+                        // 🔧 修复：计算相对于用户的屏幕坐标
+                        let screen_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH + user_pos.offset_x) as f32;
+                        let screen_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
+
+                        self.draw_tile_normal(
+                            ctx,
+                            canvas,
+                            cell.middle_index as i32,
+                            index as usize,
+                            screen_x,
+                            screen_y,
+                            zoom,
+                        )?;
+                    } else {
+                        // 动画瓦片
+                        let use_blend = (animation & 0x0f) > 0;
+                        animation &= 0x0f;
+
+                        if animation > 0 {
+                            let animation_tick = cell.middle_animation_tick;
+                            let total_frames = animation as i32 + (animation as i32 * animation_tick as i32);
+                            let frame_offset = (self.animation_count % total_frames) / (1 + animation_tick as i32);
+                            index += frame_offset;
+
+                            // 尺寸检查
+                            let should_draw = if let Some(mlib) = get_map_library(cell.middle_index) {
+                                if let Ok(mut mlib) = mlib.lock() {
+                                    if let Ok((w, h)) = mlib.get_size(index as usize) {
+                                        ((w as i32 != Self::CELL_WIDTH || h as i32 != Self::CELL_HEIGHT)
+                                            && (w as i32 != Self::CELL_WIDTH * 2 || h as i32 != Self::CELL_HEIGHT * 2))
+                                            || use_blend
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+
+                            if should_draw {
+                                // 🔧 修复：计算相对于用户的屏幕坐标
+                                let screen_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH + user_pos.offset_x) as f32;
+                                let screen_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32;
+
+                                self.draw_tile_blend(
+                                    ctx,
+                                    canvas,
+                                    cell.middle_index as i32,
+                                    index as usize,
+                                    screen_x,
+                                    screen_y,
+                                    use_blend && (animation == 10 || animation == 8),
+                                    1.0,
+                                )?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 🎨 Front层绘制（前景层 - 静态 + 动画 + 门）
+    fn draw_front_layer(
+        &mut self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        start_x: i32,
+        end_x: i32,
+        start_y: i32,
+        end_y: i32,
+        user_pos: &UserPosition,
+        zoom: f32,
+    ) -> GameResult<()> {
+        for y in start_y..=end_y {
+            for x in start_x..=end_x {
+                if let Some(cell) = self.get_cell(x, y) {
+                    let mut index = (cell.front_image & 0x7FFF) - 1;
+                    if index == -1 || cell.front_index == -1 || cell.front_index == 200 {
+                        continue;
+                    }
+
+                    let mut animation = cell.front_animation_frame;
+                    let use_blend = (animation & 0x80) != 0;
+                    animation &= 0x7F;
+
+                    let has_animation = animation > 0;
+                    let has_door = cell.door_index > 0;
+
+                    // 动画帧推进
+                    if has_animation {
+                        let animation_tick = cell.front_animation_tick;
+                        let total_frames = animation as i32 + (animation as i32 * animation_tick as i32);
+                        let frame_offset = (self.animation_count % total_frames) / (1 + animation_tick as i32);
+                        index += frame_offset;
+                    }
+
+                    // 门动画处理
+                    if has_door {
+                        let door_frame = self.get_door_frame(cell.door_index);
+                        if door_frame > 0 {
+                            index += (door_frame + 1) * cell.door_offset as i32;
+                        }
+                    }
+
+                    // 获取瓦片尺寸
+                    let (tile_width, tile_height) = if let Some(mlib) = get_map_library(cell.front_index) {
+                        if let Ok(mut mlib) = mlib.lock() {
+                            mlib.get_size(index as usize)
+                                .unwrap_or((Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16))
+                        } else {
+                            (Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16)
+                        }
+                    } else {
+                        (Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16)
+                    };
+
+                    // 🔧 修复：计算相对于用户的屏幕坐标
+                    let mut screen_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH + user_pos.offset_x) as f32;
+                    let mut screen_y = if (tile_width as i32 != Self::CELL_WIDTH || tile_height as i32 != Self::CELL_HEIGHT)
+                        && (tile_width as i32 != Self::CELL_WIDTH * 2 || tile_height as i32 != Self::CELL_HEIGHT * 2)
+                    {
+                        // 非标准尺寸 = 大型物体（树/建筑等）
+                        ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + Self::CELL_HEIGHT - tile_height as i32 + user_pos.offset_y) as f32
+                    } else {
+                        // 标准地板瓦片
+                        ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT + user_pos.offset_y) as f32
+                    };
+
+                    // 混合模式偏移
+                    if use_blend {
+                        screen_x -= Self::CELL_WIDTH as f32;
+                        screen_y -= (4 * Self::CELL_HEIGHT) as f32;
+                    }
+
+                    // 亮度控制：有火焰效果时变亮
+                    let brightness = if use_blend && !has_animation { 1.5 } else { 1.0 };
+
+                    self.draw_tile_blend(
+                        ctx,
+                        canvas,
+                        cell.front_index as i32,
+                        index as usize,
+                        screen_x,
+                        screen_y,
+                        use_blend,
+                        brightness,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 🎨 TileAnimation层绘制（库190 - Shanda动画）
+    fn draw_tile_animations(
+        &mut self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        start_x: i32,
+        end_x: i32,
+        start_y: i32,
+        end_y: i32,
+        user_pos: &UserPosition,
+        zoom: f32,
+    ) -> GameResult<()> {
+        for y in start_y..=end_y {
+            for x in start_x..=end_x {
+                if let Some(cell) = self.get_cell(x, y) {
+                    let tile_index = cell.tile_animation_image;
+                    let tile_frames = cell.tile_animation_frames;
+
+                    if tile_index > 0 && tile_frames > 0 {
+                        let mut index = (tile_index - 1) as i32;
+                        let animation_offset = (cell.tile_animation_offset ^ 0x2000) as i32;
+                        index += animation_offset * (self.animation_count % tile_frames as i32);
+
+                        if index >= 0 {
+                            // 获取纹理高度用于DrawUp偏移
+                            let tile_height = if let Some(mlib) = get_map_library(190) {
+                                if let Ok(mut mlib) = mlib.lock() {
+                                    mlib.get_size(index as usize)
+                                        .map(|(_, h)| h as i32)
+                                        .unwrap_or(Self::CELL_HEIGHT)
+                                } else {
+                                    Self::CELL_HEIGHT
+                                }
+                            } else {
+                                Self::CELL_HEIGHT
+                            };
+
+                            // 🔧 修复：计算相对于用户的屏幕坐标
+                            let screen_x = ((x - user_pos.x + self.offset_x) * Self::CELL_WIDTH + user_pos.offset_x) as f32;
+                            let screen_y = ((y - user_pos.y + self.offset_y) * Self::CELL_HEIGHT - tile_height + user_pos.offset_y) as f32;
+
+                            self.draw_tile_blend(
+                                ctx,
+                                canvas,
+                                190,
+                                index as usize,
+                                screen_x,
+                                screen_y,
+                                true,
+                                1.0,
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 🚪 获取门的当前动画帧 (0-8)
+    fn get_door_frame(&self, door_index: u8) -> i32 {
+        self.doors
+            .iter()
+            .find(|d| d.index == door_index as usize)
+            .map(|d| d.image_index)
+            .unwrap_or(0)
     }
     
     /// Clear map data

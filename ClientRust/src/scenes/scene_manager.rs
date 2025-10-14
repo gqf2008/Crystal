@@ -132,9 +132,9 @@ impl SceneManager {
     }
     
     /// Render current scene (ggez版本)
-    pub fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &mut crate::graphics::GgezManager) {
+    pub fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas) {
         if let Some(scene) = &mut self.current_scene {
-            scene.draw(ctx, canvas, ggez_manager);
+            scene.draw(ctx, canvas);
         }
     }
     
@@ -164,6 +164,13 @@ impl SceneManager {
     pub fn handle_mouse_button(&mut self, button: super::MouseButton, pressed: bool, x: i32, y: i32) {
         if let Some(scene) = &mut self.current_scene {
             scene.handle_mouse_button(button, pressed, x, y);
+        }
+    }
+    
+    /// Handle mouse wheel (for zooming and scrolling)
+    pub fn handle_mouse_wheel(&mut self, delta_x: f32, delta_y: f32) {
+        if let Some(scene) = &mut self.current_scene {
+            scene.handle_mouse_wheel(delta_x, delta_y);
         }
     }
     

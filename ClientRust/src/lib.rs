@@ -10,8 +10,9 @@
 pub mod error;
 pub mod version;
 pub mod settings;
-// pub mod key_bind_settings;
+// pub mod key_bind_settings;  // TODO: 需要实现
 pub mod downloader;
+pub mod program;           // 🔧 客户端运行时和初始化逻辑
 
 // 主要功能模块
 pub mod graphics;          // ✅ 已迁移到 ggez
@@ -19,9 +20,8 @@ pub mod network;           // ✅ 不依赖 winit/wgpu
 pub mod objects;           // ✅ 不依赖 winit/wgpu
 pub mod resolution;        // ✅ 不依赖 winit/wgpu
 pub mod resources;         // ✅ 不依赖 winit/wgpu
-// pub mod utils;             // ✅ 不依赖 winit/wgpu
 pub mod scenes;            // ⚠️ 部分使用 winit 类型(Scene trait)
-pub mod ui; // UI模块
+pub mod ui;                // UI模块
 pub mod controls;          // ⚠️ 部分使用 winit 类型(Control trait)
 
 // 重新导出常用类型

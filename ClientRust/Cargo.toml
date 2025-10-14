@@ -72,7 +72,7 @@ tempfile = "3"
 # 主程序入口 - 使用 ggez 框架
 [[bin]]
 name = "mir2_client"
-path = "src/main_ggez.rs"
+path = "src/bin/main_ggez.rs"
 
 # .lib 文件检查工具
 [[bin]]

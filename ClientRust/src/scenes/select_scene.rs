@@ -788,34 +788,22 @@ impl Scene for SelectScene {
         }
     }
     
-    fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &mut crate::graphics::GgezManager) {
+    fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas) {
         use ggez::graphics::{DrawParam, Color, PxScale, Text};
+        use crate::graphics::libraries::{get_library, LibraryName};
         
         // 1. 绘制背景 Prguse_65
-        if let Some(bg_texture) = ggez_manager.get_texture("Prguse_65") {
-            let draw_param = DrawParam::default()
-                .dest([0.0, 0.0])
-                .color(Color::WHITE);
-            canvas.draw(bg_texture, draw_param);
-        } else {
-            tracing::warn!("背景纹理未找到: Prguse_65");
+        if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                let _ = lib.draw_with_color(ctx, canvas, 65, 0.0, 0.0, Color::WHITE, false);
+            }
         }
         
         // 2. 绘制标题 Title_40 (C#位置: 468, 20)
-        if let Some(title_texture) = ggez_manager.get_texture("Title_40") {
-            let draw_param = DrawParam::default()
-                .dest([468.0, 20.0])  // C#原始位置
-                .color(Color::WHITE);
-            canvas.draw(title_texture, draw_param);
-        } else {
-            // 如果Title_40不存在，显示文本标题作为后备
-            let mut title_text = Text::new("SELECT CHARACTER");
-            title_text.set_font("AlibabaPuHuiTi")
-                .set_scale(PxScale::from(32.0));
-            canvas.draw(&title_text, DrawParam::default()
-                .dest([400.0, 30.0])
-                .color(Color::from_rgb(255, 215, 0)));  // 金色
-            tracing::warn!("标题纹理未找到: Title_40");
+        if let Some(lib_arc) = get_library(LibraryName::Title) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                let _ = lib.draw_with_color(ctx, canvas, 40, 468.0, 20.0, Color::WHITE, false);
+            }
         }
         
         // 2.5 绘制服务器标签 (C#位置: 432, 60, Size: 155x17, 水平居中)
@@ -855,11 +843,10 @@ impl Scene for SelectScene {
                 660 + (character.class as i32)  // 未选中状态: 660-664
             };
             
-            if let Some(slot_texture) = ggez_manager.get_texture(&format!("Title_{}", slot_index)) {
-                let draw_param = DrawParam::default()
-                    .dest([slot_x, slot_y])
-                    .color(Color::WHITE);
-                canvas.draw(slot_texture, draw_param);
+            if let Some(lib_arc) = get_library(LibraryName::Title) {
+                if let Ok(mut lib) = lib_arc.try_lock() {
+                    let _ = lib.draw_with_color(ctx, canvas, slot_index as usize, slot_x, slot_y, Color::WHITE, false);
+                }
             }
             
             // 绘制角色名称和等级信息 (使用文本)
@@ -899,11 +886,10 @@ impl Scene for SelectScene {
         for i in self.characters.len()..4 {
             let (slot_x, slot_y) = character_button_positions[i];
             
-            if let Some(empty_texture) = ggez_manager.get_texture("Prguse_44") {
-                let draw_param = DrawParam::default()
-                    .dest([slot_x, slot_y])
-                    .color(Color::WHITE);
-                canvas.draw(empty_texture, draw_param);
+            if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+                if let Ok(mut lib) = lib_arc.try_lock() {
+                    let _ = lib.draw_with_color(ctx, canvas, 44, slot_x, slot_y, Color::WHITE, false);
+                }
             }
         }
         
@@ -933,43 +919,17 @@ impl Scene for SelectScene {
             let preview_x = 260.0;
             let preview_y = 420.0;
             
-            // 获取纹理偏移量（从MLibrary）
-            use crate::graphics::libraries::{get_library, LibraryName};
-            let (offset_x, offset_y) = if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
-                let mut lib = lib_arc.lock().unwrap();
-                if let Ok(info) = lib.get_image_info(anim_index as usize) {
-                    (info.x as f32, info.y as f32)
-                } else {
-                    (0.0, 0.0)
-                }
-            } else {
-                (0.0, 0.0)
-            };
-            
-            if let Some(texture) = ggez_manager.get_texture(&anim_key) {
-                // 应用偏移量（C# UseOffSet = true）
-                // 注意：C#版本的DisplayLocation已经包含了偏移量
-                // 但我们需要显式添加，因为我们直接从MLibrary获取偏移
-                let final_x = preview_x + offset_x;
-                let final_y = preview_y + offset_y;
-                
-                canvas.draw(texture, DrawParam::default().dest([final_x, final_y]));
-                
-                // 法师需要绘制混合效果（C# AfterDraw事件）
-                if character.class == mir2_shared::enums::MirClass::Wizard {
-                    let blend_key = format!("ChrSel_{}", anim_index + 560);
-                    if let Some(blend_texture) = ggez_manager.get_texture(&blend_key) {
-                        // C#: DrawBlend with Color.White and opacity ~0.7
-                        canvas.draw(blend_texture, DrawParam::default()
-                            .dest([final_x, final_y])
-                            .color(Color::from_rgba(255, 255, 255, 180)));
+            // 使用新的库系统绘制角色预览
+            if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
+                if let Ok(mut lib) = lib_arc.try_lock() {
+                    // draw_with_color 最后一个参数 use_offset=true 会自动应用偏移量
+                    let _ = lib.draw_with_color(ctx, canvas, anim_index as usize, preview_x, preview_y, Color::WHITE, true);
+                    
+                    // 法师需要绘制混合效果（C# AfterDraw事件）
+                    if character.class == mir2_shared::enums::MirClass::Wizard {
+                        let blend_index = (anim_index + 560) as usize;
+                        let _ = lib.draw_with_color(ctx, canvas, blend_index, preview_x, preview_y, Color::from_rgba(255, 255, 255, 180), true);
                     }
-                }
-            } else {
-                // 纹理未找到 - 这会导致角色不显示
-                // 在帧0或15时记录，因为这是循环边界
-                if self.character_animation_frame == 0 || self.character_animation_frame == 15 {
-                    tracing::warn!("Character texture not found: {} (frame {})", anim_key, self.character_animation_frame);
                 }
             }
             
@@ -1016,56 +976,39 @@ impl Scene for SelectScene {
             }
         };
         
-        // 开始游戏按钮 (Title_340, 341, 342)
-        let start_btn_index = get_button_index(340, BottomButton::StartGame);
-        if let Some(start_btn) = ggez_manager.get_texture(&format!("Title_{}", start_btn_index)) {
-            canvas.draw(start_btn, DrawParam::default().dest([button_start_x + button_spacing * 0.0, button_y]));
-        }
-        
-        // 新建角色按钮 (Title_343, 344, 345)
-        let new_btn_index = get_button_index(343, BottomButton::NewCharacter);
-        if let Some(new_btn) = ggez_manager.get_texture(&format!("Title_{}", new_btn_index)) {
-            canvas.draw(new_btn, DrawParam::default().dest([button_start_x + button_spacing * 1.0, button_y]));
-        }
-        
-        // 删除角色按钮 (Title_346, 347, 348)
-        let delete_btn_index = get_button_index(346, BottomButton::DeleteCharacter);
-        if let Some(delete_btn) = ggez_manager.get_texture(&format!("Title_{}", delete_btn_index)) {
-            canvas.draw(delete_btn, DrawParam::default().dest([button_start_x + button_spacing * 2.0, button_y]));
-        }
-        
-        // 制作人员按钮 (Title_349, 350, 351)
-        let credits_btn_index = get_button_index(349, BottomButton::Credits);
-        if let Some(credits_btn) = ggez_manager.get_texture(&format!("Title_{}", credits_btn_index)) {
-            canvas.draw(credits_btn, DrawParam::default().dest([button_start_x + button_spacing * 3.0, button_y]));
-        }
-        
-        // 退出游戏按钮 (Title_352, 353, 354)
-        let exit_btn_index = get_button_index(352, BottomButton::ExitGame);
-        if let Some(exit_btn) = ggez_manager.get_texture(&format!("Title_{}", exit_btn_index)) {
-            canvas.draw(exit_btn, DrawParam::default().dest([button_start_x + button_spacing * 4.0, button_y]));
-        }
-        
-        // 6. 绘制 NewCharacterDialog (最上层)
-        if let Some(dialog) = &self.new_character_dialog {
-            if dialog.visible {
-                self.draw_new_character_dialog(ctx, canvas, ggez_manager, dialog);
+        // 绘制所有底部按钮
+        if let Some(lib_arc) = get_library(LibraryName::Title) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                // 开始游戏按钮 (Title_340, 341, 342)
+                let start_btn_index = get_button_index(340, BottomButton::StartGame);
+                let _ = lib.draw_with_color(ctx, canvas, start_btn_index as usize, button_start_x + button_spacing * 0.0, button_y, Color::WHITE, false);
+                
+                // 新建角色按钮 (Title_343, 344, 345)
+                let new_btn_index = get_button_index(343, BottomButton::NewCharacter);
+                let _ = lib.draw_with_color(ctx, canvas, new_btn_index as usize, button_start_x + button_spacing * 1.0, button_y, Color::WHITE, false);
+                
+                // 删除角色按钮 (Title_346, 347, 348)
+                let delete_btn_index = get_button_index(346, BottomButton::DeleteCharacter);
+                let _ = lib.draw_with_color(ctx, canvas, delete_btn_index as usize, button_start_x + button_spacing * 2.0, button_y, Color::WHITE, false);
+                
+                // 制作人员按钮 (Title_349, 350, 351)
+                let credits_btn_index = get_button_index(349, BottomButton::Credits);
+                let _ = lib.draw_with_color(ctx, canvas, credits_btn_index as usize, button_start_x + button_spacing * 3.0, button_y, Color::WHITE, false);
+                
+                // 退出游戏按钮 (Title_352, 353, 354)
+                let exit_btn_index = get_button_index(352, BottomButton::ExitGame);
+                let _ = lib.draw_with_color(ctx, canvas, exit_btn_index as usize, button_start_x + button_spacing * 4.0, button_y, Color::WHITE, false);
             }
         }
         
-        // 7. 绘制 DeleteCharacterDialog (最上层)
-        if let Some(dialog) = &self.delete_character_dialog {
-            if dialog.is_visible() {
-                self.draw_delete_character_dialog(ctx, canvas, ggez_manager, dialog);
-            }
-        }
+        // TODO: 6. 绘制 NewCharacterDialog (最上层)
+        // 暂时禁用对话框绘制，等待完整迁移到新的库系统
         
-        // 8. 绘制 CreditsDialog (最上层)
-        if let Some(dialog) = &self.credits_dialog {
-            if dialog.is_visible() {
-                dialog.draw(ctx, canvas, ggez_manager, self.window_width, self.window_height);
-            }
-        }
+        // TODO: 7. 绘制 DeleteCharacterDialog (最上层)
+        // 暂时禁用对话框绘制
+        
+        // TODO: 8. 绘制 CreditsDialog (最上层)
+        // 暂时禁用对话框绘制
     }
     
     fn process_event(&mut self, event: &GameEvent) {
@@ -1162,9 +1105,15 @@ impl Scene for SelectScene {
             }
             GameEvent::StartGameResponse { result } => {
                 tracing::info!("🎮 进入游戏响应: result={}", result);
-                if *result == 0 {
+                // Result codes from Server\MirObjects\PlayerObject.cs:
+                // 0: AllowStartGame disabled but connection allowed (special case)
+                // 1: Not logged in
+                // 2: Character not found
+                // 3: Failed to start game (validation error)
+                // 4: Success! (normal case - see StartGameSuccess())
+                if *result == 4 || *result == 0 {
                     // Success - queue scene transition to game
-                    tracing::info!("✅ 进入游戏成功! 切换到游戏场景...");
+                    tracing::info!("✅ 进入游戏成功! (result={}) 切换到游戏场景...", result);
                     self.pending_scene_change = Some(SceneType::Game);
                 } else {
                     // Error
@@ -1172,7 +1121,7 @@ impl Scene for SelectScene {
                         1 => "You are not logged in.",
                         2 => "Character not found.",
                         3 => "Failed to start game.",
-                        _ => "Unknown error occurred.",
+                        _ => &format!("Unknown error occurred (result code: {})", result),
                     };
                     tracing::error!("❌ 进入游戏失败: {}", error_msg);
                     // TODO: 显示错误消息框
