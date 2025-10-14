@@ -1180,13 +1180,19 @@ impl Scene for GameScene {
             }
         }
         
-        // � 清空画布 - 绘制全屏黑色背景
-        // 这样可以清除之前场景的残留内容
-        use ggez::graphics::{Rect, DrawMode, Mesh, Color};
+        // 🖤 清空画布 - 绘制全屏黑色背景,清除之前场景的残留内容
+        // 注意: program.rs 创建 Canvas 时使用深绿色背景,我们需要完全覆盖它
+        use ggez::graphics::{Rect, DrawMode, Mesh, Color, DrawParam};
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
-        let bg_rect = Rect::new(0.0, 0.0, screen_width, screen_height);
+        
+        // 绘制黑色矩形覆盖整个屏幕 (包括边界外)
+        let bg_rect = Rect::new(-10.0, -10.0, screen_width + 20.0, screen_height + 20.0);
         if let Ok(bg_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), bg_rect, Color::BLACK) {
-            canvas.draw(&bg_mesh, ggez::graphics::DrawParam::default());
+            // 确保在最底层绘制
+            canvas.draw(&bg_mesh, DrawParam::default());
+            tracing::trace!("✓ GameScene 背景清空完成");
+        } else {
+            tracing::warn!("⚠️ Failed to create background mesh for GameScene");
         }
         
         // 🎥 更新摄像机屏幕尺寸
