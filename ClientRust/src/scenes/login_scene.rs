@@ -230,10 +230,18 @@ impl LoginScene {
         self.require_password_change = false;
         self.ready_for_character_select = true;
         self.characters = characters.to_vec();
-        self.record_status(format!(
+        
+        let status_msg = format!(
             "Login successful. {} character(s) available.",
             self.characters.len()
-        ));
+        );
+        self.record_status(status_msg.clone());
+        
+        // 🔧 TODO: 触发场景切换到 SelectScene
+        // 目前 Scene trait 没有返回"请求场景切换"的机制
+        // 需要通过 SceneManager 或其他方式触发
+        tracing::info!("✅ {}", status_msg);
+        tracing::warn!("⚠️ 需要手动切换到 SelectScene - Scene trait 没有自动切换机制!");
     }
 
     fn handle_login_ban(&mut self, reason: &str, expiry_date: i64) {

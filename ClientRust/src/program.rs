@@ -265,12 +265,18 @@ impl CrystalGame {
     /// 处理网络事件
     pub fn process_network_events(&mut self) {
         while let Ok(event) = self.event_rx.try_recv() {
-            tracing::debug!("收到网络事件: {:?}", event);
-            
-            // 特殊处理: 缓存 MapInformation 事件,防止场景切换时丢失
-            if let crate::network::game_client::GameEvent::MapInformation { map_index, ref file_name, ref title } = event {
-                tracing::info!("💾 Caching MapInformation: {} ({})", title, file_name);
-                self.cached_map_info = Some((map_index, file_name.clone(), title.clone()));
+            // 🐛 DEBUG: 打印所有网络事件
+            match &event {
+                crate::network::game_client::GameEvent::LoginSuccess { characters } => {
+                    tracing::info!("🎉🎉🎉 收到 LoginSuccess 事件! 角色数量: {}", characters.len());
+                }
+                crate::network::game_client::GameEvent::MapInformation { map_index, ref file_name, ref title } => {
+                    tracing::info!("💾 Caching MapInformation: {} ({})", title, file_name);
+                    self.cached_map_info = Some((*map_index, file_name.clone(), title.clone()));
+                }
+                _ => {
+                    tracing::debug!("收到网络事件: {:?}", event);
+                }
             }
             
             let mut scene_manager = self.scene_manager.write();
@@ -280,22 +286,33 @@ impl CrystalGame {
     
     /// 检查并处理场景切换 (Login -> Select)
     pub fn check_login_to_select_transition(&mut self, ctx: &mut ggez::Context) {
-        let should_switch_to_select = {
+        let (should_switch_to_select, ready_flag) = {
             let scene_manager = self.scene_manager.read();
             if scene_manager.current_scene_type() == Some(SceneType::Login) {
                 if let Some(scene) = scene_manager.current_scene() {
                     if let Some(login_scene) = scene.as_any().downcast_ref::<LoginScene>() {
-                        login_scene.ready_for_character_select
+                        let ready = login_scene.ready_for_character_select;
+                        (ready, Some(ready))
                     } else {
-                        false
+                        (false, None)
                     }
                 } else {
-                    false
+                    (false, None)
                 }
             } else {
-                false
+                (false, None)
             }
         };
+        
+        // 🐛 DEBUG: 每隔一段时间打印状态
+        static mut CHECK_COUNTER: u32 = 0;
+        unsafe {
+            CHECK_COUNTER += 1;
+            if CHECK_COUNTER % 120 == 1 {  // 每2秒打印一次(60fps)
+                tracing::debug!("🔍 检查场景切换: ready_for_character_select={:?}, should_switch={}", 
+                    ready_flag, should_switch_to_select);
+            }
+        }
         
         if should_switch_to_select {
             // 获取角色列表

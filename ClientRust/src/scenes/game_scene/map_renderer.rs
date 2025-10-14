@@ -89,7 +89,8 @@ impl MapRenderer {
         if x < 0 || y < 0 || x >= self.width || y >= self.height {
             return None;
         }
-        self.cells.get(y as usize)?.get(x as usize)
+        // 注意：MapReader 的 cells 布局是 [x][y] 不是 [y][x]
+        self.cells.get(x as usize)?.get(y as usize)
     }
 
     /// 判断指定坐标是否可行走
@@ -416,6 +417,18 @@ impl MapRenderer {
         canvas: &mut Canvas,
         camera: &Camera,
     ) -> GameResult<()> {
+        // 🐛 调试：每60帧打印一次摄像机信息
+        static mut DEBUG_COUNTER: u32 = 0;
+        unsafe {
+            DEBUG_COUNTER += 1;
+            if DEBUG_COUNTER % 60 == 0 {
+                println!(
+                    "🎥 MapRenderer::draw() - Camera: ({:.1}, {:.1}), zoom: {:.2}, screen: ({:.0}x{:.0})",
+                    camera.x, camera.y, camera.zoom, camera.screen_width, camera.screen_height
+                );
+            }
+        }
+        
         // 更新动画计数器
         self.animation_count = (self.animation_count + 1) % 1000;
 
@@ -432,8 +445,18 @@ impl MapRenderer {
         let start_y = ((top / Self::CELL_HEIGHT as f32).floor() as i32 - 2).max(0);
         let end_y =
             ((bottom / Self::CELL_HEIGHT as f32).ceil() as i32 + 2).min(self.height - 1);
+        
+        // 🐛 调试：每60帧打印可见区域
+        unsafe {
+            if DEBUG_COUNTER % 60 == 0 {
+                println!(
+                    "   📐 可见区域: world({:.0},{:.0} -> {:.0},{:.0}), tiles({},{} -> {},{})",
+                    left, top, right, bottom, start_x, start_y, end_x, end_y
+                );
+            }
+        }
 
-        // Front层特殊处理：向下扩展更多格子
+        // 🎨 Front层特殊处理：向下扩展更多格子 (与map_viewer.rs一致)
         let front_extra_cells = 20;
         let front_start_y = start_y;
         let front_end_y = (end_y + front_extra_cells).min(self.height - 1);

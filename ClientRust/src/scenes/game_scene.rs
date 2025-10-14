@@ -1164,8 +1164,19 @@ impl Scene for GameScene {
             if DRAW_COUNTER % 60 == 1 {
                 tracing::info!("🎬 GameScene::draw() 第 {} 帧", DRAW_COUNTER);
                 tracing::info!("   用户对象存在: {}", self.user.is_some());
+                if let Some(ref user) = self.user {
+                    tracing::info!("   玩家位置 (格): ({}, {})", 
+                        user.player.map_object.movement.x, 
+                        user.player.map_object.movement.y);
+                    tracing::info!("   玩家位置 (像素): ({:.1}, {:.1})", 
+                        user.player.map_object.movement.x as f32 * 48.0, 
+                        user.player.map_object.movement.y as f32 * 32.0);
+                }
                 tracing::info!("   当前摄像机位置: ({:.1}, {:.1})", self.camera.x, self.camera.y);
-                tracing::info!("   地图尺寸: {} x {}", self.map_renderer.width, self.map_renderer.height);
+                tracing::info!("   地图尺寸: {} x {} ({}x{} 像素)", 
+                    self.map_renderer.width, self.map_renderer.height,
+                    self.map_renderer.width as f32 * 48.0,
+                    self.map_renderer.height as f32 * 32.0);
             }
         }
         
@@ -1193,18 +1204,29 @@ impl Scene for GameScene {
             let map_width_px = self.map_renderer.width as f32 * MapRenderer::CELL_WIDTH as f32;
             let map_height_px = self.map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32;
             
-            // 🐛 DEBUG: 打印摄像机更新信息
-            tracing::debug!("🎥 摄像机更新:");
-            tracing::debug!("   玩家位置 (格): ({}, {})", user.player.map_object.movement.x, user.player.map_object.movement.y);
-            tracing::debug!("   玩家偏移 (像素): ({}, {})", user.player.map_object.offset_move.x, user.player.map_object.offset_move.y);
-            tracing::debug!("   玩家世界坐标 (像素): ({:.1}, {:.1})", player_world_x, player_world_y);
-            tracing::debug!("   地图尺寸 (像素): {:.1} x {:.1}", map_width_px, map_height_px);
-            tracing::debug!("   摄像机更新前: ({:.1}, {:.1})", self.camera.x, self.camera.y);
+            // 🐛 DEBUG: 每帧都打印摄像机更新信息（临时调试）
+            static mut CAMERA_UPDATE_COUNTER: u32 = 0;
+            unsafe {
+                CAMERA_UPDATE_COUNTER += 1;
+                if CAMERA_UPDATE_COUNTER <= 5 || CAMERA_UPDATE_COUNTER % 60 == 0 {
+                    tracing::info!("🎥 ======== 摄像机更新 #{} ========", CAMERA_UPDATE_COUNTER);
+                    tracing::info!("🎥 玩家位置 (格): ({}, {})", user.player.map_object.movement.x, user.player.map_object.movement.y);
+                    tracing::info!("🎥 玩家偏移 (像素): ({}, {})", user.player.map_object.offset_move.x, user.player.map_object.offset_move.y);
+                    tracing::info!("🎥 玩家世界坐标 (像素): ({:.1}, {:.1})", player_world_x, player_world_y);
+                    tracing::info!("🎥 地图尺寸 (像素): {:.1} x {:.1}", map_width_px, map_height_px);
+                    tracing::info!("🎥 摄像机更新前: ({:.1}, {:.1})", self.camera.x, self.camera.y);
+                }
+            }
             
             // 使用带边界限制的摄像机跟随
             self.camera.follow_target_clamped(player_world_x, player_world_y, map_width_px, map_height_px);
             
-            tracing::debug!("   摄像机更新后: ({:.1}, {:.1})", self.camera.x, self.camera.y);
+            unsafe {
+                if CAMERA_UPDATE_COUNTER <= 5 || CAMERA_UPDATE_COUNTER % 60 == 0 {
+                    tracing::info!("🎥 摄像机更新后: ({:.1}, {:.1})", self.camera.x, self.camera.y);
+                    tracing::info!("🎥 ========================================");
+                }
+            }
         } else {
             tracing::warn!("⚠️ GameScene::draw() 但 self.user 为 None，摄像机保持在: ({:.1}, {:.1})", 
                 self.camera.x, self.camera.y);

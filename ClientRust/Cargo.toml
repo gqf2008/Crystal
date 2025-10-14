@@ -79,6 +79,11 @@ path = "src/bin/main_ggez.rs"
 name = "lib_inspector"
 path = "lib_inspector.rs"
 
+# 简化的地图查看器 - 使用 GameScene 的 MapRenderer
+[[bin]]
+name = "simple_map_viewer"
+path = "src/bin/simple_map_viewer.rs"
+
 # # 中文输入法测试程序
 # [[bin]]
 # name = "test_chinese_ime"
