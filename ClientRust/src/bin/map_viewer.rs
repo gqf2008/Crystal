@@ -26,6 +26,10 @@ struct Camera {
     y: f32,    // 世界坐标 Y
     zoom: f32, // 缩放级别 (1.0 = 正常)
 
+    // 🖥️ 屏幕尺寸 (由相机维护，避免层层传递)
+    screen_width: f32,
+    screen_height: f32,
+
     // 拖拽状态
     dragging: bool,
     drag_start_x: f32,
@@ -35,17 +39,25 @@ struct Camera {
 }
 
 impl Camera {
-    fn new() -> Self {
+    fn new(screen_width: f32, screen_height: f32) -> Self {
         Self {
             x: 0.0,
             y: 0.0,
             zoom: 1.0,
+            screen_width,
+            screen_height,
             dragging: false,
             drag_start_x: 0.0,
             drag_start_y: 0.0,
             drag_start_cam_x: 0.0,
             drag_start_cam_y: 0.0,
         }
+    }
+
+    /// 更新屏幕尺寸 (窗口大小改变时调用)
+    fn update_screen_size(&mut self, width: f32, height: f32) {
+        self.screen_width = width;
+        self.screen_height = height;
     }
 
     /// 开始拖拽
@@ -73,40 +85,67 @@ impl Camera {
     }
 
     /// 缩放
-    fn zoom_by(
-        &mut self,
-        delta: f32,
-        mouse_x: f32,
-        mouse_y: f32,
-        screen_width: f32,
-        screen_height: f32,
-    ) {
+    fn zoom_by(&mut self, delta: f32, mouse_x: f32, mouse_y: f32) {
         self.zoom = (self.zoom * (1.0 + delta * 0.1)).clamp(0.1, 4.0);
 
         // 以鼠标位置为中心缩放
-        let world_x = self.screen_to_world_x(mouse_x, screen_width);
-        let world_y = self.screen_to_world_y(mouse_y, screen_height);
+        let world_x = self.screen_to_world_x(mouse_x);
+        let world_y = self.screen_to_world_y(mouse_y);
 
-        self.x = world_x - (mouse_x - screen_width / 2.0) / self.zoom;
-        self.y = world_y - (mouse_y - screen_height / 2.0) / self.zoom;
+        self.x = world_x - (mouse_x - self.screen_width / 2.0) / self.zoom;
+        self.y = world_y - (mouse_y - self.screen_height / 2.0) / self.zoom;
     }
 
     /// 屏幕坐标转世界坐标
-    fn screen_to_world_x(&self, screen_x: f32, screen_width: f32) -> f32 {
-        self.x + (screen_x - screen_width / 2.0) / self.zoom
+    fn screen_to_world_x(&self, screen_x: f32) -> f32 {
+        self.x + (screen_x - self.screen_width / 2.0) / self.zoom
     }
 
-    fn screen_to_world_y(&self, screen_y: f32, screen_height: f32) -> f32 {
-        self.y + (screen_y - screen_height / 2.0) / self.zoom
+    fn screen_to_world_y(&self, screen_y: f32) -> f32 {
+        self.y + (screen_y - self.screen_height / 2.0) / self.zoom
+    }
+
+    fn screen_to_world(&self, screen_x: f32, screen_y: f32) -> (f32, f32) {
+        (
+            self.x + (screen_x - self.screen_width / 2.0) / self.zoom,
+            self.y + (screen_y - self.screen_height / 2.0) / self.zoom,
+        )
     }
 
     /// 世界坐标转屏幕坐标
-    fn world_to_screen_x(&self, world_x: f32, screen_width: f32) -> f32 {
-        (world_x - self.x) * self.zoom + screen_width / 2.0
+    fn world_to_screen_x(&self, world_x: f32) -> f32 {
+        (world_x - self.x) * self.zoom + self.screen_width / 2.0
     }
 
-    fn world_to_screen_y(&self, world_y: f32, screen_height: f32) -> f32 {
-        (world_y - self.y) * self.zoom + screen_height / 2.0
+    fn world_to_screen_y(&self, world_y: f32) -> f32 {
+        (world_y - self.y) * self.zoom + self.screen_height / 2.0
+    }
+
+    fn world_to_screen(&self, world_x: f32, world_y: f32) -> (f32, f32) {
+        (
+            (world_x - self.x) * self.zoom + self.screen_width / 2.0,
+            (world_y - self.y) * self.zoom + self.screen_height / 2.0,
+        )
+    }
+}
+
+/// 门结构体 (对应 C# Door)
+#[derive(Debug, Clone)]
+struct Door {
+    index: u8,                     // 门ID (DoorIndex)
+    door_state: u8,                // 门状态：0=关闭, 1=正在开启, 2=已开启, 3=正在关闭
+    image_index: i32,              // 当前动画帧 (0-8, 共9帧)
+    last_tick: std::time::Instant, // 上次动画更新时间
+}
+
+impl Door {
+    fn new(index: u8) -> Self {
+        Self {
+            index,
+            door_state: 0,  // 初始为关闭状态
+            image_index: 0, // 初始帧为0
+            last_tick: std::time::Instant::now(),
+        }
     }
 }
 
@@ -116,6 +155,7 @@ struct MapRenderer {
     width: i32,
     height: i32,
     animation_count: i32,
+    doors: Vec<Door>, // 🚪 门列表
 }
 
 impl MapRenderer {
@@ -136,6 +176,7 @@ impl MapRenderer {
             width: reader.width,
             height: reader.height,
             animation_count: 0,
+            doors: Vec::new(), // 🚪 初始化空门列表
         }
     }
 
@@ -148,27 +189,45 @@ impl MapRenderer {
         }
     }
 
-    /// 渲染地图
-    fn draw(
+    /// 🚪 获取或创建门对象
+    fn get_or_create_door(&mut self, door_index: u8) -> &mut Door {
+        // 查找现有门
+        if let Some(pos) = self.doors.iter().position(|d| d.index == door_index) {
+            return &mut self.doors[pos];
+        }
+
+        // 首次遇到，创建新门
+        self.doors.push(Door::new(door_index));
+        self.doors.last_mut().unwrap()
+    }
+
+    /// 🚪 获取门的当前动画帧 (0-8)
+    fn get_door_frame(&self, door_index: u8) -> i32 {
+        self.doors
+            .iter()
+            .find(|d| d.index == door_index)
+            .map(|d| d.image_index)
+            .unwrap_or(0)
+    }
+
+    /// 🎨 绘制地板三层 (Back/Middle/Front) - 包含门动画
+    fn draw_floor(
         &mut self,
         ctx: &mut Context,
         canvas: &mut Canvas,
         camera: &Camera,
-        screen_width: f32,
-        screen_height: f32,
         show_back: bool,
         show_middle: bool,
         show_front: bool,
         show_borders: bool,
     ) -> GameResult<()> {
-        // 更新动画计数器
-        self.animation_count = (self.animation_count + 1) % 1000;
+        // 动画计数器已在draw()中更新，这里不重复更新
 
         // 计算可见区域 (世界坐标转地图格子)
-        let left = camera.screen_to_world_x(0.0, screen_width);
-        let right = camera.screen_to_world_x(screen_width, screen_width);
-        let top = camera.screen_to_world_y(0.0, screen_height);
-        let bottom = camera.screen_to_world_y(screen_height, screen_height);
+        let left = camera.screen_to_world_x(0.0);
+        let right = camera.screen_to_world_x(camera.screen_width);
+        let top = camera.screen_to_world_y(0.0);
+        let bottom = camera.screen_to_world_y(camera.screen_height);
 
         // Back/Middle层：标准边距
         let start_x = ((left / Self::CELL_WIDTH as f32).floor() as i32 - 2).max(0);
@@ -187,14 +246,14 @@ impl MapRenderer {
         let visible_width = end_x - start_x + 1;
         let visible_height = end_y - start_y + 1;
         let total_cells = visible_width * visible_height;
-        
+
         // 根据可见格子数量动态调整图层绘制策略
         let (draw_middle, draw_front) = if total_cells > 50000 {
-            (false, false)  // 超大范围：只绘制Back层
+            (false, false) // 超大范围：只绘制Back层
         } else if total_cells > 20000 {
-            (false, true)   // 大范围：Back + Front
+            (false, true) // 大范围：Back + Front
         } else {
-            (true, true)    // 正常范围：绘制所有层
+            (true, true) // 正常范围：绘制所有层
         };
 
         // ========================================
@@ -203,9 +262,17 @@ impl MapRenderer {
         if show_back {
             // 传奇地图特点：Back层只渲染偶数行列，通过大瓦片(96x64)覆盖4个格子
             // 🔧 关键修复：必须从偶数坐标开始，不能直接用 step_by(2)
-            let back_start_y = if start_y % 2 == 0 { start_y } else { start_y + 1 };
-            let back_start_x = if start_x % 2 == 0 { start_x } else { start_x + 1 };
-            
+            let back_start_y = if start_y % 2 == 0 {
+                start_y
+            } else {
+                start_y + 1
+            };
+            let back_start_x = if start_x % 2 == 0 {
+                start_x
+            } else {
+                start_x + 1
+            };
+
             for y in (back_start_y..=end_y).step_by(2) {
                 // 只处理偶数行
                 for x in (back_start_x..=end_x).step_by(2) {
@@ -225,12 +292,10 @@ impl MapRenderer {
                         let world_x = (x * Self::CELL_WIDTH) as f32;
                         let world_y = (y * Self::CELL_HEIGHT) as f32;
 
-                        self.draw_tile(
+                        self.draw_normal(
                             ctx,
                             canvas,
                             camera,
-                            screen_width,
-                            screen_height,
                             cell.back_index as i32,
                             index,
                             world_x,
@@ -244,17 +309,38 @@ impl MapRenderer {
         }
 
         // ========================================
-        // MIDDLE LAYER (小地砖)
+        // MIDDLE LAYER (小地砖 + 动画)
         // ========================================
-        if show_middle && draw_middle {  // 🚀 大范围时跳过Middle层
+        if show_middle && draw_middle {
+            // 🚀 大范围时跳过Middle层
             // 渲染所有格子，不限奇偶
             for y in start_y..=end_y {
                 for x in start_x..=end_x {
                     if let Some(cell) = self.get_cell(x, y) {
-                        let index = cell.middle_image - 1;
+                        let mut index = cell.middle_image - 1;
                         if index < 0 || cell.middle_index == -1 {
                             continue;
                         }
+
+                        // 🎬 Middle层动画处理
+                        // animation = M2CellInfo[x, y].MiddleAnimationFrame;
+                        // if ((animation > 0) && (animation < 255)) {
+                        //     byte animationTick = M2CellInfo[x, y].MiddleAnimationTick;
+                        //     index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
+                        // }
+                        let mut animation = cell.middle_animation_frame;
+                        if animation > 0 && animation < 255 {
+                            animation &= 0x0f; // 取低4位为真实帧数
+                            if animation > 0 {
+                                let animation_tick = cell.middle_animation_tick;
+                                let total_frames =
+                                    animation as i32 + (animation as i32 * animation_tick as i32);
+                                let frame_offset = (self.animation_count % total_frames)
+                                    / (1 + animation_tick as i32);
+                                index += frame_offset;
+                            }
+                        }
+
                         // Middle层尺寸过滤：只渲染 48x32 或 96x64 的瓦片
                         // 防止绘制条状错误瓦片 (tile strips)
                         if cell.middle_index >= 0 {
@@ -276,12 +362,10 @@ impl MapRenderer {
                         let world_x = (x * Self::CELL_WIDTH) as f32;
                         let world_y = (y * Self::CELL_HEIGHT) as f32;
 
-                        self.draw_tile(
+                        self.draw_normal(
                             ctx,
                             canvas,
                             camera,
-                            screen_width,
-                            screen_height,
                             cell.middle_index as i32,
                             index as usize,
                             world_x,
@@ -295,9 +379,10 @@ impl MapRenderer {
         }
 
         // ========================================
-        // FRONT LAYER (前景层)
+        // FRONT LAYER (前景层 + 动画)
         // ========================================
-        if show_front && draw_front {  // 🚀 大范围时跳过Front层
+        if show_front && draw_front {
+            // 🚀 大范围时跳过Front层
             // 🎨 使用扩展后的Y范围，确保屏幕下方的长纹理能被绘制
             for y in front_start_y..=front_end_y {
                 for x in start_x..=end_x {
@@ -308,73 +393,212 @@ impl MapRenderer {
                         // if (fileIndex == -1) continue;
                         // Size s = Libraries.MapLibs[fileIndex].GetSize(index);
                         // if (fileIndex == 200) continue; // 修复旧版 4.map 的随机坏点
-                        let index = (cell.front_image & 0x7FFF) - 1;
+                        let mut index = (cell.front_image & 0x7FFF) - 1;
                         if index == -1 || cell.front_index == -1 || cell.front_index == 200 {
                             continue;
                         }
 
-                        // 🔥 检查是否需要加法混合 (FrontAnimationFrame的最高位0x80)
-                        let use_blend = (cell.front_animation_frame & 0x80) != 0;
-
-                        //TODO 门动画处理
-                        // if (M2CellInfo[x, y].DoorIndex > 0)
-                        // {
-                        //     // 查找或创建门对象
-                        //     Door DoorInfo = GetDoor(M2CellInfo[x, y].DoorIndex);
-                        //     if (DoorInfo == null)
-                        //     {
-                        //         // 首次遇到门，创建门对象
-                        //         DoorInfo = new Door() { index = M2CellInfo[x, y].DoorIndex, DoorState = 0, ImageIndex = 0, LastTick = CMain.Time };
-                        //         Doors.Add(DoorInfo);
-                        //     }
-                        //     else
-                        //     {
-                        //         // 门已开启，使用开门动画帧
-                        //         if (DoorInfo.DoorState != 0)
-                        //         {
-                        //             // 门动画索引计算：基础索引 + (动画帧 + 1) * 偏移量
-                        //             index += (DoorInfo.ImageIndex + 1) * M2CellInfo[x, y].DoorOffset;
-                        //         }
-                        //     }
+                        // 🎬 Front层动画处理
+                        // animation = M2CellInfo[x, y].FrontAnimationFrame;
+                        // if ((animation & 0x80) > 0) blend = true;
+                        // animation &= 0x7F;
+                        // if (animation > 0) {
+                        //     byte animationTick = M2CellInfo[x, y].FrontAnimationTick;
+                        //     index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
                         // }
+                        let mut animation = cell.front_animation_frame;
+                        let use_blend = (animation & 0x80) != 0;
+                        animation &= 0x7F; // 去除混合标志，取低7位
 
-                        // if let Some(mlib) = get_map_library(cell.front_index) {
-                        //     if let Ok(mut mlib) = mlib.lock() {
-                        //         if let Ok((w, h)) = mlib.get_size(index as usize) {
-                        //             // 只允许单格 (48x32) 或双格 (96x64) 尺寸
-                        //             if (w as i32 != Self::CELL_WIDTH
-                        //                 || h as i32 != Self::CELL_HEIGHT)
-                        //                 && (w as i32 != Self::CELL_WIDTH * 2
-                        //                     || h as i32 != Self::CELL_HEIGHT * 2)
-                        //             {
-                        //                 continue;
-                        //             }
-                        //         }
-                        //     }
-                        // }
+                        if animation > 0 {
+                            let animation_tick = cell.front_animation_tick;
+                            let total_frames =
+                                animation as i32 + (animation as i32 * animation_tick as i32);
+                            let frame_offset =
+                                (self.animation_count % total_frames) / (1 + animation_tick as i32);
+                            index += frame_offset;
+                        }
+
+                        // 🚪 门动画处理 (在动画帧之后应用)
+                        if cell.door_index > 0 {
+                            let door_frame = self.get_door_frame(cell.door_index);
+                            if door_frame > 0 {
+                                // 门动画索引计算：基础索引 + (动画帧 + 1) * 偏移量
+                                // C# 公式: index += (DoorInfo.ImageIndex + 1) * M2CellInfo[x, y].DoorOffset
+                                index += (door_frame + 1) * cell.door_offset as i32;
+                            }
+                        }
 
                         // Front层不需要向上偏移，让图像的offset自然处理
                         let world_x = (x * Self::CELL_WIDTH) as f32;
                         let world_y = (y * Self::CELL_HEIGHT) as f32;
 
-                        self.draw_front(
+                        self.draw_blend(
                             ctx,
                             canvas,
                             camera,
-                            screen_width,
-                            screen_height,
                             cell.front_index as i32,
                             index as usize,
                             world_x,
                             world_y,
                             show_borders,
                             Color::from_rgb(0, 150, 255),
-                            use_blend,  // 🔥 传递blend标志
+                            use_blend, // 🔥 传递blend标志
                         )?;
                     }
                 }
             }
         }
+
+        Ok(())
+    }
+
+    /// 🔥 绘制地图动画和特效
+    ///
+    /// ⚠️ 注意: 目前只绘制 TileAnimationImage (库190)
+    /// Middle/Front 层动画已经在 draw_floor() 中处理
+    ///
+    /// 包括:
+    /// - 瓦片动画 (TileAnimationImage - 库190) - Shanda动画层
+    fn draw_effects(
+        &mut self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        // 计算可见区域
+        let left = camera.screen_to_world_x(0.0);
+        let right = camera.screen_to_world_x(camera.screen_width);
+        let top = camera.screen_to_world_y(0.0);
+        let bottom = camera.screen_to_world_y(camera.screen_height);
+
+        let start_x = ((left / Self::CELL_WIDTH as f32).floor() as i32 - 2).max(0);
+        let end_x = ((right / Self::CELL_WIDTH as f32).ceil() as i32 + 2).min(self.width - 1);
+        let start_y = ((top / Self::CELL_HEIGHT as f32).floor() as i32 - 2).max(0);
+        let end_y = ((bottom / Self::CELL_HEIGHT as f32).ceil() as i32 + 2).min(self.height - 1);
+
+        // ========================================
+        // 1️⃣ TileAnimationImage (库190 - Shanda动画)
+        // ========================================
+        // 这是独立的动画层,不会与 Middle/Front 层冲突
+        // C# 逻辑:
+        // index = M2CellInfo[x, y].TileAnimationImage;
+        // animation = M2CellInfo[x, y].TileAnimationFrames;
+        // if ((index > 0) & (animation > 0)) {
+        //     index--; // 索引从1开始，需要减1
+        //     int animationoffset = M2CellInfo[x, y].TileAnimationOffset ^ 0x2000;
+        //     index += animationoffset * (AnimationCount % animation);
+        //     Libraries.MapLibs[190].DrawUp(index, drawX, drawY);
+        // }
+        for y in start_y..=end_y {
+            for x in start_x..=end_x {
+                if let Some(cell) = self.get_cell(x, y) {
+                    let tile_index = cell.tile_animation_image;
+                    let tile_frames = cell.tile_animation_frames;
+
+                    if tile_index > 0 && tile_frames > 0 {
+                        // 索引从1开始，减1转为0基索引
+                        let mut index = (tile_index - 1) as i32;
+
+                        // 动画偏移异或 0x2000 (用于控制动画方向/速度)
+                        let animation_offset = (cell.tile_animation_offset ^ 0x2000) as i32;
+
+                        // 循环动画公式: base_index + offset * (frame % total_frames)
+                        index += animation_offset * (self.animation_count % tile_frames as i32);
+
+                        if index >= 0 {
+                            let world_x = (x * Self::CELL_WIDTH) as f32;
+                            let world_y = (y * Self::CELL_HEIGHT) as f32;
+
+                            // 使用库190绘制 (Shanda动画库)
+                            self.draw_blend(
+                                ctx,
+                                canvas,
+                                camera,
+                                190, // 固定使用库190
+                                index as usize,
+                                world_x,
+                                world_y,
+                                false, // 不显示边框
+                                Color::WHITE,
+                                false, // 不使用加法混合
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ⚠️ Middle/Front 层动画已在 draw_floor() 中处理，不在这里重复绘制
+        // 原因: draw_floor() 会根据 animation 标志决定是否应用动画帧
+        // 如果在这里再次绘制会导致:
+        // 1. 重复绘制 (性能浪费)
+        // 2. 静态瓦片消失 (因为这里的条件判断会跳过它们)
+
+        Ok(())
+    }
+
+    /// 绘制玩家/怪物/NPC
+    fn draw_objects(
+        &mut self,
+        _ctx: &mut Context,
+        _canvas: &mut Canvas,
+        _camera: &Camera,
+    ) -> GameResult<()> {
+        // TODO: 实现对象渲染
+        Ok(())
+    }
+
+    /// 绘制UI元素
+    fn draw_ui(
+        &mut self,
+        _ctx: &mut Context,
+        _canvas: &mut Canvas,
+        _camera: &Camera,
+    ) -> GameResult<()> {
+        // TODO: 实现UI渲染
+        Ok(())
+    }
+
+    /// 🎬 绘制所有屏幕元素 (完整渲染管线)
+    ///
+    /// 渲染顺序:
+    /// 1. draw_floor() - 地板三层 (Back/Middle/Front + 门动画)
+    /// 2. draw_effects() - 动画和特效
+    /// 3. [未来扩展] draw_objects() - 玩家/怪物/NPC
+    /// 4. [未来扩展] draw_ui() - UI元素(血条/名字等)
+    fn draw(
+        &mut self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        camera: &Camera,
+        show_back: bool,
+        show_middle: bool,
+        show_front: bool,
+        show_borders: bool,
+    ) -> GameResult<()> {
+        // 更新动画计数器 (全局动画时钟)
+        self.animation_count = (self.animation_count + 1) % 1000;
+
+        // 🎨 步骤1: 绘制地板三层
+        self.draw_floor(
+            ctx,
+            canvas,
+            camera,
+            show_back,
+            show_middle,
+            show_front,
+            show_borders,
+        )?;
+
+        // 🔥 步骤2: 绘制动画和特效
+        self.draw_effects(ctx, canvas, camera)?;
+
+        // 🎮 步骤3: [未来] 绘制对象 (玩家/怪物/NPC)
+        // self.draw_objects(ctx, canvas, camera)?;
+
+        // 📊 步骤4: [未来] 绘制UI (血条/名字/聊天/伤害数字)
+        // self.draw_ui(ctx, canvas, camera)?;
 
         Ok(())
     }
@@ -399,13 +623,11 @@ impl MapRenderer {
     /// 2. 只有 Draw(index, point, color, offSet=true) 才会应用 offset
     /// 3. 地图瓦片绘制使用前者，所以offset在格子坐标计算时已经体现
     /// 4. **但是**：对于 Middle/Front 层的大型物体（树、建筑），offset 用于定位
-    fn draw_tile(
+    fn draw_normal(
         &self,
         ctx: &mut Context,
         canvas: &mut Canvas,
         camera: &Camera,
-        screen_width: f32,
-        screen_height: f32,
         lib_index: i32,
         image_index: usize,
         world_x: f32,
@@ -421,15 +643,14 @@ impl MapRenderer {
                 Ok(info) => {
                     // 从ImageInfo获取实际的纹理
                     if let Some(ref texture) = info.image {
-                        // 🔧 修复坐标计算：正确的世界坐标转屏幕坐标
-                        // 必须考虑相机缩放系数
-                        let screen_x = (world_x - camera.x) * camera.zoom + screen_width / 2.0;
-                        let screen_y = (world_y - camera.y) * camera.zoom + screen_height / 2.0;
+                        // 使用Camera的坐标转换方法
+                        let screen_x = camera.world_to_screen_x(world_x);
+                        let screen_y = camera.world_to_screen_y(world_y);
 
                         // 应用图像offset（如果需要的话）
                         let final_x = screen_x;
                         let final_y = screen_y;
- canvas.set_blend_mode(graphics::BlendMode::REPLACE);
+                        canvas.set_blend_mode(graphics::BlendMode::REPLACE);
                         // 🔧 应用缩放到瓦片绘制
                         canvas.draw(
                             texture,
@@ -464,34 +685,30 @@ impl MapRenderer {
         Ok(())
     }
 
-    fn draw_front(
+    fn draw_blend(
         &self,
         ctx: &mut Context,
         canvas: &mut Canvas,
         camera: &Camera,
-        screen_width: f32,
-        screen_height: f32,
         lib_index: i32,
         image_index: usize,
         world_x: f32,
         world_y: f32,
         show_border: bool,
         border_color: Color,
-        use_blend: bool,  // 🔥 是否使用加法混合
+        use_blend: bool, // 🔥 是否使用加法混合
     ) -> GameResult<()> {
         if let Some(map_lib) = get_map_library(lib_index as i16) {
             let mut lib = map_lib.lock().unwrap();
-
 
             // 使用纹理缓存（先获取纹理再读取 info，避免重复 lock）
             match lib.get_or_create_texture(ctx, image_index) {
                 Ok(info) => {
                     // 从ImageInfo获取实际的纹理
                     if let Some(ref texture) = info.image {
-                        // 🔧 修复坐标计算：正确的世界坐标转屏幕坐标
-                        // 必须考虑相机缩放系数
-                        let screen_x = (world_x - camera.x) * camera.zoom + screen_width / 2.0;
-                        let screen_y = (world_y - camera.y) * camera.zoom + screen_height / 2.0;
+                        // 使用Camera的坐标转换方法
+                        let screen_x = camera.world_to_screen_x(world_x);
+                        let screen_y = camera.world_to_screen_y(world_y);
 
                         // Front层特殊处理：让纹理底部对齐到格子底部
                         // world_y是格子顶部，格子底部 = world_y + CELL_HEIGHT
@@ -504,10 +721,10 @@ impl MapRenderer {
                         // � 根据动画标志决定是否使用加法混合
                         if use_blend {
                             canvas.set_blend_mode(graphics::BlendMode::ADD);
-                        }else{
-                             canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+                        } else {
+                            canvas.set_blend_mode(graphics::BlendMode::ALPHA);
                         }
-                        
+
                         // �🔧 应用缩放到瓦片绘制
                         canvas.draw(
                             texture,
@@ -515,7 +732,7 @@ impl MapRenderer {
                                 .dest([final_x, final_y])
                                 .scale([camera.zoom, camera.zoom]),
                         );
-                        
+
                         // if use_blend {
                         //     canvas.set_blend_mode(graphics::BlendMode::ALPHA);
                         // }
@@ -552,14 +769,12 @@ impl MapRenderer {
         ctx: &mut Context,
         canvas: &mut Canvas,
         camera: &Camera,
-        screen_width: f32,
-        screen_height: f32,
     ) -> GameResult<()> {
         // 计算可见区域
-        let left = camera.screen_to_world_x(0.0, screen_width);
-        let right = camera.screen_to_world_x(screen_width, screen_width);
-        let top = camera.screen_to_world_y(0.0, screen_height);
-        let bottom = camera.screen_to_world_y(screen_height, screen_height);
+        let left = camera.screen_to_world_x(0.0);
+        let right = camera.screen_to_world_x(camera.screen_width);
+        let top = camera.screen_to_world_y(0.0);
+        let bottom = camera.screen_to_world_y(camera.screen_height);
 
         let start_x = ((left / Self::CELL_WIDTH as f32).floor() as i32).max(0);
         let end_x = ((right / Self::CELL_WIDTH as f32).ceil() as i32).min(self.width);
@@ -571,13 +786,13 @@ impl MapRenderer {
         // 绘制垂直线
         for x in start_x..=end_x {
             let world_x = (x * Self::CELL_WIDTH) as f32;
-            // 应用缩放到网格线坐标
-            let screen_x = (world_x - camera.x) * camera.zoom + screen_width / 2.0;
+            // 使用Camera的坐标转换
+            let screen_x = camera.world_to_screen_x(world_x);
 
-            if screen_x >= 0.0 && screen_x <= screen_width {
+            if screen_x >= 0.0 && screen_x <= camera.screen_width {
                 let line = graphics::Mesh::new_line(
                     ctx,
-                    &[[screen_x, 0.0], [screen_x, screen_height]],
+                    &[[screen_x, 0.0], [screen_x, camera.screen_height]],
                     1.0,
                     grid_color,
                 )?;
@@ -588,13 +803,13 @@ impl MapRenderer {
         // 绘制水平线
         for y in start_y..=end_y {
             let world_y = (y * Self::CELL_HEIGHT) as f32;
-            // 应用缩放到网格线坐标
-            let screen_y = (world_y - camera.y) * camera.zoom + screen_height / 2.0;
+            // 使用Camera的坐标转换
+            let screen_y = camera.world_to_screen_y(world_y);
 
-            if screen_y >= 0.0 && screen_y <= screen_height {
+            if screen_y >= 0.0 && screen_y <= camera.screen_height {
                 let line = graphics::Mesh::new_line(
                     ctx,
-                    &[[0.0, screen_y], [screen_width, screen_y]],
+                    &[[0.0, screen_y], [camera.screen_width, screen_y]],
                     1.0,
                     grid_color,
                 )?;
@@ -611,14 +826,12 @@ impl MapRenderer {
         ctx: &mut Context,
         canvas: &mut Canvas,
         camera: &Camera,
-        screen_width: f32,
-        screen_height: f32,
     ) -> GameResult<()> {
         // 计算可见区域
-        let left = camera.screen_to_world_x(0.0, screen_width);
-        let right = camera.screen_to_world_x(screen_width, screen_width);
-        let top = camera.screen_to_world_y(0.0, screen_height);
-        let bottom = camera.screen_to_world_y(screen_height, screen_height);
+        let left = camera.screen_to_world_x(0.0);
+        let right = camera.screen_to_world_x(camera.screen_width);
+        let top = camera.screen_to_world_y(0.0);
+        let bottom = camera.screen_to_world_y(camera.screen_height);
 
         let start_x = ((left / Self::CELL_WIDTH as f32).floor() as i32).max(0);
         let end_x = ((right / Self::CELL_WIDTH as f32).ceil() as i32).min(self.width);
@@ -636,15 +849,15 @@ impl MapRenderer {
                     let has_obstacle = (cell.back_image & 0x20000000) != 0  // HighWall (山、水等不可行走地形)
                         || (cell.door_offset & 0x80) != 0                   // DoorClosed
                         || (cell.door_index & 0x80) != 0                    // Block
-                        || (cell.front_image & 0x8000) != 0;                // MiddleBlock (LowWall)
+                        || (cell.front_image & 0x8000) != 0; // MiddleBlock (LowWall)
 
                     if has_obstacle {
                         let world_x = (x * Self::CELL_WIDTH) as f32;
                         let world_y = (y * Self::CELL_HEIGHT) as f32;
-                        
-                        // 🔧 应用缩放到障碍物坐标计算
-                        let screen_x = (world_x - camera.x) * camera.zoom + screen_width / 2.0;
-                        let screen_y = (world_y - camera.y) * camera.zoom + screen_height / 2.0;
+
+                        // 使用Camera的坐标转换
+                        let screen_x = camera.world_to_screen_x(world_x);
+                        let screen_y = camera.world_to_screen_y(world_y);
 
                         // 🔧 绘制半透明矩形表示障碍，尺寸也要缩放
                         let obstacle_rect = graphics::Mesh::new_rectangle(
@@ -704,15 +917,17 @@ impl MapViewerState {
         let map_renderer = MapRenderer::new(reader);
 
         // 🔧 相机初始位置：地图中心
-        let mut camera = Camera::new();
+        let mut camera = Camera::new(screen_width, screen_height);
         // 计算地图中心的世界坐标
         let map_center_x = (map_renderer.width / 2) as f32 * MapRenderer::CELL_WIDTH as f32;
         let map_center_y = (map_renderer.height / 2) as f32 * MapRenderer::CELL_HEIGHT as f32;
         camera.x = map_center_x;
         camera.y = map_center_y;
-        camera.zoom = 1.0;
 
-        println!("📍 相机初始位置: 地图中心 世界坐标({:.1}, {:.1})", camera.x, camera.y);
+        println!(
+            "📍 相机初始位置: 地图中心 世界坐标({:.1}, {:.1})",
+            camera.x, camera.y
+        );
         println!(
             "🎯 地图像素尺寸: {}x{} 像素",
             map_renderer.width * MapRenderer::CELL_WIDTH,
@@ -740,7 +955,7 @@ impl MapViewerState {
     /// 重新加载地图
     fn reload_map(&mut self, map_path: &str) -> GameResult<()> {
         println!("\n🔄 重新加载地图: {}", map_path);
-        
+
         let reader = MapReader::new(map_path).map_err(|e| {
             eprintln!("❌ 加载地图失败: {}", e);
             ggez::GameError::ResourceLoadError(format!("Failed to load map: {}", e))
@@ -759,7 +974,10 @@ impl MapViewerState {
 
         self.map_name = map_path.to_string();
 
-        println!("📍 相机重置到地图中心: 世界坐标({:.1}, {:.1})", self.camera.x, self.camera.y);
+        println!(
+            "📍 相机重置到地图中心: 世界坐标({:.1}, {:.1})",
+            self.camera.x, self.camera.y
+        );
         println!(
             "🎯 地图像素尺寸: {}x{} 像素",
             self.map_renderer.width * MapRenderer::CELL_WIDTH,
@@ -783,221 +1001,14 @@ impl MapViewerState {
     }
 }
 
-impl EventHandler for MapViewerState {
-    fn update(&mut self, ctx: &mut Context) -> GameResult {
-        // 更新FPS
-        self.frame_count += 1;
-        if self.fps_timer.elapsed().as_secs() >= 1 {
-            self.fps = self.frame_count;
-            self.frame_count = 0;
-            self.fps_timer = Instant::now();
-        }
-
-        // 更新屏幕尺寸
-        let (w, h) = ctx.gfx.drawable_size();
-        self.screen_width = w;
-        self.screen_height = h;
-
-        Ok(())
-    }
-
-    fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        // 使用黑色背景
-        let mut canvas = Canvas::from_frame(ctx, Color::from_rgb(0, 0, 0));
-
-        // 🎨 使用REPLACE混合模式 - 直接替换像素,不混合,避免发白
-        // REPLACE: 完全不透明的纹理直接覆盖背景
-        // 适合地图瓦片这种不需要半透明混合的场景
-
-        // 绘制地图
-        self.map_renderer.draw(
-            ctx,
-            &mut canvas,
-            &self.camera,
-            self.screen_width,
-            self.screen_height,
-            self.show_layer_back,
-            self.show_layer_middle,
-            self.show_layer_front,
-            self.show_borders,
-        )?;
-
-        // 绘制网格
-        if self.show_grid {
-            self.map_renderer.draw_grid(
-                ctx,
-                &mut canvas,
-                &self.camera,
-                self.screen_width,
-                self.screen_height,
-            )?;
-        }
-
-        // 绘制障碍层
-        if self.show_obstacles {
-            self.map_renderer.draw_obstacles(
-                ctx,
-                &mut canvas,
-                &self.camera,
-                self.screen_width,
-                self.screen_height,
-            )?;
-        }
-
-        // 绘制UI信息
-        self.draw_ui(ctx, &mut canvas)?;
-
-        canvas.finish(ctx)?;
-        Ok(())
-    }
-
-    fn mouse_button_down_event(
-        &mut self,
-        _ctx: &mut Context,
-        button: MouseButton,
-        x: f32,
-        y: f32,
-    ) -> GameResult {
-        if button == MouseButton::Left {
-            self.camera.start_drag(x, y);
-        }
-        Ok(())
-    }
-
-    fn mouse_button_up_event(
-        &mut self,
-        _ctx: &mut Context,
-        button: MouseButton,
-        _x: f32,
-        _y: f32,
-    ) -> GameResult {
-        if button == MouseButton::Left {
-            self.camera.end_drag();
-        }
-        Ok(())
-    }
-
-    fn mouse_motion_event(
-        &mut self,
-        _ctx: &mut Context,
-        x: f32,
-        y: f32,
-        _dx: f32,
-        _dy: f32,
-    ) -> GameResult {
-        self.camera.update_drag(x, y);
-        Ok(())
-    }
-
-    fn mouse_wheel_event(&mut self, ctx: &mut Context, _x: f32, y: f32) -> GameResult {
-        // 鼠标滚轮缩放：向上放大，向下缩小
-        let mouse_pos = ctx.mouse.position();
-        self.camera.zoom_by(
-            y,
-            mouse_pos.x,
-            mouse_pos.y,
-            self.screen_width,
-            self.screen_height,
-        );
-        Ok(())
-    }
-
-    fn key_down_event(
-        &mut self,
-        _ctx: &mut Context,
-        input: ggez::input::keyboard::KeyInput,
-        _repeated: bool,
-    ) -> GameResult {
-        use ggez::input::keyboard::KeyCode;
-        use ggez::winit::keyboard::PhysicalKey;
-
-        if let PhysicalKey::Code(keycode) = input.event.physical_key {
-            match keycode {
-                KeyCode::KeyG => {
-                    self.show_grid = !self.show_grid;
-                    println!(
-                        "🔍 地图网格: {}",
-                        if self.show_grid { "开启" } else { "关闭" }
-                    );
-                }
-                KeyCode::KeyB => {
-                    self.show_borders = !self.show_borders;
-                    println!(
-                        "🔍 纹理边框: {}",
-                        if self.show_borders {
-                            "开启"
-                        } else {
-                            "关闭"
-                        }
-                    );
-                }
-                KeyCode::Digit1 => {
-                    self.show_layer_back = !self.show_layer_back;
-                    println!(
-                        "🎨 Back层: {}",
-                        if self.show_layer_back {
-                            "开启"
-                        } else {
-                            "关闭"
-                        }
-                    );
-                }
-                KeyCode::Digit2 => {
-                    self.show_layer_middle = !self.show_layer_middle;
-                    println!(
-                        "🎨 Middle层: {}",
-                        if self.show_layer_middle {
-                            "开启"
-                        } else {
-                            "关闭"
-                        }
-                    );
-                }
-                KeyCode::Digit3 => {
-                    self.show_layer_front = !self.show_layer_front;
-                    println!(
-                        "🎨 Front层: {}",
-                        if self.show_layer_front {
-                            "开启"
-                        } else {
-                            "关闭"
-                        }
-                    );
-                }
-                KeyCode::KeyO => {
-                    self.show_obstacles = !self.show_obstacles;
-                    println!(
-                        "🚧 障碍层: {}",
-                        if self.show_obstacles {
-                            "开启"
-                        } else {
-                            "关闭"
-                        }
-                    );
-                }
-                KeyCode::KeyM => {
-                    println!("📂 打开地图选择对话框...");
-                    self.open_map_dialog();
-                }
-                KeyCode::Escape => {
-                    std::process::exit(0);
-                }
-                _ => {}
-            }
-        }
-
-        Ok(())
-    }
-}
-
 impl MapViewerState {
     fn draw_ui(&self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
         // 计算当前鼠标悬停的地图格子坐标
         let mouse_pos = ctx.mouse.position();
         let mouse_x = mouse_pos.x;
         let mouse_y = mouse_pos.y;
-        let world_x = self.camera.screen_to_world_x(mouse_x, self.screen_width);
-        let world_y = self.camera.screen_to_world_y(mouse_y, self.screen_height);
+        let world_x = self.camera.screen_to_world_x(mouse_x);
+        let world_y = self.camera.screen_to_world_y(mouse_y);
         let grid_x = (world_x / MapRenderer::CELL_WIDTH as f32).floor() as i32;
         let grid_y = (world_y / MapRenderer::CELL_HEIGHT as f32).floor() as i32;
 
@@ -1053,17 +1064,17 @@ impl MapViewerState {
             };
 
             // 构建详细信息（按图片格式）
-            // 
+            //
             // 三层绘制逻辑中的索引计算：
             // Back:   index = (back_image & 0x1FFFFFFF) - 1
-            // Middle: index = middle_image - 1  
+            // Middle: index = middle_image - 1
             // Front:  index = (front_image & 0x7FFF) - 1
             //
             // 注意：显示的是原始值（去掉标志位），不是减1后的索引
             let back_image_value = cell.back_image & 0x1FFFFFFF;
             let middle_image_value = cell.middle_image;
             let front_image_value = cell.front_image & 0x7FFF;
-            
+
             let cell_info = format!(
                 "X: {}        Y: {}     Version        LibName    LibIndex\n\
                 BackImage:   {}       WemadeMir2     {}      {}\n\
@@ -1183,6 +1194,202 @@ impl MapViewerState {
     }
 }
 
+impl EventHandler for MapViewerState {
+    fn update(&mut self, ctx: &mut Context) -> GameResult {
+        // 更新FPS
+        self.frame_count += 1;
+        if self.fps_timer.elapsed().as_secs() >= 1 {
+            self.fps = self.frame_count;
+            self.frame_count = 0;
+            self.fps_timer = Instant::now();
+        }
+
+        // 更新屏幕尺寸
+        let (w, h) = ctx.gfx.drawable_size();
+        self.screen_width = w;
+        self.screen_height = h;
+        self.camera.update_screen_size(w, h);
+
+        Ok(())
+    }
+
+    fn draw(&mut self, ctx: &mut Context) -> GameResult {
+        // 使用黑色背景
+        let mut canvas = Canvas::from_frame(ctx, Color::from_rgb(0, 0, 0));
+
+        // 🎨 使用REPLACE混合模式 - 直接替换像素,不混合,避免发白
+        // REPLACE: 完全不透明的纹理直接覆盖背景
+        // 适合地图瓦片这种不需要半透明混合的场景
+
+        // 绘制地图
+        self.map_renderer.draw(
+            ctx,
+            &mut canvas,
+            &self.camera,
+            self.show_layer_back,
+            self.show_layer_middle,
+            self.show_layer_front,
+            self.show_borders,
+        )?;
+
+        // 绘制网格
+        if self.show_grid {
+            self.map_renderer.draw_grid(
+                ctx,
+                &mut canvas,
+                &self.camera,
+            )?;
+        }
+
+        // 绘制障碍层
+        if self.show_obstacles {
+            self.map_renderer.draw_obstacles(
+                ctx,
+                &mut canvas,
+                &self.camera,
+            )?;
+        }
+
+        // 绘制UI信息
+        self.draw_ui(ctx, &mut canvas)?;
+
+        canvas.finish(ctx)?;
+        Ok(())
+    }
+
+    fn mouse_button_down_event(
+        &mut self,
+        _ctx: &mut Context,
+        button: MouseButton,
+        x: f32,
+        y: f32,
+    ) -> GameResult {
+        if button == MouseButton::Left {
+            self.camera.start_drag(x, y);
+        }
+        Ok(())
+    }
+
+    fn mouse_button_up_event(
+        &mut self,
+        _ctx: &mut Context,
+        button: MouseButton,
+        _x: f32,
+        _y: f32,
+    ) -> GameResult {
+        if button == MouseButton::Left {
+            self.camera.end_drag();
+        }
+        Ok(())
+    }
+
+    fn mouse_motion_event(
+        &mut self,
+        _ctx: &mut Context,
+        x: f32,
+        y: f32,
+        _dx: f32,
+        _dy: f32,
+    ) -> GameResult {
+        self.camera.update_drag(x, y);
+        Ok(())
+    }
+
+    fn mouse_wheel_event(&mut self, ctx: &mut Context, _x: f32, y: f32) -> GameResult {
+        // 鼠标滚轮缩放：向上放大，向下缩小
+        let mouse_pos = ctx.mouse.position();
+        self.camera.zoom_by(y, mouse_pos.x, mouse_pos.y);
+        Ok(())
+    }
+
+    fn key_down_event(
+        &mut self,
+        _ctx: &mut Context,
+        input: ggez::input::keyboard::KeyInput,
+        _repeated: bool,
+    ) -> GameResult {
+        use ggez::input::keyboard::KeyCode;
+        use ggez::winit::keyboard::PhysicalKey;
+
+        if let PhysicalKey::Code(keycode) = input.event.physical_key {
+            match keycode {
+                KeyCode::KeyG => {
+                    self.show_grid = !self.show_grid;
+                    println!(
+                        "🔍 地图网格: {}",
+                        if self.show_grid { "开启" } else { "关闭" }
+                    );
+                }
+                KeyCode::KeyB => {
+                    self.show_borders = !self.show_borders;
+                    println!(
+                        "🔍 纹理边框: {}",
+                        if self.show_borders {
+                            "开启"
+                        } else {
+                            "关闭"
+                        }
+                    );
+                }
+                KeyCode::Digit1 => {
+                    self.show_layer_back = !self.show_layer_back;
+                    println!(
+                        "🎨 Back层: {}",
+                        if self.show_layer_back {
+                            "开启"
+                        } else {
+                            "关闭"
+                        }
+                    );
+                }
+                KeyCode::Digit2 => {
+                    self.show_layer_middle = !self.show_layer_middle;
+                    println!(
+                        "🎨 Middle层: {}",
+                        if self.show_layer_middle {
+                            "开启"
+                        } else {
+                            "关闭"
+                        }
+                    );
+                }
+                KeyCode::Digit3 => {
+                    self.show_layer_front = !self.show_layer_front;
+                    println!(
+                        "🎨 Front层: {}",
+                        if self.show_layer_front {
+                            "开启"
+                        } else {
+                            "关闭"
+                        }
+                    );
+                }
+                KeyCode::KeyO => {
+                    self.show_obstacles = !self.show_obstacles;
+                    println!(
+                        "🚧 障碍层: {}",
+                        if self.show_obstacles {
+                            "开启"
+                        } else {
+                            "关闭"
+                        }
+                    );
+                }
+                KeyCode::KeyM => {
+                    println!("📂 打开地图选择对话框...");
+                    self.open_map_dialog();
+                }
+                KeyCode::Escape => {
+                    std::process::exit(0);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+}
+
 fn main() -> GameResult {
     // 从命令行参数获取地图路径
     let args: Vec<String> = std::env::args().collect();
@@ -1190,7 +1397,7 @@ fn main() -> GameResult {
         args[1].clone()
     } else {
         // 默认地图
-        "Map/0122.map".to_string()
+        "Map/0.map".to_string()
     };
 
     println!("\n╔══════════════════════════════════════════╗");
