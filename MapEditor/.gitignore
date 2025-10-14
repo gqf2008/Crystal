@@ -1,0 +1,13 @@
+/Map Editor/obj/Debug
+/.vs/Map Editor/v16
+/Map Editor/bin/Release
+/Map Editor/obj/Release
+/.vs/Map Editor
+/.vs
+/Map Editor/bin
+/Map Editor/obj
+/rust-map-editor/Data
+/rust-map-editor/Map
+/rust-map-editor/Sound
+/SharedRust/target
+/target

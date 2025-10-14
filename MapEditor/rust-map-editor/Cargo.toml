@@ -1,0 +1,22 @@
+[package]
+name = "crystal-map-editor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ggez = "=0.10.0-rc0"
+anyhow = "1.0"
+image = "0.25"
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+byteorder = "1.5"
+flate2 = "1.0"
+glam = "0.27"
+mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = true
