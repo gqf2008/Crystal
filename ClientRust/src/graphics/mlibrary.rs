@@ -262,59 +262,59 @@ impl ImageInfo {
                 );
                 decompressed.resize(expected_size, 0);
             }
-        }
-        // 🔧 关键修复：处理黑色背景透明化
-        // Back层的地砖有纯黑色背景(RGB=0,0,0,alpha=255)，需要转为透明
-       // Self::bgra_to_transparent(&mut decompressed);
+        }       
         Ok(decompressed)
     }
 
     
-    /// BGRA黑色背景透明化
-    /// DirectX的alpha值已经正确：alpha=0透明，alpha>0可见
-    /// 但某些库文件的黑色背景alpha可能是255，需要转为0
-    fn bgra_to_transparent(data: &mut [u8]) {
-        for chunk in data.chunks_exact_mut(4) {
-            let b = chunk[0];
-            let g = chunk[1];
-            let r = chunk[2];
-            let a = chunk[3];
+    // /// BGRA黑色背景透明化
+    // /// DirectX的alpha值已经正确：alpha=0透明，alpha>0可见
+    // /// 但某些库文件的黑色背景alpha可能是255，需要转为0
+    // fn bgra_to_transparent(data: &mut [u8]) {
+    //     for chunk in data.chunks_exact_mut(4) {
+    //         let b = chunk[0];
+    //         let g = chunk[1];
+    //         let r = chunk[2];
+    //         let a = chunk[3];
             
-            // 🔧 只处理纯黑背景
-            // 原因: 火焰的阴影已经有正确的alpha值,不应该被修改
-            // 只有地砖的纯黑背景需要转透明
-            let brightness = (r as u16 + g as u16 + b as u16) / 3;
-            let is_pure_black = brightness < 5;  // 几乎纯黑
-            let is_opaque = a > 250; // 完全不透明
+    //         // 🔧 纯黑色背景透明化（匹配C#原版逻辑）
+    //         // C# 原版: if (pixels[i] == 0 && pixels[i + 1] == 0 && pixels[i + 2] == 0) pixels[i + 3] = 0;
+    //         // 
+    //         // 但由于DXT压缩/解压可能导致精度损失，纯黑(0,0,0)可能变成接近黑(1,1,1)或(2,2,2)
+    //         // 所以放宽到 RGB < 3 来容错
+    //         //
+    //         // 注意：金黄色等有色像素不会被误判（它们的RGB值远大于3）
+    //         let is_near_black = r < 3 && g < 3 && b < 3; // 接近纯黑（容忍DXT压缩误差）
+    //         let is_opaque = a > 250;                     // 完全不透明
             
-            if is_pure_black && is_opaque {
-                chunk[3] = 0;  // 纯黑背景 → 完全透明
-            }
-            // 其他所有情况保持原始alpha值
-        }
-    }
+    //         if is_near_black && is_opaque {
+    //             chunk[3] = 0;  // 纯黑背景 → 完全透明
+    //         }
+    //         // 其他所有情况保持原始alpha值
+    //     }
+    // }
 
-    fn apply_auto_alpha(rgba: &mut [u8]) {
-        for chunk in rgba.chunks_exact_mut(4) {
-            let alpha = chunk[3];
-            if alpha == 0 {
-                chunk.copy_from_slice(&[0, 0, 0, 0]);
-                continue;
-            }
+    // fn apply_auto_alpha(rgba: &mut [u8]) {
+    //     for chunk in rgba.chunks_exact_mut(4) {
+    //         let alpha = chunk[3];
+    //         if alpha == 0 {
+    //             chunk.copy_from_slice(&[0, 0, 0, 0]);
+    //             continue;
+    //         }
 
-            let max_rgb = chunk[2].max(chunk[1]).max(chunk[0]);
-            if max_rgb == 0 {
-                chunk.copy_from_slice(&[0, 0, 0, 0]);
-                continue;
-            }
+    //         let max_rgb = chunk[2].max(chunk[1]).max(chunk[0]);
+    //         if max_rgb == 0 {
+    //             chunk.copy_from_slice(&[0, 0, 0, 0]);
+    //             continue;
+    //         }
 
-            let scale = max_rgb as u16;
-            chunk[0] = ((u16::from(chunk[0]) * 255 + scale / 2) / scale).min(255) as u8;
-            chunk[1] = ((u16::from(chunk[1]) * 255 + scale / 2) / scale).min(255) as u8;
-            chunk[2] = ((u16::from(chunk[2]) * 255 + scale / 2) / scale).min(255) as u8;
-            chunk[3] = max_rgb;
-        }
-    }
+    //         let scale = max_rgb as u16;
+    //         chunk[0] = ((u16::from(chunk[0]) * 255 + scale / 2) / scale).min(255) as u8;
+    //         chunk[1] = ((u16::from(chunk[1]) * 255 + scale / 2) / scale).min(255) as u8;
+    //         chunk[2] = ((u16::from(chunk[2]) * 255 + scale / 2) / scale).min(255) as u8;
+    //         chunk[3] = max_rgb;
+    //     }
+    // }
 
     /// 检查指定像素是否可见（非透明）
     ///

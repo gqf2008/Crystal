@@ -12,7 +12,10 @@ use ggez::winit::event::MouseButton;
 use ggez::{
     conf::{WindowMode, WindowSetup},
     event::{self, EventHandler},
-    graphics::{self, Canvas, Color, DrawParam, FontData, Text},
+    graphics::{
+        self, BlendComponent, BlendFactor, BlendMode, BlendOperation, Canvas, Color, DrawParam,
+        FontData, Text,
+    },
     Context, ContextBuilder, GameResult,
 };
 use mir2_client::graphics::libraries::{get_map_library, initialize_all_libraries};
@@ -165,6 +168,37 @@ impl MapRenderer {
     const CELL_WIDTH: i32 = 48; // 单个格子宽度
     const CELL_HEIGHT: i32 = 32; // 单个格子高度
 
+    /// 🔥 创建传奇特效混合模式
+    ///
+    /// 对应 C# 的混合设置:
+    /// ```csharp
+    /// Device.SetRenderState(RenderState.SourceBlend, Blend.SourceAlpha);
+    /// Device.SetRenderState(RenderState.DestinationBlend, Blend.One);
+    /// ```
+    ///
+    /// 混合公式:
+    /// `最终颜色 = 源颜色 × 源Alpha + 背景颜色 × 1`
+    ///
+    /// 这种混合模式的特点:
+    /// - 黑色(RGB=0)透明区域(Alpha=0) → 0×0 + 背景×1 = 背景 (完全透明，正确！)
+    /// - 半透明火焰(RGB=亮色, Alpha=0.5) → 亮色×0.5 + 背景×1 = 发光效果
+    /// - 不透明核心(RGB=亮色, Alpha=1.0) → 亮色×1 + 背景×1 = 明亮发光
+    #[inline]
+    fn create_blend_mode() -> BlendMode {
+        BlendMode {
+            color: BlendComponent {
+                src_factor: BlendFactor::SrcAlpha, // 源颜色乘以源Alpha
+                dst_factor: BlendFactor::One,      // 背景颜色乘以1（保持原样）
+                operation: BlendOperation::Add,    // 相加
+            },
+            alpha: BlendComponent {
+                src_factor: BlendFactor::One,   // 源Alpha保持
+                dst_factor: BlendFactor::One,   // 背景Alpha保持
+                operation: BlendOperation::Add, // 相加
+            },
+        }
+    }
+
     fn new(reader: MapReader) -> Self {
         // 🔧 使用全局 LIBRARIES 初始化所有地图库
         println!("📚 正在初始化地图库...");
@@ -189,7 +223,54 @@ impl MapRenderer {
         }
     }
 
-    /// 🚪 获取或创建门对象
+    /// 🗺️ 地图格子坐标 → 世界像素坐标
+    ///
+    /// 参数:
+    /// - `grid_x`: 地图格子 X 坐标 (0 到 width-1)
+    /// - `grid_y`: 地图格子 Y 坐标 (0 到 height-1)
+    ///
+    /// 返回: (world_x, world_y) 世界像素坐标
+    #[inline]
+    fn map_to_world(grid_x: i32, grid_y: i32) -> (f32, f32) {
+        (
+            (grid_x * Self::CELL_WIDTH) as f32,
+            (grid_y * Self::CELL_HEIGHT) as f32,
+        )
+    }
+
+    /// 🌍 世界像素坐标 → 地图格子坐标
+    ///
+    /// 参数:
+    /// - `world_x`: 世界像素 X 坐标
+    /// - `world_y`: 世界像素 Y 坐标
+    ///
+    /// 返回: (grid_x, grid_y) 地图格子坐标
+    #[inline]
+    fn world_to_map(world_x: f32, world_y: f32) -> (i32, i32) {
+        (
+            (world_x / Self::CELL_WIDTH as f32).floor() as i32,
+            (world_y / Self::CELL_HEIGHT as f32).floor() as i32,
+        )
+    }
+
+    /// � 获取瓦片尺寸 (宽度, 高度)
+    /// 对应 C# 的 Libraries.MapLibs[fileIndex].GetSize(index)
+    fn get_tile_size(&self, file_index: i32, image_index: usize) -> Option<(i32, i32)> {
+        if file_index < 0 {
+            return None;
+        }
+
+        if let Some(mlib) = get_map_library(file_index as i16) {
+            if let Ok(mut mlib) = mlib.lock() {
+                if let Ok((w, h)) = mlib.get_size(image_index) {
+                    return Some((w as i32, h as i32));
+                }
+            }
+        }
+        None
+    }
+
+    /// �🚪 获取或创建门对象
     fn get_or_create_door(&mut self, door_index: u8) -> &mut Door {
         // 查找现有门
         if let Some(pos) = self.doors.iter().position(|d| d.index == door_index) {
@@ -210,7 +291,11 @@ impl MapRenderer {
             .unwrap_or(0)
     }
 
-    /// 🎨 绘制地板三层 (Back/Middle/Front) - 包含门动画
+    /// 🎨 绘制地板三层 (Back/Middle/Front) - 静态层
+    ///
+    /// 对应 C# 的 DrawFloor() 方法
+    /// 职责: 只渲染静态瓦片，不处理动画
+    /// 动画渲染在 draw_effects() 中统一处理
     fn draw_floor(
         &mut self,
         ctx: &mut Context,
@@ -289,8 +374,7 @@ impl MapRenderer {
 
                         // C# 公式: drawX = (x - User.X + OffSetX) * CellWidth - OffSetX
                         // 简化版：直接使用格子坐标 * 格子宽度
-                        let world_x = (x * Self::CELL_WIDTH) as f32;
-                        let world_y = (y * Self::CELL_HEIGHT) as f32;
+                        let (world_x, world_y) = Self::map_to_world(x, y);
 
                         self.draw_normal(
                             ctx,
@@ -309,7 +393,7 @@ impl MapRenderer {
         }
 
         // ========================================
-        // MIDDLE LAYER (小地砖 + 动画)
+        // MIDDLE LAYER (小地砖 - 静态层)
         // ========================================
         if show_middle && draw_middle {
             // 🚀 大范围时跳过Middle层
@@ -317,28 +401,9 @@ impl MapRenderer {
             for y in start_y..=end_y {
                 for x in start_x..=end_x {
                     if let Some(cell) = self.get_cell(x, y) {
-                        let mut index = cell.middle_image - 1;
+                        let index = cell.middle_image - 1;
                         if index < 0 || cell.middle_index == -1 {
                             continue;
-                        }
-
-                        // 🎬 Middle层动画处理
-                        // animation = M2CellInfo[x, y].MiddleAnimationFrame;
-                        // if ((animation > 0) && (animation < 255)) {
-                        //     byte animationTick = M2CellInfo[x, y].MiddleAnimationTick;
-                        //     index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
-                        // }
-                        let mut animation = cell.middle_animation_frame;
-                        if animation > 0 && animation < 255 {
-                            animation &= 0x0f; // 取低4位为真实帧数
-                            if animation > 0 {
-                                let animation_tick = cell.middle_animation_tick;
-                                let total_frames =
-                                    animation as i32 + (animation as i32 * animation_tick as i32);
-                                let frame_offset = (self.animation_count % total_frames)
-                                    / (1 + animation_tick as i32);
-                                index += frame_offset;
-                            }
                         }
 
                         // Middle层尺寸过滤：只渲染 48x32 或 96x64 的瓦片
@@ -359,8 +424,7 @@ impl MapRenderer {
                                 }
                             }
                         }
-                        let world_x = (x * Self::CELL_WIDTH) as f32;
-                        let world_y = (y * Self::CELL_HEIGHT) as f32;
+                        let (world_x, world_y) = Self::map_to_world(x, y);
 
                         self.draw_normal(
                             ctx,
@@ -379,7 +443,7 @@ impl MapRenderer {
         }
 
         // ========================================
-        // FRONT LAYER (前景层 + 动画)
+        // FRONT LAYER (前景层 - 静态层)
         // ========================================
         if show_front && draw_front {
             // 🚀 大范围时跳过Front层
@@ -387,51 +451,44 @@ impl MapRenderer {
             for y in front_start_y..=front_end_y {
                 for x in start_x..=end_x {
                     if let Some(cell) = self.get_cell(x, y) {
-                        // index = (M2CellInfo[x, y].FrontImage & 0x7FFF) - 1;
-                        // if (index == -1) continue;
-                        // int fileIndex = M2CellInfo[x, y].FrontIndex;
-                        // if (fileIndex == -1) continue;
-                        // Size s = Libraries.MapLibs[fileIndex].GetSize(index);
-                        // if (fileIndex == 200) continue; // 修复旧版 4.map 的随机坏点
-                        let mut index = (cell.front_image & 0x7FFF) - 1;
+                        let index = (cell.front_image & 0x7FFF) - 1;
                         if index == -1 || cell.front_index == -1 || cell.front_index == 200 {
                             continue;
                         }
-
-                        // 🎬 Front层动画处理
-                        // animation = M2CellInfo[x, y].FrontAnimationFrame;
-                        // if ((animation & 0x80) > 0) blend = true;
-                        // animation &= 0x7F;
-                        // if (animation > 0) {
-                        //     byte animationTick = M2CellInfo[x, y].FrontAnimationTick;
-                        //     index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
-                        // }
-                        let mut animation = cell.front_animation_frame;
-                        let use_blend = (animation & 0x80) != 0;
-                        animation &= 0x7F; // 去除混合标志，取低7位
-
-                        if animation > 0 {
-                            let animation_tick = cell.front_animation_tick;
-                            let total_frames =
-                                animation as i32 + (animation as i32 * animation_tick as i32);
-                            let frame_offset =
-                                (self.animation_count % total_frames) / (1 + animation_tick as i32);
-                            index += frame_offset;
+                        if cell.front_animation_frame > 0 {
+                            continue;
                         }
-
-                        // 🚪 门动画处理 (在动画帧之后应用)
-                        if cell.door_index > 0 {
-                            let door_frame = self.get_door_frame(cell.door_index);
-                            if door_frame > 0 {
-                                // 门动画索引计算：基础索引 + (动画帧 + 1) * 偏移量
-                                // C# 公式: index += (DoorInfo.ImageIndex + 1) * M2CellInfo[x, y].DoorOffset
-                                index += (door_frame + 1) * cell.door_offset as i32;
+                        let (tile_width, tile_height) = if let Some(mlib) =
+                            get_map_library(cell.front_index)
+                        {
+                            if let Ok(mut mlib) = mlib.lock() {
+                                mlib.get_size(index as usize)
+                                    .unwrap_or((Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16))
+                            } else {
+                                (Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16)
                             }
-                        }
+                        } else {
+                            (Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16)
+                        };
 
-                        // Front层不需要向上偏移，让图像的offset自然处理
-                        let world_x = (x * Self::CELL_WIDTH) as f32;
-                        let world_y = (y * Self::CELL_HEIGHT) as f32;
+                        let (world_x, world_y_base) = Self::map_to_world(x, y);
+                        let world_y = if (tile_width as i32 != Self::CELL_WIDTH
+                            || tile_height as i32 != Self::CELL_HEIGHT)
+                            && (tile_width as i32 != Self::CELL_WIDTH * 2
+                                || tile_height as i32 != Self::CELL_HEIGHT * 2)
+                        {
+                            // 🔑 非标准尺寸 = 大型物体 (树/建筑等)
+                            // C#: drawY = (y - mapPoint.Y + 1)*(CellHeight) 然后 drawY - s.Height
+                            // 简化为: (y + 1) * CellHeight - s.Height = y * CellHeight + CellHeight - s.Height
+                            world_y_base + Self::CELL_HEIGHT as f32 - tile_height as f32
+                        } else {
+                            // 标准地板瓦片 (48×32 或 96×64)
+                            // C#: drawY = (y - mapPoint.Y)*(CellHeight)
+
+                            world_y_base
+                        };
+
+                       // let use_blend = (cell.front_animation_frame & 0x80) != 0;
 
                         self.draw_blend(
                             ctx,
@@ -443,7 +500,7 @@ impl MapRenderer {
                             world_y,
                             show_borders,
                             Color::from_rgb(0, 150, 255),
-                            use_blend, // 🔥 传递blend标志
+                            false,
                         )?;
                     }
                 }
@@ -455,11 +512,13 @@ impl MapRenderer {
 
     /// 🔥 绘制地图动画和特效
     ///
-    /// ⚠️ 注意: 目前只绘制 TileAnimationImage (库190)
-    /// Middle/Front 层动画已经在 draw_floor() 中处理
+    /// 对应 C# 的 DrawObjects() 方法
+    /// 职责: 渲染所有动态内容 (动画瓦片、门、对象、特效等)
     ///
     /// 包括:
-    /// - 瓦片动画 (TileAnimationImage - 库190) - Shanda动画层
+    /// - Shanda瓦片动画 (TileAnimationImage - 库190)
+    /// - Middle层动画 (MiddleAnimationFrame)
+    /// - Front层动画 (FrontAnimationFrame + 门动画)
     fn draw_effects(
         &mut self,
         ctx: &mut Context,
@@ -477,19 +536,14 @@ impl MapRenderer {
         let start_y = ((top / Self::CELL_HEIGHT as f32).floor() as i32 - 2).max(0);
         let end_y = ((bottom / Self::CELL_HEIGHT as f32).ceil() as i32 + 2).min(self.height - 1);
 
+        // Front层特殊处理：向下扩展更多格子
+        let front_extra_cells = 20;
+        let front_start_y = start_y;
+        let front_end_y = (end_y + front_extra_cells).min(self.height - 1);
+
         // ========================================
         // 1️⃣ TileAnimationImage (库190 - Shanda动画)
         // ========================================
-        // 这是独立的动画层,不会与 Middle/Front 层冲突
-        // C# 逻辑:
-        // index = M2CellInfo[x, y].TileAnimationImage;
-        // animation = M2CellInfo[x, y].TileAnimationFrames;
-        // if ((index > 0) & (animation > 0)) {
-        //     index--; // 索引从1开始，需要减1
-        //     int animationoffset = M2CellInfo[x, y].TileAnimationOffset ^ 0x2000;
-        //     index += animationoffset * (AnimationCount % animation);
-        //     Libraries.MapLibs[190].DrawUp(index, drawX, drawY);
-        // }
         for y in start_y..=end_y {
             for x in start_x..=end_x {
                 if let Some(cell) = self.get_cell(x, y) {
@@ -497,31 +551,24 @@ impl MapRenderer {
                     let tile_frames = cell.tile_animation_frames;
 
                     if tile_index > 0 && tile_frames > 0 {
-                        // 索引从1开始，减1转为0基索引
                         let mut index = (tile_index - 1) as i32;
-
-                        // 动画偏移异或 0x2000 (用于控制动画方向/速度)
                         let animation_offset = (cell.tile_animation_offset ^ 0x2000) as i32;
-
-                        // 循环动画公式: base_index + offset * (frame % total_frames)
                         index += animation_offset * (self.animation_count % tile_frames as i32);
 
                         if index >= 0 {
-                            let world_x = (x * Self::CELL_WIDTH) as f32;
-                            let world_y = (y * Self::CELL_HEIGHT) as f32;
+                            let (world_x, world_y) = Self::map_to_world(x, y);
 
-                            // 使用库190绘制 (Shanda动画库)
                             self.draw_blend(
                                 ctx,
                                 canvas,
                                 camera,
-                                190, // 固定使用库190
+                                190,
                                 index as usize,
                                 world_x,
                                 world_y,
-                                false, // 不显示边框
+                                false,
                                 Color::WHITE,
-                                false, // 不使用加法混合
+                                true,
                             )?;
                         }
                     }
@@ -529,11 +576,181 @@ impl MapRenderer {
             }
         }
 
-        // ⚠️ Middle/Front 层动画已在 draw_floor() 中处理，不在这里重复绘制
-        // 原因: draw_floor() 会根据 animation 标志决定是否应用动画帧
-        // 如果在这里再次绘制会导致:
-        // 1. 重复绘制 (性能浪费)
-        // 2. 静态瓦片消失 (因为这里的条件判断会跳过它们)
+        // ========================================
+        // 2️⃣ Middle层动画 (对应 C# DrawObjects 中的 mir3 middle layer)
+        // ========================================
+        for y in start_y..=end_y {
+            for x in start_x..=end_x {
+                if let Some(cell) = self.get_cell(x, y) {
+                    let mut index = cell.middle_image - 1;
+                    if index < 0 || cell.middle_index == -1 {
+                        continue;
+                    }
+
+                    let mut animation = cell.middle_animation_frame;
+                    if animation > 0 && animation < 255 {
+                        let use_blend = (animation & 0x0f) > 0;
+                        animation &= 0x0f;
+
+                        if animation > 0 {
+                            let animation_tick = cell.middle_animation_tick;
+                            let total_frames =
+                                animation as i32 + (animation as i32 * animation_tick as i32);
+                            let frame_offset =
+                                (self.animation_count % total_frames) / (1 + animation_tick as i32);
+                            index += frame_offset;
+
+                            let (world_x, world_y) = Self::map_to_world(x, y);
+
+                            // 绘制动画瓦片
+                            let should_draw = if let Some(mlib) = get_map_library(cell.middle_index)
+                            {
+                                if let Ok(mut mlib) = mlib.lock() {
+                                    if let Ok((w, h)) = mlib.get_size(index as usize) {
+                                        // 只绘制非标准尺寸或需要blend的瓦片
+                                        ((w as i32 != Self::CELL_WIDTH
+                                            || h as i32 != Self::CELL_HEIGHT)
+                                            && (w as i32 != Self::CELL_WIDTH * 2
+                                                || h as i32 != Self::CELL_HEIGHT * 2))
+                                            || use_blend
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+
+                            if should_draw {
+                                self.draw_blend(
+                                    ctx,
+                                    canvas,
+                                    camera,
+                                    cell.middle_index as i32,
+                                    index as usize,
+                                    world_x,
+                                    world_y,
+                                    false,
+                                    Color::WHITE,
+                                    use_blend && (animation == 10 || animation == 8),
+                                )?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ========================================
+        // 3️⃣ Front层动画 + 门动画 (对应 C# DrawObjects 中的 front layer)
+        // ========================================
+        for y in front_start_y..=front_end_y {
+            for x in start_x..=end_x {
+                if let Some(cell) = self.get_cell(x, y) {
+                    let mut index = (cell.front_image & 0x7FFF) - 1;
+                    if index < 0 || cell.front_index == -1 || cell.front_index == 200 {
+                        continue;
+                    }
+
+                    let mut animation = cell.front_animation_frame;
+                    let use_blend = (animation & 0x80) != 0;
+                    animation &= 0x7F;
+
+                    // 只渲染有动画或门的瓦片
+                    if animation == 0 && cell.door_index == 0 {
+                        continue;
+                    }
+
+                    // 动画帧推进
+                    if animation > 0 {
+                        let animation_tick = cell.front_animation_tick;
+                        let total_frames =
+                            animation as i32 + (animation as i32 * animation_tick as i32);
+                        let frame_offset =
+                            (self.animation_count % total_frames) / (1 + animation_tick as i32);
+                        index += frame_offset;
+                    }
+
+                    // 门动画处理
+                    if cell.door_index > 0 {
+                        let door_frame = self.get_door_frame(cell.door_index);
+                        if door_frame > 0 {
+                            index += (door_frame + 1) * cell.door_offset as i32;
+                        }
+                    }
+
+                    // 尺寸检查：判断是否应该渲染
+                    let should_draw = if let Some(mlib) = get_map_library(cell.front_index) {
+                        if let Ok(mut mlib) = mlib.lock() {
+                            if let Ok((w, h)) = mlib.get_size(index as usize) {
+                                // 标准尺寸 (48x32 或 96x64) 且无动画，跳过
+                                if ((w as i32 == Self::CELL_WIDTH && h as i32 == Self::CELL_HEIGHT)
+                                    || (w as i32 == Self::CELL_WIDTH * 2
+                                        && h as i32 == Self::CELL_HEIGHT * 2))
+                                    && animation == 0
+                                {
+                                    false
+                                } else {
+                                    true
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if should_draw {
+                        // 🔍 获取瓦片尺寸以判断是地板瓦片还是大型物体
+                        // 与Front静态层保持一致的处理逻辑
+                        let (tile_width, tile_height) = if let Some(mlib) =
+                            get_map_library(cell.front_index)
+                        {
+                            if let Ok(mut mlib) = mlib.lock() {
+                                mlib.get_size(index as usize)
+                                    .unwrap_or((Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16))
+                            } else {
+                                (Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16)
+                            }
+                        } else {
+                            (Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16)
+                        };
+
+                        let (world_x, world_y_base) = Self::map_to_world(x, y);
+                        let world_y = if (tile_width as i32 != Self::CELL_WIDTH
+                            || tile_height as i32 != Self::CELL_HEIGHT)
+                            && (tile_width as i32 != Self::CELL_WIDTH * 2
+                                || tile_height as i32 != Self::CELL_HEIGHT * 2)
+                        {
+                            // 🔑 非标准尺寸 = 大型物体 (树/建筑等)
+                            // 底部对齐：(y + 1) * CELL_HEIGHT - tile_height
+                            world_y_base + Self::CELL_HEIGHT as f32 - tile_height as f32
+                        } else {
+                            // 标准地板瓦片 (48×32 或 96×64)
+                            world_y_base
+                        };
+
+                        self.draw_blend(
+                            ctx,
+                            canvas,
+                            camera,
+                            cell.front_index as i32,
+                            index as usize,
+                            world_x,
+                            world_y,
+                            false,
+                            Color::WHITE,
+                            use_blend,
+                        )?;
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
@@ -576,6 +793,7 @@ impl MapRenderer {
         show_middle: bool,
         show_front: bool,
         show_borders: bool,
+        show_animations: bool,
     ) -> GameResult<()> {
         // 更新动画计数器 (全局动画时钟)
         self.animation_count = (self.animation_count + 1) % 1000;
@@ -591,8 +809,10 @@ impl MapRenderer {
             show_borders,
         )?;
 
-        // 🔥 步骤2: 绘制动画和特效
-        self.draw_effects(ctx, canvas, camera)?;
+        // 🔥 步骤2: 绘制动画和特效 (仅当开关开启时)
+        if show_animations {
+            self.draw_effects(ctx, canvas, camera)?;
+        }
 
         // 🎮 步骤3: [未来] 绘制对象 (玩家/怪物/NPC)
         // self.draw_objects(ctx, canvas, camera)?;
@@ -696,7 +916,7 @@ impl MapRenderer {
         world_y: f32,
         show_border: bool,
         border_color: Color,
-        use_blend: bool, // 🔥 是否使用加法混合
+        use_blend: bool, // 🔥 混合标志（暂时未使用，统一用ALPHA避免黑边）
     ) -> GameResult<()> {
         if let Some(map_lib) = get_map_library(lib_index as i16) {
             let mut lib = map_lib.lock().unwrap();
@@ -709,18 +929,14 @@ impl MapRenderer {
                         // 使用Camera的坐标转换方法
                         let screen_x = camera.world_to_screen_x(world_x);
                         let screen_y = camera.world_to_screen_y(world_y);
-
-                        // Front层特殊处理：让纹理底部对齐到格子底部
-                        // world_y是格子顶部，格子底部 = world_y + CELL_HEIGHT
-                        // 纹理应该从 (格子底部 - 纹理高度) 开始绘制
                         let final_x = screen_x;
-                        // 注意：info.height是未缩放的纹理高度，需要乘以zoom
-                        let cell_bottom_y = screen_y + Self::CELL_HEIGHT as f32 * camera.zoom;
-                        let final_y = cell_bottom_y - info.height as f32 * camera.zoom;
+                        let final_y = screen_y;
 
-                        // � 根据动画标志决定是否使用加法混合
+                        // 🔥 使用自定义混合模式
+                        // C#原版: SourceBlend=SourceAlpha, DestinationBlend=One
+                        // 效果: 半透明发光，黑色区域完全透明
                         if use_blend {
-                            canvas.set_blend_mode(graphics::BlendMode::ADD);
+                            canvas.set_blend_mode(Self::create_blend_mode());
                         } else {
                             canvas.set_blend_mode(graphics::BlendMode::ALPHA);
                         }
@@ -764,12 +980,7 @@ impl MapRenderer {
     }
 
     /// 绘制地图网格
-    fn draw_grid(
-        &self,
-        ctx: &mut Context,
-        canvas: &mut Canvas,
-        camera: &Camera,
-    ) -> GameResult<()> {
+    fn draw_grid(&self, ctx: &mut Context, canvas: &mut Canvas, camera: &Camera) -> GameResult<()> {
         // 计算可见区域
         let left = camera.screen_to_world_x(0.0);
         let right = camera.screen_to_world_x(camera.screen_width);
@@ -785,7 +996,7 @@ impl MapRenderer {
 
         // 绘制垂直线
         for x in start_x..=end_x {
-            let world_x = (x * Self::CELL_WIDTH) as f32;
+            let (world_x, _) = Self::map_to_world(x, 0);
             // 使用Camera的坐标转换
             let screen_x = camera.world_to_screen_x(world_x);
 
@@ -802,7 +1013,7 @@ impl MapRenderer {
 
         // 绘制水平线
         for y in start_y..=end_y {
-            let world_y = (y * Self::CELL_HEIGHT) as f32;
+            let (_, world_y) = Self::map_to_world(0, y);
             // 使用Camera的坐标转换
             let screen_y = camera.world_to_screen_y(world_y);
 
@@ -852,8 +1063,7 @@ impl MapRenderer {
                         || (cell.front_image & 0x8000) != 0; // MiddleBlock (LowWall)
 
                     if has_obstacle {
-                        let world_x = (x * Self::CELL_WIDTH) as f32;
-                        let world_y = (y * Self::CELL_HEIGHT) as f32;
+                        let (world_x, world_y) = Self::map_to_world(x, y);
 
                         // 使用Camera的坐标转换
                         let screen_x = camera.world_to_screen_x(world_x);
@@ -899,6 +1109,7 @@ struct MapViewerState {
     show_layer_middle: bool, // 2键：显示Middle层
     show_layer_front: bool,  // 3键：显示Front层
     show_obstacles: bool,    // O键：显示障碍层
+    show_animations: bool,   // A键：显示动画
 }
 
 impl MapViewerState {
@@ -949,6 +1160,7 @@ impl MapViewerState {
             show_layer_middle: true,
             show_layer_front: true,
             show_obstacles: false,
+            show_animations: true, // 默认开启动画
         })
     }
 
@@ -1009,12 +1221,11 @@ impl MapViewerState {
         let mouse_y = mouse_pos.y;
         let world_x = self.camera.screen_to_world_x(mouse_x);
         let world_y = self.camera.screen_to_world_y(mouse_y);
-        let grid_x = (world_x / MapRenderer::CELL_WIDTH as f32).floor() as i32;
-        let grid_y = (world_y / MapRenderer::CELL_HEIGHT as f32).floor() as i32;
+        let (grid_x, grid_y) = MapRenderer::world_to_map(world_x, world_y);
 
         // 构建顶部状态栏
         let status_text = format!(
-            "Map: {} | Size: {}x{} | FPS: {} | Zoom: {:.2}x | Camera: ({:.0}, {:.0}) | Grid: ({}, {})\nG-网格 | B-边框 | 1/2/3-图层 | O-障碍 | M-选择地图",
+            "Map: {} | Size: {}x{} | FPS: {} | Zoom: {:.2}x | Camera: ({:.0}, {:.0}) | Grid: ({}, {})\nG-网格 | B-边框 | 1/2/3-图层 | O-障碍 | A-动画 | M-选择地图",
             self.map_name,
             self.map_renderer.width, self.map_renderer.height,
             self.fps,
@@ -1230,24 +1441,19 @@ impl EventHandler for MapViewerState {
             self.show_layer_middle,
             self.show_layer_front,
             self.show_borders,
+            self.show_animations,
         )?;
 
         // 绘制网格
         if self.show_grid {
-            self.map_renderer.draw_grid(
-                ctx,
-                &mut canvas,
-                &self.camera,
-            )?;
+            self.map_renderer
+                .draw_grid(ctx, &mut canvas, &self.camera)?;
         }
 
         // 绘制障碍层
         if self.show_obstacles {
-            self.map_renderer.draw_obstacles(
-                ctx,
-                &mut canvas,
-                &self.camera,
-            )?;
+            self.map_renderer
+                .draw_obstacles(ctx, &mut canvas, &self.camera)?;
         }
 
         // 绘制UI信息
@@ -1375,6 +1581,17 @@ impl EventHandler for MapViewerState {
                         }
                     );
                 }
+                KeyCode::KeyA => {
+                    self.show_animations = !self.show_animations;
+                    println!(
+                        "🎬 动画效果: {}",
+                        if self.show_animations {
+                            "开启"
+                        } else {
+                            "关闭"
+                        }
+                    );
+                }
                 KeyCode::KeyM => {
                     println!("📂 打开地图选择对话框...");
                     self.open_map_dialog();
@@ -1408,6 +1625,7 @@ fn main() -> GameResult {
     println!("  - G键 - 切换地图网格");
     println!("  - B键 - 切换纹理边框");
     println!("  - O键 - 切换障碍层");
+    println!("  - A键 - 切换动画效果");
     println!("  - 1/2/3键 - 切换Back/Middle/Front层");
     println!("  - M键 - 选择地图文件");
     println!("  - ESC 退出");
