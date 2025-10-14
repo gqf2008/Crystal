@@ -185,16 +185,23 @@ impl MapRenderer {
     /// - 不透明核心(RGB=亮色, Alpha=1.0) → 亮色×1 + 背景×1 = 明亮发光
     #[inline]
     fn create_blend_mode() -> BlendMode {
+        // 🔥 火焰发光效果混合模式（纯ADD混合 - 最大发光范围）
+        // 
+        // 公式: src_color * 1 + dst_color * 1
+        // - 源纹理的所有颜色值（包括暗色）都全量添加到背景上
+        // - 即使暗金色像素也会产生发光效果
+        // - 黑色像素(0,0,0)才是真正透明
+        // - 产生最大范围的光晕效果
         BlendMode {
             color: BlendComponent {
-                src_factor: BlendFactor::SrcAlpha, // 源颜色乘以源Alpha
-                dst_factor: BlendFactor::One,      // 背景颜色乘以1（保持原样）
-                operation: BlendOperation::Add,    // 相加
+                src_factor: BlendFactor::One,       // 源颜色全量保留
+                dst_factor: BlendFactor::One,       // 背景颜色全量保留
+                operation: BlendOperation::Add,     // 相加（累加发光）
             },
             alpha: BlendComponent {
-                src_factor: BlendFactor::One,   // 源Alpha保持
-                dst_factor: BlendFactor::One,   // 背景Alpha保持
-                operation: BlendOperation::Add, // 相加
+                src_factor: BlendFactor::One,       // 源Alpha保持
+                dst_factor: BlendFactor::One,       // 背景Alpha保持
+                operation: BlendOperation::Add,     // 相加
             },
         }
     }
@@ -493,6 +500,8 @@ impl MapRenderer {
                             world_x = world_x - 1.0 * Self::CELL_WIDTH as f32; // 混合模式的Front层纹理向左偏移4像素
                             world_y = world_y - 4.0 * Self::CELL_HEIGHT as f32; // 混合模式的Front层纹理向上偏移10像素
                         }
+                        // 💡 如果有动画(火焰等)，Front层静态纹理需要变亮以模拟光照效果
+                        let brightness = if use_blend { 1.5 } else { 1.0 };
                         self.draw_blend(
                             ctx,
                             canvas,
@@ -505,6 +514,7 @@ impl MapRenderer {
                             Color::from_rgb(0, 150, 255),
                             use_blend, // 根据动画标记决定混合模式
                             false,     // Front静态层不应用纹理偏移
+                            brightness, // 💡 火焰位置的静态纹理变亮
                         )?;
                     }
                 }
@@ -590,6 +600,7 @@ impl MapRenderer {
                                 Color::WHITE,
                                 true,  // TileAnimationImage使用自定义混合
                                 false, // DrawUp不应用纹理偏移（C#: DrawUp无offSet参数）
+                                1.0,   // 动画本身不需要额外亮度
                             )?;
                         }
                     }
@@ -657,6 +668,7 @@ impl MapRenderer {
                                     Color::WHITE,
                                     use_blend && (animation == 10 || animation == 8),
                                     false, // Middle动画层不应用纹理偏移
+                                    1.0,   // Middle动画本身不需要额外亮度
                                 )?;
                             }
                         }
@@ -780,34 +792,13 @@ impl MapRenderer {
                             Color::WHITE,
                             use_blend,
                             apply_offset, // 特殊库应用纹理偏移
+                            1.0,          // Front动画本身不需要额外亮度
                         )?;
                     }
                 }
             }
         }
 
-        Ok(())
-    }
-
-    /// 绘制玩家/怪物/NPC
-    fn draw_objects(
-        &mut self,
-        _ctx: &mut Context,
-        _canvas: &mut Canvas,
-        _camera: &Camera,
-    ) -> GameResult<()> {
-        // TODO: 实现对象渲染
-        Ok(())
-    }
-
-    /// 绘制UI元素
-    fn draw_ui(
-        &mut self,
-        _ctx: &mut Context,
-        _canvas: &mut Canvas,
-        _camera: &Camera,
-    ) -> GameResult<()> {
-        // TODO: 实现UI渲染
         Ok(())
     }
 
@@ -906,11 +897,13 @@ impl MapRenderer {
                         let final_y = screen_y;
                         canvas.set_blend_mode(graphics::BlendMode::REPLACE);
                         // 🔧 应用缩放到瓦片绘制
+                        // C#: DXManager.Draw(mi.Image, ..., Color.White)
                         canvas.draw(
                             texture,
                             DrawParam::default()
                                 .dest([final_x, final_y])
-                                .scale([camera.zoom, camera.zoom]),
+                                .scale([camera.zoom, camera.zoom])
+                                .color(Color::WHITE),  // ⭐ 必须设置为白色
                         );
 
                         // 绘制纹理边框
@@ -952,6 +945,7 @@ impl MapRenderer {
         border_color: Color,
         use_blend: bool,    // 🔥 是否使用自定义混合模式
         apply_offset: bool, // 🎯 是否应用纹理的 (X, Y) 偏移 (对应 C# 的 offSet 参数)
+        brightness: f32,    // 💡 亮度倍数 (1.0=正常, >1.0=变亮)
     ) -> GameResult<()> {
         if let Some(map_lib) = get_map_library(lib_index as i16) {
             let mut lib = map_lib.lock().unwrap();
@@ -986,12 +980,24 @@ impl MapRenderer {
                             canvas.set_blend_mode(graphics::BlendMode::ALPHA);
                         }
 
-                        // �🔧 应用缩放到瓦片绘制
+                        // 🔧 应用缩放到瓦片绘制
+                        // C#: DXManager.Draw(mi.Image, ..., Color.White)
+                        // 
+                        // 💡 亮度控制:
+                        // - brightness = 1.0: 正常亮度 (Color::WHITE)
+                        // - brightness > 1.0: 变亮 (火焰照亮Front层静态纹理)
+                        let draw_color = if brightness > 1.0 {
+                            Color::new(brightness, brightness, brightness, 1.0)
+                        } else {
+                            Color::WHITE
+                        };
+                        
                         canvas.draw(
                             texture,
                             DrawParam::default()
                                 .dest([final_x, final_y])
-                                .scale([camera.zoom, camera.zoom]),
+                                .scale([camera.zoom, camera.zoom])
+                                .color(draw_color),
                         );
 
                         // if use_blend {
