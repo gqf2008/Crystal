@@ -513,7 +513,6 @@ impl MapRenderer {
                             show_borders,
                             Color::from_rgb(0, 150, 255),
                             use_blend, // 根据动画标记决定混合模式
-                            false,     // Front静态层不应用纹理偏移
                             brightness, // 💡 火焰位置的静态纹理变亮
                         )?;
                     }
@@ -599,7 +598,6 @@ impl MapRenderer {
                                 false,
                                 Color::WHITE,
                                 true,  // TileAnimationImage使用自定义混合
-                                false, // DrawUp不应用纹理偏移（C#: DrawUp无offSet参数）
                                 1.0,   // 动画本身不需要额外亮度
                             )?;
                         }
@@ -667,7 +665,6 @@ impl MapRenderer {
                                     false,
                                     Color::WHITE,
                                     use_blend && (animation == 10 || animation == 8),
-                                    false, // Middle动画层不应用纹理偏移
                                     1.0,   // Middle动画本身不需要额外亮度
                                 )?;
                             }
@@ -791,7 +788,6 @@ impl MapRenderer {
                             false,
                             Color::WHITE,
                             use_blend,
-                            apply_offset, // 特殊库应用纹理偏移
                             1.0,          // Front动画本身不需要额外亮度
                         )?;
                     }
@@ -944,7 +940,6 @@ impl MapRenderer {
         show_border: bool,
         border_color: Color,
         use_blend: bool,    // 🔥 是否使用自定义混合模式
-        apply_offset: bool, // 🎯 是否应用纹理的 (X, Y) 偏移 (对应 C# 的 offSet 参数)
         brightness: f32,    // 💡 亮度倍数 (1.0=正常, >1.0=变亮)
     ) -> GameResult<()> {
         if let Some(map_lib) = get_map_library(lib_index as i16) {
@@ -958,19 +953,9 @@ impl MapRenderer {
                         // 使用Camera的坐标转换方法
                         let screen_x = camera.world_to_screen_x(world_x);
                         let screen_y = camera.world_to_screen_y(world_y);
-
-                        // 🎯 应用纹理偏移 (对应 C# if (offSet) point.Offset(mi.X, mi.Y))
-                        let final_x = if apply_offset {
-                            screen_x + info.x as f32 * camera.zoom
-                        } else {
-                            screen_x
-                        };
-                        let final_y = if apply_offset {
-                            screen_y + info.y as f32 * camera.zoom
-                        } else {
-                            screen_y
-                        };
-
+                        let final_x=screen_x;
+                        let final_y=screen_y;
+                       
                         // 🔥 使用自定义混合模式
                         // C#原版: SourceBlend=SourceAlpha, DestinationBlend=One
                         // 效果: 半透明发光，黑色区域完全透明
