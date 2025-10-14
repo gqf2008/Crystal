@@ -567,6 +567,7 @@ impl MapRenderer {
     /// 参数:
     /// - `show_back/middle/front`: 图层显示开关
     /// - `show_borders`: 边框显示开关
+    /// - `show_animations`: 动画显示开关
     ///
     /// 每层内部自己处理静态和动画内容
     fn draw_all_layers(
@@ -578,6 +579,7 @@ impl MapRenderer {
         show_middle: bool,
         show_front: bool,
         show_borders: bool,
+        show_animations: bool,
     ) -> GameResult<()> {
         // 计算可见区域 (世界坐标转地图格子)
         let left = camera.screen_to_world_x(0.0);
@@ -612,13 +614,14 @@ impl MapRenderer {
         // ========================================
         // 🔥 TileAnimationImage (库190 - Shanda动画)
         // ========================================
-        for y in start_y..=end_y {
-            for x in start_x..=end_x {
-                if let Some(cell) = self.get_cell(x, y) {
-                    let tile_index = cell.tile_animation_image;
-                    let tile_frames = cell.tile_animation_frames;
+        if show_animations {
+            for y in start_y..=end_y {
+                for x in start_x..=end_x {
+                    if let Some(cell) = self.get_cell(x, y) {
+                        let tile_index = cell.tile_animation_image;
+                        let tile_frames = cell.tile_animation_frames;
 
-                    if tile_index > 0 && tile_frames > 0 {
+                        if tile_index > 0 && tile_frames > 0 {
                         let mut index = (tile_index - 1) as i32;
                         let animation_offset = (cell.tile_animation_offset ^ 0x2000) as i32;
                         index += animation_offset * (self.animation_count % tile_frames as i32);
@@ -657,6 +660,7 @@ impl MapRenderer {
                     }
                 }
             }
+        }
         }
 
         // ========================================
@@ -728,8 +732,10 @@ impl MapRenderer {
         show_borders: bool,
         show_animations: bool,
     ) -> GameResult<()> {
-        // 更新动画计数器 (全局动画时钟)
-        self.animation_count = (self.animation_count + 1) % 1000;
+        // 🎬 只有动画开启时才更新动画计数器
+        if show_animations {
+            self.animation_count = (self.animation_count + 1) % 1000;
+        }
 
         // 🎨 绘制所有层 (每层内部自己处理静态+动画)
         self.draw_all_layers(
@@ -740,6 +746,7 @@ impl MapRenderer {
             show_middle,
             show_front,
             show_borders,
+            show_animations,
         )?;
 
         Ok(())
