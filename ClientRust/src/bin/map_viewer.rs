@@ -455,9 +455,9 @@ impl MapRenderer {
                         if index == -1 || cell.front_index == -1 || cell.front_index == 200 {
                             continue;
                         }
-                        if cell.front_animation_frame > 0 {
-                            continue;
-                        }
+                        // if cell.front_animation_frame > 0 {
+                        //     continue;
+                        // }
                         let (tile_width, tile_height) = if let Some(mlib) =
                             get_map_library(cell.front_index)
                         {
@@ -471,8 +471,8 @@ impl MapRenderer {
                             (Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16)
                         };
 
-                        let (world_x, world_y_base) = Self::map_to_world(x, y);
-                        let world_y = if (tile_width as i32 != Self::CELL_WIDTH
+                        let (mut world_x, world_y_base) = Self::map_to_world(x, y);
+                        let mut world_y = if (tile_width as i32 != Self::CELL_WIDTH
                             || tile_height as i32 != Self::CELL_HEIGHT)
                             && (tile_width as i32 != Self::CELL_WIDTH * 2
                                 || tile_height as i32 != Self::CELL_HEIGHT * 2)
@@ -488,8 +488,11 @@ impl MapRenderer {
                             world_y_base
                         };
 
-                       // let use_blend = (cell.front_animation_frame & 0x80) != 0;
-
+                        let use_blend = (cell.front_animation_frame & 0x80) != 0;
+                        if use_blend {
+                            world_x = world_x - 1.0 * Self::CELL_WIDTH as f32; // 混合模式的Front层纹理向左偏移4像素
+                            world_y = world_y - 4.0 * Self::CELL_HEIGHT as f32; // 混合模式的Front层纹理向上偏移10像素
+                        }
                         self.draw_blend(
                             ctx,
                             canvas,
@@ -500,7 +503,8 @@ impl MapRenderer {
                             world_y,
                             show_borders,
                             Color::from_rgb(0, 150, 255),
-                            false,
+                            use_blend, // 根据动画标记决定混合模式
+                            false,     // Front静态层不应用纹理偏移
                         )?;
                     }
                 }
@@ -556,7 +560,23 @@ impl MapRenderer {
                         index += animation_offset * (self.animation_count % tile_frames as i32);
 
                         if index >= 0 {
-                            let (world_x, world_y) = Self::map_to_world(x, y);
+                            // 🔍 获取纹理高度用于DrawUp偏移
+                            // C#: DrawUp() 会自动执行 y -= mi.Height
+                            let tile_height = if let Some(mlib) = get_map_library(190) {
+                                if let Ok(mut mlib) = mlib.lock() {
+                                    mlib.get_size(index as usize)
+                                        .map(|(_, h)| h as f32)
+                                        .unwrap_or(Self::CELL_HEIGHT as f32)
+                                } else {
+                                    Self::CELL_HEIGHT as f32
+                                }
+                            } else {
+                                Self::CELL_HEIGHT as f32
+                            };
+
+                            let (world_x, world_y_base) = Self::map_to_world(x, y);
+                            // 🎯 DrawUp效果：向上偏移纹理高度 (对应 C# y -= mi.Height)
+                            let world_y = world_y_base - tile_height;
 
                             self.draw_blend(
                                 ctx,
@@ -568,7 +588,8 @@ impl MapRenderer {
                                 world_y,
                                 false,
                                 Color::WHITE,
-                                true,
+                                true,  // TileAnimationImage使用自定义混合
+                                false, // DrawUp不应用纹理偏移（C#: DrawUp无offSet参数）
                             )?;
                         }
                     }
@@ -635,6 +656,7 @@ impl MapRenderer {
                                     false,
                                     Color::WHITE,
                                     use_blend && (animation == 10 || animation == 8),
+                                    false, // Middle动画层不应用纹理偏移
                                 )?;
                             }
                         }
@@ -721,8 +743,8 @@ impl MapRenderer {
                             (Self::CELL_WIDTH as i16, Self::CELL_HEIGHT as i16)
                         };
 
-                        let (world_x, world_y_base) = Self::map_to_world(x, y);
-                        let world_y = if (tile_width as i32 != Self::CELL_WIDTH
+                        let (mut world_x, world_y_base) = Self::map_to_world(x, y);
+                        let mut world_y = if (tile_width as i32 != Self::CELL_WIDTH
                             || tile_height as i32 != Self::CELL_HEIGHT)
                             && (tile_width as i32 != Self::CELL_WIDTH * 2
                                 || tile_height as i32 != Self::CELL_HEIGHT * 2)
@@ -735,6 +757,17 @@ impl MapRenderer {
                             world_y_base
                         };
 
+                        // 🎯 Front层动画偏移规则 (对应 C# GameScene.cs:11970)
+                        // 特殊库 (14, 27, 100-199) 使用纹理偏移
+                        // C#: DrawBlend(index, new Point(drawX, drawY - 3*CellHeight), Color.White, true)
+                        //                                                                             ^^^^
+                        let apply_offset = cell.front_index == 14
+                            || cell.front_index == 27
+                            || (cell.front_index > 99 && cell.front_index < 199);
+                        if use_blend {
+                            world_x = world_x - 1.0 * Self::CELL_WIDTH as f32; // 混合模式的Front层纹理向左偏移4像素
+                            world_y = world_y - 4.0 * Self::CELL_HEIGHT as f32; // 混合模式的Front层纹理向上偏移10像素
+                        }
                         self.draw_blend(
                             ctx,
                             canvas,
@@ -746,6 +779,7 @@ impl MapRenderer {
                             false,
                             Color::WHITE,
                             use_blend,
+                            apply_offset, // 特殊库应用纹理偏移
                         )?;
                     }
                 }
@@ -916,7 +950,8 @@ impl MapRenderer {
         world_y: f32,
         show_border: bool,
         border_color: Color,
-        use_blend: bool, // 🔥 混合标志（暂时未使用，统一用ALPHA避免黑边）
+        use_blend: bool,    // 🔥 是否使用自定义混合模式
+        apply_offset: bool, // 🎯 是否应用纹理的 (X, Y) 偏移 (对应 C# 的 offSet 参数)
     ) -> GameResult<()> {
         if let Some(map_lib) = get_map_library(lib_index as i16) {
             let mut lib = map_lib.lock().unwrap();
@@ -929,8 +964,18 @@ impl MapRenderer {
                         // 使用Camera的坐标转换方法
                         let screen_x = camera.world_to_screen_x(world_x);
                         let screen_y = camera.world_to_screen_y(world_y);
-                        let final_x = screen_x;
-                        let final_y = screen_y;
+
+                        // 🎯 应用纹理偏移 (对应 C# if (offSet) point.Offset(mi.X, mi.Y))
+                        let final_x = if apply_offset {
+                            screen_x + info.x as f32 * camera.zoom
+                        } else {
+                            screen_x
+                        };
+                        let final_y = if apply_offset {
+                            screen_y + info.y as f32 * camera.zoom
+                        } else {
+                            screen_y
+                        };
 
                         // 🔥 使用自定义混合模式
                         // C#原版: SourceBlend=SourceAlpha, DestinationBlend=One
