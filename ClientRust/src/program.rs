@@ -155,6 +155,9 @@ pub struct CrystalGame {
     // 缓存的 MapInformation 事件(用于场景切换时不丢失)
     pub cached_map_info: Option<(i32, String, String)>, // (map_index, file_name, title)
     
+    // 缓存的 UserInformation 事件(用于场景切换时不丢失) - ⭐ 关键修复!
+    pub cached_user_info: Option<Box<mir2_shared::packets::server::UserInformation>>,
+    
     // Tokio runtime (保持网络任务运行)
     #[allow(dead_code)]
     pub runtime: tokio::runtime::Runtime,
@@ -258,6 +261,7 @@ impl CrystalGame {
             command_tx,
             network_task,
             cached_map_info: None,  // 初始化为 None
+            cached_user_info: None, // 初始化为 None
             runtime,
         })
     }
@@ -265,28 +269,79 @@ impl CrystalGame {
     /// 处理网络事件
     pub fn process_network_events(&mut self) {
         while let Ok(event) = self.event_rx.try_recv() {
-            // 🐛 DEBUG: 打印所有网络事件
+            // 🐛 DEBUG: 强制打印所有网络事件到控制台 (使用 println! 确保一定能看到)
+            println!("╔════════════════════════════════════════════════════════════════");
+            println!("║ 📦 收到服务器数据包!");
+            println!("╚════════════════════════════════════════════════════════════════");
+            
             match &event {
+                crate::network::game_client::GameEvent::Connected => {
+                    println!("📡 事件类型: Connected (连接成功)");
+                    tracing::info!("📡 Connected");
+                }
+                crate::network::game_client::GameEvent::Disconnected { reason } => {
+                    println!("❌ 事件类型: Disconnected (断开连接)");
+                    println!("   原因: {}", reason);
+                    tracing::info!("❌ Disconnected: {}", reason);
+                }
                 crate::network::game_client::GameEvent::LoginSuccess { characters } => {
-                    tracing::info!("🎉🎉🎉 收到 LoginSuccess 事件! 角色数量: {}", characters.len());
+                    println!("🎉 事件类型: LoginSuccess (登录成功)");
+                    println!("   角色数量: {}", characters.len());
+                    for (i, ch) in characters.iter().enumerate() {
+                        println!("   - 角色{}: {} (等级{})", i+1, ch.name, ch.level);
+                    }
+                    tracing::info!("🎉 LoginSuccess, 角色数量: {}", characters.len());
                 }
                 crate::network::game_client::GameEvent::MapInformation { map_index, ref file_name, ref title } => {
-                    tracing::info!("�️  收到 MapInformation 事件: {} ({})", title, file_name);
+                    println!("🗺️  事件类型: MapInformation (地图信息)");
+                    println!("   地图索引: {}", map_index);
+                    println!("   地图文件: {}", file_name);
+                    println!("   地图名称: {}", title);
+                    tracing::info!("🗺️  MapInformation: {} ({})", title, file_name);
                     self.cached_map_info = Some((*map_index, file_name.clone(), title.clone()));
                 }
                 crate::network::game_client::GameEvent::UserInformation { user_info } => {
-                    tracing::info!("👤 收到 UserInformation 事件: 玩家={}, 位置=({},{})", 
+                    println!("👤 事件类型: UserInformation (角色信息) ⭐ 关键!");
+                    println!("   ObjectID: {}", user_info.object_id);
+                    println!("   玩家名称: {}", user_info.name);
+                    println!("   职业: {:?}", user_info.class);
+                    println!("   性别: {:?}", user_info.gender);
+                    println!("   等级: {}", user_info.level);
+                    println!("   位置: ({}, {})", user_info.location_x, user_info.location_y);
+                    // ⭐ 缓存 UserInformation - 关键修复!
+                    self.cached_user_info = Some(user_info.clone());
+                    println!("   朝向: {:?}", user_info.direction);
+                    println!("   发型: {}", user_info.hair);
+                    println!("   金币: {}", user_info.gold);
+                    println!("   声望: {}", user_info.credit);
+                    tracing::info!("👤 UserInformation: {} 位置=({},{})", 
                         user_info.name, user_info.location_x, user_info.location_y);
                 }
                 crate::network::game_client::GameEvent::PlayerSpawned { player } => {
-                    tracing::info!("👥 收到 PlayerSpawned 事件: name={}, 位置=({}, {})", 
+                    println!("👥 事件类型: PlayerSpawned (玩家出生)");
+                    println!("   玩家名称: {}", player.name);
+                    println!("   位置: ({}, {})", player.location.x, player.location.y);
+                    tracing::info!("👥 PlayerSpawned: {} 位置=({}, {})", 
                         player.name, player.location.x, player.location.y);
                 }
+                crate::network::game_client::GameEvent::SystemMessage { message } => {
+                    println!("💬 事件类型: SystemMessage (系统消息)");
+                    println!("   消息: {}", message);
+                    tracing::info!("💬 SystemMessage: {}", message);
+                }
+                crate::network::game_client::GameEvent::StartGameResponse { result } => {
+                    println!("🎮 事件类型: StartGameResponse (开始游戏响应)");
+                    println!("   结果: {:?}", result);
+                    tracing::info!("🎮 StartGameResponse: {:?}", result);
+                }
                 _ => {
-                    // 其他事件用 info 级别记录事件类型
+                    // 其他事件
+                    println!("📨 事件类型: {:?}", std::mem::discriminant(&event));
                     tracing::info!("📨 收到网络事件: {:?}", std::mem::discriminant(&event));
                 }
             }
+            
+            println!("════════════════════════════════════════════════════════════════\n");
             
             let mut scene_manager = self.scene_manager.write();
             scene_manager.process_event(&event);
@@ -391,8 +446,14 @@ impl CrystalGame {
             } else {
                 tracing::info!("🎮 场景切换完成: Game");
                 
-                // 如果有缓存的地图信息,立即发送到 GameScene
+                // 1️⃣ 如果有缓存的地图信息,立即发送到 GameScene
                 if let Some((map_index, file_name, title)) = cached_map {
+                    println!("╔════════════════════════════════════════════════════════════════");
+                    println!("║ 🔄 重发缓存的 MapInformation");
+                    println!("╚════════════════════════════════════════════════════════════════");
+                    println!("   地图: {} ({})", title, file_name);
+                    println!("════════════════════════════════════════════════════════════════\n");
+                    
                     tracing::info!("🔄 Resending cached MapInformation to GameScene: {} ({})", title, file_name);
                     
                     // 重新创建 MapInformation 事件并发送到 GameScene
@@ -407,6 +468,28 @@ impl CrystalGame {
                     tracing::info!("✅ MapInformation event resent to GameScene");
                 } else {
                     tracing::warn!("⚠️  No cached map information available");
+                }
+                
+                // 2️⃣ ⭐ 关键修复: 重发缓存的 UserInformation
+                if let Some(ref user_info) = self.cached_user_info {
+                    println!("╔════════════════════════════════════════════════════════════════");
+                    println!("║ 🔄 重发缓存的 UserInformation ⭐⭐⭐");
+                    println!("╚════════════════════════════════════════════════════════════════");
+                    println!("   玩家: {}", user_info.name);
+                    println!("   位置: ({}, {})", user_info.location_x, user_info.location_y);
+                    println!("════════════════════════════════════════════════════════════════\n");
+                    
+                    tracing::info!("🔄 Resending cached UserInformation to GameScene: {}", user_info.name);
+                    
+                    // 重新创建 UserInformation 事件并发送到 GameScene
+                    let event = crate::network::game_client::GameEvent::UserInformation {
+                        user_info: user_info.clone(),
+                    };
+                    
+                    scene_manager.process_event(&event);
+                    tracing::info!("✅ UserInformation event resent to GameScene");
+                } else {
+                    tracing::warn!("⚠️  No cached user information available");
                 }
             }
         }
@@ -557,8 +640,10 @@ impl ggez::event::EventHandler for CrystalGame {
         // 开始帧
         self.ggez_manager.begin_frame();
         
-        // 使用深绿色背景 (传奇2地图底色)
-        let bg_color = ggez::graphics::Color::from_rgb(0, 32, 0);
+        // 🔧 使用深绿色背景 (传奇2地图底色)
+        // 注意: 加载屏幕使用黑色背景,游戏场景使用绿色底色
+        use ggez::graphics::Color;
+        let bg_color = Color::from_rgb(0, 32, 0);
         
         // 创建 canvas
         let mut canvas = ggez::graphics::Canvas::from_frame(ctx, bg_color);

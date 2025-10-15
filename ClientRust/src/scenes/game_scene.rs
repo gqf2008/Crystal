@@ -110,6 +110,26 @@ pub enum OutputMessageType {
 // ❌ RelationshipType → ✅ 不需要,使用 ClientFriend 的字段表示
 // ❌ GuildObject      → ✅ 不需要完整对象,只存公会名称/等级字段
 
+// ==================== GameScene 状态机 ====================
+
+/// GameScene 加载状态
+/// 
+/// 用于管理从 SelectScene 切换到 GameScene 的加载流程:
+/// 1. WaitingForData - 等待地图信息和玩家信息
+/// 2. LoadingMap - 正在加载地图文件
+/// 3. Ready - 地图和玩家都已准备好,可以渲染
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GameSceneState {
+    /// 初始状态,等待地图和玩家数据
+    WaitingForData,
+    /// 正在加载地图 (map_name)
+    LoadingMap(String),
+    /// 等待玩家信息
+    WaitingForPlayer,
+    /// 所有数据就绪,可以正常渲染
+    Ready,
+}
+
 // ==================== GameScene 主结构 ====================
 
 /// GameScene - 游戏场景中枢
@@ -124,6 +144,11 @@ pub enum OutputMessageType {
 /// - 输入处理
 #[allow(dead_code)]
 pub struct GameScene {
+    // ==================== 场景状态 ====================
+    
+    /// 当前场景加载状态
+    state: GameSceneState,
+    
     // ==================== 玩家与英雄 ====================
     // C# line 27-48
     
@@ -462,6 +487,9 @@ impl GameScene {
         tracing::info!("🎮 ========================================");
         
         Self {
+            // 场景状态
+            state: GameSceneState::WaitingForData,
+            
             // 玩家与英雄
             user: None,
             hero: None,
@@ -1097,6 +1125,43 @@ impl GameScene {
             self.output_messages.pop_front();
         }
     }
+    
+    /// 绘制加载屏幕（私有辅助方法）
+    /// 会先绘制黑色背景覆盖游戏内容,然后显示加载文本
+    fn draw_loading_screen(&self, canvas: &mut crate::graphics::Canvas, message: &str, screen_width: f32, screen_height: f32) {
+        use ggez::graphics::{Color, DrawParam, PxScale, Rect};
+        use ggez::glam::Vec2;
+        
+        tracing::info!("📺 绘制加载屏幕: \"{}\" (屏幕: {:.0}x{:.0})", message, screen_width, screen_height);
+        
+        // 先绘制黑色背景覆盖整个屏幕 (覆盖绿色底色)
+        canvas.draw(
+            &ggez::graphics::Quad,
+            DrawParam::default()
+                .dest(Vec2::new(0.0, 0.0))
+                .scale(Vec2::new(screen_width, screen_height))
+                .color(Color::BLACK),
+        );
+        
+        // 在屏幕中心绘制加载文本 (使用更大的字体)
+        let mut text = ggez::graphics::Text::new(message);
+        text.set_font("AlibabaPuHuiTi");  // 🔧 关键修复: 设置中文字体!
+        text.set_scale(PxScale::from(32.0));  // 32px 大字体,更明显
+        
+        // 简单居中：估算文本宽度约为字符数 * 24px (32px字体的中文字符), 高度约 40px
+        let estimated_width = message.chars().count() as f32 * 24.0;
+        let text_x = (screen_width - estimated_width) / 2.0;
+        let text_y = (screen_height - 40.0) / 2.0;
+        
+        tracing::info!("📺   文本位置: ({:.0}, {:.0}), 估算宽度: {:.0}px", text_x, text_y, estimated_width);
+        
+        canvas.draw(
+            &text,
+            DrawParam::default()
+                .dest(Vec2::new(text_x.max(0.0), text_y.max(0.0)))
+                .color(Color::WHITE),
+        );
+    }
 }
 
 // MapControl 的实现在 map_control.rs 中
@@ -1157,53 +1222,60 @@ impl Scene for GameScene {
     
     /// 渲染场景 (Scene trait 要求的签名)
     fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas) {
-        // 🐛 DEBUG: 每 60 帧打印一次状态
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        
+        // ============================================================
+        // 🐛 DEBUG: 打印当前状态
+        // ============================================================
         static mut DRAW_COUNTER: u32 = 0;
         unsafe {
             DRAW_COUNTER += 1;
-            if DRAW_COUNTER % 60 == 1 {
-                tracing::info!("🎬 GameScene::draw() 第 {} 帧", DRAW_COUNTER);
-                tracing::info!("   用户对象存在: {}", self.user.is_some());
-                if let Some(ref user) = self.user {
-                    tracing::info!("   玩家位置 (格): ({}, {})", 
-                        user.player.map_object.movement.x, 
-                        user.player.map_object.movement.y);
-                    tracing::info!("   玩家位置 (像素): ({:.1}, {:.1})", 
-                        user.player.map_object.movement.x as f32 * 48.0, 
-                        user.player.map_object.movement.y as f32 * 32.0);
-                }
-                tracing::info!("   当前摄像机位置: ({:.1}, {:.1})", self.camera.x, self.camera.y);
-                tracing::info!("   地图尺寸: {} x {} ({}x{} 像素)", 
-                    self.map_renderer.width, self.map_renderer.height,
-                    self.map_renderer.width as f32 * 48.0,
-                    self.map_renderer.height as f32 * 32.0);
+            if DRAW_COUNTER <= 10 || DRAW_COUNTER % 60 == 1 {
+                tracing::info!("🎬 GameScene::draw() 第 {} 帧, 当前状态: {:?}", DRAW_COUNTER, self.state);
             }
         }
         
-        // 🖤 清空画布 - 清除之前场景的残留内容
-        // CRITICAL: SelectScene 的背景图像会残留在帧缓冲中,必须完全覆盖!
-        use ggez::graphics::{Rect, DrawMode, Mesh, Color, DrawParam};
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
-        
-        // 🐛 DEBUG: 检查 Canvas 的坐标系统
-        if let Some(canvas_rect) = canvas.screen_coordinates() {
-            tracing::info!("🖼️  Canvas 坐标系统: x={:.1}, y={:.1}, w={:.1}, h={:.1}", 
-                canvas_rect.x, canvas_rect.y, canvas_rect.w, canvas_rect.h);
-        } else {
-            tracing::info!("🖼️  Canvas 使用默认坐标系统");
+        // ============================================================
+        // 状态机检查: 只有 Ready 状态才渲染游戏内容
+        // ============================================================
+        match &self.state {
+            GameSceneState::WaitingForData => {
+                // 显示 "等待游戏数据..." 提示
+                self.draw_loading_screen(canvas, "等待服务器数据...", screen_width, screen_height);
+                return;
+            },
+            GameSceneState::LoadingMap(map_name) => {
+                // 显示 "正在加载地图: XXX" 提示
+                let msg = format!("正在加载地图: {}", map_name);
+                self.draw_loading_screen(canvas, &msg, screen_width, screen_height);
+                return;
+            },
+            GameSceneState::WaitingForPlayer => {
+                // 显示 "等待角色数据..." 提示
+                self.draw_loading_screen(canvas, "等待角色数据...", screen_width, screen_height);
+                return;
+            },
+            GameSceneState::Ready => {
+                // 继续正常渲染
+                unsafe {
+                    if DRAW_COUNTER <= 10 || DRAW_COUNTER % 60 == 1 {
+                        println!("╔════════════════════════════════════════════════════════════════");
+                        println!("║ 🎬 正常渲染游戏 (Ready 状态)");
+                        println!("╚════════════════════════════════════════════════════════════════");
+                        println!("   第 {} 帧", DRAW_COUNTER);
+                        println!("   地图尺寸: {}x{}", self.map_renderer.width, self.map_renderer.height);
+                        println!("   玩家存在: {}", self.user.is_some());
+                        println!("   摄像机位置: ({:.1}, {:.1})", self.camera.x, self.camera.y);
+                        println!("════════════════════════════════════════════════════════════════\n");
+                    }
+                }
+                tracing::info!("🎬 状态 = Ready, 开始正常渲染游戏内容");
+            }
         }
-        tracing::info!("🖼️  屏幕尺寸: {}x{}", screen_width, screen_height);
         
-        // 绘制全屏黑色矩形,完全覆盖之前场景的所有内容
-        // 使用比屏幕更大的矩形,确保覆盖所有边缘区域
-        let clear_rect = Rect::new(-100.0, -100.0, screen_width + 200.0, screen_height + 200.0);
-        if let Ok(clear_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), clear_rect, Color::BLACK) {
-            canvas.draw(&clear_mesh, DrawParam::default());
-            tracing::info!("✅ GameScene 清空完成: 绘制 {}x{} 黑色矩形", 
-                screen_width + 200.0, screen_height + 200.0);
-        } else {
-            tracing::error!("❌ 无法创建清空矩形!");
-        }
+        // ============================================================
+        // 以下是正常游戏渲染流程 (状态 == Ready)
+        // ============================================================
         
         // 🎥 更新摄像机屏幕尺寸
         self.camera.update_screen_size(screen_width, screen_height);
@@ -1292,7 +1364,14 @@ impl Scene for GameScene {
     /// 
     /// 对应 C# ProcessPacket 的各个分支
     fn process_event(&mut self, event: &GameEvent) {
-        // 🐛 DEBUG: 记录所有收到的事件
+        // 🐛 DEBUG: 强制打印所有收到的事件
+        println!("╔════════════════════════════════════════════════════════════════");
+        println!("║ 🎮 GameScene.process_event() 被调用!");
+        println!("╚════════════════════════════════════════════════════════════════");
+        println!("   事件类型: {:?}", std::mem::discriminant(event));
+        println!("   当前状态: {:?}", self.state);
+        println!("════════════════════════════════════════════════════════════════\n");
+        
         tracing::debug!("📨 GameScene 收到事件: {:?}", std::mem::discriminant(event));
         
         match event {
@@ -1303,7 +1382,11 @@ impl Scene for GameScene {
                 tracing::info!("🗺️    文件名: {}", file_name);
                 tracing::info!("🗺️  ========================================");
                 
-                // 🎨 新架构：加载地图到 MapRenderer
+                // 🔄 状态转换: WaitingForData → LoadingMap
+                self.state = GameSceneState::LoadingMap(file_name.clone());
+                tracing::info!("🔄 状态切换: WaitingForData → LoadingMap({})", file_name);
+                
+                // 🎨 加载地图到 MapRenderer
                 let (screen_width, screen_height) = self.camera.get_screen_size();
                 match Self::load_map_file(file_name, screen_width, screen_height) {
                     Ok(map_renderer) => {
@@ -1314,8 +1397,29 @@ impl Scene for GameScene {
                             map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32);
                         self.map_renderer = map_renderer;
                         
-                        // 🔧 CRITICAL FIX: 如果用户已经存在，更新摄像机到玩家位置
-                        // 处理 UserInformation 先于 MapInformation 到达的情况
+                        // 🔧 状态转换: 地图加载完成
+                        println!("╔════════════════════════════════════════════════════════════════");
+                        println!("║ 🔄 状态转换检查 - MapInformation");
+                        println!("╚════════════════════════════════════════════════════════════════");
+                        println!("   当前状态: {:?}", self.state);
+                        println!("   地图已加载: {}", self.map_renderer.width > 0);
+                        println!("   玩家已创建: {}", self.user.is_some());
+                        
+                        if self.user.is_some() {
+                            // 玩家数据已存在 → Ready
+                            self.state = GameSceneState::Ready;
+                            println!("   ✅ 状态切换: LoadingMap → Ready (玩家数据已存在) ⭐⭐⭐");
+                            tracing::info!("🔄 状态切换: LoadingMap → Ready (玩家数据已存在)");
+                        } else {
+                            // 等待玩家数据
+                            self.state = GameSceneState::WaitingForPlayer;
+                            println!("   ⏳ 状态切换: LoadingMap → WaitingForPlayer");
+                            tracing::info!("🔄 状态切换: LoadingMap → WaitingForPlayer");
+                        }
+                        println!("   切换后状态: {:?}", self.state);
+                        println!("════════════════════════════════════════════════════════════════\n");
+                        
+                        // 🔧 如果用户已经存在，更新摄像机到玩家位置
                         if let Some(ref user) = self.user {
                             let player_world_x = (user.player.map_object.movement.x as f32 * MapRenderer::CELL_WIDTH as f32) 
                                 + user.player.map_object.offset_move.x as f32;
@@ -1419,8 +1523,40 @@ impl Scene for GameScene {
                 
                 self.user = Some(user_obj);
                 
-                // 🔧 CRITICAL FIX: 立即更新摄像机到玩家位置
-                // 这样可以确保第一帧就能正确显示玩家周围的区域
+                // 🔧 状态转换: 玩家数据到达
+                println!("╔════════════════════════════════════════════════════════════════");
+                println!("║ 🔄 状态转换检查 - UserInformation");
+                println!("╚════════════════════════════════════════════════════════════════");
+                println!("   当前状态: {:?}", self.state);
+                println!("   地图已加载: {}", self.map_renderer.width > 0);
+                println!("   玩家已创建: {}", self.user.is_some());
+                
+                match self.state {
+                    GameSceneState::WaitingForData => {
+                        // 地图还未加载 → WaitingForData (不变)
+                        println!("   ❌ 玩家数据到达,但地图还未加载 (保持 WaitingForData)");
+                        tracing::info!("🔄 玩家数据到达,但地图还未加载 (保持 WaitingForData)");
+                    },
+                    GameSceneState::LoadingMap(_) => {
+                        // 地图正在加载 → 等待地图加载完成
+                        println!("   ⏳ 玩家数据到达,等待地图加载完成");
+                        tracing::info!("🔄 玩家数据到达,等待地图加载完成");
+                    },
+                    GameSceneState::WaitingForPlayer => {
+                        // 地图已加载 → Ready
+                        self.state = GameSceneState::Ready;
+                        println!("   ✅ 状态切换: WaitingForPlayer → Ready ⭐⭐⭐");
+                        tracing::info!("🔄 状态切换: WaitingForPlayer → Ready");
+                    },
+                    GameSceneState::Ready => {
+                        // 已就绪,不变
+                        println!("   ✅ 已经是 Ready 状态");
+                    }
+                }
+                println!("   切换后状态: {:?}", self.state);
+                println!("════════════════════════════════════════════════════════════════\n");
+                
+                // 🔧 立即更新摄像机到玩家位置
                 let map_width_px = self.map_renderer.width as f32 * MapRenderer::CELL_WIDTH as f32;
                 let map_height_px = self.map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32;
                 
