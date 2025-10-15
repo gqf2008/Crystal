@@ -100,7 +100,14 @@ impl SceneManager {
         let mut new_scene: Box<dyn Scene> = match scene_type {
             SceneType::Login => Box::new(LoginScene::new()),
             SceneType::Select => Box::new(SelectScene::new(Vec::new())), // Empty character list initially
-            SceneType::Game => Box::new(GameScene::new()),
+            SceneType::Game => {
+                let mut game_scene = GameScene::new();
+                // 设置网络命令通道
+                if let Some(ref tx) = self.command_tx {
+                    game_scene.set_command_sender(tx.clone());
+                }
+                Box::new(game_scene)
+            }
         };
         
         new_scene.initialize();

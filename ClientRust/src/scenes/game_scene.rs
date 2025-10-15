@@ -431,6 +431,14 @@ pub struct GameScene {
     mouse_left_down: bool,
     /// 鼠标左键按下位置
     mouse_left_location: Point,
+    
+    // ==================== 调试信息 ====================
+    /// 碰到的障碍物格子 (用于调试绘制红色标记)
+    blocked_cell: Option<Point>,
+    
+    // ==================== 网络通信 ====================
+    /// 网络命令发送通道
+    command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
 }
 
 /// HeroSpawnState - 英雄召唤状态
@@ -594,7 +602,16 @@ impl GameScene {
             mouse_right_location: Point { x: 0, y: 0 },
             mouse_left_down: false,
             mouse_left_location: Point { x: 0, y: 0 },
+            
+            blocked_cell: None, // 障碍物调试
+            command_tx: None, // 网络命令通道（后续通过 set_command_sender 设置）
         }
+    }
+
+    /// 设置网络命令发送通道
+    pub fn set_command_sender(&mut self, tx: tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>) {
+        self.command_tx = Some(tx);
+        tracing::info!("✅ GameScene 网络命令通道已设置");
     }
 
     /// 绘制 UI 控件树
@@ -1229,7 +1246,9 @@ impl GameScene {
     /// Reference: Client/MirScenes/GameScene.cs line 13174
     pub fn can_walk(&self, dir: MirDirection) -> bool {
         if let Some(ref user) = self.user {
-            let current_loc = user.player.map_object.movement;
+            // 🔧 修复: 应该使用 current_location 而不是 movement
+            // current_location 是逻辑位置，movement 是渲染位置
+            let current_loc = user.player.map_object.current_location;
             let target_loc = self.point_move(current_loc, dir, 1);
             
             // 检查目标位置是否为空
@@ -1475,35 +1494,55 @@ impl Scene for GameScene {
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
         self.camera.update_screen_size(screen_width, screen_height);
         
-        // ==================== 鼠标左右键移动 (简化版本) ====================
-        // 策略: 直接移动格子坐标,不使用offset累积
+        // ==================== 鼠标左右键移动 (基于时间) ====================
+        // 策略: 使用时间而非帧数，确保不同FPS下速度一致
         // 左键: 慢速行走 (Walking)
         // 右键: 快速奔跑 (Running)
         
-        static mut MOVE_TIMER: u32 = 0;
-        const WALK_INTERVAL: u32 = 20;  // 左键: 每20帧移动一格 (约3格/秒) - 行走速度
-        const RUN_INTERVAL: u32 = 12;   // 右键: 每12帧移动一格 (约5格/秒) - 奔跑速度
+        static mut LAST_MOVE_TIME: Option<std::time::Instant> = None;
+        const WALK_INTERVAL_MS: u64 = 500;  // 左键: 每500ms移动一格 (2格/秒)
+        const RUN_INTERVAL_MS: u64 = 300;   // 右键: 每300ms移动一格 (3.3格/秒)
         
+        let now = std::time::Instant::now();
+        
+        // 🔧 修复：如果是第一次或者刚开始移动，初始化时间为当前时间
+        let last_move = unsafe { 
+            if LAST_MOVE_TIME.is_none() {
+                LAST_MOVE_TIME = Some(now);
+            }
+            LAST_MOVE_TIME.unwrap()
+        };
+        let elapsed_ms = now.duration_since(last_move).as_millis() as u64;
+        
+        // 🐛 调试：打印鼠标状态
+        static mut DEBUG_COUNTER: u32 = 0;
         unsafe {
-            MOVE_TIMER += 1;
+            DEBUG_COUNTER += 1;
+            if DEBUG_COUNTER <= 5 || DEBUG_COUNTER % 60 == 0 {
+                println!("🖱️ 鼠标状态: 右键={}, 左键={}", self.mouse_right_down, self.mouse_left_down);
+                if self.mouse_right_down {
+                    println!("   右键位置: ({}, {})", self.mouse_right_location.x, self.mouse_right_location.y);
+                }
+                if self.mouse_left_down {
+                    println!("   左键位置: ({}, {})", self.mouse_left_location.x, self.mouse_left_location.y);
+                }
+            }
         }
         
-        // 🎯 先计算方向 - 每帧都要更新，不管鼠标是否按下
-        if self.user.is_some() {
-            // 获取鼠标当前位置（即使没按下也要计算方向）
+        // 🎯 只在鼠标按下时计算方向（修复问题3）
+        if self.user.is_some() && (self.mouse_right_down || self.mouse_left_down) {
+            // 获取鼠标按下位置
             let mouse_pos = if self.mouse_right_down {
                 self.mouse_right_location
-            } else if self.mouse_left_down {
-                self.mouse_left_location
             } else {
-                self.mouse_location  // 使用当前鼠标位置
+                self.mouse_left_location
             };
             
             let target_loc = self.screen_to_map_location(mouse_pos);
             let current_loc = self.user.as_ref().unwrap().player.map_object.current_location;
             let direction = self.direction_from_point(current_loc, target_loc);
             
-            // 每帧都更新方向（实时跟随鼠标）
+            // 只在按下时更新方向
             if let Some(ref mut user) = self.user {
                 user.player.map_object.direction = direction;
             }
@@ -1514,7 +1553,7 @@ impl Scene for GameScene {
         
         if is_moving && self.user.is_some() {
             // 确定使用哪个按钮的设置
-            let move_interval = if self.mouse_right_down { RUN_INTERVAL } else { WALK_INTERVAL };
+            let move_interval_ms = if self.mouse_right_down { RUN_INTERVAL_MS } else { WALK_INTERVAL_MS };
             let movement_action = if self.mouse_right_down { MirAction::Running } else { MirAction::Walking };
             
             // 获取鼠标位置和当前位置
@@ -1530,17 +1569,16 @@ impl Scene for GameScene {
             
             // 检查是否到达目标
             if current_loc != target_loc {
-                // 检查是否到了移动间隔
-                let should_move = unsafe { MOVE_TIMER % move_interval == 0 };
+                // 检查是否到了移动间隔（基于时间）
+                let should_move = elapsed_ms >= move_interval_ms;
                 
                 if should_move {
                     // 到了移动间隔,尝试移动
+                    let next_loc = self.point_move(current_loc, direction, 1);
                     let can_walk = self.can_walk(direction);
                     
                     if can_walk {
                         // ✅ 可以移动,更新位置
-                        let next_loc = self.point_move(current_loc, direction, 1);
-                        
                         if let Some(ref mut user) = self.user {
                             user.player.map_object.current_location = next_loc;
                             user.player.map_object.movement = next_loc;
@@ -1548,24 +1586,74 @@ impl Scene for GameScene {
                             if user.player.current_action != movement_action {
                                 user.player.set_current_action(movement_action);
                             }
+                            // 重置偏移量，准备下一次平滑移动
                             user.player.map_object.offset_move.x = 0;
                             user.player.map_object.offset_move.y = 0;
                         }
+                        self.blocked_cell = None; // 清除障碍物标记
+                        
+                        // 重置移动时间
+                        unsafe { LAST_MOVE_TIME = Some(now); }
+                        
+                        // 🌐 发送移动包到服务器
+                        if let Some(ref tx) = self.command_tx {
+                            use crate::network::NetworkCommand;
+                            let _ = tx.send(NetworkCommand::Move {
+                                direction: direction as u8,
+                                location: (next_loc.x, next_loc.y),
+                            });
+                        }
                     } else {
-                        // ❌ 碰到障碍物,停止移动（只在状态改变时调用一次）
+                        // ❌ 碰到障碍物
+                        self.blocked_cell = Some(next_loc); // 记录障碍物位置
+                        
+                        // 🔧 修复抖动：碰到障碍物时清零偏移量
                         if let Some(ref mut user) = self.user {
                             if user.player.current_action != MirAction::Standing {
                                 user.player.set_current_action(MirAction::Standing);
                             }
+                            // 清零偏移量，防止画面抖动
                             user.player.map_object.offset_move.x = 0;
                             user.player.map_object.offset_move.y = 0;
                         }
+                        
+                        // 重置移动时间，避免持续尝试移动
+                        unsafe { LAST_MOVE_TIME = Some(now); }
                     }
                 } else {
-                    // 还没到移动间隔,保持移动动画（只在状态改变时调用）
+                    // 还没到移动间隔，计算平滑偏移量（基于时间）
+                    // 先检查是否可以移动（预先检测，避免动画到一半碰墙）
+                    let can_move_next = self.can_walk(direction);
+                    
                     if let Some(ref mut user) = self.user {
+                        // 只在状态改变时调用 set_current_action
                         if user.player.current_action != movement_action {
                             user.player.set_current_action(movement_action);
+                        }
+                        
+                        if can_move_next {
+                            // 🎯 平滑移动: 计算世界坐标偏移量（基于时间进度）
+                            let progress = (elapsed_ms as f32 / move_interval_ms as f32).min(1.0);
+                            
+                            // 根据方向计算偏移量（世界坐标）
+                            use mir2_shared::enums::MirDirection::*;
+                            let (dx, dy) = match direction {
+                                Up => (0.0, -MapRenderer::CELL_HEIGHT as f32),
+                                Down => (0.0, MapRenderer::CELL_HEIGHT as f32),
+                                Left => (-MapRenderer::CELL_WIDTH as f32, 0.0),
+                                Right => (MapRenderer::CELL_WIDTH as f32, 0.0),
+                                UpLeft => (-MapRenderer::CELL_WIDTH as f32, -MapRenderer::CELL_HEIGHT as f32),
+                                UpRight => (MapRenderer::CELL_WIDTH as f32, -MapRenderer::CELL_HEIGHT as f32),
+                                DownLeft => (-MapRenderer::CELL_WIDTH as f32, MapRenderer::CELL_HEIGHT as f32),
+                                DownRight => (MapRenderer::CELL_WIDTH as f32, MapRenderer::CELL_HEIGHT as f32),
+                            };
+                            
+                            user.player.map_object.offset_move.x = (dx * progress) as i32;
+                            user.player.map_object.offset_move.y = (dy * progress) as i32;
+                        } else {
+                            // 前方有障碍物，停止偏移量计算，避免抖动
+                            user.player.map_object.offset_move.x = 0;
+                            user.player.map_object.offset_move.y = 0;
                         }
                     }
                 }
@@ -1578,6 +1666,9 @@ impl Scene for GameScene {
                     user.player.map_object.offset_move.x = 0;
                     user.player.map_object.offset_move.y = 0;
                 }
+                self.blocked_cell = None; // 清除障碍物标记
+                // 🔧 重置时间，准备下次移动
+                unsafe { LAST_MOVE_TIME = None; }
             }
         } else {
             // 鼠标没按下,确保停止（只在状态改变时调用）
@@ -1588,6 +1679,9 @@ impl Scene for GameScene {
                 user.player.map_object.offset_move.x = 0;
                 user.player.map_object.offset_move.y = 0;
             }
+            self.blocked_cell = None; // 清除障碍物标记
+            // 🔧 重置时间，准备下次移动
+            unsafe { LAST_MOVE_TIME = None; }
         }
         
         // ==================== 更新玩家动画 ====================
@@ -1859,6 +1953,35 @@ impl Scene for GameScene {
             tracing::warn!("⚠️  没有玩家数据，跳过玩家绘制");
         }
 
+        // 5d. 绘制障碍物标记 (调试用)
+        if let Some(blocked_pos) = self.blocked_cell {
+            // 将地图坐标转换为世界坐标（像素）
+            let world_x = blocked_pos.x as f32 * MapRenderer::CELL_WIDTH as f32;
+            let world_y = blocked_pos.y as f32 * MapRenderer::CELL_HEIGHT as f32;
+            
+            // 转换为屏幕坐标
+            let screen_pos = self.camera.world_to_screen(world_x, world_y);
+            
+            // 绘制红色半透明矩形标记障碍物
+            use ggez::graphics::{Color as GgezColor, DrawMode, DrawParam, Mesh, Rect};
+            let obstacle_rect = Rect::new(
+                screen_pos.0,
+                screen_pos.1,
+                MapRenderer::CELL_WIDTH as f32,
+                MapRenderer::CELL_HEIGHT as f32,
+            );
+            let obstacle_color = GgezColor::from_rgba(255, 0, 0, 128); // 半透明红色
+            if let Ok(obstacle_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), obstacle_rect, obstacle_color) {
+                canvas.draw(&obstacle_mesh, DrawParam::default());
+            }
+            
+            // 绘制边框
+            let border_color = GgezColor::from_rgb(255, 0, 0); // 纯红色
+            if let Ok(border_mesh) = Mesh::new_rectangle(ctx, DrawMode::stroke(2.0), obstacle_rect, border_color) {
+                canvas.draw(&border_mesh, DrawParam::default());
+            }
+        }
+
         // ════════════════════════════════════════════════════════════
         // 步骤 6: 绘制 UI 控件树 (TODO)
         // ════════════════════════════════════════════════════════════
@@ -1870,6 +1993,28 @@ impl Scene for GameScene {
         // ════════════════════════════════════════════════════════════
         // TODO: 绘制鼠标提示、输出消息、对话框等
         tracing::trace!("✨ 顶层元素绘制 (暂未实现)");
+
+        // ════════════════════════════════════════════════════════════
+        // 步骤 8: 绘制FPS显示
+        // ════════════════════════════════════════════════════════════
+        {
+            use ggez::graphics::{Text, Color as GgezColor, DrawParam};
+            
+            // 计算FPS
+            let fps = ctx.time.fps();
+            
+            // 创建FPS文本
+            let fps_text = format!("FPS: {:.0}", fps);
+            let mut text = Text::new(fps_text);
+            text.set_scale(24.0);
+            
+            // 绘制在左上角
+            let draw_param = DrawParam::default()
+                .dest([10.0, 10.0])
+                .color(GgezColor::from_rgb(255, 255, 0)); // 黄色
+            
+            canvas.draw(&text, draw_param);
+        }
 
         // ════════════════════════════════════════════════════════════
         // 绘制完成
@@ -2291,31 +2436,39 @@ impl Scene for GameScene {
     }
     
     /// 处理鼠标按钮事件
+    /// 🐛 调试：添加日志追踪鼠标事件是否被正确处理
     fn handle_mouse_button(&mut self, button: super::MouseButton, pressed: bool, x: i32, y: i32) {
         // 转换坐标
         let location = Point { x, y };
+        
+        // 🐛 调试：打印所有鼠标事件
+        println!("🖱️ handle_mouse_button: {:?} {} at ({}, {})", button, if pressed { "按下" } else { "释放" }, x, y);
         
         // 根据按钮类型处理
         match button {
             super::MouseButton::Right => {
                 if pressed {
                     // 鼠标右键按下
+                    println!("   ✅ 设置 mouse_right_down = true");
                     self.mouse_right_down = true;
                     self.mouse_right_location = location;
                     self.on_mouse_down(ggez::input::mouse::MouseButton::Right, location);
                 } else {
                     // 鼠标右键释放
+                    println!("   ✅ 设置 mouse_right_down = false");
                     self.mouse_right_down = false;
                 }
             }
             super::MouseButton::Left => {
                 if pressed {
                     // 鼠标左键按下
+                    println!("   ✅ 设置 mouse_left_down = true");
                     self.mouse_left_down = true;
                     self.mouse_left_location = location;
                     self.on_mouse_down(ggez::input::mouse::MouseButton::Left, location);
                 } else {
                     // 鼠标左键释放
+                    println!("   ✅ 设置 mouse_left_down = false");
                     self.mouse_left_down = false;
                 }
             }

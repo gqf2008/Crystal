@@ -178,6 +178,19 @@ impl NetworkManager {
                 self.send_packet(&packet)?;
             }
             
+            NetworkCommand::Move { direction, location } => {
+                // 将 u8 转换为 MirDirection
+                use mir2_shared::enums::MirDirection;
+                if let Ok(dir) = MirDirection::try_from(direction) {
+                    // 发送移动包到服务器 (Walk包只需要方向)
+                    let packet = client::Walk {
+                        direction: dir,
+                    };
+                    self.send_packet(&packet)?;
+                    tracing::debug!("发送移动包: direction={:?}, location=({}, {})", dir, location.0, location.1);
+                }
+            }
+            
             NetworkCommand::Disconnect => {
                 tracing::info!("Handling disconnect command");
                 self.disconnect();

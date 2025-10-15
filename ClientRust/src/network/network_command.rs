@@ -50,6 +50,12 @@ pub enum NetworkCommand {
         character_index: i32,
     },
     
+    /// Send movement command (Walk/Run)
+    Move {
+        direction: u8,  // MirDirection as u8
+        location: (i32, i32),  // (x, y)
+    },
+    
     /// Disconnect from server
     Disconnect,
 }
