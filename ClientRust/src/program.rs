@@ -580,7 +580,7 @@ impl CrystalGame {
         
         for (lib_name, index) in textures_to_load {
             // 从 MLibrary 预加载纹理（MLibrary 内部会缓存）
-            if let Some(lib_arc) = get_library(lib_name) {
+            if let Some(lib_arc) = get_library(lib_name.clone()) {
                 let mut lib = lib_arc.lock().unwrap();
                 // 调用 get_or_create_texture 会自动创建并缓存纹理
                 match lib.get_or_create_texture(ctx, index) {

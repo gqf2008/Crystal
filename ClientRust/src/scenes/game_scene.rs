@@ -940,76 +940,109 @@ impl GameScene {
             tracing::trace!("✅ 玩家中心点已绘制");
 
             // ════════════════════════════════════════════════════════
-            // 步骤 4: 计算角色纹理索引
+            // 步骤 4: 计算角色动画帧索引 (NEW - 使用正确的帧计算)
             // ════════════════════════════════════════════════════════
-            // ChrSel 库索引规则:
-            //   每个职业占 40 帧
-            //   每个性别占 20 帧
-            //   每个方向 1 帧 (0-7: 上右下左等8方向)
-            let class_base = match user.player.class {
-                MirClass::Warrior => 0,    // 战士: 0-39
-                MirClass::Wizard => 40,    // 法师: 40-79
-                MirClass::Taoist => 80,    // 道士: 80-119
-                MirClass::Assassin => 120, // 刺客: 120-159
-                MirClass::Archer => 160,   // 弓手: 160-199
-            };
-
-            let gender_offset = match user.player.gender {
-                MirGender::Male => 0,    // 男性: +0
-                MirGender::Female => 20, // 女性: +20
-            };
-
-            let direction = user.player.map_object.direction as usize; // 0-7
-            let frame_index = class_base + gender_offset + direction;
+            // CArmours 库帧布局:
+            //   - Standing: 0-31   (8方向 * 4帧)
+            //   - Walking:  32-79  (8方向 * 6帧)
+            //   - Running:  80-127 (8方向 * 6帧)
+            //   - Attack1:  128-175 (8方向 * 6帧)
+            //   - Male: 0-xxx
+            //   - Female: +808 offset
+            //
+            // 计算公式: DrawFrame + ArmourOffSet
+            //   DrawFrame = action_frame_start + direction * frames_per_direction + frame_index
+            //   ArmourOffSet = gender_offset (Male=0, Female=808)
+            
+            let final_frame = user.player.get_final_frame() as usize;
 
             tracing::trace!(
-                "🎨 角色纹理索引: {} (职业:{} + 性别:{} + 方向:{})",
-                frame_index,
-                class_base,
-                gender_offset,
-                direction
+                "🎨 角色帧索引: {} (动作:{:?}, 方向:{}, 性别:{:?})",
+                final_frame,
+                user.player.current_action,
+                user.player.map_object.direction as usize,
+                user.player.gender
             );
 
             // ════════════════════════════════════════════════════════
-            // 步骤 5: 绘制角色纹理 (ChrSel 库)
+            // 步骤 5: 绘制角色纹理 (CArmours 库 - 正确!)
             // ════════════════════════════════════════════════════════
-            if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
+            // 选择装备库:
+            //   - Warrior/Wizard/Taoist: CArmours[armour_id]
+            //   - Assassin: AArmours[armour_id]
+            //   - Archer: CArmours or ARArmours (取决于动作)
+            
+            // 获取装备ID (如果为负数则使用默认值0)
+            let armour_id = if user.player.armour < 0 {
+                tracing::warn!("⚠️ 装备ID为负数 ({}), 使用默认值0", user.player.armour);
+                0
+            } else {
+                user.player.armour as usize
+            };
+            
+            let library_name = match user.player.class {
+                MirClass::Warrior | MirClass::Wizard | MirClass::Taoist => {
+                    // 通用装备库 CArmours
+                    // 当前使用装备0 (默认服装)
+                    LibraryName::CArmours(armour_id)
+                }
+                MirClass::Assassin => {
+                    // 刺客专用库 AArmours
+                    LibraryName::AArmours(armour_id)
+                }
+                MirClass::Archer => {
+                    // 弓箭手: 根据动作选择库
+                    // Walking/Running/Attack1 用 ARArmours, 其他用 CArmours
+                    let alt_anim = matches!(
+                        user.player.current_action,
+                        MirAction::Walking | MirAction::Running | MirAction::Attack1
+                    );
+                    
+                    if alt_anim {
+                        LibraryName::ARArmours(armour_id)
+                    } else {
+                        LibraryName::CArmours(armour_id)
+                    }
+                }
+            };
+            
+            if let Some(lib_arc) = get_library(library_name.clone()) {
                 if let Ok(mut lib) = lib_arc.try_lock() {
                     let image_count = lib.count();
 
                     // 检查索引是否有效
-                    if frame_index < image_count {
-                        tracing::trace!("🎨 开始绘制 ChrSel[{}] 纹理...", frame_index);
+                    if final_frame < image_count {
+                        tracing::trace!("🎨 开始绘制 {:?}[{}] 纹理...", library_name, final_frame);
 
-                        // 绘制角色纹理
+                        // 绘制角色身体
                         match lib.draw_with_color(
                             ctx,
                             canvas,
-                            frame_index,
+                            final_frame,
                             screen_x,
-                            screen_y - 20.0, // 稍微往上偏移
+                            screen_y,
                             Color::WHITE,
                             true, // use_offset (使用图像偏移量)
                         ) {
                             Ok(_) => {
-                                tracing::trace!("✅ ChrSel[{}] 纹理绘制成功", frame_index);
+                                tracing::trace!("✅ {:?}[{}] 纹理绘制成功", library_name, final_frame);
                             }
                             Err(e) => {
-                                tracing::error!("❌ ChrSel[{}] 纹理绘制失败: {:?}", frame_index, e);
+                                tracing::error!("❌ {:?}[{}] 纹理绘制失败: {:?}", library_name, final_frame, e);
                             }
                         }
                     } else {
                         tracing::error!(
                             "❌ 角色纹理索引越界: {} >= {} (总图像数)",
-                            frame_index,
+                            final_frame,
                             image_count
                         );
                     }
                 } else {
-                    tracing::error!("❌ 无法锁定 ChrSel 库");
+                    tracing::error!("❌ 无法锁定装备库 {:?}", library_name);
                 }
             } else {
-                tracing::error!("❌ ChrSel 库未加载");
+                tracing::error!("❌ 装备库 {:?} 未加载", library_name);
             }
         }
 
@@ -1221,6 +1254,12 @@ impl Scene for GameScene {
         }
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
         self.camera.update_screen_size(screen_width, screen_height);
+        
+        // ==================== 更新玩家角色动画 (NEW) ====================
+        if let Some(ref mut user) = self.user {
+            user.player.update_animation();
+        }
+        
         // TODO: 实现更新逻辑 (对应 C# Process)
         // 更新动画计数器
         // 更新对象

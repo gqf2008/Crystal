@@ -36,7 +36,7 @@ impl StringPadding for String {
 /// 库名称枚举
 /// 
 /// 对应 C# Libraries 类中的所有静态字段
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LibraryName {
     // UI 相关
     ChrSel,      // 角色选择界面
@@ -72,6 +72,43 @@ pub enum LibraryName {
     // 装饰
     Deco,        // 装饰物
     
+    // ==================== 角色装备库 (NEW) ====================
+    /// 通用装备库 (Warrior/Wizard/Taoist)
+    /// CArmour/0000.Lib - CArmour/0999.Lib
+    CArmours(usize),
+    
+    /// 刺客装备库 (Assassin)
+    /// AArmour/0000.Lib - AArmour/0999.Lib
+    AArmours(usize),
+    
+    /// 弓箭手装备库 (Archer alternative animation)
+    /// ARArmour/0000.Lib - ARArmour/0999.Lib
+    ARArmours(usize),
+    
+    /// 通用发型库 (Warrior/Wizard/Taoist)
+    /// CHair/0000.Lib - CHair/0999.Lib
+    CHair(usize),
+    
+    /// 刺客发型库
+    /// AHair/0000.Lib - AHair/0999.Lib
+    AHair(usize),
+    
+    /// 弓箭手发型库
+    /// ARHair/0000.Lib - ARHair/0999.Lib
+    ARHair(usize),
+    
+    /// 通用武器库
+    /// CWeapon/0000.Lib - CWeapon/0999.Lib
+    CWeapons(usize),
+    
+    /// 弓箭手武器库
+    /// ARWeapon/0000.Lib - ARWeapon/0999.Lib
+    ARWeapons(usize),
+    
+    /// 人物特效库 (翅膀等)
+    /// CHumEffect/0000.Lib - CHumEffect/0999.Lib
+    CHumEffect(usize),
+    
     // 其他（可扩展）
     Custom(u32), // 自定义库（用于动态加载）
 }
@@ -104,6 +141,20 @@ impl LibraryName {
             LibraryName::StateItems => "StateItem".to_string(),
             LibraryName::FloorItems => "DNItems".to_string(),
             LibraryName::Deco => "Deco".to_string(),
+            
+            // 角色装备库 (使用 {:02} 格式,对应 C# ToString("00"))
+            // C# 代码: library[i] = new MLibrary(path + i.ToString("00") + suffix);
+            // 生成文件名: 00.Lib, 01.Lib, 02.Lib, ... 99.Lib
+            LibraryName::CArmours(idx) => format!("CArmour/{:02}", idx),
+            LibraryName::AArmours(idx) => format!("AArmour/{:02}", idx),
+            LibraryName::ARArmours(idx) => format!("ARArmour/{:02}", idx),
+            LibraryName::CHair(idx) => format!("CHair/{:02}", idx),
+            LibraryName::AHair(idx) => format!("AHair/{:02}", idx),
+            LibraryName::ARHair(idx) => format!("ARHair/{:02}", idx),
+            LibraryName::CWeapons(idx) => format!("CWeapon/{:02}", idx),
+            LibraryName::ARWeapons(idx) => format!("ARWeapon/{:02}", idx),
+            LibraryName::CHumEffect(idx) => format!("CHumEffect/{:02}", idx),
+            
             LibraryName::Custom(id) => format!("Custom{}", id),
         }
     }
@@ -446,7 +497,25 @@ impl Libraries {
         }
     }
     
-    /// 获取库引用
+    /// 获取库引用 (如果未加载则自动加载)
+    /// 
+    /// C# equivalent: 直接访问 Libraries.Weather
+    pub fn get_or_load(&mut self, name: LibraryName) -> Option<Arc<Mutex<MLibrary>>> {
+        // 如果已加载，直接返回
+        if let Some(lib) = self.libraries.get(&name) {
+            return Some(lib.clone());
+        }
+        
+        // 否则尝试加载
+        tracing::info!("🔄 懒加载库: {:?}", name);
+        if self.load(name.clone()).is_ok() {
+            self.libraries.get(&name).cloned()
+        } else {
+            None
+        }
+    }
+    
+    /// 获取库引用 (不自动加载)
     /// 
     /// C# equivalent: 直接访问 Libraries.Weather
     pub fn get(&self, name: LibraryName) -> Option<Arc<Mutex<MLibrary>>> {
@@ -995,9 +1064,9 @@ pub static LIBRARIES: Lazy<Mutex<Libraries>> = Lazy::new(|| {
 
 // ===== 便捷访问函数 =====
 
-/// 便捷函数: 获取单体库
+/// 便捷函数: 获取单体库 (如果未加载则自动懒加载)
 pub fn get_library(name: LibraryName) -> Option<Arc<Mutex<MLibrary>>> {
-    LIBRARIES.lock().unwrap().get(name)
+    LIBRARIES.lock().unwrap().get_or_load(name)
 }
 
 /// 便捷函数: 获取数组库中的某个元素
@@ -1039,7 +1108,7 @@ pub fn initialize_all_libraries(data_path: &str) -> std::io::Result<()> {
     ];
     
     for lib_name in core_libs {
-        if let Err(e) = libs.load(lib_name) {
+        if let Err(e) = libs.load(lib_name.clone()) {
             tracing::warn!("核心库 {} 加载失败: {}", lib_name, e);
         }
     }
@@ -1126,7 +1195,7 @@ pub fn load_core_libraries() -> std::io::Result<()> {
     let mut errors = Vec::new();
     
     for lib_name in core_libs {
-        if let Err(e) = libs.load(lib_name) {
+        if let Err(e) = libs.load(lib_name.clone()) {
             errors.push((lib_name, e));
         }
     }
@@ -1198,7 +1267,7 @@ pub fn load_all_libraries() -> std::io::Result<()> {
     let mut errors = Vec::new();
     
     for lib_name in all_libs {
-        if let Err(e) = libs.load(lib_name) {
+        if let Err(e) = libs.load(lib_name.clone()) {
             errors.push((lib_name, e));
             // 继续加载其他库，不中断
         }

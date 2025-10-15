@@ -115,6 +115,16 @@ pub struct PlayerObject {
     /// Skip frame update counter
     pub skip_frame_update: u8,
     
+    // ==================== Animation Tracking (NEW) ====================
+    /// Last frame update time (for animation timing)
+    pub last_frame_time: Instant,
+    
+    /// Base frame index for current action (e.g., Standing=0, Walking=32)
+    pub action_frame_start: i32,
+    
+    /// Number of frames per direction for current action
+    pub frames_per_direction: i32,
+    
     // ==================== Spell Casting ====================
     /// Current spell being cast
     pub spell: Option<Spell>,
@@ -329,6 +339,10 @@ impl PlayerObject {
             action_feed: Vec::new(),
             current_action: MirAction::Standing,
             next_motion: 0,
+            // Animation tracking
+            last_frame_time: Instant::now(),
+            action_frame_start: 0,     // Standing starts at frame 0
+            frames_per_direction: 4,   // Standing has 4 frames per direction
         }
     }
     
@@ -1946,5 +1960,135 @@ impl DrawableMapObject for PlayerObject {
     
     fn draw_priority(&self) -> i32 {
         2 // Players draw after items and spells
+    }
+}
+
+// ==================== Animation Helpers ====================
+impl PlayerObject {
+    /// Get the draw frame index for current animation state
+    /// 
+    /// Mirrors C# PlayerObject.DrawFrame property:
+    /// ```csharp
+    /// public int DrawFrame
+    /// {
+    ///     get { return Frame.Start + (int)Direction * Frame.Count + FrameIndex; }
+    /// }
+    /// ```
+    pub fn get_draw_frame(&self) -> i32 {
+        let direction_offset = (self.map_object.direction as i32) * self.frames_per_direction;
+        self.action_frame_start + direction_offset + self.frame_index
+    }
+    
+    /// Get armour offset based on gender and class
+    /// 
+    /// Mirrors C# PlayerObject.ArmourOffSet (calculated in SetLibraries)
+    /// ```csharp
+    /// // Warrior/Wizard/Taoist:
+    /// ArmourOffSet = Gender == MirGender.Male ? 0 : 808;
+    /// 
+    /// // Assassin:
+    /// ArmourOffSet = Gender == MirGender.Male ? 0 : 808;
+    /// 
+    /// // Archer (depends on action):
+    /// if (altAnim) // Walking/Running/AttackRange1
+    ///     ArmourOffSet = Gender == MirGender.Male ? 0 : 352;
+    /// else
+    ///     ArmourOffSet = Gender == MirGender.Male ? 0 : 808;
+    /// ```
+    pub fn get_armour_offset(&self) -> i32 {
+        match self.class {
+            MirClass::Warrior | MirClass::Wizard | MirClass::Taoist | MirClass::Assassin => {
+                // Standard offset: Male=0, Female=808
+                if self.gender == MirGender::Male { 0 } else { 808 }
+            }
+            MirClass::Archer => {
+                // Archer has different offsets for different actions
+                let alt_anim = matches!(
+                    self.current_action,
+                    MirAction::Walking | MirAction::Running | MirAction::Attack1
+                );
+                
+                if alt_anim {
+                    // Alternative animation: Male=0, Female=352
+                    if self.gender == MirGender::Male { 0 } else { 352 }
+                } else {
+                    // Standard offset: Male=0, Female=808
+                    if self.gender == MirGender::Male { 0 } else { 808 }
+                }
+            }
+        }
+    }
+    
+    /// Get final frame index for drawing (DrawFrame + Offset)
+    /// 
+    /// Mirrors C# usage: `BodyLibrary.Draw(DrawFrame + ArmourOffSet, ...)`
+    pub fn get_final_frame(&self) -> i32 {
+        self.get_draw_frame() + self.get_armour_offset()
+    }
+    
+    /// Set current action and update animation frame parameters
+    /// 
+    /// Mirrors C# PlayerObject.SetAction() behavior
+    /// 
+    /// This updates action_frame_start and frames_per_direction based on the action.
+    /// Frame data from C# FrameSet (Globals.DataReader):
+    /// ```csharp
+    /// Standing: Start=0, Count=4, Interval=500
+    /// Walking:  Start=32, Count=6, Interval=100
+    /// Running:  Start=80, Count=6, Interval=80
+    /// Attack1:  Start=128, Count=6, Interval=100
+    /// ```
+    pub fn set_current_action(&mut self, action: MirAction) {
+        if self.current_action == action {
+            return;
+        }
+        
+        self.current_action = action;
+        self.frame_index = 0;
+        self.last_frame_time = Instant::now();
+        
+        // Set frame parameters based on action
+        // TODO: Load these from Globals.DataReader in production
+        match action {
+            MirAction::Standing => {
+                self.action_frame_start = 0;
+                self.frames_per_direction = 4;
+                self.frame_interval = 500; // ms
+            }
+            MirAction::Walking => {
+                self.action_frame_start = 32;
+                self.frames_per_direction = 6;
+                self.frame_interval = 100; // ms
+            }
+            MirAction::Running => {
+                self.action_frame_start = 80;
+                self.frames_per_direction = 6;
+                self.frame_interval = 80; // ms
+            }
+            MirAction::Attack1 => {
+                self.action_frame_start = 128;
+                self.frames_per_direction = 6;
+                self.frame_interval = 100; // ms
+            }
+            _ => {
+                // Default to standing
+                self.action_frame_start = 0;
+                self.frames_per_direction = 4;
+                self.frame_interval = 500; // ms
+            }
+        }
+    }
+    
+    /// Update animation frame (called each frame in GameScene::update)
+    /// 
+    /// Mirrors C# automatic frame advancement in MapObject.FrameIndex property
+    pub fn update_animation(&mut self) {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_frame_time).as_millis() as i32;
+        
+        if elapsed >= self.frame_interval {
+            self.frame_index = (self.frame_index + 1) % self.frames_per_direction;
+            self.last_frame_time = now;
+        }
     }
 }
