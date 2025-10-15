@@ -1095,9 +1095,11 @@ impl PlayerObject {
                 };
             }
             
-            // TODO Phase 2: Handle direction, location updates (C# lines 988-997)
-            // self.map_object.set_direction(action.direction);
-            // self.map_object.set_current_location(action.location);
+            // Handle direction, location updates (C# lines 988-997)
+            // IMPORTANT: action.location is the TARGET (CurrentLocation in C#)
+            // Movement will be calculated in process() as the "pushed back" position
+            self.map_object.direction = action.direction;
+            self.map_object.current_location = action.location;
             
             // Get frame for action (C# line 999)
             self.frame = self.frames.get(&self.current_action).cloned();
@@ -2089,6 +2091,171 @@ impl PlayerObject {
         if elapsed >= self.frame_interval {
             self.frame_index = (self.frame_index + 1) % self.frames_per_direction;
             self.last_frame_time = now;
+        }
+    }
+
+    /// Process player state - handles movement offset calculation
+    /// 
+    /// Mirrors C# PlayerObject.Process() method (lines 864-969)
+    /// 
+    /// Key difference from C#:
+    /// - C# uses CurrentLocation (target) and Movement (render position, pushed back)
+    /// - Rust uses current_location (target) and movement (render position)
+    /// - OffSetMove is the pixel offset from Movement toward CurrentLocation
+    pub fn process(&mut self) {
+        // Constants (from C# MapControl)
+        const CELL_WIDTH: i32 = 48;
+        const CELL_HEIGHT: i32 = 32;
+        
+        // 🐛 DEBUG: 打印进入process的状态
+        static mut PROCESS_COUNTER: u32 = 0;
+        unsafe {
+            PROCESS_COUNTER += 1;
+            if PROCESS_COUNTER <= 10 || PROCESS_COUNTER % 60 == 0 {
+                println!("🔄 PlayerObject.process() #{} - action: {:?}, frame: {}", 
+                    PROCESS_COUNTER, self.current_action, self.frame.is_some());
+            }
+        }
+        
+        // Update animation frames (C# line 877: ProcessFrames())
+        self.update_animation();
+        
+        // Calculate movement offset for smooth animation (C# lines 891-962)
+        match self.current_action {
+            MirAction::Walking | MirAction::Running | 
+            MirAction::MountWalking | MirAction::MountRunning => {
+                unsafe {
+                    if PROCESS_COUNTER <= 10 || PROCESS_COUNTER % 60 == 0 {
+                        println!("  ✅ 进入 Walking/Running 分支!");
+                    }
+                }
+                
+                // Check if we have valid frame data (C# lines 900-904)
+                if self.frame.is_none() {
+                    unsafe {
+                        if PROCESS_COUNTER <= 10 || PROCESS_COUNTER % 60 == 0 {
+                            println!("  ❌ frame 为 None, 退出");
+                        }
+                    }
+                    self.map_object.offset_move = Point::new(0, 0);
+                    self.map_object.movement = self.map_object.current_location;
+                    return;
+                }
+                
+                // Calculate movement distance multiplier (C# lines 910-915)
+                let i = if self.current_action == MirAction::MountRunning {
+                    3
+                } else if self.current_action == MirAction::Running {
+                    if self.sprint { 3 } else { 2 }
+                } else {
+                    1
+                };
+                
+                // Calculate Movement position (pushed back from CurrentLocation)
+                // C# line 919: Movement = Functions.PointMove(CurrentLocation, Direction, -i);
+                // This means Movement is i cells BEHIND CurrentLocation in the movement direction
+                self.map_object.movement = self.point_move_back(
+                    self.map_object.current_location,
+                    self.map_object.direction,
+                    i
+                );
+                
+                // Get animation frame count and current index (C# lines 921-922)
+                let count = self.frames_per_direction;
+                let index = self.frame_index;
+                
+                // Calculate pixel offset from Movement to CurrentLocation (C# lines 930-956)
+                let offset = match self.map_object.direction {
+                    MirDirection::Up => {
+                        Point::new(
+                            0,
+                            ((CELL_HEIGHT * i) as f32 / count as f32 * (index + 1) as f32) as i32
+                        )
+                    }
+                    MirDirection::UpRight => {
+                        Point::new(
+                            ((-CELL_WIDTH * i) as f32 / count as f32 * (index + 1) as f32) as i32,
+                            ((CELL_HEIGHT * i) as f32 / count as f32 * (index + 1) as f32) as i32
+                        )
+                    }
+                    MirDirection::Right => {
+                        Point::new(
+                            ((-CELL_WIDTH * i) as f32 / count as f32 * (index + 1) as f32) as i32,
+                            0
+                        )
+                    }
+                    MirDirection::DownRight => {
+                        Point::new(
+                            ((-CELL_WIDTH * i) as f32 / count as f32 * (index + 1) as f32) as i32,
+                            ((-CELL_HEIGHT * i) as f32 / count as f32 * (index + 1) as f32) as i32
+                        )
+                    }
+                    MirDirection::Down => {
+                        Point::new(
+                            0,
+                            ((-CELL_HEIGHT * i) as f32 / count as f32 * (index + 1) as f32) as i32
+                        )
+                    }
+                    MirDirection::DownLeft => {
+                        Point::new(
+                            ((CELL_WIDTH * i) as f32 / count as f32 * (index + 1) as f32) as i32,
+                            ((-CELL_HEIGHT * i) as f32 / count as f32 * (index + 1) as f32) as i32
+                        )
+                    }
+                    MirDirection::Left => {
+                        Point::new(
+                            ((CELL_WIDTH * i) as f32 / count as f32 * (index + 1) as f32) as i32,
+                            0
+                        )
+                    }
+                    MirDirection::UpLeft => {
+                        Point::new(
+                            ((CELL_WIDTH * i) as f32 / count as f32 * (index + 1) as f32) as i32,
+                            ((CELL_HEIGHT * i) as f32 / count as f32 * (index + 1) as f32) as i32
+                        )
+                    }
+                };
+                
+                // Apply rounding adjustment (C# line 958)
+                self.map_object.offset_move = Point::new(
+                    offset.x % 2 + offset.x,
+                    offset.y % 2 + offset.y
+                );
+                
+                unsafe {
+                    if PROCESS_COUNTER <= 10 || PROCESS_COUNTER % 60 == 0 {
+                        println!("  📐 计算完成: offset=({}, {}), i={}, count={}, index={}", 
+                            self.map_object.offset_move.x, self.map_object.offset_move.y,
+                            i, count, index);
+                    }
+                }
+            }
+            _ => {
+                // No movement - clear offset (C# lines 960-962)
+                unsafe {
+                    if PROCESS_COUNTER <= 10 || PROCESS_COUNTER % 60 == 0 {
+                        println!("  ⏸️  非移动状态,清空offset");
+                    }
+                }
+                self.map_object.offset_move = Point::new(0, 0);
+                self.map_object.movement = self.map_object.current_location;
+            }
+        }
+    }
+    
+    /// Move a point backward (opposite direction)
+    /// Helper for calculating Movement position
+    fn point_move_back(&self, point: Point, direction: MirDirection, distance: i32) -> Point {
+        // Move in opposite direction by negating distance
+        match direction {
+            MirDirection::Up => Point::new(point.x, point.y + distance),
+            MirDirection::UpRight => Point::new(point.x + distance, point.y + distance),
+            MirDirection::Right => Point::new(point.x + distance, point.y),
+            MirDirection::DownRight => Point::new(point.x + distance, point.y - distance),
+            MirDirection::Down => Point::new(point.x, point.y - distance),
+            MirDirection::DownLeft => Point::new(point.x - distance, point.y - distance),
+            MirDirection::Left => Point::new(point.x - distance, point.y),
+            MirDirection::UpLeft => Point::new(point.x - distance, point.y + distance),
         }
     }
 }

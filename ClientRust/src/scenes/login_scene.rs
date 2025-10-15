@@ -1087,9 +1087,10 @@ impl Scene for LoginScene {
         tracing::info!("LoginScene 初始化完成,等待网络连接...");
     }
     
-    fn update(&mut self, ctx: &mut ggez::Context, delta_time: f32) {
+    fn update(&mut self, ctx: &mut ggez::Context) {
         // 更新背景动画 (C# 原版: AnimationCount=19, AnimationDelay=100ms)
         // 如果没有暂停，则更新动画
+        let delta_time=ctx.time.delta().as_secs_f32();
         if !self.animation_paused {
             self.animation_timer += delta_time;
             if self.animation_timer >= 0.1 {  // 100ms per frame

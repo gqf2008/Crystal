@@ -952,6 +952,44 @@ impl MLibrary {
         Ok(())
     }
 
+    /// 带缩放的绘制 - 支持摄像机缩放
+    pub fn draw_with_scale(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        index: usize,
+        x: f32,
+        y: f32,
+        color: ggez::graphics::Color,
+        offset: bool,
+        scale: f32,
+    ) -> io::Result<()> {
+        use ggez::graphics::DrawParam;
+
+        // 获取或创建纹理
+        let info = self.get_or_create_texture(ctx, index)?;
+
+        // 应用偏移 (偏移也需要缩放)
+        let (draw_x, draw_y) = if offset {
+            (x + info.x as f32 * scale, y + info.y as f32 * scale)
+        } else {
+            (x, y)
+        };
+
+        // 绘制
+        if let Some(ref image) = info.image {
+            canvas.draw(
+                image,
+                DrawParam::default()
+                    .dest([draw_x, draw_y])
+                    .color(color)
+                    .scale([scale, scale]),
+            );
+        }
+
+        Ok(())
+    }
+
     /// 带透明度的绘制 - Draw(index, point, colour, offSet, opacity)
     ///
     /// 对应 C# 实现:

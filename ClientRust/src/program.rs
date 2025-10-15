@@ -143,7 +143,6 @@ pub struct CrystalGame {
     pub settings: ClientSettings,
     pub ggez_manager: GgezManager,
     pub scene_manager: Arc<RwLock<SceneManager>>,
-    pub last_update_time: std::time::Instant,
     pub scale_factor: f32,  // 窗口缩放因子
     
     // 网络系统
@@ -254,7 +253,6 @@ impl CrystalGame {
             settings,
             ggez_manager,
             scene_manager,
-            last_update_time: std::time::Instant::now(),
             scale_factor: 1.0,  // 暂时不缩放
             game_client,
             event_rx,
@@ -603,14 +601,6 @@ impl CrystalGame {
 /// 为 CrystalGame 实现 ggez::EventHandler trait
 impl ggez::event::EventHandler for CrystalGame {
     fn update(&mut self, ctx: &mut ggez::Context) -> ggez::GameResult {
-        // 计算 delta_time
-        let now = std::time::Instant::now();
-        let delta_time = now.duration_since(self.last_update_time).as_secs_f32();
-        self.last_update_time = now;
-        
-        // 限制 delta_time (防止卡顿时跳跃过大)
-        let delta_time = delta_time.min(0.1);
-        
         // 处理网络事件
         self.process_network_events();
         
@@ -630,7 +620,7 @@ impl ggez::event::EventHandler for CrystalGame {
             }
             
             // 更新当前场景
-            scene_manager.update( ctx,delta_time);
+            scene_manager.update( ctx);
         }
         
         Ok(())

@@ -125,9 +125,9 @@ impl SceneManager {
     }
     
     /// Update current scene
-    pub fn update(&mut self, ctx: &mut ggez::Context, delta_time: f32) {
+    pub fn update(&mut self, ctx: &mut ggez::Context) {
         if let Some(scene) = &mut self.current_scene {
-            scene.update(ctx,delta_time);
+            scene.update(ctx);
         }
     }
     

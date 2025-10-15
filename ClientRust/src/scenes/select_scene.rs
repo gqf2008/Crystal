@@ -768,14 +768,14 @@ impl Scene for SelectScene {
         // TODO: Request character list from server
     }
     
-    fn update(&mut self, ctx: &mut ggez::Context, delta_time: f32) {
+    fn update(&mut self, ctx: &mut ggez::Context) {
         // 更新 NewCharacterDialog 动画和计时器
         if let Some(dialog) = &mut self.new_character_dialog {
-            dialog.update(delta_time);
+            dialog.update(ctx.time.delta().as_secs_f32());
         }
         
         // 更新角色预览动画 (16帧, 250ms/帧 = 4 FPS)
-        self.character_animation_timer += delta_time;
+        self.character_animation_timer += ctx.time.delta().as_secs_f32();
         if self.character_animation_timer >= 0.25 {
             self.character_animation_timer -= 0.25;
             let old_frame = self.character_animation_frame;

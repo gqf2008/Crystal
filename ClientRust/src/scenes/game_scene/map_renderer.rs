@@ -124,6 +124,22 @@ impl MapRenderer {
             .map(|cell| cell.is_walkable()) // 调用 CellInfo 的 is_walkable() 方法
             .unwrap_or(false)
     }
+    
+    /// 获取cells的一维展平视图（用于移动检测）
+    /// 
+    /// 注意：cells 的布局是 Vec<Vec<CellInfo>> = [x][y]
+    /// 这个方法将其转换为按行优先的一维数组访问
+    pub fn get_cells_flat(&self) -> Vec<&CellInfo> {
+        let mut flat = Vec::with_capacity((self.width * self.height) as usize);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if let Some(cell) = self.get_cell(x, y) {
+                    flat.push(cell);
+                }
+            }
+        }
+        flat
+    }
 
     /// 获取或创建门对象（运行时管理）
     pub fn get_or_create_door(&mut self, index: u8) -> &mut Door {
