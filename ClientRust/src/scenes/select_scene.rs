@@ -768,7 +768,7 @@ impl Scene for SelectScene {
         // TODO: Request character list from server
     }
     
-    fn update(&mut self, delta_time: f32) {
+    fn update(&mut self, ctx: &mut ggez::Context, delta_time: f32) {
         // 更新 NewCharacterDialog 动画和计时器
         if let Some(dialog) = &mut self.new_character_dialog {
             dialog.update(delta_time);

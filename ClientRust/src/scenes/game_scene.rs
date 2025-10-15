@@ -30,7 +30,7 @@ use mir2_shared::{
 
 use crate::controls::Control;
 use crate::objects::{HeroObject, MapObject, UserObject};
-use crate::scenes::{GameEvent, Scene, SceneType};
+use crate::scenes::{GameEvent, KeyCode, ModifiersState, Scene, SceneType};
 
 // 导入 Camera (摄像机系统)
 pub mod camera;
@@ -574,106 +574,9 @@ impl GameScene {
         }
     }
 
-    /// 加载地图
-    ///
-    /// 对应 C# LoadMap 方法
-    ///
-    /// 参数:
-    /// - map_path: 地图文件路径 (如 "Maps/0.map")
-    fn load_map(&mut self, map_path: &str) -> GameResult<()> {
-        use crate::objects::MapReader;
-
-        tracing::info!("🗺️  Loading map: {}", map_path);
-
-        // 加载地图数据
-        match MapReader::new(map_path) {
-            Ok(reader) => {
-                // 🎨 新架构：直接构造 MapRenderer（拥有数据所有权）
-                let width = reader.width;
-                let height = reader.height;
-                let filename = reader.file_name.clone();
-
-                self.map_renderer = MapRenderer::from_reader(reader);
-
-                tracing::info!("✅ Map loaded: {} ({}x{})", filename, width, height);
-
-                Ok(())
-            }
-            Err(e) => {
-                tracing::error!("❌ Failed to load map: {}", e);
-                Err(ggez::GameError::CustomError(format!(
-                    "Failed to load map: {}",
-                    e
-                )))
-            }
-        }
-    }
-
-    // ==================== 主渲染方法 ====================
-    // 对应 C# DrawControl (line 1062-1086)
-
-    /// 绘制场景
-    ///
-    /// 渲染分三个阶段:
-    /// 1. MapControl.draw() - 地图与对象
-    /// 2. UI 控件树 - 所有对话框
-    /// 3. 顶层元素 - 拖拽物品/输出消息
-    ///
-    /// 注意: 此方法已弃用,使用 Scene trait 的 draw 方法
-    #[allow(dead_code)]
-    pub fn draw_old(&mut self, ctx: &mut ggez::Context, canvas: &mut Canvas) -> GameResult<()> {
-        // 定期清理纹理缓存 (每 5 分钟清理一次超过 10 分钟未使用的纹理)
-        // 对应 C# DXManager.CleanUp()
-        static mut LAST_CLEANUP_TIME: Option<std::time::Instant> = None;
-        unsafe {
-            let now = std::time::Instant::now();
-            if LAST_CLEANUP_TIME.is_none()
-                || now.duration_since(LAST_CLEANUP_TIME.unwrap())
-                    > std::time::Duration::from_secs(300)
-            {
-                self.cleanup_texture_cache();
-                LAST_CLEANUP_TIME = Some(now);
-            }
-        }
-
-        // Phase 1: 地图与对象
-        // 🎨 使用新的渲染架构：MapRenderer 直接拥有数据
-        // 🔧 关键修复：使用 Movement 而不是 CurrentLocation
-        // C# 参考: DrawFloor() 使用 User.Movement.X/Y (line 10463)
-        // Movement 是当前移动中的位置，CurrentLocation 是最终目标位置
-        let user_pos = if let Some(user) = &self.user {
-            UserPosition {
-                x: user.player.map_object.movement.x,
-                y: user.player.map_object.movement.y,
-                offset_x: user.player.map_object.offset_move.x,
-                offset_y: user.player.map_object.offset_move.y,
-            }
-        } else {
-            // 如果没有 user 对象,使用默认中心位置
-            UserPosition {
-                x: self.map_renderer.width / 2,
-                y: self.map_renderer.height / 2,
-                offset_x: 0,
-                offset_y: 0,
-            }
-        };
-
-        // 绘制地图（简化后的 API）
-        self.map_renderer.draw(ctx, canvas, &self.camera)?;
-
-        // Phase 2: UI 控件树 (等价于 C# base.DrawControl())
-        self.draw_controls(canvas)?;
-
-        // Phase 3: 顶层元素
-        self.draw_top_layer(canvas)?;
-
-        Ok(())
-    }
-
     /// 绘制 UI 控件树
     ///
     /// 等价于 C# base.DrawControl()
-    #[allow(unused_variables)]
     fn draw_controls(&mut self, canvas: &mut Canvas) -> GameResult<()> {
         for control in &mut self.controls {
             if control.visible() {
@@ -684,8 +587,6 @@ impl GameScene {
     }
 
     /// 绘制顶层元素
-    ///
-    /// 对应 C# DrawControl 后半部分 (line 1070-1085)
     fn draw_top_layer(&mut self, canvas: &mut Canvas) -> GameResult<()> {
         // 1) 拖拽物品图标
         if self.picked_up_gold || self.selected_cell_item.is_some() {
@@ -699,7 +600,6 @@ impl GameScene {
     }
 
     /// 绘制输出消息
-    #[allow(unused_variables)]
     fn draw_output_messages(&mut self, canvas: &mut Canvas) -> GameResult<()> {
         // TODO: 实现输出行绘制
         Ok(())
@@ -1112,11 +1012,7 @@ impl GameScene {
     /// 加载地图文件 (从 game_scene_old.rs 迁移)
     ///
     /// 对应 C# LoadMap 方法
-    fn load_map_file(
-        map_name: &str,
-        _screen_width: f32,
-        _screen_height: f32,
-    ) -> std::io::Result<MapRenderer> {
+    fn load_map_file(map_name: &str) -> std::io::Result<MapRenderer> {
         use crate::objects::MapReader;
         use std::path::PathBuf;
 
@@ -1214,21 +1110,15 @@ impl GameScene {
 
     /// 绘制加载屏幕（私有辅助方法）
     /// 会先绘制黑色背景覆盖游戏内容,然后显示加载文本
-    fn draw_loading_screen(
-        &self,
-        canvas: &mut crate::graphics::Canvas,
-        message: &str,
-        screen_width: f32,
-        screen_height: f32,
-    ) {
+    fn draw_loading_screen(&self, canvas: &mut crate::graphics::Canvas, message: &str) {
         use ggez::glam::Vec2;
         use ggez::graphics::{Color, DrawParam, PxScale, Rect};
 
         tracing::info!(
             "📺 绘制加载屏幕: \"{}\" (屏幕: {:.0}x{:.0})",
             message,
-            screen_width,
-            screen_height
+            self.camera.screen_width,
+            self.camera.screen_height
         );
 
         // 先绘制黑色背景覆盖整个屏幕 (覆盖绿色底色)
@@ -1236,7 +1126,10 @@ impl GameScene {
             &ggez::graphics::Quad,
             DrawParam::default()
                 .dest(Vec2::new(0.0, 0.0))
-                .scale(Vec2::new(screen_width, screen_height))
+                .scale(Vec2::new(
+                    self.camera.screen_width,
+                    self.camera.screen_height,
+                ))
                 .color(Color::BLACK),
         );
 
@@ -1247,8 +1140,8 @@ impl GameScene {
 
         // 简单居中：估算文本宽度约为字符数 * 24px (32px字体的中文字符), 高度约 40px
         let estimated_width = message.chars().count() as f32 * 24.0;
-        let text_x = (screen_width - estimated_width) / 2.0;
-        let text_y = (screen_height - 40.0) / 2.0;
+        let text_x = (self.camera.screen_width - estimated_width) / 2.0;
+        let text_y = (self.camera.screen_height - 40.0) / 2.0;
 
         tracing::info!(
             "📺   文本位置: ({:.0}, {:.0}), 估算宽度: {:.0}px",
@@ -1304,8 +1197,9 @@ impl Scene for GameScene {
         self
     }
 
-    fn update(&mut self, _delta_time: f32) {
+    fn update(&mut self, ctx: &mut ggez::Context, _delta_time: f32) {
         // 定期清理纹理缓存 (每 5 秒检查一次,清理超过 30 秒未使用的纹理)
+
         // 对应 C# DXManager.CleanUp()
         static mut LAST_CLEANUP_TIME: Option<std::time::Instant> = None;
         unsafe {
@@ -1318,7 +1212,8 @@ impl Scene for GameScene {
                 LAST_CLEANUP_TIME = Some(now);
             }
         }
-
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        self.camera.update_screen_size(screen_width, screen_height);
         // TODO: 实现更新逻辑 (对应 C# Process)
         // 更新动画计数器
         // 更新对象
@@ -1351,26 +1246,6 @@ impl Scene for GameScene {
     /// ============================================================
     fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas) {
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
-
-        // ════════════════════════════════════════════════════════════
-        // 步骤 1: 清除整个屏幕 (防止前一场景残留)
-        // ════════════════════════════════════════════════════════════
-        // 🔧 关键修复: 在draw()函数一开始就清除整个Canvas
-        // 防止登录场景的ChrSel背景动画残留在framebuffer中
-        use ggez::graphics::{Color, DrawMode, DrawParam, Mesh, Rect};
-        let clear_color = Color::from_rgb(0, 32, 0); // 传奇2深绿色 (R=0, G=32, B=0)
-        let clear_rect = Rect::new(0.0, 0.0, screen_width, screen_height);
-        if let Ok(clear_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), clear_rect, clear_color)
-        {
-            canvas.draw(&clear_mesh, DrawParam::default());
-            tracing::trace!(
-                "✅ 屏幕已清除为深绿色 ({:.0}x{:.0})",
-                screen_width,
-                screen_height
-            );
-        } else {
-            tracing::error!("❌ 无法创建清除用的矩形!");
-        }
 
         // ════════════════════════════════════════════════════════════
         // 步骤 2: 打印当前帧计数和状态
@@ -1406,18 +1281,18 @@ impl Scene for GameScene {
         match &self.state {
             GameSceneState::WaitingForData => {
                 // 显示 "等待游戏数据..." 提示
-                self.draw_loading_screen(canvas, "等待服务器数据...", screen_width, screen_height);
+                self.draw_loading_screen(canvas, "等待服务器数据...");
                 return;
             }
             GameSceneState::LoadingMap(map_name) => {
                 // 显示 "正在加载地图: XXX" 提示
                 let msg = format!("正在加载地图: {}", map_name);
-                self.draw_loading_screen(canvas, &msg, screen_width, screen_height);
+                self.draw_loading_screen(canvas, &msg);
                 return;
             }
             GameSceneState::WaitingForPlayer => {
                 // 显示 "等待角色数据..." 提示
-                self.draw_loading_screen(canvas, "等待角色数据...", screen_width, screen_height);
+                self.draw_loading_screen(canvas, "等待角色数据...");
                 return;
             }
             GameSceneState::Ready => {
@@ -1443,6 +1318,25 @@ impl Scene for GameScene {
                     }
                 }
             }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // 🔧 关键修复: 清空画布 - 防止其他场景背景残留!
+        // ════════════════════════════════════════════════════════════
+        // 📝 问题: 从 LoginScene/SelectScene 切换到 GameScene 时,
+        //         旧场景的背景纹理会残留在画布上,因为 ggez 的 Canvas
+        //         不会自动清空。
+        //
+        // 📝 解决方案: 在每帧开始时用黑色矩形覆盖整个屏幕。
+        //             这样即使之前场景有背景,也会被清除干净。
+        //
+        // 📝 参考: SelectScene.rs 第795-802行也使用了相同的技巧
+        use ggez::graphics::{Color as GgezColor, DrawMode, DrawParam, Mesh, Rect};
+        let clear_rect = Rect::new(0.0, 0.0, screen_width, screen_height);
+        let clear_color = GgezColor::from_rgb(0, 0, 0); // 黑色背景
+        if let Ok(clear_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), clear_rect, clear_color)
+        {
+            canvas.draw(&clear_mesh, DrawParam::default());
         }
 
         // ════════════════════════════════════════════════════════════
@@ -1566,7 +1460,7 @@ impl Scene for GameScene {
         }
 
         // 5c. 绘制玩家角色 (使用摄像机转换坐标)
-        if let Some(ref user) = self.user {
+        if self.user.is_some() {
             tracing::trace!("👤 开始绘制玩家角色...");
             if let Err(e) = self.draw_player_with_camera(ctx, canvas, &user_pos) {
                 tracing::error!("❌ 玩家绘制失败: {:?}", e);
@@ -1626,8 +1520,7 @@ impl Scene for GameScene {
                 tracing::info!("🔄 状态切换: WaitingForData → LoadingMap({})", file_name);
 
                 // 🎨 加载地图到 MapRenderer
-                let (screen_width, screen_height) = self.camera.get_screen_size();
-                match Self::load_map_file(file_name, screen_width, screen_height) {
+                match Self::load_map_file(file_name) {
                     Ok(map_renderer) => {
                         tracing::info!("✅ 地图加载成功:");
                         tracing::info!(
@@ -2027,6 +1920,123 @@ impl Scene for GameScene {
             clamped_zoom,
             delta_y
         );
+    }
+
+    /// 🎮 处理键盘按键事件 - MapRenderer 显示控制
+    ///
+    /// 快捷键列表:
+    /// - G键: 切换地图网格
+    /// - B键: 切换纹理边框
+    /// - 1键: 切换 Back 层
+    /// - 2键: 切换 Middle 层
+    /// - 3键: 切换 Front 层
+    /// - O键: 切换障碍层
+    /// - A键: 切换动画效果
+    fn handle_key_press(&mut self, key: KeyCode, _modifiers: ModifiersState) -> bool {
+        use crate::scenes::KeyCode;
+
+        match key {
+            // G键: 切换地图网格
+            KeyCode::KeyG => {
+                self.map_renderer.show_grid = !self.map_renderer.show_grid;
+                println!(
+                    "🔍 地图网格: {}",
+                    if self.map_renderer.show_grid {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true // 已处理
+            }
+
+            // B键: 切换纹理边框
+            KeyCode::KeyB => {
+                self.map_renderer.show_borders = !self.map_renderer.show_borders;
+                println!(
+                    "🔍 纹理边框: {}",
+                    if self.map_renderer.show_borders {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // 1键: 切换 Back 层
+            KeyCode::Digit1 => {
+                self.map_renderer.show_layer_back = !self.map_renderer.show_layer_back;
+                println!(
+                    "🎨 Back层: {}",
+                    if self.map_renderer.show_layer_back {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // 2键: 切换 Middle 层
+            KeyCode::Digit2 => {
+                self.map_renderer.show_layer_middle = !self.map_renderer.show_layer_middle;
+                println!(
+                    "🎨 Middle层: {}",
+                    if self.map_renderer.show_layer_middle {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // 3键: 切换 Front 层
+            KeyCode::Digit3 => {
+                self.map_renderer.show_layer_front = !self.map_renderer.show_layer_front;
+                println!(
+                    "🎨 Front层: {}",
+                    if self.map_renderer.show_layer_front {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // O键: 切换障碍层
+            KeyCode::KeyO => {
+                self.map_renderer.show_obstacles = !self.map_renderer.show_obstacles;
+                println!(
+                    "🚧 障碍层: {}",
+                    if self.map_renderer.show_obstacles {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // A键: 切换动画效果
+            KeyCode::KeyA => {
+                self.map_renderer.show_animations = !self.map_renderer.show_animations;
+                println!(
+                    "🎬 动画效果: {}",
+                    if self.map_renderer.show_animations {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // 其他按键不处理
+            _ => false,
+        }
     }
 }
 

@@ -630,7 +630,7 @@ impl ggez::event::EventHandler for CrystalGame {
             }
             
             // 更新当前场景
-            scene_manager.update(delta_time);
+            scene_manager.update( ctx,delta_time);
         }
         
         Ok(())
@@ -638,7 +638,7 @@ impl ggez::event::EventHandler for CrystalGame {
 
     fn draw(&mut self, ctx: &mut ggez::Context) -> ggez::GameResult {
         // 开始帧
-        self.ggez_manager.begin_frame();
+       // self.ggez_manager.begin_frame();
         
         // 🔧 根据当前场景选择背景色
         use ggez::graphics::Color;
@@ -666,7 +666,7 @@ impl ggez::event::EventHandler for CrystalGame {
         
         // 结束帧
         canvas.finish(ctx)?;
-        self.ggez_manager.end_frame();
+      //  self.ggez_manager.end_frame();
         
         Ok(())
     }

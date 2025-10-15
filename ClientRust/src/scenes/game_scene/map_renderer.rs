@@ -50,6 +50,15 @@ pub struct MapRenderer {
     
     // 🎬 动画计数器
     animation_count: i32,
+    
+    // 🎮 显示控制开关（调试用）
+    pub show_grid: bool,         // G键：显示地图网格
+    pub show_borders: bool,      // B键：显示纹理边框
+    pub show_layer_back: bool,   // 1键：显示Back层
+    pub show_layer_middle: bool, // 2键：显示Middle层
+    pub show_layer_front: bool,  // 3键：显示Front层
+    pub show_obstacles: bool,    // O键：显示障碍层
+    pub show_animations: bool,   // A键：显示动画
 }
 
 impl Default for MapRenderer {
@@ -60,6 +69,14 @@ impl Default for MapRenderer {
             height: 0,
             doors: Vec::new(),
             animation_count: 0,
+            // 默认全部开启
+            show_grid: false,
+            show_borders: false,
+            show_layer_back: true,
+            show_layer_middle: true,
+            show_layer_front: true,
+            show_obstacles: false,
+            show_animations: true,
         }
     }
 }
@@ -81,6 +98,14 @@ impl MapRenderer {
             height,
             doors: Vec::new(),        // 门列表初始化为空（运行时动态创建）
             animation_count: 0,
+            // 默认全部开启
+            show_grid: false,
+            show_borders: false,
+            show_layer_back: true,
+            show_layer_middle: true,
+            show_layer_front: true,
+            show_obstacles: false,
+            show_animations: true,
         }
     }
 
@@ -153,6 +178,111 @@ impl MapRenderer {
             (grid_x * Self::CELL_WIDTH) as f32,
             (grid_y * Self::CELL_HEIGHT) as f32,
         )
+    }
+
+    /// 🎬 主渲染入口 - 绘制所有图层
+    ///
+    /// 参数:
+    /// - `camera`: 相机引用
+    pub fn draw(
+        &mut self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        // 🐛 调试：每60帧打印一次摄像机信息
+        static mut DEBUG_COUNTER: u32 = 0;
+        unsafe {
+            DEBUG_COUNTER += 1;
+            if DEBUG_COUNTER % 60 == 0 {
+                println!(
+                    "🎥 MapRenderer::draw() - Camera: ({:.1}, {:.1}), zoom: {:.2}, screen: ({:.0}x{:.0})",
+                    camera.x, camera.y, camera.zoom, camera.screen_width, camera.screen_height
+                );
+            }
+        }
+        
+        // 更新动画计数器
+        self.animation_count = (self.animation_count + 1) % 1000;
+
+        // 计算可见区域 (世界坐标转地图格子)
+        let left = camera.screen_to_world_x(0.0);
+        let right = camera.screen_to_world_x(camera.screen_width);
+        let top = camera.screen_to_world_y(0.0);
+        let bottom = camera.screen_to_world_y(camera.screen_height);
+
+        // 标准边距
+        let start_x = ((left / Self::CELL_WIDTH as f32).floor() as i32 - 2).max(0);
+        let end_x =
+            ((right / Self::CELL_WIDTH as f32).ceil() as i32 + 2).min(self.width - 1);
+        let start_y = ((top / Self::CELL_HEIGHT as f32).floor() as i32 - 2).max(0);
+        let end_y =
+            ((bottom / Self::CELL_HEIGHT as f32).ceil() as i32 + 2).min(self.height - 1);
+        
+        // 🐛 调试：每60帧打印可见区域
+        unsafe {
+            if DEBUG_COUNTER % 60 == 0 {
+                println!(
+                    "   📐 可见区域: world({:.0},{:.0} -> {:.0},{:.0}), tiles({},{} -> {},{})",
+                    left, top, right, bottom, start_x, start_y, end_x, end_y
+                );
+            }
+        }
+
+        // 🎨 Front层特殊处理：向下扩展更多格子 (与map_viewer.rs一致)
+        let front_extra_cells = 20;
+        let front_start_y = start_y;
+        let front_end_y = (end_y + front_extra_cells).min(self.height - 1);
+
+        // 性能优化：根据可见格子数量动态调整
+        let visible_width = end_x - start_x + 1;
+        let visible_height = end_y - start_y + 1;
+        let total_cells = visible_width * visible_height;
+
+        let (draw_middle, draw_front) = if total_cells > 50000 {
+            (false, false)
+        } else if total_cells > 20000 {
+            (false, true)
+        } else {
+            (true, true)
+        };
+
+        // 🎨 分层绘制（根据显示开关控制）
+        
+        // Back层 - 仅静态
+        if self.show_layer_back {
+            self.draw_back(ctx, canvas, camera, start_x, end_x, start_y, end_y)?;
+        }
+
+        // Middle层 - 静态+动画
+        if self.show_layer_middle && draw_middle {
+            self.draw_middle(ctx, canvas, camera, start_x, end_x, start_y, end_y)?;
+        }
+
+        // Front层 - 静态+动画+门
+        if self.show_layer_front && draw_front {
+            self.draw_front(
+                ctx,
+                canvas,
+                camera,
+                start_x,
+                end_x,
+                front_start_y,
+                front_end_y,
+            )?;
+        }
+
+        // 🗺️ 绘制网格（如果启用）
+        if self.show_grid {
+            self.draw_grid(ctx, canvas, camera)?;
+        }
+
+        // 🚧 绘制障碍层（如果启用）
+        if self.show_obstacles {
+            self.draw_obstacles(ctx, canvas, camera)?;
+        }
+
+        Ok(())
     }
 
     /// 🎨 Back层绘制 (大地砖层 - 仅静态)
@@ -251,8 +381,8 @@ impl MapRenderer {
                             world_x,
                             world_y,
                         )?;
-                    } else {
-                        // 动画瓦片：有动画的格子
+                    } else if self.show_animations {
+                        // 动画瓦片：有动画的格子（仅当 show_animations 开启时）
                         let use_blend = (animation & 0x0f) > 0;
                         animation &= 0x0f;
 
@@ -332,8 +462,8 @@ impl MapRenderer {
                     let has_animation = animation > 0;
                     let has_door = cell.door_index > 0;
 
-                    // 动画帧推进（如果有动画）
-                    if has_animation {
+                    // 动画帧推进（如果有动画且 show_animations 开启）
+                    if has_animation && self.show_animations {
                         let animation_tick = cell.front_animation_tick;
                         let total_frames =
                             animation as i32 + (animation as i32 * animation_tick as i32);
@@ -342,8 +472,8 @@ impl MapRenderer {
                         index += frame_offset;
                     }
 
-                    // 门动画处理
-                    if has_door {
+                    // 门动画处理（如果有门且 show_animations 开启）
+                    if has_door && self.show_animations {
                         let door_frame = self.get_door_frame(cell.door_index);
                         if door_frame > 0 {
                             index += (door_frame + 1) * cell.door_offset as i32;
@@ -407,97 +537,7 @@ impl MapRenderer {
         Ok(())
     }
 
-    /// 🎬 主渲染入口 - 绘制所有图层
-    ///
-    /// 参数:
-    /// - `camera`: 相机引用
-    pub fn draw(
-        &mut self,
-        ctx: &mut Context,
-        canvas: &mut Canvas,
-        camera: &Camera,
-    ) -> GameResult<()> {
-        // 🐛 调试：每60帧打印一次摄像机信息
-        static mut DEBUG_COUNTER: u32 = 0;
-        unsafe {
-            DEBUG_COUNTER += 1;
-            if DEBUG_COUNTER % 60 == 0 {
-                println!(
-                    "🎥 MapRenderer::draw() - Camera: ({:.1}, {:.1}), zoom: {:.2}, screen: ({:.0}x{:.0})",
-                    camera.x, camera.y, camera.zoom, camera.screen_width, camera.screen_height
-                );
-            }
-        }
-        
-        // 更新动画计数器
-        self.animation_count = (self.animation_count + 1) % 1000;
-
-        // 计算可见区域 (世界坐标转地图格子)
-        let left = camera.screen_to_world_x(0.0);
-        let right = camera.screen_to_world_x(camera.screen_width);
-        let top = camera.screen_to_world_y(0.0);
-        let bottom = camera.screen_to_world_y(camera.screen_height);
-
-        // 标准边距
-        let start_x = ((left / Self::CELL_WIDTH as f32).floor() as i32 - 2).max(0);
-        let end_x =
-            ((right / Self::CELL_WIDTH as f32).ceil() as i32 + 2).min(self.width - 1);
-        let start_y = ((top / Self::CELL_HEIGHT as f32).floor() as i32 - 2).max(0);
-        let end_y =
-            ((bottom / Self::CELL_HEIGHT as f32).ceil() as i32 + 2).min(self.height - 1);
-        
-        // 🐛 调试：每60帧打印可见区域
-        unsafe {
-            if DEBUG_COUNTER % 60 == 0 {
-                println!(
-                    "   📐 可见区域: world({:.0},{:.0} -> {:.0},{:.0}), tiles({},{} -> {},{})",
-                    left, top, right, bottom, start_x, start_y, end_x, end_y
-                );
-            }
-        }
-
-        // 🎨 Front层特殊处理：向下扩展更多格子 (与map_viewer.rs一致)
-        let front_extra_cells = 20;
-        let front_start_y = start_y;
-        let front_end_y = (end_y + front_extra_cells).min(self.height - 1);
-
-        // 性能优化：根据可见格子数量动态调整
-        let visible_width = end_x - start_x + 1;
-        let visible_height = end_y - start_y + 1;
-        let total_cells = visible_width * visible_height;
-
-        let (draw_middle, draw_front) = if total_cells > 50000 {
-            (false, false)
-        } else if total_cells > 20000 {
-            (false, true)
-        } else {
-            (true, true)
-        };
-
-        // 🎨 分层绘制
-        // Back层 - 仅静态
-        self.draw_back(ctx, canvas, camera, start_x, end_x, start_y, end_y)?;
-
-        // Middle层 - 静态+动画
-        if draw_middle {
-            self.draw_middle(ctx, canvas, camera, start_x, end_x, start_y, end_y)?;
-        }
-
-        // Front层 - 静态+动画+门
-        if draw_front {
-            self.draw_front(
-                ctx,
-                canvas,
-                camera,
-                start_x,
-                end_x,
-                front_start_y,
-                front_end_y,
-            )?;
-        }
-
-        Ok(())
-    }
+    
 
     /// 绘制普通瓦片 (不使用混合模式)
     fn draw_tile_normal(
@@ -527,6 +567,23 @@ impl MapRenderer {
                                 .scale([camera.zoom, camera.zoom])
                                 .color(Color::WHITE),
                         );
+
+                        // 🔍 绘制纹理边框（如果启用）
+                        if self.show_borders {
+                            let border_color = Color::from_rgb(255, 0, 0); // 红色边框
+                            let border_rect = ggez::graphics::Mesh::new_rectangle(
+                                ctx,
+                                ggez::graphics::DrawMode::stroke(1.0),
+                                ggez::graphics::Rect::new(
+                                    screen_x,
+                                    screen_y,
+                                    info.width as f32 * camera.zoom,
+                                    info.height as f32 * camera.zoom,
+                                ),
+                                border_color,
+                            )?;
+                            canvas.draw(&border_rect, DrawParam::default());
+                        }
                     }
                 }
                 Err(_) => {
@@ -581,10 +638,134 @@ impl MapRenderer {
                                 .scale([camera.zoom, camera.zoom])
                                 .color(draw_color),
                         );
+
+                        // 🔍 绘制纹理边框（如果启用）
+                        if self.show_borders {
+                            let border_color = Color::from_rgb(0, 150, 255); // 蓝色边框
+                            let border_rect = ggez::graphics::Mesh::new_rectangle(
+                                ctx,
+                                ggez::graphics::DrawMode::stroke(1.0),
+                                ggez::graphics::Rect::new(
+                                    screen_x,
+                                    screen_y,
+                                    info.width as f32 * camera.zoom,
+                                    info.height as f32 * camera.zoom,
+                                ),
+                                border_color,
+                            )?;
+                            canvas.draw(&border_rect, DrawParam::default());
+                        }
                     }
                 }
                 Err(_) => {
                     // 忽略加载错误
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 🗺️ 绘制地图网格
+    fn draw_grid(&self, ctx: &mut Context, canvas: &mut Canvas, camera: &Camera) -> GameResult<()> {
+        // 计算可见区域
+        let left = camera.screen_to_world_x(0.0);
+        let right = camera.screen_to_world_x(camera.screen_width);
+        let top = camera.screen_to_world_y(0.0);
+        let bottom = camera.screen_to_world_y(camera.screen_height);
+
+        let start_x = ((left / Self::CELL_WIDTH as f32).floor() as i32).max(0);
+        let end_x = ((right / Self::CELL_WIDTH as f32).ceil() as i32).min(self.width);
+        let start_y = ((top / Self::CELL_HEIGHT as f32).floor() as i32).max(0);
+        let end_y = ((bottom / Self::CELL_HEIGHT as f32).ceil() as i32).min(self.height);
+
+        let grid_color = Color::from_rgba(0, 255, 0, 120);
+
+        // 绘制垂直线
+        for x in start_x..=end_x {
+            let (world_x, _) = Self::map_to_world(x, 0);
+            let screen_x = camera.world_to_screen_x(world_x);
+
+            if screen_x >= 0.0 && screen_x <= camera.screen_width {
+                let line = ggez::graphics::Mesh::new_line(
+                    ctx,
+                    &[[screen_x, 0.0], [screen_x, camera.screen_height]],
+                    1.0,
+                    grid_color,
+                )?;
+                canvas.draw(&line, DrawParam::default());
+            }
+        }
+
+        // 绘制水平线
+        for y in start_y..=end_y {
+            let (_, world_y) = Self::map_to_world(0, y);
+            let screen_y = camera.world_to_screen_y(world_y);
+
+            if screen_y >= 0.0 && screen_y <= camera.screen_height {
+                let line = ggez::graphics::Mesh::new_line(
+                    ctx,
+                    &[[0.0, screen_y], [camera.screen_width, screen_y]],
+                    1.0,
+                    grid_color,
+                )?;
+                canvas.draw(&line, DrawParam::default());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 🚧 绘制障碍层
+    fn draw_obstacles(
+        &self,
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        // 计算可见区域
+        let left = camera.screen_to_world_x(0.0);
+        let right = camera.screen_to_world_x(camera.screen_width);
+        let top = camera.screen_to_world_y(0.0);
+        let bottom = camera.screen_to_world_y(camera.screen_height);
+
+        let start_x = ((left / Self::CELL_WIDTH as f32).floor() as i32).max(0);
+        let end_x = ((right / Self::CELL_WIDTH as f32).ceil() as i32).min(self.width);
+        let start_y = ((top / Self::CELL_HEIGHT as f32).floor() as i32).max(0);
+        let end_y = ((bottom / Self::CELL_HEIGHT as f32).ceil() as i32).min(self.height);
+
+        // 半透明红色表示障碍物
+        let obstacle_color = Color::from_rgba(255, 0, 0, 100);
+
+        // 遍历所有格子
+        for y in start_y..=end_y {
+            for x in start_x..=end_x {
+                if let Some(cell) = self.get_cell(x, y) {
+                    // 检查是否有障碍物
+                    let has_obstacle = (cell.back_image & 0x20000000) != 0  // HighWall (山、水等不可行走地形)
+                        || (cell.door_offset & 0x80) != 0                   // DoorClosed
+                        || (cell.door_index & 0x80) != 0                    // Block
+                        || (cell.front_image & 0x8000) != 0; // MiddleBlock (LowWall)
+
+                    if has_obstacle {
+                        let (world_x, world_y) = Self::map_to_world(x, y);
+                        let screen_x = camera.world_to_screen_x(world_x);
+                        let screen_y = camera.world_to_screen_y(world_y);
+
+                        // 绘制半透明矩形表示障碍，尺寸也要缩放
+                        let obstacle_rect = ggez::graphics::Mesh::new_rectangle(
+                            ctx,
+                            ggez::graphics::DrawMode::fill(),
+                            ggez::graphics::Rect::new(
+                                screen_x,
+                                screen_y,
+                                Self::CELL_WIDTH as f32 * camera.zoom,
+                                Self::CELL_HEIGHT as f32 * camera.zoom,
+                            ),
+                            obstacle_color,
+                        )?;
+                        canvas.draw(&obstacle_rect, DrawParam::default());
+                    }
                 }
             }
         }

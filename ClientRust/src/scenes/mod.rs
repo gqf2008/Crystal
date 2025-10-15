@@ -87,7 +87,7 @@ pub trait Scene {
     fn as_any(&self) -> &dyn std::any::Any;
     
     /// Process per-frame logic
-    fn update(&mut self, delta_time: f32);
+    fn update(&mut self, ctx: &mut ggez::Context,delta_time: f32);
     
     /// Render scene (ggez版本)
     fn draw(&mut self, _ctx: &mut ggez::Context, _canvas: &mut crate::graphics::Canvas) {
