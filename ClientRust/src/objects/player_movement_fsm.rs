@@ -121,6 +121,35 @@ impl PlayerMovementFSM {
         self.render_start_cell = self.current_cell;
     }
     
+    /// 更新移动目标和方向(用于鼠标长按时改变方向)
+    /// 
+    /// # 参数
+    /// * `target` - 新的目标格子坐标
+    /// * `direction` - 新的移动方向
+    /// * `running` - 是否跑步
+    pub fn update_target(&mut self, target: Point, direction: MirDirection, running: bool) {
+        // 更新目标和方向
+        self.target_cell = target;
+        self.direction = direction;
+        
+        // 如果跑步状态改变,更新速度
+        if self.running != running {
+            self.running = running;
+            // 如果正在移动,更新当前移动的持续时间
+            if let MovementState::Moving { start_time, .. } = self.state {
+                let new_duration = if running {
+                    self.run_speed_ms
+                } else {
+                    self.walk_speed_ms
+                };
+                self.state = MovementState::Moving {
+                    start_time,
+                    duration_ms: new_duration,
+                };
+            }
+        }
+    }
+    
     /// 更新状态机(每帧调用)
     /// 
     /// # 返回
@@ -144,6 +173,10 @@ impl PlayerMovementFSM {
                         // 到达目标,停止
                         self.state = MovementState::Idle;
                     } else {
+                        // 🔧 重新计算从当前位置到目标的方向
+                        // 这样可以处理路径变化和斜线移动
+                        self.direction = Self::calculate_direction(self.current_cell, self.target_cell);
+                        
                         // 继续向目标移动
                         let new_duration = if self.running {
                             self.run_speed_ms
@@ -162,6 +195,37 @@ impl PlayerMovementFSM {
                 
                 false
             }
+        }
+    }
+    
+    /// 根据两点计算方向 (使用 SharedRust 的标准实现)
+    fn calculate_direction(source: Point, dest: Point) -> MirDirection {
+        use mir2_shared::enums::MirDirection::*;
+        
+        if source.x < dest.x {
+            if source.y < dest.y {
+                return DownRight;
+            }
+            if source.y > dest.y {
+                return UpRight;
+            }
+            return Right;
+        }
+
+        if source.x > dest.x {
+            if source.y < dest.y {
+                return DownLeft;
+            }
+            if source.y > dest.y {
+                return UpLeft;
+            }
+            return Left;
+        }
+
+        if source.y < dest.y {
+            Down
+        } else {
+            Up
         }
     }
     

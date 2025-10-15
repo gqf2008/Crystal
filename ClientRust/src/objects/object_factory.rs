@@ -8,7 +8,7 @@ use mir2_shared::packets::server::*;
 use mir2_shared::Point;
 
 use super::{
-    MonsterObject, NPCObject, ItemObject, UserObject, HeroObject,
+    MonsterObject, NPCObject, ItemObject, UserObject, HeroObject, PlayerMovementFSM,
 };
 
 #[allow(unused_imports)]
@@ -159,6 +159,9 @@ impl ObjectFactory {
         user.player.map_object.set_location(location);
         user.player.map_object.set_current_location(location);
         user.player.map_object.set_map_location(location);
+        
+        // 🔧 CRITICAL FIX: Initialize movement FSM with player location
+        user.movement_fsm = PlayerMovementFSM::new(location);
         
         // Set visual properties
         user.player.map_object.set_direction(packet.direction);

@@ -64,13 +64,16 @@ impl Camera {
         self.y = world_y;
     }
     
-    /// 设置摄像机跟随目标（带地图边界限制）
+    /// 设置摄像机跟随目标（带地图边界限制和平滑跟随）
     /// 
     /// # 参数
     /// - `world_x`: 目标世界坐标 X（像素）
     /// - `world_y`: 目标世界坐标 Y（像素）
     /// - `map_width_px`: 地图宽度（像素）
     /// - `map_height_px`: 地图高度（像素）
+    /// 
+    /// # 平滑跟随
+    /// 使用线性插值(lerp)实现平滑跟随,防止摄像机抖动
     pub fn follow_target_clamped(&mut self, world_x: f32, world_y: f32, map_width_px: f32, map_height_px: f32) {
         // 计算可视区域的半宽和半高
         let half_width = self.screen_width / (2.0 * self.zoom);
@@ -84,11 +87,19 @@ impl Camera {
         let min_y = half_height.max(0.0);
         let max_y = (map_height_px - half_height).max(min_y);
         
-        self.x = world_x.clamp(min_x, max_x);
-        self.y = world_y.clamp(min_y, max_y);
+        // 限制目标位置
+        let target_x = world_x.clamp(min_x, max_x);
+        let target_y = world_y.clamp(min_y, max_y);
         
-        tracing::trace!("📷 Camera clamped: target=({:.1}, {:.1}) → actual=({:.1}, {:.1}), bounds=[{:.1}-{:.1}, {:.1}-{:.1}]",
-            world_x, world_y, self.x, self.y, min_x, max_x, min_y, max_y);
+        // 🔧 平滑跟随: 使用线性插值,而不是直接跳到目标位置
+        // lerp_factor = 0.2 意味着每帧移动到目标位置的 20%
+        // 这样可以避免摄像机抖动,同时保持跟随的响应性
+        let lerp_factor = 0.2f32;
+        self.x = self.x + (target_x - self.x) * lerp_factor;
+        self.y = self.y + (target_y - self.y) * lerp_factor;
+        
+        tracing::trace!("📷 Camera smooth follow: target=({:.1}, {:.1}) → actual=({:.1}, {:.1}), bounds=[{:.1}-{:.1}, {:.1}-{:.1}]",
+            target_x, target_y, self.x, self.y, min_x, max_x, min_y, max_y);
     }
     
     /// 世界坐标转屏幕坐标（X）

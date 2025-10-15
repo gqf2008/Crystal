@@ -1102,17 +1102,17 @@ impl GameScene {
     /// 
     /// 对应 C# ToMapLocation
     fn screen_to_map_location(&self, screen_pos: Point) -> Point {
-        // 屏幕坐标 -> 世界坐标 -> 地图坐标
-        let world_x = screen_pos.x as f32 + self.camera.x - self.camera.screen_width / 2.0;
-        let world_y = screen_pos.y as f32 + self.camera.y - self.camera.screen_height / 2.0;
+        // 1. 屏幕坐标 -> 世界坐标（像素）
+        let (world_x, world_y) = self.camera.screen_to_world(screen_pos.x as f32, screen_pos.y as f32);
         
-        // 世界坐标 -> 地图格子坐标（基于瓦片大小48x32）
+        // 2. 世界坐标（像素）-> 地图格子坐标
         use crate::scenes::game_scene::map_renderer::MapRenderer;
         
-        // 传奇2的等距视角转换比较复杂，这里使用简化版本
-        // TODO: 更精确的坐标转换
-        let map_x = (world_x / 48.0) as i32;
-        let map_y = (world_y / 32.0) as i32;
+        // 传奇2使用48x32的瓦片大小
+        // 但渲染时使用了48x48的格子（CELL_WIDTH x CELL_HEIGHT）
+        // 这里使用CELL_WIDTH和CELL_HEIGHT来转换
+        let map_x = (world_x / MapRenderer::CELL_WIDTH as f32) as i32;
+        let map_y = (world_y / MapRenderer::CELL_HEIGHT as f32) as i32;
         
         Point { x: map_x, y: map_y }
     }
@@ -1235,29 +1235,34 @@ impl GameScene {
     /// 根据两点计算方向
     /// 
     /// 对应 C# Functions.DirectionFromPoint(Point source, Point dest)
+    /// 使用 SharedRust 的标准实现(基于象限判断,比角度计算更准确)
     fn direction_from_point(&self, source: Point, dest: Point) -> MirDirection {
         use mir2_shared::enums::MirDirection::*;
         
-        let dx = dest.x - source.x;
-        let dy = dest.y - source.y;
-        
-        // 计算角度
-        let angle = (dy as f32).atan2(dx as f32);
-        let degrees = angle.to_degrees();
-        
-        // 转换为8方向
-        let normalized = ((degrees + 22.5 + 360.0) % 360.0) as i32;
-        
-        match normalized / 45 {
-            0 => Right,      // 0°
-            1 => DownRight,  // 45°
-            2 => Down,       // 90°
-            3 => DownLeft,   // 135°
-            4 => Left,       // 180°
-            5 => UpLeft,     // 225°
-            6 => Up,         // 270°
-            7 => UpRight,    // 315°
-            _ => Right,
+        if source.x < dest.x {
+            if source.y < dest.y {
+                return DownRight;
+            }
+            if source.y > dest.y {
+                return UpRight;
+            }
+            return Right;
+        }
+
+        if source.x > dest.x {
+            if source.y < dest.y {
+                return DownLeft;
+            }
+            if source.y > dest.y {
+                return UpLeft;
+            }
+            return Left;
+        }
+
+        if source.y < dest.y {
+            Down
+        } else {
+            Up
         }
     }
     
@@ -1451,6 +1456,22 @@ impl Scene for GameScene {
             let next_cell = self.point_move(current_cell, direction, 1);
             let can_move = self.can_walk_to(next_cell);
             
+            // 🐛 调试坐标转换
+            static mut CLICK_DEBUG_COUNTER: u32 = 0;
+            unsafe {
+                CLICK_DEBUG_COUNTER += 1;
+                if CLICK_DEBUG_COUNTER % 30 == 1 { // 每30帧打印一次，避免刷屏
+                    println!("🖱️ [坐标转换] 屏幕点击: ({}, {})", mouse_pos.x, mouse_pos.y);
+                    println!("   摄像机: ({:.1}, {:.1}), 屏幕: ({:.1}x{:.1})", 
+                        self.camera.x, self.camera.y, 
+                        self.camera.screen_width, self.camera.screen_height);
+                    println!("   当前格子: ({}, {})", current_cell.x, current_cell.y);
+                    println!("   目标格子: ({}, {})", target_cell.x, target_cell.y);
+                    println!("   下一格子: ({}, {}) - 方向: {:?}", next_cell.x, next_cell.y, direction);
+                    println!("   可以移动: {}", can_move);
+                }
+            }
+            
             Some((target_cell, direction, running, current_cell, is_idle, can_move))
         } else {
             None
@@ -1459,22 +1480,39 @@ impl Scene for GameScene {
         // 第二步: 应用到user(可以安全地借用)
         if let Some(ref mut user) = self.user {
             if let Some((target_cell, direction, running, current_cell, is_idle, can_move)) = mouse_input {
-                // 启动或更新移动
-                if is_idle && current_cell != target_cell {
-                    if can_move {
-                        // 开始移动
-                        println!("✅ [移动] 开始移动: 从({},{}) -> ({},{}), 方向={:?}, 跑步={}", 
-                            current_cell.x, current_cell.y, target_cell.x, target_cell.y, direction, running);
-                        user.movement_fsm.move_to(target_cell, direction, running);
+                // 🔧 修复: 无论是否在移动,都更新目标和方向
+                // 这样鼠标长按时角色会跟随鼠标方向
+                if current_cell != target_cell {
+                    if is_idle {
+                        // 当前静止,开始新的移动
+                        if can_move {
+                            println!("✅ [移动] 开始移动: 从({},{}) -> ({},{}), 方向={:?}, 跑步={}", 
+                                current_cell.x, current_cell.y, target_cell.x, target_cell.y, direction, running);
+                            user.movement_fsm.move_to(target_cell, direction, running);
+                            user.player.set_current_action(if running {
+                                MirAction::Running
+                            } else {
+                                MirAction::Walking
+                            });
+                            // 立即设置角色朝向
+                            user.player.map_object.set_direction(direction);
+                        } else {
+                            println!("❌ [移动] 无法移动到 ({},{}): 格子被阻挡", target_cell.x, target_cell.y);
+                            // 无法移动,但更新朝向
+                            user.player.map_object.set_direction(direction);
+                            user.player.set_current_action(MirAction::Standing);
+                        }
+                    } else {
+                        // 正在移动中,更新目标和方向
+                        user.movement_fsm.update_target(target_cell, direction, running);
+                        // 更新角色朝向
+                        user.player.map_object.set_direction(direction);
+                        // 更新动作(可能从走切换到跑,或相反)
                         user.player.set_current_action(if running {
                             MirAction::Running
                         } else {
                             MirAction::Walking
                         });
-                    } else {
-                        println!("❌ [移动] 无法移动到 ({},{}): 格子被阻挡", target_cell.x, target_cell.y);
-                        // 无法移动,站立
-                        user.player.set_current_action(MirAction::Standing);
                     }
                 }
             } else {
@@ -1624,23 +1662,23 @@ impl Scene for GameScene {
 
         // 4b. 更新摄像机跟随玩家（带地图边界限制）
         // 📝 摄像机跟随原理:
-        //    - 玩家世界坐标 = 格子坐标 * 格子尺寸 + 偏移量
+        //    - 使用 FSM 计算的平滑世界坐标
         //    - 摄像机居中对准玩家
         //    - 边界限制防止摄像机超出地图范围
+        //    - 平滑插值防止抖动
         if let Some(ref user) = self.user {
-            // 计算玩家的世界坐标（像素）
-            let player_world_x = (user.player.map_object.movement.x as f32
-                * MapRenderer::CELL_WIDTH as f32)
-                + user.player.map_object.offset_move.x as f32;
-            let player_world_y = (user.player.map_object.movement.y as f32
-                * MapRenderer::CELL_HEIGHT as f32)
-                + user.player.map_object.offset_move.y as f32;
+            // 🔧 使用 FSM 的平滑世界坐标,而不是手动计算
+            // 这样可以避免摄像机跳跃和抖动
+            let (player_world_x, player_world_y) = user.movement_fsm.get_world_position(
+                MapRenderer::CELL_WIDTH,
+                MapRenderer::CELL_HEIGHT,
+            );
 
             // 计算地图的像素尺寸
             let map_width_px = self.map_renderer.width as f32 * MapRenderer::CELL_WIDTH as f32;
             let map_height_px = self.map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32;
 
-            // 使用带边界限制的摄像机跟随
+            // 使用带边界限制和平滑插值的摄像机跟随
             self.camera.follow_target_clamped(
                 player_world_x,
                 player_world_y,
