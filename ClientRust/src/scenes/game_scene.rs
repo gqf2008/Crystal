@@ -421,17 +421,6 @@ pub struct GameScene {
     /// 是否显示玩家角色 (调试用，U键控制)
     show_player: bool,
     
-    // ==================== 鼠标状态 ====================
-    /// 鼠标右键是否按下
-    mouse_right_down: bool,
-    /// 鼠标右键按下位置
-    mouse_right_location: Point,
-    
-    /// 鼠标左键是否按下
-    mouse_left_down: bool,
-    /// 鼠标左键按下位置
-    mouse_left_location: Point,
-    
     // ==================== 调试信息 ====================
     /// 碰到的障碍物格子 (用于调试绘制红色标记)
     blocked_cell: Option<Point>,
@@ -597,11 +586,6 @@ impl GameScene {
 
             // 调试控制
             show_player: true, // 默认显示玩家
-            
-            mouse_right_down: false,
-            mouse_right_location: Point { x: 0, y: 0 },
-            mouse_left_down: false,
-            mouse_left_location: Point { x: 0, y: 0 },
             
             blocked_cell: None, // 障碍物调试
             command_tx: None, // 网络命令通道（后续通过 set_command_sender 设置）
@@ -1113,86 +1097,7 @@ impl GameScene {
         // }
     }
 
-    /// 处理鼠标移动
-    pub fn on_mouse_move(&mut self, location: Point) {
-        self.mouse_location = location;
-        
-        // 🔧 关键修复: 如果鼠标按着,实时更新目标位置
-        if self.mouse_right_down {
-            self.mouse_right_location = location;
-        }
-        if self.mouse_left_down {
-            self.mouse_left_location = location;
-        }
-        
-        // TODO: 更新物品悬浮提示
-    }
 
-    /// 处理鼠标点击
-    /// 
-    /// 对应 C# GameScene.cs OnMouseClick
-    /// Reference: Client/MirScenes/GameScene.cs line 12365
-    pub fn on_mouse_down(&mut self, button: ggez::input::mouse::MouseButton, location: Point) {
-        use ggez::input::mouse::MouseButton;
-        
-        // 1) 检查 UI 控件命中
-        for control in &mut self.controls {
-            // TODO: if control.contains(location) && control.on_mouse_down(button, location) { return; }
-        }
-
-        // 2) 地图交互
-        match button {
-            MouseButton::Right => {
-                // 鼠标右键：移动到点击位置
-                // 先计算所有需要的数据（避免借用冲突）
-                if self.user.is_none() {
-                    return;
-                }
-                
-                let current_loc = self.user.as_ref().unwrap().player.map_object.movement;
-                let map_location = self.screen_to_map_location(location);
-                
-                tracing::info!("🖱️ 鼠标右键点击: 屏幕({}, {}) -> 地图({}, {})", 
-                    location.x, location.y, map_location.x, map_location.y);
-                
-                // 检查目标位置是否可行走
-                if !self.empty_cell(map_location) {
-                    tracing::warn!("❌ 目标位置({}, {})不可行走", map_location.x, map_location.y);
-                    return;
-                }
-                
-                // 计算移动方向
-                let direction = self.direction_from_point(current_loc, map_location);
-                
-                // 检查是否可以向该方向移动
-                if let Some(adjusted_dir) = self.can_walk_adjust(direction) {
-                    let target_loc = self.point_move(current_loc, adjusted_dir, 1);
-                    
-                    tracing::info!("✅ 设置移动: 从({}, {}) 向{:?} 到({}, {})", 
-                        current_loc.x, current_loc.y, adjusted_dir, target_loc.x, target_loc.y);
-                    
-                    // 使用 action_feed 队列系统添加移动动作
-                    if let Some(ref mut user) = self.user {
-                        use crate::objects::QueuedAction;
-                        
-                        let action = QueuedAction {
-                            action: MirAction::Walking,
-                            location: target_loc,
-                            direction: adjusted_dir,
-                        };
-                        
-                        user.player.action_feed.push(action);
-                    }
-                } else {
-                    tracing::warn!("❌ 无法移动到目标方向");
-                }
-            }
-            _ => {
-                // 其他鼠标按钮暂不处理
-            }
-        }
-    }
-    
     /// 将屏幕坐标转换为地图坐标
     /// 
     /// 对应 C# ToMapLocation
@@ -1256,6 +1161,11 @@ impl GameScene {
         } else {
             false
         }
+    }
+    
+    /// 检查指定格子是否可以移动到
+    pub fn can_walk_to(&self, target: Point) -> bool {
+        self.empty_cell(target)
     }
     
     /// 检查是否可以向指定方向移动，如果不行尝试相邻方向
@@ -1494,194 +1404,119 @@ impl Scene for GameScene {
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
         self.camera.update_screen_size(screen_width, screen_height);
         
-        // ==================== 鼠标左右键移动 (基于时间) ====================
-        // 策略: 使用时间而非帧数，确保不同FPS下速度一致
-        // 左键: 慢速行走 (Walking)
-        // 右键: 快速奔跑 (Running)
+        // ==================== 角色移动状态机 ====================
+        // 使用 PlayerMovementFSM 处理平滑的格子移动
         
-        static mut LAST_MOVE_TIME: Option<std::time::Instant> = None;
-        const WALK_INTERVAL_MS: u64 = 500;  // 左键: 每500ms移动一格 (2格/秒)
-        const RUN_INTERVAL_MS: u64 = 300;   // 右键: 每300ms移动一格 (3.3格/秒)
-        
-        let now = std::time::Instant::now();
-        
-        // 🔧 修复：如果是第一次或者刚开始移动，初始化时间为当前时间
-        let last_move = unsafe { 
-            if LAST_MOVE_TIME.is_none() {
-                LAST_MOVE_TIME = Some(now);
-            }
-            LAST_MOVE_TIME.unwrap()
+        // ✅ 主动查询鼠标状态 (不依赖事件回调)
+        use ggez::input::mouse::MouseButton;
+        let mouse_right_down = ctx.mouse.button_pressed(MouseButton::Right);
+        let mouse_left_down = ctx.mouse.button_pressed(MouseButton::Left);
+        let mouse_pos = ctx.mouse.position();
+        let mouse_pos_point = Point { 
+            x: mouse_pos.x as i32, 
+            y: mouse_pos.y as i32 
         };
-        let elapsed_ms = now.duration_since(last_move).as_millis() as u64;
         
-        // 🐛 调试：打印鼠标状态
+        // 🐛 调试：每60帧打印一次鼠标状态
         static mut DEBUG_COUNTER: u32 = 0;
         unsafe {
             DEBUG_COUNTER += 1;
-            if DEBUG_COUNTER <= 5 || DEBUG_COUNTER % 60 == 0 {
-                println!("🖱️ 鼠标状态: 右键={}, 左键={}", self.mouse_right_down, self.mouse_left_down);
-                if self.mouse_right_down {
-                    println!("   右键位置: ({}, {})", self.mouse_right_location.x, self.mouse_right_location.y);
-                }
-                if self.mouse_left_down {
-                    println!("   左键位置: ({}, {})", self.mouse_left_location.x, self.mouse_left_location.y);
-                }
+            if DEBUG_COUNTER % 60 == 0 {
+                tracing::info!("🖱️ 鼠标状态: 右键={}, 左键={}, 位置=({}, {})", 
+                    mouse_right_down, mouse_left_down, mouse_pos.x, mouse_pos.y);
             }
         }
         
-        // 🎯 只在鼠标按下时计算方向（修复问题3）
-        if self.user.is_some() && (self.mouse_right_down || self.mouse_left_down) {
-            // 获取鼠标按下位置
-            let mouse_pos = if self.mouse_right_down {
-                self.mouse_right_location
+        // 第一步: 计算所有需要的数据(不借用user)
+        let mouse_input = if mouse_right_down || mouse_left_down {
+            let running = mouse_right_down;
+            
+            // 提取当前状态
+            let current_cell = if let Some(ref user) = self.user {
+                user.movement_fsm.current_cell
             } else {
-                self.mouse_left_location
+                Point { x: 0, y: 0 }
+            };
+            let is_idle = if let Some(ref user) = self.user {
+                user.movement_fsm.is_idle()
+            } else {
+                true
             };
             
-            let target_loc = self.screen_to_map_location(mouse_pos);
-            let current_loc = self.user.as_ref().unwrap().player.map_object.current_location;
-            let direction = self.direction_from_point(current_loc, target_loc);
+            // 计算目标和可行性
+            let target_cell = self.screen_to_map_location(mouse_pos_point);
+            let direction = self.direction_from_point(current_cell, target_cell);
+            let next_cell = self.point_move(current_cell, direction, 1);
+            let can_move = self.can_walk_to(next_cell);
             
-            // 只在按下时更新方向
-            if let Some(ref mut user) = self.user {
-                user.player.map_object.direction = direction;
-            }
-        }
+            Some((target_cell, direction, running, current_cell, is_idle, can_move))
+        } else {
+            None
+        };
         
-        // 检查左键或右键是否按下
-        let is_moving = self.mouse_right_down || self.mouse_left_down;
-        
-        if is_moving && self.user.is_some() {
-            // 确定使用哪个按钮的设置
-            let move_interval_ms = if self.mouse_right_down { RUN_INTERVAL_MS } else { WALK_INTERVAL_MS };
-            let movement_action = if self.mouse_right_down { MirAction::Running } else { MirAction::Walking };
-            
-            // 获取鼠标位置和当前位置
-            let mouse_pos = if self.mouse_right_down {
-                self.mouse_right_location
-            } else {
-                self.mouse_left_location
-            };
-            
-            let target_loc = self.screen_to_map_location(mouse_pos);
-            let current_loc = self.user.as_ref().unwrap().player.map_object.current_location;
-            let direction = self.user.as_ref().unwrap().player.map_object.direction;
-            
-            // 检查是否到达目标
-            if current_loc != target_loc {
-                // 检查是否到了移动间隔（基于时间）
-                let should_move = elapsed_ms >= move_interval_ms;
-                
-                if should_move {
-                    // 到了移动间隔,尝试移动
-                    let next_loc = self.point_move(current_loc, direction, 1);
-                    let can_walk = self.can_walk(direction);
-                    
-                    if can_walk {
-                        // ✅ 可以移动,更新位置
-                        if let Some(ref mut user) = self.user {
-                            user.player.map_object.current_location = next_loc;
-                            user.player.map_object.movement = next_loc;
-                            // 只在动作改变时才调用 set_current_action
-                            if user.player.current_action != movement_action {
-                                user.player.set_current_action(movement_action);
-                            }
-                            // 重置偏移量，准备下一次平滑移动
-                            user.player.map_object.offset_move.x = 0;
-                            user.player.map_object.offset_move.y = 0;
-                        }
-                        self.blocked_cell = None; // 清除障碍物标记
-                        
-                        // 重置移动时间
-                        unsafe { LAST_MOVE_TIME = Some(now); }
-                        
-                        // 🌐 发送移动包到服务器
-                        if let Some(ref tx) = self.command_tx {
-                            use crate::network::NetworkCommand;
-                            let _ = tx.send(NetworkCommand::Move {
-                                direction: direction as u8,
-                                location: (next_loc.x, next_loc.y),
-                            });
-                        }
-                    } else {
-                        // ❌ 碰到障碍物
-                        self.blocked_cell = Some(next_loc); // 记录障碍物位置
-                        
-                        // 🔧 修复抖动：碰到障碍物时清零偏移量
-                        if let Some(ref mut user) = self.user {
-                            if user.player.current_action != MirAction::Standing {
-                                user.player.set_current_action(MirAction::Standing);
-                            }
-                            // 清零偏移量，防止画面抖动
-                            user.player.map_object.offset_move.x = 0;
-                            user.player.map_object.offset_move.y = 0;
-                        }
-                        
-                        // 重置移动时间，避免持续尝试移动
-                        unsafe { LAST_MOVE_TIME = Some(now); }
-                    }
-                } else {
-                    // 还没到移动间隔，计算平滑偏移量（基于时间）
-                    // 先检查是否可以移动（预先检测，避免动画到一半碰墙）
-                    let can_move_next = self.can_walk(direction);
-                    
-                    if let Some(ref mut user) = self.user {
-                        // 只在状态改变时调用 set_current_action
-                        if user.player.current_action != movement_action {
-                            user.player.set_current_action(movement_action);
-                        }
-                        
-                        if can_move_next {
-                            // 🎯 平滑移动: 计算世界坐标偏移量（基于时间进度）
-                            let progress = (elapsed_ms as f32 / move_interval_ms as f32).min(1.0);
-                            
-                            // 根据方向计算偏移量（世界坐标）
-                            use mir2_shared::enums::MirDirection::*;
-                            let (dx, dy) = match direction {
-                                Up => (0.0, -MapRenderer::CELL_HEIGHT as f32),
-                                Down => (0.0, MapRenderer::CELL_HEIGHT as f32),
-                                Left => (-MapRenderer::CELL_WIDTH as f32, 0.0),
-                                Right => (MapRenderer::CELL_WIDTH as f32, 0.0),
-                                UpLeft => (-MapRenderer::CELL_WIDTH as f32, -MapRenderer::CELL_HEIGHT as f32),
-                                UpRight => (MapRenderer::CELL_WIDTH as f32, -MapRenderer::CELL_HEIGHT as f32),
-                                DownLeft => (-MapRenderer::CELL_WIDTH as f32, MapRenderer::CELL_HEIGHT as f32),
-                                DownRight => (MapRenderer::CELL_WIDTH as f32, MapRenderer::CELL_HEIGHT as f32),
-                            };
-                            
-                            user.player.map_object.offset_move.x = (dx * progress) as i32;
-                            user.player.map_object.offset_move.y = (dy * progress) as i32;
+        // 第二步: 应用到user(可以安全地借用)
+        if let Some(ref mut user) = self.user {
+            if let Some((target_cell, direction, running, current_cell, is_idle, can_move)) = mouse_input {
+                // 启动或更新移动
+                if is_idle && current_cell != target_cell {
+                    if can_move {
+                        // 开始移动
+                        tracing::info!("✅ 开始移动: 从({},{}) -> ({},{}), 方向={:?}, 跑步={}", 
+                            current_cell.x, current_cell.y, target_cell.x, target_cell.y, direction, running);
+                        user.movement_fsm.move_to(target_cell, direction, running);
+                        user.player.set_current_action(if running {
+                            MirAction::Running
                         } else {
-                            // 前方有障碍物，停止偏移量计算，避免抖动
-                            user.player.map_object.offset_move.x = 0;
-                            user.player.map_object.offset_move.y = 0;
-                        }
-                    }
-                }
-            } else {
-                // 已到达目标位置,停止（只在状态改变时调用）
-                if let Some(ref mut user) = self.user {
-                    if user.player.current_action != MirAction::Standing {
+                            MirAction::Walking
+                        });
+                    } else {
+                        tracing::warn!("❌ 无法移动到 ({},{}): 格子被阻挡", target_cell.x, target_cell.y);
+                        // 无法移动,站立
                         user.player.set_current_action(MirAction::Standing);
                     }
-                    user.player.map_object.offset_move.x = 0;
-                    user.player.map_object.offset_move.y = 0;
                 }
-                self.blocked_cell = None; // 清除障碍物标记
-                // 🔧 重置时间，准备下次移动
-                unsafe { LAST_MOVE_TIME = None; }
-            }
-        } else {
-            // 鼠标没按下,确保停止（只在状态改变时调用）
-            if let Some(ref mut user) = self.user {
-                if user.player.current_action != MirAction::Standing {
+            } else {
+                // 鼠标释放,停止移动
+                if user.movement_fsm.is_moving() {
+                    tracing::info!("🛑 停止移动");
+                    user.movement_fsm.stop();
                     user.player.set_current_action(MirAction::Standing);
                 }
-                user.player.map_object.offset_move.x = 0;
-                user.player.map_object.offset_move.y = 0;
             }
-            self.blocked_cell = None; // 清除障碍物标记
-            // 🔧 重置时间，准备下次移动
-            unsafe { LAST_MOVE_TIME = None; }
+            
+            // 2. 更新状态机
+            if user.movement_fsm.update() {
+                // 完成了一格移动
+                let new_cell = user.movement_fsm.current_cell;
+                let render_start = user.movement_fsm.render_start_cell;
+                let direction = user.movement_fsm.direction;
+                
+                // 同步到 MapObject
+                user.player.map_object.current_location = new_cell;
+                user.player.map_object.movement = render_start;
+                
+                // 发送移动包到服务器
+                if let Some(ref tx) = self.command_tx {
+                    use crate::network::NetworkCommand;
+                    let _ = tx.send(NetworkCommand::Move {
+                        direction: direction as u8,
+                        location: (new_cell.x, new_cell.y),
+                    });
+                }
+                
+                // 检查是否继续移动或到达目标
+                if user.movement_fsm.is_idle() {
+                    user.player.set_current_action(MirAction::Standing);
+                }
+            }
+            
+            // 3. 计算渲染偏移
+            let (offset_x, offset_y) = user.movement_fsm.get_render_offset(
+                MapRenderer::CELL_WIDTH,
+                MapRenderer::CELL_HEIGHT,
+            );
+            user.player.map_object.offset_move.x = offset_x;
+            user.player.map_object.offset_move.y = offset_y;
         }
         
         // ==================== 更新玩家动画 ====================
@@ -1723,29 +1558,7 @@ impl Scene for GameScene {
     fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas) {
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
 
-        // ════════════════════════════════════════════════════════════
-        // 步骤 2: 打印当前帧计数和状态
-        // ════════════════════════════════════════════════════════════
-        static mut DRAW_COUNTER: u32 = 0;
-        unsafe {
-            DRAW_COUNTER += 1;
-            if DRAW_COUNTER <= 10 || DRAW_COUNTER % 60 == 1 {
-                println!("╔════════════════════════════════════════════════════════════════");
-                println!("║ 🎬 GameScene::draw() 被调用 - 第 {} 帧", DRAW_COUNTER);
-                println!("╚════════════════════════════════════════════════════════════════");
-                println!("   当前状态: {:?}", self.state);
-                println!("   屏幕尺寸: {:.0}x{:.0}", screen_width, screen_height);
-                println!("   地图已加载: {}", self.map_renderer.width > 0);
-                println!("   玩家已创建: {}", self.user.is_some());
-                if let Some(ref user) = self.user {
-                    println!(
-                        "   玩家位置: ({}, {})",
-                        user.player.map_object.movement.x, user.player.map_object.movement.y
-                    );
-                }
-                println!("════════════════════════════════════════════════════════════════\n");
-            }
-        }
+        // 绘制帧计数 (调试时可打印)
 
         // ════════════════════════════════════════════════════════════
         // 步骤 3: 状态机检查 - 只有 Ready 状态才渲染游戏
@@ -1773,26 +1586,6 @@ impl Scene for GameScene {
             }
             GameSceneState::Ready => {
                 // ✅ 状态正常，继续渲染游戏
-                unsafe {
-                    if DRAW_COUNTER <= 10 || DRAW_COUNTER % 60 == 1 {
-                        println!(
-                            "╔════════════════════════════════════════════════════════════════"
-                        );
-                        println!("║ ✅ 状态: Ready - 正常渲染游戏");
-                        println!(
-                            "╚════════════════════════════════════════════════════════════════"
-                        );
-                        println!(
-                            "   📍 地图尺寸: {}x{}",
-                            self.map_renderer.width, self.map_renderer.height
-                        );
-                        println!("   👤 玩家存在: {}", self.user.is_some());
-                        println!("   🎥 摄像机: ({:.1}, {:.1})", self.camera.x, self.camera.y);
-                        println!(
-                            "════════════════════════════════════════════════════════════════\n"
-                        );
-                    }
-                }
             }
         }
 
@@ -1845,41 +1638,6 @@ impl Scene for GameScene {
             let map_width_px = self.map_renderer.width as f32 * MapRenderer::CELL_WIDTH as f32;
             let map_height_px = self.map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32;
 
-            // 🐛 DEBUG: 详细打印摄像机更新过程
-            static mut CAMERA_UPDATE_COUNTER: u32 = 0;
-            unsafe {
-                CAMERA_UPDATE_COUNTER += 1;
-                if CAMERA_UPDATE_COUNTER <= 5 || CAMERA_UPDATE_COUNTER % 60 == 0 {
-                    println!("╔════════════════════════════════════════════════════════════════");
-                    println!("║ 🎥 摄像机更新 #{}", CAMERA_UPDATE_COUNTER);
-                    println!("╚════════════════════════════════════════════════════════════════");
-                    println!(
-                        "   📍 玩家目标格子 (current_location): ({}, {})",
-                        user.player.map_object.current_location.x, user.player.map_object.current_location.y
-                    );
-                    println!(
-                        "   📍 玩家渲染格子 (movement): ({}, {})",
-                        user.player.map_object.movement.x, user.player.map_object.movement.y
-                    );
-                    println!(
-                        "   📐 玩家偏移: ({}, {})",
-                        user.player.map_object.offset_move.x, user.player.map_object.offset_move.y
-                    );
-                    println!(
-                        "   � 玩家世界坐标 (像素): ({:.1}, {:.1})",
-                        player_world_x, player_world_y
-                    );
-                    println!(
-                        "   🗺️  地图尺寸 (像素): {:.1} x {:.1}",
-                        map_width_px, map_height_px
-                    );
-                    println!(
-                        "   🎥 摄像机更新前: ({:.1}, {:.1})",
-                        self.camera.x, self.camera.y
-                    );
-                }
-            }
-
             // 使用带边界限制的摄像机跟随
             self.camera.follow_target_clamped(
                 player_world_x,
@@ -1887,16 +1645,6 @@ impl Scene for GameScene {
                 map_width_px,
                 map_height_px,
             );
-
-            unsafe {
-                if CAMERA_UPDATE_COUNTER <= 5 || CAMERA_UPDATE_COUNTER % 60 == 0 {
-                    println!(
-                        "   🎥 摄像机更新后: ({:.1}, {:.1})",
-                        self.camera.x, self.camera.y
-                    );
-                    println!("════════════════════════════════════════════════════════════════\n");
-                }
-            }
         } else {
             tracing::warn!(
                 "⚠️ GameScene::draw() 但 self.user 为 None，摄像机保持在: ({:.1}, {:.1})",
@@ -2431,49 +2179,14 @@ impl Scene for GameScene {
 
     /// 处理鼠标移动事件 - 覆盖Scene trait的默认实现
     fn handle_mouse_move(&mut self, x: i32, y: i32) {
-        // 调用 on_mouse_move 更新鼠标位置
-        self.on_mouse_move(Point { x, y });
+        // 更新鼠标位置
+        self.mouse_location = Point { x, y };
     }
     
     /// 处理鼠标按钮事件
-    /// 🐛 调试：添加日志追踪鼠标事件是否被正确处理
-    fn handle_mouse_button(&mut self, button: super::MouseButton, pressed: bool, x: i32, y: i32) {
-        // 转换坐标
-        let location = Point { x, y };
-        
-        // 🐛 调试：打印所有鼠标事件
-        println!("🖱️ handle_mouse_button: {:?} {} at ({}, {})", button, if pressed { "按下" } else { "释放" }, x, y);
-        
-        // 根据按钮类型处理
-        match button {
-            super::MouseButton::Right => {
-                if pressed {
-                    // 鼠标右键按下
-                    println!("   ✅ 设置 mouse_right_down = true");
-                    self.mouse_right_down = true;
-                    self.mouse_right_location = location;
-                    self.on_mouse_down(ggez::input::mouse::MouseButton::Right, location);
-                } else {
-                    // 鼠标右键释放
-                    println!("   ✅ 设置 mouse_right_down = false");
-                    self.mouse_right_down = false;
-                }
-            }
-            super::MouseButton::Left => {
-                if pressed {
-                    // 鼠标左键按下
-                    println!("   ✅ 设置 mouse_left_down = true");
-                    self.mouse_left_down = true;
-                    self.mouse_left_location = location;
-                    self.on_mouse_down(ggez::input::mouse::MouseButton::Left, location);
-                } else {
-                    // 鼠标左键释放
-                    println!("   ✅ 设置 mouse_left_down = false");
-                    self.mouse_left_down = false;
-                }
-            }
-            _ => {}
-        }
+    /// 注意：游戏一般不使用事件驱动，而是在 update() 中主动轮询鼠标状态
+    fn handle_mouse_button(&mut self, _button: super::MouseButton, _pressed: bool, _x: i32, _y: i32) {
+        // 不需要实现，鼠标状态在 update() 中主动查询
     }
     
     /// 处理鼠标滚轮事件（用于地图和窗口缩放）

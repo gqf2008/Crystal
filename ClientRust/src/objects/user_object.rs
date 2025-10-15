@@ -20,6 +20,7 @@ use mir2_shared::{
 };
 
 use super::player_object::{PlayerObject, QueuedAction};
+use super::player_movement_fsm::PlayerMovementFSM;
 use super::stats_ext::StatsExt;  // Import Stats extensions
 use super::drawable::DrawableMapObject;
 
@@ -128,6 +129,10 @@ pub struct UserObject {
     
     // Queued action
     pub queued_action: Option<QueuedAction>,
+    
+    // ==================== Movement State Machine ====================
+    /// 移动状态机 - 处理平滑的格子移动
+    pub movement_fsm: PlayerMovementFSM,
 }
 
 // Note: All data types imported from mir2_shared to maintain consistency:
@@ -206,6 +211,7 @@ impl UserObject {
             next_magic_object: None,
             next_magic_direction: MirDirection::Up,
             queued_action: None,
+            movement_fsm: PlayerMovementFSM::default(),
         }
     }
 
@@ -229,6 +235,9 @@ impl UserObject {
         let location = Point::new(info.location_x, info.location_y);
         self.player.map_object.set_current_location(location);
         self.player.map_object.set_map_location(location);
+        
+        // 初始化移动状态机
+        self.movement_fsm = PlayerMovementFSM::new(location);
         
         // C# line 90: GameScene.Scene.MapControl.AddObject(this);
         // TODO: Add to map control when scene system is ready

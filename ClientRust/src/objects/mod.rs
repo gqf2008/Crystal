@@ -7,6 +7,7 @@ pub(crate) mod frames;
 mod frames_test;
 mod map_object;
 mod player_object;  // NEW: PlayerObject base class (Phase 1)
+mod player_movement_fsm;  // NEW: Player movement state machine
 mod user_object;
 mod monster_object;
 mod npc_object;
@@ -30,6 +31,7 @@ pub use map_object::{
 
 // NEW: Phase 1 - PlayerObject base class
 pub use player_object::{PlayerObject, QueuedAction};
+pub use player_movement_fsm::{PlayerMovementFSM, MovementState};
 
 pub use user_object::UserObject;
 
