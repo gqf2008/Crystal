@@ -1550,7 +1550,10 @@ impl Scene for GameScene {
                 }
             }
             
-            // 3. 计算渲染偏移
+            // 3. 🔧 每帧同步渲染位置和偏移
+            // 这样确保 movement 和 offset_move 始终与 FSM 同步
+            user.player.map_object.movement = user.movement_fsm.render_start_cell;
+            
             let (offset_x, offset_y) = user.movement_fsm.get_render_offset(
                 MapRenderer::CELL_WIDTH,
                 MapRenderer::CELL_HEIGHT,
