@@ -1180,19 +1180,29 @@ impl Scene for GameScene {
             }
         }
         
-        // 🖤 清空画布 - 绘制全屏黑色背景,清除之前场景的残留内容
-        // 注意: program.rs 创建 Canvas 时使用深绿色背景,我们需要完全覆盖它
+        // 🖤 清空画布 - 清除之前场景的残留内容
+        // CRITICAL: SelectScene 的背景图像会残留在帧缓冲中,必须完全覆盖!
         use ggez::graphics::{Rect, DrawMode, Mesh, Color, DrawParam};
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
         
-        // 绘制黑色矩形覆盖整个屏幕 (包括边界外)
-        let bg_rect = Rect::new(-10.0, -10.0, screen_width + 20.0, screen_height + 20.0);
-        if let Ok(bg_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), bg_rect, Color::BLACK) {
-            // 确保在最底层绘制
-            canvas.draw(&bg_mesh, DrawParam::default());
-            tracing::trace!("✓ GameScene 背景清空完成");
+        // 🐛 DEBUG: 检查 Canvas 的坐标系统
+        if let Some(canvas_rect) = canvas.screen_coordinates() {
+            tracing::info!("🖼️  Canvas 坐标系统: x={:.1}, y={:.1}, w={:.1}, h={:.1}", 
+                canvas_rect.x, canvas_rect.y, canvas_rect.w, canvas_rect.h);
         } else {
-            tracing::warn!("⚠️ Failed to create background mesh for GameScene");
+            tracing::info!("🖼️  Canvas 使用默认坐标系统");
+        }
+        tracing::info!("🖼️  屏幕尺寸: {}x{}", screen_width, screen_height);
+        
+        // 绘制全屏黑色矩形,完全覆盖之前场景的所有内容
+        // 使用比屏幕更大的矩形,确保覆盖所有边缘区域
+        let clear_rect = Rect::new(-100.0, -100.0, screen_width + 200.0, screen_height + 200.0);
+        if let Ok(clear_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), clear_rect, Color::BLACK) {
+            canvas.draw(&clear_mesh, DrawParam::default());
+            tracing::info!("✅ GameScene 清空完成: 绘制 {}x{} 黑色矩形", 
+                screen_width + 200.0, screen_height + 200.0);
+        } else {
+            tracing::error!("❌ 无法创建清空矩形!");
         }
         
         // 🎥 更新摄像机屏幕尺寸
