@@ -271,11 +271,20 @@ impl CrystalGame {
                     tracing::info!("🎉🎉🎉 收到 LoginSuccess 事件! 角色数量: {}", characters.len());
                 }
                 crate::network::game_client::GameEvent::MapInformation { map_index, ref file_name, ref title } => {
-                    tracing::info!("💾 Caching MapInformation: {} ({})", title, file_name);
+                    tracing::info!("�️  收到 MapInformation 事件: {} ({})", title, file_name);
                     self.cached_map_info = Some((*map_index, file_name.clone(), title.clone()));
                 }
+                crate::network::game_client::GameEvent::UserInformation { user_info } => {
+                    tracing::info!("👤 收到 UserInformation 事件: 玩家={}, 位置=({},{})", 
+                        user_info.name, user_info.location_x, user_info.location_y);
+                }
+                crate::network::game_client::GameEvent::PlayerSpawned { player } => {
+                    tracing::info!("👥 收到 PlayerSpawned 事件: name={}, 位置=({}, {})", 
+                        player.name, player.location.x, player.location.y);
+                }
                 _ => {
-                    tracing::debug!("收到网络事件: {:?}", event);
+                    // 其他事件用 info 级别记录事件类型
+                    tracing::info!("📨 收到网络事件: {:?}", std::mem::discriminant(&event));
                 }
             }
             

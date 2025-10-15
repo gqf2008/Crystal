@@ -1282,6 +1282,9 @@ impl Scene for GameScene {
     /// 
     /// 对应 C# ProcessPacket 的各个分支
     fn process_event(&mut self, event: &GameEvent) {
+        // 🐛 DEBUG: 记录所有收到的事件
+        tracing::debug!("📨 GameScene 收到事件: {:?}", std::mem::discriminant(event));
+        
         match event {
             GameEvent::MapInformation { map_index: _, file_name, title } => {
                 tracing::info!("🗺️  ========================================");
