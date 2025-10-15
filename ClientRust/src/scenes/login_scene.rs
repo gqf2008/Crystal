@@ -1130,6 +1130,15 @@ impl Scene for LoginScene {
         use crate::graphics::libraries::{get_library, LibraryName};
         use ggez::graphics::{Text, TextFragment, DrawParam, Color as GgezColor};
         
+        // 🔧 清除Canvas,防止之前帧的残留
+        use ggez::graphics::{Rect, DrawMode, Mesh, Color};
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let clear_color = Color::from_rgb(0, 0, 0); // 黑色背景
+        let clear_rect = Rect::new(0.0, 0.0, screen_width, screen_height);
+        if let Ok(clear_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), clear_rect, clear_color) {
+            canvas.draw(&clear_mesh, DrawParam::default());
+        }
+        
         // 1. 绘制登录背景动画 (C# 原版: ChrSel.lib 索引 0-18, 共19帧)
         if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
             if let Ok(mut lib) = lib_arc.try_lock() {

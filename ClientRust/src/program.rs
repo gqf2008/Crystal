@@ -640,12 +640,22 @@ impl ggez::event::EventHandler for CrystalGame {
         // 开始帧
         self.ggez_manager.begin_frame();
         
-        // 🔧 使用深绿色背景 (传奇2地图底色)
-        // 注意: 加载屏幕使用黑色背景,游戏场景使用绿色底色
+        // 🔧 根据当前场景选择背景色
         use ggez::graphics::Color;
-        let bg_color = Color::from_rgb(0, 32, 0);
+        let bg_color = {
+            let scene_manager = self.scene_manager.read();
+            match scene_manager.current_scene_type() {
+                Some(crate::scenes::SceneType::Login) | Some(crate::scenes::SceneType::Select) => {
+                    Color::from_rgb(0, 0, 0) // 登录和选择场景使用黑色背景
+                },
+                Some(crate::scenes::SceneType::Game) => {
+                    Color::from_rgb(0, 32, 0) // 游戏场景使用深绿色背景
+                },
+                None => Color::from_rgb(0, 0, 0), // 默认黑色
+            }
+        };
         
-        // 创建 canvas
+        // 创建 canvas (ggez会用bg_color清除framebuffer)
         let mut canvas = ggez::graphics::Canvas::from_frame(ctx, bg_color);
         
         // 绘制当前场景

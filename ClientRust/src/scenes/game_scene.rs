@@ -925,40 +925,81 @@ impl GameScene {
     /// - 使用摄像机的世界坐标转屏幕坐标
     /// - 角色始终在屏幕中心
     /// - 支持缩放
+    /// 绘制玩家角色 (使用摄像机坐标系统)
+    /// 
+    /// ════════════════════════════════════════════════════════════
+    /// 📝 玩家绘制流程详解
+    /// ════════════════════════════════════════════════════════════
+    /// 
+    /// 1. 计算玩家世界坐标 (像素)
+    ///    world_x = grid_x * CELL_WIDTH + offset_x
+    ///    world_y = grid_y * CELL_HEIGHT + offset_y
+    /// 
+    /// 2. 世界坐标转屏幕坐标 (通过摄像机)
+    ///    screen_x = world_x - camera.x + screen_width/2
+    ///    screen_y = world_y - camera.y + screen_height/2
+    /// 
+    /// 3. 绘制角色纹理
+    ///    - 绿色矩形框 (占位符)
+    ///    - 黄色圆点 (中心点标记)
+    ///    - ChrSel 库的角色纹理 (实际角色图像)
+    /// 
+    /// 4. 计算纹理索引
+    ///    frame_index = class_base + gender_offset + direction
+    ///    - Warrior: 0-19 (Male: 0-7, Female: 20-27)
+    ///    - Wizard: 40-59
+    ///    - Taoist: 80-99
+    ///    - Assassin: 120-139
+    ///    - Archer: 160-179
+    /// ════════════════════════════════════════════════════════════
     fn draw_player_with_camera(&self, ctx: &mut ggez::Context, canvas: &mut ggez::graphics::Canvas, _user_pos: &UserPosition) -> ggez::GameResult<()> {
         use crate::graphics::libraries::{get_library, LibraryName};
         use ggez::graphics::{DrawParam, Color, Rect, DrawMode, Mesh};
         use mir2_shared::enums::{MirGender, MirClass};
         
         if let Some(ref user) = self.user {
-            // 🎥 计算玩家的世界坐标（像素）
+            // ════════════════════════════════════════════════════════
+            // 步骤 1: 计算玩家世界坐标（像素）
+            // ════════════════════════════════════════════════════════
             let player_world_x = (user.player.map_object.movement.x as f32 * MapRenderer::CELL_WIDTH as f32) 
                 + user.player.map_object.offset_move.x as f32;
             let player_world_y = (user.player.map_object.movement.y as f32 * MapRenderer::CELL_HEIGHT as f32) 
                 + user.player.map_object.offset_move.y as f32;
             
-            // 🎥 世界坐标转屏幕坐标
+            // ════════════════════════════════════════════════════════
+            // 步骤 2: 世界坐标转屏幕坐标
+            // ════════════════════════════════════════════════════════
             let (screen_x, screen_y) = self.camera.world_to_screen(player_world_x, player_world_y);
             
-            // 🐛 调试：首帧打印信息
+            // 🐛 DEBUG: 首帧详细打印玩家绘制信息
             static mut FIRST_DRAW_WITH_CAMERA: bool = true;
             unsafe {
                 if FIRST_DRAW_WITH_CAMERA {
-                    println!("\n🎥 === 摄像机角色绘制调试 ===");
-                    println!("玩家格子位置: ({}, {})", user.player.map_object.movement.x, user.player.map_object.movement.y);
-                    println!("玩家偏移: ({}, {})", user.player.map_object.offset_move.x, user.player.map_object.offset_move.y);
-                    println!("玩家世界坐标: ({:.1}, {:.1}) 像素", player_world_x, player_world_y);
-                    println!("摄像机位置: ({:.1}, {:.1})", self.camera.x, self.camera.y);
-                    println!("屏幕坐标: ({:.1}, {:.1})", screen_x, screen_y);
-                    println!("屏幕尺寸: ({:.0}, {:.0})", self.camera.get_screen_size().0, self.camera.get_screen_size().1);
-                    println!("方向: {:?}", user.player.map_object.direction);
-                    println!("性别: {:?}, 职业: {:?}", user.player.gender, user.player.class);
-                    println!("====================\n");
+                    println!("╔════════════════════════════════════════════════════════════════");
+                    println!("║ 👤 玩家角色绘制详细信息");
+                    println!("╚════════════════════════════════════════════════════════════════");
+                    println!("   📍 格子位置: ({}, {})", 
+                        user.player.map_object.movement.x, 
+                        user.player.map_object.movement.y);
+                    println!("   📐 移动偏移: ({}, {})", 
+                        user.player.map_object.offset_move.x, 
+                        user.player.map_object.offset_move.y);
+                    println!("   🌍 世界坐标: ({:.1}, {:.1}) 像素", player_world_x, player_world_y);
+                    println!("   🎥 摄像机位置: ({:.1}, {:.1})", self.camera.x, self.camera.y);
+                    println!("   🖥️  屏幕坐标: ({:.1}, {:.1})", screen_x, screen_y);
+                    println!("   📺 屏幕尺寸: ({:.0}, {:.0})", 
+                        self.camera.get_screen_size().0, 
+                        self.camera.get_screen_size().1);
+                    println!("   🧭 朝向: {:?}", user.player.map_object.direction);
+                    println!("   👤 性别: {:?}, 职业: {:?}", user.player.gender, user.player.class);
+                    println!("════════════════════════════════════════════════════════════════\n");
                     FIRST_DRAW_WITH_CAMERA = false;
                 }
             }
             
-            // 🎨 绘制角色占位符（绿色矩形 + 黄色圆点）
+            // ════════════════════════════════════════════════════════
+            // 步骤 3a: 绘制占位符 - 绿色矩形框
+            // ════════════════════════════════════════════════════════
             let player_rect = Rect::new(screen_x - 20.0, screen_y - 40.0, 40.0, 60.0);
             let rect_mesh = Mesh::new_rectangle(
                 ctx,
@@ -967,41 +1008,57 @@ impl GameScene {
                 Color::from_rgb(0, 255, 0), // 绿色边框
             )?;
             canvas.draw(&rect_mesh, DrawParam::default());
+            tracing::trace!("✅ 玩家占位框已绘制");
             
-            // 黄色圆点标记角色中心点
+            // 步骤 3b: 绘制占位符 - 黄色圆点标记中心
             let circle_mesh = Mesh::new_circle(
                 ctx,
                 DrawMode::fill(),
                 [screen_x, screen_y],
                 5.0,
                 0.1,
-                Color::from_rgb(255, 255, 0),
+                Color::from_rgb(255, 255, 0), // 黄色
             )?;
             canvas.draw(&circle_mesh, DrawParam::default());
+            tracing::trace!("✅ 玩家中心点已绘制");
             
-            // 🎨 尝试绘制 ChrSel 库的角色纹理
+            // ════════════════════════════════════════════════════════
+            // 步骤 4: 计算角色纹理索引
+            // ════════════════════════════════════════════════════════
+            // ChrSel 库索引规则:
+            //   每个职业占 40 帧
+            //   每个性别占 20 帧
+            //   每个方向 1 帧 (0-7: 上右下左等8方向)
             let class_base = match user.player.class {
-                MirClass::Warrior => 0,
-                MirClass::Wizard => 40,
-                MirClass::Taoist => 80,
-                MirClass::Assassin => 120,
-                MirClass::Archer => 160,
+                MirClass::Warrior => 0,      // 战士: 0-39
+                MirClass::Wizard => 40,      // 法师: 40-79
+                MirClass::Taoist => 80,      // 道士: 80-119
+                MirClass::Assassin => 120,   // 刺客: 120-159
+                MirClass::Archer => 160,     // 弓手: 160-199
             };
             
             let gender_offset = match user.player.gender {
-                MirGender::Male => 0,
-                MirGender::Female => 20,
+                MirGender::Male => 0,        // 男性: +0
+                MirGender::Female => 20,     // 女性: +20
             };
             
-            let direction = user.player.map_object.direction as usize;
+            let direction = user.player.map_object.direction as usize; // 0-7
             let frame_index = class_base + gender_offset + direction;
             
+            tracing::trace!("🎨 角色纹理索引: {} (职业:{} + 性别:{} + 方向:{})", 
+                frame_index, class_base, gender_offset, direction);
+            
+            // ════════════════════════════════════════════════════════
+            // 步骤 5: 绘制角色纹理 (ChrSel 库)
+            // ════════════════════════════════════════════════════════
             if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
                 if let Ok(mut lib) = lib_arc.try_lock() {
                     let image_count = lib.count();
                     
-                    // 确保索引有效
+                    // 检查索引是否有效
                     if frame_index < image_count {
+                        tracing::trace!("🎨 开始绘制 ChrSel[{}] 纹理...", frame_index);
+                        
                         // 绘制角色纹理
                         match lib.draw_with_color(
                             ctx,
@@ -1010,17 +1067,24 @@ impl GameScene {
                             screen_x,
                             screen_y - 20.0, // 稍微往上偏移
                             Color::WHITE,
-                            true, // use_offset
+                            true, // use_offset (使用图像偏移量)
                         ) {
-                            Ok(_) => {},
+                            Ok(_) => {
+                                tracing::trace!("✅ ChrSel[{}] 纹理绘制成功", frame_index);
+                            },
                             Err(e) => {
-                                tracing::warn!("⚠️  Failed to draw character texture: {:?}", e);
+                                tracing::error!("❌ ChrSel[{}] 纹理绘制失败: {:?}", frame_index, e);
                             }
                         }
                     } else {
-                        tracing::warn!("⚠️  Character frame index out of bounds: {} >= {}", frame_index, image_count);
+                        tracing::error!("❌ 角色纹理索引越界: {} >= {} (总图像数)", 
+                            frame_index, image_count);
                     }
+                } else {
+                    tracing::error!("❌ 无法锁定 ChrSel 库");
                 }
+            } else {
+                tracing::error!("❌ ChrSel 库未加载");
             }
         }
         
@@ -1221,23 +1285,77 @@ impl Scene for GameScene {
     }
     
     /// 渲染场景 (Scene trait 要求的签名)
+    /// 
+    /// ============================================================
+    /// 🎨 GameScene 绘制流程详解
+    /// ============================================================
+    /// 
+    /// 📝 **绘制顺序**:
+    /// 1. 清除整个屏幕 (深绿色背景) ← 防止登录场景残留
+    /// 2. 检查状态机 (WaitingForData/LoadingMap/WaitingForPlayer/Ready)
+    /// 3. 如果不是 Ready 状态，显示加载提示并返回
+    /// 4. 如果是 Ready 状态:
+    ///    a. 更新摄像机屏幕尺寸
+    ///    b. 让摄像机跟随玩家 (带地图边界限制)
+    ///    c. 绘制地图 (MapRenderer)
+    ///    d. 绘制玩家角色
+    ///    e. 绘制 UI 控件
+    ///    f. 绘制顶层元素 (鼠标提示等)
+    /// 
+    /// 🐛 **常见问题**:
+    /// - 登录背景残留: Canvas 没清除 → 已修复 (第1步)
+    /// - 地图不显示: 检查状态是否为 Ready
+    /// - 玩家不显示: 检查 self.user 是否为 Some
+    /// - 摄像机不跟随: 检查 follow_target_clamped 调用
+    /// ============================================================
     fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas) {
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
         
-        // ============================================================
-        // 🐛 DEBUG: 打印当前状态
-        // ============================================================
+        // ════════════════════════════════════════════════════════════
+        // 步骤 1: 清除整个屏幕 (防止前一场景残留)
+        // ════════════════════════════════════════════════════════════
+        // 🔧 关键修复: 在draw()函数一开始就清除整个Canvas
+        // 防止登录场景的ChrSel背景动画残留在framebuffer中
+        use ggez::graphics::{Color, Rect, DrawMode, Mesh, DrawParam};
+        let clear_color = Color::from_rgb(0, 32, 0); // 传奇2深绿色 (R=0, G=32, B=0)
+        let clear_rect = Rect::new(0.0, 0.0, screen_width, screen_height);
+        if let Ok(clear_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), clear_rect, clear_color) {
+            canvas.draw(&clear_mesh, DrawParam::default());
+            tracing::trace!("✅ 屏幕已清除为深绿色 ({:.0}x{:.0})", screen_width, screen_height);
+        } else {
+            tracing::error!("❌ 无法创建清除用的矩形!");
+        }
+        
+        // ════════════════════════════════════════════════════════════
+        // 步骤 2: 打印当前帧计数和状态
+        // ════════════════════════════════════════════════════════════
         static mut DRAW_COUNTER: u32 = 0;
         unsafe {
             DRAW_COUNTER += 1;
             if DRAW_COUNTER <= 10 || DRAW_COUNTER % 60 == 1 {
-                tracing::info!("🎬 GameScene::draw() 第 {} 帧, 当前状态: {:?}", DRAW_COUNTER, self.state);
+                println!("╔════════════════════════════════════════════════════════════════");
+                println!("║ 🎬 GameScene::draw() 被调用 - 第 {} 帧", DRAW_COUNTER);
+                println!("╚════════════════════════════════════════════════════════════════");
+                println!("   当前状态: {:?}", self.state);
+                println!("   屏幕尺寸: {:.0}x{:.0}", screen_width, screen_height);
+                println!("   地图已加载: {}", self.map_renderer.width > 0);
+                println!("   玩家已创建: {}", self.user.is_some());
+                if let Some(ref user) = self.user {
+                    println!("   玩家位置: ({}, {})", 
+                        user.player.map_object.movement.x, 
+                        user.player.map_object.movement.y);
+                }
+                println!("════════════════════════════════════════════════════════════════\n");
             }
         }
         
-        // ============================================================
-        // 状态机检查: 只有 Ready 状态才渲染游戏内容
-        // ============================================================
+        // ════════════════════════════════════════════════════════════
+        // 步骤 3: 状态机检查 - 只有 Ready 状态才渲染游戏
+        // ════════════════════════════════════════════════════════════
+        // 📝 状态转换流程:
+        //    WaitingForData → LoadingMap → WaitingForPlayer → Ready
+        //    ↑                ↑             ↑                  ↑
+        //    场景初始化       收到MapInfo   收到UserInfo       可以渲染游戏
         match &self.state {
             GameSceneState::WaitingForData => {
                 // 显示 "等待游戏数据..." 提示
@@ -1256,31 +1374,34 @@ impl Scene for GameScene {
                 return;
             },
             GameSceneState::Ready => {
-                // 继续正常渲染
+                // ✅ 状态正常，继续渲染游戏
                 unsafe {
                     if DRAW_COUNTER <= 10 || DRAW_COUNTER % 60 == 1 {
                         println!("╔════════════════════════════════════════════════════════════════");
-                        println!("║ 🎬 正常渲染游戏 (Ready 状态)");
+                        println!("║ ✅ 状态: Ready - 正常渲染游戏");
                         println!("╚════════════════════════════════════════════════════════════════");
-                        println!("   第 {} 帧", DRAW_COUNTER);
-                        println!("   地图尺寸: {}x{}", self.map_renderer.width, self.map_renderer.height);
-                        println!("   玩家存在: {}", self.user.is_some());
-                        println!("   摄像机位置: ({:.1}, {:.1})", self.camera.x, self.camera.y);
+                        println!("   📍 地图尺寸: {}x{}", self.map_renderer.width, self.map_renderer.height);
+                        println!("   👤 玩家存在: {}", self.user.is_some());
+                        println!("   🎥 摄像机: ({:.1}, {:.1})", self.camera.x, self.camera.y);
                         println!("════════════════════════════════════════════════════════════════\n");
                     }
                 }
-                tracing::info!("🎬 状态 = Ready, 开始正常渲染游戏内容");
             }
         }
         
-        // ============================================================
-        // 以下是正常游戏渲染流程 (状态 == Ready)
-        // ============================================================
+        // ════════════════════════════════════════════════════════════
+        // 步骤 4: 更新摄像机 (只有 Ready 状态才执行)
+        // ════════════════════════════════════════════════════════════
         
-        // 🎥 更新摄像机屏幕尺寸
+        // 4a. 更新摄像机屏幕尺寸
         self.camera.update_screen_size(screen_width, screen_height);
+        tracing::trace!("🎥 摄像机屏幕尺寸已更新: {:.0}x{:.0}", screen_width, screen_height);
         
-        // 🎥 更新摄像机跟随玩家（带地图边界限制）
+        // 4b. 更新摄像机跟随玩家（带地图边界限制）
+        // 📝 摄像机跟随原理:
+        //    - 玩家世界坐标 = 格子坐标 * 格子尺寸 + 偏移量
+        //    - 摄像机居中对准玩家
+        //    - 边界限制防止摄像机超出地图范围
         if let Some(ref user) = self.user {
             // 计算玩家的世界坐标（像素）
             let player_world_x = (user.player.map_object.movement.x as f32 * MapRenderer::CELL_WIDTH as f32) 
@@ -1292,17 +1413,23 @@ impl Scene for GameScene {
             let map_width_px = self.map_renderer.width as f32 * MapRenderer::CELL_WIDTH as f32;
             let map_height_px = self.map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32;
             
-            // 🐛 DEBUG: 每帧都打印摄像机更新信息（临时调试）
+            // 🐛 DEBUG: 详细打印摄像机更新过程
             static mut CAMERA_UPDATE_COUNTER: u32 = 0;
             unsafe {
                 CAMERA_UPDATE_COUNTER += 1;
                 if CAMERA_UPDATE_COUNTER <= 5 || CAMERA_UPDATE_COUNTER % 60 == 0 {
-                    tracing::info!("🎥 ======== 摄像机更新 #{} ========", CAMERA_UPDATE_COUNTER);
-                    tracing::info!("🎥 玩家位置 (格): ({}, {})", user.player.map_object.movement.x, user.player.map_object.movement.y);
-                    tracing::info!("🎥 玩家偏移 (像素): ({}, {})", user.player.map_object.offset_move.x, user.player.map_object.offset_move.y);
-                    tracing::info!("🎥 玩家世界坐标 (像素): ({:.1}, {:.1})", player_world_x, player_world_y);
-                    tracing::info!("🎥 地图尺寸 (像素): {:.1} x {:.1}", map_width_px, map_height_px);
-                    tracing::info!("🎥 摄像机更新前: ({:.1}, {:.1})", self.camera.x, self.camera.y);
+                    println!("╔════════════════════════════════════════════════════════════════");
+                    println!("║ 🎥 摄像机更新 #{}", CAMERA_UPDATE_COUNTER);
+                    println!("╚════════════════════════════════════════════════════════════════");
+                    println!("   📍 玩家格子: ({}, {})", 
+                        user.player.map_object.movement.x, 
+                        user.player.map_object.movement.y);
+                    println!("   📐 玩家偏移: ({}, {})", 
+                        user.player.map_object.offset_move.x, 
+                        user.player.map_object.offset_move.y);
+                    println!("   � 玩家世界坐标 (像素): ({:.1}, {:.1})", player_world_x, player_world_y);
+                    println!("   🗺️  地图尺寸 (像素): {:.1} x {:.1}", map_width_px, map_height_px);
+                    println!("   🎥 摄像机更新前: ({:.1}, {:.1})", self.camera.x, self.camera.y);
                 }
             }
             
@@ -1311,8 +1438,8 @@ impl Scene for GameScene {
             
             unsafe {
                 if CAMERA_UPDATE_COUNTER <= 5 || CAMERA_UPDATE_COUNTER % 60 == 0 {
-                    tracing::info!("🎥 摄像机更新后: ({:.1}, {:.1})", self.camera.x, self.camera.y);
-                    tracing::info!("🎥 ========================================");
+                    println!("   🎥 摄像机更新后: ({:.1}, {:.1})", self.camera.x, self.camera.y);
+                    println!("════════════════════════════════════════════════════════════════\n");
                 }
             }
         } else {
@@ -1320,9 +1447,15 @@ impl Scene for GameScene {
                 self.camera.x, self.camera.y);
         }
         
-        // Phase 1: 地图与对象渲染
-        // 🎨 使用新的渲染架构：MapRenderer 直接拥有数据
-        // 🔧 关键修复：使用 Movement 而不是 CurrentLocation
+        // ════════════════════════════════════════════════════════════
+        // 步骤 5: 绘制地图与游戏对象
+        // ════════════════════════════════════════════════════════════
+        // 📝 绘制顺序:
+        //    1. 地图 (MapRenderer) - 分层绘制 (Tiles, Front)
+        //    2. 玩家角色 (draw_player_with_camera)
+        //    3. 其他对象 (NPC, 怪物等) - TODO
+        
+        // 5a. 准备玩家位置数据
         let user_pos = if let Some(ref user) = self.user {
             UserPosition {
                 x: user.player.map_object.movement.x,
@@ -1340,24 +1473,42 @@ impl Scene for GameScene {
             }
         };
         
-        // 绘制地图（简化后的 API）
+        // 5b. 绘制地图 (MapRenderer 会根据摄像机计算可见区域)
+        tracing::trace!("🗺️  开始绘制地图 (MapRenderer)...");
         if let Err(e) = self.map_renderer.draw(ctx, canvas, &self.camera) {
-            tracing::error!("❌ Failed to draw map: {:?}", e);
+            tracing::error!("❌ 地图绘制失败: {:?}", e);
+        } else {
+            tracing::trace!("✅ 地图绘制成功");
         }
         
-        // 🎨 绘制玩家角色（使用摄像机）
+        // 5c. 绘制玩家角色 (使用摄像机转换坐标)
         if let Some(ref user) = self.user {
+            tracing::trace!("👤 开始绘制玩家角色...");
             if let Err(e) = self.draw_player_with_camera(ctx, canvas, &user_pos) {
-                tracing::error!("❌ Failed to draw player: {:?}", e);
+                tracing::error!("❌ 玩家绘制失败: {:?}", e);
+            } else {
+                tracing::trace!("✅ 玩家绘制成功");
             }
+        } else {
+            tracing::warn!("⚠️  没有玩家数据，跳过玩家绘制");
         }
-            tracing::warn!("⚠️  GameScene.draw() called but map_control is None!");
         
-        // Phase 2: UI 控件树渲染
+        // ════════════════════════════════════════════════════════════
+        // 步骤 6: 绘制 UI 控件树 (TODO)
+        // ════════════════════════════════════════════════════════════
         // TODO: 遍历 self.controls 并调用 draw
+        tracing::trace!("🎨 UI 控件绘制 (暂未实现)");
         
-        // Phase 3: 顶层元素渲染
-        // TODO: 绘制鼠标提示、输出消息等
+        // ════════════════════════════════════════════════════════════
+        // 步骤 7: 绘制顶层元素 (TODO)
+        // ════════════════════════════════════════════════════════════
+        // TODO: 绘制鼠标提示、输出消息、对话框等
+        tracing::trace!("✨ 顶层元素绘制 (暂未实现)");
+        
+        // ════════════════════════════════════════════════════════════
+        // 绘制完成
+        // ════════════════════════════════════════════════════════════
+        tracing::trace!("🎬 GameScene::draw() 完成");
     }
     
     /// 处理游戏事件 (从 game_scene_old.rs 迁移)

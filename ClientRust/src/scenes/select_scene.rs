@@ -792,6 +792,15 @@ impl Scene for SelectScene {
         use ggez::graphics::{DrawParam, Color, PxScale, Text};
         use crate::graphics::libraries::{get_library, LibraryName};
         
+        // 🔧 清除Canvas,防止之前场景的残留
+        use ggez::graphics::{Rect, DrawMode, Mesh};
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let clear_color = Color::from_rgb(0, 0, 0); // 黑色背景
+        let clear_rect = Rect::new(0.0, 0.0, screen_width, screen_height);
+        if let Ok(clear_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), clear_rect, clear_color) {
+            canvas.draw(&clear_mesh, DrawParam::default());
+        }
+        
         // 1. 绘制背景 Prguse_65
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
             if let Ok(mut lib) = lib_arc.try_lock() {
