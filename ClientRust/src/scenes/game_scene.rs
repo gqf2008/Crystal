@@ -1422,8 +1422,10 @@ impl Scene for GameScene {
         unsafe {
             DEBUG_COUNTER += 1;
             if DEBUG_COUNTER % 60 == 0 {
-                tracing::info!("🖱️ 鼠标状态: 右键={}, 左键={}, 位置=({}, {})", 
+                println!("🖱️ [GameScene::update] 鼠标状态: 右键={}, 左键={}, 位置=({}, {})", 
                     mouse_right_down, mouse_left_down, mouse_pos.x, mouse_pos.y);
+                println!("   玩家对象: {}", if self.user.is_some() { "存在" } else { "无" });
+                println!("   场景状态: {:?}", self.state);
             }
         }
         
@@ -1461,7 +1463,7 @@ impl Scene for GameScene {
                 if is_idle && current_cell != target_cell {
                     if can_move {
                         // 开始移动
-                        tracing::info!("✅ 开始移动: 从({},{}) -> ({},{}), 方向={:?}, 跑步={}", 
+                        println!("✅ [移动] 开始移动: 从({},{}) -> ({},{}), 方向={:?}, 跑步={}", 
                             current_cell.x, current_cell.y, target_cell.x, target_cell.y, direction, running);
                         user.movement_fsm.move_to(target_cell, direction, running);
                         user.player.set_current_action(if running {
@@ -1470,7 +1472,7 @@ impl Scene for GameScene {
                             MirAction::Walking
                         });
                     } else {
-                        tracing::warn!("❌ 无法移动到 ({},{}): 格子被阻挡", target_cell.x, target_cell.y);
+                        println!("❌ [移动] 无法移动到 ({},{}): 格子被阻挡", target_cell.x, target_cell.y);
                         // 无法移动,站立
                         user.player.set_current_action(MirAction::Standing);
                     }
@@ -1478,7 +1480,7 @@ impl Scene for GameScene {
             } else {
                 // 鼠标释放,停止移动
                 if user.movement_fsm.is_moving() {
-                    tracing::info!("🛑 停止移动");
+                    println!("🛑 [移动] 停止移动");
                     user.movement_fsm.stop();
                     user.player.set_current_action(MirAction::Standing);
                 }
