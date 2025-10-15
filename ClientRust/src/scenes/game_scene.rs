@@ -416,6 +416,10 @@ pub struct GameScene {
     // C# line 53
     /// 粒子引擎列表 (C#: public List<ParticleEngine> ParticleEngines)
     particle_engines: Vec<()>, // TODO: 实现 ParticleEngine
+
+    // ==================== 调试控制 ====================
+    /// 是否显示玩家角色 (调试用，U键控制)
+    show_player: bool,
 }
 
 /// HeroSpawnState - 英雄召唤状态
@@ -571,6 +575,9 @@ impl GameScene {
 
             // 粒子引擎
             particle_engines: Vec::new(),
+
+            // 调试控制
+            show_player: true, // 默认显示玩家
         }
     }
 
@@ -1460,13 +1467,15 @@ impl Scene for GameScene {
         }
 
         // 5c. 绘制玩家角色 (使用摄像机转换坐标)
-        if self.user.is_some() {
+        if self.user.is_some() && self.show_player {
             tracing::trace!("👤 开始绘制玩家角色...");
             if let Err(e) = self.draw_player_with_camera(ctx, canvas, &user_pos) {
                 tracing::error!("❌ 玩家绘制失败: {:?}", e);
             } else {
                 tracing::trace!("✅ 玩家绘制成功");
             }
+        } else if !self.show_player {
+            tracing::trace!("👤 玩家显示已关闭 (U键控制)");
         } else {
             tracing::warn!("⚠️  没有玩家数据，跳过玩家绘制");
         }
@@ -2026,6 +2035,20 @@ impl Scene for GameScene {
                 println!(
                     "🎬 动画效果: {}",
                     if self.map_renderer.show_animations {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // U键: 切换玩家显示
+            KeyCode::KeyU => {
+                self.show_player = !self.show_player;
+                println!(
+                    "👤 玩家显示: {}",
+                    if self.show_player {
                         "开启"
                     } else {
                         "关闭"
