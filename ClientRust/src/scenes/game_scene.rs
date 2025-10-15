@@ -1284,6 +1284,35 @@ impl GameScene {
         }
     }
     
+    /// 计算从当前方向到目标方向的最近转向
+    /// 
+    /// 返回下一步应该朝向的方向(最多转一格)
+    /// 这样可以实现平滑的方向转换,而不是直接跳转
+    fn smooth_direction_change(&self, current: MirDirection, target: MirDirection) -> MirDirection {
+        if current == target {
+            return current;
+        }
+        
+        // 计算顺时针和逆时针到目标的步数
+        let mut clockwise_steps = 0;
+        let mut dir = current;
+        while dir != target && clockwise_steps < 8 {
+            dir = self.next_dir(dir);
+            clockwise_steps += 1;
+        }
+        
+        let counter_clockwise_steps = 8 - clockwise_steps;
+        
+        // 选择最短路径
+        if clockwise_steps <= counter_clockwise_steps {
+            // 顺时针转一格
+            self.next_dir(current)
+        } else {
+            // 逆时针转一格
+            self.previous_dir(current)
+        }
+    }
+    
     /// 获取上一个方向 (逆时针)
     /// 
     /// 对应 C# Functions.PreviousDir(MirDirection d)
@@ -1477,7 +1506,19 @@ impl Scene for GameScene {
             None
         };
         
-        // 第二步: 应用到user(可以安全地借用)
+        // 第二步: 计算平滑方向(在借用 user 之前)
+        let smooth_direction = if let Some((_, direction, _, _, _, _)) = mouse_input {
+            if let Some(ref user) = self.user {
+                let current_dir = user.player.map_object.direction;
+                self.smooth_direction_change(current_dir, direction)
+            } else {
+                direction
+            }
+        } else {
+            MirDirection::Up // 默认值,不会被使用
+        };
+        
+        // 第三步: 应用到user(可以安全地借用)
         if let Some(ref mut user) = self.user {
             if let Some((target_cell, direction, running, current_cell, is_idle, can_move)) = mouse_input {
                 // 🔧 修复: 无论是否在移动,都更新目标和方向
@@ -1494,19 +1535,19 @@ impl Scene for GameScene {
                             } else {
                                 MirAction::Walking
                             });
-                            // 立即设置角色朝向
-                            user.player.map_object.set_direction(direction);
+                            // 平滑设置角色朝向
+                            user.player.map_object.set_direction(smooth_direction);
                         } else {
                             println!("❌ [移动] 无法移动到 ({},{}): 格子被阻挡", target_cell.x, target_cell.y);
-                            // 无法移动,但更新朝向
-                            user.player.map_object.set_direction(direction);
+                            // 无法移动,但平滑更新朝向
+                            user.player.map_object.set_direction(smooth_direction);
                             user.player.set_current_action(MirAction::Standing);
                         }
                     } else {
                         // 正在移动中,更新目标和方向
                         user.movement_fsm.update_target(target_cell, direction, running);
-                        // 更新角色朝向
-                        user.player.map_object.set_direction(direction);
+                        // 平滑更新角色朝向
+                        user.player.map_object.set_direction(smooth_direction);
                         // 更新动作(可能从走切换到跑,或相反)
                         user.player.set_current_action(if running {
                             MirAction::Running
