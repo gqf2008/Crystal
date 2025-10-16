@@ -156,39 +156,21 @@ impl PlayerMovementFSM {
         }
     }
     
-    /// 改变移动方向(移动中转向,重置当前格子动画)
+    /// 改变移动方向(移动中转向)
     /// 
     /// # 参数
     /// * `direction` - 新的移动方向
     /// 
-    /// 这个方法会:
-    /// 1. 立即完成当前格子移动 (跳到 current_cell)
-    /// 2. 重置渲染起始点
-    /// 3. 按新方向开始移动
+    /// 注意:方向改变只更新方向字段,不中断当前的移动动画
+    /// 下一格移动时会自动使用新方向
     pub fn change_direction(&mut self, direction: MirDirection) {
         if self.direction == direction {
             return; // 方向没变,不需要处理
         }
         
+        // 🔧 只更新方向,不重置动画
+        // 让当前格子的移动完成,下一格会自动使用新方向
         self.direction = direction;
-        
-        // 如果正在移动,重置当前格子的动画
-        if let MovementState::Moving { .. } = self.state {
-            // 重置渲染起始点为当前格子 (消除动画偏移)
-            self.render_start_cell = self.current_cell;
-            
-            // 重新开始移动动画
-            let duration_ms = if self.running {
-                self.run_speed_ms
-            } else {
-                self.walk_speed_ms
-            };
-            
-            self.state = MovementState::Moving {
-                start_time: Instant::now(),
-                duration_ms,
-            };
-        }
     }
     
     /// 更新状态机(每帧调用)
