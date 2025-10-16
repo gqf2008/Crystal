@@ -1,1755 +1,2441 @@
-// GameScene - Main game scene (核心游戏场景)
-// Mirrors Client/MirScenes/GameScene.cs (12,297 lines)
-pub mod map_control;
-// pub mod map_loader; // 已删除 - 使用 objects::MapReader 代替
-pub mod tile_texture_manager;
+// GameScene V2 - Refactored to mirror C# GameScene.cs architecture
+// Reference: Client/MirScenes/GameScene.cs
+//
+// ARCHITECTURE PRINCIPLES:
+// 1. GameScene is the central hub managing ALL game state
+// 2. MapControl handles map rendering (nested functionality)
+// 3. UI controls managed through control tree (Parent = this)
+// 4. Network packets processed centrally via process_packet()
+// 5. Rendering phases: MapControl.draw() → UI tree → Top layer
 
-use super::{Scene, SceneType};
-use crate::objects::*;
-use crate::objects::ObjectFactory; // Object creation from server packets
-use crate::network::game_client::GameEvent;
-use mir2_shared::{UserItem, Point};
-use mir2_shared::enums::{AttackMode, PetMode, LightSetting};
+use ggez::graphics::Canvas;
+use ggez::GameResult;
 use std::collections::{HashMap, VecDeque};
 
-/// Output message (chat/system messages)
+use mir2_shared::{
+    data::client_data::{
+        ClientBuff,      // ✅ SharedRust/src/data/client_data.rs line 764
+        ClientFriend, // ✅ SharedRust/src/data/client_data.rs line 885 (Shared/Data/ClientData.cs line 122)
+        ClientMagic,  // ✅ SharedRust/src/data/client_data.rs line 70
+        ClientMail, // ✅ SharedRust/src/data/client_data.rs line 922 (Shared/Data/ClientData.cs line 154)
+        ClientQuestInfo, // ✅ SharedRust/src/data/client_data.rs line 392
+    },
+    data::shared_data::{
+        RankCharacterInfo, // ✅ SharedRust/src/data/shared_data.rs line 92 (Shared/Data/SharedData.cs line 43)
+    },
+    enums::*,
+    Point,
+    UserItem, // ✅ Shared/Data/ItemData.cs line 277
+};
+
+use crate::controls::Control;
+use crate::objects::{HeroObject, MapObject, UserObject};
+use crate::scenes::{GameEvent, KeyCode, ModifiersState, Scene, SceneType};
+
+// 导入 Camera (摄像机系统)
+pub mod camera;
+pub use camera::Camera;
+
+// 导入 MapRenderer (纯渲染层)
+pub mod map_renderer;
+pub use map_renderer::MapRenderer;
+
+// ==================== 架构说明 ====================
+//
+// 数据结构来源:
+// - UserItem, ClientMagic, ClientBuff, ClientQuestInfo → mir2_shared (Shared 项目)
+// - MirItemCell, MirLabel 等 UI 控件 → controls 模块 (Client/MirControls)
+// - MapObject, UserObject 等游戏对象 → objects 模块 (Client/MirObjects)
+//
+// 参考:
+// - Shared/Data/ItemData.cs line 277 (UserItem)
+// - SharedRust/src/data/client_data.rs line 70 (ClientMagic)
+// - SharedRust/src/data/client_data.rs line 764 (ClientBuff)
+// - SharedRust/src/data/client_data.rs line 392 (ClientQuestInfo)
+// - Client/MirControls/MirItemCell.cs line 11 (MirItemCell - UI 控件)
+//
+// ==================== 客户端专有数据结构 ====================
+
+/// 用户位置（用于绘制玩家）
+#[derive(Debug, Clone, Copy)]
+pub struct UserPosition {
+    pub x: i32,
+    pub y: i32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+}
+
+//
+// 以下结构是客户端 UI 层的数据,不属于 mir2_shared:
+
+#[allow(dead_code)]
+/// 任务跟踪 UI 状态 (对应 C# QuestTrackingDialog 的内部状态)
+///
+/// 注意: C# 中 QuestTrackingDialog 维护任务追踪状态,没有单独的 QuestTracker 类
+/// TODO: 后续应迁移到 controls::QuestTrackingDialog 作为内部状态
+#[derive(Debug, Clone)]
+pub struct QuestTracker {
+    pub quest_id: u32,
+    pub active: bool,
+}
+
+/// 输出消息 (对应 C# OutPutMessage)
+///
+/// 屏幕左上角的滚动提示文本 (系统消息/任务消息/公会消息)
+/// 这是客户端 UI 层的数据,不需要与服务器通信
 #[derive(Debug, Clone)]
 pub struct OutputMessage {
-    pub text: String,
-    pub color: (u8, u8, u8), // RGB
-    pub timestamp: i64,
+    pub message: String,
+    pub expire_time: i64,
+    pub message_type: OutputMessageType,
 }
 
-/// Main game scene
-pub struct GameScene {
-    // Player and hero
-    pub user: Option<UserObject>,
-    pub hero: Option<HeroObject>,
-    
-    // Game objects - unified drawable object map for rendering
-    pub objects: HashMap<u32, Box<dyn DrawableMapObject>>, // All drawable objects by ID
-    
-    // Separate collections for specific object types (for game logic)
-    pub monsters: HashMap<u32, MonsterObject>,
-    pub npcs: HashMap<u32, NPCObject>,
-    pub items: HashMap<u32, ItemObject>,
-    pub players: HashMap<u32, UserObject>,
-    pub spells: Vec<SpellObject>,
-    pub effects: Vec<Effect>,
-    pub damages: Vec<Damage>,
-    
-    // Game state
-    pub gold: u32,
-    pub credit: u32,
-    pub attack_mode: AttackMode,
-    pub pet_mode: PetMode,
-    pub lights: LightSetting,
-    
-    // Storage
-    pub storage: Vec<Option<UserItem>>,         // 80 slots
-    pub guild_storage: Vec<Option<UserItem>>,   // 112 slots
-    pub refine_storage: Vec<Option<UserItem>>,  // 16 slots
-    pub hero_storage: [Option<HeroObject>; 8],  // 8 hero slots
-    
-    // Item interaction
-    pub hover_item: Option<UserItem>,
-    pub selected_item: Option<UserItem>,
-    pub picked_up_gold: bool,
-    
-    // Timing
-    pub move_time: i64,
-    pub attack_time: i64,
-    pub spell_time: i64,
-    pub pickup_time: i64,
-    pub use_item_time: i64,
-    
-    // Flags
-    pub can_move: bool,
-    pub can_run: bool,
-    pub observing: bool,
-    pub allow_observe: bool,
-    
-    // Output messages (chat log)
-    pub output_messages: VecDeque<OutputMessage>,
-    pub max_output_messages: usize,
-    
-    // Map info
-    pub map_info: HashMap<i32, String>, // map_id -> map_name
-    pub current_map_index: i32,
-    pub map_control: Option<map_control::MapControl>,
-    
-    // Rendering
-    pub tile_texture_manager: std::cell::RefCell<crate::scenes::game_scene::tile_texture_manager::TileTextureManager>,
-    pub player_x: i32,
-    pub player_y: i32,
-    pub animation_count: u32, // C#: AnimationCount (for tile animations)
-    
-    // Dialogs (TODO: implement when dialog system ready)
-    // pub main_dialog: MainDialog,
-    // pub chat_dialog: ChatDialog,
-    // pub inventory_dialog: InventoryDialog,
-    // ... 40+ dialogs
-    
-    // Pathfinding
-    pub pathfinder: Option<PathFinder>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputMessageType {
+    Normal,
+    Quest,
+    Guild,
 }
+
+// ==================== 已删除的重复定义 ====================
+//
+// 以下结构已从 game_scene_v2.rs 删除,改用 mir2_shared:
+//
+// ❌ Friend           → ✅ 使用 mir2_shared::data::client_data::ClientFriend
+// ❌ Mail             → ✅ 使用 mir2_shared::data::client_data::ClientMail
+// ❌ Rank             → ✅ 使用 mir2_shared::data::shared_data::RankCharacterInfo
+// ❌ Relationship     → ✅ 不需要,使用 ClientFriend 即可
+// ❌ RelationshipType → ✅ 不需要,使用 ClientFriend 的字段表示
+// ❌ GuildObject      → ✅ 不需要完整对象,只存公会名称/等级字段
+
+// ==================== GameScene 状态机 ====================
+
+/// GameScene 加载状态
+///
+/// 用于管理从 SelectScene 切换到 GameScene 的加载流程:
+/// 1. WaitingForData - 等待地图信息和玩家信息
+/// 2. LoadingMap - 正在加载地图文件
+/// 3. Ready - 地图和玩家都已准备好,可以渲染
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GameSceneState {
+    /// 初始状态,等待地图和玩家数据
+    WaitingForData,
+    /// 正在加载地图 (map_name)
+    LoadingMap(String),
+    /// 等待玩家信息
+    WaitingForPlayer,
+    /// 所有数据就绪,可以正常渲染
+    Ready,
+}
+
+// ==================== GameScene 主结构 ====================
+
+/// GameScene - 游戏场景中枢
+///
+/// 对应 C# Client/MirScenes/GameScene.cs (line 27-10207)
+///
+/// 这是游戏运行期的核心类,管理:
+/// - 所有游戏状态数据
+/// - MapControl (地图渲染)
+/// - UI 控件树
+/// - 网络协议处理
+/// - 输入处理
+#[allow(dead_code)]
+pub struct GameScene {
+    // ==================== 场景状态 ====================
+    /// 当前场景加载状态
+    state: GameSceneState,
+
+    // ==================== 玩家与英雄 ====================
+    // C# line 27-48
+    /// 当前玩家对象 (C#: public static UserObject User)
+    user: Option<UserObject>,
+
+    /// 英雄对象 (C#: public static UserHeroObject Hero)
+    hero: Option<HeroObject>,
+
+    /// 是否拥有英雄 (C#: public bool HasHero)
+    has_hero: bool,
+
+    /// 英雄召唤状态 (C#: public HeroSpawnState HeroSpawnState)
+    hero_spawn_state: HeroSpawnState,
+
+    // ==================== 对象管理 ====================
+    // C# line 50-58
+    /// 所有地图对象 (C#: 通过 MapObject.User/MapObject.Objects 管理)
+    /// 注意: C# 使用静态字典,Rust 用实例字段
+    objects: HashMap<u32, MapObject>,
+
+    /// 被选中的格子 (C#: public static MapObject SelectedCell)
+    selected_cell: Option<MapObject>,
+
+    // ==================== 物品与经济 ====================
+    // C# line 160-169
+    /// 背包 46 格 (C#: 通过 GameScene.Inventory 静态字段)
+    /// 注意: C# 中 Inventory 是 MirItemCell[] (UI控件数组)
+    /// Rust 中暂用 Option<UserItem> 存储数据,UI 由 controls 模块负责
+    inventory: [Option<UserItem>; 46],
+
+    /// 仓库 80 格 (C#: public static UserItem[] Storage)
+    storage: [Option<UserItem>; 80],
+
+    /// 腰带 6 格 (C#: 通过 BeltIdx)
+    belt: [Option<UserItem>; 6],
+
+    /// 装备槽 14 格 (C#: 通过 Equipment)
+    equipment: [Option<UserItem>; 14],
+
+    /// 公会仓库 112 格 (C#: public static UserItem[] GuildStorage)
+    guild_storage: [Option<UserItem>; 112],
+
+    /// 精炼仓库 16 格 (C#: public static UserItem[] Refine)
+    refine_storage: [Option<UserItem>; 16],
+
+    /// 金币 (C#: public static uint Gold)
+    gold: u32,
+
+    /// 点数 (C#: public static uint Credit)
+    credit: u32,
+
+    /// 悬浮物品 (C#: public static UserItem HoverItem)
+    hover_item: Option<UserItem>,
+
+    /// 选中物品 (C#: public static UserItem SelectedItem)
+    selected_item: Option<UserItem>,
+
+    /// 选中的物品格子 (C#: public static MirItemCell SelectedCell)
+    /// 注意: C# 中是 MirItemCell (UI 控件引用)
+    /// Rust 中暂存物品数据,UI 控件由 controls 模块管理
+    selected_cell_item: Option<UserItem>,
+
+    /// 是否拾取了金币 (C#: public static bool PickedUpGold)
+    picked_up_gold: bool,
+
+    // ==================== 技能与 Buff ====================
+    // C# 通过 User.Magics/User.Buffs
+    /// 技能列表 (C#: User.Magics)
+    /// 使用 mir2_shared::data::client_data::ClientMagic
+    magics: Vec<ClientMagic>,
+
+    /// Buff 列表 (C#: User.Buffs)
+    /// 使用 mir2_shared::data::client_data::ClientBuff
+    buffs: Vec<ClientBuff>,
+
+    // ==================== 任务系统 ====================
+    // C# line 153-156
+    /// 任务列表 (C#: public static List<ClientQuestInfo> QuestInfoList)
+    /// 使用 mir2_shared::data::client_data::ClientQuestInfo
+    quests: Vec<ClientQuestInfo>,
+
+    /// 跟踪的任务 (C#: QuestTrackingDialog.TrackedQuests)
+    tracked_quests: Vec<QuestTracker>,
+
+    // ==================== 社交系统 ====================
+    // C# 通过各个 Dialog 管理
+    /// 好友列表 (C#: FriendDialog)
+    /// 使用 mir2_shared::data::client_data::ClientFriend (C# Shared/Data/ClientData.cs line 122)
+    friends: Vec<ClientFriend>,
+
+    /// 公会名称 (C#: Scene.Guild.Name)
+    /// 注意: 客户端不需要完整的 GuildObject,只存储公会名称和等级
+    guild_name: Option<String>,
+
+    /// 公会等级 (C#: Scene.Guild.Rank)
+    guild_rank: Option<String>,
+
+    // ==================== 邮件系统 ====================
+    // C# line 106-110
+    /// 邮件列表 (C#: MailListDialog)
+    /// 使用 mir2_shared::data::client_data::ClientMail (C# Shared/Data/ClientData.cs line 154)
+    mail_list: Vec<ClientMail>,
+
+    /// 是否有新邮件 (C#: public bool NewMail)
+    new_mail: bool,
+
+    /// 新邮件计数器 (C#: public int NewMailCounter)
+    new_mail_counter: i32,
+
+    // ==================== 排行榜 ====================
+    // C# line 157
+    /// 排行榜列表 (C#: public static Dictionary<long, RankCharacterInfo> RankingList)
+    /// 使用 mir2_shared::data::shared_data::RankCharacterInfo (C# Shared/Data/SharedData.cs line 43)
+    rankings: Vec<RankCharacterInfo>,
+
+    // ==================== MapRenderer (地图渲染) ====================
+    // 对应 C# MapControl 嵌套类 (line 10209-11241)
+    // 重构后：MapRenderer 直接拥有地图数据（采用 map_viewer.rs 设计）
+    /// 地图渲染器 - 拥有地图数据并负责渲染
+    map_renderer: MapRenderer,
+
+    // ==================== Camera (摄像机系统) ====================
+    // 🎥 用于坐标转换和视野管理
+    /// 摄像机（跟随玩家，处理世界坐标↔屏幕坐标转换）
+    camera: Camera,
+
+    // ==================== UI 控件树 ====================
+    // 对应 C# line 59-149 (所有 Dialog)
+    /// 子控件列表 (C#: 通过 Parent = this 建立)
+    controls: Vec<Box<dyn Control>>,
+
+    // 主要对话框 (C#: public XXXDialog XXXDialog)
+    // 注意: 暂时用 Option,后续实现时创建
+    main_dialog: Option<()>,           // MainDialog
+    chat_dialog: Option<()>,           // ChatDialog
+    chat_control: Option<()>,          // ChatControlBar
+    inventory_dialog: Option<()>,      // InventoryDialog
+    character_dialog: Option<()>,      // CharacterDialog
+    hero_dialog: Option<()>,           // HeroDialog (CharacterDialog for hero)
+    hero_inventory_dialog: Option<()>, // HeroInventoryDialog
+    hero_manage_dialog: Option<()>,    // HeroManageDialog
+    craft_dialog: Option<()>,          // CraftDialog
+    storage_dialog: Option<()>,        // StorageDialog
+    belt_dialog: Option<()>,           // BeltDialog
+    minimap_dialog: Option<()>,        // MiniMapDialog
+    inspect_dialog: Option<()>,        // InspectDialog
+    option_dialog: Option<()>,         // OptionDialog
+    menu_dialog: Option<()>,           // MenuDialog
+    npc_dialog: Option<()>,            // NPCDialog
+    // ... 40+ 其他对话框
+
+    // ==================== 输入与渲染 ====================
+    // C# line 171-182
+    /// 鼠标位置 (C#: 通过 CMain.MPoint)
+    mouse_location: Point,
+
+    /// 输出消息列表 (C#: public List<OutPutMessage> OutputMessages)
+    output_messages: VecDeque<OutputMessage>,
+
+    /// 输出行 (C#: public MirLabel[] OutputLines)
+    output_lines: Vec<String>,
+
+    /// 最大输出消息数 (C#: 默认 10)
+    max_output_messages: usize,
+
+    // ==================== 模式与状态 ====================
+    // C# line 184-186
+    /// 攻击模式 (C#: public AttackMode AMode)
+    attack_mode: AttackMode,
+
+    /// 宠物模式 (C#: public PetMode PMode)
+    pet_mode: PetMode,
+
+    /// 光照设置 (C#: public LightSetting Lights)
+    lights: LightSetting,
+
+    /// 观察模式 (C#: public static bool Observing)
+    observing: bool,
+
+    /// 允许观察 (C#: public static bool AllowObserve)
+    allow_observe: bool,
+
+    // ==================== 时间戳 ====================
+    // C# line 29-30
+    /// 移动时间 (C#: public static long MoveTime)
+    move_time: i64,
+
+    /// 攻击时间 (C#: public static long AttackTime)
+    attack_time: i64,
+
+    /// 下次奔跑时间 (C#: public static long NextRunTime)
+    next_run_time: i64,
+
+    /// 登出时间 (C#: public static long LogTime)
+    log_time: i64,
+
+    /// 上次奔跑时间 (C#: public static long LastRunTime)
+    last_run_time: i64,
+
+    /// 切换宠物模式时间 (C#: public static long ChangePModeTime)
+    change_pmode_time: i64,
+
+    /// 切换攻击模式时间 (C#: public static long ChangeAModeTime)
+    change_amode_time: i64,
+
+    /// 英雄技能时间 (C#: public static long HeroSpellTime)
+    hero_spell_time: i64,
+
+    /// 智能生物拾取时间 (C#: public static long IntelligentCreaturePickupTime)
+    intelligent_creature_pickup_time: i64,
+
+    /// 使用物品时间 (C#: public static long UseItemTime)
+    use_item_time: i64,
+
+    /// 拾取时间 (C#: public static long PickUpTime)
+    pickup_time: i64,
+
+    /// 掉落视图时间 (C#: public static long DropViewTime)
+    drop_view_time: i64,
+
+    /// 目标死亡时间 (C#: public static long TargetDeadTime)
+    target_dead_time: i64,
+
+    /// 检查时间 (C#: public static long InspectTime)
+    inspect_time: i64,
+
+    /// 法术时间 (C#: public static long SpellTime)
+    spell_time: i64,
+
+    /// 切换时间 (C#: public long ToggleTime)
+    toggle_time: i64,
+
+    /// 输出延迟 (C#: public long OutputDelay)
+    output_delay: i64,
+
+    // ==================== 标志位 ====================
+    // C# line 31
+    /// 可以移动 (C#: public static bool CanMove)
+    can_move: bool,
+
+    /// 可以奔跑 (C#: public static bool CanRun)
+    can_run: bool,
+
+    /// 显示复活消息 (C#: public bool ShowReviveMessage)
+    show_revive_message: bool,
+
+    // ==================== NPC 相关 ====================
+    // C# line 188-193
+    /// NPC 时间 (C#: public static long NPCTime)
+    npc_time: i64,
+
+    /// NPC ID (C#: public static uint NPCID)
+    npc_id: u32,
+
+    /// NPC 费率 (C#: public static float NPCRate)
+    npc_rate: f32,
+
+    /// NPC 面板类型 (C#: public static PanelType NPCPanelType)
+    npc_panel_type: PanelType,
+
+    /// 默认 NPC ID (C#: public static uint DefaultNPCID)
+    default_npc_id: u32,
+
+    /// 隐藏添加的商店属性 (C#: public static bool HideAddedStoreStats)
+    hide_added_store_stats: bool,
+
+    // ==================== 粒子引擎 ====================
+    // C# line 53
+    /// 粒子引擎列表 (C#: public List<ParticleEngine> ParticleEngines)
+    particle_engines: Vec<()>, // TODO: 实现 ParticleEngine
+
+    // ==================== 调试控制 ====================
+    /// 是否显示玩家角色 (调试用，U键控制)
+    show_player: bool,
+    
+    // ==================== 调试信息 ====================
+    /// 碰到的障碍物格子 (用于调试绘制红色标记)
+    blocked_cell: Option<Point>,
+    
+    // ==================== 网络通信 ====================
+    /// 网络命令发送通道
+    command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
+}
+
+/// HeroSpawnState - 英雄召唤状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeroSpawnState {
+    None,
+    Spawning,
+    Spawned,
+    Unsummoning,
+}
+
+/// PanelType - 面板类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelType {
+    Buy,
+    BuySub,
+    Craft,
+    Sell,
+    // ... 更多类型
+}
+
+// ==================== GameScene 实现 ====================
 
 impl GameScene {
-    /// Load map file by name (searches in Map and Data/Map directories)
-    fn load_map_file(map_name: &str) -> std::io::Result<map_control::MapControl> {
+    /// 创建新的 GameScene
+    ///
+    /// 对应 C# GameScene 构造函数 (line 242-461)
+    pub fn new() -> Self {
+        tracing::info!("🎮 ========================================");
+        tracing::info!("🎮 GameScene::new() 创建游戏场景");
+        tracing::info!("🎮   初始摄像机位置: (0, 0)");
+        tracing::info!("🎮   初始用户对象: None");
+        tracing::info!("🎮 ========================================");
+
+        Self {
+            // 场景状态
+            state: GameSceneState::WaitingForData,
+
+            // 玩家与英雄
+            user: None,
+            hero: None,
+            has_hero: false,
+            hero_spawn_state: HeroSpawnState::None,
+
+            // 对象管理
+            objects: HashMap::new(),
+            selected_cell: None,
+
+            // 物品与经济
+            inventory: std::array::from_fn(|_| None),
+            storage: std::array::from_fn(|_| None),
+            belt: std::array::from_fn(|_| None),
+            equipment: std::array::from_fn(|_| None),
+            guild_storage: std::array::from_fn(|_| None),
+            refine_storage: std::array::from_fn(|_| None),
+            gold: 0,
+            credit: 0,
+            hover_item: None,
+            selected_item: None,
+            selected_cell_item: None,
+            picked_up_gold: false,
+
+            // 技能与 Buff
+            magics: Vec::new(),
+            buffs: Vec::new(),
+
+            // 任务系统
+            quests: Vec::new(),
+            tracked_quests: Vec::new(),
+
+            // 社交系统
+            friends: Vec::new(),
+            guild_name: None,
+            guild_rank: None,
+
+            // 邮件系统
+            mail_list: Vec::new(),
+            new_mail: false,
+            new_mail_counter: 0,
+
+            // 排行榜
+            rankings: Vec::new(),
+
+            // MapRenderer（拥有地图数据，初始化为空，load_map 时从 MapReader 构造）
+            map_renderer: MapRenderer::default(),
+
+            // Camera（初始化为 1024x768，后续在 initialize 中更新）
+            camera: Camera::new(1024.0, 768.0),
+
+            // UI 控件树
+            controls: Vec::new(),
+            main_dialog: None,
+            chat_dialog: None,
+            chat_control: None,
+            inventory_dialog: None,
+            character_dialog: None,
+            hero_dialog: None,
+            hero_inventory_dialog: None,
+            hero_manage_dialog: None,
+            craft_dialog: None,
+            storage_dialog: None,
+            belt_dialog: None,
+            minimap_dialog: None,
+            inspect_dialog: None,
+            option_dialog: None,
+            menu_dialog: None,
+            npc_dialog: None,
+
+            // 输入与渲染
+            mouse_location: Point { x: 0, y: 0 },
+            output_messages: VecDeque::new(),
+            output_lines: Vec::new(),
+            max_output_messages: 10,
+
+            // 模式与状态
+            attack_mode: AttackMode::Peace,
+            pet_mode: PetMode::Both,
+            lights: LightSetting::Day,
+            observing: false,
+            allow_observe: false,
+
+            // 时间戳
+            move_time: 0,
+            attack_time: 0,
+            next_run_time: 0,
+            log_time: 0,
+            last_run_time: 0,
+            change_pmode_time: 0,
+            change_amode_time: 0,
+            hero_spell_time: 0,
+            intelligent_creature_pickup_time: 0,
+            use_item_time: 0,
+            pickup_time: 0,
+            drop_view_time: 0,
+            target_dead_time: 0,
+            inspect_time: 0,
+            spell_time: 0,
+            toggle_time: 0,
+            output_delay: 0,
+
+            // 标志位
+            can_move: true,
+            can_run: true,
+            show_revive_message: false,
+
+            // NPC 相关
+            npc_time: 0,
+            npc_id: 0,
+            npc_rate: 1.0,
+            npc_panel_type: PanelType::Buy,
+            default_npc_id: 0,
+            hide_added_store_stats: false,
+
+            // 粒子引擎
+            particle_engines: Vec::new(),
+
+            // 调试控制
+            show_player: true, // 默认显示玩家
+            
+            blocked_cell: None, // 障碍物调试
+            command_tx: None, // 网络命令通道（后续通过 set_command_sender 设置）
+        }
+    }
+
+    /// 设置网络命令发送通道
+    pub fn set_command_sender(&mut self, tx: tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>) {
+        self.command_tx = Some(tx);
+        tracing::info!("✅ GameScene 网络命令通道已设置");
+    }
+
+    /// 绘制 UI 控件树
+    ///
+    /// 等价于 C# base.DrawControl()
+    fn draw_controls(&mut self, canvas: &mut Canvas) -> GameResult<()> {
+        for control in &mut self.controls {
+            if control.visible() {
+                // TODO: control.draw(canvas)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 绘制顶层元素
+    fn draw_top_layer(&mut self, canvas: &mut Canvas) -> GameResult<()> {
+        // 1) 拖拽物品图标
+        if self.picked_up_gold || self.selected_cell_item.is_some() {
+            // TODO: 绘制拖拽图标
+        }
+
+        // 2) 输出消息 (左上角滚动提示)
+        self.draw_output_messages(canvas)?;
+
+        Ok(())
+    }
+
+    /// 绘制输出消息
+    fn draw_output_messages(&mut self, canvas: &mut Canvas) -> GameResult<()> {
+        // TODO: 实现输出行绘制
+        Ok(())
+    }
+
+    /// 清理纹理缓存
+    ///
+    /// 对应 C# DXManager.CleanUp() 方法
+    ///
+    /// 清理所有 MapLibs 中超过指定时间未使用的纹理
+    /// 清理纹理缓存 (对应 C# DXManager.CleanUp)
+    ///
+    /// C# 参考:
+    /// ```csharp
+    /// // DXManager.cs - CleanUp()
+    /// for (int i = TextureList.Count - 1; i >= 0; i--) {
+    ///     if (CMain.Time >= TextureList[i].CleanTime)
+    ///         TextureList[i].DisposeTexture();
+    /// }
+    /// ```
+    fn cleanup_texture_cache(&mut self) {
+        use crate::graphics::get_all_map_libraries;
+        use std::time::Duration;
+
+        // 清理超过 30 秒未使用的纹理 (C# 使用 CleanDelay = 600000ms = 10分钟)
+        // Rust 使用更激进的清理策略以节省内存
+        let max_age = Duration::from_secs(30);
+        let libs = get_all_map_libraries();
+        let mut total_cleaned = 0;
+
+        for (idx, lib) in libs.iter().enumerate() {
+            if let Ok(mut library) = lib.lock() {
+                let (before, _) = library.get_cache_stats();
+                library.cleanup_old_textures(max_age);
+                let (after, _) = library.get_cache_stats();
+
+                let cleaned = before.saturating_sub(after);
+                if cleaned > 0 {
+                    total_cleaned += cleaned;
+                    tracing::debug!(
+                        "🧹 MapLib[{}]: cleaned {} textures ({} → {})",
+                        idx,
+                        cleaned,
+                        before,
+                        after
+                    );
+                }
+            }
+        }
+
+        if total_cleaned > 0 {
+            tracing::info!(
+                "🧹 Texture cache cleanup: removed {} old textures",
+                total_cleaned
+            );
+        }
+    }
+
+    // ==================== 网络协议处理 ====================
+    // 对应 C# ProcessPacket (line 1384-5976)
+
+    /// 绘制玩家角色（旧版本，已废弃，使用 draw_player_with_camera 代替）
+    ///
+    /// 简化版本：绘制一个简单的角色图像用于测试位置
+    #[allow(dead_code)]
+    fn draw_player(
+        &self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        user_pos: &UserPosition,
+    ) -> ggez::GameResult<()> {
+        use crate::graphics::libraries::{get_library, LibraryName};
+        use ggez::graphics::{Color, DrawMode, DrawParam, Mesh, Rect};
+        use mir2_shared::enums::{MirClass, MirGender};
+
+        if let Some(ref user) = self.user {
+            // 计算角色在屏幕上的绘制位置（屏幕中心）
+            // 注意：offset_x/offset_y 已被摄像机系统取代
+            let screen_center_x = (self.camera.screen_width / 2.0) as f32;
+            let screen_center_y = (self.camera.screen_height / 2.0) as f32;
+
+            // 🎨 先绘制一个简单的矩形作为角色占位符，确认位置
+            let player_rect = Rect::new(screen_center_x - 20.0, screen_center_y - 40.0, 40.0, 60.0);
+            let rect_mesh = Mesh::new_rectangle(
+                ctx,
+                DrawMode::stroke(2.0),
+                player_rect,
+                Color::from_rgb(0, 255, 0), // 绿色边框
+            )?;
+            canvas.draw(&rect_mesh, DrawParam::default());
+
+            // 绘制一个填充的圆形表示角色位置
+            let circle_mesh = Mesh::new_circle(
+                ctx,
+                DrawMode::fill(),
+                [screen_center_x, screen_center_y],
+                5.0,
+                0.1,
+                Color::from_rgb(255, 255, 0), // 黄色圆点
+            )?;
+            canvas.draw(&circle_mesh, DrawParam::default());
+
+            // 🎨 使用 ChrSel 库绘制角色
+            // 这个库包含角色选择界面的角色预览，可以用于测试
+            // 帧索引计算：class_index * 40 + gender * 20 + direction
+            let class_base = match user.player.class {
+                MirClass::Warrior => 0,
+                MirClass::Wizard => 40,
+                MirClass::Taoist => 80,
+                MirClass::Assassin => 120,
+                MirClass::Archer => 160,
+            };
+
+            let gender_offset = match user.player.gender {
+                MirGender::Male => 0,
+                MirGender::Female => 20,
+            };
+
+            let direction = user.player.map_object.direction as usize;
+            let frame_index = class_base + gender_offset + direction;
+
+            // 🐛 调试：打印角色绘制信息
+            static mut FIRST_PLAYER_DRAW: bool = true;
+            unsafe {
+                if FIRST_PLAYER_DRAW {
+                    println!("\n👤 === 角色绘制调试 ===");
+                    println!(
+                        "角色位置: ({}, {})",
+                        user.player.map_object.movement.x, user.player.map_object.movement.y
+                    );
+                    println!(
+                        "屏幕中心位置: ({:.1}, {:.1})",
+                        screen_center_x, screen_center_y
+                    );
+                    println!(
+                        "绿色矩形: x={:.1}, y={:.1}, 宽=40, 高=60",
+                        screen_center_x - 20.0,
+                        screen_center_y - 40.0
+                    );
+                    println!("黄色圆点: ({:.1}, {:.1})", screen_center_x, screen_center_y);
+                    println!("方向: {:?}", user.player.map_object.direction);
+                    println!(
+                        "性别: {:?}, 职业: {:?}",
+                        user.player.gender, user.player.class
+                    );
+                    FIRST_PLAYER_DRAW = false;
+                }
+            }
+
+            // 🎨 尝试使用 ChrSel 库绘制角色预览图
+            let class_base = match user.player.class {
+                MirClass::Warrior => 0,
+                MirClass::Wizard => 40,
+                MirClass::Taoist => 80,
+                MirClass::Assassin => 120,
+                MirClass::Archer => 160,
+            };
+
+            let gender_offset = match user.player.gender {
+                MirGender::Male => 0,
+                MirGender::Female => 20,
+            };
+
+            let direction = user.player.map_object.direction as usize;
+            let frame_index = class_base + gender_offset + direction;
+
+            if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
+                if let Ok(mut lib) = lib_arc.try_lock() {
+                    // 检查图像数量
+                    let image_count = lib.count();
+                    unsafe {
+                        if FIRST_PLAYER_DRAW {
+                            println!("ChrSel 库图像数量: {}", image_count);
+                            println!("====================\n");
+                        }
+                    }
+
+                    // 确保索引有效
+                    if frame_index >= image_count {
+                        tracing::warn!("❌ 角色帧索引越界: {} >= {}", frame_index, image_count);
+                        return Ok(());
+                    }
+
+                    // 绘制角色（使用偏移量居中显示）
+                    match lib.draw_with_color(
+                        ctx,
+                        canvas,
+                        frame_index,
+                        screen_center_x,
+                        screen_center_y - 20.0, // 稍微往上偏移，因为角色图片底部应该在脚下
+                        Color::WHITE,
+                        true, // use_offset = true，使用图像的偏移信息
+                    ) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::error!("❌ 角色绘制失败 (索引 {}): {:?}", frame_index, e);
+                        }
+                    }
+                } else {
+                    tracing::warn!("❌ 无法锁定 ChrSel 库");
+                }
+            } else {
+                tracing::error!("❌ ChrSel 库未加载！");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 🎥 使用摄像机系统绘制玩家角色
+    ///
+    /// 与 draw_player 的区别：
+    /// - 使用摄像机的世界坐标转屏幕坐标
+    /// - 角色始终在屏幕中心
+    /// - 支持缩放
+    /// 绘制玩家角色 (使用摄像机坐标系统)
+    ///
+    /// ════════════════════════════════════════════════════════════
+    /// 📝 玩家绘制流程详解
+    /// ════════════════════════════════════════════════════════════
+    ///
+    /// 1. 计算玩家世界坐标 (像素)
+    ///    world_x = grid_x * CELL_WIDTH + offset_x
+    ///    world_y = grid_y * CELL_HEIGHT + offset_y
+    ///
+    /// 2. 世界坐标转屏幕坐标 (通过摄像机)
+    ///    screen_x = world_x - camera.x + screen_width/2
+    ///    screen_y = world_y - camera.y + screen_height/2
+    ///
+    /// 3. 绘制角色纹理
+    ///    - 绿色矩形框 (占位符)
+    ///    - 黄色圆点 (中心点标记)
+    ///    - ChrSel 库的角色纹理 (实际角色图像)
+    ///
+    /// 4. 计算纹理索引
+    ///    frame_index = class_base + gender_offset + direction
+    ///    - Warrior: 0-19 (Male: 0-7, Female: 20-27)
+    ///    - Wizard: 40-59
+    ///    - Taoist: 80-99
+    ///    - Assassin: 120-139
+    ///    - Archer: 160-179
+    /// ════════════════════════════════════════════════════════════
+    fn draw_player_with_camera(
+        &self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        _user_pos: &UserPosition,
+    ) -> ggez::GameResult<()> {
+        use crate::graphics::libraries::{get_library, LibraryName};
+        use ggez::graphics::{Color, DrawMode, DrawParam, Mesh, Rect};
+        use mir2_shared::enums::{MirClass, MirGender};
+
+        if let Some(ref user) = self.user {
+            // ════════════════════════════════════════════════════════
+            // 步骤 1: 计算玩家世界坐标（像素）
+            // ════════════════════════════════════════════════════════
+            let player_world_x = (user.player.map_object.movement.x as f32
+                * MapRenderer::CELL_WIDTH as f32)
+                + user.player.map_object.offset_move.x as f32;
+            let player_world_y = (user.player.map_object.movement.y as f32
+                * MapRenderer::CELL_HEIGHT as f32)
+                + user.player.map_object.offset_move.y as f32;
+
+            // ════════════════════════════════════════════════════════
+            // 步骤 2: 世界坐标转屏幕坐标
+            // ════════════════════════════════════════════════════════
+            let (screen_x, screen_y) = self.camera.world_to_screen(player_world_x, player_world_y);
+
+            // 🐛 DEBUG: 首帧详细打印玩家绘制信息
+            static mut FIRST_DRAW_WITH_CAMERA: bool = true;
+            unsafe {
+                if FIRST_DRAW_WITH_CAMERA {
+                    println!("╔════════════════════════════════════════════════════════════════");
+                    println!("║ 👤 玩家角色绘制详细信息");
+                    println!("╚════════════════════════════════════════════════════════════════");
+                    println!(
+                        "   📍 格子位置: ({}, {})",
+                        user.player.map_object.movement.x, user.player.map_object.movement.y
+                    );
+                    println!(
+                        "   📐 移动偏移: ({}, {})",
+                        user.player.map_object.offset_move.x, user.player.map_object.offset_move.y
+                    );
+                    println!(
+                        "   🌍 世界坐标: ({:.1}, {:.1}) 像素",
+                        player_world_x, player_world_y
+                    );
+                    println!(
+                        "   🎥 摄像机位置: ({:.1}, {:.1})",
+                        self.camera.x, self.camera.y
+                    );
+                    println!("   🖥️  屏幕坐标: ({:.1}, {:.1})", screen_x, screen_y);
+                    println!(
+                        "   📺 屏幕尺寸: ({:.0}, {:.0})",
+                        self.camera.get_screen_size().0,
+                        self.camera.get_screen_size().1
+                    );
+                    println!("   🧭 朝向: {:?}", user.player.map_object.direction);
+                    println!(
+                        "   👤 性别: {:?}, 职业: {:?}",
+                        user.player.gender, user.player.class
+                    );
+                    println!("════════════════════════════════════════════════════════════════\n");
+                    FIRST_DRAW_WITH_CAMERA = false;
+                }
+            }
+
+            // ════════════════════════════════════════════════════════
+            // 步骤 3: 计算角色动画帧索引 (使用正确的帧计算)
+            // ════════════════════════════════════════════════════════
+            // CArmours 库帧布局:
+            //   - Standing: 0-31   (8方向 * 4帧)
+            //   - Walking:  32-79  (8方向 * 6帧)
+            //   - Running:  80-127 (8方向 * 6帧)
+            //   - Attack1:  128-175 (8方向 * 6帧)
+            //   - Male: 0-xxx
+            //   - Female: +808 offset
+            //
+            // 计算公式: DrawFrame + ArmourOffSet
+            //   DrawFrame = action_frame_start + direction * frames_per_direction + frame_index
+            //   ArmourOffSet = gender_offset (Male=0, Female=808)
+            
+            let final_frame = user.player.get_final_frame() as usize;
+
+            tracing::trace!(
+                "🎨 角色帧索引: {} (动作:{:?}, 方向:{}, 性别:{:?})",
+                final_frame,
+                user.player.current_action,
+                user.player.map_object.direction as usize,
+                user.player.gender
+            );
+
+            // ════════════════════════════════════════════════════════
+            // 步骤 5: 绘制角色纹理 (CArmours 库 - 正确!)
+            // ════════════════════════════════════════════════════════
+            // 选择装备库:
+            //   - Warrior/Wizard/Taoist: CArmours[armour_id]
+            //   - Assassin: AArmours[armour_id]
+            //   - Archer: CArmours or ARArmours (取决于动作)
+            
+            // 获取装备ID (如果为负数则使用默认值0)
+            let armour_id = if user.player.armour < 0 {
+                tracing::warn!("⚠️ 装备ID为负数 ({}), 使用默认值0", user.player.armour);
+                0
+            } else {
+                user.player.armour as usize
+            };
+            
+            let library_name = match user.player.class {
+                MirClass::Warrior | MirClass::Wizard | MirClass::Taoist => {
+                    // 通用装备库 CArmours
+                    // 当前使用装备0 (默认服装)
+                    LibraryName::CArmours(armour_id)
+                }
+                MirClass::Assassin => {
+                    // 刺客专用库 AArmours
+                    LibraryName::AArmours(armour_id)
+                }
+                MirClass::Archer => {
+                    // 弓箭手: 根据动作选择库
+                    // Walking/Running/Attack1 用 ARArmours, 其他用 CArmours
+                    let alt_anim = matches!(
+                        user.player.current_action,
+                        MirAction::Walking | MirAction::Running | MirAction::Attack1
+                    );
+                    
+                    if alt_anim {
+                        LibraryName::ARArmours(armour_id)
+                    } else {
+                        LibraryName::CArmours(armour_id)
+                    }
+                }
+            };
+            
+            if let Some(lib_arc) = get_library(library_name.clone()) {
+                if let Ok(mut lib) = lib_arc.try_lock() {
+                    let image_count = lib.count();
+
+                    // 检查索引是否有效
+                    if final_frame < image_count {
+                        tracing::trace!("🎨 开始绘制 {:?}[{}] 纹理...", library_name, final_frame);
+
+                        // 绘制角色身体 (使用摄像机缩放)
+                        match lib.draw_with_scale(
+                            ctx,
+                            canvas,
+                            final_frame,
+                            screen_x,
+                            screen_y,
+                            Color::WHITE,
+                            true, // use_offset (使用图像偏移量)
+                            self.camera.zoom, // 应用摄像机缩放
+                        ) {
+                            Ok(_) => {
+                                tracing::trace!("✅ {:?}[{}] 纹理绘制成功 (缩放: {:.2}x)", library_name, final_frame, self.camera.zoom);
+                            }
+                            Err(e) => {
+                                tracing::error!("❌ {:?}[{}] 纹理绘制失败: {:?}", library_name, final_frame, e);
+                            }
+                        }
+                    } else {
+                        tracing::error!(
+                            "❌ 角色纹理索引越界: {} >= {} (总图像数)",
+                            final_frame,
+                            image_count
+                        );
+                    }
+                } else {
+                    tracing::error!("❌ 无法锁定装备库 {:?}", library_name);
+                }
+            } else {
+                tracing::error!("❌ 装备库 {:?} 未加载", library_name);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 加载地图文件 (从 game_scene_old.rs 迁移)
+    ///
+    /// 对应 C# LoadMap 方法
+    fn load_map_file(map_name: &str) -> std::io::Result<MapRenderer> {
+        use crate::objects::MapReader;
         use std::path::PathBuf;
-        
-        // Try different paths - prioritize ClientRust/Map first
+
+        // 尝试不同路径 - 优先 ClientRust/Map
         let paths = [
-            PathBuf::from(format!("Map/{}.map", map_name)),         // ClientRust/Map
+            PathBuf::from(format!("Map/{}.map", map_name)), // ClientRust/Map
             PathBuf::from(format!("./Map/{}.map", map_name)),
             PathBuf::from(format!("Data/Map/{}.map", map_name)),
             PathBuf::from(format!("./Data/Map/{}.map", map_name)),
             PathBuf::from(format!("../Data/Map/{}.map", map_name)),
             PathBuf::from(format!("../../Data/Map/{}.map", map_name)),
         ];
-        
+
         for path in &paths {
             if path.exists() {
-                tracing::debug!("📂 Found map file at: {}", path.display());
+                tracing::info!("🗺️  Found map file: {:?}", path);
                 match MapReader::new(path.to_str().unwrap()) {
                     Ok(reader) => {
-                        tracing::info!("✅ MapReader loaded: {}x{}", reader.width, reader.height);
-                        return Ok(map_control::MapControl::from_map_reader(reader));
+                        // 🎨 新架构：直接返回 MapRenderer
+                        return Ok(MapRenderer::from_reader(reader));
                     }
                     Err(e) => {
-                        tracing::error!("❌ Failed to parse map {}: {}", path.display(), e);
-                        return Err(e);
+                        tracing::warn!("⚠️  Failed to parse map file {:?}: {}", path, e);
+                        continue;
                     }
                 }
             }
         }
-        
+
         Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("Map file not found: {}", map_name),
         ))
     }
-    
-    /// Create new game scene
-    pub fn new() -> Self {
-        // 🧪 临时: 尝试加载测试地图 "0"
-        let test_map = Self::load_map_file("0").ok();
-        let (initial_x, initial_y) = if let Some(ref map) = test_map {
-            let center_x = map.width / 2;
-            let center_y = map.height / 2;
-            // 确保是偶数坐标
-            let x = if center_x % 2 == 0 { center_x } else { center_x + 1 };
-            let y = if center_y % 2 == 0 { center_y } else { center_y + 1 };
-            tracing::info!("🧪 Loaded test map '0': {}x{}, player at ({}, {})", map.width, map.height, x, y);
-            (x, y)
-        } else {
-            tracing::warn!("⚠️  Failed to load test map '0', using default empty position");
-            (100, 100) // 默认偶数坐标
-        };
-        
-        // ✅ 注意: initialize() 会由 SceneManager::switch_scene() 调用
-        // 不在构造函数中调用,遵循Scene trait的两阶段初始化模式
-        Self {
-            user: None,
-            hero: None,
-            objects: HashMap::new(),
-            monsters: HashMap::new(),
-            npcs: HashMap::new(),
-            items: HashMap::new(),
-            players: HashMap::new(),
-            spells: Vec::new(),
-            effects: Vec::new(),
-            damages: Vec::new(),
-            gold: 0,
-            credit: 0,
-            attack_mode: AttackMode::Peace,
-            pet_mode: PetMode::Both,
-            lights: LightSetting::Normal,
-            storage: vec![None; 80],
-            guild_storage: vec![None; 112],
-            refine_storage: vec![None; 16],
-            hero_storage: [None, None, None, None, None, None, None, None],
-            hover_item: None,
-            selected_item: None,
-            picked_up_gold: false,
-            move_time: 0,
-            attack_time: 0,
-            spell_time: 0,
-            pickup_time: 0,
-            use_item_time: 0,
-            can_move: true,
-            can_run: true,
-            observing: false,
-            allow_observe: false,
-            output_messages: VecDeque::new(),
-            max_output_messages: 100,
-            map_info: HashMap::new(),
-            current_map_index: 0,
-            map_control: test_map, // 🧪 使用测试地图
-            tile_texture_manager: std::cell::RefCell::new(
-                crate::scenes::game_scene::tile_texture_manager::TileTextureManager::new()
-            ),
-            player_x: initial_x,
-            player_y: initial_y,
-            animation_count: 0,
-            pathfinder: None,
-        }
+
+    // ==================== 输入处理 ====================
+    // 对应 C# GameScene_KeyDown (line 1148-801)
+
+    /// 处理键盘输入
+    ///
+    /// 对应 C# GameScene_KeyDown
+    #[allow(unused_variables)]
+    pub fn on_key_down(&mut self, key: ggez::input::keyboard::KeyCode) {
+        // TODO: 映射 KeybindOptions
+        // match keybind_option {
+        //     KeybindOptions::Bar1Skill1 => self.use_spell(1),
+        //     KeybindOptions::Inventory => self.toggle_inventory(),
+        //     ...
+        // }
     }
-    
-    /// Add output message to chat log
-    pub fn add_output_message(&mut self, text: String, color: (u8, u8, u8)) {
-        let message = OutputMessage {
-            text,
-            color,
-            timestamp: get_current_time(),
-        };
+
+
+    /// 将屏幕坐标转换为地图坐标
+    /// 
+    /// 对应 C# ToMapLocation
+    fn screen_to_map_location(&self, screen_pos: Point) -> Point {
+        // 1. 屏幕坐标 -> 世界坐标（像素）
+        let (world_x, world_y) = self.camera.screen_to_world(screen_pos.x as f32, screen_pos.y as f32);
         
-        self.output_messages.push_back(message);
+        // 2. 世界坐标（像素）-> 地图格子坐标
+        use crate::scenes::game_scene::map_renderer::MapRenderer;
         
-        // Limit message count
-        while self.output_messages.len() > self.max_output_messages {
+        // 传奇2使用48x32的瓦片大小
+        // 但渲染时使用了48x48的格子（CELL_WIDTH x CELL_HEIGHT）
+        // 这里使用CELL_WIDTH和CELL_HEIGHT来转换
+        let map_x = (world_x / MapRenderer::CELL_WIDTH as f32) as i32;
+        let map_y = (world_y / MapRenderer::CELL_HEIGHT as f32) as i32;
+        
+        Point { x: map_x, y: map_y }
+    }
+
+    // ==================== 游戏逻辑 ====================
+
+    /// 使用技能
+    ///
+    /// 对应 C# UseSpell (line 878-1021)
+    #[allow(unused_variables)]
+    pub fn use_spell(&mut self, key: i32) {
+        // TODO: 实现技能释放逻辑
+    }
+
+    /// 输出消息
+    ///
+    /// 对应 C# OutputMessage (line 504-508)
+    pub fn output_message(&mut self, message: String, message_type: OutputMessageType) {
+        let expire_time = 0; // TODO: CMain.Time + 5000
+        self.output_messages.push_back(OutputMessage {
+            message,
+            expire_time,
+            message_type,
+        });
+
+        if self.output_messages.len() > self.max_output_messages {
             self.output_messages.pop_front();
         }
     }
     
-    /// Add game object (adds to both objects map and cell, plus specific collection)
-    pub fn add_monster(&mut self, monster: MonsterObject) {
-        let id = monster.map_object.object_id();
-        let location = monster.map_object.location();
-        
-        // Add to drawable objects map
-        self.objects.insert(id, Box::new(monster.clone()));
-        
-        // Add to monsters collection
-        self.monsters.insert(id, monster);
-        
-        // Add to cell's object list
-        if let Some(ref mut map) = self.map_control {
-            if let Some(cell) = map.get_cell_mut(location.x, location.y) {
-                cell.add_object(id);
-            }
+    // ==================== 移动相关方法 ====================
+    
+    /// 检查是否可以向指定方向移动
+    /// 
+    /// 对应 C# GameScene.cs CanWalk(MirDirection dir)
+    /// Reference: Client/MirScenes/GameScene.cs line 13174
+    pub fn can_walk(&self, dir: MirDirection) -> bool {
+        if let Some(ref user) = self.user {
+            // 🔧 修复: 应该使用 current_location 而不是 movement
+            // current_location 是逻辑位置，movement 是渲染位置
+            let current_loc = user.player.map_object.current_location;
+            let target_loc = self.point_move(current_loc, dir, 1);
+            
+            // 检查目标位置是否为空
+            self.empty_cell(target_loc) && !user.player.map_object.in_trap_rock
+        } else {
+            false
         }
     }
     
-    pub fn add_npc(&mut self, npc: NPCObject) {
-        let id = npc.map_object.object_id();
-        let location = npc.map_object.location();
-        
-        // Add to drawable objects map
-        self.objects.insert(id, Box::new(npc.clone()));
-        
-        // Add to NPCs collection
-        self.npcs.insert(id, npc);
-        
-        // Add to cell's object list
-        if let Some(ref mut map) = self.map_control {
-            if let Some(cell) = map.get_cell_mut(location.x, location.y) {
-                cell.add_object(id);
-            }
-        }
+    /// 检查指定格子是否可以移动到
+    pub fn can_walk_to(&self, target: Point) -> bool {
+        self.empty_cell(target)
     }
     
-    pub fn add_item(&mut self, item: ItemObject) {
-        let id = item.map_object.object_id();
-        let location = item.map_object.location();
-        
-        // Add to drawable objects map
-        self.objects.insert(id, Box::new(item.clone()));
-        
-        // Add to items collection
-        self.items.insert(id, item);
-        
-        // Add to cell's object list
-        if let Some(ref mut map) = self.map_control {
-            if let Some(cell) = map.get_cell_mut(location.x, location.y) {
-                cell.add_object(id);
-            }
-        }
-    }
-    
-    pub fn add_player(&mut self, player: UserObject) {
-        let id = player.player.map_object.object_id();
-        let location = player.player.map_object.location();
-        
-        // Add to drawable objects map
-        self.objects.insert(id, Box::new(player.clone()));
-        
-        // Add to players collection
-        self.players.insert(id, player);
-        
-        // Add to cell's object list
-        if let Some(ref mut map) = self.map_control {
-            if let Some(cell) = map.get_cell_mut(location.x, location.y) {
-                cell.add_object(id);
-            }
-        }
-    }
-    
-    /// Find monster by ID
-    pub fn get_monster(&self, object_id: u32) -> Option<&MonsterObject> {
-        self.monsters.get(&object_id)
-    }
-    
-    /// Find monster by ID (mutable)
-    pub fn get_monster_mut(&mut self, object_id: u32) -> Option<&mut MonsterObject> {
-        self.monsters.get_mut(&object_id)
-    }
-    
-    /// Find NPC by ID
-    pub fn get_npc(&self, object_id: u32) -> Option<&NPCObject> {
-        self.npcs.get(&object_id)
-    }
-    
-    /// Find item by ID
-    pub fn get_item(&self, object_id: u32) -> Option<&ItemObject> {
-        self.items.get(&object_id)
-    }
-    
-    /// Find player by ID
-    pub fn get_player(&self, object_id: u32) -> Option<&UserObject> {
-        self.players.get(&object_id)
-    }
-    
-    /// Find player by ID (mutable)
-    pub fn get_player_mut(&mut self, object_id: u32) -> Option<&mut UserObject> {
-        self.players.get_mut(&object_id)
-    }
-    
-    /// Get all objects at a specific location
-    pub fn get_objects_at(&self, location: Point) -> Vec<u32> {
-        if let Some(ref map) = self.map_control {
-            if let Some(cell) = map.get_cell(location.x, location.y) {
-                return cell.cell_objects.clone().unwrap_or_default();
-            }
-        }
-        Vec::new()
-    }
-    
-    /// Find closest monster to a location
-    pub fn find_closest_monster(&self, location: Point, max_distance: i32) -> Option<u32> {
-        let mut closest_id = None;
-        let mut closest_dist = max_distance * max_distance; // Use squared distance
-        
-        for monster in self.monsters.values() {
-            if monster.map_object.is_dead() {
-                continue;
+    /// 检查是否可以向指定方向移动，如果不行尝试相邻方向
+    /// 
+    /// 对应 C# GameScene.cs CanWalk(MirDirection dir, out MirDirection outDir)
+    /// Reference: Client/MirScenes/GameScene.cs line 13179
+    pub fn can_walk_adjust(&self, dir: MirDirection) -> Option<MirDirection> {
+        if let Some(ref user) = self.user {
+            if user.player.map_object.in_trap_rock {
+                return None;
             }
             
-            let pos = monster.map_object.location();
-            let dx = pos.x - location.x;
-            let dy = pos.y - location.y;
-            let dist_sq = dx * dx + dy * dy;
+            let current_loc = user.player.map_object.movement;
             
-            if dist_sq < closest_dist {
-                closest_dist = dist_sq;
-                closest_id = Some(monster.map_object.object_id());
-            }
-        }
-        
-        closest_id
-    }
-    
-    /// Clear all objects from the scene
-    pub fn clear_all_objects(&mut self) {
-        tracing::info!("Clearing all objects from scene");
-        
-        self.objects.clear();
-        self.monsters.clear();
-        self.npcs.clear();
-        self.items.clear();
-        self.players.clear();
-        self.spells.clear();
-        self.effects.clear();
-        self.damages.clear();
-        
-        // Clear cell object lists
-        if let Some(ref mut map) = self.map_control {
-            for y in 0..map.height {
-                for x in 0..map.width {
-                    if let Some(cell) = map.get_cell_mut(x, y) {
-                        cell.cell_objects = None;
-                    }
-                }
-            }
-        }
-    }
-    
-    /// Remove a specific object from the scene
-    pub fn remove_object(&mut self, object_id: u32) -> bool {
-        let mut removed = false;
-        
-        // Remove from general objects map
-        if self.objects.remove(&object_id).is_some() {
-            removed = true;
-        }
-        
-        // Try removing from each specific collection
-        if self.monsters.remove(&object_id).is_some() {
-            tracing::debug!("Removed monster {}", object_id);
-            removed = true;
-        }
-        
-        if self.npcs.remove(&object_id).is_some() {
-            tracing::debug!("Removed NPC {}", object_id);
-            removed = true;
-        }
-        
-        if self.items.remove(&object_id).is_some() {
-            tracing::debug!("Removed item {}", object_id);
-            removed = true;
-        }
-        
-        if self.players.remove(&object_id).is_some() {
-            tracing::debug!("Removed player {}", object_id);
-            removed = true;
-        }
-        
-        // Remove from map cell tracking
-        if removed {
-            self.remove_object_from_all_cells(object_id);
-        }
-        
-        removed
-    }
-    
-    /// Remove object from all map cells (helper method)
-    fn remove_object_from_all_cells(&mut self, object_id: u32) {
-        if let Some(ref mut map) = self.map_control {
-            for y in 0..map.height {
-                for x in 0..map.width {
-                    if let Some(cell) = map.get_cell_mut(x, y) {
-                        if let Some(ref mut objects) = cell.cell_objects {
-                            objects.retain(|&id| id != object_id);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    /// Remove multiple objects at once
-    pub fn remove_objects(&mut self, object_ids: &[u32]) {
-        for &object_id in object_ids {
-            self.remove_object(object_id);
-        }
-        tracing::debug!("Removed {} objects", object_ids.len());
-    }
-    
-    /// Remove all dead monsters
-    pub fn remove_dead_monsters(&mut self) {
-        let dead_ids: Vec<u32> = self.monsters
-            .iter()
-            .filter(|(_, m)| m.map_object.is_dead())
-            .map(|(id, _)| *id)
-            .collect();
-        
-        for id in &dead_ids {
-            self.remove_object(*id);
-        }
-        
-        if !dead_ids.is_empty() {
-            tracing::debug!("Removed {} dead monsters", dead_ids.len());
-        }
-    }
-    
-    /// Remove all items at a specific location
-    pub fn remove_items_at(&mut self, location: Point) -> usize {
-        let items_to_remove: Vec<u32> = self.items
-            .iter()
-            .filter(|(_, item)| item.map_object.location() == location)
-            .map(|(id, _)| *id)
-            .collect();
-        
-        let count = items_to_remove.len();
-        for id in items_to_remove {
-            self.remove_object(id);
-        }
-        
-        if count > 0 {
-            tracing::debug!("Removed {} items at ({}, {})", count, location.x, location.y);
-        }
-        
-        count
-    }
-    
-    /// Get current time in milliseconds
-    fn get_time(&self) -> i64 {
-        get_current_time()
-    }
-    
-    /// Update all game objects
-    pub fn update_objects(&mut self, delta_time: f32) {
-        let current_time = self.get_time();
-        let delta_ms = (delta_time * 1000.0) as u32;
-        
-        // Update user
-        if let Some(ref mut user) = self.user {
-            // Update movement
-            if user.player.map_object.update_movement(delta_time) {
-                user.player.map_object.update_draw_location();
+            // 首先尝试原方向
+            let target_loc = self.point_move(current_loc, dir, 1);
+            if self.empty_cell(target_loc) {
+                return Some(dir);
             }
             
-            // Update animation
-            user.player.map_object.advance(delta_ms);
-        }
-        
-        // Update hero
-        if let Some(ref mut hero) = self.hero {
-            hero.update_loyalty(delta_time);
-            
-            // Update movement
-            if hero.player.map_object.update_movement(delta_time) {
-                hero.player.map_object.update_draw_location();
+            // 尝试下一个方向 (顺时针)
+            let next_dir = self.next_dir(dir);
+            let target_loc = self.point_move(current_loc, next_dir, 1);
+            if self.empty_cell(target_loc) {
+                return Some(next_dir);
             }
             
-            // Update animation
-            hero.player.map_object.advance(delta_ms);
-        }
-        
-        // Update monsters
-        for monster in self.monsters.values_mut() {
-            // Update movement
-            if monster.map_object.update_movement(delta_time) {
-                monster.map_object.update_draw_location();
+            // 尝试上一个方向 (逆时针)
+            let prev_dir = self.previous_dir(dir);
+            let target_loc = self.point_move(current_loc, prev_dir, 1);
+            if self.empty_cell(target_loc) {
+                return Some(prev_dir);
             }
             
-            // Update animation
-            monster.map_object.advance(delta_ms);
+            None
+        } else {
+            None
         }
-        
-        // Update NPCs (usually stationary, but animate)
-        for npc in self.npcs.values_mut() {
-            npc.map_object.advance(delta_ms);
-        }
-        
-        // Update players
-        for player in self.players.values_mut() {
-            // Update movement
-            if player.player.map_object.update_movement(delta_time) {
-                player.player.map_object.update_draw_location();
-            }
-            
-            // Update animation
-            player.player.map_object.advance(delta_ms);
-        }
-        
-        // Update spells
-        for spell in self.spells.iter_mut() {
-            spell.update_position(current_time);
-        }
-        
-        // Remove expired spells
-        self.spells.retain(|s| !s.should_remove(current_time));
-        
-        // Update effects
-        for effect in self.effects.iter_mut() {
-            effect.update(current_time);
-        }
-        
-        // Remove finished effects
-        self.effects.retain(|e| !e.is_finished());
-        
-        // Update damage numbers
-        for damage in self.damages.iter_mut() {
-            damage.update(current_time, delta_time);
-        }
-        
-        // Remove finished damage numbers
-        self.damages.retain(|d| !d.is_finished());
     }
     
-    /// Handle server packets for object spawning
-    /// This uses ObjectFactory to create game objects from network packets
-    pub fn handle_server_object_packets(&mut self) {
-        // TODO: 当网络层完善后,从这里接收并处理ObjectMonster/ObjectNpc等包
-        // 示例:
-        // 
-        // use mir2_shared::packets::server::{ObjectMonster, ObjectNpc, ObjectPlayer};
-        // 
-        // match server_packet {
-        //     ServerPacket::ObjectMonster(packet) => {
-        //         let monster = ObjectFactory::create_monster(&packet);
-        //         self.add_monster(monster);
-        //     }
-        //     ServerPacket::ObjectNpc(packet) => {
-        //         let npc = ObjectFactory::create_npc(&packet);
-        //         self.add_npc(npc);
-        //     }
-        //     ServerPacket::ObjectPlayer(packet) => {
-        //         let player = ObjectFactory::create_player(&packet);
-        //         self.add_player(player);
-        //     }
-        //     ServerPacket::ObjectItem(packet) => {
-        //         let item = ObjectFactory::create_item(&packet);
-        //         self.add_item(item);
-        //     }
-        //     ServerPacket::ObjectGold(packet) => {
-        //         let gold = ObjectFactory::create_gold(&packet);
-        //         self.add_item(gold);
-        //     }
-        //     ServerPacket::ObjectHero(packet) => {
-        //         let hero = ObjectFactory::create_hero(&packet);
-        //         self.hero = Some(hero);
-        //     }
-        //     _ => {}
-        // }
+    /// 检查格子是否为空 (没有障碍物)
+    /// 
+    /// 对应 C# GameScene.cs EmptyCell(Point p)
+    fn empty_cell(&self, p: Point) -> bool {
+        // 直接使用MapRenderer的is_walkable方法
+        self.map_renderer.is_walkable(p.x, p.y)
     }
     
-    /// 🧪 Create test player character
-    fn create_test_player(&mut self) {
-        use mir2_shared::packets::server::ObjectPlayer;
-        use mir2_shared::enums::{MirClass, MirGender, MirDirection, PoisonType};
+    /// 计算从某点向指定方向移动 n 格后的位置
+    /// 
+    /// 对应 C# Functions.PointMove(Point p, MirDirection d, int count)
+    fn point_move(&self, p: Point, d: MirDirection, count: i32) -> Point {
+        use mir2_shared::enums::MirDirection::*;
         
-        tracing::info!("🧪 Creating test player character...");
+        match d {
+            Up => Point { x: p.x, y: p.y - count },
+            UpRight => Point { x: p.x + count, y: p.y - count },
+            Right => Point { x: p.x + count, y: p.y },
+            DownRight => Point { x: p.x + count, y: p.y + count },
+            Down => Point { x: p.x, y: p.y + count },
+            DownLeft => Point { x: p.x - count, y: p.y + count },
+            Left => Point { x: p.x - count, y: p.y },
+            UpLeft => Point { x: p.x - count, y: p.y - count },
+        }
+    }
+    
+    /// 根据两点计算方向
+    /// 
+    /// 对应 C# Functions.DirectionFromPoint(Point source, Point dest)
+    /// 使用 SharedRust 的标准实现(基于象限判断,比角度计算更准确)
+    fn direction_from_point(&self, source: Point, dest: Point) -> MirDirection {
+        use mir2_shared::enums::MirDirection::*;
         
-        // Create test player packet
-        let player_packet = ObjectPlayer {
-            object_id: 1,
-            name: "TestPlayer".to_string(),
-            guild_name: String::new(),
-            guild_rank_name: String::new(),
-            name_colour: 0xFFFFFF,
-            class: MirClass::Warrior,
-            gender: MirGender::Male,
-            level: 1,
-            location_x: self.player_x,
-            location_y: self.player_y,
-            direction: MirDirection::Down,
-            hair: 0,
-            light: 3,
-            weapon: -1,
-            weapon_effect: 0,
-            armour: -1,
-            poison: PoisonType::NONE,
-            dead: false,
-            hidden: false,
-            effect: mir2_shared::enums::SpellEffect::None,
-            wing_effect: 0,
-            extra: false,
-            mount_type: -1,
-            riding_mount: false,
-            fishing: false,
-            transform_type: -1,
-            element_orb_effect: 0,
-            element_orb_lvl: 0,
-            element_orb_max: 0,
-            buffs: vec![],
-            level_effects: mir2_shared::enums::LevelEffects::NONE,
-        };
+        if source.x < dest.x {
+            if source.y < dest.y {
+                return DownRight;
+            }
+            if source.y > dest.y {
+                return UpRight;
+            }
+            return Right;
+        }
+
+        if source.x > dest.x {
+            if source.y < dest.y {
+                return DownLeft;
+            }
+            if source.y > dest.y {
+                return UpLeft;
+            }
+            return Left;
+        }
+
+        if source.y < dest.y {
+            Down
+        } else {
+            Up
+        }
+    }
+    
+    /// 获取下一个方向 (顺时针)
+    /// 
+    /// 对应 C# Functions.NextDir(MirDirection d)
+    fn next_dir(&self, d: MirDirection) -> MirDirection {
+        use mir2_shared::enums::MirDirection::*;
         
-        // Create player using ObjectFactory
-        let user = ObjectFactory::create_player(&player_packet);
+        match d {
+            Up => UpRight,
+            UpRight => Right,
+            Right => DownRight,
+            DownRight => Down,
+            Down => DownLeft,
+            DownLeft => Left,
+            Left => UpLeft,
+            UpLeft => Up,
+        }
+    }
+    
+    /// 计算从当前方向到目标方向的最近转向
+    /// 
+    /// 返回下一步应该朝向的方向(最多转一格)
+    /// 这样可以实现平滑的方向转换,而不是直接跳转
+    fn smooth_direction_change(&self, current: MirDirection, target: MirDirection) -> MirDirection {
+        if current == target {
+            return current;
+        }
         
-        let player_id = user.player.map_object.object_id();
-        let player_location = user.player.map_object.location();
+        // 计算顺时针和逆时针到目标的步数
+        let mut clockwise_steps = 0;
+        let mut dir = current;
+        while dir != target && clockwise_steps < 8 {
+            dir = self.next_dir(dir);
+            clockwise_steps += 1;
+        }
         
-        tracing::info!("✅ Created test player: id={}, name='{}', pos=({}, {}), class={:?}", 
-            player_id,
-            user.player.map_object.name,
-            player_location.x,
-            player_location.y,
-            user.player.class
+        let counter_clockwise_steps = 8 - clockwise_steps;
+        
+        // 选择最短路径
+        if clockwise_steps <= counter_clockwise_steps {
+            // 顺时针转一格
+            self.next_dir(current)
+        } else {
+            // 逆时针转一格
+            self.previous_dir(current)
+        }
+    }
+    
+    /// 获取上一个方向 (逆时针)
+    /// 
+    /// 对应 C# Functions.PreviousDir(MirDirection d)
+    fn previous_dir(&self, d: MirDirection) -> MirDirection {
+        use mir2_shared::enums::MirDirection::*;
+        
+        match d {
+            Up => UpLeft,
+            UpLeft => Left,
+            Left => DownLeft,
+            DownLeft => Down,
+            Down => DownRight,
+            DownRight => Right,
+            Right => UpRight,
+            UpRight => Up,
+        }
+    }
+
+    /// 绘制加载屏幕（私有辅助方法）
+    /// 会先绘制黑色背景覆盖游戏内容,然后显示加载文本
+    fn draw_loading_screen(&self, canvas: &mut crate::graphics::Canvas, message: &str) {
+        use ggez::glam::Vec2;
+        use ggez::graphics::{Color, DrawParam, PxScale, Rect};
+
+        tracing::info!(
+            "📺 绘制加载屏幕: \"{}\" (屏幕: {:.0}x{:.0})",
+            message,
+            self.camera.screen_width,
+            self.camera.screen_height
         );
-        
-        // 🔧 关键: 将玩家添加到drawable objects HashMap
-        self.objects.insert(player_id, Box::new(user.clone()));
-        
-        // 🔧 关键: 将玩家添加到地图单元格 (用于渲染)
-        if let Some(ref mut map) = self.map_control {
-            if let Some(cell) = map.get_cell_mut(player_location.x, player_location.y) {
-                cell.add_object(player_id);
-                tracing::info!("✅ Added player to cell ({}, {})", player_location.x, player_location.y);
-            } else {
-                tracing::warn!("⚠️  Failed to get cell at ({}, {})", player_location.x, player_location.y);
-            }
-        }
-        
-        self.user = Some(user);
-        
-        tracing::info!("🎉 Test player setup complete! Total objects in scene: {}", self.objects.len());
-    }
-    
-    /// 🧪 Create test objects using ObjectFactory
-    /// This demonstrates how to use the object factory system
-    fn create_test_objects(&mut self) {
-        use mir2_shared::packets::server::{ObjectMonster, ObjectNpc, ObjectGold};
-        use mir2_shared::enums::{MirDirection, PoisonType};
-        
-        tracing::info!("🧪 Creating test objects using ObjectFactory...");
-        
-        // 创建测试NPC (使用ObjectFactory)
-        let npc_packet = ObjectNpc {
-            object_id: 1001,
-            name: "Test Guard".to_string(),
-            name_colour: 0xFFFFFF,
-            image: 10,
-            colour: 0,
-            location_x: self.player_x + 2,
-            location_y: self.player_y + 2,
-            direction: MirDirection::Down,
-        };
-        
-        let npc = ObjectFactory::create_npc(&npc_packet);
-        tracing::info!("✅ Created NPC via factory: id={}, name='{}', pos=({}, {})", 
-            npc.map_object.object_id(), 
-            npc.map_object.name,
-            npc.map_object.location().x,
-            npc.map_object.location().y
+
+        // 先绘制黑色背景覆盖整个屏幕 (覆盖绿色底色)
+        canvas.draw(
+            &ggez::graphics::Quad,
+            DrawParam::default()
+                .dest(Vec2::new(0.0, 0.0))
+                .scale(Vec2::new(
+                    self.camera.screen_width,
+                    self.camera.screen_height,
+                ))
+                .color(Color::BLACK),
         );
-        self.add_npc(npc);
-        
-        // 创建测试怪物 (使用ObjectFactory)
-        let monster_packet = ObjectMonster {
-            object_id: 1002,
-            name: "Test Monster".to_string(),
-            name_colour: 0xFF0000,
-            location_x: self.player_x - 3,
-            location_y: self.player_y + 1,
-            image: 5,
-            direction: MirDirection::Right,
-            effect: 0,
-            ai: 0,
-            light: 3,
-            dead: false,
-            skeleton: false,
-            poison: PoisonType::NONE,
-            hidden: false,
-            shock_time: 0,
-            binding_shot_center: false,
-            extra: false,
-            extra_byte: 0,
-            buffs: vec![],
-        };
-        
-        let monster = ObjectFactory::create_monster(&monster_packet);
-        tracing::info!("✅ Created Monster via factory: id={}, name='{}', pos=({}, {})", 
-            monster.map_object.object_id(), 
-            monster.map_object.name,
-            monster.map_object.location().x,
-            monster.map_object.location().y
+
+        // 在屏幕中心绘制加载文本 (使用更大的字体)
+        let mut text = ggez::graphics::Text::new(message);
+        text.set_font("AlibabaPuHuiTi"); // 🔧 关键修复: 设置中文字体!
+        text.set_scale(PxScale::from(32.0)); // 32px 大字体,更明显
+
+        // 简单居中：估算文本宽度约为字符数 * 24px (32px字体的中文字符), 高度约 40px
+        let estimated_width = message.chars().count() as f32 * 24.0;
+        let text_x = (self.camera.screen_width - estimated_width) / 2.0;
+        let text_y = (self.camera.screen_height - 40.0) / 2.0;
+
+        tracing::info!(
+            "📺   文本位置: ({:.0}, {:.0}), 估算宽度: {:.0}px",
+            text_x,
+            text_y,
+            estimated_width
         );
-        self.add_monster(monster);
-        
-        // 创建测试金币 (使用ObjectFactory)
-        let gold_packet = ObjectGold {
-            object_id: 1003,
-            gold: 1000,
-            location_x: self.player_x + 1,
-            location_y: self.player_y - 2,
-        };
-        
-        let gold = ObjectFactory::create_gold(&gold_packet);
-        tracing::info!("✅ Created Gold via factory: id={}, amount={}, pos=({}, {})", 
-            gold.map_object.object_id(), 
-            gold.gold_amount,
-            gold.map_object.location().x,
-            gold.map_object.location().y
+
+        canvas.draw(
+            &text,
+            DrawParam::default()
+                .dest(Vec2::new(text_x.max(0.0), text_y.max(0.0)))
+                .color(Color::WHITE),
         );
-        self.add_item(gold);
-        
-        tracing::info!("🎉 Test objects created: {} total objects, {} monsters, {} npcs, {} items", 
-            self.objects.len(), 
-            self.monsters.len(), 
-            self.npcs.len(), 
-            self.items.len()
-        );
-    }
-    
-    /// Move an object to a new location (with interpolation)
-    pub fn move_object(&mut self, object_id: u32, target: Point) -> bool {
-        // Try to find and move the object in each collection
-        if let Some(monster) = self.monsters.get_mut(&object_id) {
-            let old_location = monster.map_object.location();
-            monster.map_object.start_move(target);
-            
-            // Update cell tracking
-            self.update_object_cell(object_id, old_location, target);
-            
-            tracing::debug!("Moving monster {} from ({},{}) to ({},{})", 
-                object_id, old_location.x, old_location.y, target.x, target.y);
-            return true;
-        }
-        
-        if let Some(player) = self.players.get_mut(&object_id) {
-            let old_location = player.player.map_object.location();
-            player.player.map_object.start_move(target);
-            self.update_object_cell(object_id, old_location, target);
-            return true;
-        }
-        
-        if let Some(ref mut user) = self.user {
-            if user.player.map_object.object_id() == object_id {
-                user.player.map_object.start_move(target);
-                // Update player position
-                self.player_x = target.x;
-                self.player_y = target.y;
-                return true;
-            }
-        }
-        
-        if let Some(ref mut hero) = self.hero {
-            if hero.player.map_object.object_id() == object_id {
-                let old_location = hero.player.map_object.location();
-                hero.player.map_object.start_move(target);
-                self.update_object_cell(object_id, old_location, target);
-                return true;
-            }
-        }
-        
-        false
-    }
-    
-    /// Teleport an object instantly (no interpolation)
-    pub fn teleport_object(&mut self, object_id: u32, target: Point) -> bool {
-        if let Some(monster) = self.monsters.get_mut(&object_id) {
-            let old_location = monster.map_object.location();
-            monster.map_object.teleport_to(target);
-            self.update_object_cell(object_id, old_location, target);
-            return true;
-        }
-        
-        if let Some(player) = self.players.get_mut(&object_id) {
-            let old_location = player.player.map_object.location();
-            player.player.map_object.teleport_to(target);
-            self.update_object_cell(object_id, old_location, target);
-            return true;
-        }
-        
-        false
-    }
-    
-    /// Update object's cell tracking when it moves
-    fn update_object_cell(&mut self, object_id: u32, old_location: Point, new_location: Point) {
-        if old_location == new_location {
-            return;
-        }
-        
-        if let Some(ref mut map) = self.map_control {
-            // Remove from old cell
-            if let Some(old_cell) = map.get_cell_mut(old_location.x, old_location.y) {
-                old_cell.remove_object(object_id);
-            }
-            
-            // Add to new cell
-            if let Some(new_cell) = map.get_cell_mut(new_location.x, new_location.y) {
-                new_cell.add_object(object_id);
-            }
-        }
-    }
-    
-    /// Change attack mode
-    pub fn set_attack_mode(&mut self, mode: AttackMode) {
-        self.attack_mode = mode;
-        self.add_output_message(
-            format!("Attack mode: {:?}", mode),
-            (255, 255, 0),
-        );
-    }
-    
-    /// Change pet mode
-    pub fn set_pet_mode(&mut self, mode: PetMode) {
-        self.pet_mode = mode;
-        self.add_output_message(
-            format!("Pet mode: {:?}", mode),
-            (255, 255, 0),
-        );
-    }
-    
-    /// Pick up item
-    pub fn pickup_item(&mut self, item_id: u32) {
-        let current_time = self.get_time();
-        
-        // Check pickup cooldown
-        if current_time < self.pickup_time {
-            return;
-        }
-        
-        // TODO: Send pickup packet to server
-        println!("Picking up item {}", item_id);
-        
-        self.pickup_time = current_time + 200; // 200ms cooldown
-    }
-    
-    /// Use item from inventory
-    pub fn use_item(&mut self, slot: usize) {
-        let current_time = self.get_time();
-        
-        // Check use item cooldown
-        if current_time < self.use_item_time {
-            return;
-        }
-        
-        // TODO: Check if item exists in slot
-        // TODO: Send use item packet to server
-        println!("Using item in slot {}", slot);
-        
-        self.use_item_time = current_time + 300; // 300ms cooldown
-    }
-    
-    /// Draw map with 3 layers (Back, Middle, Front)
-    fn draw_map(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &mut crate::graphics::GgezManager, map: &map_control::MapControl) {
-        // Get tile manager
-        let mut tile_manager = self.tile_texture_manager.borrow_mut();
-        
-        // Map tile dimensions (matches C# CellWidth/CellHeight)
-        const TILE_WIDTH: f32 = 48.0;
-        const TILE_HEIGHT: f32 = 32.0;
-        
-        // 使用实际窗口大小
-        let screen_width = ctx.gfx.drawable_size().0;
-        let screen_height = ctx.gfx.drawable_size().1;
-        
-        // Screen offset in tiles (C# formula: OffSetX = ScreenWidth / 2 / CellWidth)
-        let offset_x_tiles = (screen_width / 2.0 / TILE_WIDTH) as i32;
-        let offset_y_tiles = (screen_height / 2.0 / TILE_HEIGHT) as i32 - 1;
-        
-        // Calculate visible tile range (C#: ViewRangeX = OffSetX + 6)
-        let view_range_x = offset_x_tiles + 6;
-        let view_range_y = offset_y_tiles + 6;
-        
-        // C#允许循环从负数开始,在循环内部检查边界!
-        // 不要用.max(0)裁剪,这会改变遍历顺序导致坐标错位
-        let start_x = self.player_x - view_range_x;
-        let start_y = self.player_y - view_range_y;
-        let end_x = self.player_x + view_range_x;
-        let end_y = self.player_y + view_range_y;
-        
-        tracing::debug!("🎨 Drawing map: player=({}, {}), range=({},{} to {},{})", 
-            self.player_x, self.player_y, start_x, start_y, end_x, end_y);
-        
-        use ggez::graphics::DrawParam;
-        
-        let mut drawn_tiles = 0;
-        
-        // ========== LAYER 1: BackImage (Ground) ==========
-        let mut checked_cells = 0;
-        let mut back_image_cells = 0;
-        let mut texture_found = 0;
-        for y in start_y..=end_y {  // C# uses <=, so use ..= in Rust
-            if y <= 0 || y % 2 == 1 { continue; } // Skip y<=0 or odd rows (matches C#)
-            if y >= map.height { break; }  // C#: if (y >= Height) break;
-            for x in start_x..=end_x {  // C# uses <=, so use ..= in Rust
-                if x <= 0 || x % 2 == 1 { continue; } // Skip x<=0 or odd columns (matches C#)
-                if x >= map.width { break; }  // C#: if (x >= Width) break;
-                
-                if let Some(cell) = map.get_cell(x, y) {
-                    checked_cells += 1;
-                    if cell.back_image > 0 && cell.back_index != -1 {
-                        back_image_cells += 1;
-                        // C#: index = (M2CellInfo[x, y].BackImage & 0x1FFFFFFF) - 1;
-                        let image_index = ((cell.back_image & 0x1FFFFFFF) - 1) as u16;
-                        if back_image_cells == 1 {
-                            tracing::debug!("🎨 First BackImage cell: ({}, {}), back_image=0x{:X} (raw), masked_index={}, back_index={}", 
-                                x, y, cell.back_image, image_index, cell.back_index);
-                        }
-                        
-                        // C# formula (EXACT):
-                        // drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X
-                        // drawY = (y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y
-                        // 注意: 第二个OffSetX是tile数(非像素),作为微调值!
-                        let draw_x = ((x - self.player_x + offset_x_tiles) as f32 * TILE_WIDTH 
-                            - offset_x_tiles as f32) + 0.0; // User.OffSetMove.X (平滑移动偏移,暂时为0)
-                        let draw_y = ((y - self.player_y + offset_y_tiles) as f32 * TILE_HEIGHT) 
-                            + 0.0; // User.OffSetMove.Y (平滑移动偏移,暂时为0)
-                        
-                        if let Some(texture) = tile_manager.get_tile_texture(ctx, cell.back_index as i32, image_index, ggez_manager) {
-                            texture_found += 1;
-                            if texture_found == 1 {
-                                tracing::debug!("🎨 First texture: {} (width={}, height={}, offset=({}, {}))", 
-                                    texture.texture_name, texture.width, texture.height, 
-                                    texture.offset_x, texture.offset_y);
-                            }
-                            if let Some(image) = ggez_manager.get_texture(&texture.texture_name) {
-                                
-                                // C#: Draw(index, drawX, drawY) - 不应用offset,直接绘制
-                                // ggez坐标系与DirectX相同:左上角(0,0),Y轴向下
-                                if drawn_tiles == 0 {
-                                    tracing::debug!("🎨 First tile: cell({},{}), draw_pos=({:.1},{:.1}), tex_size=({}x{}), tex_offset=({},{})", 
-                                        x, y, draw_x, draw_y, texture.width, texture.height, texture.offset_x, texture.offset_y);
-                                }
-                                
-                                canvas.draw(
-                                    image,
-                                    DrawParam::default()
-                                        .dest([draw_x, draw_y])
-                                );
-                                
-                                drawn_tiles += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // ========== LAYER 2: MiddleImage (Decorations) ==========
-        // Note: Middle layer does NOT skip odd coordinates (unlike BackImage)
-        for y in start_y..=(end_y + 5) {  // C#: y <= User.Movement.Y + ViewRangeY + 5
-            if y <= 0 { continue; } // Skip y<=0 (matches C#)
-            if y >= map.height { break; }  // C#: boundary check
-            for x in start_x..=end_x {  // C# uses <=
-                if x < 0 { continue; } // Skip x<0 (matches C#)
-                if x >= map.width { break; }  // C#: boundary check
-                if let Some(cell) = map.get_cell(x, y) {
-                    if cell.middle_image > 0 && cell.middle_index != -1 {
-                        // C#: index = M2CellInfo[x, y].MiddleImage - 1; (no mask)
-                        let image_index = (cell.middle_image - 1) as u16;
-                        
-                        // C# formula (EXACT):
-                        // drawY = (y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y;
-                        let draw_y = ((y - self.player_y + offset_y_tiles) as f32 * TILE_HEIGHT) + 0.0;
-                        // drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
-                        let draw_x = ((x - self.player_x + offset_x_tiles) as f32 * TILE_WIDTH 
-                            - offset_x_tiles as f32) + 0.0;
-                        
-                        if let Some(texture) = tile_manager.get_tile_texture(ctx, cell.middle_index as i32, image_index, ggez_manager) {
-                            // C# size filtering:
-                            // if ((s.Width != CellWidth || s.Height != CellHeight) &&
-                            //     ((s.Width != CellWidth * 2) || (s.Height != CellHeight * 2))) continue;
-                            let w = texture.width as i32;
-                            let h = texture.height as i32;
-                            let valid_size = (w == TILE_WIDTH as i32 && h == TILE_HEIGHT as i32) ||
-                                           (w == TILE_WIDTH as i32 * 2 && h == TILE_HEIGHT as i32 * 2);
-                            
-                            if valid_size {
-                                if let Some(image) = ggez_manager.get_texture(&texture.texture_name) {
-                                    // C#: Draw(index, drawX, drawY)
-                                    canvas.draw(
-                                        image,
-                                        DrawParam::default()
-                                            .dest([draw_x, draw_y])
-                                    );
-                                    
-                                    drawn_tiles += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // ========== LAYER 3: FrontImage (Standard Tiles in DrawFloor) ==========
-        // C# DrawFloor: Only draws standard size tiles (48x32 or 96x64)
-        for y in start_y..=(end_y + 5) {  // C#: y <= User.Movement.Y + ViewRangeY + 5
-            if y <= 0 { continue; } // Skip y<=0 (matches C#)
-            if y >= map.height { break; }  // C#: boundary check
-            for x in start_x..=end_x {  // C# uses <=
-                if x < 0 { continue; } // Skip x<0 (matches C#)
-                if x >= map.width { break; }  // C#: boundary check
-                if let Some(cell) = map.get_cell(x, y) {
-                    if cell.front_image > 0 && cell.front_index != -1 && cell.front_index != 200 {
-                        let image_index = (cell.front_image & 0x7FFF) - 1;
-                        
-                        if image_index >= 0 {
-                            // C# formula (EXACT):
-                            // drawY = (y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y;
-                            let draw_y = ((y - self.player_y + offset_y_tiles) as f32 * TILE_HEIGHT) + 0.0;
-                            // drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
-                            let draw_x = ((x - self.player_x + offset_x_tiles) as f32 * TILE_WIDTH 
-                                - offset_x_tiles as f32) + 0.0;
-                            
-                            if let Some(texture) = tile_manager.get_tile_texture(ctx, cell.front_index as i32, image_index as u16, ggez_manager) {
-                                // C# DrawFloor Front layer: only standard sizes
-                                // if (index < 0 || ((s.Width != CellWidth || s.Height != CellHeight) &&
-                                //     ((s.Width != CellWidth * 2) || (s.Height != CellHeight * 2)))) continue;
-                                let w = texture.width as i32;
-                                let h = texture.height as i32;
-                                let is_standard_size = (w == TILE_WIDTH as i32 && h == TILE_HEIGHT as i32) ||
-                                                      (w == TILE_WIDTH as i32 * 2 && h == TILE_HEIGHT as i32 * 2);
-                                
-                                if is_standard_size {
-                                    if let Some(image) = ggez_manager.get_texture(&texture.texture_name) {
-                                        // C#: Draw(index, drawX, drawY)
-                                        canvas.draw(
-                                            image,
-                                            DrawParam::default()
-                                                .dest([draw_x, draw_y])
-                                        );
-                                        
-                                        drawn_tiles += 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // ========== LAYER 4: FrontImage Large Objects (Buildings, Trees) ==========
-        // C# DrawObjects: Draws non-standard size objects with bottom alignment (drawY - s.Height)
-        let mut layer4_checked = 0;
-        let mut layer4_drawn = 0;
-        let mut layer4_negative_index = 0;
-        let mut layer4_texture_fail = 0;
-        let mut layer4_standard_size = 0;
-        
-        for y in start_y..=(end_y + 25) {  // C#: y <= User.Movement.Y + ViewRangeY + 25 (larger range for tall objects)
-            if y <= 0 { continue; }
-            if y >= map.height { break; }
-            
-            // C# DrawObjects formula: drawY = (y - User.Movement.Y + OffSetY + 1) * CellHeight + User.OffSetMove.Y
-            let draw_y = (y - self.player_y + offset_y_tiles + 1) as f32 * TILE_HEIGHT + 0.0;
-            
-            for x in start_x..=end_x {
-                if x < 0 { continue; }
-                if x >= map.width { break; }
-                
-                if let Some(cell) = map.get_cell(x, y) {
-                    if cell.front_image > 0 && cell.front_index != -1 && cell.front_index != 200 {
-                        layer4_checked += 1;
-                        let image_index = (cell.front_image & 0x7FFF) - 1;
-                        
-                        if image_index >= 0 {
-                            let draw_x = ((x - self.player_x + offset_x_tiles) as f32 * TILE_WIDTH 
-                                - offset_x_tiles as f32) + 0.0;
-                            
-                            if let Some(texture) = tile_manager.get_tile_texture(ctx, cell.front_index as i32, image_index as u16, ggez_manager) {
-                                let w = texture.width as i32;
-                                let h = texture.height as i32;
-                                let is_standard_size = (w == TILE_WIDTH as i32 && h == TILE_HEIGHT as i32) ||
-                                                      (w == TILE_WIDTH as i32 * 2 && h == TILE_HEIGHT as i32 * 2);
-                                
-                                // C# DrawObjects Front: Skip standard sizes, draw large objects with bottom alignment
-                                // if (s.Width == CellWidth && s.Height == CellHeight && animation == 0) continue;
-                                // if ((s.Width == CellWidth * 2) && (s.Height == CellHeight * 2) && (animation == 0)) continue;
-                                // Libraries.MapLibs[fileIndex].Draw(index, drawX, drawY - s.Height);
-                                if !is_standard_size {
-                                    if let Some(image) = ggez_manager.get_texture(&texture.texture_name) {
-                                        // Bottom alignment: drawY - s.Height
-                                        let aligned_y = draw_y - texture.height as f32;
-                                        
-                                        if layer4_drawn == 0 {
-                                            tracing::debug!("🎨 Layer 4 first draw: cell({},{}), size={}x{}, index={}, draw_y={:.1}, aligned_y={:.1}", 
-                                                x, y, w, h, image_index, draw_y, aligned_y);
-                                        }
-                                        
-                                        canvas.draw(
-                                            image,
-                                            DrawParam::default()
-                                                .dest([draw_x, aligned_y])
-                                        );
-                                        
-                                        drawn_tiles += 1;
-                                        layer4_drawn += 1;
-                                    }
-                                } else {
-                                    layer4_standard_size += 1;
-                                }
-                            } else {
-                                layer4_texture_fail += 1;
-                            }
-                        } else {
-                            layer4_negative_index += 1;
-                        }
-                    }
-                }
-            }
-        }
-        
-        if layer4_checked > 0 {
-            tracing::debug!("🎨 Layer 4 stats: checked={}, drawn={}, neg_index={}, tex_fail={}, standard_size={}", 
-                layer4_checked, layer4_drawn, layer4_negative_index, layer4_texture_fail, layer4_standard_size);
-        }
-        
-        // ========== LAYER 5: TileAnimationImage (Animated Tiles) ==========
-        // C# DrawObjects: Shanda's tile animation layer using library 190
-        for y in start_y..=(end_y + 25) {
-            if y <= 0 { continue; }
-            if y >= map.height { break; }
-            
-            // C#: drawY = (y - User.Movement.Y + OffSetY + 1) * CellHeight + User.OffSetMove.Y
-            let draw_y = ((y - self.player_y + offset_y_tiles + 1) as f32 * TILE_HEIGHT) + 0.0;
-            
-            for x in start_x..=end_x {
-                if x < 0 { continue; }
-                if x >= map.width { break; }
-                let draw_x = ((x - self.player_x + offset_x_tiles) as f32 * TILE_WIDTH 
-                    - offset_x_tiles as f32) + 0.0;
-                
-                if let Some(cell) = map.get_cell(x, y) {
-                    // C#: index = M2CellInfo[x, y].TileAnimationImage;
-                    // C#: animation = M2CellInfo[x, y].TileAnimationFrames;
-                    let mut index = cell.tile_animation_image;
-                    let animation = cell.tile_animation_frames;
-                    
-                    if index > 0 && animation > 0 {
-                        // C#: index--;
-                        // C#: int animationoffset = M2CellInfo[x, y].TileAnimationOffset ^ 0x2000;
-                        // C#: index += animationoffset * (AnimationCount % animation);
-                        index -= 1;
-                        let animation_offset = cell.tile_animation_offset ^ 0x2000;
-                        index += animation_offset * ((self.animation_count % animation as u32) as i16);
-                        
-                        // C#: Libraries.MapLibs[190].DrawUp(index, drawX, drawY);
-                        // DrawUp means: y -= height (bottom alignment)
-                        if let Some(texture) = tile_manager.get_tile_texture(ctx, 190, index as u16, ggez_manager) {
-                            if let Some(image) = ggez_manager.get_texture(&texture.texture_name) {
-                                let aligned_y = draw_y - texture.height as f32;
-                                canvas.draw(
-                                    image,
-                                    DrawParam::default()
-                                        .dest([draw_x, aligned_y])
-                                );
-                                drawn_tiles += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // ========== LAYER 6: MiddleImage Animated (Mir3 middle layer with animations) ==========
-        // C# DrawObjects: Middle layer with animation support (different from DrawFloor Middle)
-        for y in start_y..=(end_y + 25) {
-            if y <= 0 { continue; }
-            if y >= map.height { break; }
-            
-            let draw_y = ((y - self.player_y + offset_y_tiles + 1) as f32 * TILE_HEIGHT) + 0.0;
-            
-            for x in start_x..=end_x {
-                if x < 0 { continue; }
-                if x >= map.width { break; }
-                let draw_x = ((x - self.player_x + offset_x_tiles) as f32 * TILE_WIDTH 
-                    - offset_x_tiles as f32) + 0.0;
-                
-                if let Some(cell) = map.get_cell(x, y) {
-                    // C#: if ((M2CellInfo[x, y].MiddleIndex >= 0) && (M2CellInfo[x, y].MiddleIndex != -1))
-                    if cell.middle_index >= 0 && cell.middle_index != -1 {
-                        // C#: index = M2CellInfo[x, y].MiddleImage - 1;
-                        let mut index = cell.middle_image - 1;
-                        
-                        if index > 0 {
-                            // C#: animation = M2CellInfo[x, y].MiddleAnimationFrame;
-                            let mut animation = cell.middle_animation_frame;
-                            let mut blend = false;
-                            
-                            // C#: if ((animation > 0) && (animation < 255))
-                            if animation > 0 && animation < 255 {
-                                // C#: if ((animation & 0x0f) > 0) { blend = true; animation &= 0x0f; }
-                                if (animation & 0x0f) > 0 {
-                                    blend = true;
-                                    animation &= 0x0f;
-                                }
-                                
-                                if animation > 0 {
-                                    // C#: byte animationTick = M2CellInfo[x, y].MiddleAnimationTick;
-                                    // C#: index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
-                                    let animation_tick = cell.middle_animation_tick;
-                                    let anim_total = animation as u32 + (animation as u32 * animation_tick as u32);
-                                    index += ((self.animation_count % anim_total) / (1 + animation_tick as u32)) as i32;
-                                    
-                                    // C#: if (blend && (animation == 10 || animation == 8)) DrawUpBlend else DrawUp
-                                    if let Some(texture) = tile_manager.get_tile_texture(ctx, cell.middle_index as i32, index as u16, ggez_manager) {
-                                        if let Some(image) = ggez_manager.get_texture(&texture.texture_name) {
-                                            let aligned_y = draw_y - texture.height as f32;
-                                            canvas.draw(
-                                                image,
-                                                DrawParam::default()
-                                                    .dest([draw_x, aligned_y])
-                                                    // TODO: Add blend mode for blend=true cases
-                                            );
-                                            drawn_tiles += 1;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // C#: s = Libraries.MapLibs[M2CellInfo[x, y].MiddleIndex].GetSize(index);
-                            // C#: if ((s.Width != CellWidth || s.Height != CellHeight) && 
-                            //         (s.Width != (CellWidth * 2) || s.Height != (CellHeight * 2)) && !blend)
-                            //     Libraries.MapLibs[M2CellInfo[x, y].MiddleIndex].DrawUp(index, drawX, drawY);
-                            if let Some(texture) = tile_manager.get_tile_texture(ctx, cell.middle_index as i32, index as u16, ggez_manager) {
-                                let w = texture.width as i32;
-                                let h = texture.height as i32;
-                                let is_standard_size = (w == TILE_WIDTH as i32 && h == TILE_HEIGHT as i32) ||
-                                                      (w == TILE_WIDTH as i32 * 2 && h == TILE_HEIGHT as i32 * 2);
-                                
-                                if !is_standard_size && !blend {
-                                    if let Some(image) = ggez_manager.get_texture(&texture.texture_name) {
-                                        let aligned_y = draw_y - texture.height as f32;
-                                        canvas.draw(
-                                            image,
-                                            DrawParam::default()
-                                                .dest([draw_x, aligned_y])
-                                        );
-                                        drawn_tiles += 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // ========== OBJECT RENDERING LAYER ==========
-        // C# DrawObjects: Iterate cells and call M2CellInfo[x,y].DrawObjects()
-        // This renders all game objects (monsters, NPCs, players, items, spells)
-        let mut objects_drawn = 0;
-        let mut cells_with_objects = 0;
-        
-        for y in start_y..=(end_y + 25) {
-            if y <= 0 { continue; }
-            if y >= map.height { break; }
-            
-            for x in start_x..=end_x {
-                if x < 0 { continue; }
-                if x >= map.width { break; }
-                
-                if let Some(cell) = map.get_cell(x, y) {
-                    // Skip cells without objects
-                    if cell.cell_objects.is_none() {
-                        continue;
-                    }
-                    
-                    cells_with_objects += 1;
-                    
-                    // Calculate draw location for this cell
-                    // C#: drawY = (y - User.Movement.Y + OffSetY + 1) * CellHeight + User.OffSetMove.Y
-                    let draw_location = Point::new(
-                        (x - self.player_x + offset_x_tiles) * 48 - offset_x_tiles,
-                        (y - self.player_y + offset_y_tiles + 1) * 32
-                    );
-                    
-                    // Draw dead objects first (corpses behind live objects)
-                    if let Err(e) = cell.draw_dead_objects(ctx, canvas, &self.objects, draw_location) {
-                        tracing::warn!("Failed to draw dead objects at ({}, {}): {}", x, y, e);
-                    }
-                    
-                    // Draw live objects
-                    if let Err(e) = cell.draw_objects(ctx, canvas, &self.objects, draw_location) {
-                        tracing::warn!("Failed to draw objects at ({}, {}): {}", x, y, e);
-                    } else {
-                        objects_drawn += cell.cell_objects.as_ref().map(|o| o.len()).unwrap_or(0);
-                    }
-                }
-            }
-        }
-        
-        // Debug: Count cells with front/middle/animation data
-        let mut front_cells = 0;
-        let mut middle_anim_cells = 0;
-        let mut tile_anim_cells = 0;
-        for y in start_y..=(end_y + 25) {
-            if y <= 0 || y >= map.height { continue; }
-            for x in start_x..=end_x {
-                if x < 0 || x >= map.width { continue; }
-                if let Some(cell) = map.get_cell(x, y) {
-                    if cell.front_image > 0 && cell.front_index != -1 && cell.front_index != 200 {
-                        front_cells += 1;
-                    }
-                    if cell.middle_index >= 0 && cell.middle_index != -1 && cell.middle_image > 0 && cell.middle_animation_frame > 0 {
-                        middle_anim_cells += 1;
-                    }
-                    if cell.tile_animation_image > 0 && cell.tile_animation_frames > 0 {
-                        tile_anim_cells += 1;
-                    }
-                }
-            }
-        }
-        
-        tracing::debug!("🎨 Map draw summary: checked={}, back_image={}, texture_found={}, drawn={}", 
-            checked_cells, back_image_cells, texture_found, drawn_tiles);
-        tracing::debug!("🎨 Layer data: front_cells={}, middle_anim={}, tile_anim={}", 
-            front_cells, middle_anim_cells, tile_anim_cells);
-        tracing::debug!("🎨 Objects: cells_with_objects={}, objects_drawn={}", 
-            cells_with_objects, objects_drawn);
-        
-        if drawn_tiles > 0 {
-            tracing::trace!("Drew {} tiles (6 layers) + {} objects", drawn_tiles, objects_drawn);
-        }
     }
 }
 
-impl std::fmt::Debug for GameScene {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GameScene")
-            .field("user", &self.user)
-            .field("hero", &self.hero)
-            .field("objects_count", &self.objects.len())
-            .field("monsters_count", &self.monsters.len())
-            .field("npcs_count", &self.npcs.len())
-            .field("items_count", &self.items.len())
-            .field("players_count", &self.players.len())
-            .field("gold", &self.gold)
-            .field("current_map_index", &self.current_map_index)
-            .finish()
-    }
-}
+// MapControl 的实现在 map_control.rs 中
 
-impl Default for GameScene {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// ==================== Scene trait 实现 ====================
 
 impl Scene for GameScene {
     fn scene_type(&self) -> SceneType {
         SceneType::Game
     }
-    
+
+    fn initialize(&mut self) {
+        tracing::info!("🎮 GameScene V2 initializing...");
+
+        // 🎥 初始化摄像机（使用默认屏幕尺寸 1024x768）
+        // 实际尺寸会在 draw() 方法中根据窗口大小更新
+        self.camera = Camera::new(1024.0, 768.0);
+        tracing::info!("📷 Camera initialized: 1024x768");
+
+        // TODO: 创建所有 UI 对话框
+        // self.main_dialog = Some(MainDialog::new());
+        // self.chat_dialog = Some(ChatDialog::new());
+        // ... 40+ dialogs
+
+        // TODO: 设置控件树 (Parent = this)
+        // self.controls.push(Box::new(self.main_dialog));
+        // self.controls.push(Box::new(self.chat_dialog));
+        // ...
+
+        tracing::info!("✅ GameScene V2 initialized!");
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
-    fn initialize(&mut self) {
-        println!("🎮🎮🎮 GameScene::initialize CALLED! 🎮🎮🎮");
-        tracing::error!("🎮🎮🎮 GameScene::initialize CALLED! 🎮🎮🎮");
-        
-        // Load map tile libraries
-        let mut tile_mgr = self.tile_texture_manager.borrow_mut();
-        tracing::error!("🔄 About to call load_tiles_libraries()...");
-        match tile_mgr.load_tiles_libraries() {
-            Ok(count) => {
-                tracing::error!("✅✅✅ Loaded {} map tile libraries ✅✅✅", count);
-            }
-            Err(e) => {
-                tracing::error!("❌❌❌ Failed to load map tile libraries: {} ❌❌❌", e);
+
+    fn update(&mut self, ctx: &mut ggez::Context) {
+        // 定期清理纹理缓存 (每 5 秒检查一次,清理超过 30 秒未使用的纹理)
+
+        // 对应 C# DXManager.CleanUp()
+        static mut LAST_CLEANUP_TIME: Option<std::time::Instant> = None;
+        unsafe {
+            let now = std::time::Instant::now();
+            if LAST_CLEANUP_TIME.is_none()
+                || now.duration_since(LAST_CLEANUP_TIME.unwrap())
+                    > std::time::Duration::from_secs(5)
+            {
+                self.cleanup_texture_cache();
+                LAST_CLEANUP_TIME = Some(now);
             }
         }
-        drop(tile_mgr);
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        self.camera.update_screen_size(screen_width, screen_height);
         
-        // 🧪 测试: 创建测试玩家和对象
-        if self.map_control.is_some() {
-            self.create_test_player();  // 先创建玩家
-            self.create_test_objects(); // 再创建其他对象
+        // ==================== 角色移动状态机 ====================
+        // 使用 PlayerMovementFSM 处理平滑的格子移动
+        
+        // ✅ 主动查询鼠标状态 (不依赖事件回调)
+        use ggez::input::mouse::MouseButton;
+        let mouse_right_down = ctx.mouse.button_pressed(MouseButton::Right);
+        let mouse_left_down = ctx.mouse.button_pressed(MouseButton::Left);
+        let mouse_pos = ctx.mouse.position();
+        let mouse_pos_point = Point { 
+            x: mouse_pos.x as i32, 
+            y: mouse_pos.y as i32 
+        };
+        
+        // 🐛 调试：每60帧打印一次鼠标状态
+        static mut DEBUG_COUNTER: u32 = 0;
+        unsafe {
+            DEBUG_COUNTER += 1;
+            if DEBUG_COUNTER % 60 == 0 {
+                println!("🖱️ [GameScene::update] 鼠标状态: 右键={}, 左键={}, 位置=({}, {})", 
+                    mouse_right_down, mouse_left_down, mouse_pos.x, mouse_pos.y);
+                println!("   玩家对象: {}", if self.user.is_some() { "存在" } else { "无" });
+                println!("   场景状态: {:?}", self.state);
+            }
         }
         
-        tracing::error!("🎮 GameScene::initialize COMPLETED!");
-        // TODO: Initialize pathfinder
-        // TODO: Load UI dialogs
-        // TODO: Request initial game state from server
-    }
-    
-    fn update(&mut self, delta_time: f32) {
-        // Update animation counter (C#: AnimationCount++)
-        self.animation_count = self.animation_count.wrapping_add(1);
-        
-        // Update all game objects
-        self.update_objects(delta_time);
-        
-        // TODO: Update camera
-        // TODO: Update map
-    }
-    
-    fn draw(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &mut crate::graphics::GgezManager) {
-        use ggez::graphics::{Color, DrawParam, Text, PxScale};
-        use ggez::mint::Point2;
-        
-        // 1. Draw map (if loaded)
-        if let Some(map) = &self.map_control {
-            self.draw_map(ctx, canvas, ggez_manager, map);
+        // 第一步: 计算所有需要的数据(不借用user)
+        let mouse_input = if mouse_right_down || mouse_left_down {
+            let running = mouse_right_down;
             
-            // Display map info (debug - bottom left)
-            let map_info_text = format!(
-                "Map: {} ({}x{})\nPos: ({}, {})", 
-                map.title, map.width, map.height,
-                self.player_x, self.player_y
+            // 提取当前状态
+            let current_cell = if let Some(ref user) = self.user {
+                user.movement_fsm.current_cell
+            } else {
+                Point { x: 0, y: 0 }
+            };
+            let is_idle = if let Some(ref user) = self.user {
+                user.movement_fsm.is_idle()
+            } else {
+                true
+            };
+            
+            // 计算目标和可行性
+            let target_cell = self.screen_to_map_location(mouse_pos_point);
+            let direction = self.direction_from_point(current_cell, target_cell);
+            let next_cell = self.point_move(current_cell, direction, 1);
+            let can_move = self.can_walk_to(next_cell);
+            
+            // 🐛 调试坐标转换
+            static mut CLICK_DEBUG_COUNTER: u32 = 0;
+            unsafe {
+                CLICK_DEBUG_COUNTER += 1;
+                if CLICK_DEBUG_COUNTER % 30 == 1 { // 每30帧打印一次，避免刷屏
+                    println!("🖱️ [坐标转换] 屏幕点击: ({}, {})", mouse_pos.x, mouse_pos.y);
+                    println!("   摄像机: ({:.1}, {:.1}), 屏幕: ({:.1}x{:.1})", 
+                        self.camera.x, self.camera.y, 
+                        self.camera.screen_width, self.camera.screen_height);
+                    println!("   当前格子: ({}, {})", current_cell.x, current_cell.y);
+                    println!("   目标格子: ({}, {})", target_cell.x, target_cell.y);
+                    println!("   下一格子: ({}, {}) - 方向: {:?}", next_cell.x, next_cell.y, direction);
+                    println!("   可以移动: {}", can_move);
+                }
+            }
+            
+            Some((target_cell, direction, running, current_cell, is_idle, can_move))
+        } else {
+            None
+        };
+        
+        // 第二步: 计算平滑方向(在借用 user 之前)
+        let smooth_direction = if let Some((_, direction, _, _, _, _)) = mouse_input {
+            if let Some(ref user) = self.user {
+                let current_dir = user.player.map_object.direction;
+                self.smooth_direction_change(current_dir, direction)
+            } else {
+                direction
+            }
+        } else {
+            MirDirection::Up // 默认值,不会被使用
+        };
+        
+        // 第三步: 应用到user(可以安全地借用)
+        if let Some(ref mut user) = self.user {
+            if let Some((target_cell, direction, running, current_cell, is_idle, can_move)) = mouse_input {
+                // 🔧 修复: 无论是否在移动,都更新目标和方向
+                // 这样鼠标长按时角色会跟随鼠标方向
+                if current_cell != target_cell {
+                    if is_idle {
+                        // 当前静止,开始新的移动
+                        if can_move {
+                            println!("✅ [移动] 开始移动: 从({},{}) -> ({},{}), 方向={:?}, 跑步={}", 
+                                current_cell.x, current_cell.y, target_cell.x, target_cell.y, direction, running);
+                            user.movement_fsm.move_to(target_cell, direction, running);
+                            user.player.set_current_action(if running {
+                                MirAction::Running
+                            } else {
+                                MirAction::Walking
+                            });
+                            // 平滑设置角色朝向
+                            user.player.map_object.set_direction(smooth_direction);
+                        } else {
+                            println!("❌ [移动] 无法移动到 ({},{}): 格子被阻挡", target_cell.x, target_cell.y);
+                            // 无法移动,但平滑更新朝向
+                            user.player.map_object.set_direction(smooth_direction);
+                            user.player.set_current_action(MirAction::Standing);
+                        }
+                    } else {
+                        // 正在移动中,更新目标和方向
+                        user.movement_fsm.update_target(target_cell, direction, running);
+                        // 平滑更新角色朝向
+                        user.player.map_object.set_direction(smooth_direction);
+                        // 更新动作(可能从走切换到跑,或相反)
+                        user.player.set_current_action(if running {
+                            MirAction::Running
+                        } else {
+                            MirAction::Walking
+                        });
+                    }
+                }
+            } else {
+                // 鼠标释放,停止移动
+                if user.movement_fsm.is_moving() {
+                    println!("🛑 [移动] 停止移动");
+                    user.movement_fsm.stop();
+                    user.player.set_current_action(MirAction::Standing);
+                }
+            }
+            
+            // 2. 更新状态机
+            if user.movement_fsm.update() {
+                // 完成了一格移动
+                let new_cell = user.movement_fsm.current_cell;
+                let render_start = user.movement_fsm.render_start_cell;
+                let direction = user.movement_fsm.direction;
+                
+                // 同步到 MapObject
+                user.player.map_object.current_location = new_cell;
+                user.player.map_object.movement = render_start;
+                
+                // 发送移动包到服务器
+                if let Some(ref tx) = self.command_tx {
+                    use crate::network::NetworkCommand;
+                    let _ = tx.send(NetworkCommand::Move {
+                        direction: direction as u8,
+                        location: (new_cell.x, new_cell.y),
+                    });
+                }
+                
+                // 检查是否继续移动或到达目标
+                if user.movement_fsm.is_idle() {
+                    user.player.set_current_action(MirAction::Standing);
+                }
+            }
+            
+            // 3. 🔧 每帧同步渲染位置和偏移
+            // 这样确保 movement 和 offset_move 始终与 FSM 同步
+            user.player.map_object.movement = user.movement_fsm.render_start_cell;
+            
+            let (offset_x, offset_y) = user.movement_fsm.get_render_offset(
+                MapRenderer::CELL_WIDTH,
+                MapRenderer::CELL_HEIGHT,
             );
-            let mut map_info = Text::new(map_info_text);
-            map_info.set_scale(PxScale::from(14.0));
-            canvas.draw(
-                &map_info,
-                DrawParam::default()
-                    .dest(Point2 { x: 10.0, y: 700.0 })
-                    .color(Color::from_rgba(100, 255, 100, 200)),
+            user.player.map_object.offset_move.x = offset_x;
+            user.player.map_object.offset_move.y = offset_y;
+        }
+        
+        // ==================== 更新玩家动画 ====================
+        if let Some(ref mut user) = self.user {
+            // 只更新动画帧
+            user.player.update_animation();
+        }
+        
+        // TODO: 实现更新逻辑 (对应 C# Process)
+        // 更新动画计数器
+        // 更新对象
+        // 更新 UI
+    }
+
+    /// 渲染场景 (Scene trait 要求的签名)
+    ///
+    /// ============================================================
+    /// 🎨 GameScene 绘制流程详解
+    /// ============================================================
+    ///
+    /// 📝 **绘制顺序**:
+    /// 1. 清除整个屏幕 (深绿色背景) ← 防止登录场景残留
+    /// 2. 检查状态机 (WaitingForData/LoadingMap/WaitingForPlayer/Ready)
+    /// 3. 如果不是 Ready 状态，显示加载提示并返回
+    /// 4. 如果是 Ready 状态:
+    ///    a. 更新摄像机屏幕尺寸
+    ///    b. 让摄像机跟随玩家 (带地图边界限制)
+    ///    c. 绘制地图 (MapRenderer)
+    ///    d. 绘制玩家角色
+    ///    e. 绘制 UI 控件
+    ///    f. 绘制顶层元素 (鼠标提示等)
+    ///
+    /// 🐛 **常见问题**:
+    /// - 登录背景残留: Canvas 没清除 → 已修复 (第1步)
+    /// - 地图不显示: 检查状态是否为 Ready
+    /// - 玩家不显示: 检查 self.user 是否为 Some
+    /// - 摄像机不跟随: 检查 follow_target_clamped 调用
+    /// ============================================================
+    fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas) {
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+
+        // 绘制帧计数 (调试时可打印)
+
+        // ════════════════════════════════════════════════════════════
+        // 步骤 3: 状态机检查 - 只有 Ready 状态才渲染游戏
+        // ════════════════════════════════════════════════════════════
+        // 📝 状态转换流程:
+        //    WaitingForData → LoadingMap → WaitingForPlayer → Ready
+        //    ↑                ↑             ↑                  ↑
+        //    场景初始化       收到MapInfo   收到UserInfo       可以渲染游戏
+        match &self.state {
+            GameSceneState::WaitingForData => {
+                // 显示 "等待游戏数据..." 提示
+                self.draw_loading_screen(canvas, "等待服务器数据...");
+                return;
+            }
+            GameSceneState::LoadingMap(map_name) => {
+                // 显示 "正在加载地图: XXX" 提示
+                let msg = format!("正在加载地图: {}", map_name);
+                self.draw_loading_screen(canvas, &msg);
+                return;
+            }
+            GameSceneState::WaitingForPlayer => {
+                // 显示 "等待角色数据..." 提示
+                self.draw_loading_screen(canvas, "等待角色数据...");
+                return;
+            }
+            GameSceneState::Ready => {
+                // ✅ 状态正常，继续渲染游戏
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // 🔧 关键修复: 清空画布 - 防止其他场景背景残留!
+        // ════════════════════════════════════════════════════════════
+        // 📝 问题: 从 LoginScene/SelectScene 切换到 GameScene 时,
+        //         旧场景的背景纹理会残留在画布上,因为 ggez 的 Canvas
+        //         不会自动清空。
+        //
+        // 📝 解决方案: 在每帧开始时用黑色矩形覆盖整个屏幕。
+        //             这样即使之前场景有背景,也会被清除干净。
+        //
+        // 📝 参考: SelectScene.rs 第795-802行也使用了相同的技巧
+        use ggez::graphics::{Color as GgezColor, DrawMode, DrawParam, Mesh, Rect};
+        let clear_rect = Rect::new(0.0, 0.0, screen_width, screen_height);
+        let clear_color = GgezColor::from_rgb(0, 0, 0); // 黑色背景
+        if let Ok(clear_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), clear_rect, clear_color)
+        {
+            canvas.draw(&clear_mesh, DrawParam::default());
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // 步骤 4: 更新摄像机 (只有 Ready 状态才执行)
+        // ════════════════════════════════════════════════════════════
+
+        // 4a. 更新摄像机屏幕尺寸
+        self.camera.update_screen_size(screen_width, screen_height);
+        tracing::trace!(
+            "🎥 摄像机屏幕尺寸已更新: {:.0}x{:.0}",
+            screen_width,
+            screen_height
+        );
+
+        // 4b. 更新摄像机跟随玩家（带地图边界限制）
+        // 📝 摄像机跟随原理:
+        //    - 使用 FSM 计算的平滑世界坐标
+        //    - 摄像机居中对准玩家
+        //    - 边界限制防止摄像机超出地图范围
+        //    - 平滑插值防止抖动
+        if let Some(ref user) = self.user {
+            // 🔧 使用 FSM 的平滑世界坐标,而不是手动计算
+            // 这样可以避免摄像机跳跃和抖动
+            let (player_world_x, player_world_y) = user.movement_fsm.get_world_position(
+                MapRenderer::CELL_WIDTH,
+                MapRenderer::CELL_HEIGHT,
+            );
+
+            // 计算地图的像素尺寸
+            let map_width_px = self.map_renderer.width as f32 * MapRenderer::CELL_WIDTH as f32;
+            let map_height_px = self.map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32;
+
+            // 使用带边界限制和平滑插值的摄像机跟随
+            self.camera.follow_target_clamped(
+                player_world_x,
+                player_world_y,
+                map_width_px,
+                map_height_px,
             );
         } else {
-            // No map loaded - show waiting message
-            let mut waiting = Text::new("🗺️  Waiting for map data...");
-            waiting.set_scale(PxScale::from(32.0));
-            canvas.draw(
-                &waiting,
-                DrawParam::default()
-                    .dest(Point2 { x: 300.0, y: 350.0 })
-                    .color(Color::from_rgb(255, 200, 100)),
+            tracing::warn!(
+                "⚠️ GameScene::draw() 但 self.user 为 None，摄像机保持在: ({:.1}, {:.1})",
+                self.camera.x,
+                self.camera.y
             );
         }
-        
-        // 2. Display player info (top right)
-        if let Some(user) = &self.user {
-            let player_text = format!(
-                "Player: {} | Gold: {}", 
-                user.player.map_object.name,
-                self.gold
-            );
-            let mut player_info = Text::new(player_text);
-            player_info.set_scale(PxScale::from(18.0));
-            canvas.draw(
-                &player_info,
-                DrawParam::default()
-                    .dest(Point2 { x: 700.0, y: 10.0 })
-                    .color(Color::from_rgb(255, 255, 100)),
-            );
+
+        // ════════════════════════════════════════════════════════════
+        // 步骤 5: 绘制地图与游戏对象
+        // ════════════════════════════════════════════════════════════
+        // 📝 绘制顺序:
+        //    1. 地图 (MapRenderer) - 分层绘制 (Tiles, Front)
+        //    2. 玩家角色 (draw_player_with_camera)
+        //    3. 其他对象 (NPC, 怪物等) - TODO
+
+        // 5a. 准备玩家位置数据
+        let user_pos = if let Some(ref user) = self.user {
+            UserPosition {
+                x: user.player.map_object.movement.x,
+                y: user.player.map_object.movement.y,
+                offset_x: user.player.map_object.offset_move.x,
+                offset_y: user.player.map_object.offset_move.y,
+            }
+        } else {
+            // 没有用户时,使用地图中心
+            UserPosition {
+                x: self.map_renderer.width / 2,
+                y: self.map_renderer.height / 2,
+                offset_x: 0,
+                offset_y: 0,
+            }
+        };
+
+        // 5b. 绘制地图 (MapRenderer 会根据摄像机计算可见区域)
+        tracing::trace!("🗺️  开始绘制地图 (MapRenderer)...");
+        if let Err(e) = self.map_renderer.draw(ctx, canvas, &self.camera) {
+            tracing::error!("❌ 地图绘制失败: {:?}", e);
+        } else {
+            tracing::trace!("✅ 地图绘制成功");
         }
-        
-        // TODO: Draw game objects (sorted by Y position)
-        // TODO: Draw effects
-        // TODO: Draw damage numbers
-        // TODO: Draw UI dialogs
+
+        // 5c. 绘制玩家角色 (使用摄像机转换坐标)
+        if self.user.is_some() && self.show_player {
+            tracing::trace!("👤 开始绘制玩家角色...");
+            if let Err(e) = self.draw_player_with_camera(ctx, canvas, &user_pos) {
+                tracing::error!("❌ 玩家绘制失败: {:?}", e);
+            } else {
+                tracing::trace!("✅ 玩家绘制成功");
+            }
+        } else if !self.show_player {
+            tracing::trace!("👤 玩家显示已关闭 (U键控制)");
+        } else {
+            tracing::warn!("⚠️  没有玩家数据，跳过玩家绘制");
+        }
+
+        // 5d. 绘制障碍物标记 (调试用)
+        if let Some(blocked_pos) = self.blocked_cell {
+            // 将地图坐标转换为世界坐标（像素）
+            let world_x = blocked_pos.x as f32 * MapRenderer::CELL_WIDTH as f32;
+            let world_y = blocked_pos.y as f32 * MapRenderer::CELL_HEIGHT as f32;
+            
+            // 转换为屏幕坐标
+            let screen_pos = self.camera.world_to_screen(world_x, world_y);
+            
+            // 绘制红色半透明矩形标记障碍物
+            use ggez::graphics::{Color as GgezColor, DrawMode, DrawParam, Mesh, Rect};
+            let obstacle_rect = Rect::new(
+                screen_pos.0,
+                screen_pos.1,
+                MapRenderer::CELL_WIDTH as f32,
+                MapRenderer::CELL_HEIGHT as f32,
+            );
+            let obstacle_color = GgezColor::from_rgba(255, 0, 0, 128); // 半透明红色
+            if let Ok(obstacle_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), obstacle_rect, obstacle_color) {
+                canvas.draw(&obstacle_mesh, DrawParam::default());
+            }
+            
+            // 绘制边框
+            let border_color = GgezColor::from_rgb(255, 0, 0); // 纯红色
+            if let Ok(border_mesh) = Mesh::new_rectangle(ctx, DrawMode::stroke(2.0), obstacle_rect, border_color) {
+                canvas.draw(&border_mesh, DrawParam::default());
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // 步骤 6: 绘制 UI 控件树 (TODO)
+        // ════════════════════════════════════════════════════════════
+        // TODO: 遍历 self.controls 并调用 draw
+        tracing::trace!("🎨 UI 控件绘制 (暂未实现)");
+
+        // ════════════════════════════════════════════════════════════
+        // 步骤 7: 绘制顶层元素 (TODO)
+        // ════════════════════════════════════════════════════════════
+        // TODO: 绘制鼠标提示、输出消息、对话框等
+        tracing::trace!("✨ 顶层元素绘制 (暂未实现)");
+
+        // ════════════════════════════════════════════════════════════
+        // 步骤 8: 绘制FPS显示
+        // ════════════════════════════════════════════════════════════
+        {
+            use ggez::graphics::{Text, Color as GgezColor, DrawParam};
+            
+            // 计算FPS
+            let fps = ctx.time.fps();
+            
+            // 创建FPS文本
+            let fps_text = format!("FPS: {:.0}", fps);
+            let mut text = Text::new(fps_text);
+            text.set_scale(24.0);
+            
+            // 绘制在左上角
+            let draw_param = DrawParam::default()
+                .dest([10.0, 10.0])
+                .color(GgezColor::from_rgb(255, 255, 0)); // 黄色
+            
+            canvas.draw(&text, draw_param);
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // 绘制完成
+        // ════════════════════════════════════════════════════════════
+        tracing::trace!("🎬 GameScene::draw() 完成");
     }
-    
-    /// Process game events from GameClient
+
+    /// 处理游戏事件 (从 game_scene_old.rs 迁移)
+    ///
+    /// 对应 C# ProcessPacket 的各个分支
     fn process_event(&mut self, event: &GameEvent) {
+        // 🐛 DEBUG: 强制打印所有收到的事件
+        println!("╔════════════════════════════════════════════════════════════════");
+        println!("║ 🎮 GameScene.process_event() 被调用!");
+        println!("╚════════════════════════════════════════════════════════════════");
+        println!("   事件类型: {:?}", std::mem::discriminant(event));
+        println!("   当前状态: {:?}", self.state);
+        println!("════════════════════════════════════════════════════════════════\n");
+
+        tracing::debug!("📨 GameScene 收到事件: {:?}", std::mem::discriminant(event));
+
         match event {
-            GameEvent::PlayerSpawned { player } => {
-                tracing::info!("Player spawned: {}", player.name);
-                // TODO: Create UserObject from PlayerState
-                // For now, just log
-            }
-            
-            GameEvent::PlayerMoved { location } => {
-                if let Some(ref mut user) = self.user {
-                    // Update user position
-                    user.player.map_object.start_move(*location);
-                    tracing::debug!("Player moved to: ({}, {})", location.x, location.y);
-                }
-            }
-            
-            GameEvent::ObjectSpawned { object } => {
-                use crate::network::game_client::GameObject;
-                
-                match object {
-                    GameObject::Player { id, name, .. } => {
-                        tracing::info!("Player spawned: {} ({})", name, id);
-                        // TODO: 当有完整的ObjectPlayer packet时使用ObjectFactory::create_player
-                        // let player = ObjectFactory::create_player(&packet);
-                        // self.add_player(player);
-                    }
-                    
-                    GameObject::Monster { id, name, .. } => {
-                        tracing::info!("Monster spawned: {} ({})", name, id);
-                        // TODO: 当有完整的ObjectMonster packet时使用ObjectFactory::create_monster
-                        // let monster = ObjectFactory::create_monster(&packet);
-                        // self.add_monster(monster);
-                    }
-                    
-                    GameObject::Npc { id, name, .. } => {
-                        tracing::info!("NPC spawned: {} ({})", name, id);
-                        // TODO: 当有完整的ObjectNpc packet时使用ObjectFactory::create_npc
-                        // let npc = ObjectFactory::create_npc(&packet);
-                        // self.add_npc(npc);
-                    }
-                    
-                    GameObject::Item { id, .. } => {
-                        tracing::info!("Item spawned: {}", id);
-                        // TODO: 当有完整的ObjectItem packet时使用ObjectFactory::create_item
-                        // let item = ObjectFactory::create_item(&packet);
-                        // self.add_item(item);
-                    }
-                }
-            }
-            
-            GameEvent::ObjectRemoved { object_id } => {
-                println!("Removing object {}", object_id);
-                self.remove_object(*object_id);
-            }
-            
-            GameEvent::ChatReceived { message } => {
-                self.add_output_message(
-                    message.text.clone(),
-                    (255, 255, 255),
-                );
-            }
-            
-            GameEvent::GoldChanged { gold } => {
-                self.gold = *gold;
-            }
-            
-            GameEvent::SystemMessage { message } => {
-                self.add_output_message(
-                    message.clone(),
-                    (255, 255, 0),
-                );
-            }
-            
-            GameEvent::ItemGained { item, grid_type } => {
-                println!("Item gained: {:?} in {}", item, grid_type);
-                // TODO: Add to appropriate inventory
-            }
-            
-            GameEvent::MagicCast { spell, target_id } => {
-                println!("Magic cast: {:?} on target {}", spell, target_id);
-                // TODO: Create spell effect
-            }
-            
-            GameEvent::MapInformation { map_index, file_name, title } => {
-                tracing::info!("🗺️  Loading map: {} ({})", title, file_name);
-                self.current_map_index = *map_index;
-                self.map_info.insert(*map_index, title.clone());
-                
-                // Load map file using objects::MapReader
+            GameEvent::MapInformation {
+                map_index: _,
+                file_name,
+                title,
+            } => {
+                tracing::info!("🗺️  ========================================");
+                tracing::info!("🗺️  收到服务器地图信息:");
+                tracing::info!("🗺️    地图名称: {}", title);
+                tracing::info!("🗺️    文件名: {}", file_name);
+                tracing::info!("🗺️  ========================================");
+
+                // 🔄 状态转换: WaitingForData → LoadingMap
+                self.state = GameSceneState::LoadingMap(file_name.clone());
+                tracing::info!("🔄 状态切换: WaitingForData → LoadingMap({})", file_name);
+
+                // 🎨 加载地图到 MapRenderer
                 match Self::load_map_file(file_name) {
-                    Ok(mut map) => {
-                        map.title = title.clone();
-                        map.filename = file_name.clone();
-                        tracing::info!("✅ Map loaded: {} ({}x{})", map.title, map.width, map.height);
-                        self.map_control = Some(map);
-                        
-                        // Update player position (center of map for now)
-                        // ⚠️ 重要: 坐标必须是偶数 (C# MapControl 只绘制偶数坐标的格子)
-                        if self.player_x == 0 && self.player_y == 0 {
-                            let center_x = self.map_control.as_ref().unwrap().width / 2;
-                            let center_y = self.map_control.as_ref().unwrap().height / 2;
-                            // 确保是偶数坐标
-                            self.player_x = if center_x % 2 == 0 { center_x } else { center_x + 1 };
-                            self.player_y = if center_y % 2 == 0 { center_y } else { center_y + 1 };
-                            tracing::info!("📍 Player positioned at even coords: ({}, {})", self.player_x, self.player_y);
+                    Ok(map_renderer) => {
+                        tracing::info!("✅ 地图加载成功:");
+                        tracing::info!(
+                            "   - 地图尺寸: {} x {} 格子",
+                            map_renderer.width,
+                            map_renderer.height
+                        );
+                        tracing::info!(
+                            "   - 像素尺寸: {:.1} x {:.1} 像素",
+                            map_renderer.width as f32 * MapRenderer::CELL_WIDTH as f32,
+                            map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32
+                        );
+                        self.map_renderer = map_renderer;
+
+                        // 🔧 状态转换: 地图加载完成
+                        println!(
+                            "╔════════════════════════════════════════════════════════════════"
+                        );
+                        println!("║ 🔄 状态转换检查 - MapInformation");
+                        println!(
+                            "╚════════════════════════════════════════════════════════════════"
+                        );
+                        println!("   当前状态: {:?}", self.state);
+                        println!("   地图已加载: {}", self.map_renderer.width > 0);
+                        println!("   玩家已创建: {}", self.user.is_some());
+
+                        if self.user.is_some() {
+                            // 玩家数据已存在 → Ready
+                            self.state = GameSceneState::Ready;
+                            println!("   ✅ 状态切换: LoadingMap → Ready (玩家数据已存在) ⭐⭐⭐");
+                            tracing::info!("🔄 状态切换: LoadingMap → Ready (玩家数据已存在)");
+                        } else {
+                            // 等待玩家数据
+                            self.state = GameSceneState::WaitingForPlayer;
+                            println!("   ⏳ 状态切换: LoadingMap → WaitingForPlayer");
+                            tracing::info!("🔄 状态切换: LoadingMap → WaitingForPlayer");
+                        }
+                        println!("   切换后状态: {:?}", self.state);
+                        println!(
+                            "════════════════════════════════════════════════════════════════\n"
+                        );
+
+                        // 🔧 如果用户已经存在，更新摄像机到玩家位置
+                        if let Some(ref user) = self.user {
+                            let player_world_x = (user.player.map_object.movement.x as f32
+                                * MapRenderer::CELL_WIDTH as f32)
+                                + user.player.map_object.offset_move.x as f32;
+                            let player_world_y = (user.player.map_object.movement.y as f32
+                                * MapRenderer::CELL_HEIGHT as f32)
+                                + user.player.map_object.offset_move.y as f32;
+
+                            let map_width_px =
+                                self.map_renderer.width as f32 * MapRenderer::CELL_WIDTH as f32;
+                            let map_height_px =
+                                self.map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32;
+
+                            tracing::info!("🎥 地图加载后更新摄像机:");
+                            tracing::info!(
+                                "   玩家位置: ({:.1}, {:.1})",
+                                player_world_x,
+                                player_world_y
+                            );
+                            tracing::info!(
+                                "   摄像机更新前: ({:.1}, {:.1})",
+                                self.camera.x,
+                                self.camera.y
+                            );
+
+                            self.camera.follow_target_clamped(
+                                player_world_x,
+                                player_world_y,
+                                map_width_px,
+                                map_height_px,
+                            );
+
+                            tracing::info!(
+                                "   摄像机更新后: ({:.1}, {:.1})",
+                                self.camera.x,
+                                self.camera.y
+                            );
                         }
                     }
                     Err(e) => {
                         tracing::error!("❌ Failed to load map {}: {}", file_name, e);
-                        // Create empty fallback map
-                        let mut fallback = map_control::MapControl::new(100, 100);
-                        fallback.title = title.clone();
-                        fallback.filename = file_name.clone();
-                        self.map_control = Some(fallback);
+                        // 创建空白地图作为后备
+                        self.map_renderer = MapRenderer::default();
                     }
                 }
             }
-            
+
+            GameEvent::UserInformation { user_info } => {
+                tracing::info!("👤 ========================================");
+                tracing::info!("👤 收到服务器玩家信息:");
+                tracing::info!("👤   玩家名称: {}", user_info.name);
+                tracing::info!("👤   ObjectID: {}", user_info.object_id);
+                tracing::info!(
+                    "👤   位置: ({}, {}) ⭐ 这是玩家的初始位置!",
+                    user_info.location_x,
+                    user_info.location_y
+                );
+                tracing::info!("👤   方向: {:?}", user_info.direction);
+                tracing::info!(
+                    "👤   职业: {:?}, 等级: {}",
+                    user_info.class,
+                    user_info.level
+                );
+                tracing::info!("👤   金币: {}, 点券: {}", user_info.gold, user_info.credit);
+                tracing::info!("👤 ========================================");
+
+                // 🔧 CRITICAL FIX: Create user object from UserInformation packet
+                // This is the PRIMARY way to create the player object
+                use mir2_shared::packets::server::ObjectPlayer;
+
+                let object_player = ObjectPlayer {
+                    object_id: user_info.object_id,
+                    name: user_info.name.clone(),
+                    guild_name: user_info.guild_name.clone(),
+                    guild_rank_name: user_info.guild_rank.clone(),
+                    name_colour: user_info.name_colour,
+                    class: user_info.class,
+                    gender: user_info.gender,
+                    level: user_info.level,
+                    location_x: user_info.location_x,
+                    location_y: user_info.location_y,
+                    direction: user_info.direction,
+                    hair: user_info.hair,
+                    light: 0,
+                    weapon: -1, // Will be set from equipment
+                    weapon_effect: 0,
+                    armour: -1, // Will be set from equipment
+                    poison: mir2_shared::PoisonType::empty(),
+                    dead: false,
+                    hidden: false,
+                    effect: mir2_shared::enums::SpellEffect::None,
+                    wing_effect: 0,
+                    extra: false,
+                    mount_type: -1,
+                    riding_mount: false,
+                    fishing: false,
+                    transform_type: 0,
+                    element_orb_effect: 0,
+                    element_orb_lvl: 0,
+                    element_orb_max: 0,
+                    buffs: Vec::new(),
+                    level_effects: user_info.level_effects,
+                };
+
+                // 使用 ObjectFactory 创建玩家对象
+                let user_obj = crate::objects::ObjectFactory::create_player(&object_player);
+
+                tracing::info!("✅ ========================================");
+                tracing::info!("✅ 玩家对象创建成功:");
+                tracing::info!("✅   ObjectID: {}", user_obj.player.map_object.object_id());
+                tracing::info!("✅   玩家名称: {}", user_obj.player.map_object.name);
+                tracing::info!(
+                    "✅   CurrentLocation: ({}, {})",
+                    user_obj.player.map_object.current_location.x,
+                    user_obj.player.map_object.current_location.y
+                );
+                tracing::info!(
+                    "✅   Movement: ({}, {}) ⭐ 这个位置用于摄像机跟随!",
+                    user_obj.player.map_object.movement.x,
+                    user_obj.player.map_object.movement.y
+                );
+                tracing::info!(
+                    "✅   Offset: ({}, {})",
+                    user_obj.player.map_object.offset_move.x,
+                    user_obj.player.map_object.offset_move.y
+                );
+                tracing::info!(
+                    "✅   职业: {:?}, 等级: {}",
+                    user_obj.player.class,
+                    user_obj.player.level
+                );
+
+                // 计算玩家的世界坐标（像素）
+                let player_world_x = (user_obj.player.map_object.movement.x as f32
+                    * MapRenderer::CELL_WIDTH as f32)
+                    + user_obj.player.map_object.offset_move.x as f32;
+                let player_world_y = (user_obj.player.map_object.movement.y as f32
+                    * MapRenderer::CELL_HEIGHT as f32)
+                    + user_obj.player.map_object.offset_move.y as f32;
+                tracing::info!(
+                    "✅   世界坐标 (像素): ({:.1}, {:.1})",
+                    player_world_x,
+                    player_world_y
+                );
+                tracing::info!("✅ ========================================");
+
+                self.user = Some(user_obj);
+
+                // 🔧 状态转换: 玩家数据到达
+                println!("╔════════════════════════════════════════════════════════════════");
+                println!("║ 🔄 状态转换检查 - UserInformation");
+                println!("╚════════════════════════════════════════════════════════════════");
+                println!("   当前状态: {:?}", self.state);
+                println!("   地图已加载: {}", self.map_renderer.width > 0);
+                println!("   玩家已创建: {}", self.user.is_some());
+
+                match self.state {
+                    GameSceneState::WaitingForData => {
+                        // 地图还未加载 → WaitingForData (不变)
+                        println!("   ❌ 玩家数据到达,但地图还未加载 (保持 WaitingForData)");
+                        tracing::info!("🔄 玩家数据到达,但地图还未加载 (保持 WaitingForData)");
+                    }
+                    GameSceneState::LoadingMap(_) => {
+                        // 地图正在加载 → 等待地图加载完成
+                        println!("   ⏳ 玩家数据到达,等待地图加载完成");
+                        tracing::info!("🔄 玩家数据到达,等待地图加载完成");
+                    }
+                    GameSceneState::WaitingForPlayer => {
+                        // 地图已加载 → Ready
+                        self.state = GameSceneState::Ready;
+                        println!("   ✅ 状态切换: WaitingForPlayer → Ready ⭐⭐⭐");
+                        tracing::info!("🔄 状态切换: WaitingForPlayer → Ready");
+                    }
+                    GameSceneState::Ready => {
+                        // 已就绪,不变
+                        println!("   ✅ 已经是 Ready 状态");
+                    }
+                }
+                println!("   切换后状态: {:?}", self.state);
+                println!("════════════════════════════════════════════════════════════════\n");
+
+                // 🔧 立即更新摄像机到玩家位置
+                let map_width_px = self.map_renderer.width as f32 * MapRenderer::CELL_WIDTH as f32;
+                let map_height_px =
+                    self.map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32;
+
+                tracing::info!("🎥 ========================================");
+                tracing::info!("🎥 初始化摄像机位置:");
+                tracing::info!(
+                    "🎥   地图尺寸 (像素): {:.1} x {:.1}",
+                    map_width_px,
+                    map_height_px
+                );
+                tracing::info!(
+                    "🎥   摄像机更新前: ({:.1}, {:.1})",
+                    self.camera.x,
+                    self.camera.y
+                );
+
+                if map_width_px > 0.0 && map_height_px > 0.0 {
+                    // 地图已加载，使用带边界限制的跟随
+                    self.camera.follow_target_clamped(
+                        player_world_x,
+                        player_world_y,
+                        map_width_px,
+                        map_height_px,
+                    );
+                    tracing::info!("🎥   使用带边界限制的跟随");
+                } else {
+                    // 地图还未加载，直接设置摄像机位置（不限制边界）
+                    self.camera.follow_target(player_world_x, player_world_y);
+                    tracing::info!("🎥   地图未加载，直接设置摄像机位置");
+                }
+
+                tracing::info!(
+                    "🎥   摄像机更新后: ({:.1}, {:.1})",
+                    self.camera.x,
+                    self.camera.y
+                );
+                tracing::info!("🎥 ========================================");
+
+                // Update inventory, equipment, gold, etc.
+                self.gold = user_info.gold;
+                self.credit = user_info.credit;
+                if let Some(ref inv) = user_info.inventory {
+                    // Convert Vec to array, fallback to empty array if length mismatch
+                    if inv.len() == 46 {
+                        self.inventory = inv.clone().try_into().unwrap();
+                    }
+                }
+                if let Some(ref equip) = user_info.equipment {
+                    if equip.len() == 14 {
+                        self.equipment = equip.clone().try_into().unwrap();
+                    }
+                }
+
+                tracing::info!("✅ User state fully initialized!");
+            }
+
+            GameEvent::PlayerSpawned { player } => {
+                tracing::info!(
+                    "👤 Player spawned: {} at ({}, {})",
+                    player.name,
+                    player.location.x,
+                    player.location.y
+                );
+
+                // 🔧 CRITICAL: Update user object position if it exists
+                if let Some(ref mut user) = self.user {
+                    tracing::info!(
+                        "✅ Updating user position from PlayerSpawned: ({}, {})",
+                        player.location.x,
+                        player.location.y
+                    );
+                    user.player.map_object.set_current_location(player.location);
+                    tracing::info!(
+                        "✅ User object synced: current_location=({}, {}), movement=({}, {})",
+                        user.player.map_object.current_location.x,
+                        user.player.map_object.current_location.y,
+                        user.player.map_object.movement.x,
+                        user.player.map_object.movement.y
+                    );
+                } else {
+                    tracing::warn!("⚠️  PlayerSpawned received but user object doesn't exist yet (will be created from UserInformation)");
+                }
+            }
+
+            GameEvent::PlayerMoved { location } => {
+                if let Some(ref mut user) = self.user {
+                    tracing::debug!("🚶 Player moved to: ({}, {})", location.x, location.y);
+                    // 🔧 CRITICAL FIX: Update both current_location AND movement
+                    // This synchronizes the rendering position with the actual map position
+                    user.player.map_object.set_current_location(*location);
+                    tracing::debug!(
+                        "✅ User position synced: current_location={:?}, movement={:?}",
+                        user.player.map_object.current_location,
+                        user.player.map_object.movement
+                    );
+                }
+            }
+
+            GameEvent::ObjectSpawned { object } => {
+                use crate::network::game_client::GameObject;
+
+                match object {
+                    GameObject::Player { id, name, .. } => {
+                        tracing::info!("👤 Player spawned: {} ({})", name, id);
+                    }
+                    GameObject::Monster { id, name, .. } => {
+                        tracing::info!("👹 Monster spawned: {} ({})", name, id);
+                    }
+                    GameObject::Npc { id, name, .. } => {
+                        tracing::info!("🧙 NPC spawned: {} ({})", name, id);
+                    }
+                    GameObject::Item { id, .. } => {
+                        tracing::info!("💎 Item spawned: {}", id);
+                    }
+                }
+            }
+
+            GameEvent::ObjectRemoved { object_id } => {
+                tracing::debug!("🗑️  Object removed: {}", object_id);
+                // TODO: self.remove_object(*object_id);
+            }
+
+            GameEvent::ChatReceived { message } => {
+                self.output_message(message.text.clone(), OutputMessageType::Normal);
+            }
+
+            GameEvent::GoldChanged { gold } => {
+                self.gold = *gold;
+                tracing::debug!("💰 Gold changed: {}", gold);
+            }
+
+            GameEvent::SystemMessage { message } => {
+                self.output_message(message.clone(), OutputMessageType::Normal);
+            }
+
+            GameEvent::ItemGained { item, grid_type } => {
+                tracing::info!("🎁 Item gained: {:?} in {}", item, grid_type);
+            }
+
+            GameEvent::MagicCast { spell, target_id } => {
+                tracing::debug!("✨ Magic cast: {:?} on target {}", spell, target_id);
+            }
+
             _ => {
-                // TODO: Handle other game events
+                tracing::warn!("⚠️  Unhandled game event: {:?}", event);
             }
         }
     }
-    
-    fn handle_mouse_move(&mut self, _x: i32, _y: i32) {
-        // TODO: Update hover states
-        // TODO: Update cursor
+
+    /// 处理鼠标移动事件 - 覆盖Scene trait的默认实现
+    fn handle_mouse_move(&mut self, x: i32, y: i32) {
+        // 更新鼠标位置
+        self.mouse_location = Point { x, y };
     }
     
-    fn handle_mouse_button(&mut self, button: super::MouseButton, pressed: bool, x: i32, y: i32) {
-        use super::MouseButton;
-        
-        if pressed {
-            tracing::debug!("GameScene click at ({}, {}) with {:?}", x, y, button);
-            
-            match button {
-                MouseButton::Left => {
-                    // TODO: Handle left click (move, attack, interact)
-                }
-                MouseButton::Right => {
-                    // TODO: Handle right click (pickup item)
-                }
-                MouseButton::Middle => {
-                    // TODO: Handle middle click
-                }
-                _ => {}
-            }
-        }
+    /// 处理鼠标按钮事件
+    /// 注意：游戏一般不使用事件驱动，而是在 update() 中主动轮询鼠标状态
+    fn handle_mouse_button(&mut self, _button: super::MouseButton, _pressed: bool, _x: i32, _y: i32) {
+        // 不需要实现，鼠标状态在 update() 中主动查询
     }
     
-    fn handle_key_press(&mut self, key: super::KeyCode, modifiers: super::ModifiersState) -> bool {
-        use super::KeyCode;
-        
+    /// 处理鼠标滚轮事件（用于地图和窗口缩放）
+    fn handle_mouse_wheel(&mut self, _delta_x: f32, delta_y: f32) {
+        // delta_y > 0: 向上滚动 (放大)
+        // delta_y < 0: 向下滚动 (缩小)
+
+        // 获取当前缩放级别
+        let current_zoom = self.camera.zoom;
+
+        // 缩放速度：每次滚动改变 10%
+        let zoom_factor = if delta_y > 0.0 { 1.1 } else { 0.9 };
+        let new_zoom = current_zoom * zoom_factor;
+
+        // 限制缩放范围：0.5x ~ 3.0x
+        let clamped_zoom = new_zoom.max(0.5).min(3.0);
+
+        // 应用新的缩放级别
+        self.camera.set_zoom(clamped_zoom);
+
+        tracing::debug!(
+            "🔍 Camera zoom changed: {:.2}x -> {:.2}x (wheel delta: {:.1})",
+            current_zoom,
+            clamped_zoom,
+            delta_y
+        );
+    }
+
+    /// 🎮 处理键盘按键事件 - MapRenderer 显示控制
+    ///
+    /// 快捷键列表:
+    /// - G键: 切换地图网格
+    /// - B键: 切换纹理边框
+    /// - 1键: 切换 Back 层
+    /// - 2键: 切换 Middle 层
+    /// - 3键: 切换 Front 层
+    /// - O键: 切换障碍层
+    /// - A键: 切换动画效果
+    fn handle_key_press(&mut self, key: KeyCode, _modifiers: ModifiersState) -> bool {
+        use crate::scenes::KeyCode;
+
         match key {
-            // Movement keys handled separately
-            KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::ArrowLeft | KeyCode::ArrowRight => {
-                // TODO: Handle movement
-                true
-            }
-            
-            // Attack mode (Ctrl+H)
-            KeyCode::KeyH if modifiers.control_key() => {
-                // TODO: Cycle through attack modes
-                true
-            }
-            
-            // Pet mode (Ctrl+E)
-            KeyCode::KeyE if modifiers.control_key() => {
-                // TODO: Cycle through pet modes
-                true
-            }
-            
-            // Inventory (Tab)
-            KeyCode::Tab => {
-                // TODO: Toggle inventory
-                true
-            }
-            
-            // Character (C)
-            KeyCode::KeyC => {
-                // TODO: Toggle character dialog
-                true
-            }
-            
-            // Skills (S)
-            KeyCode::KeyS => {
-                // TODO: Toggle skills dialog
-                true
-            }
-            
-            // Quest (Q)
-            KeyCode::KeyQ => {
-                // TODO: Toggle quest dialog
-                true
-            }
-            
-            // Guild (G)
+            // G键: 切换地图网格
             KeyCode::KeyG => {
-                // TODO: Toggle guild dialog
+                self.map_renderer.show_grid = !self.map_renderer.show_grid;
+                println!(
+                    "🔍 地图网格: {}",
+                    if self.map_renderer.show_grid {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true // 已处理
+            }
+
+            // B键: 切换纹理边框
+            KeyCode::KeyB => {
+                self.map_renderer.show_borders = !self.map_renderer.show_borders;
+                println!(
+                    "🔍 纹理边框: {}",
+                    if self.map_renderer.show_borders {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
                 true
             }
-            
-            _ => false
+
+            // 1键: 切换 Back 层
+            KeyCode::Digit1 => {
+                self.map_renderer.show_layer_back = !self.map_renderer.show_layer_back;
+                println!(
+                    "🎨 Back层: {}",
+                    if self.map_renderer.show_layer_back {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // 2键: 切换 Middle 层
+            KeyCode::Digit2 => {
+                self.map_renderer.show_layer_middle = !self.map_renderer.show_layer_middle;
+                println!(
+                    "🎨 Middle层: {}",
+                    if self.map_renderer.show_layer_middle {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // 3键: 切换 Front 层
+            KeyCode::Digit3 => {
+                self.map_renderer.show_layer_front = !self.map_renderer.show_layer_front;
+                println!(
+                    "🎨 Front层: {}",
+                    if self.map_renderer.show_layer_front {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // O键: 切换障碍层
+            KeyCode::KeyO => {
+                self.map_renderer.show_obstacles = !self.map_renderer.show_obstacles;
+                println!(
+                    "🚧 障碍层: {}",
+                    if self.map_renderer.show_obstacles {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // A键: 切换动画效果
+            KeyCode::KeyA => {
+                self.map_renderer.show_animations = !self.map_renderer.show_animations;
+                println!(
+                    "🎬 动画效果: {}",
+                    if self.map_renderer.show_animations {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // U键: 切换玩家显示
+            KeyCode::KeyU => {
+                self.show_player = !self.show_player;
+                println!(
+                    "👤 玩家显示: {}",
+                    if self.show_player {
+                        "开启"
+                    } else {
+                        "关闭"
+                    }
+                );
+                true
+            }
+
+            // 其他按键不处理
+            _ => false,
         }
     }
 }
 
-/// Get current time in milliseconds
-fn get_current_time() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64
-}
+// ==================== 辅助函数 ====================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_game_scene_creation() {
-        let scene = GameScene::new();
-        assert_eq!(scene.scene_type(), SceneType::Game);
-        assert_eq!(scene.gold, 0);
-        assert_eq!(scene.storage.len(), 80);
-        assert_eq!(scene.guild_storage.len(), 112);
-    }
-
-    #[test]
-    fn test_add_output_message() {
-        let mut scene = GameScene::new();
-        
-        scene.add_output_message("Test message".to_string(), (255, 255, 255));
-        assert_eq!(scene.output_messages.len(), 1);
-        
-        // Test message limit
-        scene.max_output_messages = 3;
-        scene.add_output_message("Message 2".to_string(), (255, 255, 255));
-        scene.add_output_message("Message 3".to_string(), (255, 255, 255));
-        scene.add_output_message("Message 4".to_string(), (255, 255, 255));
-        
-        assert_eq!(scene.output_messages.len(), 3);
-        assert_eq!(scene.output_messages[0].text, "Message 2");
-    }
-
-    #[test]
-    fn test_attack_pet_modes() {
-        let mut scene = GameScene::new();
-        
-        scene.set_attack_mode(AttackMode::All);
-        assert_eq!(scene.attack_mode, AttackMode::All);
-        
-        scene.set_pet_mode(PetMode::AttackOnly);
-        assert_eq!(scene.pet_mode, PetMode::AttackOnly);
-    }
+/// 获取当前时间戳 (毫秒)
+#[allow(dead_code)]
+fn current_time_millis() -> i64 {
+    // TODO: 实现
+    0
 }

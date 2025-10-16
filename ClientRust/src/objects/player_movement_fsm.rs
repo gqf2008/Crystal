@@ -33,6 +33,9 @@ pub struct PlayerMovementFSM {
     /// 渲染起始格子(用于插值计算)
     pub render_start_cell: Point,
     
+    /// 移动起始格子(用于方向计算,避免方向抖动)
+    pub move_start_cell: Point,
+    
     /// 移动方向
     pub direction: MirDirection,
     
@@ -53,6 +56,7 @@ impl Default for PlayerMovementFSM {
             current_cell: Point { x: 0, y: 0 },
             target_cell: Point { x: 0, y: 0 },
             render_start_cell: Point { x: 0, y: 0 },
+            move_start_cell: Point { x: 0, y: 0 },
             direction: MirDirection::Up,
             running: false,
             walk_speed_ms: 600,  // 600ms走一格
@@ -68,6 +72,7 @@ impl PlayerMovementFSM {
             current_cell: spawn_point,
             target_cell: spawn_point,
             render_start_cell: spawn_point,
+            move_start_cell: spawn_point,
             ..Default::default()
         }
     }
@@ -93,9 +98,10 @@ impl PlayerMovementFSM {
         self.direction = direction;
         self.running = running;
         
-        // 如果当前是静止状态,记录渲染起始点
+        // 如果当前是静止状态,记录渲染起始点和移动起始点
         if matches!(self.state, MovementState::Idle) {
             self.render_start_cell = self.current_cell;
+            self.move_start_cell = self.current_cell; // 🔧 记录移动起始位置,用于方向计算
         }
         
         // 计算移动时间
@@ -173,11 +179,11 @@ impl PlayerMovementFSM {
                         // 到达目标,停止
                         self.state = MovementState::Idle;
                     } else {
-                        // 🔧 重新计算从当前位置到目标的方向
-                        // 这样可以处理路径变化和斜线移动
-                        self.direction = Self::calculate_direction(self.current_cell, self.target_cell);
+                        // 🔧 不要重新计算方向!保持用户点击时设定的方向
+                        // 方向由 handle_move_input 和 update_target() 控制
+                        // 如果这里重新计算,会导致方向在相邻方向间来回跳动
                         
-                        // 继续向目标移动
+                        // 继续向目标移动(保持当前方向)
                         let new_duration = if self.running {
                             self.run_speed_ms
                         } else {

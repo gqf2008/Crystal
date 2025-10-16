@@ -142,16 +142,25 @@ pub enum GameSceneState {
 /// - 输入处理
 #[allow(dead_code)]
 pub struct GameScene {
+    // ==================== 子系统架构 (NEW) ====================
+    /// 输入系统 - 统一处理鼠标键盘
+    input_system: crate::systems::InputSystem,
+    
+    /// 对象管理系统 - 管理玩家、怪物、NPC、掉落物
+    object_manager: crate::systems::ObjectManager,
+    
+    /// 渲染管线 - 整合 MapRenderer 和 Camera
+    rendering_pipeline: crate::systems::RenderingPipeline,
+    
     // ==================== 场景状态 ====================
     /// 当前场景加载状态
     state: GameSceneState,
 
-    // ==================== 玩家与英雄 ====================
-    // C# line 27-48
-    /// 当前玩家对象 (C#: public static UserObject User)
+    // ==================== 玩家与英雄 (保留用于向后兼容) ====================
+    /// 当前玩家对象 (向后兼容字段，实际数据在 object_manager 中)
     user: Option<UserObject>,
 
-    /// 英雄对象 (C#: public static UserHeroObject Hero)
+    /// 英雄对象 (向后兼容字段，实际数据在 object_manager 中)
     hero: Option<HeroObject>,
 
     /// 是否拥有英雄 (C#: public bool HasHero)
@@ -160,10 +169,8 @@ pub struct GameScene {
     /// 英雄召唤状态 (C#: public HeroSpawnState HeroSpawnState)
     hero_spawn_state: HeroSpawnState,
 
-    // ==================== 对象管理 ====================
-    // C# line 50-58
-    /// 所有地图对象 (C#: 通过 MapObject.User/MapObject.Objects 管理)
-    /// 注意: C# 使用静态字典,Rust 用实例字段
+    // ==================== 对象管理 (保留用于向后兼容) ====================
+    /// 所有地图对象 (向后兼容字段)
     objects: HashMap<u32, MapObject>,
 
     /// 被选中的格子 (C#: public static MapObject SelectedCell)
@@ -457,22 +464,32 @@ impl GameScene {
     /// 对应 C# GameScene 构造函数 (line 242-461)
     pub fn new() -> Self {
         tracing::info!("🎮 ========================================");
-        tracing::info!("🎮 GameScene::new() 创建游戏场景");
+        tracing::info!("🎮 GameScene::new() 创建游戏场景 (子系统架构)");
+        tracing::info!("🎮   使用 InputSystem + ObjectManager + RenderingPipeline");
         tracing::info!("🎮   初始摄像机位置: (0, 0)");
-        tracing::info!("🎮   初始用户对象: None");
         tracing::info!("🎮 ========================================");
 
+        // 创建子系统
+        let input_system = crate::systems::InputSystem::new();
+        let object_manager = crate::systems::ObjectManager::new();
+        let rendering_pipeline = crate::systems::RenderingPipeline::new();
+
         Self {
+            // 子系统
+            input_system,
+            object_manager,
+            rendering_pipeline,
+            
             // 场景状态
             state: GameSceneState::WaitingForData,
-
-            // 玩家与英雄
+            
+            // 玩家与英雄 (向后兼容字段)
             user: None,
             hero: None,
             has_hero: false,
             hero_spawn_state: HeroSpawnState::None,
-
-            // 对象管理
+            
+            // 对象管理 (向后兼容字段)
             objects: HashMap::new(),
             selected_cell: None,
 
@@ -1422,8 +1439,6 @@ impl Scene for GameScene {
 
     fn update(&mut self, ctx: &mut ggez::Context) {
         // 定期清理纹理缓存 (每 5 秒检查一次,清理超过 30 秒未使用的纹理)
-
-        // 对应 C# DXManager.CleanUp()
         static mut LAST_CLEANUP_TIME: Option<std::time::Instant> = None;
         unsafe {
             let now = std::time::Instant::now();
@@ -1435,13 +1450,35 @@ impl Scene for GameScene {
                 LAST_CLEANUP_TIME = Some(now);
             }
         }
+        
+        // 1. 更新屏幕尺寸
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
         self.camera.update_screen_size(screen_width, screen_height);
         
-        // ==================== 角色移动状态机 ====================
-        // 使用 PlayerMovementFSM 处理平滑的格子移动
+        // 2. 🆕 更新输入系统 (读取鼠标键盘状态)
+        self.input_system.update(ctx);
         
-        // ✅ 主动查询鼠标状态 (不依赖事件回调)
+        // 3. 🆕 处理玩家移动输入 (通过 ObjectManager)
+        self.object_manager.handle_move_input(
+            &self.input_system,
+            &self.camera,
+            &self.map_renderer,
+            &self.command_tx,
+        );
+        
+        // 4. 🆕 更新对象管理器 (FSM、动画、网络同步)
+        let delta_time = ctx.time.delta().as_secs_f32();
+        self.object_manager.update(delta_time, &self.command_tx);
+        
+        // 5. 同步玩家对象 (向后兼容)
+        if let Some(user) = self.object_manager.user() {
+            self.user = Some(user.clone());
+        }
+        
+        // ==================== 角色移动状态机 (旧版逻辑 - 暂时禁用) ====================
+        // ⚠️ 临时注释: 此代码与 ObjectManager.update() 冲突,导致 FSM 被更新两次
+        // TODO: 将此逻辑完整迁移到 ObjectManager::handle_move_input()
+        /*
         use ggez::input::mouse::MouseButton;
         let mouse_right_down = ctx.mouse.button_pressed(MouseButton::Right);
         let mouse_left_down = ctx.mouse.button_pressed(MouseButton::Left);
@@ -1451,163 +1488,9 @@ impl Scene for GameScene {
             y: mouse_pos.y as i32 
         };
         
-        // 🐛 调试：每60帧打印一次鼠标状态
-        static mut DEBUG_COUNTER: u32 = 0;
-        unsafe {
-            DEBUG_COUNTER += 1;
-            if DEBUG_COUNTER % 60 == 0 {
-                println!("🖱️ [GameScene::update] 鼠标状态: 右键={}, 左键={}, 位置=({}, {})", 
-                    mouse_right_down, mouse_left_down, mouse_pos.x, mouse_pos.y);
-                println!("   玩家对象: {}", if self.user.is_some() { "存在" } else { "无" });
-                println!("   场景状态: {:?}", self.state);
-            }
-        }
-        
-        // 第一步: 计算所有需要的数据(不借用user)
-        let mouse_input = if mouse_right_down || mouse_left_down {
-            let running = mouse_right_down;
-            
-            // 提取当前状态
-            let current_cell = if let Some(ref user) = self.user {
-                user.movement_fsm.current_cell
-            } else {
-                Point { x: 0, y: 0 }
-            };
-            let is_idle = if let Some(ref user) = self.user {
-                user.movement_fsm.is_idle()
-            } else {
-                true
-            };
-            
-            // 计算目标和可行性
-            let target_cell = self.screen_to_map_location(mouse_pos_point);
-            let direction = self.direction_from_point(current_cell, target_cell);
-            let next_cell = self.point_move(current_cell, direction, 1);
-            let can_move = self.can_walk_to(next_cell);
-            
-            // 🐛 调试坐标转换
-            static mut CLICK_DEBUG_COUNTER: u32 = 0;
-            unsafe {
-                CLICK_DEBUG_COUNTER += 1;
-                if CLICK_DEBUG_COUNTER % 30 == 1 { // 每30帧打印一次，避免刷屏
-                    println!("🖱️ [坐标转换] 屏幕点击: ({}, {})", mouse_pos.x, mouse_pos.y);
-                    println!("   摄像机: ({:.1}, {:.1}), 屏幕: ({:.1}x{:.1})", 
-                        self.camera.x, self.camera.y, 
-                        self.camera.screen_width, self.camera.screen_height);
-                    println!("   当前格子: ({}, {})", current_cell.x, current_cell.y);
-                    println!("   目标格子: ({}, {})", target_cell.x, target_cell.y);
-                    println!("   下一格子: ({}, {}) - 方向: {:?}", next_cell.x, next_cell.y, direction);
-                    println!("   可以移动: {}", can_move);
-                }
-            }
-            
-            Some((target_cell, direction, running, current_cell, is_idle, can_move))
-        } else {
-            None
-        };
-        
-        // 第二步: 计算平滑方向(在借用 user 之前)
-        let smooth_direction = if let Some((_, direction, _, _, _, _)) = mouse_input {
-            if let Some(ref user) = self.user {
-                let current_dir = user.player.map_object.direction;
-                self.smooth_direction_change(current_dir, direction)
-            } else {
-                direction
-            }
-        } else {
-            MirDirection::Up // 默认值,不会被使用
-        };
-        
-        // 第三步: 应用到user(可以安全地借用)
-        if let Some(ref mut user) = self.user {
-            if let Some((target_cell, direction, running, current_cell, is_idle, can_move)) = mouse_input {
-                // 🔧 修复: 无论是否在移动,都更新目标和方向
-                // 这样鼠标长按时角色会跟随鼠标方向
-                if current_cell != target_cell {
-                    if is_idle {
-                        // 当前静止,开始新的移动
-                        if can_move {
-                            println!("✅ [移动] 开始移动: 从({},{}) -> ({},{}), 方向={:?}, 跑步={}", 
-                                current_cell.x, current_cell.y, target_cell.x, target_cell.y, direction, running);
-                            user.movement_fsm.move_to(target_cell, direction, running);
-                            user.player.set_current_action(if running {
-                                MirAction::Running
-                            } else {
-                                MirAction::Walking
-                            });
-                            // 平滑设置角色朝向
-                            user.player.map_object.set_direction(smooth_direction);
-                        } else {
-                            println!("❌ [移动] 无法移动到 ({},{}): 格子被阻挡", target_cell.x, target_cell.y);
-                            // 无法移动,但平滑更新朝向
-                            user.player.map_object.set_direction(smooth_direction);
-                            user.player.set_current_action(MirAction::Standing);
-                        }
-                    } else {
-                        // 正在移动中,更新目标和方向
-                        user.movement_fsm.update_target(target_cell, direction, running);
-                        // 平滑更新角色朝向
-                        user.player.map_object.set_direction(smooth_direction);
-                        // 更新动作(可能从走切换到跑,或相反)
-                        user.player.set_current_action(if running {
-                            MirAction::Running
-                        } else {
-                            MirAction::Walking
-                        });
-                    }
-                }
-            } else {
-                // 鼠标释放,停止移动
-                if user.movement_fsm.is_moving() {
-                    println!("🛑 [移动] 停止移动");
-                    user.movement_fsm.stop();
-                    user.player.set_current_action(MirAction::Standing);
-                }
-            }
-            
-            // 2. 更新状态机
-            if user.movement_fsm.update() {
-                // 完成了一格移动
-                let new_cell = user.movement_fsm.current_cell;
-                let render_start = user.movement_fsm.render_start_cell;
-                let direction = user.movement_fsm.direction;
-                
-                // 同步到 MapObject
-                user.player.map_object.current_location = new_cell;
-                user.player.map_object.movement = render_start;
-                
-                // 发送移动包到服务器
-                if let Some(ref tx) = self.command_tx {
-                    use crate::network::NetworkCommand;
-                    let _ = tx.send(NetworkCommand::Move {
-                        direction: direction as u8,
-                        location: (new_cell.x, new_cell.y),
-                    });
-                }
-                
-                // 检查是否继续移动或到达目标
-                if user.movement_fsm.is_idle() {
-                    user.player.set_current_action(MirAction::Standing);
-                }
-            }
-            
-            // 3. 🔧 每帧同步渲染位置和偏移
-            // 这样确保 movement 和 offset_move 始终与 FSM 同步
-            user.player.map_object.movement = user.movement_fsm.render_start_cell;
-            
-            let (offset_x, offset_y) = user.movement_fsm.get_render_offset(
-                MapRenderer::CELL_WIDTH,
-                MapRenderer::CELL_HEIGHT,
-            );
-            user.player.map_object.offset_move.x = offset_x;
-            user.player.map_object.offset_move.y = offset_y;
-        }
-        
-        // ==================== 更新玩家动画 ====================
-        if let Some(ref mut user) = self.user {
-            // 只更新动画帧
-            user.player.update_animation();
-        }
+        // ... (旧版鼠标处理和移动逻辑)
+        // 已被 ObjectManager.update() 替代
+        */
         
         // TODO: 实现更新逻辑 (对应 C# Process)
         // 更新动画计数器
@@ -1763,17 +1646,30 @@ impl Scene for GameScene {
             }
         };
 
-        // 5b. 绘制地图 (MapRenderer 会根据摄像机计算可见区域)
-        tracing::trace!("🗺️  开始绘制地图 (MapRenderer)...");
-        if let Err(e) = self.map_renderer.draw(ctx, canvas, &self.camera) {
-            tracing::error!("❌ 地图绘制失败: {:?}", e);
+        // ════════════════════════════════════════════════════════════
+        // 🆕 使用 RenderingPipeline 进行渲染
+        // ════════════════════════════════════════════════════════════
+        tracing::trace!("🎨 使用 RenderingPipeline 渲染场景...");
+        if let Err(e) = self.rendering_pipeline.render(
+            ctx,
+            canvas,
+            &mut self.map_renderer,
+            &self.camera,
+            &self.object_manager
+        ) {
+            tracing::error!("❌ RenderingPipeline 渲染失败: {:?}", e);
         } else {
-            tracing::trace!("✅ 地图绘制成功");
+            tracing::trace!("✅ RenderingPipeline 渲染成功");
         }
-
+        
+        // ════════════════════════════════════════════════════════════
+        // 🔧 旧版玩家绘制 (暂时保留用于向后兼容)
+        // TODO: 逐步迁移到 RenderingPipeline
+        // ════════════════════════════════════════════════════════════
+        
         // 5c. 绘制玩家角色 (使用摄像机转换坐标)
         if self.user.is_some() && self.show_player {
-            tracing::trace!("👤 开始绘制玩家角色...");
+            tracing::trace!("👤 开始绘制玩家角色 (旧版)...");
             if let Err(e) = self.draw_player_with_camera(ctx, canvas, &user_pos) {
                 tracing::error!("❌ 玩家绘制失败: {:?}", e);
             } else {
@@ -1899,6 +1795,9 @@ impl Scene for GameScene {
                             map_renderer.height as f32 * MapRenderer::CELL_HEIGHT as f32
                         );
                         self.map_renderer = map_renderer;
+                        
+                        // 🆕 地图已经加载到 self.map_renderer
+                        // RenderingPipeline 通过引用访问，无需复制
 
                         // 🔧 状态转换: 地图加载完成
                         println!(
@@ -2075,6 +1974,8 @@ impl Scene for GameScene {
                 );
                 tracing::info!("✅ ========================================");
 
+                // 🆕 同步玩家到 ObjectManager
+                self.object_manager.set_user(user_obj.clone());
                 self.user = Some(user_obj);
 
                 // 🔧 状态转换: 玩家数据到达
@@ -2084,6 +1985,7 @@ impl Scene for GameScene {
                 println!("   当前状态: {:?}", self.state);
                 println!("   地图已加载: {}", self.map_renderer.width > 0);
                 println!("   玩家已创建: {}", self.user.is_some());
+                println!("   ObjectManager 玩家: {}", self.object_manager.user().is_some());
 
                 match self.state {
                     GameSceneState::WaitingForData => {

@@ -1226,13 +1226,21 @@ impl Scene for LoginScene {
         
         // 连接状态
         if self.connecting {
-            let status_text = Text::new(format!("正在连接服务器... (尝试 {})", self.connect_attempts));
+            let status_text = Text::new(
+                TextFragment::new(format!("正在连接服务器... (尝试 {})", self.connect_attempts))
+                    .font("AlibabaPuHuiTi")
+                    .scale(21.0)
+            );
             let status_params = DrawParam::default()
                 .dest([10.0, 740.0]) // 底部
                 .color(GgezColor::from_rgb(255, 255, 100));
             canvas.draw(&status_text, status_params);
         } else if let Some(status) = &self.last_status {
-            let status_text = Text::new(status.as_str());
+            let status_text = Text::new(
+                TextFragment::new(status.as_str())
+                    .font("AlibabaPuHuiTi")
+                    .scale(21.0)
+            );
             let status_params = DrawParam::default()
                 .dest([10.0, 740.0])
                 .color(GgezColor::from_rgb(100, 255, 100));
@@ -1241,7 +1249,11 @@ impl Scene for LoginScene {
         
         // FPS 和调试信息 (可选)
         let fps = ctx.time.fps();
-        let debug_text = Text::new(format!("FPS: {:.1}", fps));
+        let debug_text = Text::new(
+            TextFragment::new(format!("FPS: {:.1}", fps))
+                .font("AlibabaPuHuiTi")
+                .scale(21.0)
+        );
         let debug_params = DrawParam::default()
             .dest([950.0, 10.0])
             .color(GgezColor::from_rgb(255, 255, 255));
@@ -1529,6 +1541,9 @@ impl Scene for LoginScene {
     }
     
     fn handle_mouse_button(&mut self, button: super::MouseButton, pressed: bool, x: i32, y: i32) {
+        // 🔧 调试日志
+        tracing::info!("🖱️ LoginScene 收到鼠标事件: button={:?}, pressed={}, pos=({}, {})", button, pressed, x, y);
+        
         if pressed && button == super::MouseButton::Left {
             // 优先处理 MessageBox (如果显示)
             if let Some(msg_box) = &mut self.message_box {

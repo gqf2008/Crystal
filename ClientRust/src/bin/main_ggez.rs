@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             WindowSetup::default()
                 .title(&format!("Crystal - {}", settings.launcher.server_name))
                 .samples(NumSamples::Four)  // 4x MSAA
-                .vsync(false)  // 关闭垂直同步以提高帧率
+                .vsync(true)  // 开启垂直同步，锁定 60 FPS
         )
         .window_mode(
             WindowMode::default()
@@ -57,8 +57,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .build()?;
     
-        info!(
-        "Ggez Context 创建成功: {}x{} (vsync关闭)",
+    info!(
+        "Ggez Context 创建成功: {}x{} (vsync开启)",
         window_width, window_height
     );
     
