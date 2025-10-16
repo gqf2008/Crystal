@@ -131,10 +131,7 @@ impl InputSystem {
         let pos = ctx.mouse.position();
         self.mouse_state.position = Point::new(pos.x as i32, pos.y as i32);
         
-        // 🐛 调试:显示鼠标位置(仅在按下时)
-        if ctx.mouse.button_pressed(MouseButton::Left) {
-            println!("🖱️ [InputSystem] 鼠标屏幕位置: ({}, {})", pos.x, pos.y);
-        }
+
         
         // 更新鼠标按钮状态
         let left_down = ctx.mouse.button_pressed(MouseButton::Left);
@@ -195,13 +192,22 @@ impl InputSystem {
     
     // ==================== 游戏动作处理 ====================
     
-    /// 获取移动输入 (右键按下则返回移动信息)
-    /// 返回: (是否跑步)
+    /// 获取移动输入 (左键走路,右键跑步)
+    /// 返回: Some(是否跑步) 或 None(无移动输入)
     pub fn get_move_input(&self) -> Option<bool> {
+        // 右键优先 = 跑步
         match self.mouse_state.right_button {
-            ButtonState::Pressed | ButtonState::Held => Some(true), // 右键 = 跑步
-            _ => None,
+            ButtonState::Pressed | ButtonState::Held => return Some(true),
+            _ => {}
         }
+        
+        // 左键 = 走路
+        match self.mouse_state.left_button {
+            ButtonState::Pressed | ButtonState::Held => return Some(false),
+            _ => {}
+        }
+        
+        None
     }
     
     /// 获取攻击/拾取输入 (左键按下)

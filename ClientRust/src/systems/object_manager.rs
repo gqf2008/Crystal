@@ -157,9 +157,6 @@ impl ObjectManager {
                 let map_x = (world_x / 48.0) as i32; // MapRenderer::CELL_WIDTH = 48
                 let map_y = (world_y / 32.0) as i32; // MapRenderer::CELL_HEIGHT = 32 ⚠️ 不是48!
                 
-                println!("🖱️ [坐标转换] 屏幕=({:.0},{:.0}) -> 世界=({:.0},{:.0}) -> 地图=({},{})", 
-                    screen_pos.x, screen_pos.y, world_x, world_y, map_x, map_y);
-                
                 Point { x: map_x, y: map_y }
             });
             let current_cell = user.movement_fsm.current_cell;
@@ -216,8 +213,7 @@ impl ObjectManager {
                     user.player.set_current_action(MirAction::Standing);
                 }
             } else {
-                // 🔧 正在移动中:基于当前位置计算方向,直接更新
-                // 坐标计算已修复(Y=32而非48),方向应该稳定了
+                // 🔧 正在移动中:基于当前位置计算方向,平滑转向
                 
                 // 更新目标位置
                 user.movement_fsm.target_cell = target_cell;
@@ -225,15 +221,18 @@ impl ObjectManager {
                 // 基于当前位置重新计算方向
                 let new_direction = Self::direction_from_point(current_cell, target_cell);
                 
-                // 只要方向改变就更新 (不再过滤)
+                // 如果方向改变,重置当前格子动画 (避免视觉跳跃)
                 if new_direction != user.movement_fsm.direction {
-                    println!("🔄 [移动中转向] {:?} -> {:?}", 
+                    println!("🔄 [移动中转向] {:?} -> {:?} (重置动画)", 
                         user.movement_fsm.direction, new_direction);
-                    user.movement_fsm.direction = new_direction;
+                    user.movement_fsm.change_direction(new_direction);
                 }
                 
                 // 更新跑步状态
-                user.movement_fsm.running = running;
+                if user.movement_fsm.running != running {
+                    user.movement_fsm.running = running;
+                }
+                
                 user.player.set_current_action(if running {
                     MirAction::Running
                 } else {
@@ -259,10 +258,6 @@ impl ObjectManager {
         // 游戏使用屏幕坐标系 (Y 轴向下)，需要反转 dy
         let angle = (-dy as f32).atan2(dx as f32).to_degrees();
         
-        // 🐛 调试:显示详细计算过程
-        println!("🧭 [方向计算] 起点=({},{}), 终点=({},{}), dx={}, dy={}, angle={:.1}°", 
-            source.x, source.y, dest.x, dest.y, dx, dy, angle);
-        
         // 映射到 8 方向
         let direction = if angle >= -22.5 && angle < 22.5 {
             MirDirection::Right
@@ -282,7 +277,6 @@ impl ObjectManager {
             MirDirection::DownRight
         };
         
-        println!("   → 计算结果: {:?}", direction);
         direction
     }
     
