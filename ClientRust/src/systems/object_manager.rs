@@ -221,11 +221,12 @@ impl ObjectManager {
                 // 基于当前位置重新计算方向
                 let new_direction = Self::direction_from_point(current_cell, target_cell);
                 
-                // 如果方向改变,重置当前格子动画 (避免视觉跳跃)
+                // 如果方向改变,尝试更新方向 (带冷却,避免画面抖动)
                 if new_direction != user.movement_fsm.direction {
-                    println!("🔄 [移动中转向] {:?} -> {:?} (重置动画)", 
-                        user.movement_fsm.direction, new_direction);
-                    user.movement_fsm.change_direction(new_direction);
+                    if user.movement_fsm.change_direction(new_direction) {
+                        println!("🔄 [移动中转向] {:?} -> {:?}", 
+                            user.movement_fsm.direction, new_direction);
+                    }
                 }
                 
                 // 更新跑步状态

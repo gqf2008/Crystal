@@ -39,6 +39,9 @@ pub struct PlayerMovementFSM {
     /// 移动方向
     pub direction: MirDirection,
     
+    /// 上次方向改变时间 (用于防止频繁转向导致画面抖动)
+    last_direction_change: Instant,
+    
     /// 是否在跑步(跑步速度更快)
     pub running: bool,
     
@@ -58,6 +61,7 @@ impl Default for PlayerMovementFSM {
             render_start_cell: Point { x: 0, y: 0 },
             move_start_cell: Point { x: 0, y: 0 },
             direction: MirDirection::Up,
+            last_direction_change: Instant::now(),
             running: false,
             walk_speed_ms: 600,  // 600ms走一格
             run_speed_ms: 300,   // 300ms跑一格
@@ -163,14 +167,29 @@ impl PlayerMovementFSM {
     /// 
     /// 注意:方向改变只更新方向字段,不中断当前的移动动画
     /// 下一格移动时会自动使用新方向
-    pub fn change_direction(&mut self, direction: MirDirection) {
+    /// 
+    /// # 返回
+    /// * `true` - 方向已更新
+    /// * `false` - 方向未改变或在冷却中
+    pub fn change_direction(&mut self, direction: MirDirection) -> bool {
         if self.direction == direction {
-            return; // 方向没变,不需要处理
+            return false; // 方向没变,不需要处理
+        }
+        
+        // 🔧 方向改变冷却:防止频繁转向导致画面抖动
+        // 至少等待 150ms 才能再次转向
+        const MIN_DIRECTION_CHANGE_INTERVAL_MS: u64 = 150;
+        let elapsed = self.last_direction_change.elapsed().as_millis() as u64;
+        
+        if elapsed < MIN_DIRECTION_CHANGE_INTERVAL_MS {
+            return false; // 冷却中,忽略方向改变
         }
         
         // 🔧 只更新方向,不重置动画
         // 让当前格子的移动完成,下一格会自动使用新方向
         self.direction = direction;
+        self.last_direction_change = Instant::now();
+        true
     }
     
     /// 更新状态机(每帧调用)
