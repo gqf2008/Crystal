@@ -19,7 +19,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9.33"
 thiserror = "2.0.17"
-tokio = { version = "1", features = [
+tokio = { version = "1.48.0", features = [
     "macros",
     "rt-multi-thread",
     "time",
@@ -44,10 +44,22 @@ md5 = "0.8.0"
 pollster = "0.4"  # 用于在同步代码中运行异步函数
 flate2 = "1.1.4"  # GZip decompression for .lib files
 once_cell = "1.21.3"
-regex = "1.11.3"
+regex = "1.12.2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"  # For Stream trait (used in downloader)
+
+# ========== Bevy 0.17.2 (新引擎) ==========
+bevy = { version = "0.17.2", features = [
+    "dynamic_linking",  # 加快编译速度 (开发模式)
+    "experimental_bevy_feathers",  # UI 组件库 (带样式主题)
+    "bevy_ui_debug",  # UI 调试工具
+    "png",  # PNG 图片支持
+    "jpeg",  # JPEG 图片支持
+    "default_font",  # 默认字体 (ASCII)
+] }
+
+# ========== Ggez (旧引擎,暂时保留) ==========
 ggez = "=0.10.0-rc0"  # Includes winit re-export (use ggez::winit::*)
 # egui = "0.27"  # 暂时禁用,egui_ggez 不兼容 ggez 0.10-rc0
 # egui_ggez = "0.3"  # 在 crates.io 上不存在或不兼容
@@ -69,7 +81,13 @@ winapi = { version = "0.3", features = ["winuser", "wingdi"] }  # For Windows di
 criterion = "0.7.0"
 tempfile = "3"
 
-# 主程序入口 - 使用 ggez 框架
+# ========== 主程序入口 ==========
+# Bevy 版本 (新)
+[[bin]]
+name = "mir2_bevy"
+path = "src/bin/main_bevy.rs"
+
+# Ggez 版本 (旧,保留用于参考)
 [[bin]]
 name = "mir2_client"
 path = "src/bin/main_ggez.rs"
