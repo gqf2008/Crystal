@@ -1,16 +1,54 @@
 // Movement System - 移动系统
 use bevy::prelude::*;
 use crate::bevy::components::{GridPosition, Movement, RenderOffset};
+use mir2_shared::MirDirection;
+
+/// 移动状态
+#[derive(Component, Debug)]
+pub struct MovementState {
+    pub moving: bool,
+    pub timer: f32,
+    pub target_x: i32,
+    pub target_y: i32,
+}
+
+impl MovementState {
+    pub fn new() -> Self {
+        Self {
+            moving: false,
+            timer: 0.0,
+            target_x: 0,
+            target_y: 0,
+        }
+    }
+}
+
+/// 获取方向的偏移量
+fn get_direction_offset(direction: MirDirection) -> (i32, i32) {
+    use mir2_shared::MirDirection::*;
+    match direction {
+        Up => (0, -1),
+        UpRight => (1, -1),
+        Right => (1, 0),
+        DownRight => (1, 1),
+        Down => (0, 1),
+        DownLeft => (-1, 1),
+        Left => (-1, 0),
+        UpLeft => (-1, -1),
+    }
+}
 
 /// 移动处理系统
 pub fn movement_system(
     time: Res<Time>,
     mut query: Query<(&mut GridPosition, &Movement, &mut RenderOffset)>,
 ) {
-    for (_grid_pos, _movement, _offset) in query.iter_mut() {
-        // TODO: 实现网格移动逻辑
-        // 1. 根据 Movement 组件更新 GridPosition
-        // 2. 更新 RenderOffset 用于平滑动画
+    for (mut grid_pos, movement, mut offset) in query.iter_mut() {
+        // 简单的持续移动逻辑 (后续可以改为 FSM)
+        // TODO: 添加碰撞检测、路径查找等
+        
+        // 暂时只更新方向,不自动移动
+        // 移动将由单独的命令触发
     }
 }
 

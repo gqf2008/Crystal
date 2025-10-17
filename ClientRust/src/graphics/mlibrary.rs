@@ -210,6 +210,13 @@ impl ImageInfo {
         self.bgra_data.take();
         self.texture_valid = false;
     }
+    
+    /// 获取 BGRA 原始数据的引用 (如果已加载)
+    /// 
+    /// 用于 Bevy 等其他渲染引擎获取图像数据
+    pub fn get_bgra_data(&self) -> Option<&Vec<u8>> {
+        self.bgra_data.as_ref()
+    }
 
     /// 解压图像数据并转换为RGBA格式
     ///
@@ -589,6 +596,32 @@ impl MLibrary {
         // 缓存结果
         self.cached_info.insert(index, info.clone());
         Ok(info)
+    }
+    
+    /// 获取图像并解压 BGRA 数据 (用于非 ggez 渲染引擎,如 Bevy)
+    /// 
+    /// 返回 (ImageInfo, BGRA数据)
+    pub fn get_image_with_data(&mut self, index: usize) -> io::Result<(ImageInfo, Vec<u8>)> {
+        if index >= self.indices.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Image index {} out of range", index),
+            ));
+        }
+        
+        // 定位到图像数据
+        let offset = self.indices[index].offset as u64;
+        self.reader.seek(SeekFrom::Start(offset))?;
+        
+        // 读取图像信息
+        let info = ImageInfo::from_reader(&mut self.reader)?;
+        
+        // 读取并解压主图像数据
+        let mut compressed_data = vec![0u8; info.length as usize];
+        self.reader.read_exact(&mut compressed_data)?;
+        let bgra_data = ImageInfo::decompress_image(&compressed_data, info.width, info.height)?;
+        
+        Ok((info, bgra_data))
     }
 
     /// 获取或创建缓存的 ggez 纹理

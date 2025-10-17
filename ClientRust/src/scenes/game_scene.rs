@@ -891,7 +891,7 @@ impl GameScene {
     ) -> ggez::GameResult<()> {
         use crate::graphics::libraries::{get_library, LibraryName};
         use ggez::graphics::{Color, DrawMode, DrawParam, Mesh, Rect};
-        use mir2_shared::enums::{MirClass, MirGender};
+        use mir2_shared::enums::MirClass;
 
         if let Some(ref user) = self.user {
             // ════════════════════════════════════════════════════════

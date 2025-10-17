@@ -1,0 +1,22 @@
+# Cargo配置文件
+
+# 使用 lld 链接器以避免MSVC的65535对象限制
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
+rustflags = ["-Clinker=rust-lld.exe"]
+
+# 或者使用GNU工具链(如果可用)
+# [target.x86_64-pc-windows-gnu]
+# linker = "x86_64-w64-mingw32-gcc"
+
+# 编译优化
+[profile.dev]
+opt-level = 1  # 基本优化,加快编译速度
+
+[profile.dev.package."*"]
+opt-level = 3  # 依赖包使用完整优化
+
+[profile.release]
+lto = "thin"  # 链接时优化
+codegen-units = 1  # 生成单个代码单元
+strip = true  # 去除调试符号

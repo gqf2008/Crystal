@@ -7,11 +7,15 @@ pub fn camera_follow_system(
     player_query: Query<&Transform, With<Player>>,
     mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<Player>)>,
 ) {
-    let Ok(player_transform) = player_query.get_single() else {
+    // Get player transform
+    let mut player_iter = player_query.iter();
+    let Some(player_transform) = player_iter.next() else {
         return;
     };
     
-    let Ok(mut camera_transform) = camera_query.get_single_mut() else {
+    // Get camera transform
+    let mut camera_iter = camera_query.iter_mut();
+    let Some(mut camera_transform) = camera_iter.next() else {
         return;
     };
     

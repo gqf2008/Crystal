@@ -1,6 +1,9 @@
 // Bevy Components - ECS 组件定义
 use bevy::prelude::*;
-use crate::mir2_shared::protocol::MirDirection;
+use mir2_shared::MirDirection;
+
+pub mod text_input;
+pub use text_input::*;
 
 /// 玩家组件标记
 #[derive(Component)]
