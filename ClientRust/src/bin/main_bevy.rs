@@ -36,7 +36,15 @@ use bevy_modules::scenes::{
     update_input_borders,
     update_cursor_blink,
     handle_button_hover,
+    handle_button_press,
     handle_button_clicks,
+    handle_dialog_buttons,  // 对话框按钮处理
+    handle_dialog_text_input,  // 对话框输入处理
+    update_dialog_input_display,  // 对话框输入显示
+    handle_dialog_tab_focus,  // 对话框Tab切换
+    handle_dialog_input_click,  // 对话框输入点击
+    update_dialog_input_borders,  // 对话框输入边框更新
+    update_dialog_cursor_visibility,  // 对话框光标可见性
     handle_login_message,
     handle_close_message,
     handle_new_account_message,
@@ -110,20 +118,37 @@ fn main() {
     ));
     println!("11. 通用 Update 系统已添加");
         
-    // LoginScene V2 系统 (仅在 Login 状态运行)
+    // LoginScene V2 系统 - 输入处理 (仅在 Login 状态运行)
     app.add_systems(Update, (
         // 背景动画
         update_background_animation,
-        // 输入处理
+        // 登录输入处理
         handle_text_input,
         update_input_display,
         handle_input_focus,
         handle_tab_focus,
         update_input_borders,
         update_cursor_blink,
+    ).run_if(in_state(GameState::Login)));
+    
+    // LoginScene V2 系统 - 对话框处理 (仅在 Login 状态运行)
+    app.add_systems(Update, (
+        // 对话框输入处理
+        handle_dialog_text_input,
+        update_dialog_input_display,
+        handle_dialog_tab_focus,
+        handle_dialog_input_click,
+        update_dialog_input_borders,
+        update_dialog_cursor_visibility,
+    ).run_if(in_state(GameState::Login)));
+    
+    // LoginScene V2 系统 - 按钮和消息 (仅在 Login 状态运行)
+    app.add_systems(Update, (
         // 按钮交互
         handle_button_hover,
+        handle_button_press,
         handle_button_clicks,
+        handle_dialog_buttons,  // 对话框按钮处理
         // 消息处理
         handle_login_message,
         handle_close_message,
