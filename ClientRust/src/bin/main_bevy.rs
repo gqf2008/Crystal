@@ -8,6 +8,11 @@ mod bevy_modules {
 
 use bevy_modules::{GameState, GameConfig, MLibraryAssets, MapAssets};
 use bevy_modules::{MLibraryResource, load_mlibrary_system};
+use bevy_modules::{
+    init_global_network_manager,
+    process_network_events,
+    cleanup_network_manager,
+};
 use bevy_modules::systems::{
     mouse_input_system, 
     keyboard_input_system,
@@ -57,27 +62,22 @@ use bevy_modules::scenes::{
     PasswordChangeButtonPressed,
     ViewKeyButtonPressed,
     CloseButtonPressed,
-    // SelectScene
+    // SelectScene（新架构）
     setup_select_scene,
     cleanup_select_scene,
-    update_character_list,
-    select_button_hover,
-    handle_character_select,
-    handle_character_delete,
-    handle_create_character,
-    handle_start_game,
-    handle_back_to_login,
-    message_handle_select_character,
-    message_handle_delete_character,
-    message_handle_create_character,
-    message_handle_start_game,
-    message_handle_back_to_login,
-    // SelectScene Messages
-    SelectCharacterMessage,
-    DeleteCharacterMessage,
-    CreateCharacterMessage,
-    StartGameMessage,
-    BackToLoginMessage,
+    init_select_network_channel,
+    update_character_animation,
+    update_character_slots,
+    update_button_textures,
+    handle_select_button_clicks,
+    handle_slot_clicks,
+    update_slot_texts,
+    update_slot_text_colors,
+    handle_slot_hover,
+    DialogState,
+    handle_dialog_button_clicks,
+    handle_dialog_button_hover,
+    update_dialog_character_preview,
     // GameScene
     setup_game_scene,
     cleanup_game_scene,
@@ -219,12 +219,7 @@ fn main() {
     app.add_message::<ViewKeyButtonPressed>();
     app.add_message::<CloseButtonPressed>();
     
-    // 注册 SelectScene 使用的所有 Message 类型
-    app.add_message::<SelectCharacterMessage>();
-    app.add_message::<DeleteCharacterMessage>();
-    app.add_message::<CreateCharacterMessage>();
-    app.add_message::<StartGameMessage>();
-    app.add_message::<BackToLoginMessage>();
+    // SelectScene 新架构不使用 Message 系统（直接通过 Interaction 处理）
     
     // 注册 GameScene 使用的所有 Message 类型
     app.add_message::<PlayerMoveMessage>();
@@ -283,8 +278,13 @@ fn main() {
     println!("9. MLibraryResource 已插入");
         
     // 启动系统
-    app.add_systems(Startup, (setup, load_mlibrary_system, setup_debug_ui));
-    println!("10. Startup 系统已添加");
+    app.add_systems(Startup, (
+        setup, 
+        load_mlibrary_system, 
+        setup_debug_ui,
+        init_global_network_manager,  // 初始化全局 NetworkManager
+    ));
+    println!("10. Startup 系统已添加 (包含 NetworkManager)");
         
     // 通用更新系统 (所有状态都运行)
     app.add_systems(Update, (
@@ -292,8 +292,9 @@ fn main() {
         animation_system,
         update_fps_system,
         update_player_info_system,
+        process_network_events,  // 处理网络事件
     ));
-    println!("11. 通用 Update 系统已添加");
+    println!("11. 通用 Update 系统已添加 (包含网络事件处理)");
         
     // LoginScene V2 系统 - 输入处理 (仅在 Login 状态运行)
     app.add_systems(Update, (
@@ -335,27 +336,21 @@ fn main() {
     ).run_if(in_state(GameState::Login)));
     println!("12. LoginScene V2 系统已添加");
     
-    // SelectScene 系统 - UI 更新 (仅在 Select 状态运行)
+    // SelectScene 系统 - 新架构（参考 ggez 版本）
     app.add_systems(Update, (
-        update_character_list,
+        update_character_animation,      // 角色预览动画
+        update_character_slots,          // 角色槽位纹理
+        update_button_textures,          // 按钮悬停/按下状态
+        handle_select_button_clicks,     // 按钮点击处理
+        handle_slot_clicks,              // 角色槽点击选择
+        update_slot_texts,               // 角色槽文本更新
+        update_slot_text_colors,         // 角色槽文本颜色高亮
+        handle_slot_hover,               // 角色槽悬停效果
+        handle_dialog_button_clicks,     // 对话框按钮点击
+        handle_dialog_button_hover,      // 对话框按钮悬停
+        update_dialog_character_preview, // 对话框角色预览动画
     ).run_if(in_state(GameState::Select)));
-    
-    // SelectScene 系统 - 按钮和交互 (仅在 Select 状态运行)
-    app.add_systems(Update, (
-        select_button_hover,
-        handle_character_select,
-        handle_character_delete,
-        handle_create_character,
-        handle_start_game,
-        handle_back_to_login,
-        // 消息处理
-        message_handle_select_character,
-        message_handle_delete_character,
-        message_handle_create_character,
-        message_handle_start_game,
-        message_handle_back_to_login,
-    ).run_if(in_state(GameState::Select)));
-    println!("12.5. SelectScene 系统已添加");
+    println!("12.5. SelectScene 系统已添加（纹理系统重构版 + 角色槽交互 + 对话框）");
     
     // GameScene 系统 - UI 更新 (仅在 Game 状态运行)
     app.add_systems(Update, (
@@ -485,7 +480,7 @@ fn main() {
     println!("15. OnExit(Login) 系统已添加");
     
     // 进入角色选择状态时设置 SelectScene
-    app.add_systems(OnEnter(GameState::Select), setup_select_scene);
+    app.add_systems(OnEnter(GameState::Select), (setup_select_scene, init_select_network_channel));
     println!("15.5. OnEnter(Select) 系统已添加");
     
     // 退出角色选择状态时清理 SelectScene

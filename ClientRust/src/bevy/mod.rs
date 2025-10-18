@@ -6,12 +6,14 @@ pub mod systems;
 pub mod states;
 pub mod assets;
 pub mod scenes;
+pub mod network_resources;
 
 pub use components::*;
 pub use resources::*;
 pub use states::*;
 pub use assets::*;
 pub use scenes::*;
+pub use network_resources::*;
 
 // 重新导出库类型
 pub use crate::graphics::libraries::{LibraryName, LibraryArray};

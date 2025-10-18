@@ -1,194 +1,197 @@
 // SelectScene Components - 角色选择场景的组件和资源定义
+// 参考 ggez 版本 src/scenes/select_scene.rs 的架构
 
 use bevy::prelude::*;
-use std::collections::HashMap;
+use mir2_shared::SelectInfo;
 
 /// 角色选择场景的全局状态资源
 #[derive(Resource, Debug)]
 pub struct SelectSceneState {
-    /// 可选的角色列表
-    pub characters: Vec<CharacterInfo>,
+    /// 角色列表（从服务器接收）
+    pub characters: Vec<SelectInfo>,
     
-    /// 当前选中的角色索引
-    pub selected_index: Option<usize>,
+    /// 当前选中的角色索引（-1 表示未选中）
+    pub selected_index: i32,
     
-    /// 是否显示新角色创建对话框
-    pub show_create_dialog: bool,
+    /// 角色预览动画帧（0-15，循环）
+    pub character_animation_frame: usize,
+    pub character_animation_timer: f32,
     
-    /// 是否显示删除确认对话框
-    pub show_delete_dialog: bool,
+    /// 底部按钮悬停状态
+    pub hovered_button: Option<BottomButtonType>,
+    pub pressed_button: Option<BottomButtonType>,
     
-    /// 删除确认的角色索引
-    pub delete_confirm_index: Option<usize>,
-    
-    /// 新角色创建时的输入
-    pub new_character_name: String,
-    pub new_character_class: u8,
-    pub new_character_gender: u8,
-    
-    /// 动画状态
-    pub animation_timer: f32,
-    pub is_animating: bool,
+    /// 网络命令发送器
+    pub command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
 }
 
 impl Default for SelectSceneState {
     fn default() -> Self {
         Self {
             characters: Vec::new(),
-            selected_index: None,
-            show_create_dialog: false,
-            show_delete_dialog: false,
-            delete_confirm_index: None,
-            new_character_name: String::new(),
-            new_character_class: 0,
-            new_character_gender: 0,
-            animation_timer: 0.0,
-            is_animating: false,
+            selected_index: -1,
+            character_animation_frame: 0,
+            character_animation_timer: 0.0,
+            hovered_button: None,
+            pressed_button: None,
+            command_tx: None,
         }
     }
 }
 
-/// 角色信息 - 从服务器接收的角色数据
-#[derive(Debug, Clone)]
-pub struct CharacterInfo {
-    pub index: i32,
-    pub name: String,
-    pub level: u16,
-    pub class: u8,
-    pub gender: u8,
-    pub experience: i64,
-    pub hair: u8,
-    pub deleted: bool,
+impl SelectSceneState {
+    /// 创建带测试数据的状态（用于测试和演示）
+    #[allow(dead_code)]
+    pub fn with_test_data() -> Self {
+        use mir2_shared::enums::{MirClass, MirGender};
+        use chrono::Utc;
+        
+        let now = Utc::now();
+        
+        let characters = vec![
+            SelectInfo {
+                index: 0,
+                name: "剑客无双".to_string(),
+                level: 35,
+                class: MirClass::Warrior,
+                gender: MirGender::Male,
+                last_access: now - chrono::Duration::hours(2),
+            },
+            SelectInfo {
+                index: 1,
+                name: "冰雪女神".to_string(),
+                level: 28,
+                class: MirClass::Wizard,
+                gender: MirGender::Female,
+                last_access: now - chrono::Duration::days(1),
+            },
+            SelectInfo {
+                index: 2,
+                name: "道行天下".to_string(),
+                level: 42,
+                class: MirClass::Taoist,
+                gender: MirGender::Male,
+                last_access: now - chrono::Duration::days(3),
+            },
+        ];
+        
+        Self {
+            characters,
+            selected_index: 0,  // 默认选中第一个
+            character_animation_frame: 0,
+            character_animation_timer: 0.0,
+            hovered_button: None,
+            pressed_button: None,
+            command_tx: None,
+        }
+    }
+}
+
+/// 底部按钮类型（参考 ggez 版本）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BottomButtonType {
+    StartGame,     // Title_340/341/342
+    NewCharacter,  // Title_343/344/345
+    DeleteCharacter, // Title_346/347/348
+    Credits,       // Title_349/350/351
+    ExitGame,      // Title_352/353/354
 }
 
 // ============================================================================
-// Messages for SelectScene
+// UI Components（参考 ggez 版本的纹理系统）
 // ============================================================================
 
-/// 选择角色消息
-#[derive(Message, Clone, Default)]
-pub struct SelectCharacterMessage {
-    pub index: usize,
-}
-
-/// 删除角色消息
-#[derive(Message, Clone, Default)]
-pub struct DeleteCharacterMessage {
-    pub index: usize,
-}
-
-/// 创建新角色消息
-#[derive(Message, Clone, Default)]
-pub struct CreateCharacterMessage {
-    pub name: String,
-    pub class: u8,
-    pub gender: u8,
-}
-
-/// 开始游戏消息
-#[derive(Message, Clone, Default)]
-pub struct StartGameMessage {
-    pub character_index: i32,
-}
-
-/// 返回登录消息
-#[derive(Message, Clone, Default)]
-pub struct BackToLoginMessage;
-
-// ============================================================================
-// UI Components
-// ============================================================================
-
-/// 选择场景根节点
+/// SelectScene 根节点标记
 #[derive(Component)]
 pub struct SelectSceneRoot;
 
-/// 背景
+/// 角色槽位组件（位置：637, 194/298/402/506）
 #[derive(Component)]
-pub struct SelectBackground;
-
-/// 角色列表容器
-#[derive(Component)]
-pub struct CharacterListContainer;
-
-/// 单个角色项目
-#[derive(Component)]
-pub struct CharacterItem {
-    pub index: usize,
+pub struct CharacterSlot {
+    pub slot_index: usize,  // 0-3
 }
 
-/// 角色选择按钮
+/// 角色预览动画组件（位置：260, 420）
 #[derive(Component)]
-pub struct SelectButton {
-    pub character_index: usize,
+pub struct CharacterPreview;
+
+/// 底部按钮组件
+#[derive(Component)]
+pub struct BottomButton {
+    pub button_type: BottomButtonType,
+    pub position_index: usize,  // 0-4
 }
 
-/// 删除按钮
+/// 服务器标签组件
 #[derive(Component)]
-pub struct DeleteButton {
-    pub character_index: usize,
+pub struct ServerLabel;
+
+/// 最后登录时间标签
+#[derive(Component)]
+pub struct LastAccessLabel;
+
+/// 角色槽位文本（名称、等级、职业）
+#[derive(Component)]
+pub struct CharacterSlotText {
+    pub slot_index: usize,
+    pub text_type: SlotTextType,
 }
 
-/// 创建新角色按钮
-#[derive(Component, Default)]
-pub struct CreateCharacterButton;
-
-/// 开始游戏按钮
-#[derive(Component, Default)]
-pub struct StartGameButton;
-
-/// 返回登录按钮
-#[derive(Component, Default)]
-pub struct BackToLoginButton;
-
-/// 新角色创建对话框
-#[derive(Component)]
-pub struct CreateDialog;
-
-/// 删除确认对话框
-#[derive(Component)]
-pub struct DeleteConfirmDialog;
-
-/// 角色名称输入框
-#[derive(Component)]
-pub struct CharacterNameInput;
-
-/// 职业选择按钮
-#[derive(Component)]
-pub struct ClassSelectButton {
-    pub class: u8,
-}
-
-/// 性别选择按钮
-#[derive(Component)]
-pub struct GenderSelectButton {
-    pub gender: u8,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotTextType {
+    Name,
+    Level,
+    Class,
 }
 
 // ============================================================================
-// Constants
+// Constants（参考 C# 原版位置）
 // ============================================================================
 
-pub const BACKGROUND_COLOR: Color = Color::srgba(0.1, 0.1, 0.15, 1.0);
-pub const BUTTON_COLOR: Color = Color::srgba(0.2, 0.2, 0.3, 1.0);
-pub const BUTTON_HOVER_COLOR: Color = Color::srgba(0.3, 0.3, 0.4, 1.0);
-pub const BUTTON_PRESSED_COLOR: Color = Color::srgba(0.15, 0.15, 0.25, 1.0);
-pub const TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
-pub const SELECTED_COLOR: Color = Color::srgba(1.0, 1.0, 0.0, 1.0);
-pub const ERROR_COLOR: Color = Color::srgba(1.0, 0.0, 0.0, 1.0);
+/// 角色预览动画帧数
+pub const ANIMATION_FRAME_COUNT: usize = 16;
 
-/// 最大可创建的角色数
-pub const MAX_CHARACTERS: usize = 3;
+/// 动画延迟（秒）
+pub const ANIMATION_DELAY: f32 = 0.25;  // 250ms per frame
 
-/// 职业列表
-pub const CLASSES: &[(&str, u8)] = &[
-    ("战士 (Warrior)", 0),
-    ("道士 (Taoist)", 1),
-    ("法师 (Wizard)", 2),
+/// 角色槽位位置（C# 原始位置）
+pub const CHARACTER_SLOT_POSITIONS: [(f32, f32); 4] = [
+    (637.0, 194.0),
+    (637.0, 298.0),
+    (637.0, 402.0),
+    (637.0, 506.0),
 ];
 
-/// 性别列表
-pub const GENDERS: &[(&str, u8)] = &[
-    ("男 (Male)", 0),
-    ("女 (Female)", 1),
+/// 角色预览位置
+pub const CHARACTER_PREVIEW_POS: (f32, f32) = (260.0, 420.0);
+
+/// 底部按钮布局
+pub const BUTTON_Y: f32 = 736.0;  // 768 - 32
+pub const BUTTON_START_X: f32 = 100.0;
+pub const BUTTON_SPACING: f32 = 150.0;
+
+/// 底部按钮配置（button_type, base_index）
+pub const BOTTOM_BUTTONS: [(BottomButtonType, i32); 5] = [
+    (BottomButtonType::StartGame, 340),
+    (BottomButtonType::NewCharacter, 343),
+    (BottomButtonType::DeleteCharacter, 346),
+    (BottomButtonType::Credits, 349),
+    (BottomButtonType::ExitGame, 352),
 ];
+
+// 角色动画基础索引（参考 ggez 版本）
+pub fn get_character_animation_base(class: mir2_shared::enums::MirClass, gender: mir2_shared::enums::MirGender) -> i32 {
+    use mir2_shared::enums::{MirClass, MirGender};
+    match (class, gender) {
+        (MirClass::Warrior, MirGender::Male) => 20,
+        (MirClass::Warrior, MirGender::Female) => 300,
+        (MirClass::Wizard, MirGender::Male) => 40,
+        (MirClass::Wizard, MirGender::Female) => 320,
+        (MirClass::Taoist, MirGender::Male) => 60,
+        (MirClass::Taoist, MirGender::Female) => 340,
+        (MirClass::Assassin, MirGender::Male) => 80,
+        (MirClass::Assassin, MirGender::Female) => 360,
+        (MirClass::Archer, MirGender::Male) => 100,
+        (MirClass::Archer, MirGender::Female) => 140,
+    }
+}

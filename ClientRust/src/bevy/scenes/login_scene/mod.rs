@@ -13,6 +13,10 @@ pub mod components;
 pub mod button_systems;
 pub mod input_systems;
 pub mod ui_helpers;
+pub mod dialog_systems;
+
+// Re-export dialog functions
+pub use dialog_systems::{spawn_new_account_dialog, spawn_change_password_dialog};
 
 // ============================================================================
 // Constants
@@ -281,23 +285,22 @@ pub fn setup_login_scene(
 /// This sets up the communication channel between Bevy and the network thread
 pub fn init_network_channel(
     mut login_state: Option<ResMut<LoginState>>,
+    network_sender: Option<Res<crate::bevy::NetworkCommandSender>>,
 ) {
     // Only process if LoginState exists (only during Login state)
     if login_state.is_none() {
         return;
     }
     
-    if let Some(mut _login_state) = login_state {
-        // Create a channel for sending network commands from UI to network thread
-        // Note: The receiver will be handled by the network manager thread
-        let (_tx, _rx) = tokio::sync::mpsc::unbounded_channel::<crate::network::NetworkCommand>();
-        
-        // For now, we don't have a real network manager running yet
-        // In a full implementation, you would receive the tx from an existing network manager
-        // and store it in login_state.command_tx
-        
-        // TODO: Integrate with real NetworkManager when available
-        info!("📡 Network channel initialization (waiting for NetworkManager integration)");
+    if let Some(mut state) = login_state {
+        if let Some(sender) = network_sender {
+            // Use global NetworkCommandSender
+            state.command_tx = Some(sender.tx.clone());
+            info!("📡 LoginScene network channel connected to global NetworkManager");
+        } else {
+            // Fallback to test mode if NetworkManager not initialized
+            warn!("⚠️ Global NetworkManager not available, staying in test mode");
+        }
     }
 }
 
@@ -1338,7 +1341,11 @@ fn update_login_enabled(login_state: &mut LoginState) {
 // ============================================================================
 // Dialog Creation Functions
 // ============================================================================
+// REFACTORED: Moved to dialog_systems/ subdirectory
+// See: dialog_systems/new_account_dialog.rs
+// See: dialog_systems/change_password_dialog.rs
 
+/*
 /// Spawn new account dialog
 fn spawn_new_account_dialog(
     commands: &mut Commands,
@@ -1826,8 +1833,10 @@ fn spawn_new_account_dialog(
     
     info!("✅ New Account Dialog created with 8 input fields");
 }
+*/
 
-/// Spawn change password dialog
+/// Spawn change password dialog - REFACTORED to dialog_systems/change_password_dialog.rs
+/*
 fn spawn_change_password_dialog(
     commands: &mut Commands,
     mlibrary_assets: &mut ResMut<crate::bevy::MLibraryAssets>,
@@ -2141,6 +2150,7 @@ fn spawn_change_password_dialog(
     
     info!("✅ Change Password Dialog created with 4 input fields");
 }
+*/
 
 /// Handle dialog button clicks
 pub fn handle_dialog_buttons(

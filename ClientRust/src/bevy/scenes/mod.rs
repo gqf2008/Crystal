@@ -38,30 +38,26 @@ pub use login_scene::{
     CloseButtonPressed,
 };
 
-// Re-export select scene items (excluding handle_button_hover to avoid conflict)
+// Re-export select scene items (新架构)
 pub use select_scene::{
     setup_select_scene,
     cleanup_select_scene,
-    update_character_list,
-    handle_character_select,
-    handle_character_delete,
-    handle_create_character,
-    handle_start_game,
-    handle_back_to_login,
-    message_handle_select_character,
-    message_handle_delete_character,
-    message_handle_create_character,
-    message_handle_start_game,
-    message_handle_back_to_login,
-    SelectCharacterMessage,
-    DeleteCharacterMessage,
-    CreateCharacterMessage,
-    StartGameMessage,
-    BackToLoginMessage,
+    update_character_animation,
+    update_character_slots,
+    update_button_textures,
+    handle_slot_clicks,
+    update_slot_texts,
+    update_slot_text_colors,
+    handle_slot_hover,
+    DialogState,
+    handle_dialog_button_clicks,
+    handle_dialog_button_hover,
+    update_dialog_character_preview,
 };
-
-// Export select_scene button hover handler with explicit alias
-pub use select_scene::handle_button_hover as select_button_hover;
+// 使用别名避免与 login_scene::handle_button_clicks 冲突
+pub use select_scene::handle_button_clicks as handle_select_button_clicks;
+// 使用别名避免与 login_scene::init_network_channel 冲突
+pub use select_scene::init_network_channel as init_select_network_channel;
 
 // Re-export game scene items
 pub use game_scene::{
