@@ -13,13 +13,26 @@ use bevy_modules::{
     process_network_events,
     cleanup_network_manager,
 };
+
+// 引入调试系统
+use bevy_modules::{debug_shortcuts_system, debug_info_overlay_system};
+
+// 引入 GameScene 渲染系统 (新架构)
+use bevy_modules::scenes::{
+    MapRenderData, MapLoadRequest, GameCamera,
+    render_map_system, update_animation_system, 
+    camera_follow_system_new, camera_zoom_system,
+    load_map_system_new,
+    setup_game_rendering, cleanup_game_rendering,
+};
+
 use bevy_modules::systems::{
     mouse_input_system, 
     keyboard_input_system,
     movement_system,
     render_offset_system,
     animation_system,
-    camera_follow_system,
+    camera_follow_system as camera_follow_system_old,  // 旧的摄像机系统
     spawn_test_player,
     debug_info_system,
     setup_map_system,
@@ -275,6 +288,13 @@ fn main() {
     
     app.insert_resource(MLibraryResource::new());
     println!("9. MLibraryResource 已插入");
+    
+    // GameScene 渲染资源 (新架构)
+    app.insert_resource(MapRenderData::default());
+    println!("9.1. MapRenderData 已插入");
+    
+    app.insert_resource(MapLoadRequest::default());
+    println!("9.2. MapLoadRequest 已插入");
         
     // 启动系统
     app.add_systems(Startup, (
@@ -292,8 +312,9 @@ fn main() {
         update_fps_system,
         update_player_info_system,
         process_network_events,  // 处理网络事件
+        debug_shortcuts_system,  // 调试快捷键 (F1-F5, ESC)
     ));
-    println!("11. 通用 Update 系统已添加 (包含网络事件处理)");
+    println!("11. 通用 Update 系统已添加 (包含网络事件处理和调试快捷键)");
         
     // LoginScene V2 系统 - 输入处理 (仅在 Login 状态运行)
     app.add_systems(Update, (
@@ -458,13 +479,23 @@ fn main() {
     ).run_if(in_state(GameState::Game)));
     
     println!("13. GameScene 系统已添加 (Phase 1-6, 分组注册)");
+    
+    // GameScene 新渲染系统 (Phase 4: 摄像机 + Phase 5: 地图加载)
+    app.add_systems(Update, (
+        update_animation_system,     // 更新地图动画
+        load_map_system_new,         // 地图加载系统 (新)
+        render_map_system,           // 地图渲染系统 (新)
+        camera_follow_system_new,    // 摄像机跟随系统 (新)
+        camera_zoom_system,          // 摄像机缩放系统
+    ).run_if(in_state(GameState::Game)));
+    println!("13.1. GameScene 新渲染系统已添加 (Phase 4-5)");
         
-    // 游戏中的系统 (仅在 Game 状态运行，原有的地图/渲染系统)
+    // 游戏中的系统 (仅在 Game 状态运行,原有的地图/渲染系统)
     app.add_systems(Update, (
         mouse_input_system,
         movement_system,
         render_offset_system,
-        camera_follow_system,
+        camera_follow_system_old,  // 使用旧的摄像机系统
         debug_info_system,
         map_culling_system,
     ).run_if(in_state(GameState::Game)));
@@ -489,6 +520,7 @@ fn main() {
     // 进入游戏状态时设置 GameScene HUD
     app.add_systems(OnEnter(GameState::Game), (
         setup_game_scene, 
+        setup_game_rendering,  // 新架构: 初始化摄像机和加载地图
         spawn_test_player, 
         setup_map_system,
         load_map_system,  // Phase 2: 加载地图
@@ -502,7 +534,7 @@ fn main() {
     println!("16. OnEnter(Game) 系统已添加 (包含 GameScene 和 Phase 2-6 系统)");
     
     // 退出游戏状态时清理 GameScene
-    app.add_systems(OnExit(GameState::Game), cleanup_game_scene);
+    app.add_systems(OnExit(GameState::Game), (cleanup_game_scene, cleanup_game_rendering));
     println!("16.5. OnExit(Game) 系统已添加");
     
     println!("=== 准备运行 App.run() ===");

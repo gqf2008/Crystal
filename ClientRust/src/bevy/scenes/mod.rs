@@ -89,6 +89,17 @@ pub use game_scene::{
     spawn_map_objects_system,
     update_map_state_system,
     handle_map_collision_system,
+    // Phase 4-5: 新渲染架构 (摄像机 + 地图加载)
+    MapRenderData,
+    MapLoadRequest,
+    GameCamera,
+    render_map_system,
+    update_animation_system,
+    camera_follow_system_new,
+    camera_zoom_system,
+    load_map_system_new,
+    setup_game_rendering,
+    cleanup_game_rendering,
     // Phase 3: NPC 和对象交互
     setup_dialogue_system,
     detect_interaction_system,

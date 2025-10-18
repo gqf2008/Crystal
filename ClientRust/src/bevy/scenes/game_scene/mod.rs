@@ -48,7 +48,12 @@ pub use network_systems::*;
 pub use game_loop_systems::*;
 
 // 重导出渲染和桥接模块
-pub use rendering::{MLibraryAssets, SpriteRenderer, MapRenderData, TileCache, TileEntity, TileLayer, DoorInfo, GameCamera};
+pub use rendering::{
+    MLibraryAssets, SpriteRenderer, MapRenderData, TileCache, TileEntity, TileLayer, DoorInfo, 
+    GameCamera, MapLoadRequest, load_map_direct,
+    render_map_system, update_animation_system, camera_follow_system_new, camera_zoom_system, load_map_system_new,
+    setup_game_rendering, cleanup_game_rendering
+};
 pub use bridge::{MapObjectRef, NetworkBridge, ServerPacketEvent, ClientPacketEvent};
 
 use bevy::prelude::*;

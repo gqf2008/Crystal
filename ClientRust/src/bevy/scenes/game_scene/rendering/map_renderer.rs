@@ -56,6 +56,12 @@ pub struct MapRenderData {
     pub show_obstacles: bool,
 }
 
+impl Default for MapRenderData {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 impl MapRenderData {
     /// 创建空地图
     pub fn empty() -> Self {
@@ -74,7 +80,7 @@ impl MapRenderData {
             show_obstacles: false,
         }
     }
-
+    
     /// 从 CellInfo 数组加载地图
     pub fn from_cells(cells: Vec<Vec<CellInfo>>) -> Self {
         let height = cells.len() as i32;
