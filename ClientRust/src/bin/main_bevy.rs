@@ -101,7 +101,6 @@ use bevy_modules::scenes::{
     // Phase 1: 玩家实体管理
     update_player_stats_system,
     process_buffs_system,
-    handle_chat_input_system,
     // Phase 2: 地图加载和渲染
     load_map_system,
     create_map_layers_system,
@@ -386,7 +385,7 @@ fn main() {
     app.add_systems(Update, (
         update_player_stats_system,
         process_buffs_system,
-        handle_chat_input_system,
+        process_chat_input_system,
         update_chat_display_system,
     ).run_if(in_state(GameState::Game)));
     

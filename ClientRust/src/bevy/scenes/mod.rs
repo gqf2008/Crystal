@@ -83,7 +83,6 @@ pub use game_scene::{
     // Phase 1: 玩家实体管理系统
     update_player_stats_system,
     process_buffs_system,
-    handle_chat_input_system,
     // Phase 2: 地图加载和渲染
     load_map_system,
     create_map_layers_system,

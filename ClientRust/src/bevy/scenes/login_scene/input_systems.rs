@@ -6,6 +6,8 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::ui_widgets::Button;
 
 use super::components::*;
+use super::resources::*;
+use super::constants::*;
 
 // ============================================================================
 // Input Handling Systems
@@ -236,13 +238,14 @@ pub fn update_cursor_blink(
     for children in input_query.iter() {
         for child in children.iter() {
             if let Ok((mut cursor, mut visibility)) = cursor_query.get_mut(child) {
-                cursor.blink_timer += time.delta_secs();
+                cursor.blink_timer.tick(time.delta());
                 
-                if cursor.blink_timer >= 0.5 {
-                    cursor.blink_timer = 0.0;
-                    *visibility = match *visibility {
-                        Visibility::Inherited => Visibility::Hidden,
-                        _ => Visibility::Inherited,
+                if cursor.blink_timer.just_finished() {
+                    cursor.visible = !cursor.visible;
+                    *visibility = if cursor.visible {
+                        Visibility::Inherited
+                    } else {
+                        Visibility::Hidden
                     };
                 }
             }

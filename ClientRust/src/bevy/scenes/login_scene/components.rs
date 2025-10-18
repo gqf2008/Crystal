@@ -2,113 +2,9 @@
 // Extracted from login_scene_v2.rs for better modularity
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
-// ============================================================================
-// Constants
-// ============================================================================
-
-/// Animation constants
-pub const ANIMATION_FRAME_COUNT: usize = 19;
-pub const ANIMATION_DELAY: f32 = 0.1; // 100ms per frame
-
-/// Dialog dimensions
-pub const DIALOG_WIDTH: f32 = 328.0;
-pub const DIALOG_HEIGHT: f32 = 220.0;
-
-/// Input validation constants
-pub const MIN_ACCOUNT_ID_LENGTH: usize = 3;
-pub const MAX_ACCOUNT_ID_LENGTH: usize = 15;
-pub const MIN_PASSWORD_LENGTH: usize = 5;
-pub const MAX_PASSWORD_LENGTH: usize = 15;
-
-/// UI Colors
-pub const INPUT_BORDER_NORMAL: Color = Color::srgba(0.5, 0.5, 0.5, 1.0);
-pub const INPUT_BORDER_FOCUSED: Color = Color::srgba(1.0, 1.0, 0.0, 1.0);
-pub const INPUT_BORDER_VALID: Color = Color::srgba(0.0, 1.0, 0.0, 1.0);
-pub const INPUT_BORDER_INVALID: Color = Color::srgba(1.0, 0.0, 0.0, 1.0);
-pub const TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
-
-// ============================================================================
-// Resources
-// ============================================================================
-
-#[derive(Resource, Debug)]
-pub struct LoginState {
-    /// Network connection state
-    pub connecting: bool,
-    pub connect_attempts: u32,
-    
-    /// Version check state
-    pub version_checked: bool,
-    pub version_valid: bool,
-    
-    /// Login enabled state
-    pub login_enabled: bool,
-    pub login_success: bool,
-    pub frames_after_login: usize,  // 登录后经过的帧数
-    
-    /// Background animation state
-    pub background_frame: usize,
-    pub animation_timer: f32,
-    pub animation_paused: bool,
-    
-    /// Input values
-    pub account_id: String,
-    pub password: String,
-    
-    /// Input validation
-    pub account_id_valid: bool,
-    pub password_valid: bool,
-    
-    /// Dialog state
-    pub dialog_visible: DialogType,
-    
-    /// Dialog input values
-    pub dialog_inputs: HashMap<DialogFieldType, String>,
-    
-    /// Network command sender - for sending login requests to network thread
-    pub command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
-}
-
-/// Dialog type enum
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DialogType {
-    None,
-    NewAccount,
-    ChangePassword,
-}
-
-impl Default for LoginState {
-    fn default() -> Self {
-        Self {
-            connecting: false,
-            connect_attempts: 0,
-            version_checked: true,
-            version_valid: true,
-            login_enabled: false,
-            login_success: false,
-            frames_after_login: 0,
-            background_frame: 0,
-            animation_timer: 0.0,
-            animation_paused: true,
-            account_id: String::new(),
-            password: String::new(),
-            account_id_valid: false,
-            password_valid: false,
-            dialog_visible: DialogType::None,
-            dialog_inputs: HashMap::new(),
-            command_tx: None,
-        }
-    }
-}
-
-impl LoginState {
-    /// Set the network command sender for sending login requests
-    pub fn set_command_sender(&mut self, tx: tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>) {
-        self.command_tx = Some(tx);
-    }
-}
+// Constants are now in constants.rs
+// Resources (LoginState, DialogType) are now in resources.rs
 
 // ============================================================================
 // Component Markers
@@ -134,20 +30,22 @@ pub struct PasswordInput;
 #[derive(Component)]
 pub struct InputFocused;
 
-/// Marker for input cursor
+/// Marker for input cursor - 带闪烁计时器和可见性标志
 #[derive(Component)]
 pub struct InputCursor {
-    pub blink_timer: f32,
+    pub blink_timer: Timer,
+    pub visible: bool,
 }
 
 #[derive(Component)]
 pub struct ButtonType(pub LoginButtonType);
 
+/// 按钮纹理索引 - 用于按钮hover效果
 #[derive(Component, Clone)]
 pub struct ButtonTextures {
-    pub normal_index: u32,
-    pub hover_index: u32,
-    pub pressed_index: u32,
+    pub normal_index: i32,
+    pub hover_index: i32,
+    pub pressed_index: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,12 +71,11 @@ pub struct ChangePasswordDialog;
 #[derive(Component)]
 pub struct Dialog;
 
-/// Marker for dialog input fields
+/// Marker for dialog input fields - 包含输入字段类型
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
-pub struct DialogInputField(pub DialogInputType);
-
-/// Dialog input field type alias for compatibility
-pub type DialogInputType = DialogFieldType;
+pub struct DialogInputField {
+    pub field_type: DialogFieldType,
+}
 
 /// Marker for input text node  
 #[derive(Component)]
@@ -189,10 +86,10 @@ pub struct InputText;
 pub enum DialogFieldType {
     // New Account fields
     NewAccountId,
-    NewPassword,
-    NewPasswordConfirm,
+    NewPassword1,
+    NewPassword2,
     NewEmail,
-    NewUsername,
+    NewUserName,
     NewBirthDate,
     NewQuestion,
     NewAnswer,
@@ -200,8 +97,8 @@ pub enum DialogFieldType {
     // Change Password fields
     ChangeAccountId,
     ChangeCurrentPassword,
-    ChangeNewPassword,
-    ChangeNewPasswordConfirm,
+    ChangeNewPassword1,
+    ChangeNewPassword2,
 }
 
 // ============================================================================

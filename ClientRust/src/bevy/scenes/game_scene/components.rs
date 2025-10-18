@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use std::collections::HashMap;
+use super::constants::*; // 导入常量定义
 
 /// 游戏场景的全局状态资源
 #[derive(Resource, Debug, Clone)]
@@ -745,10 +746,7 @@ pub const DEFAULT_MOVE_SPEED: f32 = 100.0;
 pub const QUICKSLOT_COUNT: usize = 12;
 
 /// 最大聊天消息历史
-pub const MAX_CHAT_HISTORY: usize = 100;
-
-/// 聊天消息消息最大长度 (字符)
-pub const MAX_CHAT_MESSAGE_LENGTH: usize = 100;
+// 注意: 所有常量已移动到 constants.rs
 
 // ============================================================================
 // Phase 5: 网络同步系统
