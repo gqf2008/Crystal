@@ -23,7 +23,7 @@ use bevy_modules::scenes::{
     render_map_system, update_animation_system, 
     camera_follow_system_new, camera_zoom_system,
     load_map_system_new,
-    setup_game_rendering, cleanup_game_rendering,
+    setup_game_rendering, cleanup_game_rendering, setup_map_renderer,
 };
 
 use bevy_modules::systems::{
@@ -518,19 +518,21 @@ fn main() {
     println!("15.7. OnExit(Select) 系统已添加");
     
     // 进入游戏状态时设置 GameScene HUD
+    // 使用 chain() 确保系统按顺序执行
     app.add_systems(OnEnter(GameState::Game), (
-        setup_game_scene, 
-        setup_game_rendering,  // 新架构: 初始化摄像机和加载地图
-        spawn_test_player, 
-        setup_map_system,
-        load_map_system,  // Phase 2: 加载地图
-        create_map_layers_system,  // Phase 2: 创建地图图层
-        spawn_map_objects_system,  // Phase 2: 生成地图对象
-        setup_dialogue_system,  // Phase 3: 初始化对话系统
-        setup_chat_system,  // Phase 4: 初始化聊天系统
-        setup_network_system,  // Phase 5: 初始化网络系统
-        setup_game_loop_system,  // Phase 6: 初始化游戏循环系统
-    ));
+        setup_game_scene,          // 1. 首先初始化资源 (MapData, GameSceneState)
+        setup_map_renderer,        // 2. 初始化地图渲染器 (MapRenderData, TileCache)
+        setup_game_rendering,      // 3. 初始化摄像机和渲染
+        spawn_test_player,         // 4. 生成测试玩家
+        setup_map_system,          // 5. 设置地图系统
+        load_map_system,           // 6. 加载地图数据
+        create_map_layers_system,  // 7. 创建地图图层 (需要 MapData)
+        spawn_map_objects_system,  // 8. 生成地图对象
+        setup_dialogue_system,     // 9. 初始化对话系统
+        setup_chat_system,         // 10. 初始化聊天系统
+        setup_network_system,      // 11. 初始化网络系统
+        setup_game_loop_system,    // 12. 初始化游戏循环系统
+    ).chain());  // ← 关键：使用 chain() 确保顺序执行
     println!("16. OnEnter(Game) 系统已添加 (包含 GameScene 和 Phase 2-6 系统)");
     
     // 退出游戏状态时清理 GameScene
@@ -542,10 +544,10 @@ fn main() {
     println!("=== App.run() 已结束 (不应该看到这条消息) ===");
 }
 
-/// 启动系统 - 创建摄像机和基础设置
+/// 启动系统 - 基础设置（不创建摄像机，让各场景自己创建）
 fn setup(mut commands: Commands, mut next_state: ResMut<NextState<GameState>>) {
-    // 生成 2D 摄像机
-    commands.spawn(Camera2d::default());
+    // 不再创建全局摄像机，每个场景自己管理摄像机
+    // LoginScene, SelectScene, GameScene 都有各自的摄像机
     
     println!("✅ Bevy 原型启动成功!");
     println!("🎮 窗口大小: 1024x768");

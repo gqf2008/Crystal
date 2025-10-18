@@ -9,6 +9,7 @@ pub fn handle_button_clicks(
     mut interaction_query: Query<(&Interaction, &BottomButton), Changed<Interaction>>,
     state: Res<SelectSceneState>,
     mut dialog_state: ResMut<crate::bevy::scenes::select_scene::DialogState>,
+    mut next_state: ResMut<NextState<crate::bevy::GameState>>,
     commands: Commands,
     mlibrary_assets: ResMut<crate::bevy::MLibraryAssets>,
     images: ResMut<Assets<Image>>,
@@ -42,9 +43,10 @@ pub fn handle_button_clicks(
                                 }
                             }
                         } else {
-                            warn!("⚠️ 网络命令通道未初始化");
-                            info!("📤 [TESTING] 测试模式: 假装开始游戏 - {}", character.name);
-                            // TODO: 切换到 GameScene
+                            // 测试模式: NetworkManager 未初始化,直接切换到游戏场景
+                            warn!("⚠️ 网络命令通道未初始化 - 进入测试模式");
+                            info!("🎮 [测试模式] 直接进入游戏场景: {}", character.name);
+                            next_state.set(crate::bevy::GameState::Game);
                         }
                     } else {
                         warn!("⚠️ 请先选择一个角色！");

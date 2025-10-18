@@ -52,7 +52,7 @@ pub use rendering::{
     MLibraryAssets, SpriteRenderer, MapRenderData, TileCache, TileEntity, TileLayer, DoorInfo, 
     GameCamera, MapLoadRequest, load_map_direct,
     render_map_system, update_animation_system, camera_follow_system_new, camera_zoom_system, load_map_system_new,
-    setup_game_rendering, cleanup_game_rendering
+    setup_game_rendering, cleanup_game_rendering, setup_map_renderer
 };
 pub use bridge::{MapObjectRef, NetworkBridge, ServerPacketEvent, ClientPacketEvent};
 
@@ -72,6 +72,10 @@ pub fn setup_game_scene(
     // 创建游戏场景状态资源
     commands.insert_resource(GameSceneState::default());
     info!("✅ GameSceneState 已创建");
+    
+    // 初始化 MapData 资源 (空地图,等待加载)
+    commands.insert_resource(MapData::default());
+    info!("✅ MapData 资源已初始化");
     
     // 创建游戏场景根节点 (全屏容器)
     let root = commands.spawn((

@@ -29,11 +29,18 @@ use super::{
 /// - 添加地图对象 (NPC、传送点)
 /// - 标记地图加载完成
 pub fn load_map_system(
-    mut commands: Commands,
+    mut map_data: ResMut<MapData>,
     mut game_state: ResMut<GameSceneState>,
 ) {
-    // 创建默认地图
-    let mut map_data = MapData::new(
+    // 如果地图已经加载，跳过
+    if map_data.is_loaded {
+        return;
+    }
+    
+    info!("🗺️ 开始加载地图...");
+    
+    // 初始化地图数据
+    *map_data = MapData::new(
         1,
         "Mirror World".to_string(),
         100,
@@ -85,8 +92,7 @@ pub fn load_map_system(
     
     map_data.is_loaded = true;
     
-    // 存储为资源
-    commands.insert_resource(map_data);
+    // 更新游戏状态
     game_state.is_initialized = true;
     
     info!("🗺️ 地图加载完成 (100×100, 对象数: 2)");

@@ -41,6 +41,13 @@ pub fn init_global_network_manager(
     settings: Res<crate::bevy::GameConfig>,
 ) {
     info!("🌐 Initializing global NetworkManager...");
+    info!("⚠️ NetworkManager 暂时禁用 (需要 Tokio 运行时)");
+    
+    // TODO: 修复 Tokio 运行时集成
+    // 当前问题: "there is no reactor running"
+    // 解决方案: 使用 bevy_tokio 或 bevy_async_task
+    
+    return; // 暂时禁用
     
     // Create communication channels
     let (event_tx, event_rx) = mpsc::unbounded_channel::<GameEvent>();
@@ -95,8 +102,13 @@ pub fn init_global_network_manager(
 /// System to process network events
 /// This should run in Update to handle server responses
 pub fn process_network_events(
-    mut event_rx: ResMut<NetworkEventReceiver>,
+    event_rx: Option<ResMut<NetworkEventReceiver>>,
 ) {
+    // Skip if NetworkManager is not initialized
+    let Some(mut event_rx) = event_rx else {
+        return;
+    };
+    
     // Process all pending events
     while let Ok(event) = event_rx.rx.try_recv() {
         match &event {

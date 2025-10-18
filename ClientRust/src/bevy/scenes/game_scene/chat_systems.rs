@@ -40,8 +40,8 @@ use super::{
 pub fn setup_chat_system(
     mut commands: Commands,
 ) {
-    // 聊天管理器已在 Phase 1 中初始化
-    // 这里初始化聊天的额外设置
+    // 初始化聊天管理器和相关资源
+    commands.insert_resource(ChatManager::default());
     commands.insert_resource(ChatFilterConfig::default());
     commands.insert_resource(ChatCommandManager::default());
     commands.insert_resource(ChatDisplaySettings::default());

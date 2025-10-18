@@ -260,8 +260,13 @@ pub fn receive_map_sync_system(
 /// 注意: 这个系统与 chat_systems.rs 中的 receive_chat_messages_system 配合使用
 /// 这里主要处理服务器特定的广播格式,receive_chat_messages_system 处理本地显示
 pub fn receive_server_chat_system(
-    mut chat_manager: ResMut<ChatManager>,
+    chat_manager: Option<ResMut<ChatManager>>,
 ) {
+    // 如果聊天管理器未初始化,跳过
+    let Some(_chat_manager) = chat_manager else {
+        return;
+    };
+    
     // 模拟接收服务器聊天广播
     // 实际应用会从网络缓冲区读取
     

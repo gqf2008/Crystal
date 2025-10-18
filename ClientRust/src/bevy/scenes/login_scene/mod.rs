@@ -82,6 +82,7 @@ pub struct CloseButtonPressed;
 /// 设置登录场景
 /// 
 /// 初始化LoginState资源,创建UI层次结构:
+/// - 2D 摄像机 (用于UI渲染)
 /// - 背景动画 (Prguse 1-19)
 /// - 输入框 (账号、密码)
 /// - 按钮 (登录、新账号、修改密码、查看密钥、关闭)
@@ -94,6 +95,14 @@ pub fn setup_login_scene(
     asset_server: Res<AssetServer>,
 ) {
     info!("🎮 Setting up LoginScene");
+    
+    // Spawn UI camera for LoginScene
+    commands.spawn((
+        Camera2d::default(),
+        LoginSceneRoot,  // 标记为 LoginScene 的一部分,退出时会被清理
+        Name::new("LoginCamera"),
+    ));
+    info!("📷 LoginScene 摄像机已创建");
     
     // Insert LoginState resource
     commands.insert_resource(LoginState::default());

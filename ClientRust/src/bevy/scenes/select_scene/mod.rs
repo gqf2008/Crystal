@@ -94,6 +94,14 @@ pub fn setup_select_scene(
 ) {
     info!("🎮 Setting up SelectScene (模块化架构)");
     
+    // Spawn UI camera for SelectScene
+    commands.spawn((
+        Camera2d::default(),
+        SelectSceneRoot,  // 标记为 SelectScene 的一部分,退出时会被清理
+        Name::new("SelectCamera"),
+    ));
+    info!("📷 SelectScene 摄像机已创建");
+    
     // 插入 SelectSceneState 资源（使用测试数据）
     commands.insert_resource(SelectSceneState::with_test_data());
     info!("✅ SelectSceneState 已创建（包含 3 个测试角色）");

@@ -198,8 +198,18 @@ impl TileCache {
 
 /// 初始化地图渲染器
 pub fn setup_map_renderer(mut commands: Commands) {
+    use std::path::PathBuf;
+    use super::mlibrary_assets::MLibraryAssets;
+    
+    // 初始化地图渲染数据
     commands.insert_resource(MapRenderData::empty());
     commands.insert_resource(TileCache::default());
+    
+    // 初始化 MLibrary 资源 (从 Data 文件夹加载纹理)
+    let data_path = PathBuf::from("Data");
+    commands.insert_resource(MLibraryAssets::new(data_path));
+    info!("✅ MLibraryAssets 已初始化");
+    
     info!("✅ MapRenderer 初始化完成");
 }
 
@@ -217,7 +227,7 @@ pub fn update_animation_system(mut map_data: ResMut<MapRenderData>) {
 /// 4. 按需更新动画瓦片
 pub fn render_map_system(
     mut commands: Commands,
-    mut mlibrary: ResMut<MLibraryAssets>,
+    mlibrary: Option<ResMut<MLibraryAssets>>,
     map_data: Res<MapRenderData>,
     mut tile_cache: ResMut<TileCache>,
     mut images: ResMut<Assets<Image>>,
@@ -225,6 +235,11 @@ pub fn render_map_system(
     window_query: Query<&Window, With<PrimaryWindow>>,
     tile_query: Query<(Entity, &TileEntity)>,
 ) {
+    // 如果 MLibraryAssets 未初始化,跳过
+    let Some(mut mlibrary) = mlibrary else {
+        return;
+    };
+    
     // 如果没有地图数据,跳过
     if map_data.width == 0 || map_data.height == 0 {
         return;

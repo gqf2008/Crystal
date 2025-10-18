@@ -100,6 +100,7 @@ pub use game_scene::{
     load_map_system_new,
     setup_game_rendering,
     cleanup_game_rendering,
+    setup_map_renderer,  // ← 新增
     // Phase 3: NPC 和对象交互
     setup_dialogue_system,
     detect_interaction_system,
