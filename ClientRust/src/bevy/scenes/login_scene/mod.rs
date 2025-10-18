@@ -46,7 +46,7 @@ const TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
 // Resources
 // ============================================================================
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug)]
 pub struct LoginState {
     /// Network connection state
     pub connecting: bool,
@@ -79,6 +79,9 @@ pub struct LoginState {
     
     /// Dialog input values
     pub dialog_inputs: std::collections::HashMap<DialogFieldType, String>,
+    
+    /// Network command sender - for sending login requests to network thread
+    pub command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
 }
 
 /// Dialog type enum
@@ -108,7 +111,15 @@ impl Default for LoginState {
             password_valid: false,
             dialog_visible: DialogType::None,
             dialog_inputs: std::collections::HashMap::new(),
+            command_tx: None,
         }
+    }
+}
+
+impl LoginState {
+    /// Set the network command sender for sending login requests
+    pub fn set_command_sender(&mut self, tx: tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>) {
+        self.command_tx = Some(tx);
     }
 }
 
@@ -234,7 +245,7 @@ pub fn setup_login_scene(
     mut images: ResMut<Assets<Image>>,
     asset_server: Res<AssetServer>,
 ) {
-    info!("🎮 Setting up LoginScene v2");
+    info!("🎮 Setting up LoginScene");
     
     // Insert LoginState resource
     commands.insert_resource(LoginState::default());
@@ -263,7 +274,31 @@ pub fn setup_login_scene(
     // Spawn version label
     spawn_version_label(&mut commands, root, &asset_server);
     
-    info!("🎉 LoginScene v2 设置完成!");
+    info!("🎉 LoginScene 设置完成!");
+}
+
+/// Initialize network command channel for LoginScene
+/// This sets up the communication channel between Bevy and the network thread
+pub fn init_network_channel(
+    mut login_state: Option<ResMut<LoginState>>,
+) {
+    // Only process if LoginState exists (only during Login state)
+    if login_state.is_none() {
+        return;
+    }
+    
+    if let Some(mut _login_state) = login_state {
+        // Create a channel for sending network commands from UI to network thread
+        // Note: The receiver will be handled by the network manager thread
+        let (_tx, _rx) = tokio::sync::mpsc::unbounded_channel::<crate::network::NetworkCommand>();
+        
+        // For now, we don't have a real network manager running yet
+        // In a full implementation, you would receive the tx from an existing network manager
+        // and store it in login_state.command_tx
+        
+        // TODO: Integrate with real NetworkManager when available
+        info!("📡 Network channel initialization (waiting for NetworkManager integration)");
+    }
 }
 
 // ============================================================================
@@ -1132,8 +1167,7 @@ pub fn handle_button_clicks(
 // Message Handlers
 // ============================================================================
 
-/// Handle login button message
-/// Handle login button message
+/// Handle login button message - Send login request to server
 pub fn handle_login_message(
     events: Option<MessageReader<LoginButtonPressed>>,
     mut login_state: ResMut<LoginState>,
@@ -1141,15 +1175,43 @@ pub fn handle_login_message(
     let Some(mut events) = events else { return; };
     
     for event in events.read() {
-        info!("🚀 Processing login: {}", event.account_id);
-        // TODO: Send network packet to server
+        info!("🚀 Processing login request: account={}", event.account_id);
         
-        // 标记登录成功,重置帧计数器,开始播放动画
-        login_state.login_success = true;
-        login_state.frames_after_login = 0;
-        login_state.animation_paused = false;  // 开始播放背景动画
+        // Mark as connecting
+        login_state.connecting = true;
+        login_state.connect_attempts += 1;
         
-        info!("✅ Login success! Starting animation, will transition after {} frames", ANIMATION_FRAME_COUNT);
+        // Send login request through network command channel
+        if let Some(tx) = &login_state.command_tx {
+            info!("📤 Sending login request to server: {}", event.account_id);
+            info!("🔐 Account: {} (password length: {})", event.account_id, event.password.len());
+            
+            // Create and send login command
+            let command = crate::network::NetworkCommand::Login {
+                username: event.account_id.clone(),
+                password: event.password.clone(),
+            };
+            
+            match tx.send(command) {
+                Ok(_) => {
+                    info!("✅ Login command sent to network thread successfully");
+                }
+                Err(e) => {
+                    error!("❌ Failed to send login command: {}", e);
+                    login_state.connecting = false;
+                    login_state.connect_attempts -= 1;
+                }
+            }
+        } else {
+            warn!("⚠️  Network command channel not initialized");
+            // Fallback: auto-approve for testing when network is not set up
+            info!("📤 [TESTING] Auto-approving login without network: {}", event.account_id);
+            login_state.login_success = true;
+            login_state.frames_after_login = 0;
+            login_state.animation_paused = false;
+            login_state.connecting = false;
+            info!("✅ [TESTING] Login success! Starting animation, will transition after {} frames", ANIMATION_FRAME_COUNT);
+        }
     }
 }
 

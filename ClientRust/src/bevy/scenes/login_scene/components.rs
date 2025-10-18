@@ -2,6 +2,7 @@
 // Extracted from login_scene_v2.rs for better modularity
 
 use bevy::prelude::*;
+use std::collections::HashMap;
 
 // ============================================================================
 // Constants
@@ -32,7 +33,7 @@ pub const TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
 // Resources
 // ============================================================================
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug)]
 pub struct LoginState {
     /// Network connection state
     pub connecting: bool,
@@ -44,25 +45,36 @@ pub struct LoginState {
     
     /// Login enabled state
     pub login_enabled: bool,
-    pub require_password_change: bool,
+    pub login_success: bool,
+    pub frames_after_login: usize,  // 登录后经过的帧数
     
     /// Background animation state
     pub background_frame: usize,
     pub animation_timer: f32,
+    pub animation_paused: bool,
     
-    /// Input state
+    /// Input values
     pub account_id: String,
     pub password: String,
+    
+    /// Input validation
     pub account_id_valid: bool,
     pub password_valid: bool,
     
-    /// Active dialog
-    pub active_dialog: Option<DialogType>,
+    /// Dialog state
+    pub dialog_visible: DialogType,
+    
+    /// Dialog input values
+    pub dialog_inputs: HashMap<DialogFieldType, String>,
+    
+    /// Network command sender - for sending login requests to network thread
+    pub command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
 }
 
 /// Dialog type enum
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogType {
+    None,
     NewAccount,
     ChangePassword,
 }
@@ -75,15 +87,26 @@ impl Default for LoginState {
             version_checked: true,
             version_valid: true,
             login_enabled: false,
-            require_password_change: false,
+            login_success: false,
+            frames_after_login: 0,
             background_frame: 0,
             animation_timer: 0.0,
+            animation_paused: true,
             account_id: String::new(),
             password: String::new(),
             account_id_valid: false,
             password_valid: false,
-            active_dialog: None,
+            dialog_visible: DialogType::None,
+            dialog_inputs: HashMap::new(),
+            command_tx: None,
         }
+    }
+}
+
+impl LoginState {
+    /// Set the network command sender for sending login requests
+    pub fn set_command_sender(&mut self, tx: tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>) {
+        self.command_tx = Some(tx);
     }
 }
 

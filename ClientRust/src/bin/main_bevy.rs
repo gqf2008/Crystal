@@ -27,6 +27,7 @@ use bevy_modules::systems::{
 // 引入 LoginScene V2 (完整功能版本)
 use bevy_modules::scenes::{
     setup_login_scene,
+    init_network_channel,
     cleanup_login_scene,
     update_background_animation,
     handle_text_input,
@@ -35,7 +36,7 @@ use bevy_modules::scenes::{
     handle_tab_focus,
     update_input_borders,
     update_cursor_blink,
-    handle_button_hover,
+    handle_button_hover as login_handle_button_hover,
     handle_button_press,
     handle_button_clicks,
     handle_dialog_buttons,  // 对话框按钮处理
@@ -50,12 +51,143 @@ use bevy_modules::scenes::{
     handle_new_account_message,
     handle_password_change_message,
     handle_view_key_message,
-    // Messages
+    // LoginScene Messages
     LoginButtonPressed,
     NewAccountButtonPressed,
     PasswordChangeButtonPressed,
     ViewKeyButtonPressed,
     CloseButtonPressed,
+    // SelectScene
+    setup_select_scene,
+    cleanup_select_scene,
+    update_character_list,
+    select_button_hover,
+    handle_character_select,
+    handle_character_delete,
+    handle_create_character,
+    handle_start_game,
+    handle_back_to_login,
+    message_handle_select_character,
+    message_handle_delete_character,
+    message_handle_create_character,
+    message_handle_start_game,
+    message_handle_back_to_login,
+    // SelectScene Messages
+    SelectCharacterMessage,
+    DeleteCharacterMessage,
+    CreateCharacterMessage,
+    StartGameMessage,
+    BackToLoginMessage,
+    // GameScene
+    setup_game_scene,
+    cleanup_game_scene,
+    update_game_time,
+    handle_player_input,
+    handle_player_movement,
+    update_player_position,
+    update_hud_display,
+    handle_quickslot_hover,
+    message_handle_player_move,
+    message_handle_open_chat,
+    message_handle_close_chat,
+    message_handle_open_inventory,
+    message_handle_close_inventory,
+    message_handle_open_skills,
+    message_handle_close_skills,
+    message_handle_pause_game,
+    message_handle_exit_game,
+    message_handle_interact_npc,
+    message_handle_use_skill,
+    // Phase 1: 玩家实体管理
+    update_player_stats_system,
+    process_buffs_system,
+    handle_chat_input_system,
+    // Phase 2: 地图加载和渲染
+    load_map_system,
+    create_map_layers_system,
+    spawn_map_objects_system,
+    update_map_state_system,
+    handle_map_collision_system,
+    // Phase 3: NPC 和对象交互
+    setup_dialogue_system,
+    detect_interaction_system,
+    handle_interaction_system,
+    update_dialogue_display_system,
+    handle_dialogue_choice_system,
+    message_handle_npc_dialogue,
+    // Phase 4: 聊天系统
+    setup_chat_system,
+    process_chat_input_system,
+    process_chat_commands_system,
+    receive_chat_messages_system,
+    update_chat_display_system,
+    manage_chat_history_system,
+    message_handle_send_chat,
+    // Phase 5: 网络同步系统
+    setup_network_system,
+    send_player_position_system,
+    send_player_stats_system,
+    send_chat_to_server_system,
+    send_interaction_to_server_system,
+    receive_player_sync_system,
+    receive_npc_sync_system,
+    receive_map_sync_system,
+    receive_server_chat_system,
+    handle_connection_events_system,
+    apply_player_sync_system,
+    apply_npc_sync_system,
+    apply_item_spawn_system,
+    sync_local_state_system,
+    // Phase 6: 完整事件循环
+    setup_game_loop_system,
+    game_loop_system,
+    process_frame_events_system,
+    update_frame_stats_system,
+    check_win_lose_conditions_system,
+    integrate_all_systems_system,
+    validate_game_state_system,
+    handle_game_errors_system,
+    debug_system_health_system,
+    optimize_network_updates_system,
+    optimize_render_system,
+    profile_system_performance_system,
+    message_handle_game_loop,
+    message_handle_frame_stats_request,
+    message_handle_system_health_request,
+    message_handle_performance_report,
+    // GameScene Messages
+    PlayerMoveMessage,
+    PlayerStopMessage,
+    OpenChatMessage,
+    CloseChatMessage,
+    SendChatMessage,
+    OpenInventoryMessage,
+    CloseInventoryMessage,
+    OpenSkillsMessage,
+    CloseSkillsMessage,
+    OpenCharacterMessage,
+    CloseCharacterMessage,
+    ExitGameMessage,
+    InteractWithNpcMessage,
+    UseSkillMessage,
+    PauseGameMessage,
+    // Phase 5: 网络同步消息
+    PlayerSyncMessage,
+    PlayerStatsSyncMessage,
+    RemotePlayerSyncMessage,
+    NPCSyncMessage,
+    MapObjectSyncMessage,
+    ChatSyncMessage,
+    ItemSpawnMessage,
+    ItemDespawnMessage,
+    ConnectionEvent,
+    NetworkErrorMessage,
+    ServerTimeSyncMessage,
+    // Phase 6: 游戏循环消息
+    GameLoopMessage,
+    RequestFrameStatsMessage,
+    RequestSystemHealthMessage,
+    PerformanceReportMessage,
 };
 
 fn main() {
@@ -86,7 +218,52 @@ fn main() {
     app.add_message::<PasswordChangeButtonPressed>();
     app.add_message::<ViewKeyButtonPressed>();
     app.add_message::<CloseButtonPressed>();
+    
+    // 注册 SelectScene 使用的所有 Message 类型
+    app.add_message::<SelectCharacterMessage>();
+    app.add_message::<DeleteCharacterMessage>();
+    app.add_message::<CreateCharacterMessage>();
+    app.add_message::<StartGameMessage>();
+    app.add_message::<BackToLoginMessage>();
+    
+    // 注册 GameScene 使用的所有 Message 类型
+    app.add_message::<PlayerMoveMessage>();
+    app.add_message::<PlayerStopMessage>();
+    app.add_message::<OpenChatMessage>();
+    app.add_message::<CloseChatMessage>();
+    app.add_message::<SendChatMessage>();
+    app.add_message::<OpenInventoryMessage>();
+    app.add_message::<CloseInventoryMessage>();
+    app.add_message::<OpenSkillsMessage>();
+    app.add_message::<CloseSkillsMessage>();
+    app.add_message::<OpenCharacterMessage>();
+    app.add_message::<CloseCharacterMessage>();
+    app.add_message::<ExitGameMessage>();
+    app.add_message::<InteractWithNpcMessage>();
+    app.add_message::<UseSkillMessage>();
+    app.add_message::<PauseGameMessage>();
     println!("3.5. Message 类型已注册");
+    
+    // 注册 Phase 5 网络同步相关的 Message 类型
+    app.add_message::<PlayerSyncMessage>();
+    app.add_message::<PlayerStatsSyncMessage>();
+    app.add_message::<RemotePlayerSyncMessage>();
+    app.add_message::<NPCSyncMessage>();
+    app.add_message::<MapObjectSyncMessage>();
+    app.add_message::<ChatSyncMessage>();
+    app.add_message::<ItemSpawnMessage>();
+    app.add_message::<ItemDespawnMessage>();
+    app.add_message::<ConnectionEvent>();
+    app.add_message::<NetworkErrorMessage>();
+    app.add_message::<ServerTimeSyncMessage>();
+    println!("3.6. Phase 5 网络消息类型已注册");
+    
+    // 注册 Phase 6 游戏循环相关的 Message 类型
+    app.add_message::<GameLoopMessage>();
+    app.add_message::<RequestFrameStatsMessage>();
+    app.add_message::<RequestSystemHealthMessage>();
+    app.add_message::<PerformanceReportMessage>();
+    println!("3.7. Phase 6 游戏循环消息类型已注册");
         
     // 初始化状态
     app.init_state::<GameState>();
@@ -145,7 +322,7 @@ fn main() {
     // LoginScene V2 系统 - 按钮和消息 (仅在 Login 状态运行)
     app.add_systems(Update, (
         // 按钮交互
-        handle_button_hover,
+        login_handle_button_hover,
         handle_button_press,
         handle_button_clicks,
         handle_dialog_buttons,  // 对话框按钮处理
@@ -157,8 +334,138 @@ fn main() {
         handle_view_key_message,
     ).run_if(in_state(GameState::Login)));
     println!("12. LoginScene V2 系统已添加");
+    
+    // SelectScene 系统 - UI 更新 (仅在 Select 状态运行)
+    app.add_systems(Update, (
+        update_character_list,
+    ).run_if(in_state(GameState::Select)));
+    
+    // SelectScene 系统 - 按钮和交互 (仅在 Select 状态运行)
+    app.add_systems(Update, (
+        select_button_hover,
+        handle_character_select,
+        handle_character_delete,
+        handle_create_character,
+        handle_start_game,
+        handle_back_to_login,
+        // 消息处理
+        message_handle_select_character,
+        message_handle_delete_character,
+        message_handle_create_character,
+        message_handle_start_game,
+        message_handle_back_to_login,
+    ).run_if(in_state(GameState::Select)));
+    println!("12.5. SelectScene 系统已添加");
+    
+    // GameScene 系统 - UI 更新 (仅在 Game 状态运行)
+    app.add_systems(Update, (
+        update_game_time,
+        update_hud_display,
+    ).run_if(in_state(GameState::Game)));
+    
+    // GameScene 系统 - 玩家控制 (仅在 Game 状态运行)
+    app.add_systems(Update, (
+        handle_player_input,
+        handle_player_movement,
+        update_player_position,
+    ).run_if(in_state(GameState::Game)));
+    
+    // GameScene 系统 - 消息处理和 UI 交互 (仅在 Game 状态运行)
+    app.add_systems(Update, (
+        handle_quickslot_hover,
+        // 消息处理
+        message_handle_player_move,
+        message_handle_open_chat,
+        message_handle_close_chat,
+        message_handle_open_inventory,
+        message_handle_close_inventory,
+        message_handle_open_skills,
+        message_handle_close_skills,
+        message_handle_pause_game,
+        message_handle_exit_game,
+        message_handle_interact_npc,
+        message_handle_use_skill,
+    ).run_if(in_state(GameState::Game)));
+    
+    // GameScene 系统 - Phase 1 玩家管理
+    app.add_systems(Update, (
+        update_player_stats_system,
+        process_buffs_system,
+        handle_chat_input_system,
+        update_chat_display_system,
+    ).run_if(in_state(GameState::Game)));
+    
+    // GameScene 系统 - Phase 2 地图系统
+    app.add_systems(Update, (
+        update_map_state_system,
+        handle_map_collision_system,
+    ).run_if(in_state(GameState::Game)));
+    
+    // GameScene 系统 - Phase 3 交互系统
+    app.add_systems(Update, (
+        detect_interaction_system,
+        handle_interaction_system,
+        handle_dialogue_choice_system,
+        update_dialogue_display_system,
+        message_handle_npc_dialogue,
+    ).run_if(in_state(GameState::Game)));
+    
+    // GameScene 系统 - Phase 4 聊天系统
+    app.add_systems(Update, (
+        process_chat_input_system,
+        process_chat_commands_system,
+        receive_chat_messages_system,
+        manage_chat_history_system,
+        update_chat_display_system,
+        message_handle_send_chat,
+    ).run_if(in_state(GameState::Game)));
+    
+    // GameScene 系统 - Phase 5 网络同步
+    app.add_systems(Update, (
+        // 网络发送系统
+        send_player_position_system,
+        send_player_stats_system,
+        send_chat_to_server_system,
+        send_interaction_to_server_system,
+        // 网络接收系统
+        receive_player_sync_system,
+        receive_npc_sync_system,
+        receive_map_sync_system,
+        receive_server_chat_system,
+        handle_connection_events_system,
+        // 同步应用系统
+        apply_player_sync_system,
+        apply_npc_sync_system,
+        apply_item_spawn_system,
+        sync_local_state_system,
+    ).run_if(in_state(GameState::Game)));
+    
+    // GameScene 系统 - Phase 6 完整事件循环
+    app.add_systems(Update, (
+        // 游戏循环核心
+        game_loop_system,
+        process_frame_events_system,
+        update_frame_stats_system,
+        check_win_lose_conditions_system,
+        // 系统整合和验证
+        integrate_all_systems_system,
+        validate_game_state_system,
+        handle_game_errors_system,
+        debug_system_health_system,
+        // 性能优化
+        optimize_network_updates_system,
+        optimize_render_system,
+        profile_system_performance_system,
+        // 消息处理
+        message_handle_game_loop,
+        message_handle_frame_stats_request,
+        message_handle_system_health_request,
+        message_handle_performance_report,
+    ).run_if(in_state(GameState::Game)));
+    
+    println!("13. GameScene 系统已添加 (Phase 1-6, 分组注册)");
         
-    // 游戏中的系统 (仅在 Game 状态运行)
+    // 游戏中的系统 (仅在 Game 状态运行，原有的地图/渲染系统)
     app.add_systems(Update, (
         mouse_input_system,
         movement_system,
@@ -167,19 +474,42 @@ fn main() {
         debug_info_system,
         map_culling_system,
     ).run_if(in_state(GameState::Game)));
-    println!("13. Game 系统已添加");
+    println!("13.5. 原有 Game 系统已添加");
         
     // 进入登录状态时设置 LoginScene
-    app.add_systems(OnEnter(GameState::Login), setup_login_scene);
+    app.add_systems(OnEnter(GameState::Login), (setup_login_scene, init_network_channel));
     println!("14. OnEnter(Login) 系统已添加");
         
     // 退出登录状态时清理 LoginScene
     app.add_systems(OnExit(GameState::Login), cleanup_login_scene);
     println!("15. OnExit(Login) 系统已添加");
-        
-    // 进入游戏状态时生成测试玩家和地图
-    app.add_systems(OnEnter(GameState::Game), (spawn_test_player, setup_map_system));
-    println!("16. OnEnter(Game) 系统已添加");
+    
+    // 进入角色选择状态时设置 SelectScene
+    app.add_systems(OnEnter(GameState::Select), setup_select_scene);
+    println!("15.5. OnEnter(Select) 系统已添加");
+    
+    // 退出角色选择状态时清理 SelectScene
+    app.add_systems(OnExit(GameState::Select), cleanup_select_scene);
+    println!("15.7. OnExit(Select) 系统已添加");
+    
+    // 进入游戏状态时设置 GameScene HUD
+    app.add_systems(OnEnter(GameState::Game), (
+        setup_game_scene, 
+        spawn_test_player, 
+        setup_map_system,
+        load_map_system,  // Phase 2: 加载地图
+        create_map_layers_system,  // Phase 2: 创建地图图层
+        spawn_map_objects_system,  // Phase 2: 生成地图对象
+        setup_dialogue_system,  // Phase 3: 初始化对话系统
+        setup_chat_system,  // Phase 4: 初始化聊天系统
+        setup_network_system,  // Phase 5: 初始化网络系统
+        setup_game_loop_system,  // Phase 6: 初始化游戏循环系统
+    ));
+    println!("16. OnEnter(Game) 系统已添加 (包含 GameScene 和 Phase 2-6 系统)");
+    
+    // 退出游戏状态时清理 GameScene
+    app.add_systems(OnExit(GameState::Game), cleanup_game_scene);
+    println!("16.5. OnExit(Game) 系统已添加");
     
     println!("=== 准备运行 App.run() ===");
     app.run();

@@ -1,6 +1,7 @@
 // Test System - 测试精灵显示
 use bevy::prelude::*;
-use crate::bevy::{MLibraryResource, Player, GridPosition, Movement, RenderOffset, LibraryName};
+use crate::bevy::{MLibraryResource, GridPosition, Movement, RenderOffset, LibraryName};
+use crate::bevy::components::Player as LegacyPlayer;
 
 /// 生成测试玩家精灵
 pub fn spawn_test_player(
@@ -23,7 +24,7 @@ pub fn spawn_test_player(
         
         // 生成玩家实体
         commands.spawn((
-            Player,
+            LegacyPlayer,
             GridPosition::new(5, 5),
             Movement::new(),
             RenderOffset::default(),
@@ -43,7 +44,7 @@ pub fn spawn_test_player(
 /// 调试信息显示系统
 pub fn debug_info_system(
     time: Res<Time>,
-    player_query: Query<(&GridPosition, &Transform), With<Player>>,
+    player_query: Query<(&GridPosition, &Transform), With<LegacyPlayer>>,
 ) {
     // 每秒打印一次调试信息
     if time.elapsed_secs() as u32 % 5 == 0 && time.delta_secs() < 0.1 {
