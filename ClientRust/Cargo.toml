@@ -62,6 +62,7 @@ bevy = { version = "0.17.2", features = [
 
 # ========== Ggez (旧引擎,暂时保留) ==========
 ggez = "=0.10.0-rc0" # Includes winit re-export (use ggez::winit::*)
+specs = "0.20.0"
 # egui = "0.27"  # 暂时禁用,egui_ggez 不兼容 ggez 0.10-rc0
 # egui_ggez = "0.3"  # 在 crates.io 上不存在或不兼容
 assets_manager = "0.13.3"
