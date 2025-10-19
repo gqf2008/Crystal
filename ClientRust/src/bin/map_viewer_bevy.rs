@@ -271,6 +271,7 @@ struct ViewSettings {
     show_border: bool,   // 🆕 显示纹理边框
     flip_texture_y: bool, // 🆕 翻转纹理Y轴（调试用）
     show_info: bool,
+    show_animation: bool, // 🆕 是否绘制动画帧（调试用）
 }
 
 impl Default for ViewSettings {
@@ -283,6 +284,7 @@ impl Default for ViewSettings {
             show_border: false,  // 🆕 默认不显示边框
             flip_texture_y: false, // 🆕 默认不翻转（Bevy UV与传奇图像一致）
             show_info: true,
+            show_animation: true, // 🆕 默认显示动画（可用A键切换）
         }
     }
 }
@@ -576,6 +578,12 @@ fn keyboard_input_system(
     // I键：切换信息显示
     if keyboard.just_pressed(KeyCode::KeyI) {
         view_settings.show_info = !view_settings.show_info;
+    }
+
+    // A键：切换动画显示（调试用）
+    if keyboard.just_pressed(KeyCode::KeyA) {
+        view_settings.show_animation = !view_settings.show_animation;
+        info!("🎬 动画显示: {}", if view_settings.show_animation { "开启" } else { "关闭" });
     }
 
     // 1/2/3键：切换图层显示
@@ -954,16 +962,9 @@ fn render_static_tiles_system(
                     let has_animation = animation > 0;
                     let has_door = cell.door_index > 0;
                     
-                    // � 调试:输出动画信息
-                    if has_animation && (x == 346 || x == 350) && (y == 278 || y == 280) {
-                        warn!("🔍 Front静态渲染 - 坐标({}, {}): front_image={:#06x}, animation_frame={}, use_blend={}, 准备跳过!",
-                              x, y, cell.front_image, animation, use_blend);
-                    }
-                    
-                    // �🔥 关键修复：如果有动画，跳过静态绘制，由 update_animated_tiles_system 负责
-                    // 这样可以避免黑边问题（动画在update系统中每帧重绘，避免透明黑边）
-                    if has_animation {
-                        continue;  // 跳过，让动画系统处理
+                    // 如果有动画但动画开关关闭，跳过绘制
+                    if has_animation && !view_settings.show_animation {
+                        continue;  // 跳过有动画的瓦片
                     }
                     
                     // 🚪 门动画处理（如果有门）
@@ -1171,8 +1172,8 @@ fn update_animated_tiles_system(
     }
     
     // ============ Front层动画瓦片 ============
-    // 🔧 处理Front层的动画（火焰、光效等）
-    if view_settings.show_front {
+    // 处理Front层的动画（火焰、光效等）
+    if view_settings.show_front && view_settings.show_animation {
         for y in start_y..=front_end_y {
             for x in start_x..=end_x {
                 if let Some(cell) = map_data.get_cell(x, y) {
