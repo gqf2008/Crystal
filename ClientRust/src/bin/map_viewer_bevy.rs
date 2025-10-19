@@ -202,45 +202,13 @@ impl MLibraryAssets {
         }
 
         // 转换BGRA → RGBA，并彻底修复透明像素的黑边问题
+        // 直接BGRA→RGBA转换，保留原始数据
         let mut rgba_data = Vec::with_capacity(image_data.len());
         for chunk in image_data.chunks_exact(4) {
-            let b = chunk[0];
-            let g = chunk[1];
-            let r = chunk[2];
-            let alpha = chunk[3];
-            
-            // � 彻底修复黑边：对于透明和半透明像素，扩大清除阈值
-            // 火焰特效的黑边是因为半透明边缘像素保留了黑色RGB值
-            if alpha < 30 {  // 提高阈值到30（约12%透明度以下）
-                // 完全透明区域：清零所有通道
-                rgba_data.push(0); // R
-                rgba_data.push(0); // G
-                rgba_data.push(0); // B
-                rgba_data.push(0); // A
-            } else if alpha < 128 {  // 半透明像素（12%-50%透明度）
-                // 🔧 关键修复：对于半透明像素，如果RGB值很暗（接近黑色），也清除
-                // 这可以消除火焰周围的暗边
-                let brightness = (r as u32 + g as u32 + b as u32) / 3;
-                if brightness < 30 {  // 如果像素很暗（接近黑色）
-                    // 清除暗色半透明像素，避免黑边
-                    rgba_data.push(0);
-                    rgba_data.push(0);
-                    rgba_data.push(0);
-                    rgba_data.push(0);
-                } else {
-                    // 保留正常半透明像素
-                    rgba_data.push(r);
-                    rgba_data.push(g);
-                    rgba_data.push(b);
-                    rgba_data.push(alpha);
-                }
-            } else {
-                // 不透明像素：保持原样
-                rgba_data.push(r);
-                rgba_data.push(g);
-                rgba_data.push(b);
-                rgba_data.push(alpha);
-            }
+            rgba_data.push(chunk[2]); // R
+            rgba_data.push(chunk[1]); // G
+            rgba_data.push(chunk[0]); // B
+            rgba_data.push(chunk[3]); // A
         }
 
         if is_debug {
@@ -261,6 +229,8 @@ impl MLibraryAssets {
         }
 
         // 🔧 创建Bevy Image
+        // C#原版使用 Format.A8R8G8B8 + SpriteFlags.AlphaBlend (标准alpha混合)
+        // Bevy默认就是标准alpha混合，所以直接用sRGB格式即可
         let image = Image::new(
             Extent3d {
                 width: image_info.width as u32,
@@ -269,7 +239,7 @@ impl MLibraryAssets {
             },
             TextureDimension::D2,
             rgba_data,
-            TextureFormat::Rgba8UnormSrgb,  // 🔧 使用sRGB格式（颜色纹理）
+            TextureFormat::Rgba8UnormSrgb,  // 🔧 使用sRGB格式（标准色彩空间）
             Default::default(),
         );
 
@@ -1644,3 +1614,4 @@ fn update_cell_info_panel_system(
     panel_node.left = Val::Px(panel_x);
     panel_node.top = Val::Px(panel_y);
 }
+
