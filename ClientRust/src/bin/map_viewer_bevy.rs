@@ -201,36 +201,29 @@ impl MLibraryAssets {
             return None;
         }
 
-        // 转换BGRA → RGBA，并彻底修复透明像素的黑边问题
-        // 直接BGRA→RGBA转换，保留原始数据
-        let mut rgba_data = Vec::with_capacity(image_data.len());
-        for chunk in image_data.chunks_exact(4) {
-            rgba_data.push(chunk[2]); // R
-            rgba_data.push(chunk[1]); // G
-            rgba_data.push(chunk[0]); // B
-            rgba_data.push(chunk[3]); // A
-        }
-
+        // 🔧 关键发现:原始数据就是BGRA格式,不需要转换!
+        // C#原版: Format.A8R8G8B8 (BGRA)
+        // ggez: ImageFormat::Bgra8UnormSrgb
+        // Bevy: TextureFormat::Bgra8UnormSrgb
+        
         if is_debug {
-            warn!("  - BGRA→RGBA转换完成");
-            // 检查前几个像素的Alpha值
-            if rgba_data.len() >= 16 {
-                warn!("  - 前4个像素RGBA值:");
+            warn!("  - 使用原始BGRA数据，无需转换");
+            // 检查前几个像素的BGRA值
+            if image_data.len() >= 16 {
+                warn!("  - 前4个像素BGRA值:");
                 for i in 0..4 {
                     let offset = i * 4;
-                    warn!("    像素{}: R={} G={} B={} A={}", 
+                    warn!("    像素{}: B={} G={} R={} A={}", 
                           i, 
-                          rgba_data[offset], 
-                          rgba_data[offset+1], 
-                          rgba_data[offset+2], 
-                          rgba_data[offset+3]);
+                          image_data[offset], 
+                          image_data[offset+1], 
+                          image_data[offset+2], 
+                          image_data[offset+3]);
                 }
             }
         }
 
-        // 🔧 创建Bevy Image
-        // C#原版使用 Format.A8R8G8B8 + SpriteFlags.AlphaBlend (标准alpha混合)
-        // Bevy默认就是标准alpha混合，所以直接用sRGB格式即可
+        // 🔧 创建Bevy Image - 使用BGRA格式（与C#原版一致）
         let image = Image::new(
             Extent3d {
                 width: image_info.width as u32,
@@ -238,8 +231,8 @@ impl MLibraryAssets {
                 depth_or_array_layers: 1,
             },
             TextureDimension::D2,
-            rgba_data,
-            TextureFormat::Rgba8UnormSrgb,  // 🔧 使用sRGB格式（标准色彩空间）
+            image_data,  // 直接使用原始BGRA数据
+            TextureFormat::Bgra8UnormSrgb,  // 🔧 BGRA格式（与C#的A8R8G8B8对应）
             Default::default(),
         );
 
