@@ -657,10 +657,10 @@ fn camera_zoom_system(
     };
 
     for event in mouse_wheel.read() {
-        // 🔧 修复：滚轮向上缩小，向下放大（与Windows资源管理器一致）
+        // 🔧 滚轮方向：向上放大，向下缩小（正常方向）
         let zoom_delta = match event.unit {
-            MouseScrollUnit::Line => -event.y,          // 反转方向
-            MouseScrollUnit::Pixel => -event.y * 0.01,  // 反转方向
+            MouseScrollUnit::Line => event.y,          // 正常方向
+            MouseScrollUnit::Pixel => event.y * 0.01,  // 正常方向
         };
 
         camera.zoom = (camera.zoom * (1.0 + zoom_delta * 0.1)).clamp(MIN_ZOOM, MAX_ZOOM);
