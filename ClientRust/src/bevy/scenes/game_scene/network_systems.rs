@@ -295,7 +295,7 @@ pub fn handle_connection_events_system(
     // 模拟处理连接事件
     match network_state.connection_state {
         ConnectionState::Disconnected => {
-            info!("❌ 网络断开连接");
+            // info!("❌ 网络断开连接");  // 测试模式下屏蔽
         }
         ConnectionState::Connecting => {
             info!("🔗 正在连接到服务器...");

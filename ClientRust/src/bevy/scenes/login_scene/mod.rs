@@ -1163,13 +1163,16 @@ pub fn cleanup_login_scene(
     mut commands: Commands,
     query: Query<Entity, With<LoginSceneRoot>>,
 ) {
+    info!("🧹 开始清理 LoginScene");
+    let mut count = 0;
     for entity in query.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).despawn(); // Bevy会自动清理子节点
+        count += 1;
     }
     
     commands.remove_resource::<LoginState>();
     
-    info!("🧹 LoginScene cleaned up");
+    info!("🧹 LoginScene 已清理 ({} 个根实体)", count);
 }
 
 // ============================================================================

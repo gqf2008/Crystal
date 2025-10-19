@@ -197,9 +197,22 @@ impl TileCache {
 }
 
 /// 初始化地图渲染器
-pub fn setup_map_renderer(mut commands: Commands) {
+pub fn setup_map_renderer(
+    mut commands: Commands,
+    mut tile_cache: Option<ResMut<TileCache>>,
+    tile_query: Query<Entity, With<TileEntity>>,
+) {
     use std::path::PathBuf;
     use super::mlibrary_assets::MLibraryAssets;
+    
+    // 如果TileCache已存在，清空所有旧的瓦片实体
+    if let Some(mut cache) = tile_cache {
+        info!("🧹 清理旧的瓦片实体 ({} 个)", tile_query.iter().count());
+        for entity in tile_query.iter() {
+            commands.entity(entity).despawn();
+        }
+        cache.entities.clear();
+    }
     
     // 初始化地图渲染数据
     commands.insert_resource(MapRenderData::empty());
@@ -207,8 +220,16 @@ pub fn setup_map_renderer(mut commands: Commands) {
     
     // 初始化 MLibrary 资源 (从 Data 文件夹加载纹理)
     let data_path = PathBuf::from("Data");
-    commands.insert_resource(MLibraryAssets::new(data_path));
-    info!("✅ MLibraryAssets 已初始化");
+    let mut mlibrary_assets = MLibraryAssets::new(data_path);
+    
+    // 预加载所有库 (MapLibs[0-399] 和游戏内容库)
+    if let Err(e) = mlibrary_assets.preload_all_libraries() {
+        error!("❌ MLibrary 库加载失败: {}", e);
+        return;
+    }
+    
+    commands.insert_resource(mlibrary_assets);
+    info!("✅ MLibraryAssets 已初始化并预加载");
     
     info!("✅ MapRenderer 初始化完成");
 }
@@ -237,16 +258,34 @@ pub fn render_map_system(
 ) {
     // 如果 MLibraryAssets 未初始化,跳过
     let Some(mut mlibrary) = mlibrary else {
+        warn!("⚠️ MLibraryAssets 不存在，跳过渲染");
         return;
     };
     
     // 如果没有地图数据,跳过
     if map_data.width == 0 || map_data.height == 0 {
+        warn!("⚠️ 地图数据为空 ({}x{})", map_data.width, map_data.height);
         return;
+    }
+    
+    // 第一次渲染时清空缓存并记录日志
+    if tile_cache.entities.is_empty() {
+        info!("🎨 render_map_system 首次渲染 (地图: {}x{})", map_data.width, map_data.height);
+    } else if tile_cache.entities.len() > 0 {
+        // 如果缓存中有数据但没有实际创建过Sprite,清空缓存
+        static mut CACHE_CLEARED: bool = false;
+        unsafe {
+            if !CACHE_CLEARED {
+                info!("🧹 清空瓦片缓存 ({} 个条目)", tile_cache.entities.len());
+                tile_cache.entities.clear();
+                CACHE_CLEARED = true;
+            }
+        }
     }
 
     // 获取摄像机和窗口信息
     let Ok((camera_transform, game_camera)) = camera_query.single() else {
+        warn!("⚠️ 找不到游戏摄像机");
         return;
     };
     let Ok(window) = window_query.single() else {
@@ -259,6 +298,12 @@ pub fn render_map_system(
         -camera_transform.translation.y, // Bevy Y轴向上,转回世界坐标
     );
     let screen_size = Vec2::new(window.width(), window.height());
+    
+    // 第一次渲染时输出摄像机信息
+    if tile_cache.entities.is_empty() {
+        info!("📷 摄像机位置: ({:.1}, {:.1}), 屏幕大小: ({:.0}, {:.0})", 
+            camera_pos.x, camera_pos.y, screen_size.x, screen_size.y);
+    }
 
     let (start_x, end_x, start_y, end_y) = game_camera.get_visible_tiles(
         camera_pos,
@@ -266,6 +311,11 @@ pub fn render_map_system(
         map_data.width,
         map_data.height,
     );
+    
+    // 第一次渲染时输出可见区域
+    if tile_cache.entities.is_empty() {
+        info!("🔲 可见区域: X({} ~ {}), Y({} ~ {})", start_x, end_x, start_y, end_y);
+    }
 
     // TODO: 清理不在可见区域的瓦片 (实现更智能的剔除)
 
@@ -330,6 +380,10 @@ fn render_back_layer(
     start_y: i32,
     end_y: i32,
 ) {
+    let mut created_count = 0;
+    let mut skipped_cache = 0;
+    let mut failed_texture = 0;
+    
     // 只渲染偶数行列
     for y in (start_y..=end_y).step_by(2) {
         for x in (start_x..=end_x).step_by(2) {
@@ -342,6 +396,7 @@ fn render_back_layer(
                 // 检查缓存
                 let key = TileCache::make_key(TileLayer::Back, x, y);
                 if tile_cache.entities.contains_key(&key) {
+                    skipped_cache += 1;
                     continue; // 已经生成过了
                 }
 
@@ -349,16 +404,14 @@ fn render_back_layer(
                 if let Some(texture_handle) =
                     mlibrary.get_map_texture(cell.back_index, index as usize, images)
                 {
+                    created_count += 1;
                     let (world_x, world_y) = MapRenderData::map_to_world(x, y);
 
-                    // 生成 Sprite 实体
+                    // 生成 Sprite 实体 - 使用 Sprite::from_image (Bevy 0.17推荐方式)
                     let entity = commands
                         .spawn((
-                            Sprite {
-                                image: texture_handle,
-                                ..default()
-                            },
-                            Transform::from_xyz(world_x, -world_y, 0.0), // Bevy Y轴向上,所以取负
+                            Sprite::from_image(texture_handle.clone()),
+                            Transform::from_xyz(world_x, -world_y, 0.0),
                         ))
                         .insert(TileEntity {
                             map_x: x,
@@ -367,12 +420,24 @@ fn render_back_layer(
                             is_animated: false,
                         })
                         .id();
+                    
+                    // 第一个创建的瓦片输出详细信息
+                    if created_count == 1 {
+                        info!("🎯 首个瓦片: 网格({}, {}) → 世界({:.1}, {:.1}), Z=0.0, 纹理ID={:?}", 
+                            x, y, world_x, world_y, texture_handle.id());
+                    }
 
                     // 加入缓存
                     tile_cache.entities.insert(key, entity);
+                } else {
+                    failed_texture += 1;
                 }
             }
         }
+    }
+    
+    if created_count > 0 || failed_texture > 0 {
+        info!("📦 Back层渲染: 创建={}, 跳过缓存={}, 纹理失败={}", created_count, skipped_cache, failed_texture);
     }
 }
 
@@ -440,6 +505,10 @@ fn render_middle_layer(
                                 ..default()
                             },
                             Transform::from_xyz(world_x, -world_y, 1.0), // Z=1 (高于Back层)
+                            GlobalTransform::default(),
+                            Visibility::default(),
+                            InheritedVisibility::default(),
+                            ViewVisibility::default(),
                         ))
                         .insert(TileEntity {
                             map_x: x,
@@ -543,6 +612,10 @@ fn render_front_layer(
                                 ..default()
                             },
                             Transform::from_xyz(world_x, -world_y, 2.0), // Z=2 (高于Middle层)
+                            GlobalTransform::default(),
+                            Visibility::default(),
+                            InheritedVisibility::default(),
+                            ViewVisibility::default(),
                         ))
                         .insert(TileEntity {
                             map_x: x,

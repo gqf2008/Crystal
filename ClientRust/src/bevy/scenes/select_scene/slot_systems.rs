@@ -10,7 +10,7 @@ use super::components::*;
 
 /// 处理角色槽点击，更新选中状态
 pub fn handle_slot_clicks(
-    mut interaction_query: Query<(&Interaction, &CharacterSlot), Changed<Interaction>>,
+    interaction_query: Query<(&Interaction, &CharacterSlot), Changed<Interaction>>,
     mut state: ResMut<SelectSceneState>,
     mut dialog_state: ResMut<crate::bevy::scenes::select_scene::DialogState>,
     commands: Commands,

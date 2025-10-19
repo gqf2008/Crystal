@@ -133,9 +133,12 @@ pub fn spawn_camera(mut commands: Commands) {
 
 /// 摄像机平滑跟随系统
 ///
-/// 使用线性插值实现平滑跟随,避免摄像机抖动
+/// 包含两个步骤:
+/// 1. 更新摄像机目标位置 (跟随玩家)
+/// 2. 平滑插值到目标位置
 pub fn camera_follow_system(
-    mut camera_query: Query<(&mut Transform, &GameCamera), With<Camera2d>>,
+    mut camera_query: Query<(&mut Transform, &mut GameCamera), With<Camera2d>>,
+    player_query: Query<&Transform, (With<crate::bevy::components::Player>, Without<Camera2d>)>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     time: Res<Time>,
 ) {
@@ -146,15 +149,37 @@ pub fn camera_follow_system(
     let screen_width = window.width();
     let screen_height = window.height();
 
-    for (mut transform, camera) in camera_query.iter_mut() {
-        // 计算限制后的目标位置
+    for (mut transform, mut camera) in camera_query.iter_mut() {
+        // 步骤1: 更新摄像机目标位置为玩家位置
+        if let Ok(player_transform) = player_query.single() {
+            // 玩家的世界坐标 (Y轴已翻转)
+            let player_world_x = player_transform.translation.x;
+            let player_world_y = -player_transform.translation.y; // 转回正Y轴
+            
+            camera.target = Vec2::new(player_world_x, player_world_y);
+            
+            // 🔧 调试：每60帧打印一次摄像机跟随信息
+            if (time.elapsed_secs() * 60.0) as u32 % 60 == 0 {
+                debug!("📷 摄像机跟随玩家 | 玩家世界坐标:({:.1}, {:.1}) | 摄像机目标:({:.1}, {:.1})", 
+                    player_world_x, player_world_y, camera.target.x, camera.target.y);
+            }
+        } else {
+            // 🔧 调试：找不到玩家时警告
+            if (time.elapsed_secs() * 60.0) as u32 % 180 == 0 {
+                warn!("⚠️ 摄像机找不到玩家实体 (Player组件)");
+            }
+        }
+        
+        // 步骤2: 计算限制后的目标位置
         let clamped_target = camera.clamp_target(screen_width, screen_height);
 
-        // 平滑插值到目标位置 (lerp)
-        let current = transform.translation.truncate();
-        let lerp_factor = camera.smoothness * time.delta_secs() * 60.0;
-        let lerp_factor = lerp_factor.min(1.0); // 防止超过目标
-
+        // 步骤3: 平滑插值到目标位置 (lerp)
+        let current = Vec2::new(transform.translation.x, -transform.translation.y);
+        
+        // 🔧 修复抖动：减小lerp_factor，让跟随更平滑
+        // smoothness = 0.2, delta = 0.016s (60fps) => lerp_factor ≈ 0.192
+        let lerp_factor = (camera.smoothness * time.delta_secs() * 60.0).min(1.0);
+        
         let new_pos = current.lerp(clamped_target, lerp_factor);
 
         transform.translation.x = new_pos.x;

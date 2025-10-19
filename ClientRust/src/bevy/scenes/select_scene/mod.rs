@@ -150,11 +150,13 @@ pub fn cleanup_select_scene(
     mut commands: Commands,
     query: Query<Entity, With<SelectSceneRoot>>,
 ) {
+    info!("🧹 开始清理 SelectScene");
+    let mut count = 0;
     for entity in query.iter() {
-        // 简单移除实体（子实体会自动清理）
-        commands.entity(entity).despawn();
+        commands.entity(entity).despawn(); // Bevy会自动清理子节点
+        count += 1;
     }
     commands.remove_resource::<SelectSceneState>();
     commands.remove_resource::<crate::bevy::scenes::select_scene::DialogState>();
-    info!("🧹 SelectScene 已清理");
+    info!("🧹 SelectScene 已清理 ({} 个根实体)", count);
 }

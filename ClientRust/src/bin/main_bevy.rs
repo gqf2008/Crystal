@@ -24,6 +24,7 @@ use bevy_modules::scenes::{
     camera_follow_system_new, camera_zoom_system,
     load_map_system_new,
     setup_game_rendering, cleanup_game_rendering, setup_map_renderer,
+    debug_transforms_system,
 };
 
 use bevy_modules::systems::{
@@ -480,26 +481,29 @@ fn main() {
     
     println!("13. GameScene 系统已添加 (Phase 1-6, 分组注册)");
     
-    // GameScene 新渲染系统 (Phase 4: 摄像机 + Phase 5: 地图加载)
+    // 🔧 修复：调整系统执行顺序，避免摄像机抖动
+    // 顺序: 输入 -> 移动 -> 渲染偏移 -> 摄像机跟随 -> 地图渲染
     app.add_systems(Update, (
-        update_animation_system,     // 更新地图动画
-        load_map_system_new,         // 地图加载系统 (新)
-        render_map_system,           // 地图渲染系统 (新)
-        camera_follow_system_new,    // 摄像机跟随系统 (新)
-        camera_zoom_system,          // 摄像机缩放系统
-    ).run_if(in_state(GameState::Game)));
-    println!("13.1. GameScene 新渲染系统已添加 (Phase 4-5)");
-        
-    // 游戏中的系统 (仅在 Game 状态运行,原有的地图/渲染系统)
-    app.add_systems(Update, (
+        // 第1步: 处理输入
         mouse_input_system,
+        keyboard_input_system,
+        // 第2步: 更新玩家移动 (必须在摄像机之前)
         movement_system,
         render_offset_system,
-        camera_follow_system_old,  // 使用旧的摄像机系统
-        debug_info_system,
+        // 第3步: 更新摄像机 (在玩家移动之后)
+        camera_follow_system_new,
+        // 第4步: 地图相关
+        load_map_system_new,
+        update_animation_system,
+        render_map_system,
         map_culling_system,
-    ).run_if(in_state(GameState::Game)));
-    println!("13.5. 原有 Game 系统已添加");
+        // 调试系统
+        debug_transforms_system,
+        debug_info_system,
+        camera_zoom_system,
+    ).chain().run_if(in_state(GameState::Game))); // 使用 .chain() 强制顺序执行
+    
+    println!("13.1. GameScene 渲染系统已添加 (使用系统链保证执行顺序)");
         
     // 进入登录状态时设置 LoginScene
     app.add_systems(OnEnter(GameState::Login), (setup_login_scene, init_network_channel));
@@ -555,7 +559,7 @@ fn setup(mut commands: Commands, mut next_state: ResMut<NextState<GameState>>) {
     println!("🏗️ ECS 架构初始化完成");
     println!("📊 状态机: Loading -> Login -> Select -> Game");
     
-    // 进入登录状态
-    next_state.set(GameState::Login);
-    println!("🎮 进入登录状态");
+    // 测试模式: 直接进入游戏状态
+    next_state.set(GameState::Game);
+    println!("🎮 测试模式: 直接进入游戏状态");
 }

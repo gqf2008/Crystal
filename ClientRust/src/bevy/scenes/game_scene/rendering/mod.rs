@@ -22,6 +22,7 @@ pub mod map_renderer;
 pub mod camera;
 pub mod map_loader;
 pub mod init;
+pub mod debug_transforms;
 
 pub use mlibrary_assets::MLibraryAssets;
 pub use sprite_renderer::SpriteRenderer;
@@ -29,4 +30,5 @@ pub use map_renderer::{MapRenderData, TileCache, TileEntity, TileLayer, DoorInfo
 pub use camera::{GameCamera, camera_follow_system as camera_follow_system_new, camera_zoom_system};
 pub use map_loader::{MapLoadRequest, load_map_system as load_map_system_new, load_map_direct};
 pub use init::{setup_game_rendering, cleanup_game_rendering};
+pub use debug_transforms::debug_transforms_system;
 

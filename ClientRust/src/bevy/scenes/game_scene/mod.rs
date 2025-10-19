@@ -52,7 +52,8 @@ pub use rendering::{
     MLibraryAssets, SpriteRenderer, MapRenderData, TileCache, TileEntity, TileLayer, DoorInfo, 
     GameCamera, MapLoadRequest, load_map_direct,
     render_map_system, update_animation_system, camera_follow_system_new, camera_zoom_system, load_map_system_new,
-    setup_game_rendering, cleanup_game_rendering, setup_map_renderer
+    setup_game_rendering, cleanup_game_rendering, setup_map_renderer,
+    debug_transforms_system
 };
 pub use bridge::{MapObjectRef, NetworkBridge, ServerPacketEvent, ClientPacketEvent};
 
@@ -87,7 +88,8 @@ pub fn setup_game_scene(
         },
         GameSceneRoot,
         Name::new("GameSceneRoot"),
-        BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 1.0)),
+        // 移除不透明背景，让下面的2D Sprite可见
+        // BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 1.0)),
     )).id();
     
     info!("✅ 游戏场景根节点已创建");
@@ -275,13 +277,16 @@ pub fn cleanup_game_scene(
     mut commands: Commands,
     query: Query<Entity, With<GameSceneRoot>>,
 ) {
-    info!("🧹 清理游戏场景");
+    info!("🧹 开始清理游戏场景");
+    let mut count = 0;
     
     for entity in query.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).despawn(); // Bevy会自动清理子节点
+        count += 1;
     }
     
     commands.remove_resource::<GameSceneState>();
+    info!("🧹 游戏场景已清理 ({} 个根实体)", count);
 }
 
 // ============================================================================

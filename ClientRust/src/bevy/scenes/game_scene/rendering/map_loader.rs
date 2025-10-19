@@ -50,6 +50,7 @@ impl MapLoadRequest {
 pub fn load_map_system(
     mut load_request: ResMut<MapLoadRequest>,
     mut map_data: ResMut<MapRenderData>,
+    mut tile_cache: ResMut<super::map_renderer::TileCache>,
     mut camera_query: Query<&mut GameCamera>,
 ) {
     if !load_request.is_requested() {
@@ -60,6 +61,10 @@ pub fn load_map_system(
     load_request.start_loading();
 
     info!("🗺️  开始加载地图: {}", map_name);
+    
+    // 清空瓦片缓存 (加载新地图时)
+    info!("🧹 清空瓦片缓存 ({} 个实体)", tile_cache.entities.len());
+    tile_cache.entities.clear();
 
     match load_map_file(&map_name) {
         Ok((cells, width, height)) => {
