@@ -962,9 +962,13 @@ fn render_static_tiles_system(
                     let has_animation = animation > 0;
                     let has_door = cell.door_index > 0;
                     
-                    // 如果有动画但动画开关关闭，跳过绘制
+                    // 如果有动画,跳过静态渲染,让update_animated_tiles_system处理
+                    // 这样静态瓦片只在视野变化时重建(性能优化)
+                    // 动画瓦片每帧更新(避免每帧重建所有瓦片)
                     if has_animation && !view_settings.show_animation {
-                        continue;  // 跳过有动画的瓦片
+                        continue;  // 如果动画开关关闭,跳过有动画的瓦片
+                    } else if has_animation && view_settings.show_animation {
+                        continue;  // 有动画且开关开启,交给update_animated_tiles_system处理
                     }
                     
                     // 🚪 门动画处理（如果有门）
