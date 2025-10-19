@@ -62,8 +62,10 @@ pub fn render_offset_system(
     
     for (grid_pos, mut transform, offset) in query.iter_mut() {
         // 计算目标世界坐标
+        // X轴：正常 (向右为正)
+        // Y轴：翻转 (向下为负，网格Y越大，世界Y越负)
         let target_x = (grid_pos.x as f32 * CELL_WIDTH) + offset.x;
-        let target_y = (grid_pos.y as f32 * CELL_HEIGHT) + offset.y;
+        let target_y = -((grid_pos.y as f32 * CELL_HEIGHT) + offset.y); // ← 修复：取负，翻转Y轴
         
         // 插值到目标位置 (平滑移动)
         const LERP_FACTOR: f32 = 0.2;

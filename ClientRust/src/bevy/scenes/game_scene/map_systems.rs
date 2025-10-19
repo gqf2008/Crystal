@@ -227,9 +227,15 @@ pub fn handle_map_collision_system(
     }
     
     for mut player_transform in player_query.iter_mut() {
+        // 🔧 调试：打印玩家坐标
+        error!("🗺️ handle_map_collision_system 读取玩家坐标: ({:.1}, {:.1})", 
+            player_transform.translation.x, player_transform.translation.y);
+        
         // 将世界坐标转换为地图坐标
         let tile_x = (player_transform.translation.x / 32.0) as u16;
-        let tile_y = (player_transform.translation.y / 32.0) as u16;
+        let tile_y = (player_transform.translation.y / 32.0) as u16; // ❌ 负数转u16会溢出！
+        
+        error!("🗺️ 转换后的瓦片坐标: ({}, {})", tile_x, tile_y);
         
         // 检查该瓦片是否可行走
         if !map_data.is_walkable(tile_x, tile_y) {
@@ -238,5 +244,8 @@ pub fn handle_map_collision_system(
             
             info!("⚠️ 玩家碰撞检测: 不可通过的瓦片 ({}, {})", tile_x, tile_y);
         }
+        
+        error!("🗺️ handle_map_collision_system 最终玩家坐标: ({:.1}, {:.1})", 
+            player_transform.translation.x, player_transform.translation.y);
     }
 }

@@ -41,13 +41,26 @@ pub fn mouse_input_system(
     windows: Query<&Window>,
     mut player_query: Query<(&GridPosition, &mut Movement), With<Player>>,
 ) {
+    // 🔧 调试：检查玩家是否存在
+    let player_count = player_query.iter().count();
+    if player_count == 0 && mouse_button.just_pressed(MouseButton::Right) {
+        error!("⚠️ mouse_input_system: 找不到玩家实体 (Player组件)");
+        return;
+    }
+    
     // 获取第一个摄像机
     let Some((camera, camera_transform)) = camera_query.iter().next() else {
+        if mouse_button.just_pressed(MouseButton::Right) {
+            error!("⚠️ mouse_input_system: 找不到摄像机");
+        }
         return;
     };
     
     // 获取第一个窗口
     let Some(window) = windows.iter().next() else {
+        if mouse_button.just_pressed(MouseButton::Right) {
+            error!("⚠️ mouse_input_system: 找不到窗口");
+        }
         return;
     };
     

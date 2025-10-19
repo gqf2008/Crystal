@@ -25,6 +25,7 @@ use bevy_modules::scenes::{
     load_map_system_new,
     setup_game_rendering, cleanup_game_rendering, setup_map_renderer,
     debug_transforms_system,
+    toggle_grid_system, render_grid_system,  // 新增：网格调试系统
 };
 
 use bevy_modules::systems::{
@@ -35,6 +36,9 @@ use bevy_modules::systems::{
     animation_system,
     camera_follow_system as camera_follow_system_old,  // 旧的摄像机系统
     spawn_test_player,
+    spawn_test_player_once, // ← 添加一次性创建函数
+    diagnostic_state_system, // ← 添加诊断系统
+    verify_player_coords, // ← 添加验证系统
     debug_info_system,
     setup_map_system,
     map_culling_system,
@@ -414,7 +418,7 @@ fn main() {
     // GameScene 系统 - Phase 2 地图系统
     app.add_systems(Update, (
         update_map_state_system,
-        handle_map_collision_system,
+        handle_map_collision_system, // ← 恢复碰撞系统
     ).run_if(in_state(GameState::Game)));
     
     // GameScene 系统 - Phase 3 交互系统
@@ -497,6 +501,9 @@ fn main() {
         update_animation_system,
         render_map_system,
         map_culling_system,
+        // 网格调试系统
+        toggle_grid_system,
+        render_grid_system,
         // 调试系统
         debug_transforms_system,
         debug_info_system,
@@ -527,17 +534,26 @@ fn main() {
         setup_game_scene,          // 1. 首先初始化资源 (MapData, GameSceneState)
         setup_map_renderer,        // 2. 初始化地图渲染器 (MapRenderData, TileCache)
         setup_game_rendering,      // 3. 初始化摄像机和渲染
-        spawn_test_player,         // 4. 生成测试玩家
-        setup_map_system,          // 5. 设置地图系统
-        load_map_system,           // 6. 加载地图数据
-        create_map_layers_system,  // 7. 创建地图图层 (需要 MapData)
-        spawn_map_objects_system,  // 8. 生成地图对象
-        setup_dialogue_system,     // 9. 初始化对话系统
-        setup_chat_system,         // 10. 初始化聊天系统
-        setup_network_system,      // 11. 初始化网络系统
-        setup_game_loop_system,    // 12. 初始化游戏循环系统
+        spawn_test_player_once,    // 4. 🔥 生成测试玩家（一次性，无Query）
+        verify_player_coords,      // 5. 验证玩家坐标
+        setup_map_system,          // 6. 设置地图系统
+        load_map_system,           // 7. 加载地图数据
+        create_map_layers_system,  // 8. 创建地图图层 (需要 MapData)
+        spawn_map_objects_system,  // 9. 生成地图对象
+        setup_dialogue_system,     // 10. 初始化对话系统
+        setup_chat_system,         // 11. 初始化聊天系统
+        setup_network_system,      // 12. 初始化网络系统
+        setup_game_loop_system,    // 13. 初始化游戏循环系统
     ).chain());  // ← 关键：使用 chain() 确保顺序执行
-    println!("16. OnEnter(Game) 系统已添加 (包含 GameScene 和 Phase 2-6 系统)");
+    println!("16. OnEnter(Game) 系统已添加 (包含 spawn_test_player_once)");
+    
+    // ✨ 新增：spawn_test_player 作为Update系统，每帧检查玩家是否存在
+    app.add_systems(Update, spawn_test_player.run_if(in_state(GameState::Game)));
+    println!("16.1. spawn_test_player (Update) 系统已添加");
+    
+    // ✨ 新增：诊断系统，无条件运行，显示当前游戏状态
+    app.add_systems(Update, diagnostic_state_system);
+    println!("16.2. diagnostic_state_system (Update) 系统已添加");
     
     // 退出游戏状态时清理 GameScene
     app.add_systems(OnExit(GameState::Game), (cleanup_game_scene, cleanup_game_rendering));

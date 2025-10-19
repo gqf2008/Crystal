@@ -55,13 +55,28 @@ pub fn setup_game_rendering(
     // 设置全局背景颜色为深蓝色
     *clear_color = ClearColor(Color::srgb(0.1, 0.1, 0.15));
     
-    // 生成游戏摄像机
+    // 🔧 生成摄像机时，设置初始位置为地图中心 (700x700地图的中心是350, 350)
+    // 这样玩家会显示在屏幕中央
+    let player_grid_x = 350;
+    let player_grid_y = 350;
+    let player_world_x = player_grid_x as f32 * 48.0; // 16800.0
+    let player_world_y = -(player_grid_y as f32 * 32.0); // -11200.0
+    
+    info!("🎯 摄像机初始位置设置为地图中心: 网格({}, {}) → 世界({:.1}, {:.1})", 
+        player_grid_x, player_grid_y, player_world_x, player_world_y);
+    
+    let mut game_camera = GameCamera::new();
+    game_camera.target = Vec2::new(player_world_x, player_world_y); // Target也用负Y
+    
+    // 生成游戏摄像机，并立即设置到玩家位置
     let camera_entity = commands.spawn((
         Camera2d,
-        GameCamera::new(),
+        game_camera,
+        Transform::from_xyz(player_world_x, player_world_y, 0.0), // Transform和Target一致
         Name::new("GameCamera"),
     )).id();
-    info!("📷 游戏摄像机已生成 (Entity: {:?}, 背景: 深蓝色)", camera_entity);
+    info!("📷 游戏摄像机已生成 (Entity: {:?}, 初始位置: 地图中心({:.0}, {:.0}), 背景: 深蓝色)", 
+        camera_entity, player_world_x, player_world_y);
     
     // 加载初始地图 (地图 "0")
     load_request.request("0".to_string());

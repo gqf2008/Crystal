@@ -23,6 +23,7 @@ pub mod camera;
 pub mod map_loader;
 pub mod init;
 pub mod debug_transforms;
+pub mod grid_debug;  // 新增：网格调试系统
 
 pub use mlibrary_assets::MLibraryAssets;
 pub use sprite_renderer::SpriteRenderer;
@@ -31,4 +32,5 @@ pub use camera::{GameCamera, camera_follow_system as camera_follow_system_new, c
 pub use map_loader::{MapLoadRequest, load_map_system as load_map_system_new, load_map_direct};
 pub use init::{setup_game_rendering, cleanup_game_rendering};
 pub use debug_transforms::debug_transforms_system;
+pub use grid_debug::{GridLines, toggle_grid_system, render_grid_system};  // 导出网格系统
 

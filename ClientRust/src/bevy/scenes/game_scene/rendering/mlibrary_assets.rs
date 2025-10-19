@@ -28,6 +28,16 @@ use crate::graphics::libraries::{
 };
 use crate::graphics::mlibrary::MLibrary;
 
+/// 纹理数据 (包含Handle和偏移量信息)
+#[derive(Clone)]
+pub struct TextureData {
+    pub handle: Handle<Image>,
+    pub offset_x: i16,
+    pub offset_y: i16,
+    pub width: i16,
+    pub height: i16,
+}
+
 /// Bevy 资源: MLibrary 纹理资产管理器
 /// 
 /// 职责:
@@ -96,7 +106,7 @@ impl MLibraryAssets {
         file_index: i16,
         image_index: usize,
         images: &mut Assets<Image>,
-    ) -> Option<Handle<Image>> {
+    ) -> Option<TextureData> {
         self.get_texture_from_array(
             LibraryArray::MapLibs,
             file_index as usize,
@@ -116,7 +126,7 @@ impl MLibraryAssets {
     /// - `images`: Bevy Assets<Image> 引用
     /// 
     /// # 返回
-    /// - Some(Handle<Image>): 纹理句柄
+    /// - Some(TextureData): 纹理数据(包含Handle和偏移量)
     /// - None: 加载失败
     pub fn get_texture_from_array(
         &mut self,
@@ -124,14 +134,25 @@ impl MLibraryAssets {
         lib_index: usize,
         image_index: usize,
         images: &mut Assets<Image>,
-    ) -> Option<Handle<Image>> {
+    ) -> Option<TextureData> {
         // 1. 生成缓存 key
         let cache_key = format!("{:?}_{}_{}", array_type, lib_index, image_index);
         
-        // 2. 检查缓存
+        // 2. 检查缓存 - 注意：现在需要重新获取offset信息
         if let Some(handle) = self.texture_cache.get(&cache_key) {
             self.cache_hits += 1;
-            return Some(handle.clone());
+            // 从MLibrary重新获取offset信息 (offset很小，不缓存)
+            let mlibrary = get_library_from_array(array_type, lib_index)?;
+            let mut lib = mlibrary.lock().unwrap();
+            let (image_info, _) = lib.get_image_with_data(image_index).ok()?;
+            
+            return Some(TextureData {
+                handle: handle.clone(),
+                offset_x: image_info.x,
+                offset_y: image_info.y,
+                width: image_info.width,
+                height: image_info.height,
+            });
         }
         
         self.cache_misses += 1;
@@ -143,14 +164,26 @@ impl MLibraryAssets {
         // 4. 从 MLibrary 获取图像数据
         let (image_info, image_data) = lib.get_image_with_data(image_index).ok()?;
         
-        // 5. 转换为 Bevy Image
+        // 5. 保存offset信息
+        let offset_x = image_info.x;
+        let offset_y = image_info.y;
+        let width = image_info.width;
+        let height = image_info.height;
+        
+        // 6. 转换为 Bevy Image
         let bevy_image = self.convert_to_bevy_image(&image_info, &image_data);
         
-        // 6. 添加到 Bevy Assets 并缓存 Handle
+        // 7. 添加到 Bevy Assets 并缓存 Handle
         let handle = images.add(bevy_image);
         self.texture_cache.insert(cache_key, handle.clone());
         
-        Some(handle)
+        Some(TextureData {
+            handle,
+            offset_x,
+            offset_y,
+            width,
+            height,
+        })
     }
     
     /// 将 MLibrary 图像数据转换为 Bevy Image

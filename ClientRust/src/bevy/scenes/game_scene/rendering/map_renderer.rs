@@ -144,10 +144,14 @@ impl MapRenderData {
     }
 
     /// 地图坐标 → 世界坐标
+    /// 
+    /// 注意: 返回Bevy世界坐标 (Y轴向上为正)
+    /// - X轴: 向右为正 (与GGEZ相同)
+    /// - Y轴: 向上为正 (与GGEZ相反，需要翻转)
     #[inline]
     pub fn map_to_world(x: i32, y: i32) -> (f32, f32) {
         let world_x = x as f32 * CELL_WIDTH as f32;
-        let world_y = y as f32 * CELL_HEIGHT as f32;
+        let world_y = -(y as f32 * CELL_HEIGHT as f32); // 翻转Y轴: 地图Y向下，世界Y向上
         (world_x, world_y)
     }
 }
@@ -173,6 +177,9 @@ pub struct TileEntity {
     pub layer: TileLayer,
     /// 是否是动画瓦片
     pub is_animated: bool,
+    /// 纹理偏移量 (从MLibrary的ImageInfo中获取)
+    pub offset_x: i16,
+    pub offset_y: i16,
 }
 
 /// 图层类型
@@ -384,9 +391,12 @@ fn render_back_layer(
     let mut skipped_cache = 0;
     let mut failed_texture = 0;
     
-    // 只渲染偶数行列
-    for y in (start_y..=end_y).step_by(2) {
-        for x in (start_x..=end_x).step_by(2) {
+    // 🎯 Back层只渲染偶数坐标 (地砖大小96x64，占2x2格子)
+    let adjusted_start_x = if start_x % 2 == 0 { start_x } else { start_x + 1 };
+    let adjusted_start_y = if start_y % 2 == 0 { start_y } else { start_y + 1 };
+    
+    for y in (adjusted_start_y..=end_y).step_by(2) {
+        for x in (adjusted_start_x..=end_x).step_by(2) {
             if let Some(cell) = map_data.get_cell(x, y) {
                 let index = (cell.back_image & 0x1FFFFFFF) - 1;
                 if index < 0 || cell.back_index == -1 {
@@ -401,30 +411,40 @@ fn render_back_layer(
                 }
 
                 // 加载纹理
-                if let Some(texture_handle) =
+                if let Some(texture_data) =
                     mlibrary.get_map_texture(cell.back_index, index as usize, images)
                 {
                     created_count += 1;
-                    let (world_x, world_y) = MapRenderData::map_to_world(x, y);
+                    
+                    // 🎯 纹理对齐到地图网格（不使用offset）
+                    // Back层地砖尺寸: 96x64，占用2x2个格子（48x32每格）
+                    // 纹理底部对齐到格子底部
+                    let (grid_x, grid_y) = MapRenderData::map_to_world(x, y);
+                    let texture_height = texture_data.height as f32;
+                    
+                    // Bevy Sprite原点在中心，所以Y坐标 = 格子底部 + 纹理高度/2
+                    let sprite_y = grid_y + texture_height / 2.0;
 
                     // 生成 Sprite 实体 - 使用 Sprite::from_image (Bevy 0.17推荐方式)
                     let entity = commands
                         .spawn((
-                            Sprite::from_image(texture_handle.clone()),
-                            Transform::from_xyz(world_x, -world_y, 0.0),
+                            Sprite::from_image(texture_data.handle.clone()),
+                            Transform::from_xyz(grid_x, sprite_y, 0.0),
                         ))
                         .insert(TileEntity {
                             map_x: x,
                             map_y: y,
                             layer: TileLayer::Back,
                             is_animated: false,
+                            offset_x: 0,
+                            offset_y: 0,
                         })
                         .id();
                     
                     // 第一个创建的瓦片输出详细信息
                     if created_count == 1 {
-                        info!("🎯 首个瓦片: 网格({}, {}) → 世界({:.1}, {:.1}), Z=0.0, 纹理ID={:?}", 
-                            x, y, world_x, world_y, texture_handle.id());
+                        info!("🎯 首个Back瓦片: 网格({}, {}) → 世界坐标({:.1}, {:.1}), 纹理{}x{}, Sprite中心Y={:.1}, Z=0.0", 
+                            x, y, grid_x, grid_y, texture_data.width, texture_height, sprite_y);
                     }
 
                     // 加入缓存
@@ -485,10 +505,13 @@ fn render_middle_layer(
                 }
 
                 // 加载纹理
-                if let Some(texture_handle) =
+                if let Some(texture_data) =
                     mlibrary.get_map_texture(cell.middle_index, index as usize, images)
                 {
-                    let (world_x, world_y) = MapRenderData::map_to_world(x, y);
+                    // 🎯 纹理对齐到地图网格（不使用offset）
+                    let (grid_x, grid_y) = MapRenderData::map_to_world(x, y);
+                    let texture_height = texture_data.height as f32;
+                    let sprite_y = grid_y + texture_height / 2.0;
 
                     // 如果是动画,先删除旧实体
                     if has_animation {
@@ -501,10 +524,10 @@ fn render_middle_layer(
                     let entity = commands
                         .spawn((
                             Sprite {
-                                image: texture_handle,
+                                image: texture_data.handle,
                                 ..default()
                             },
-                            Transform::from_xyz(world_x, -world_y, 1.0), // Z=1 (高于Back层)
+                            Transform::from_xyz(grid_x, sprite_y, 1.0), // Z=1
                             GlobalTransform::default(),
                             Visibility::default(),
                             InheritedVisibility::default(),
@@ -515,6 +538,8 @@ fn render_middle_layer(
                             map_y: y,
                             layer: TileLayer::Middle,
                             is_animated: has_animation,
+                            offset_x: 0,
+                            offset_y: 0,
                         })
                         .id();
 
@@ -584,13 +609,13 @@ fn render_front_layer(
                 }
 
                 // 加载纹理
-                if let Some(texture_handle) =
+                if let Some(texture_data) =
                     mlibrary.get_map_texture(cell.front_index, index as usize, images)
                 {
-                    let (world_x, world_y_base) = MapRenderData::map_to_world(x, y);
-                    
-                    // TODO: 根据纹理尺寸计算Y偏移 (需要从 mlibrary 获取尺寸)
-                    let world_y = world_y_base;
+                    // 🎯 纹理对齐到地图网格（不使用offset）
+                    let (grid_x, grid_y) = MapRenderData::map_to_world(x, y);
+                    let texture_height = texture_data.height as f32;
+                    let sprite_y = grid_y + texture_height / 2.0;
 
                     // 如果需要更新,先删除旧实体
                     if should_update {
@@ -599,19 +624,19 @@ fn render_front_layer(
                         }
                     }
 
-                    // 亮度控制
-                    let brightness = if use_blend && !has_animation { 1.5 } else { 1.0 };
+                    // 🌟 Front层亮度控制（模拟ADD混合效果）
+                    let brightness = if use_blend && !has_animation { 1.8 } else { 1.0 };
                     let color = Color::srgb(brightness, brightness, brightness);
 
                     // 生成 Sprite 实体
                     let entity = commands
                         .spawn((
                             Sprite {
-                                image: texture_handle,
+                                image: texture_data.handle,
                                 color,
                                 ..default()
                             },
-                            Transform::from_xyz(world_x, -world_y, 2.0), // Z=2 (高于Middle层)
+                            Transform::from_xyz(grid_x, sprite_y, 2.0), // Z=2
                             GlobalTransform::default(),
                             Visibility::default(),
                             InheritedVisibility::default(),
@@ -622,6 +647,8 @@ fn render_front_layer(
                             map_y: y,
                             layer: TileLayer::Front,
                             is_animated: has_animation || has_door,
+                            offset_x: 0,
+                            offset_y: 0,
                         })
                         .id();
 

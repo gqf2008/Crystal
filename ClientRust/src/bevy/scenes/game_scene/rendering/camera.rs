@@ -10,6 +10,10 @@
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy::input::{
+    mouse::{MouseWheel, MouseScrollUnit, MouseMotion},
+    keyboard::KeyCode,
+};
 
 /// 地图常量
 const CELL_WIDTH: f32 = 48.0;
@@ -31,6 +35,10 @@ pub struct GameCamera {
     pub zoom: f32,
     /// 地图边界 (像素)
     pub map_bounds: Option<Vec2>,
+    /// 是否是第一帧 (用于立即跳到玩家位置)
+    pub first_frame: bool,
+    /// 手动控制模式（拖拽时禁用自动跟随）
+    pub manual_control: bool,
 }
 
 impl Default for GameCamera {
@@ -40,6 +48,8 @@ impl Default for GameCamera {
             smoothness: 0.2,
             zoom: 1.0,
             map_bounds: None,
+            first_frame: true, // 第一帧立即跳到目标
+            manual_control: false, // 默认自动跟随
         }
     }
 }
@@ -78,10 +88,15 @@ impl GameCamera {
         let half_height = screen_height / (2.0 * self.zoom);
 
         // 限制摄像机位置，确保不超出地图边界
+        // X轴：正坐标系统 (0 到 map_bounds.x)
         let min_x = half_width.max(0.0);
         let max_x = (map_bounds.x - half_width).max(min_x);
-        let min_y = half_height.max(0.0);
-        let max_y = (map_bounds.y - half_height).max(min_y);
+        
+        // Y轴：负坐标系统 (-map_bounds.y 到 0)
+        // 地图顶部Y=0，地图底部Y=-map_bounds.y
+        // 摄像机不能超出地图边界（考虑半屏高度）
+        let max_y = -half_height; // 上边界（接近0，最大Y）
+        let min_y = -(map_bounds.y - half_height); // 下边界（最负，最小Y）
 
         Vec2::new(
             self.target.x.clamp(min_x, max_x),
@@ -150,11 +165,21 @@ pub fn camera_follow_system(
     let screen_height = window.height();
 
     for (mut transform, mut camera) in camera_query.iter_mut() {
+        // 🖱️ 如果处于手动控制模式（拖拽），跳过自动跟随
+        if camera.manual_control {
+            continue;
+        }
+        
         // 步骤1: 更新摄像机目标位置为玩家位置
         if let Ok(player_transform) = player_query.single() {
-            // 玩家的世界坐标 (Y轴已翻转)
+            // 玩家的世界坐标 (直接使用，不转换Y轴)
             let player_world_x = player_transform.translation.x;
-            let player_world_y = -player_transform.translation.y; // 转回正Y轴
+            let player_world_y = player_transform.translation.y; // 玩家已经在负Y，直接使用
+            
+            // 🔧 第一帧：立即打印玩家坐标
+            if camera.first_frame {
+                error!("📷 摄像机第一帧找到玩家: ({:.1}, {:.1})", player_world_x, player_world_y);
+            }
             
             camera.target = Vec2::new(player_world_x, player_world_y);
             
@@ -165,6 +190,9 @@ pub fn camera_follow_system(
             }
         } else {
             // 🔧 调试：找不到玩家时警告
+            if camera.first_frame {
+                error!("❌ 摄像机第一帧找不到玩家！Query失败");
+            }
             if (time.elapsed_secs() * 60.0) as u32 % 180 == 0 {
                 warn!("⚠️ 摄像机找不到玩家实体 (Player组件)");
             }
@@ -172,29 +200,117 @@ pub fn camera_follow_system(
         
         // 步骤2: 计算限制后的目标位置
         let clamped_target = camera.clamp_target(screen_width, screen_height);
+        
+        // 🔧 调试：第一帧显示详细信息
+        if camera.first_frame {
+            error!("📷 摄像机第一帧调试:");
+            error!("   - 原始target: ({:.1}, {:.1})", camera.target.x, camera.target.y);
+            error!("   - 钳制后target: ({:.1}, {:.1})", clamped_target.x, clamped_target.y);
+            error!("   - 屏幕尺寸: {:.0}x{:.0}", screen_width, screen_height);
+            if let Some(bounds) = camera.map_bounds {
+                error!("   - 地图边界: ({:.0}, {:.0})", bounds.x, bounds.y);
+            }
+        }
 
         // 步骤3: 平滑插值到目标位置 (lerp)
-        let current = Vec2::new(transform.translation.x, -transform.translation.y);
+        let current = Vec2::new(transform.translation.x, transform.translation.y); // 也不转换
         
-        // 🔧 修复抖动：减小lerp_factor，让跟随更平滑
-        // smoothness = 0.2, delta = 0.016s (60fps) => lerp_factor ≈ 0.192
-        let lerp_factor = (camera.smoothness * time.delta_secs() * 60.0).min(1.0);
-        
-        let new_pos = current.lerp(clamped_target, lerp_factor);
+        let new_pos = if camera.first_frame {
+            // 🔧 第一帧：立即跳到目标位置，让玩家显示在屏幕中央
+            camera.first_frame = false;
+            info!("📷 摄像机第一帧，立即跳到玩家位置: ({:.1}, {:.1})", clamped_target.x, clamped_target.y);
+            clamped_target
+        } else {
+            // 之后的帧：平滑跟随
+            let lerp_factor = (camera.smoothness * time.delta_secs() * 60.0).min(1.0);
+            current.lerp(clamped_target, lerp_factor)
+        };
 
         transform.translation.x = new_pos.x;
-        transform.translation.y = -new_pos.y; // Bevy Y轴向上,所以取负
+        transform.translation.y = new_pos.y; // 直接设置，不取负
     }
 }
 
 /// 摄像机缩放系统 (可选) - 已禁用
 /// 
 /// 注意: Bevy 0.17 中,OrthographicProjection 不再是组件
-/// 缩放功能需要通过其他方式实现
-#[allow(dead_code)]
+/// 摄像机缩放和拖拽控制系统
 pub fn camera_zoom_system(
+    mut mouse_wheel_events: EventReader<MouseWheel>,
+    mouse_button: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    mut mouse_motion_events: EventReader<MouseMotion>,
+    mut camera_query: Query<(&mut GameCamera, &mut Transform), With<Camera2d>>,
+    windows: Query<&Window>,
 ) {
-    // TODO: 实现缩放功能
-    // 可能需要使用 Camera2d 的其他配置
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    
+    let Ok((mut game_camera, mut transform)) = camera_query.single_mut() else {
+        return;
+    };
+    
+    // 1. 滚轮缩放
+    let mut zoomed = false;
+    for event in mouse_wheel_events.read() {
+        let zoom_delta = match event.unit {
+            MouseScrollUnit::Line => event.y * 0.1,      // 行滚动
+            MouseScrollUnit::Pixel => event.y * 0.001,   // 像素滚动
+        };
+        
+        // 限制缩放范围: 0.5x ~ 3.0x
+        let old_zoom = game_camera.zoom;
+        game_camera.zoom = (game_camera.zoom + zoom_delta).clamp(0.5, 3.0);
+        
+        if (game_camera.zoom - old_zoom).abs() > 0.001 {
+            info!("🔍 摄像机缩放: {:.2}x", game_camera.zoom);
+            zoomed = true;
+        }
+    }
+    
+    // 2. 鼠标中键/右键拖拽地图
+    let is_dragging = mouse_button.pressed(MouseButton::Middle) || mouse_button.pressed(MouseButton::Right);
+    
+    if is_dragging {
+        // 🖱️ 拖拽时进入手动控制模式
+        if !game_camera.manual_control {
+            game_camera.manual_control = true;
+            info!("🖱️ 进入手动拖拽模式（保持到按空格键恢复自动跟随）");
+        }
+        
+        let mut dragged = false;
+        for event in mouse_motion_events.read() {
+            // 鼠标移动的像素转换为世界坐标移动（考虑缩放）
+            let delta_x = -event.delta.x / game_camera.zoom;
+            let delta_y = event.delta.y / game_camera.zoom; // Y轴翻转（屏幕Y向下，世界Y向上）
+            
+            // 更新摄像机目标位置
+            game_camera.target.x += delta_x;
+            game_camera.target.y += delta_y;
+            
+            // 立即更新Transform（无平滑）
+            transform.translation.x = game_camera.target.x;
+            transform.translation.y = game_camera.target.y;
+            
+            dragged = true;
+        }
+        
+        // 拖拽时打印调试信息
+        if dragged {
+            info!("🖱️ 拖拽地图: 目标({:.1}, {:.1})", game_camera.target.x, game_camera.target.y);
+        }
+    }
+    
+    // 清空未使用的鼠标移动事件
+    if !is_dragging {
+        mouse_motion_events.clear();
+    }
+    
+    // 3. 按空格键恢复自动跟随玩家
+    if keyboard.just_pressed(KeyCode::Space) && game_camera.manual_control {
+        game_camera.manual_control = false;
+        info!("🔄 按空格键恢复自动跟随玩家");
+    }
 }
+

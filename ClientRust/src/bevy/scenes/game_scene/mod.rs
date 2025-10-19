@@ -53,7 +53,8 @@ pub use rendering::{
     GameCamera, MapLoadRequest, load_map_direct,
     render_map_system, update_animation_system, camera_follow_system_new, camera_zoom_system, load_map_system_new,
     setup_game_rendering, cleanup_game_rendering, setup_map_renderer,
-    debug_transforms_system
+    debug_transforms_system,
+    GridLines, toggle_grid_system, render_grid_system,  // 导出网格系统
 };
 pub use bridge::{MapObjectRef, NetworkBridge, ServerPacketEvent, ClientPacketEvent};
 
