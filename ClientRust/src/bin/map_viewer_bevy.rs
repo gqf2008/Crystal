@@ -281,8 +281,8 @@ impl Default for ViewSettings {
     fn default() -> Self {
         Self {
             show_back: true,     // ✅ 默认显示Back层
-            show_middle: false,  // ❌ 默认隐藏Middle层
-            show_front: false,   // ❌ 默认隐藏Front层
+            show_middle: true,   // ✅ 默认显示Middle层
+            show_front: true,    // ✅ 默认显示Front层
             show_grid: false,
             show_border: false,  // 🆕 默认不显示边框
             flip_texture_y: false, // 🆕 默认不翻转（Bevy UV与传奇图像一致）
@@ -732,9 +732,12 @@ fn render_static_tiles_system(
     let top = camera.target.y + half_height;
     let bottom = camera.target.y - half_height;
 
-    // 🔧 动态缓冲区：projection.scale越大，渲染范围越大
-    let base_buffer = 6;
-    let buffer = (base_buffer as f32 * projection_scale).ceil() as i32;
+    // 🔧 动态缓冲区：zoom越小(缩小)，buffer越小，减少过度渲染
+    // projection_scale = 1.0 / zoom，所以zoom小时projection_scale大
+    // 但我们要限制buffer不要随zoom过度增长
+    let base_buffer = 3;  // 减少基础buffer
+    // 限制buffer最大值，避免缩小时渲染太多瓦片
+    let buffer = ((base_buffer as f32 * projection_scale).ceil() as i32).min(10);
     
     // 转换为地图格子坐标（扩大边界缓冲，Back层需要更多空间）
     let start_x = ((left / CELL_WIDTH as f32).floor() as i32 - buffer).max(0);
@@ -743,17 +746,21 @@ fn render_static_tiles_system(
     let end_y = ((-bottom / CELL_HEIGHT as f32).ceil() as i32 + buffer).min(map_data.height - 1);
     
     // 🎨 Front层特殊处理：向下扩展更多格子（建筑物可能很高）
-    // 根据projection scale动态调整
-    let front_extra_cells = (20.0 * projection_scale).ceil() as i32;
+    // 根据projection scale动态调整，但限制最大值
+    let front_extra_cells = ((15.0 * projection_scale).ceil() as i32).min(30);
     let front_end_y = (end_y + front_extra_cells).min(map_data.height - 1);
 
     // 🔍 检测可见区域或缩放是否变化
-    let area_changed = visible_area.start_x != start_x
-        || visible_area.end_x != end_x
-        || visible_area.start_y != start_y
-        || visible_area.end_y != end_y
-        || visible_area.front_end_y != front_end_y
-        || (visible_area.zoom - camera.zoom).abs() > 0.001;
+    // ⚡ 性能优化：使用更大的阈值，避免微小变化就触发重建
+    let min_cell_threshold = 2;  // 至少移动2个格子才重建
+    let x_changed = (visible_area.start_x - start_x).abs() >= min_cell_threshold 
+                    || (visible_area.end_x - end_x).abs() >= min_cell_threshold;
+    let y_changed = (visible_area.start_y - start_y).abs() >= min_cell_threshold 
+                    || (visible_area.end_y - end_y).abs() >= min_cell_threshold;
+    let front_y_changed = (visible_area.front_end_y - front_end_y).abs() >= min_cell_threshold;
+    let zoom_changed = (visible_area.zoom - camera.zoom).abs() > 0.05;  // 增大zoom阈值
+    
+    let area_changed = x_changed || y_changed || front_y_changed || zoom_changed;
 
     if !area_changed {
         return;  // ⚡ 可见区域未变化，跳过静态瓦片重建
@@ -767,15 +774,17 @@ fn render_static_tiles_system(
     visible_area.front_end_y = front_end_y;
     visible_area.zoom = camera.zoom;
 
-    // 🔍 调试信息
-    let grid_width = end_x - start_x + 1;
-    let grid_height = end_y - start_y + 1;
-    info!("📐 可见区域更新: x=[{}, {}] y=[{}, {}] 范围={}x{} zoom={:.2}", 
-          start_x, end_x, start_y, end_y, grid_width, grid_height, camera.zoom);
-    info!("📐 世界坐标: left={:.1} right={:.1} top={:.1} bottom={:.1} 宽度={:.1} 高度={:.1}",
-          left, right, top, bottom, right - left, top - bottom);
-    info!("📐 窗口尺寸: {}x{} 世界半宽={:.1} 世界半高={:.1}",
-          window.width(), window.height(), half_width, half_height);
+    // 🔍 调试信息（仅在zoom变化时输出，减少日志开销）
+    if zoom_changed {
+        let grid_width = end_x - start_x + 1;
+        let grid_height = end_y - start_y + 1;
+        info!("📐 可见区域更新: x=[{}, {}] y=[{}, {}] 范围={}x{} zoom={:.2}", 
+              start_x, end_x, start_y, end_y, grid_width, grid_height, camera.zoom);
+        info!("📐 世界坐标: left={:.1} right={:.1} top={:.1} bottom={:.1} 宽度={:.1} 高度={:.1}",
+              left, right, top, bottom, right - left, top - bottom);
+        info!("📐 窗口尺寸: {}x{} 世界半宽={:.1} 世界半高={:.1}",
+              window.width(), window.height(), half_width, half_height);
+    }
 
     // 清除所有静态瓦片（但保留动画瓦片）
     for entity in static_tile_query.iter() {
@@ -788,9 +797,7 @@ fn render_static_tiles_system(
         let back_start_x = if start_x % 2 == 0 { start_x } else { start_x - 1 };
         let back_start_y = if start_y % 2 == 0 { start_y } else { start_y - 1 };
         
-        info!("🟦 Back层范围: x=[{}, {}] y=[{}, {}]", 
-              back_start_x, end_x, back_start_y, end_y);
-        
+        // 减少日志输出
         let mut back_tile_count = 0;
         for y in (back_start_y..=end_y).step_by(2) {
             for x in (back_start_x..=end_x).step_by(2) {
@@ -868,7 +875,10 @@ fn render_static_tiles_system(
                 }
             }
         }
-        info!("✅ Back层绘制完成: {} 个瓦片", back_tile_count);
+        // 仅在zoom变化时输出统计
+        if zoom_changed {
+            info!("✅ Back层绘制完成: {} 个瓦片", back_tile_count);
+        }
     }
 
     // ============ Middle层渲染（仅静态瓦片） ============
