@@ -954,7 +954,13 @@ fn render_static_tiles_system(
                     let has_animation = animation > 0;
                     let has_door = cell.door_index > 0;
                     
-                    // 🔥 关键修复：如果有动画，跳过静态绘制，由 update_animated_tiles_system 负责
+                    // � 调试:输出动画信息
+                    if has_animation && (x == 346 || x == 350) && (y == 278 || y == 280) {
+                        warn!("🔍 Front静态渲染 - 坐标({}, {}): front_image={:#06x}, animation_frame={}, use_blend={}, 准备跳过!",
+                              x, y, cell.front_image, animation, use_blend);
+                    }
+                    
+                    // �🔥 关键修复：如果有动画，跳过静态绘制，由 update_animated_tiles_system 负责
                     // 这样可以避免黑边问题（动画在update系统中每帧重绘，避免透明黑边）
                     if has_animation {
                         continue;  // 跳过，让动画系统处理
@@ -997,22 +1003,19 @@ fn render_static_tiles_system(
                             sprite_y += (CELL_HEIGHT * 4) as f32;  // Bevy Y轴向上
                         }
                         
-                        // 🎨 颜色选择（动画已经被跳过，这里只处理静态和门）
-                        let sprite_color = if use_blend {
-                            // 静态混合模式（如固定光效）：更亮
-                            Color::srgba(1.5, 1.5, 1.5, 1.0)
-                        } else {
-                            // 普通瓦片：Alpha混合
-                            Color::srgba(1.0, 1.0, 1.0, 1.0)
-                        };
-                        
                         // 🔧 只处理门和静态瓦片（动画已跳过）
                         if has_door {
                             // ⚡ 门瓦片：统一Z坐标2.2
                             commands.spawn((
                                 Sprite {
                                     image: texture_data.handle.clone(),
-                                    color: sprite_color,
+                                    // 🔥 C#加法混合模拟:将颜色增亮,利用alpha混合产生加法效果
+                                    // 原理:高亮度+标准alpha = 近似加法混合
+                                    color: if use_blend {
+                                        Color::srgba(2.0, 2.0, 2.0, 0.9)  // 超亮+高Alpha
+                                    } else {
+                                        Color::srgba(1.0, 1.0, 1.0, 1.0)
+                                    },
                                     ..default()
                                 },
                                 Transform::from_xyz(sprite_x, sprite_y, 2.2),  // 门统一Z
@@ -1032,7 +1035,12 @@ fn render_static_tiles_system(
                             commands.spawn((
                                 Sprite {
                                     image: texture_data.handle.clone(),
-                                    color: sprite_color,
+                                    // 🔥 C#加法混合模拟
+                                    color: if use_blend {
+                                        Color::srgba(2.0, 2.0, 2.0, 0.9)  // 超亮+高Alpha
+                                    } else {
+                                        Color::srgba(1.0, 1.0, 1.0, 1.0)
+                                    },
                                     ..default()
                                 },
                                 Transform::from_xyz(sprite_x, sprite_y, 2.0),  // 静态统一Z
@@ -1177,6 +1185,12 @@ fn update_animated_tiles_system(
                         // 提取基础索引
                         let base_index = (cell.front_image & 0x7FFF) - 1;
                         
+                        // 🐛 调试:输出动画渲染信息
+                        if (x == 346 || x == 350) && (y == 278 || y == 280) {
+                            warn!("🔥 Front动画渲染 - 坐标({}, {}): base_index={}, use_blend={}, animation_frames={}",
+                                  x, y, base_index, use_blend, animation);
+                        }
+                        
                         // ⚠️ 过滤无效瓦片
                         if base_index == -1 || cell.front_index == -1 || cell.front_index == 200 {
                             continue;
@@ -1212,18 +1226,24 @@ fn update_animated_tiles_system(
                                 sprite_y += (CELL_HEIGHT * 4) as f32;
                             }
                             
-                            // 🎨 动画混合模式颜色
-                            let sprite_color = if use_blend {
-                                Color::srgba(1.5, 1.5, 1.5, 0.8)  // ADD混合效果
-                            } else {
-                                Color::srgba(1.0, 1.0, 1.0, 1.0)  // 普通Alpha混合
-                            };
-
+                            // 🎨 C#加法混合公式:
+                            // SourceBlend = SourceAlpha (源Alpha)
+                            // DestBlend = One (目标RGB直接相加)
+                            // 结果 = src.rgb * src.a + dst.rgb * 1.0
+                            // 
+                            // Bevy模拟方案:由于Bevy 0.17没有直接的加法混合API
+                            // 使用超亮颜色+高Alpha来模拟加法混合效果
+                            
                             // ⚡ Front动画统一Z=2.1
                             commands.spawn((
                                 Sprite {
                                     image: texture_data.handle.clone(),
-                                    color: sprite_color,
+                                    // 🔥 加法混合模拟:超亮度产生发光效果
+                                    color: if use_blend {
+                                        Color::srgba(2.0, 2.0, 2.0, 0.9)  // 超亮+高Alpha
+                                    } else {
+                                        Color::srgba(1.0, 1.0, 1.0, 1.0)  // 普通瓦片
+                                    },
                                     ..default()
                                 },
                                 Transform::from_xyz(sprite_x, sprite_y, 2.1),
