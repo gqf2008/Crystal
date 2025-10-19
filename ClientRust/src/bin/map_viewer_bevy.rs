@@ -201,23 +201,45 @@ impl MLibraryAssets {
             return None;
         }
 
-        // 转换BGRA → RGBA，并修复透明像素的预乘问题
+        // 转换BGRA → RGBA，并彻底修复透明像素的黑边问题
         let mut rgba_data = Vec::with_capacity(image_data.len());
         for chunk in image_data.chunks_exact(4) {
+            let b = chunk[0];
+            let g = chunk[1];
+            let r = chunk[2];
             let alpha = chunk[3];
             
-            // 🔧 修复：如果Alpha接近0（完全透明），清除RGB值避免黑边
-            // 这对于火焰等ADD混合特效特别重要
-            if alpha < 10 {
+            // � 彻底修复黑边：对于透明和半透明像素，扩大清除阈值
+            // 火焰特效的黑边是因为半透明边缘像素保留了黑色RGB值
+            if alpha < 30 {  // 提高阈值到30（约12%透明度以下）
+                // 完全透明区域：清零所有通道
                 rgba_data.push(0); // R
                 rgba_data.push(0); // G
                 rgba_data.push(0); // B
                 rgba_data.push(0); // A
+            } else if alpha < 128 {  // 半透明像素（12%-50%透明度）
+                // 🔧 关键修复：对于半透明像素，如果RGB值很暗（接近黑色），也清除
+                // 这可以消除火焰周围的暗边
+                let brightness = (r as u32 + g as u32 + b as u32) / 3;
+                if brightness < 30 {  // 如果像素很暗（接近黑色）
+                    // 清除暗色半透明像素，避免黑边
+                    rgba_data.push(0);
+                    rgba_data.push(0);
+                    rgba_data.push(0);
+                    rgba_data.push(0);
+                } else {
+                    // 保留正常半透明像素
+                    rgba_data.push(r);
+                    rgba_data.push(g);
+                    rgba_data.push(b);
+                    rgba_data.push(alpha);
+                }
             } else {
-                rgba_data.push(chunk[2]); // R
-                rgba_data.push(chunk[1]); // G
-                rgba_data.push(chunk[0]); // B
-                rgba_data.push(alpha);    // A
+                // 不透明像素：保持原样
+                rgba_data.push(r);
+                rgba_data.push(g);
+                rgba_data.push(b);
+                rgba_data.push(alpha);
             }
         }
 
@@ -969,12 +991,10 @@ fn render_static_tiles_system(
                     let has_animation = animation > 0;
                     let has_door = cell.door_index > 0;
                     
-                    // 🎬 动画帧推进（如果有动画）
+                    // 🔥 关键修复：如果有动画，跳过静态绘制，由 update_animated_tiles_system 负责
+                    // 这样可以避免黑边问题（动画在update系统中每帧重绘，避免透明黑边）
                     if has_animation {
-                        let animation_tick = cell.front_animation_tick;
-                        let total_frames = animation as i32 + (animation as i32 * animation_tick as i32);
-                        let frame_offset = (map_data.animation_count % total_frames) / (1 + animation_tick as i32);
-                        index += frame_offset;
+                        continue;  // 跳过，让动画系统处理
                     }
                     
                     // 🚪 门动画处理（如果有门）
@@ -1014,59 +1034,17 @@ fn render_static_tiles_system(
                             sprite_y += (CELL_HEIGHT * 4) as f32;  // Bevy Y轴向上
                         }
                         
-                        // 🎨 颜色/混合模式选择
-                        let sprite_color = if use_blend && !has_animation {
+                        // 🎨 颜色选择（动画已经被跳过，这里只处理静态和门）
+                        let sprite_color = if use_blend {
                             // 静态混合模式（如固定光效）：更亮
                             Color::srgba(1.5, 1.5, 1.5, 1.0)
-                        } else if use_blend && has_animation {
-                            // 动画混合模式（如火焰）：模拟ADD混合
-                            Color::srgba(1.5, 1.5, 1.5, 0.8)
                         } else {
                             // 普通瓦片：Alpha混合
                             Color::srgba(1.0, 1.0, 1.0, 1.0)
                         };
                         
-                        // Z坐标分层：门 > 动画 > 静态
-                        let z_order = if has_door {
-                            2.2
-                        } else if has_animation {
-                            2.1
-                        } else {
-                            2.0
-                        };
-                        
-                        // 🔧 区分静态和动画瓦片：动画瓦片需要添加AnimatedTile组件
-                        let base_index = (cell.front_image & 0x7FFF) - 1;
-                        
-                        if has_animation {
-                            // ⚡ 动画瓦片：统一Z坐标2.1以便批处理
-                            commands.spawn((
-                                Sprite {
-                                    image: texture_data.handle.clone(),
-                                    color: sprite_color,
-                                    ..default()
-                                },
-                                Transform::from_xyz(sprite_x, sprite_y, 2.1),  // 动画统一Z
-                                TileSprite {
-                                    grid_x: x,
-                                    grid_y: y,
-                                    layer: TileLayer::Front,
-                                    is_animated: true,
-                                    animation_index: cell.front_image as i16,
-                                    width: texture_data.width as f32,
-                                    height: texture_data.height as f32,
-                                },
-                                AnimatedTile {
-                                    cell_x: x,
-                                    cell_y: y,
-                                    layer: TileLayer::Front,
-                                    base_index: base_index as i16,
-                                    frames: animation,
-                                    offset: cell.front_animation_tick as i32,
-                                },
-                                InheritedVisibility::default(),
-                            ));
-                        } else if has_door {
+                        // 🔧 只处理门和静态瓦片（动画已跳过）
+                        if has_door {
                             // ⚡ 门瓦片：统一Z坐标2.2
                             commands.spawn((
                                 Sprite {
