@@ -201,13 +201,24 @@ impl MLibraryAssets {
             return None;
         }
 
-        // 转换BGRA → RGBA
+        // 转换BGRA → RGBA，并修复透明像素的预乘问题
         let mut rgba_data = Vec::with_capacity(image_data.len());
         for chunk in image_data.chunks_exact(4) {
-            rgba_data.push(chunk[2]); // R
-            rgba_data.push(chunk[1]); // G
-            rgba_data.push(chunk[0]); // B
-            rgba_data.push(chunk[3]); // A
+            let alpha = chunk[3];
+            
+            // 🔧 修复：如果Alpha接近0（完全透明），清除RGB值避免黑边
+            // 这对于火焰等ADD混合特效特别重要
+            if alpha < 10 {
+                rgba_data.push(0); // R
+                rgba_data.push(0); // G
+                rgba_data.push(0); // B
+                rgba_data.push(0); // A
+            } else {
+                rgba_data.push(chunk[2]); // R
+                rgba_data.push(chunk[1]); // G
+                rgba_data.push(chunk[0]); // B
+                rgba_data.push(alpha);    // A
+            }
         }
 
         if is_debug {
