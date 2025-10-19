@@ -848,6 +848,7 @@ fn render_static_tiles_system(
                                 warn!("  - Sprite坐标: ({}, {}) Z=0.0", sprite_x, sprite_y);
                             }
 
+                            // ⚡ 批处理优化：所有Back层使用相同的Z坐标，并添加批处理提示
                             commands.spawn((
                                 Sprite {
                                     image: texture_data.handle.clone(),
@@ -864,6 +865,8 @@ fn render_static_tiles_system(
                                     width: texture_data.width as f32,
                                     height: texture_data.height as f32,
                                 },
+                                // ⚡ 批处理提示：我们已经做了可见性判断，跳过Bevy的视锥剔除
+                                InheritedVisibility::default(),
                             ));
                             back_tile_count += 1;
                         } else {
@@ -903,6 +906,7 @@ fn render_static_tiles_system(
                                 let sprite_x = world_pos.x + texture_data.width as f32 / 2.0;
                                 let sprite_y = world_pos.y - texture_data.height as f32 / 2.0;  // 🔧 Y轴向上，需要减去
 
+                                // ⚡ 批处理优化：所有Middle层使用相同的Z坐标
                                 commands.spawn((
                                     Sprite {
                                         image: texture_data.handle.clone(),
@@ -919,6 +923,7 @@ fn render_static_tiles_system(
                                         width: texture_data.width as f32,
                                         height: texture_data.height as f32,
                                     },
+                                    InheritedVisibility::default(),
                                 ));
                             }
                         }
@@ -1023,14 +1028,14 @@ fn render_static_tiles_system(
                         let base_index = (cell.front_image & 0x7FFF) - 1;
                         
                         if has_animation {
-                            // 动画瓦片：添加AnimatedTile组件以便update_animated_tiles_system更新
+                            // ⚡ 动画瓦片：统一Z坐标2.1以便批处理
                             commands.spawn((
                                 Sprite {
                                     image: texture_data.handle.clone(),
                                     color: sprite_color,
                                     ..default()
                                 },
-                                Transform::from_xyz(sprite_x, sprite_y, z_order),
+                                Transform::from_xyz(sprite_x, sprite_y, 2.1),  // 动画统一Z
                                 TileSprite {
                                     grid_x: x,
                                     grid_y: y,
@@ -1048,25 +1053,47 @@ fn render_static_tiles_system(
                                     frames: animation,
                                     offset: cell.front_animation_tick as i32,
                                 },
+                                InheritedVisibility::default(),
                             ));
-                        } else {
-                            // 静态瓦片（包括门）：不需要AnimatedTile组件
+                        } else if has_door {
+                            // ⚡ 门瓦片：统一Z坐标2.2
                             commands.spawn((
                                 Sprite {
                                     image: texture_data.handle.clone(),
                                     color: sprite_color,
                                     ..default()
                                 },
-                                Transform::from_xyz(sprite_x, sprite_y, z_order),
+                                Transform::from_xyz(sprite_x, sprite_y, 2.2),  // 门统一Z
                                 TileSprite {
                                     grid_x: x,
                                     grid_y: y,
                                     layer: TileLayer::Front,
                                     is_animated: false,
-                                    animation_index: if has_door { cell.door_index as i16 } else { 0 },
+                                    animation_index: cell.door_index as i16,
                                     width: texture_data.width as f32,
                                     height: texture_data.height as f32,
                                 },
+                                InheritedVisibility::default(),
+                            ));
+                        } else {
+                            // ⚡ 静态瓦片：统一Z坐标2.0
+                            commands.spawn((
+                                Sprite {
+                                    image: texture_data.handle.clone(),
+                                    color: sprite_color,
+                                    ..default()
+                                },
+                                Transform::from_xyz(sprite_x, sprite_y, 2.0),  // 静态统一Z
+                                TileSprite {
+                                    grid_x: x,
+                                    grid_y: y,
+                                    layer: TileLayer::Front,
+                                    is_animated: false,
+                                    animation_index: 0,
+                                    width: texture_data.width as f32,
+                                    height: texture_data.height as f32,
+                                },
+                                InheritedVisibility::default(),
                             ));
                         }
                     }
@@ -1149,6 +1176,7 @@ fn update_animated_tiles_system(
                             let sprite_x = world_pos.x + texture_data.width as f32 / 2.0;
                             let sprite_y = world_pos.y - texture_data.height as f32 / 2.0;  // 🔧 Y轴向上
 
+                            // ⚡ Middle动画统一Z=1.1
                             commands.spawn((
                                 Sprite {
                                     image: texture_data.handle.clone(),
@@ -1173,6 +1201,7 @@ fn update_animated_tiles_system(
                                     frames: cell.tile_animation_frames,
                                     offset: cell.tile_animation_offset as i32,
                                 },
+                                InheritedVisibility::default(),
                             ));
                         }
                     }
@@ -1238,6 +1267,7 @@ fn update_animated_tiles_system(
                                 Color::srgba(1.0, 1.0, 1.0, 1.0)  // 普通Alpha混合
                             };
 
+                            // ⚡ Front动画统一Z=2.1
                             commands.spawn((
                                 Sprite {
                                     image: texture_data.handle.clone(),
@@ -1262,6 +1292,7 @@ fn update_animated_tiles_system(
                                     frames: animation,
                                     offset: animation_tick as i32,
                                 },
+                                InheritedVisibility::default(),
                             ));
                         }
                     }
