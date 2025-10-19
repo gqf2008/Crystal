@@ -20,6 +20,7 @@ use mir2_client::objects::{CellInfo, MapReader};
 use rfd::FileDialog;
 use std::path::PathBuf;
 
+
 // ============================================================================
 // 常量定义
 // ============================================================================
@@ -288,6 +289,10 @@ impl Default for ViewSettings {
         }
     }
 }
+
+// ============================================================================
+// 瓦片组件
+// ============================================================================
 
 /// 瓦片实体标记
 #[derive(Component)]
@@ -1231,46 +1236,65 @@ fn update_animated_tiles_system(
                                 sprite_y += (CELL_HEIGHT * 4) as f32;
                             }
                             
-                            // 🎨 C#加法混合公式:
-                            // SourceBlend = SourceAlpha (源Alpha)
-                            // DestBlend = One (目标RGB直接相加)
-                            // 结果 = src.rgb * src.a + dst.rgb * 1.0
-                            // 
-                            // Bevy模拟方案:由于Bevy 0.17没有直接的加法混合API
-                            // 使用超亮颜色+高Alpha来模拟加法混合效果
-                            
                             // ⚡ Front动画统一Z=2.1
-                            commands.spawn((
-                                Sprite {
-                                    image: texture_data.handle.clone(),
-                                    // 🔥 加法混合模拟:超亮度产生发光效果
-                                    color: if use_blend {
-                                        Color::srgba(2.0, 2.0, 2.0, 0.9)  // 超亮+高Alpha
-                                    } else {
-                                        Color::srgba(1.0, 1.0, 1.0, 1.0)  // 普通瓦片
+                            
+                            // 🔥 根据use_blend标志选择渲染方式
+                            if use_blend {
+                                // 使用标准Sprite渲染(加法混合需要自定义渲染管线,暂不实现)
+                                commands.spawn((
+                                    Sprite {
+                                        image: texture_data.handle.clone(),
+                                        ..default()
                                     },
-                                    ..default()
-                                },
-                                Transform::from_xyz(sprite_x, sprite_y, 2.1),
-                                TileSprite {
-                                    grid_x: x,
-                                    grid_y: y,
-                                    layer: TileLayer::Front,
-                                    is_animated: true,
-                                    animation_index: cell.front_image as i16,
-                                    width: texture_data.width as f32,
-                                    height: texture_data.height as f32,
-                                },
-                                AnimatedTile {
-                                    cell_x: x,
-                                    cell_y: y,
-                                    layer: TileLayer::Front,
-                                    base_index: base_index as i16,
-                                    frames: animation,
-                                    offset: animation_tick as i32,
-                                },
-                                InheritedVisibility::default(),
-                            ));
+                                    Transform::from_xyz(sprite_x, sprite_y, 2.1),
+                                    TileSprite {
+                                        grid_x: x,
+                                        grid_y: y,
+                                        layer: TileLayer::Front,
+                                        is_animated: true,
+                                        animation_index: cell.front_image as i16,
+                                        width: texture_data.width as f32,
+                                        height: texture_data.height as f32,
+                                    },
+                                    AnimatedTile {
+                                        cell_x: x,
+                                        cell_y: y,
+                                        layer: TileLayer::Front,
+                                        base_index: base_index as i16,
+                                        frames: animation,
+                                        offset: animation_tick as i32,
+                                    },
+                                    InheritedVisibility::default(),
+                                ));
+                            } else {
+                                // ✅ 普通瓦片 - 使用Sprite渲染 (高性能)
+                                commands.spawn((
+                                    Sprite {
+                                        image: texture_data.handle.clone(),
+                                        color: Color::srgba(1.0, 1.0, 1.0, 1.0),
+                                        ..default()
+                                    },
+                                    Transform::from_xyz(sprite_x, sprite_y, 2.1),
+                                    TileSprite {
+                                        grid_x: x,
+                                        grid_y: y,
+                                        layer: TileLayer::Front,
+                                        is_animated: true,
+                                        animation_index: cell.front_image as i16,
+                                        width: texture_data.width as f32,
+                                        height: texture_data.height as f32,
+                                    },
+                                    AnimatedTile {
+                                        cell_x: x,
+                                        cell_y: y,
+                                        layer: TileLayer::Front,
+                                        base_index: base_index as i16,
+                                        frames: animation,
+                                        offset: animation_tick as i32,
+                                    },
+                                    InheritedVisibility::default(),
+                                ));
+                            }
                         }
                     }
                 }
