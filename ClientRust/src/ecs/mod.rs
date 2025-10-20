@@ -1,0 +1,43 @@
+// ============================================================================
+// ECS Architecture for Crystal Mir2 Client
+// 使用 hecs 轻量级 ECS 库重构游戏逻辑
+// ============================================================================
+
+pub mod components;
+pub mod systems;
+pub mod world;
+
+pub use components::*;
+pub use systems::*;
+pub use world::GameWorld;
+
+// ============================================================================
+// 架构说明
+// ============================================================================
+//
+// GGEZ + hecs 分工:
+// - GGEZ: 负责渲染、音频、输入处理、资源管理
+// - hecs: 负责游戏实体(Entity)和逻辑(System)
+//
+// 优势:
+// 1. 实体管理更清晰 (Player/Monster/NPC/Spell 都是 Entity)
+// 2. 逻辑解耦 (Movement/Combat/AI 等系统独立)
+// 3. 性能优异 (hecs 的缓存友好设计)
+// 4. 保留 GGEZ 的简单渲染 (ADD 混合等特性)
+//
+// 实体类型:
+// - Player Entity: Position + Velocity + Sprite + PlayerData + Health
+// - Monster Entity: Position + Velocity + Sprite + MonsterData + AI + Health
+// - NPC Entity: Position + Sprite + NPCData + Dialogue
+// - Spell Entity: Position + Velocity + Sprite + SpellData + Lifetime
+// - Item Entity: Position + Sprite + ItemData
+//
+// 系统类型:
+// - MovementSystem: 处理实体移动
+// - CombatSystem: 处理战斗逻辑
+// - AISystem: 处理怪物AI
+// - AnimationSystem: 处理动画状态
+// - RenderSystem: 渲染所有可见实体 (调用 GGEZ)
+// - NetworkSystem: 同步远程玩家
+//
+// ============================================================================

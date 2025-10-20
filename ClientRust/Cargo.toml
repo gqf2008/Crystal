@@ -49,20 +49,20 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3" # For Stream trait (used in downloader)
 
-# ========== Bevy 0.17.2 (新引擎) ==========
-bevy = { version = "0.17.2", features = [
-    "dynamic_linking",            # 加快编译速度 (开发模式)
-    "experimental_bevy_feathers", # UI 组件库 (带样式主题)
-    "bevy_ui_debug",              # UI 调试工具
-    "custom_cursor",
-    "png",                        # PNG 图片支持
-    "jpeg",                       # JPEG 图片支持
-    "default_font",               # 默认字体 (ASCII)
-] }
+# ========== Bevy 0.17.2 (暂时禁用,使用 GGEZ + hecs 代替) ==========
+# bevy = { version = "0.17.2", features = [
+#     "dynamic_linking",            # 加快编译速度 (开发模式)
+#     "experimental_bevy_feathers", # UI 组件库 (带样式主题)
+#     "bevy_ui_debug",              # UI 调试工具
+#     "custom_cursor",
+#     "png",                        # PNG 图片支持
+#     "jpeg",                       # JPEG 图片支持
+#     "default_font",               # 默认字体 (ASCII)
+# ] }
 
-# ========== Ggez (旧引擎,暂时保留) ==========
+# ========== Ggez + hecs (ECS架构) ==========
 ggez = "=0.10.0-rc0" # Includes winit re-export (use ggez::winit::*)
-specs = "0.20.0"
+hecs = "0.10"        # 轻量级高性能 ECS 库
 # egui = "0.27"  # 暂时禁用,egui_ggez 不兼容 ggez 0.10-rc0
 # egui_ggez = "0.3"  # 在 crates.io 上不存在或不兼容
 assets_manager = "0.13.3"

@@ -25,8 +25,11 @@ pub mod ui;                // UI模块
 pub mod controls;          // ⚠️ 部分使用 winit 类型(Control trait)
 pub mod systems;           // 🆕 GameScene 子系统架构
 
-// Bevy 模块 (新架构)
-pub mod bevy;              // 🆕 Bevy 0.17.2 ECS 架构
+// ECS 模块 (GGEZ + hecs 架构)
+pub mod ecs;               // 🆕 轻量级 ECS 架构 (推荐)
+
+// Bevy 模块 (新架构 - 暂时禁用)
+// pub mod bevy;              // Bevy 0.17.2 ECS 架构 (已搁置,使用 GGEZ + hecs)
 
 // 重新导出常用类型
 pub use error::{ClientError, ClientResult};
