@@ -371,3 +371,4 @@ FodyWeavers.xsd
 /target
 /ClientRust/target
 ClientRust/map_viewer.exe
+ClientRust/map_viewer_ecs.exe

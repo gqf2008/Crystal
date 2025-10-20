@@ -126,10 +126,9 @@ struct Draggable {
 struct Player {
     direction: u8,  // 0-7 八方向
     action: PlayerAction,
-    frame_index: i32,
-    frame_interval: i32,
-    frame_time: i32,
-    speed: f32,  // 移动速度（像素/帧）
+    frame_index: i32,  // 当前帧索引（0 到 frame_count-1）
+    frame_time: i32,   // 当前帧累计时间（帧数）
+    speed: f32,        // 移动速度（像素/帧）
     target_x: f32,
     target_y: f32,
     is_moving: bool,
@@ -144,19 +143,30 @@ enum PlayerAction {
 }
 
 impl PlayerAction {
+    /// 每个动作有多少帧（每个方向）
     fn frame_count(&self) -> i32 {
         match self {
-            PlayerAction::Stand => 4,
-            PlayerAction::Walk => 6,
-            PlayerAction::Run => 6,
+            PlayerAction::Stand => 4,  // 站立 4 帧
+            PlayerAction::Walk => 6,   // 走路 6 帧
+            PlayerAction::Run => 6,    // 跑步 6 帧
         }
     }
     
+    /// 每帧间隔（游戏帧数，60fps）
     fn frame_interval(&self) -> i32 {
         match self {
-            PlayerAction::Stand => 10,
-            PlayerAction::Walk => 5,
-            PlayerAction::Run => 3,
+            PlayerAction::Stand => 30,  // 500ms ≈ 30帧 @ 60fps
+            PlayerAction::Walk => 6,    // 100ms ≈ 6帧 @ 60fps
+            PlayerAction::Run => 5,     // 80ms ≈ 5帧 @ 60fps
+        }
+    }
+    
+    /// 动作帧起始索引（在 CArmours 库中）
+    fn frame_start(&self) -> i32 {
+        match self {
+            PlayerAction::Stand => 0,   // Standing: 0-31
+            PlayerAction::Walk => 32,   // Walking: 32-79
+            PlayerAction::Run => 80,    // Running: 80-127
         }
     }
 }
@@ -363,6 +373,7 @@ impl PlayerSystem {
     }
     
     /// 计算两点间的方向（0-7，八方向）
+    /// 注意：这是老版本的方向计算（用于测试）
     fn calculate_direction(dx: f32, dy: f32) -> u8 {
         let angle = dy.atan2(dx);
         let mut dir = ((angle / std::f32::consts::PI * 4.0).round() as i32 + 4) % 8;
@@ -842,44 +853,87 @@ impl RenderSystem {
         camera_pos: &Position,
         camera: &Camera,
     ) -> GameResult<()> {
+        use mir2_client::graphics::libraries::{get_library, LibraryName};
+        
         // 🎨 使用 CArmours(0) 库绘制角色（默认装备）
-        // CArmours 库帧布局:
+        // CArmours 库帧布局（参考 player_object.rs）:
         //   - Standing: 0-31   (8方向 * 4帧)
         //   - Walking:  32-79  (8方向 * 6帧)
         //   - Running:  80-127 (8方向 * 6帧)
+        //   - Attack1:  128-175 (8方向 * 6帧)
+        //
+        // 公式: DrawFrame = action_frame_start + direction * frames_per_direction + frame_index
+        //       FinalFrame = DrawFrame + ArmourOffSet (Male=0, Female=808)
         
-        // 计算基础索引
-        let base_index = match player.action {
-            PlayerAction::Stand => 0,   // 0-31
-            PlayerAction::Walk => 32,   // 32-79
-            PlayerAction::Run => 80,    // 80-127
-        };
+        // 计算 DrawFrame
+        let action_frame_start = player.action.frame_start();
+        let frames_per_direction = player.action.frame_count();
+        let direction_offset = (player.direction as i32) * frames_per_direction;
+        let draw_frame = action_frame_start + direction_offset + player.frame_index;
         
-        // 计算最终帧索引：基础 + (方向 * 每方向帧数) + 当前帧
-        let image_index = base_index + (player.direction as i32 * player.action.frame_count()) + player.frame_index;
+        // 暂不考虑性别偏移（默认男性，偏移=0）
+        let armour_offset = 0;
+        let final_frame = draw_frame + armour_offset;
         
-        // 使用 CArmours(0) - 地图库索引4
-        let library_index = 4;  // CArmours(0).Lib
+        // 🐛 DEBUG: 首次绘制打印帧信息
+        static mut FIRST_DRAW: bool = true;
+        unsafe {
+            if FIRST_DRAW {
+                let dir_name = match player.direction {
+                    0 => "Up(上)",
+                    1 => "UpRight(右上)",
+                    2 => "Right(右)",
+                    3 => "DownRight(右下)",
+                    4 => "Down(下)",
+                    5 => "DownLeft(左下)",
+                    6 => "Left(左)",
+                    7 => "UpLeft(左上)",
+                    _ => "Unknown",
+                };
+                
+                println!("\n🎨 === 角色帧计算调试 ===");
+                println!("动作: {:?}", player.action);
+                println!("方向: {} - {}", player.direction, dir_name);
+                println!("当前帧索引: {}/{}", player.frame_index, frames_per_direction);
+                println!("动作起始帧: {}", action_frame_start);
+                println!("方向偏移: {} (方向{} * 每方向{}帧)", direction_offset, player.direction, frames_per_direction);
+                println!("DrawFrame: {} + {} + {} = {}", action_frame_start, direction_offset, player.frame_index, draw_frame);
+                println!("性别偏移: {}", armour_offset);
+                println!("FinalFrame: {} + {} = {}", draw_frame, armour_offset, final_frame);
+                println!("使用库: CArmours(0)");
+                println!("========================\n");
+                FIRST_DRAW = false;
+            }
+        }
         
-        // 获取角色纹理
-        if let Some(mlib) = get_map_library(library_index) {
+        // ✅ 获取角色纹理 - 使用正确的角色库（不是地图库！）
+        if let Some(mlib) = get_library(LibraryName::CArmours(0)) {
             if let Ok(mut mlib) = mlib.lock() {
-                // 先获取尺寸
+                // 获取尺寸和偏移量
                 let (char_w, char_h) = mlib
-                    .get_size(image_index as usize)
+                    .get_size(final_frame as usize)
                     .unwrap_or((48, 64));
                 
-                // 再获取纹理
-                match mlib.get_or_create_texture(ctx, image_index as usize) {
+                let (offset_x, offset_y) = mlib
+                    .get_offset(final_frame as usize)
+                    .unwrap_or((0, 0));
+                
+                // 获取纹理
+                match mlib.get_or_create_texture(ctx, final_frame as usize) {
                     Ok(info) => {
                         if let Some(ref texture) = info.image {
                             // 世界坐标转屏幕坐标
-                            // 角色位置应该在脚底，所以需要向上偏移纹理高度
+                            // 角色 Position 是脚底位置，需要应用图像偏移量
+                            // C# 代码: BodyLibrary.Draw(DrawFrame + ArmourOffSet, DisplayLocation, Color.White, true, 0.8F, ImageLayer);
+                            // 其中 use_offset=true 表示使用图像的偏移信息
+                            let world_x = player_pos.x + offset_x as f32;
+                            let world_y = player_pos.y + offset_y as f32 - char_h as f32;
+                            
                             let (screen_x, screen_y) = CameraSystem::world_to_screen(
                                 camera_pos, 
                                 camera, 
-                                player_pos.x - char_w as f32 / 2.0,  // 居中对齐
-                                player_pos.y - char_h as f32        // 脚底对齐（纹理底部在脚下）
+                                world_x,
+                                world_y
                             );
                             
                             // 绘制角色
@@ -1446,8 +1500,7 @@ impl MapViewerApp {
                 direction: 4,  // 初始方向：朝下
                 action: PlayerAction::Stand,
                 frame_index: 0,
-                frame_interval: 10,
-                frame_time: 0,
+                frame_time: 0,   // 帧时间累计
                 speed: 0.0,
                 target_x: 2400.0,
                 target_y: 1600.0,
@@ -1530,7 +1583,19 @@ impl MapViewerApp {
         {
             println!("🗺️ 正在加载新地图: {:?}", path);
 
-            // 清除旧瓦片
+            // ✅ 1. 清除旧的 MapData（障碍物信息）
+            let map_data_entities: Vec<_> = self
+                .world
+                .query::<&MapData>()
+                .iter()
+                .map(|(e, _)| e)
+                .collect();
+
+            for entity in map_data_entities {
+                let _ = self.world.despawn(entity);
+            }
+
+            // ✅ 2. 清除旧瓦片
             let tile_entities: Vec<_> = self
                 .world
                 .query::<&MapTile>()
@@ -1542,17 +1607,19 @@ impl MapViewerApp {
                 let _ = self.world.despawn(entity);
             }
 
-            // 加载新地图
+            // ✅ 3. 加载新地图（会创建新的 MapData 和瓦片）
             let reader = MapReader::new(path.to_str().unwrap())?;
             println!("✅ 地图加载完成: {}x{}", reader.width, reader.height);
 
             MapLoader::load_map(&mut self.world, reader)?;
 
-            // 重置相机位置
+            // ✅ 4. 重置相机位置
             if let Ok(mut pos) = self.world.get::<&mut Position>(self.camera_entity) {
                 pos.x = 2400.0;
                 pos.y = 1600.0;
             }
+            
+            println!("🎉 地图切换完成！");
         }
 
         Ok(())
