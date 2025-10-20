@@ -1199,7 +1199,7 @@ fn main() -> GameResult {
 
     // 创建 GGEZ 上下文
     let (mut ctx, event_loop) = ContextBuilder::new("map_viewer_ecs", "Crystal Team")
-        .window_setup(WindowSetup::default().title("传奇地图查看器 ECS - GGEZ + hecs"))
+        .window_setup(WindowSetup::default().title("传奇地图查看器 ECS - GGEZ + hecs").vsync(false))
         .window_mode(
             WindowMode::default()
                 .dimensions(1280.0, 720.0)
