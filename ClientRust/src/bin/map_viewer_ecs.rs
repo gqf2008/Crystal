@@ -121,6 +121,55 @@ struct Draggable {
     drag_start_pos_y: f32,
 }
 
+/// 角色组件 - 玩家角色
+#[derive(Debug, Clone)]
+struct Player {
+    direction: u8,  // 0-7 八方向
+    action: PlayerAction,
+    frame_index: i32,
+    frame_interval: i32,
+    frame_time: i32,
+    speed: f32,  // 移动速度（像素/帧）
+    target_x: f32,
+    target_y: f32,
+    is_moving: bool,
+}
+
+/// 角色动作
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PlayerAction {
+    Stand = 0,
+    Walk = 1,
+    Run = 2,
+}
+
+impl PlayerAction {
+    fn frame_count(&self) -> i32 {
+        match self {
+            PlayerAction::Stand => 4,
+            PlayerAction::Walk => 6,
+            PlayerAction::Run => 6,
+        }
+    }
+    
+    fn frame_interval(&self) -> i32 {
+        match self {
+            PlayerAction::Stand => 10,
+            PlayerAction::Walk => 5,
+            PlayerAction::Run => 3,
+        }
+    }
+}
+
+/// 鼠标输入状态组件（单例）
+#[derive(Debug, Clone)]
+struct MouseInput {
+    left_pressed: bool,
+    right_pressed: bool,
+    x: f32,
+    y: f32,
+}
+
 /// 地图瓦片组件
 #[derive(Debug, Clone)]
 struct MapTile {
@@ -299,6 +348,127 @@ impl CameraSystem {
         
         pos.x = world_x - (mouse_x - camera.screen_width / 2.0) / camera.zoom;
         pos.y = world_y - (mouse_y - camera.screen_height / 2.0) / camera.zoom;
+    }
+}
+
+/// 角色系统 - 处理角色移动和动画
+struct PlayerSystem;
+
+impl PlayerSystem {
+    /// 计算鼠标位置对应的世界坐标
+    fn screen_to_world(mouse_x: f32, mouse_y: f32, camera_pos: &Position, camera: &Camera) -> (f32, f32) {
+        let world_x = camera_pos.x + (mouse_x - camera.screen_width / 2.0) / camera.zoom;
+        let world_y = camera_pos.y + (mouse_y - camera.screen_height / 2.0) / camera.zoom;
+        (world_x, world_y)
+    }
+    
+    /// 计算两点间的方向（0-7，八方向）
+    fn calculate_direction(dx: f32, dy: f32) -> u8 {
+        let angle = dy.atan2(dx);
+        let mut dir = ((angle / std::f32::consts::PI * 4.0).round() as i32 + 4) % 8;
+        if dir < 0 {
+            dir += 8;
+        }
+        dir as u8
+    }
+    
+    /// 平滑方向转换（避免角色突然转180度）
+    fn smooth_direction(current: u8, target: u8) -> u8 {
+        let diff = ((target as i32 - current as i32) + 8) % 8;
+        if diff <= 1 || diff >= 7 {
+            target
+        } else if diff <= 4 {
+            (current + 1) % 8
+        } else {
+            (current + 7) % 8
+        }
+    }
+    
+    /// 更新角色状态
+    fn update(world: &mut World) {
+        // 获取鼠标输入
+        let mouse_input = world.query_mut::<&MouseInput>()
+            .into_iter()
+            .next()
+            .map(|(_, input)| input.clone());
+        
+        let mouse_input = match mouse_input {
+            Some(input) => input,
+            None => return,
+        };
+        
+        // 获取相机信息
+        let (camera_pos, camera) = world.query_mut::<(&Position, &Camera)>()
+            .into_iter()
+            .next()
+            .map(|(_, (pos, cam))| (pos.clone(), cam.clone()))
+            .unwrap_or((Position { x: 0.0, y: 0.0 }, Camera { zoom: 1.0, screen_width: 1280.0, screen_height: 720.0 }));
+        
+        // 更新所有玩家
+        for (_entity, (player, pos)) in world.query_mut::<(&mut Player, &mut Position)>() {
+            // 根据鼠标按键设置目标和动作
+            if mouse_input.left_pressed || mouse_input.right_pressed {
+                let (target_x, target_y) = Self::screen_to_world(
+                    mouse_input.x, 
+                    mouse_input.y, 
+                    &camera_pos, 
+                    &camera
+                );
+                
+                player.target_x = target_x;
+                player.target_y = target_y;
+                player.is_moving = true;
+                
+                // 左键走，右键跑
+                player.action = if mouse_input.right_pressed {
+                    PlayerAction::Run
+                } else {
+                    PlayerAction::Walk
+                };
+                
+                player.speed = match player.action {
+                    PlayerAction::Walk => 2.0,
+                    PlayerAction::Run => 4.0,
+                    _ => 0.0,
+                };
+            } else {
+                player.is_moving = false;
+                player.action = PlayerAction::Stand;
+            }
+            
+            // 如果正在移动
+            if player.is_moving {
+                let dx = player.target_x - pos.x;
+                let dy = player.target_y - pos.y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                
+                // 如果距离目标很近，停止移动
+                if distance < player.speed {
+                    pos.x = player.target_x;
+                    pos.y = player.target_y;
+                    player.is_moving = false;
+                    player.action = PlayerAction::Stand;
+                } else {
+                    // 计算目标方向
+                    let target_dir = Self::calculate_direction(dx, dy);
+                    
+                    // 平滑转向
+                    player.direction = Self::smooth_direction(player.direction, target_dir);
+                    
+                    // 朝目标移动
+                    let move_angle = (player.direction as f32 * std::f32::consts::PI / 4.0) - std::f32::consts::PI;
+                    pos.x += move_angle.cos() * player.speed;
+                    pos.y += move_angle.sin() * player.speed;
+                }
+            }
+            
+            // 更新动画帧
+            player.frame_time += 1;
+            if player.frame_time >= player.action.frame_interval() {
+                player.frame_time = 0;
+                player.frame_index = (player.frame_index + 1) % player.action.frame_count();
+            }
+        }
     }
 }
 
@@ -660,6 +830,70 @@ impl RenderSystem {
             }
         }
 
+        Ok(())
+    }
+
+    /// 绘制角色
+    fn draw_player(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        player: &Player,
+        player_pos: &Position,
+        camera_pos: &Position,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        // 使用Hum素材库（角色库）
+        // 格式：方向(0-7) * 动作帧数 + 帧索引
+        // 战士素材：库索引3，基础索引从0开始
+        let library_index = 3;  // Hum.Lib
+        
+        // 计算图像索引
+        // 假设：站立0-31(8方向*4帧), 行走32-79(8方向*6帧), 跑步80-127(8方向*6帧)
+        let base_index = match player.action {
+            PlayerAction::Stand => 0,
+            PlayerAction::Walk => 32,
+            PlayerAction::Run => 80,
+        };
+        
+        let image_index = base_index + (player.direction as i32 * player.action.frame_count()) + player.frame_index;
+        
+        // 获取角色纹理
+        if let Some(mlib) = get_map_library(library_index) {
+            if let Ok(mut mlib) = mlib.lock() {
+                // 先获取尺寸
+                let (char_w, char_h) = mlib
+                    .get_size(image_index as usize)
+                    .unwrap_or((48, 64));
+                
+                // 再获取纹理
+                match mlib.get_or_create_texture(ctx, image_index as usize) {
+                    Ok(info) => {
+                        if let Some(ref texture) = info.image {
+                            
+                            // 世界坐标转屏幕坐标
+                            let (screen_x, screen_y) = CameraSystem::world_to_screen(
+                                camera_pos, 
+                                camera, 
+                                player_pos.x - char_w as f32 / 2.0,  // 居中对齐
+                                player_pos.y - char_h as f32 + 16.0  // 脚底对齐
+                            );
+                            
+                            // 绘制角色
+                            canvas.set_blend_mode(BlendMode::ALPHA);
+                            canvas.draw(
+                                texture,
+                                DrawParam::default()
+                                    .dest([screen_x, screen_y])
+                                    .scale([camera.zoom, camera.zoom])
+                                    .color(Color::WHITE),
+                            );
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        
         Ok(())
     }
 
@@ -1202,6 +1436,33 @@ impl MapViewerApp {
         // 创建可见区域缓存实体
         let visible_area_entity = world.spawn((VisibleArea::default(),));
 
+        // 创建玩家角色实体
+        let _player_entity = world.spawn((
+            Player {
+                direction: 4,  // 初始方向：朝下
+                action: PlayerAction::Stand,
+                frame_index: 0,
+                frame_interval: 10,
+                frame_time: 0,
+                speed: 0.0,
+                target_x: 2400.0,
+                target_y: 1600.0,
+                is_moving: false,
+            },
+            Position {
+                x: 2400.0,
+                y: 1600.0,
+            },
+        ));
+
+        // 创建鼠标输入状态实体
+        let _mouse_input_entity = world.spawn((MouseInput {
+            left_pressed: false,
+            right_pressed: false,
+            x: 0.0,
+            y: 0.0,
+        },));
+
         // 🎨 加载中文字体
         let ui_font_name = Self::load_chinese_font(ctx)?;
 
@@ -1342,6 +1603,9 @@ impl EventHandler for MapViewerApp {
             DoorSystem::update(&mut self.world);
         }
 
+        // 更新角色系统
+        PlayerSystem::update(&mut self.world);
+
         Ok(())
     }
 
@@ -1378,6 +1642,11 @@ impl EventHandler for MapViewerApp {
             RenderSystem::draw_obstacles(ctx, &mut canvas, &self.world, &pos, &camera)?;
         }
 
+        // 渲染角色
+        for (_entity, (player, player_pos)) in self.world.query::<(&Player, &Position)>().iter() {
+            RenderSystem::draw_player(ctx, &mut canvas, player, player_pos, &pos, &camera)?;
+        }
+
         // 绘制 UI 文本（使用中文字体）
         let time = self.world.get::<&TimeTracker>(self.time_entity).unwrap();
         
@@ -1401,8 +1670,9 @@ impl EventHandler for MapViewerApp {
              📍 位置: ({:.0}, {:.0}) | 缩放: {:.2}x\n\
              🎨 图层: Back={} Middle={} Front={}\n\
              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
+             👤 角色控制: [左键长按]走动 [右键长按]跑动\n\
              [M]选择地图 [G]网格 [O]障碍 [A]动画 [L]LOD\n\
-             [+/-]调整最大帧率 [1/2/3]切换图层 [鼠标拖拽]移动 [滚轮]缩放",
+             [+/-]调整最大帧率 [1/2/3]切换图层 [滚轮]缩放",
             time.fps,
             frame_time,
             config.max_fps,
@@ -1441,10 +1711,21 @@ impl EventHandler for MapViewerApp {
         x: f32,
         y: f32,
     ) -> GameResult<()> {
-        if button == MouseButton::Left {
-            let pos = self.world.get::<&Position>(self.camera_entity).unwrap().clone();
-            let mut draggable = self.world.get::<&mut Draggable>(self.camera_entity).unwrap();
-            CameraSystem::start_drag(&mut draggable, &pos, x, y);
+        // 更新鼠标输入状态
+        if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
+            match button {
+                MouseButton::Left => {
+                    mouse_input.left_pressed = true;
+                    mouse_input.x = x;
+                    mouse_input.y = y;
+                }
+                MouseButton::Right => {
+                    mouse_input.right_pressed = true;
+                    mouse_input.x = x;
+                    mouse_input.y = y;
+                }
+                _ => {}
+            }
         }
         Ok(())
     }
@@ -1456,18 +1737,27 @@ impl EventHandler for MapViewerApp {
         _x: f32,
         _y: f32,
     ) -> GameResult<()> {
-        if button == MouseButton::Left {
-            let mut draggable = self.world.get::<&mut Draggable>(self.camera_entity).unwrap();
-            CameraSystem::end_drag(&mut draggable);
+        // 更新鼠标输入状态
+        if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
+            match button {
+                MouseButton::Left => {
+                    mouse_input.left_pressed = false;
+                }
+                MouseButton::Right => {
+                    mouse_input.right_pressed = false;
+                }
+                _ => {}
+            }
         }
         Ok(())
     }
 
     fn mouse_motion_event(&mut self, _ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) -> GameResult<()> {
-        let draggable = self.world.get::<&Draggable>(self.camera_entity).unwrap().clone();
-        let camera = self.world.get::<&Camera>(self.camera_entity).unwrap().clone();
-        let mut pos = self.world.get::<&mut Position>(self.camera_entity).unwrap();
-        CameraSystem::update_drag(&draggable, &mut pos, &camera, x, y);
+        // 更新鼠标位置
+        if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
+            mouse_input.x = x;
+            mouse_input.y = y;
+        }
         Ok(())
     }
 
@@ -1587,6 +1877,8 @@ fn main() -> GameResult {
 
     println!("\n🎮 ECS 地图查看器已启动!");
     println!("📋 快捷键:");
+    println!("  👤 [鼠标左键长按] - 角色走动");
+    println!("  🏃 [鼠标右键长按] - 角色跑动");
     println!("  [M] - 选择地图文件");
     println!("  [1/2/3] - 切换 Back/Middle/Front 层");
     println!("  [G] - 切换网格显示");
@@ -1595,7 +1887,6 @@ fn main() -> GameResult {
     println!("  [L] - 🎯 切换 LOD 优化（缩小时过滤纹理）");
     println!("  [+/-] - 🎯 调整最大帧率限制");
     println!("  [B] - 切换边框显示 (调试)");
-    println!("  [鼠标拖拽] - 移动视角");
     println!("  [鼠标滚轮] - 缩放");
     println!("  [ESC] - 退出");
     println!("\n🚀 性能优化:");
