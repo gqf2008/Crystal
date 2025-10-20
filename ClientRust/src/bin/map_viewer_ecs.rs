@@ -842,20 +842,24 @@ impl RenderSystem {
         camera_pos: &Position,
         camera: &Camera,
     ) -> GameResult<()> {
-        // 使用Hum素材库（角色库）
-        // 格式：方向(0-7) * 动作帧数 + 帧索引
-        // 战士素材：库索引3，基础索引从0开始
-        let library_index = 3;  // Hum.Lib
+        // 🎨 使用 CArmours(0) 库绘制角色（默认装备）
+        // CArmours 库帧布局:
+        //   - Standing: 0-31   (8方向 * 4帧)
+        //   - Walking:  32-79  (8方向 * 6帧)
+        //   - Running:  80-127 (8方向 * 6帧)
         
-        // 计算图像索引
-        // 假设：站立0-31(8方向*4帧), 行走32-79(8方向*6帧), 跑步80-127(8方向*6帧)
+        // 计算基础索引
         let base_index = match player.action {
-            PlayerAction::Stand => 0,
-            PlayerAction::Walk => 32,
-            PlayerAction::Run => 80,
+            PlayerAction::Stand => 0,   // 0-31
+            PlayerAction::Walk => 32,   // 32-79
+            PlayerAction::Run => 80,    // 80-127
         };
         
+        // 计算最终帧索引：基础 + (方向 * 每方向帧数) + 当前帧
         let image_index = base_index + (player.direction as i32 * player.action.frame_count()) + player.frame_index;
+        
+        // 使用 CArmours(0) - 地图库索引4
+        let library_index = 4;  // CArmours(0).Lib
         
         // 获取角色纹理
         if let Some(mlib) = get_map_library(library_index) {
@@ -869,13 +873,13 @@ impl RenderSystem {
                 match mlib.get_or_create_texture(ctx, image_index as usize) {
                     Ok(info) => {
                         if let Some(ref texture) = info.image {
-                            
                             // 世界坐标转屏幕坐标
+                            // 角色位置应该在脚底，所以需要向上偏移纹理高度
                             let (screen_x, screen_y) = CameraSystem::world_to_screen(
                                 camera_pos, 
                                 camera, 
                                 player_pos.x - char_w as f32 / 2.0,  // 居中对齐
-                                player_pos.y - char_h as f32 + 16.0  // 脚底对齐
+                                player_pos.y - char_h as f32        // 脚底对齐（纹理底部在脚下）
                             );
                             
                             // 绘制角色
@@ -1670,7 +1674,7 @@ impl EventHandler for MapViewerApp {
              📍 位置: ({:.0}, {:.0}) | 缩放: {:.2}x\n\
              🎨 图层: Back={} Middle={} Front={}\n\
              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
-             👤 角色控制: [左键长按]走动 [右键长按]跑动\n\
+             👤 角色: [左键长按]走动 [右键长按]跑动 [中键拖拽]移动地图\n\
              [M]选择地图 [G]网格 [O]障碍 [A]动画 [L]LOD\n\
              [+/-]调整最大帧率 [1/2/3]切换图层 [滚轮]缩放",
             time.fps,
@@ -1711,21 +1715,26 @@ impl EventHandler for MapViewerApp {
         x: f32,
         y: f32,
     ) -> GameResult<()> {
-        // 更新鼠标输入状态
-        if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
-            match button {
-                MouseButton::Left => {
-                    mouse_input.left_pressed = true;
+        match button {
+            // 左键和右键：控制角色移动
+            MouseButton::Left | MouseButton::Right => {
+                if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
+                    if button == MouseButton::Left {
+                        mouse_input.left_pressed = true;
+                    } else {
+                        mouse_input.right_pressed = true;
+                    }
                     mouse_input.x = x;
                     mouse_input.y = y;
                 }
-                MouseButton::Right => {
-                    mouse_input.right_pressed = true;
-                    mouse_input.x = x;
-                    mouse_input.y = y;
-                }
-                _ => {}
             }
+            // 中键：拖拽地图
+            MouseButton::Middle => {
+                let pos = self.world.get::<&Position>(self.camera_entity).unwrap().clone();
+                let mut draggable = self.world.get::<&mut Draggable>(self.camera_entity).unwrap();
+                CameraSystem::start_drag(&mut draggable, &pos, x, y);
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -1737,27 +1746,42 @@ impl EventHandler for MapViewerApp {
         _x: f32,
         _y: f32,
     ) -> GameResult<()> {
-        // 更新鼠标输入状态
-        if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
-            match button {
-                MouseButton::Left => {
-                    mouse_input.left_pressed = false;
+        match button {
+            // 左键和右键：停止角色移动
+            MouseButton::Left | MouseButton::Right => {
+                if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
+                    if button == MouseButton::Left {
+                        mouse_input.left_pressed = false;
+                    } else {
+                        mouse_input.right_pressed = false;
+                    }
                 }
-                MouseButton::Right => {
-                    mouse_input.right_pressed = false;
-                }
-                _ => {}
             }
+            // 中键：停止拖拽地图
+            MouseButton::Middle => {
+                let mut draggable = self.world.get::<&mut Draggable>(self.camera_entity).unwrap();
+                CameraSystem::end_drag(&mut draggable);
+            }
+            _ => {}
         }
         Ok(())
     }
 
     fn mouse_motion_event(&mut self, _ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) -> GameResult<()> {
-        // 更新鼠标位置
+        // 更新鼠标位置（用于角色控制）
         if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
             mouse_input.x = x;
             mouse_input.y = y;
         }
+        
+        // 处理中键拖拽地图
+        let draggable = self.world.get::<&Draggable>(self.camera_entity).unwrap().clone();
+        if draggable.is_dragging {
+            let camera = self.world.get::<&Camera>(self.camera_entity).unwrap().clone();
+            let mut pos = self.world.get::<&mut Position>(self.camera_entity).unwrap();
+            CameraSystem::update_drag(&draggable, &mut pos, &camera, x, y);
+        }
+        
         Ok(())
     }
 
@@ -1879,6 +1903,7 @@ fn main() -> GameResult {
     println!("📋 快捷键:");
     println!("  👤 [鼠标左键长按] - 角色走动");
     println!("  🏃 [鼠标右键长按] - 角色跑动");
+    println!("  🗺️  [鼠标中键拖拽] - 移动地图");
     println!("  [M] - 选择地图文件");
     println!("  [1/2/3] - 切换 Back/Middle/Front 层");
     println!("  [G] - 切换网格显示");
