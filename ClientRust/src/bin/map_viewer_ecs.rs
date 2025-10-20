@@ -15,6 +15,44 @@
 // - A键切换动画
 //
 // 运行: cargo run --bin map_viewer_ecs --release
+//
+// ============================================================================
+// 📚 DrawParam 参数说明
+// ============================================================================
+//
+// DrawParam 是 GGEZ 中控制绘制的核心参数结构：
+//
+// 1. 🎯 z 参数 (深度排序 - ZIndex)
+//    - 类型: i32
+//    - 语义: **数值越大越靠前（前景），数值越小越靠后（背景）**
+//    - 官方文档: "Greater values correspond to the foreground, 
+//                 and lower values correspond to the background."
+//    - 示例: 
+//      .z(0)     // 背景层
+//      .z(1000)  // 中间层
+//      .z(2000)  // 前景层
+//    - 重要: InstanceArray 需要设置 ordered=true 才会自动排序
+//    - 注意: 单个 draw 调用时，GGEZ 默认按绘制顺序，z 参数可能不生效
+//            更推荐手动控制绘制顺序（如本代码所做）
+//
+// 2. 🔄 transform 参数 (2D变换矩阵)
+//    - 可组合平移、旋转、缩放、倾斜
+//    - 比单独的 dest/scale/rotation 更灵活
+//    - 示例: 
+//      use glam::Mat4;
+//      let transform = Mat4::from_scale_rotation_translation(
+//          scale, rotation, translation
+//      );
+//      DrawParam::default().transform(transform)
+//
+// 3. 📐 其他常用参数
+//    - dest([x, y]): 目标位置
+//    - scale([sx, sy]): 缩放比例
+//    - rotation: 旋转角度（弧度）
+//    - color: 颜色调制
+//    - offset([ox, oy]): 原点偏移
+//
+// ============================================================================
 
 use ggez::winit::event::MouseButton;
 use ggez::{
@@ -22,7 +60,7 @@ use ggez::{
     event::{self, EventHandler},
     graphics::{
         self, BlendComponent, BlendFactor, BlendMode, BlendOperation, Canvas, Color, DrawParam,
-        Text,
+        Text, TextFragment, PxScale, FontData,
     },
     Context, ContextBuilder, GameResult,
 };
@@ -31,9 +69,31 @@ use mir2_client::graphics::libraries::{get_map_library, initialize_all_libraries
 use mir2_client::objects::{CellInfo, MapReader};
 use rfd::FileDialog;
 use std::time::Instant;
+use std::path::Path;
 
 // ============================================================================
 // ECS 组件定义
+// ============================================================================
+//
+// 🎨 Z 轴绘制顺序设计说明：
+//
+// 本项目使用自定义 z_order (i32) 来控制绘制顺序，而不依赖 DrawParam.z()
+//
+// 原因：
+//   1. GGEZ 的 DrawParam.z() 只在 InstanceArray (ordered=true) 时自动排序
+//   2. 单个 canvas.draw() 调用时，仍按代码执行顺序绘制
+//   3. 手动排序更可控、更可靠
+//
+// 设计：
+//   - MapTile.z_order: 存储 Z 坐标（数值越大越靠前）
+//   - 渲染前排序: visible_with_sort_key.sort_by(z_order)
+//   - 绘制顺序: Back(0) → Middle(1000) → Front(2000)
+//
+// GGEZ ZIndex 约定（如果使用 DrawParam.z()）：
+//   - Greater values = Foreground（前景）
+//   - Lower values = Background（背景）
+//   - 例如: sky.z(0) < player.z(100) < ui.z(1000)
+//
 // ============================================================================
 
 /// 位置组件 - 世界坐标
@@ -546,12 +606,28 @@ impl RenderSystem {
                             255,
                         );
 
+                        // 🎯 可以使用 z 参数实现深度排序（可选）
+                        // GGEZ ZIndex 说明：
+                        //   - 类型: i32
+                        //   - **数值越大越靠前（前景）**
+                        //   - **数值越小越靠后（背景）**
+                        //   - 例如: Back=0, Middle=1000, Front=2000
+                        // 
+                        // 注意：
+                        //   1. 单个 canvas.draw() 调用时，z 参数可能不自动生效
+                        //   2. InstanceArray 需要 ordered=true 才会按 z 排序
+                        //   3. 手动控制绘制顺序更可靠（我们已经在做了）
+                        // 
+                        // 示例用法：.z(tile.z_order)
+
                         canvas.draw(
                             texture,
                             DrawParam::default()
                                 .dest([screen_x, screen_y])
                                 .scale([camera.zoom, camera.zoom])
                                 .color(color),
+                                // 可选：.z(tile.z_order)
+                                // 但由于我们已经手动排序，这里不需要
                         );
 
                         // 绘制边框 (调试用)
@@ -890,6 +966,7 @@ struct MapViewerApp {
     time_entity: Entity,
     config_entity: Entity,
     visible_area_entity: Entity,
+    ui_font_name: String,  // 🎨 中文UI字体名称
 }
 
 impl MapViewerApp {
@@ -956,13 +1033,58 @@ impl MapViewerApp {
         // 创建可见区域缓存实体
         let visible_area_entity = world.spawn((VisibleArea::default(),));
 
+        // 🎨 加载中文字体
+        let ui_font_name = Self::load_chinese_font(ctx)?;
+
         Ok(Self {
             world,
             camera_entity,
             time_entity,
             config_entity,
             visible_area_entity,
+            ui_font_name,
         })
+    }
+
+    /// 🎨 加载中文字体（优先使用系统字体）
+    fn load_chinese_font(ctx: &mut Context) -> GameResult<String> {
+        // 尝试多个常见中文字体路径和对应的字体名
+        let font_configs = [
+            ("C:/Windows/Fonts/msyh.ttc", "Microsoft YaHei"),      // 微软雅黑
+            ("C:/Windows/Fonts/simsun.ttc", "SimSun"),             // 宋体
+            ("C:/Windows/Fonts/simhei.ttf", "SimHei"),             // 黑体
+            ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", "WenQuanYi"),  // Linux
+            ("/System/Library/Fonts/PingFang.ttc", "PingFang"),    // macOS
+        ];
+
+        for (path, font_name) in &font_configs {
+            if Path::new(path).exists() {
+                match std::fs::read(path) {
+                    Ok(bytes) => {
+                        // 添加字体到 GGEZ 的字体系统
+                        match FontData::from_vec(bytes) {
+                            Ok(font_data) => {
+                                // add_font 不返回 Result，直接调用
+                                ctx.gfx.add_font(*font_name, font_data);
+                                println!("✅ 成功加载中文字体: {} ({})", font_name, path);
+                                return Ok(font_name.to_string());
+                            }
+                            Err(e) => {
+                                println!("⚠️ 字体数据创建失败 {}: {}", font_name, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("⚠️ 字体文件读取失败 {}: {}", path, e);
+                    }
+                }
+            }
+        }
+
+        // 如果没有找到系统字体，使用默认字体（可能不支持中文）
+        println!("⚠️ 未找到中文字体，使用默认字体（可能显示乱码）");
+        println!("💡 提示：请确保系统安装了中文字体（微软雅黑、宋体等）");
+        Ok(String::from("default"))  // 返回默认字体名
     }
 
     /// 选择并加载新地图
@@ -1087,7 +1209,7 @@ impl EventHandler for MapViewerApp {
             RenderSystem::draw_obstacles(ctx, &mut canvas, &self.world, &pos, &camera)?;
         }
 
-        // 绘制 UI 文本
+        // 绘制 UI 文本（使用中文字体）
         let time = self.world.get::<&TimeTracker>(self.time_entity).unwrap();
         let ui_text = format!(
             "FPS: {:.1} / {} (最大)  LOD: {}\n\
@@ -1107,12 +1229,18 @@ impl EventHandler for MapViewerApp {
             if config.show_front { "√" } else { "×" },
         );
 
-        let text = Text::new(ui_text);
+        // 🎨 使用中文字体创建文本
+        let text = Text::new(
+            TextFragment::new(ui_text)
+                .font(&self.ui_font_name)  // 使用加载的中文字体
+                .scale(18.0)  // 字体大小
+                .color(Color::from_rgb(255, 255, 0))
+        );
+        
         canvas.draw(
             &text,
             DrawParam::default()
-                .dest([10.0, 10.0])
-                .color(Color::from_rgb(255, 255, 0)),
+                .dest([10.0, 10.0]),
         );
 
         canvas.finish(ctx)?;
