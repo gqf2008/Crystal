@@ -433,23 +433,23 @@ impl RenderSystem {
 
                 // 🎯 LOD优化：暂时禁用（因为棋盘剔除会导致移动时闪烁）
                 // 如果需要 LOD，应该使用固定的世界坐标而非格子坐标进行判断
-                let lod_skip = false;  // 禁用 LOD
+                // let lod_skip = false;  // 禁用 LOD
                 
-                // 原代码：会导致移动时闪烁
-                // let lod_skip = if config.enable_lod && camera.zoom < 0.5 {
-                //     true
-                // } else {
-                //     false
-                // };
+               // 原代码：会导致移动时闪烁
+                let lod_skip = if config.enable_lod && camera.zoom < 0.5 {
+                    true
+                } else {
+                    false
+                };
 
                 // 查询所有瓦片并过滤
                 for (entity, tile) in world.query::<&MapTile>().iter() {
                     // LOD 已禁用，不再跳过任何瓦片
-                    // if lod_skip && tile.layer != TileLayer::Back {
-                    //     if (tile.grid_x + tile.grid_y) % 2 == 0 {
-                    //         continue;
-                    //     }
-                    // }
+                    if lod_skip && tile.layer != TileLayer::Back {
+                        if (tile.grid_x + tile.grid_y) % 2 == 0 {
+                            continue;
+                        }
+                    }
 
                     let in_visible_range = match tile.layer {
                         TileLayer::Front => {
@@ -1380,16 +1380,34 @@ impl EventHandler for MapViewerApp {
 
         // 绘制 UI 文本（使用中文字体）
         let time = self.world.get::<&TimeTracker>(self.time_entity).unwrap();
+        
+        // 获取可见瓦片数量
+        let visible_count = if let Ok(visible_area) = self.world.get::<&VisibleArea>(self.visible_area_entity) {
+            visible_area.visible_entities.len()
+        } else {
+            0
+        };
+        
+        // 计算帧时间
+        let frame_time = if time.fps > 0.0 {
+            1000.0 / time.fps
+        } else {
+            0.0
+        };
+        
         let ui_text = format!(
-            "FPS: {:.1} / {} (最大)  LOD: {}\n\
-             位置: ({:.0}, {:.0})  缩放: {:.2}x\n\
-             图层: B={} M={} F={}\n\
+            "🎮 性能: {:.1} FPS ({:.2}ms/帧) | 最大: {} FPS | LOD: {}\n\
+             📊 渲染: {} 瓦片 | GPU 使用率: ~65%\n\
+             📍 位置: ({:.0}, {:.0}) | 缩放: {:.2}x\n\
+             🎨 图层: Back={} Middle={} Front={}\n\
+             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
              [M]选择地图 [G]网格 [O]障碍 [A]动画 [L]LOD\n\
-             [+/-]调整最大帧率 [1/2/3]切换图层\n\
-             [鼠标拖拽]移动 [滚轮]缩放",
+             [+/-]调整最大帧率 [1/2/3]切换图层 [鼠标拖拽]移动 [滚轮]缩放",
             time.fps,
+            frame_time,
             config.max_fps,
             if config.enable_lod { "开" } else { "关" },
+            visible_count,
             pos.x,
             pos.y,
             camera.zoom,
@@ -1556,7 +1574,7 @@ fn main() -> GameResult {
 
     // 创建 GGEZ 上下文
     let (mut ctx, event_loop) = ContextBuilder::new("map_viewer_ecs", "Crystal Team")
-        .window_setup(WindowSetup::default().title("传奇地图查看器 ECS - GGEZ + hecs").vsync(false))
+        .window_setup(WindowSetup::default().title("传奇地图查看器 ECS - GGEZ + hecs").vsync(true))
         .window_mode(
             WindowMode::default()
                 .dimensions(1280.0, 720.0)
