@@ -495,36 +495,77 @@ println!("渲染耗时: {:.2}ms", elapsed.as_secs_f32() * 1000.0);
 
 ## 🎯 最终建议
 
-### 短期（推荐）⭐⭐⭐⭐⭐
+### ✅ 已实现！⭐⭐⭐⭐⭐
 
-**保持当前实现**，因为：
-- ✅ 已经很优化（批渲染 + LOD + 视口裁剪）
-- ✅ 35-160 FPS 对于地图查看器足够
-- ✅ 实现简单，易维护
+**InstanceArray 优化已完成**！
 
-**仅在以下情况考虑 InstanceArray**：
-- 需要支持超大地图（> 10000 瓦片）
-- 目标 FPS > 200
-- 在低端设备上运行
+**实现方式**：
+- ✅ 按 (library_index, image_index, use_blend) 分组
+- ✅ 使用 `InstanceArray::set_ordered(true)` 保持 Z 顺序
+- ✅ 保留所有现有优化（LOD、视口裁剪、屏幕剔除）
+- ✅ 混合模式分离（ALPHA / ADD）
 
----
+**预期性能提升**：
+- draw 调用：5000+ → 10-50（减少 99%）
+- FPS 提升：15-30%（取决于瓦片数量）
+- 内存开销：每帧额外 48 字节 × 实例数（可忽略）
 
-### 中期（可选）⭐⭐⭐
-
-**实现混合方案**：
-- 80% 普通瓦片用 InstanceArray
-- 20% 特殊瓦片保持原样
-- 预期提升 15-25%
-- 工作量：1-2 天
+**代码位置**：
+- `draw_tiles()`: 第 495-550 行（按纹理分组）
+- `draw_tiles_instanced()`: 第 678-820 行（批量绘制）
 
 ---
 
-### 长期（谨慎）⭐⭐
+### 测试步骤
 
-**完全纹理图集 + InstanceArray**：
-- 仅在需要数万实体时
+```powershell
+cd ClientRust
+cargo run --bin map_viewer_ecs --release
+```
+
+**观察指标**：
+1. FPS 变化（左上角显示）
+2. 帧时间（应该减少 15-30%）
+3. 缩放时的流畅度
+4. 大地图性能（最明显）
+
+---
+
+### 技术细节
+
+**关键代码片段**：
+```rust
+// 按纹理分组
+let mut texture_groups: HashMap<TextureKey, Vec<&MapTile>> = HashMap::new();
+
+// 创建 InstanceArray
+let mut instances = InstanceArray::new(ctx.gfx, texture);
+instances.set_ordered(true);  // 保持 Z 顺序
+
+// 添加实例
+for tile in tiles {
+    instances.push(DrawParam {
+        dest: [screen_x, screen_y],
+        scale: [zoom, zoom],
+        color: color,
+        z: tile.z_order,  // Z 轴排序
+        ..Default::default()
+    });
+}
+
+// 一次性绘制！
+canvas.draw(&instances, DrawParam::default());
+```
+
+---
+
+### 长期优化（可选）⭐⭐
+
+**纹理图集 + 完全 InstanceArray**：
+- 仅在需要数万实体时考虑
 - 需要重构图库系统
 - 工作量：1-2 周
+- 额外提升：5-10%（边际收益递减）
 
 ---
 
