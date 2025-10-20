@@ -749,20 +749,25 @@ impl RenderSystem {
             let start_y = ((top / CELL_HEIGHT as f32).floor() as i32).max(0);
             let end_y = ((bottom / CELL_HEIGHT as f32).ceil() as i32).min(map_data.height);
 
-            let obstacle_color = Color::from_rgba(255, 0, 0, 100);
+            // 🔴 障碍物颜色（半透明红色，更明显）
+            let obstacle_color = Color::from_rgba(255, 0, 0, 150);
+            let text_color = Color::from_rgb(255, 255, 0);
 
             for y in start_y..end_y {
                 for x in start_x..end_x {
                     if x >= 0 && x < map_data.width && y >= 0 && y < map_data.height {
                         let cell = &map_data.cells[x as usize][y as usize];
-                        // 检查是否有阻挡 (简化版 - 有 Front 层或 Middle 高位标记通常表示障碍)
-                        let has_obstacle = cell.front_image > 0 || (cell.middle_image & 0x8000) != 0;
+                        
+                        // 🎯 正确的障碍物判断：使用 back_image 的高位标记
+                        let has_obstacle = (cell.back_image & 0x20000000) != 0;
+                        
                         if has_obstacle {
                             let world_x = (x * CELL_WIDTH) as f32;
                             let world_y = (y * CELL_HEIGHT) as f32;
                             let (screen_x, screen_y) =
                                 CameraSystem::world_to_screen(pos, camera, world_x, world_y);
 
+                            // 绘制障碍物方块
                             let rect = graphics::Mesh::new_rectangle(
                                 ctx,
                                 graphics::DrawMode::fill(),
@@ -775,6 +780,20 @@ impl RenderSystem {
                                 obstacle_color,
                             )?;
                             canvas.draw(&rect, DrawParam::default());
+
+                            // 🔤 绘制障碍物标记文字（更大字体）
+                            if camera.zoom > 0.5 {  // 只在放大时显示文字
+                                let text = Text::new(
+                                    TextFragment::new("X")
+                                        .scale(24.0)  // 加大字体
+                                        .color(text_color)
+                                );
+                                
+                                let text_x = screen_x + (CELL_WIDTH as f32 * camera.zoom - 12.0) / 2.0;
+                                let text_y = screen_y + (CELL_HEIGHT as f32 * camera.zoom - 24.0) / 2.0;
+                                
+                                canvas.draw(&text, DrawParam::default().dest([text_x, text_y]));
+                            }
                         }
                     }
                 }
@@ -1229,11 +1248,11 @@ impl EventHandler for MapViewerApp {
             if config.show_front { "√" } else { "×" },
         );
 
-        // 🎨 使用中文字体创建文本
+        // 🎨 使用中文字体创建文本（增大字体）
         let text = Text::new(
             TextFragment::new(ui_text)
                 .font(&self.ui_font_name)  // 使用加载的中文字体
-                .scale(18.0)  // 字体大小
+                .scale(22.0)  // 字体大小（从 18 增大到 22）
                 .color(Color::from_rgb(255, 255, 0))
         );
         
