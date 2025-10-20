@@ -71,6 +71,7 @@ struct MapTile {
     image_index: i32,
     use_blend: bool,
     brightness: f32,
+    z_order: i32,  // 🎯 Z轴绘制顺序：数值越大越后绘制（在上层）
 }
 
 /// 瓦片层级
@@ -125,6 +126,8 @@ struct RenderConfig {
     show_obstacles: bool,
     show_animations: bool,
     show_borders: bool,
+    max_fps: u32,  // 🎯 最大帧率限制
+    enable_lod: bool,  // 🎯 启用LOD（缩小时过滤纹理）
 }
 
 /// 时间组件 (单例) - 用于动画计数
@@ -134,6 +137,7 @@ struct TimeTracker {
     frame_count: u64,
     fps: f32,
     last_fps_update: Instant,
+    last_frame_time: Instant,  // 🎯 用于帧率限制
 }
 
 /// 可见区域缓存 (单例) - 用于视口裁剪优化
@@ -364,11 +368,27 @@ impl RenderSystem {
             if area_changed {
                 visible_area.visible_entities.clear();
 
-                // 🔥 收集可见实体（带层级和Y坐标用于排序）
-                let mut visible_with_sort_key: Vec<(hecs::Entity, TileLayer, i32)> = Vec::new();
+                // 🔥 收集可见实体（带 z_order 和 Y 坐标用于排序）
+                let mut visible_with_sort_key: Vec<(hecs::Entity, i32, i32)> = Vec::new();
+
+                // 🎯 LOD优化：缩小时跳过部分纹理
+                let lod_skip = if config.enable_lod && camera.zoom < 0.5 {
+                    // 缩放 < 0.5 时，跳过部分 Middle 和 Front 层瓦片（棋盘模式）
+                    true
+                } else {
+                    false
+                };
 
                 // 查询所有瓦片并过滤
                 for (entity, tile) in world.query::<&MapTile>().iter() {
+                    // 🎯 LOD过滤：缩小时跳过部分纹理（棋盘剔除）
+                    if lod_skip && tile.layer != TileLayer::Back {
+                        // Back 层保留（地面），Middle 和 Front 层棋盘剔除
+                        if (tile.grid_x + tile.grid_y) % 2 == 0 {
+                            continue;  // 跳过 50% 的 Middle/Front 瓦片
+                        }
+                    }
+
                     let in_visible_range = match tile.layer {
                         TileLayer::Front => {
                             tile.grid_x >= start_x
@@ -385,15 +405,16 @@ impl RenderSystem {
                     };
 
                     if in_visible_range {
-                        visible_with_sort_key.push((entity, tile.layer, tile.grid_y));
+                        // 🎯 使用 z_order 作为主排序键，Y坐标作为次排序键
+                        visible_with_sort_key.push((entity, tile.z_order, tile.grid_y));
                     }
                 }
 
-                // 按层级和Y坐标排序 (实现正确的遮挡)
+                // 🎯 按 Z轴排序（z_order 优先，相同则按 Y 坐标）
                 visible_with_sort_key.sort_by(|a, b| {
                     match a.1.cmp(&b.1) {
-                        std::cmp::Ordering::Equal => a.2.cmp(&b.2),
-                        other => other,
+                        std::cmp::Ordering::Equal => a.2.cmp(&b.2),  // z_order 相同则按 Y
+                        other => other,  // 否则按 z_order
                     }
                 });
 
@@ -748,6 +769,7 @@ impl MapLoader {
             image_index: index,
             use_blend: false,
             brightness: 1.0,
+            z_order: 0,  // 🎯 Back层最底层
         };
 
         world.spawn((tile,));
@@ -774,6 +796,7 @@ impl MapLoader {
                 image_index: index,
                 use_blend: use_blend && (animation == 10 || animation == 8),
                 brightness: 1.0,
+                z_order: 1000,  // 🎯 Middle层中间层
             };
 
             let anim = AnimatedTile {
@@ -793,6 +816,7 @@ impl MapLoader {
                 image_index: index,
                 use_blend: false,
                 brightness: 1.0,
+                z_order: 1000,  // 🎯 Middle层中间层
             };
 
             world.spawn((tile,));
@@ -823,6 +847,7 @@ impl MapLoader {
             image_index: index,
             use_blend,
             brightness: if use_blend && !has_animation { 1.5 } else { 1.0 },
+            z_order: 2000,  // 🎯 Front层最上层
         };
 
         let mut builder = hecs::EntityBuilder::new();
@@ -912,6 +937,7 @@ impl MapViewerApp {
             frame_count: 0,
             fps: 0.0,
             last_fps_update: Instant::now(),
+            last_frame_time: Instant::now(),  // 🎯 帧率限制计时
         },));
 
         // 创建渲染配置实体
@@ -923,6 +949,8 @@ impl MapViewerApp {
             show_obstacles: false,
             show_animations: true,
             show_borders: false,
+            max_fps: 160,  // 🎯 最高160帧
+            enable_lod: true,  // 🎯 启用LOD优化
         },));
 
         // 创建可见区域缓存实体
@@ -977,8 +1005,23 @@ impl MapViewerApp {
 
 impl EventHandler for MapViewerApp {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
-        // 更新时间跟踪
+        // 🎯 帧率限制（最高 160 FPS）
+        let config = self.world.get::<&RenderConfig>(self.config_entity).unwrap();
+        let max_fps = config.max_fps;
+        drop(config);  // 释放借用
+
         if let Ok(mut time) = self.world.get::<&mut TimeTracker>(self.time_entity) {
+            // 计算目标帧时间
+            let target_frame_time = std::time::Duration::from_secs_f32(1.0 / max_fps as f32);
+            let elapsed = time.last_frame_time.elapsed();
+            
+            // 如果距离上一帧时间太短，提前返回（跳过此帧）
+            if elapsed < target_frame_time {
+                return Ok(());
+            }
+            
+            // 更新时间跟踪
+            time.last_frame_time = Instant::now();
             time.animation_count += 1;
             time.frame_count += 1;
 
@@ -1047,13 +1090,15 @@ impl EventHandler for MapViewerApp {
         // 绘制 UI 文本
         let time = self.world.get::<&TimeTracker>(self.time_entity).unwrap();
         let ui_text = format!(
-            "FPS: {:.1}\n\
-             位置: ({:.0}, {:.0})\n\
-             缩放: {:.2}x\n\
+            "FPS: {:.1} / {} (最大)  LOD: {}\n\
+             位置: ({:.0}, {:.0})  缩放: {:.2}x\n\
              图层: B={} M={} F={}\n\
-             [M]选择地图 [G]网格 [O]障碍 [A]动画\n\
-             [B/M/F]切换图层 [鼠标拖拽]移动 [滚轮]缩放",
+             [M]选择地图 [G]网格 [O]障碍 [A]动画 [L]LOD\n\
+             [+/-]调整最大帧率 [1/2/3]切换图层\n\
+             [鼠标拖拽]移动 [滚轮]缩放",
             time.fps,
+            config.max_fps,
+            if config.enable_lod { "开" } else { "关" },
             pos.x,
             pos.y,
             camera.zoom,
@@ -1172,6 +1217,21 @@ impl EventHandler for MapViewerApp {
                     config.show_animations = !config.show_animations;
                     println!("动画 (A): {}", if config.show_animations { "播放" } else { "暂停" });
                 }
+                KeyCode::KeyL => {
+                    let mut config = self.world.get::<&mut RenderConfig>(self.config_entity).unwrap();
+                    config.enable_lod = !config.enable_lod;
+                    println!("🎯 LOD优化 (L): {}", if config.enable_lod { "启用（缩小时过滤50%瓦片）" } else { "禁用" });
+                }
+                KeyCode::Equal | KeyCode::NumpadAdd => {
+                    let mut config = self.world.get::<&mut RenderConfig>(self.config_entity).unwrap();
+                    config.max_fps = (config.max_fps + 10).min(300);
+                    println!("🎯 最大FPS (+ 键): {} 帧", config.max_fps);
+                }
+                KeyCode::Minus | KeyCode::NumpadSubtract => {
+                    let mut config = self.world.get::<&mut RenderConfig>(self.config_entity).unwrap();
+                    config.max_fps = (config.max_fps.saturating_sub(10)).max(30);
+                    println!("🎯 最大FPS (- 键): {} 帧", config.max_fps);
+                }
                 KeyCode::Escape => {
                     ctx.request_quit();
                 }
@@ -1213,16 +1273,20 @@ fn main() -> GameResult {
     println!("\n🎮 ECS 地图查看器已启动!");
     println!("📋 快捷键:");
     println!("  [M] - 选择地图文件");
-    println!("  [1] - 切换 Back 层");
-    println!("  [2] - 切换 Middle 层");
-    println!("  [3] - 切换 Front 层");
+    println!("  [1/2/3] - 切换 Back/Middle/Front 层");
     println!("  [G] - 切换网格显示");
     println!("  [O] - 切换障碍物显示");
     println!("  [A] - 切换动画播放");
+    println!("  [L] - 🎯 切换 LOD 优化（缩小时过滤纹理）");
+    println!("  [+/-] - 🎯 调整最大帧率限制");
     println!("  [B] - 切换边框显示 (调试)");
     println!("  [鼠标拖拽] - 移动视角");
     println!("  [鼠标滚轮] - 缩放");
-    println!("  [ESC] - 退出\n");
+    println!("  [ESC] - 退出");
+    println!("\n🚀 性能优化:");
+    println!("  • 最大帧率: 160 FPS (可调)");
+    println!("  • LOD: 缩放 < 0.5x 时自动过滤 50% Middle/Front 瓦片");
+    println!("  • Z轴排序: 灵活控制绘制顺序\n");
 
     // 运行事件循环
     event::run(ctx, event_loop, app)?;
