@@ -35,7 +35,7 @@ impl GameWorld {
         position: Point,
     ) -> hecs::Entity {
         self.world.spawn((
-            Position::new(position.x, position.y),
+            Position::new(position.x as f32, position.y as f32),
             Velocity::zero(),
             DirectionComp::new(MirDirection::Down),
             SpriteComp::new(2, 0), // Objects.wil
@@ -74,7 +74,7 @@ impl GameWorld {
         position: Point,
     ) -> hecs::Entity {
         self.world.spawn((
-            Position::new(position.x, position.y),
+            Position::new(position.x as f32, position.y as f32),
             Velocity::zero(),
             DirectionComp::new(MirDirection::Down),
             SpriteComp::new(2, 0),
@@ -102,7 +102,7 @@ impl GameWorld {
         position: Point,
     ) -> hecs::Entity {
         self.world.spawn((
-            Position::new(position.x, position.y),
+            Position::new(position.x as f32, position.y as f32),
             Velocity::zero(),
             DirectionComp::new(MirDirection::Down),
             SpriteComp::new(4, monster_index as i32), // Monsters.wil
@@ -142,7 +142,7 @@ impl GameWorld {
         position: Point,
     ) -> hecs::Entity {
         self.world.spawn((
-            Position::new(position.x, position.y),
+            Position::new(position.x as f32, position.y as f32),
             DirectionComp::new(MirDirection::Down),
             SpriteComp::new(3, npc_index as i32), // NPCs.wil
             NPCComp {
@@ -173,7 +173,7 @@ impl GameWorld {
         let vy = if distance > 0.0 { dy / distance * speed } else { 0.0 };
 
         self.world.spawn((
-            Position::new(position.x, position.y),
+            Position::new(position.x as f32, position.y as f32),
             Velocity::new(vx, vy),
             SpriteComp::with_blend(6, spell_id as i32, BlendModeComp::Add), // Magic.wil + ADD混合
             AnimationComp::new(MirAction::Spell, 10, 100),
@@ -198,7 +198,7 @@ impl GameWorld {
         owner_id: Option<u32>,
     ) -> hecs::Entity {
         self.world.spawn((
-            Position::new(position.x, position.y),
+            Position::new(position.x as f32, position.y as f32),
             SpriteComp::new(5, item_index as i32), // Items.wil
             ItemDrop {
                 item_id,
@@ -228,7 +228,7 @@ impl GameWorld {
     pub fn get_local_player_position(&self) -> Option<Point> {
         let entity = self.get_local_player()?;
         let pos = self.world.get::<&Position>(entity).ok()?;
-        Some(Point::new(pos.x, pos.y))
+        Some(Point::new(pos.x as i32, pos.y as i32))
     }
 
     /// 根据 ID 查找远程玩家
@@ -254,7 +254,7 @@ impl GameWorld {
         self.world
             .query::<&Position>()
             .iter()
-            .filter(|(_, position)| position.x == pos.x && position.y == pos.y)
+            .filter(|(_, position)| position.x as i32 == pos.x && position.y as i32 == pos.y)
             .map(|(entity, _)| entity)
             .collect()
     }

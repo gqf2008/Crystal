@@ -5,27 +5,37 @@
 
 use mir2_shared::Point;
 pub use mir2_shared::{MirDirection, MirAction, MirClass, MirGender};
+use std::time::Instant;
+use crate::objects::CellInfo;
 
 // ============================================================================
 // 核心组件 (所有实体都有)
 // ============================================================================
 
-/// 位置组件 - 所有实体必备
+/// 位置组件 - 世界坐标（像素级，支持浮点）
+/// 统一使用 f32 坐标系统，支持平滑移动和精确渲染
 #[derive(Debug, Clone, Copy)]
 pub struct Position {
-    pub x: i32,      // 地图格子坐标
-    pub y: i32,
-    pub offset_x: i32, // 像素偏移 (用于移动插值)
-    pub offset_y: i32,
+    pub x: f32,      // 世界坐标 X（像素）
+    pub y: f32,      // 世界坐标 Y（像素）
 }
 
 impl Position {
-    pub fn new(x: i32, y: i32) -> Self {
-        Self { x, y, offset_x: 0, offset_y: 0 }
+    pub fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
     }
-
-    pub fn with_offset(x: i32, y: i32, offset_x: i32, offset_y: i32) -> Self {
-        Self { x, y, offset_x, offset_y }
+    
+    /// 从整数格子坐标创建（48x32像素单元格）
+    pub fn from_grid(grid_x: i32, grid_y: i32) -> Self {
+        Self {
+            x: grid_x as f32 * 48.0,
+            y: grid_y as f32 * 32.0,
+        }
+    }
+    
+    /// 转换为格子坐标
+    pub fn to_grid(&self) -> (i32, i32) {
+        ((self.x / 48.0) as i32, (self.y / 32.0) as i32)
     }
 }
 
@@ -331,3 +341,284 @@ impl RenderOrder {
     }
 }
 
+// ============================================================================
+// 地图查看器/工具专用组件
+// ============================================================================
+
+/// 相机组件 - 视口控制
+#[derive(Debug, Clone)]
+pub struct Camera {
+    pub zoom: f32,
+    pub screen_width: f32,
+    pub screen_height: f32,
+}
+
+impl Camera {
+    pub fn new(screen_width: f32, screen_height: f32) -> Self {
+        Self {
+            zoom: 1.0,
+            screen_width,
+            screen_height,
+        }
+    }
+}
+
+/// 拖拽组件 - 鼠标拖拽状态
+#[derive(Debug, Clone)]
+pub struct Draggable {
+    pub is_dragging: bool,
+    pub drag_start_x: f32,
+    pub drag_start_y: f32,
+    pub drag_start_pos_x: f32,
+    pub drag_start_pos_y: f32,
+}
+
+impl Default for Draggable {
+    fn default() -> Self {
+        Self {
+            is_dragging: false,
+            drag_start_x: 0.0,
+            drag_start_y: 0.0,
+            drag_start_pos_x: 0.0,
+            drag_start_pos_y: 0.0,
+        }
+    }
+}
+
+/// 角色组件 - 查看器中的可控角色
+#[derive(Debug, Clone)]
+pub struct Player {
+    pub direction: u8,  // 0-7 八方向
+    pub action: PlayerAction,
+    pub frame_index: i32,
+    pub frame_time: i32,
+    pub speed: f32,
+    pub target_x: f32,
+    pub target_y: f32,
+    pub is_moving: bool,
+    pub path: Vec<(i32, i32)>,
+    pub path_index: usize,
+    pub move_mode: MoveMode,
+}
+
+/// 角色动作
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlayerAction {
+    Stand = 0,
+    Walk = 1,
+    Run = 2,
+}
+
+impl PlayerAction {
+    pub fn frame_count(&self) -> i32 {
+        match self {
+            PlayerAction::Stand => 4,
+            PlayerAction::Walk => 6,
+            PlayerAction::Run => 6,
+        }
+    }
+    
+    pub fn frame_interval(&self) -> i32 {
+        match self {
+            PlayerAction::Stand => 30,
+            PlayerAction::Walk => 6,
+            PlayerAction::Run => 5,
+        }
+    }
+    
+    pub fn frame_start(&self) -> i32 {
+        match self {
+            PlayerAction::Stand => 0,
+            PlayerAction::Walk => 32,
+            PlayerAction::Run => 80,
+        }
+    }
+}
+
+/// 移动模式状态机
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MoveMode {
+    Idle,
+    DirectFollow,
+    AutoPathfinding,
+}
+
+/// 鼠标输入状态组件
+#[derive(Debug, Clone)]
+pub struct MouseInput {
+    pub left_pressed: bool,
+    pub right_pressed: bool,
+    pub left_double_clicked: bool,
+    pub right_double_clicked: bool,
+    pub left_press_time: i32,
+    pub right_press_time: i32,
+    pub left_last_click_time: Instant,
+    pub right_last_click_time: Instant,
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Default for MouseInput {
+    fn default() -> Self {
+        Self {
+            left_pressed: false,
+            right_pressed: false,
+            left_double_clicked: false,
+            right_double_clicked: false,
+            left_press_time: 0,
+            right_press_time: 0,
+            left_last_click_time: Instant::now(),
+            right_last_click_time: Instant::now(),
+            x: 0.0,
+            y: 0.0,
+        }
+    }
+}
+
+/// 地图瓦片组件
+#[derive(Debug, Clone)]
+pub struct MapTile {
+    pub grid_x: i32,
+    pub grid_y: i32,
+    pub layer: TileLayer,
+    pub library_index: i16,
+    pub image_index: i32,
+    pub use_blend: bool,
+    pub brightness: f32,
+    pub z_order: i32,
+}
+
+/// 瓦片层级
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TileLayer {
+    Back = 0,
+    Middle = 1,
+    Front = 2,
+}
+
+/// 动画瓦片组件
+#[derive(Debug, Clone)]
+pub struct AnimatedTile {
+    pub frame_count: u8,
+    pub frame_interval: u8,
+    pub base_image_index: i32,
+}
+
+/// 门组件
+#[derive(Debug, Clone)]
+pub struct Door {
+    pub door_index: u8,
+    pub door_offset: i32,
+    pub state: DoorState,
+    pub current_frame: i32,
+    pub last_tick: Instant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DoorState {
+    Closed = 0,
+    Opening = 1,
+    Open = 2,
+    Closing = 3,
+}
+
+/// 地图数据组件
+#[derive(Clone)]
+pub struct MapData {
+    pub cells: Vec<Vec<CellInfo>>,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// 渲染配置组件
+#[derive(Debug, Clone)]
+pub struct RenderConfig {
+    pub show_back: bool,
+    pub show_middle: bool,
+    pub show_front: bool,
+    pub show_grid: bool,
+    pub show_obstacles: bool,
+    pub show_animations: bool,
+    pub show_borders: bool,
+    pub show_path: bool,
+    pub max_fps: u32,
+    pub enable_lod: bool,
+}
+
+impl Default for RenderConfig {
+    fn default() -> Self {
+        Self {
+            show_back: true,
+            show_middle: true,
+            show_front: true,
+            show_grid: false,
+            show_obstacles: false,
+            show_animations: true,
+            show_borders: false,
+            show_path: false,
+            max_fps: 60,
+            enable_lod: false,
+        }
+    }
+}
+
+/// 时间跟踪组件
+#[derive(Debug, Clone)]
+pub struct TimeTracker {
+    pub animation_count: i32,
+    pub frame_count: u64,
+    pub fps: f32,
+    pub last_fps_update: Instant,
+    pub last_frame_time: Instant,
+}
+
+impl Default for TimeTracker {
+    fn default() -> Self {
+        Self {
+            animation_count: 0,
+            frame_count: 0,
+            fps: 0.0,
+            last_fps_update: Instant::now(),
+            last_frame_time: Instant::now(),
+        }
+    }
+}
+
+/// 可见区域缓存
+#[derive(Debug, Clone)]
+pub struct VisibleArea {
+    pub start_x: i32,
+    pub end_x: i32,
+    pub start_y: i32,
+    pub end_y: i32,
+    pub front_end_y: i32,
+    pub zoom: f32,
+    pub camera_x: f32,
+    pub camera_y: f32,
+    pub visible_entities: Vec<hecs::Entity>,
+    pub last_update: Instant,
+}
+
+impl Default for VisibleArea {
+    fn default() -> Self {
+        Self {
+            start_x: -999999,
+            end_x: -999999,
+            start_y: -999999,
+            end_y: -999999,
+            front_end_y: -999999,
+            zoom: -1.0,
+            camera_x: -999999.0,
+            camera_y: -999999.0,
+            visible_entities: Vec::new(),
+            last_update: Instant::now(),
+        }
+    }
+}
+
+// ============================================================================
+// 常量
+// ============================================================================
+
+pub const CELL_WIDTH: i32 = 48;
+pub const CELL_HEIGHT: i32 = 32;

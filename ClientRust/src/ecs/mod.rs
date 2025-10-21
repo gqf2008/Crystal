@@ -7,9 +7,17 @@ pub mod components;
 pub mod systems;
 pub mod world;
 
+// Map Helper/Loader 模块
+pub mod map_helper;
+pub mod map_loader;
+
 pub use components::*;
 pub use systems::*;
 pub use world::GameWorld;
+
+// Map Helper/Loader 导出
+pub use map_helper::MapHelper;
+pub use map_loader::MapLoader;
 
 // ============================================================================
 // 架构说明
