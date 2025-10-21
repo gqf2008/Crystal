@@ -373,6 +373,78 @@ impl CameraSystem {
         // 简单缩放，不改变摄像机位置（位置由角色跟随控制）
         camera.zoom = (camera.zoom * (1.0 + delta * 0.1)).clamp(0.5, 3.0);
     }
+
+    /// 🎯 更新摄像机系统 - 边缘滚屏 + 跟随角色
+    fn update(world: &mut World) {
+        // 边缘滚屏配置
+        const EDGE_THRESHOLD: f32 = 100.0;     // 距离边缘多少像素开始滚动
+        const MIN_SCROLL_SPEED: f32 = 3.0;     // 最小滚动速度 (增加基础速度)
+        const MAX_SCROLL_SPEED: f32 = 20.0;    // 最大滚动速度 (增加最大速度)
+        const ACCELERATION: f32 = 0.5;         // 加速度系数 (增加加速度)
+
+        // 查找摄像机实体
+        let camera_query: Vec<_> = world
+            .query::<(&Camera, &Position, &Draggable)>()
+            .iter()
+            .map(|(entity, (cam, pos, drag))| (entity, cam.clone(), pos.clone(), drag.is_dragging))
+            .collect();
+
+        if camera_query.is_empty() {
+            return;
+        }
+
+        let (camera_entity, camera, camera_pos, is_dragging) = &camera_query[0];
+
+        // === 1. 边缘滚屏 (只在非拖拽状态下执行) ===
+        if !is_dragging {
+            // 获取鼠标位置
+            let mouse_input = world.query_mut::<&MouseInput>()
+                .into_iter()
+                .next()
+                .map(|(_, m)| (m.x, m.y));
+
+            if let Some((mouse_x, mouse_y)) = mouse_input {
+                let mut scroll_x = 0.0;
+                let mut scroll_y = 0.0;
+
+                // 水平方向
+                if mouse_x < EDGE_THRESHOLD {
+                    let ratio = (EDGE_THRESHOLD - mouse_x) / EDGE_THRESHOLD;
+                    let accelerated_ratio = ratio.powf(1.0 + ACCELERATION);
+                    scroll_x = -(MIN_SCROLL_SPEED + (MAX_SCROLL_SPEED - MIN_SCROLL_SPEED) * accelerated_ratio);
+                } else if mouse_x > camera.screen_width - EDGE_THRESHOLD {
+                    let dist = mouse_x - (camera.screen_width - EDGE_THRESHOLD);
+                    let ratio = dist / EDGE_THRESHOLD;
+                    let accelerated_ratio = ratio.powf(1.0 + ACCELERATION);
+                    scroll_x = MIN_SCROLL_SPEED + (MAX_SCROLL_SPEED - MIN_SCROLL_SPEED) * accelerated_ratio;
+                }
+
+                // 垂直方向
+                if mouse_y < EDGE_THRESHOLD {
+                    let ratio = (EDGE_THRESHOLD - mouse_y) / EDGE_THRESHOLD;
+                    let accelerated_ratio = ratio.powf(1.0 + ACCELERATION);
+                    scroll_y = -(MIN_SCROLL_SPEED + (MAX_SCROLL_SPEED - MIN_SCROLL_SPEED) * accelerated_ratio);
+                } else if mouse_y > camera.screen_height - EDGE_THRESHOLD {
+                    let dist = mouse_y - (camera.screen_height - EDGE_THRESHOLD);
+                    let ratio = dist / EDGE_THRESHOLD;
+                    let accelerated_ratio = ratio.powf(1.0 + ACCELERATION);
+                    scroll_y = MIN_SCROLL_SPEED + (MAX_SCROLL_SPEED - MIN_SCROLL_SPEED) * accelerated_ratio;
+                }
+
+                // 应用边缘滚动
+                if scroll_x != 0.0 || scroll_y != 0.0 {
+                    if let Ok(mut pos) = world.get::<&mut Position>(*camera_entity) {
+                        pos.x += scroll_x;
+                        pos.y += scroll_y;
+                    }
+                }
+            }
+        }
+
+        // === 2. 摄像机跟随角色 (平滑跟随) ===
+        // TODO: 如果需要摄像机跟随角色，在这里实现
+        // 目前边缘滚屏和手动拖拽已经控制了摄像机位置
+    }
 }
 
 /// 地图辅助函数 - 查找无障碍位置、寻路等
@@ -2237,6 +2309,9 @@ impl EventHandler for MapViewerApp {
             DoorSystem::update(&mut self.world);
         }
 
+        // 🎯 摄像机系统 - 边缘滚屏 + 跟随角色
+        CameraSystem::update(&mut self.world);
+
         // 更新角色系统
         PlayerSystem::update(&mut self.world);
 
@@ -2608,6 +2683,7 @@ impl EventHandler for MapViewerApp {
 // ============================================================================
 // 主函数
 // ============================================================================
+
 
 fn main() -> GameResult {
     // 默认地图路径
