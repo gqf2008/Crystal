@@ -220,30 +220,36 @@ impl PlayerSystem {
                     }
                 }
             }
-            // 2. 长按事件 → 直接跟随模式(不寻路)
+            // 2. 长按事件 → 直接跟随模式(不寻路，但需要检查碰撞)
             else if (mouse_input.left_pressed && mouse_input.left_press_time >= 30) 
                   || (mouse_input.right_pressed && mouse_input.right_press_time >= 30) {
                 let is_run = mouse_input.right_pressed;
                 
-                match player.move_mode {
-                    MoveMode::Idle | MoveMode::DirectFollow => {
-                        player.target_x = mouse_world_x;
-                        player.target_y = mouse_world_y;
-                        player.is_moving = true;
-                        player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
-                        player.speed = if is_run { 1.6 } else { 1.33 };
-                        player.move_mode = MoveMode::DirectFollow;
-                        player.path.clear();
-                    }
-                    MoveMode::AutoPathfinding => {
-                        player.target_x = mouse_world_x;
-                        player.target_y = mouse_world_y;
-                        player.is_moving = true;
-                        player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
-                        player.speed = if is_run { 1.6 } else { 1.33 };
-                        player.move_mode = MoveMode::DirectFollow;
-                        player.path.clear();
-                        println!("🎯 切换到直接跟随模式");
+                // 🎯 检查目标位置是否可行走
+                let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
+                let is_walkable = MapHelper::is_walkable(&map_data, target_grid_x, target_grid_y);
+                
+                if is_walkable {
+                    match player.move_mode {
+                        MoveMode::Idle | MoveMode::DirectFollow => {
+                            player.target_x = mouse_world_x;
+                            player.target_y = mouse_world_y;
+                            player.is_moving = true;
+                            player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
+                            player.speed = if is_run { 1.6 } else { 1.33 };
+                            player.move_mode = MoveMode::DirectFollow;
+                            player.path.clear();
+                        }
+                        MoveMode::AutoPathfinding => {
+                            player.target_x = mouse_world_x;
+                            player.target_y = mouse_world_y;
+                            player.is_moving = true;
+                            player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
+                            player.speed = if is_run { 1.6 } else { 1.33 };
+                            player.move_mode = MoveMode::DirectFollow;
+                            player.path.clear();
+                            println!("🎯 切换到直接跟随模式");
+                        }
                     }
                 }
             }
@@ -295,22 +301,44 @@ impl PlayerSystem {
                     }
                 }
             }
-            // 2. 直接跟随模式：直线移动到鼠标位置
+            // 2. 直接跟随模式：直线移动到鼠标位置（带碰撞检测）
             else if player.move_mode == MoveMode::DirectFollow && player.is_moving {
                 let dx = player.target_x - pos.x;
                 let dy = player.target_y - pos.y;
                 let distance = (dx * dx + dy * dy).sqrt();
                 
                 if distance < player.speed * 2.0 {
-                    pos.x = player.target_x;
-                    pos.y = player.target_y;
+                    // 检查最终位置是否可行走
+                    let (final_grid_x, final_grid_y) = MapHelper::world_to_grid(player.target_x, player.target_y);
+                    if MapHelper::is_walkable(&map_data, final_grid_x, final_grid_y) {
+                        pos.x = player.target_x;
+                        pos.y = player.target_y;
+                    } else {
+                        // 目标不可行走，停止移动
+                        player.is_moving = false;
+                        player.action = PlayerAction::Stand;
+                    }
                 } else {
                     if distance > 10.0 {
                         let target_dir = Self::calculate_direction(dx, dy);
                         player.direction = Self::smooth_direction(player.direction, target_dir);
                     }
-                    pos.x += (dx / distance) * player.speed;
-                    pos.y += (dy / distance) * player.speed;
+                    
+                    // 计算下一步位置
+                    let next_x = pos.x + (dx / distance) * player.speed;
+                    let next_y = pos.y + (dy / distance) * player.speed;
+                    
+                    // 检查下一步是否可行走
+                    let (next_grid_x, next_grid_y) = MapHelper::world_to_grid(next_x, next_y);
+                    if MapHelper::is_walkable(&map_data, next_grid_x, next_grid_y) {
+                        pos.x = next_x;
+                        pos.y = next_y;
+                    } else {
+                        // 遇到障碍物，停止移动
+                        player.is_moving = false;
+                        player.action = PlayerAction::Stand;
+                        player.move_mode = MoveMode::Idle;
+                    }
                 }
             }
             

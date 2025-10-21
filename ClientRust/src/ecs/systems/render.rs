@@ -410,8 +410,9 @@ impl RenderSystem {
                                 world_y
                             );
                             
-                            // 绘制角色
-                            canvas.set_blend_mode(BlendMode::ALPHA);
+                            // 🎯 角色与Front层使用ADD混合
+                            // 当角色在树木、建筑等Front层物体下方时，使用ADD混合实现半透明遮挡效果
+                            canvas.set_blend_mode(Self::create_blend_mode());
                             canvas.draw(
                                 texture,
                                 DrawParam::default()
@@ -419,6 +420,155 @@ impl RenderSystem {
                                     .scale([camera.zoom, camera.zoom])
                                     .color(Color::WHITE),
                             );
+                            // 恢复默认混合模式
+                            canvas.set_blend_mode(BlendMode::ALPHA);
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// 绘制角色（带Front层重叠检测）
+    pub fn draw_player_with_world(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        player: &Player,
+        player_pos: &Position,
+        camera_pos: &Position,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        use crate::graphics::libraries::{get_library, LibraryName};
+        use crate::ecs::systems::CameraSystem;
+        use crate::ecs::components::{MapTile, TileLayer};
+        
+        // 🎨 使用 CArmours(0) 库绘制角色（默认装备）
+        // CArmours 库帧布局（参考 player_object.rs）:
+        //   - Standing: 0-31   (8方向 * 4帧)
+        //   - Walking:  32-79  (8方向 * 6帧)
+        //   - Running:  80-127 (8方向 * 6帧)
+        //   - Attack1:  128-175 (8方向 * 6帧)
+        //
+        // 公式: DrawFrame = action_frame_start + direction * frames_per_direction + frame_index
+        //       FinalFrame = DrawFrame + ArmourOffSet (Male=0, Female=808)
+        
+        // 计算 DrawFrame
+        let action_frame_start = player.action.frame_start();
+        let frames_per_direction = player.action.frame_count();
+        let direction_offset = (player.direction as i32) * frames_per_direction;
+        let draw_frame = action_frame_start + direction_offset + player.frame_index;
+        
+        // 暂不考虑性别偏移（默认男性，偏移=0）
+        let armour_offset = 0;
+        let final_frame = draw_frame + armour_offset;
+        
+        // 🐛 DEBUG: 首次绘制打印帧信息
+        static mut FIRST_DRAW: bool = true;
+        unsafe {
+            if FIRST_DRAW {
+                let dir_name = match player.direction {
+                    0 => "Up(上)",
+                    1 => "UpRight(右上)",
+                    2 => "Right(右)",
+                    3 => "DownRight(右下)",
+                    4 => "Down(下)",
+                    5 => "DownLeft(左下)",
+                    6 => "Left(左)",
+                    7 => "UpLeft(左上)",
+                    _ => "Unknown",
+                };
+                
+                println!("\n🎨 === 角色帧计算调试 ===");
+                println!("动作: {:?}", player.action);
+                println!("方向: {} - {}", player.direction, dir_name);
+                println!("当前帧索引: {}/{}", player.frame_index, frames_per_direction);
+                println!("动作起始帧: {}", action_frame_start);
+                println!("方向偏移: {} (方向{} * 每方向{}帧)", direction_offset, player.direction, frames_per_direction);
+                println!("DrawFrame: {} + {} + {} = {}", action_frame_start, direction_offset, player.frame_index, draw_frame);
+                println!("性别偏移: {}", armour_offset);
+                println!("FinalFrame: {} + {} = {}", draw_frame, armour_offset, final_frame);
+                println!("使用库: CArmours(0)");
+                println!("========================\n");
+                FIRST_DRAW = false;
+            }
+        }
+        
+        // 🎯 检测角色是否与Front层重叠
+        use crate::ecs::map_helper::MapHelper;
+        let (player_grid_x, player_grid_y) = MapHelper::world_to_grid(player_pos.x, player_pos.y);
+        
+        let mut has_front_overlap = false;
+        for (_, tile) in world.query::<&MapTile>().iter() {
+            // 只检查Front层
+            if !matches!(tile.layer, TileLayer::Front) {
+                continue;
+            }
+            
+            // 检查瓦片位置是否与角色位置重叠（在角色周围1格范围内）
+            let tile_grid_x = tile.grid_x;
+            let tile_grid_y = tile.grid_y;
+            
+            let dx = (tile_grid_x - player_grid_x).abs();
+            let dy = (tile_grid_y - player_grid_y).abs();
+            
+            // 如果Front层瓦片在角色位置或相邻位置，认为有重叠
+            if dx <= 1 && dy <= 1 {
+                has_front_overlap = true;
+                break;
+            }
+        }
+        
+        // ✅ 获取角色纹理 - 使用正确的角色库（不是地图库！）
+        if let Some(mlib) = get_library(LibraryName::CArmours(0)) {
+            if let Ok(mut mlib) = mlib.lock() {
+                // 获取尺寸和偏移量
+                let (_char_w, char_h) = mlib
+                    .get_size(final_frame as usize)
+                    .unwrap_or((48, 64));
+                
+                let (offset_x, offset_y) = mlib
+                    .get_offset(final_frame as usize)
+                    .unwrap_or((0, 0));
+                
+                // 获取纹理
+                match mlib.get_or_create_texture(ctx, final_frame as usize) {
+                    Ok(info) => {
+                        if let Some(ref texture) = info.image {
+                            // 世界坐标转屏幕坐标
+                            // 角色 Position 是脚底位置，需要应用图像偏移量
+                            let world_x = player_pos.x + offset_x as f32;
+                            let world_y = player_pos.y + offset_y as f32 - char_h as f32;
+                            
+                            let (screen_x, screen_y) = CameraSystem::world_to_screen(
+                                camera_pos, 
+                                camera, 
+                                world_x,
+                                world_y
+                            );
+                            
+                            // 🎯 根据是否与Front层重叠选择混合模式
+                            if has_front_overlap {
+                                // 与Front层重叠时使用ADD混合
+                                canvas.set_blend_mode(Self::create_blend_mode());
+                            } else {
+                                // 正常情况使用ALPHA混合
+                                canvas.set_blend_mode(BlendMode::ALPHA);
+                            }
+                            
+                            canvas.draw(
+                                texture,
+                                DrawParam::default()
+                                    .dest([screen_x, screen_y])
+                                    .scale([camera.zoom, camera.zoom])
+                                    .color(Color::WHITE),
+                            );
+                            
+                            // 恢复默认混合模式
+                            canvas.set_blend_mode(BlendMode::ALPHA);
                         }
                     }
                     Err(_) => {}

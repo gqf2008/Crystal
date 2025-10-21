@@ -425,9 +425,9 @@ impl EventHandler for MapViewerApp {
             RenderSystem::draw_obstacles(ctx, &mut canvas, &self.world, &pos, &camera)?;
         }
 
-        // 渲染角色
+        // 渲染角色（需要传递world以检测Front层重叠）
         for (_entity, (player, player_pos)) in self.world.query::<(&Player, &Position)>().iter() {
-            RenderSystem::draw_player(ctx, &mut canvas, player, player_pos, &pos, &camera)?;
+            RenderSystem::draw_player_with_world(ctx, &mut canvas, &self.world, player, player_pos, &pos, &camera)?;
         }
 
         // 🎯 绘制寻路路径 (调试用)
