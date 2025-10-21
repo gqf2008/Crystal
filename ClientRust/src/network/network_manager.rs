@@ -178,6 +178,30 @@ impl NetworkManager {
                 self.send_packet(&packet)?;
             }
             
+            NetworkCommand::Walk { direction } => {
+                tracing::debug!("Handling walk command: direction={:?}", direction);
+                let packet = client::Walk {
+                    direction,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::Run { direction } => {
+                tracing::debug!("Handling run command: direction={:?}", direction);
+                let packet = client::Run {
+                    direction,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::Turn { direction } => {
+                tracing::debug!("Handling turn command: direction={:?}", direction);
+                let packet = client::Turn {
+                    direction,
+                };
+                self.send_packet(&packet)?;
+            }
+            
             NetworkCommand::Move { direction, location } => {
                 // 将 u8 转换为 MirDirection
                 use mir2_shared::enums::MirDirection;

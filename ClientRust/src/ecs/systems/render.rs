@@ -1200,4 +1200,207 @@ impl RenderSystem {
 
         Ok(())
     }
+    
+    /// 绘制怪物
+    /// 
+    /// 参数：
+    /// - ctx: ggez 上下文
+    /// - canvas: 画布
+    /// - world: ECS 世界
+    /// - camera_pos: 相机位置
+    /// - camera: 相机组件
+    pub fn draw_monsters(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        camera_pos: &Position,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        use crate::ecs::components::{MonsterComp, AnimationComp};
+        use crate::graphics::libraries::{get_library, LibraryName};
+        use crate::ecs::systems::CameraSystem;
+        use mir2_shared::MirAction;
+        
+        // 遍历所有怪物实体
+        for (_entity, (monster, pos, anim)) in 
+            world.query::<(&MonsterComp, &Position, &AnimationComp)>().iter() 
+        {
+            // 获取怪物图库
+            // 怪物库命名规则: Mon1.lib, Mon2.lib, ...
+            let lib_index = (monster.monster_index / 1000) as usize;
+            let lib_name = match lib_index {
+                0 => LibraryName::Mon(1),
+                1 => LibraryName::Mon(2),
+                2 => LibraryName::Mon(3),
+                3 => LibraryName::Mon(4),
+                4 => LibraryName::Mon(5),
+                5 => LibraryName::Mon(6),
+                6 => LibraryName::Mon(7),
+                7 => LibraryName::Mon(8),
+                8 => LibraryName::Mon(9),
+                9 => LibraryName::Mon(10),
+                _ => LibraryName::Mon(1), // 默认使用 Mon1
+            };
+            
+            let lib = match get_library(lib_name) {
+                Ok(lib) => lib,
+                Err(_) => continue, // 库不存在，跳过
+            };
+            
+            // 计算帧索引
+            // 怪物动画布局（与玩家类似）:
+            //   - Standing: 每方向 4 帧
+            //   - Walking:  每方向 6 帧
+            //   - Attack1:  每方向 6 帧
+            //   - Die:      每方向 10 帧
+            //   - Dead:     每方向 1 帧
+            
+            let action_frame_start = match anim.action {
+                MirAction::Standing => 0,
+                MirAction::Walking => 32,    // 8方向 * 4帧 = 32
+                MirAction::Attack1 => 80,    // 32 + 8方向 * 6帧 = 80
+                MirAction::Struck => 128,    // 80 + 8方向 * 6帧 = 128
+                MirAction::Die => 144,       // 128 + 8方向 * 2帧 = 144
+                MirAction::Dead => 224,      // 144 + 8方向 * 10帧 = 224
+                _ => 0,
+            };
+            
+            let frames_per_direction = match anim.action {
+                MirAction::Standing => 4,
+                MirAction::Walking => 6,
+                MirAction::Attack1 => 6,
+                MirAction::Struck => 2,
+                MirAction::Die => 10,
+                MirAction::Dead => 1,
+                _ => 4,
+            };
+            
+            let direction_offset = (anim.direction as i32) * frames_per_direction;
+            let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
+            
+            // 怪物索引偏移
+            let monster_offset = (monster.monster_index % 1000) as i32;
+            let final_frame = draw_frame + monster_offset;
+            
+            // 转换为屏幕坐标
+            let (screen_x, screen_y) = CameraSystem::world_to_screen(
+                camera_pos,
+                camera,
+                pos.x,
+                pos.y,
+            );
+            
+            // 绘制怪物
+            if let Some(image_info) = lib.get_image(final_frame as usize) {
+                // 计算绘制位置（考虑偏移）
+                let draw_x = screen_x + image_info.offset_x as f32 * camera.zoom;
+                let draw_y = screen_y + image_info.offset_y as f32 * camera.zoom;
+                
+                // 绘制精灵
+                if let Some(image) = &image_info.image {
+                    canvas.draw(
+                        image,
+                        DrawParam::default()
+                            .dest([draw_x, draw_y])
+                            .scale([camera.zoom, camera.zoom]),
+                    );
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// 绘制怪物血条和名称
+    /// 
+    /// 参数：
+    /// - ctx: ggez 上下文
+    /// - canvas: 画布
+    /// - world: ECS 世界
+    /// - camera_pos: 相机位置
+    /// - camera: 相机组件
+    pub fn draw_monster_info(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        camera_pos: &Position,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        use crate::ecs::components::{MonsterComp, Health};
+        use crate::ecs::systems::CameraSystem;
+        use ggez::graphics::{Text, Mesh, DrawMode, Rect};
+        
+        // 遍历所有怪物实体
+        for (_entity, (monster, pos, health)) in 
+            world.query::<(&MonsterComp, &Position, &Health)>().iter() 
+        {
+            // 跳过死亡怪物
+            if health.current <= 0 {
+                continue;
+            }
+            
+            // 转换为屏幕坐标
+            let (screen_x, screen_y) = CameraSystem::world_to_screen(
+                camera_pos,
+                camera,
+                pos.x,
+                pos.y,
+            );
+            
+            // 名称位置（怪物上方）
+            let name_y = screen_y - 60.0 * camera.zoom;
+            
+            // 绘制名称
+            let name_text = Text::new(&monster.name);
+            let name_width = name_text.measure(ctx)?.x;
+            let name_x = screen_x - name_width / 2.0;
+            
+            canvas.draw(
+                &name_text,
+                DrawParam::default()
+                    .dest([name_x, name_y])
+                    .color(Color::from_rgb(255, 255, 255)),
+            );
+            
+            // 血条位置（名称下方）
+            let hp_bar_width = 50.0 * camera.zoom;
+            let hp_bar_height = 4.0 * camera.zoom;
+            let hp_bar_y = name_y + 16.0;
+            let hp_bar_x = screen_x - hp_bar_width / 2.0;
+            
+            // 血条背景（黑色）
+            let bg_rect = Mesh::new_rectangle(
+                ctx,
+                DrawMode::fill(),
+                Rect::new(hp_bar_x, hp_bar_y, hp_bar_width, hp_bar_height),
+                Color::from_rgb(0, 0, 0),
+            )?;
+            canvas.draw(&bg_rect, DrawParam::default());
+            
+            // 血条前景（红色，根据血量百分比）
+            let hp_percent = health.current as f32 / health.max as f32;
+            let hp_color = if hp_percent > 0.5 {
+                Color::from_rgb(0, 255, 0) // 绿色
+            } else if hp_percent > 0.25 {
+                Color::from_rgb(255, 255, 0) // 黄色
+            } else {
+                Color::from_rgb(255, 0, 0) // 红色
+            };
+            
+            let fg_rect = Mesh::new_rectangle(
+                ctx,
+                DrawMode::fill(),
+                Rect::new(
+                    hp_bar_x + 1.0,
+                    hp_bar_y + 1.0,
+                    (hp_bar_width - 2.0) * hp_percent,
+                    hp_bar_height - 2.0,
+                ),
+                hp_color,
+            )?;
+            canvas.draw(&fg_rect, DrawParam::default());
+        }
+        
+        Ok(())
+    }
 }

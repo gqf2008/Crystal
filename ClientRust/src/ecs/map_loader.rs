@@ -182,4 +182,87 @@ impl MapLoader {
         world.spawn(builder.build());
         *count += 1;
     }
+    
+    /// 生成测试怪物
+    /// 
+    /// 在地图上随机生成一些测试怪物
+    pub fn spawn_test_monsters(world: &mut World, count: usize) -> GameResult<()> {
+        use crate::ecs::components::{
+            Position, MonsterComp, AIState, Health, AnimationComp, SpriteComp,
+        };
+        use mir2_shared::MirAction;
+        use rand::Rng;
+        
+        println!("🐲 正在生成 {} 个测试怪物...", count);
+        
+        let mut rng = rand::thread_rng();
+        
+        // 获取地图数据
+        let (map_width, map_height) = {
+            let mut map_width = 100;
+            let mut map_height = 100;
+            
+            for (_, map_data) in world.query::<&MapData>().iter() {
+                map_width = map_data.width;
+                map_height = map_data.height;
+                break;
+            }
+            
+            (map_width, map_height)
+        };
+        
+        for i in 0..count {
+            // 随机位置（避开地图边缘）
+            let x = rng.gen_range(10..map_width - 10) as f32;
+            let y = rng.gen_range(10..map_height - 10) as f32;
+            
+            // 随机AI类型
+            let ai_type = (i % 3) as u8 + 1; // 1=近战, 2=远程, 3=巡逻
+            
+            // 怪物数据
+            let monster_name = match ai_type {
+                1 => "骷髅战士",
+                2 => "弓箭骷髅",
+                3 => "巡逻卫兵",
+                _ => "怪物",
+            };
+            
+            // 创建怪物实体
+            world.spawn((
+                Position { x, y },
+                MonsterComp {
+                    id: i as u32 + 1,
+                    name: monster_name.to_string(),
+                    monster_index: 0,  // 使用第一个怪物模型
+                    ai_mode: ai_type,
+                    ai_type,
+                    spawn_x: x,
+                    spawn_y: y,
+                },
+                AIState::default(),
+                Health { 
+                    current: 100, 
+                    max: 100 
+                },
+                AnimationComp {
+                    action: MirAction::Standing,
+                    direction: 0,
+                    frame_count: 4,
+                    frame_index: 0,
+                    frame_interval: 200,
+                    frame_timer: 0,
+                    loop_animation: true,
+                },
+                SpriteComp {
+                    library: 1,
+                    index: 0,
+                    width: 48,
+                    height: 64,
+                },
+            ));
+        }
+        
+        println!("✅ 成功生成 {} 个测试怪物", count);
+        Ok(())
+    }
 }

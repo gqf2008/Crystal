@@ -199,6 +199,13 @@ pub enum GameEvent {
     MagicCast { spell: Spell, target_id: u32 },
     ObjectMagicCast { caster_id: u32, spell: Spell, target_id: u32 },
     MagicDelayed { spell: Spell, delay: i64 },
+    
+    // Object movement events
+    ObjectTurned { object_id: u32, direction: MirDirection, location: Point },
+    ObjectWalked { object_id: u32, direction: MirDirection, location: Point },
+    ObjectRan { object_id: u32, direction: MirDirection, location: Point },
+    ObjectAttacked { object_id: u32, direction: MirDirection, location: Point, spell: Spell },
+    ObjectPushed { object_id: u32, direction: MirDirection, location: Point },
 }
 
 // ==================== Implementation ====================
@@ -1166,6 +1173,13 @@ impl PacketHandler for GameClient {
                 }
             }
         }
+        
+        // Send event to game
+        self.send_event(GameEvent::ObjectTurned {
+            object_id: packet.object_id,
+            direction: packet.direction,
+            location: Point { x: packet.location_x, y: packet.location_y },
+        });
     }
     
     fn on_object_walk(&mut self, packet: packets::ObjectWalk) {
@@ -1184,6 +1198,13 @@ impl PacketHandler for GameClient {
                 }
             }
         }
+        
+        // Send event to game
+        self.send_event(GameEvent::ObjectWalked {
+            object_id: packet.object_id,
+            direction: packet.direction,
+            location: Point { x: packet.location_x, y: packet.location_y },
+        });
     }
     
     fn on_object_run(&mut self, packet: packets::ObjectRun) {
@@ -1202,12 +1223,27 @@ impl PacketHandler for GameClient {
                 }
             }
         }
+        
+        // Send event to game
+        self.send_event(GameEvent::ObjectRan {
+            object_id: packet.object_id,
+            direction: packet.direction,
+            location: Point { x: packet.location_x, y: packet.location_y },
+        });
     }
     
     fn on_object_attack(&mut self, packet: packets::ObjectAttack) {
         tracing::debug!("⚔️ Object {} attacking {:?} at ({}, {}), Target: {}", 
             packet.object_id, packet.direction, packet.location_x, 
             packet.location_y, packet.spell);
+        
+        // Send event to game
+        self.send_event(GameEvent::ObjectAttacked {
+            object_id: packet.object_id,
+            direction: MirDirection::try_from(packet.direction).unwrap_or(MirDirection::Up),
+            location: Point { x: packet.location_x as i32, y: packet.location_y as i32 },
+            spell: Spell::try_from(packet.spell).unwrap_or(Spell::None),
+        });
     }
     
     fn on_object_range_attack(&mut self, packet: packets::ObjectRangeAttack) {
@@ -1232,6 +1268,13 @@ impl PacketHandler for GameClient {
                 }
             }
         }
+        
+        // Send event to game
+        self.send_event(GameEvent::ObjectPushed {
+            object_id: packet.object_id,
+            direction: MirDirection::try_from(packet.direction).unwrap_or(MirDirection::Up),
+            location: Point { x: packet.location_x as i32, y: packet.location_y as i32 },
+        });
     }
     
     fn on_object_item(&mut self, packet: packets::ObjectItem) {

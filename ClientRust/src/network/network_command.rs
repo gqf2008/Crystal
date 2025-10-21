@@ -50,7 +50,22 @@ pub enum NetworkCommand {
         character_index: i32,
     },
     
-    /// Send movement command (Walk/Run)
+    /// Walk in direction
+    Walk {
+        direction: mir2_shared::enums::MirDirection,
+    },
+    
+    /// Run in direction
+    Run {
+        direction: mir2_shared::enums::MirDirection,
+    },
+    
+    /// Turn to direction (without moving)
+    Turn {
+        direction: mir2_shared::enums::MirDirection,
+    },
+    
+    /// Send movement command (Walk/Run) - deprecated, use Walk/Run instead
     Move {
         direction: u8,  // MirDirection as u8
         location: (i32, i32),  // (x, y)

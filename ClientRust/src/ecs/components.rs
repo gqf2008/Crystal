@@ -108,6 +108,7 @@ impl SpriteComp {
 #[derive(Debug, Clone)]
 pub struct AnimationComp {
     pub action: MirAction,
+    pub direction: u8,       // 方向 0-7
     pub frame_count: u8,
     pub frame_index: u8,
     pub frame_interval: u32, // 毫秒
@@ -119,6 +120,7 @@ impl AnimationComp {
     pub fn new(action: MirAction, frame_count: u8, frame_interval: u32) -> Self {
         Self {
             action,
+            direction: 0,    // 默认朝右
             frame_count,
             frame_index: 0,
             frame_interval,
@@ -224,14 +226,35 @@ pub struct MonsterComp {
     pub name: String,
     pub monster_index: u16,
     pub ai_mode: u8,
+    pub ai_type: u8,         // AI 类型 (0=无, 1=近战, 2=远程, 3=巡逻)
+    pub spawn_x: f32,        // 出生点 X
+    pub spawn_y: f32,        // 出生点 Y
 }
 
 /// AI 状态组件
 #[derive(Debug, Clone)]
 pub struct AIState {
     pub mode: AIMode,
+    pub current_action: AIAction,
     pub target_entity: Option<hecs::Entity>, // 目标实体
+    pub target_pos: Option<(f32, f32)>,      // 目标位置
     pub last_action_time: u64,
+    pub patrol_points: Vec<(f32, f32)>,      // 巡逻路径点
+    pub current_patrol_index: usize,         // 当前巡逻点索引
+}
+
+impl Default for AIState {
+    fn default() -> Self {
+        Self {
+            mode: AIMode::Idle,
+            current_action: AIAction::Idle,
+            target_entity: None,
+            target_pos: None,
+            last_action_time: 0,
+            patrol_points: Vec::new(),
+            current_patrol_index: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -241,6 +264,15 @@ pub enum AIMode {
     Chase,
     Attack,
     Retreat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AIAction {
+    Idle,      // 闲置
+    Patrol,    // 巡逻
+    Chase,     // 追击
+    Attack,    // 攻击
+    Retreat,   // 后退
 }
 
 // ============================================================================
@@ -309,9 +341,33 @@ pub struct ItemDrop {
 // ============================================================================
 
 /// 网络同步标记 (需要同步的实体)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct NetworkSync {
-    pub last_sync_time: u64,
+    /// 服务器对象ID
+    pub object_id: u32,
+    /// 最后更新时间
+    pub last_update: Instant,
+    /// 对象类型
+    pub object_type: NetworkObjectType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkObjectType {
+    Player,      // 其他玩家
+    NPC,         // NPC
+    Monster,     // 怪物
+    Item,        // 地面物品
+    Spell,       // 技能特效
+}
+
+impl NetworkSync {
+    pub fn new(object_id: u32, object_type: NetworkObjectType) -> Self {
+        Self {
+            object_id,
+            last_update: Instant::now(),
+            object_type,
+        }
+    }
 }
 
 // ============================================================================
@@ -612,6 +668,79 @@ impl Default for VisibleArea {
             camera_y: -999999.0,
             visible_entities: Vec::new(),
             last_update: Instant::now(),
+        }
+    }
+}
+
+// ============================================================================
+// 其他网络对象组件
+// ============================================================================
+
+/// 其他玩家组件（区别于本地玩家Player）
+#[derive(Debug, Clone)]
+pub struct OtherPlayer {
+    pub name: String,
+    pub class: MirClass,
+    pub gender: MirGender,
+    pub level: u16,
+    pub guild_name: Option<String>,
+}
+
+impl OtherPlayer {
+    pub fn new(name: String, class: MirClass, gender: MirGender, level: u16) -> Self {
+        Self {
+            name,
+            class,
+            gender,
+            level,
+            guild_name: None,
+        }
+    }
+}
+
+/// NPC组件
+#[derive(Debug, Clone)]
+pub struct NPC {
+    pub name: String,
+    pub npc_type: String,
+    pub can_interact: bool,
+}
+
+impl NPC {
+    pub fn new(name: String, npc_type: String) -> Self {
+        Self {
+            name,
+            npc_type,
+            can_interact: true,
+        }
+    }
+}
+
+/// 怪物组件
+#[derive(Debug, Clone)]
+pub struct Monster {
+    pub name: String,
+    pub monster_type: u16,
+    pub ai_state: MonsterAIState,
+    pub target_id: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonsterAIState {
+    Idle,
+    Patrol,
+    Chase,
+    Attack,
+    Dead,
+}
+
+impl Monster {
+    pub fn new(name: String, monster_type: u16) -> Self {
+        Self {
+            name,
+            monster_type,
+            ai_state: MonsterAIState::Idle,
+            target_id: None,
         }
     }
 }

@@ -59,7 +59,7 @@ impl GameWorld {
                 gold: 0,
             },
             LocalPlayer,
-            NetworkSync { last_sync_time: 0 },
+            NetworkSync::new(0, NetworkObjectType::Player),
             RenderOrder::new(RenderLayer::Object, position.y),
         ))
     }
@@ -128,7 +128,7 @@ impl GameWorld {
                 target_entity: None,
                 last_action_time: 0,
             },
-            NetworkSync { last_sync_time: 0 },
+            NetworkSync::new(id, NetworkObjectType::Monster),
             RenderOrder::new(RenderLayer::Object, position.y),
         ))
     }

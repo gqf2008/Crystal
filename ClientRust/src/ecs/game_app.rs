@@ -22,6 +22,7 @@ use tokio::sync::mpsc;
 use crate::ecs::scenes::{Scene, SceneType, LoginScene, SelectScene, GameScene};
 use crate::network::{NetworkManager, GameEvent, NetworkCommand};
 use crate::settings::ClientSettings;
+use mir2_shared::packets::CharacterSummary;
 
 /// 游戏主应用
 pub struct GameState {
@@ -48,6 +49,12 @@ pub struct GameState {
     
     /// 客户端设置
     settings: Arc<RwLock<ClientSettings>>,
+    
+    /// 场景间临时数据 - 角色列表（LoginScene → SelectScene）
+    pending_characters: Option<Vec<CharacterSummary>>,
+    
+    /// 场景间临时数据 - 选中的角色索引（SelectScene → GameScene）
+    selected_character_index: Option<i32>,
 }
 
 impl GameState {
@@ -106,6 +113,8 @@ impl GameState {
             command_tx,
             tokio_runtime: Some(tokio_runtime),
             settings,
+            pending_characters: None,
+            selected_character_index: None,
         })
     }
     
@@ -150,10 +159,8 @@ impl GameState {
                     if let GameEvent::LoginSuccess { ref characters } = event {
                         println!("✅ 登录成功！收到 {} 个角色", characters.len());
                         // 保存角色列表，准备切换到SelectScene
-                        let characters_clone = characters.clone();
+                        self.pending_characters = Some(characters.clone());
                         next_scene = Some(SceneType::Select);
-                        // 稍后在switch_scene中创建SelectScene时传递角色列表
-                        // TODO: 需要在GameState中暂存角色列表
                     }
                     
                     // 将事件传递给LoginScene处理
@@ -166,6 +173,10 @@ impl GameState {
                     if let GameEvent::StartGameResponse { result } = event {
                         if result == 0 {
                             println!("🎮 开始游戏成功");
+                            // 获取SelectScene中选中的角色索引
+                            if let Some(select_scene) = self.current_scene.as_mut().as_any_mut().downcast_mut::<SelectScene>() {
+                                self.selected_character_index = Some(select_scene.selected_index);
+                            }
                             next_scene = Some(SceneType::Game);
                         }
                     }
@@ -176,10 +187,10 @@ impl GameState {
                     }
                 }
                 SceneType::Game => {
-                    // TODO: 将事件传递给GameScene处理
-                    // if let Some(game_scene) = self.current_scene.as_any_mut().downcast_mut::<GameScene>() {
-                    //     game_scene.handle_network_event(&event);
-                    // }
+                    // 将事件传递给GameScene处理
+                    if let Some(game_scene) = self.current_scene.as_mut().as_any_mut().downcast_mut::<GameScene>() {
+                        game_scene.handle_network_event(&mut self.world, &event);
+                    }
                 }
             }
         }
@@ -196,8 +207,10 @@ impl GameState {
         self.current_scene = match scene_type {
             SceneType::Login => Box::new(LoginScene::new()),
             SceneType::Select => {
-                // TODO: 从LoginScene传递角色列表
-                Box::new(SelectScene::new(Vec::new()))
+                // 从LoginScene传递角色列表
+                let characters = self.pending_characters.take().unwrap_or_else(Vec::new);
+                println!("🎭 创建SelectScene，角色数: {}", characters.len());
+                Box::new(SelectScene::new(characters))
             },
             SceneType::Game => Box::new(GameScene::new(ctx, &mut self.world)?),
         };

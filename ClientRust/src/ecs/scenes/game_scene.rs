@@ -14,16 +14,16 @@
 use ggez::{Context, GameResult};
 use ggez::graphics::{Canvas, Color, Text, DrawParam};
 use ggez::winit::event::MouseButton;
-use ggez::input::keyboard::{KeyInput, KeyCode};
+use ggez::input::keyboard::KeyInput;
 use hecs::{World, Entity};
 use std::time::Instant;
 use tokio::sync::mpsc;
 
 use super::{Scene, SceneType};
-use crate::network::NetworkCommand;
+use crate::network::{NetworkCommand, game_client::GameEvent};
 use crate::ecs::{
     components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea},
-    systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem},
+    systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem},
     map_helper::MapHelper,
     map_loader::MapLoader,
 };
@@ -43,6 +43,9 @@ pub struct GameScene {
     
     /// 可见区域缓存实体
     visible_area_entity: Entity,
+    
+    /// 网络同步系统
+    network_system: NetworkSystem,
     
     /// UI字体名称
     ui_font_name: String,
@@ -122,6 +125,11 @@ impl GameScene {
         
         // 创建可见区域缓存实体
         let visible_area_entity = world.spawn((VisibleArea::default(),));
+        
+        // 生成测试怪物
+        println!("👹 正在生成测试怪物...");
+        MapLoader::spawn_test_monsters(world, &map_data, 15);
+        println!("✅ 已生成 15 只测试怪物");
         
         // 创建玩家角色实体
         let _player_entity = world.spawn((
@@ -211,8 +219,14 @@ impl GameScene {
             time_entity,
             config_entity,
             visible_area_entity,
+            network_system: NetworkSystem::new(),
             ui_font_name,
         })
+    }
+    
+    /// 处理网络事件（由GameApp调用）
+    pub fn handle_network_event(&mut self, world: &mut World, event: &GameEvent) {
+        self.network_system.process_event(world, event);
     }
     
     /// 加载中文字体
@@ -254,7 +268,7 @@ impl GameScene {
 impl Scene for GameScene {
     fn update(
         &mut self, 
-        ctx: &mut Context, 
+        _ctx: &mut Context, 
         world: &mut World,
         _network_tx: &mpsc::UnboundedSender<NetworkCommand>
     ) -> GameResult<Option<SceneType>> {
@@ -303,6 +317,10 @@ impl Scene for GameScene {
         // 更新角色系统
         PlayerSystem::update(world);
         
+        // 更新怪物系统
+        let delta_time = 1.0 / max_fps as f32;
+        MonsterSystem::update(world, delta_time);
+        
         Ok(None)
     }
     
@@ -327,10 +345,16 @@ impl Scene for GameScene {
             self.visible_area_entity,
         )?;
         
+        // 渲染怪物
+        RenderSystem::draw_monsters(ctx, canvas, world, &pos, &camera)?;
+        
         // 渲染角色
         for (_entity, (player, player_pos)) in world.query::<(&Player, &Position)>().iter() {
             RenderSystem::draw_player_with_world(ctx, canvas, world, player, player_pos, &pos, &camera)?;
         }
+        
+        // 渲染怪物血条和名称
+        RenderSystem::draw_monster_info(ctx, canvas, world, &pos, &camera)?;
         
         // 绘制FPS
         let time = world.get::<&TimeTracker>(self.time_entity).unwrap();
@@ -343,11 +367,11 @@ impl Scene for GameScene {
         );
         
         // 绘制操作提示（移到右上角）
-        let hint_text = Text::new("[左键长按] 走动  [右键长按] 跑动  [Esc] 返回选择角色");
+        let hint_text = Text::new("[WASD/方向键] 移动  [Shift+WASD] 跑动  [鼠标] 点击移动  [Esc] 返回");
         canvas.draw(
             &hint_text,
             DrawParam::default()
-                .dest([camera.screen_width - 450.0, 10.0])
+                .dest([camera.screen_width - 500.0, 10.0])
                 .color(Color::from_rgb(200, 200, 200)),
         );
         
@@ -362,19 +386,55 @@ impl Scene for GameScene {
         _ctx: &mut Context,
         _world: &mut World,
         input: KeyInput,
-        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult<Option<SceneType>> {
         use ggez::winit::keyboard::KeyCode;
+        use mir2_shared::enums::MirDirection;
         
         if let ggez::winit::event::KeyEvent {
             physical_key: ggez::winit::keyboard::PhysicalKey::Code(keycode),
             ..
         } = input.event
         {
+            // 检查是否按下 Shift 键（跑步）
+            let running = input.mods.shift_key();
+            
             match keycode {
                 // Esc 返回选择角色
                 KeyCode::Escape => {
                     return Ok(Some(SceneType::Select));
+                }
+                // W 或上方向键 - 向上移动
+                KeyCode::KeyW | KeyCode::ArrowUp => {
+                    if running {
+                        let _ = network_tx.send(NetworkCommand::Run { direction: MirDirection::Up });
+                    } else {
+                        let _ = network_tx.send(NetworkCommand::Walk { direction: MirDirection::Up });
+                    }
+                }
+                // S 或下方向键 - 向下移动
+                KeyCode::KeyS | KeyCode::ArrowDown => {
+                    if running {
+                        let _ = network_tx.send(NetworkCommand::Run { direction: MirDirection::Down });
+                    } else {
+                        let _ = network_tx.send(NetworkCommand::Walk { direction: MirDirection::Down });
+                    }
+                }
+                // A 或左方向键 - 向左移动
+                KeyCode::KeyA | KeyCode::ArrowLeft => {
+                    if running {
+                        let _ = network_tx.send(NetworkCommand::Run { direction: MirDirection::Left });
+                    } else {
+                        let _ = network_tx.send(NetworkCommand::Walk { direction: MirDirection::Left });
+                    }
+                }
+                // D 或右方向键 - 向右移动
+                KeyCode::KeyD | KeyCode::ArrowRight => {
+                    if running {
+                        let _ = network_tx.send(NetworkCommand::Run { direction: MirDirection::Right });
+                    } else {
+                        let _ = network_tx.send(NetworkCommand::Walk { direction: MirDirection::Right });
+                    }
                 }
                 _ => {}
             }
@@ -392,7 +452,7 @@ impl Scene for GameScene {
         y: f32,
     ) -> GameResult {
         // 更新鼠标状态
-        if let Some((_, mut mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
+        if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
             mouse_input.x = x;
             mouse_input.y = y;
             
@@ -421,7 +481,7 @@ impl Scene for GameScene {
         _y: f32,
     ) -> GameResult {
         // 更新鼠标状态
-        if let Some((_, mut mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
+        if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
             match button {
                 MouseButton::Left => {
                     mouse_input.left_pressed = false;
@@ -446,7 +506,7 @@ impl Scene for GameScene {
         y: f32,
     ) -> GameResult {
         // 更新鼠标位置
-        if let Some((_, mut mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
+        if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
             mouse_input.x = x;
             mouse_input.y = y;
         }
