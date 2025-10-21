@@ -575,7 +575,10 @@ impl PlayerSystem {
                         
                         // 🐛 调试输出：坐标转换
                         println!("🔍 寻路调试:");
-                        println!("  屏幕坐标: ({}, {})", mouse_input.x, mouse_input.y);
+                        println!("  屏幕坐标: ({:.1}, {:.1})", mouse_input.x, mouse_input.y);
+                        println!("  Camera尺寸: {:.0}x{:.0}", camera.screen_width, camera.screen_height);
+                        println!("  摄像机位置: ({:.1}, {:.1})", camera_pos.x, camera_pos.y);
+                        println!("  缩放: {:.2}", camera.zoom);
                         println!("  世界坐标: ({:.1}, {:.1})", mouse_world_x, mouse_world_y);
                         println!("  目标格子: ({}, {})", target_grid_x, target_grid_y);
                         println!("  起始格子: ({}, {})", start_grid_x, start_grid_y);
@@ -630,19 +633,39 @@ impl PlayerSystem {
                         }
                     }
                     MoveMode::AutoPathfinding => {
-                        // 自动寻路模式 → 单击取消寻路
-                        player.move_mode = MoveMode::Idle;
-                        player.is_moving = false;
-                        player.action = PlayerAction::Stand;
-                        player.path.clear();
-                        println!("🛑 取消寻路");
+                        // 自动寻路模式 → 双击更新寻路目标位置
+                        let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
+                        let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
+                        
+                        println!("🔄 更新寻路目标: ({}, {}) -> ({}, {})", start_grid_x, start_grid_y, target_grid_x, target_grid_y);
+                        
+                        let map_data_for_pathfinding = map_data.clone();
+                        let pathfinder = PathFinder::new(
+                            map_data.width,
+                            map_data.height,
+                            Box::new(move |p: Point| !MapHelper::is_walkable(&map_data_for_pathfinding, p.x, p.y))
+                        );
+                        
+                        let start_point = Point::new(start_grid_x, start_grid_y);
+                        let target_point = Point::new(target_grid_x, target_grid_y);
+                        
+                        if let Some(path) = pathfinder.find_path(start_point, target_point) {
+                            player.path = path.iter().map(|p| (p.x, p.y)).collect();
+                            player.path_index = 0;
+                            player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
+                            player.speed = if is_run { 1.6 } else { 1.33 };
+                            // 保持在 AutoPathfinding 模式
+                            println!("✅ 寻路目标已更新: {} 个路径点 ({})", player.path.len(), if is_run { "跑" } else { "走" });
+                        } else {
+                            println!("❌ 新目标寻路失败: 无法到达");
+                        }
                     }
                 }
             }
             // 2. 长按事件 → 直接跟随模式(不寻路)
-            // 🎯 只在真正长按(>10帧)时才触发直接跟随
-            else if (mouse_input.left_pressed && mouse_input.left_press_time > 10) 
-                  || (mouse_input.right_pressed && mouse_input.right_press_time > 10) {
+            // 🎯 只在真正长按(>=30帧,约500ms)时才触发直接跟随
+            else if (mouse_input.left_pressed && mouse_input.left_press_time >= 30) 
+                  || (mouse_input.right_pressed && mouse_input.right_press_time >= 30) {
                 let is_run = mouse_input.right_pressed;
                 
                 match player.move_mode {
@@ -2221,7 +2244,7 @@ impl EventHandler for MapViewerApp {
 
     fn mouse_button_down_event(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,
         button: MouseButton,
         x: f32,
         y: f32,
@@ -2230,6 +2253,28 @@ impl EventHandler for MapViewerApp {
             // 左键和右键:控制角色移动
             MouseButton::Left | MouseButton::Right => {
                 if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
+                    // 🎯 获取DPI缩放比例
+                    let (drawable_w, drawable_h) = ctx.gfx.drawable_size();
+                    let (window_w, window_h) = ctx.gfx.size();
+                    let scale_x = drawable_w / window_w;
+                    let scale_y = drawable_h / window_h;
+                    
+                    // 🎯 一次性调试输出DPI信息
+                    static mut DPI_LOGGED: bool = false;
+                    unsafe {
+                        if !DPI_LOGGED {
+                            println!("🖥️ DPI缩放信息:");
+                            println!("  窗口尺寸: {:.0}x{:.0}", window_w, window_h);
+                            println!("  可绘制尺寸: {:.0}x{:.0}", drawable_w, drawable_h);
+                            println!("  缩放比例: {:.2}x, {:.2}x", scale_x, scale_y);
+                            DPI_LOGGED = true;
+                        }
+                    }
+                    
+                    // 🎯 将鼠标坐标从窗口坐标转换为drawable坐标
+                    let scaled_x = x * scale_x;
+                    let scaled_y = y * scale_y;
+                    
                     if button == MouseButton::Left {
                         mouse_input.left_pressed = true;
                         mouse_input.left_press_time = 0;  // 🎯 重置按下时间
@@ -2237,8 +2282,8 @@ impl EventHandler for MapViewerApp {
                         mouse_input.right_pressed = true;
                         mouse_input.right_press_time = 0;  // 🎯 重置按下时间
                     }
-                    mouse_input.x = x;
-                    mouse_input.y = y;
+                    mouse_input.x = scaled_x;
+                    mouse_input.y = scaled_y;
                 }
             }
             // 中键：拖拽地图
@@ -2254,7 +2299,7 @@ impl EventHandler for MapViewerApp {
 
     fn mouse_button_up_event(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,
         button: MouseButton,
         x: f32,
         y: f32,
@@ -2263,13 +2308,23 @@ impl EventHandler for MapViewerApp {
             // 左键和右键：检测双击
             MouseButton::Left | MouseButton::Right => {
                 if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
+                    // 🎯 获取DPI缩放比例
+                    let (drawable_w, drawable_h) = ctx.gfx.drawable_size();
+                    let (window_w, window_h) = ctx.gfx.size();
+                    let scale_x = drawable_w / window_w;
+                    let scale_y = drawable_h / window_h;
+                    
+                    // 🎯 将鼠标坐标从窗口坐标转换为drawable坐标
+                    let scaled_x = x * scale_x;
+                    let scaled_y = y * scale_y;
+                    
                     // 🎯 更新鼠标位置（防止快速点击时位置不准确）
-                    mouse_input.x = x;
-                    mouse_input.y = y;
+                    mouse_input.x = scaled_x;
+                    mouse_input.y = scaled_y;
                     
                     if button == MouseButton::Left {
-                        // 🎯 双击检测：如果按下时间很短(< 10帧)且距离上次点击 < 500ms
-                        if mouse_input.left_press_time < 10 {
+                        // 🎯 双击检测：如果按下时间不太长(< 30帧,约500ms)且距离上次点击 < 500ms
+                        if mouse_input.left_press_time < 30 {
                             let now = std::time::Instant::now();
                             let time_since_last_click = now.duration_since(mouse_input.left_last_click_time);
                             
@@ -2288,7 +2343,7 @@ impl EventHandler for MapViewerApp {
                         mouse_input.left_press_time = 0;
                     } else {
                         // 🎯 双击检测：右键
-                        if mouse_input.right_press_time < 10 {
+                        if mouse_input.right_press_time < 30 {
                             let now = std::time::Instant::now();
                             let time_since_last_click = now.duration_since(mouse_input.right_last_click_time);
                             
@@ -2317,11 +2372,21 @@ impl EventHandler for MapViewerApp {
         Ok(())
     }
 
-    fn mouse_motion_event(&mut self, _ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) -> GameResult<()> {
+    fn mouse_motion_event(&mut self, ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) -> GameResult<()> {
+        // 🎯 获取DPI缩放比例
+        let (drawable_w, drawable_h) = ctx.gfx.drawable_size();
+        let (window_w, window_h) = ctx.gfx.size();
+        let scale_x = drawable_w / window_w;
+        let scale_y = drawable_h / window_h;
+        
+        // 🎯 将鼠标坐标从窗口坐标转换为drawable坐标
+        let scaled_x = x * scale_x;
+        let scaled_y = y * scale_y;
+        
         // 更新鼠标位置（用于角色控制）
         if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
-            mouse_input.x = x;
-            mouse_input.y = y;
+            mouse_input.x = scaled_x;
+            mouse_input.y = scaled_y;
         }
         
         // 处理中键拖拽地图
@@ -2426,9 +2491,14 @@ impl EventHandler for MapViewerApp {
     }
 
     fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) -> GameResult<()> {
+        // 🎯 使用 drawable_size 而不是 window size (处理高DPI)
+        let (actual_width, actual_height) = ctx.gfx.drawable_size();
+        println!("🖥️ 窗口大小调整: 窗口尺寸={}x{}, 可绘制尺寸={}x{}", 
+                 width, height, actual_width, actual_height);
+        
         let mut camera = self.world.get::<&mut Camera>(self.camera_entity).unwrap();
-        camera.screen_width = width;
-        camera.screen_height = height;
+        camera.screen_width = actual_width;
+        camera.screen_height = actual_height;
         Ok(())
     }
 }
