@@ -11,6 +11,13 @@ pub mod world;
 pub mod map_helper;
 pub mod map_loader;
 
+// UI 模块
+pub mod ui;
+
+// 游戏主应用和场景系统
+pub mod game_app;
+pub mod scenes;
+
 pub use components::*;
 pub use systems::*;
 pub use world::GameWorld;
@@ -18,6 +25,13 @@ pub use world::GameWorld;
 // Map Helper/Loader 导出
 pub use map_helper::MapHelper;
 pub use map_loader::MapLoader;
+
+// UI 导出
+pub use ui::{CharacterStatus, HealthBar, ManaBar, ExpBar, SkillBar, ChatWindow, UIRenderer};
+
+// 游戏应用导出
+pub use game_app::GameState;
+pub use scenes::{Scene, SceneType, LoginScene, SelectScene, GameScene};
 
 // ============================================================================
 // 架构说明

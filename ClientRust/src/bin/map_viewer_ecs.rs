@@ -425,7 +425,7 @@ impl EventHandler for MapViewerApp {
             RenderSystem::draw_obstacles(ctx, &mut canvas, &self.world, &pos, &camera)?;
         }
 
-        // 渲染角色（需要传递world以检测Front层重叠）
+        // 渲染角色
         for (_entity, (player, player_pos)) in self.world.query::<(&Player, &Position)>().iter() {
             RenderSystem::draw_player_with_world(ctx, &mut canvas, &self.world, player, player_pos, &pos, &camera)?;
         }
@@ -765,9 +765,10 @@ fn main() -> GameResult {
 
     // 创建 GGEZ 上下文
     let (mut ctx, event_loop) = ContextBuilder::new("map_viewer_ecs", "Crystal Team")
-        .window_setup(WindowSetup::default().title("传奇地图查看器 ECS - GGEZ + hecs").vsync(true))
+        .window_setup(WindowSetup::default().title("传奇地图查看器 ECS - GGEZ + hecs").samples(ggez::conf::NumSamples::Four).vsync(true))
         .window_mode(
             WindowMode::default()
+            .fullscreen_type(ggez::conf::FullscreenType::Windowed)
                 .dimensions(1280.0, 720.0)
                 .resizable(true),
         )

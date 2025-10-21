@@ -207,6 +207,140 @@ impl RenderSystem {
         Ok(())
     }
 
+    /// 🎯 绘制Front层（带角色遮挡透明效果）
+    /// 当Front层瓦片与角色位置重叠时，使用半透明绘制
+    pub fn draw_front_layer_with_occlusion(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        pos: &Position,
+        camera: &Camera,
+        config: &RenderConfig,
+        visible_area_entity: hecs::Entity,
+        player_positions: &[(f32, f32)],
+    ) -> GameResult<()> {
+        use crate::ecs::{CELL_WIDTH, CELL_HEIGHT, TileLayer, MapTile, VisibleArea};
+        use crate::ecs::map_helper::MapHelper;
+        
+        // 获取可见区域的瓦片
+        if let Ok(visible_area) = world.get::<&VisibleArea>(visible_area_entity) {
+            for &entity in &visible_area.visible_entities {
+                if let Ok(tile) = world.get::<&MapTile>(entity) {
+                    // 只处理Front层
+                    if !matches!(tile.layer, TileLayer::Front) {
+                        continue;
+                    }
+                    
+                    if !config.show_front {
+                        continue;
+                    }
+                    
+                    // 检查瓦片是否与任何角色重叠
+                    let mut has_overlap = false;
+                    for &(player_x, player_y) in player_positions {
+                        let (player_grid_x, player_grid_y) = MapHelper::world_to_grid(player_x, player_y);
+                        
+                        // 检查瓦片是否在角色上方附近
+                        let dx = (tile.grid_x - player_grid_x).abs();
+                        let dy = player_grid_y - tile.grid_y; // 正值表示瓦片在角色上方
+                        
+                        // 如果瓦片在角色上方且X方向接近，认为有遮挡
+                        if dx <= 3 && dy >= 0 && dy <= 5 {
+                            has_overlap = true;
+                            break;
+                        }
+                    }
+                    
+                    // 根据是否重叠设置不同的透明度
+                    if has_overlap {
+                        // 🎯 半透明绘制（alpha=0.4，让玩家能看到角色）
+                        Self::draw_tile_with_alpha(ctx, canvas, &tile, pos, camera, config, 0.4)?;
+                    } else {
+                        // 正常绘制
+                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config)?;
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// 绘制单个瓦片（支持自定义透明度）
+    fn draw_tile_with_alpha(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        tile: &MapTile,
+        pos: &Position,
+        camera: &Camera,
+        config: &RenderConfig,
+        alpha: f32,
+    ) -> GameResult<()> {
+        use crate::ecs::{CELL_WIDTH, CELL_HEIGHT};
+        use crate::ecs::systems::CameraSystem;
+        use crate::graphics::libraries::get_map_library;
+        use ggez::graphics::Color;
+        
+        if let Some(mlib) = get_map_library(tile.library_index) {
+            if let Ok(mut mlib) = mlib.lock() {
+                // 先获取所有需要的信息
+                let (tile_w, tile_h) = mlib
+                    .get_size(tile.image_index as usize)
+                    .unwrap_or((CELL_WIDTH as i16, CELL_HEIGHT as i16));
+                
+                let (offset_x, offset_y) = mlib
+                    .get_offset(tile.image_index as usize)
+                    .unwrap_or((0, 0));
+                
+                // 然后获取纹理
+                match mlib.get_or_create_texture(ctx, tile.image_index as usize) {
+                    Ok(info) => {
+                        if let Some(ref texture) = info.image {
+                            let mut world_x = (tile.grid_x * CELL_WIDTH) as f32;
+                            let world_y = (tile.grid_y * CELL_HEIGHT) as f32;
+                            
+                            let mut adjusted_y = if (tile_w as i32 != CELL_WIDTH
+                                || tile_h as i32 != CELL_HEIGHT)
+                                && (tile_w as i32 != CELL_WIDTH * 2
+                                    || tile_h as i32 != CELL_HEIGHT * 2)
+                            {
+                                world_y + CELL_HEIGHT as f32 - tile_h as f32
+                            } else {
+                                world_y
+                            };
+                            
+                            // Front层混合模式偏移
+                            if tile.use_blend {
+                                adjusted_y -= 2.0;
+                            }
+                            
+                            // 应用偏移量
+                            world_x += offset_x as f32;
+                            let final_y = adjusted_y + offset_y as f32;
+                            
+                            let (screen_x, screen_y) =
+                                CameraSystem::world_to_screen(pos, camera, world_x, final_y);
+                            
+                            // 🎯 使用自定义透明度
+                            let color = Color::from_rgba(255, 255, 255, (alpha * 255.0) as u8);
+                            
+                            canvas.draw(
+                                texture,
+                                ggez::graphics::DrawParam::default()
+                                    .dest([screen_x, screen_y])
+                                    .scale([camera.zoom, camera.zoom])
+                                    .color(color),
+                            );
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
     /// 绘制单个瓦片（快速版：不切换混合模式）
     pub fn draw_tile_fast(
         ctx: &mut Context,
@@ -588,14 +722,9 @@ impl RenderSystem {
                                 world_y
                             );
                             
-                            // 🎯 当角色被Front层遮挡时，添加轻微的发光效果以便在建筑物下看清
-                            // 使用稍微提亮的颜色，而不是改变混合模式或透明度
-                            let color = if has_front_overlap {
-                                // 轻微提亮（添加少量白色）
-                                Color::from_rgba(255, 255, 255, 200)
-                            } else {
-                                Color::WHITE
-                            };
+                            // 🎯 角色始终保持完全可见（不改变透明度）
+                            // 遮挡效果由渲染顺序控制：Front层绘制在角色之后
+                            let color = Color::WHITE;
                             
                             canvas.draw(
                                 texture,
