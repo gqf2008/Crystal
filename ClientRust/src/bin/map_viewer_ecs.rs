@@ -190,8 +190,12 @@ impl PlayerAction {
 struct MouseInput {
     left_pressed: bool,   // 左键是否按下
     right_pressed: bool,  // 右键是否按下
-    left_clicked: bool,   // 🎯 左键单击事件（帧事件）
-    right_clicked: bool,  // 🎯 右键单击事件（帧事件）
+    left_double_clicked: bool,   // 🎯 左键双击事件（帧事件）
+    right_double_clicked: bool,  // 🎯 右键双击事件（帧事件）
+    left_press_time: i32,  // 🎯 左键按下持续时间(帧数)
+    right_press_time: i32, // 🎯 右键按下持续时间(帧数)
+    left_last_click_time: std::time::Instant,  // 🎯 左键上次点击时间
+    right_last_click_time: std::time::Instant, // 🎯 右键上次点击时间
     x: f32,
     y: f32,
 }
@@ -410,10 +414,13 @@ impl MapHelper {
         
         let cell = &map_data.cells[x as usize][y as usize];
         
-        // 传奇障碍物判断逻辑：
-        // 1. 有门（door_index != 0）不可行走
-        // 2. 有前景层物体（front_image != 0）不可行走
-        cell.door_index == 0 && cell.front_image == 0
+        // ✅ 传奇正确的障碍物判断逻辑：
+        // back_image 的第 29 位 (0x20000000) 标记该格子是否有障碍物
+        // 不能简单判断 front_image != 0，因为桥梁、地面装饰等也有 front_image 但可以行走
+        let has_obstacle = (cell.back_image & 0x20000000) != 0;
+        
+        // 有障碍物标记 = 不可行走
+        !has_obstacle
     }
     
     /// 🎯 格子坐标转世界坐标（中心点）
@@ -556,15 +563,23 @@ impl PlayerSystem {
             );
             
             // 🎯 状态机：处理鼠标输入
-            // 1. 单击事件 → 切换到自动寻路模式
-            if mouse_input.left_clicked || mouse_input.right_clicked {
-                let is_run = mouse_input.right_clicked;  // 右键=跑,左键=走
+            // 1. 双击事件 → 切换到自动寻路模式
+            if mouse_input.left_double_clicked || mouse_input.right_double_clicked {
+                let is_run = mouse_input.right_double_clicked;  // 右键=跑,左键=走
                 
                 match player.move_mode {
                     MoveMode::Idle => {
                         // 空闲状态 → 单击触发寻路
                         let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
                         let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
+                        
+                        // 🐛 调试输出：坐标转换
+                        println!("🔍 寻路调试:");
+                        println!("  屏幕坐标: ({}, {})", mouse_input.x, mouse_input.y);
+                        println!("  世界坐标: ({:.1}, {:.1})", mouse_world_x, mouse_world_y);
+                        println!("  目标格子: ({}, {})", target_grid_x, target_grid_y);
+                        println!("  起始格子: ({}, {})", start_grid_x, start_grid_y);
+                        println!("  目标格子可走: {}", MapHelper::is_walkable(&map_data, target_grid_x, target_grid_y));
                         
                         // 使用 A* 寻路
                         let map_data_for_pathfinding = map_data.clone();
@@ -625,7 +640,9 @@ impl PlayerSystem {
                 }
             }
             // 2. 长按事件 → 直接跟随模式(不寻路)
-            else if mouse_input.left_pressed || mouse_input.right_pressed {
+            // 🎯 只在真正长按(>10帧)时才触发直接跟随
+            else if (mouse_input.left_pressed && mouse_input.left_press_time > 10) 
+                  || (mouse_input.right_pressed && mouse_input.right_press_time > 10) {
                 let is_run = mouse_input.right_pressed;
                 
                 match player.move_mode {
@@ -735,10 +752,19 @@ impl PlayerSystem {
             }
         }
         
-        // 🔄 清除单击事件标志(帧事件,处理一次后清除)
+        // 🔄 更新鼠标按下时间和清除双击事件
         if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
-            mouse_input.left_clicked = false;
-            mouse_input.right_clicked = false;
+            // 🎯 增加按下时间计数
+            if mouse_input.left_pressed {
+                mouse_input.left_press_time += 1;
+            }
+            if mouse_input.right_pressed {
+                mouse_input.right_press_time += 1;
+            }
+            
+            // 🎯 清除双击事件标志(帧事件,处理一次后清除)
+            mouse_input.left_double_clicked = false;
+            mouse_input.right_double_clicked = false;
         }
         
         // 📷 更新摄像机跟随玩家
@@ -1922,8 +1948,12 @@ impl MapViewerApp {
         let _mouse_input_entity = world.spawn((MouseInput {
             left_pressed: false,
             right_pressed: false,
-            left_clicked: false,   // 🎯 单击事件
-            right_clicked: false,  // 🎯 单击事件
+            left_double_clicked: false,   // 🎯 双击事件
+            right_double_clicked: false,  // 🎯 双击事件
+            left_press_time: 0,    // 🎯 按下时间
+            right_press_time: 0,   // 🎯 按下时间
+            left_last_click_time: std::time::Instant::now() - std::time::Duration::from_secs(10),  // 🎯 初始化为很久以前
+            right_last_click_time: std::time::Instant::now() - std::time::Duration::from_secs(10),
             x: 0.0,
             y: 0.0,
         },));
@@ -2202,10 +2232,10 @@ impl EventHandler for MapViewerApp {
                 if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
                     if button == MouseButton::Left {
                         mouse_input.left_pressed = true;
-                        mouse_input.left_clicked = true;  // 🎯 标记单击事件
+                        mouse_input.left_press_time = 0;  // 🎯 重置按下时间
                     } else {
                         mouse_input.right_pressed = true;
-                        mouse_input.right_clicked = true;  // 🎯 标记单击事件
+                        mouse_input.right_press_time = 0;  // 🎯 重置按下时间
                     }
                     mouse_input.x = x;
                     mouse_input.y = y;
@@ -2226,17 +2256,54 @@ impl EventHandler for MapViewerApp {
         &mut self,
         _ctx: &mut Context,
         button: MouseButton,
-        _x: f32,
-        _y: f32,
+        x: f32,
+        y: f32,
     ) -> GameResult<()> {
         match button {
-            // 左键和右键：清除按下状态
+            // 左键和右键：检测双击
             MouseButton::Left | MouseButton::Right => {
                 if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
+                    // 🎯 更新鼠标位置（防止快速点击时位置不准确）
+                    mouse_input.x = x;
+                    mouse_input.y = y;
+                    
                     if button == MouseButton::Left {
+                        // 🎯 双击检测：如果按下时间很短(< 10帧)且距离上次点击 < 500ms
+                        if mouse_input.left_press_time < 10 {
+                            let now = std::time::Instant::now();
+                            let time_since_last_click = now.duration_since(mouse_input.left_last_click_time);
+                            
+                            if time_since_last_click < std::time::Duration::from_millis(500) {
+                                // 双击！
+                                mouse_input.left_double_clicked = true;
+                                println!("👆👆 左键双击事件触发 at ({}, {})", x, y);
+                                // 重置上次点击时间，防止三击被识别为两次双击
+                                mouse_input.left_last_click_time = now - std::time::Duration::from_secs(10);
+                            } else {
+                                // 第一次点击
+                                mouse_input.left_last_click_time = now;
+                            }
+                        }
                         mouse_input.left_pressed = false;
+                        mouse_input.left_press_time = 0;
                     } else {
+                        // 🎯 双击检测：右键
+                        if mouse_input.right_press_time < 10 {
+                            let now = std::time::Instant::now();
+                            let time_since_last_click = now.duration_since(mouse_input.right_last_click_time);
+                            
+                            if time_since_last_click < std::time::Duration::from_millis(500) {
+                                // 双击！
+                                mouse_input.right_double_clicked = true;
+                                println!("👆👆 右键双击事件触发 at ({}, {})", x, y);
+                                mouse_input.right_last_click_time = now - std::time::Duration::from_secs(10);
+                            } else {
+                                // 第一次点击
+                                mouse_input.right_last_click_time = now;
+                            }
+                        }
                         mouse_input.right_pressed = false;
+                        mouse_input.right_press_time = 0;
                     }
                 }
             }
