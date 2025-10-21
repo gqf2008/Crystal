@@ -132,6 +132,9 @@ struct Player {
     target_x: f32,
     target_y: f32,
     is_moving: bool,
+    path: Vec<(i32, i32)>,  // 🎯 寻路路径（格子坐标）
+    path_index: usize,      // 🎯 当前路径点索引
+    move_mode: MoveMode,    // 🎯 移动模式状态机
 }
 
 /// 角色动作
@@ -140,6 +143,17 @@ enum PlayerAction {
     Stand = 0,
     Walk = 1,
     Run = 2,
+}
+
+/// 移动模式状态机
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum MoveMode {
+    /// 空闲状态 - 不移动
+    Idle,
+    /// 直接跟随模式 - 长按鼠标，直接朝鼠标方向移动（不寻路）
+    DirectFollow,
+    /// 自动寻路模式 - 单击鼠标，自动寻路到目标点
+    AutoPathfinding,
 }
 
 impl PlayerAction {
@@ -174,8 +188,10 @@ impl PlayerAction {
 /// 鼠标输入状态组件（单例）
 #[derive(Debug, Clone)]
 struct MouseInput {
-    left_pressed: bool,
-    right_pressed: bool,
+    left_pressed: bool,   // 左键是否按下
+    right_pressed: bool,  // 右键是否按下
+    left_clicked: bool,   // 🎯 左键单击事件（帧事件）
+    right_clicked: bool,  // 🎯 右键单击事件（帧事件）
     x: f32,
     y: f32,
 }
@@ -245,6 +261,7 @@ struct RenderConfig {
     show_obstacles: bool,
     show_animations: bool,
     show_borders: bool,
+    show_path: bool,  // 🎯 显示寻路路径
     max_fps: u32,  // 🎯 最大帧率限制
     enable_lod: bool,  // 🎯 启用LOD（缩小时过滤纹理）
 }
@@ -347,17 +364,78 @@ impl CameraSystem {
         draggable.is_dragging = false;
     }
 
-    /// 缩放
-    fn zoom(pos: &mut Position, camera: &mut Camera, delta: f32, mouse_x: f32, mouse_y: f32) {
-        let old_zoom = camera.zoom;
-        camera.zoom = (camera.zoom * (1.0 + delta * 0.1)).clamp(0.1, 4.0);
+    /// 缩放（简化版本，避免晃动）
+    fn zoom(_pos: &mut Position, camera: &mut Camera, delta: f32, _mouse_x: f32, _mouse_y: f32) {
+        // 简单缩放，不改变摄像机位置（位置由角色跟随控制）
+        camera.zoom = (camera.zoom * (1.0 + delta * 0.1)).clamp(0.5, 3.0);
+    }
+}
+
+/// 地图辅助函数 - 查找无障碍位置、寻路等
+struct MapHelper;
+
+impl MapHelper {
+    /// 🎯 找到地图中心附近的无障碍位置
+    fn find_center_walkable_position(map_data: &MapData) -> (i32, i32) {
+        let center_x = map_data.width / 2;
+        let center_y = map_data.height / 2;
         
-        // 以鼠标位置为中心缩放
-        let world_x = pos.x + (mouse_x - camera.screen_width / 2.0) / old_zoom;
-        let world_y = pos.y + (mouse_y - camera.screen_height / 2.0) / old_zoom;
+        // 螺旋搜索：从中心向外扩散
+        for radius in 0i32..50i32 {
+            for dx in -radius..=radius {
+                for dy in -radius..=radius {
+                    // 只检查当前半径的边界格子
+                    if dx.abs() == radius || dy.abs() == radius {
+                        let x = center_x + dx;
+                        let y = center_y + dy;
+                        
+                        if Self::is_walkable(map_data, x, y) {
+                            return (x, y);
+                        }
+                    }
+                }
+            }
+        }
         
-        pos.x = world_x - (mouse_x - camera.screen_width / 2.0) / camera.zoom;
-        pos.y = world_y - (mouse_y - camera.screen_height / 2.0) / camera.zoom;
+        // 如果实在找不到，返回中心
+        (center_x, center_y)
+    }
+    
+    /// 🎯 检查格子是否可行走（没有障碍物）
+    fn is_walkable(map_data: &MapData, x: i32, y: i32) -> bool {
+        // 边界检查
+        if x < 0 || x >= map_data.width || y < 0 || y >= map_data.height {
+            return false;
+        }
+        
+        let cell = &map_data.cells[x as usize][y as usize];
+        
+        // 传奇障碍物判断逻辑：
+        // 1. 有门（door_index != 0）不可行走
+        // 2. 有前景层物体（front_image != 0）不可行走
+        cell.door_index == 0 && cell.front_image == 0
+    }
+    
+    /// 🎯 格子坐标转世界坐标（中心点）
+    fn grid_to_world(grid_x: i32, grid_y: i32) -> (f32, f32) {
+        const CELL_WIDTH: i32 = 48;
+        const CELL_HEIGHT: i32 = 32;
+        
+        let world_x = (grid_x * CELL_WIDTH + CELL_WIDTH / 2) as f32;
+        let world_y = (grid_y * CELL_HEIGHT + CELL_HEIGHT / 2) as f32;
+        
+        (world_x, world_y)
+    }
+    
+    /// 🎯 世界坐标转格子坐标
+    fn world_to_grid(world_x: f32, world_y: f32) -> (i32, i32) {
+        const CELL_WIDTH: i32 = 48;
+        const CELL_HEIGHT: i32 = 32;
+        
+        let grid_x = (world_x / CELL_WIDTH as f32).floor() as i32;
+        let grid_y = (world_y / CELL_HEIGHT as f32).floor() as i32;
+        
+        (grid_x, grid_y)
     }
 }
 
@@ -373,14 +451,52 @@ impl PlayerSystem {
     }
     
     /// 计算两点间的方向（0-7，八方向）
-    /// 注意：这是老版本的方向计算（用于测试）
+    /// 参考 SharedRust/src/utils/direction.rs
+    /// MirDirection: 0=Up, 1=UpRight, 2=Right, 3=DownRight, 4=Down, 5=DownLeft, 6=Left, 7=UpLeft
     fn calculate_direction(dx: f32, dy: f32) -> u8 {
-        let angle = dy.atan2(dx);
-        let mut dir = ((angle / std::f32::consts::PI * 4.0).round() as i32 + 4) % 8;
-        if dir < 0 {
-            dir += 8;
+        // 使用绝对值阈值来判断主方向
+        let abs_dx = dx.abs();
+        let abs_dy = dy.abs();
+        
+        // 如果差异很小，认为是纯水平或纯垂直
+        let threshold = 0.1;
+        
+        if abs_dx < threshold && abs_dy < threshold {
+            // 几乎不动，保持当前方向
+            return 4; // 默认朝下
         }
-        dir as u8
+        
+        // 根据 dx 和 dy 的符号和大小判断方向
+        if abs_dx > abs_dy * 2.414 {
+            // 主要是水平方向（tan(22.5°) ≈ 0.414, 1/0.414 ≈ 2.414）
+            if dx > 0.0 {
+                2  // Right
+            } else {
+                6  // Left
+            }
+        } else if abs_dy > abs_dx * 2.414 {
+            // 主要是垂直方向
+            if dy > 0.0 {
+                4  // Down
+            } else {
+                0  // Up
+            }
+        } else {
+            // 对角线方向
+            if dx > 0.0 {
+                if dy > 0.0 {
+                    3  // DownRight
+                } else {
+                    1  // UpRight
+                }
+            } else {
+                if dy > 0.0 {
+                    5  // DownLeft
+                } else {
+                    7  // UpLeft
+                }
+            }
+        }
     }
     
     /// 平滑方向转换（避免角色突然转180度）
@@ -397,6 +513,9 @@ impl PlayerSystem {
     
     /// 更新角色状态
     fn update(world: &mut World) {
+        use mir2_client::objects::pathfinder::PathFinder;
+        use mir2_shared::Point;
+        
         // 获取鼠标输入
         let mouse_input = world.query_mut::<&MouseInput>()
             .into_iter()
@@ -415,61 +534,196 @@ impl PlayerSystem {
             .map(|(_, (pos, cam))| (pos.clone(), cam.clone()))
             .unwrap_or((Position { x: 0.0, y: 0.0 }, Camera { zoom: 1.0, screen_width: 1280.0, screen_height: 720.0 }));
         
+        // 🎯 获取地图数据（用于寻路和碰撞检测）
+        let map_data = world.query_mut::<&MapData>()
+            .into_iter()
+            .next()
+            .map(|(_, data)| data.clone());
+        
+        let map_data = match map_data {
+            Some(data) => data,
+            None => return,
+        };
+        
         // 更新所有玩家
         for (_entity, (player, pos)) in world.query_mut::<(&mut Player, &mut Position)>() {
-            // 根据鼠标按键设置目标和动作
-            if mouse_input.left_pressed || mouse_input.right_pressed {
-                let (target_x, target_y) = Self::screen_to_world(
-                    mouse_input.x, 
-                    mouse_input.y, 
-                    &camera_pos, 
-                    &camera
-                );
+            // 📍 计算鼠标指向的世界坐标
+            let (mouse_world_x, mouse_world_y) = Self::screen_to_world(
+                mouse_input.x, 
+                mouse_input.y, 
+                &camera_pos, 
+                &camera
+            );
+            
+            // 🎯 状态机：处理鼠标输入
+            // 1. 单击事件 → 切换到自动寻路模式
+            if mouse_input.left_clicked || mouse_input.right_clicked {
+                let is_run = mouse_input.right_clicked;  // 右键=跑,左键=走
                 
-                player.target_x = target_x;
-                player.target_y = target_y;
-                player.is_moving = true;
+                match player.move_mode {
+                    MoveMode::Idle => {
+                        // 空闲状态 → 单击触发寻路
+                        let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
+                        let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
+                        
+                        // 使用 A* 寻路
+                        let map_data_for_pathfinding = map_data.clone();
+                        let pathfinder = PathFinder::new(
+                            map_data.width,
+                            map_data.height,
+                            Box::new(move |p: Point| !MapHelper::is_walkable(&map_data_for_pathfinding, p.x, p.y))
+                        );
+                        
+                        let start_point = Point::new(start_grid_x, start_grid_y);
+                        let target_point = Point::new(target_grid_x, target_grid_y);
+                        
+                        if let Some(path) = pathfinder.find_path(start_point, target_point) {
+                            player.path = path.iter().map(|p| (p.x, p.y)).collect();
+                            player.path_index = 0;
+                            player.is_moving = true;
+                            player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
+                            player.speed = if is_run { 1.6 } else { 1.33 };
+                            player.move_mode = MoveMode::AutoPathfinding;
+                            println!("🗺️ 寻路成功: {} 个路径点 ({})", player.path.len(), if is_run { "跑" } else { "走" });
+                        } else {
+                            println!("❌ 寻路失败: 无法到达目标");
+                        }
+                    }
+                    MoveMode::DirectFollow => {
+                        // 直接跟随模式 → 单击切换到寻路
+                        let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
+                        let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
+                        
+                        let map_data_for_pathfinding = map_data.clone();
+                        let pathfinder = PathFinder::new(
+                            map_data.width,
+                            map_data.height,
+                            Box::new(move |p: Point| !MapHelper::is_walkable(&map_data_for_pathfinding, p.x, p.y))
+                        );
+                        
+                        let start_point = Point::new(start_grid_x, start_grid_y);
+                        let target_point = Point::new(target_grid_x, target_grid_y);
+                        
+                        if let Some(path) = pathfinder.find_path(start_point, target_point) {
+                            player.path = path.iter().map(|p| (p.x, p.y)).collect();
+                            player.path_index = 0;
+                            player.is_moving = true;
+                            player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
+                            player.speed = if is_run { 1.6 } else { 1.33 };
+                            player.move_mode = MoveMode::AutoPathfinding;
+                            println!("🎯 切换到寻路模式: {} 个路径点", player.path.len());
+                        }
+                    }
+                    MoveMode::AutoPathfinding => {
+                        // 自动寻路模式 → 单击取消寻路
+                        player.move_mode = MoveMode::Idle;
+                        player.is_moving = false;
+                        player.action = PlayerAction::Stand;
+                        player.path.clear();
+                        println!("🛑 取消寻路");
+                    }
+                }
+            }
+            // 2. 长按事件 → 直接跟随模式(不寻路)
+            else if mouse_input.left_pressed || mouse_input.right_pressed {
+                let is_run = mouse_input.right_pressed;
                 
-                // 左键走，右键跑
-                player.action = if mouse_input.right_pressed {
-                    PlayerAction::Run
-                } else {
-                    PlayerAction::Walk
-                };
-                
-                player.speed = match player.action {
-                    PlayerAction::Walk => 2.0,
-                    PlayerAction::Run => 4.0,
-                    _ => 0.0,
-                };
-            } else {
-                player.is_moving = false;
-                player.action = PlayerAction::Stand;
+                match player.move_mode {
+                    MoveMode::Idle | MoveMode::DirectFollow => {
+                        // 空闲或已在直接跟随 → 继续直接跟随
+                        player.target_x = mouse_world_x;
+                        player.target_y = mouse_world_y;
+                        player.is_moving = true;
+                        player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
+                        player.speed = if is_run { 1.6 } else { 1.33 };
+                        player.move_mode = MoveMode::DirectFollow;
+                        player.path.clear();  // 清空寻路路径
+                    }
+                    MoveMode::AutoPathfinding => {
+                        // 自动寻路模式 → 长按取消寻路,切换到直接跟随
+                        player.target_x = mouse_world_x;
+                        player.target_y = mouse_world_y;
+                        player.is_moving = true;
+                        player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
+                        player.speed = if is_run { 1.6 } else { 1.33 };
+                        player.move_mode = MoveMode::DirectFollow;
+                        player.path.clear();
+                        println!("🎯 切换到直接跟随模式");
+                    }
+                }
+            }
+            // 3. 松开鼠标 → 根据模式处理
+            else {
+                match player.move_mode {
+                    MoveMode::DirectFollow => {
+                        // 直接跟随模式 → 松开鼠标停止
+                        player.move_mode = MoveMode::Idle;
+                        player.is_moving = false;
+                        player.action = PlayerAction::Stand;
+                    }
+                    MoveMode::AutoPathfinding => {
+                        // 自动寻路模式 → 继续寻路(不受松开鼠标影响)
+                    }
+                    MoveMode::Idle => {
+                        // 空闲状态 → 保持空闲
+                    }
+                }
             }
             
-            // 如果正在移动
-            if player.is_moving {
+            // 🎯 移动逻辑
+            // 1. 自动寻路模式：沿路径移动
+            if player.move_mode == MoveMode::AutoPathfinding && !player.path.is_empty() {
+                if player.path_index < player.path.len() {
+                    // 获取当前目标格子
+                    let (target_grid_x, target_grid_y) = player.path[player.path_index];
+                    let (target_x, target_y) = MapHelper::grid_to_world(target_grid_x, target_grid_y);
+                    
+                    let dx = target_x - pos.x;
+                    let dy = target_y - pos.y;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    
+                    // 到达当前路径点，移动到下一个
+                    if distance < player.speed * 2.0 {
+                        player.path_index += 1;
+                        
+                        // 如果到达终点
+                        if player.path_index >= player.path.len() {
+                            player.move_mode = MoveMode::Idle;
+                            player.is_moving = false;
+                            player.action = PlayerAction::Stand;
+                            player.path.clear();
+                            println!("✅ 到达目的地");
+                        }
+                    } else {
+                        // 🎯 更新方向和移动
+                        if distance > 10.0 {
+                            let target_dir = Self::calculate_direction(dx, dy);
+                            player.direction = Self::smooth_direction(player.direction, target_dir);
+                        }
+                        pos.x += (dx / distance) * player.speed;
+                        pos.y += (dy / distance) * player.speed;
+                    }
+                }
+            }
+            // 2. 直接跟随模式：直线移动到鼠标位置
+            else if player.move_mode == MoveMode::DirectFollow && player.is_moving {
                 let dx = player.target_x - pos.x;
                 let dy = player.target_y - pos.y;
                 let distance = (dx * dx + dy * dy).sqrt();
                 
-                // 如果距离目标很近，停止移动
-                if distance < player.speed {
+                // 到达目标
+                if distance < player.speed * 2.0 {
                     pos.x = player.target_x;
                     pos.y = player.target_y;
-                    player.is_moving = false;
-                    player.action = PlayerAction::Stand;
+                    // 不停止，继续跟随鼠标(在长按时会持续更新target)
                 } else {
-                    // 计算目标方向
-                    let target_dir = Self::calculate_direction(dx, dy);
-                    
-                    // 平滑转向
-                    player.direction = Self::smooth_direction(player.direction, target_dir);
-                    
-                    // 朝目标移动
-                    let move_angle = (player.direction as f32 * std::f32::consts::PI / 4.0) - std::f32::consts::PI;
-                    pos.x += move_angle.cos() * player.speed;
-                    pos.y += move_angle.sin() * player.speed;
+                    // 🎯 更新方向和移动
+                    if distance > 10.0 {
+                        let target_dir = Self::calculate_direction(dx, dy);
+                        player.direction = Self::smooth_direction(player.direction, target_dir);
+                    }
+                    pos.x += (dx / distance) * player.speed;
+                    pos.y += (dy / distance) * player.speed;
                 }
             }
             
@@ -479,6 +733,39 @@ impl PlayerSystem {
                 player.frame_time = 0;
                 player.frame_index = (player.frame_index + 1) % player.action.frame_count();
             }
+        }
+        
+        // 🔄 清除单击事件标志(帧事件,处理一次后清除)
+        if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
+            mouse_input.left_clicked = false;
+            mouse_input.right_clicked = false;
+        }
+        
+        // 📷 更新摄像机跟随玩家
+        Self::update_camera_follow(world);
+    }
+    
+    /// 摄像机跟随玩家（带平滑过渡）
+    fn update_camera_follow(world: &mut World) {
+        // 获取玩家位置
+        let player_pos = world.query_mut::<(&Player, &Position)>()
+            .into_iter()
+            .next()
+            .map(|(_, (_, pos))| (pos.x, pos.y));
+        
+        let Some((target_x, target_y)) = player_pos else { return };
+        
+        // 平滑更新摄像机位置（lerp 插值，smoothing = 0.1 表示每帧移动10%的距离）
+        const CAMERA_SMOOTHING: f32 = 0.1;
+        
+        for (_entity, (camera_pos, _camera)) in world.query_mut::<(&mut Position, &Camera)>() {
+            // 计算到目标的距离
+            let dx = target_x - camera_pos.x;
+            let dy = target_y - camera_pos.y;
+            
+            // 平滑插值移动
+            camera_pos.x += dx * CAMERA_SMOOTHING;
+            camera_pos.y += dy * CAMERA_SMOOTHING;
         }
     }
 }
@@ -949,6 +1236,108 @@ impl RenderSystem {
                     }
                     Err(_) => {}
                 }
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// 🎯 绘制寻路路径 (调试用)
+    fn draw_path(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        camera_pos: &Position,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        // 查询玩家的路径信息
+        for (_entity, (player, player_pos)) in world.query::<(&Player, &Position)>().iter() {
+            if player.path.is_empty() {
+                continue;
+            }
+
+            // 绘制从当前位置到第一个路径点的线段
+            if let Some(&(first_x, first_y)) = player.path.get(player.path_index) {
+                // 第一个路径点的世界坐标
+                let (first_world_x, first_world_y) = MapHelper::grid_to_world(first_x, first_y);
+                
+                // 转换到屏幕坐标
+                let (player_screen_x, player_screen_y) = CameraSystem::world_to_screen(
+                    camera_pos, camera, player_pos.x, player_pos.y
+                );
+                let (first_screen_x, first_screen_y) = CameraSystem::world_to_screen(
+                    camera_pos, camera, first_world_x, first_world_y
+                );
+                
+                // 绘制连接线 (黄色)
+                let line = graphics::Mesh::new_line(
+                    ctx,
+                    &[[player_screen_x, player_screen_y], [first_screen_x, first_screen_y]],
+                    2.0,
+                    Color::from_rgb(255, 255, 0), // 黄色
+                )?;
+                canvas.draw(&line, DrawParam::default());
+            }
+
+            // 绘制路径点之间的连接线
+            for i in player.path_index..(player.path.len() - 1) {
+                let (x1, y1) = player.path[i];
+                let (x2, y2) = player.path[i + 1];
+                
+                // 转换到世界坐标
+                let (world_x1, world_y1) = MapHelper::grid_to_world(x1, y1);
+                let (world_x2, world_y2) = MapHelper::grid_to_world(x2, y2);
+                
+                // 转换到屏幕坐标
+                let (screen_x1, screen_y1) = CameraSystem::world_to_screen(
+                    camera_pos, camera, world_x1, world_y1
+                );
+                let (screen_x2, screen_y2) = CameraSystem::world_to_screen(
+                    camera_pos, camera, world_x2, world_y2
+                );
+                
+                // 绘制连接线 (青色)
+                let line = graphics::Mesh::new_line(
+                    ctx,
+                    &[[screen_x1, screen_y1], [screen_x2, screen_y2]],
+                    2.0,
+                    Color::from_rgb(0, 255, 255), // 青色
+                )?;
+                canvas.draw(&line, DrawParam::default());
+            }
+
+            // 绘制路径点标记 (小圆点)
+            for (idx, &(x, y)) in player.path.iter().enumerate() {
+                if idx < player.path_index {
+                    continue; // 跳过已经走过的点
+                }
+                
+                // 转换到世界坐标
+                let (world_x, world_y) = MapHelper::grid_to_world(x, y);
+                
+                // 转换到屏幕坐标
+                let (screen_x, screen_y) = CameraSystem::world_to_screen(
+                    camera_pos, camera, world_x, world_y
+                );
+                
+                // 绘制圆点
+                // 当前目标点用更大的红色圆圈
+                let (radius, color) = if idx == player.path_index {
+                    (6.0, Color::from_rgb(255, 0, 0)) // 红色,大圆
+                } else {
+                    (3.0, Color::from_rgb(255, 255, 0)) // 黄色,小圆
+                };
+                
+                // 使用圆形绘制路径点
+                let circle = graphics::Mesh::new_circle(
+                    ctx,
+                    graphics::DrawMode::fill(),
+                    [screen_x, screen_y],
+                    radius,
+                    0.1,
+                    color,
+                )?;
+                canvas.draw(&circle, DrawParam::default());
             }
         }
         
@@ -1448,12 +1837,25 @@ impl MapViewerApp {
         // 加载地图瓦片到 ECS
         MapLoader::load_map(&mut world, reader)?;
 
-        // 创建相机实体
+        // 🎯 找到地图中心的无障碍位置作为玩家和摄像机出生点
+        let map_data = world.query_mut::<&MapData>()
+            .into_iter()
+            .next()
+            .map(|(_, data)| data.clone())
+            .expect("地图数据未加载");
+        
+        let (spawn_grid_x, spawn_grid_y) = MapHelper::find_center_walkable_position(&map_data);
+        let (spawn_x, spawn_y) = MapHelper::grid_to_world(spawn_grid_x, spawn_grid_y);
+        
+        println!("🧙 出生位置: 格子({}, {}) -> 世界坐标({:.1}, {:.1})", 
+                 spawn_grid_x, spawn_grid_y, spawn_x, spawn_y);
+
+        // 创建相机实体（初始位置设为出生点）
         let screen = ctx.gfx.drawable_size();
         let camera_entity = world.spawn((
             Position {
-                x: 2400.0,
-                y: 1600.0,
+                x: spawn_x,
+                y: spawn_y,
             },
             Camera {
                 zoom: 1.0,
@@ -1487,6 +1889,7 @@ impl MapViewerApp {
             show_obstacles: false,
             show_animations: true,
             show_borders: false,
+            show_path: false,  // 🎯 默认不显示路径
             max_fps: 160,  // 🎯 最高160帧
             enable_lod: true,  // 🎯 启用LOD优化
         },));
@@ -1494,7 +1897,7 @@ impl MapViewerApp {
         // 创建可见区域缓存实体
         let visible_area_entity = world.spawn((VisibleArea::default(),));
 
-        // 创建玩家角色实体
+        // 创建玩家角色实体（使用之前计算的出生点）
         let _player_entity = world.spawn((
             Player {
                 direction: 4,  // 初始方向：朝下
@@ -1502,13 +1905,16 @@ impl MapViewerApp {
                 frame_index: 0,
                 frame_time: 0,   // 帧时间累计
                 speed: 0.0,
-                target_x: 2400.0,
-                target_y: 1600.0,
+                target_x: spawn_x,
+                target_y: spawn_y,
                 is_moving: false,
+                path: Vec::new(),      // 🎯 寻路路径
+                path_index: 0,         // 🎯 路径索引
+                move_mode: MoveMode::Idle,  // 🎯 初始状态：空闲
             },
             Position {
-                x: 2400.0,
-                y: 1600.0,
+                x: spawn_x,
+                y: spawn_y,
             },
         ));
 
@@ -1516,6 +1922,8 @@ impl MapViewerApp {
         let _mouse_input_entity = world.spawn((MouseInput {
             left_pressed: false,
             right_pressed: false,
+            left_clicked: false,   // 🎯 单击事件
+            right_clicked: false,  // 🎯 单击事件
             x: 0.0,
             y: 0.0,
         },));
@@ -1718,6 +2126,11 @@ impl EventHandler for MapViewerApp {
             RenderSystem::draw_player(ctx, &mut canvas, player, player_pos, &pos, &camera)?;
         }
 
+        // 🎯 绘制寻路路径 (调试用)
+        if config.show_path {
+            RenderSystem::draw_path(ctx, &mut canvas, &self.world, &pos, &camera)?;
+        }
+
         // 绘制 UI 文本（使用中文字体）
         let time = self.world.get::<&TimeTracker>(self.time_entity).unwrap();
         
@@ -1741,9 +2154,10 @@ impl EventHandler for MapViewerApp {
              📍 位置: ({:.0}, {:.0}) | 缩放: {:.2}x\n\
              🎨 图层: Back={} Middle={} Front={}\n\
              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
-             👤 角色: [左键长按]走动 [右键长按]跑动 [中键拖拽]移动地图\n\
+             👤 角色: [长按左键]跟随鼠标走动 [长按右键]智能寻路跑动\n\
+             🗺️ 地图: [中键拖拽]移动地图 [滚轮]缩放\n\
              [M]选择地图 [G]网格 [O]障碍 [A]动画 [L]LOD\n\
-             [+/-]调整最大帧率 [1/2/3]切换图层 [滚轮]缩放",
+             [+/-]调整最大帧率 [1/2/3]切换图层",
             time.fps,
             frame_time,
             config.max_fps,
@@ -1783,13 +2197,15 @@ impl EventHandler for MapViewerApp {
         y: f32,
     ) -> GameResult<()> {
         match button {
-            // 左键和右键：控制角色移动
+            // 左键和右键:控制角色移动
             MouseButton::Left | MouseButton::Right => {
                 if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
                     if button == MouseButton::Left {
                         mouse_input.left_pressed = true;
+                        mouse_input.left_clicked = true;  // 🎯 标记单击事件
                     } else {
                         mouse_input.right_pressed = true;
+                        mouse_input.right_clicked = true;  // 🎯 标记单击事件
                     }
                     mouse_input.x = x;
                     mouse_input.y = y;
@@ -1814,7 +2230,7 @@ impl EventHandler for MapViewerApp {
         _y: f32,
     ) -> GameResult<()> {
         match button {
-            // 左键和右键：停止角色移动
+            // 左键和右键：清除按下状态
             MouseButton::Left | MouseButton::Right => {
                 if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
                     if button == MouseButton::Left {
@@ -1824,7 +2240,7 @@ impl EventHandler for MapViewerApp {
                     }
                 }
             }
-            // 中键：停止拖拽地图
+            // 中键：停止拖拽
             MouseButton::Middle => {
                 let mut draggable = self.world.get::<&mut Draggable>(self.camera_entity).unwrap();
                 CameraSystem::end_drag(&mut draggable);
@@ -1918,6 +2334,11 @@ impl EventHandler for MapViewerApp {
                     config.enable_lod = !config.enable_lod;
                     println!("🎯 LOD优化 (L): {}", if config.enable_lod { "启用（缩小时过滤50%瓦片）" } else { "禁用" });
                 }
+                KeyCode::KeyP => {
+                    let mut config = self.world.get::<&mut RenderConfig>(self.config_entity).unwrap();
+                    config.show_path = !config.show_path;
+                    println!("🎯 寻路路径 (P): {}", if config.show_path { "显示" } else { "隐藏" });
+                }
                 KeyCode::Equal | KeyCode::NumpadAdd => {
                     let mut config = self.world.get::<&mut RenderConfig>(self.config_entity).unwrap();
                     config.max_fps = (config.max_fps + 10).min(300);
@@ -1969,7 +2390,7 @@ fn main() -> GameResult {
     println!("\n🎮 ECS 地图查看器已启动!");
     println!("📋 快捷键:");
     println!("  👤 [鼠标左键长按] - 角色走动");
-    println!("  🏃 [鼠标右键长按] - 角色跑动");
+    println!("  🏃 [鼠标右键长按] - 角色跑动 (自动寻路)");
     println!("  🗺️  [鼠标中键拖拽] - 移动地图");
     println!("  [M] - 选择地图文件");
     println!("  [1/2/3] - 切换 Back/Middle/Front 层");
@@ -1977,6 +2398,7 @@ fn main() -> GameResult {
     println!("  [O] - 切换障碍物显示");
     println!("  [A] - 切换动画播放");
     println!("  [L] - 🎯 切换 LOD 优化（缩小时过滤纹理）");
+    println!("  [P] - 🎯 切换寻路路径显示（调试用）");
     println!("  [+/-] - 🎯 调整最大帧率限制");
     println!("  [B] - 切换边框显示 (调试)");
     println!("  [鼠标滚轮] - 缩放");
