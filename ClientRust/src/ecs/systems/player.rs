@@ -188,7 +188,8 @@ impl PlayerSystem {
                             player.path_index = 0;
                             player.is_moving = true;
                             player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
-                            player.speed = if is_run { 1.6 } else { 1.33 };
+                            // 🎯 统一速度：走路1.8, 跑步2.5
+                            player.speed = if is_run { 2.5 } else { 1.8 };
                             player.move_mode = MoveMode::AutoPathfinding;
                             println!("🎯 切换到寻路模式: {} 个路径点", player.path.len());
                         }
@@ -212,7 +213,8 @@ impl PlayerSystem {
                             player.path = path.iter().map(|p| (p.x, p.y)).collect();
                             player.path_index = 0;
                             player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
-                            player.speed = if is_run { 1.6 } else { 1.33 };
+                            // 🎯 统一速度：走路1.8, 跑步2.5
+                            player.speed = if is_run { 2.5 } else { 1.8 };
                             println!("✅ 寻路目标已更新: {} 个路径点 ({})", player.path.len(), if is_run { "跑" } else { "走" });
                         } else {
                             println!("❌ 新目标寻路失败: 无法到达");
@@ -221,8 +223,9 @@ impl PlayerSystem {
                 }
             }
             // 2. 长按事件 → 直接跟随模式(不寻路，但需要检查碰撞)
-            else if (mouse_input.left_pressed && mouse_input.left_press_time >= 30) 
-                  || (mouse_input.right_pressed && mouse_input.right_press_time >= 30) {
+            // 🎯 优化：降低延时从30帧→5帧，提升操作灵敏度
+            else if (mouse_input.left_pressed && mouse_input.left_press_time >= 5) 
+                  || (mouse_input.right_pressed && mouse_input.right_press_time >= 5) {
                 let is_run = mouse_input.right_pressed;
                 
                 // 🎯 检查目标位置是否可行走
@@ -236,7 +239,8 @@ impl PlayerSystem {
                             player.target_y = mouse_world_y;
                             player.is_moving = true;
                             player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
-                            player.speed = if is_run { 1.6 } else { 1.33 };
+                            // 🎯 优化速度：走路1.5→1.8, 跑步1.6→2.5 (更快更流畅)
+                            player.speed = if is_run { 2.5 } else { 1.8 };
                             player.move_mode = MoveMode::DirectFollow;
                             player.path.clear();
                         }
@@ -245,7 +249,7 @@ impl PlayerSystem {
                             player.target_y = mouse_world_y;
                             player.is_moving = true;
                             player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
-                            player.speed = if is_run { 1.6 } else { 1.33 };
+                            player.speed = if is_run { 2.5 } else { 1.8 };
                             player.move_mode = MoveMode::DirectFollow;
                             player.path.clear();
                             println!("🎯 切换到直接跟随模式");
@@ -334,15 +338,16 @@ impl PlayerSystem {
                         pos.x = next_x;
                         pos.y = next_y;
                     } else {
-                        // 遇到障碍物，停止移动
+                        // 🎯 遇到障碍物，暂停移动但保持DirectFollow模式和当前动画
+                        // 这样角色会继续播放走/跑动画（原地踏步效果）
                         player.is_moving = false;
-                        player.action = PlayerAction::Stand;
-                        player.move_mode = MoveMode::Idle;
+                        // 不改变 action，保持走/跑动画
+                        // 不改变 move_mode，保持 DirectFollow 状态
                     }
                 }
             }
             
-            // 更新动画帧
+            // 🎯 更新动画帧（始终播放，即使碰到障碍物也保持动画）
             player.frame_time += 1;
             if player.frame_time >= player.action.frame_interval() {
                 player.frame_time = 0;
