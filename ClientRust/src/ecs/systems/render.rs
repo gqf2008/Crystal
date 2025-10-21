@@ -497,26 +497,64 @@ impl RenderSystem {
             }
         }
         
-        // 🎯 检测角色是否与Front层重叠
+        // 🎯 遮挡检测：检测角色是否被Front层瓦片遮挡
+        // 遮挡条件：
+        // 1. Front层瓦片的世界Y坐标 <= 角色脚底Y坐标（瓦片在前面绘制）
+        // 2. Front层瓦片在屏幕空间与角色有重叠
         use crate::ecs::map_helper::MapHelper;
-        let (player_grid_x, player_grid_y) = MapHelper::world_to_grid(player_pos.x, player_pos.y);
+        use crate::ecs::{CELL_WIDTH, CELL_HEIGHT};
         
         let mut has_front_overlap = false;
+        
+        // 角色脚底的世界坐标和格子坐标
+        let player_world_x = player_pos.x;
+        let player_world_y = player_pos.y;
+        let (player_grid_x, player_grid_y) = MapHelper::world_to_grid(player_world_x, player_world_y);
+        
+        // 预先获取角色的尺寸信息（用于碰撞检测）
+        // 🎯 使用稍大的检测范围，避免边缘临界状态导致闪烁
+        let char_height = 80.0; // 角色大约高度（加大检测范围）
+        let char_width = 64.0;  // 角色大约宽度（加大检测范围）
+        
         for (_, tile) in world.query::<&MapTile>().iter() {
             // 只检查Front层
             if !matches!(tile.layer, TileLayer::Front) {
                 continue;
             }
             
-            // 检查瓦片位置是否与角色位置重叠（在角色周围1格范围内）
-            let tile_grid_x = tile.grid_x;
-            let tile_grid_y = tile.grid_y;
+            // 瓦片的世界坐标（左上角）
+            let tile_world_x = (tile.grid_x * CELL_WIDTH) as f32;
+            let tile_world_y = (tile.grid_y * CELL_HEIGHT) as f32;
             
-            let dx = (tile_grid_x - player_grid_x).abs();
-            let dy = (tile_grid_y - player_grid_y).abs();
+            // 条件1: Front层瓦片的Y坐标 <= 角色的Y坐标（格子空间）
+            // 即瓦片在角色前面或同一行
+            if tile.grid_y > player_grid_y {
+                continue; // 瓦片在角色后面，不会遮挡
+            }
             
-            // 如果Front层瓦片在角色位置或相邻位置，认为有重叠
-            if dx <= 1 && dy <= 1 {
+            // 条件2: 在世界空间检查X方向重叠
+            // Front层瓦片通常比较大（树木、建筑），需要获取实际尺寸
+            // 简化处理：假设Front层瓦片至少覆盖 2x2 格子 (96x64)
+            let tile_width = CELL_WIDTH as f32 * 2.0;  // 假设宽度
+            let tile_height = CELL_HEIGHT as f32 * 3.0; // 假设高度（建筑物可能更高）
+            
+            // 角色的包围盒（以脚底为基准）
+            let char_left = player_world_x - char_width / 2.0;
+            let char_right = player_world_x + char_width / 2.0;
+            let char_top = player_world_y - char_height;
+            let char_bottom = player_world_y;
+            
+            // 瓦片的包围盒
+            let tile_left = tile_world_x;
+            let tile_right = tile_world_x + tile_width;
+            let tile_top = tile_world_y;
+            let tile_bottom = tile_world_y + tile_height;
+            
+            // AABB碰撞检测
+            let x_overlap = char_right > tile_left && char_left < tile_right;
+            let y_overlap = char_bottom > tile_top && char_top < tile_bottom;
+            
+            if x_overlap && y_overlap {
                 has_front_overlap = true;
                 break;
             }
@@ -550,25 +588,22 @@ impl RenderSystem {
                                 world_y
                             );
                             
-                            // 🎯 根据是否与Front层重叠选择混合模式
-                            if has_front_overlap {
-                                // 与Front层重叠时使用ADD混合
-                                canvas.set_blend_mode(Self::create_blend_mode());
+                            // 🎯 当角色被Front层遮挡时，添加轻微的发光效果以便在建筑物下看清
+                            // 使用稍微提亮的颜色，而不是改变混合模式或透明度
+                            let color = if has_front_overlap {
+                                // 轻微提亮（添加少量白色）
+                                Color::from_rgba(255, 255, 255, 200)
                             } else {
-                                // 正常情况使用ALPHA混合
-                                canvas.set_blend_mode(BlendMode::ALPHA);
-                            }
+                                Color::WHITE
+                            };
                             
                             canvas.draw(
                                 texture,
                                 DrawParam::default()
                                     .dest([screen_x, screen_y])
                                     .scale([camera.zoom, camera.zoom])
-                                    .color(Color::WHITE),
+                                    .color(color),
                             );
-                            
-                            // 恢复默认混合模式
-                            canvas.set_blend_mode(BlendMode::ALPHA);
                         }
                     }
                     Err(_) => {}
