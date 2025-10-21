@@ -79,27 +79,46 @@ impl PathFinder {
             width,
             height,
             is_blocking_fn,
-            max_iterations: 1000,
+            max_iterations: 10000,  // ✅ 增加到10000次迭代
             diagonal_movement: true,
         }
     }
 
     /// Find path from start to goal using A* algorithm
     pub fn find_path(&self, start: Point, goal: Point) -> Option<Vec<Point>> {
+        // 🐛 调试:打印输入参数
+        println!("🔍 PathFinder.find_path 调用:");
+        println!("  start = ({}, {})", start.x, start.y);
+        println!("  goal  = ({}, {})", goal.x, goal.y);
+        
         // Validate start and goal
         if !self.is_valid_position(start) || !self.is_valid_position(goal) {
+            println!("  ❌ 坐标无效");
             return None;
         }
 
         // If goal is blocking, try to find closest valid position
+        let original_goal = goal;
         let goal = if (self.is_blocking_fn)(goal) {
-            self.find_nearest_walkable(goal)?
+            println!("  ⚠️ 原目标 ({}, {}) 被阻挡,寻找最近可走点...", goal.x, goal.y);
+            match self.find_nearest_walkable(goal) {
+                Some(new_goal) => {
+                    println!("  ✅ 找到替代目标: ({}, {})", new_goal.x, new_goal.y);
+                    new_goal
+                }
+                None => {
+                    println!("  ❌ 找不到可走的替代目标");
+                    return None;
+                }
+            }
         } else {
+            println!("  ✅ 目标格子可走");
             goal
         };
 
         // If start equals goal
         if start == goal {
+            println!("  ℹ️ 起点=终点,返回单点路径");
             return Some(vec![start]);
         }
 
@@ -119,12 +138,26 @@ impl PathFinder {
             iterations += 1;
             if iterations > self.max_iterations {
                 // Timeout - return partial path to closest node
-                return self.reconstruct_partial_path(&came_from, current.position, start);
+                println!("  ⏱️ A*超时 ({}次迭代),返回部分路径", iterations);
+                let partial = self.reconstruct_partial_path(&came_from, current.position, start);
+                if let Some(ref path) = partial {
+                    println!("  部分路径: {} 个点", path.len());
+                    println!("  path[0] = ({}, {})", path[0].x, path[0].y);
+                    println!("  path[last] = ({}, {})", path[path.len()-1].x, path[path.len()-1].y);
+                }
+                return partial;
             }
 
             // Check if reached goal
             if current.position == goal {
-                return Some(self.reconstruct_path(&came_from, goal, start));
+                let path = self.reconstruct_path(&came_from, goal, start);
+                
+                // 🐛 调试:打印路径结果
+                println!("  ✅ 找到路径: {} 个点", path.len());
+                println!("  path[0] = ({}, {})", path[0].x, path[0].y);
+                println!("  path[last] = ({}, {})", path[path.len()-1].x, path[path.len()-1].y);
+                
+                return Some(path);
             }
 
             // Add to closed set
@@ -162,6 +195,7 @@ impl PathFinder {
         }
 
         // No path found
+        println!("  ❌ 找不到路径 (搜索了{}次迭代)", iterations);
         None
     }
 

@@ -412,6 +412,7 @@ impl MapHelper {
             return false;
         }
         
+        // ✅ 修正: 传奇地图是按 cells[x][y] 存储的
         let cell = &map_data.cells[x as usize][y as usize];
         
         // ✅ 传奇正确的障碍物判断逻辑：
@@ -555,7 +556,7 @@ impl PlayerSystem {
         // 更新所有玩家
         for (_entity, (player, pos)) in world.query_mut::<(&mut Player, &mut Position)>() {
             // 📍 计算鼠标指向的世界坐标
-            let (mouse_world_x, mouse_world_y) = Self::screen_to_world(
+            let (mouse_world_x, mouse_world_y) = PlayerSystem::screen_to_world(
                 mouse_input.x, 
                 mouse_input.y, 
                 &camera_pos, 
@@ -571,20 +572,53 @@ impl PlayerSystem {
                     MoveMode::Idle => {
                         // 空闲状态 → 单击触发寻路
                         let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
-                        let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
                         
-                        // 🐛 调试输出：坐标转换
-                        println!("🔍 寻路调试:");
-                        println!("  屏幕坐标: ({:.1}, {:.1})", mouse_input.x, mouse_input.y);
-                        println!("  Camera尺寸: {:.0}x{:.0}", camera.screen_width, camera.screen_height);
-                        println!("  摄像机位置: ({:.1}, {:.1})", camera_pos.x, camera_pos.y);
-                        println!("  缩放: {:.2}", camera.zoom);
-                        println!("  世界坐标: ({:.1}, {:.1})", mouse_world_x, mouse_world_y);
-                        println!("  目标格子: ({}, {})", target_grid_x, target_grid_y);
-                        println!("  起始格子: ({}, {})", start_grid_x, start_grid_y);
-                        println!("  目标格子可走: {}", MapHelper::is_walkable(&map_data, target_grid_x, target_grid_y));
+                        // ✅ 使用C#原版算法:屏幕坐标转地图坐标
+                        // MapLocation.X = MouseLocation.X / CellWidth - OffSetX + User.CurrentLocation.X
+                        // 其中 OffSetX = ScreenWidth / 2 / CellWidth
+                        const CELL_WIDTH: f32 = 48.0;
+                        const CELL_HEIGHT: f32 = 32.0;
                         
-                        // 使用 A* 寻路
+                        let offset_x = (camera.screen_width / 2.0 / CELL_WIDTH) as i32;
+                        let offset_y = (camera.screen_height / 2.0 / CELL_HEIGHT) as i32;
+                        
+                        let target_grid_x = (mouse_input.x / CELL_WIDTH) as i32 - offset_x + start_grid_x;
+                        let target_grid_y = (mouse_input.y / CELL_HEIGHT) as i32 - offset_y + start_grid_y;
+                        
+                        // 🐛 调试输出:坐标转换的每一步
+                println!("\n🔍 ========== 寻路调试 (C#原版算法) ==========");
+                println!("� 鼠标原始输入:");
+                println!("  屏幕坐标(逻辑像素): ({:.1}, {:.1})", mouse_input.x, mouse_input.y);
+                println!("  屏幕尺寸: {:.0}x{:.0}", camera.screen_width, camera.screen_height);
+                
+                println!("\n📐 C#原版算法计算:");
+                println!("  格子尺寸: {:.0}x{:.0}", CELL_WIDTH, CELL_HEIGHT);
+                println!("  屏幕偏移(格子): offset_x={}, offset_y={}", offset_x, offset_y);
+                println!("  鼠标格子坐标: ({}, {})", 
+                         (mouse_input.x / CELL_WIDTH) as i32,
+                         (mouse_input.y / CELL_HEIGHT) as i32);
+                println!("  计算公式:");
+                println!("    target_x = {} - {} + {} = {}", 
+                         (mouse_input.x / CELL_WIDTH) as i32, offset_x, start_grid_x, target_grid_x);
+                println!("    target_y = {} - {} + {} = {}",
+                         (mouse_input.y / CELL_HEIGHT) as i32, offset_y, start_grid_y, target_grid_y);
+
+                println!("\n🎯 角色信息:");
+                println!("  起始格子: ({}, {})", start_grid_x, start_grid_y);
+                println!("  目标格子: ({}, {})", target_grid_x, target_grid_y);
+                
+                println!("\n📊 坐标变化分析:");
+                let delta_grid_x = target_grid_x - start_grid_x;
+                let delta_grid_y = target_grid_y - start_grid_y;
+                println!("  格子坐标差: Δx={}, Δy={}", delta_grid_x, delta_grid_y);
+                println!("  方向判断: {}", 
+                         if delta_grid_y > 0 { "向下↓(Y增大)" } 
+                         else if delta_grid_y < 0 { "向上↑(Y减小)" } 
+                         else { "水平→" });
+
+                println!("\n✅ 寻路参数:");
+                println!("  目标格子可走: {}", MapHelper::is_walkable(&map_data, target_grid_x, target_grid_y));
+                println!("==================================\n");                        // 使用 A* 寻路
                         let map_data_for_pathfinding = map_data.clone();
                         let pathfinder = PathFinder::new(
                             map_data.width,
@@ -602,7 +636,25 @@ impl PlayerSystem {
                             player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
                             player.speed = if is_run { 1.6 } else { 1.33 };
                             player.move_mode = MoveMode::AutoPathfinding;
-                            println!("🗺️ 寻路成功: {} 个路径点 ({})", player.path.len(), if is_run { "跑" } else { "走" });
+                            
+                            println!("\n🗺️ 寻路成功: {} 个路径点 ({})", player.path.len(), if is_run { "跑" } else { "走" });
+                            println!("  🎯 输入参数验证:");
+                            println!("    起点: start_point = ({}, {})", start_point.x, start_point.y);
+                            println!("    终点: target_point = ({}, {})", target_point.x, target_point.y);
+                            println!("    实际起点: path[0] = {:?}", player.path.first());
+                            println!("    实际终点: path[last] = {:?}", player.path.last());
+                            
+                            // 🐛 输出完整路径用于调试
+                            print!("  路径格子: ");
+                            for (i, &(x, y)) in player.path.iter().enumerate() {
+                                if i < 5 || i >= player.path.len() - 3 {
+                                    print!("({},{}) ", x, y);
+                                    if i == 4 && player.path.len() > 8 {
+                                        print!("... ");
+                                    }
+                                }
+                            }
+                            println!();
                         } else {
                             println!("❌ 寻路失败: 无法到达目标");
                         }
@@ -1305,6 +1357,19 @@ impl RenderSystem {
                 continue;
             }
 
+            // 🎯 一次性调试输出
+            static mut PATH_DEBUG_LOGGED: bool = false;
+            unsafe {
+                if !PATH_DEBUG_LOGGED {
+                    println!("🗺️ 路径绘制调试:");
+                    println!("  总路径点数: {}", player.path.len());
+                    println!("  当前路径索引: {}", player.path_index);
+                    println!("  摄像机位置: ({:.1}, {:.1})", camera_pos.x, camera_pos.y);
+                    println!("  屏幕尺寸: {:.0}x{:.0}", camera.screen_width, camera.screen_height);
+                    PATH_DEBUG_LOGGED = true;
+                }
+            }
+
             // 绘制从当前位置到第一个路径点的线段
             if let Some(&(first_x, first_y)) = player.path.get(player.path_index) {
                 // 第一个路径点的世界坐标
@@ -1318,17 +1383,25 @@ impl RenderSystem {
                     camera_pos, camera, first_world_x, first_world_y
                 );
                 
-                // 绘制连接线 (黄色)
-                let line = graphics::Mesh::new_line(
-                    ctx,
-                    &[[player_screen_x, player_screen_y], [first_screen_x, first_screen_y]],
-                    2.0,
-                    Color::from_rgb(255, 255, 0), // 黄色
-                )?;
-                canvas.draw(&line, DrawParam::default());
+                // 🎯 绘制连接线前,检查坐标是否合理
+                // 即使超出屏幕也绘制,但避免极端值导致的渲染问题
+                if player_screen_x.is_finite() && player_screen_y.is_finite() 
+                    && first_screen_x.is_finite() && first_screen_y.is_finite() {
+                    // 绘制连接线 (黄色)
+                    let line = graphics::Mesh::new_line(
+                        ctx,
+                        &[[player_screen_x, player_screen_y], [first_screen_x, first_screen_y]],
+                        2.0,
+                        Color::from_rgb(255, 255, 0), // 黄色
+                    )?;
+                    canvas.draw(&line, DrawParam::default());
+                }
             }
 
             // 绘制路径点之间的连接线
+            let mut out_of_screen_count = 0;
+            let mut drawn_line_count = 0;
+            
             for i in player.path_index..(player.path.len() - 1) {
                 let (x1, y1) = player.path[i];
                 let (x2, y2) = player.path[i + 1];
@@ -1345,14 +1418,39 @@ impl RenderSystem {
                     camera_pos, camera, world_x2, world_y2
                 );
                 
-                // 绘制连接线 (青色)
-                let line = graphics::Mesh::new_line(
-                    ctx,
-                    &[[screen_x1, screen_y1], [screen_x2, screen_y2]],
-                    2.0,
-                    Color::from_rgb(0, 255, 255), // 青色
-                )?;
-                canvas.draw(&line, DrawParam::default());
+                // 🎯 检查坐标是否合理 (允许超出屏幕,但必须是有限值)
+                if screen_x1.is_finite() && screen_y1.is_finite() 
+                    && screen_x2.is_finite() && screen_y2.is_finite() {
+                    
+                    // 🎯 即使超出屏幕也绘制 (让GPU自己裁剪)
+                    // 只要坐标有效就绘制
+                    if let Ok(line) = graphics::Mesh::new_line(
+                        ctx,
+                        &[[screen_x1, screen_y1], [screen_x2, screen_y2]],
+                        2.0,
+                        Color::from_rgb(0, 255, 255), // 青色
+                    ) {
+                        canvas.draw(&line, DrawParam::default());
+                        drawn_line_count += 1;
+                        
+                        // 统计超出屏幕的线段
+                        let out1 = screen_x1 < 0.0 || screen_x1 > camera.screen_width 
+                                || screen_y1 < 0.0 || screen_y1 > camera.screen_height;
+                        let out2 = screen_x2 < 0.0 || screen_x2 > camera.screen_width 
+                                || screen_y2 < 0.0 || screen_y2 > camera.screen_height;
+                        if out1 || out2 {
+                            out_of_screen_count += 1;
+                        }
+                    }
+                }
+            }
+            
+            // 🎯 调试输出:统计超出屏幕的线段数
+            unsafe {
+                if !PATH_DEBUG_LOGGED {
+                    println!("  绘制线段数: {}", drawn_line_count);
+                    println!("  超出屏幕的线段数: {}", out_of_screen_count);
+                }
             }
 
             // 绘制路径点标记 (小圆点)
@@ -1369,24 +1467,28 @@ impl RenderSystem {
                     camera_pos, camera, world_x, world_y
                 );
                 
-                // 绘制圆点
-                // 当前目标点用更大的红色圆圈
-                let (radius, color) = if idx == player.path_index {
-                    (6.0, Color::from_rgb(255, 0, 0)) // 红色,大圆
-                } else {
-                    (3.0, Color::from_rgb(255, 255, 0)) // 黄色,小圆
-                };
-                
-                // 使用圆形绘制路径点
-                let circle = graphics::Mesh::new_circle(
-                    ctx,
-                    graphics::DrawMode::fill(),
-                    [screen_x, screen_y],
-                    radius,
-                    0.1,
-                    color,
-                )?;
-                canvas.draw(&circle, DrawParam::default());
+                // 🎯 只绘制有效坐标的路径点
+                if screen_x.is_finite() && screen_y.is_finite() {
+                    // 绘制圆点
+                    // 当前目标点用更大的红色圆圈
+                    let (radius, color) = if idx == player.path_index {
+                        (6.0, Color::from_rgb(255, 0, 0)) // 红色,大圆
+                    } else {
+                        (3.0, Color::from_rgb(255, 255, 0)) // 黄色,小圆
+                    };
+                    
+                    // 使用圆形绘制路径点
+                    if let Ok(circle) = graphics::Mesh::new_circle(
+                        ctx,
+                        graphics::DrawMode::fill(),
+                        [screen_x, screen_y],
+                        radius,
+                        0.1,
+                        color,
+                    ) {
+                        canvas.draw(&circle, DrawParam::default());
+                    }
+                }
             }
         }
         
