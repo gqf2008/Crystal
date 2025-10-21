@@ -1217,7 +1217,7 @@ impl RenderSystem {
         camera: &Camera,
     ) -> GameResult<()> {
         use crate::ecs::components::{MonsterComp, AnimationComp};
-        use crate::graphics::libraries::{get_library, LibraryName};
+        use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
         use mir2_shared::MirAction;
         
@@ -1226,25 +1226,13 @@ impl RenderSystem {
             world.query::<(&MonsterComp, &Position, &AnimationComp)>().iter() 
         {
             // 获取怪物图库
-            // 怪物库命名规则: Mon1.lib, Mon2.lib, ...
+            // 怪物库使用 LibraryArray::Monsters
+            // 索引范围: 0-999
             let lib_index = (monster.monster_index / 1000) as usize;
-            let lib_name = match lib_index {
-                0 => LibraryName::Mon(1),
-                1 => LibraryName::Mon(2),
-                2 => LibraryName::Mon(3),
-                3 => LibraryName::Mon(4),
-                4 => LibraryName::Mon(5),
-                5 => LibraryName::Mon(6),
-                6 => LibraryName::Mon(7),
-                7 => LibraryName::Mon(8),
-                8 => LibraryName::Mon(9),
-                9 => LibraryName::Mon(10),
-                _ => LibraryName::Mon(1), // 默认使用 Mon1
-            };
             
-            let lib = match get_library(lib_name) {
-                Ok(lib) => lib,
-                Err(_) => continue, // 库不存在，跳过
+            let lib = match get_library_from_array(LibraryArray::Monsters, lib_index) {
+                Some(lib) => lib,
+                None => continue, // 库不存在，跳过
             };
             
             // 计算帧索引
@@ -1291,10 +1279,11 @@ impl RenderSystem {
             );
             
             // 绘制怪物
-            if let Some(image_info) = lib.get_image(final_frame as usize) {
+            let mut lib_locked = lib.lock().unwrap();
+            if let Ok(image_info) = lib_locked.get_image_info(final_frame as usize) {
                 // 计算绘制位置（考虑偏移）
-                let draw_x = screen_x + image_info.offset_x as f32 * camera.zoom;
-                let draw_y = screen_y + image_info.offset_y as f32 * camera.zoom;
+                let draw_x = screen_x + image_info.x as f32 * camera.zoom;
+                let draw_y = screen_y + image_info.y as f32 * camera.zoom;
                 
                 // 绘制精灵
                 if let Some(image) = &image_info.image {

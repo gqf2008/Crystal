@@ -105,25 +105,29 @@ codegen-units = 1
 # Slows compile times, marginal improvements.
 lto = "thin"
 # ========== 主程序入口 ==========
-# Bevy 版本 (新)
 [[bin]]
-name = "mir2_bevy"
-path = "src/bin/main_bevy.rs"
+name = "mir2x"
+path = "src/bin/mir2x.rs"
+
+# Bevy 版本 (新)
+# [[bin]]
+# name = "mir2_bevy"
+# path = "src/bin/main_bevy.rs"
 
 # Ggez 版本 (旧,保留用于参考)
-[[bin]]
-name = "mir2_client"
-path = "src/bin/main_ggez.rs"
+# [[bin]]
+# name = "mir2_client"
+# path = "src/bin/main_ggez.rs"
 
 # .lib 文件检查工具
-[[bin]]
-name = "lib_inspector"
-path = "lib_inspector.rs"
+# [[bin]]
+# name = "lib_inspector"
+# path = "lib_inspector.rs"
 
 # 简化的地图查看器 - 使用 GameScene 的 MapRenderer
-[[bin]]
-name = "simple_map_viewer"
-path = "src/bin/simple_map_viewer.rs"
+# [[bin]]
+# name = "simple_map_viewer"
+# path = "src/bin/simple_map_viewer.rs"
 
 # # 中文输入法测试程序
 # [[bin]]

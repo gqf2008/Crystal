@@ -73,6 +73,34 @@ enum BottomButton {
     ExitGame,
 }
 
+// 按钮布局常量（统一管理，避免绘制和点击检测不一致）
+const BUTTON_Y: f32 = 736.0;  // 768 - 32
+const BUTTON_HEIGHT: f32 = 32.0;
+const BUTTON_WIDTH: f32 = 96.0;
+const BUTTON_SPACING: f32 = 150.0;
+const BUTTON_START_X: f32 = 100.0;
+
+impl BottomButton {
+    /// 获取按钮的X坐标
+    fn get_x(&self) -> f32 {
+        let index = match self {
+            BottomButton::StartGame => 0.0,
+            BottomButton::NewCharacter => 1.0,
+            BottomButton::DeleteCharacter => 2.0,
+            BottomButton::Credits => 3.0,
+            BottomButton::ExitGame => 4.0,
+        };
+        BUTTON_START_X + BUTTON_SPACING * index
+    }
+    
+    /// 检查点是否在按钮范围内
+    fn contains(&self, x: f32, y: f32) -> bool {
+        let button_x = self.get_x();
+        x >= button_x && x <= button_x + BUTTON_WIDTH &&
+        y >= BUTTON_Y && y <= BUTTON_Y + BUTTON_HEIGHT
+    }
+}
+
 impl SelectScene {
     /// Create new select scene with character list
     /// 
@@ -967,10 +995,7 @@ impl Scene for SelectScene {
         }
         
         // 6. 绘制底部按钮 (水平布局，带悬停效果)
-        // C# 代码: Location = new Point(100 + (xPoint * n) - (xPoint / 2) - 50, Settings.ScreenHeight - 32)
-        let button_y = 736.0;  // 768 - 32
-        let button_spacing = 150.0;
-        let button_start_x = 100.0;
+        // 使用统一的布局常量
         
         // 辅助函数：根据按钮状态获取纹理索引
         let get_button_index = |base: i32, button_type: BottomButton| -> i32 {
@@ -988,23 +1013,23 @@ impl Scene for SelectScene {
             if let Ok(mut lib) = lib_arc.try_lock() {
                 // 开始游戏按钮 (Title_340, 341, 342)
                 let start_btn_index = get_button_index(340, BottomButton::StartGame);
-                let _ = lib.draw_with_color(ctx, canvas, start_btn_index as usize, button_start_x + button_spacing * 0.0, button_y, Color::WHITE, false);
+                let _ = lib.draw_with_color(ctx, canvas, start_btn_index as usize, BottomButton::StartGame.get_x(), BUTTON_Y, Color::WHITE, false);
                 
                 // 新建角色按钮 (Title_343, 344, 345)
                 let new_btn_index = get_button_index(343, BottomButton::NewCharacter);
-                let _ = lib.draw_with_color(ctx, canvas, new_btn_index as usize, button_start_x + button_spacing * 1.0, button_y, Color::WHITE, false);
+                let _ = lib.draw_with_color(ctx, canvas, new_btn_index as usize, BottomButton::NewCharacter.get_x(), BUTTON_Y, Color::WHITE, false);
                 
                 // 删除角色按钮 (Title_346, 347, 348)
                 let delete_btn_index = get_button_index(346, BottomButton::DeleteCharacter);
-                let _ = lib.draw_with_color(ctx, canvas, delete_btn_index as usize, button_start_x + button_spacing * 2.0, button_y, Color::WHITE, false);
+                let _ = lib.draw_with_color(ctx, canvas, delete_btn_index as usize, BottomButton::DeleteCharacter.get_x(), BUTTON_Y, Color::WHITE, false);
                 
                 // 制作人员按钮 (Title_349, 350, 351)
                 let credits_btn_index = get_button_index(349, BottomButton::Credits);
-                let _ = lib.draw_with_color(ctx, canvas, credits_btn_index as usize, button_start_x + button_spacing * 3.0, button_y, Color::WHITE, false);
+                let _ = lib.draw_with_color(ctx, canvas, credits_btn_index as usize, BottomButton::Credits.get_x(), BUTTON_Y, Color::WHITE, false);
                 
                 // 退出游戏按钮 (Title_352, 353, 354)
                 let exit_btn_index = get_button_index(352, BottomButton::ExitGame);
-                let _ = lib.draw_with_color(ctx, canvas, exit_btn_index as usize, button_start_x + button_spacing * 4.0, button_y, Color::WHITE, false);
+                let _ = lib.draw_with_color(ctx, canvas, exit_btn_index as usize, BottomButton::ExitGame.get_x(), BUTTON_Y, Color::WHITE, false);
             }
         }
         
@@ -1020,8 +1045,260 @@ impl Scene for SelectScene {
         Ok(())
     }
     
+    fn on_mouse_down(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        button: ggez::winit::event::MouseButton,
+        x: f32,
+        y: f32,
+        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+    ) -> GameResult {
+        use ggez::winit::event::MouseButton;
+        
+        // 调试：输出鼠标点击位置
+        tracing::debug!("🖱️ SelectScene 鼠标点击: ({:.0}, {:.0}), 按钮: {:?}", x, y, button);
+        
+        // 只处理左键点击
+        if button != MouseButton::Left {
+            return Ok(());
+        }
+        
+        // 1. 处理对话框点击（优先级最高）
+        if let Some(_dialog) = &mut self.new_character_dialog {
+            // TODO: 实现 NewCharacterDialog 的点击处理
+            // if dialog.handle_mouse_click(x, y, true) {
+            //     return Ok(()); // 对话框消费了点击事件
+            // }
+        }
+        
+        if let Some(dialog) = &mut self.delete_character_dialog {
+            // TODO: 实现 DeleteCharacterDialog 的点击处理
+        }
+        
+        if let Some(dialog) = &mut self.credits_dialog {
+            // TODO: 实现 CreditsDialog 的点击处理
+        }
+        
+        // 2. 处理角色槽位点击 (右侧垂直布局)
+        // C# 代码中的原始位置: (637, 194), (637, 298), (637, 402), (637, 506)
+        // 槽位大小约 80x80
+        let character_button_positions = [
+            (637.0, 194.0),
+            (637.0, 298.0),
+            (637.0, 402.0),
+            (637.0, 506.0),
+        ];
+        
+        for (i, &(slot_x, slot_y)) in character_button_positions.iter().enumerate() {
+            if i >= self.characters.len() {
+                break; // 没有更多角色
+            }
+            
+            // 检查点击是否在槽位范围内 (80x80)
+            if x >= slot_x && x <= slot_x + 80.0 &&
+               y >= slot_y && y <= slot_y + 80.0 {
+                // 点击了角色槽位
+                self.select_character(i as i32);
+                tracing::info!("🖱️ 选中角色: {}", self.characters[i].name);
+                return Ok(());
+            }
+        }
+        
+        // 3. 处理底部按钮点击
+        let all_buttons = [
+            BottomButton::StartGame,
+            BottomButton::NewCharacter,
+            BottomButton::DeleteCharacter,
+            BottomButton::Credits,
+            BottomButton::ExitGame,
+        ];
+        
+        for button_type in &all_buttons {
+            if button_type.contains(x, y) {
+                tracing::info!("🖱️ 点击按钮: {:?} at ({:.0}, {:.0})", button_type, x, y);
+                self.handle_button_click(*button_type, network_tx);
+                return Ok(());
+            }
+        }
+        
+        Ok(())
+    }
+    
+    fn on_mouse_up(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        _button: ggez::winit::event::MouseButton,
+        _x: f32,
+        _y: f32,
+        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+    ) -> GameResult {
+        // 清除按下状态
+        self.pressed_button = None;
+        Ok(())
+    }
+    
+    fn on_mouse_move(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        x: f32,
+        y: f32,
+    ) -> GameResult {
+        // 处理对话框鼠标移动
+        if let Some(_dialog) = &mut self.new_character_dialog {
+            // TODO: 实现对话框拖拽
+            // dialog.handle_mouse_drag(x, y);
+        }
+        
+        // 检测底部按钮悬停
+        let all_buttons = [
+            BottomButton::StartGame,
+            BottomButton::NewCharacter,
+            BottomButton::DeleteCharacter,
+            BottomButton::Credits,
+            BottomButton::ExitGame,
+        ];
+        
+        let old_hovered = self.hovered_button;
+        self.hovered_button = None;
+        
+        for button_type in &all_buttons {
+            if button_type.contains(x, y) {
+                self.hovered_button = Some(*button_type);
+                // 调试：悬停变化时输出
+                if old_hovered != self.hovered_button {
+                    tracing::debug!("✨ 按钮悬停: {:?}", button_type);
+                }
+                break;
+            }
+        }
+        
+        Ok(())
+    }
+    
+    fn on_key_down(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        input: ggez::input::keyboard::KeyInput,
+        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+    ) -> GameResult<Option<SceneType>> {
+        use ggez::winit::keyboard::KeyCode;
+        
+        // 检查物理键码
+        if let ggez::winit::event::KeyEvent {
+            physical_key: ggez::winit::keyboard::PhysicalKey::Code(keycode),
+            ..
+        } = &input.event {
+            match keycode {
+                KeyCode::Escape => {
+                    // ESC 键关闭对话框或退出
+                    if self.new_character_dialog.is_some() {
+                        self.new_character_dialog = None;
+                        tracing::info!("❌ 关闭新建角色对话框");
+                    } else if self.delete_character_dialog.is_some() {
+                        self.delete_character_dialog = None;
+                        tracing::info!("❌ 关闭删除角色对话框");
+                    } else if self.credits_dialog.is_some() {
+                        self.credits_dialog = None;
+                        tracing::info!("❌ 关闭制作人员对话框");
+                    } else {
+                        // TODO: 返回登录场景或退出游戏
+                        tracing::info!("❌ ESC 键: 退出角色选择");
+                    }
+                }
+                KeyCode::Enter | KeyCode::NumpadEnter => {
+                    // Enter 键开始游戏
+                    if !self.characters.is_empty() && self.selected_index >= 0 {
+                        self.handle_button_click(BottomButton::StartGame, network_tx);
+                    }
+                }
+                KeyCode::Digit1 | KeyCode::Numpad1 => {
+                    if !self.characters.is_empty() {
+                        self.select_character(0);
+                        tracing::info!("⌨️ 键盘选中角色1: {}", self.characters[0].name);
+                    }
+                }
+                KeyCode::Digit2 | KeyCode::Numpad2 => {
+                    if self.characters.len() > 1 {
+                        self.select_character(1);
+                        tracing::info!("⌨️ 键盘选中角色2: {}", self.characters[1].name);
+                    }
+                }
+                KeyCode::Digit3 | KeyCode::Numpad3 => {
+                    if self.characters.len() > 2 {
+                        self.select_character(2);
+                        tracing::info!("⌨️ 键盘选中角色3: {}", self.characters[2].name);
+                    }
+                }
+                KeyCode::Digit4 | KeyCode::Numpad4 => {
+                    if self.characters.len() > 3 {
+                        self.select_character(3);
+                        tracing::info!("⌨️ 键盘选中角色4: {}", self.characters[3].name);
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        Ok(None)
+    }
+    
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+}
+
+// Helper methods for SelectScene
+impl SelectScene {
+    /// 处理底部按钮点击
+    fn handle_button_click(
+        &mut self,
+        button: BottomButton,
+        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+    ) {
+        match button {
+            BottomButton::StartGame => {
+                if !self.characters.is_empty() && self.selected_index >= 0 {
+                    let char_index = self.characters[self.selected_index as usize].index;
+                    tracing::info!("🎮 开始游戏: 角色索引={}", char_index);
+                    
+                    // 发送 StartGame 命令
+                    let _ = network_tx.send(NetworkCommand::StartGame { 
+                        character_index: char_index 
+                    });
+                } else {
+                    tracing::warn!("⚠️ 没有选中角色");
+                }
+            }
+            BottomButton::NewCharacter => {
+                tracing::info!("➕ 打开新建角色对话框");
+                self.new_character_dialog = Some(NewCharacterDialog::new());
+            }
+            BottomButton::DeleteCharacter => {
+                if !self.characters.is_empty() && self.selected_index >= 0 {
+                    let character = &self.characters[self.selected_index as usize];
+                    tracing::info!("🗑️ 打开删除角色对话框: {}", character.name);
+                    self.delete_character_dialog = Some(DeleteCharacterDialog::new(
+                        character.name.clone(),
+                        character.index,
+                    ));
+                } else {
+                    tracing::warn!("⚠️ 没有选中角色可删除");
+                }
+            }
+            BottomButton::Credits => {
+                tracing::info!("ℹ️ 打开制作人员对话框");
+                self.credits_dialog = Some(CreditsDialog::new());
+            }
+            BottomButton::ExitGame => {
+                tracing::info!("🚪 退出游戏");
+                // TODO: 实现退出游戏逻辑
+                std::process::exit(0);
+            }
+        }
     }
 }
 

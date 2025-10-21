@@ -57,6 +57,7 @@ pub trait Scene {
         _button: ggez::winit::event::MouseButton,
         _x: f32,
         _y: f32,
+        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult {
         Ok(())
     }
@@ -69,6 +70,7 @@ pub trait Scene {
         _button: ggez::winit::event::MouseButton,
         _x: f32,
         _y: f32,
+        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult {
         Ok(())
     }

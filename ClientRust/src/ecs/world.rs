@@ -122,10 +122,17 @@ impl GameWorld {
                 name,
                 monster_index,
                 ai_mode: 0,
+                ai_type: 0,        // 无AI
+                spawn_x: position.x as f32,
+                spawn_y: position.y as f32,
             },
             AIState {
+                current_action: crate::ecs::components::AIAction::Idle,
                 mode: AIMode::Idle,
                 target_entity: None,
+                target_pos: None,
+                patrol_points: Vec::new(),
+                current_patrol_index: 0,
                 last_action_time: 0,
             },
             NetworkSync::new(id, NetworkObjectType::Monster),

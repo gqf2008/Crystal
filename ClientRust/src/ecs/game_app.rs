@@ -15,7 +15,6 @@ use ggez::event::EventHandler;
 use ggez::graphics::{Canvas, Color};
 use hecs::World;
 use std::sync::Arc;
-use parking_lot::RwLock;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
@@ -35,8 +34,8 @@ pub struct GameState {
     /// 场景类型
     scene_type: SceneType,
     
-    /// 网络管理器（可选）
-    network_manager: Option<Arc<RwLock<NetworkManager>>>,
+    /// 网络管理器（可选，使用 tokio::sync::RwLock 以支持跨 await 的 Send）
+    network_manager: Option<Arc<tokio::sync::RwLock<NetworkManager>>>,
     
     /// 事件接收器（从网络线程接收）
     event_rx: mpsc::UnboundedReceiver<GameEvent>,
@@ -44,11 +43,8 @@ pub struct GameState {
     /// 命令发送器（发送到网络线程）
     command_tx: mpsc::UnboundedSender<NetworkCommand>,
     
-    /// Tokio runtime（用于网络线程）
-    tokio_runtime: Option<Runtime>,
-    
     /// 客户端设置
-    settings: Arc<RwLock<ClientSettings>>,
+    settings: Arc<parking_lot::RwLock<ClientSettings>>,
     
     /// 场景间临时数据 - 角色列表（LoginScene → SelectScene）
     pending_characters: Option<Vec<CharacterSummary>>,
@@ -56,45 +52,63 @@ pub struct GameState {
     /// 场景间临时数据 - 选中的角色索引（SelectScene → GameScene）
     selected_character_index: Option<i32>,
 }
-
 impl GameState {
     /// 创建新的游戏应用
-    pub fn new(ctx: &mut Context) -> GameResult<Self> {
+    /// 
+    /// # 参数
+    /// - `ctx`: ggez 上下文
+    /// - `settings`: 客户端配置（由 ClientRuntime 加载）
+    /// - `runtime`: Tokio runtime（由 ClientRuntime 创建，保持网络任务运行）
+    pub fn new(
+        ctx: &mut Context,
+        settings: ClientSettings,
+    ) -> GameResult<Self> {
         println!("🎮 游戏应用初始化中...");
         
-        // 加载客户端设置
-        let settings = ClientSettings::load(false, None)
-            .map_err(|e| {
-                eprintln!("❌ 加载设置失败: {}", e);
-                ggez::GameError::CustomError(format!("加载设置失败: {}", e))
-            })?;
-        let settings = Arc::new(RwLock::new(settings));
+        let settings_arc = Arc::new(parking_lot::RwLock::new(settings));
         
         // 创建事件和命令通道
         let (event_tx, event_rx) = mpsc::unbounded_channel::<GameEvent>();
         let (command_tx, command_rx) = mpsc::unbounded_channel::<NetworkCommand>();
         
-        // 创建 Tokio runtime（用于网络线程）
-        let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .thread_name("mir2-network")
-            .build()
-            .map_err(|e| {
-                eprintln!("❌ 创建Tokio runtime失败: {}", e);
-                ggez::GameError::CustomError(format!("创建Tokio runtime失败: {}", e))
-            })?;
-        
         // 创建网络管理器
         let network_manager = NetworkManager::new(
-            settings.clone(),
+            settings_arc.clone(),
             event_tx.clone(),
             command_rx,
         );
         
-        let network_manager_arc = Arc::new(parking_lot::RwLock::new(network_manager));
+        let network_manager_arc = Arc::new(tokio::sync::RwLock::new(network_manager));
         
-        // 注意：网络管理器在这里创建，但不立即启动连接
-        // 实际使用中，可以在LoginScene中发送Connect命令来连接服务器
+        // 启动网络任务（使用 tokio::spawn，类似 CrystalGame）
+        {
+            let nm_clone = network_manager_arc.clone();
+            tokio::spawn(async move {
+                tracing::info!("🌐 网络任务启动");
+                
+                // 自动连接到服务器
+                {
+                    let mut nm = nm_clone.write().await;
+                    if let Err(e) = nm.connect().await {
+                        tracing::error!("❌ 初始连接失败: {}", e);
+                    } else {
+                        tracing::info!("✅ 已连接到服务器");
+                    }
+                }
+                
+                // 进入网络处理循环
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
+                    
+                    let mut nm = nm_clone.write().await;
+                    if let Err(e) = nm.process().await {
+                        tracing::error!("⚠️ 网络处理错误: {}", e);
+                        // 发生错误后等待一段时间再重试
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    }
+                }
+            });
+        }
         
         println!("✅ 网络系统初始化完成");
         
@@ -111,8 +125,7 @@ impl GameState {
             network_manager: Some(network_manager_arc),
             event_rx,
             command_tx,
-            tokio_runtime: Some(tokio_runtime),
-            settings,
+            settings: settings_arc,
             pending_characters: None,
             selected_character_index: None,
         })
@@ -257,7 +270,7 @@ impl EventHandler for GameState {
         x: f32,
         y: f32,
     ) -> GameResult {
-        self.current_scene.on_mouse_down(ctx, &mut self.world, button, x, y)
+        self.current_scene.on_mouse_down(ctx, &mut self.world, button, x, y, &self.command_tx)
     }
     
     fn mouse_button_up_event(
@@ -267,7 +280,7 @@ impl EventHandler for GameState {
         x: f32,
         y: f32,
     ) -> GameResult {
-        self.current_scene.on_mouse_up(ctx, &mut self.world, button, x, y)
+        self.current_scene.on_mouse_up(ctx, &mut self.world, button, x, y, &self.command_tx)
     }
     
     fn mouse_motion_event(

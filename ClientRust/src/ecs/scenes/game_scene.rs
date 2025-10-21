@@ -450,6 +450,7 @@ impl Scene for GameScene {
         button: MouseButton,
         x: f32,
         y: f32,
+        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult {
         // 更新鼠标状态
         if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
@@ -479,6 +480,7 @@ impl Scene for GameScene {
         button: MouseButton,
         _x: f32,
         _y: f32,
+        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult {
         // 更新鼠标状态
         if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {

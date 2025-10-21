@@ -96,22 +96,29 @@ impl NetworkManager {
     }
     
     /// Process commands from UI thread
-    fn process_commands(&mut self) {
+    async fn process_commands(&mut self) {
         // Process all pending commands
         while let Ok(command) = self.command_rx.try_recv() {
-            if let Err(e) = self.handle_command(command) {
+            if let Err(e) = self.handle_command(command).await {
                 tracing::error!("Failed to handle network command: {}", e);
             }
         }
     }
     
     /// Handle a single command
-    fn handle_command(&mut self, command: NetworkCommand) -> Result<()> {
+    async fn handle_command(&mut self, command: NetworkCommand) -> Result<()> {
         use mir2_shared::packets::client;
         
         match command {
             NetworkCommand::Login { username, password } => {
                 tracing::info!("Handling login command for user: {}", username);
+                
+                // 如果未连接，先连接到服务器
+                if !self.is_connected() {
+                    tracing::info!("Not connected, attempting to connect...");
+                    self.connect().await?;
+                }
+                
                 let packet = client::Login {
                     account_id: username,
                     password,
@@ -229,7 +236,7 @@ impl NetworkManager {
         let network_settings = self.settings.read().network.clone();
         
         // Process commands from UI
-        self.process_commands();
+        self.process_commands().await;
         
         // Process network I/O
         self.network.process(&network_settings).await?;

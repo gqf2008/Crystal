@@ -185,39 +185,41 @@ impl MapLoader {
     
     /// 生成测试怪物
     /// 
-    /// 在地图上随机生成一些测试怪物
-    pub fn spawn_test_monsters(world: &mut World, count: usize) -> GameResult<()> {
+    /// 在地图上随机生成一些测试怪物,确保生成在可行走位置
+    pub fn spawn_test_monsters(world: &mut World, map_data: &MapData, count: usize) {
         use crate::ecs::components::{
             Position, MonsterComp, AIState, Health, AnimationComp, SpriteComp,
         };
+        use crate::ecs::map_helper::MapHelper;
         use mir2_shared::MirAction;
         use rand::Rng;
         
         println!("🐲 正在生成 {} 个测试怪物...", count);
         
         let mut rng = rand::thread_rng();
+        let mut spawned = 0;
         
-        // 获取地图数据
-        let (map_width, map_height) = {
-            let mut map_width = 100;
-            let mut map_height = 100;
+        // 尝试生成怪物,最多重试次数
+        let max_attempts = count * 10;
+        let mut attempts = 0;
+        
+        while spawned < count && attempts < max_attempts {
+            attempts += 1;
             
-            for (_, map_data) in world.query::<&MapData>().iter() {
-                map_width = map_data.width;
-                map_height = map_data.height;
-                break;
+            // 随机网格位置（避开地图边缘）
+            let grid_x = rng.gen_range(10..map_data.width - 10);
+            let grid_y = rng.gen_range(10..map_data.height - 10);
+            
+            // 检查是否可行走
+            if !MapHelper::is_walkable(map_data, grid_x, grid_y) {
+                continue;
             }
             
-            (map_width, map_height)
-        };
-        
-        for i in 0..count {
-            // 随机位置（避开地图边缘）
-            let x = rng.gen_range(10..map_width - 10) as f32;
-            let y = rng.gen_range(10..map_height - 10) as f32;
+            // 转换为世界坐标
+            let (x, y) = MapHelper::grid_to_world(grid_x, grid_y);
             
             // 随机AI类型
-            let ai_type = (i % 3) as u8 + 1; // 1=近战, 2=远程, 3=巡逻
+            let ai_type = (spawned % 3) as u8 + 1; // 1=近战, 2=远程, 3=巡逻
             
             // 怪物数据
             let monster_name = match ai_type {
@@ -231,7 +233,7 @@ impl MapLoader {
             world.spawn((
                 Position { x, y },
                 MonsterComp {
-                    id: i as u32 + 1,
+                    id: spawned as u32 + 1,
                     name: monster_name.to_string(),
                     monster_index: 0,  // 使用第一个怪物模型
                     ai_mode: ai_type,
@@ -254,15 +256,16 @@ impl MapLoader {
                     loop_animation: true,
                 },
                 SpriteComp {
-                    library: 1,
-                    index: 0,
-                    width: 48,
-                    height: 64,
+                    library: 0,     // 怪物库索引
+                    index: 0,       // 贴图索引
+                    frame: 0,       // 当前帧
+                    blend_mode: crate::ecs::components::BlendModeComp::Alpha,
                 },
             ));
+            
+            spawned += 1;
         }
         
-        println!("✅ 成功生成 {} 个测试怪物", count);
-        Ok(())
+        println!("✅ 成功生成 {} 个测试怪物 (尝试次数: {})", spawned, attempts);
     }
 }

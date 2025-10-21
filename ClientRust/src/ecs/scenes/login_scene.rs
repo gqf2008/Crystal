@@ -56,6 +56,7 @@ pub struct LoginScene {
     pub ok_button_hovered: bool,
     pub account_button_hovered: bool,
     pub pass_button_hovered: bool,
+    pub view_key_button_hovered: bool,
     pub close_button_hovered: bool,
     
     // Status tracking
@@ -94,6 +95,7 @@ impl LoginScene {
             ok_button_hovered: false,
             account_button_hovered: false,
             pass_button_hovered: false,
+            view_key_button_hovered: false,
             close_button_hovered: false,
             last_status: None,
             message_log: Vec::new(),
@@ -1205,6 +1207,11 @@ impl Scene for LoginScene {
                 let pass_index = if self.pass_button_hovered { 327 } else { 326 };
                 let _ = lib.draw_with_color(ctx, canvas, pass_index, dialog_x + 166.0, dialog_y + 163.0, ggez::graphics::Color::WHITE, false);
                 
+                // "查看密钥" 按钮 (索引 332/333/334)
+                // C# 位置: (60, 189)
+                let view_key_index = if self.view_key_button_hovered { 333 } else { 332 };
+                let _ = lib.draw_with_color(ctx, canvas, view_key_index, dialog_x + 60.0, dialog_y + 189.0, ggez::graphics::Color::WHITE, false);
+                
                 // "关闭" 按钮 (索引 329/330/331)
                 // C# 位置: (166, 189)
                 let close_index = if self.close_button_hovered { 330 } else { 329 };
@@ -1286,6 +1293,190 @@ impl Scene for LoginScene {
         }
         
         Ok(())
+    }
+    
+    /// 鼠标按下事件
+    fn on_mouse_down(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        button: ggez::winit::event::MouseButton,
+        x: f32,
+        y: f32,
+        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+    ) -> GameResult {
+        use ggez::winit::event::MouseButton;
+        
+        // 只处理左键点击
+        if button != MouseButton::Left {
+            return Ok(());
+        }
+        
+        // 计算对话框位置（与绘制时相同）
+        let center_x = 1024.0 / 2.0;
+        let center_y = 768.0 / 2.0;
+        let dialog_x = center_x - 164.0;
+        let dialog_y = center_y - 110.0;
+        
+        // 检查各个按钮的点击区域
+        // OK/登录按钮 (227, 81), 大小约 42x42
+        if x >= dialog_x + 227.0 && x <= dialog_x + 227.0 + 42.0 &&
+           y >= dialog_y + 81.0 && y <= dialog_y + 81.0 + 42.0 {
+            // 登录按钮点击
+            println!("🔘 登录按钮被点击");
+            if self.login_enabled {
+                if let Some((account, password)) = self.login_dialog.get_credentials() {
+                    println!("✅ 发送登录请求: 账号={}, 密码长度={}", account, password.len());
+                    
+                    // 发送登录命令（NetworkManager会自动连接服务器）
+                    let _ = network_tx.send(NetworkCommand::Login { 
+                        username: account, 
+                        password 
+                    });
+                    
+                    self.login_enabled = false; // 禁用登录按钮防止重复点击
+                    self.connecting = true; // 设置连接状态
+                }
+            }
+        }
+        // "新建账号" 按钮 (60, 163), 大小约 90x30
+        else if x >= dialog_x + 60.0 && x <= dialog_x + 60.0 + 90.0 &&
+                y >= dialog_y + 163.0 && y <= dialog_y + 163.0 + 30.0 {
+            println!("🔘 新建账号按钮被点击");
+            self.open_new_account_dialog();
+        }
+        // "修改密码" 按钮 (166, 163), 大小约 90x30
+        else if x >= dialog_x + 166.0 && x <= dialog_x + 166.0 + 90.0 &&
+                y >= dialog_y + 163.0 && y <= dialog_y + 163.0 + 30.0 {
+            println!("🔘 修改密码按钮被点击");
+            self.open_change_password_dialog(None, None);
+        }
+        // "查看密钥" 按钮 (60, 189), 大小约 90x30
+        else if x >= dialog_x + 60.0 && x <= dialog_x + 60.0 + 90.0 &&
+                y >= dialog_y + 189.0 && y <= dialog_y + 189.0 + 30.0 {
+            println!("🔘 查看密钥按钮被点击");
+            // TODO: 实现密钥查看功能
+        }
+        // "关闭" 按钮 (166, 189), 大小约 90x30
+        else if x >= dialog_x + 166.0 && x <= dialog_x + 166.0 + 90.0 &&
+                y >= dialog_y + 189.0 && y <= dialog_y + 189.0 + 30.0 {
+            println!("🔘 关闭按钮被点击");
+            // TODO: 关闭游戏
+        }
+        // 账号输入框点击 (约 100, 83), 大小约 120x20
+        else if x >= dialog_x + 100.0 && x <= dialog_x + 100.0 + 120.0 &&
+                y >= dialog_y + 83.0 && y <= dialog_y + 83.0 + 20.0 {
+            println!("🔘 账号输入框被点击");
+            self.login_dialog.focus_account();
+        }
+        // 密码输入框点击 (约 100, 105), 大小约 120x20
+        else if x >= dialog_x + 100.0 && x <= dialog_x + 100.0 + 120.0 &&
+                y >= dialog_y + 105.0 && y <= dialog_y + 105.0 + 20.0 {
+            println!("🔘 密码输入框被点击");
+            self.login_dialog.focus_password();
+        }
+        
+        Ok(())
+    }
+    
+    /// 鼠标移动事件（用于悬停效果）
+    fn on_mouse_move(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        x: f32,
+        y: f32,
+    ) -> GameResult {
+        // 计算对话框位置
+        let center_x = 1024.0 / 2.0;
+        let center_y = 768.0 / 2.0;
+        let dialog_x = center_x - 164.0;
+        let dialog_y = center_y - 110.0;
+        
+        // 检查各个按钮的悬停状态
+        self.ok_button_hovered = 
+            x >= dialog_x + 227.0 && x <= dialog_x + 227.0 + 42.0 &&
+            y >= dialog_y + 81.0 && y <= dialog_y + 81.0 + 42.0;
+        
+        self.account_button_hovered = 
+            x >= dialog_x + 60.0 && x <= dialog_x + 60.0 + 90.0 &&
+            y >= dialog_y + 163.0 && y <= dialog_y + 163.0 + 30.0;
+        
+        self.pass_button_hovered = 
+            x >= dialog_x + 166.0 && x <= dialog_x + 166.0 + 90.0 &&
+            y >= dialog_y + 163.0 && y <= dialog_y + 163.0 + 30.0;
+        
+        self.view_key_button_hovered = 
+            x >= dialog_x + 60.0 && x <= dialog_x + 60.0 + 90.0 &&
+            y >= dialog_y + 189.0 && y <= dialog_y + 189.0 + 30.0;
+        
+        self.close_button_hovered = 
+            x >= dialog_x + 166.0 && x <= dialog_x + 166.0 + 90.0 &&
+            y >= dialog_y + 189.0 && y <= dialog_y + 189.0 + 30.0;
+        
+        Ok(())
+    }
+    
+    /// 键盘按下事件
+    fn on_key_down(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        input: ggez::input::keyboard::KeyInput,
+        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+    ) -> GameResult<Option<SceneType>> {
+        use ggez::winit::keyboard::KeyCode;
+        
+        // 检查物理键码
+        if let ggez::winit::event::KeyEvent {
+            physical_key: ggez::winit::keyboard::PhysicalKey::Code(keycode),
+            text,
+            ..
+        } = &input.event {
+            match keycode {
+                KeyCode::Backspace => {
+                    // 退格键
+                    if self.login_dialog.visible {
+                        self.login_dialog.handle_backspace();
+                    }
+                }
+                KeyCode::Enter => {
+                    // 回车键 - 提交登录
+                    if self.login_dialog.visible && self.login_enabled {
+                        if let Some((account, password)) = self.login_dialog.get_credentials() {
+                            println!("✅ [回车] 发送登录请求: 账号={}, 密码长度={}", account, password.len());
+                            
+                            // 发送登录命令
+                            let _ = network_tx.send(NetworkCommand::Login { 
+                                username: account, 
+                                password 
+                            });
+                            
+                            self.login_enabled = false;
+                            self.connecting = true;
+                        }
+                    }
+                }
+                KeyCode::Tab => {
+                    // Tab键 - 切换输入焦点
+                    if self.login_dialog.visible {
+                        self.login_dialog.handle_tab();
+                    }
+                }
+                _ => {
+                    // 处理文本输入
+                    if let Some(text_str) = text {
+                        if self.login_dialog.visible {
+                            for ch in text_str.chars() {
+                                self.login_dialog.handle_text_input(ch);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(None)
     }
     
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
