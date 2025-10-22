@@ -15,9 +15,8 @@ use tokio::sync::mpsc;
 
 use super::{Scene, SceneType};
 use crate::network::{game_client::GameEvent, NetworkCommand};
+use crate::ecs::ui::{ButtonGroup, ButtonWidget};  // 🆕 按钮部件
 use mir2_shared::SelectInfo;
-
-/// Character selection scene
 /// 
 /// Mirrors C# SelectScene:
 /// ```csharp
@@ -51,9 +50,12 @@ pub struct SelectScene {
     // Scene transition
     pub pending_scene_change: Option<SceneType>,
     
-    // UI state
-    hovered_button: Option<BottomButton>,
-    pressed_button: Option<BottomButton>,
+    // 🆕 按钮组管理器(替代手动状态管理)
+    bottom_buttons: ButtonGroup,
+    
+    // UI state (保留用于对话框)
+    hovered_button: Option<BottomButton>,  // TODO: 可以删除,由 ButtonGroup 管理
+    pressed_button: Option<BottomButton>,  // TODO: 可以删除,由 ButtonGroup 管理
     
     // Character preview animation
     character_animation_frame: usize,
@@ -73,34 +75,6 @@ enum BottomButton {
     ExitGame,
 }
 
-// 按钮布局常量（统一管理，避免绘制和点击检测不一致）
-const BUTTON_Y: f32 = 736.0;  // 768 - 32
-const BUTTON_HEIGHT: f32 = 32.0;
-const BUTTON_WIDTH: f32 = 96.0;
-const BUTTON_SPACING: f32 = 150.0;
-const BUTTON_START_X: f32 = 100.0;
-
-impl BottomButton {
-    /// 获取按钮的X坐标
-    fn get_x(&self) -> f32 {
-        let index = match self {
-            BottomButton::StartGame => 0.0,
-            BottomButton::NewCharacter => 1.0,
-            BottomButton::DeleteCharacter => 2.0,
-            BottomButton::Credits => 3.0,
-            BottomButton::ExitGame => 4.0,
-        };
-        BUTTON_START_X + BUTTON_SPACING * index
-    }
-    
-    /// 检查点是否在按钮范围内
-    fn contains(&self, x: f32, y: f32) -> bool {
-        let button_x = self.get_x();
-        x >= button_x && x <= button_x + BUTTON_WIDTH &&
-        y >= BUTTON_Y && y <= BUTTON_Y + BUTTON_HEIGHT
-    }
-}
-
 impl SelectScene {
     /// Create new select scene with character list
     /// 
@@ -114,6 +88,38 @@ impl SelectScene {
     /// }
     /// ```
     pub fn new(characters: Vec<SelectInfo>) -> Self {
+        // 创建底部按钮组
+        let mut bottom_buttons = ButtonGroup::new();
+        
+        // 按钮布局常量
+        const BUTTON_Y: f32 = 736.0;
+        const BUTTON_WIDTH: f32 = 96.0;
+        const BUTTON_HEIGHT: f32 = 32.0;
+        const BUTTON_SPACING: f32 = 150.0;
+        const BUTTON_START_X: f32 = 100.0;
+        
+        // 添加5个底部按钮 (使用 Builder 模式添加工具提示)
+        bottom_buttons.add(
+            ButtonWidget::new(1, BUTTON_START_X, BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 340)
+                .with_tooltip("开始游戏 (Enter)")
+        );
+        bottom_buttons.add(
+            ButtonWidget::new(2, BUTTON_START_X + BUTTON_SPACING, BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 343)
+                .with_tooltip("新建角色")
+        );
+        bottom_buttons.add(
+            ButtonWidget::new(3, BUTTON_START_X + BUTTON_SPACING * 2.0, BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 346)
+                .with_tooltip("删除角色 (Delete)")
+        );
+        bottom_buttons.add(
+            ButtonWidget::new(4, BUTTON_START_X + BUTTON_SPACING * 3.0, BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 349)
+                .with_tooltip("制作人员")
+        );
+        bottom_buttons.add(
+            ButtonWidget::new(5, BUTTON_START_X + BUTTON_SPACING * 4.0, BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT, 352)
+                .with_tooltip("退出游戏 (ESC)")
+        );
+        
         let mut scene = Self {
             characters,
             selected_index: 0,
@@ -122,6 +128,7 @@ impl SelectScene {
             credits_dialog: None,
             command_tx: None,
             pending_scene_change: None,
+            bottom_buttons,  // 🆕 使用 ButtonGroup
             hovered_button: None,
             pressed_button: None,
             character_animation_frame: 0,
@@ -994,52 +1001,70 @@ impl Scene for SelectScene {
                 .color(Color::WHITE));
         }
         
-        // 6. 绘制底部按钮 (水平布局，带悬停效果)
-        // 使用统一的布局常量
-        
-        // 辅助函数：根据按钮状态获取纹理索引
-        let get_button_index = |base: i32, button_type: BottomButton| -> i32 {
-            if self.pressed_button == Some(button_type) {
-                base + 2  // Pressed
-            } else if self.hovered_button == Some(button_type) {
-                base + 1  // Hover
-            } else {
-                base  // Normal
-            }
-        };
-        
-        // 绘制所有底部按钮
+        // 6. 绘制底部按钮 (使用 ButtonGroup 自动状态管理)
         if let Some(lib_arc) = get_library(LibraryName::Title) {
             if let Ok(mut lib) = lib_arc.try_lock() {
-                // 开始游戏按钮 (Title_340, 341, 342)
-                let start_btn_index = get_button_index(340, BottomButton::StartGame);
-                let _ = lib.draw_with_color(ctx, canvas, start_btn_index as usize, BottomButton::StartGame.get_x(), BUTTON_Y, Color::WHITE, false);
-                
-                // 新建角色按钮 (Title_343, 344, 345)
-                let new_btn_index = get_button_index(343, BottomButton::NewCharacter);
-                let _ = lib.draw_with_color(ctx, canvas, new_btn_index as usize, BottomButton::NewCharacter.get_x(), BUTTON_Y, Color::WHITE, false);
-                
-                // 删除角色按钮 (Title_346, 347, 348)
-                let delete_btn_index = get_button_index(346, BottomButton::DeleteCharacter);
-                let _ = lib.draw_with_color(ctx, canvas, delete_btn_index as usize, BottomButton::DeleteCharacter.get_x(), BUTTON_Y, Color::WHITE, false);
-                
-                // 制作人员按钮 (Title_349, 350, 351)
-                let credits_btn_index = get_button_index(349, BottomButton::Credits);
-                let _ = lib.draw_with_color(ctx, canvas, credits_btn_index as usize, BottomButton::Credits.get_x(), BUTTON_Y, Color::WHITE, false);
-                
-                // 退出游戏按钮 (Title_352, 353, 354)
-                let exit_btn_index = get_button_index(352, BottomButton::ExitGame);
-                let _ = lib.draw_with_color(ctx, canvas, exit_btn_index as usize, BottomButton::ExitGame.get_x(), BUTTON_Y, Color::WHITE, false);
+                for button in &self.bottom_buttons.buttons {
+                    let texture_index = button.get_texture_index();
+                    let color = button.get_color();
+                    let _ = lib.draw_with_color(
+                        ctx,
+                        canvas,
+                        texture_index as usize,
+                        button.x,
+                        button.y,
+                        color,
+                        false
+                    );
+                }
             }
         }
         
-        // TODO: 6. 绘制 NewCharacterDialog (最上层)
+        // 7. 绘制工具提示 (悬停在按钮上时)
+        for button in &self.bottom_buttons.buttons {
+            if let Some(tooltip_text) = button.get_tooltip() {
+                let mut tooltip = Text::new(tooltip_text);
+                tooltip.set_font("AlibabaPuHuiTi");
+                tooltip.set_scale(14.0);
+                
+                // 计算提示框位置 (按钮上方)
+                let tooltip_x = button.x;
+                let tooltip_y = button.y - 25.0;
+                
+                // 绘制半透明背景
+                let text_bounds = tooltip.measure(ctx).unwrap_or(ggez::glam::Vec2::new(100.0, 20.0).into());
+                let bg_rect = Rect::new(
+                    tooltip_x - 5.0,
+                    tooltip_y - 5.0,
+                    text_bounds.x + 10.0,
+                    text_bounds.y + 10.0
+                );
+                
+                if let Ok(mesh) = Mesh::new_rectangle(
+                    ctx,
+                    DrawMode::fill(),
+                    bg_rect,
+                    Color::from_rgba(0, 0, 0, 200)
+                ) {
+                    canvas.draw(&mesh, DrawParam::default());
+                }
+                
+                // 绘制提示文字
+                canvas.draw(&tooltip, DrawParam::default()
+                    .dest([tooltip_x, tooltip_y])
+                    .color(Color::from_rgb(255, 255, 200)));
+                
+                break; // 只显示一个提示
+            }
+        }
+        
+        // TODO: 8. 绘制 NewCharacterDialog (最上层)
         // 暂时禁用对话框绘制，等待完整迁移到新的库系统
         
-        // TODO: 7. 绘制 DeleteCharacterDialog (最上层)
+        // TODO: 9. 绘制 DeleteCharacterDialog (最上层)
         // 暂时禁用对话框绘制
         
-        // TODO: 8. 绘制 CreditsDialog (最上层)
+        // TODO: 10. 绘制 CreditsDialog (最上层)
         // 暂时禁用对话框绘制
         
         Ok(())
@@ -1105,21 +1130,20 @@ impl Scene for SelectScene {
             }
         }
         
-        // 3. 处理底部按钮点击
-        let all_buttons = [
-            BottomButton::StartGame,
-            BottomButton::NewCharacter,
-            BottomButton::DeleteCharacter,
-            BottomButton::Credits,
-            BottomButton::ExitGame,
-        ];
-        
-        for button_type in &all_buttons {
-            if button_type.contains(x, y) {
-                tracing::info!("🖱️ 点击按钮: {:?} at ({:.0}, {:.0})", button_type, x, y);
-                self.handle_button_click(*button_type, network_tx);
-                return Ok(());
+        // 3. 处理底部按钮点击 (使用 ButtonGroup)
+        if let Some(button_id) = self.bottom_buttons.on_mouse_down(x, y) {
+            tracing::info!("🖱️ 点击按钮 ID: {} at ({:.0}, {:.0})", button_id, x, y);
+            
+            // 根据按钮ID分发事件
+            match button_id {
+                1 => self.handle_button_click(BottomButton::StartGame, network_tx),
+                2 => self.handle_button_click(BottomButton::NewCharacter, network_tx),
+                3 => self.handle_button_click(BottomButton::DeleteCharacter, network_tx),
+                4 => self.handle_button_click(BottomButton::Credits, network_tx),
+                5 => self.handle_button_click(BottomButton::ExitGame, network_tx),
+                _ => {}
             }
+            return Ok(());
         }
         
         Ok(())
@@ -1130,11 +1154,17 @@ impl Scene for SelectScene {
         _ctx: &mut Context,
         _world: &mut World,
         _button: ggez::winit::event::MouseButton,
-        _x: f32,
-        _y: f32,
-        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        x: f32,
+        y: f32,
+        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult {
-        // 清除按下状态
+        // 使用 ButtonGroup 处理释放 (如果需要触发点击)
+        if let Some(button_id) = self.bottom_buttons.on_mouse_up(x, y) {
+            tracing::info!("✅ 按钮点击完成: {}", button_id);
+            // 按下和释放都在同一按钮内才触发(已在 on_mouse_down 处理)
+        }
+        
+        // 清除旧的按下状态 (兼容性)
         self.pressed_button = None;
         Ok(())
     }
@@ -1152,25 +1182,22 @@ impl Scene for SelectScene {
             // dialog.handle_mouse_drag(x, y);
         }
         
-        // 检测底部按钮悬停
-        let all_buttons = [
-            BottomButton::StartGame,
-            BottomButton::NewCharacter,
-            BottomButton::DeleteCharacter,
-            BottomButton::Credits,
-            BottomButton::ExitGame,
-        ];
+        // 使用 ButtonGroup 自动更新悬停状态
+        self.bottom_buttons.update_hover(x, y);
         
-        let old_hovered = self.hovered_button;
+        // 兼容旧代码:同步 hovered_button 字段 (TODO: 删除)
         self.hovered_button = None;
-        
-        for button_type in &all_buttons {
-            if button_type.contains(x, y) {
-                self.hovered_button = Some(*button_type);
-                // 调试：悬停变化时输出
-                if old_hovered != self.hovered_button {
-                    tracing::debug!("✨ 按钮悬停: {:?}", button_type);
-                }
+        for (i, button) in self.bottom_buttons.buttons.iter().enumerate() {
+            if button.state == crate::ecs::ui::ButtonState::Hovered || 
+               button.state == crate::ecs::ui::ButtonState::Pressed {
+                self.hovered_button = Some(match i {
+                    0 => BottomButton::StartGame,
+                    1 => BottomButton::NewCharacter,
+                    2 => BottomButton::DeleteCharacter,
+                    3 => BottomButton::Credits,
+                    4 => BottomButton::ExitGame,
+                    _ => continue,
+                });
                 break;
             }
         }

@@ -71,6 +71,17 @@ pub enum NetworkCommand {
         location: (i32, i32),  // (x, y)
     },
     
+    /// Attack in direction
+    Attack {
+        direction: mir2_shared::enums::MirDirection,
+        spell: mir2_shared::enums::Spell,
+    },
+    
+    /// Pickup item at location
+    PickupItem {
+        location: (i32, i32),  // (x, y)
+    },
+    
     /// Disconnect from server
     Disconnect,
 }

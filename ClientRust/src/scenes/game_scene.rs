@@ -2150,11 +2150,147 @@ impl Scene for GameScene {
             }
 
             GameEvent::ItemGained { item, grid_type } => {
-                tracing::info!("🎁 Item gained: {:?} in {}", item, grid_type);
+                let item_name = item.info.as_ref().map(|i| i.name.as_str()).unwrap_or("Unknown");
+                tracing::info!("🎁 获得物品: {} x{} (放入 {})", item_name, item.count, grid_type);
+                
+                // 根据grid_type添加到对应的背包
+                if grid_type == "Inventory" {
+                    // 查找空格子或同类物品堆叠
+                    let mut added = false;
+                    
+                    // 优先查找同类可堆叠物品
+                    if let Some(info) = &item.info {
+                        if info.stack_size > 1 {
+                            for slot in self.inventory.iter_mut().flatten() {
+                                if let Some(slot_info) = &slot.info {
+                                    if slot_info.index == info.index && 
+                                       slot.count < info.stack_size {
+                                        let add_count = (info.stack_size - slot.count).min(item.count);
+                                        slot.count += add_count;
+                                        tracing::info!("   堆叠到现有物品: +{} (总计: {})", add_count, slot.count);
+                                        added = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 如果没有堆叠，查找空格子
+                    if !added {
+                        for (i, slot) in self.inventory.iter_mut().enumerate() {
+                            if slot.is_none() {
+                                *slot = Some(item.clone());
+                                tracing::info!("   添加到背包格子 #{}", i);
+                                added = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if !added {
+                        tracing::warn!("⚠️  背包已满，无法添加物品: {}", item_name);
+                    }
+                } else if grid_type == "Equipment" {
+                    // TODO: 添加到装备栏
+                    tracing::info!("   装备物品 (暂未实现)");
+                }
             }
 
             GameEvent::MagicCast { spell, target_id } => {
                 tracing::debug!("✨ Magic cast: {:?} on target {}", spell, target_id);
+            }
+            
+            GameEvent::PlayerStruck { attacker_id, damage, location } => {
+                tracing::warn!("💥 玩家受到攻击! 攻击者: {}, 伤害: {}, 位置: ({}, {})", 
+                    attacker_id, damage, location.x, location.y);
+                
+                // TODO: 播放受击动画和音效
+                // TODO: 显示伤害数字
+                self.output_message(
+                    format!("受到 {} 点伤害!", damage),
+                    OutputMessageType::Normal,
+                );
+            }
+            
+            GameEvent::PlayerDied { location } => {
+                tracing::error!("💀 玩家死亡! 位置: ({}, {})", location.x, location.y);
+                
+                // TODO: 播放死亡动画
+                // TODO: 显示复活界面
+                self.output_message(
+                    "你已死亡!".to_string(),
+                    OutputMessageType::Normal,
+                );
+            }
+            
+            GameEvent::ObjectDamaged { object_id, damage, damage_type } => {
+                tracing::debug!("💥 对象 {} 受到 {} 点伤害 (类型: {})", 
+                    object_id, damage, damage_type);
+                
+                // TODO: 显示伤害数字
+            }
+            
+            GameEvent::ObjectAttacked { object_id, direction, location, spell } => {
+                tracing::debug!("⚔️  对象 {} 攻击 方向: {:?}, 位置: ({}, {}), 技能: {:?}", 
+                    object_id, direction, location.x, location.y, spell);
+                
+                // TODO: 播放攻击动画
+            }
+            
+            GameEvent::ItemSpawned { object_id, item, location } => {
+                let item_name = item.info.as_ref().map(|i| i.name.as_str()).unwrap_or("Unknown");
+                tracing::info!("💎 地面物品出现: {} (ID: {}) 位置: ({}, {})", 
+                    item_name, object_id, location.x, location.y);
+                
+                // TODO: 在地图上显示物品图标
+            }
+            
+            GameEvent::GoldSpawned { object_id, gold, location } => {
+                tracing::info!("💰 地面金币出现: {} (ID: {}) 位置: ({}, {})", 
+                    gold, object_id, location.x, location.y);
+                
+                // TODO: 在地图上显示金币图标
+            }
+            
+            GameEvent::LevelChanged { object_id, level } => {
+                tracing::info!("🎉 对象 {} 升级到 {}!", object_id, level);
+                
+                // TODO: 播放升级动画和音效
+                self.output_message(
+                    format!("恭喜！升级到 {} 级!", level),
+                    OutputMessageType::Normal,
+                );
+            }
+            
+            GameEvent::ExperienceGained { amount } => {
+                tracing::debug!("✨ 获得经验: {}", amount);
+                
+                // TODO: 更新经验条显示
+            }
+            
+            GameEvent::MagicLearned { spell, level } => {
+                tracing::info!("📖 学会新技能: {:?} (等级 {})", spell, level);
+                
+                self.output_message(
+                    format!("学会新技能: {:?}", spell),
+                    OutputMessageType::Normal,
+                );
+            }
+            
+            GameEvent::MagicLevelUp { spell, level } => {
+                tracing::info!("⭐ 技能升级: {:?} → {} 级", spell, level);
+                
+                self.output_message(
+                    format!("技能升级: {:?} → {} 级", spell, level),
+                    OutputMessageType::Normal,
+                );
+            }
+            
+            GameEvent::MagicDelayed { spell, delay } => {
+                tracing::debug!("⏱️  技能延迟: {:?} ({}ms)", spell, delay);
+                
+                // TODO: 更新技能冷却显示
             }
 
             _ => {

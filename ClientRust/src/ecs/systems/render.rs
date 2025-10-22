@@ -578,17 +578,29 @@ impl RenderSystem {
     ) -> GameResult<()> {
         use crate::graphics::libraries::{get_library, LibraryName};
         use crate::ecs::systems::CameraSystem;
-        use crate::ecs::components::{MapTile, TileLayer};
+        use crate::ecs::components::{MapTile, TileLayer, PlayerAppearance};
+        use mir2_shared::enums::{MirClass, MirGender};
         
-        // 🎨 使用 CArmours(0) 库绘制角色（默认装备）
-        // CArmours 库帧布局（参考 player_object.rs）:
-        //   - Standing: 0-31   (8方向 * 4帧)
-        //   - Walking:  32-79  (8方向 * 6帧)
-        //   - Running:  80-127 (8方向 * 6帧)
-        //   - Attack1:  128-175 (8方向 * 6帧)
-        //
-        // 公式: DrawFrame = action_frame_start + direction * frames_per_direction + frame_index
-        //       FinalFrame = DrawFrame + ArmourOffSet (Male=0, Female=808)
+        // � 尝试获取 PlayerAppearance 组件（如果存在）
+        let appearance = world.query::<&PlayerAppearance>()
+            .iter()
+            .next()
+            .map(|(_, app)| app.clone());
+        
+        // 如果没有外观组件，使用默认值
+        let (class, gender, armour_index) = if let Some(app) = &appearance {
+            (app.class, app.gender, app.armour)
+        } else {
+            // 默认：战士，男性，盔甲索引0
+            (MirClass::Warrior, MirGender::Male, 0)
+        };
+        
+        // 🎨 根据职业和性别选择库
+        // CArmours(0) = 默认盔甲（战士/法师/道士通用）
+        // 不同职业和性别使用同一个库，但帧索引不同
+        // 暂时简化：所有职业都使用 CArmours
+        let library_index = armour_index.max(0);
+        let library_name = LibraryName::CArmours(library_index as usize);
         
         // 计算 DrawFrame
         let action_frame_start = player.action.frame_start();
@@ -596,40 +608,8 @@ impl RenderSystem {
         let direction_offset = (player.direction as i32) * frames_per_direction;
         let draw_frame = action_frame_start + direction_offset + player.frame_index;
         
-        // 暂不考虑性别偏移（默认男性，偏移=0）
-        let armour_offset = 0;
-        let final_frame = draw_frame + armour_offset;
-        
-        // 🐛 DEBUG: 首次绘制打印帧信息
-        static mut FIRST_DRAW: bool = true;
-        unsafe {
-            if FIRST_DRAW {
-                let dir_name = match player.direction {
-                    0 => "Up(上)",
-                    1 => "UpRight(右上)",
-                    2 => "Right(右)",
-                    3 => "DownRight(右下)",
-                    4 => "Down(下)",
-                    5 => "DownLeft(左下)",
-                    6 => "Left(左)",
-                    7 => "UpLeft(左上)",
-                    _ => "Unknown",
-                };
-                
-                println!("\n🎨 === 角色帧计算调试 ===");
-                println!("动作: {:?}", player.action);
-                println!("方向: {} - {}", player.direction, dir_name);
-                println!("当前帧索引: {}/{}", player.frame_index, frames_per_direction);
-                println!("动作起始帧: {}", action_frame_start);
-                println!("方向偏移: {} (方向{} * 每方向{}帧)", direction_offset, player.direction, frames_per_direction);
-                println!("DrawFrame: {} + {} + {} = {}", action_frame_start, direction_offset, player.frame_index, draw_frame);
-                println!("性别偏移: {}", armour_offset);
-                println!("FinalFrame: {} + {} = {}", draw_frame, armour_offset, final_frame);
-                println!("使用库: CArmours(0)");
-                println!("========================\n");
-                FIRST_DRAW = false;
-            }
-        }
+        // 性别偏移（Female库已经分开，不需要偏移）
+        let final_frame = draw_frame;
         
         // 🎯 遮挡检测：检测角色是否被Front层瓦片遮挡
         // 遮挡条件：
@@ -694,8 +674,8 @@ impl RenderSystem {
             }
         }
         
-        // ✅ 获取角色纹理 - 使用正确的角色库（不是地图库！）
-        if let Some(mlib) = get_library(LibraryName::CArmours(0)) {
+        // ✅ 获取角色纹理 - 根据职业和性别使用对应的库
+        if let Some(mlib) = get_library(library_name) {
             if let Ok(mut mlib) = mlib.lock() {
                 // 获取尺寸和偏移量
                 let (_char_w, char_h) = mlib

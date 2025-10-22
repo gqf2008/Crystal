@@ -96,4 +96,15 @@ pub trait Scene {
     ) -> GameResult<Option<SceneType>> {
         Ok(None)
     }
+    
+    /// 窗口大小调整事件
+    fn on_resize(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        _width: f32,
+        _height: f32,
+    ) -> GameResult {
+        Ok(())
+    }
 }

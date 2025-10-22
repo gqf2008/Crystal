@@ -58,7 +58,6 @@ impl GameState {
     /// # 参数
     /// - `ctx`: ggez 上下文
     /// - `settings`: 客户端配置（由 ClientRuntime 加载）
-    /// - `runtime`: Tokio runtime（由 ClientRuntime 创建，保持网络任务运行）
     pub fn new(
         ctx: &mut Context,
         settings: ClientSettings,
@@ -305,5 +304,9 @@ impl EventHandler for GameState {
             self.switch_scene(ctx, new_scene_type)?;
         }
         Ok(())
+    }
+    
+    fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) -> GameResult {
+        self.current_scene.on_resize(ctx, &mut self.world, width, height)
     }
 }

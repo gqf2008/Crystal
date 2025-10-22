@@ -209,6 +209,22 @@ impl NetworkManager {
                 self.send_packet(&packet)?;
             }
             
+            NetworkCommand::Attack { direction, spell } => {
+                tracing::debug!("Handling attack command: direction={:?}, spell={:?}", direction, spell);
+                let packet = client::Attack {
+                    direction,
+                    spell,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::PickupItem { location } => {
+                tracing::debug!("Handling pickup item command: location=({}, {})", location.0, location.1);
+                // TODO: 实现拾取物品包
+                // let packet = client::PickUpItem { ... };
+                // self.send_packet(&packet)?;
+            }
+            
             NetworkCommand::Move { direction, location } => {
                 // 将 u8 转换为 MirDirection
                 use mir2_shared::enums::MirDirection;

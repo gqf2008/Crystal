@@ -206,6 +206,20 @@ pub enum GameEvent {
     ObjectRan { object_id: u32, direction: MirDirection, location: Point },
     ObjectAttacked { object_id: u32, direction: MirDirection, location: Point, spell: Spell },
     ObjectPushed { object_id: u32, direction: MirDirection, location: Point },
+    
+    // Combat events
+    PlayerAttacked { object_id: u32, direction: MirDirection, location: Point, spell: Spell },
+    PlayerStruck { attacker_id: u32, damage: i32, location: Point },
+    PlayerDied { location: Point },
+    ObjectDamaged { object_id: u32, damage: i32, damage_type: u8 },
+    
+    // Ground item events
+    ItemSpawned { object_id: u32, item: UserItem, location: Point },
+    GoldSpawned { object_id: u32, gold: u32, location: Point },
+    
+    // Level/Experience events
+    LevelChanged { object_id: u32, level: u16 },
+    ExperienceGained { amount: i64 },
 }
 
 // ==================== Implementation ====================
@@ -488,18 +502,40 @@ impl PacketHandler for GameClient {
     
     fn on_struck(&mut self, packet: packets::Struck) {
         tracing::warn!("💥 Player struck by object {}", packet.attacker_id);
+        
+        // TODO: 伤害值从 DamageIndicator 包获取
+        // Struck 包只包含攻击者ID，不包含伤害值
+        
+        self.send_event(GameEvent::PlayerStruck {
+            attacker_id: packet.attacker_id,
+            damage: 0, // 实际伤害从 DamageIndicator 包获取
+            location: self.player.as_ref().map(|p| p.location).unwrap_or_default(),
+        });
     }
     
     fn on_death(&mut self, _packet: packets::Death) {
         tracing::error!("💀 Player died!");
+        
+        // 设置玩家死亡状态
+        if let Some(player) = &mut self.player {
+            player.health = 0;
+        }
+        
         self.add_chat_message(
             "You have died!".to_string(),
             ChatType::System,
         );
+        
+        self.send_event(GameEvent::PlayerDied {
+            location: self.player.as_ref().map(|p| p.location).unwrap_or_default(),
+        });
     }
     
     fn on_object_struck(&mut self, packet: packets::ObjectStruck) {
         tracing::debug!("⚔️  Object {} struck", packet.object_id);
+        
+        // TODO: ObjectStruck 包也不包含伤害值
+        // 伤害显示从 DamageIndicator 包处理
     }
     
     fn on_object_died(&mut self, packet: packets::ObjectDied) {
@@ -515,8 +551,13 @@ impl PacketHandler for GameClient {
     fn on_gain_experience(&mut self, packet: packets::GainExperience) {
         if let Some(player) = &mut self.player {
             player.experience += packet.amount as i64;
-            tracing::debug!("✨ Gained {} XP", packet.amount);
+            tracing::debug!("✨ Gained {} XP (Total: {}/{})", 
+                packet.amount, player.experience, player.max_experience);
         }
+        
+        self.send_event(GameEvent::ExperienceGained {
+            amount: packet.amount as i64,
+        });
     }
     
     fn on_level_changed(&mut self, packet: packets::LevelChanged) {
@@ -530,6 +571,11 @@ impl PacketHandler for GameClient {
             format!("Congratulations! You reached level {}!", packet.level),
             ChatType::System,
         );
+        
+        self.send_event(GameEvent::LevelChanged {
+            object_id: self.player.as_ref().map(|p| p.object_id).unwrap_or(0),
+            level: packet.level,
+        });
     }
     
     // ==================== Group System (The 4 packets we just completed!) ====================
@@ -1284,11 +1330,29 @@ impl PacketHandler for GameClient {
         
         tracing::debug!("💎 Item {} on ground: {} at ({}, {})", 
             packet.object_id, item_name, packet.location_x, packet.location_y);
+        
+        self.send_event(GameEvent::ItemSpawned {
+            object_id: packet.object_id,
+            item: packet.item,
+            location: Point { 
+                x: packet.location_x as i32, 
+                y: packet.location_y as i32 
+            },
+        });
     }
     
     fn on_object_gold(&mut self, packet: packets::ObjectGold) {
         tracing::debug!("💰 Gold {} on ground: {} at ({}, {})", 
             packet.object_id, packet.gold, packet.location_x, packet.location_y);
+        
+        self.send_event(GameEvent::GoldSpawned {
+            object_id: packet.object_id,
+            gold: packet.gold,
+            location: Point { 
+                x: packet.location_x as i32, 
+                y: packet.location_y as i32 
+            },
+        });
     }
     
     fn on_object_hero(&mut self, _packet: packets::ObjectHero) {
@@ -1961,8 +2025,14 @@ impl PacketHandler for GameClient {
 
     // Combat Visual Effects (1 handler)
     fn on_damage_indicator(&mut self, packet: packets::DamageIndicator) {
-        tracing::debug!("Damage indicator: {} damage (type {}) on object {}", 
+        tracing::debug!("💥 Damage indicator: {} damage (type {}) on object {}", 
             packet.damage, packet.damage_type, packet.object_id);
+        
+        self.send_event(GameEvent::ObjectDamaged {
+            object_id: packet.object_id,
+            damage: packet.damage,
+            damage_type: packet.damage_type,
+        });
     }
 
     // Player Visual Effects (1 handler)

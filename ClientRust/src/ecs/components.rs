@@ -499,6 +499,128 @@ pub enum MoveMode {
     AutoPathfinding,
 }
 
+/// 玩家外观组件
+#[derive(Debug, Clone)]
+pub struct PlayerAppearance {
+    pub class: mir2_shared::enums::MirClass,
+    pub gender: mir2_shared::enums::MirGender,
+    pub hair: u8,
+    pub weapon: i16,
+    pub armour: i16,
+    pub weapon_effect: i16,
+    pub wing_effect: u8,
+}
+
+impl Default for PlayerAppearance {
+    fn default() -> Self {
+        Self {
+            class: mir2_shared::enums::MirClass::Warrior,
+            gender: mir2_shared::enums::MirGender::Male,
+            hair: 0,
+            weapon: -1,  // -1 表示无武器
+            armour: 0,   // 默认盔甲索引
+            weapon_effect: 0,
+            wing_effect: 0,
+        }
+    }
+}
+
+/// 地面物品组件
+#[derive(Debug, Clone)]
+pub struct GroundItem {
+    pub object_id: u32,
+    pub item: mir2_shared::data::item::UserItem,
+    pub gold_amount: u32,  // 如果是金币，这里是数量
+}
+
+/// 背包组件 - 存储玩家的物品
+#[derive(Debug, Clone)]
+pub struct Inventory {
+    /// 背包物品列表（索引对应格子位置）
+    /// None 表示空格子
+    pub items: Vec<Option<mir2_shared::data::item::UserItem>>,
+    
+    /// 背包容量（默认40格）
+    pub capacity: usize,
+    
+    /// 金币数量
+    pub gold: u32,
+    
+    /// 当前负重
+    pub current_weight: u16,
+    
+    /// 最大负重
+    pub max_weight: u16,
+}
+
+impl Default for Inventory {
+    fn default() -> Self {
+        Self::new(40) // 默认40格背包
+    }
+}
+
+impl Inventory {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            items: vec![None; capacity],
+            capacity,
+            gold: 0,
+            current_weight: 0,
+            max_weight: 100, // 默认最大负重100
+        }
+    }
+    
+    /// 添加物品到背包
+    pub fn add_item(&mut self, item: mir2_shared::data::item::UserItem) -> bool {
+        // 查找空格子
+        for slot in &mut self.items {
+            if slot.is_none() {
+                *slot = Some(item);
+                return true;
+            }
+        }
+        false // 背包已满
+    }
+    
+    /// 移除指定格子的物品
+    pub fn remove_item(&mut self, slot_index: usize) -> Option<mir2_shared::data::item::UserItem> {
+        if slot_index < self.items.len() {
+            self.items[slot_index].take()
+        } else {
+            None
+        }
+    }
+    
+    /// 获取指定格子的物品引用
+    pub fn get_item(&self, slot_index: usize) -> Option<&mir2_shared::data::item::UserItem> {
+        if slot_index < self.items.len() {
+            self.items[slot_index].as_ref()
+        } else {
+            None
+        }
+    }
+    
+    /// 设置金币数量
+    pub fn set_gold(&mut self, gold: u32) {
+        self.gold = gold;
+    }
+    
+    /// 添加金币
+    pub fn add_gold(&mut self, amount: u32) {
+        self.gold = self.gold.saturating_add(amount);
+    }
+    
+    /// 减少金币
+    pub fn remove_gold(&mut self, amount: u32) -> bool {
+        if self.gold >= amount {
+            self.gold -= amount;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// 鼠标输入状态组件
 #[derive(Debug, Clone)]
 pub struct MouseInput {
