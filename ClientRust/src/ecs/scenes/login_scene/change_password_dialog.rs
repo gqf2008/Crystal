@@ -153,6 +153,23 @@ impl ChangePasswordDialog {
         }
     }
     
+    /// Update mouse hover state for buttons
+    pub fn update_mouse_hover(&mut self, mouse_x: f32, mouse_y: f32, dialog_x: f32, dialog_y: f32) {
+        // OK按钮: (80, 236), 大小约 70x30
+        let ok_btn_x = dialog_x + 80.0;
+        let ok_btn_y = dialog_y + 236.0;
+        self.ok_button_hovered = 
+            mouse_x >= ok_btn_x && mouse_x < ok_btn_x + 70.0 &&
+            mouse_y >= ok_btn_y && mouse_y < ok_btn_y + 30.0;
+        
+        // Cancel按钮: (170, 236), 大小约 70x30
+        let cancel_btn_x = dialog_x + 170.0;
+        let cancel_btn_y = dialog_y + 236.0;
+        self.cancel_button_hovered = 
+            mouse_x >= cancel_btn_x && mouse_x < cancel_btn_x + 70.0 &&
+            mouse_y >= cancel_btn_y && mouse_y < cancel_btn_y + 30.0;
+    }
+    
     /// Handle Tab key (switch to next field)
     pub fn handle_tab(&mut self) {
         self.focused_field = match self.focused_field {
@@ -401,6 +418,49 @@ impl ChangePasswordDialog {
         } else {
             None
         }
+    }
+    
+    // ============================================================================
+    // Focus methods - For error handling (auto focus on error field)
+    // ============================================================================
+    
+    /// Focus account ID input field
+    pub fn focus_account_id(&mut self) {
+        self.focused_field = PasswordInputField::AccountId;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Focus current password input field
+    pub fn focus_current_password(&mut self) {
+        self.focused_field = PasswordInputField::CurrentPassword;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Focus new password input field
+    pub fn focus_new_password1(&mut self) {
+        self.focused_field = PasswordInputField::NewPassword;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Focus new password confirmation field
+    pub fn focus_new_password2(&mut self) {
+        self.focused_field = PasswordInputField::NewPasswordConfirm;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    // ============================================================================
+    // Clear methods - For error handling (clear input on specific errors)
+    // ============================================================================
+    
+    /// Clear current password input field (对应C# case 5: CurrentPasswordTextBox.Text = string.Empty)
+    pub fn clear_current_password(&mut self) {
+        self.current_password.clear();
+        self.current_password_valid = false;
+        self.ok_button_enabled = self.can_submit();
     }
 }
 

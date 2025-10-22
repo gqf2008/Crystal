@@ -180,6 +180,62 @@ impl NewAccountDialog {
             self.cursor_blink_timer = 0.0;
             self.cursor_visible = !self.cursor_visible;
         }
+        
+        // ✅ 修复BUG: 更新OK按钮状态（根据必填字段验证）
+        // 必填字段: 账号、密码、确认密码、邮箱
+        let old_state = self.ok_button_enabled;
+        self.ok_button_enabled = 
+            self.account_id_valid && 
+            self.password1_valid && 
+            self.password2_valid && 
+            self.email_valid &&
+            !self.registration.account_id.is_empty() &&
+            !self.registration.password.is_empty() &&
+            !self.registration.email.is_empty();
+        
+        // 调试: 打印状态变化
+        if old_state != self.ok_button_enabled {
+            tracing::info!("🔘 NewAccountDialog OK按钮状态变化: {} -> {}", old_state, self.ok_button_enabled);
+            tracing::info!("   验证状态: account_id={}, password1={}, password2={}, email={}", 
+                self.account_id_valid, self.password1_valid, self.password2_valid, self.email_valid);
+            tracing::info!("   字段内容: account_id='{}', password='{}', email='{}'", 
+                self.registration.account_id, "*".repeat(self.registration.password.len()), self.registration.email);
+        }
+    }
+    
+    /// Update mouse hover state for buttons
+    pub fn update_mouse_hover(&mut self, mouse_x: f32, mouse_y: f32, dialog_x: f32, dialog_y: f32) {
+        // ✅ 修复按钮位置 - 使用与绘制代码相同的坐标
+        // OK按钮: (135, 425) - 对应C# Location
+        let ok_btn_x = dialog_x + 135.0;
+        let ok_btn_y = dialog_y + 425.0;
+        let ok_btn_width = 80.0;  // 按钮宽度
+        let ok_btn_height = 23.0; // 按钮高度
+        let ok_hovered = 
+            mouse_x >= ok_btn_x && mouse_x < ok_btn_x + ok_btn_width &&
+            mouse_y >= ok_btn_y && mouse_y < ok_btn_y + ok_btn_height;
+        
+        // Cancel按钮: (409, 425) - 对应C# Location
+        let cancel_btn_x = dialog_x + 409.0;
+        let cancel_btn_y = dialog_y + 425.0;
+        let cancel_btn_width = 80.0;
+        let cancel_btn_height = 23.0;
+        let cancel_hovered = 
+            mouse_x >= cancel_btn_x && mouse_x < cancel_btn_x + cancel_btn_width &&
+            mouse_y >= cancel_btn_y && mouse_y < cancel_btn_y + cancel_btn_height;
+        
+        // 调试：打印悬停状态变化
+        if ok_hovered != self.ok_button_hovered || cancel_hovered != self.cancel_button_hovered {
+            tracing::debug!("🖱️ 按钮悬停状态: OK={}, Cancel={} (鼠标: {:.1}, {:.1})", 
+                ok_hovered, cancel_hovered, mouse_x, mouse_y);
+            tracing::debug!("   OK区域: ({:.1}, {:.1}) - ({:.1}, {:.1})", 
+                ok_btn_x, ok_btn_y, ok_btn_x + ok_btn_width, ok_btn_y + ok_btn_height);
+            tracing::debug!("   Cancel区域: ({:.1}, {:.1}) - ({:.1}, {:.1})", 
+                cancel_btn_x, cancel_btn_y, cancel_btn_x + cancel_btn_width, cancel_btn_y + cancel_btn_height);
+        }
+        
+        self.ok_button_hovered = ok_hovered;
+        self.cancel_button_hovered = cancel_hovered;
     }
     
     /// Handle Tab key (switch to next field)
@@ -681,14 +737,15 @@ impl NewAccountDialog {
 
     /// Refresh OK button state
     fn refresh_ok_button(&mut self) {
+        // ✅ 修复BUG: 只检查必填字段（账号、密码、确认密码、邮箱）
+        // 可选字段（username, birth_date, question, answer）不应该阻止提交
         self.ok_button_enabled = self.account_id_valid
             && self.password1_valid
             && self.password2_valid
             && self.email_valid
-            && self.username_valid
-            && self.birth_date_valid
-            && self.question_valid
-            && self.answer_valid;
+            && !self.registration.account_id.is_empty()
+            && !self.registration.password.is_empty()
+            && !self.registration.email.is_empty();
     }
 
     /// Check if can submit
@@ -709,6 +766,77 @@ impl NewAccountDialog {
             "answer" => self.answer_valid,
             _ => false,
         }
+    }
+    
+    // ============================================================================
+    // Focus methods - For error handling (auto focus on error field)
+    // ============================================================================
+    
+    /// Focus account ID input field
+    pub fn focus_account_id(&mut self) {
+        self.focused_field = InputField::AccountId;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Focus password input field
+    pub fn focus_password1(&mut self) {
+        self.focused_field = InputField::Password;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Focus password confirmation field
+    pub fn focus_password2(&mut self) {
+        self.focused_field = InputField::PasswordConfirm;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Focus email input field
+    pub fn focus_email(&mut self) {
+        self.focused_field = InputField::Email;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Focus username input field
+    pub fn focus_user_name(&mut self) {
+        self.focused_field = InputField::Username;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Focus birth date input field
+    pub fn focus_birth_date(&mut self) {
+        self.focused_field = InputField::BirthDate;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Focus secret question input field
+    pub fn focus_question(&mut self) {
+        self.focused_field = InputField::Question;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    /// Focus secret answer input field
+    pub fn focus_answer(&mut self) {
+        self.focused_field = InputField::Answer;
+        self.cursor_visible = true;
+        self.cursor_blink_timer = 0.0;
+    }
+    
+    // ============================================================================
+    // Clear methods - For error handling (clear input on specific errors)
+    // ============================================================================
+    
+    /// Clear account ID input field (对应C# case 7: AccountIDTextBox.Text = string.Empty)
+    pub fn clear_account_id(&mut self) {
+        self.registration.account_id.clear();
+        self.account_id_valid = false;
+        self.ok_button_enabled = self.can_submit();
     }
 }
 

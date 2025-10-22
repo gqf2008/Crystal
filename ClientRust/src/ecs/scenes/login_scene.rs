@@ -16,11 +16,13 @@ pub mod login_dialog;
 pub mod new_account_dialog;
 pub mod change_password_dialog;
 pub mod message_box;
+pub mod connecting_box;
 
 pub use login_dialog::LoginDialog;
 pub use new_account_dialog::NewAccountDialog;
 pub use change_password_dialog::ChangePasswordDialog;
 pub use message_box::MessageBox;
+pub use connecting_box::ConnectingBox;
 
 #[derive(Debug, Clone)]
 pub struct BanInfo {
@@ -74,6 +76,7 @@ pub struct LoginScene {
     pub new_account_dialog: Option<NewAccountDialog>,
     pub change_password_dialog: Option<ChangePasswordDialog>,
     pub message_box: Option<MessageBox>,
+    pub connecting_box: ConnectingBox,  // 连接服务器提示框
 }
 
 impl LoginScene {
@@ -91,7 +94,7 @@ impl LoginScene {
             ready_for_character_select: false,
             background_frame: 0,
             animation_timer: 0.0,
-            animation_paused: false,
+            animation_paused: true,  // ✅ 修复：初始化时暂停动画（对应C# Animated = false）
             ok_button_hovered: false,
             account_button_hovered: false,
             pass_button_hovered: false,
@@ -109,6 +112,7 @@ impl LoginScene {
             new_account_dialog: None,
             change_password_dialog: None,
             message_box: None,
+            connecting_box: ConnectingBox::new(),
         }
     }
     
@@ -235,8 +239,22 @@ impl LoginScene {
         self.version_checked = true;
         self.version_valid = true;
         self.require_password_change = false;
-        self.ready_for_character_select = true;
+        // ✅ 修复BUG：不要立即设置ready_for_character_select，应该等动画播放完成
+        // self.ready_for_character_select = true;  // ❌ 错误：这会导致立即跳转场景
         self.characters = characters.to_vec();
+        
+        // 关闭连接提示框（对应C#的 _connectBox = null）
+        self.connecting_box.hide();
+        
+        // TODO: 播放登录音效（对应C# SoundManager.PlaySound(SoundList.LoginEffect)）
+        // 需要先集成SoundManager到ECS架构
+        // use crate::sounds::{sound_manager::SoundManager, sound_list::LOGIN_EFFECT};
+        // sound_manager.play_sound(LOGIN_EFFECT, false, 0)?;
+        
+        // ✅ 开始播放登录成功动画（对应C# _background.Animated = true）
+        self.animation_paused = false;
+        self.background_frame = 0;  // 从第0帧开始播放
+        self.animation_timer = 0.0;
         
         let status_msg = format!(
             "Login successful. {} character(s) available.",
@@ -244,11 +262,7 @@ impl LoginScene {
         );
         self.record_status(status_msg.clone());
         
-        // 🔧 TODO: 触发场景切换到 SelectScene
-        // 目前 Scene trait 没有返回"请求场景切换"的机制
-        // 需要通过 SceneManager 或其他方式触发
-        tracing::info!("✅ {}", status_msg);
-        tracing::warn!("⚠️ 需要手动切换到 SelectScene - Scene trait 没有自动切换机制!");
+        tracing::info!("✅ {} - 开始播放登录动画（19帧）", status_msg);
     }
 
     fn handle_login_ban(&mut self, reason: &str, expiry_date: i64) {
@@ -266,19 +280,155 @@ impl LoginScene {
 
     fn handle_new_account_response(&mut self, result: u8) {
         self.last_new_account_result = Some(result);
-        if let Some(message) = Self::new_account_result_message(result) {
-            self.record_status(message);
-        } else {
-            self.record_status(format!("Unknown new account result code {}", result));
+        
+        // 重新启用OK按钮
+        if let Some(dialog) = &mut self.new_account_dialog {
+            dialog.ok_button_enabled = true;
+        }
+        
+        // 根据result显示消息并处理UI交互（对应C# NewAccount方法）
+        let message = Self::new_account_result_message(result);
+        
+        match result {
+            0 => {
+                // Account creation disabled - 关闭对话框
+                self.show_message("Account creation is currently disabled.");
+                self.new_account_dialog = None;
+                self.login_dialog.show();
+            }
+            1 => {
+                // AccountID不可接受 - 聚焦账号输入框
+                self.show_message("Your AccountID is not acceptable.");
+                if let Some(dialog) = &mut self.new_account_dialog {
+                    dialog.focus_account_id();
+                }
+            }
+            2 => {
+                // Password不可接受 - 聚焦密码输入框
+                self.show_message("Your Password is not acceptable.");
+                if let Some(dialog) = &mut self.new_account_dialog {
+                    dialog.focus_password1();
+                }
+            }
+            3 => {
+                // Email不可接受 - 聚焦Email
+                self.show_message("Your E-Mail Address is not acceptable.");
+                if let Some(dialog) = &mut self.new_account_dialog {
+                    dialog.focus_email();
+                }
+            }
+            4 => {
+                // UserName不可接受 - 聚焦用户名
+                self.show_message("Your User Name is not acceptable.");
+                if let Some(dialog) = &mut self.new_account_dialog {
+                    dialog.focus_user_name();
+                }
+            }
+            5 => {
+                // Question不可接受 - 聚焦密保问题
+                self.show_message("Your Secret Question is not acceptable.");
+                if let Some(dialog) = &mut self.new_account_dialog {
+                    dialog.focus_question();
+                }
+            }
+            6 => {
+                // Answer不可接受 - 聚焦密保答案
+                self.show_message("Your Secret Answer is not acceptable.");
+                if let Some(dialog) = &mut self.new_account_dialog {
+                    dialog.focus_answer();
+                }
+            }
+            7 => {
+                // ⚠️ 账号已存在 - 清空账号输入框并聚焦（对应C# case 7）
+                self.show_message("An Account with this ID already exists.");
+                if let Some(dialog) = &mut self.new_account_dialog {
+                    dialog.clear_account_id();  // ✅ 清空输入框
+                    dialog.focus_account_id();  // ✅ 自动聚焦
+                }
+            }
+            8 => {
+                // 注册成功 - 关闭对话框
+                self.show_message("Your account was created successfully.");
+                self.new_account_dialog = None;
+                self.login_dialog.show();
+            }
+            _ => {
+                self.show_message(format!("Unknown new account result code {}", result));
+            }
+        }
+        
+        if let Some(msg) = message {
+            self.record_status(msg);
         }
     }
 
     fn handle_change_password_response(&mut self, result: u8) {
         self.last_change_password_result = Some(result);
-        if let Some(message) = Self::change_password_result_message(result) {
-            self.record_status(message);
-        } else {
-            self.record_status(format!("Unknown change password result code {}", result));
+        
+        // 重新启用OK按钮
+        if let Some(dialog) = &mut self.change_password_dialog {
+            dialog.ok_button_enabled = true;
+        }
+        
+        // 根据result显示消息并处理UI交互（对应C# ChangePassword方法）
+        let message = Self::change_password_result_message(result);
+        
+        match result {
+            0 => {
+                // Password changing disabled - 关闭对话框
+                self.show_message("Password Changing is currently disabled.");
+                self.change_password_dialog = None;
+                self.login_dialog.show();
+            }
+            1 => {
+                // AccountID不可接受 - 聚焦账号输入框
+                self.show_message("Your AccountID is not acceptable.");
+                if let Some(dialog) = &mut self.change_password_dialog {
+                    dialog.focus_account_id();
+                }
+            }
+            2 => {
+                // 当前密码不可接受 - 聚焦当前密码输入框
+                self.show_message("The current Password is not acceptable.");
+                if let Some(dialog) = &mut self.change_password_dialog {
+                    dialog.focus_current_password();
+                }
+            }
+            3 => {
+                // 新密码不可接受 - 聚焦新密码输入框
+                self.show_message("Your new Password is not acceptable.");
+                if let Some(dialog) = &mut self.change_password_dialog {
+                    dialog.focus_new_password1();
+                }
+            }
+            4 => {
+                // 账号不存在 - 聚焦账号输入框
+                self.show_message("No account with that ID exists.");
+                if let Some(dialog) = &mut self.change_password_dialog {
+                    dialog.focus_account_id();
+                }
+            }
+            5 => {
+                // ⚠️ 当前密码错误 - 清空当前密码并聚焦（对应C# case 5）
+                self.show_message("Incorrect password for that account ID.");
+                if let Some(dialog) = &mut self.change_password_dialog {
+                    dialog.clear_current_password();  // ✅ 清空输入框
+                    dialog.focus_current_password();  // ✅ 自动聚焦
+                }
+            }
+            6 => {
+                // 密码修改成功 - 关闭对话框
+                self.show_message("Your password was changed successfully.");
+                self.change_password_dialog = None;
+                self.login_dialog.show();
+            }
+            _ => {
+                self.show_message(format!("Unknown change password result code {}", result));
+            }
+        }
+        
+        if let Some(msg) = message {
+            self.record_status(msg);
         }
     }
 
@@ -375,6 +525,10 @@ impl LoginScene {
         self.version_valid = false;
         self.ready_for_character_select = false;
         
+        // 显示连接提示框（对应C#的 _connectBox）
+        self.connecting_box.update_message(self.connect_attempts);
+        self.connecting_box.show();
+        
         // TODO: Actual network connection
         let status = format!(
             "Attempting to connect to server (attempt {})",
@@ -455,7 +609,90 @@ impl LoginScene {
     /// Close change password dialog
     pub fn close_change_password_dialog(&mut self) {
         self.change_password_dialog = None;
-        self.login_dialog.show();
+        let _ = self.login_dialog.show();
+    }
+    
+    /// Submit new account registration to server
+    pub fn submit_new_account(&mut self) {
+        if let Some(dialog) = &self.new_account_dialog {
+            tracing::info!("🔍 submit_new_account 调用:");
+            tracing::info!("   can_submit() = {}", dialog.can_submit());
+            tracing::info!("   enabled = {}", dialog.enabled);
+            tracing::info!("   ok_button_enabled = {}", dialog.ok_button_enabled);
+            
+            if !dialog.can_submit() {
+                self.show_message("请检查输入字段格式是否正确");
+                return;
+            }
+            
+            // Parse birth date (optional field)
+            let birth_date_timestamp = if dialog.registration.birth_date.is_empty() {
+                0i64  // C# DateTime.MinValue
+            } else {
+                // TODO: Parse birth date properly
+                0i64
+            };
+            
+            // Send NewAccount command to network thread
+            if let Some(tx) = &self.command_tx {
+                let command = crate::network::NetworkCommand::NewAccount {
+                    account_id: dialog.registration.account_id.clone(),
+                    password: dialog.registration.password.clone(),
+                    birth_date: birth_date_timestamp,
+                    username: dialog.registration.username.clone(),
+                    secret_question: dialog.registration.secret_question.clone(),
+                    secret_answer: dialog.registration.secret_answer.clone(),
+                    email: dialog.registration.email.clone(),
+                };
+                
+                if let Err(e) = tx.send(command) {
+                    tracing::error!("❌ 发送新建账号命令失败: {}", e);
+                    self.show_message("网络错误,无法发送注册请求");
+                    return;
+                }
+                
+                tracing::info!("✅ 已发送新建账号请求: {}", dialog.registration.account_id);
+                self.record_status(format!("正在提交注册请求: {}", dialog.registration.account_id));
+                self.show_message("注册请求已提交,请等待服务器响应...");
+            } else {
+                tracing::error!("❌ command_tx 未初始化");
+                self.show_message("网络未初始化,请稍后再试");
+            }
+        }
+    }
+    
+    /// Submit change password request to server
+    pub fn submit_change_password(&mut self) {
+        if let Some(dialog) = &self.change_password_dialog {
+            if !dialog.can_submit() {
+                self.show_message("请检查所有字段是否正确填写");
+                return;
+            }
+            
+            if let Some((account_id, current_password, new_password)) = dialog.get_request_data() {
+                // Send ChangePassword command to network thread
+                if let Some(tx) = &self.command_tx {
+                    let command = crate::network::NetworkCommand::ChangePassword {
+                        account_id: account_id.clone(),
+                        current_password: current_password.clone(),
+                        new_password: new_password.clone(),
+                    };
+                    
+                    if let Err(e) = tx.send(command) {
+                        tracing::error!("❌ 发送修改密码命令失败: {}", e);
+                        self.show_message("网络错误,无法发送修改密码请求");
+                        return;
+                    }
+                    
+                    tracing::info!("✅ 已发送修改密码请求: {}", account_id);
+                    self.record_status(format!("正在提交修改密码请求: {}", account_id));
+                    self.show_message("修改密码请求已提交,请等待服务器响应...");
+                } else {
+                    tracing::error!("❌ command_tx 未初始化");
+                    self.show_message("网络未初始化,请稍后再试");
+                }
+            }
+        }
     }
     
     /// 绘制登录输入框的文本和光标
@@ -630,6 +867,65 @@ impl LoginScene {
                     .dest([cursor_x, password_text_y - 3.0])  // 和文本保持相同的Y坐标
                     .color(cursor_color);
                 canvas.draw(&cursor_text, cursor_params);
+            }
+        }
+    }
+    
+    /// 绘制连接服务器提示框（对应C# _connectBox）
+    fn draw_connecting_box(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, connecting_box: &ConnectingBox) {
+        use ggez::graphics::{Text, TextFragment, DrawParam, Color as GgezColor, Mesh, DrawMode, Rect};
+        use crate::graphics::{get_library, LibraryName};
+        
+        // 1. 绘制半透明背景遮罩
+        if let Ok(bg_mesh) = Mesh::new_rectangle(
+            ctx,
+            DrawMode::fill(),
+            Rect::new(0.0, 0.0, 1024.0, 768.0),
+            GgezColor::from_rgba(0, 0, 0, 128),
+        ) {
+            canvas.draw(&bg_mesh, DrawParam::default());
+        }
+        
+        // 2. 绘制连接框背景 (使用和MessageBox相同的背景)
+        if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                let box_index = 360;  // 和MessageBox相同的背景
+                
+                // 连接框大小（稍小些）
+                let box_width = 250.0;
+                let box_height = 150.0;
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                
+                // 绘制背景
+                let _ = lib.draw_with_color(ctx, canvas, box_index, box_x, box_y, ggez::graphics::Color::WHITE, false);
+                
+                // 3. 绘制消息文本
+                let text_x = box_x + 20.0;
+                let text_y = box_y + 30.0;
+                let message_lines: Vec<&str> = connecting_box.message.lines().collect();
+                for (i, line) in message_lines.iter().enumerate() {
+                    let line_text = Text::new(
+                        TextFragment::new(*line)
+                            .font("AlibabaPuHuiTi")
+                            .scale(16.0)
+                    );
+                    let line_params = DrawParam::default()
+                        .dest([text_x, text_y + (i as f32 * 24.0)])
+                        .color(GgezColor::WHITE);
+                    canvas.draw(&line_text, line_params);
+                }
+                
+                // 4. 绘制 Cancel 按钮（对应C# MirMessageBoxButtons.Cancel）
+                if let Some(title_arc) = get_library(LibraryName::Title) {
+                    if let Ok(mut title_lib) = title_arc.try_lock() {
+                        // 使用Title库中的Cancel按钮图片（索引待确认，这里先用200系列）
+                        let button_index = if connecting_box.cancel_button_hovered { 211 } else { 210 };
+                        let button_x = box_x + 70.0;  // 居中
+                        let button_y = box_y + 120.0; // 底部
+                        let _ = title_lib.draw_with_color(ctx, canvas, button_index, button_x, button_y, ggez::graphics::Color::WHITE, false);
+                    }
+                }
             }
         }
     }
@@ -1089,7 +1385,16 @@ impl Scene for LoginScene {
             self.animation_timer += delta_time;
             if self.animation_timer >= 0.1 {  // 100ms per frame
                 self.animation_timer = 0.0;
-                self.background_frame = (self.background_frame + 1) % 19;  // 19 frames loop
+                self.background_frame += 1;
+                
+                // 检查动画是否播放完成（对应C# _background.AfterAnimation）
+                if self.background_frame >= 19 {
+                    // 动画播放完成，触发场景切换到SelectScene
+                    tracing::info!("✅ 登录动画播放完成（19帧） - 切换到角色选择场景");
+                    self.ready_for_character_select = true;
+                    self.animation_paused = true;  // 暂停动画
+                    self.background_frame = 18;    // 停留在最后一帧
+                }
             }
         }
         
@@ -1285,6 +1590,11 @@ impl Scene for LoginScene {
             }
         }
         
+        // 3.8 绘制连接服务器提示框 (ConnectingBox) - 在MessageBox之前绘制
+        if self.connecting_box.visible {
+            self.draw_connecting_box(ctx, canvas, &self.connecting_box);
+        }
+        
         // 4. 绘制消息框 (MessageBox) - 最后绘制，显示在最上层
         if let Some(msg_box) = &self.message_box {
             if msg_box.visible {
@@ -1317,6 +1627,21 @@ impl Scene for LoginScene {
         let center_y = 768.0 / 2.0;
         let dialog_x = center_x - 164.0;
         let dialog_y = center_y - 110.0;
+        
+        // ========== 优先处理 ConnectingBox Cancel 按钮 ==========
+        if self.connecting_box.visible {
+            let connecting_box_x = center_x - 125.0;  // 250px宽，居中
+            let connecting_box_y = center_y - 75.0;   // 150px高，居中
+            
+            if self.connecting_box.handle_click(x, y, connecting_box_x, connecting_box_y) {
+                println!("🔘 ConnectingBox Cancel按钮被点击 - 取消连接");
+                self.connecting_box.hide();
+                self.connecting = false;
+                self.login_enabled = true;
+                // TODO: 实际取消网络连接
+                return Ok(());
+            }
+        }
         
         // 检查各个按钮的点击区域
         // OK/登录按钮 (227, 81), 大小约 42x42
@@ -1376,6 +1701,76 @@ impl Scene for LoginScene {
             self.login_dialog.focus_password();
         }
         
+        // ========== 处理 NewAccountDialog 按钮点击 ==========
+        if let Some(dialog) = &mut self.new_account_dialog {
+            if dialog.visible {
+                // 计算NewAccountDialog位置 (对应C# Index=720的对话框)
+                let box_width = 417.0;
+                let box_height = 440.0;
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                
+                // ✅ 修复按钮位置 - 使用与绘制代码相同的坐标
+                // OK按钮: (135, 425), 大小 80x23
+                let ok_btn_x = box_x + 135.0;
+                let ok_btn_y = box_y + 425.0;
+                if x >= ok_btn_x && x < ok_btn_x + 80.0 && y >= ok_btn_y && y < ok_btn_y + 23.0 {
+                    println!("🔘 NewAccountDialog OK按钮被点击 (鼠标位置: {}, {})", x, y);
+                    println!("   按钮区域: ({}, {}) - ({}, {})", ok_btn_x, ok_btn_y, ok_btn_x + 80.0, ok_btn_y + 23.0);
+                    self.submit_new_account();
+                    return Ok(());
+                }
+                
+                // 调试: 打印所有点击位置
+                println!("🖱️ NewAccountDialog内点击: ({}, {}), box位置: ({}, {})", x, y, box_x, box_y);
+                
+                // ✅ 修复按钮位置 - 使用与绘制代码相同的坐标
+                // Cancel按钮: (409, 425), 大小 80x23
+                let cancel_btn_x = box_x + 409.0;
+                let cancel_btn_y = box_y + 425.0;
+                if x >= cancel_btn_x && x < cancel_btn_x + 80.0 && y >= cancel_btn_y && y < cancel_btn_y + 23.0 {
+                    println!("🔘 NewAccountDialog Cancel按钮被点击");
+                    self.new_account_dialog = None;
+                    let _ = self.login_dialog.show();
+                    return Ok(());
+                }
+            }
+        }
+        
+        // ========== 处理 ChangePasswordDialog 按钮点击 ==========
+        if let Some(dialog) = &mut self.change_password_dialog {
+            if dialog.visible {
+                // 计算ChangePasswordDialog位置 (对应C# Index=50的对话框)
+                let box_width = 322.0;
+                let box_height = 280.0;
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                
+                // OK按钮: (80, 236), 大小约 70x30
+                let ok_btn_x = box_x + 80.0;
+                let ok_btn_y = box_y + 236.0;
+                if x >= ok_btn_x && x < ok_btn_x + 70.0 && y >= ok_btn_y && y < ok_btn_y + 30.0 {
+                    println!("🔘 ChangePasswordDialog OK按钮被点击");
+                    if dialog.can_submit() {
+                        self.submit_change_password();
+                    } else {
+                        self.show_message("请检查所有字段是否正确填写");
+                    }
+                    return Ok(());
+                }
+                
+                // Cancel按钮: (222, 236), 大小约 70x30
+                let cancel_btn_x = box_x + 222.0;
+                let cancel_btn_y = box_y + 236.0;
+                if x >= cancel_btn_x && x < cancel_btn_x + 70.0 && y >= cancel_btn_y && y < cancel_btn_y + 30.0 {
+                    println!("🔘 ChangePasswordDialog Cancel按钮被点击");
+                    self.change_password_dialog = None;
+                    let _ = self.login_dialog.show();
+                    return Ok(());
+                }
+            }
+        }
+        
         Ok(())
     }
     
@@ -1393,7 +1788,38 @@ impl Scene for LoginScene {
         let dialog_x = center_x - 164.0;
         let dialog_y = center_y - 110.0;
         
-        // 检查各个按钮的悬停状态
+        // ========== 更新 ConnectingBox 按钮悬停状态 ==========
+        if self.connecting_box.visible {
+            let connecting_box_x = center_x - 125.0;
+            let connecting_box_y = center_y - 75.0;
+            self.connecting_box.update_button_hover(x, y, connecting_box_x, connecting_box_y);
+        }
+        
+        // ========== 处理 NewAccountDialog 鼠标悬停 ==========
+        if let Some(dialog) = &mut self.new_account_dialog {
+            if dialog.visible {
+                let box_width = 417.0;
+                let box_height = 440.0;
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                dialog.update_mouse_hover(x, y, box_x, box_y);
+                return Ok(()); // NewAccountDialog打开时不处理LoginDialog悬停
+            }
+        }
+        
+        // ========== 处理 ChangePasswordDialog 鼠标悬停 ==========
+        if let Some(dialog) = &mut self.change_password_dialog {
+            if dialog.visible {
+                let box_width = 322.0;
+                let box_height = 280.0;
+                let box_x = (1024.0 - box_width) / 2.0;
+                let box_y = (768.0 - box_height) / 2.0;
+                dialog.update_mouse_hover(x, y, box_x, box_y);
+                return Ok(()); // ChangePasswordDialog打开时不处理LoginDialog悬停
+            }
+        }
+        
+        // ========== LoginDialog 按钮悬停状态 ==========
         self.ok_button_hovered = 
             x >= dialog_x + 227.0 && x <= dialog_x + 227.0 + 42.0 &&
             y >= dialog_y + 81.0 && y <= dialog_y + 81.0 + 42.0;
@@ -1433,6 +1859,80 @@ impl Scene for LoginScene {
             text,
             ..
         } = &input.event {
+            
+            // ========== 优先处理 NewAccountDialog 键盘事件 ==========
+            if let Some(dialog) = &mut self.new_account_dialog {
+                if dialog.visible {
+                    match keycode {
+                        KeyCode::Backspace => {
+                            dialog.handle_backspace();
+                            return Ok(None);
+                        }
+                        KeyCode::Tab => {
+                            dialog.handle_tab();
+                            return Ok(None);
+                        }
+                        KeyCode::Enter => {
+                            if dialog.can_submit() {
+                                self.submit_new_account();
+                            }
+                            return Ok(None);
+                        }
+                        KeyCode::Escape => {
+                            self.new_account_dialog = None;
+                            self.login_dialog.show();
+                            return Ok(None);
+                        }
+                        _ => {
+                            // 处理文本输入
+                            if let Some(text_str) = text {
+                                for ch in text_str.chars() {
+                                    dialog.handle_text_input(ch);
+                                }
+                            }
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+            
+            // ========== 处理 ChangePasswordDialog 键盘事件 ==========
+            if let Some(dialog) = &mut self.change_password_dialog {
+                if dialog.visible {
+                    match keycode {
+                        KeyCode::Backspace => {
+                            dialog.handle_backspace();
+                            return Ok(None);
+                        }
+                        KeyCode::Tab => {
+                            dialog.handle_tab();
+                            return Ok(None);
+                        }
+                        KeyCode::Enter => {
+                            if dialog.can_submit() {
+                                self.submit_change_password();
+                            }
+                            return Ok(None);
+                        }
+                        KeyCode::Escape => {
+                            self.change_password_dialog = None;
+                            self.login_dialog.show();
+                            return Ok(None);
+                        }
+                        _ => {
+                            // 处理文本输入
+                            if let Some(text_str) = text {
+                                for ch in text_str.chars() {
+                                    dialog.handle_text_input(ch);
+                                }
+                            }
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+            
+            // ========== 处理 LoginDialog 键盘事件 ==========
             match keycode {
                 KeyCode::Backspace => {
                     // 退格键
