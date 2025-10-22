@@ -7,7 +7,7 @@
 // ============================================================================
 
 mod game_scene;
-mod login_scene;
+pub mod login_scene;  // LoginScene模块（包含ECS组件、系统、对话框等）
 mod select_scene;
 
 use crate::network::NetworkCommand;

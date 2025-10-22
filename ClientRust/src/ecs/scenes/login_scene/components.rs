@@ -135,6 +135,7 @@ pub enum ButtonAction {
     Login,
     NewAccount,
     ChangePassword,
+    CloseDialog,  // 通用关闭按钮
     
     // NewAccountDialog
     NewAccountOk,
@@ -146,6 +147,9 @@ pub enum ButtonAction {
     
     // ConnectingBox
     CancelConnect,
+    
+    // MessageBox
+    MessageBoxOk,
 }
 
 /// 悬停状态组件
