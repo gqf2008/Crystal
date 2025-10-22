@@ -300,68 +300,50 @@ impl ChangePasswordDialog {
         self.refresh_ok_button();
     }
 
-    /// Validate current password (必须包含字母和数字)
+    /// Validate current password (字母数字,符合长度即可)
     fn validate_current_password(&mut self) {
         if self.current_password.is_empty() {
             self.current_password_valid = false;
         } else {
-            // 检查长度
-            let len = self.current_password.len();
-            let valid_length = len >= self.min_password_length && len <= self.max_password_length;
-            
-            // 检查字符是否都是字母或数字
-            let all_alphanumeric = self.current_password.chars().all(|c| c.is_ascii_alphanumeric());
-            
-            // 检查是否同时包含字母和数字
-            let has_letter = self.current_password.chars().any(|c| c.is_ascii_alphabetic());
-            let has_digit = self.current_password.chars().any(|c| c.is_ascii_digit());
-            
-            self.current_password_valid = valid_length && all_alphanumeric && has_letter && has_digit;
+            let pattern = format!(
+                r"^[A-Za-z0-9]{{{},{}}}$",
+                self.min_password_length,
+                self.max_password_length
+            );
+            if let Ok(regex) = Regex::new(&pattern) {
+                self.current_password_valid = regex.is_match(&self.current_password);
+            } else {
+                self.current_password_valid = false;
+            }
         }
         self.refresh_ok_button();
     }
 
-    /// Validate new password (必须包含字母和数字)
+    /// Validate new password (字母数字,符合长度即可)
     fn validate_new_password1(&mut self) {
         if self.new_password.is_empty() {
             self.new_password1_valid = false;
         } else {
-            // 检查长度
-            let len = self.new_password.len();
-            let valid_length = len >= self.min_password_length && len <= self.max_password_length;
-            
-            // 检查字符是否都是字母或数字
-            let all_alphanumeric = self.new_password.chars().all(|c| c.is_ascii_alphanumeric());
-            
-            // 检查是否同时包含字母和数字
-            let has_letter = self.new_password.chars().any(|c| c.is_ascii_alphabetic());
-            let has_digit = self.new_password.chars().any(|c| c.is_ascii_digit());
-            
-            self.new_password1_valid = valid_length && all_alphanumeric && has_letter && has_digit;
+            let pattern = format!(
+                r"^[A-Za-z0-9]{{{},{}}}$",
+                self.min_password_length,
+                self.max_password_length
+            );
+            if let Ok(regex) = Regex::new(&pattern) {
+                self.new_password1_valid = regex.is_match(&self.new_password);
+            } else {
+                self.new_password1_valid = false;
+            }
         }
         self.refresh_ok_button();
     }
 
-    /// Validate new password confirmation (必须包含字母和数字且与新密码一致)
+    /// Validate new password confirmation (必须与新密码一致)
     fn validate_new_password2(&mut self) {
-        if self.new_password_confirm.is_empty() {
-            self.new_password2_valid = false;
+        if self.new_password == self.new_password_confirm {
+            self.new_password2_valid = self.new_password1_valid;
         } else {
-            // 检查长度
-            let len = self.new_password_confirm.len();
-            let valid_length = len >= self.min_password_length && len <= self.max_password_length;
-            
-            // 检查字符是否都是字母或数字
-            let all_alphanumeric = self.new_password_confirm.chars().all(|c| c.is_ascii_alphanumeric());
-            
-            // 检查是否同时包含字母和数字
-            let has_letter = self.new_password_confirm.chars().any(|c| c.is_ascii_alphabetic());
-            let has_digit = self.new_password_confirm.chars().any(|c| c.is_ascii_digit());
-            
-            // 检查是否与新密码一致
-            let matches_new_password = self.new_password == self.new_password_confirm;
-            
-            self.new_password2_valid = valid_length && all_alphanumeric && has_letter && has_digit && matches_new_password;
+            self.new_password2_valid = false;
         }
         self.refresh_ok_button();
     }

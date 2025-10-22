@@ -51,6 +51,11 @@ pub struct InventoryDialog {
     /// 当前负重/最大负重
     current_weight: u16,
     max_weight: u16,
+    
+    /// 拖拽状态
+    dragging_slot: Option<usize>,
+    drag_offset_x: f32,
+    drag_offset_y: f32,
 }
 
 impl InventoryDialog {
@@ -88,6 +93,9 @@ impl InventoryDialog {
             gold: 0,
             current_weight: 0,
             max_weight: 100,
+            dragging_slot: None,
+            drag_offset_x: 0.0,
+            drag_offset_y: 0.0,
         }
     }
     
@@ -163,6 +171,48 @@ impl InventoryDialog {
         Some(row * self.grid_cols + col)
     }
     
+    /// 开始拖拽
+    pub fn start_drag(&mut self, slot: usize, mouse_x: f32, mouse_y: f32) {
+        self.dragging_slot = Some(slot);
+        
+        // 计算拖拽偏移量(鼠标相对于格子中心的偏移)
+        let (slot_x, slot_y) = self.get_slot_position(slot);
+        self.drag_offset_x = mouse_x - (slot_x + self.cell_width / 2.0);
+        self.drag_offset_y = mouse_y - (slot_y + self.cell_height / 2.0);
+    }
+    
+    /// 结束拖拽
+    pub fn end_drag(&mut self, mouse_x: f32, mouse_y: f32) -> Option<InventoryAction> {
+        if let Some(from_slot) = self.dragging_slot {
+            self.dragging_slot = None;
+            
+            // 检查是否拖拽到另一个格子
+            let to_slot = self.get_slot_at(mouse_x, mouse_y);
+            
+            return Some(InventoryAction::EndDrag {
+                from: from_slot,
+                to: to_slot,
+            });
+        }
+        None
+    }
+    
+    /// 是否正在拖拽
+    pub fn is_dragging(&self) -> bool {
+        self.dragging_slot.is_some()
+    }
+    
+    /// 获取格子的屏幕位置
+    fn get_slot_position(&self, slot: usize) -> (f32, f32) {
+        let row = slot / self.grid_cols;
+        let col = slot % self.grid_cols;
+        
+        let x = self.x + self.grid_start_x + col as f32 * (self.cell_width + self.cell_spacing);
+        let y = self.y + self.grid_start_y + row as f32 * (self.cell_height + self.cell_spacing);
+        
+        (x, y)
+    }
+    
     /// 更新鼠标悬停状态
     pub fn update_hover(&mut self, mouse_x: f32, mouse_y: f32) {
         self.hover_slot = self.get_slot_at(mouse_x, mouse_y);
@@ -188,10 +238,38 @@ impl InventoryDialog {
         // 检查是否点击物品格子
         if let Some(slot) = self.get_slot_at(mouse_x, mouse_y) {
             self.selected_slot = Some(slot);
-            println!("🖱️ 点击背包格子: {}", slot);
-            return Some(InventoryAction::SelectSlot(slot));
+            // 开始拖拽
+            self.start_drag(slot, mouse_x, mouse_y);
+            println!("🖱️ 点击背包格子: {}, 开始拖拽", slot);
+            return Some(InventoryAction::StartDrag(slot));
         }
         
+        None
+    }
+    
+    /// 处理鼠标释放
+    pub fn on_mouse_up(&mut self, mouse_x: f32, mouse_y: f32) -> Option<InventoryAction> {
+        if !self.visible {
+            return None;
+        }
+        
+        // 如果正在拖拽,结束拖拽
+        if self.is_dragging() {
+            return self.end_drag(mouse_x, mouse_y);
+        }
+        
+        None
+    }
+    
+    /// 处理鼠标移动(拖拽中)
+    pub fn on_mouse_move(&mut self, mouse_x: f32, mouse_y: f32) -> Option<InventoryAction> {
+        if let Some(dragging_slot) = self.dragging_slot {
+            return Some(InventoryAction::Dragging {
+                slot: dragging_slot,
+                x: mouse_x - self.drag_offset_x,
+                y: mouse_y - self.drag_offset_y,
+            });
+        }
         None
     }
     
@@ -315,6 +393,19 @@ impl InventoryDialog {
                 .color(weight_color),
         );
         
+        // 绘制拖拽中的物品
+        if let Some(drag_slot) = self.dragging_slot {
+            // TODO: 从ECS世界或ItemComponent获取物品数据并绘制
+            // 暂时显示一个简单的拖拽提示
+            let drag_text = Text::new(format!("拖拽物品 slot: {}", drag_slot));
+            canvas.draw(
+                &drag_text,
+                DrawParam::default()
+                    .dest([self.x + self.width / 2.0 - 50.0, self.y + 40.0])
+                    .color(Color::from_rgba(255, 255, 100, 180)),
+            );
+        }
+        
         Ok(())
     }
 }
@@ -326,4 +417,10 @@ pub enum InventoryAction {
     SelectSlot(usize),
     UseItem(usize),
     DropItem(usize),
+    /// 开始拖拽物品
+    StartDrag(usize),
+    /// 拖拽中
+    Dragging { slot: usize, x: f32, y: f32 },
+    /// 结束拖拽 (from_slot, to_slot)
+    EndDrag { from: usize, to: Option<usize> },
 }

@@ -487,6 +487,7 @@ impl NewAccountDialog {
         self.account_id_valid = false;
         self.password1_valid = false;
         self.password2_valid = false;
+        // ✅ C#原版: 可选字段默认为true(灰色边框)
         self.email_valid = true;
         self.username_valid = true;
         self.birth_date_valid = true;
@@ -563,23 +564,21 @@ impl NewAccountDialog {
         self.refresh_ok_button();
     }
 
-    /// Validate password (必须包含字母和数字)
+    /// Validate password (字母数字,符合长度即可)
     fn validate_password1(&mut self) {
         if self.registration.password.is_empty() {
             self.password1_valid = false;
         } else {
-            // 检查长度
-            let len = self.registration.password.len();
-            let valid_length = len >= self.min_password_length && len <= self.max_password_length;
-            
-            // 检查字符是否都是字母或数字
-            let all_alphanumeric = self.registration.password.chars().all(|c| c.is_ascii_alphanumeric());
-            
-            // 检查是否同时包含字母和数字 (增强安全性)
-            let has_letter = self.registration.password.chars().any(|c| c.is_ascii_alphabetic());
-            let has_digit = self.registration.password.chars().any(|c| c.is_ascii_digit());
-            
-            self.password1_valid = valid_length && all_alphanumeric && has_letter && has_digit;
+            let pattern = format!(
+                r"^[A-Za-z0-9]{{{},{}}}$",
+                self.min_password_length,
+                self.max_password_length
+            );
+            if let Ok(regex) = Regex::new(&pattern) {
+                self.password1_valid = regex.is_match(&self.registration.password);
+            } else {
+                self.password1_valid = false;
+            }
         }
         self.refresh_ok_button();
     }
@@ -605,15 +604,15 @@ impl NewAccountDialog {
         self.refresh_ok_button();
     }
 
-    /// Validate email (必填,格式验证)
+    /// Validate email (可选字段,为空时valid)
     fn validate_email(&mut self) {
-        // C# 原版: Email 是必填字段
+        // C# 原版: Email 为空时 = valid (灰色)
         if self.registration.email.is_empty() {
-            self.email_valid = false;
+            self.email_valid = true;  // ✅ 空值有效
         } else if self.registration.email.len() > 50 {
             self.email_valid = false;
         } else {
-            // Enhanced email pattern - 标准 RFC 5322 简化版
+            // Email格式验证: \w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*
             let pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
             if let Ok(regex) = Regex::new(pattern) {
                 self.email_valid = regex.is_match(&self.registration.email);
@@ -624,28 +623,30 @@ impl NewAccountDialog {
         self.refresh_ok_button();
     }
 
-    /// Validate username (必填, 1-20字符,可包含中文)
+    /// Validate username (可选字段,为空时valid,最大20字符)
     fn validate_username(&mut self) {
-        // C# 原版: Username 是必填字段
+        // C# 原版: Username 为空时 = valid (灰色)
         if self.registration.username.is_empty() {
-            self.username_valid = false;
+            self.username_valid = true;  // ✅ 空值有效
         } else {
             let len = self.registration.username.chars().count();
-            // 允许中文、字母、数字、下划线,长度1-20
-            self.username_valid = len >= 1 && len <= 20;
+            // 最大20字符,允许任何可见字符(包括中文)
+            self.username_valid = len > 0 && len <= 20;
         }
         self.refresh_ok_button();
     }
 
-    /// Validate birth date (必填, 格式: MM/DD/YYYY 或 YYYY-MM-DD)
+    /// Validate birth date (可选字段,为空时valid,格式: dd/MM/yyyy 或 yyyy-MM-dd)
     fn validate_birth_date(&mut self) {
-        // C# 原版: BirthDate 是必填字段
+        // C# 原版: BirthDate 为空时 = valid (灰色)
         if self.registration.birth_date.is_empty() {
+            self.birth_date_valid = true;  // ✅ 空值有效
+        } else if self.registration.birth_date.len() > 10 {
             self.birth_date_valid = false;
         } else {
-            // 接受两种格式: MM/DD/YYYY (美式) 或 YYYY-MM-DD (ISO)
-            let pattern1 = r"^(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])/\d{4}$"; // MM/DD/YYYY
-            let pattern2 = r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"; // YYYY-MM-DD
+            // 接受两种格式: dd/MM/yyyy 或 yyyy-MM-dd
+            let pattern1 = r"^(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/\d{4}$"; // dd/MM/yyyy
+            let pattern2 = r"^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"; // yyyy-MM-dd
             
             let valid_format1 = Regex::new(pattern1).map(|r| r.is_match(&self.registration.birth_date)).unwrap_or(false);
             let valid_format2 = Regex::new(pattern2).map(|r| r.is_match(&self.registration.birth_date)).unwrap_or(false);
@@ -655,26 +656,26 @@ impl NewAccountDialog {
         self.refresh_ok_button();
     }
 
-    /// Validate secret question (必填, 1-30字符)
+    /// Validate secret question (可选字段,为空时valid,最大30字符)
     fn validate_question(&mut self) {
-        // C# 原版: Question 是必填字段
+        // C# 原版: Question 为空时 = valid (灰色)
         if self.registration.secret_question.is_empty() {
-            self.question_valid = false;
+            self.question_valid = true;  // ✅ 空值有效
         } else {
             let len = self.registration.secret_question.chars().count();
-            self.question_valid = len >= 1 && len <= 30;
+            self.question_valid = len > 0 && len <= 30;
         }
         self.refresh_ok_button();
     }
 
-    /// Validate secret answer (必填, 1-30字符)
+    /// Validate secret answer (可选字段,为空时valid,最大30字符)
     fn validate_answer(&mut self) {
-        // C# 原版: Answer 是必填字段
+        // C# 原版: Answer 为空时 = valid (灰色)
         if self.registration.secret_answer.is_empty() {
-            self.answer_valid = false;
+            self.answer_valid = true;  // ✅ 空值有效
         } else {
             let len = self.registration.secret_answer.chars().count();
-            self.answer_valid = len >= 1 && len <= 30;
+            self.answer_valid = len > 0 && len <= 30;
         }
         self.refresh_ok_button();
     }

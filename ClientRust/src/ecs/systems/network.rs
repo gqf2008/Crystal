@@ -58,9 +58,13 @@ impl NetworkSystem {
                 self.handle_object_pushed(world, *object_id, *direction, location);
             }
             _ => {
-                // 其他事件暂不处理
+                // 其他事件由UISystem处理
             }
         }
+        
+        // 将事件传递给UISystem处理UI更新
+        use crate::ecs::systems::UISystem;
+        UISystem::process_event(world, event);
     }
     
     /// 处理玩家移动事件

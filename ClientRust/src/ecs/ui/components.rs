@@ -359,3 +359,97 @@ impl ChatMessageType {
         }
     }
 }
+
+// ============================================================================
+// UI 对话框 ECS 组件封装
+// ============================================================================
+//
+// 将 UI 对话框封装为 ECS 组件，使其能够存储在 World 中
+// 符合 ECS 的数据驱动设计原则
+//
+// ============================================================================
+
+use super::{
+    MainDialog, InventoryDialog, CharacterDialog, 
+    SkillBarDialog, ChatDialog
+};
+
+/// 主对话框组件
+pub struct MainDialogComp {
+    pub dialog: MainDialog,
+}
+
+impl MainDialogComp {
+    pub fn new(screen_width: f32, screen_height: f32) -> Self {
+        Self {
+            dialog: MainDialog::new(screen_width, screen_height),
+        }
+    }
+}
+
+/// 背包对话框组件
+pub struct InventoryDialogComp {
+    pub dialog: InventoryDialog,
+}
+
+impl InventoryDialogComp {
+    pub fn new() -> Self {
+        Self {
+            dialog: InventoryDialog::new(),
+        }
+    }
+}
+
+/// 角色对话框组件
+pub struct CharacterDialogComp {
+    pub dialog: CharacterDialog,
+}
+
+impl CharacterDialogComp {
+    pub fn new() -> Self {
+        Self {
+            dialog: CharacterDialog::new(),
+        }
+    }
+}
+
+/// 技能栏组件
+pub struct SkillBarComp {
+    pub dialog: SkillBarDialog,
+    pub bar_index: u8,
+}
+
+impl SkillBarComp {
+    pub fn new(bar_index: u8) -> Self {
+        Self {
+            dialog: SkillBarDialog::new(bar_index),
+            bar_index,
+        }
+    }
+}
+
+/// 聊天对话框组件
+pub struct ChatDialogComp {
+    pub dialog: ChatDialog,
+}
+
+impl ChatDialogComp {
+    pub fn new(x: f32, y: f32) -> Self {
+        Self {
+            dialog: ChatDialog::new(x, y),
+        }
+    }
+}
+
+/// 技能学习对话框组件
+pub struct MagicLearningDialogComp {
+    pub dialog: super::MagicLearningDialog,
+}
+
+impl MagicLearningDialogComp {
+    pub fn new() -> Self {
+        Self {
+            dialog: super::MagicLearningDialog::new(),
+        }
+    }
+}

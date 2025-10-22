@@ -220,6 +220,10 @@ impl CharacterDialog {
         self.visible = false;
     }
     
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+    
     pub fn switch_tab(&mut self, tab: CharacterTab) {
         self.current_tab = tab;
     }

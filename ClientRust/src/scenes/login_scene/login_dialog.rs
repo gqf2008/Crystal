@@ -81,16 +81,15 @@ impl LoginDialog {
         self.validate_password();
     }
 
-    /// Show dialog
-    pub fn show(&mut self) {
+    /// Show dialog, returns true if should auto-login
+    pub fn show(&mut self) -> bool {
         if self.visible {
-            return;
+            return false;
         }
         self.visible = true;
-        // Auto-login if both fields are filled
-        if !self.account_id.is_empty() && !self.password.is_empty() {
-            // Will trigger login in update
-        }
+        // C# 原版: 如果Settings中有账号和密码,自动登录
+        // if (Settings.Password != string.Empty && Settings.AccountID != string.Empty) { Login(); }
+        !self.account_id.is_empty() && !self.password.is_empty()
     }
 
     /// Hide dialog

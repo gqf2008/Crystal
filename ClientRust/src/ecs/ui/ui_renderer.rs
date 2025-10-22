@@ -7,6 +7,8 @@ use ggez::graphics::{Canvas, Color, DrawParam, Rect, Mesh, DrawMode, Text, PxSca
 use hecs::World;
 
 use super::components::*;
+use super::quest_dialog::QuestDialogComp;
+use super::trade_dialog::TradeDialogComp;
 
 /// UI 渲染系统
 pub struct UIRenderer;
@@ -50,6 +52,16 @@ impl UIRenderer {
                     Self::draw_chat_window(ctx, canvas, chat)?;
                 }
             }
+        }
+        
+        // 渲染任务对话框
+        for (_, quest_dialog) in world.query::<&QuestDialogComp>().iter() {
+            quest_dialog.draw(ctx, canvas)?;
+        }
+        
+        // 渲染交易窗口
+        for (_, trade_dialog) in world.query::<&TradeDialogComp>().iter() {
+            trade_dialog.draw(ctx, canvas)?;
         }
         
         Ok(())

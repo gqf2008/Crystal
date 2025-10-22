@@ -178,6 +178,44 @@ impl Health {
     }
 }
 
+/// 魔法值组件
+#[derive(Debug, Clone, Copy)]
+pub struct Mana {
+    pub current: i32,
+    pub max: i32,
+}
+
+impl Mana {
+    pub fn new(max: i32) -> Self {
+        Self { current: max, max }
+    }
+
+    pub fn has_enough(&self, cost: i32) -> bool {
+        self.current >= cost
+    }
+
+    pub fn consume(&mut self, cost: i32) -> bool {
+        if self.current >= cost {
+            self.current -= cost;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn restore(&mut self, amount: i32) {
+        self.current = (self.current + amount).min(self.max);
+    }
+
+    pub fn percent(&self) -> f32 {
+        if self.max > 0 {
+            self.current as f32 / self.max as f32
+        } else {
+            0.0
+        }
+    }
+}
+
 /// 战斗属性组件 (玩家/怪物)
 #[derive(Debug, Clone)]
 pub struct CombatStats {
@@ -653,6 +691,119 @@ impl Default for MouseInput {
     }
 }
 
+/// 装备栏组件
+#[derive(Debug, Clone)]
+pub struct Equipment {
+    pub weapon: Option<mir2_shared::data::item::UserItem>,       // 武器
+    pub armour: Option<mir2_shared::data::item::UserItem>,       // 衣服
+    pub helmet: Option<mir2_shared::data::item::UserItem>,       // 头盔
+    pub necklace: Option<mir2_shared::data::item::UserItem>,     // 项链
+    pub bracelet_l: Option<mir2_shared::data::item::UserItem>,   // 左手镯
+    pub bracelet_r: Option<mir2_shared::data::item::UserItem>,   // 右手镯
+    pub ring_l: Option<mir2_shared::data::item::UserItem>,       // 左戒指
+    pub ring_r: Option<mir2_shared::data::item::UserItem>,       // 右戒指
+    pub amulet: Option<mir2_shared::data::item::UserItem>,       // 护身符
+    pub belt: Option<mir2_shared::data::item::UserItem>,         // 腰带
+    pub boots: Option<mir2_shared::data::item::UserItem>,        // 鞋子
+    pub stone: Option<mir2_shared::data::item::UserItem>,        // 宝石
+    pub torch: Option<mir2_shared::data::item::UserItem>,        // 火把
+    pub mount: Option<mir2_shared::data::item::UserItem>,        // 坐骑
+}
+
+impl Default for Equipment {
+    fn default() -> Self {
+        Self {
+            weapon: None,
+            armour: None,
+            helmet: None,
+            necklace: None,
+            bracelet_l: None,
+            bracelet_r: None,
+            ring_l: None,
+            ring_r: None,
+            amulet: None,
+            belt: None,
+            boots: None,
+            stone: None,
+            torch: None,
+            mount: None,
+        }
+    }
+}
+
+impl Equipment {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    /// 根据装备类型获取对应槽位
+    pub fn get_slot_for_type(&self, item_type: mir2_shared::enums::ItemType) -> Option<u8> {
+        use mir2_shared::enums::ItemType;
+        match item_type {
+            ItemType::Weapon => Some(0),
+            ItemType::Armour => Some(1),
+            ItemType::Helmet => Some(2),
+            ItemType::Necklace => Some(3),
+            ItemType::Bracelet => Some(4), // 默认左手镯
+            ItemType::Ring => Some(6),     // 默认左戒指
+            ItemType::Amulet => Some(8),
+            ItemType::Belt => Some(9),
+            ItemType::Boots => Some(10),
+            ItemType::Stone => Some(11),
+            ItemType::Torch => Some(12),
+            ItemType::Mount => Some(13),
+            _ => None,
+        }
+    }
+    
+    /// 装备物品到指定槽位
+    pub fn equip(&mut self, slot: u8, item: mir2_shared::data::item::UserItem) -> Option<mir2_shared::data::item::UserItem> {
+        let slot_ref = match slot {
+            0 => &mut self.weapon,
+            1 => &mut self.armour,
+            2 => &mut self.helmet,
+            3 => &mut self.necklace,
+            4 => &mut self.bracelet_l,
+            5 => &mut self.bracelet_r,
+            6 => &mut self.ring_l,
+            7 => &mut self.ring_r,
+            8 => &mut self.amulet,
+            9 => &mut self.belt,
+            10 => &mut self.boots,
+            11 => &mut self.stone,
+            12 => &mut self.torch,
+            13 => &mut self.mount,
+            _ => return None,
+        };
+        
+        // 返回旧装备
+        slot_ref.replace(item)
+    }
+    
+    /// 卸下指定槽位的装备
+    pub fn unequip(&mut self, slot: u8) -> Option<mir2_shared::data::item::UserItem> {
+        let slot_ref = match slot {
+            0 => &mut self.weapon,
+            1 => &mut self.armour,
+            2 => &mut self.helmet,
+            3 => &mut self.necklace,
+            4 => &mut self.bracelet_l,
+            5 => &mut self.bracelet_r,
+            6 => &mut self.ring_l,
+            7 => &mut self.ring_r,
+            8 => &mut self.amulet,
+            9 => &mut self.belt,
+            10 => &mut self.boots,
+            11 => &mut self.stone,
+            12 => &mut self.torch,
+            13 => &mut self.mount,
+            _ => return None,
+        };
+        
+        slot_ref.take()
+    }
+}
+
 /// 地图瓦片组件
 #[derive(Debug, Clone)]
 pub struct MapTile {
@@ -866,6 +1017,416 @@ impl Monster {
         }
     }
 }
+
+// ============================================================================
+// 技能/魔法系统组件
+// ============================================================================
+
+/// 技能类型 (对应 C# Spell 枚举)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum SpellType {
+    None = 0,
+    
+    // Warrior (战士)
+    Fencing = 1,
+    Slaying = 2,
+    Thrusting = 3,
+    HalfMoon = 4,
+    ShoulderDash = 5,
+    TwinDrakeBlade = 6,
+    Entrapment = 7,
+    FlamingSword = 8,
+    LionRoar = 9,
+    CrossHalfMoon = 10,
+    BladeAvalanche = 11,
+    ProtectionField = 12,
+    Rage = 13,
+    CounterAttack = 14,
+    SlashingBurst = 15,
+    Fury = 16,
+    ImmortalSkin = 17,
+    
+    // Wizard (法师)
+    FireBall = 31,
+    Repulsion = 32,
+    ElectricShock = 33,
+    GreatFireBall = 34,
+    HellFire = 35,
+    ThunderBolt = 36,
+    Teleport = 37,
+    FireBang = 38,
+    FireWall = 39,
+    Lightning = 40,
+    FrostCrunch = 41,
+    ThunderStorm = 42,
+    MagicShield = 43,
+    TurnUndead = 44,
+    Vampirism = 45,
+    IceStorm = 46,
+    FlameDisruptor = 47,
+    Mirroring = 48,
+    FlameField = 49,
+    Blizzard = 50,
+    MagicBooster = 51,
+    MeteorStrike = 52,
+    IceThrust = 53,
+    FastMove = 54,
+    StormEscape = 55,
+    
+    // Taoist (道士)
+    Healing = 61,
+    SpiritSword = 62,
+    Poisoning = 63,
+    SoulFireBall = 64,
+    SummonSkeleton = 65,
+    Hiding = 67,
+    MassHiding = 68,
+    SoulShield = 69,
+    Revelation = 70,
+    BlessedArmour = 71,
+    EnergyRepulsor = 72,
+    TrapHexagon = 73,
+    Purification = 74,
+    MassHealing = 75,
+    Hallucination = 76,
+    UltimateEnhancer = 77,
+    SummonShinsu = 78,
+    Reincarnation = 79,
+    SummonHolyDeva = 80,
+    Curse = 81,
+    Plague = 82,
+    PoisonCloud = 83,
+    EnergyShield = 84,
+    PetEnhancer = 85,
+    HealingCircle = 86,
+    
+    // Assassin (刺客)
+    FatalSword = 91,
+    DoubleSlash = 92,
+    Haste = 93,
+    FlashDash = 94,
+    LightBody = 95,
+    HeavenlySword = 96,
+    FireBurst = 97,
+    Trap = 98,
+    PoisonSword = 99,
+    MoonLight = 100,
+    MPEater = 101,
+    SwiftFeet = 102,
+    DarkBody = 103,
+    Hemorrhage = 104,
+    CrescentSlash = 105,
+    MoonMist = 106,
+    CatTongue = 107,
+    
+    // Archer (弓箭手)
+    Focus = 121,
+    StraightShot = 122,
+    DoubleShot = 123,
+    ExplosiveTrap = 124,
+    DelayedExplosion = 125,
+    Meditation = 126,
+    BackStep = 127,
+    ElementalShot = 128,
+    Concentration = 129,
+    Stonetrap = 130,
+    ElementalBarrier = 131,
+    SummonVampire = 132,
+    VampireShot = 133,
+    SummonToad = 134,
+    PoisonShot = 135,
+    CrippleShot = 136,
+    SummonSnakes = 137,
+    NapalmShot = 138,
+    OneWithNature = 139,
+    BindingShot = 140,
+    MentalState = 141,
+}
+
+impl SpellType {
+    /// 获取技能名称
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::None => "无",
+            // Warrior
+            Self::Fencing => "基本剑术",
+            Self::Slaying => "攻杀剑术",
+            Self::Thrusting => "刺杀剑术",
+            Self::HalfMoon => "半月弯刀",
+            Self::ShoulderDash => "野蛮冲撞",
+            Self::LionRoar => "狮子吼",
+            // Wizard
+            Self::FireBall => "火球术",
+            Self::GreatFireBall => "大火球",
+            Self::HellFire => "地狱火",
+            Self::ThunderBolt => "雷电术",
+            Self::Teleport => "瞬息移动",
+            Self::Lightning => "疾光电影",
+            Self::MagicShield => "魔法盾",
+            // Taoist
+            Self::Healing => "治愈术",
+            Self::SpiritSword => "精神力战法",
+            Self::Poisoning => "施毒术",
+            Self::SummonSkeleton => "召唤骷髅",
+            Self::Hiding => "隐身术",
+            Self::SoulShield => "幽灵盾",
+            // Assassin
+            Self::FatalSword => "致命剑术",
+            Self::DoubleSlash => "双倍斩",
+            Self::Haste => "加速",
+            Self::FlashDash => "闪避",
+            // Archer
+            Self::Focus => "集中",
+            Self::StraightShot => "直射",
+            Self::DoubleShot => "双射",
+            Self::Meditation => "冥想",
+            _ => "未知技能"
+        }
+    }
+    
+    /// 获取技能所需职业
+    pub fn required_class(&self) -> MirClass {
+        let id = *self as u8;
+        if id >= 1 && id <= 17 { MirClass::Warrior }
+        else if id >= 31 && id <= 55 { MirClass::Wizard }
+        else if id >= 61 && id <= 86 { MirClass::Taoist }
+        else if id >= 91 && id <= 107 { MirClass::Assassin }
+        else if id >= 121 && id <= 141 { MirClass::Archer }
+        else { MirClass::Warrior } // 默认
+    }
+}
+
+/// 已学会的技能数据
+#[derive(Debug, Clone)]
+pub struct LearnedMagic {
+    pub spell: SpellType,
+    pub level: u8,        // 技能等级 (0-3)
+    pub experience: u32,  // 技能经验
+    pub key_slot: Option<u8>, // 绑定的快捷键槽位 (F1-F8)
+}
+
+impl LearnedMagic {
+    pub fn new(spell: SpellType) -> Self {
+        Self {
+            spell,
+            level: 0,
+            experience: 0,
+            key_slot: None,
+        }
+    }
+}
+
+/// 玩家已学技能列表组件
+#[derive(Debug, Clone)]
+pub struct MagicList {
+    pub magics: Vec<LearnedMagic>,
+}
+
+impl MagicList {
+    pub fn new() -> Self {
+        Self { magics: Vec::new() }
+    }
+    
+    /// 学会新技能
+    pub fn learn(&mut self, spell: SpellType) -> bool {
+        if self.has_learned(spell) {
+            return false;
+        }
+        self.magics.push(LearnedMagic::new(spell));
+        true
+    }
+    
+    /// 是否已学会某技能
+    pub fn has_learned(&self, spell: SpellType) -> bool {
+        self.magics.iter().any(|m| m.spell == spell)
+    }
+    
+    /// 获取技能
+    pub fn get_mut(&mut self, spell: SpellType) -> Option<&mut LearnedMagic> {
+        self.magics.iter_mut().find(|m| m.spell == spell)
+    }
+    
+    /// 获取绑定到某槽位的技能
+    pub fn get_by_slot(&self, slot: u8) -> Option<&LearnedMagic> {
+        self.magics.iter().find(|m| m.key_slot == Some(slot))
+    }
+}
+
+impl Default for MagicList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 可学习技能列表组件 (NPC 提供或职业默认)
+#[derive(Debug, Clone)]
+pub struct LearnableMagicList {
+    pub spells: Vec<(SpellType, u16)>, // (技能, 所需等级)
+}
+
+impl LearnableMagicList {
+    pub fn new() -> Self {
+        Self { spells: Vec::new() }
+    }
+    
+    /// 添加可学技能
+    pub fn add(&mut self, spell: SpellType, required_level: u16) {
+        self.spells.push((spell, required_level));
+    }
+    
+    /// 获取玩家当前可学习的技能
+    pub fn get_available(&self, player_level: u16, learned: &MagicList) -> Vec<SpellType> {
+        self.spells.iter()
+            .filter(|(spell, req_level)| {
+                *req_level <= player_level && !learned.has_learned(*spell)
+            })
+            .map(|(spell, _)| *spell)
+            .collect()
+    }
+    
+    /// 为职业初始化默认可学技能
+    pub fn init_for_class(class: MirClass) -> Self {
+        let mut list = Self::new();
+        match class {
+            MirClass::Warrior => {
+                list.add(SpellType::Fencing, 7);
+                list.add(SpellType::Slaying, 15);
+                list.add(SpellType::Thrusting, 22);
+                list.add(SpellType::HalfMoon, 28);
+                list.add(SpellType::ShoulderDash, 30);
+                list.add(SpellType::LionRoar, 36);
+            },
+            MirClass::Wizard => {
+                list.add(SpellType::FireBall, 7);
+                list.add(SpellType::Repulsion, 12);
+                list.add(SpellType::ElectricShock, 13);
+                list.add(SpellType::GreatFireBall, 15);
+                list.add(SpellType::HellFire, 19);
+                list.add(SpellType::ThunderBolt, 22);
+                list.add(SpellType::Teleport, 25);
+                list.add(SpellType::Lightning, 29);
+                list.add(SpellType::MagicShield, 31);
+            },
+            MirClass::Taoist => {
+                list.add(SpellType::Healing, 7);
+                list.add(SpellType::SpiritSword, 9);
+                list.add(SpellType::Poisoning, 14);
+                list.add(SpellType::SoulFireBall, 18);
+                list.add(SpellType::SummonSkeleton, 19);
+                list.add(SpellType::Hiding, 20);
+                list.add(SpellType::SoulShield, 24);
+            },
+            MirClass::Assassin => {
+                list.add(SpellType::FatalSword, 7);
+                list.add(SpellType::DoubleSlash, 15);
+                list.add(SpellType::Haste, 20);
+                list.add(SpellType::FlashDash, 25);
+            },
+            MirClass::Archer => {
+                list.add(SpellType::Focus, 7);
+                list.add(SpellType::StraightShot, 9);
+                list.add(SpellType::DoubleShot, 15);
+                list.add(SpellType::Meditation, 20);
+            },
+        }
+        list
+    }
+}
+
+impl Default for LearnableMagicList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// 目标选择组件
+// ============================================================================
+
+/// 目标类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetType {
+    None,
+    Monster(u32),      // 怪物实体 ID
+    Player(u32),       // 玩家实体 ID
+    NPC(u32),          // NPC 实体 ID
+    Location(i32, i32), // 地面位置 (x, y)
+}
+
+/// 当前选中的目标组件
+#[derive(Debug, Clone, Copy)]
+pub struct TargetSelection {
+    pub current: TargetType,
+    pub last_update: std::time::Instant,
+}
+
+impl TargetSelection {
+    pub fn new() -> Self {
+        Self {
+            current: TargetType::None,
+            last_update: std::time::Instant::now(),
+        }
+    }
+    
+    pub fn select_monster(&mut self, id: u32) {
+        self.current = TargetType::Monster(id);
+        self.last_update = std::time::Instant::now();
+    }
+    
+    pub fn select_player(&mut self, id: u32) {
+        self.current = TargetType::Player(id);
+        self.last_update = std::time::Instant::now();
+    }
+    
+    pub fn select_location(&mut self, x: i32, y: i32) {
+        self.current = TargetType::Location(x, y);
+        self.last_update = std::time::Instant::now();
+    }
+    
+    pub fn clear(&mut self) {
+        self.current = TargetType::None;
+        self.last_update = std::time::Instant::now();
+    }
+    
+    pub fn has_target(&self) -> bool {
+        !matches!(self.current, TargetType::None)
+    }
+    
+    pub fn get_monster_id(&self) -> Option<u32> {
+        match self.current {
+            TargetType::Monster(id) => Some(id),
+            _ => None,
+        }
+    }
+    
+    pub fn get_location(&self) -> Option<(i32, i32)> {
+        match self.current {
+            TargetType::Location(x, y) => Some((x, y)),
+            _ => None,
+        }
+    }
+}
+
+impl Default for TargetSelection {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// 任务组件 (从 quest_system.rs 重新导出)
+// ============================================================================
+
+// QuestLog 组件在 quest_system.rs 中定义，在这里重新导出
+pub use crate::ecs::systems::quest_system::QuestLog;
+
+// ============================================================================
+// 交易组件 (从 trade_system.rs 重新导出)
+// ============================================================================
+
+// TradeWindow 组件在 trade_system.rs 中定义，在这里重新导出
+pub use crate::ecs::systems::trade_system::TradeWindow;
 
 // ============================================================================
 // 常量

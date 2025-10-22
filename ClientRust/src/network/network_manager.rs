@@ -126,16 +126,16 @@ impl NetworkManager {
                 self.send_packet(&packet)?;
             }
             
-            NetworkCommand::NewAccount { account_id, password, email, username, secret_question, secret_answer } => {
-                tracing::info!("Handling new account command");
+            NetworkCommand::NewAccount { account_id, password, birth_date, username, secret_question, secret_answer, email } => {
+                tracing::info!("📤 Handling new account command for: {}", account_id);
                 let packet = client::NewAccount {
                     account_id,
                     password,
-                    email_address: email,
+                    birth_date_binary: birth_date,
                     user_name: username,
                     secret_question,
                     secret_answer,
-                    birth_date_binary: 0, // TODO: Get actual birthdate
+                    email_address: email,
                 };
                 self.send_packet(&packet)?;
             }
@@ -236,6 +236,149 @@ impl NetworkManager {
                     self.send_packet(&packet)?;
                     tracing::debug!("发送移动包: direction={:?}, location=({}, {})", dir, location.0, location.1);
                 }
+            }
+            
+            NetworkCommand::Magic { spell, direction, target_id, location } => {
+                tracing::debug!("Handling magic command: spell={}, direction={:?}, target_id={}, location={:?}", 
+                    spell, direction, target_id, location);
+                // TODO: 实现技能施放包
+                // 目前 SharedRust 可能还没有 Magic 包定义
+                // let packet = client::Magic {
+                //     spell,
+                //     target_id,
+                //     location_x: location.map(|l| l.0).unwrap_or(0),
+                //     location_y: location.map(|l| l.1).unwrap_or(0),
+                // };
+                // self.send_packet(&packet)?;
+            }
+            
+            // ========================================================================
+            // Quest System Commands
+            // ========================================================================
+            
+            NetworkCommand::AcceptQuest { npc_index, quest_index } => {
+                tracing::info!("Accepting quest: npc_index={}, quest_index={}", npc_index, quest_index);
+                let packet = client::quest::AcceptQuest {
+                    npc_index,
+                    quest_index,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::FinishQuest { quest_index, selected_item_index } => {
+                tracing::info!("Finishing quest: quest_index={}, selected_item={}", quest_index, selected_item_index);
+                let packet = client::quest::FinishQuest {
+                    quest_index,
+                    selected_item_index,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::AbandonQuest { quest_index } => {
+                tracing::info!("Abandoning quest: quest_index={}", quest_index);
+                let packet = client::quest::AbandonQuest {
+                    quest_index,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::ShareQuest { quest_index } => {
+                tracing::info!("Sharing quest: quest_index={}", quest_index);
+                let packet = client::quest::ShareQuest {
+                    quest_index,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            // ========================================================================
+            // Trade System Commands
+            // ========================================================================
+            
+            NetworkCommand::TradeRequest => {
+                tracing::info!("Requesting trade with player");
+                // ✅ C# version is empty packet, server determines target from click event
+                let packet = client::trade::TradeRequest;
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::TradeReply { accept_invite } => {
+                tracing::info!("Replying to trade request: accept={}", accept_invite);
+                let packet = client::trade::TradeReply {
+                    accept_invite,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::TradeGold { amount } => {
+                tracing::info!("Adding gold to trade: amount={}", amount);
+                let packet = client::trade::TradeGold {
+                    amount,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::TradeConfirm { locked } => {
+                tracing::info!("Confirming trade: locked={}", locked);
+                let packet = client::trade::TradeConfirm {
+                    locked,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::TradeCancel => {
+                tracing::info!("Cancelling trade");
+                let packet = client::trade::TradeCancel;
+                self.send_packet(&packet)?;
+            }
+            
+            // ========================================================================
+            // Item Management Commands
+            // ========================================================================
+            
+            NetworkCommand::MoveItem { grid, from, to } => {
+                tracing::info!("Moving item: grid={}, from={}, to={}", grid, from, to);
+                let grid_type = mir2_shared::enums::MirGridType::try_from(grid)
+                    .unwrap_or(mir2_shared::enums::MirGridType::Inventory);
+                let packet = client::item::MoveItem {
+                    grid: grid_type,
+                    from,
+                    to,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            // ========================================================================
+            // Shop/NPC System Commands
+            // ========================================================================
+            
+            NetworkCommand::BuyItem { item_index, count, panel_type } => {
+                tracing::info!("Buying item: item_index={}, count={}, panel_type={}", 
+                    item_index, count, panel_type);
+                let panel = mir2_shared::enums::PanelType::try_from(panel_type)
+                    .unwrap_or(mir2_shared::enums::PanelType::Buy);
+                let packet = client::npc::BuyItem {
+                    item_index,
+                    count,
+                    panel_type: panel,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::SellItem { unique_id, count } => {
+                tracing::info!("Selling item: unique_id={}, count={}", unique_id, count);
+                let packet = client::npc::SellItem {
+                    unique_id,
+                    count,
+                };
+                self.send_packet(&packet)?;
+            }
+            
+            NetworkCommand::RepairItem { unique_id } => {
+                tracing::info!("Repairing item: unique_id={}", unique_id);
+                let packet = client::npc::RepairItem {
+                    unique_id,
+                };
+                self.send_packet(&packet)?;
             }
             
             NetworkCommand::Disconnect => {

@@ -155,9 +155,15 @@ impl LoginScene {
         tracing::info!("⚠ 临时跳过客户端版本验证,登录对话框已启用");
     }
     
-    /// Load settings
+    /// Load settings and trigger auto-login if credentials exist
     pub fn load_settings(&mut self, account_id: String, password: String) {
         self.login_dialog.load_from_settings(account_id, password);
+        // C# 原版: LoginDialog.Show()中,如果Settings有账号密码则自动Login()
+        if self.login_dialog.show() {
+            // 自动登录
+            tracing::info!("🔐 Settings中有保存的账号密码,触发自动登录");
+            self.submit_login();
+        }
     }
     
     pub fn record_status<S: Into<String>>(&mut self, message: S) {
@@ -443,6 +449,76 @@ impl LoginScene {
     pub fn close_new_account_dialog(&mut self) {
         self.new_account_dialog = None;
         self.login_dialog.show();
+    }
+    
+    /// Submit new account registration to server
+    pub fn submit_new_account(&mut self) {
+        if let Some(dialog) = &self.new_account_dialog {
+            // ✅ C#原版: 只需要验证所有字段的valid状态(包括可选字段)
+            if !dialog.can_submit() {
+                self.show_message("请检查输入字段格式是否正确");
+                return;
+            }
+            
+            // Parse birth date (可选字段,如果为空则使用MinValue)
+            let birth_date_str = &dialog.registration.birth_date;
+            let birth_date_timestamp = if birth_date_str.is_empty() {
+                // C# DateTime.MinValue = 1/1/0001 12:00:00 AM
+                0i64  // Unix timestamp for MinValue
+            } else {
+                match self.parse_birth_date(birth_date_str) {
+                    Some(timestamp) => timestamp,
+                    None => {
+                        self.show_message("生日格式错误,请使用 dd/MM/yyyy 或 yyyy-MM-dd 格式");
+                        return;
+                    }
+                }
+            };
+            
+            // 发送新建账号命令到网络线程
+            if let Some(tx) = &self.command_tx {
+                let command = crate::network::NetworkCommand::NewAccount {
+                    account_id: dialog.registration.account_id.clone(),
+                    password: dialog.registration.password.clone(),
+                    birth_date: birth_date_timestamp,
+                    username: dialog.registration.username.clone(),
+                    secret_question: dialog.registration.secret_question.clone(),
+                    secret_answer: dialog.registration.secret_answer.clone(),
+                    email: dialog.registration.email.clone(),
+                };
+                
+                if let Err(e) = tx.send(command) {
+                    tracing::error!("❌ 发送新建账号命令失败: {}", e);
+                    self.show_message("网络错误,无法发送注册请求");
+                    return;
+                }
+                
+                tracing::info!("✅ 已发送新建账号请求: {}", dialog.registration.account_id);
+                self.record_status(format!("正在提交注册请求: {}", dialog.registration.account_id));
+                self.show_message("注册请求已提交,请等待服务器响应...");
+            } else {
+                tracing::error!("❌ command_tx 未初始化");
+                self.show_message("网络未初始化,请稍后再试");
+            }
+        }
+    }
+    
+    /// Parse birth date string to Unix timestamp (i64)
+    /// Supports formats: "dd/MM/yyyy" and "yyyy-MM-dd"
+    fn parse_birth_date(&self, date_str: &str) -> Option<i64> {
+        use chrono::{NaiveDate, TimeZone};
+        
+        // Try format: dd/MM/yyyy (C# default)
+        if let Some(date) = NaiveDate::parse_from_str(date_str, "%d/%m/%Y").ok() {
+            return Some(chrono::Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0)?).timestamp());
+        }
+        
+        // Try format: yyyy-MM-dd (ISO 8601)
+        if let Some(date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok() {
+            return Some(chrono::Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0)?).timestamp());
+        }
+        
+        None
     }
     
     /// Close change password dialog
@@ -1131,7 +1207,21 @@ impl Scene for LoginScene {
         use crate::graphics::libraries::{get_library, LibraryName};
         use ggez::graphics::{Text, TextFragment, DrawParam, Color as GgezColor};
         
-        // 🔧 清除Canvas,防止之前帧的残留
+        // � 调试: 打印对话框可见状态 (每60帧打印一次,避免日志刷屏)
+        static mut DEBUG_FRAME_COUNTER: u32 = 0;
+        unsafe {
+            DEBUG_FRAME_COUNTER += 1;
+            if DEBUG_FRAME_COUNTER % 60 == 0 {
+                println!("🎨 对话框状态: login={}, new_account={}, change_pass={}, msg_box={}",
+                    self.login_dialog.visible,
+                    self.new_account_dialog.as_ref().map(|d| d.visible).unwrap_or(false),
+                    self.change_password_dialog.as_ref().map(|d| d.visible).unwrap_or(false),
+                    self.message_box.as_ref().map(|m| m.visible).unwrap_or(false)
+                );
+            }
+        }
+        
+        // �🔧 清除Canvas,防止之前帧的残留
         use ggez::graphics::{Rect, DrawMode, Mesh, Color};
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
         let clear_color = Color::from_rgb(0, 0, 0); // 黑色背景
@@ -1157,29 +1247,40 @@ impl Scene for LoginScene {
         
         // 2. 绘制登录对话框 (C# 原版: Prguse.lib 索引 1084)
         // 对话框大小: 328x220, 居中显示
+        let center_x = 1024.0 / 2.0; // 屏幕中心 = 512
+        let center_y = 768.0 / 2.0;  // 屏幕中心 = 384
+        let dialog_x = center_x - 164.0; // 328/2 = 164
+        let dialog_y = center_y - 110.0; // 220/2 = 110
+        
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
             if let Ok(mut lib) = lib_arc.try_lock() {
-                let center_x = 1024.0 / 2.0; // 屏幕中心 = 512
-                let center_y = 768.0 / 2.0;  // 屏幕中心 = 384
-                
-                // 登录对话框 (328x220)
-                let dialog_x = center_x - 164.0; // 328/2 = 164
-                let dialog_y = center_y - 110.0; // 220/2 = 110
+                // 登录对话框背景 (328x220)
+                // 🐛 调试: 打印图片信息
+                unsafe {
+                    if DEBUG_FRAME_COUNTER % 120 == 0 {
+                        if let Ok(info) = lib.get_image_info(1084) {
+                            println!("🖼️ Prguse 1084 (登录对话框): {}x{}", info.width, info.height);
+                        }
+                        if let Ok(info) = lib.get_image_info(661) {
+                            println!("🖼️ Prguse 661 (输入框): {}x{}", info.width, info.height);
+                        }
+                    }
+                }
                 let _ = lib.draw_with_color(ctx, canvas, 1084, dialog_x, dialog_y, ggez::graphics::Color::WHITE, false);
+                
+                // ❌ 暂时移除输入框背景绘制 - Prguse 661 是错误的索引 (316x207 而非 136x15)
+                // TODO: 查找正确的输入框背景图片索引
+                // 账号输入框背景应该是 136x15 的小图片
+                // let _ = lib.draw_with_color(ctx, canvas, 661, dialog_x + 85.0, dialog_y + 85.0, ggez::graphics::Color::WHITE, false);
+                // let _ = lib.draw_with_color(ctx, canvas, 661, dialog_x + 85.0, dialog_y + 108.0, ggez::graphics::Color::WHITE, false);
             }
         }
         
         // 3. 绘制 UI 元素 (C# 原版: Title.lib)
         if let Some(lib_arc) = get_library(LibraryName::Title) {
             if let Ok(mut lib) = lib_arc.try_lock() {
-                let center_x = 1024.0 / 2.0;
-                let center_y = 768.0 / 2.0;
-                let dialog_x = center_x - 164.0;
-                let dialog_y = center_y - 110.0;
-                
                 // 标题 "登录" (索引 30)
                 // C# 原版位置: (Size.Width - TitleLabel.Size.Width)/2, 12
-                // 假设标题宽度约 100px, 对话框宽 328
                 let _ = lib.draw_with_color(ctx, canvas, 30, dialog_x + 114.0, dialog_y + 12.0, ggez::graphics::Color::WHITE, false);
                 
                 // "账号ID" 标签 (索引 31)
@@ -1205,6 +1306,11 @@ impl Scene for LoginScene {
                 let pass_index = if self.pass_button_hovered { 327 } else { 326 };
                 let _ = lib.draw_with_color(ctx, canvas, pass_index, dialog_x + 166.0, dialog_y + 163.0, ggez::graphics::Color::WHITE, false);
                 
+                // "查看密钥" 按钮 (索引 332/333/334)
+                // C# 位置: (60, 189)
+                let viewkey_index = 332; // 暂不实现hover
+                let _ = lib.draw_with_color(ctx, canvas, viewkey_index, dialog_x + 60.0, dialog_y + 189.0, ggez::graphics::Color::WHITE, false);
+                
                 // "关闭" 按钮 (索引 329/330/331)
                 // C# 位置: (166, 189)
                 let close_index = if self.close_button_hovered { 330 } else { 329 };
@@ -1213,50 +1319,52 @@ impl Scene for LoginScene {
         }
         
         // 3. 绘制文本信息 (使用中文字体)
-        // 版本信息
+        // 版本信息 (左下角)
         let version_text = Text::new(
             TextFragment::new("Crystal v1.0 - Ggez Edition")
                 .font("AlibabaPuHuiTi")
-                .scale(21.0)
+                .scale(18.0)
         );
         let version_params = DrawParam::default()
-            .dest([10.0, 10.0])
+            .dest([10.0, 745.0])
             .color(GgezColor::from_rgb(200, 200, 255));
         canvas.draw(&version_text, version_params);
         
-        // 连接状态
+        // TestLabel - 测试版标签 (右上角, C# 原版: Prguse 79, 位置 Settings.ScreenWidth - 116, 10)
+        // 仅在测试/开发模式显示
+        #[cfg(debug_assertions)]
+        {
+            if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+                if let Ok(mut lib) = lib_arc.try_lock() {
+                    let _ = lib.draw_with_color(ctx, canvas, 79, 1024.0 - 116.0, 10.0, ggez::graphics::Color::WHITE, false);
+                }
+            }
+        }
+        
+        // 连接状态 (底部居中)
         if self.connecting {
             let status_text = Text::new(
                 TextFragment::new(format!("正在连接服务器... (尝试 {})", self.connect_attempts))
                     .font("AlibabaPuHuiTi")
-                    .scale(21.0)
+                    .scale(18.0)
             );
+            let text_measure = status_text.measure(ctx).map(|m| m.x).unwrap_or(0.0);
             let status_params = DrawParam::default()
-                .dest([10.0, 740.0]) // 底部
+                .dest([(1024.0 - text_measure) / 2.0, 730.0]) // 居中
                 .color(GgezColor::from_rgb(255, 255, 100));
-            canvas.draw(&status_text, status_params);
-        } else if let Some(status) = &self.last_status {
-            let status_text = Text::new(
-                TextFragment::new(status.as_str())
-                    .font("AlibabaPuHuiTi")
-                    .scale(21.0)
-            );
-            let status_params = DrawParam::default()
-                .dest([10.0, 740.0])
-                .color(GgezColor::from_rgb(100, 255, 100));
             canvas.draw(&status_text, status_params);
         }
         
-        // FPS 和调试信息 (可选)
+        // FPS 显示 (右上角)
         let fps = ctx.time.fps();
         let debug_text = Text::new(
-            TextFragment::new(format!("FPS: {:.1}", fps))
+            TextFragment::new(format!("FPS: {:.0}", fps))
                 .font("AlibabaPuHuiTi")
-                .scale(21.0)
+                .scale(18.0)
         );
         let debug_params = DrawParam::default()
             .dest([950.0, 10.0])
-            .color(GgezColor::from_rgb(255, 255, 255));
+            .color(GgezColor::from_rgb(100, 255, 100));
         canvas.draw(&debug_text, debug_params);
         
         // 3.5 绘制登录对话框的输入框文本和光标
@@ -1653,7 +1761,7 @@ impl Scene for LoginScene {
                     if fx >= ok_btn_x && fx < ok_btn_x + button_w
                         && fy >= ok_btn_y && fy < ok_btn_y + button_h {
                         tracing::debug!("NewAccountDialog OK button clicked");
-                        // TODO: 提交注册
+                        self.submit_new_account();
                         return;
                     }
                     
@@ -1901,29 +2009,8 @@ impl Scene for LoginScene {
                         return true;
                     }
                     KeyCode::Enter => {
-                        // Enter键: 如果所有必填字段都有效,提交注册请求;否则显示提示
-                        // C# 原版: 所有 8 个字段都是必填的
-                        if dialog.account_id_valid && dialog.password1_valid && dialog.password2_valid 
-                            && dialog.username_valid && dialog.birth_date_valid && dialog.question_valid 
-                            && dialog.answer_valid && dialog.email_valid {
-                            tracing::info!("新建账号: Enter键提交注册请求 (所有8个字段已验证)");
-                            // TODO: 实际提交到服务器
-                            self.show_message("注册功能开发中...\n\n所有账号信息已验证通过!\n网络集成完成后将提交到服务器。");
-                        } else {
-                            // 显示哪些字段需要填写
-                            let mut missing = Vec::new();
-                            if !dialog.account_id_valid { missing.push("账号ID"); }
-                            if !dialog.password1_valid { missing.push("密码"); }
-                            if !dialog.password2_valid { missing.push("确认密码"); }
-                            if !dialog.username_valid { missing.push("用户名"); }
-                            if !dialog.birth_date_valid { missing.push("生日"); }
-                            if !dialog.question_valid { missing.push("安全问题"); }
-                            if !dialog.answer_valid { missing.push("安全答案"); }
-                            if !dialog.email_valid { missing.push("电子邮箱"); }
-                            
-                            let msg = format!("请完善以下必填字段:\n\n{}", missing.join("\n"));
-                            self.show_message(&msg);
-                        }
+                        // C# 原版没有Enter键提交功能,只能点击OK按钮
+                        // 不实现Enter键提交,保持与C#一致
                         return true;
                     }
                     _ => {
@@ -1958,23 +2045,8 @@ impl Scene for LoginScene {
                         return true;
                     }
                     KeyCode::Enter => {
-                        // Enter键: 如果所有必填字段都有效,提交修改密码请求;否则显示提示
-                        if dialog.account_id_valid && dialog.current_password_valid 
-                            && dialog.new_password1_valid && dialog.new_password2_valid {
-                            tracing::info!("修改密码: Enter键提交修改请求");
-                            // TODO: 实际提交到服务器
-                            self.show_message("修改密码功能开发中...\n\n密码信息已验证通过!\n网络集成完成后将提交到服务器。");
-                        } else {
-                            // 显示哪些字段需要填写
-                            let mut missing = Vec::new();
-                            if !dialog.account_id_valid { missing.push("账号ID"); }
-                            if !dialog.current_password_valid { missing.push("当前密码"); }
-                            if !dialog.new_password1_valid { missing.push("新密码"); }
-                            if !dialog.new_password2_valid { missing.push("确认新密码"); }
-                            
-                            let msg = format!("请完善以下必填字段:\n\n{}", missing.join("\n"));
-                            self.show_message(&msg);
-                        }
+                        // C# 原版没有Enter键提交功能,只能点击OK按钮
+                        // 不实现Enter键提交,保持与C#一致
                         return true;
                     }
                     _ => {
@@ -1989,7 +2061,17 @@ impl Scene for LoginScene {
         if self.login_dialog.visible {
             match key {
                 KeyCode::Enter => {
-                    self.submit_login();
+                    // C# 原版Enter键逻辑 (TextBox_KeyPress):
+                    // 1. 如果AccountID无效 -> 聚焦AccountID
+                    // 2. 如果Password无效 -> 聚焦Password
+                    // 3. 如果OKButton启用 -> 触发登录
+                    if !self.login_dialog.is_account_id_valid() {
+                        self.login_dialog.focus_account();
+                    } else if !self.login_dialog.is_password_valid() {
+                        self.login_dialog.focus_password();
+                    } else if self.login_dialog.is_ok_button_enabled() {
+                        self.submit_login();
+                    }
                     return true;
                 }
                 KeyCode::Tab => {

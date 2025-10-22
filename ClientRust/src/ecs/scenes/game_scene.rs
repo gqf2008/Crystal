@@ -22,11 +22,11 @@ use tokio::sync::mpsc;
 use super::{Scene, SceneType};
 use crate::network::{NetworkCommand, game_client::GameEvent};
 use crate::ecs::{
-    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, PlayerComp},
-    systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem},
+    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerComp, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow},
+    systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, MagicLearningSystem, QuestSystem},
     map_helper::MapHelper,
     map_loader::MapLoader,
-    ui::{MainDialog, MainDialogButton, InventoryDialog, InventoryAction, CharacterDialog, CharacterAction},
+    ui::{MainDialogButton, InventoryAction, CharacterAction, ChatType, MainDialogComp, InventoryDialogComp, CharacterDialogComp, SkillBarComp, ChatDialogComp, MagicLearningDialogComp, QuestDialogComp, TradeDialogComp},
 };
 use crate::objects::{MapReader, PathFinder};
 use crate::graphics::libraries::initialize_all_libraries;
@@ -46,20 +46,24 @@ pub struct GameScene {
     /// 可见区域缓存实体
     visible_area_entity: Entity,
     
+    /// UI 实体引用
+    main_dialog_entity: Entity,
+    inventory_dialog_entity: Entity,
+    character_dialog_entity: Entity,
+    skillbar_entities: [Entity; 2],
+    chat_dialog_entity: Entity,
+    magic_learning_dialog_entity: Entity, // 🆕 技能学习对话框
+    quest_dialog_entity: Entity,          // 🆕 任务对话框
+    trade_dialog_entity: Entity,          // 🆕 交易窗口
+    
     /// 网络同步系统
     network_system: NetworkSystem,
     
+    /// UI 系统
+    ui_system: UISystem,
+    
     /// UI字体名称
     ui_font_name: String,
-    
-    /// 主对话框
-    main_dialog: MainDialog,
-    
-    /// 背包对话框
-    inventory_dialog: InventoryDialog,
-    
-    /// 角色对话框
-    character_dialog: CharacterDialog,
 }
 
 impl GameScene {
@@ -160,9 +164,24 @@ impl GameScene {
             Position { x: spawn_x, y: spawn_y },
             PlayerAppearance::default(),  // 默认外观（战士男）
             Inventory::default(),  // 默认背包（40格）
+            Equipment::new(),  // 装备栏
+            LocalPlayer,  // 本地玩家标记
+            PlayerComp {
+                id: 1,
+                name: "勇士".to_string(),
+                class: MirClass::Warrior,
+                gender: MirGender::Male,
+                exp: 750,
+                gold: 100,
+            },
+            MagicList::new(),  // 已学技能列表
+            LearnableMagicList::new(),  // 可学技能列表
+            TargetSelection::new(),  // 目标选择
+            QuestLog::new(),  // ✅ 任务日志（用于任务系统）
+            TradeWindow::new(),  // ✅ 交易窗口（用于玩家交易）
         ));
         
-        println!("✅ 本地玩家已创建，使用默认外观和空背包");
+        println!("✅ 本地玩家已创建，包含任务日志和交易窗口组件");
         
         // 创建鼠标输入状态实体
         let _mouse_input_entity = world.spawn((MouseInput {
@@ -227,12 +246,61 @@ impl GameScene {
         // 加载中文字体
         let ui_font_name = Self::load_chinese_font(ctx)?;
         
-        // 创建主对话框
+        // 创建主对话框实体
         let screen = ctx.gfx.drawable_size();
-        let main_dialog = MainDialog::new(screen.0, screen.1);
+        let main_dialog_entity = world.spawn((
+            MainDialogComp::new(screen.0, screen.1),
+        ));
         
-        // 创建背包对话框
-        let inventory_dialog = InventoryDialog::new();
+        // 创建背包对话框实体
+        let inventory_dialog_entity = world.spawn((
+            InventoryDialogComp::new(),
+        ));
+        
+        // 创建角色对话框实体
+        let character_dialog_entity = world.spawn((
+            CharacterDialogComp::new(),
+        ));
+        
+        // 创建两个技能栏实体
+        let skillbar_entities = [
+            world.spawn((SkillBarComp::new(0),)),
+            world.spawn((SkillBarComp::new(1),)),
+        ];
+        
+        // 创建聊天对话框实体
+        let chat_dialog_entity = world.spawn((
+            ChatDialogComp::new(0.0, screen.1 - 300.0), // 屏幕底部
+        ));
+        
+        // 创建技能学习对话框实体
+        let magic_learning_dialog_entity = world.spawn((
+            MagicLearningDialogComp::new(),
+        ));
+        
+        // 创建任务对话框实体
+        let quest_dialog_entity = world.spawn((
+            QuestDialogComp::new(100.0, 100.0),
+        ));
+        
+        // 创建交易窗口实体
+        let trade_dialog_entity = world.spawn((
+            TradeDialogComp::new(300.0, 150.0),
+        ));
+        
+        // 添加欢迎消息
+        UISystem::add_chat_message(
+            world,
+            chat_dialog_entity,
+            "欢迎来到传奇世界！".to_string(),
+            ChatType::System,
+        );
+        UISystem::add_chat_message(
+            world,
+            chat_dialog_entity,
+            "游戏测试中...".to_string(),
+            ChatType::Normal,
+        );
         
         println!("✅ 游戏场景初始化完成！");
         
@@ -242,16 +310,51 @@ impl GameScene {
             config_entity,
             visible_area_entity,
             network_system: NetworkSystem::new(),
+            ui_system: UISystem::new(),
             ui_font_name,
-            main_dialog,
-            inventory_dialog,
-            character_dialog: CharacterDialog::new(),
+            main_dialog_entity,
+            inventory_dialog_entity,
+            character_dialog_entity,
+            skillbar_entities,
+            chat_dialog_entity,
+            magic_learning_dialog_entity,
+            quest_dialog_entity,
+            trade_dialog_entity,
         })
     }
     
     /// 处理网络事件（由GameApp调用）
     pub fn handle_network_event(&mut self, world: &mut World, event: &GameEvent) {
         self.network_system.process_event(world, event);
+    }
+    
+    // ========================================================================
+    // UI 组件访问辅助方法
+    // ========================================================================
+    
+    /// 获取主对话框的可变引用
+    fn get_main_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut MainDialogComp> {
+        world.query_one_mut::<&mut MainDialogComp>(self.main_dialog_entity).ok()
+    }
+    
+    /// 获取背包对话框的可变引用
+    fn get_inventory_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut InventoryDialogComp> {
+        world.query_one_mut::<&mut InventoryDialogComp>(self.inventory_dialog_entity).ok()
+    }
+    
+    /// 获取角色对话框的可变引用
+    fn get_character_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut CharacterDialogComp> {
+        world.query_one_mut::<&mut CharacterDialogComp>(self.character_dialog_entity).ok()
+    }
+    
+    /// 获取聊天对话框的可变引用
+    fn get_chat_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut ChatDialogComp> {
+        world.query_one_mut::<&mut ChatDialogComp>(self.chat_dialog_entity).ok()
+    }
+    
+    /// 获取技能学习对话框的可变引用
+    fn get_magic_learning_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut MagicLearningDialogComp> {
+        world.query_one_mut::<&mut MagicLearningDialogComp>(self.magic_learning_dialog_entity).ok()
     }
     
     /// 加载中文字体
@@ -352,6 +455,37 @@ impl GameScene {
             } else {
                 println!("❌ 无法找到路径");
             }
+        }
+    }
+    
+    /// 施放技能栏中的技能
+    fn cast_spell_in_slot(
+        &mut self,
+        world: &mut World,
+        slot: usize,
+        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+    ) {
+        use crate::ecs::systems::MagicCastSystem;
+        use crate::ecs::components::{LocalPlayer, MagicList};
+        
+        // 从技能栏获取技能 (通过 key_slot 查找)
+        let spell = {
+            let mut spell_opt = None;
+            for (_, (_, magic_list)) in world.query::<(&LocalPlayer, &MagicList)>().iter() {
+                // 查找绑定到该槽位的技能
+                if let Some(learned_magic) = magic_list.get_by_slot(slot as u8) {
+                    spell_opt = Some(learned_magic.spell);
+                }
+                break;
+            }
+            spell_opt
+        };
+        
+        if let Some(spell_type) = spell {
+            // 施放技能
+            MagicCastSystem::cast_spell(world, spell_type, network_tx);
+        } else {
+            println!("⚠️ 技能栏 F{} 未绑定技能", slot + 1);
         }
     }
 }
@@ -469,35 +603,8 @@ impl Scene for GameScene {
         // 渲染 UI 系统
         crate::ecs::ui::UIRenderer::render(ctx, canvas, world)?;
         
-        // 渲染主对话框
-        self.main_dialog.draw(ctx, canvas)?;
-        
-        // 同步玩家背包数据到UI
-        if let Some((_, inventory)) = world.query::<&Inventory>().iter().next() {
-            self.inventory_dialog.set_gold(inventory.gold);
-            self.inventory_dialog.set_weight(inventory.current_weight, inventory.max_weight);
-        }
-        
-        // 同步玩家基本数据到角色对话框
-        if let Some((_, (player_comp, inventory))) = world.query::<(&PlayerComp, &Inventory)>().iter().next() {
-            // 基本信息
-            self.character_dialog.level = player_comp.exp as u16; // TODO: 从经验计算等级
-            self.character_dialog.experience = player_comp.exp;
-            self.character_dialog.max_experience = 1000; // TODO: 使用真实最大经验值
-            
-            // 负重
-            self.character_dialog.bag_weight = inventory.current_weight as i32;
-            self.character_dialog.max_bag_weight = inventory.max_weight as i32;
-            
-            // TODO: HP/MP/装备等数据需要从服务器同步
-            // 目前这些字段使用默认值或需要添加额外组件
-        }
-        
-        // 渲染背包对话框
-        self.inventory_dialog.draw(ctx, canvas)?;
-        
-        // 渲染角色对话框
-        self.character_dialog.draw(ctx, canvas)?;
+        // 使用 UISystem 渲染所有 UI组件
+        self.ui_system.draw(ctx, canvas, world, 0)?; // TODO: 传递正确的 current_time
         
         Ok(())
     }
@@ -537,7 +644,119 @@ impl Scene for GameScene {
                     return Ok(Some(SceneType::Select));
                 }
                 
-                // Ctrl + 方向键 = 攻击
+                // K键 - 打开技能学习对话框
+                KeyCode::KeyK => {
+                    if let Some(dialog) = self.get_magic_learning_dialog_mut(world) {
+                        dialog.dialog.toggle();
+                        // 更新可学习技能列表
+                        MagicLearningSystem::update_available_magics(world);
+                        println!("📖 打开技能学习对话框");
+                    }
+                }
+                
+                // Q键 - 打开任务对话框
+                KeyCode::KeyQ => {
+                    // 先获取任务列表
+                    let active_quests = QuestSystem::get_active_quests(world);
+                    
+                    // 再更新UI
+                    for (_, dialog) in world.query_mut::<&mut QuestDialogComp>() {
+                        if dialog.is_open {
+                            dialog.close();
+                        } else {
+                            dialog.open();
+                            dialog.update_active_quests(active_quests);
+                            println!("📜 打开任务对话框");
+                        }
+                        break;
+                    }
+                }
+                
+                // T键 - 打开交易窗口 (测试用，实际应由交易请求触发)
+                KeyCode::KeyT => {
+                    for (_, dialog) in world.query_mut::<&mut TradeDialogComp>() {
+                        if dialog.is_open {
+                            dialog.close();
+                            println!("🚫 关闭交易窗口");
+                        } else {
+                            // 测试：创建虚拟交易数据
+                            use crate::ecs::systems::TradeData;
+                            let test_trade = TradeData::new(999, "测试玩家".to_string());
+                            dialog.open(test_trade);
+                            println!("🤝 打开交易窗口 (测试)");
+                        }
+                        break;
+                    }
+                }
+                
+                // F1-F8 技能快捷键
+                KeyCode::F1 => self.cast_spell_in_slot(world, 0, network_tx),
+                KeyCode::F2 => self.cast_spell_in_slot(world, 1, network_tx),
+                KeyCode::F3 => self.cast_spell_in_slot(world, 2, network_tx),
+                KeyCode::F4 => self.cast_spell_in_slot(world, 3, network_tx),
+                KeyCode::F5 => self.cast_spell_in_slot(world, 4, network_tx),
+                KeyCode::F6 => self.cast_spell_in_slot(world, 5, network_tx),
+                KeyCode::F7 => self.cast_spell_in_slot(world, 6, network_tx),
+                KeyCode::F8 => self.cast_spell_in_slot(world, 7, network_tx),
+                
+                // 1-8 数字键 - 使用物品栏物品 (对应背包前8个格子)
+                KeyCode::Digit1 => {
+                    use crate::ecs::systems::ItemSystem;
+                    ItemSystem::use_item(world, 0, network_tx);
+                }
+                KeyCode::Digit2 => {
+                    use crate::ecs::systems::ItemSystem;
+                    ItemSystem::use_item(world, 1, network_tx);
+                }
+                KeyCode::Digit3 => {
+                    use crate::ecs::systems::ItemSystem;
+                    ItemSystem::use_item(world, 2, network_tx);
+                }
+                KeyCode::Digit4 => {
+                    use crate::ecs::systems::ItemSystem;
+                    ItemSystem::use_item(world, 3, network_tx);
+                }
+                KeyCode::Digit5 => {
+                    use crate::ecs::systems::ItemSystem;
+                    ItemSystem::use_item(world, 4, network_tx);
+                }
+                KeyCode::Digit6 => {
+                    use crate::ecs::systems::ItemSystem;
+                    ItemSystem::use_item(world, 5, network_tx);
+                }
+                KeyCode::Digit7 => {
+                    use crate::ecs::systems::ItemSystem;
+                    ItemSystem::use_item(world, 6, network_tx);
+                }
+                KeyCode::Digit8 => {
+                    use crate::ecs::systems::ItemSystem;
+                    ItemSystem::use_item(world, 7, network_tx);
+                }
+                
+                // Z键 - 整理背包
+                KeyCode::KeyZ => {
+                    use crate::ecs::systems::ItemSystem;
+                    ItemSystem::organize_inventory(world);
+                }
+                
+                // N键 - 与最近的NPC对话
+                KeyCode::KeyN => {
+                    use crate::ecs::systems::NPCSystem;
+                    if let Some(npc_id) = NPCSystem::find_nearest_npc(world) {
+                        NPCSystem::click_npc(world, npc_id, network_tx);
+                    } else {
+                        println!("⚠️ 附近没有NPC");
+                    }
+                }
+                
+                // Tab键 - 切换目标
+                KeyCode::Tab => {
+                    use crate::ecs::systems::MagicCastSystem;
+                    MagicCastSystem::cycle_target(world);
+                }
+                
+                // 注意: Escape键已在上面处理，这里删除重复代码
+
                 KeyCode::KeyW | KeyCode::ArrowUp if input.mods.control_key() => {
                     let _ = network_tx.send(NetworkCommand::Attack { 
                         direction: MirDirection::Up,
@@ -613,52 +832,69 @@ impl Scene for GameScene {
     ) -> GameResult {
         // 先检查角色对话框点击
         if button == MouseButton::Left {
-            if let Some(action) = self.character_dialog.on_mouse_down(x, y) {
-                match action {
-                    CharacterAction::Close => {
-                        println!("👤 角色对话框关闭");
+            if let Some(mut char_dialog) = self.get_character_dialog_mut(world) {
+                if let Some(action) = char_dialog.dialog.on_mouse_down(x, y) {
+                    match action {
+                        CharacterAction::Close => {
+                            println!("👤 角色对话框关闭");
+                        }
+                        CharacterAction::SwitchTab(tab) => {
+                            println!("👤 切换到标签页: {:?}", tab);
+                        }
+                        CharacterAction::EquipmentClick(slot) => {
+                            println!("👤 点击装备槽: {:?}", slot);
+                            // TODO: 处理装备操作
+                        }
                     }
-                    CharacterAction::SwitchTab(tab) => {
-                        println!("👤 切换到标签页: {:?}", tab);
-                    }
-                    CharacterAction::EquipmentClick(slot) => {
-                        println!("👤 点击装备槽: {:?}", slot);
-                        // TODO: 处理装备操作
-                    }
+                    return Ok(());
                 }
-                return Ok(());
             }
         }
         
         // 再检查背包对话框点击
         if button == MouseButton::Left {
-            if let Some(action) = self.inventory_dialog.on_mouse_down(x, y) {
-                match action {
-                    InventoryAction::Close => {
-                        println!("🎒 背包关闭");
+            if let Some(mut inv_dialog) = self.get_inventory_dialog_mut(world) {
+                if let Some(action) = inv_dialog.dialog.on_mouse_down(x, y) {
+                    match action {
+                        InventoryAction::Close => {
+                            println!("🎒 背包关闭");
+                        }
+                        InventoryAction::SelectSlot(slot) => {
+                            println!("🎒 选中背包格子: {}", slot);
+                            // TODO: 处理物品选择
+                        }
+                        _ => {}
                     }
-                    InventoryAction::SelectSlot(slot) => {
-                        println!("🎒 选中背包格子: {}", slot);
-                        // TODO: 处理物品选择
-                    }
-                    _ => {}
+                    return Ok(());
                 }
-                return Ok(());
             }
         }
         
         // 再检查主对话框按钮点击
         if button == MouseButton::Left {
-            if let Some(clicked_button) = self.main_dialog.on_mouse_down(x, y) {
+            let clicked_button = {
+                if let Some(mut main_dialog) = self.get_main_dialog_mut(world) {
+                    main_dialog.dialog.on_mouse_down(x, y)
+                } else {
+                    None
+                }
+            };
+            
+            if let Some(clicked_button) = clicked_button {
                 println!("🖱️ 点击主对话框按钮: {:?}", clicked_button);
+                
                 match clicked_button {
                     MainDialogButton::Inventory => {
                         println!("📦 打开背包");
-                        self.inventory_dialog.toggle();
+                        if let Some(mut inv_dialog) = self.get_inventory_dialog_mut(world) {
+                            inv_dialog.dialog.toggle();
+                        }
                     }
                     MainDialogButton::Character => {
                         println!("👤 打开角色界面");
-                        self.character_dialog.toggle();
+                        if let Some(mut char_dialog) = self.get_character_dialog_mut(world) {
+                            char_dialog.dialog.toggle();
+                        }
                     }
                     MainDialogButton::Skills => {
                         println!("⚔️ 打开技能界面");
@@ -772,13 +1008,19 @@ impl Scene for GameScene {
         }
         
         // 更新主对话框hover状态
-        self.main_dialog.update_hover(x, y);
+        if let Some(mut main_dialog) = self.get_main_dialog_mut(world) {
+            main_dialog.dialog.update_hover(x, y);
+        }
         
         // 更新角色对话框hover状态
-        self.character_dialog.update_hover(x, y);
+        if let Some(mut char_dialog) = self.get_character_dialog_mut(world) {
+            char_dialog.dialog.update_hover(x, y);
+        }
         
         // 更新背包对话框hover状态
-        self.inventory_dialog.update_hover(x, y);
+        if let Some(mut inv_dialog) = self.get_inventory_dialog_mut(world) {
+            inv_dialog.dialog.update_hover(x, y);
+        }
         
         Ok(())
     }
@@ -797,7 +1039,9 @@ impl Scene for GameScene {
         }
         
         // 更新主对话框尺寸
-        self.main_dialog.resize(width, height);
+        if let Some(mut main_dialog) = self.get_main_dialog_mut(world) {
+            main_dialog.dialog.resize(width, height);
+        }
         
         println!("📐 窗口调整: {}x{}", width, height);
         
