@@ -5,6 +5,7 @@ use regex::Regex;
 use ggez::{Context, graphics::Canvas};
 use crate::graphics::{LibraryName, draw_sprite_at};
 use crate::ecs::scenes::ui::{Button, TextInput};
+use super::dialog_manager::DialogWithValidation;
 
 /// 修改密码结果
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,13 +97,16 @@ impl ChangePasswordDialog {
             new_password_confirm: String::new(),
             focused_field: PasswordInputField::AccountId,
             
-            account_input: TextInput::new(x + 120.0, y + 40.0, 180.0, 20),
-            current_password_input: TextInput::new(x + 120.0, y + 70.0, 180.0, 20).password(),
-            new_password_input: TextInput::new(x + 120.0, y + 100.0, 180.0, 20).password(),
-            confirm_input: TextInput::new(x + 120.0, y + 130.0, 180.0, 20).password(),
+            // 对应C# Location: (178, 75), (178, 113), (178, 151), (178, 188)
+            account_input: TextInput::new(x + 178.0, y + 75.0, 136.0, 20),
+            current_password_input: TextInput::new(x + 178.0, y + 113.0, 136.0, 20).password(),
+            new_password_input: TextInput::new(x + 178.0, y + 151.0, 136.0, 20).password(),
+            confirm_input: TextInput::new(x + 178.0, y + 188.0, 136.0, 20).password(),
             
-            ok_button: Button::new_with_states(x + 80.0, y + 180.0, LibraryName::Title, 320, 321, 322),
-            cancel_button: Button::new_with_states(x + 180.0, y + 180.0, LibraryName::Title, 329, 330, 331),
+            // OK按钮：Title库 107(normal), 108(hover), 109(pressed), 位置(80, 236)
+            ok_button: Button::new_with_states(x + 80.0, y + 236.0, LibraryName::Title, 107, 108, 109),
+            // Cancel按钮：Title库 110(normal), 111(hover), 112(pressed), 位置(222, 236)
+            cancel_button: Button::new_with_states(x + 222.0, y + 236.0, LibraryName::Title, 110, 111, 112),
             
             account_valid: false,
             current_valid: false,
@@ -114,6 +118,35 @@ impl ChangePasswordDialog {
             min_password_len: 3,
             max_password_len: 20,
         }
+    }
+    
+    /// 根据屏幕尺寸更新对话框位置(居中)
+    pub fn update_positions(&mut self, screen_w: f32, screen_h: f32) {
+        // C#: Index = 50, Library = Prguse
+        // 对话框尺寸根据纹理 - 估算约为 360x280
+        let dialog_w = 360.0;
+        let dialog_h = 280.0;
+        self.x = (screen_w - dialog_w) / 2.0;
+        self.y = (screen_h - dialog_h) / 2.0;
+        
+        // 更新所有子组件位置
+        self.account_input.x = self.x + 178.0;
+        self.account_input.y = self.y + 75.0;
+        
+        self.current_password_input.x = self.x + 178.0;
+        self.current_password_input.y = self.y + 113.0;
+        
+        self.new_password_input.x = self.x + 178.0;
+        self.new_password_input.y = self.y + 151.0;
+        
+        self.confirm_input.x = self.x + 178.0;
+        self.confirm_input.y = self.y + 188.0;
+        
+        self.ok_button.x = self.x + 80.0;
+        self.ok_button.y = self.y + 236.0;
+        
+        self.cancel_button.x = self.x + 222.0;
+        self.cancel_button.y = self.y + 236.0;
     }
     
     pub fn show(&mut self, autofill_id: Option<String>, autofill_password: Option<String>) {
@@ -246,27 +279,76 @@ impl ChangePasswordDialog {
         self.account_valid && self.current_valid && self.new_password_valid && self.confirm_valid
     }
     
+    /// 获取验证错误消息
+    pub fn get_validation_error(&self) -> String {
+        if !self.account_valid {
+            if self.account_id.is_empty() {
+                return "Please enter an Account ID.".to_string();
+            }
+            return format!("Account ID must be {}-{} alphanumeric characters.", 
+                self.min_account_len, self.max_account_len);
+        }
+        if !self.current_valid {
+            if self.current_password.is_empty() {
+                return "Please enter your current Password.".to_string();
+            }
+            return format!("Current Password must be {}-{} characters.", 
+                self.min_password_len, self.max_password_len);
+        }
+        if !self.new_password_valid {
+            if self.new_password.is_empty() {
+                return "Please enter a new Password.".to_string();
+            }
+            return format!("New Password must be {}-{} alphanumeric characters.", 
+                self.min_password_len, self.max_password_len);
+        }
+        if !self.confirm_valid {
+            if self.new_password_confirm.is_empty() {
+                return "Please confirm your new Password.".to_string();
+            }
+            return "New Passwords do not match.".to_string();
+        }
+        "Unknown validation error.".to_string()
+    }
+    
+    /// 构建网络命令
+    pub fn build_network_command(&self) -> crate::network::NetworkCommand {
+        crate::network::NetworkCommand::ChangePassword {
+            account_id: self.account_id.clone(),
+            current_password: self.current_password.clone(),
+            new_password: self.new_password.clone(),
+        }
+    }
+    
     pub fn on_mouse_move(&mut self, x: f32, y: f32) {
         self.ok_button.update_hover(x, y);
         self.cancel_button.update_hover(x, y);
     }
     
     pub fn on_mouse_down(&mut self, x: f32, y: f32) -> ChangePasswordAction {
-        if self.ok_button.contains(x, y) && self.can_submit() {
-            return ChangePasswordAction::Submit;
+        if self.ok_button.contains(x, y) {
+            if self.can_submit() {
+                return ChangePasswordAction::Submit;
+            } else {
+                return ChangePasswordAction::ValidationFailed(self.get_validation_error());
+            }
         }
         if self.cancel_button.contains(x, y) {
             return ChangePasswordAction::Cancel;
         }
         
-        // 检测点击了哪个输入框
-        if y >= self.y + 40.0 && y < self.y + 70.0 {
+        // 检测点击了哪个输入框 - 根据C#位置调整
+        // AccountID: y=75, height=18
+        if y >= self.y + 75.0 && y < self.y + 93.0 {
             self.focused_field = PasswordInputField::AccountId;
-        } else if y >= self.y + 70.0 && y < self.y + 100.0 {
+        // Current Password: y=113
+        } else if y >= self.y + 113.0 && y < self.y + 131.0 {
             self.focused_field = PasswordInputField::CurrentPassword;
-        } else if y >= self.y + 100.0 && y < self.y + 130.0 {
+        // New Password 1: y=151
+        } else if y >= self.y + 151.0 && y < self.y + 169.0 {
             self.focused_field = PasswordInputField::NewPassword;
-        } else if y >= self.y + 130.0 && y < self.y + 180.0 {
+        // New Password 2: y=188
+        } else if y >= self.y + 188.0 && y < self.y + 206.0 {
             self.focused_field = PasswordInputField::NewPasswordConfirm;
         }
         self.update_focus();
@@ -277,8 +359,8 @@ impl ChangePasswordDialog {
     pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> anyhow::Result<()> {
         if !self.visible { return Ok(()); }
         
-        // 绘制对话框背景
-        draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 950, self.x, self.y)?;
+        // 绘制对话框背景 - C#: Index = 50, Library = Prguse
+        draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 50, self.x, self.y)?;
         
         // 绘制所有输入框
         self.account_input.draw(ctx, canvas)?;
@@ -294,9 +376,36 @@ impl ChangePasswordDialog {
     }
 }
 
+impl DialogWithValidation for ChangePasswordDialog {
+    fn on_tab(&mut self) {
+        self.on_tab();
+    }
+    
+    fn on_backspace(&mut self) {
+        self.on_backspace();
+    }
+    
+    fn on_char(&mut self, ch: char) {
+        self.on_char(ch);
+    }
+    
+    fn can_submit(&self) -> bool {
+        self.can_submit()
+    }
+    
+    fn get_validation_error(&self) -> String {
+        self.get_validation_error()
+    }
+    
+    fn build_network_command(&self) -> crate::network::NetworkCommand {
+        self.build_network_command()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum ChangePasswordAction {
     None,
     Submit,
     Cancel,
+    ValidationFailed(String),
 }

@@ -101,6 +101,13 @@ impl LoginDialog {
         Some((self.account_input.text.clone(), self.password_input.text.clone()))
     }
     
+    /// 构建登录的网络命令(如果凭证有效)
+    pub fn build_network_command(&self) -> Option<crate::network::NetworkCommand> {
+        self.get_credentials().map(|(username, password)| {
+            crate::network::NetworkCommand::Login { username, password }
+        })
+    }
+    
     pub fn clear(&mut self) { 
         self.account_input.clear(); 
         self.password_input.clear(); 
@@ -161,7 +168,7 @@ impl LoginDialog {
         // 2. 绘制标签 (Title库)
         // Title标签 (Index=30) - 需要居中，暂时简化
         draw_sprite_at(ctx, canvas, &LibraryName::Title, 30, 
-                      self.x + (self.width - 220.0) / 2.0, self.y + 12.0)?;  // 假设标题宽220
+                      self.x + (self.width - 220.0) / 2.0, self.y + 12.0)?;
         
         // AccountID标签 (Index=31)
         draw_sprite_at(ctx, canvas, &LibraryName::Title, 31, 

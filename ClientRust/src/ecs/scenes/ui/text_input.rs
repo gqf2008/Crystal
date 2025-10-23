@@ -67,12 +67,15 @@ impl TextInput {
         let display_text = if self.password_mode { "*".repeat(self.text.len()) } else { self.text.clone() };
         let mut text = Text::new(display_text);
         text.set_scale(PxScale::from(16.0));
-        canvas.draw(&text, ggez::graphics::DrawParam::default().dest([self.x + 5.0, self.y + 2.0]).color(Color::WHITE));
+        canvas.draw(&text, ggez::graphics::DrawParam::default()
+            .dest([self.x + 5.0, self.y + 2.0])
+            .color(Color::WHITE));
         
         // 光标：白色
         if self.focused && self.cursor_visible {
             let cursor_x = self.x + 5.0 + (self.text.len() as f32 * 8.0);
-            let cursor = Mesh::new_rectangle(ctx, DrawMode::fill(), Rect::new(cursor_x, self.y + 2.0, 2.0, 16.0), Color::WHITE)?;
+            let cursor = Mesh::new_rectangle(ctx, DrawMode::fill(), 
+                Rect::new(cursor_x, self.y + 2.0, 2.0, 16.0), Color::WHITE)?;
             canvas.draw(&cursor, ggez::graphics::DrawParam::default());
         }
         Ok(())

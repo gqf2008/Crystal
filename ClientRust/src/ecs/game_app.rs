@@ -167,8 +167,6 @@ impl GameState {
             // 将事件分发到当前场景
             match self.scene_type {
                 SceneType::Login => {
-                    println!("🎯🎯🎯 GameApp收到事件(LoginScene): {:?}", event);
-                    
                     // LoginScene特殊处理：登录成功需要切换场景并传递角色列表
                     if let GameEvent::LoginSuccess { ref characters } = event {
                         println!("✅ 登录成功！收到 {} 个角色", characters.len());
@@ -179,11 +177,7 @@ impl GameState {
                     
                     // 将事件传递给LoginScene处理
                     if let Some(login_scene) = self.current_scene.as_mut().as_any_mut().downcast_mut::<LoginScene>() {
-                        println!("🎯🎯🎯 正在调用LoginScene::handle_network_event");
                         login_scene.handle_network_event(&event);
-                        println!("🎯🎯🎯 LoginScene::handle_network_event调用完成");
-                    } else {
-                        println!("❌❌❌ 无法downcast到LoginScene!");
                     }
                 }
                 SceneType::Select => {

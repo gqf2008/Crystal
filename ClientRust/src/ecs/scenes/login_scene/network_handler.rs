@@ -9,8 +9,6 @@ use super::message_box::MessageBox;
 impl LoginScene {
     /// 处理网络事件
     pub fn handle_network_event(&mut self, event: &GameEvent) {
-        tracing::debug!("🎯 LoginScene收到网络事件: {:?}", event);
-        
         match event {
             GameEvent::Connected => {
                 self.on_connected();
@@ -25,8 +23,13 @@ impl LoginScene {
                 self.on_login_banned(reason);
             }
             GameEvent::NewAccountResponse { result } => {
-                tracing::info!("🔔 收到NewAccountResponse事件: result={}", result);
                 self.on_new_account_response(*result);
+            }
+            GameEvent::ChangePasswordResponse { result } => {
+                self.on_change_password_response(*result);
+            }
+            GameEvent::LoginSuccess { .. } => {
+                self.on_login_success();
             }
             _ => {
                 // 其他事件由GameApp处理（如LoginSuccess会触发场景切换）
@@ -71,7 +74,7 @@ impl LoginScene {
     /// 处理新建账号服务器响应
     /// 对应C#: LoginScene::NewAccount(S.NewAccount p)
     fn on_new_account_response(&mut self, result: u8) {
-        tracing::info!("🎯 开始处理新建账号响应: result={}", result);
+        tracing::info!("📝 收到新建账号响应: result={}", result);
         
         // 获取响应信息和UI行为
         let (message, should_close, focus_field) = match result {
@@ -94,18 +97,14 @@ impl LoginScene {
             _ => ("Unknown error occurred.", true, None),
         };
         
-        tracing::info!("📝 显示消息: {}", message);
-        
         // 显示消息
         self.show_message(message);
         
         // 根据结果决定是否关闭对话框
         if should_close {
-            tracing::info!("🚪 关闭新建账号对话框");
             self.new_account_dialog = None;
         } else if let Some(field) = focus_field {
             // 设置焦点到错误字段
-            tracing::info!("🎯 设置焦点到字段: {:?}", field);
             if let Some(dialog) = &mut self.new_account_dialog {
                 dialog.focused_field = field;
                 // 如果是AccountID已存在错误,清空字段
@@ -114,7 +113,35 @@ impl LoginScene {
                 }
             }
         }
+    }
+    
+    /// 处理修改密码服务器响应
+    /// 对应C#: LoginScene::ChangePassword(S.ChangePassword p)
+    fn on_change_password_response(&mut self, result: u8) {
+        use super::ChangePasswordResult;
         
-        tracing::info!("✅ 新建账号响应处理完成");
+        tracing::info!("🔑 收到修改密码响应: result={}", result);
+        
+        let result_enum = ChangePasswordResult::from_u8(result)
+            .unwrap_or(ChangePasswordResult::Disabled);
+        
+        // 显示服务器返回的消息
+        self.show_message(result_enum.message());
+        
+        // 如果修改成功,关闭对话框
+        if result_enum == ChangePasswordResult::Success {
+            self.change_password_dialog = None;
+            tracing::info!("✅ 密码修改成功!");
+        }
+        // 错误情况保持对话框打开,让用户修改
+    }
+    
+    /// 处理登录成功事件
+    /// 对应C#: LoginScene::Login(S.LoginSuccess p)
+    fn on_login_success(&mut self) {
+        tracing::info!("🎉 登录成功,启动背景动画");
+        self.login_enabled = false;
+        self.animation_paused = false;  // C#原版: _background.Animated = true
+        // 注意: 场景切换由GameApp处理,这里只负责启动动画
     }
 }

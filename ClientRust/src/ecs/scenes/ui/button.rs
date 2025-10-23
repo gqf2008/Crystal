@@ -1,7 +1,7 @@
 //! 按钮组件
 
 use ggez::{Context, graphics::Canvas};
-use crate::graphics::{LibraryName, draw_sprite_at};
+use crate::graphics::{LibraryName, draw_sprite_at, draw_sprite_scaled};
 
 #[derive(Debug, Clone)]
 pub struct Button {

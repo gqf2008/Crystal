@@ -5,6 +5,7 @@ use regex::Regex;
 use ggez::{Context, graphics::Canvas};
 use crate::graphics::{LibraryName, draw_sprite_at};
 use crate::ecs::scenes::ui::{Button, TextInput};
+use super::dialog_manager::DialogWithValidation;
 
 /// 新建账号结果
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -370,14 +371,50 @@ impl NewAccountDialog {
         self.account_valid && self.password_valid && self.confirm_valid && self.email_valid
     }
     
+    /// 获取验证错误消息
+    pub fn get_validation_error(&self) -> String {
+        if !self.account_valid {
+            if self.registration.account_id.is_empty() {
+                return "Please enter an Account ID.".to_string();
+            } else {
+                return "Account ID must be 3-15 alphanumeric characters.".to_string();
+            }
+        }
+        if !self.password_valid {
+            if self.registration.password.is_empty() {
+                return "Please enter a Password.".to_string();
+            } else {
+                return "Password must be 5-20 alphanumeric characters.".to_string();
+            }
+        }
+        if !self.confirm_valid {
+            if self.registration.password_confirm.is_empty() {
+                return "Please confirm your Password.".to_string();
+            } else {
+                return "Passwords do not match.".to_string();
+            }
+        }
+        if !self.email_valid && !self.registration.email.is_empty() {
+            return "Invalid email format.".to_string();
+        }
+        "Please complete all required fields.".to_string()
+    }
+    
     pub fn on_mouse_move(&mut self, x: f32, y: f32) {
         self.ok_button.update_hover(x, y);
         self.cancel_button.update_hover(x, y);
     }
     
     pub fn on_mouse_down(&mut self, x: f32, y: f32) -> NewAccountAction {
-        if self.ok_button.contains(x, y) && self.can_submit() {
-            return NewAccountAction::Submit;
+        if self.ok_button.contains(x, y) {
+            if self.can_submit() {
+                return NewAccountAction::Submit;
+            } else {
+                // 验证失败,返回具体的错误消息
+                let error_msg = self.get_validation_error();
+                tracing::info!("❌ 表单验证失败: {}", error_msg);
+                return NewAccountAction::ValidationFailed(error_msg);
+            }
         }
         if self.cancel_button.contains(x, y) {
             return NewAccountAction::Cancel;
@@ -429,6 +466,45 @@ impl NewAccountDialog {
         
         Ok(())
     }
+    
+    /// 构建新建账号的网络命令
+    pub fn build_network_command(&self) -> crate::network::NetworkCommand {
+        crate::network::NetworkCommand::NewAccount {
+            account_id: self.registration.account_id.clone(),
+            password: self.registration.password.clone(),
+            birth_date: 0, // TODO: 解析birth_date字符串转timestamp
+            username: self.registration.username.clone(),
+            secret_question: self.registration.secret_question.clone(),
+            secret_answer: self.registration.secret_answer.clone(),
+            email: self.registration.email.clone(),
+        }
+    }
+}
+
+impl DialogWithValidation for NewAccountDialog {
+    fn on_tab(&mut self) {
+        self.on_tab();
+    }
+    
+    fn on_backspace(&mut self) {
+        self.on_backspace();
+    }
+    
+    fn on_char(&mut self, ch: char) {
+        self.on_char(ch);
+    }
+    
+    fn can_submit(&self) -> bool {
+        self.can_submit()
+    }
+    
+    fn get_validation_error(&self) -> String {
+        self.get_validation_error()
+    }
+    
+    fn build_network_command(&self) -> crate::network::NetworkCommand {
+        self.build_network_command()
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -436,4 +512,5 @@ pub enum NewAccountAction {
     None,
     Submit,
     Cancel,
+    ValidationFailed(String), // 验证失败,携带错误消息
 }
