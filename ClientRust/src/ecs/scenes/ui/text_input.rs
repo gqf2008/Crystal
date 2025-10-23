@@ -65,15 +65,21 @@ impl TextInput {
         
         // 文本：白色
         let display_text = if self.password_mode { "*".repeat(self.text.len()) } else { self.text.clone() };
-        let mut text = Text::new(display_text);
+        let mut text = Text::new(display_text.clone());
         text.set_scale(PxScale::from(16.0));
         canvas.draw(&text, ggez::graphics::DrawParam::default()
             .dest([self.x + 5.0, self.y + 2.0])
             .color(Color::WHITE));
         
-        // 光标：白色
+        // 光标：白色 - 使用实际文本宽度计算位置
         if self.focused && self.cursor_visible {
-            let cursor_x = self.x + 5.0 + (self.text.len() as f32 * 8.0);
+            // 测量实际文本宽度
+            let text_width = if !display_text.is_empty() {
+                text.measure(ctx).map(|dim| dim.x).unwrap_or(0.0)
+            } else {
+                0.0
+            };
+            let cursor_x = self.x + 5.0 + text_width;
             let cursor = Mesh::new_rectangle(ctx, DrawMode::fill(), 
                 Rect::new(cursor_x, self.y + 2.0, 2.0, 16.0), Color::WHITE)?;
             canvas.draw(&cursor, ggez::graphics::DrawParam::default());

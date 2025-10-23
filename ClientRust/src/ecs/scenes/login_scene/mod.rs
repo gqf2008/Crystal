@@ -5,11 +5,13 @@ mod new_account;
 mod change_password;
 mod network_handler;
 mod dialog_manager;
+mod virtual_keyboard;
 
 pub use login::{LoginDialog, DialogAction};
 pub use message_box::MessageBox;
 pub use new_account::{NewAccountDialog, NewAccountAction, NewAccountResult, AccountRegistration, InputField};
 pub use change_password::{ChangePasswordDialog, ChangePasswordAction, ChangePasswordResult, PasswordInputField};
+pub use virtual_keyboard::{VirtualKeyboard, VirtualKeyboardAction, FocusedInput};
 use dialog_manager::{handle_dialog_keycode, DialogKeyResult};
 
 
@@ -36,6 +38,7 @@ pub struct LoginScene {
     new_account_dialog: Option<NewAccountDialog>,
     change_password_dialog: Option<ChangePasswordDialog>,
     message_box: Option<MessageBox>,
+    virtual_keyboard: Option<VirtualKeyboard>,
     status_log: Vec<String>,
     // 坐标转换参数(屏幕坐标 -> 虚拟坐标)
     scale: f32,
@@ -56,6 +59,7 @@ impl LoginScene {
             new_account_dialog: None,
             change_password_dialog: None,
             message_box: None,
+            virtual_keyboard: None,
             status_log: Vec::new(),
             scale: 1.0,
             offset_x: 0.0,
@@ -191,12 +195,25 @@ impl Scene for LoginScene {
             let _ = msg_box.draw(ctx, canvas);
         }
         
+        // 虚拟键盘在最上层
+        if let Some(keyboard) = &self.virtual_keyboard {
+            let _ = keyboard.draw(ctx, canvas);
+        }
+        
         Ok(())
     }
     
     fn on_mouse_move(&mut self, _ctx: &mut Context, _world: &mut World, x: f32, y: f32) -> GameResult {
         // 将屏幕坐标转换为虚拟1280×720坐标
         let (vx, vy) = self.screen_to_virtual(x, y);
+        
+        // 虚拟键盘优先级最高,但也更新背后的界面(允许悬停效果)
+        if let Some(keyboard) = &mut self.virtual_keyboard {
+            keyboard.on_mouse_move(vx, vy);
+            // 继续更新背后的登录界面,让按钮保持悬停效果
+            self.login_dialog.on_mouse_move(vx, vy);
+            return Ok(());
+        }
         
         if let Some(msg_box) = &mut self.message_box {
             msg_box.on_mouse_move(vx, vy);
@@ -222,6 +239,42 @@ impl Scene for LoginScene {
     fn on_mouse_down(&mut self, _ctx: &mut Context, _world: &mut World, _button: MouseButton, x: f32, y: f32, network_tx: &mpsc::UnboundedSender<NetworkCommand>) -> GameResult {
         // 将屏幕坐标转换为虚拟1280×720坐标
         let (vx, vy) = self.screen_to_virtual(x, y);
+        
+        // 虚拟键盘优先级最高
+        if let Some(keyboard) = &mut self.virtual_keyboard {
+            let action = keyboard.on_mouse_down(vx, vy);
+            match action {
+                VirtualKeyboardAction::Close => {
+                    self.virtual_keyboard = None;
+                }
+                VirtualKeyboardAction::Delete => {
+                    // 删除当前焦点输入框的最后一个字符
+                    match keyboard.focused_input {
+                        FocusedInput::Account => {
+                            self.login_dialog.account_input.backspace();
+                        }
+                        FocusedInput::Password => {
+                            self.login_dialog.password_input.backspace();
+                        }
+                    }
+                }
+                VirtualKeyboardAction::Input(ch) => {
+                    // 输入字符到当前焦点输入框
+                    if ch.is_ascii_alphanumeric() {
+                        match keyboard.focused_input {
+                            FocusedInput::Account => {
+                                self.login_dialog.account_input.add_char(ch.to_ascii_lowercase());
+                            }
+                            FocusedInput::Password => {
+                                self.login_dialog.password_input.add_char(ch.to_ascii_lowercase());
+                            }
+                        }
+                    }
+                }
+                VirtualKeyboardAction::None => {}
+            }
+            return Ok(());
+        }
         
         if let Some(msg_box) = &mut self.message_box {
             if msg_box.on_mouse_down(vx, vy) {
@@ -298,7 +351,20 @@ impl Scene for LoginScene {
                 dialog.show(account_id, password);
                 self.change_password_dialog = Some(dialog);
             }
-            DialogAction::OpenViewKey => self.show_message("虚拟键盘功能待实现"),
+            DialogAction::OpenViewKey => {
+                tracing::info!("⌨️ 打开虚拟键盘");
+                let base_w = 1280.0;
+                let base_h = 720.0;
+                let mut keyboard = VirtualKeyboard::new(base_w, base_h);
+                // 根据当前焦点决定虚拟键盘输入目标
+                let focused = if self.login_dialog.account_input.focused {
+                    FocusedInput::Account
+                } else {
+                    FocusedInput::Password
+                };
+                keyboard.show(focused);
+                self.virtual_keyboard = Some(keyboard);
+            }
             DialogAction::Exit => tracing::info!("🚪 退出游戏"),
             DialogAction::None => {}
         }
@@ -306,6 +372,46 @@ impl Scene for LoginScene {
     }
     
     fn on_key_down(&mut self, _ctx: &mut Context, _world: &mut World, input: KeyInput, network_tx: &mpsc::UnboundedSender<NetworkCommand>) -> GameResult<Option<SceneType>> {
+        // 虚拟键盘优先级最高(处理ESC/Backspace/Enter/Space)
+        if let Some(keyboard) = &mut self.virtual_keyboard {
+            if let ggez::winit::event::KeyEvent {
+                physical_key: PhysicalKey::Code(keycode),
+                ..
+            } = input.event
+            {
+                match keycode {
+                    KeyCode::Escape | KeyCode::Enter => {
+                        // ESC或Enter关闭虚拟键盘
+                        self.virtual_keyboard = None;
+                    }
+                    KeyCode::Backspace => {
+                        // 删除字符
+                        match keyboard.focused_input {
+                            FocusedInput::Account => {
+                                self.login_dialog.account_input.backspace();
+                            }
+                            FocusedInput::Password => {
+                                self.login_dialog.password_input.backspace();
+                            }
+                        }
+                    }
+                    KeyCode::Space => {
+                        // 空格键输入空格
+                        match keyboard.focused_input {
+                            FocusedInput::Account => {
+                                self.login_dialog.account_input.add_char(' ');
+                            }
+                            FocusedInput::Password => {
+                                self.login_dialog.password_input.add_char(' ');
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return Ok(None);
+        }
+        
         // 消息框优先级最高
         if self.message_box.is_some() {
             if let ggez::winit::event::KeyEvent {

@@ -1,6 +1,7 @@
 //! 按钮组件
 
-use ggez::{Context, graphics::Canvas};
+use ggez::{Context, graphics::{Canvas, Color, Text, TextFragment, PxScale, DrawParam}};
+use ggez::glam::Vec2;
 use crate::graphics::{LibraryName, draw_sprite_at, draw_sprite_scaled};
 
 #[derive(Debug, Clone)]
@@ -17,6 +18,8 @@ pub struct Button {
     pub pressed: bool,
     pub enabled: bool,
     pub visible: bool,
+    pub text: String,
+    pub center_text: bool,
 }
 
 impl Button {
@@ -26,6 +29,8 @@ impl Button {
             hover_sprite_index: sprite_index + 1,
             pressed_sprite_index: sprite_index + 2,
             hovered: false, pressed: false, enabled: true, visible: true,
+            text: String::new(),
+            center_text: false,
         }
     }
     
@@ -37,6 +42,8 @@ impl Button {
             hover_sprite_index: hover,
             pressed_sprite_index: pressed,
             hovered: false, pressed: false, enabled: true, visible: true,
+            text: String::new(),
+            center_text: false,
         }
     }
     
@@ -59,6 +66,27 @@ impl Button {
             self.sprite_index
         };
         draw_sprite_at(ctx, canvas, &self.library, index, self.x, self.y)?;
+        
+        // 渲染文本
+        if !self.text.is_empty() {
+            let mut text = Text::new(TextFragment {
+                text: self.text.clone(),
+                color: Some(Color::WHITE),
+                scale: Some(PxScale::from(16.0)),
+                ..Default::default()
+            });
+            
+            let text_dims = text.measure(ctx)?;
+            let text_x = if self.center_text {
+                self.x + (self.width - text_dims.x) / 2.0
+            } else {
+                self.x + 4.0
+            };
+            let text_y = self.y + (self.height - text_dims.y) / 2.0;
+            
+            canvas.draw(&text, DrawParam::default().dest(Vec2::new(text_x, text_y)));
+        }
+        
         Ok(())
     }
 }
