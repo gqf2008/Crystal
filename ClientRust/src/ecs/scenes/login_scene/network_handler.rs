@@ -48,7 +48,11 @@ impl LoginScene {
         println!("❌ Disconnected: {}", reason);
         self.connecting = false;
         self.login_enabled = false;
-        self.message_box = Some(MessageBox::new(format!("Disconnected: {}", reason)));
+        self.message_box = Some(MessageBox::new(
+            format!("Disconnected: {}", reason), 
+            super::DESIGN_WIDTH, 
+            super::DESIGN_HEIGHT
+        ));
     }
     
     /// 处理登录响应

@@ -18,6 +18,9 @@ pub mod ui;
 pub mod game_app;
 pub mod scenes;
 
+// IME 输入处理
+pub mod ime_handler;
+
 pub use components::*;
 pub use systems::*;
 pub use world::GameWorld;

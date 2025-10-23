@@ -306,6 +306,12 @@ impl EventHandler for GameState {
         Ok(())
     }
     
+    fn text_input_event(&mut self, ctx: &mut Context, character: char) -> GameResult {
+        // 转发 IME 输入到当前场景
+        // 将 char 转换为 String
+        self.current_scene.on_text_input(ctx, &mut self.world, character.to_string())
+    }
+    
     fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) -> GameResult {
         self.current_scene.on_resize(ctx, &mut self.world, width, height)
     }

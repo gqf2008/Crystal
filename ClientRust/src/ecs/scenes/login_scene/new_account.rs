@@ -111,11 +111,34 @@ pub struct NewAccountDialog {
 }
 
 impl NewAccountDialog {
+    // 相对于对话框纹理的偏移常量
+    const OFFSET_ACCOUNT_INPUT_X: f32 = 226.0;
+    const OFFSET_ACCOUNT_INPUT_Y: f32 = 103.0;
+    const OFFSET_PASSWORD_INPUT_X: f32 = 226.0;
+    const OFFSET_PASSWORD_INPUT_Y: f32 = 129.0;
+    const OFFSET_CONFIRM_INPUT_X: f32 = 226.0;
+    const OFFSET_CONFIRM_INPUT_Y: f32 = 155.0;
+    const OFFSET_USERNAME_INPUT_X: f32 = 226.0;
+    const OFFSET_USERNAME_INPUT_Y: f32 = 189.0;
+    const OFFSET_BIRTHDATE_INPUT_X: f32 = 226.0;
+    const OFFSET_BIRTHDATE_INPUT_Y: f32 = 215.0;
+    const OFFSET_QUESTION_INPUT_X: f32 = 226.0;
+    const OFFSET_QUESTION_INPUT_Y: f32 = 250.0;
+    const OFFSET_ANSWER_INPUT_X: f32 = 226.0;
+    const OFFSET_ANSWER_INPUT_Y: f32 = 276.0;
+    const OFFSET_EMAIL_INPUT_X: f32 = 226.0;
+    const OFFSET_EMAIL_INPUT_Y: f32 = 311.0;
+    const OFFSET_OK_BUTTON_X: f32 = 135.0;
+    const OFFSET_OK_BUTTON_Y: f32 = 425.0;
+    const OFFSET_CANCEL_BUTTON_X: f32 = 409.0;
+    const OFFSET_CANCEL_BUTTON_Y: f32 = 425.0;
+    
     pub fn new(screen_w: f32, screen_h: f32) -> Self {
-        // C#原版: Index 63, Prguse库, 需要居中
-        // 对话框尺寸从纹理资源获取,暂用估算值 520x470
+        // 对话框纹理尺寸 (Prguse:4 - TODO: 从图库查询)
         let dialog_w = 520.0;
         let dialog_h = 470.0;
+        
+        // 在1024x768设计空间居中
         let x = (screen_w - dialog_w) / 2.0;
         let y = (screen_h - dialog_h) / 2.0;
         
@@ -124,19 +147,19 @@ impl NewAccountDialog {
             registration: AccountRegistration::default(),
             focused_field: InputField::AccountId,
             
-            // C#原版输入框位置(相对对话框): AccountID(226,103), Password1(226,129), etc.
-            account_input: TextInput::new(x + 226.0, y + 103.0, 136.0, 15),    // MaxLength对应Globals.MaxAccountIDLength
-            password_input: TextInput::new(x + 226.0, y + 129.0, 136.0, 20).password(),
-            confirm_input: TextInput::new(x + 226.0, y + 155.0, 136.0, 20).password(),
-            username_input: TextInput::new(x + 226.0, y + 189.0, 136.0, 20),
-            birthdate_input: TextInput::new(x + 226.0, y + 215.0, 136.0, 10),
-            question_input: TextInput::new(x + 226.0, y + 250.0, 190.0, 30),
-            answer_input: TextInput::new(x + 226.0, y + 276.0, 190.0, 30),
-            email_input: TextInput::new(x + 226.0, y + 311.0, 136.0, 50),
+            // 使用常量偏移创建输入框
+            account_input: TextInput::new(x + Self::OFFSET_ACCOUNT_INPUT_X, y + Self::OFFSET_ACCOUNT_INPUT_Y, 136.0, 15),
+            password_input: TextInput::new(x + Self::OFFSET_PASSWORD_INPUT_X, y + Self::OFFSET_PASSWORD_INPUT_Y, 136.0, 20).password(),
+            confirm_input: TextInput::new(x + Self::OFFSET_CONFIRM_INPUT_X, y + Self::OFFSET_CONFIRM_INPUT_Y, 136.0, 20).password(),
+            username_input: TextInput::new(x + Self::OFFSET_USERNAME_INPUT_X, y + Self::OFFSET_USERNAME_INPUT_Y, 136.0, 20),
+            birthdate_input: TextInput::new(x + Self::OFFSET_BIRTHDATE_INPUT_X, y + Self::OFFSET_BIRTHDATE_INPUT_Y, 136.0, 10),
+            question_input: TextInput::new(x + Self::OFFSET_QUESTION_INPUT_X, y + Self::OFFSET_QUESTION_INPUT_Y, 190.0, 30),
+            answer_input: TextInput::new(x + Self::OFFSET_ANSWER_INPUT_X, y + Self::OFFSET_ANSWER_INPUT_Y, 190.0, 30),
+            email_input: TextInput::new(x + Self::OFFSET_EMAIL_INPUT_X, y + Self::OFFSET_EMAIL_INPUT_Y, 136.0, 50),
             
-            // C#原版按钮: OK(135,425), Cancel(409,425)
-            ok_button: Button::new_with_states(x + 135.0, y + 425.0, LibraryName::Title, 200, 201, 202),
-            cancel_button: Button::new_with_states(x + 409.0, y + 425.0, LibraryName::Title, 203, 204, 205),
+            // 使用常量偏移创建按钮
+            ok_button: Button::new_with_states(x + Self::OFFSET_OK_BUTTON_X, y + Self::OFFSET_OK_BUTTON_Y, LibraryName::Title, 200, 201, 202),
+            cancel_button: Button::new_with_states(x + Self::OFFSET_CANCEL_BUTTON_X, y + Self::OFFSET_CANCEL_BUTTON_Y, LibraryName::Title, 203, 204, 205),
             
             account_valid: false,
             password_valid: false,
@@ -151,43 +174,38 @@ impl NewAccountDialog {
         }
     }
     
-    pub fn update_positions(&mut self, screen_w: f32, screen_h: f32) {
-        // 动态调整位置保持居中
-        let dialog_w = 520.0;
-        let dialog_h = 470.0;
-        self.x = (screen_w - dialog_w) / 2.0;
-        self.y = (screen_h - dialog_h) / 2.0;
+    /// 更新所有子组件位置（当对话框x/y改变时调用）
+    pub fn update_positions(&mut self) {
+        // 使用常量偏移更新位置
+        self.account_input.x = self.x + Self::OFFSET_ACCOUNT_INPUT_X;
+        self.account_input.y = self.y + Self::OFFSET_ACCOUNT_INPUT_Y;
         
-        // 更新所有子组件位置
-        self.account_input.x = self.x + 226.0;
-        self.account_input.y = self.y + 103.0;
+        self.password_input.x = self.x + Self::OFFSET_PASSWORD_INPUT_X;
+        self.password_input.y = self.y + Self::OFFSET_PASSWORD_INPUT_Y;
         
-        self.password_input.x = self.x + 226.0;
-        self.password_input.y = self.y + 129.0;
+        self.confirm_input.x = self.x + Self::OFFSET_CONFIRM_INPUT_X;
+        self.confirm_input.y = self.y + Self::OFFSET_CONFIRM_INPUT_Y;
         
-        self.confirm_input.x = self.x + 226.0;
-        self.confirm_input.y = self.y + 155.0;
+        self.username_input.x = self.x + Self::OFFSET_USERNAME_INPUT_X;
+        self.username_input.y = self.y + Self::OFFSET_USERNAME_INPUT_Y;
         
-        self.username_input.x = self.x + 226.0;
-        self.username_input.y = self.y + 189.0;
+        self.birthdate_input.x = self.x + Self::OFFSET_BIRTHDATE_INPUT_X;
+        self.birthdate_input.y = self.y + Self::OFFSET_BIRTHDATE_INPUT_Y;
         
-        self.birthdate_input.x = self.x + 226.0;
-        self.birthdate_input.y = self.y + 215.0;
+        self.question_input.x = self.x + Self::OFFSET_QUESTION_INPUT_X;
+        self.question_input.y = self.y + Self::OFFSET_QUESTION_INPUT_Y;
         
-        self.question_input.x = self.x + 226.0;
-        self.question_input.y = self.y + 250.0;
+        self.answer_input.x = self.x + Self::OFFSET_ANSWER_INPUT_X;
+        self.answer_input.y = self.y + Self::OFFSET_ANSWER_INPUT_Y;
         
-        self.answer_input.x = self.x + 226.0;
-        self.answer_input.y = self.y + 276.0;
+        self.email_input.x = self.x + Self::OFFSET_EMAIL_INPUT_X;
+        self.email_input.y = self.y + Self::OFFSET_EMAIL_INPUT_Y;
         
-        self.email_input.x = self.x + 226.0;
-        self.email_input.y = self.y + 311.0;
+        self.ok_button.x = self.x + Self::OFFSET_OK_BUTTON_X;
+        self.ok_button.y = self.y + Self::OFFSET_OK_BUTTON_Y;
         
-        self.ok_button.x = self.x + 135.0;
-        self.ok_button.y = self.y + 425.0;
-        
-        self.cancel_button.x = self.x + 409.0;
-        self.cancel_button.y = self.y + 425.0;
+        self.cancel_button.x = self.x + Self::OFFSET_CANCEL_BUTTON_X;
+        self.cancel_button.y = self.y + Self::OFFSET_CANCEL_BUTTON_Y;
     }
     
     pub fn show(&mut self) {
@@ -282,6 +300,48 @@ impl NewAccountDialog {
             }
             InputField::Answer => {
                 self.answer_input.add_char(ch);
+                self.registration.secret_answer = self.answer_input.text.clone();
+            }
+        }
+    }
+    
+    /// 处理 IME 输入 (中文输入)
+    pub fn on_text_input(&mut self, text: &str) {
+        match self.focused_field {
+            InputField::AccountId => {
+                self.account_input.add_text(text);
+                self.registration.account_id = self.account_input.text.clone();
+                self.validate_account();
+            }
+            InputField::Password => {
+                self.password_input.add_text(text);
+                self.registration.password = self.password_input.text.clone();
+                self.validate_password();
+            }
+            InputField::PasswordConfirm => {
+                self.confirm_input.add_text(text);
+                self.registration.password_confirm = self.confirm_input.text.clone();
+                self.validate_confirm();
+            }
+            InputField::Email => {
+                self.email_input.add_text(text);
+                self.registration.email = self.email_input.text.clone();
+                self.validate_email();
+            }
+            InputField::Username => {
+                self.username_input.add_text(text);
+                self.registration.username = self.username_input.text.clone();
+            }
+            InputField::BirthDate => {
+                self.birthdate_input.add_text(text);
+                self.registration.birth_date = self.birthdate_input.text.clone();
+            }
+            InputField::Question => {
+                self.question_input.add_text(text);
+                self.registration.secret_question = self.question_input.text.clone();
+            }
+            InputField::Answer => {
+                self.answer_input.add_text(text);
                 self.registration.secret_answer = self.answer_input.text.clone();
             }
         }

@@ -16,15 +16,14 @@
 use anyhow::Result;
 use ggez::{
     conf::{WindowMode, WindowSetup, NumSamples},
-    event,
     ContextBuilder,
 };
 use tracing::info;
 
-use mir2_client::ecs::GameState;
+use mir2_client::ecs::{GameState, ime_handler};
 use mir2_client::program::ClientRuntime;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<()> {
     println!("\n========================================");
     println!("🎮 Crystal Mir2 Client - Mir2X (ECS版本)");
     println!("========================================\n");
@@ -48,10 +47,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("将继续运行,但部分图像可能无法显示");
     }
     
-    // 5. 创建 ggez Context (使用配置中的分辨率)
-    let res = settings.resolution();
-    let window_width = res.width as f32;
-    let window_height = res.height as f32;
+    // 5. 创建 ggez Context (从配置读取窗口尺寸，但强制调整为4:3比例)
+    let resolution = settings.resolution();
+    // UI纹理是4:3设计，需要强制窗口为4:3比例
+    let initial_width = resolution.width as f32;
+    let initial_height = (initial_width * 3.0 / 4.0).round();  // 强制4:3比例
     
     let (mut ctx, event_loop) = ContextBuilder::new("mir2x", "Crystal")
         .window_setup(
@@ -62,14 +62,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .window_mode(
             WindowMode::default()
-                .dimensions(window_width, window_height)
-                .resizable(false)
+                .dimensions(initial_width, initial_height)
+                .resizable(false)  // 允许缩放，但会强制保持4:3比例
+                .resize_on_scale_factor_change(true)
         )
         .build()?;
     
     info!(
-        "Ggez Context 创建成功: {}x{} (vsync开启)",
-        window_width, window_height
+        "Ggez Context 创建成功: {}x{} (可缩放，4:3比例)",
+        initial_width, initial_height
     );
     
     // 6. 添加中文字体支持 (使用 ClientRuntime 统一路径)
@@ -82,7 +83,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 8. 创建游戏应用 (传入配置和 runtime，像 CrystalGame 一样)
     let game = GameState::new(&mut ctx, settings)?;
     
-    // 9. 运行游戏循环
-    event::run(ctx, event_loop, game)
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    // 9. 运行自定义事件循环 (完整支持 IME)
+    tracing::info!("启动自定义事件循环 (IME 支持)");
+    ime_handler::run_with_ime(ctx, event_loop, game)?;
+    Ok(())
 }

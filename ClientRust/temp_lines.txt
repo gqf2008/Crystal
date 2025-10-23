@@ -1,0 +1,400 @@
+﻿    
+    /// 绘制NewCharacterDialog
+    fn draw_new_character_dialog(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager, dialog: &NewCharacterDialog) {
+        use ggez::graphics::{Text, DrawParam, Color, Rect, Mesh, DrawMode};
+        
+        // 1. 绘制半透明遮罩
+        let overlay_rect = Rect::new(0.0, 0.0, 1024.0, 768.0);
+        if let Ok(mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), overlay_rect, Color::from_rgba(0, 0, 0, 180)) {
+            canvas.draw(&mesh, DrawParam::default());
+        }
+        
+        // 2. 绘制对话框背景 (Prguse_73)
+        if let Some(texture) = ggez_manager.get_texture("Prguse_73") {
+            canvas.draw(texture, DrawParam::default().dest([dialog.x, dialog.y]));
+        }
+        
+        // 3. 绘制标题 (Title_20, 位置: dialog_x + 206, dialog_y + 11)
+        if let Some(texture) = ggez_manager.get_texture("Title_20") {
+            canvas.draw(texture, DrawParam::default().dest([dialog.x + 206.0, dialog.y + 11.0]));
+        }
+        
+        // 4. 绘制角色预览动画 (位置: dialog_x + 120, dialog_y + 250)
+        let anim_index = dialog.get_animation_index();
+        let anim_key = format!("ChrSel_{}", anim_index);
+        
+        // 获取纹理偏移量（从MLibrary）
+        use crate::graphics::libraries::{get_library, LibraryName};
+        let (offset_x, offset_y) = if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
+            let mut lib = lib_arc.lock().unwrap();
+            if let Ok(info) = lib.get_image_info(anim_index as usize) {
+                (info.x as f32, info.y as f32)
+            } else {
+                (0.0, 0.0)
+            }
+        } else {
+            (0.0, 0.0)
+        };
+        
+        if let Some(texture) = ggez_manager.get_texture(&anim_key) {
+            // 应用偏移量（C# UseOffSet = true）
+            canvas.draw(texture, DrawParam::default().dest([dialog.x + 120.0 + offset_x, dialog.y + 250.0 + offset_y]));
+            
+            // 法师需要绘制混合效果
+            if dialog.selected_class == mir2_shared::enums::MirClass::Wizard {
+                let blend_key = format!("ChrSel_{}", anim_index + 560);
+                if let Some(blend_texture) = ggez_manager.get_texture(&blend_key) {
+                    canvas.draw(blend_texture, DrawParam::default()
+                        .dest([dialog.x + 120.0 + offset_x, dialog.y + 250.0 + offset_y])
+                        .color(Color::from_rgba(255, 255, 255, 180)));
+                }
+            }
+        }
+        
+        // 5. 绘制职业按钮 (Prguse_2426-2440)
+        use new_character_dialog::DialogButton as NCDialogButton;
+        let class_buttons = [
+            (NCDialogButton::Warrior, 2426, 2427, 2428),
+            (NCDialogButton::Wizard, 2429, 2430, 2431),
+            (NCDialogButton::Taoist, 2432, 2433, 2434),
+            (NCDialogButton::Assassin, 2435, 2436, 2437),
+            (NCDialogButton::Archer, 2438, 2439, 2440),
+        ];
+        
+        for (btn_id, normal_idx, hover_idx, pressed_idx) in class_buttons {
+            let is_selected = match (btn_id, dialog.selected_class) {
+                (NCDialogButton::Warrior, mir2_shared::enums::MirClass::Warrior) => true,
+                (NCDialogButton::Wizard, mir2_shared::enums::MirClass::Wizard) => true,
+                (NCDialogButton::Taoist, mir2_shared::enums::MirClass::Taoist) => true,
+                (NCDialogButton::Assassin, mir2_shared::enums::MirClass::Assassin) => true,
+                (NCDialogButton::Archer, mir2_shared::enums::MirClass::Archer) => true,
+                _ => false,
+            };
+            
+            let idx = if dialog.pressed_button == Some(btn_id) {
+                pressed_idx
+            } else if is_selected || dialog.hovered_button == Some(btn_id) {
+                hover_idx
+            } else {
+                normal_idx
+            };
+            
+            let (bx, by, _, _) = dialog.get_button_rect(btn_id);
+            let texture_key = format!("Prguse_{}", idx);
+            if let Some(texture) = ggez_manager.get_texture(&texture_key) {
+                canvas.draw(texture, DrawParam::default().dest([bx, by]));
+            }
+        }
+        
+        // 6. 绘制性别按钮 (Prguse_2420-2425)
+        let gender_buttons = [
+            (NCDialogButton::Male, 2420, 2421, 2422),
+            (NCDialogButton::Female, 2423, 2424, 2425),
+        ];
+        
+        for (btn_id, normal_idx, hover_idx, pressed_idx) in gender_buttons {
+            let is_selected = match (btn_id, dialog.selected_gender) {
+                (NCDialogButton::Male, mir2_shared::enums::MirGender::Male) => true,
+                (NCDialogButton::Female, mir2_shared::enums::MirGender::Female) => true,
+                _ => false,
+            };
+            
+            let idx = if dialog.pressed_button == Some(btn_id) {
+                pressed_idx
+            } else if is_selected || dialog.hovered_button == Some(btn_id) {
+                hover_idx
+            } else {
+                normal_idx
+            };
+            
+            let (bx, by, _, _) = dialog.get_button_rect(btn_id);
+            let texture_key = format!("Prguse_{}", idx);
+            if let Some(texture) = ggez_manager.get_texture(&texture_key) {
+                canvas.draw(texture, DrawParam::default().dest([bx, by]));
+            }
+        }
+        
+        // 7. 绘制输入框 (位置: dialog_x + 325, dialog_y + 268, 大小: 240x20)
+        let input_x = dialog.x + 325.0;
+        let input_y = dialog.y + 268.0;
+        let input_w = 240.0;
+        let input_h = 20.0;
+        
+        // 输入框边框
+        let border_color = if let Some(_err) = &dialog.error_message {
+            Color::from_rgb(255, 0, 0)  // 红色表示错误
+        } else if !dialog.name.is_empty() {
+            Color::from_rgb(0, 255, 0)  // 绿色表示有效
+        } else {
+            Color::from_rgb(128, 128, 128)  // 灰色表示空
+        };
+        
+        let input_rect = Rect::new(input_x, input_y, input_w, input_h);
+        if let Ok(mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), input_rect, Color::from_rgb(0, 0, 0)) {
+            canvas.draw(&mesh, DrawParam::default());
+        }
+        if let Ok(mesh) = Mesh::new_rectangle(ctx, DrawMode::stroke(1.0), input_rect, border_color) {
+            canvas.draw(&mesh, DrawParam::default());
+        }
+        
+        // 输入框文字
+        if !dialog.name.is_empty() {
+            let mut input_text = Text::new(&dialog.name);
+            input_text.set_font("AlibabaPuHuiTi");
+            input_text.set_scale(14.0);
+            canvas.draw(&input_text, DrawParam::default().dest([input_x + 5.0, input_y + 3.0]).color(Color::WHITE));
+        }
+        
+        // 光标
+        if dialog.input_focused && dialog.cursor_visible {
+            let text_width = if dialog.cursor_position == 0 { 
+                0.0 
+            } else {
+                let cursor_text = &dialog.name.chars().take(dialog.cursor_position).collect::<String>();
+                let mut temp_text = Text::new(cursor_text);
+                temp_text.set_font("AlibabaPuHuiTi");
+                temp_text.set_scale(14.0);
+                temp_text.measure(ctx).map(|r| r.x).unwrap_or(0.0)
+            };
+            let cursor_rect = Rect::new(input_x + 5.0 + text_width, input_y + 3.0, 1.0, 14.0);
+            if let Ok(mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), cursor_rect, Color::WHITE) {
+                canvas.draw(&mesh, DrawParam::default());
+            }
+        }
+        
+        // 8. 绘制职业描述 (位置: dialog_x + 279, dialog_y + 70, 大小: 278x170)
+        let desc_text = dialog.get_class_description();
+        let mut desc_label = Text::new(desc_text);
+        desc_label.set_font("AlibabaPuHuiTi");
+        desc_label.set_scale(12.0);
+        desc_label.set_wrap(true);
+        desc_label.set_bounds([278.0, 170.0]);
+        canvas.draw(&desc_label, DrawParam::default().dest([dialog.x + 279.0, dialog.y + 70.0]).color(Color::WHITE));
+        
+        // 9. 绘制确认按钮 (Title_360/361/362, 位置: dialog_x + 160, dialog_y + 425)
+        let ok_enabled = dialog.validate_name().is_ok() && !dialog.creating;
+        let ok_idx = if !ok_enabled {
+            360  // 禁用状态
+        } else if dialog.pressed_button == Some(NCDialogButton::OK) {
+            362  // 按下
+        } else if dialog.hovered_button == Some(NCDialogButton::OK) {
+            361  // 悬停
+        } else {
+            360  // 正常
+        };
+        
+        let ok_key = format!("Title_{}", ok_idx);
+        if let Some(texture) = ggez_manager.get_texture(&ok_key) {
+            let color = if ok_enabled { Color::WHITE } else { Color::from_rgba(128, 128, 128, 128) };
+            canvas.draw(texture, DrawParam::default().dest([dialog.x + 160.0, dialog.y + 425.0]).color(color));
+        }
+        
+        // 10. 绘制取消按钮 (Title_280/281/282, 位置: dialog_x + 425, dialog_y + 425)
+        let cancel_idx = if dialog.pressed_button == Some(NCDialogButton::Cancel) {
+            282  // 按下
+        } else if dialog.hovered_button == Some(NCDialogButton::Cancel) {
+            281  // 悬停
+        } else {
+            280  // 正常
+        };
+        
+        let cancel_key = format!("Title_{}", cancel_idx);
+        if let Some(texture) = ggez_manager.get_texture(&cancel_key) {
+            canvas.draw(texture, DrawParam::default().dest([dialog.x + 425.0, dialog.y + 425.0]));
+        }
+        
+        // 11. 绘制错误消息
+        if let Some(err_msg) = &dialog.error_message {
+            let mut err_label = Text::new(err_msg);
+            err_label.set_font("AlibabaPuHuiTi");
+            err_label.set_scale(14.0);
+            canvas.draw(&err_label, DrawParam::default().dest([dialog.x + 325.0, dialog.y + 290.0]).color(Color::from_rgb(255, 0, 0)));
+        }
+        
+        // 12. 绘制创建中提示
+        if dialog.creating {
+            let creating_text = "正在创建角色,请稍候...";
+            let mut creating_label = Text::new(creating_text);
+            creating_label.set_font("AlibabaPuHuiTi");
+            creating_label.set_scale(16.0);
+            canvas.draw(&creating_label, DrawParam::default().dest([dialog.x + 200.0, dialog.y + 500.0]).color(Color::from_rgb(255, 255, 0)));
+        }
+    }
+    
+    /// 绘制删除角色对话框
+    /// 
+    /// Mirrors C# MirMessageBox (Confirmation) + MirInputBox (Name Input)
+    /// - MessageBox背景: Prguse_360
+    /// - InputBox背景: Prguse_660
+    /// - 按钮: Title库 (Yes: 206/207/208, No: 210/211/212, OK: 200/201/202, Cancel: 203/204/205)
+    fn draw_delete_character_dialog(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager, dialog: &DeleteCharacterDialog) {
+        use ggez::graphics::{Color, DrawParam};
+        
+        // 根据对话框状态选择不同的背景
+        let (bg_key, dialog_width, dialog_height) = match dialog.state {
+            delete_character_dialog::DialogState::Confirmation => {
+                // MessageBox: Prguse_360
+                ("Prguse_360", 464.0, 260.0)  // C# Size from MirMessageBox
+            }
+            delete_character_dialog::DialogState::NameInput => {
+                // InputBox: Prguse_660
+                ("Prguse_660", 290.0, 188.0)  // C# Size from MirInputBox
+            }
+        };
+        
+        let dialog_x = (self.window_width - dialog_width) / 2.0;
+        let dialog_y = (self.window_height - dialog_height) / 2.0;
+        
+        // 1. 绘制对话框背景
+        if let Some(bg_texture) = ggez_manager.get_texture(bg_key) {
+            canvas.draw(bg_texture, DrawParam::default().dest([dialog_x, dialog_y]));
+        } else {
+            // 如果纹理未加载,使用简单矩形作为后备
+            if let Ok(rect) = ggez::graphics::Mesh::new_rectangle(
+                ctx,
+                ggez::graphics::DrawMode::fill(),
+                ggez::graphics::Rect::new(dialog_x, dialog_y, dialog_width, dialog_height),
+                Color::from_rgba(30, 30, 40, 220),
+            ) {
+                canvas.draw(&rect, DrawParam::default());
+            }
+        }
+        
+        // 2. 根据状态渲染内容
+        match dialog.state {
+            delete_character_dialog::DialogState::Confirmation => {
+                self.draw_delete_confirmation(ctx, canvas, ggez_manager, dialog, dialog_x, dialog_y);
+            }
+            delete_character_dialog::DialogState::NameInput => {
+                self.draw_delete_name_input(ctx, canvas, ggez_manager, dialog, dialog_x, dialog_y);
+            }
+        }
+    }
+    
+    /// 绘制删除确认对话框 (第一阶段: Yes/No)
+    fn draw_delete_confirmation(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager, dialog: &DeleteCharacterDialog, dialog_x: f32, dialog_y: f32) {
+        use ggez::graphics::{Text, Color, DrawParam};
+        
+        // 消息文本 (C# Location: 35, 35, Size: 390, 110)
+        let message = format!("您确定要删除角色 {} 吗？\n\n此操作无法撤销！", dialog.character_name);
+        let mut text = Text::new(&message);
+        text.set_font("AlibabaPuHuiTi");
+        text.set_scale(16.0);
+        canvas.draw(&text, DrawParam::default()
+            .dest([dialog_x + 35.0, dialog_y + 35.0])
+            .color(Color::WHITE));
+        
+        // Yes按钮 (C# Location: 260, 157)
+        let yes_key = "Title_206";  // 正常状态
+        if let Some(texture) = ggez_manager.get_texture(yes_key) {
+            canvas.draw(texture, DrawParam::default().dest([dialog_x + 260.0, dialog_y + 157.0]));
+        }
+        
+        // No按钮 (C# Location: 360, 157)
+        let no_key = "Title_210";  // 正常状态
+        if let Some(texture) = ggez_manager.get_texture(no_key) {
+            canvas.draw(texture, DrawParam::default().dest([dialog_x + 360.0, dialog_y + 157.0]));
+        }
+    }
+    
+    /// 绘制删除名称输入对话框 (第二阶段: 输入角色名)
+    fn draw_delete_name_input(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager, dialog: &DeleteCharacterDialog, dialog_x: f32, dialog_y: f32) {
+        use ggez::graphics::{Text, Color, DrawParam, Rect};
+        
+        // 提示文本 (C# Location: 25, 25, Size: 235, 40)
+        let caption = "请输入角色名称以确认删除:";
+        let mut caption_text = Text::new(caption);
+        caption_text.set_font("AlibabaPuHuiTi");
+        caption_text.set_scale(14.0);
+        canvas.draw(&caption_text, DrawParam::default()
+            .dest([dialog_x + 25.0, dialog_y + 25.0])
+            .color(Color::WHITE));
+        
+        // 角色名提示
+        let name_hint = format!("角色名: {}", dialog.character_name);
+        let mut hint_text = Text::new(&name_hint);
+        hint_text.set_font("AlibabaPuHuiTi");
+        hint_text.set_scale(12.0);
+        canvas.draw(&hint_text, DrawParam::default()
+            .dest([dialog_x + 25.0, dialog_y + 55.0])
+            .color(Color::from_rgb(200, 200, 200)));
+        
+        // 输入框背景 (C# Location: 23, 86, Size: 240, 19)
+        if let Ok(input_bg) = ggez::graphics::Mesh::new_rectangle(
+            ctx,
+            ggez::graphics::DrawMode::fill(),
+            Rect::new(dialog_x + 23.0, dialog_y + 86.0, 240.0, 19.0),
+            Color::from_rgb(20, 20, 30),
+        ) {
+            canvas.draw(&input_bg, DrawParam::default());
+        }
+        
+        // 输入框边框
+        if let Ok(input_border) = ggez::graphics::Mesh::new_rectangle(
+            ctx,
+            ggez::graphics::DrawMode::stroke(1.0),
+            Rect::new(dialog_x + 23.0, dialog_y + 86.0, 240.0, 19.0),
+            Color::from_rgb(0, 255, 0),  // C# BorderColour = Color.Lime
+        ) {
+            canvas.draw(&input_border, DrawParam::default());
+        }
+        
+        // 输入文本 + IME拼音
+        let display_text = if !dialog.ime_preedit.is_empty() {
+            format!("{}|{}", dialog.input_text, dialog.ime_preedit)
+        } else {
+            dialog.input_text.clone()
+        };
+        
+        let mut input_text = Text::new(&display_text);
+        input_text.set_font("AlibabaPuHuiTi");
+        input_text.set_scale(14.0);
+        canvas.draw(&input_text, DrawParam::default()
+            .dest([dialog_x + 28.0, dialog_y + 88.0])
+            .color(Color::WHITE));
+        
+        // 错误消息或状态提示
+        if let Some(error) = &dialog.error_message {
+            let mut error_text = Text::new(error);
+            error_text.set_font("AlibabaPuHuiTi");
+            error_text.set_scale(12.0);
+            canvas.draw(&error_text, DrawParam::default()
+                .dest([dialog_x + 25.0, dialog_y + 110.0])
+                .color(Color::from_rgb(255, 100, 100)));
+        } else if dialog.deleting {
+            let status = "正在删除角色...";
+            let mut status_text = Text::new(status);
+            status_text.set_font("AlibabaPuHuiTi");
+            status_text.set_scale(12.0);
+            canvas.draw(&status_text, DrawParam::default()
+                .dest([dialog_x + 25.0, dialog_y + 110.0])
+                .color(Color::from_rgb(255, 200, 100)));
+        }
+        
+        // OK按钮 (C# Location: 60, 123)
+        let ok_key = if dialog.can_submit() {
+            "Title_200"  // 正常可用
+        } else {
+            "Title_200"  // TODO: 需要一个灰色/禁用状态的按钮
+        };
+        if let Some(texture) = ggez_manager.get_texture(ok_key) {
+            let alpha = if dialog.can_submit() { 1.0 } else { 0.5 };
+            canvas.draw(texture, DrawParam::default()
+                .dest([dialog_x + 60.0, dialog_y + 123.0])
+                .color(Color::from_rgba(255, 255, 255, (alpha * 255.0) as u8)));
+        }
+        
+        // Cancel按钮 (C# Location: 160, 123)
+        let cancel_key = "Title_203";  // 正常状态
+        if let Some(texture) = ggez_manager.get_texture(cancel_key) {
+            canvas.draw(texture, DrawParam::default().dest([dialog_x + 160.0, dialog_y + 123.0]));
+        }
+    }
+}
+
+impl Default for SelectScene {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+

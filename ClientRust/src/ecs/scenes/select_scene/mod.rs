@@ -1,8 +1,14 @@
-// SelectScene - Character selection scene
+﻿// SelectScene - Character selection scene
 // Mirrors Client/MirScenes/SelectScene.cs
+
+// UI 组件子模块（每个组件负责自己的绘制和事件处理）
 pub mod new_character_dialog;
 pub mod delete_character_dialog;
 pub mod credits_dialog;
+
+// 业务逻辑子模块（按照单一职责原则分离）
+mod ui_actions;        // UI 交互逻辑（按钮点击、对话框打开、游戏启动等）
+mod network_handler;   // 网络事件处理（服务器响应处理）
 
 pub use new_character_dialog::NewCharacterDialog;
 pub use delete_character_dialog::DeleteCharacterDialog;
@@ -14,9 +20,14 @@ use hecs::World;
 use tokio::sync::mpsc;
 
 use super::{Scene, SceneType};
-use crate::network::{game_client::GameEvent, NetworkCommand};
+use crate::network::NetworkCommand;
 use crate::ecs::ui::{ButtonGroup, ButtonWidget};  // 🆕 按钮部件
 use mir2_shared::SelectInfo;
+
+// 设计分辨率常量 (与 LoginScene 保持一致)
+const DESIGN_WIDTH: f32 = 1024.0;
+const DESIGN_HEIGHT: f32 = 768.0;
+
 /// 
 /// Mirrors C# SelectScene:
 /// ```csharp
@@ -174,613 +185,54 @@ impl SelectScene {
         }
     }
     
-    /// Start game with selected character
+    /// 将窗口坐标转换为设计坐标 (与 LoginScene 保持一致)
     /// 
-    /// Mirrors C# StartGame():
-    /// ```csharp
-    /// private void StartGame()
-    /// {
-    ///     // Send StartGame packet
-    ///     Network.Enqueue(new C.StartGame { CharacterIndex = Characters[_selected].Index });
-    /// }
-    /// ```
-    pub fn start_game(&mut self) {
-        tracing::info!("🎮 start_game() called - selected_index={}, characters.len()={}", 
-            self.selected_index, self.characters.len());
+    /// 窗口可能是任意大小，但我们使用固定的 1024x768 设计坐标系。
+    /// 这个方法将鼠标的窗口坐标转换为设计坐标，考虑4:3比例和居中偏移。
+    fn window_to_design_coords(&self, ctx: &Context, window_x: f32, window_y: f32) -> (f32, f32) {
+        let window_size = ctx.gfx.drawable_size();
+        let window_width = window_size.0;
+        let window_height = window_size.1;
         
-        if self.selected_index >= 0 && (self.selected_index as usize) < self.characters.len() {
-            let character = &self.characters[self.selected_index as usize];
-            tracing::info!("🎮 Starting game with character: {} (index={})", character.name, character.index);
-            
-            // Send StartGame command to network thread
-            if let Some(command_tx) = &self.command_tx {
-                use crate::network::NetworkCommand;
-                
-                tracing::info!("📡 Network command channel available, sending StartGame...");
-                if command_tx.send(NetworkCommand::StartGame {
-                    character_index: character.index,
-                }).is_ok() {
-                    tracing::info!("✅ Sent StartGame command for character index {}", character.index);
-                } else {
-                    tracing::error!("❌ Failed to send StartGame command (channel send error)");
-                }
-            } else {
-                tracing::error!("❌ Network command channel not available (command_tx is None)");
-            }
+        // 计算4:3视口
+        let aspect_ratio = 4.0 / 3.0;
+        let current_ratio = window_width / window_height;
+        
+        let (viewport_width, viewport_height) = if current_ratio > aspect_ratio {
+            (window_height * aspect_ratio, window_height)
         } else {
-            tracing::warn!("⚠️ Cannot start game: No character selected (selected_index={}, len={})", 
-                self.selected_index, self.characters.len());
-        }
-    }
-    
-    /// Open new character creation dialog
-    /// 
-    /// Mirrors C# OpenNewCharacterDialog():
-    /// ```csharp
-    /// private void OpenNewCharacterDialog()
-    /// {
-    ///     if (_character == null || _character.IsDisposed)
-    ///     {
-    ///         _character = new NewCharacterDialog { Parent = this };
-    ///         // ...
-    ///     }
-    /// }
-    /// ```
-    pub fn open_new_character_dialog(&mut self) {
-        tracing::info!("➕ 打开角色创建对话框");
-        
-        if self.new_character_dialog.is_none() {
-            let mut dialog = NewCharacterDialog::new();
-            dialog.show();
-            self.new_character_dialog = Some(dialog);
-            tracing::info!("✅ 角色创建对话框已打开");
-        } else {
-            // 如果对话框已存在,则显示它
-            if let Some(dialog) = &mut self.new_character_dialog {
-                dialog.show();
-            }
-            tracing::info!("ℹ️ 角色创建对话框已显示");
-        }
-    }
-    
-    /// Open delete character dialog
-    /// 
-    /// Mirrors C# DeleteCharacter():
-    /// ```csharp
-    /// private void DeleteCharacter()
-    /// {
-    ///     MirMessageBox message = new MirMessageBox(...);
-    ///     message.YesButton.Click += ...
-    /// }
-    /// ```
-    pub fn open_delete_character_dialog(&mut self) {
-        if self.selected_index < 0 || (self.selected_index as usize) >= self.characters.len() {
-            tracing::warn!("⚠️ 没有选中角色,无法删除");
-            return;
-        }
-        
-        let character = &self.characters[self.selected_index as usize];
-        tracing::info!("🗑️ 打开删除角色对话框: {}", character.name);
-        
-        let dialog = DeleteCharacterDialog::new(
-            character.name.clone(),
-            character.index
-        );
-        
-        self.delete_character_dialog = Some(dialog);
-    }
-    
-    /// Open credits dialog
-    pub fn open_credits_dialog(&mut self) {
-        tracing::info!("📜 打开Credits对话框");
-        let dialog = CreditsDialog::new();
-        self.credits_dialog = Some(dialog);
-        if let Some(d) = &mut self.credits_dialog {
-            d.show();
-        }
-    }
-    
-    /// Submit delete character request
-    /// 
-    /// Mirrors C# DeleteCharacter() sending packet:
-    /// ```csharp
-    /// Network.Enqueue(new C.DeleteCharacter { CharacterIndex = index });
-    /// ```
-    fn submit_delete_character(&mut self) {
-        if let Some(dialog) = &mut self.delete_character_dialog {
-            if !dialog.can_submit() {
-                tracing::warn!("⚠️ 无法提交删除请求: 名称不匹配或正在删除");
-                return;
-            }
-            
-            let character_index = dialog.character_index;
-            dialog.deleting = true;
-            
-            tracing::info!("🗑️ 发送删除角色请求: index={}", character_index);
-            
-            // 发送删除命令到网络层
-            if let Some(tx) = &self.command_tx {
-                use crate::network::NetworkCommand;
-                if let Err(e) = tx.send(NetworkCommand::DeleteCharacter { index: character_index }) {
-                    tracing::error!("❌ 发送删除角色命令失败: {}", e);
-                    dialog.deleting = false;
-                    dialog.error_message = Some("网络错误,无法发送删除请求".to_string());
-                }
-            } else {
-                tracing::error!("❌ 网络命令发送器未初始化");
-                dialog.deleting = false;
-                dialog.error_message = Some("网络未连接".to_string());
-            }
-        }
-    }
-    
-    /// 处理对话框按钮点击
-    fn handle_dialog_button_click(&mut self, button: crate::scenes::select_scene::new_character_dialog::DialogButton) {
-        use crate::scenes::select_scene::new_character_dialog::DialogButton;
-        
-        if let Some(dialog) = &mut self.new_character_dialog {
-            match button {
-                DialogButton::OK => {
-                    // 验证角色名称
-                    if let Err(err_msg) = dialog.validate_name() {
-                        tracing::warn!("角色名称验证失败: {}", err_msg);
-                        dialog.error_message = Some(err_msg);
-                        return;
-                    }
-                    
-                    // 标记为正在创建
-                    dialog.creating = true;
-                    
-                    // 发送 NewCharacter 网络包
-                    tracing::info!("📝 创建新角色: {} ({:?}, {:?})", 
-                        dialog.name, dialog.selected_class, dialog.selected_gender);
-                    
-                    if let Some(tx) = &self.command_tx {
-                        if let Err(e) = tx.send(crate::network::NetworkCommand::NewCharacter {
-                            name: dialog.name.clone(),
-                            class: dialog.selected_class as u8,
-                            gender: dialog.selected_gender as u8,
-                        }) {
-                            tracing::error!("Failed to send NewCharacter command: {}", e);
-                            dialog.error_message = Some("网络错误,请重试".to_string());
-                            dialog.creating = false;
-                            return;
-                        }
-                        tracing::info!("✅ 角色创建请求已发送,等待服务器响应...");
-                    } else {
-                        tracing::warn!("No network command channel available");
-                        dialog.error_message = Some("网络未连接".to_string());
-                        dialog.creating = false;
-                    }
-                }
-                DialogButton::Cancel => {
-                    tracing::info!("❌ 取消角色创建");
-                    dialog.hide();
-                }
-                DialogButton::Warrior => {
-                    dialog.selected_class = mir2_shared::enums::MirClass::Warrior;
-                    tracing::debug!("选择职业: 战士");
-                }
-                DialogButton::Wizard => {
-                    dialog.selected_class = mir2_shared::enums::MirClass::Wizard;
-                    tracing::debug!("选择职业: 法师");
-                }
-                DialogButton::Taoist => {
-                    dialog.selected_class = mir2_shared::enums::MirClass::Taoist;
-                    tracing::debug!("选择职业: 道士");
-                }
-                DialogButton::Assassin => {
-                    dialog.selected_class = mir2_shared::enums::MirClass::Assassin;
-                    tracing::debug!("选择职业: 刺客");
-                }
-                DialogButton::Archer => {
-                    dialog.selected_class = mir2_shared::enums::MirClass::Archer;
-                    tracing::debug!("选择职业: 弓箭手");
-                }
-                DialogButton::Male => {
-                    dialog.selected_gender = mir2_shared::enums::MirGender::Male;
-                    tracing::debug!("选择性别: 男");
-                }
-                DialogButton::Female => {
-                    dialog.selected_gender = mir2_shared::enums::MirGender::Female;
-                    tracing::debug!("选择性别: 女");
-                }
-            }
-        }
-    }
-    
-    /// 绘制NewCharacterDialog
-    fn draw_new_character_dialog(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager, dialog: &NewCharacterDialog) {
-        use ggez::graphics::{Text, DrawParam, Color, Rect, Mesh, DrawMode};
-        
-        // 1. 绘制半透明遮罩
-        let overlay_rect = Rect::new(0.0, 0.0, 1024.0, 768.0);
-        if let Ok(mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), overlay_rect, Color::from_rgba(0, 0, 0, 180)) {
-            canvas.draw(&mesh, DrawParam::default());
-        }
-        
-        // 2. 绘制对话框背景 (Prguse_73)
-        if let Some(texture) = ggez_manager.get_texture("Prguse_73") {
-            canvas.draw(texture, DrawParam::default().dest([dialog.x, dialog.y]));
-        }
-        
-        // 3. 绘制标题 (Title_20, 位置: dialog_x + 206, dialog_y + 11)
-        if let Some(texture) = ggez_manager.get_texture("Title_20") {
-            canvas.draw(texture, DrawParam::default().dest([dialog.x + 206.0, dialog.y + 11.0]));
-        }
-        
-        // 4. 绘制角色预览动画 (位置: dialog_x + 120, dialog_y + 250)
-        let anim_index = dialog.get_animation_index();
-        let anim_key = format!("ChrSel_{}", anim_index);
-        
-        // 获取纹理偏移量（从MLibrary）
-        use crate::graphics::libraries::{get_library, LibraryName};
-        let (offset_x, offset_y) = if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
-            let mut lib = lib_arc.lock().unwrap();
-            if let Ok(info) = lib.get_image_info(anim_index as usize) {
-                (info.x as f32, info.y as f32)
-            } else {
-                (0.0, 0.0)
-            }
-        } else {
-            (0.0, 0.0)
+            (window_width, window_width / aspect_ratio)
         };
         
-        if let Some(texture) = ggez_manager.get_texture(&anim_key) {
-            // 应用偏移量（C# UseOffSet = true）
-            canvas.draw(texture, DrawParam::default().dest([dialog.x + 120.0 + offset_x, dialog.y + 250.0 + offset_y]));
-            
-            // 法师需要绘制混合效果
-            if dialog.selected_class == mir2_shared::enums::MirClass::Wizard {
-                let blend_key = format!("ChrSel_{}", anim_index + 560);
-                if let Some(blend_texture) = ggez_manager.get_texture(&blend_key) {
-                    canvas.draw(blend_texture, DrawParam::default()
-                        .dest([dialog.x + 120.0 + offset_x, dialog.y + 250.0 + offset_y])
-                        .color(Color::from_rgba(255, 255, 255, 180)));
-                }
-            }
-        }
+        let offset_x = (window_width - viewport_width) / 2.0;
+        let offset_y = (window_height - viewport_height) / 2.0;
         
-        // 5. 绘制职业按钮 (Prguse_2426-2440)
-        use new_character_dialog::DialogButton as NCDialogButton;
-        let class_buttons = [
-            (NCDialogButton::Warrior, 2426, 2427, 2428),
-            (NCDialogButton::Wizard, 2429, 2430, 2431),
-            (NCDialogButton::Taoist, 2432, 2433, 2434),
-            (NCDialogButton::Assassin, 2435, 2436, 2437),
-            (NCDialogButton::Archer, 2438, 2439, 2440),
-        ];
+        // 转换：窗口坐标 -> 视口坐标 -> 设计坐标
+        let viewport_x = window_x - offset_x;
+        let viewport_y = window_y - offset_y;
         
-        for (btn_id, normal_idx, hover_idx, pressed_idx) in class_buttons {
-            let is_selected = match (btn_id, dialog.selected_class) {
-                (NCDialogButton::Warrior, mir2_shared::enums::MirClass::Warrior) => true,
-                (NCDialogButton::Wizard, mir2_shared::enums::MirClass::Wizard) => true,
-                (NCDialogButton::Taoist, mir2_shared::enums::MirClass::Taoist) => true,
-                (NCDialogButton::Assassin, mir2_shared::enums::MirClass::Assassin) => true,
-                (NCDialogButton::Archer, mir2_shared::enums::MirClass::Archer) => true,
-                _ => false,
-            };
-            
-            let idx = if dialog.pressed_button == Some(btn_id) {
-                pressed_idx
-            } else if is_selected || dialog.hovered_button == Some(btn_id) {
-                hover_idx
-            } else {
-                normal_idx
-            };
-            
-            let (bx, by, _, _) = dialog.get_button_rect(btn_id);
-            let texture_key = format!("Prguse_{}", idx);
-            if let Some(texture) = ggez_manager.get_texture(&texture_key) {
-                canvas.draw(texture, DrawParam::default().dest([bx, by]));
-            }
-        }
+        let design_x = (viewport_x / viewport_width) * DESIGN_WIDTH;
+        let design_y = (viewport_y / viewport_height) * DESIGN_HEIGHT;
         
-        // 6. 绘制性别按钮 (Prguse_2420-2425)
-        let gender_buttons = [
-            (NCDialogButton::Male, 2420, 2421, 2422),
-            (NCDialogButton::Female, 2423, 2424, 2425),
-        ];
-        
-        for (btn_id, normal_idx, hover_idx, pressed_idx) in gender_buttons {
-            let is_selected = match (btn_id, dialog.selected_gender) {
-                (NCDialogButton::Male, mir2_shared::enums::MirGender::Male) => true,
-                (NCDialogButton::Female, mir2_shared::enums::MirGender::Female) => true,
-                _ => false,
-            };
-            
-            let idx = if dialog.pressed_button == Some(btn_id) {
-                pressed_idx
-            } else if is_selected || dialog.hovered_button == Some(btn_id) {
-                hover_idx
-            } else {
-                normal_idx
-            };
-            
-            let (bx, by, _, _) = dialog.get_button_rect(btn_id);
-            let texture_key = format!("Prguse_{}", idx);
-            if let Some(texture) = ggez_manager.get_texture(&texture_key) {
-                canvas.draw(texture, DrawParam::default().dest([bx, by]));
-            }
-        }
-        
-        // 7. 绘制输入框 (位置: dialog_x + 325, dialog_y + 268, 大小: 240x20)
-        let input_x = dialog.x + 325.0;
-        let input_y = dialog.y + 268.0;
-        let input_w = 240.0;
-        let input_h = 20.0;
-        
-        // 输入框边框
-        let border_color = if let Some(_err) = &dialog.error_message {
-            Color::from_rgb(255, 0, 0)  // 红色表示错误
-        } else if !dialog.name.is_empty() {
-            Color::from_rgb(0, 255, 0)  // 绿色表示有效
-        } else {
-            Color::from_rgb(128, 128, 128)  // 灰色表示空
-        };
-        
-        let input_rect = Rect::new(input_x, input_y, input_w, input_h);
-        if let Ok(mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), input_rect, Color::from_rgb(0, 0, 0)) {
-            canvas.draw(&mesh, DrawParam::default());
-        }
-        if let Ok(mesh) = Mesh::new_rectangle(ctx, DrawMode::stroke(1.0), input_rect, border_color) {
-            canvas.draw(&mesh, DrawParam::default());
-        }
-        
-        // 输入框文字
-        if !dialog.name.is_empty() {
-            let mut input_text = Text::new(&dialog.name);
-            input_text.set_font("AlibabaPuHuiTi");
-            input_text.set_scale(14.0);
-            canvas.draw(&input_text, DrawParam::default().dest([input_x + 5.0, input_y + 3.0]).color(Color::WHITE));
-        }
-        
-        // 光标
-        if dialog.input_focused && dialog.cursor_visible {
-            let text_width = if dialog.cursor_position == 0 { 
-                0.0 
-            } else {
-                let cursor_text = &dialog.name.chars().take(dialog.cursor_position).collect::<String>();
-                let mut temp_text = Text::new(cursor_text);
-                temp_text.set_font("AlibabaPuHuiTi");
-                temp_text.set_scale(14.0);
-                temp_text.measure(ctx).map(|r| r.x).unwrap_or(0.0)
-            };
-            let cursor_rect = Rect::new(input_x + 5.0 + text_width, input_y + 3.0, 1.0, 14.0);
-            if let Ok(mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), cursor_rect, Color::WHITE) {
-                canvas.draw(&mesh, DrawParam::default());
-            }
-        }
-        
-        // 8. 绘制职业描述 (位置: dialog_x + 279, dialog_y + 70, 大小: 278x170)
-        let desc_text = dialog.get_class_description();
-        let mut desc_label = Text::new(desc_text);
-        desc_label.set_font("AlibabaPuHuiTi");
-        desc_label.set_scale(12.0);
-        desc_label.set_wrap(true);
-        desc_label.set_bounds([278.0, 170.0]);
-        canvas.draw(&desc_label, DrawParam::default().dest([dialog.x + 279.0, dialog.y + 70.0]).color(Color::WHITE));
-        
-        // 9. 绘制确认按钮 (Title_360/361/362, 位置: dialog_x + 160, dialog_y + 425)
-        let ok_enabled = dialog.validate_name().is_ok() && !dialog.creating;
-        let ok_idx = if !ok_enabled {
-            360  // 禁用状态
-        } else if dialog.pressed_button == Some(NCDialogButton::OK) {
-            362  // 按下
-        } else if dialog.hovered_button == Some(NCDialogButton::OK) {
-            361  // 悬停
-        } else {
-            360  // 正常
-        };
-        
-        let ok_key = format!("Title_{}", ok_idx);
-        if let Some(texture) = ggez_manager.get_texture(&ok_key) {
-            let color = if ok_enabled { Color::WHITE } else { Color::from_rgba(128, 128, 128, 128) };
-            canvas.draw(texture, DrawParam::default().dest([dialog.x + 160.0, dialog.y + 425.0]).color(color));
-        }
-        
-        // 10. 绘制取消按钮 (Title_280/281/282, 位置: dialog_x + 425, dialog_y + 425)
-        let cancel_idx = if dialog.pressed_button == Some(NCDialogButton::Cancel) {
-            282  // 按下
-        } else if dialog.hovered_button == Some(NCDialogButton::Cancel) {
-            281  // 悬停
-        } else {
-            280  // 正常
-        };
-        
-        let cancel_key = format!("Title_{}", cancel_idx);
-        if let Some(texture) = ggez_manager.get_texture(&cancel_key) {
-            canvas.draw(texture, DrawParam::default().dest([dialog.x + 425.0, dialog.y + 425.0]));
-        }
-        
-        // 11. 绘制错误消息
-        if let Some(err_msg) = &dialog.error_message {
-            let mut err_label = Text::new(err_msg);
-            err_label.set_font("AlibabaPuHuiTi");
-            err_label.set_scale(14.0);
-            canvas.draw(&err_label, DrawParam::default().dest([dialog.x + 325.0, dialog.y + 290.0]).color(Color::from_rgb(255, 0, 0)));
-        }
-        
-        // 12. 绘制创建中提示
-        if dialog.creating {
-            let creating_text = "正在创建角色,请稍候...";
-            let mut creating_label = Text::new(creating_text);
-            creating_label.set_font("AlibabaPuHuiTi");
-            creating_label.set_scale(16.0);
-            canvas.draw(&creating_label, DrawParam::default().dest([dialog.x + 200.0, dialog.y + 500.0]).color(Color::from_rgb(255, 255, 0)));
-        }
-    }
-    
-    /// 绘制删除角色对话框
-    /// 
-    /// Mirrors C# MirMessageBox (Confirmation) + MirInputBox (Name Input)
-    /// - MessageBox背景: Prguse_360
-    /// - InputBox背景: Prguse_660
-    /// - 按钮: Title库 (Yes: 206/207/208, No: 210/211/212, OK: 200/201/202, Cancel: 203/204/205)
-    fn draw_delete_character_dialog(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager, dialog: &DeleteCharacterDialog) {
-        use ggez::graphics::{Color, DrawParam};
-        
-        // 根据对话框状态选择不同的背景
-        let (bg_key, dialog_width, dialog_height) = match dialog.state {
-            delete_character_dialog::DialogState::Confirmation => {
-                // MessageBox: Prguse_360
-                ("Prguse_360", 464.0, 260.0)  // C# Size from MirMessageBox
-            }
-            delete_character_dialog::DialogState::NameInput => {
-                // InputBox: Prguse_660
-                ("Prguse_660", 290.0, 188.0)  // C# Size from MirInputBox
-            }
-        };
-        
-        let dialog_x = (self.window_width - dialog_width) / 2.0;
-        let dialog_y = (self.window_height - dialog_height) / 2.0;
-        
-        // 1. 绘制对话框背景
-        if let Some(bg_texture) = ggez_manager.get_texture(bg_key) {
-            canvas.draw(bg_texture, DrawParam::default().dest([dialog_x, dialog_y]));
-        } else {
-            // 如果纹理未加载,使用简单矩形作为后备
-            if let Ok(rect) = ggez::graphics::Mesh::new_rectangle(
-                ctx,
-                ggez::graphics::DrawMode::fill(),
-                ggez::graphics::Rect::new(dialog_x, dialog_y, dialog_width, dialog_height),
-                Color::from_rgba(30, 30, 40, 220),
-            ) {
-                canvas.draw(&rect, DrawParam::default());
-            }
-        }
-        
-        // 2. 根据状态渲染内容
-        match dialog.state {
-            delete_character_dialog::DialogState::Confirmation => {
-                self.draw_delete_confirmation(ctx, canvas, ggez_manager, dialog, dialog_x, dialog_y);
-            }
-            delete_character_dialog::DialogState::NameInput => {
-                self.draw_delete_name_input(ctx, canvas, ggez_manager, dialog, dialog_x, dialog_y);
-            }
-        }
-    }
-    
-    /// 绘制删除确认对话框 (第一阶段: Yes/No)
-    fn draw_delete_confirmation(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager, dialog: &DeleteCharacterDialog, dialog_x: f32, dialog_y: f32) {
-        use ggez::graphics::{Text, Color, DrawParam};
-        
-        // 消息文本 (C# Location: 35, 35, Size: 390, 110)
-        let message = format!("您确定要删除角色 {} 吗？\n\n此操作无法撤销！", dialog.character_name);
-        let mut text = Text::new(&message);
-        text.set_font("AlibabaPuHuiTi");
-        text.set_scale(16.0);
-        canvas.draw(&text, DrawParam::default()
-            .dest([dialog_x + 35.0, dialog_y + 35.0])
-            .color(Color::WHITE));
-        
-        // Yes按钮 (C# Location: 260, 157)
-        let yes_key = "Title_206";  // 正常状态
-        if let Some(texture) = ggez_manager.get_texture(yes_key) {
-            canvas.draw(texture, DrawParam::default().dest([dialog_x + 260.0, dialog_y + 157.0]));
-        }
-        
-        // No按钮 (C# Location: 360, 157)
-        let no_key = "Title_210";  // 正常状态
-        if let Some(texture) = ggez_manager.get_texture(no_key) {
-            canvas.draw(texture, DrawParam::default().dest([dialog_x + 360.0, dialog_y + 157.0]));
-        }
-    }
-    
-    /// 绘制删除名称输入对话框 (第二阶段: 输入角色名)
-    fn draw_delete_name_input(&self, ctx: &mut ggez::Context, canvas: &mut crate::graphics::Canvas, ggez_manager: &crate::graphics::GgezManager, dialog: &DeleteCharacterDialog, dialog_x: f32, dialog_y: f32) {
-        use ggez::graphics::{Text, Color, DrawParam, Rect};
-        
-        // 提示文本 (C# Location: 25, 25, Size: 235, 40)
-        let caption = "请输入角色名称以确认删除:";
-        let mut caption_text = Text::new(caption);
-        caption_text.set_font("AlibabaPuHuiTi");
-        caption_text.set_scale(14.0);
-        canvas.draw(&caption_text, DrawParam::default()
-            .dest([dialog_x + 25.0, dialog_y + 25.0])
-            .color(Color::WHITE));
-        
-        // 角色名提示
-        let name_hint = format!("角色名: {}", dialog.character_name);
-        let mut hint_text = Text::new(&name_hint);
-        hint_text.set_font("AlibabaPuHuiTi");
-        hint_text.set_scale(12.0);
-        canvas.draw(&hint_text, DrawParam::default()
-            .dest([dialog_x + 25.0, dialog_y + 55.0])
-            .color(Color::from_rgb(200, 200, 200)));
-        
-        // 输入框背景 (C# Location: 23, 86, Size: 240, 19)
-        if let Ok(input_bg) = ggez::graphics::Mesh::new_rectangle(
-            ctx,
-            ggez::graphics::DrawMode::fill(),
-            Rect::new(dialog_x + 23.0, dialog_y + 86.0, 240.0, 19.0),
-            Color::from_rgb(20, 20, 30),
-        ) {
-            canvas.draw(&input_bg, DrawParam::default());
-        }
-        
-        // 输入框边框
-        if let Ok(input_border) = ggez::graphics::Mesh::new_rectangle(
-            ctx,
-            ggez::graphics::DrawMode::stroke(1.0),
-            Rect::new(dialog_x + 23.0, dialog_y + 86.0, 240.0, 19.0),
-            Color::from_rgb(0, 255, 0),  // C# BorderColour = Color.Lime
-        ) {
-            canvas.draw(&input_border, DrawParam::default());
-        }
-        
-        // 输入文本 + IME拼音
-        let display_text = if !dialog.ime_preedit.is_empty() {
-            format!("{}|{}", dialog.input_text, dialog.ime_preedit)
-        } else {
-            dialog.input_text.clone()
-        };
-        
-        let mut input_text = Text::new(&display_text);
-        input_text.set_font("AlibabaPuHuiTi");
-        input_text.set_scale(14.0);
-        canvas.draw(&input_text, DrawParam::default()
-            .dest([dialog_x + 28.0, dialog_y + 88.0])
-            .color(Color::WHITE));
-        
-        // 错误消息或状态提示
-        if let Some(error) = &dialog.error_message {
-            let mut error_text = Text::new(error);
-            error_text.set_font("AlibabaPuHuiTi");
-            error_text.set_scale(12.0);
-            canvas.draw(&error_text, DrawParam::default()
-                .dest([dialog_x + 25.0, dialog_y + 110.0])
-                .color(Color::from_rgb(255, 100, 100)));
-        } else if dialog.deleting {
-            let status = "正在删除角色...";
-            let mut status_text = Text::new(status);
-            status_text.set_font("AlibabaPuHuiTi");
-            status_text.set_scale(12.0);
-            canvas.draw(&status_text, DrawParam::default()
-                .dest([dialog_x + 25.0, dialog_y + 110.0])
-                .color(Color::from_rgb(255, 200, 100)));
-        }
-        
-        // OK按钮 (C# Location: 60, 123)
-        let ok_key = if dialog.can_submit() {
-            "Title_200"  // 正常可用
-        } else {
-            "Title_200"  // TODO: 需要一个灰色/禁用状态的按钮
-        };
-        if let Some(texture) = ggez_manager.get_texture(ok_key) {
-            let alpha = if dialog.can_submit() { 1.0 } else { 0.5 };
-            canvas.draw(texture, DrawParam::default()
-                .dest([dialog_x + 60.0, dialog_y + 123.0])
-                .color(Color::from_rgba(255, 255, 255, (alpha * 255.0) as u8)));
-        }
-        
-        // Cancel按钮 (C# Location: 160, 123)
-        let cancel_key = "Title_203";  // 正常状态
-        if let Some(texture) = ggez_manager.get_texture(cancel_key) {
-            canvas.draw(texture, DrawParam::default().dest([dialog_x + 160.0, dialog_y + 123.0]));
-        }
+        (design_x, design_y)
     }
 }
+
+// ========================================================================
+// 死代码已删除：以下方法从未被调用，违反了单一职责原则
+// - draw_new_character_dialog() (~227行)
+// - draw_delete_character_dialog() (~45行)
+// - draw_delete_confirmation() (~26行)
+// - draw_delete_name_input() (~96行)
+//
+// 这些方法引用了已删除的字段（self.window_width, self.window_height）
+// 对话框的绘制应该在各自的组件内部实现（new_character_dialog.rs 等）
+// 
+// UI操作方法已移至专门模块：
+// - handle_button_click() → ui_actions.rs
+// - handle_dialog_button_click() → ui_actions.rs
+// - start_game(), open_*_dialog() 等 → ui_actions.rs
+// ========================================================================
 
 impl Default for SelectScene {
     fn default() -> Self {
@@ -822,19 +274,14 @@ impl Scene for SelectScene {
     }
     
     fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, _world: &World) -> GameResult {
-        use ggez::graphics::{DrawParam, Color, PxScale, Text};
+        use ggez::graphics::{DrawParam, Color, PxScale, Text, Rect, Mesh, DrawMode};
         use crate::graphics::libraries::{get_library, LibraryName};
         
-        // 🔧 清除Canvas,防止之前场景的残留
-        use ggez::graphics::{Rect, DrawMode, Mesh};
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
-        let clear_color = Color::from_rgb(0, 0, 0); // 黑色背景
-        let clear_rect = Rect::new(0.0, 0.0, screen_width, screen_height);
-        if let Ok(clear_mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), clear_rect, clear_color) {
-            canvas.draw(&clear_mesh, DrawParam::default());
-        }
+        // 设置画布使用设计分辨率坐标系（1024x768）
+        // ggez会自动缩放到窗口大小，保持4:3比例
+        canvas.set_screen_coordinates(ggez::graphics::Rect::new(0.0, 0.0, DESIGN_WIDTH, DESIGN_HEIGHT));
         
-        // 1. 绘制背景 Prguse_65
+        // 1. 绘制背景 Prguse_65 (在设计坐标系中直接铺满)
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
             if let Ok(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, 65, 0.0, 0.0, Color::WHITE, false);
@@ -1072,7 +519,7 @@ impl Scene for SelectScene {
     
     fn on_mouse_down(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,
         _world: &mut World,
         button: ggez::winit::event::MouseButton,
         x: f32,
@@ -1081,8 +528,12 @@ impl Scene for SelectScene {
     ) -> GameResult {
         use ggez::winit::event::MouseButton;
         
-        // 调试：输出鼠标点击位置
-        tracing::debug!("🖱️ SelectScene 鼠标点击: ({:.0}, {:.0}), 按钮: {:?}", x, y, button);
+        // 🔧 转换窗口坐标为设计坐标
+        let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
+        
+        // 调试：输出转换后的坐标
+        tracing::debug!("🖱️ SelectScene 鼠标点击: 窗口({:.0}, {:.0}) -> 设计({:.0}, {:.0}), 按钮: {:?}", 
+            x, y, design_x, design_y, button);
         
         // 只处理左键点击
         if button != MouseButton::Left {
@@ -1091,21 +542,21 @@ impl Scene for SelectScene {
         
         // 1. 处理对话框点击（优先级最高）
         if let Some(_dialog) = &mut self.new_character_dialog {
-            // TODO: 实现 NewCharacterDialog 的点击处理
-            // if dialog.handle_mouse_click(x, y, true) {
+            // TODO: 实现 NewCharacterDialog 的点击处理（使用设计坐标）
+            // if dialog.handle_mouse_click(design_x, design_y, true) {
             //     return Ok(()); // 对话框消费了点击事件
             // }
         }
         
-        if let Some(dialog) = &mut self.delete_character_dialog {
+        if let Some(_dialog) = &mut self.delete_character_dialog {
             // TODO: 实现 DeleteCharacterDialog 的点击处理
         }
         
-        if let Some(dialog) = &mut self.credits_dialog {
+        if let Some(_dialog) = &mut self.credits_dialog {
             // TODO: 实现 CreditsDialog 的点击处理
         }
         
-        // 2. 处理角色槽位点击 (右侧垂直布局)
+        // 2. 处理角色槽位点击 (右侧垂直布局) - 使用设计坐标
         // C# 代码中的原始位置: (637, 194), (637, 298), (637, 402), (637, 506)
         // 槽位大小约 80x80
         let character_button_positions = [
@@ -1120,9 +571,9 @@ impl Scene for SelectScene {
                 break; // 没有更多角色
             }
             
-            // 检查点击是否在槽位范围内 (80x80)
-            if x >= slot_x && x <= slot_x + 80.0 &&
-               y >= slot_y && y <= slot_y + 80.0 {
+            // 检查点击是否在槽位范围内 (80x80) - 使用设计坐标
+            if design_x >= slot_x && design_x <= slot_x + 80.0 &&
+               design_y >= slot_y && design_y <= slot_y + 80.0 {
                 // 点击了角色槽位
                 self.select_character(i as i32);
                 tracing::info!("🖱️ 选中角色: {}", self.characters[i].name);
@@ -1130,9 +581,9 @@ impl Scene for SelectScene {
             }
         }
         
-        // 3. 处理底部按钮点击 (使用 ButtonGroup)
-        if let Some(button_id) = self.bottom_buttons.on_mouse_down(x, y) {
-            tracing::info!("🖱️ 点击按钮 ID: {} at ({:.0}, {:.0})", button_id, x, y);
+        // 3. 处理底部按钮点击 (使用 ButtonGroup) - 使用设计坐标
+        if let Some(button_id) = self.bottom_buttons.on_mouse_down(design_x, design_y) {
+            tracing::info!("🖱️ 点击按钮 ID: {} at 设计({:.0}, {:.0})", button_id, design_x, design_y);
             
             // 根据按钮ID分发事件
             match button_id {
@@ -1151,15 +602,18 @@ impl Scene for SelectScene {
     
     fn on_mouse_up(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,
         _world: &mut World,
         _button: ggez::winit::event::MouseButton,
         x: f32,
         y: f32,
-        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult {
-        // 使用 ButtonGroup 处理释放 (如果需要触发点击)
-        if let Some(button_id) = self.bottom_buttons.on_mouse_up(x, y) {
+        // 🔧 转换窗口坐标为设计坐标
+        let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
+        
+        // 使用 ButtonGroup 处理释放 (如果需要触发点击) - 使用设计坐标
+        if let Some(button_id) = self.bottom_buttons.on_mouse_up(design_x, design_y) {
             tracing::info!("✅ 按钮点击完成: {}", button_id);
             // 按下和释放都在同一按钮内才触发(已在 on_mouse_down 处理)
         }
@@ -1171,19 +625,22 @@ impl Scene for SelectScene {
     
     fn on_mouse_move(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,
         _world: &mut World,
         x: f32,
         y: f32,
     ) -> GameResult {
-        // 处理对话框鼠标移动
+        // 🔧 转换窗口坐标为设计坐标
+        let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
+        
+        // 处理对话框鼠标移动 - 使用设计坐标
         if let Some(_dialog) = &mut self.new_character_dialog {
-            // TODO: 实现对话框拖拽
-            // dialog.handle_mouse_drag(x, y);
+            // TODO: 实现对话框拖拽（使用设计坐标）
+            // dialog.handle_mouse_drag(design_x, design_y);
         }
         
-        // 使用 ButtonGroup 自动更新悬停状态
-        self.bottom_buttons.update_hover(x, y);
+        // 使用 ButtonGroup 自动更新悬停状态 - 使用设计坐标
+        self.bottom_buttons.update_hover(design_x, design_y);
         
         // 兼容旧代码:同步 hovered_button 字段 (TODO: 删除)
         self.hovered_button = None;
@@ -1278,187 +735,15 @@ impl Scene for SelectScene {
     }
 }
 
-// Helper methods for SelectScene
-impl SelectScene {
-    /// 处理底部按钮点击
-    fn handle_button_click(
-        &mut self,
-        button: BottomButton,
-        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
-    ) {
-        match button {
-            BottomButton::StartGame => {
-                if !self.characters.is_empty() && self.selected_index >= 0 {
-                    let char_index = self.characters[self.selected_index as usize].index;
-                    tracing::info!("🎮 开始游戏: 角色索引={}", char_index);
-                    
-                    // 发送 StartGame 命令
-                    let _ = network_tx.send(NetworkCommand::StartGame { 
-                        character_index: char_index 
-                    });
-                } else {
-                    tracing::warn!("⚠️ 没有选中角色");
-                }
-            }
-            BottomButton::NewCharacter => {
-                tracing::info!("➕ 打开新建角色对话框");
-                self.new_character_dialog = Some(NewCharacterDialog::new());
-            }
-            BottomButton::DeleteCharacter => {
-                if !self.characters.is_empty() && self.selected_index >= 0 {
-                    let character = &self.characters[self.selected_index as usize];
-                    tracing::info!("🗑️ 打开删除角色对话框: {}", character.name);
-                    self.delete_character_dialog = Some(DeleteCharacterDialog::new(
-                        character.name.clone(),
-                        character.index,
-                    ));
-                } else {
-                    tracing::warn!("⚠️ 没有选中角色可删除");
-                }
-            }
-            BottomButton::Credits => {
-                tracing::info!("ℹ️ 打开制作人员对话框");
-                self.credits_dialog = Some(CreditsDialog::new());
-            }
-            BottomButton::ExitGame => {
-                tracing::info!("🚪 退出游戏");
-                // TODO: 实现退出游戏逻辑
-                std::process::exit(0);
-            }
-        }
-    }
-}
-
-// 网络事件处理（在GameApp中调用）
-impl SelectScene {
-    pub fn handle_network_event(&mut self, event: &GameEvent) {
-        match event {
-            GameEvent::SystemMessage { message } => {
-                println!("System message: {}", message);
-                // TODO: Display in UI
-            }
-            GameEvent::Disconnected { reason } => {
-                println!("Disconnected: {}", reason);
-                // TODO: Return to login
-            }
-            GameEvent::DeleteCharacterSuccess { character_index } => {
-                tracing::info!("✅ 角色删除成功: index={}", character_index);
-                
-                // 1. 关闭删除对话框
-                self.delete_character_dialog = None;
-                
-                // 2. 从角色列表移除已删除的角色
-                if let Some(pos) = self.characters.iter().position(|c| c.index == *character_index) {
-                    self.characters.remove(pos);
-                    tracing::info!("📋 已从列表移除角色 (index={}), 剩余角色数: {}", 
-                        character_index, self.characters.len());
-                    
-                    // 3. 更新选中索引
-                    if self.selected_index >= self.characters.len() as i32 {
-                        self.selected_index = if self.characters.is_empty() {
-                            -1
-                        } else {
-                            (self.characters.len() - 1) as i32
-                        };
-                    }
-                }
-                
-                // TODO: 显示成功消息框 "Your character was deleted successfully."
-            }
-            GameEvent::DeleteCharacterResponse { result } => {
-                tracing::info!("⚠️ 删除角色响应: result={}", result);
-                if let Some(dialog) = &mut self.delete_character_dialog {
-                    dialog.deleting = false;
-                    if *result != 0 {
-                        // 删除失败
-                        dialog.error_message = Some(format!("删除失败 (错误代码: {})", result));
-                    }
-                }
-            }
-            GameEvent::NewCharacterResponse { result } => {
-                tracing::info!("📝 创建角色响应: result={}", result);
-                if let Some(dialog) = &mut self.new_character_dialog {
-                    dialog.creating = false;
-                    
-                    // C# SelectScene.NewCharacter(S.NewCharacter p)
-                    let error_msg = match *result {
-                        0 => Some("Creating new characters is currently disabled.".to_string()),
-                        1 => Some("Your Character Name is not acceptable.".to_string()),
-                        2 => Some("The gender you selected does not exist.\nContact a GM for assistance.".to_string()),
-                        3 => Some("The class you selected does not exist.\nContact a GM for assistance.".to_string()),
-                        4 => Some("You cannot make more than 4 Characters.".to_string()),
-                        5 => Some("A Character with this name already exists.".to_string()),
-                        _ => Some(format!("Unknown error (code: {})", result)),
-                    };
-                    
-                    if let Some(msg) = error_msg {
-                        tracing::warn!("❌ 创建角色失败: {}", msg);
-                        dialog.error_message = Some(msg);
-                    }
-                }
-            }
-            GameEvent::NewCharacterSuccess { character } => {
-                tracing::info!("✅ 角色创建成功: {}", character.name);
-                
-                // 1. 关闭新建角色对话框
-                self.new_character_dialog = None;
-                
-                // 2. 将新角色添加到列表开头
-                self.characters.insert(0, character.clone());
-                
-                // 3. 选中新创建的角色
-                self.selected_index = 0;
-                
-                tracing::info!("📋 新角色已添加到列表, 总角色数: {}", self.characters.len());
-                
-                // TODO: 显示成功消息框 "Your character was created successfully."
-            }
-            GameEvent::PlayerSpawned { player } => {
-                // 🎉 玩家已生成,切换到游戏场景!
-                // 注意: 某些服务器实现不发送 StartGameResponse,而是直接发送 PlayerSpawned
-                tracing::info!("🎮 玩家已生成: {} (Lv.{}, HP:{}/{}, MP:{}/{})", 
-                    player.name, player.level, player.health, player.max_health, player.mana, player.max_mana);
-                tracing::info!("📍 位置: ({}, {})", 
-                    player.location.x, player.location.y);
-                tracing::info!("✅ 切换到游戏场景...");
-                self.pending_scene_change = Some(SceneType::Game);
-            }
-            GameEvent::StartGameResponse { result } => {
-                tracing::info!("🎮 进入游戏响应: result={}", result);
-                // Result codes from Server\MirObjects\PlayerObject.cs:
-                // 0: AllowStartGame disabled but connection allowed (special case)
-                // 1: Not logged in
-                // 2: Character not found
-                // 3: Failed to start game (validation error)
-                // 4: Success! (normal case - see StartGameSuccess())
-                if *result == 4 || *result == 0 {
-                    // Success - queue scene transition to game
-                    tracing::info!("✅ 进入游戏成功! (result={}) 切换到游戏场景...", result);
-                    self.pending_scene_change = Some(SceneType::Game);
-                } else {
-                    // Error
-                    let error_msg = match *result {
-                        1 => "You are not logged in.",
-                        2 => "Character not found.",
-                        3 => "Failed to start game.",
-                        _ => &format!("Unknown error occurred (result code: {})", result),
-                    };
-                    tracing::error!("❌ 进入游戏失败: {}", error_msg);
-                    // TODO: 显示错误消息框
-                }
-            }
-            GameEvent::StartGameBanned { reason, expiry_date } => {
-                tracing::warn!("🚫 进入游戏被禁止: reason={}, expiry={}", reason, expiry_date);
-                // TODO: 显示封禁消息框
-            }
-            GameEvent::StartGameDelay { milliseconds } => {
-                tracing::info!("⏱️ 进入游戏延迟: {}ms", milliseconds);
-                // TODO: 显示延迟提示
-            }
-            _ => {
-                // TODO: Handle other events
-            }
-        }
-    }
-    
-}
+// ========================================================================
+// 所有辅助方法已移至专门的模块：
+// - handle_button_click() → ui_actions.rs
+// - handle_dialog_button_click() → ui_actions.rs  
+// - start_game(), open_*_dialog() 等 → ui_actions.rs
+// - handle_network_event() → network_handler.rs
+// 
+// mod.rs 现在只保留：
+// - 核心数据结构 (SelectScene)
+// - Scene trait 实现 (update, draw, on_*)
+// - 基本状态管理方法 (select_character, set_command_sender 等)
+// ========================================================================

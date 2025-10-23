@@ -87,6 +87,7 @@ pub trait Scene {
         Ok(())
     }
 
+    
     /// 键盘按下事件
     fn on_key_down(
         &mut self,
@@ -96,6 +97,16 @@ pub trait Scene {
         _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult<Option<SceneType>> {
         Ok(None)
+    }
+    
+    /// 文本输入事件 (IME)
+    fn on_text_input(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        _character: String,
+    ) -> GameResult {
+        Ok(())
     }
     
     /// 窗口大小调整事件

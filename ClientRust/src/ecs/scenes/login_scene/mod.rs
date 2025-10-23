@@ -25,7 +25,7 @@ use hecs::World;
 
 use super::{Scene, SceneType};
 use crate::network::NetworkCommand;
-use crate::graphics::{LibraryName, draw_sprite_at, draw_sprite_scaled};
+use crate::graphics::{LibraryName, draw_sprite_at};
 
 /// 登录场景
 pub struct LoginScene {
@@ -39,44 +39,60 @@ pub struct LoginScene {
     change_password_dialog: Option<ChangePasswordDialog>,
     message_box: Option<MessageBox>,
     virtual_keyboard: Option<VirtualKeyboard>,
-    status_log: Vec<String>,
-    // 坐标转换参数(屏幕坐标 -> 虚拟坐标)
-    scale: f32,
-    offset_x: f32,
-    offset_y: f32,
 }
+
+// 设计分辨率：UI纹理的原始设计分辨率（4:3比例）
+const DESIGN_WIDTH: f32 = 1024.0;
+const DESIGN_HEIGHT: f32 = 768.0;
 
 impl LoginScene {
     pub fn new() -> Self {
-        // 初始使用占位尺寸，第一次绘制时会动态调整
         Self {
             connecting: false,
             login_enabled: true,
             background_frame: 0,
             animation_timer: 0.0,
-            animation_paused: true,  // C#原版: 默认暂停,只有登录成功后才播放动画
-            login_dialog: LoginDialog::new(1280.0, 720.0),  // 默认1280x720，会动态调整
+            animation_paused: true,
+            login_dialog: LoginDialog::new(DESIGN_WIDTH, DESIGN_HEIGHT),
             new_account_dialog: None,
             change_password_dialog: None,
             message_box: None,
             virtual_keyboard: None,
-            status_log: Vec::new(),
-            scale: 1.0,
-            offset_x: 0.0,
-            offset_y: 0.0,
         }
-    }
-    
-    /// 屏幕坐标转换为虚拟1280×720坐标
-    fn screen_to_virtual(&self, screen_x: f32, screen_y: f32) -> (f32, f32) {
-        let virtual_x = (screen_x - self.offset_x) / self.scale;
-        let virtual_y = (screen_y - self.offset_y) / self.scale;
-        (virtual_x, virtual_y)
     }
     
     pub fn show_message(&mut self, message: &str) {
         tracing::info!("📬 显示消息框: {}", message);
-        self.message_box = Some(MessageBox::new(message.to_string()));
+        self.message_box = Some(MessageBox::new(message.to_string(), DESIGN_WIDTH, DESIGN_HEIGHT));
+    }
+    
+    /// 将窗口坐标转换为设计坐标系（1280x960）
+    fn window_to_design_coords(&self, ctx: &Context, window_x: f32, window_y: f32) -> (f32, f32) {
+        let window_size = ctx.gfx.drawable_size();
+        let window_width = window_size.0;
+        let window_height = window_size.1;
+        
+        // 计算4:3视口
+        let aspect_ratio = 4.0 / 3.0;
+        let current_ratio = window_width / window_height;
+        
+        let (viewport_width, viewport_height) = if current_ratio > aspect_ratio {
+            (window_height * aspect_ratio, window_height)
+        } else {
+            (window_width, window_width / aspect_ratio)
+        };
+        
+        let offset_x = (window_width - viewport_width) / 2.0;
+        let offset_y = (window_height - viewport_height) / 2.0;
+        
+        // 转换：窗口坐标 -> 视口坐标 -> 设计坐标
+        let viewport_x = window_x - offset_x;
+        let viewport_y = window_y - offset_y;
+        
+        let design_x = (viewport_x / viewport_width) * DESIGN_WIDTH;
+        let design_y = (viewport_y / viewport_height) * DESIGN_HEIGHT;
+        
+        (design_x, design_y)
     }
     
     fn submit_login(&mut self, network_tx: &mpsc::UnboundedSender<NetworkCommand>) {
@@ -125,62 +141,58 @@ impl Scene for LoginScene {
     }
     
     fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, _world: &World) -> GameResult {
-        // 获取当前窗口尺寸
-        let (screen_w, screen_h) = ctx.gfx.drawable_size();
+        // 动态获取当前窗口大小
+        let window_size = ctx.gfx.drawable_size();
+        let window_width = window_size.0;
+        let window_height = window_size.1;
         
-        // 计算全局UI缩放因子 (基准分辨率: 1280x720)
-        let base_w = 1280.0;
-        let base_h = 720.0;
-        self.scale = (screen_w / base_w).min(screen_h / base_h);
+        // 强制保持4:3比例
+        let aspect_ratio = 4.0 / 3.0;
+        let current_ratio = window_width / window_height;
         
-        // 计算居中偏移 (缩放后的内容居中显示)
-        let scaled_w = base_w * self.scale;
-        let scaled_h = base_h * self.scale;
-        self.offset_x = (screen_w - scaled_w) / 2.0;
-        self.offset_y = (screen_h - scaled_h) / 2.0;
+        let (viewport_width, viewport_height) = if current_ratio > aspect_ratio {
+            // 窗口太宽，限制宽度
+            (window_height * aspect_ratio, window_height)
+        } else {
+            // 窗口太高，限制高度
+            (window_width, window_width / aspect_ratio)
+        };
         
-        // 保存Canvas状态并应用全局变换
-        canvas.set_screen_coordinates(ggez::graphics::Rect::new(0.0, 0.0, screen_w, screen_h));
+        // 计算居中偏移（未使用，但保留用于调试）
+        let offset_x = (window_width - viewport_width) / 2.0;
+        let offset_y = (window_height - viewport_height) / 2.0;
         
-        // 绘制背景动画 (ChrSel库, Index 0-18, 共19帧) - 背景铺满整个屏幕
-        let bg_original_w = 1024.0;
-        let bg_original_h = 768.0;
-        let bg_scale_x = screen_w / bg_original_w;
-        let bg_scale_y = screen_h / bg_original_h;
+        // 设置画布使用设计分辨率坐标系（1024x768）
+        // ggez会自动缩放到viewport大小
+        canvas.set_screen_coordinates(ggez::graphics::Rect::new(0.0, 0.0, DESIGN_WIDTH, DESIGN_HEIGHT));
+        
+        // 绘制背景动画(ChrSel库, 1024x768原始尺寸，直接铺满设计坐标系)
         let bg_index = self.background_frame as i32;
-        let _ = draw_sprite_scaled(ctx, canvas, &LibraryName::ChrSel, bg_index, 0.0, 0.0, bg_scale_x, bg_scale_y);
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::ChrSel, bg_index, 0.0, 0.0);
         
-        // 应用UI缩放和偏移变换
-        canvas.set_screen_coordinates(ggez::graphics::Rect::new(
-            -self.offset_x / self.scale,
-            -self.offset_y / self.scale,
-            screen_w / self.scale,
-            screen_h / self.scale
-        ));
-        
-        // 更新对话框位置(基于1280x720坐标系)
+        // 更新对话框位置(在设计坐标系中居中)
         let dialog_w = 328.0;
         let dialog_h = 220.0;
-        self.login_dialog.x = (base_w - dialog_w) / 2.0;
-        self.login_dialog.y = (base_h - dialog_h) / 2.0;
+        self.login_dialog.x = (DESIGN_WIDTH - dialog_w) / 2.0;
+        self.login_dialog.y = (DESIGN_HEIGHT - dialog_h) / 2.0;
         self.login_dialog.update_positions();
         
         // 更新新建账号对话框位置
         if let Some(dialog) = &mut self.new_account_dialog {
-            dialog.update_positions(base_w, base_h);
+            dialog.update_positions();
         }
         
         // 更新修改密码对话框位置
         if let Some(dialog) = &mut self.change_password_dialog {
-            dialog.update_positions(base_w, base_h);
+            dialog.update_positions();
         }
         
         // 更新消息框位置
         if let Some(msg_box) = &mut self.message_box {
-            msg_box.update_positions(base_w, base_h);
+            msg_box.update_positions(DESIGN_WIDTH, DESIGN_HEIGHT);
         }
         
-        // 绘制所有UI元素(在缩放后的坐标系中)
+        // 绘制所有UI元素(在设计坐标系中)
         let _ = self.login_dialog.draw(ctx, canvas);
         
         if let Some(dialog) = &self.new_account_dialog {
@@ -203,46 +215,46 @@ impl Scene for LoginScene {
         Ok(())
     }
     
-    fn on_mouse_move(&mut self, _ctx: &mut Context, _world: &mut World, x: f32, y: f32) -> GameResult {
-        // 将屏幕坐标转换为虚拟1280×720坐标
-        let (vx, vy) = self.screen_to_virtual(x, y);
+    fn on_mouse_move(&mut self, ctx: &mut Context, _world: &mut World, x: f32, y: f32) -> GameResult {
+        // 将窗口坐标转换为设计坐标系（1280x960）
+        let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
         
         // 虚拟键盘优先级最高,但也更新背后的界面(允许悬停效果)
         if let Some(keyboard) = &mut self.virtual_keyboard {
-            keyboard.on_mouse_move(vx, vy);
+            keyboard.on_mouse_move(design_x, design_y);
             // 继续更新背后的登录界面,让按钮保持悬停效果
-            self.login_dialog.on_mouse_move(vx, vy);
+            self.login_dialog.on_mouse_move(design_x, design_y);
             return Ok(());
         }
         
         if let Some(msg_box) = &mut self.message_box {
-            msg_box.on_mouse_move(vx, vy);
+            msg_box.on_mouse_move(design_x, design_y);
             return Ok(());
         }
         
         // 修改密码对话框优先级最高
         if let Some(dialog) = &mut self.change_password_dialog {
-            dialog.on_mouse_move(vx, vy);
+            dialog.on_mouse_move(design_x, design_y);
             return Ok(());
         }
         
         // 新建账号对话框优先级高于登录对话框
         if let Some(dialog) = &mut self.new_account_dialog {
-            dialog.on_mouse_move(vx, vy);
+            dialog.on_mouse_move(design_x, design_y);
             return Ok(());
         }
         
-        self.login_dialog.on_mouse_move(vx, vy);
+        self.login_dialog.on_mouse_move(design_x, design_y);
         Ok(())
     }
     
-    fn on_mouse_down(&mut self, _ctx: &mut Context, _world: &mut World, _button: MouseButton, x: f32, y: f32, network_tx: &mpsc::UnboundedSender<NetworkCommand>) -> GameResult {
-        // 将屏幕坐标转换为虚拟1280×720坐标
-        let (vx, vy) = self.screen_to_virtual(x, y);
+    fn on_mouse_down(&mut self, ctx: &mut Context, _world: &mut World, _button: MouseButton, x: f32, y: f32, network_tx: &mpsc::UnboundedSender<NetworkCommand>) -> GameResult {
+        // 将窗口坐标转换为设计坐标系
+        let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
         
         // 虚拟键盘优先级最高
         if let Some(keyboard) = &mut self.virtual_keyboard {
-            let action = keyboard.on_mouse_down(vx, vy);
+            let action = keyboard.on_mouse_down(design_x, design_y);
             match action {
                 VirtualKeyboardAction::Close => {
                     self.virtual_keyboard = None;
@@ -277,7 +289,7 @@ impl Scene for LoginScene {
         }
         
         if let Some(msg_box) = &mut self.message_box {
-            if msg_box.on_mouse_down(vx, vy) {
+            if msg_box.on_mouse_down(design_x, design_y) {
                 self.message_box = None;
             }
             return Ok(());
@@ -285,7 +297,7 @@ impl Scene for LoginScene {
         
         // 处理修改密码对话框
         if let Some(dialog) = &mut self.change_password_dialog {
-            let action = dialog.on_mouse_down(vx, vy);
+            let action = dialog.on_mouse_down(design_x, design_y);
             match action {
                 ChangePasswordAction::Submit => {
                     // 构建并发送网络命令
@@ -308,7 +320,7 @@ impl Scene for LoginScene {
         
         // 处理新建账号对话框
         if let Some(dialog) = &mut self.new_account_dialog {
-            let action = dialog.on_mouse_down(vx, vy);
+            let action = dialog.on_mouse_down(design_x, design_y);
             match action {
                 NewAccountAction::Submit => {
                     // 构建并发送网络命令
@@ -330,14 +342,12 @@ impl Scene for LoginScene {
         }
         
         // 处理登录对话框
-        let action = self.login_dialog.on_mouse_down(vx, vy);
+        let action = self.login_dialog.on_mouse_down(design_x, design_y);
         match action {
             DialogAction::Login => self.submit_login(network_tx),
             DialogAction::OpenNewAccount => {
                 tracing::info!("🆕 打开新建账号对话框");
-                let base_w = 1280.0;
-                let base_h = 720.0;
-                let mut dialog = NewAccountDialog::new(base_w, base_h);
+                let mut dialog = NewAccountDialog::new(DESIGN_WIDTH, DESIGN_HEIGHT);
                 dialog.show();
                 self.new_account_dialog = Some(dialog);
             }
@@ -347,15 +357,13 @@ impl Scene for LoginScene {
                 let (account_id, password) = self.login_dialog.get_credentials()
                     .map(|(id, pwd)| (Some(id), Some(pwd)))
                     .unwrap_or((None, None));
-                let mut dialog = ChangePasswordDialog::new();
+                let mut dialog = ChangePasswordDialog::new(DESIGN_WIDTH, DESIGN_HEIGHT);
                 dialog.show(account_id, password);
                 self.change_password_dialog = Some(dialog);
             }
             DialogAction::OpenViewKey => {
                 tracing::info!("⌨️ 打开虚拟键盘");
-                let base_w = 1280.0;
-                let base_h = 720.0;
-                let mut keyboard = VirtualKeyboard::new(base_w, base_h);
+                let mut keyboard = VirtualKeyboard::new(DESIGN_WIDTH, DESIGN_HEIGHT);
                 // 根据当前焦点决定虚拟键盘输入目标
                 let focused = if self.login_dialog.account_input.focused {
                     FocusedInput::Account
@@ -505,5 +513,48 @@ impl Scene for LoginScene {
         }
         Ok(None)
     }
+    
+    fn on_resize(&mut self, ctx: &mut Context, _world: &mut World, width: f32, height: f32) -> GameResult {
+        // 强制保持4:3比例
+        let aspect_ratio = 4.0 / 3.0;
+        let current_ratio = width / height;
+        
+        let (new_width, new_height) = if (current_ratio - aspect_ratio).abs() > 0.01 {
+            // 比例不对，调整窗口大小
+            if current_ratio > aspect_ratio {
+                // 太宽，缩小宽度
+                (height * aspect_ratio, height)
+            } else {
+                // 太高，缩小高度
+                (width, width / aspect_ratio)
+            }
+        } else {
+            (width, height)
+        };
+        
+        // 更新窗口大小以保持4:3比例
+        if (new_width - width).abs() > 1.0 || (new_height - height).abs() > 1.0 {
+            ctx.gfx.set_drawable_size(new_width, new_height)?;
+            tracing::debug!("🔧 窗口调整为4:3比例: {}x{}", new_width, new_height);
+        }
+        
+        Ok(())
+    }
+    
+    fn on_text_input(&mut self, _ctx: &mut Context, _world: &mut World, character: String) -> GameResult {
+        // 转发到登录对话框
+        self.login_dialog.on_text_input(&character);
+        
+        // 转发到新建账号对话框
+        if let Some(dialog) = &mut self.new_account_dialog {
+            dialog.on_text_input(&character);
+        }
+        
+        // 转发到修改密码对话框
+        if let Some(dialog) = &mut self.change_password_dialog {
+            dialog.on_text_input(&character);
+        }
+        
+        Ok(())
+    }
 }
-

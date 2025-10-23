@@ -13,20 +13,20 @@ pub struct MessageBox {
     pub visible: bool,
     pub message: String,
     pub ok_button: Button,
-    // 背景尺寸
-    width: f32,
-    height: f32,
 }
 
 impl MessageBox {
-    /// 创建新消息框
-    /// C#原版: Location = (ScreenWidth - Width) / 2, (ScreenHeight - Height) / 2
-    pub fn new(message: String) -> Self {
-        // 背景纹理大小约460x220,居中显示
-        let screen_w = 1280.0;
-        let screen_h = 720.0;
+    // 相对于MessageBox纹理(Prguse 360)的偏移量
+    const OFFSET_OK_BUTTON_X: f32 = 360.0;
+    const OFFSET_OK_BUTTON_Y: f32 = 157.0;
+    const OFFSET_TEXT_X: f32 = 35.0;
+    const OFFSET_TEXT_Y: f32 = 35.0;
+    
+    pub fn new(message: String, screen_w: f32, screen_h: f32) -> Self {
+        // TODO: 从纹理库获取实际尺寸，暂时使用估算值
         let box_w = 460.0;
         let box_h = 220.0;
+        
         let x = (screen_w - box_w) / 2.0;
         let y = (screen_h - box_h) / 2.0;
         
@@ -35,19 +35,19 @@ impl MessageBox {
             y,
             visible: true,
             message,
-            width: box_w,
-            height: box_h,
-            // C#原版: OK按钮在(360, 157)相对位置,使用Title库200/201/202
-            ok_button: Button::new(x + 360.0, y + 157.0, LibraryName::Title, 200),
+            ok_button: Button::new(x + Self::OFFSET_OK_BUTTON_X, y + Self::OFFSET_OK_BUTTON_Y, LibraryName::Title, 200),
         }
     }
     
-    /// 更新位置以适应窗口大小
+    /// 更新位置以适应窗口大小（在设计坐标系中居中）
     pub fn update_positions(&mut self, screen_w: f32, screen_h: f32) {
-        self.x = (screen_w - self.width) / 2.0;
-        self.y = (screen_h - self.height) / 2.0;
-        self.ok_button.x = self.x + 360.0;
-        self.ok_button.y = self.y + 157.0;
+        let box_w = 460.0;  // TODO: 从纹理获取
+        let box_h = 220.0;
+        
+        self.x = (screen_w - box_w) / 2.0;
+        self.y = (screen_h - box_h) / 2.0;
+        self.ok_button.x = self.x + Self::OFFSET_OK_BUTTON_X;
+        self.ok_button.y = self.y + Self::OFFSET_OK_BUTTON_Y;
     }
     
     /// 更新按钮悬停状态
@@ -69,13 +69,13 @@ impl MessageBox {
         // 绘制背景 (Prguse Index=360)
         draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 360, self.x, self.y)?;
         
-        // 绘制消息文本 (C#原版: Location=(35, 35), Size=(390, 110))
+        // 绘制消息文本（使用相对纹理的偏移）
         let mut text = Text::new(&self.message);
         text.set_scale(PxScale::from(14.0));
         canvas.draw(
             &text,
             ggez::graphics::DrawParam::default()
-                .dest([self.x + 35.0, self.y + 35.0])
+                .dest([self.x + Self::OFFSET_TEXT_X, self.y + Self::OFFSET_TEXT_Y])
                 .color(Color::WHITE),
         );
         

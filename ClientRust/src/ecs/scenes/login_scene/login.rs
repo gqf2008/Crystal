@@ -5,11 +5,9 @@ use crate::graphics::{LibraryName, draw_sprite_at};
 use crate::ecs::scenes::ui::{Button, TextInput};
 
 pub struct LoginDialog {
-    // 对话框位置和尺寸
+    // 对话框位置
     pub x: f32,
     pub y: f32,
-    pub width: f32,
-    pub height: f32,
     pub visible: bool,
     
     // 输入框
@@ -25,45 +23,80 @@ pub struct LoginDialog {
 }
 
 impl LoginDialog {
+    // 相对于对话框纹理的偏移常量
+    const OFFSET_ACCOUNT_INPUT_X: f32 = 85.0;
+    const OFFSET_ACCOUNT_INPUT_Y: f32 = 85.0;
+    const OFFSET_PASSWORD_INPUT_X: f32 = 85.0;
+    const OFFSET_PASSWORD_INPUT_Y: f32 = 108.0;
+    const OFFSET_OK_BUTTON_X: f32 = 227.0;
+    const OFFSET_OK_BUTTON_Y: f32 = 81.0;
+    const OFFSET_NEW_ACCOUNT_X: f32 = 60.0;
+    const OFFSET_NEW_ACCOUNT_Y: f32 = 163.0;
+    const OFFSET_CHANGE_PASSWORD_X: f32 = 166.0;
+    const OFFSET_CHANGE_PASSWORD_Y: f32 = 163.0;
+    const OFFSET_VIEW_KEY_X: f32 = 60.0;
+    const OFFSET_VIEW_KEY_Y: f32 = 189.0;
+    const OFFSET_EXIT_X: f32 = 166.0;
+    const OFFSET_EXIT_Y: f32 = 189.0;
+    const OFFSET_TITLE_X: f32 = 54.0;  // (328 - 220) / 2
+    const OFFSET_TITLE_Y: f32 = 12.0;
+    const OFFSET_ACCOUNT_LABEL_X: f32 = 52.0;
+    const OFFSET_ACCOUNT_LABEL_Y: f32 = 83.0;
+    const OFFSET_PASSWORD_LABEL_X: f32 = 43.0;
+    const OFFSET_PASSWORD_LABEL_Y: f32 = 105.0;
+    
     pub fn new(screen_width: f32, screen_height: f32) -> Self {
-        // 对话框尺寸 (C#原版)
-        let width = 328.0;
-        let height = 220.0;
+        // 对话框纹理尺寸 (Prguse:1084 - TODO: 从图库查询)
+        let dialog_w = 328.0;
+        let dialog_h = 220.0;
         
-        // 动态居中计算
-        let x = (screen_width - width) / 2.0;
-        let y = (screen_height - height) / 2.0;
+        // 在1024x768设计空间居中
+        let x = (screen_width - dialog_w) / 2.0;
+        let y = (screen_height - dialog_h) / 2.0;
         
         let mut dialog = Self {
-            x, y, width, height, visible: true,
+            x, y, visible: true,
             
-            // 输入框 - 使用C#原版精确位置
-            account_input: TextInput::new(x + 85.0, y + 85.0, 136.0, 15),
-            password_input: TextInput::new(x + 85.0, y + 108.0, 136.0, 15).password(),
+            // 输入框 - 使用相对偏移常量
+            account_input: TextInput::new(
+                x + Self::OFFSET_ACCOUNT_INPUT_X, 
+                y + Self::OFFSET_ACCOUNT_INPUT_Y, 
+                136.0, 15
+            ),
+            password_input: TextInput::new(
+                x + Self::OFFSET_PASSWORD_INPUT_X, 
+                y + Self::OFFSET_PASSWORD_INPUT_Y, 
+                136.0, 15
+            ).password(),
             
-            // 所有按钮使用Title库和正确索引
+            // 所有按钮使用Title库和相对偏移
             ok_button: Button::new_with_states(
-                x + 227.0, y + 81.0,
+                x + Self::OFFSET_OK_BUTTON_X, 
+                y + Self::OFFSET_OK_BUTTON_Y,
                 LibraryName::Title,
-                320, 321, 322  // normal, hover, pressed
+                320, 321, 322
             ),
             new_account_button: Button::new_with_states(
-                x + 60.0, y + 163.0,
+                x + Self::OFFSET_NEW_ACCOUNT_X, 
+                y + Self::OFFSET_NEW_ACCOUNT_Y,
                 LibraryName::Title,
                 323, 324, 325
             ),
             change_password_button: Button::new_with_states(
-                x + 166.0, y + 163.0,
+                x + Self::OFFSET_CHANGE_PASSWORD_X, 
+                y + Self::OFFSET_CHANGE_PASSWORD_Y,
                 LibraryName::Title,
                 326, 327, 328
             ),
             view_key_button: Button::new_with_states(
-                x + 60.0, y + 189.0,
+                x + Self::OFFSET_VIEW_KEY_X, 
+                y + Self::OFFSET_VIEW_KEY_Y,
                 LibraryName::Title,
                 332, 333, 334
             ),
             exit_button: Button::new_with_states(
-                x + 166.0, y + 189.0,
+                x + Self::OFFSET_EXIT_X, 
+                y + Self::OFFSET_EXIT_Y,
                 LibraryName::Title,
                 329, 330, 331
             ),
@@ -77,23 +110,22 @@ impl LoginDialog {
     
     /// 更新所有子组件位置（当对话框x/y改变时调用）
     pub fn update_positions(&mut self) {
-        // 更新输入框位置
-        self.account_input.x = self.x + 85.0;
-        self.account_input.y = self.y + 85.0;
-        self.password_input.x = self.x + 85.0;
-        self.password_input.y = self.y + 108.0;
+        // 使用常量偏移更新位置
+        self.account_input.x = self.x + Self::OFFSET_ACCOUNT_INPUT_X;
+        self.account_input.y = self.y + Self::OFFSET_ACCOUNT_INPUT_Y;
+        self.password_input.x = self.x + Self::OFFSET_PASSWORD_INPUT_X;
+        self.password_input.y = self.y + Self::OFFSET_PASSWORD_INPUT_Y;
         
-        // 更新按钮位置
-        self.ok_button.x = self.x + 227.0;
-        self.ok_button.y = self.y + 81.0;
-        self.new_account_button.x = self.x + 60.0;
-        self.new_account_button.y = self.y + 163.0;
-        self.change_password_button.x = self.x + 166.0;
-        self.change_password_button.y = self.y + 163.0;
-        self.view_key_button.x = self.x + 60.0;
-        self.view_key_button.y = self.y + 189.0;
-        self.exit_button.x = self.x + 166.0;
-        self.exit_button.y = self.y + 189.0;
+        self.ok_button.x = self.x + Self::OFFSET_OK_BUTTON_X;
+        self.ok_button.y = self.y + Self::OFFSET_OK_BUTTON_Y;
+        self.new_account_button.x = self.x + Self::OFFSET_NEW_ACCOUNT_X;
+        self.new_account_button.y = self.y + Self::OFFSET_NEW_ACCOUNT_Y;
+        self.change_password_button.x = self.x + Self::OFFSET_CHANGE_PASSWORD_X;
+        self.change_password_button.y = self.y + Self::OFFSET_CHANGE_PASSWORD_Y;
+        self.view_key_button.x = self.x + Self::OFFSET_VIEW_KEY_X;
+        self.view_key_button.y = self.y + Self::OFFSET_VIEW_KEY_Y;
+        self.exit_button.x = self.x + Self::OFFSET_EXIT_X;
+        self.exit_button.y = self.y + Self::OFFSET_EXIT_Y;
     }
     
     pub fn get_credentials(&self) -> Option<(String, String)> {
@@ -159,24 +191,30 @@ impl LoginDialog {
         if self.account_input.focused || self.password_input.focused { DialogAction::Login } else { DialogAction::None }
     }
     
+    /// 处理 IME 输入 (中文输入)
+    pub fn on_text_input(&mut self, text: &str) {
+        if self.account_input.focused {
+            self.account_input.add_text(text);
+        } else if self.password_input.focused {
+            self.password_input.add_text(text);
+        }
+    }
+    
     pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> anyhow::Result<()> {
         if !self.visible { return Ok(()); }
         
-        // 1. 绘制对话框背景 (正确索引: 1084)
+        // 1. 绘制对话框背景 (Prguse:1084 - 328x220纹理)
         draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 1084, self.x, self.y)?;
         
-        // 2. 绘制标签 (Title库)
-        // Title标签 (Index=30) - 需要居中，暂时简化
+        // 2. 绘制标签 (使用相对偏移常量)
         draw_sprite_at(ctx, canvas, &LibraryName::Title, 30, 
-                      self.x + (self.width - 220.0) / 2.0, self.y + 12.0)?;
+                      self.x + Self::OFFSET_TITLE_X, self.y + Self::OFFSET_TITLE_Y)?;
         
-        // AccountID标签 (Index=31)
         draw_sprite_at(ctx, canvas, &LibraryName::Title, 31, 
-                      self.x + 52.0, self.y + 83.0)?;
+                      self.x + Self::OFFSET_ACCOUNT_LABEL_X, self.y + Self::OFFSET_ACCOUNT_LABEL_Y)?;
         
-        // Password标签 (Index=32)
         draw_sprite_at(ctx, canvas, &LibraryName::Title, 32, 
-                      self.x + 43.0, self.y + 105.0)?;
+                      self.x + Self::OFFSET_PASSWORD_LABEL_X, self.y + Self::OFFSET_PASSWORD_LABEL_Y)?;
         
         // 3. 绘制输入框
         self.account_input.draw(ctx, canvas)?;

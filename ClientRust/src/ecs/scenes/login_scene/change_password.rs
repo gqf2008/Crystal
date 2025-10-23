@@ -87,8 +87,29 @@ pub struct ChangePasswordDialog {
 }
 
 impl ChangePasswordDialog {
-    pub fn new() -> Self {
-        let (x, y) = (300.0, 200.0);
+    // 相对于对话框纹理的偏移常量
+    const OFFSET_ACCOUNT_X: f32 = 178.0;
+    const OFFSET_ACCOUNT_Y: f32 = 75.0;
+    const OFFSET_CURRENT_PASSWORD_X: f32 = 178.0;
+    const OFFSET_CURRENT_PASSWORD_Y: f32 = 113.0;
+    const OFFSET_NEW_PASSWORD_X: f32 = 178.0;
+    const OFFSET_NEW_PASSWORD_Y: f32 = 151.0;
+    const OFFSET_CONFIRM_X: f32 = 178.0;
+    const OFFSET_CONFIRM_Y: f32 = 188.0;
+    const OFFSET_OK_BUTTON_X: f32 = 80.0;
+    const OFFSET_OK_BUTTON_Y: f32 = 236.0;
+    const OFFSET_CANCEL_BUTTON_X: f32 = 222.0;
+    const OFFSET_CANCEL_BUTTON_Y: f32 = 236.0;
+    
+    pub fn new(screen_w: f32, screen_h: f32) -> Self {
+        // 对话框纹理尺寸 (Prguse:2 - TODO: 从图库查询)
+        let dialog_w = 360.0;
+        let dialog_h = 280.0;
+        
+        // 在1024x768设计空间居中
+        let x = (screen_w - dialog_w) / 2.0;
+        let y = (screen_h - dialog_h) / 2.0;
+        
         Self {
             x, y, visible: false,
             account_id: String::new(),
@@ -97,16 +118,14 @@ impl ChangePasswordDialog {
             new_password_confirm: String::new(),
             focused_field: PasswordInputField::AccountId,
             
-            // 对应C# Location: (178, 75), (178, 113), (178, 151), (178, 188)
-            account_input: TextInput::new(x + 178.0, y + 75.0, 136.0, 20),
-            current_password_input: TextInput::new(x + 178.0, y + 113.0, 136.0, 20).password(),
-            new_password_input: TextInput::new(x + 178.0, y + 151.0, 136.0, 20).password(),
-            confirm_input: TextInput::new(x + 178.0, y + 188.0, 136.0, 20).password(),
+            // 使用常量偏移创建UI元素
+            account_input: TextInput::new(x + Self::OFFSET_ACCOUNT_X, y + Self::OFFSET_ACCOUNT_Y, 136.0, 20),
+            current_password_input: TextInput::new(x + Self::OFFSET_CURRENT_PASSWORD_X, y + Self::OFFSET_CURRENT_PASSWORD_Y, 136.0, 20).password(),
+            new_password_input: TextInput::new(x + Self::OFFSET_NEW_PASSWORD_X, y + Self::OFFSET_NEW_PASSWORD_Y, 136.0, 20).password(),
+            confirm_input: TextInput::new(x + Self::OFFSET_CONFIRM_X, y + Self::OFFSET_CONFIRM_Y, 136.0, 20).password(),
             
-            // OK按钮：Title库 107(normal), 108(hover), 109(pressed), 位置(80, 236)
-            ok_button: Button::new_with_states(x + 80.0, y + 236.0, LibraryName::Title, 107, 108, 109),
-            // Cancel按钮：Title库 110(normal), 111(hover), 112(pressed), 位置(222, 236)
-            cancel_button: Button::new_with_states(x + 222.0, y + 236.0, LibraryName::Title, 110, 111, 112),
+            ok_button: Button::new_with_states(x + Self::OFFSET_OK_BUTTON_X, y + Self::OFFSET_OK_BUTTON_Y, LibraryName::Title, 107, 108, 109),
+            cancel_button: Button::new_with_states(x + Self::OFFSET_CANCEL_BUTTON_X, y + Self::OFFSET_CANCEL_BUTTON_Y, LibraryName::Title, 110, 111, 112),
             
             account_valid: false,
             current_valid: false,
@@ -120,33 +139,26 @@ impl ChangePasswordDialog {
         }
     }
     
-    /// 根据屏幕尺寸更新对话框位置(居中)
-    pub fn update_positions(&mut self, screen_w: f32, screen_h: f32) {
-        // C#: Index = 50, Library = Prguse
-        // 对话框尺寸根据纹理 - 估算约为 360x280
-        let dialog_w = 360.0;
-        let dialog_h = 280.0;
-        self.x = (screen_w - dialog_w) / 2.0;
-        self.y = (screen_h - dialog_h) / 2.0;
+    /// 更新所有子组件位置（当对话框x/y改变时调用）
+    pub fn update_positions(&mut self) {
+        // 使用常量偏移更新位置
+        self.account_input.x = self.x + Self::OFFSET_ACCOUNT_X;
+        self.account_input.y = self.y + Self::OFFSET_ACCOUNT_Y;
         
-        // 更新所有子组件位置
-        self.account_input.x = self.x + 178.0;
-        self.account_input.y = self.y + 75.0;
+        self.current_password_input.x = self.x + Self::OFFSET_CURRENT_PASSWORD_X;
+        self.current_password_input.y = self.y + Self::OFFSET_CURRENT_PASSWORD_Y;
         
-        self.current_password_input.x = self.x + 178.0;
-        self.current_password_input.y = self.y + 113.0;
+        self.new_password_input.x = self.x + Self::OFFSET_NEW_PASSWORD_X;
+        self.new_password_input.y = self.y + Self::OFFSET_NEW_PASSWORD_Y;
         
-        self.new_password_input.x = self.x + 178.0;
-        self.new_password_input.y = self.y + 151.0;
+        self.confirm_input.x = self.x + Self::OFFSET_CONFIRM_X;
+        self.confirm_input.y = self.y + Self::OFFSET_CONFIRM_Y;
         
-        self.confirm_input.x = self.x + 178.0;
-        self.confirm_input.y = self.y + 188.0;
+        self.ok_button.x = self.x + Self::OFFSET_OK_BUTTON_X;
+        self.ok_button.y = self.y + Self::OFFSET_OK_BUTTON_Y;
         
-        self.ok_button.x = self.x + 80.0;
-        self.ok_button.y = self.y + 236.0;
-        
-        self.cancel_button.x = self.x + 222.0;
-        self.cancel_button.y = self.y + 236.0;
+        self.cancel_button.x = self.x + Self::OFFSET_CANCEL_BUTTON_X;
+        self.cancel_button.y = self.y + Self::OFFSET_CANCEL_BUTTON_Y;
     }
     
     pub fn show(&mut self, autofill_id: Option<String>, autofill_password: Option<String>) {
@@ -213,6 +225,32 @@ impl ChangePasswordDialog {
             }
             PasswordInputField::NewPasswordConfirm => {
                 self.confirm_input.add_char(ch);
+                self.new_password_confirm = self.confirm_input.text.clone();
+                self.validate_confirm();
+            }
+        }
+    }
+    
+    /// 处理 IME 输入 (中文输入)
+    pub fn on_text_input(&mut self, text: &str) {
+        match self.focused_field {
+            PasswordInputField::AccountId => {
+                self.account_input.add_text(text);
+                self.account_id = self.account_input.text.clone();
+                self.validate_account();
+            }
+            PasswordInputField::CurrentPassword => {
+                self.current_password_input.add_text(text);
+                self.current_password = self.current_password_input.text.clone();
+                self.validate_current();
+            }
+            PasswordInputField::NewPassword => {
+                self.new_password_input.add_text(text);
+                self.new_password = self.new_password_input.text.clone();
+                self.validate_new_password();
+            }
+            PasswordInputField::NewPasswordConfirm => {
+                self.confirm_input.add_text(text);
                 self.new_password_confirm = self.confirm_input.text.clone();
                 self.validate_confirm();
             }

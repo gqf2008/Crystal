@@ -25,6 +25,18 @@ impl TextInput {
         px >= self.x && px < self.x + self.width && py >= self.y && py < self.y + self.height
     }
     pub fn add_char(&mut self, c: char) { if self.text.len() < self.max_length { self.text.push(c); } }
+    
+    /// 添加文本 (用于 IME 中文输入)
+    pub fn add_text(&mut self, text: &str) {
+        for c in text.chars() {
+            if self.text.len() < self.max_length {
+                self.text.push(c);
+            } else {
+                break;
+            }
+        }
+    }
+    
     pub fn backspace(&mut self) { self.text.pop(); }
     pub fn clear(&mut self) { self.text.clear(); }
     

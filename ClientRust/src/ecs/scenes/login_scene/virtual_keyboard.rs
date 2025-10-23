@@ -6,9 +6,6 @@ use crate::graphics::{LibraryName, draw_sprite_at};
 use crate::ecs::scenes::ui::Button;
 use rand::seq::SliceRandom;
 
-const KEYBOARD_WIDTH: f32 = 204.0;  // Prguse:1080 实际宽度
-const KEYBOARD_HEIGHT: f32 = 276.0;
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FocusedInput {
     Account,
@@ -38,38 +35,49 @@ pub struct VirtualKeyboard {
 }
 
 impl VirtualKeyboard {
+    // 相对于键盘纹理的偏移常量
+    const OFFSET_ESC_X: f32 = 12.0;
+    const OFFSET_ESC_Y: f32 = 12.0;
+    const OFFSET_DELETE_X: f32 = 140.0;
+    const OFFSET_DELETE_Y: f32 = 76.0;
+    const OFFSET_RANDOM_X: f32 = 76.0;
+    const OFFSET_RANDOM_Y: f32 = 236.0;
+    const OFFSET_ENTER_X: f32 = 140.0;
+    const OFFSET_ENTER_Y: f32 = 236.0;
+    
     pub fn new(base_w: f32, base_h: f32) -> Self {
-        // 键盘居中偏右,参考 C# Location = (ScreenWidth/2 - Width/2 + 285, ScreenHeight/2 - Height/2 + 150)
-        let x = (base_w - KEYBOARD_WIDTH) / 2.0 + 285.0;
-        let y = (base_h - KEYBOARD_HEIGHT) / 2.0 + 150.0;
+        // 键盘纹理尺寸 (Prguse:1080 - TODO: 从图库查询)
+        let keyboard_w = 204.0;
+        let keyboard_h = 276.0;
         
-        // C#: Esc 按钮在 (12, 12), Title库 300-302
+        // 键盘居中偏右,参考 C# Location = (ScreenWidth/2 - Width/2 + 285, ScreenHeight/2 - Height/2 + 150)
+        let x = (base_w - keyboard_w) / 2.0 + 285.0;
+        let y = (base_h - keyboard_h) / 2.0 + 150.0;
+        
+        // 使用常量偏移创建按钮
         let mut esc_button = Button::new_with_states(
-            x + 12.0, y + 12.0,
+            x + Self::OFFSET_ESC_X, y + Self::OFFSET_ESC_Y,
             LibraryName::Title, 300, 301, 302
         );
         esc_button.text = "Esc".to_string();
         esc_button.center_text = true;
         
-        // C#: Delete 按钮在 (140, 76), Title库 303-305
         let mut delete_button = Button::new_with_states(
-            x + 140.0, y + 76.0,
+            x + Self::OFFSET_DELETE_X, y + Self::OFFSET_DELETE_Y,
             LibraryName::Title, 303, 304, 305
         );
         delete_button.text = "Delete".to_string();
         delete_button.center_text = true;
         
-        // C#: Random 按钮在 (76, 236), Title库 309-311
         let mut random_button = Button::new_with_states(
-            x + 76.0, y + 236.0,
+            x + Self::OFFSET_RANDOM_X, y + Self::OFFSET_RANDOM_Y,
             LibraryName::Title, 309, 310, 311
         );
         random_button.text = "Random".to_string();
         random_button.center_text = true;
         
-        // C#: Enter 按钮在 (140, 236), Title库 306-308
         let mut enter_button = Button::new_with_states(
-            x + 140.0, y + 236.0,
+            x + Self::OFFSET_ENTER_X, y + Self::OFFSET_ENTER_Y,
             LibraryName::Title, 306, 307, 308
         );
         enter_button.text = "Enter".to_string();
