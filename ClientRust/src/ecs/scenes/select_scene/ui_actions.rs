@@ -5,6 +5,7 @@
 
 use tokio::sync::mpsc;
 use crate::network::NetworkCommand;
+use mir2_shared::enums::{MirClass, MirGender};
 use super::{SelectScene, BottomButton, NewCharacterDialog, DeleteCharacterDialog, CreditsDialog};
 use super::new_character_dialog::DialogButton;
 
@@ -85,35 +86,40 @@ impl SelectScene {
                     dialog.hide();
                 }
                 DialogButton::Warrior => {
-                    dialog.selected_class = mir2_shared::enums::MirClass::Warrior;
+                    dialog.selected_class = MirClass::Warrior;
                     tracing::debug!("选择职业: 战士");
                 }
                 DialogButton::Wizard => {
-                    dialog.selected_class = mir2_shared::enums::MirClass::Wizard;
+                    dialog.selected_class = MirClass::Wizard;
                     tracing::debug!("选择职业: 法师");
                 }
                 DialogButton::Taoist => {
-                    dialog.selected_class = mir2_shared::enums::MirClass::Taoist;
+                    dialog.selected_class = MirClass::Taoist;
                     tracing::debug!("选择职业: 道士");
                 }
                 DialogButton::Assassin => {
-                    dialog.selected_class = mir2_shared::enums::MirClass::Assassin;
+                    dialog.selected_class = MirClass::Assassin;
                     tracing::debug!("选择职业: 刺客");
                 }
                 DialogButton::Archer => {
-                    dialog.selected_class = mir2_shared::enums::MirClass::Archer;
+                    dialog.selected_class = MirClass::Archer;
                     tracing::debug!("选择职业: 弓箭手");
                 }
                 DialogButton::Male => {
-                    dialog.selected_gender = mir2_shared::enums::MirGender::Male;
+                    dialog.selected_gender = MirGender::Male;
                     tracing::debug!("选择性别: 男");
                 }
                 DialogButton::Female => {
-                    dialog.selected_gender = mir2_shared::enums::MirGender::Female;
+                    dialog.selected_gender = MirGender::Female;
                     tracing::debug!("选择性别: 女");
                 }
             }
         }
+    }
+    
+    /// 处理新建角色对话框按钮（别名方法）
+    pub(super) fn handle_new_character_button(&mut self, button: DialogButton) {
+        self.handle_dialog_button_click(button);
     }
 
     /// 开始游戏
@@ -196,18 +202,31 @@ impl SelectScene {
     pub(super) fn open_delete_character_dialog(&mut self) {
         if self.selected_index < 0 || (self.selected_index as usize) >= self.characters.len() {
             tracing::warn!("⚠️ 没有选中角色,无法删除");
+            
+            // 🆕 显示消息框提示用户
+            let mut message_box = super::MessageBox::new(
+                "Please select a character first.".to_string(),
+                super::MessageBoxButtons::Ok,
+                super::DESIGN_WIDTH,
+                super::DESIGN_HEIGHT
+            );
+            message_box.show();
+            self.message_box = Some(message_box);
             return;
         }
         
         let character = &self.characters[self.selected_index as usize];
         tracing::info!("🗑️ 打开删除角色对话框: {}", character.name);
         
-        let dialog = DeleteCharacterDialog::new(
-            character.name.clone(),
-            character.index
+        // 🆕 使用正确的 MessageBox 显示确认对话框
+        let mut message_box = super::MessageBox::new(
+            format!("Are you sure you want to Delete the character {}?", character.name),
+            super::MessageBoxButtons::YesNo,
+            super::DESIGN_WIDTH,
+            super::DESIGN_HEIGHT
         );
-        
-        self.delete_character_dialog = Some(dialog);
+        message_box.show();
+        self.message_box = Some(message_box);
     }
 
     /// 打开制作人员对话框
@@ -256,15 +275,17 @@ impl SelectScene {
         }
     }
 
-    /// 退出游戏
+    /// 退出到登录场景
     /// 
     /// Mirrors C# ExitGame.Click event:
     /// ```csharp
     /// ExitGame.Click += (o, e) => Program.Form.Close();
     /// ```
-    fn exit_game(&self) {
-        tracing::info!("🚪 退出游戏");
-        // TODO: 实现更优雅的退出逻辑（保存状态、断开连接等）
-        std::process::exit(0);
+    /// 
+    /// 注意: C#原版是完全退出程序，但在现代游戏中
+    /// 更好的做法是返回到登录界面，而不是直接关闭窗口
+    fn exit_game(&mut self) {
+        tracing::info!("� 返回登录场景");
+        self.pending_scene_change = Some(crate::ecs::scenes::SceneType::Login);
     }
 }

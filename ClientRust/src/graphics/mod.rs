@@ -52,6 +52,7 @@ pub use libraries::get_all_map_libraries;
 // pub use particles::Particle;
 
 // === 辅助函数 ===
+// draw_sprite_at, draw_sprite_with_offset, draw_sprite_scaled 在下面定义
 
 /// 简单的精灵绘制辅助函数
 pub fn draw_sprite_at(
@@ -71,6 +72,34 @@ pub fn draw_sprite_at(
         if let Ok(image_info) = lib.get_or_create_texture(ctx, index as usize) {
             if let Some(image) = &image_info.image {
                 canvas.draw(image, DrawParam::default().dest([x, y]));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 带偏移量的精灵绘制辅助函数（使用纹理自带的偏移量）
+/// UseOffSet = true 时使用此函数
+pub fn draw_sprite_with_offset(
+    ctx: &mut ggez::Context,
+    canvas: &mut ggez::graphics::Canvas,
+    library_name: &LibraryName,
+    index: i32,
+    x: f32,
+    y: f32,
+) -> anyhow::Result<()> {
+    use ggez::graphics::DrawParam;
+    
+    if let Some(library) = get_library(library_name.clone()) {
+        let mut lib = library.try_lock()
+            .map_err(|e| anyhow::anyhow!("Failed to lock library: {}", e))?;
+        
+        if let Ok(image_info) = lib.get_or_create_texture(ctx, index as usize) {
+            if let Some(image) = &image_info.image {
+                // 应用纹理偏移量
+                let offset_x = x + image_info.x as f32;
+                let offset_y = y + image_info.y as f32;
+                canvas.draw(image, DrawParam::default().dest([offset_x, offset_y]));
             }
         }
     }

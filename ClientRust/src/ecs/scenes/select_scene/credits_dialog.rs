@@ -186,67 +186,44 @@ impl CreditsDialog {
         self.visible
     }
     
-    /// 绘制Credits对话框
+    /// 绘制Credits对话框 (使用新的绘制系统)
     pub fn draw(
         &self,
         ctx: &mut ggez::Context,
-        canvas: &mut crate::graphics::Canvas,
-        ggez_manager: &crate::graphics::GgezManager,
-        window_width: f32,
-        window_height: f32,
-    ) {
+        canvas: &mut ggez::graphics::Canvas,
+    ) -> ggez::GameResult {
+        use crate::graphics::{LibraryName, draw_sprite_at};
+        use ggez::graphics::{Mesh, Rect, DrawMode};
+        
         if !self.visible {
-            return;
+            return Ok(());
         }
         
-        // 半透明黑色背景遮罩
-        let bg_rect = ggez::graphics::Mesh::new_rectangle(
+        // 设计分辨率 1024x768
+        let design_width = 1024.0;
+        let design_height = 768.0;
+        
+        // 1. 绘制半透明黑色背景遮罩
+        let bg_rect = Mesh::new_rectangle(
             ctx,
-            ggez::graphics::DrawMode::fill(),
-            ggez::graphics::Rect::new(0.0, 0.0, window_width, window_height),
+            DrawMode::fill(),
+            Rect::new(0.0, 0.0, design_width, design_height),
             Color::from_rgba(0, 0, 0, 200),
-        ).unwrap();
+        )?;
         canvas.draw(&bg_rect, DrawParam::default());
         
-        // 使用游戏资源背景 Prguse_360 (MessageBox背景, 464×260)
-        // C# MirMessageBox: Index = 360, Library = Libraries.Prguse
-        let content_x = (window_width - 464.0) / 2.0;
-        let content_y = (window_height - 500.0) / 2.0;
+        // 2. 绘制对话框背景 (Prguse_360, 464×260)
+        // 居中显示，堆叠两个背景以获得足够高度
+        let content_x = (design_width - 464.0) / 2.0;  // 约280
+        let content_y = (design_height - 520.0) / 2.0; // 约124
         
-        // 绘制多个背景图块来填充整个内容区域
-        if let Some(bg_texture) = ggez_manager.get_texture("Prguse_360") {
-            // 计算需要多少个背景图块（纵向堆叠）
-            let bg_height = 260.0_f32;
-            let total_height = 500.0_f32;
-            let num_tiles = (total_height / bg_height).ceil() as i32;
-            
-            for i in 0..num_tiles {
-                let y_offset = content_y + (i as f32 * bg_height);
-                // 如果是最后一块，可能需要裁剪
-                canvas.draw(bg_texture, DrawParam::default()
-                    .dest([content_x, y_offset]));
-            }
-        } else {
-            // 如果纹理未加载，使用简单的矩形背景
-            let content_rect = ggez::graphics::Mesh::new_rectangle(
-                ctx,
-                ggez::graphics::DrawMode::fill(),
-                ggez::graphics::Rect::new(content_x, content_y, 464.0, 500.0),
-                Color::from_rgb(30, 30, 40),
-            ).unwrap();
-            canvas.draw(&content_rect, DrawParam::default());
-            
-            // 边框
-            let border_rect = ggez::graphics::Mesh::new_rectangle(
-                ctx,
-                ggez::graphics::DrawMode::stroke(2.0),
-                ggez::graphics::Rect::new(content_x, content_y, 464.0, 500.0),
-                Color::from_rgb(100, 150, 200),
-            ).unwrap();
-            canvas.draw(&border_rect, DrawParam::default());
-        }
+        // 绘制第一个背景
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 360, content_x, content_y);
         
-        // 绘制内容
+        // 绘制第二个背景（叠加）
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 360, content_x, content_y + 260.0);
+        
+        // 3. 绘制内容文本
         let mut current_y = content_y + 30.0;
         let content_width = 464.0;
         let base_x = content_x + 50.0;
@@ -275,6 +252,8 @@ impl CreditsDialog {
             
             current_y += line.font_size + 8.0;
         }
+        
+        Ok(())
     }
     
     /// 处理点击事件

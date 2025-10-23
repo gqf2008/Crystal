@@ -5,6 +5,7 @@
 pub mod new_character_dialog;
 pub mod delete_character_dialog;
 pub mod credits_dialog;
+mod message_box;  // 🆕 SelectScene 专用消息框
 
 // 业务逻辑子模块（按照单一职责原则分离）
 mod ui_actions;        // UI 交互逻辑（按钮点击、对话框打开、游戏启动等）
@@ -13,6 +14,7 @@ mod network_handler;   // 网络事件处理（服务器响应处理）
 pub use new_character_dialog::NewCharacterDialog;
 pub use delete_character_dialog::DeleteCharacterDialog;
 pub use credits_dialog::CreditsDialog;
+pub use message_box::{MessageBox, MessageBoxButtons, MessageBoxResult};  // 🆕 导出消息框
 
 use ggez::{Context, GameResult};
 use ggez::graphics::Canvas;
@@ -21,7 +23,8 @@ use tokio::sync::mpsc;
 
 use super::{Scene, SceneType};
 use crate::network::NetworkCommand;
-use crate::ecs::ui::{ButtonGroup, ButtonWidget};  // 🆕 按钮部件
+use super::ui::InputBox;  // 🆕 只导入 InputBox
+use crate::ecs::ui::{ButtonGroup, ButtonWidget};  // ButtonGroup 从原路径导入
 use mir2_shared::SelectInfo;
 
 // 设计分辨率常量 (与 LoginScene 保持一致)
@@ -54,6 +57,10 @@ pub struct SelectScene {
     pub delete_character_dialog: Option<DeleteCharacterDialog>,
     /// Credits dialog
     pub credits_dialog: Option<CreditsDialog>,
+    
+    // 🆕 消息框和输入框
+    pub message_box: Option<MessageBox>,
+    pub input_box: Option<InputBox>,
     
     // Network
     command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
@@ -137,6 +144,8 @@ impl SelectScene {
             new_character_dialog: None,
             delete_character_dialog: None,
             credits_dialog: None,
+            message_box: None,
+            input_box: None,
             command_tx: None,
             pending_scene_change: None,
             bottom_buttons,  // 🆕 使用 ButtonGroup
@@ -241,11 +250,15 @@ impl Default for SelectScene {
 }
 
 impl Scene for SelectScene {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    
     fn update(
         &mut self, 
         ctx: &mut Context, 
         _world: &mut World,
-        _network_tx: &mpsc::UnboundedSender<NetworkCommand>
+        network_tx: &mpsc::UnboundedSender<NetworkCommand>
     ) -> GameResult<Option<SceneType>> {
         // 更新 NewCharacterDialog 动画和计时器
         if let Some(dialog) = &mut self.new_character_dialog {
@@ -262,6 +275,69 @@ impl Scene for SelectScene {
             // 调试：监控帧15→0的循环重启
             if old_frame == 15 && self.character_animation_frame == 0 {
                 tracing::debug!("Animation loop restart: frame 15 -> 0");
+            }
+        }
+        
+        // 🆕 处理消息框结果
+        if let Some(ref mut message_box) = self.message_box {
+            if message_box.has_result() {
+                let result = message_box.result;
+                self.message_box = None;  // 关闭消息框
+                
+                // 根据结果执行相应操作
+                match result {
+                    MessageBoxResult::Ok => {
+                        tracing::debug!("✅ 消息框: 用户点击OK");
+                    }
+                    MessageBoxResult::Yes => {
+                        tracing::debug!("✅ 消息框: 用户点击Yes - 显示输入框");
+                        // 删除角色确认后，显示输入框验证
+                        if self.selected_index >= 0 && (self.selected_index as usize) < self.characters.len() {
+                            let mut input_box = InputBox::new("Please enter the character's name.".to_string());
+                            input_box.show();
+                            self.input_box = Some(input_box);
+                        }
+                    }
+                    MessageBoxResult::No => {
+                        tracing::debug!("❌ 消息框: 用户点击No");
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        // 🆕 处理输入框结果
+        if let Some(ref mut input_box) = self.input_box {
+            if input_box.confirmed {
+                let input_text = input_box.get_input().to_string();
+                tracing::info!("✅ 输入框确认: {}", input_text);
+                
+                // 验证角色名并发送删除请求
+                if self.selected_index >= 0 && (self.selected_index as usize) < self.characters.len() {
+                    let character = &self.characters[self.selected_index as usize];
+                    if input_text == character.name {
+                        tracing::info!("🗑️ 发送删除角色请求: index={}", character.index);
+                        // 发送 DeleteCharacter 包
+                        let _ = network_tx.send(NetworkCommand::DeleteCharacter {
+                            index: character.index,
+                        });
+                    } else {
+                        // 名称不匹配，显示错误消息
+                        let mut msg = MessageBox::new(
+                            "Incorrect Entry.".to_string(),
+                            MessageBoxButtons::Ok,
+                            DESIGN_WIDTH,
+                            DESIGN_HEIGHT
+                        );
+                        msg.show();
+                        self.message_box = Some(msg);
+                    }
+                }
+                
+                self.input_box = None;
+            } else if input_box.cancelled {
+                tracing::info!("❌ 输入框取消");
+                self.input_box = None;
             }
         }
         
@@ -506,13 +582,31 @@ impl Scene for SelectScene {
         }
         
         // TODO: 8. 绘制 NewCharacterDialog (最上层)
-        // 暂时禁用对话框绘制，等待完整迁移到新的库系统
+        if let Some(ref mut dialog) = self.new_character_dialog {
+            if dialog.visible {
+                dialog.draw(ctx, canvas)?;
+            }
+        }
         
         // TODO: 9. 绘制 DeleteCharacterDialog (最上层)
         // 暂时禁用对话框绘制
         
-        // TODO: 10. 绘制 CreditsDialog (最上层)
-        // 暂时禁用对话框绘制
+        // 10. 🆕 绘制 CreditsDialog (最上层)
+        if let Some(ref dialog) = self.credits_dialog {
+            if dialog.visible {
+                let _ = dialog.draw(ctx, canvas);
+            }
+        }
+        
+        // 11. 🆕 绘制消息框 (最上层)
+        if let Some(ref message_box) = self.message_box {
+            let _ = message_box.draw(ctx, canvas);  // 使用正确的 MessageBox
+        }
+        
+        // 12. 🆕 绘制输入框 (最上层)
+        if let Some(ref mut input_box) = self.input_box {
+            input_box.draw(ctx, canvas)?;
+        }
         
         Ok(())
     }
@@ -540,20 +634,42 @@ impl Scene for SelectScene {
             return Ok(());
         }
         
+        // 🆕 0. 优先处理输入框（最上层）
+        if let Some(ref mut input_box) = self.input_box {
+            if input_box.visible {
+                input_box.on_mouse_down(design_x, design_y);
+                return Ok(()); // 输入框消费了事件
+            }
+        }
+        
+        // 🆕 0.3. 处理 CreditsDialog
+        if let Some(ref mut dialog) = self.credits_dialog {
+            if dialog.visible {
+                dialog.hide();  // 点击任意位置关闭
+                return Ok(());
+            }
+        }
+        
+        // 🆕 0.5. 处理消息框
+        if let Some(ref mut message_box) = self.message_box {
+            if message_box.visible {
+                message_box.on_mouse_down(design_x, design_y);
+                return Ok(()); // 消息框消费了事件
+            }
+        }
+        
         // 1. 处理对话框点击（优先级最高）
-        if let Some(_dialog) = &mut self.new_character_dialog {
-            // TODO: 实现 NewCharacterDialog 的点击处理（使用设计坐标）
-            // if dialog.handle_mouse_click(design_x, design_y, true) {
-            //     return Ok(()); // 对话框消费了点击事件
-            // }
+        if let Some(ref mut dialog) = self.new_character_dialog {
+            if dialog.visible {
+                if let Some(button) = dialog.handle_mouse_down(design_x as i32, design_y as i32) {
+                    self.handle_new_character_button(button);
+                    return Ok(()); // 对话框消费了点击事件
+                }
+            }
         }
         
         if let Some(_dialog) = &mut self.delete_character_dialog {
             // TODO: 实现 DeleteCharacterDialog 的点击处理
-        }
-        
-        if let Some(_dialog) = &mut self.credits_dialog {
-            // TODO: 实现 CreditsDialog 的点击处理
         }
         
         // 2. 处理角色槽位点击 (右侧垂直布局) - 使用设计坐标
@@ -612,6 +728,13 @@ impl Scene for SelectScene {
         // 🔧 转换窗口坐标为设计坐标
         let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
         
+        // 🆕 处理新建角色对话框鼠标释放
+        if let Some(ref mut dialog) = self.new_character_dialog {
+            if dialog.visible {
+                dialog.handle_mouse_up();
+            }
+        }
+        
         // 使用 ButtonGroup 处理释放 (如果需要触发点击) - 使用设计坐标
         if let Some(button_id) = self.bottom_buttons.on_mouse_up(design_x, design_y) {
             tracing::info!("✅ 按钮点击完成: {}", button_id);
@@ -633,10 +756,33 @@ impl Scene for SelectScene {
         // 🔧 转换窗口坐标为设计坐标
         let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
         
+        // 🆕 0. 优先处理输入框鼠标移动
+        if let Some(ref mut input_box) = self.input_box {
+            if input_box.visible {
+                input_box.on_mouse_move(design_x, design_y);
+                return Ok(());
+            }
+        }
+        
+        // 🆕 0.5. 处理消息框鼠标移动
+        if let Some(ref mut message_box) = self.message_box {
+            if message_box.visible {
+                message_box.on_mouse_move(design_x, design_y);
+                return Ok(());
+            }
+        }
+        
+        // 🆕 0.6. 处理新建角色对话框鼠标移动
+        if let Some(ref mut dialog) = self.new_character_dialog {
+            if dialog.visible {
+                dialog.handle_mouse_move(design_x as i32, design_y as i32);
+                return Ok(());
+            }
+        }
+        
         // 处理对话框鼠标移动 - 使用设计坐标
-        if let Some(_dialog) = &mut self.new_character_dialog {
-            // TODO: 实现对话框拖拽（使用设计坐标）
-            // dialog.handle_mouse_drag(design_x, design_y);
+        if let Some(_dialog) = &mut self.delete_character_dialog {
+            // TODO: 实现对话框鼠标移动
         }
         
         // 使用 ButtonGroup 自动更新悬停状态 - 使用设计坐标
@@ -676,6 +822,41 @@ impl Scene for SelectScene {
             physical_key: ggez::winit::keyboard::PhysicalKey::Code(keycode),
             ..
         } = &input.event {
+            
+            // 🆕 优先处理新建角色对话框的文本输入
+            if let Some(ref mut dialog) = self.new_character_dialog {
+                if dialog.visible && dialog.input_focused {
+                    match keycode {
+                        KeyCode::Backspace => {
+                            dialog.handle_backspace();
+                            return Ok(None);
+                        }
+                        KeyCode::Delete => {
+                            dialog.handle_delete();
+                            return Ok(None);
+                        }
+                        KeyCode::Escape => {
+                            dialog.hide();
+                            tracing::info!("❌ ESC 关闭新建角色对话框");
+                            return Ok(None);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            
+            // 处理输入框按键
+            if let Some(ref mut input_box) = self.input_box {
+                if input_box.visible {
+                    input_box.on_key_down(*keycode);
+                    // 检查是否已确认或取消
+                    if input_box.confirmed || input_box.cancelled {
+                        // 在handle_button_click中处理结果
+                    }
+                    return Ok(None);
+                }
+            }
+            
             match keycode {
                 KeyCode::Escape => {
                     // ESC 键关闭对话框或退出
@@ -730,8 +911,32 @@ impl Scene for SelectScene {
         Ok(None)
     }
     
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
+    /// 🆕 文本输入事件 (IME 支持)
+    fn on_text_input(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        character: String,
+    ) -> GameResult {
+        // 🆕 优先处理新建角色对话框的文本输入
+        if let Some(ref mut dialog) = self.new_character_dialog {
+            if dialog.visible && dialog.input_focused {
+                // 处理每个字符
+                for ch in character.chars() {
+                    dialog.handle_text_input(ch);
+                }
+                return Ok(());
+            }
+        }
+        
+        // 转发给输入框
+        if let Some(ref mut input_box) = self.input_box {
+            if input_box.visible {
+                input_box.on_text_input(&character);
+            }
+        }
+        
+        Ok(())
     }
 }
 

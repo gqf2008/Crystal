@@ -110,19 +110,29 @@ impl SelectScene {
             dialog.creating = false;
             
             let error_msg = match result {
-                0 => Some("Creating new characters is currently disabled.".to_string()),
-                1 => Some("Your Character Name is not acceptable.".to_string()),
-                2 => Some("The gender you selected does not exist.\nContact a GM for assistance.".to_string()),
-                3 => Some("The class you selected does not exist.\nContact a GM for assistance.".to_string()),
-                4 => Some("You cannot make more than 4 Characters.".to_string()),
-                5 => Some("A Character with this name already exists.".to_string()),
-                _ => Some(format!("Unknown error (code: {})", result)),
+                0 => "Creating new characters is currently disabled.",
+                1 => "Your Character Name is not acceptable.",
+                2 => "The gender you selected does not exist.\nContact a GM for assistance.",
+                3 => "The class you selected does not exist.\nContact a GM for assistance.",
+                4 => "You cannot make more than 4 Characters.",
+                5 => "A Character with this name already exists.",
+                _ => "Unknown error occurred.",
             };
             
-            if let Some(msg) = error_msg {
-                tracing::warn!("❌ 创建角色失败: {}", msg);
-                dialog.error_message = Some(msg);
-            }
+            tracing::warn!("❌ 创建角色失败: {}", error_msg);
+            
+            // 🆕 显示MessageBox提示用户
+            let mut message_box = super::MessageBox::new(
+                error_msg.to_string(),
+                super::MessageBoxButtons::Ok,
+                super::DESIGN_WIDTH,
+                super::DESIGN_HEIGHT
+            );
+            message_box.show();
+            self.message_box = Some(message_box);
+            
+            // 同时在对话框内显示错误（如果用户关闭MessageBox后还想看）
+            dialog.error_message = Some(error_msg.to_string());
         }
     }
 

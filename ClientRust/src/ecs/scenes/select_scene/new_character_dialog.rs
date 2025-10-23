@@ -256,8 +256,14 @@ impl NewCharacterDialog {
             return;
         }
         
-        // 只允许字母、数字、中文
-        if ch.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&ch) {
+        // 只允许字母、数字、中文、下划线
+        // 注意：is_ascii_alphanumeric() 只检查ASCII字母和数字
+        let is_valid = ch.is_ascii_alphabetic()  // a-z, A-Z
+            || ch.is_ascii_digit()                // 0-9
+            || ch == '_'                           // 下划线
+            || ('\u{4e00}'..='\u{9fa5}').contains(&ch);  // 中文
+        
+        if is_valid {
             // 将字符索引转换为字节索引
             let byte_pos = self.name.chars().take(self.cursor_position).map(|c| c.len_utf8()).sum();
             self.name.insert(byte_pos, ch);
@@ -269,6 +275,8 @@ impl NewCharacterDialog {
             
             // 清除错误消息
             self.error_message = None;
+        } else {
+            tracing::debug!("拒绝无效字符: '{}' (U+{:04X})", ch, ch as u32);
         }
     }
     
@@ -405,6 +413,260 @@ impl NewCharacterDialog {
             MirGender::Female => "♀️",
         }
     }
+    
+    /// 绘制对话框
+    pub fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut ggez::graphics::Canvas) -> ggez::GameResult {
+        use ggez::graphics::{Color, Text, PxScale, DrawParam};
+        use crate::graphics::{LibraryName, draw_sprite_at, draw_sprite_with_offset};
+        
+        if !self.visible {
+            return Ok(());
+        }
+        
+        // 1. 绘制对话框背景 (Prguse_73) - 不使用偏移
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 73, self.x, self.y);
+        
+        // 2. 绘制标题 (Title_20) - 不使用偏移
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Title, 20, self.x + 206.0, self.y + 11.0);
+        
+        // 3. 绘制角色预览动画 (ChrSel库) - 使用偏移量 (UseOffSet = true)
+        let character_index = self.get_character_display_index();
+        let _ = draw_sprite_with_offset(
+            ctx, 
+            canvas, 
+            &LibraryName::ChrSel, 
+            (character_index + self.animation_frame) as i32,
+            self.x + 120.0,
+            self.y + 250.0
+        );
+        
+        // 4. 如果是法师，绘制额外的光效 (ChrSel库，索引+560，使用偏移量)
+        if self.selected_class == MirClass::Wizard {
+            let _ = draw_sprite_with_offset(
+                ctx,
+                canvas,
+                &LibraryName::ChrSel,
+                (character_index + 560 + self.animation_frame) as i32,
+                self.x + 120.0,
+                self.y + 250.0
+            );
+        }
+        
+        // 5. 绘制职业按钮 (Prguse库) - 根据状态显示不同索引
+        // 战士按钮 (323, 296)
+        let warrior_index = if self.selected_class == MirClass::Warrior { 
+            2427 
+        } else if self.hovered_button == Some(DialogButton::Warrior) {
+            2427 // 悬停效果
+        } else { 
+            2426 
+        };
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, warrior_index, self.x + 323.0, self.y + 296.0);
+        
+        // 法师按钮 (373, 296)
+        let wizard_index = if self.selected_class == MirClass::Wizard { 
+            2430 
+        } else if self.hovered_button == Some(DialogButton::Wizard) {
+            2430
+        } else { 
+            2429 
+        };
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, wizard_index, self.x + 373.0, self.y + 296.0);
+        
+        // 道士按钮 (423, 296)
+        let taoist_index = if self.selected_class == MirClass::Taoist { 
+            2433 
+        } else if self.hovered_button == Some(DialogButton::Taoist) {
+            2433
+        } else { 
+            2432 
+        };
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, taoist_index, self.x + 423.0, self.y + 296.0);
+        
+        // 刺客按钮 (473, 296)
+        let assassin_index = if self.selected_class == MirClass::Assassin { 
+            2436 
+        } else if self.hovered_button == Some(DialogButton::Assassin) {
+            2436
+        } else { 
+            2435 
+        };
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, assassin_index, self.x + 473.0, self.y + 296.0);
+        
+        // 弓手按钮 (523, 296)
+        let archer_index = if self.selected_class == MirClass::Archer { 
+            2439 
+        } else if self.hovered_button == Some(DialogButton::Archer) {
+            2439
+        } else { 
+            2438 
+        };
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, archer_index, self.x + 523.0, self.y + 296.0);
+        
+        // 6. 绘制性别按钮 (Prguse库) - 根据状态显示不同索引
+        // 男性按钮 (323, 343)
+        let male_index = if self.selected_gender == MirGender::Male { 
+            2421 
+        } else if self.hovered_button == Some(DialogButton::Male) {
+            2421
+        } else { 
+            2420 
+        };
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, male_index, self.x + 323.0, self.y + 343.0);
+        
+        // 女性按钮 (373, 343)
+        let female_index = if self.selected_gender == MirGender::Female { 
+            2424 
+        } else if self.hovered_button == Some(DialogButton::Female) {
+            2424
+        } else { 
+            2423 
+        };
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, female_index, self.x + 373.0, self.y + 343.0);
+        
+        // 7. 绘制 OK 按钮 (Title库, 160, 425) - 根据状态显示不同索引
+        let ok_enabled = !self.name.is_empty() && self.name.chars().count() >= 2 && self.name.chars().count() <= 15;
+        let ok_index = if self.hovered_button == Some(DialogButton::OK) {
+            361 // HoverIndex
+        } else if self.pressed_button == Some(DialogButton::OK) {
+            362 // PressedIndex
+        } else {
+            360 // 默认
+        };
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Title, ok_index, self.x + 160.0, self.y + 425.0);
+        
+        // 8. 绘制 Cancel 按钮 (Title库, 425, 425) - 根据状态显示不同索引
+        let cancel_index = if self.hovered_button == Some(DialogButton::Cancel) {
+            281 // HoverIndex
+        } else if self.pressed_button == Some(DialogButton::Cancel) {
+            282 // PressedIndex
+        } else {
+            280 // 默认
+        };
+        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Title, cancel_index, self.x + 425.0, self.y + 425.0);
+        
+        // 9. 绘制职业描述文本 - 动态计算最大宽度
+        let description = self.get_class_description();
+        
+        // 对话框参数:
+        // - 对话框宽度: 656像素 (Prguse_73)
+        // - 文本起始X: 279像素 (相对于对话框左边缘)
+        // - 右侧边距: 约30像素 (留出边距)
+        // - 计算最大宽度: 656 - 279 - 30 = 347像素
+        let text_start_x = 279.0;
+        let right_margin = 30.0;
+        let max_width = 656.0 - text_start_x - right_margin; // 约347像素
+        let text_start_y = 70.0;
+        
+        let char_width = 12.0; // 中文字符平均宽度
+        
+        let mut lines = Vec::new();
+        let mut current_line = String::new();
+        let mut current_width = 0.0;
+        
+        for ch in description.chars() {
+            let ch_width = if ch.is_ascii() { 6.0 } else { 12.0 }; // 英文字符约6像素
+            
+            if current_width + ch_width > max_width {
+                // 当前行已满，开始新行
+                if !current_line.is_empty() {
+                    lines.push(current_line.clone());
+                    current_line.clear();
+                    current_width = 0.0;
+                }
+            }
+            
+            current_line.push(ch);
+            current_width += ch_width;
+        }
+        
+        // 添加最后一行
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+        
+        // 绘制每一行
+        let line_height = 16.0;
+        for (i, line) in lines.iter().enumerate() {
+            let mut text = Text::new(line);
+            text.set_scale(PxScale::from(12.0));
+            text.set_font("AlibabaPuHuiTi"); // 使用中文字体
+            canvas.draw(
+                &text,
+                DrawParam::default()
+                    .dest([self.x + text_start_x, self.y + text_start_y + (i as f32 * line_height)])
+                    .color(Color::WHITE),
+            );
+        }
+        
+        // 10. 绘制输入框文本 (325, 268)
+        if !self.name.is_empty() {
+            let mut text = Text::new(&self.name);
+            text.set_scale(PxScale::from(14.0));
+            text.set_font("AlibabaPuHuiTi"); // 使用中文字体
+            canvas.draw(
+                &text,
+                DrawParam::default()
+                    .dest([self.x + 325.0, self.y + 268.0])
+                    .color(Color::WHITE),
+            );
+        }
+        
+        // 11. 绘制输入框光标 (精确计算位置)
+        if self.input_focused && self.cursor_visible {
+            // 精确计算光标位置：计算光标前所有字符的宽度
+            let text_before_cursor: String = self.name.chars().take(self.cursor_position).collect();
+            let mut text_width = 0.0;
+            
+            // 根据字符类型计算宽度
+            for ch in text_before_cursor.chars() {
+                if ch.is_ascii() {
+                    text_width += 7.0;  // 英文/数字约7像素（14号字体）
+                } else {
+                    text_width += 14.0; // 中文约14像素（14号字体）
+                }
+            }
+            
+            let cursor_x = self.x + 325.0 + text_width;
+            let cursor_y = self.y + 268.0;
+            
+            // 绘制光标竖线
+            let cursor_rect = ggez::graphics::Rect::new(cursor_x, cursor_y, 2.0, 16.0);
+            let cursor_mesh = ggez::graphics::Mesh::new_rectangle(
+                ctx,
+                ggez::graphics::DrawMode::fill(),
+                cursor_rect,
+                Color::WHITE,
+            )?;
+            canvas.draw(&cursor_mesh, DrawParam::default());
+        }
+        
+        // 12. 绘制错误消息
+        if let Some(ref error) = self.error_message {
+            let mut text = Text::new(error);
+            text.set_scale(PxScale::from(12.0));
+            text.set_font("AlibabaPuHuiTi"); // 使用中文字体
+            canvas.draw(
+                &text,
+                DrawParam::default()
+                    .dest([self.x + 50.0, self.y + 500.0])
+                    .color(Color::RED),
+            );
+        }
+        
+        Ok(())
+    }
+    
+    /// 获取角色显示索引（基于职业和性别）
+    fn get_character_display_index(&self) -> usize {
+        match self.selected_class {
+            MirClass::Warrior => if self.selected_gender == MirGender::Male { 20 } else { 300 },
+            MirClass::Wizard => if self.selected_gender == MirGender::Male { 40 } else { 320 },
+            MirClass::Taoist => if self.selected_gender == MirGender::Male { 60 } else { 340 },
+            MirClass::Assassin => if self.selected_gender == MirGender::Male { 80 } else { 360 },
+            MirClass::Archer => if self.selected_gender == MirGender::Male { 100 } else { 140 },
+        }
+    }
 }
 
 // 职业描述文本
@@ -414,7 +676,7 @@ const WARRIOR_DESCRIPTION: &str =
 
 const WIZARD_DESCRIPTION: &str =
     "法师是力量和耐力较低的职业，但拥有使用强大法术的能力。他们的攻击性法术非常有效，\
-    但由于施放这些法术需要时间，因此很容易让自己暴露在敌人的攻击之下。因此，身体虚弱的法师必须在安全距离攻击敌人。";
+    但由于施放这些法术需要时间，因此很容易让自己暴露在敌人的攻击之下。因此,身体虚弱的法师必须在安全距离攻击敌人。";
 
 const TAOIST_DESCRIPTION: &str =
     "道士除了武功外，还精通天文学、医学等学科。他们的专长不在于直接与敌人交战，\

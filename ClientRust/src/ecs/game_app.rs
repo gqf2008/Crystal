@@ -222,7 +222,10 @@ impl GameState {
                 // 从LoginScene传递角色列表
                 let characters = self.pending_characters.take().unwrap_or_else(Vec::new);
                 println!("🎭 创建SelectScene，角色数: {}", characters.len());
-                Box::new(SelectScene::new(characters))
+                let mut scene = SelectScene::new(characters);
+                // 🆕 设置网络命令发送器
+                scene.set_command_sender(self.command_tx.clone());
+                Box::new(scene)
             },
             SceneType::Game => Box::new(GameScene::new(ctx, &mut self.world)?),
         };
