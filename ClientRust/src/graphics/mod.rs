@@ -50,3 +50,60 @@ pub use mlibrary::{MLibrary, ImageInfo};
 pub use libraries::get_all_map_libraries;
 // pub use particle_engine::{ParticleEngine, ParticleType, ParticleImageInfo, get_time};
 // pub use particles::Particle;
+
+// === 辅助函数 ===
+
+/// 简单的精灵绘制辅助函数
+pub fn draw_sprite_at(
+    ctx: &mut ggez::Context,
+    canvas: &mut ggez::graphics::Canvas,
+    library_name: &LibraryName,
+    index: i32,
+    x: f32,
+    y: f32,
+) -> anyhow::Result<()> {
+    use ggez::graphics::DrawParam;
+    
+    if let Some(library) = get_library(library_name.clone()) {
+        let mut lib = library.try_lock()
+            .map_err(|e| anyhow::anyhow!("Failed to lock library: {}", e))?;
+        
+        if let Ok(image_info) = lib.get_or_create_texture(ctx, index as usize) {
+            if let Some(image) = &image_info.image {
+                canvas.draw(image, DrawParam::default().dest([x, y]));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 带缩放的精灵绘制辅助函数
+pub fn draw_sprite_scaled(
+    ctx: &mut ggez::Context,
+    canvas: &mut ggez::graphics::Canvas,
+    library_name: &LibraryName,
+    index: i32,
+    x: f32,
+    y: f32,
+    scale_x: f32,
+    scale_y: f32,
+) -> anyhow::Result<()> {
+    use ggez::graphics::DrawParam;
+    
+    if let Some(library) = get_library(library_name.clone()) {
+        let mut lib = library.try_lock()
+            .map_err(|e| anyhow::anyhow!("Failed to lock library: {}", e))?;
+        
+        if let Ok(image_info) = lib.get_or_create_texture(ctx, index as usize) {
+            if let Some(image) = &image_info.image {
+                canvas.draw(
+                    image, 
+                    DrawParam::default()
+                        .dest([x, y])
+                        .scale([scale_x, scale_y])
+                );
+            }
+        }
+    }
+    Ok(())
+}

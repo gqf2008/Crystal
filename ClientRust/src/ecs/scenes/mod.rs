@@ -9,6 +9,7 @@
 mod game_scene;
 pub mod login_scene;  // LoginScene模块（包含ECS组件、系统、对话框等）
 mod select_scene;
+pub mod ui;  // 共享UI组件（Button, TextInput等）
 
 use crate::network::NetworkCommand;
 use ggez::graphics::Canvas;

@@ -666,6 +666,7 @@ pub fn dispatch_packet<H: PacketHandler>(
         }
         x if x == ServerPacketIds::NewAccount as u16 => {
             let packet = packets::NewAccount::read_body(&mut cursor)?;
+            tracing::info!("📦 收到NewAccount响应: result={}", packet.result);
             handler.on_new_account(packet);
         }
         x if x == ServerPacketIds::ChangePassword as u16 => {

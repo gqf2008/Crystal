@@ -325,7 +325,7 @@ impl Default for GraphicsSettings {
             always_on_top: true,
             fps_cap: true,
             max_fps: 100,
-            resolution: SupportedResolution::W1024H768,
+            resolution: SupportedResolution::W1280H720,  // 改为1280x720，更现代的16:9宽屏
             debug_mode: false,
             use_mouse_cursors: true,
         }

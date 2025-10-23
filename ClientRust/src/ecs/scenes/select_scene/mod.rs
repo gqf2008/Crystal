@@ -1,4 +1,4 @@
-﻿// SelectScene - Character selection scene
+// SelectScene - Character selection scene
 // Mirrors Client/MirScenes/SelectScene.cs
 pub mod new_character_dialog;
 pub mod delete_character_dialog;
