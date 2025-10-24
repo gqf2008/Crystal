@@ -20,7 +20,7 @@ use ggez::{
 };
 
 use mir2_client::ecs::{GameState, ime_handler};
-use mir2_client::program::ClientRuntime;
+use mir2_client::ecs::runtime::ClientRuntime;
 
 fn main() -> Result<()> {
     println!("\n========================================");

@@ -15,7 +15,6 @@ use ggez::event::EventHandler;
 use ggez::graphics::{Canvas, Color};
 use hecs::World;
 use std::sync::Arc;
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use crate::ecs::scenes::{Scene, SceneType, LoginScene, SelectScene, GameScene};

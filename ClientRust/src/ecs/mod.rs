@@ -6,7 +6,7 @@
 pub mod components;
 pub mod systems;
 pub mod world;
-
+pub mod runtime;
 // Map Helper/Loader 模块
 pub mod map_helper;
 pub mod map_loader;

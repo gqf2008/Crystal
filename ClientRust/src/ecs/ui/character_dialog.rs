@@ -220,6 +220,10 @@ impl CharacterDialog {
         self.visible = false;
     }
     
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+    
     pub fn is_visible(&self) -> bool {
         self.visible
     }

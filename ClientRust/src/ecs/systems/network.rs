@@ -81,27 +81,33 @@ impl NetworkSystem {
     fn handle_user_information(&mut self, world: &mut World, user_info: &mir2_shared::packets::server::UserInformation) {
         tracing::debug!("📊 User info updated - Object ID: {}", user_info.object_id);
         
-        // 查找本地玩家实体（通过特殊的 object_id = 0 或者 Player tag）
-        let mut query = world.query::<(&mut NetworkSync, &mut Position, &mut Health)>();
+        // 查找本地玩家实体（通过 LocalPlayer 标记）
+        let mut query = world.query::<(&LocalPlayer, &mut Position, &mut Player, &mut PlayerComp)>();
         
-        for (_entity, (net_sync, position, health)) in query.iter() {
-            // 假设本地玩家的 object_id 是 user_info.object_id
-            // 或者可以通过其他方式标识本地玩家
-            if net_sync.object_id == user_info.object_id {
-                // 更新位置
-                let (world_x, world_y) = grid_to_world(user_info.location_x, user_info.location_y);
-                position.x = world_x;
-                position.y = world_y;
-                
-                // 更新血量（UserInformation没有max_hp，只有hp和mp）
-                health.current = user_info.hp.max(0);
-                // health.max保持不变，或者从其他地方获取
-                
-                tracing::info!("✅ Updated local player state: pos=({}, {}), hp={}", 
-                    user_info.location_x, user_info.location_y, 
-                    user_info.hp);
-                break;
-            }
+        for (_entity, (_local_player, position, player, player_comp)) in query.iter() {
+            // 更新位置（从格子坐标转换为世界坐标）
+            let (world_x, world_y) = grid_to_world(user_info.location_x, user_info.location_y);
+            position.x = world_x;
+            position.y = world_y;
+            
+            // 更新玩家目标位置（防止寻路到错误位置）
+            player.target_x = world_x;
+            player.target_y = world_y;
+            
+            // 更新玩家信息
+            player_comp.id = user_info.object_id;
+            player_comp.name = user_info.name.clone();
+            player_comp.gold = user_info.gold;
+            player_comp.class = user_info.class;
+            player_comp.exp = user_info.experience; // ✅ i64类型，直接赋值
+            
+            tracing::info!("✅ Updated local player state: pos=({}, {}) grid=({}, {}), hp={}, gold={}", 
+                world_x, world_y, user_info.location_x, user_info.location_y,
+                user_info.hp, user_info.gold);
+            
+            println!("✅ 本地玩家位置已更新: 格子({}, {}) -> 世界({:.1}, {:.1})", 
+                user_info.location_x, user_info.location_y, world_x, world_y);
+            break;
         }
     }
 

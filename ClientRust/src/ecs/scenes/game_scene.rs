@@ -28,9 +28,8 @@ use crate::ecs::{
     map_loader::MapLoader,
     ui::{MainDialogButton, InventoryAction, CharacterAction, ChatType, MainDialogComp, InventoryDialogComp, CharacterDialogComp, SkillBarComp, ChatDialogComp, MagicLearningDialogComp, QuestDialogComp, TradeDialogComp, SkillsDialogComp, OptionsDialogComp},
 };
-use crate::objects::{MapReader, PathFinder};
+use crate::objects::{MapReader};
 use crate::graphics::libraries::initialize_all_libraries;
-use mir2_shared::Point;
 
 // UI 设计分辨率 (所有 UI 元素都基于此设计)
 const DESIGN_WIDTH: f32 = 1024.0;
@@ -992,17 +991,21 @@ impl Scene for GameScene {
                 match clicked_button {
                     MainDialogButton::Inventory => {
                         self.dialog_manager.toggle(crate::ecs::ui::DialogType::Inventory);
-                        // 同步更新对话框组件状态
+                        // 同步更新对话框组件状态和内部可见性
                         if let Some(mut inv_dialog) = self.get_inventory_dialog_mut(world) {
-                            inv_dialog.is_open = self.dialog_manager.is_visible(crate::ecs::ui::DialogType::Inventory);
+                            let is_visible = self.dialog_manager.is_visible(crate::ecs::ui::DialogType::Inventory);
+                            inv_dialog.is_open = is_visible;
+                            inv_dialog.dialog.set_visible(is_visible); // ✅ 同步内部可见性
                         }
                         println!("📦 切换背包对话框");
                     }
                     MainDialogButton::Character => {
                         self.dialog_manager.toggle(crate::ecs::ui::DialogType::Character);
-                        // 同步更新对话框组件状态
+                        // 同步更新对话框组件状态和内部可见性
                         if let Some(mut char_dialog) = self.get_character_dialog_mut(world) {
-                            char_dialog.is_open = self.dialog_manager.is_visible(crate::ecs::ui::DialogType::Character);
+                            let is_visible = self.dialog_manager.is_visible(crate::ecs::ui::DialogType::Character);
+                            char_dialog.is_open = is_visible;
+                            char_dialog.dialog.set_visible(is_visible); // ✅ 同步内部可见性
                         }
                         println!("👤 切换角色对话框");
                     }
