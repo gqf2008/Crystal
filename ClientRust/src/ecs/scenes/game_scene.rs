@@ -102,7 +102,7 @@ impl GameScene {
         let camera_entity = world.spawn((
             Position { x: spawn_x, y: spawn_y },
             Camera {
-                zoom: 1.0,
+                zoom: 1.75,  // 初始缩放1.75x，让角色看起来更大
                 screen_width: screen.0,
                 screen_height: screen.1,
             },
@@ -536,11 +536,31 @@ impl Scene for GameScene {
             AnimationSystem::update(world, animation_count);
         }
         
+        // 🎯 更新鼠标按下时间计数器（用于长按检测）
+        if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
+            if mouse_input.left_pressed {
+                mouse_input.left_press_time += 1;
+            }
+            if mouse_input.right_pressed {
+                mouse_input.right_press_time += 1;
+            }
+        }
+        
         // 更新相机系统
         CameraSystem::update(world);
         
-        // 更新角色系统
+        // 更新角色系统（会处理双击事件）
         PlayerSystem::update(world);
+        
+        // 🎯 重置双击标志（在PlayerSystem处理完之后清除，避免重复触发）
+        if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
+            if mouse_input.left_double_clicked {
+                mouse_input.left_double_clicked = false;
+            }
+            if mouse_input.right_double_clicked {
+                mouse_input.right_double_clicked = false;
+            }
+        }
         
         // 更新怪物系统
         let delta_time = 1.0 / max_fps as f32;
@@ -581,6 +601,21 @@ impl Scene for GameScene {
         // 渲染怪物血条和名称
         RenderSystem::draw_monster_info(ctx, canvas, world, &pos, &camera)?;
         
+        // 🎯 绘制网格 (调试用 - G键切换)
+        if config.show_grid {
+            RenderSystem::draw_grid(ctx, canvas, world, &pos, &camera)?;
+        }
+        
+        // 🎯 绘制障碍物 (调试用 - O键切换)
+        if config.show_obstacles {
+            RenderSystem::draw_obstacles(ctx, canvas, world, &pos, &camera)?;
+        }
+        
+        // 🎯 绘制寻路路径 (调试用 - P键切换)
+        if config.show_path {
+            RenderSystem::draw_path(ctx, canvas, world, &pos, &camera)?;
+        }
+        
         // 绘制FPS
         let time = world.get::<&TimeTracker>(self.time_entity).unwrap();
         let fps_text = Text::new(format!("FPS: {:.1}", time.fps));
@@ -617,16 +652,12 @@ impl Scene for GameScene {
         network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult<Option<SceneType>> {
         use ggez::winit::keyboard::KeyCode;
-        use mir2_shared::enums::MirDirection;
         
         if let ggez::winit::event::KeyEvent {
             physical_key: ggez::winit::keyboard::PhysicalKey::Code(keycode),
             ..
         } = input.event
         {
-            // 检查是否按下 Shift 键（跑步）
-            let running = input.mods.shift_key();
-            
             match keycode {
                 // 空格键 = 拾取物品
                 KeyCode::Space => {
@@ -755,65 +786,34 @@ impl Scene for GameScene {
                     MagicCastSystem::cycle_target(world);
                 }
                 
-                // 注意: Escape键已在上面处理，这里删除重复代码
-
-                KeyCode::KeyW | KeyCode::ArrowUp if input.mods.control_key() => {
-                    let _ = network_tx.send(NetworkCommand::Attack { 
-                        direction: MirDirection::Up,
-                        spell: mir2_shared::enums::Spell::None,
-                    });
-                }
-                KeyCode::KeyS | KeyCode::ArrowDown if input.mods.control_key() => {
-                    let _ = network_tx.send(NetworkCommand::Attack { 
-                        direction: MirDirection::Down,
-                        spell: mir2_shared::enums::Spell::None,
-                    });
-                }
-                KeyCode::KeyA | KeyCode::ArrowLeft if input.mods.control_key() => {
-                    let _ = network_tx.send(NetworkCommand::Attack { 
-                        direction: MirDirection::Left,
-                        spell: mir2_shared::enums::Spell::None,
-                    });
-                }
-                KeyCode::KeyD | KeyCode::ArrowRight if input.mods.control_key() => {
-                    let _ = network_tx.send(NetworkCommand::Attack { 
-                        direction: MirDirection::Right,
-                        spell: mir2_shared::enums::Spell::None,
-                    });
+                // 🎯 B键 - 切换显示纹理边框（调试用）
+                KeyCode::KeyB => {
+                    let mut config = world.get::<&mut RenderConfig>(self.config_entity).unwrap();
+                    config.show_borders = !config.show_borders;
+                    println!("🖼️ 纹理边框 (B): {}", if config.show_borders { "显示" } else { "隐藏" });
                 }
                 
-                // W 或上方向键 - 向上移动
-                KeyCode::KeyW | KeyCode::ArrowUp => {
-                    if running {
-                        let _ = network_tx.send(NetworkCommand::Run { direction: MirDirection::Up });
-                    } else {
-                        let _ = network_tx.send(NetworkCommand::Walk { direction: MirDirection::Up });
-                    }
+                // 🎯 G键 - 切换显示网格（调试用）
+                KeyCode::KeyG => {
+                    let mut config = world.get::<&mut RenderConfig>(self.config_entity).unwrap();
+                    config.show_grid = !config.show_grid;
+                    println!("📐 网格 (G): {}", if config.show_grid { "显示" } else { "隐藏" });
                 }
-                // S 或下方向键 - 向下移动
-                KeyCode::KeyS | KeyCode::ArrowDown => {
-                    if running {
-                        let _ = network_tx.send(NetworkCommand::Run { direction: MirDirection::Down });
-                    } else {
-                        let _ = network_tx.send(NetworkCommand::Walk { direction: MirDirection::Down });
-                    }
+                
+                // 🎯 O键 - 切换显示障碍物（调试用）
+                KeyCode::KeyO => {
+                    let mut config = world.get::<&mut RenderConfig>(self.config_entity).unwrap();
+                    config.show_obstacles = !config.show_obstacles;
+                    println!("🚧 障碍物 (O): {}", if config.show_obstacles { "显示" } else { "隐藏" });
                 }
-                // A 或左方向键 - 向左移动
-                KeyCode::KeyA | KeyCode::ArrowLeft => {
-                    if running {
-                        let _ = network_tx.send(NetworkCommand::Run { direction: MirDirection::Left });
-                    } else {
-                        let _ = network_tx.send(NetworkCommand::Walk { direction: MirDirection::Left });
-                    }
+                
+                // 🎯 P键 - 切换显示寻路路径（调试用）
+                KeyCode::KeyP => {
+                    let mut config = world.get::<&mut RenderConfig>(self.config_entity).unwrap();
+                    config.show_path = !config.show_path;
+                    println!("🗺️ 寻路路径 (P): {}", if config.show_path { "显示" } else { "隐藏" });
                 }
-                // D 或右方向键 - 向右移动
-                KeyCode::KeyD | KeyCode::ArrowRight => {
-                    if running {
-                        let _ = network_tx.send(NetworkCommand::Run { direction: MirDirection::Right });
-                    } else {
-                        let _ = network_tx.send(NetworkCommand::Walk { direction: MirDirection::Right });
-                    }
-                }
+                
                 _ => {}
             }
         }
@@ -921,47 +921,22 @@ impl Scene for GameScene {
             }
         }
         
-        // 更新鼠标状态并检测双击
-        let mut double_click_detected = false;
-        let mut double_click_x = 0.0;
-        let mut double_click_y = 0.0;
-        
+        // 更新鼠标状态（支持左键和右键）
         if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
             mouse_input.x = x;
             mouse_input.y = y;
             
             match button {
                 MouseButton::Left => {
-                    // 检测双击（300ms内的两次点击）
-                    let now = Instant::now();
-                    let time_since_last_click = now.duration_since(mouse_input.left_last_click_time);
-                    
-                    if time_since_last_click.as_millis() < 300 {
-                        // 双击检测成功
-                        double_click_detected = true;
-                        double_click_x = x;
-                        double_click_y = y;
-                        mouse_input.left_double_clicked = true;
-                        println!("🖱️ 检测到双击: ({:.1}, {:.1})", x, y);
-                    } else {
-                        mouse_input.left_double_clicked = false;
-                    }
-                    
-                    mouse_input.left_last_click_time = now;
                     mouse_input.left_pressed = true;
-                    mouse_input.left_press_time = 0;
+                    mouse_input.left_press_time = 0;  // 🎯 重置按下时间，用于长按检测
                 }
                 MouseButton::Right => {
                     mouse_input.right_pressed = true;
-                    mouse_input.right_press_time = 0;
+                    mouse_input.right_press_time = 0;  // 🎯 重置按下时间，用于长按检测
                 }
                 _ => {}
             }
-        }
-        
-        // 处理双击寻路
-        if double_click_detected {
-            self.handle_double_click_pathfinding(world, double_click_x, double_click_y);
         }
         
         Ok(())
@@ -972,18 +947,55 @@ impl Scene for GameScene {
         _ctx: &mut Context,
         world: &mut World,
         button: MouseButton,
-        _x: f32,
-        _y: f32,
+        x: f32,
+        y: f32,
         _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult {
-        // 更新鼠标状态
+        // 更新鼠标状态并检测双击
         if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
+            // 🎯 更新鼠标位置（防止快速点击时位置不准确）
+            mouse_input.x = x;
+            mouse_input.y = y;
+            
             match button {
                 MouseButton::Left => {
+                    // 🎯 双击检测：如果按下时间不太长(< 30帧,约500ms)且距离上次点击 < 500ms
+                    if mouse_input.left_press_time < 30 {
+                        let now = Instant::now();
+                        let time_since_last_click = now.duration_since(mouse_input.left_last_click_time);
+                        
+                        if time_since_last_click < std::time::Duration::from_millis(500) {
+                            // 双击！
+                            mouse_input.left_double_clicked = true;
+                            println!("👆👆 左键双击事件触发 at ({:.1}, {:.1})", x, y);
+                            // 重置上次点击时间，防止三击被识别为两次双击
+                            mouse_input.left_last_click_time = now - std::time::Duration::from_secs(10);
+                        } else {
+                            // 第一次点击
+                            mouse_input.left_last_click_time = now;
+                            mouse_input.left_double_clicked = false;
+                        }
+                    }
                     mouse_input.left_pressed = false;
                     mouse_input.left_press_time = 0;
                 }
                 MouseButton::Right => {
+                    // 🎯 双击检测：右键
+                    if mouse_input.right_press_time < 30 {
+                        let now = Instant::now();
+                        let time_since_last_click = now.duration_since(mouse_input.right_last_click_time);
+                        
+                        if time_since_last_click < std::time::Duration::from_millis(500) {
+                            // 双击！
+                            mouse_input.right_double_clicked = true;
+                            println!("👆👆 右键双击事件触发 at ({:.1}, {:.1})", x, y);
+                            mouse_input.right_last_click_time = now - std::time::Duration::from_secs(10);
+                        } else {
+                            // 第一次点击
+                            mouse_input.right_last_click_time = now;
+                            mouse_input.right_double_clicked = false;
+                        }
+                    }
                     mouse_input.right_pressed = false;
                     mouse_input.right_press_time = 0;
                 }
@@ -1020,6 +1032,28 @@ impl Scene for GameScene {
         // 更新背包对话框hover状态
         if let Some(mut inv_dialog) = self.get_inventory_dialog_mut(world) {
             inv_dialog.dialog.update_hover(x, y);
+        }
+        
+        Ok(())
+    }
+    
+    fn on_mouse_wheel(
+        &mut self,
+        _ctx: &mut Context,
+        world: &mut World,
+        _x: f32,
+        y: f32,
+    ) -> GameResult {
+        // 滚轮缩放游戏画面（不影响UI）
+        const ZOOM_SPEED: f32 = 0.1;
+        const MIN_ZOOM: f32 = 0.5;
+        const MAX_ZOOM: f32 = 2.0;
+        
+        if let Ok(mut camera) = world.get::<&mut Camera>(self.camera_entity) {
+            // y > 0 向上滚动（放大），y < 0 向下滚动（缩小）
+            let zoom_delta = y * ZOOM_SPEED;
+            camera.zoom = (camera.zoom + zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
+            println!("🔍 缩放: {:.1}x", camera.zoom);
         }
         
         Ok(())

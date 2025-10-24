@@ -309,6 +309,10 @@ impl EventHandler for GameState {
         Ok(())
     }
     
+    fn mouse_wheel_event(&mut self, ctx: &mut Context, x: f32, y: f32) -> GameResult {
+        self.current_scene.on_mouse_wheel(ctx, &mut self.world, x, y)
+    }
+    
     fn text_input_event(&mut self, ctx: &mut Context, character: char) -> GameResult {
         // 转发 IME 输入到当前场景
         // 将 char 转换为 String

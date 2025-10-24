@@ -368,11 +368,11 @@ impl PlayerSystem {
             mouse_input.right_double_clicked = false;
         }
         
-        // 📷 更新摄像机跟随玩家
+        // 🎯 相机直接跟随角色（居中）
         Self::update_camera_follow(world);
     }
     
-    /// 摄像机跟随玩家
+    /// 摄像机直接跟随玩家（居中显示）
     pub fn update_camera_follow(world: &mut World) {
         let player_pos = world.query_mut::<(&Player, &Position)>()
             .into_iter()
@@ -381,14 +381,64 @@ impl PlayerSystem {
         
         let Some((target_x, target_y)) = player_pos else { return };
         
-        const CAMERA_SMOOTHING: f32 = 0.1;
-        
+        // 直接将相机位置设置为玩家位置（角色始终居中）
         for (_entity, (camera_pos, _camera)) in world.query_mut::<(&mut Position, &Camera)>() {
-            let dx = target_x - camera_pos.x;
-            let dy = target_y - camera_pos.y;
+            camera_pos.x = target_x;
+            camera_pos.y = target_y;
+        }
+    }
+    
+    /// 智能相机跟随：只在角色接近边缘或离开屏幕时才移动相机（已禁用）
+    #[allow(dead_code)]
+    pub fn update_smart_camera_follow(world: &mut World) {
+        // 获取玩家位置
+        let player_pos = world.query_mut::<(&Player, &Position)>()
+            .into_iter()
+            .next()
+            .map(|(_, (_, pos))| (pos.x, pos.y));
+        
+        let Some((player_x, player_y)) = player_pos else { return };
+        
+        // 获取相机信息
+        for (_entity, (camera_pos, camera)) in world.query_mut::<(&mut Position, &Camera)>() {
+            // 计算玩家在屏幕上的位置
+            let screen_x = (player_x - camera_pos.x) * camera.zoom + camera.screen_width / 2.0;
+            let screen_y = (player_y - camera_pos.y) * camera.zoom + camera.screen_height / 2.0;
             
-            camera_pos.x += dx * CAMERA_SMOOTHING;
-            camera_pos.y += dy * CAMERA_SMOOTHING;
+            // 定义安全区域（距离屏幕边缘的距离）
+            const EDGE_MARGIN: f32 = 300.0;  // 边缘安全距离（从200增加到300，提前触发）
+            const STOP_THRESHOLD: f32 = 400.0; // 停止跟随阈值（从250增加到400，增大滞后区间）
+            
+            // 检查玩家是否超出安全区域
+            let too_left = screen_x < EDGE_MARGIN;
+            let too_right = screen_x > camera.screen_width - EDGE_MARGIN;
+            let too_top = screen_y < EDGE_MARGIN;
+            let too_bottom = screen_y > camera.screen_height - EDGE_MARGIN;
+            
+            // 只有当玩家确实接近边缘时才跟随
+            if too_left || too_right || too_top || too_bottom {
+                // 计算目标位置（将玩家居中）
+                let target_cam_x = player_x;
+                let target_cam_y = player_y;
+                
+                let dx = target_cam_x - camera_pos.x;
+                let dy = target_cam_y - camera_pos.y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                
+                // 如果距离很近，直接跳转避免抖动
+                if distance < 50.0 {
+                    camera_pos.x = target_cam_x;
+                    camera_pos.y = target_cam_y;
+                } else if distance < STOP_THRESHOLD {
+                    // 在停止阈值内，使用较慢的速度（从0.03降低到0.02）
+                    camera_pos.x += dx * 0.02;
+                    camera_pos.y += dy * 0.02;
+                } else {
+                    // 距离较远时快速跟随（从0.15降低到0.08）
+                    camera_pos.x += dx * 0.08;
+                    camera_pos.y += dy * 0.08;
+                }
+            }
         }
     }
 }

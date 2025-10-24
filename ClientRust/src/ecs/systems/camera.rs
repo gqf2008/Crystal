@@ -11,7 +11,7 @@
 // ============================================================================
 
 use hecs::World;
-use crate::ecs::components::{Position, Camera, Draggable, MouseInput};
+use crate::ecs::components::{Position, Camera, Draggable};
 
 /// 相机系统
 pub struct CameraSystem;
@@ -62,70 +62,10 @@ impl CameraSystem {
         camera.zoom = (camera.zoom * (1.0 + delta * 0.1)).clamp(0.5, 3.0);
     }
 
-    /// 🎯 更新摄像机系统 - 边缘滚屏
-    pub fn update(world: &mut World) {
-        // 边缘滚屏配置
-        const EDGE_THRESHOLD: f32 = 100.0;
-        const MIN_SCROLL_SPEED: f32 = 3.0;
-        const MAX_SCROLL_SPEED: f32 = 20.0;
-        const ACCELERATION: f32 = 0.5;
-
-        // 查找摄像机实体
-        let camera_query: Vec<_> = world
-            .query::<(&Camera, &Position, &Draggable)>()
-            .iter()
-            .map(|(entity, (cam, pos, drag))| (entity, cam.clone(), pos.clone(), drag.is_dragging))
-            .collect();
-
-        if camera_query.is_empty() {
-            return;
-        }
-
-        let (camera_entity, camera, _camera_pos, is_dragging) = &camera_query[0];
-
-        // 边缘滚屏 (只在非拖拽状态下执行)
-        if !is_dragging {
-            let mouse_input = world.query_mut::<&MouseInput>()
-                .into_iter()
-                .next()
-                .map(|(_, m)| (m.x, m.y));
-
-            if let Some((mouse_x, mouse_y)) = mouse_input {
-                let mut scroll_x = 0.0;
-                let mut scroll_y = 0.0;
-
-                // 水平方向
-                if mouse_x < EDGE_THRESHOLD {
-                    let ratio = (EDGE_THRESHOLD - mouse_x) / EDGE_THRESHOLD;
-                    let accelerated_ratio = ratio.powf(1.0 + ACCELERATION);
-                    scroll_x = -(MIN_SCROLL_SPEED + (MAX_SCROLL_SPEED - MIN_SCROLL_SPEED) * accelerated_ratio);
-                } else if mouse_x > camera.screen_width - EDGE_THRESHOLD {
-                    let dist = mouse_x - (camera.screen_width - EDGE_THRESHOLD);
-                    let ratio = dist / EDGE_THRESHOLD;
-                    let accelerated_ratio = ratio.powf(1.0 + ACCELERATION);
-                    scroll_x = MIN_SCROLL_SPEED + (MAX_SCROLL_SPEED - MIN_SCROLL_SPEED) * accelerated_ratio;
-                }
-
-                // 垂直方向
-                if mouse_y < EDGE_THRESHOLD {
-                    let ratio = (EDGE_THRESHOLD - mouse_y) / EDGE_THRESHOLD;
-                    let accelerated_ratio = ratio.powf(1.0 + ACCELERATION);
-                    scroll_y = -(MIN_SCROLL_SPEED + (MAX_SCROLL_SPEED - MIN_SCROLL_SPEED) * accelerated_ratio);
-                } else if mouse_y > camera.screen_height - EDGE_THRESHOLD {
-                    let dist = mouse_y - (camera.screen_height - EDGE_THRESHOLD);
-                    let ratio = dist / EDGE_THRESHOLD;
-                    let accelerated_ratio = ratio.powf(1.0 + ACCELERATION);
-                    scroll_y = MIN_SCROLL_SPEED + (MAX_SCROLL_SPEED - MIN_SCROLL_SPEED) * accelerated_ratio;
-                }
-
-                // 应用边缘滚动
-                if scroll_x != 0.0 || scroll_y != 0.0 {
-                    if let Ok(mut pos) = world.get::<&mut Position>(*camera_entity) {
-                        pos.x += scroll_x;
-                        pos.y += scroll_y;
-                    }
-                }
-            }
-        }
+    /// 🎯 更新摄像机系统 - 边缘滚屏（已禁用，使用智能跟随代替）
+    pub fn update(_world: &mut World) {
+        // 边缘滚屏已禁用，因为与智能相机跟随冲突
+        // 现在角色移动时会自动触发智能跟随
+        // 用户可以通过鼠标中键拖拽来手动移动视角
     }
 }

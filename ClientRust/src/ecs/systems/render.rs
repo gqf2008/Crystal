@@ -65,10 +65,10 @@ impl RenderSystem {
         let top = pos.y - half_height;
         let bottom = pos.y + half_height;
 
-        // 🔧 动态缓冲区：zoom越小(缩小)，buffer越小，减少过度渲染
-        // 🚀 极致优化：缩放<0.4x时，buffer=0，完全不渲染屏幕外瓦片
-        let base_buffer = if camera.zoom < 0.4 { 0 } else { 1 };
-        let buffer = ((base_buffer as f32 * projection_scale).ceil() as i32).max(0).min(5);
+        // 🔧 修复边缘黑块：增加buffer以确保边缘瓦片正确渲染
+        // 即使缩放很小，也保持至少2格的buffer以避免黑块
+        let base_buffer = if camera.zoom < 0.4 { 2 } else { 3 };
+        let buffer = ((base_buffer as f32 * projection_scale).ceil() as i32).max(2).min(8);
 
         // 转换为地图格子坐标
         let start_x = ((left / CELL_WIDTH as f32).floor() as i32 - buffer).max(0);
@@ -83,7 +83,7 @@ impl RenderSystem {
 
         // 🔍 检测可见区域或缩放是否变化
         if let Ok(mut visible_area) = world.get::<&mut VisibleArea>(visible_area_entity) {
-            let min_cell_threshold = 2; // 至少移动2个格子才重建
+            let min_cell_threshold = 1; // 🔧 修复：移动1格就重建，避免边缘黑块
             let x_changed = (visible_area.start_x - start_x).abs() >= min_cell_threshold
                 || (visible_area.end_x - end_x).abs() >= min_cell_threshold;
             let y_changed = (visible_area.start_y - start_y).abs() >= min_cell_threshold

@@ -109,6 +109,17 @@ pub trait Scene {
         Ok(())
     }
     
+    /// 鼠标滚轮事件
+    fn on_mouse_wheel(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut World,
+        _x: f32,
+        _y: f32,
+    ) -> GameResult {
+        Ok(())
+    }
+    
     /// 窗口大小调整事件
     fn on_resize(
         &mut self,
