@@ -30,7 +30,7 @@ pub use map_helper::MapHelper;
 pub use map_loader::MapLoader;
 
 // UI 导出
-pub use ui::{CharacterStatus, HealthBar, ManaBar, ExpBar, SkillBar, ChatWindow, UIRenderer};
+pub use ui::{CharacterStatus, HealthBar, ManaBar, ExpBar, SkillBar, ChatWindow};
 
 // 游戏应用导出
 pub use game_app::GameState;

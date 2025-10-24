@@ -3,7 +3,6 @@
 // ============================================================================
 
 pub mod components;
-pub mod ui_renderer;
 pub mod button_widget;     // 🆕 按钮部件辅助结构
 pub mod dialog_manager;    // 🆕 对话框管理器
 pub mod main_dialog;       // 🆕 游戏主界面
@@ -23,7 +22,6 @@ pub mod guild_dialog;      // 🆕 行会对话框
 
 // 重新导出常用类型
 pub use components::*;
-pub use ui_renderer::UIRenderer;
 pub use button_widget::{ButtonWidget, ButtonGroup, ButtonState};
 pub use dialog_manager::{DialogManager, DialogType};
 pub use main_dialog::{MainDialog, MainDialogButton};

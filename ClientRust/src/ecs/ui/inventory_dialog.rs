@@ -63,8 +63,10 @@ impl InventoryDialog {
         // 对话框尺寸和位置
         let width = 320.0;
         let height = 250.0;
-        let x = 100.0; // 默认位置
-        let y = 100.0;
+        // C#: Location = new Point(GameScene.Scene.MainDialog.Location.X + 230, Settings.ScreenHeight - 150)
+        // 默认位置，会在显示时根据屏幕尺寸调整
+        let x = 230.0;  // MainDialog通常居中，这里先设置偏移量
+        let y = 400.0;  // 默认位置
         
         // 格子配置（参考C#: 8列5行，每格36x32，间距1）
         let grid_cols = 8;
@@ -97,6 +99,13 @@ impl InventoryDialog {
             drag_offset_x: 0.0,
             drag_offset_y: 0.0,
         }
+    }
+    
+    /// 根据屏幕尺寸和MainDialog位置调整背包位置
+    /// C#: Location = new Point(GameScene.Scene.MainDialog.Location.X + 230, Settings.ScreenHeight - 150)
+    pub fn update_position(&mut self, main_dialog_x: f32, screen_height: f32) {
+        self.x = main_dialog_x + 230.0;
+        self.y = screen_height - 150.0;
     }
     
     /// 显示/隐藏背包
@@ -310,7 +319,8 @@ impl InventoryDialog {
         
         // 绘制标题 (z+2, 在边框之上)
         use ggez::graphics::Text;
-        let title = Text::new("背包 (Inventory)");
+        let mut title = Text::new("背包 (Inventory)");
+        title.set_font("AlibabaPuHuiTi");
         canvas.draw(
             &title,
             DrawParam::default()
@@ -378,7 +388,8 @@ impl InventoryDialog {
         }
         
         // 绘制金币标签
-        let gold_text = Text::new(format!("金币: {}", self.gold));
+        let mut gold_text = Text::new(format!("金币: {}", self.gold));
+        gold_text.set_font("AlibabaPuHuiTi");
         canvas.draw(
             &gold_text,
             DrawParam::default()
@@ -395,7 +406,8 @@ impl InventoryDialog {
             Color::from_rgb(200, 200, 200) // 正常：白色
         };
         
-        let weight_text = Text::new(format!("负重: {}/{}", self.current_weight, self.max_weight));
+        let mut weight_text = Text::new(format!("负重: {}/{}", self.current_weight, self.max_weight));
+        weight_text.set_font("AlibabaPuHuiTi");
         canvas.draw(
             &weight_text,
             DrawParam::default()
@@ -407,7 +419,8 @@ impl InventoryDialog {
         if let Some(drag_slot) = self.dragging_slot {
             // TODO: 从ECS世界或ItemComponent获取物品数据并绘制
             // 暂时显示一个简单的拖拽提示
-            let drag_text = Text::new(format!("拖拽物品 slot: {}", drag_slot));
+            let mut drag_text = Text::new(format!("拖拽物品 slot: {}", drag_slot));
+            drag_text.set_font("AlibabaPuHuiTi");
             canvas.draw(
                 &drag_text,
                 DrawParam::default()

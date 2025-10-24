@@ -150,7 +150,9 @@ impl CharacterDialog {
             visible: false,
             current_tab: CharacterTab::Equipment,
             
-            x: 800.0,
+            // C#: Location = new Point(Settings.ScreenWidth - 264, 0)
+            // 默认位置，会在显示时根据屏幕尺寸调整
+            x: 760.0,  // 1024 - 264 = 760
             y: 0.0,
             width: 264.0,
             height: 450.0,
@@ -206,6 +208,11 @@ impl CharacterDialog {
             
             hover_slot: None,
         }
+    }
+    
+    /// 根据屏幕尺寸调整对话框位置（C#: Settings.ScreenWidth - 264）
+    pub fn update_position(&mut self, screen_width: f32, _screen_height: f32) {
+        self.x = screen_width - self.width;
     }
     
     pub fn toggle(&mut self) {
@@ -357,7 +364,8 @@ impl CharacterDialog {
         }
         
         // 绘制标题
-        let title = Text::new(format!("角色 - {}", self.name));
+        let mut title = Text::new(format!("角色 - {}", self.name));
+        title.set_font("AlibabaPuHuiTi");
         canvas.draw(
             &title,
             DrawParam::default()
@@ -418,7 +426,8 @@ impl CharacterDialog {
             )?;
             canvas.draw(&tab_mesh, DrawParam::default());
             
-            let tab_text = Text::new(*name);
+            let mut tab_text = Text::new(*name);
+            tab_text.set_font("AlibabaPuHuiTi");
             canvas.draw(
                 &tab_text,
                 DrawParam::default()
