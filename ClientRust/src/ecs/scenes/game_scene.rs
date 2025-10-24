@@ -26,7 +26,7 @@ use crate::ecs::{
     systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, MagicLearningSystem, QuestSystem},
     map_helper::MapHelper,
     map_loader::MapLoader,
-    ui::{MainDialogButton, InventoryAction, CharacterAction, ChatType, MainDialogComp, InventoryDialogComp, CharacterDialogComp, SkillBarComp, ChatDialogComp, MagicLearningDialogComp, QuestDialogComp, TradeDialogComp},
+    ui::{MainDialogButton, InventoryAction, CharacterAction, ChatType, MainDialogComp, InventoryDialogComp, CharacterDialogComp, SkillBarComp, ChatDialogComp, MagicLearningDialogComp, QuestDialogComp, TradeDialogComp, SkillsDialogComp, OptionsDialogComp},
 };
 use crate::objects::{MapReader, PathFinder};
 use crate::graphics::libraries::initialize_all_libraries;
@@ -289,6 +289,16 @@ impl GameScene {
         // 创建任务对话框实体
         let quest_dialog_entity = world.spawn((
             QuestDialogComp::new(100.0, 100.0),
+        ));
+        
+        // 创建技能对话框实体
+        let _skills_dialog_entity = world.spawn((
+            SkillsDialogComp::new(),
+        ));
+        
+        // 创建选项对话框实体
+        let _options_dialog_entity = world.spawn((
+            OptionsDialogComp::new(),
         ));
         
         // 创建交易窗口实体

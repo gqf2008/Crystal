@@ -235,7 +235,7 @@ impl UISystem {
         for (_, dialog_comp) in world.query::<&QuestDialogComp>().iter() {
             if dialog_comp.is_open {
                 // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
-                dialog_comp.dialog.draw(ctx, canvas)?;
+                dialog_comp.draw(ctx, canvas)?;
             }
         }
         
