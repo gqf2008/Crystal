@@ -19,7 +19,7 @@ pub mod graphics;          // ✅ 已迁移到 ggez
 pub mod network;           // ✅ 不依赖 winit/wgpu
 pub mod objects;           // ✅ 不依赖 winit/wgpu
 // pub mod resolution;        // ✅ 不依赖 winit/wgpu
-pub mod resources;         // ✅ 不依赖 winit/wgpu
+// pub mod resources;         // ✅ 不依赖 winit/wgpu
 // pub mod scenes;            // ⚠️ 部分使用 winit 类型(Scene trait)
 // pub mod ui;                // UI模块
 // pub mod controls;          // ⚠️ 部分使用 winit 类型(Control trait)
