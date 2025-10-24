@@ -13,6 +13,7 @@ use hecs::{World, Entity};
 use std::collections::HashMap;
 use crate::network::game_client::GameEvent;
 use crate::ecs::components::*;
+use mir2_shared::enums::MirDirection;
 
 /// 网络系统 - 管理网络同步的实体
 pub struct NetworkSystem {
@@ -131,8 +132,8 @@ impl NetworkSystem {
             GameObject::Npc { id, name, location } => {
                 self.create_npc(world, *id, name, location)
             }
-            GameObject::Monster { id, name, location } => {
-                self.create_monster(world, *id, name, location)
+            GameObject::Monster { id, name, location, image, direction } => {
+                self.create_monster(world, *id, name, location, *image, *direction)
             }
             GameObject::Item { .. } => {
                 // TODO: 创建地面物品
@@ -193,17 +194,19 @@ impl NetworkSystem {
     }
 
     /// 创建怪物实体
-    fn create_monster(&self, world: &mut World, object_id: u32, name: &str, location: &mir2_shared::Point) -> Entity {
+    fn create_monster(&self, world: &mut World, object_id: u32, name: &str, location: &mir2_shared::Point, image: u16, direction: MirDirection) -> Entity {
         let (world_x, world_y) = grid_to_world(location.x, location.y);
+        
+        tracing::info!("👹 创建怪物实体: ID={}, name={}, image={}, pos=({}, {})", object_id, name, image, world_x, world_y);
         
         world.spawn((
             Position::new(world_x, world_y),
-            DirectionComp::new(MirDirection::Up),
+            DirectionComp::new(direction),
             AnimationComp::new(MirAction::Standing, 4, 200),
             NetworkSync::new(object_id, NetworkObjectType::Monster),
             Monster::new(
                 name.to_string(),
-                0, // TODO: 从对象数据获取怪物类型
+                image, // 使用服务器传来的怪物图像索引
             ),
             Health::new(100), // TODO: 从对象数据获取
             CombatStats {

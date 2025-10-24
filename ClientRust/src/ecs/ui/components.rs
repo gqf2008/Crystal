@@ -390,12 +390,14 @@ impl MainDialogComp {
 /// 背包对话框组件
 pub struct InventoryDialogComp {
     pub dialog: InventoryDialog,
+    pub is_open: bool,
 }
 
 impl InventoryDialogComp {
     pub fn new() -> Self {
         Self {
             dialog: InventoryDialog::new(),
+            is_open: false,
         }
     }
 }
@@ -403,12 +405,14 @@ impl InventoryDialogComp {
 /// 角色对话框组件
 pub struct CharacterDialogComp {
     pub dialog: CharacterDialog,
+    pub is_open: bool,
 }
 
 impl CharacterDialogComp {
     pub fn new() -> Self {
         Self {
             dialog: CharacterDialog::new(),
+            is_open: false,
         }
     }
 }
@@ -444,12 +448,14 @@ impl ChatDialogComp {
 /// 技能学习对话框组件
 pub struct MagicLearningDialogComp {
     pub dialog: super::MagicLearningDialog,
+    pub is_open: bool,
 }
 
 impl MagicLearningDialogComp {
     pub fn new() -> Self {
         Self {
             dialog: super::MagicLearningDialog::new(),
+            is_open: false,
         }
     }
 }

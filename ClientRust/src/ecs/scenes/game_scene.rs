@@ -60,6 +60,9 @@ pub struct GameScene {
     quest_dialog_entity: Entity,          // 🆕 任务对话框
     trade_dialog_entity: Entity,          // 🆕 交易窗口
     
+    /// 对话框管理器 - 统一管理所有对话框的显示/隐藏、快捷键等
+    dialog_manager: crate::ecs::ui::DialogManager,
+    
     /// 网络同步系统
     network_system: NetworkSystem,
     
@@ -102,19 +105,15 @@ impl GameScene {
                  spawn_grid_x, spawn_grid_y, spawn_x, spawn_y);
         
         // 创建相机实体
-        // Camera 的 screen_width/height 用于地图渲染视野计算
-        // 注意: UI 使用固定的设计分辨率 1024×768,与窗口实际大小无关
-        let drawable = ctx.gfx.drawable_size();
-        let scale_factor = ctx.gfx.window().scale_factor() as f32;
-        let screen_width = drawable.0 / scale_factor;   // 逻辑窗口宽度
-        let screen_height = drawable.1 / scale_factor;  // 逻辑窗口高度
-        tracing::info!("📐 窗口尺寸: {}x{} (物理: {}x{}, DPI: {}x) | UI设计: {}x{}", 
-                      screen_width, screen_height, drawable.0, drawable.1, scale_factor,
+        // 使用 drawable_size() 获取窗口尺寸,ggez 会自动处理 DPI 缩放
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        tracing::info!("📐 窗口尺寸: {}x{} | UI设计: {}x{}", 
+                      screen_width, screen_height, 
                       DESIGN_WIDTH, DESIGN_HEIGHT);
         let camera_entity = world.spawn((
             Position { x: spawn_x, y: spawn_y },
             Camera {
-                zoom: 1.75,  // 初始缩放1.75x，让角色看起来更大
+                zoom: 1.25,  // 初始缩放1.75x，让角色看起来更大
                 screen_width,
                 screen_height,
             },
@@ -209,9 +208,6 @@ impl GameScene {
             y: 0.0,
         },));
         
-        // 创建 UI 实体
-        let screen = ctx.gfx.drawable_size();
-        
         // 角色状态
         let _status_entity = world.spawn((
             crate::ecs::ui::CharacterStatus {
@@ -233,13 +229,13 @@ impl GameScene {
         let _mana_bar_entity = world.spawn((crate::ecs::ui::ManaBar::default(),));
         
         // 经验条
-        let _exp_bar_entity = world.spawn((crate::ecs::ui::ExpBar::new(screen.0, screen.1),));
+        let _exp_bar_entity = world.spawn((crate::ecs::ui::ExpBar::new(screen_width, screen_height),));
         
         // 技能栏
         let _skill_bar_entity = world.spawn((crate::ecs::ui::SkillBar::default(),));
         
         // 聊天窗口
-        let mut chat = crate::ecs::ui::ChatWindow::new(screen.0, screen.1);
+        let mut chat = crate::ecs::ui::ChatWindow::new(screen_width, screen_height);
         // 添加一些测试消息
         chat.add_message(crate::ecs::ui::ChatMessage {
             sender: "系统".to_string(),
@@ -323,6 +319,7 @@ impl GameScene {
             visible_area_entity,
             network_system: NetworkSystem::new(),
             ui_system: UISystem::new(),
+            dialog_manager: crate::ecs::ui::DialogManager::new(),  // 🆕 初始化对话框管理器
             ui_font_name,
             main_dialog_entity,
             inventory_dialog_entity,
@@ -344,12 +341,11 @@ impl GameScene {
     // UI 组件访问辅助方法
     // ========================================================================
     
-    /// 将窗口物理坐标转换为 UI 设计坐标系（1024×768）
-    /// 用于 UI 鼠标事件处理,因为 UI 使用设计坐标绘制
+    /// 将窗口逻辑坐标转换为 UI 设计坐标系（1024×768）
+    /// 将窗口坐标转换为 UI 设计坐标 (1024×768)
+    /// ggez 会自动处理 DPI 缩放,我们只需要使用 drawable_size()
     fn window_to_ui_coords(&self, ctx: &Context, window_x: f32, window_y: f32) -> (f32, f32) {
-        let window_size = ctx.gfx.drawable_size();
-        let window_width = window_size.0;
-        let window_height = window_size.1;
+        let (window_width, window_height) = ctx.gfx.drawable_size();
         
         // UI 固定使用设计分辨率 1024×768
         let design_width = DESIGN_WIDTH;
@@ -886,6 +882,28 @@ impl Scene for GameScene {
                     println!("🗺️ 寻路路径 (P): {}", if config.show_path { "显示" } else { "隐藏" });
                 }
                 
+                // 📂 对话框快捷键 (使用 DialogManager)
+                KeyCode::KeyI => {
+                    self.dialog_manager.toggle(crate::ecs::ui::DialogType::Inventory);
+                    // 同步更新对话框组件状态
+                    if let Some(mut inv_dialog) = self.get_inventory_dialog_mut(world) {
+                        inv_dialog.is_open = self.dialog_manager.is_visible(crate::ecs::ui::DialogType::Inventory);
+                    }
+                    println!("📦 快捷键: 切换背包 (I)");
+                }
+                KeyCode::KeyC => {
+                    self.dialog_manager.toggle(crate::ecs::ui::DialogType::Character);
+                    // 同步更新对话框组件状态
+                    if let Some(mut char_dialog) = self.get_character_dialog_mut(world) {
+                        char_dialog.is_open = self.dialog_manager.is_visible(crate::ecs::ui::DialogType::Character);
+                    }
+                    println!("👤 快捷键: 切换角色 (C)");
+                }
+                KeyCode::KeyS => {
+                    self.dialog_manager.toggle(crate::ecs::ui::DialogType::Skills);
+                    println!("⚔️ 快捷键: 切换技能 (S) (待实现)");
+                }
+                
                 _ => {}
             }
         }
@@ -960,38 +978,43 @@ impl Scene for GameScene {
             if let Some(clicked_button) = clicked_button {
                 println!("🖱️ 点击主对话框按钮: {:?}", clicked_button);
                 
+                // 使用 DialogManager 统一管理对话框显示/隐藏
                 match clicked_button {
                     MainDialogButton::Inventory => {
-                        println!("📦 打开背包");
+                        self.dialog_manager.toggle(crate::ecs::ui::DialogType::Inventory);
+                        // 同步更新对话框组件状态
                         if let Some(mut inv_dialog) = self.get_inventory_dialog_mut(world) {
-                            inv_dialog.dialog.toggle();
+                            inv_dialog.is_open = self.dialog_manager.is_visible(crate::ecs::ui::DialogType::Inventory);
                         }
+                        println!("📦 切换背包对话框");
                     }
                     MainDialogButton::Character => {
-                        println!("👤 打开角色界面");
+                        self.dialog_manager.toggle(crate::ecs::ui::DialogType::Character);
+                        // 同步更新对话框组件状态
                         if let Some(mut char_dialog) = self.get_character_dialog_mut(world) {
-                            char_dialog.dialog.toggle();
+                            char_dialog.is_open = self.dialog_manager.is_visible(crate::ecs::ui::DialogType::Character);
                         }
+                        println!("👤 切换角色对话框");
                     }
                     MainDialogButton::Skills => {
-                        println!("⚔️ 打开技能界面");
-                        // TODO: 显示技能界面
+                        self.dialog_manager.toggle(crate::ecs::ui::DialogType::Skills);
+                        println!("⚔️ 切换技能对话框 (待实现)");
                     }
                     MainDialogButton::Quest => {
-                        println!("📜 打开任务界面");
-                        // TODO: 显示任务界面
+                        self.dialog_manager.toggle(crate::ecs::ui::DialogType::Quest);
+                        println!("📜 切换任务对话框 (待实现)");
                     }
                     MainDialogButton::Options => {
-                        println!("⚙️ 打开选项界面");
-                        // TODO: 显示选项界面
+                        self.dialog_manager.toggle(crate::ecs::ui::DialogType::Options);
+                        println!("⚙️ 切换选项对话框 (待实现)");
                     }
                     MainDialogButton::Menu => {
-                        println!("📋 打开菜单");
-                        // TODO: 显示菜单
+                        self.dialog_manager.toggle(crate::ecs::ui::DialogType::Menu);
+                        println!("📋 切换菜单对话框 (待实现)");
                     }
                     MainDialogButton::GameShop => {
-                        println!("🛒 打开商城");
-                        // TODO: 显示商城界面
+                        self.dialog_manager.toggle(crate::ecs::ui::DialogType::GameShop);
+                        println!("🛒 切换商城对话框 (待实现)");
                     }
                 }
                 return Ok(());
@@ -999,6 +1022,7 @@ impl Scene for GameScene {
         }
         
         // 更新鼠标状态（支持左键和右键）
+        // ggez 提供的 x,y 是窗口逻辑坐标，与 camera.screen_width/height 相同
         if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
             mouse_input.x = x;
             mouse_input.y = y;

@@ -68,10 +68,7 @@ impl LoginScene {
     
     /// 将窗口坐标转换为设计坐标系（1280x960）
     fn window_to_design_coords(&self, ctx: &Context, window_x: f32, window_y: f32) -> (f32, f32) {
-        let window_size = ctx.gfx.drawable_size();
-        let window_width = window_size.0;
-        let window_height = window_size.1;
-        
+        let  (window_width,window_height) = ctx.gfx.drawable_size();
         // 计算4:3视口
         let aspect_ratio = 4.0 / 3.0;
         let current_ratio = window_width / window_height;
@@ -511,32 +508,33 @@ impl Scene for LoginScene {
         Ok(None)
     }
     
-    fn on_resize(&mut self, ctx: &mut Context, _world: &mut World, width: f32, height: f32) -> GameResult {
+    //fn on_resize(&mut self, ctx: &mut Context, _world: &mut World, width: f32, height: f32) -> GameResult {
+       // panic!("登录场景不应处理窗口调整事件 {}x{}", width, height);
         // 强制保持4:3比例
-        let aspect_ratio = 4.0 / 3.0;
-        let current_ratio = width / height;
+        // let aspect_ratio = 4.0 / 3.0;
+        // let current_ratio = width / height;
         
-        let (new_width, new_height) = if (current_ratio - aspect_ratio).abs() > 0.01 {
-            // 比例不对，调整窗口大小
-            if current_ratio > aspect_ratio {
-                // 太宽，缩小宽度
-                (height * aspect_ratio, height)
-            } else {
-                // 太高，缩小高度
-                (width, width / aspect_ratio)
-            }
-        } else {
-            (width, height)
-        };
+        // let (new_width, new_height) = if (current_ratio - aspect_ratio).abs() > 0.01 {
+        //     // 比例不对，调整窗口大小
+        //     if current_ratio > aspect_ratio {
+        //         // 太宽，缩小宽度
+        //         (height * aspect_ratio, height)
+        //     } else {
+        //         // 太高，缩小高度
+        //         (width, width / aspect_ratio)
+        //     }
+        // } else {
+        //     (width, height)
+        // };
         
-        // 更新窗口大小以保持4:3比例
-        if (new_width - width).abs() > 1.0 || (new_height - height).abs() > 1.0 {
-            ctx.gfx.set_drawable_size(new_width, new_height)?;
-            tracing::debug!("🔧 窗口调整为4:3比例: {}x{}", new_width, new_height);
-        }
+        // // 更新窗口大小以保持4:3比例
+        // if (new_width - width).abs() > 1.0 || (new_height - height).abs() > 1.0 {
+        //     ctx.gfx.set_drawable_size(new_width, new_height)?;
+        //     tracing::debug!("🔧 窗口调整为4:3比例: {}x{}", new_width, new_height);
+        // }
         
-        Ok(())
-    }
+        //Ok(())
+   // }
     
     fn on_text_input(&mut self, _ctx: &mut Context, _world: &mut World, character: String) -> GameResult {
         tracing::debug!("📝 LoginScene::on_text_input: '{}'", character);

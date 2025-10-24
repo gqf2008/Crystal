@@ -134,15 +134,14 @@ impl PlayerSystem {
                         // 空闲状态 → 单击触发寻路
                         let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
                         
-                        // ✅ 使用C#原版算法:屏幕坐标转地图坐标
-                        const CELL_WIDTH: f32 = 48.0;
-                        const CELL_HEIGHT: f32 = 32.0;
-                        
-                        let offset_x = (camera.screen_width / 2.0 / CELL_WIDTH) as i32;
-                        let offset_y = (camera.screen_height / 2.0 / CELL_HEIGHT) as i32;
-                        
-                        let target_grid_x = (mouse_input.x / CELL_WIDTH) as i32 - offset_x + start_grid_x;
-                        let target_grid_y = (mouse_input.y / CELL_HEIGHT) as i32 - offset_y + start_grid_y;
+                        // ✅ 使用统一的屏幕坐标转世界坐标算法
+                        let (mouse_world_x, mouse_world_y) = PlayerSystem::screen_to_world(
+                            mouse_input.x, 
+                            mouse_input.y, 
+                            &camera_pos, 
+                            &camera
+                        );
+                        let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
                         
                         // 使用 A* 寻路
                         let map_data_for_pathfinding = map_data.clone();

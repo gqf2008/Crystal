@@ -102,7 +102,7 @@ pub struct MapInfo {
 #[derive(Debug, Clone)]
 pub enum GameObject {
     Player { id: u32, name: String, location: Point },
-    Monster { id: u32, name: String, location: Point },
+    Monster { id: u32, name: String, location: Point, image: u16, direction: MirDirection },
     Npc { id: u32, name: String, location: Point },
     Item { id: u32, location: Point, item: UserItem },
 }
@@ -654,12 +654,14 @@ impl PacketHandler for GameClient {
             id: packet.object_id,
             name: packet.name.clone(),
             location,
+            image: packet.image,
+            direction: packet.direction,
         };
         
         self.objects.insert(packet.object_id, obj.clone());
         self.send_event(GameEvent::ObjectSpawned { object: obj });
         
-        tracing::debug!("👹 Monster {} spawned", packet.name);
+        tracing::debug!("👹 Monster {} spawned (image={})", packet.name, packet.image);
     }
     
     fn on_object_npc(&mut self, packet: packets::ObjectNpc) {

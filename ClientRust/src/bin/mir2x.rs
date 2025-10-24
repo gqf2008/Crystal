@@ -68,20 +68,10 @@ fn main() -> Result<()> {
         )
         .build()?;
    let (w,h)= ctx.gfx.drawable_size();
-   let wsize=ctx.gfx.window().inner_size();
-   let scale_factor = ctx.gfx.window().scale_factor();
-    tracing::info!(
-        "Ggez Context 创建成功: 物理{}x{} 逻辑{:?} DPI{}x (4:3比例)",
-        w, h,wsize, scale_factor
-    );
+   tracing::info!("🎨 实际创建的窗口分辨率: {}x{}", w, h);
     
     // 6. 添加中文字体支持 (使用 ClientRuntime 统一路径)
     ClientRuntime::load_font_to_context(&mut ctx, "resources/font/AlibabaPuHuiTi-3-55-Regular.ttf", "AlibabaPuHuiTi")?;
-    
-    // 7. 启用文本输入 (IME)
-    ctx.gfx.window().set_ime_allowed(true);
-    tracing::info!("IME 文本输入已启用");
-    
     // 8. 创建游戏应用 (传入配置和 runtime，像 CrystalGame 一样)
     let game = GameState::new(&mut ctx, settings)?;
     

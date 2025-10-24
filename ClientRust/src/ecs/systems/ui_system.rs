@@ -172,6 +172,8 @@ impl UISystem {
     }
     
     /// 渲染所有 UI 组件
+    /// 
+    /// 注意: 需要传入 DialogManager 来控制对话框可见性
     pub fn draw(
         &self,
         ctx: &mut Context,
@@ -179,34 +181,40 @@ impl UISystem {
         world: &World,
         current_time: u64,
     ) -> GameResult {
-        // 渲染主对话框
+        // 渲染主对话框 (始终显示)
         for (_, dialog_comp) in world.query::<&MainDialogComp>().iter() {
             dialog_comp.dialog.draw(ctx, canvas)?;
         }
         
-        // 渲染背包对话框
+        // 渲染背包对话框 (仅在打开时显示)
         for (_, dialog_comp) in world.query::<&InventoryDialogComp>().iter() {
-            dialog_comp.dialog.draw(ctx, canvas)?;
+            if dialog_comp.is_open {
+                dialog_comp.dialog.draw(ctx, canvas)?;
+            }
         }
         
-        // 渲染角色对话框
+        // 渲染角色对话框 (仅在打开时显示)
         for (_, dialog_comp) in world.query::<&CharacterDialogComp>().iter() {
-            dialog_comp.dialog.draw(ctx, canvas)?;
+            if dialog_comp.is_open {
+                dialog_comp.dialog.draw(ctx, canvas)?;
+            }
         }
         
-        // 渲染技能栏
+        // 渲染技能栏 (始终显示)
         for (_, skill_bar_comp) in world.query::<&SkillBarComp>().iter() {
             skill_bar_comp.dialog.draw(ctx, canvas, current_time)?;
         }
         
-        // 渲染聊天对话框
+        // 渲染聊天对话框 (始终显示)
         for (_, dialog_comp) in world.query::<&ChatDialogComp>().iter() {
             dialog_comp.dialog.draw(ctx, canvas)?;
         }
         
-        // 渲染技能学习对话框
+        // 渲染技能学习对话框 (仅在打开时显示)
         for (_, dialog_comp) in world.query::<&MagicLearningDialogComp>().iter() {
-            dialog_comp.dialog.draw(ctx, canvas)?;
+            if dialog_comp.is_open {
+                dialog_comp.dialog.draw(ctx, canvas)?;
+            }
         }
         
         Ok(())

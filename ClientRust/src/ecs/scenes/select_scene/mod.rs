@@ -203,15 +203,8 @@ impl SelectScene {
         self.character_select.get_selected_index()
     }
 
-    /// 将窗口坐标转换为设计坐标 (与 LoginScene 保持一致)
-    ///
-    /// 窗口可能是任意大小，但我们使用固定的 1024x768 设计坐标系。
-    /// 这个方法将鼠标的窗口坐标转换为设计坐标，考虑4:3比例和居中偏移。
     fn window_to_design_coords(&self, ctx: &Context, window_x: f32, window_y: f32) -> (f32, f32) {
-        let window_size = ctx.gfx.drawable_size();
-        let window_width = window_size.0;
-        let window_height = window_size.1;
-
+        let (window_width,window_height) = ctx.gfx.drawable_size();
         // 计算4:3视口
         let aspect_ratio = 4.0 / 3.0;
         let current_ratio = window_width / window_height;
