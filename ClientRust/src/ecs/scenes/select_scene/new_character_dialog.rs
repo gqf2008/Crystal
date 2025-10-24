@@ -421,7 +421,7 @@ impl NewCharacterDialog {
     /// 绘制对话框
     pub fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut ggez::graphics::Canvas) -> ggez::GameResult {
         use ggez::graphics::{Color, Text, PxScale, DrawParam};
-        use crate::graphics::{LibraryName, draw_sprite_at, draw_sprite_with_offset, draw_sprite_blend};
+        use crate::graphics::{LibraryName, draw_sprite_at};
         
         if !self.visible {
             return Ok(());
@@ -433,31 +433,38 @@ impl NewCharacterDialog {
         // 2. 绘制标题 (Title_20) - 不使用偏移
         let _ = draw_sprite_at(ctx, canvas, &LibraryName::Title, 20, self.x + 206.0, self.y + 11.0);
         
-        // 3. 绘制角色预览动画 (ChrSel库) - 使用偏移量 (UseOffSet = true)
+        // 3. 绘制角色预览动画 (ChrSel库) - 使用库系统绘制（与 CharacterSelect 保持一致）
         let character_index = self.get_character_display_index();
-        let _ = draw_sprite_with_offset(
-            ctx, 
-            canvas, 
-            &LibraryName::ChrSel, 
-            (character_index + self.animation_frame) as i32,
-            self.x + 120.0,
-            self.y + 250.0
-        );
+        let anim_index = (character_index + self.animation_frame) as usize;
         
-        // 4. 如果是法师，绘制额外的光效 (ChrSel库，索引+560，使用混合模式)
-        // 对应 C#: Libraries.ChrSel.DrawBlend(CharacterDisplay.Index + 560, CharacterDisplay.DisplayLocationWithoutOffSet, Color.White, true);
-        if self.selected_class == MirClass::Wizard {
-            let _ = draw_sprite_blend(
-                ctx,
-                canvas,
-                &LibraryName::ChrSel,
-                (character_index + 560 + self.animation_frame) as i32,
-                self.x + 120.0,
-                self.y + 250.0,
-                Color::WHITE,
-                true,  // use_offset = true
-                1.0    // rate = 1.0
-            );
+        // 使用库系统绘制角色主体（use_offset=true 保持清晰）
+        if let Some(lib_arc) = crate::graphics::libraries::get_library(LibraryName::ChrSel) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                // 绘制角色主体动画
+                let _ = lib.draw_with_color(
+                    ctx, 
+                    canvas, 
+                    anim_index,
+                    self.x + 120.0,
+                    self.y + 250.0,
+                    Color::WHITE,
+                    true  // use_offset=true
+                );
+                
+                // 如果是法师，叠加绘制光效（半透明白色，alpha=180）
+                if self.selected_class == MirClass::Wizard {
+                    let blend_index = anim_index + 560;
+                    let _ = lib.draw_with_color(
+                        ctx, 
+                        canvas, 
+                        blend_index,
+                        self.x + 120.0,
+                        self.y + 250.0,
+                        Color::from_rgba(255, 255, 255, 180),  // 半透明白色
+                        true  // use_offset=true
+                    );
+                }
+            }
         }
         
         // 5. 绘制职业按钮 (Prguse库) - 根据状态显示不同索引

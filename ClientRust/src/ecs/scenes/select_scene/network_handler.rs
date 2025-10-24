@@ -69,19 +69,9 @@ impl SelectScene {
         self.delete_character_dialog = None;
         
         // 2. 从角色列表移除已删除的角色
-        if let Some(pos) = self.characters.iter().position(|c| c.index == character_index) {
-            self.characters.remove(pos);
+        if self.character_select.remove_character_by_index(character_index) {
             tracing::info!("📋 已从列表移除角色 (index={}), 剩余角色数: {}", 
-                character_index, self.characters.len());
-            
-            // 3. 更新选中索引
-            if self.selected_index >= self.characters.len() as i32 {
-                self.selected_index = if self.characters.is_empty() {
-                    -1
-                } else {
-                    (self.characters.len() - 1) as i32
-                };
-            }
+                character_index, self.character_select.character_count());
         }
         
         // TODO: 显示成功消息框 "Your character was deleted successfully."
@@ -144,12 +134,12 @@ impl SelectScene {
         self.new_character_dialog = None;
         
         // 2. 将新角色添加到列表开头
-        self.characters.insert(0, character.clone());
+        self.character_select.add_character(character.clone());
         
         // 3. 选中新创建的角色
-        self.selected_index = 0;
+        self.character_select.select_character(0);
         
-        tracing::info!("📋 新角色已添加到列表, 总角色数: {}", self.characters.len());
+        tracing::info!("📋 新角色已添加到列表, 总角色数: {}", self.character_select.character_count());
         
         // TODO: 显示成功消息框 "Your character was created successfully."
     }

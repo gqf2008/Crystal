@@ -6,7 +6,7 @@
 use tokio::sync::mpsc;
 use crate::network::NetworkCommand;
 use mir2_shared::enums::{MirClass, MirGender};
-use super::{SelectScene, BottomButton, NewCharacterDialog, DeleteCharacterDialog, CreditsDialog};
+use super::{SelectScene, BottomButton, NewCharacterDialog, CreditsDialog};
 use super::new_character_dialog::DialogButton;
 
 impl SelectScene {
@@ -21,7 +21,7 @@ impl SelectScene {
     pub(super) fn handle_button_click(
         &mut self,
         button: BottomButton,
-        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) {
         match button {
             BottomButton::StartGame => {
@@ -132,11 +132,12 @@ impl SelectScene {
     /// }
     /// ```
     pub(super) fn start_game(&mut self) {
+        let selected_index = self.character_select.get_selected_index();
+        let character_count = self.character_select.get_characters().len();
         tracing::info!("🎮 start_game() called - selected_index={}, characters.len()={}", 
-            self.selected_index, self.characters.len());
+            selected_index, character_count);
         
-        if self.selected_index >= 0 && (self.selected_index as usize) < self.characters.len() {
-            let character = &self.characters[self.selected_index as usize];
+        if let Some(character) = self.character_select.get_selected_character() {
             tracing::info!("🎮 Starting game with character: {} (index={})", character.name, character.index);
             
             // Send StartGame command to network thread
@@ -155,8 +156,10 @@ impl SelectScene {
                 tracing::error!("❌ Network command channel not available (command_tx is None)");
             }
         } else {
+            let selected_index = self.character_select.get_selected_index();
+            let character_count = self.character_select.get_characters().len();
             tracing::warn!("⚠️ Cannot start game: No character selected (selected_index={}, len={})", 
-                self.selected_index, self.characters.len());
+                selected_index, character_count);
         }
     }
 
@@ -200,7 +203,7 @@ impl SelectScene {
     /// }
     /// ```
     pub(super) fn open_delete_character_dialog(&mut self) {
-        if self.selected_index < 0 || (self.selected_index as usize) >= self.characters.len() {
+        let Some(character) = self.character_select.get_selected_character() else {
             tracing::warn!("⚠️ 没有选中角色,无法删除");
             
             // 🆕 显示消息框提示用户
@@ -213,9 +216,8 @@ impl SelectScene {
             message_box.show();
             self.message_box = Some(message_box);
             return;
-        }
+        };
         
-        let character = &self.characters[self.selected_index as usize];
         tracing::info!("🗑️ 打开删除角色对话框: {}", character.name);
         
         // 🆕 使用正确的 MessageBox 显示确认对话框

@@ -187,7 +187,7 @@ impl GameState {
                             println!("🎮 开始游戏成功");
                             // 获取SelectScene中选中的角色索引
                             if let Some(select_scene) = self.current_scene.as_mut().as_any_mut().downcast_mut::<SelectScene>() {
-                                self.selected_character_index = Some(select_scene.selected_index);
+                                self.selected_character_index = Some(select_scene.get_selected_character_index());
                             }
                             next_scene = Some(SceneType::Game);
                         }
