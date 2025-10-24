@@ -326,24 +326,35 @@ impl CharacterDialog {
             return Ok(());
         }
         
-        // 绘制对话框背景
-        let bg_rect = Rect::new(self.x, self.y, self.width, self.height);
-        let bg_mesh = ggez::graphics::Mesh::new_rectangle(
-            _ctx,
-            ggez::graphics::DrawMode::fill(),
-            bg_rect,
-            Color::from_rgba(40, 40, 50, 230),
-        )?;
-        canvas.draw(&bg_mesh, DrawParam::default());
+        use crate::graphics::{draw_sprite_at, LibraryName};
+        use ggez::graphics::{Mesh, DrawMode};
         
-        // 绘制边框
-        let border_mesh = ggez::graphics::Mesh::new_rectangle(
-            _ctx,
-            ggez::graphics::DrawMode::stroke(2.0),
-            bg_rect,
-            Color::from_rgb(100, 100, 120),
-        )?;
-        canvas.draw(&border_mesh, DrawParam::default());
+        // 绘制背景纹理 (Index=504, Library=Title)
+        let mut texture_drawn = false;
+        if let Ok(_) = draw_sprite_at(_ctx, canvas, &LibraryName::Title, 504, self.x, self.y) {
+            texture_drawn = true;
+        }
+        
+        // 如果纹理加载失败，绘制备用背景
+        if !texture_drawn {
+            let bg_rect = Rect::new(self.x, self.y, self.width, self.height);
+            let bg_mesh = Mesh::new_rectangle(
+                _ctx,
+                DrawMode::fill(),
+                bg_rect,
+                Color::from_rgba(40, 40, 50, 230),
+            )?;
+            canvas.draw(&bg_mesh, DrawParam::default());
+            
+            // 绘制边框
+            let border_mesh = Mesh::new_rectangle(
+                _ctx,
+                DrawMode::stroke(2.0),
+                bg_rect,
+                Color::from_rgb(100, 100, 120),
+            )?;
+            canvas.draw(&border_mesh, DrawParam::default());
+        }
         
         // 绘制标题
         let title = Text::new(format!("角色 - {}", self.name));

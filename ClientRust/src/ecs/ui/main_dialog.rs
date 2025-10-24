@@ -63,18 +63,6 @@ pub struct MainDialog {
     
     /// 是否显示左右延伸Cap (分辨率>1024时)
     show_caps: bool,
-    
-    /// 输入框文本
-    input_text: String,
-    
-    /// 输入框是否激活
-    input_active: bool,
-    
-    /// 光标闪烁计时器
-    cursor_blink_timer: u32,
-    
-    /// 光标是否可见
-    cursor_visible: bool,
 }
 
 impl MainDialog {
@@ -181,10 +169,6 @@ impl MainDialog {
             weight: (0, 100),
             bag_space: (0, 40),
             show_caps: screen_width > 1024.0,  // 大于1024分辨率显示Cap
-            input_text: String::new(),
-            input_active: false,
-            cursor_blink_timer: 0,
-            cursor_visible: true,
         }
     }
     
@@ -252,58 +236,6 @@ impl MainDialog {
     /// 更新鼠标悬停状态
     pub fn update_hover(&mut self, mouse_x: f32, mouse_y: f32) {
         self.buttons.update_hover(mouse_x, mouse_y);
-    }
-    
-    /// 更新（每帧调用，用于光标闪烁）
-    pub fn update(&mut self) {
-        if self.input_active {
-            self.cursor_blink_timer += 1;
-            if self.cursor_blink_timer >= 30 {  // 每30帧切换一次（约0.5秒）
-                self.cursor_blink_timer = 0;
-                self.cursor_visible = !self.cursor_visible;
-            }
-        } else {
-            self.cursor_blink_timer = 0;
-            self.cursor_visible = true;
-        }
-    }
-    
-    /// 激活输入框
-    pub fn activate_input(&mut self) {
-        self.input_active = true;
-        self.cursor_blink_timer = 0;
-        self.cursor_visible = true;
-    }
-    
-    /// 取消输入
-    pub fn deactivate_input(&mut self) {
-        self.input_active = false;
-        self.input_text.clear();
-    }
-    
-    /// 输入字符
-    pub fn input_char(&mut self, ch: char) {
-        if !self.input_active {
-            return;
-        }
-        
-        if self.input_text.len() < 100 {
-            self.input_text.push(ch);
-        }
-    }
-    
-    /// 删除字符
-    pub fn backspace(&mut self) {
-        if !self.input_active {
-            return;
-        }
-        
-        self.input_text.pop();
-    }
-    
-    /// 获取输入文本
-    pub fn get_input(&self) -> &str {
-        &self.input_text
     }
     
     /// 处理鼠标点击
@@ -414,63 +346,7 @@ impl MainDialog {
             }
         }
         
-        // 9. 绘制输入框（在主面板中间偏下）
-        let input_box_x = dialog_x + self.dialog_width / 2.0 - 150.0;
-        let input_box_y = dialog_y + 130.0;
-        let input_box_width = 300.0;
-        let input_box_height = 20.0;
-        
-        // 输入框背景
-        if let Ok(input_bg) = Mesh::new_rectangle(
-            ctx,
-            DrawMode::fill(),
-            Rect::new(input_box_x, input_box_y, input_box_width, input_box_height),
-            if self.input_active {
-                Color::from_rgba(255, 255, 255, 255)  // 激活时白色背景
-            } else {
-                Color::from_rgba(200, 200, 200, 150)  // 未激活时半透明
-            },
-        ) {
-            canvas.draw(&input_bg, DrawParam::default());
-        }
-        
-        // 输入框边框
-        if let Ok(input_border) = Mesh::new_rectangle(
-            ctx,
-            DrawMode::stroke(1.0),
-            Rect::new(input_box_x, input_box_y, input_box_width, input_box_height),
-            Color::from_rgb(100, 100, 100),
-        ) {
-            canvas.draw(&input_border, DrawParam::default());
-        }
-        
-        // 输入文本
-        if !self.input_text.is_empty() {
-            let mut text = Text::new(&self.input_text);
-            text.set_scale(PxScale::from(14.0));
-            canvas.draw(&text, DrawParam::default()
-                .dest([input_box_x + 5.0, input_box_y + 3.0])
-                .color(Color::BLACK));
-            
-            // 绘制闪烁光标
-            if self.input_active && self.cursor_visible {
-                let char_count = self.input_text.chars().count();
-                let text_width = char_count as f32 * 8.0;  // 估算文本宽度
-                let cursor_x = input_box_x + 5.0 + text_width;
-                let cursor_y = input_box_y + 3.0;
-                
-                if let Ok(cursor) = Mesh::new_rectangle(
-                    ctx,
-                    DrawMode::fill(),
-                    Rect::new(cursor_x, cursor_y, 1.5, 14.0),
-                    Color::BLACK,
-                ) {
-                    canvas.draw(&cursor, DrawParam::default());
-                }
-            }
-        }
-        
-        // 10. 绘制按钮工具提示
+        // 9. 绘制按钮工具提示
         for button in &self.buttons.buttons {
             if let Some(tooltip_text) = button.get_tooltip() {
                 self.draw_tooltip(ctx, canvas, tooltip_text, button.x, button.y - 25.0)?;

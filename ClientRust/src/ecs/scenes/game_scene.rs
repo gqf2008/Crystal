@@ -622,11 +622,6 @@ impl Scene for GameScene {
             chat_dialog.dialog.update();
         }
         
-        // 更新主对话框（用于输入框光标闪烁）
-        if let Some(mut main_dialog) = self.get_main_dialog_mut(world) {
-            main_dialog.dialog.update();
-        }
-        
         Ok(None)
     }
     

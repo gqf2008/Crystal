@@ -291,26 +291,22 @@ impl InventoryDialog {
             return Ok(());
         }
         
+        use crate::graphics::{get_library, LibraryName, draw_sprite_at};
         use ggez::graphics::{Mesh, DrawMode};
         
-        // 绘制背景框
-        let bg_rect = Rect::new(self.x, self.y, self.width, self.height);
-        let bg_mesh = Mesh::new_rectangle(
-            ctx,
-            DrawMode::fill(),
-            bg_rect,
-            Color::from_rgba(30, 30, 30, 230),
-        )?;
-        canvas.draw(&bg_mesh, DrawParam::default().z(z_index));
+        // 绘制背景纹理 (Index=196, Library=Title)
+        let mut texture_drawn = false;
+        if let Ok(_) = draw_sprite_at(ctx, canvas, &LibraryName::Title, 196, self.x, self.y) {
+            texture_drawn = true;
+        }
         
-        // 绘制边框 (z+1, 在背景之上)
-        let border_mesh = Mesh::new_rectangle(
-            ctx,
-            DrawMode::stroke(2.0),
-            bg_rect,
-            Color::from_rgb(100, 100, 100),
-        )?;
-        canvas.draw(&border_mesh, DrawParam::default().z(z_index + 1));
+        // 如果纹理加载失败，绘制备用背景
+        if !texture_drawn {
+            let bg_rect = Rect::new(self.x, self.y, self.width, self.height);
+            let bg_mesh = Mesh::new_rectangle(ctx, DrawMode::fill(), bg_rect, 
+                Color::from_rgba(30, 30, 30, 230))?;
+            canvas.draw(&bg_mesh, DrawParam::default().z(z_index));
+        }
         
         // 绘制标题 (z+2, 在边框之上)
         use ggez::graphics::Text;
