@@ -434,71 +434,71 @@ impl GameScene {
         Ok(String::from("default"))
     }
     
-    /// 处理双击寻路
-    fn handle_double_click_pathfinding(&self, world: &mut World, screen_x: f32, screen_y: f32) {
-        // 获取相机信息
-        let (camera_x, camera_y, camera_width, camera_height) = {
-            let pos = world.get::<&Position>(self.camera_entity).unwrap();
-            let camera = world.get::<&Camera>(self.camera_entity).unwrap();
-            (pos.x, pos.y, camera.screen_width, camera.screen_height)
-        };
+    // /// 处理双击寻路
+    // fn handle_double_click_pathfinding(&self, world: &mut World, screen_x: f32, screen_y: f32) {
+    //     // 获取相机信息
+    //     let (camera_x, camera_y, camera_width, camera_height) = {
+    //         let pos = world.get::<&Position>(self.camera_entity).unwrap();
+    //         let camera = world.get::<&Camera>(self.camera_entity).unwrap();
+    //         (pos.x, pos.y, camera.screen_width, camera.screen_height)
+    //     };
         
-        // 屏幕坐标转世界坐标
-        let world_x = camera_x + screen_x - camera_width / 2.0;
-        let world_y = camera_y + screen_y - camera_height / 2.0;
+    //     // 屏幕坐标转世界坐标
+    //     let world_x = camera_x + screen_x - camera_width / 2.0;
+    //     let world_y = camera_y + screen_y - camera_height / 2.0;
         
-        // 世界坐标转格子坐标
-        let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(world_x, world_y);
+    //     // 世界坐标转格子坐标
+    //     let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(world_x, world_y);
         
-        println!("🎯 双击寻路: 屏幕({:.1}, {:.1}) -> 世界({:.1}, {:.1}) -> 格子({}, {})", 
-                 screen_x, screen_y, world_x, world_y, target_grid_x, target_grid_y);
+    //     println!("🎯 双击寻路: 屏幕({:.1}, {:.1}) -> 世界({:.1}, {:.1}) -> 格子({}, {})", 
+    //              screen_x, screen_y, world_x, world_y, target_grid_x, target_grid_y);
         
-        // 获取地图数据
-        let map_data = if let Some((_, data)) = world.query_mut::<&crate::ecs::components::MapData>().into_iter().next() {
-            data.clone()
-        } else {
-            println!("❌ 无法获取地图数据");
-            return;
-        };
+    //     // 获取地图数据
+    //     let map_data = if let Some((_, data)) = world.query_mut::<&crate::ecs::components::MapData>().into_iter().next() {
+    //         data.clone()
+    //     } else {
+    //         println!("❌ 无法获取地图数据");
+    //         return;
+    //     };
         
-        // 检查目标是否可行走
-        if !MapHelper::is_walkable(&map_data, target_grid_x, target_grid_y) {
-            println!("❌ 目标位置不可行走");
-            return;
-        }
+    //     // 检查目标是否可行走
+    //     if !MapHelper::is_walkable(&map_data, target_grid_x, target_grid_y) {
+    //         println!("❌ 目标位置不可行走");
+    //         return;
+    //     }
         
-        // 获取玩家当前位置
-        let player_query = world.query_mut::<(&mut Player, &Position)>();
-        if let Some((_, (player, player_pos))) = player_query.into_iter().next() {
-            let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(player_pos.x, player_pos.y);
+    //     // 获取玩家当前位置
+    //     let player_query = world.query_mut::<(&mut Player, &Position)>();
+    //     if let Some((_, (player, player_pos))) = player_query.into_iter().next() {
+    //         let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(player_pos.x, player_pos.y);
             
-            println!("📍 玩家位置: 世界({:.1}, {:.1}) -> 格子({}, {})", 
-                     player_pos.x, player_pos.y, start_grid_x, start_grid_y);
+    //         println!("📍 玩家位置: 世界({:.1}, {:.1}) -> 格子({}, {})", 
+    //                  player_pos.x, player_pos.y, start_grid_x, start_grid_y);
             
-            // 创建寻路器
-            let map_data_clone = map_data.clone();
-            let pathfinder = PathFinder::new(
-                map_data.width,
-                map_data.height,
-                Box::new(move |p: Point| !MapHelper::is_walkable(&map_data_clone, p.x, p.y))
-            );
+    //         // 创建寻路器
+    //         let map_data_clone = map_data.clone();
+    //         let pathfinder = PathFinder::new(
+    //             map_data.width,
+    //             map_data.height,
+    //             Box::new(move |p: Point| !MapHelper::is_walkable(&map_data_clone, p.x, p.y))
+    //         );
             
-            // 执行寻路
-            let start_point = Point { x: start_grid_x, y: start_grid_y };
-            let target_point = Point { x: target_grid_x, y: target_grid_y };
+    //         // 执行寻路
+    //         let start_point = Point { x: start_grid_x, y: start_grid_y };
+    //         let target_point = Point { x: target_grid_x, y: target_grid_y };
             
-            if let Some(path) = pathfinder.find_path(start_point, target_point) {
-                println!("✅ 找到路径，长度: {}", path.len());
-                // 转换 Vec<Point> 为 Vec<(i32, i32)>
-                player.path = path.iter().map(|p| (p.x, p.y)).collect();
-                player.path_index = 0;
-                player.is_moving = true;
-                player.move_mode = MoveMode::AutoPathfinding;
-            } else {
-                println!("❌ 无法找到路径");
-            }
-        }
-    }
+    //         if let Some(path) = pathfinder.find_path(start_point, target_point) {
+    //             println!("✅ 找到路径，长度: {}", path.len());
+    //             // 转换 Vec<Point> 为 Vec<(i32, i32)>
+    //             player.path = path.iter().map(|p| (p.x, p.y)).collect();
+    //             player.path_index = 0;
+    //             player.is_moving = true;
+    //             player.move_mode = MoveMode::AutoPathfinding;
+    //         } else {
+    //             println!("❌ 无法找到路径");
+    //         }
+    //     }
+    // }
     
     /// 施放技能栏中的技能
     fn cast_spell_in_slot(
@@ -637,8 +637,8 @@ impl Scene for GameScene {
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,
-            camera.screen_width,   // 1280 (窗口逻辑宽度)
-            camera.screen_height,  // 960 (窗口逻辑高度)
+            camera.screen_width,  
+            camera.screen_height, 
         ));
         
         // 渲染地图瓦片

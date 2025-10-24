@@ -337,8 +337,6 @@ impl Scene for SelectScene {
     }
 
     fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, _world: &World) -> GameResult {
-        // 设置画布使用设计分辨率坐标系（1024x768）
-        // ggez会自动缩放到窗口大小，保持4:3比例
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,

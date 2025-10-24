@@ -155,10 +155,6 @@ impl Scene for LoginScene {
             (window_width, window_width / aspect_ratio)
         };
         
-        // 计算居中偏移（未使用，但保留用于调试）
-        let offset_x = (window_width - viewport_width) / 2.0;
-        let offset_y = (window_height - viewport_height) / 2.0;
-        
         // 设置画布使用设计分辨率坐标系（1024x768）
         // ggez会自动缩放到viewport大小
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(0.0, 0.0, DESIGN_WIDTH, DESIGN_HEIGHT));

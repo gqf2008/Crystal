@@ -274,7 +274,15 @@ impl InventoryDialog {
     }
     
     /// 绘制背包对话框
+    /// 
+    /// 参数:
+    /// - z_index: 绘制层级(越大越靠前), 默认为 50
     pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+        self.draw_with_z(ctx, canvas, 50)
+    }
+    
+    /// 绘制背包对话框(带 z-index 参数)
+    pub fn draw_with_z(&self, ctx: &mut Context, canvas: &mut Canvas, z_index: i32) -> GameResult {
         if !self.visible {
             return Ok(());
         }
@@ -289,28 +297,29 @@ impl InventoryDialog {
             bg_rect,
             Color::from_rgba(30, 30, 30, 230),
         )?;
-        canvas.draw(&bg_mesh, DrawParam::default());
+        canvas.draw(&bg_mesh, DrawParam::default().z(z_index));
         
-        // 绘制边框
+        // 绘制边框 (z+1, 在背景之上)
         let border_mesh = Mesh::new_rectangle(
             ctx,
             DrawMode::stroke(2.0),
             bg_rect,
             Color::from_rgb(100, 100, 100),
         )?;
-        canvas.draw(&border_mesh, DrawParam::default());
+        canvas.draw(&border_mesh, DrawParam::default().z(z_index + 1));
         
-        // 绘制标题
+        // 绘制标题 (z+2, 在边框之上)
         use ggez::graphics::Text;
         let title = Text::new("背包 (Inventory)");
         canvas.draw(
             &title,
             DrawParam::default()
                 .dest([self.x + 10.0, self.y + 8.0])
-                .color(Color::from_rgb(255, 255, 200)),
+                .color(Color::from_rgb(255, 255, 200))
+                .z(z_index + 2),
         );
         
-        // 绘制关闭按钮
+        // 绘制关闭按钮 (z+2, 在边框之上)
         let close_button_x = self.x + self.width - 30.0;
         let close_button_y = self.y + 3.0;
         let close_rect = Rect::new(close_button_x, close_button_y, 20.0, 20.0);
@@ -320,14 +329,15 @@ impl InventoryDialog {
             close_rect,
             Color::from_rgb(150, 50, 50),
         )?;
-        canvas.draw(&close_mesh, DrawParam::default());
+        canvas.draw(&close_mesh, DrawParam::default().z(z_index + 2));
         
         let close_text = Text::new("X");
         canvas.draw(
             &close_text,
             DrawParam::default()
                 .dest([close_button_x + 6.0, close_button_y + 2.0])
-                .color(Color::WHITE),
+                .color(Color::WHITE)
+                .z(z_index + 3),
         );
         
         // 绘制物品格子

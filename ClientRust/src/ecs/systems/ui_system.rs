@@ -15,7 +15,8 @@ use ggez::graphics::Canvas;
 
 use crate::ecs::ui::{
     MainDialogComp, InventoryDialogComp, CharacterDialogComp,
-    SkillBarComp, ChatDialogComp, ChatType, MagicLearningDialogComp
+    SkillBarComp, ChatDialogComp, ChatType, MagicLearningDialogComp,
+    QuestDialogComp, SkillsDialogComp, OptionsDialogComp
 };
 use crate::network::game_client::GameEvent;
 use crate::ecs::components::{LocalPlayer, PlayerComp, Mana, Health};
@@ -173,7 +174,13 @@ impl UISystem {
     
     /// 渲染所有 UI 组件
     /// 
-    /// 注意: 需要传入 DialogManager 来控制对话框可见性
+    /// 使用 DrawParam.z() 控制绘制顺序:
+    /// - z = 0: 主对话框(MainDialog) - 最底层,始终显示
+    /// - z = 1: 技能栏(SkillBar) - 底层固定UI
+    /// - z = 2: 聊天对话框(Chat) - 底层固定UI  
+    /// - z = 10-100: 可弹出对话框,根据 DialogManager 的 z_order 动态分配
+    ///   - 先打开的 z 值小,后打开的 z 值大,显示在上层
+    ///   - 点击对话框时会提升到最上层(最大 z 值)
     pub fn draw(
         &self,
         ctx: &mut Context,
@@ -181,14 +188,29 @@ impl UISystem {
         world: &World,
         current_time: u64,
     ) -> GameResult {
-        // 渲染主对话框 (始终显示)
+        // 🎯 第1层: 主对话框 (z=0, 最底层, 始终显示)
         for (_, dialog_comp) in world.query::<&MainDialogComp>().iter() {
             dialog_comp.dialog.draw(ctx, canvas)?;
         }
         
+        // 🎯 第2层: 技能栏 (z=1, 固定UI)
+        for (_, skill_bar_comp) in world.query::<&SkillBarComp>().iter() {
+            skill_bar_comp.dialog.draw(ctx, canvas, current_time)?;
+        }
+        
+        // 🎯 第3层: 聊天对话框 (z=2, 固定UI, 始终显示)
+        for (_, dialog_comp) in world.query::<&ChatDialogComp>().iter() {
+            dialog_comp.dialog.draw(ctx, canvas)?;
+        }
+        
+        // 🎯 第4层及以上: 可弹出对话框 (z=10+, 根据打开顺序动态分配)
+        // 注意: 这里暂时使用 is_open 字段,未来需要通过 DialogManager 获取 z_order
+        // TODO: 传入 DialogManager 的 render_order, 根据顺序设置 z 值
+        
         // 渲染背包对话框 (仅在打开时显示)
         for (_, dialog_comp) in world.query::<&InventoryDialogComp>().iter() {
             if dialog_comp.is_open {
+                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
                 dialog_comp.dialog.draw(ctx, canvas)?;
             }
         }
@@ -196,23 +218,39 @@ impl UISystem {
         // 渲染角色对话框 (仅在打开时显示)
         for (_, dialog_comp) in world.query::<&CharacterDialogComp>().iter() {
             if dialog_comp.is_open {
+                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
                 dialog_comp.dialog.draw(ctx, canvas)?;
             }
-        }
-        
-        // 渲染技能栏 (始终显示)
-        for (_, skill_bar_comp) in world.query::<&SkillBarComp>().iter() {
-            skill_bar_comp.dialog.draw(ctx, canvas, current_time)?;
-        }
-        
-        // 渲染聊天对话框 (始终显示)
-        for (_, dialog_comp) in world.query::<&ChatDialogComp>().iter() {
-            dialog_comp.dialog.draw(ctx, canvas)?;
         }
         
         // 渲染技能学习对话框 (仅在打开时显示)
         for (_, dialog_comp) in world.query::<&MagicLearningDialogComp>().iter() {
             if dialog_comp.is_open {
+                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
+                dialog_comp.dialog.draw(ctx, canvas)?;
+            }
+        }
+        
+        // 渲染任务对话框 (仅在打开时显示)
+        for (_, dialog_comp) in world.query::<&QuestDialogComp>().iter() {
+            if dialog_comp.is_open {
+                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
+                dialog_comp.dialog.draw(ctx, canvas)?;
+            }
+        }
+        
+        // 渲染技能对话框 (仅在打开时显示)
+        for (_, dialog_comp) in world.query::<&SkillsDialogComp>().iter() {
+            if dialog_comp.is_open {
+                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
+                dialog_comp.dialog.draw(ctx, canvas)?;
+            }
+        }
+        
+        // 渲染选项对话框 (仅在打开时显示)
+        for (_, dialog_comp) in world.query::<&OptionsDialogComp>().iter() {
+            if dialog_comp.is_open {
+                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
                 dialog_comp.dialog.draw(ctx, canvas)?;
             }
         }
