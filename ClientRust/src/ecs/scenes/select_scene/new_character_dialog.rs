@@ -612,20 +612,19 @@ impl NewCharacterDialog {
             );
         }
         
-        // 11. 绘制输入框光标 (精确计算位置)
+        // 11. 绘制输入框光标 (精确测量位置)
         if self.input_focused && self.cursor_visible {
-            // 精确计算光标位置：计算光标前所有字符的宽度
+            // 精确测量光标位置：使用ggez的文本测量API
             let text_before_cursor: String = self.name.chars().take(self.cursor_position).collect();
-            let mut text_width = 0.0;
             
-            // 根据字符类型计算宽度
-            for ch in text_before_cursor.chars() {
-                if ch.is_ascii() {
-                    text_width += 7.0;  // 英文/数字约7像素（14号字体）
-                } else {
-                    text_width += 14.0; // 中文约14像素（14号字体）
-                }
-            }
+            let text_width = if !text_before_cursor.is_empty() {
+                let mut temp_text = Text::new(&text_before_cursor);
+                temp_text.set_scale(PxScale::from(14.0));
+                temp_text.set_font("AlibabaPuHuiTi"); // 使用中文字体
+                temp_text.measure(ctx).map(|r| r.x).unwrap_or(0.0)
+            } else {
+                0.0
+            };
             
             let cursor_x = self.x + 325.0 + text_width;
             let cursor_y = self.y + 268.0;
@@ -641,18 +640,8 @@ impl NewCharacterDialog {
             canvas.draw(&cursor_mesh, DrawParam::default());
         }
         
-        // 12. 绘制错误消息
-        if let Some(ref error) = self.error_message {
-            let mut text = Text::new(error);
-            text.set_scale(PxScale::from(12.0));
-            text.set_font("AlibabaPuHuiTi"); // 使用中文字体
-            canvas.draw(
-                &text,
-                DrawParam::default()
-                    .dest([self.x + 50.0, self.y + 500.0])
-                    .color(Color::RED),
-            );
-        }
+        // 12. 绘制错误消息 (已移至 MessageBox，这里不再显示内联错误)
+        // 错误消息现在通过 MessageBox 显示，更符合原版UI体验
         
         Ok(())
     }

@@ -35,11 +35,12 @@ pub enum MessageBoxResult {
 
 impl MessageBox {
     // 相对于MessageBox纹理(Prguse 360)的偏移量
+    // C# 原版: OKButton位置(360,157), YesButton位置(260,157), NoButton位置(360,157)
     const OFFSET_OK_BUTTON_X: f32 = 360.0;
     const OFFSET_OK_BUTTON_Y: f32 = 157.0;
-    const OFFSET_YES_BUTTON_X: f32 = 285.0;  // Yes按钮靠左
+    const OFFSET_YES_BUTTON_X: f32 = 260.0;  // Yes按钮位置 (C#原版)
     const OFFSET_YES_BUTTON_Y: f32 = 157.0;
-    const OFFSET_NO_BUTTON_X: f32 = 395.0;   // No按钮靠右
+    const OFFSET_NO_BUTTON_X: f32 = 360.0;   // No按钮位置 (C#原版)
     const OFFSET_NO_BUTTON_Y: f32 = 157.0;
     const OFFSET_TEXT_X: f32 = 35.0;
     const OFFSET_TEXT_Y: f32 = 35.0;
@@ -63,8 +64,10 @@ impl MessageBox {
             MessageBoxButtons::YesNo => {
                 (
                     Button::new(0.0, 0.0, LibraryName::Title, 200), // 占位符，不使用
-                    Some(Button::new(x + Self::OFFSET_YES_BUTTON_X, y + Self::OFFSET_YES_BUTTON_Y, LibraryName::Title, 200)),
-                    Some(Button::new(x + Self::OFFSET_NO_BUTTON_X, y + Self::OFFSET_NO_BUTTON_Y, LibraryName::Title, 202))
+                    // C# 原版: Yes按钮索引206(Normal), 207(Hover), 208(Pressed)
+                    Some(Button::new(x + Self::OFFSET_YES_BUTTON_X, y + Self::OFFSET_YES_BUTTON_Y, LibraryName::Title, 206)),
+                    // C# 原版: No按钮索引210(Normal), 211(Hover), 212(Pressed)
+                    Some(Button::new(x + Self::OFFSET_NO_BUTTON_X, y + Self::OFFSET_NO_BUTTON_Y, LibraryName::Title, 210))
                 )
             }
         };
@@ -184,15 +187,26 @@ impl MessageBox {
         // 绘制背景 (Prguse Index=360)
         draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 360, self.x, self.y)?;
         
-        // 绘制消息文本（使用相对纹理的偏移）
-        let mut text = Text::new(&self.message);
-        text.set_scale(PxScale::from(14.0));
-        canvas.draw(
-            &text,
-            ggez::graphics::DrawParam::default()
-                .dest([self.x + Self::OFFSET_TEXT_X, self.y + Self::OFFSET_TEXT_Y])
-                .color(Color::WHITE),
-        );
+        // 绘制消息文本（支持换行和中文字体）
+        // 手动按 \n 分割并逐行绘制
+        let line_height = 20.0; // 行高
+        let mut y_offset = 0.0;
+        
+        for line in self.message.lines() {
+            let mut text = Text::new(line);
+            text.set_scale(PxScale::from(14.0));
+            text.set_font("AlibabaPuHuiTi"); // 使用中文字体
+            
+            // 绘制当前行
+            canvas.draw(
+                &text,
+                ggez::graphics::DrawParam::default()
+                    .dest([self.x + Self::OFFSET_TEXT_X, self.y + Self::OFFSET_TEXT_Y + y_offset])
+                    .color(Color::WHITE),
+            );
+            
+            y_offset += line_height;
+        }
         
         // 绘制按钮
         match self.buttons_type {

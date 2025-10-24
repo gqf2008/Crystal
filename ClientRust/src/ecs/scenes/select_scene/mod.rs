@@ -674,7 +674,7 @@ impl Scene for SelectScene {
         
         // 2. 处理角色槽位点击 (右侧垂直布局) - 使用设计坐标
         // C# 代码中的原始位置: (637, 194), (637, 298), (637, 402), (637, 506)
-        // 槽位大小约 80x80
+        // 槽位大小约 300x80（宽度覆盖整个角色信息区域）
         let character_button_positions = [
             (637.0, 194.0),
             (637.0, 298.0),
@@ -687,8 +687,9 @@ impl Scene for SelectScene {
                 break; // 没有更多角色
             }
             
-            // 检查点击是否在槽位范围内 (80x80) - 使用设计坐标
-            if design_x >= slot_x && design_x <= slot_x + 80.0 &&
+            // 检查点击是否在槽位范围内 (宽度300像素，高度80像素) - 使用设计坐标
+            // 扩大点击区域以包含整个角色信息栏
+            if design_x >= slot_x && design_x <= slot_x + 300.0 &&
                design_y >= slot_y && design_y <= slot_y + 80.0 {
                 // 点击了角色槽位
                 self.select_character(i as i32);

@@ -220,7 +220,7 @@ impl SelectScene {
         
         // 🆕 使用正确的 MessageBox 显示确认对话框
         let mut message_box = super::MessageBox::new(
-            format!("Are you sure you want to Delete the character {}?", character.name),
+            format!("Are you sure you want to Delete\nthe character {}?\n\nThis action cannot be undone!", character.name),
             super::MessageBoxButtons::YesNo,
             super::DESIGN_WIDTH,
             super::DESIGN_HEIGHT

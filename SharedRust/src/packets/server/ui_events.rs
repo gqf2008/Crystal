@@ -196,15 +196,38 @@ impl Packet for UpdateNotice {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let count = reader.read_i32::<LittleEndian>()?;
+
+        // 安全校验：避免根据恶意或损坏的数据分配巨量内存
+        // 合理上限：最多 200 条公告，每条公告不超过 32KB
+        const MAX_NOTICES: i32 = 200;
+        const MAX_NOTICE_LEN: i32 = 32 * 1024; // 32 KB
+
+        if count < 0 {
+            return Err(crate::data::stats::SharedError::NegativeLength { field: "notices_count", length: count });
+        }
+
+        if count > MAX_NOTICES {
+            return Err(crate::data::stats::SharedError::LengthTooLarge { field: "notices_count", length: count, max: MAX_NOTICES });
+        }
+
         let mut notices = Vec::with_capacity(count as usize);
-        
+
         for _ in 0..count {
             let len = reader.read_i32::<LittleEndian>()?;
+
+            if len < 0 {
+                return Err(crate::data::stats::SharedError::NegativeLength { field: "notice_length", length: len });
+            }
+
+            if len > MAX_NOTICE_LEN {
+                return Err(crate::data::stats::SharedError::LengthTooLarge { field: "notice_length", length: len, max: MAX_NOTICE_LEN });
+            }
+
             let mut bytes = vec![0u8; len as usize];
             reader.read_exact(&mut bytes)?;
             notices.push(String::from_utf8_lossy(&bytes).to_string());
         }
-        
+
         Ok(Self { notices })
     }
 }

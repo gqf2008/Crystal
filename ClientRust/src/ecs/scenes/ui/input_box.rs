@@ -55,23 +55,29 @@ impl InputBox {
     /// Mirrors C# constructor:
     /// ```csharp
     /// public MirInputBox(string message)
+    /// {
+    ///     Index = 360;  // Prguse
+    ///     Library = Libraries.Prguse;
+    ///     OKButton = new MirButton { Index = 200, ... };  // Title
+    ///     CancelButton = new MirButton { Index = 202, ... };  // Title
+    /// }
     /// ```
     pub fn new(prompt: String) -> Self {
-        // 居中显示
-        let width = 400.0;
-        let height = 250.0;
+        // 居中显示（使用设计分辨率坐标）
+        let width = 460.0;   // 和 MessageBox 一样的宽度
+        let height = 220.0;  // 和 MessageBox 一样的高度
         let x = (1024.0 - width) / 2.0;
         let y = (768.0 - height) / 2.0;
         
-        // 输入框位置
-        let input_x = x + 50.0;
-        let input_y = y + 100.0;
-        let input_width = width - 100.0;
+        // 输入框位置（相对于对话框背景）
+        let input_x = x + 35.0;   // 和文本位置对齐
+        let input_y = y + 90.0;   // 在提示文本下方
+        let input_width = width - 70.0;
         
-        // 按钮位置
-        let button_y = y + height - 60.0;
-        let ok_x = x + (width / 2.0) - 90.0;
-        let cancel_x = x + (width / 2.0) + 10.0;
+        // 按钮位置（和 MessageBox 一致）
+        let button_y = y + 157.0;  // MessageBox 的按钮 Y 偏移
+        let ok_x = x + 195.0;      // OK 按钮居中偏左
+        let cancel_x = x + 285.0;  // Cancel 按钮居中偏右
         
         Self {
             x,
@@ -125,41 +131,42 @@ impl InputBox {
         )?;
         canvas.draw(&screen_rect, DrawParam::default());
         
-        // 绘制对话框背景
+        // 绘制对话框背景（Prguse Index=360，和 MessageBox 一样）
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
             if let Ok(mut lib) = lib_arc.try_lock() {
-                let _ = lib.draw_with_color(ctx, canvas, 394, self.x, self.y, Color::WHITE, false);
+                let _ = lib.draw_with_color(ctx, canvas, 360, self.x, self.y, Color::WHITE, false);
             }
         }
         
         // 绘制提示文本
-        let text_x = self.x + 20.0;
-        let text_y = self.y + 40.0;
+        let text_x = self.x + 35.0;  // 和 MessageBox 文本偏移一致
+        let text_y = self.y + 35.0;
         
-        let prompt_text = Text::new(&self.prompt);
+        let mut prompt_text = Text::new(&self.prompt);
+        prompt_text.set_font("AlibabaPuHuiTi");  // 使用中文字体
+        prompt_text.set_scale(14.0);
         canvas.draw(
             &prompt_text,
             DrawParam::default()
                 .dest([text_x, text_y])
-                .color(Color::WHITE)
-                .scale([1.0, 1.0]),
+                .color(Color::WHITE),
         );
         
         // 绘制输入框
-        let _ = self.input.draw(ctx, canvas);  // 忽略错误，使用 GameResult
+        let _ = self.input.draw(ctx, canvas);
         
-        // 绘制 OK 按钮
+        // 绘制 OK 按钮（Title Index=200/201）
         let (ok_x, ok_y, _, _) = self.ok_button_rect;
-        let ok_index = if self.ok_hover { 361 } else { 360 };
+        let ok_index = if self.ok_hover { 201 } else { 200 };
         if let Some(lib_arc) = get_library(LibraryName::Title) {
             if let Ok(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, ok_index, ok_x, ok_y, Color::WHITE, false);
             }
         }
         
-        // 绘制 Cancel 按钮
+        // 绘制 Cancel 按钮（Title Index=202/203）
         let (cancel_x, cancel_y, _, _) = self.cancel_button_rect;
-        let cancel_index = if self.cancel_hover { 363 } else { 362 };
+        let cancel_index = if self.cancel_hover { 203 } else { 202 };
         if let Some(lib_arc) = get_library(LibraryName::Title) {
             if let Ok(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, cancel_index, cancel_x, cancel_y, Color::WHITE, false);
