@@ -325,7 +325,7 @@ impl Default for GraphicsSettings {
             always_on_top: true,
             fps_cap: true,
             max_fps: 100,
-            resolution: SupportedResolution::W1280H720,  // 改为1280x720，更现代的16:9宽屏
+            resolution: SupportedResolution::W1600H1200,  // 更大的4:3分辨率
             debug_mode: false,
             use_mouse_cursors: true,
         }
@@ -871,7 +871,8 @@ impl ResolutionSize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupportedResolution {
     W1024H768,
-    W1280H720,
+    W1280H960,
+    W1600H1200,  // 4:3 更大的分辨率
     W1366H768,
     W1920H1080,
 }
@@ -880,7 +881,8 @@ impl SupportedResolution {
     pub fn dimensions(self) -> ResolutionSize {
         match self {
             SupportedResolution::W1024H768 => ResolutionSize::new(1024, 768),
-            SupportedResolution::W1280H720 => ResolutionSize::new(1280, 720),
+            SupportedResolution::W1280H960 => ResolutionSize::new(1280, 960),
+            SupportedResolution::W1600H1200 => ResolutionSize::new(1600, 1200),
             SupportedResolution::W1366H768 => ResolutionSize::new(1366, 768),
             SupportedResolution::W1920H1080 => ResolutionSize::new(1920, 1080),
         }
@@ -889,7 +891,8 @@ impl SupportedResolution {
     fn from_str(value: &str) -> Option<Self> {
         match value.to_ascii_lowercase().as_str() {
             "w1024h768" | "1024" => Some(SupportedResolution::W1024H768),
-            "w1280h720" | "1280" => Some(SupportedResolution::W1280H720),
+            "w1280h960" | "1280" => Some(SupportedResolution::W1280H960),
+            "w1600h1200" | "1600" => Some(SupportedResolution::W1600H1200),
             "w1366h768" | "1366" => Some(SupportedResolution::W1366H768),
             "w1920h1080" | "1920" => Some(SupportedResolution::W1920H1080),
             _ => None,
@@ -907,7 +910,8 @@ impl fmt::Display for SupportedResolution {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
             SupportedResolution::W1024H768 => "w1024h768",
-            SupportedResolution::W1280H720 => "w1280h720",
+            SupportedResolution::W1280H960 => "w1280h960",
+            SupportedResolution::W1600H1200 => "w1600h1200",
             SupportedResolution::W1366H768 => "w1366h768",
             SupportedResolution::W1920H1080 => "w1920h1080",
         };

@@ -88,6 +88,12 @@ pub struct ChatDialog {
     
     /// 悬停状态
     hovered: bool,
+    
+    /// 光标闪烁计时器 (帧数)
+    cursor_blink_timer: u32,
+    
+    /// 光标是否可见 (每30帧切换一次)
+    cursor_visible: bool,
 }
 
 /// 聊天对话框操作
@@ -130,6 +136,8 @@ impl ChatDialog {
             input_text: String::new(),
             input_active: false,
             hovered: false,
+            cursor_blink_timer: 0,
+            cursor_visible: true,
         }
     }
     
@@ -173,9 +181,25 @@ impl ChatDialog {
         self.visible
     }
     
+    /// 更新（每帧调用，用于光标闪烁）
+    pub fn update(&mut self) {
+        if self.input_active {
+            self.cursor_blink_timer += 1;
+            if self.cursor_blink_timer >= 30 {  // 每30帧切换一次（约0.5秒）
+                self.cursor_blink_timer = 0;
+                self.cursor_visible = !self.cursor_visible;
+            }
+        } else {
+            self.cursor_blink_timer = 0;
+            self.cursor_visible = true;
+        }
+    }
+    
     /// 激活输入框
     pub fn activate_input(&mut self) {
         self.input_active = true;
+        self.cursor_blink_timer = 0;
+        self.cursor_visible = true;
     }
     
     /// 取消输入
@@ -480,6 +504,23 @@ impl ChatDialog {
                     })
                     .scale([0.7, 0.7]),
             );
+            
+            // 绘制闪烁光标（只在输入激活且有实际文本时显示）
+            if self.input_active && !self.input_text.is_empty() && self.cursor_visible {
+                // 简单估算文本宽度：每个字符约6像素宽（缩放0.7后）
+                let char_count = self.input_text.chars().count();
+                let text_width = char_count as f32 * 6.0 * 0.7;
+                let cursor_x = self.x + 8.0 + text_width;
+                let cursor_y = self.y + self.height - 18.0;
+                
+                let cursor = ggez::graphics::Mesh::new_rectangle(
+                    ctx,
+                    ggez::graphics::DrawMode::fill(),
+                    Rect::new(cursor_x, cursor_y, 1.5, 12.0),
+                    Color::WHITE,
+                )?;
+                canvas.draw(&cursor, DrawParam::default());
+            }
         }
         
         // 发送按钮

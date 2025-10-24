@@ -28,6 +28,12 @@ pub struct MainDialog {
     /// 主界面背景索引 (根据分辨率: 800->0, 1024->1, 1280+->2)
     bg_index: i32,
     
+    /// 主界面背景实际宽度 (从图像库获取)
+    dialog_width: f32,
+    
+    /// 主界面背景实际高度 (从图像库获取)
+    dialog_height: f32,
+    
     /// 底部按钮组
     buttons: ButtonGroup,
     
@@ -54,6 +60,21 @@ pub struct MainDialog {
     
     /// 背包空间 (已用/总计)
     pub bag_space: (u32, u32),
+    
+    /// 是否显示左右延伸Cap (分辨率>1024时)
+    show_caps: bool,
+    
+    /// 输入框文本
+    input_text: String,
+    
+    /// 输入框是否激活
+    input_active: bool,
+    
+    /// 光标闪烁计时器
+    cursor_blink_timer: u32,
+    
+    /// 光标是否可见
+    cursor_visible: bool,
 }
 
 impl MainDialog {
@@ -68,13 +89,39 @@ impl MainDialog {
             2  // Prguse_2 (1280x1024+)
         };
         
+        // 🔧 从图像库获取主面板背景的真实尺寸 (与C#一致)
+        let (dialog_width, dialog_height) = if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                match lib.get_image_info(bg_index as usize) {
+                    Ok(info) => {
+                        println!("✅ MainDialog: bg_index={}, width={}, height={}", bg_index, info.width, info.height);
+                        (info.width as f32, info.height as f32)
+                    }
+                    Err(e) => {
+                        println!("❌ Failed to get image info: {}", e);
+                        // 回退值
+                        (800.0, 168.0)
+                    }
+                }
+            } else {
+                println!("❌ Failed to lock Prguse library");
+                (800.0, 168.0)
+            }
+        } else {
+            println!("❌ Prguse library not loaded");
+            (800.0, 168.0)
+        };
+        
+        println!("🔍 MainDialog位置计算: screen_width={}, screen_height={}, dialog_width={}, dialog_height={}", 
+                 screen_width, screen_height, dialog_width, dialog_height);
+        
         // 创建底部按钮组
         let mut buttons = ButtonGroup::new();
         
-        // 计算按钮位置 (相对于主界面底部)
-        let dialog_width = if screen_width <= 800.0 { 800.0 } else if screen_width <= 1024.0 { 1024.0 } else { 1280.0 };
+        // 计算按钮位置 (相对于主界面底部) - 与C#完全一致
         let dialog_x = (screen_width - dialog_width) / 2.0;
-        let button_y = screen_height - 168.0 + 76.0;  // MainDialog 高度约 168, 按钮在 Y=76
+        let dialog_y = screen_height - dialog_height;
+        let button_y = dialog_y + 76.0;  // 按钮在主面板内 Y=76 处
         
         // 背包按钮 (Inventory) - Prguse_1903/1904/1905
         buttons.add(
@@ -122,6 +169,8 @@ impl MainDialog {
             screen_width,
             screen_height,
             bg_index,
+            dialog_width,
+            dialog_height,
             buttons,
             health: 100.0,
             mana: 100.0,
@@ -131,6 +180,11 @@ impl MainDialog {
             gold: 0,
             weight: (0, 100),
             bag_space: (0, 40),
+            show_caps: screen_width > 1024.0,  // 大于1024分辨率显示Cap
+            input_text: String::new(),
+            input_active: false,
+            cursor_blink_timer: 0,
+            cursor_visible: true,
         }
     }
     
@@ -138,39 +192,59 @@ impl MainDialog {
     pub fn resize(&mut self, width: f32, height: f32) {
         self.screen_width = width;
         self.screen_height = height;
+        self.show_caps = width > 1024.0;  // 更新是否显示Cap
+        
+        // 重新获取背景索引
+        let bg_index = if width <= 800.0 {
+            0
+        } else if width <= 1024.0 {
+            1
+        } else {
+            2
+        };
+        self.bg_index = bg_index;
+        
+        // 重新从图像库获取尺寸
+        if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                if let Ok(info) = lib.get_image_info(bg_index as usize) {
+                    self.dialog_width = info.width as f32;
+                    self.dialog_height = info.height as f32;
+                }
+            }
+        }
         
         // 重新计算按钮位置
-        let dialog_width = if width <= 800.0 { 800.0 } else if width <= 1024.0 { 1024.0 } else { 1280.0 };
-        let dialog_x = (width - dialog_width) / 2.0;
-        let button_y = height - 168.0 + 76.0;
+        let dialog_x = (width - self.dialog_width) / 2.0;
+        let button_y = height - self.dialog_height + 76.0;
         
         // 更新按钮位置
         if let Some(btn) = self.buttons.get_mut(1) {
-            btn.x = dialog_x + dialog_width - 96.0;
+            btn.x = dialog_x + self.dialog_width - 96.0;
             btn.y = button_y;
         }
         if let Some(btn) = self.buttons.get_mut(2) {
-            btn.x = dialog_x + dialog_width - 119.0;
+            btn.x = dialog_x + self.dialog_width - 119.0;
             btn.y = button_y;
         }
         if let Some(btn) = self.buttons.get_mut(3) {
-            btn.x = dialog_x + dialog_width - 73.0;
+            btn.x = dialog_x + self.dialog_width - 73.0;
             btn.y = button_y;
         }
         if let Some(btn) = self.buttons.get_mut(4) {
-            btn.x = dialog_x + dialog_width - 50.0;
+            btn.x = dialog_x + self.dialog_width - 50.0;
             btn.y = button_y;
         }
         if let Some(btn) = self.buttons.get_mut(5) {
-            btn.x = dialog_x + dialog_width - 27.0;
+            btn.x = dialog_x + self.dialog_width - 27.0;
             btn.y = button_y;
         }
         if let Some(btn) = self.buttons.get_mut(6) {
-            btn.x = dialog_x + dialog_width - 55.0;
+            btn.x = dialog_x + self.dialog_width - 55.0;
             btn.y = button_y - 41.0;
         }
         if let Some(btn) = self.buttons.get_mut(7) {
-            btn.x = dialog_x + dialog_width - 105.0;
+            btn.x = dialog_x + self.dialog_width - 105.0;
             btn.y = button_y - 41.0;
         }
     }
@@ -178,6 +252,58 @@ impl MainDialog {
     /// 更新鼠标悬停状态
     pub fn update_hover(&mut self, mouse_x: f32, mouse_y: f32) {
         self.buttons.update_hover(mouse_x, mouse_y);
+    }
+    
+    /// 更新（每帧调用，用于光标闪烁）
+    pub fn update(&mut self) {
+        if self.input_active {
+            self.cursor_blink_timer += 1;
+            if self.cursor_blink_timer >= 30 {  // 每30帧切换一次（约0.5秒）
+                self.cursor_blink_timer = 0;
+                self.cursor_visible = !self.cursor_visible;
+            }
+        } else {
+            self.cursor_blink_timer = 0;
+            self.cursor_visible = true;
+        }
+    }
+    
+    /// 激活输入框
+    pub fn activate_input(&mut self) {
+        self.input_active = true;
+        self.cursor_blink_timer = 0;
+        self.cursor_visible = true;
+    }
+    
+    /// 取消输入
+    pub fn deactivate_input(&mut self) {
+        self.input_active = false;
+        self.input_text.clear();
+    }
+    
+    /// 输入字符
+    pub fn input_char(&mut self, ch: char) {
+        if !self.input_active {
+            return;
+        }
+        
+        if self.input_text.len() < 100 {
+            self.input_text.push(ch);
+        }
+    }
+    
+    /// 删除字符
+    pub fn backspace(&mut self) {
+        if !self.input_active {
+            return;
+        }
+        
+        self.input_text.pop();
+    }
+    
+    /// 获取输入文本
+    pub fn get_input(&self) -> &str {
+        &self.input_text
     }
     
     /// 处理鼠标点击
@@ -200,11 +326,50 @@ impl MainDialog {
     
     /// 绘制主界面
     pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
-        let dialog_width = if self.screen_width <= 800.0 { 800.0 } else if self.screen_width <= 1024.0 { 1024.0 } else { 1280.0 };
-        let dialog_x = (self.screen_width - dialog_width) / 2.0;
-        let dialog_y = self.screen_height - 168.0;
+        // 使用从图像库获取的真实尺寸 (与C#的Size属性一致)
+        let dialog_x = (self.screen_width - self.dialog_width) / 2.0;
+        let dialog_y = self.screen_height - self.dialog_height;
         
-        // 1. 绘制主界面背景 (Prguse_0/1/2)
+        // 调试输出 (只打印一次)
+        static mut PRINTED: bool = false;
+        unsafe {
+            if !PRINTED {
+                println!("🖼️ MainDialog实际尺寸: bg_index={}, dialog_width={}, dialog_height={}", 
+                         self.bg_index, self.dialog_width, self.dialog_height);
+                println!("📐 屏幕尺寸: {}x{}, 面板位置: ({}, {})", 
+                         self.screen_width, self.screen_height, dialog_x, dialog_y);
+                PRINTED = true;
+            }
+        }
+        
+        // 1. 绘制左右延伸Cap（大于1024分辨率时平铺）
+        if self.show_caps {
+            if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+                if let Ok(mut lib) = lib_arc.try_lock() {
+                    // LeftCap (Prguse_12): 位于主面板左侧，Y偏移 -96+168=72
+                    let left_cap_x = dialog_x - 67.0;
+                    let left_cap_y = dialog_y + 72.0;
+                    let _ = lib.draw_with_color(
+                        ctx, canvas,
+                        12,  // LeftCap
+                        left_cap_x, left_cap_y,
+                        Color::WHITE, false
+                    );
+                    
+                    // RightCap (Prguse_13): 位于主面板右侧，Y偏移 -104+168=64
+                    let right_cap_x = dialog_x + self.dialog_width;
+                    let right_cap_y = dialog_y + 64.0;
+                    let _ = lib.draw_with_color(
+                        ctx, canvas,
+                        13,  // RightCap
+                        right_cap_x, right_cap_y,
+                        Color::WHITE, false
+                    );
+                }
+            }
+        }
+        
+        // 2. 绘制主界面背景 (Prguse_0/1/2)
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
             if let Ok(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(
@@ -216,24 +381,24 @@ impl MainDialog {
             }
         }
         
-        // 2. 绘制生命球 (红色进度条)
+        // 3. 绘制生命球 (红色进度条)
         self.draw_health_orb(ctx, canvas, dialog_x + 9.0, dialog_y + 30.0)?;
         
-        // 3. 绘制魔法球 (蓝色进度条,如果不是纯战士)
+        // 4. 绘制魔法球 (蓝色进度条,如果不是纯战士)
         if self.level >= 26 {
             self.draw_mana_orb(ctx, canvas, dialog_x + 9.0, dialog_y + 30.0)?;
         }
         
-        // 4. 绘制经验条
+        // 5. 绘制经验条
         self.draw_experience_bar(ctx, canvas, dialog_x + 9.0, dialog_y + 143.0)?;
         
-        // 5. 绘制负重条
-        self.draw_weight_bar(ctx, canvas, dialog_x + dialog_width - 105.0, dialog_y + 103.0)?;
+        // 6. 绘制负重条
+        self.draw_weight_bar(ctx, canvas, dialog_x + self.dialog_width - 105.0, dialog_y + 103.0)?;
         
-        // 6. 绘制文字信息
+        // 7. 绘制文字信息
         self.draw_labels(ctx, canvas, dialog_x, dialog_y)?;
         
-        // 7. 绘制按钮
+        // 8. 绘制按钮
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
             if let Ok(mut lib) = lib_arc.try_lock() {
                 for button in &self.buttons.buttons {
@@ -243,13 +408,69 @@ impl MainDialog {
                         ctx, canvas,
                         texture_index as usize,
                         button.x, button.y,
-                        color, false
+                        color, true  // 使用纹理自带的offset
                     );
                 }
             }
         }
         
-        // 8. 绘制工具提示
+        // 9. 绘制输入框（在主面板中间偏下）
+        let input_box_x = dialog_x + self.dialog_width / 2.0 - 150.0;
+        let input_box_y = dialog_y + 130.0;
+        let input_box_width = 300.0;
+        let input_box_height = 20.0;
+        
+        // 输入框背景
+        if let Ok(input_bg) = Mesh::new_rectangle(
+            ctx,
+            DrawMode::fill(),
+            Rect::new(input_box_x, input_box_y, input_box_width, input_box_height),
+            if self.input_active {
+                Color::from_rgba(255, 255, 255, 255)  // 激活时白色背景
+            } else {
+                Color::from_rgba(200, 200, 200, 150)  // 未激活时半透明
+            },
+        ) {
+            canvas.draw(&input_bg, DrawParam::default());
+        }
+        
+        // 输入框边框
+        if let Ok(input_border) = Mesh::new_rectangle(
+            ctx,
+            DrawMode::stroke(1.0),
+            Rect::new(input_box_x, input_box_y, input_box_width, input_box_height),
+            Color::from_rgb(100, 100, 100),
+        ) {
+            canvas.draw(&input_border, DrawParam::default());
+        }
+        
+        // 输入文本
+        if !self.input_text.is_empty() {
+            let mut text = Text::new(&self.input_text);
+            text.set_scale(PxScale::from(14.0));
+            canvas.draw(&text, DrawParam::default()
+                .dest([input_box_x + 5.0, input_box_y + 3.0])
+                .color(Color::BLACK));
+            
+            // 绘制闪烁光标
+            if self.input_active && self.cursor_visible {
+                let char_count = self.input_text.chars().count();
+                let text_width = char_count as f32 * 8.0;  // 估算文本宽度
+                let cursor_x = input_box_x + 5.0 + text_width;
+                let cursor_y = input_box_y + 3.0;
+                
+                if let Ok(cursor) = Mesh::new_rectangle(
+                    ctx,
+                    DrawMode::fill(),
+                    Rect::new(cursor_x, cursor_y, 1.5, 14.0),
+                    Color::BLACK,
+                ) {
+                    canvas.draw(&cursor, DrawParam::default());
+                }
+            }
+        }
+        
+        // 10. 绘制按钮工具提示
         for button in &self.buttons.buttons {
             if let Some(tooltip_text) = button.get_tooltip() {
                 self.draw_tooltip(ctx, canvas, tooltip_text, button.x, button.y - 25.0)?;
@@ -260,52 +481,62 @@ impl MainDialog {
         Ok(())
     }
     
-    /// 绘制生命球
+    /// 绘制生命球（使用Prguse_4双球或Prguse_6单球纹理）
     fn draw_health_orb(&self, ctx: &mut Context, canvas: &mut Canvas, x: f32, y: f32) -> GameResult {
         let health_percent = self.health / 100.0;
-        let bar_width = 80.0 * health_percent;
+        let hp_only = self.level < 26;  // 26级以下只显示生命
         
-        // 绘制红色生命条
-        if bar_width > 0.0 {
-            let rect = Rect::new(x + 3.0, y + 7.0, bar_width, 12.0);
-            if let Ok(mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), rect, Color::from_rgb(200, 0, 0)) {
-                canvas.draw(&mesh, DrawParam::default());
+        // 计算生命高度（从底部向上填充）
+        let max_height = 80.0;
+        let height = (max_height * health_percent).clamp(0.0, max_height);
+        
+        if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                let orb_image = if hp_only { 6 } else { 4 };  // 6=单球, 4=双球
+                let orb_width = if hp_only { 100.0 } else { 50.0 };
+                
+                // 使用draw_section绘制部分纹理（从底部向上）
+                let src_y = max_height - height;
+                let _ = lib.draw_section(
+                    ctx, canvas,
+                    orb_image,
+                    0.0, src_y,
+                    orb_width, height,
+                    x, y + src_y,
+                    Color::WHITE,
+                    false  // 不使用offset（坐标已经是绝对位置）
+                );
             }
         }
-        
-        // 绘制生命值文字
-        let hp_text = format!("{:.0}", self.health);
-        let mut text = Text::new(&hp_text);
-        text.set_font("AlibabaPuHuiTi");
-        text.set_scale(PxScale::from(12.0));
-        canvas.draw(&text, DrawParam::default()
-            .dest([x + 42.0 - text.measure(ctx)?.x / 2.0, y + 7.0])
-            .color(Color::WHITE));
         
         Ok(())
     }
     
-    /// 绘制魔法球
+    /// 绘制魔法球（只在26级以上且不是HP-only时绘制）
     fn draw_mana_orb(&self, ctx: &mut Context, canvas: &mut Canvas, x: f32, y: f32) -> GameResult {
-        let mana_percent = self.mana / 100.0;
-        let bar_width = 80.0 * mana_percent;
-        
-        // 绘制蓝色魔法条
-        if bar_width > 0.0 {
-            let rect = Rect::new(x + 3.0, y + 22.0, bar_width, 12.0);
-            if let Ok(mesh) = Mesh::new_rectangle(ctx, DrawMode::fill(), rect, Color::from_rgb(0, 0, 200)) {
-                canvas.draw(&mesh, DrawParam::default());
-            }
+        if self.level < 26 {
+            return Ok(());  // 26级以下不显示魔法
         }
         
-        // 绘制魔法值文字
-        let mp_text = format!("{:.0}", self.mana);
-        let mut text = Text::new(&mp_text);
-        text.set_font("AlibabaPuHuiTi");
-        text.set_scale(PxScale::from(12.0));
-        canvas.draw(&text, DrawParam::default()
-            .dest([x + 42.0 - text.measure(ctx)?.x / 2.0, y + 22.0])
-            .color(Color::WHITE));
+        let mana_percent = self.mana / 100.0;
+        let max_height = 80.0;
+        let height = (max_height * mana_percent).clamp(0.0, max_height);
+        
+        if let Some(lib_arc) = get_library(LibraryName::Prguse) {
+            if let Ok(mut lib) = lib_arc.try_lock() {
+                // 魔法球在Prguse_4的右半部分（X=51）
+                let src_y = max_height - height;
+                let _ = lib.draw_section(
+                    ctx, canvas,
+                    4,  // 双球纹理
+                    51.0, src_y,
+                    50.0, height,
+                    x + 51.0, y + src_y,
+                    Color::WHITE,
+                    false  // 不使用offset（坐标已经是绝对位置）
+                );
+            }
+        }
         
         Ok(())
     }

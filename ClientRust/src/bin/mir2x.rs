@@ -18,7 +18,6 @@ use ggez::{
     conf::{WindowMode, WindowSetup, NumSamples},
     ContextBuilder,
 };
-use tracing::info;
 
 use mir2_client::ecs::{GameState, ime_handler};
 use mir2_client::program::ClientRuntime;
@@ -29,7 +28,7 @@ fn main() -> Result<()> {
     println!("========================================\n");
 
     // 1. 初始化日志系统 (使用 ClientRuntime 统一方法)
-    ClientRuntime::init_logging("debug");
+    ClientRuntime::init_logging("info");
     tracing::info!("=== Crystal Mir2 Client (ECS版本) ===");
     
     // 2. 加载配置 (使用 ClientRuntime 统一方法)
@@ -49,6 +48,7 @@ fn main() -> Result<()> {
     
     // 5. 创建 ggez Context (从配置读取窗口尺寸，但强制调整为4:3比例)
     let resolution = settings.resolution();
+    tracing::info!("🎨 请求的窗口分辨率: {}x{}", resolution.width, resolution.height);
     // UI纹理是4:3设计，需要强制窗口为4:3比例
     let initial_width = resolution.width as f32;
     let initial_height = (initial_width * 3.0 / 4.0).round();  // 强制4:3比例
@@ -63,14 +63,16 @@ fn main() -> Result<()> {
         .window_mode(
             WindowMode::default()
                 .dimensions(initial_width, initial_height)
-                .resizable(false)  // 允许缩放，但会强制保持4:3比例
+                .resizable(false) 
                 .resize_on_scale_factor_change(true)
         )
         .build()?;
-    
-    info!(
-        "Ggez Context 创建成功: {}x{} (可缩放，4:3比例)",
-        initial_width, initial_height
+   let (w,h)= ctx.gfx.drawable_size();
+   let wsize=ctx.gfx.window().inner_size();
+   let scale_factor = ctx.gfx.window().scale_factor();
+    tracing::info!(
+        "Ggez Context 创建成功: 物理{}x{} 逻辑{:?} DPI{}x (4:3比例)",
+        w, h,wsize, scale_factor
     );
     
     // 6. 添加中文字体支持 (使用 ClientRuntime 统一路径)

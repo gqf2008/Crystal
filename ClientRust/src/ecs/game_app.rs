@@ -227,7 +227,11 @@ impl GameState {
                 scene.set_command_sender(self.command_tx.clone());
                 Box::new(scene)
             },
-            SceneType::Game => Box::new(GameScene::new(ctx, &mut self.world)?),
+            SceneType::Game => {
+                // GameScene 使用固定的 UI 设计分辨率 1024×768
+                // 不需要传递配置的窗口分辨率
+                Box::new(GameScene::new(ctx, &mut self.world)?)
+            },
         };
         
         Ok(())
@@ -321,6 +325,10 @@ impl EventHandler for GameState {
     }
     
     fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) -> GameResult {
-        self.current_scene.on_resize(ctx, &mut self.world, width, height)
+        // 在高 DPI 显示器上，ggez 传递的是物理像素，需要转换为逻辑像素
+        let scale_factor = ctx.gfx.window().scale_factor() as f32;
+        let logical_width = width / scale_factor;
+        let logical_height = height / scale_factor;
+        self.current_scene.on_resize(ctx, &mut self.world, logical_width, logical_height)
     }
 }

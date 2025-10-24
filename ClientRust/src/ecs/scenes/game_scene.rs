@@ -32,6 +32,10 @@ use crate::objects::{MapReader, PathFinder};
 use crate::graphics::libraries::initialize_all_libraries;
 use mir2_shared::Point;
 
+// UI 设计分辨率 (所有 UI 元素都基于此设计)
+const DESIGN_WIDTH: f32 = 1024.0;
+const DESIGN_HEIGHT: f32 = 768.0;
+
 /// 游戏场景
 pub struct GameScene {
     /// 相机实体
@@ -98,13 +102,21 @@ impl GameScene {
                  spawn_grid_x, spawn_grid_y, spawn_x, spawn_y);
         
         // 创建相机实体
-        let screen = ctx.gfx.drawable_size();
+        // Camera 的 screen_width/height 用于地图渲染视野计算
+        // 注意: UI 使用固定的设计分辨率 1024×768,与窗口实际大小无关
+        let drawable = ctx.gfx.drawable_size();
+        let scale_factor = ctx.gfx.window().scale_factor() as f32;
+        let screen_width = drawable.0 / scale_factor;   // 逻辑窗口宽度
+        let screen_height = drawable.1 / scale_factor;  // 逻辑窗口高度
+        tracing::info!("📐 窗口尺寸: {}x{} (物理: {}x{}, DPI: {}x) | UI设计: {}x{}", 
+                      screen_width, screen_height, drawable.0, drawable.1, scale_factor,
+                      DESIGN_WIDTH, DESIGN_HEIGHT);
         let camera_entity = world.spawn((
             Position { x: spawn_x, y: spawn_y },
             Camera {
                 zoom: 1.75,  // 初始缩放1.75x，让角色看起来更大
-                screen_width: screen.0,
-                screen_height: screen.1,
+                screen_width,
+                screen_height,
             },
             Draggable {
                 is_dragging: false,
@@ -247,9 +259,9 @@ impl GameScene {
         let ui_font_name = Self::load_chinese_font(ctx)?;
         
         // 创建主对话框实体
-        let screen = ctx.gfx.drawable_size();
+        // UI 使用固定设计分辨率 1024×768
         let main_dialog_entity = world.spawn((
-            MainDialogComp::new(screen.0, screen.1),
+            MainDialogComp::new(DESIGN_WIDTH, DESIGN_HEIGHT),
         ));
         
         // 创建背包对话框实体
@@ -270,7 +282,7 @@ impl GameScene {
         
         // 创建聊天对话框实体
         let chat_dialog_entity = world.spawn((
-            ChatDialogComp::new(0.0, screen.1 - 300.0), // 屏幕底部
+            ChatDialogComp::new(0.0, screen_height - 300.0), // 屏幕底部
         ));
         
         // 创建技能学习对话框实体
@@ -331,6 +343,40 @@ impl GameScene {
     // ========================================================================
     // UI 组件访问辅助方法
     // ========================================================================
+    
+    /// 将窗口物理坐标转换为 UI 设计坐标系（1024×768）
+    /// 用于 UI 鼠标事件处理,因为 UI 使用设计坐标绘制
+    fn window_to_ui_coords(&self, ctx: &Context, window_x: f32, window_y: f32) -> (f32, f32) {
+        let window_size = ctx.gfx.drawable_size();
+        let window_width = window_size.0;
+        let window_height = window_size.1;
+        
+        // UI 固定使用设计分辨率 1024×768
+        let design_width = DESIGN_WIDTH;
+        let design_height = DESIGN_HEIGHT;
+        
+        // 计算4:3视口
+        let aspect_ratio = 4.0 / 3.0;
+        let current_ratio = window_width / window_height;
+        
+        let (viewport_width, viewport_height) = if current_ratio > aspect_ratio {
+            (window_height * aspect_ratio, window_height)
+        } else {
+            (window_width, window_width / aspect_ratio)
+        };
+        
+        let offset_x = (window_width - viewport_width) / 2.0;
+        let offset_y = (window_height - viewport_height) / 2.0;
+        
+        // 转换：窗口坐标 -> 视口坐标 -> 设计坐标
+        let viewport_x = window_x - offset_x;
+        let viewport_y = window_y - offset_y;
+        
+        let design_x = (viewport_x / viewport_width) * design_width;
+        let design_y = (viewport_y / viewport_height) * design_height;
+        
+        (design_x, design_y)
+    }
     
     /// 获取主对话框的可变引用
     fn get_main_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut MainDialogComp> {
@@ -566,6 +612,16 @@ impl Scene for GameScene {
         let delta_time = 1.0 / max_fps as f32;
         MonsterSystem::update(world, delta_time);
         
+        // 更新聊天对话框（用于光标闪烁）
+        if let Some(mut chat_dialog) = self.get_chat_dialog_mut(world) {
+            chat_dialog.dialog.update();
+        }
+        
+        // 更新主对话框（用于输入框光标闪烁）
+        if let Some(mut main_dialog) = self.get_main_dialog_mut(world) {
+            main_dialog.dialog.update();
+        }
+        
         Ok(None)
     }
     
@@ -578,6 +634,16 @@ impl Scene for GameScene {
         };
         
         let config = world.get::<&RenderConfig>(self.config_entity).unwrap().clone();
+        
+        // ==================== 地图层: 使用窗口逻辑坐标 ====================
+        // 设置画布使用窗口的逻辑分辨率(如 1280×960)
+        // 这样 RenderSystem 的世界坐标转换才能正确工作
+        canvas.set_screen_coordinates(ggez::graphics::Rect::new(
+            0.0,
+            0.0,
+            camera.screen_width,   // 1280 (窗口逻辑宽度)
+            camera.screen_height,  // 960 (窗口逻辑高度)
+        ));
         
         // 渲染地图瓦片
         RenderSystem::draw_tiles(
@@ -616,6 +682,15 @@ impl Scene for GameScene {
             RenderSystem::draw_path(ctx, canvas, world, &pos, &camera)?;
         }
         
+        // ==================== UI 层: 使用设计坐标 1024×768 ====================
+        // 设置画布使用设计分辨率坐标系,ggez 会自动缩放
+        canvas.set_screen_coordinates(ggez::graphics::Rect::new(
+            0.0,
+            0.0,
+            DESIGN_WIDTH,   // 1024 (UI 设计分辨率)
+            DESIGN_HEIGHT,  // 768 (UI 设计分辨率)
+        ));
+        
         // 绘制FPS
         let time = world.get::<&TimeTracker>(self.time_entity).unwrap();
         let fps_text = Text::new(format!("FPS: {:.1}", time.fps));
@@ -626,19 +701,16 @@ impl Scene for GameScene {
                 .color(Color::from_rgb(0, 255, 0)),
         );
         
-        // 绘制操作提示（移到右上角）
+        // 绘制操作提示（移到右上角，使用设计坐标系）
         let hint_text = Text::new("[WASD/方向键] 移动  [Shift+WASD] 跑动  [鼠标] 点击移动  [Esc] 返回");
         canvas.draw(
             &hint_text,
             DrawParam::default()
-                .dest([camera.screen_width - 500.0, 10.0])
+                .dest([DESIGN_WIDTH - 500.0, 10.0])
                 .color(Color::from_rgb(200, 200, 200)),
         );
         
-        // 渲染 UI 系统
-        crate::ecs::ui::UIRenderer::render(ctx, canvas, world)?;
-        
-        // 使用 UISystem 渲染所有 UI组件
+        // 🎯 只使用 UISystem 渲染所有 UI组件（移除UIRenderer避免重复绘制）
         self.ui_system.draw(ctx, canvas, world, 0)?; // TODO: 传递正确的 current_time
         
         Ok(())
@@ -823,17 +895,22 @@ impl Scene for GameScene {
     
     fn on_mouse_down(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,
         world: &mut World,
         button: MouseButton,
         x: f32,
         y: f32,
         _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult {
+        // 转换为 UI 设计坐标 (1024×768) 用于 UI 点击检测
+        let (ui_x, ui_y) = self.window_to_ui_coords(ctx, x, y);
+        
+        // ==================== UI 层点击检测 (使用设计坐标) ====================
+        
         // 先检查角色对话框点击
         if button == MouseButton::Left {
             if let Some(mut char_dialog) = self.get_character_dialog_mut(world) {
-                if let Some(action) = char_dialog.dialog.on_mouse_down(x, y) {
+                if let Some(action) = char_dialog.dialog.on_mouse_down(ui_x, ui_y) {
                     match action {
                         CharacterAction::Close => {
                             println!("👤 角色对话框关闭");
@@ -854,7 +931,7 @@ impl Scene for GameScene {
         // 再检查背包对话框点击
         if button == MouseButton::Left {
             if let Some(mut inv_dialog) = self.get_inventory_dialog_mut(world) {
-                if let Some(action) = inv_dialog.dialog.on_mouse_down(x, y) {
+                if let Some(action) = inv_dialog.dialog.on_mouse_down(ui_x, ui_y) {
                     match action {
                         InventoryAction::Close => {
                             println!("🎒 背包关闭");
@@ -874,7 +951,7 @@ impl Scene for GameScene {
         if button == MouseButton::Left {
             let clicked_button = {
                 if let Some(mut main_dialog) = self.get_main_dialog_mut(world) {
-                    main_dialog.dialog.on_mouse_down(x, y)
+                    main_dialog.dialog.on_mouse_down(ui_x, ui_y)
                 } else {
                     None
                 }
@@ -1008,30 +1085,33 @@ impl Scene for GameScene {
     
     fn on_mouse_move(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,
         world: &mut World,
         x: f32,
         y: f32,
     ) -> GameResult {
-        // 更新鼠标位置
+        // 转换为 UI 设计坐标 (1024×768) 用于 UI hover 检测
+        let (ui_x, ui_y) = self.window_to_ui_coords(ctx, x, y);
+        
+        // 更新鼠标位置 (游戏逻辑使用窗口坐标,会被转换为世界坐标)
         if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
-            mouse_input.x = x;
+            mouse_input.x = x;  // 窗口坐标,用于地图点击
             mouse_input.y = y;
         }
         
-        // 更新主对话框hover状态
+        // 更新主对话框 hover 状态 (使用 UI 坐标)
         if let Some(mut main_dialog) = self.get_main_dialog_mut(world) {
-            main_dialog.dialog.update_hover(x, y);
+            main_dialog.dialog.update_hover(ui_x, ui_y);
         }
         
-        // 更新角色对话框hover状态
+        // 更新角色对话框 hover 状态 (使用 UI 坐标)
         if let Some(mut char_dialog) = self.get_character_dialog_mut(world) {
-            char_dialog.dialog.update_hover(x, y);
+            char_dialog.dialog.update_hover(ui_x, ui_y);
         }
         
-        // 更新背包对话框hover状态
+        // 更新背包对话框 hover 状态 (使用 UI 坐标)
         if let Some(mut inv_dialog) = self.get_inventory_dialog_mut(world) {
-            inv_dialog.dialog.update_hover(x, y);
+            inv_dialog.dialog.update_hover(ui_x, ui_y);
         }
         
         Ok(())
@@ -1066,6 +1146,12 @@ impl Scene for GameScene {
         width: f32,
         height: f32,
     ) -> GameResult {
+        // 忽略无效尺寸(避免启动时的闪烁)
+        if width <= 1.0 || height <= 1.0 {
+            println!("⚠️ 忽略无效窗口尺寸: {}x{}", width, height);
+            return Ok(());
+        }
+        
         // 更新相机尺寸
         if let Ok(mut camera) = world.get::<&mut Camera>(self.camera_entity) {
             camera.screen_width = width;
