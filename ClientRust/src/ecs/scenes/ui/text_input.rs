@@ -75,9 +75,10 @@ impl TextInput {
         let border = Mesh::new_rectangle(ctx, DrawMode::stroke(1.0), rect, border_color)?;
         canvas.draw(&border, ggez::graphics::DrawParam::default());
         
-        // 文本：白色
+        // 文本：白色 + 中文字体
         let display_text = if self.password_mode { "*".repeat(self.text.len()) } else { self.text.clone() };
         let mut text = Text::new(display_text.clone());
+        text.set_font("AlibabaPuHuiTi");  // ✅ 使用中文字体
         text.set_scale(PxScale::from(16.0));
         canvas.draw(&text, ggez::graphics::DrawParam::default()
             .dest([self.x + 5.0, self.y + 2.0])

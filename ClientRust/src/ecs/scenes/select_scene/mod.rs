@@ -260,13 +260,20 @@ impl Scene for SelectScene {
         _world: &mut World,
         network_tx: &mpsc::UnboundedSender<NetworkCommand>
     ) -> GameResult<Option<SceneType>> {
+        let delta = ctx.time.delta().as_secs_f32();
+        
         // 更新 NewCharacterDialog 动画和计时器
         if let Some(dialog) = &mut self.new_character_dialog {
-            dialog.update(ctx.time.delta().as_secs_f32());
+            dialog.update(delta);
+        }
+        
+        // ✅ 更新 InputBox (光标闪烁)
+        if let Some(ref mut input_box) = self.input_box {
+            input_box.update(delta);
         }
         
         // 更新角色预览动画 (16帧, 250ms/帧 = 4 FPS)
-        self.character_animation_timer += ctx.time.delta().as_secs_f32();
+        self.character_animation_timer += delta;
         if self.character_animation_timer >= 0.25 {
             self.character_animation_timer -= 0.25;
             let old_frame = self.character_animation_frame;
@@ -294,7 +301,7 @@ impl Scene for SelectScene {
                         // 删除角色确认后，显示输入框验证
                         if self.selected_index >= 0 && (self.selected_index as usize) < self.characters.len() {
                             let mut input_box = InputBox::new("Please enter the character's name.".to_string());
-                            input_box.show();
+                            input_box.show(ctx);  // ✅ 传入 ctx 启用 IME
                             self.input_box = Some(input_box);
                         }
                     }
@@ -334,9 +341,13 @@ impl Scene for SelectScene {
                     }
                 }
                 
+                // ✅ 关闭输入框时禁用 IME
+                input_box.hide(ctx);
                 self.input_box = None;
             } else if input_box.cancelled {
                 tracing::info!("❌ 输入框取消");
+                // ✅ 关闭输入框时禁用 IME
+                input_box.hide(ctx);
                 self.input_box = None;
             }
         }
@@ -637,7 +648,7 @@ impl Scene for SelectScene {
         // 🆕 0. 优先处理输入框（最上层）
         if let Some(ref mut input_box) = self.input_box {
             if input_box.visible {
-                input_box.on_mouse_down(design_x, design_y);
+                input_box.on_mouse_down(design_x, design_y, ctx);  // ✅ 传入 ctx
                 return Ok(()); // 输入框消费了事件
             }
         }
@@ -811,7 +822,7 @@ impl Scene for SelectScene {
     
     fn on_key_down(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,  // ✅ 去掉下划线，需要传给InputBox
         _world: &mut World,
         input: ggez::input::keyboard::KeyInput,
         network_tx: &mpsc::UnboundedSender<NetworkCommand>,
@@ -849,10 +860,10 @@ impl Scene for SelectScene {
             // 处理输入框按键
             if let Some(ref mut input_box) = self.input_box {
                 if input_box.visible {
-                    input_box.on_key_down(*keycode);
+                    input_box.on_key_down(*keycode, ctx);  // ✅ 传入 ctx
                     // 检查是否已确认或取消
                     if input_box.confirmed || input_box.cancelled {
-                        // 在handle_button_click中处理结果
+                        // 在update中处理结果
                     }
                     return Ok(None);
                 }

@@ -181,14 +181,13 @@ impl CreditsDialog {
         let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 360, content_x, content_y);
         
         // 3. 绘制内容文本
-        let mut current_y = content_y + 25.0;  // 顶部边距
-        let content_width = box_width;
-        let left_margin = 50.0;  // 左边距
-        let base_x = content_x + left_margin;
+        let mut current_y = content_y + 30.0;  // 顶部边距
+        let center_x = content_x + box_width / 2.0;  // 中心点
+        let left_margin = 60.0;  // 左边距（非标题用）
         
         for line in &self.content {
             if line.text.is_empty() {
-                current_y += line.font_size * 0.5;  // 空行占半个字体高度
+                current_y += line.font_size * 0.4;  // 空行占半个字体高度
                 continue;
             }
             
@@ -196,21 +195,21 @@ impl CreditsDialog {
             text.set_font("AlibabaPuHuiTi");
             text.set_scale(PxScale::from(line.font_size));
             
-            let x = if line.is_title {
-                // 标题居中 - 先测量文本宽度
-                let text_size = text.measure(ctx).unwrap_or(Vector2 { x: 200.0, y: 20.0 });
-                let text_width = text_size.x;
-                content_x + (content_width - text_width) / 2.0
+            if line.is_title {
+                // ✅ 标题使用 offset([0.5, 0.0]) 居中对齐
+                canvas.draw(&text, DrawParam::default()
+                    .dest([center_x, current_y])
+                    .offset([0.5, 0.0])  // 水平居中锚点
+                    .color(line.color));
             } else {
-                base_x
-            };
-            
-            canvas.draw(&text, DrawParam::default()
-                .dest([x, current_y])
-                .color(line.color));
+                // 普通文本左对齐
+                canvas.draw(&text, DrawParam::default()
+                    .dest([content_x + left_margin, current_y])
+                    .color(line.color));
+            }
             
             // 根据字体大小调整行距
-            let line_spacing = if line.is_title { 12.0 } else { 6.0 };
+            let line_spacing = if line.is_title { 10.0 } else { 5.0 };
             current_y += line.font_size + line_spacing;
         }
         

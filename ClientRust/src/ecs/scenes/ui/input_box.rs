@@ -96,19 +96,34 @@ impl InputBox {
         }
     }
     
+    /// 更新输入框 (光标闪烁动画)
+    pub fn update(&mut self, dt: f32) {
+        if self.visible {
+            self.input.update(dt);
+        }
+    }
+    
     /// 显示输入框
-    pub fn show(&mut self) {
+    pub fn show(&mut self, ctx: &mut Context) {
         self.visible = true;
         self.confirmed = false;
         self.cancelled = false;
         self.input.text.clear();
         self.input.focused = true;
+        
+        // ✅ 启用 IME 输入
+        ctx.gfx.window().set_ime_allowed(true);
+        tracing::debug!("✅ InputBox: IME 已启用");
     }
     
     /// 隐藏输入框
-    pub fn hide(&mut self) {
+    pub fn hide(&mut self, ctx: &mut Context) {
         self.visible = false;
         self.input.focused = false;
+        
+        // ✅ 禁用 IME 输入
+        ctx.gfx.window().set_ime_allowed(false);
+        tracing::debug!("❌ InputBox: IME 已禁用");
     }
     
     /// 获取输入的文本
@@ -187,7 +202,7 @@ impl InputBox {
     }
     
     /// 鼠标点击事件
-    pub fn on_mouse_down(&mut self, x: f32, y: f32) -> bool {
+    pub fn on_mouse_down(&mut self, x: f32, y: f32, ctx: &mut Context) -> bool {
         if !self.visible {
             return false;
         }
@@ -201,14 +216,14 @@ impl InputBox {
         // 检测 OK 按钮
         if self.is_point_in_rect(x, y, self.ok_button_rect) {
             self.confirmed = true;
-            self.visible = false;
+            self.hide(ctx);
             return true;
         }
         
         // 检测 Cancel 按钮
         if self.is_point_in_rect(x, y, self.cancel_button_rect) {
             self.cancelled = true;
-            self.visible = false;
+            self.hide(ctx);
             return true;
         }
         
@@ -223,7 +238,7 @@ impl InputBox {
     }
     
     /// 按键事件
-    pub fn on_key_down(&mut self, key: ggez::winit::keyboard::KeyCode) {
+    pub fn on_key_down(&mut self, key: ggez::winit::keyboard::KeyCode, ctx: &mut Context) {
         if !self.visible {
             return;
         }
@@ -234,12 +249,12 @@ impl InputBox {
             KeyCode::Enter | KeyCode::NumpadEnter => {
                 // 回车确认
                 self.confirmed = true;
-                self.visible = false;
+                self.hide(ctx);
             }
             KeyCode::Escape => {
                 // ESC 取消
                 self.cancelled = true;
-                self.visible = false;
+                self.hide(ctx);
             }
             KeyCode::Backspace => {
                 // 退格删除
