@@ -930,9 +930,12 @@ impl Scene for SelectScene {
         _world: &mut World,
         character: String,
     ) -> GameResult {
+        tracing::debug!("📝 SelectScene::on_text_input: '{}'", character);
+        
         // 🆕 优先处理新建角色对话框的文本输入
         if let Some(ref mut dialog) = self.new_character_dialog {
             if dialog.visible && dialog.input_focused {
+                tracing::debug!("📝 转发到新建角色对话框");
                 // 处理每个字符
                 for ch in character.chars() {
                     dialog.handle_text_input(ch);

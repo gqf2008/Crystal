@@ -312,6 +312,7 @@ impl EventHandler for GameState {
     fn text_input_event(&mut self, ctx: &mut Context, character: char) -> GameResult {
         // 转发 IME 输入到当前场景
         // 将 char 转换为 String
+        tracing::debug!("🔥 GameState::text_input_event 被调用: '{}'", character);
         self.current_scene.on_text_input(ctx, &mut self.world, character.to_string())
     }
     

@@ -24,10 +24,17 @@ impl TextInput {
         if !self.enabled || !self.visible { return false; }
         px >= self.x && px < self.x + self.width && py >= self.y && py < self.y + self.height
     }
-    pub fn add_char(&mut self, c: char) { if self.text.len() < self.max_length { self.text.push(c); } }
+    pub fn add_char(&mut self, c: char) { 
+        tracing::debug!("💬 TextInput::add_char 被调用: char='{}', 当前内容='{}'", c, self.text);
+        if self.text.len() < self.max_length { 
+            self.text.push(c); 
+            tracing::debug!("💬 TextInput::add_char 完成: 新内容='{}'", self.text);
+        }
+    }
     
     /// 添加文本 (用于 IME 中文输入)
     pub fn add_text(&mut self, text: &str) {
+        tracing::debug!("💬 TextInput::add_text 被调用: text='{}', 当前内容='{}'", text, self.text);
         for c in text.chars() {
             if self.text.len() < self.max_length {
                 self.text.push(c);
@@ -35,6 +42,7 @@ impl TextInput {
                 break;
             }
         }
+        tracing::debug!("💬 TextInput::add_text 完成: 新内容='{}'", self.text);
     }
     
     pub fn backspace(&mut self) { self.text.pop(); }

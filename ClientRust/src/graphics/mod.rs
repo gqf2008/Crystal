@@ -136,3 +136,25 @@ pub fn draw_sprite_scaled(
     }
     Ok(())
 }
+
+/// 带混合效果的精灵绘制辅助函数（对应 C# 的 DrawBlend）
+/// 使用 alpha blending 和指定的混合率
+pub fn draw_sprite_blend(
+    ctx: &mut ggez::Context,
+    canvas: &mut ggez::graphics::Canvas,
+    library_name: &LibraryName,
+    index: i32,
+    x: f32,
+    y: f32,
+    color: ggez::graphics::Color,
+    use_offset: bool,
+    rate: f32,
+) -> anyhow::Result<()> {
+    if let Some(library) = get_library(library_name.clone()) {
+        let mut lib = library.try_lock()
+            .map_err(|e| anyhow::anyhow!("Failed to lock library: {}", e))?;
+        
+        lib.draw_blend(ctx, canvas, index as usize, x, y, color, use_offset, rate)?;
+    }
+    Ok(())
+}

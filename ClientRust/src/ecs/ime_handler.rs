@@ -27,11 +27,16 @@ use ggez::graphics::GraphicsContext;
 pub struct CustomAppHandler<T: EventHandler> {
     ctx: Context,
     game: T,
+    ime_enabled: bool,  // 🆕 跟踪 IME 状态
 }
 
 impl<T: EventHandler> CustomAppHandler<T> {
     pub fn new(ctx: Context, game: T) -> Self {
-        Self { ctx, game }
+        Self { 
+            ctx, 
+            game,
+            ime_enabled: false,  // 默认 IME 未启用
+        }
     }
 }
 
@@ -57,14 +62,24 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
         mut window_id: WindowId,
         mut event: WindowEvent,
     ) {
+        // 🔍 记录所有 KeyboardInput 事件
+        if let WindowEvent::KeyboardInput { ref event, .. } = event {
+            if let Some(ref text) = event.text {
+                tracing::debug!("🔍 [window_event] KeyboardInput 收到: text='{}', physical_key={:?}", 
+                    text, event.physical_key);
+            }
+        }
+        
         // ===== 首先检查 IME 事件 (这是获取中文的唯一方法!) =====
         if let WindowEvent::Ime(ref ime_event) = event {
             match ime_event {
                 Ime::Enabled => {
                     tracing::debug!("IME 已启用");
+                    self.ime_enabled = true;  // 🆕 记录 IME 状态
                 }
                 Ime::Disabled => {
                     tracing::debug!("IME 已禁用");
+                    self.ime_enabled = false;  // 🆕 记录 IME 状态
                 }
                 Ime::Preedit(text, _) => {
                     tracing::debug!("IME 拼音: {}", text);
@@ -85,7 +100,13 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
         }
         
         // ===== 转发事件给 ggez 更新内部状态 =====
-        ggez::event::process_window_event(&mut self.ctx, &mut window_id, &mut event);
+        // 🔥 清除 KeyboardInput.text 字段，防止 ggez 重复处理文本输入
+        let mut event_for_ggez = event.clone();
+        if let WindowEvent::KeyboardInput { ref mut event, .. } = event_for_ggez {
+            // 清除 text 字段，我们已经在下面手动处理了
+            event.text = None;
+        }
+        ggez::event::process_window_event(&mut self.ctx, &mut window_id, &mut event_for_ggez);
         
         // ===== 手动调用 EventHandler 方法 =====
         match event {
@@ -105,11 +126,43 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
             WindowEvent::KeyboardInput { event: key_event, .. } => {
                 let mods = HasMut::<KeyboardContext>::retrieve_mut(&mut self.ctx).active_modifiers;
                 let repeat = HasMut::<KeyboardContext>::retrieve_mut(&mut self.ctx).is_key_repeated();
-                let input = KeyInput { event: key_event, mods };
+                let input = KeyInput { event: key_event.clone(), mods };
                 
                 match input.event.state {
                     ElementState::Pressed => {
                         let _ = self.game.key_down_event(&mut self.ctx, input, repeat);
+                        
+                        // 🔥 只在非重复按键时处理文本输入
+                        // repeat = true 表示按键重复，不应该再次输入字符
+                        if let Some(text) = &key_event.text {
+                            tracing::debug!("⌨️ KeyboardInput.text = '{}', repeat = {}, ime_enabled = {}", 
+                                text, repeat, self.ime_enabled);
+                            
+                            // 跳过重复按键的文本输入
+                            if repeat {
+                                tracing::debug!("⌨️ 跳过重复按键的文本输入");
+                                return;
+                            }
+                            
+                            if !self.ime_enabled {
+                                // 过滤控制字符（如退格键 \x08、回车 \r 等）
+                                // 只接受可打印字符
+                                for ch in text.chars() {
+                                    // 跳过控制字符（ASCII 0-31 和 127）
+                                    if ch.is_control() {
+                                        tracing::debug!("⌨️ 跳过控制字符: U+{:04X}", ch as u32);
+                                        continue;
+                                    }
+                                    
+                                    tracing::debug!("⌨️ 键盘文本输入: '{}'", ch);
+                                    if let Err(e) = self.game.text_input_event(&mut self.ctx, ch) {
+                                        tracing::warn!("键盘文本输入处理失败: {}", e);
+                                    }
+                                }
+                            } else {
+                                tracing::debug!("⌨️ IME 已启用，跳过 KeyboardInput.text 处理");
+                            }
+                        }
                     }
                     ElementState::Released => {
                         let _ = self.game.key_up_event(&mut self.ctx, input);

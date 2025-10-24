@@ -503,11 +503,8 @@ impl Scene for LoginScene {
                 }
                 KeyCode::Backspace => self.login_dialog.on_backspace(),
                 _ => {
-                    if let Some(text) = text {
-                        for ch in text.chars() {
-                            self.login_dialog.on_char(ch);
-                        }
-                    }
+                    // 🔥 不要在这里处理 text 字段，因为 on_text_input 会处理
+                    // 避免重复输入
                 }
             }
         }
@@ -542,6 +539,8 @@ impl Scene for LoginScene {
     }
     
     fn on_text_input(&mut self, _ctx: &mut Context, _world: &mut World, character: String) -> GameResult {
+        tracing::debug!("📝 LoginScene::on_text_input: '{}'", character);
+        
         // 转发到登录对话框
         self.login_dialog.on_text_input(&character);
         

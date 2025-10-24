@@ -248,11 +248,13 @@ impl NewCharacterDialog {
     /// 处理文本输入
     pub fn handle_text_input(&mut self, ch: char) {
         if !self.visible || !self.input_focused {
+            tracing::debug!("❌ 文本输入被忽略: visible={}, input_focused={}", self.visible, self.input_focused);
             return;
         }
         
         // 限制字符数量 (不是字节数)
         if self.name.chars().count() >= 16 {
+            tracing::debug!("❌ 文本输入被忽略: 已达到最大长度16");
             return;
         }
         
@@ -269,6 +271,8 @@ impl NewCharacterDialog {
             self.name.insert(byte_pos, ch);
             self.cursor_position += 1;
             
+            tracing::debug!("✅ 接受字符: '{}' (U+{:04X}), 当前名称: '{}'", ch, ch as u32, self.name);
+            
             // 重置光标闪烁
             self.cursor_visible = true;
             self.cursor_blink_timer = 0.0;
@@ -276,7 +280,7 @@ impl NewCharacterDialog {
             // 清除错误消息
             self.error_message = None;
         } else {
-            tracing::debug!("拒绝无效字符: '{}' (U+{:04X})", ch, ch as u32);
+            tracing::debug!("❌ 拒绝无效字符: '{}' (U+{:04X})", ch, ch as u32);
         }
     }
     
@@ -417,7 +421,7 @@ impl NewCharacterDialog {
     /// 绘制对话框
     pub fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut ggez::graphics::Canvas) -> ggez::GameResult {
         use ggez::graphics::{Color, Text, PxScale, DrawParam};
-        use crate::graphics::{LibraryName, draw_sprite_at, draw_sprite_with_offset};
+        use crate::graphics::{LibraryName, draw_sprite_at, draw_sprite_with_offset, draw_sprite_blend};
         
         if !self.visible {
             return Ok(());
@@ -440,15 +444,19 @@ impl NewCharacterDialog {
             self.y + 250.0
         );
         
-        // 4. 如果是法师，绘制额外的光效 (ChrSel库，索引+560，使用偏移量)
+        // 4. 如果是法师，绘制额外的光效 (ChrSel库，索引+560，使用混合模式)
+        // 对应 C#: Libraries.ChrSel.DrawBlend(CharacterDisplay.Index + 560, CharacterDisplay.DisplayLocationWithoutOffSet, Color.White, true);
         if self.selected_class == MirClass::Wizard {
-            let _ = draw_sprite_with_offset(
+            let _ = draw_sprite_blend(
                 ctx,
                 canvas,
                 &LibraryName::ChrSel,
                 (character_index + 560 + self.animation_frame) as i32,
                 self.x + 120.0,
-                self.y + 250.0
+                self.y + 250.0,
+                Color::WHITE,
+                true,  // use_offset = true
+                1.0    // rate = 1.0
             );
         }
         
