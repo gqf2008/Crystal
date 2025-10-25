@@ -162,12 +162,11 @@ impl NetworkSystem {
                         }
                     }
                 } else if grid_diff_x == 1 || grid_diff_y == 1 {
-                    // 🎯 1格偏差 - 可能是网络延迟,服务器数据稍慢
-                    // 客户端已经移动到下一格,不应该被拉回
-                    tracing::debug!("📡 收到服务器位置({}, {}),客户端已在({}, {}) - 保持客户端预测", 
+                    // 🎯 1格偏差 - 客户端预测前进了1格,服务器数据稍慢
+                    tracing::debug!("📡 收到服务器位置({}, {}),客户端已在({}, {}) - 同步路径索引", 
                         location.x, location.y, current_grid_x, current_grid_y);
                     
-                    // 清除路径中已经过的点(避免走回头路)
+                    // 🔧 关键修复: 将服务器位置作为已确认的起点,更新path_index
                     if player.move_mode == crate::ecs::components::MoveMode::AutoPathfinding 
                         && !player.path.is_empty() {
                         
@@ -181,11 +180,27 @@ impl NetworkSystem {
                         }
                         
                         if let Some(index) = found_index {
-                            // 服务器还在旧位置,客户端已经前进,更新路径索引避免回退
-                            if index < player.path_index {
-                                tracing::debug!("✅ 服务器位置在路径索引{},客户端已到索引{} - 保持前进", 
-                                    index, player.path_index);
+                            // 🎯 服务器确认了这个位置,下次应该从下一个点开始
+                            let old_index = player.path_index;
+                            player.path_index = index + 1;
+                            tracing::info!("✅ 服务器确认位置({}, {}),路径索引: {} -> {}", 
+                                location.x, location.y, old_index, player.path_index);
+                            
+                            if player.path_index >= player.path.len() {
+                                // 到达终点
+                                player.move_mode = crate::ecs::components::MoveMode::Idle;
+                                player.is_moving = false;
+                                tracing::info!("✅ 到达目的地");
                             }
+                        } else {
+                            // 服务器位置不在路径上,可能路径已过时
+                            tracing::warn!("⚠️ 服务器位置({}, {})不在路径上,客户端在({}, {}) - 以服务器为准", 
+                                location.x, location.y, current_grid_x, current_grid_y);
+                            // 同步到服务器位置
+                            position.x = world_x;
+                            position.y = world_y;
+                            player.target_x = world_x;
+                            player.target_y = world_y;
                         }
                     }
                 } else {
