@@ -17,7 +17,7 @@
 
 use hecs::World;
 use crate::ecs::components::{
-    Position, MonsterComp, AnimationComp, Health, AIState, Velocity,
+    Position, MonsterData, Animation, Health, AIState, Velocity,
     Player, MirAction,
 };
 
@@ -43,7 +43,7 @@ impl MonsterSystem {
         
         // 遍历所有怪物
         for (_entity, (monster, pos, ai_state, health)) in 
-            world.query::<(&MonsterComp, &mut Position, &mut AIState, &Health)>().iter() 
+            world.query::<(&MonsterData, &mut Position, &mut AIState, &Health)>().iter() 
         {
             // 跳过死亡怪物
             if health.current <= 0 {
@@ -140,7 +140,7 @@ impl MonsterSystem {
     fn ai_patrol(
         pos: &mut Position,
         ai_state: &mut AIState,
-        monster: &MonsterComp,
+        monster: &MonsterData,
     ) {
         // 如果没有巡逻点，随机选择一个
         if ai_state.patrol_points.is_empty() {
@@ -176,7 +176,7 @@ impl MonsterSystem {
     /// 更新怪物移动
     fn update_movement(world: &mut World, delta_time: f32) {
         for (_entity, (pos, ai_state, anim, velocity)) in 
-            world.query::<(&mut Position, &AIState, &mut AnimationComp, Option<&mut Velocity>)>().iter() 
+            world.query::<(&mut Position, &AIState, &mut Animation, Option<&mut Velocity>)>().iter() 
         {
             match ai_state.current_action {
                 crate::ecs::components::AIAction::Chase | 
@@ -257,7 +257,7 @@ impl MonsterSystem {
     }
     
     /// 根据移动方向更新朝向
-    fn update_direction_from_movement(anim: &mut AnimationComp, vx: f32, vy: f32) {
+    fn update_direction_from_movement(anim: &mut Animation, vx: f32, vy: f32) {
         // 计算8方向
         let angle = vy.atan2(vx).to_degrees();
         let direction = ((angle + 22.5) / 45.0).floor() as i32;
@@ -328,3 +328,5 @@ mod tests {
         assert!(matches!(ai_state.current_action, crate::ecs::components::AIAction::Chase));
     }
 }
+
+

@@ -33,7 +33,7 @@ use tokio::sync::mpsc;
 use super::{Scene, SceneType};
 use crate::network::{NetworkCommand, game_client::GameEvent};
 use crate::ecs::{
-    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerComp, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow},
+    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerData, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow},
     systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem},
     Coordinates, MapUtils,  // 坐标工具
     map_loader::MapLoader,
@@ -213,7 +213,7 @@ impl GameScene {
             Inventory::default(),  // 默认背包（40格）
             Equipment::new(),  // 装备栏
             LocalPlayer,  // 本地玩家标记
-            PlayerComp {
+            PlayerData {
                 id: 1,
                 name: "勇士".to_string(),
                 class: MirClass::Warrior,
@@ -807,3 +807,4 @@ impl Scene for GameScene {
         self
     }
 }
+

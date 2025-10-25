@@ -4,7 +4,7 @@
 
 use hecs::{World, Entity};
 use crate::ecs::components::{
-    MagicList, LearnableMagicList, SpellType, PlayerComp, LocalPlayer
+    MagicList, LearnableMagicList, SpellType, PlayerData, LocalPlayer
 };
 use crate::ecs::ui::MagicLearningDialogComp;
 use crate::network::NetworkCommand;
@@ -25,7 +25,7 @@ impl MagicLearningSystem {
             let mut player_level = 1u16;
             let mut player_class = mir2_shared::MirClass::Warrior;
             
-            for (_, (_, player)) in world.query::<(&LocalPlayer, &PlayerComp)>().iter() {
+            for (_, (_, player)) in world.query::<(&LocalPlayer, &PlayerData)>().iter() {
                 player_level = (player.exp / 1000) as u16; // 简化的等级计算
                 player_class = player.class;
                 break;
@@ -71,7 +71,7 @@ impl MagicLearningSystem {
             let mut player_level = 1u16;
             let mut player_class = mir2_shared::MirClass::Warrior;
             
-            for (_, (_, player)) in world.query::<(&LocalPlayer, &PlayerComp)>().iter() {
+            for (_, (_, player)) in world.query::<(&LocalPlayer, &PlayerData)>().iter() {
                 player_level = (player.exp / 1000) as u16;
                 player_class = player.class;
                 break;
@@ -165,3 +165,4 @@ impl MagicLearningSystem {
         Self::bind_to_slot(world, spell, target_slot)
     }
 }
+

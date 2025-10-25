@@ -188,7 +188,7 @@ impl MapLoader {
     /// 在地图上随机生成一些测试怪物,确保生成在可行走位置
     pub fn spawn_test_monsters(world: &mut World, map_data: &MapData, count: usize) {
         use crate::ecs::components::{
-            Position, MonsterComp, AIState, Health, AnimationComp, SpriteComp,
+            Position, MonsterData, AIState, Health, Animation, Sprite,
         };
         use crate::ecs::{Coordinates, MapUtils};
         use mir2_shared::MirAction;
@@ -232,7 +232,7 @@ impl MapLoader {
             // 创建怪物实体
             world.spawn((
                 Position { x, y },
-                MonsterComp {
+                MonsterData {
                     id: spawned as u32 + 1,
                     name: monster_name.to_string(),
                     monster_index: 0,  // 使用第一个怪物模型
@@ -246,7 +246,7 @@ impl MapLoader {
                     current: 100, 
                     max: 100 
                 },
-                AnimationComp {
+                Animation {
                     action: MirAction::Standing,
                     direction: 0,
                     frame_count: 4,
@@ -255,11 +255,11 @@ impl MapLoader {
                     frame_timer: 0,
                     loop_animation: true,
                 },
-                SpriteComp {
+                Sprite {
                     library: 0,     // 怪物库索引
                     index: 0,       // 贴图索引
                     frame: 0,       // 当前帧
-                    blend_mode: crate::ecs::components::BlendModeComp::Alpha,
+                    blend_mode: crate::ecs::components::SpriteBlendMode::Alpha,
                 },
             ));
             
@@ -269,3 +269,6 @@ impl MapLoader {
         println!("✅ 成功生成 {} 个测试怪物 (尝试次数: {})", spawned, attempts);
     }
 }
+
+
+

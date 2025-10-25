@@ -52,8 +52,9 @@ pub use npc_object::{NPCObject, NpcImage};
 pub use item_object::ItemObject;
 pub use hero_object::{HeroObject, HeroState};
 pub use spell_object::SpellObject;
-pub use effect::{Effect, EffectLayer, BlendMode};
+pub use effect::{Effect, EffectLayer, SpriteBlendMode};
 pub use damage::{Damage, DamageType, Color};
 pub use pathfinder::PathFinder;
 pub use map_code::{CellInfo, MapReader}; // 对应 Client/MirObjects/MapCode.cs
 pub use object_factory::ObjectFactory; // NEW: Object creation from packets
+

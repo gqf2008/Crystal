@@ -19,7 +19,7 @@ use crate::ecs::ui::{
     QuestDialogComp, SkillsDialogComp, OptionsDialogComp
 };
 use crate::network::game_client::GameEvent;
-use crate::ecs::components::{LocalPlayer, PlayerComp, Mana, Health};
+use crate::ecs::components::{LocalPlayer, PlayerData, Mana, Health};
 
 /// UI 系统
 pub struct UISystem;
@@ -76,7 +76,7 @@ impl UISystem {
                 // 检查是否是本地玩家
                 let is_local_player = {
                     let mut found = false;
-                    for (_, (_, player_comp)) in world.query::<(&LocalPlayer, &PlayerComp)>().iter() {
+                    for (_, (_, player_comp)) in world.query::<(&LocalPlayer, &PlayerData)>().iter() {
                         if player_comp.id == *object_id {
                             found = true;
                             break;
@@ -573,4 +573,5 @@ impl UISystem {
         }
     }
 }
+
 

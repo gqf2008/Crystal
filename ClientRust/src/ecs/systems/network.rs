@@ -232,7 +232,7 @@ impl NetworkSystem {
         tracing::debug!("📊 User info updated - Object ID: {}", user_info.object_id);
         
         // 查找本地玩家实体（通过 LocalPlayer 标记）
-        let mut query = world.query::<(&LocalPlayer, &mut Position, &mut Player, &mut PlayerComp)>();
+        let mut query = world.query::<(&LocalPlayer, &mut Position, &mut Player, &mut PlayerData)>();
         
         for (_entity, (_local_player, position, player, player_comp)) in query.iter() {
             // 更新位置（从格子坐标转换为世界坐标）
@@ -320,8 +320,8 @@ impl NetworkSystem {
         
         world.spawn((
             Position::new(world_x, world_y),
-            DirectionComp::new(MirDirection::Up),
-            AnimationComp::new(MirAction::Standing, 4, 200),
+            Direction::new(MirDirection::Up),
+            Animation::new(MirAction::Standing, 4, 200),
             NetworkSync::new(object_id, NetworkObjectType::Player),
             OtherPlayer::new(
                 name.to_string(),
@@ -339,8 +339,8 @@ impl NetworkSystem {
         
         world.spawn((
             Position::new(world_x, world_y),
-            DirectionComp::new(MirDirection::Up),
-            AnimationComp::new(MirAction::Standing, 4, 200),
+            Direction::new(MirDirection::Up),
+            Animation::new(MirAction::Standing, 4, 200),
             NetworkSync::new(object_id, NetworkObjectType::NPC),
             NPC::new(
                 name.to_string(),
@@ -357,8 +357,8 @@ impl NetworkSystem {
         
         world.spawn((
             Position::new(world_x, world_y),
-            DirectionComp::new(direction),
-            AnimationComp::new(MirAction::Standing, 4, 200),
+            Direction::new(direction),
+            Animation::new(MirAction::Standing, 4, 200),
             NetworkSync::new(object_id, NetworkObjectType::Monster),
             Monster::new(
                 name.to_string(),
@@ -380,7 +380,7 @@ impl NetworkSystem {
     /// 处理对象转向事件
     fn handle_object_turned(&self, world: &mut World, object_id: u32, direction: mir2_shared::enums::MirDirection, _location: &mir2_shared::Point) {
         if let Some(&entity) = self.object_map.get(&object_id) {
-            if let Ok(mut dir_comp) = world.get::<&mut DirectionComp>(entity) {
+            if let Ok(mut dir_comp) = world.get::<&mut Direction>(entity) {
                 dir_comp.current = direction;
                 dir_comp.target = direction;
                 tracing::debug!("🔄 Object {} turned to {:?}", object_id, direction);
@@ -398,11 +398,11 @@ impl NetworkSystem {
                 pos.x = world_x;
                 pos.y = world_y;
             }
-            if let Ok(mut dir_comp) = world.get::<&mut DirectionComp>(entity) {
+            if let Ok(mut dir_comp) = world.get::<&mut Direction>(entity) {
                 dir_comp.current = direction;
                 dir_comp.target = direction;
             }
-            if let Ok(mut anim) = world.get::<&mut AnimationComp>(entity) {
+            if let Ok(mut anim) = world.get::<&mut Animation>(entity) {
                 anim.action = action;
             }
             
@@ -422,11 +422,11 @@ impl NetworkSystem {
                 pos.x = world_x;
                 pos.y = world_y;
             }
-            if let Ok(mut dir_comp) = world.get::<&mut DirectionComp>(entity) {
+            if let Ok(mut dir_comp) = world.get::<&mut Direction>(entity) {
                 dir_comp.current = direction;
                 dir_comp.target = direction;
             }
-            if let Ok(mut anim) = world.get::<&mut AnimationComp>(entity) {
+            if let Ok(mut anim) = world.get::<&mut Animation>(entity) {
                 anim.action = MirAction::Attack1;
             }
             
@@ -445,11 +445,11 @@ impl NetworkSystem {
                 pos.x = world_x;
                 pos.y = world_y;
             }
-            if let Ok(mut dir_comp) = world.get::<&mut DirectionComp>(entity) {
+            if let Ok(mut dir_comp) = world.get::<&mut Direction>(entity) {
                 dir_comp.current = direction;
                 dir_comp.target = direction;
             }
-            if let Ok(mut anim) = world.get::<&mut AnimationComp>(entity) {
+            if let Ok(mut anim) = world.get::<&mut Animation>(entity) {
                 anim.action = MirAction::Pushed;
             }
             
@@ -482,4 +482,6 @@ impl Default for NetworkSystem {
 // ============================================================================
 
 // ❌ 已删除重复函数 - 使用 CoordinateSystem::grid_to_world_center() 替代
+
+
 

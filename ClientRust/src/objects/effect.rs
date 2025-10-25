@@ -14,7 +14,7 @@ pub enum EffectLayer {
 
 /// Effect blend mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BlendMode {
+pub enum SpriteBlendMode {
     None,
     Additive,      // Bright, glowing effects
     Alpha,         // Semi-transparent
@@ -45,7 +45,7 @@ pub struct Effect {
     pub repeat: bool,          // Loop animation
     pub repeat_until: i64,     // Repeat until this time (0 = infinite)
     pub blend: bool,           // Use blend mode
-    pub blend_mode: BlendMode,
+    pub blend_mode: SpriteBlendMode,
     pub light: i32,            // Light intensity (0-10)
     pub layer: EffectLayer,
     
@@ -79,7 +79,7 @@ impl Effect {
             repeat: false,
             repeat_until: 0,
             blend: false,
-            blend_mode: BlendMode::None,
+            blend_mode: SpriteBlendMode::None,
             light: 0,
             layer: EffectLayer::OnObject,
             completed: false,
@@ -97,7 +97,7 @@ impl Effect {
             50,  // 50ms per frame
         );
         effect.blend = true;
-        effect.blend_mode = BlendMode::Additive;
+        effect.blend_mode = SpriteBlendMode::Additive;
         effect.light = 5;
         effect.layer = EffectLayer::Front;
         
@@ -117,7 +117,7 @@ impl Effect {
         );
         effect.repeat = true;
         effect.blend = true;
-        effect.blend_mode = BlendMode::Alpha;
+        effect.blend_mode = SpriteBlendMode::Alpha;
         effect.light = 2;
         effect.layer = EffectLayer::OnObject;
         effect
@@ -133,7 +133,7 @@ impl Effect {
             80,  // 80ms per frame
         );
         effect.blend = true;
-        effect.blend_mode = BlendMode::Additive;
+        effect.blend_mode = SpriteBlendMode::Additive;
         effect.light = 3;
         effect.layer = EffectLayer::AboveObject;
         effect.offset = Point::new(0, -20); // Float above character
@@ -221,7 +221,7 @@ impl Effect {
     }
 
     /// Set blend mode
-    pub fn with_blend(mut self, blend_mode: BlendMode) -> Self {
+    pub fn with_blend(mut self, blend_mode: SpriteBlendMode) -> Self {
         self.blend = true;
         self.blend_mode = blend_mode;
         self
@@ -346,3 +346,4 @@ mod tests {
         assert_eq!(healing.offset.y, -20);
     }
 }
+

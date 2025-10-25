@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Components - ECS 组件定义
 // 参考 C# Client/MirObjects/ 的对象属性
 // ============================================================================
@@ -7,6 +7,9 @@ use mir2_shared::Point;
 pub use mir2_shared::{MirDirection, MirAction, MirClass, MirGender};
 use std::time::Instant;
 use crate::objects::CellInfo;
+
+// 导入效果混合模式
+pub use crate::objects::SpriteBlendMode;
 
 // ============================================================================
 // 核心组件 (所有实体都有)
@@ -53,12 +56,12 @@ impl Velocity {
 
 /// 方向组件
 #[derive(Debug, Clone, Copy)]
-pub struct DirectionComp {
+pub struct Direction {
     pub current: MirDirection,
     pub target: MirDirection,
 }
 
-impl DirectionComp {
+impl Direction {
     pub fn new(dir: MirDirection) -> Self {
         Self { current: dir, target: dir }
     }
@@ -66,31 +69,24 @@ impl DirectionComp {
 
 /// 精灵渲染组件 - 可渲染实体必备
 #[derive(Debug, Clone)]
-pub struct SpriteComp {
+pub struct Sprite {
     pub library: i32,      // MLibrary 索引 (0=Tiles, 1=SmTiles, 2=Objects, etc.)
     pub index: i32,        // 贴图索引
     pub frame: i32,        // 当前帧
-    pub blend_mode: BlendModeComp, // 混合模式
+    pub blend_mode: SpriteBlendMode, // 混合模式
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BlendModeComp {
-    Alpha,
-    Add,    // ⭐ ADD 混合 (技能特效)
-    Multiply,
-}
-
-impl SpriteComp {
+impl Sprite {
     pub fn new(library: i32, index: i32) -> Self {
         Self {
             library,
             index,
             frame: 0,
-            blend_mode: BlendModeComp::Alpha,
+            blend_mode: SpriteBlendMode::Alpha,
         }
     }
 
-    pub fn with_blend(library: i32, index: i32, blend_mode: BlendModeComp) -> Self {
+    pub fn with_blend(library: i32, index: i32, blend_mode: SpriteBlendMode) -> Self {
         Self { library, index, frame: 0, blend_mode }
     }
 }
@@ -101,7 +97,7 @@ impl SpriteComp {
 
 /// 动画状态组件
 #[derive(Debug, Clone)]
-pub struct AnimationComp {
+pub struct Animation {
     pub action: MirAction,
     pub direction: u8,       // 方向 0-7
     pub frame_count: u8,
@@ -111,7 +107,7 @@ pub struct AnimationComp {
     pub loop_animation: bool,
 }
 
-impl AnimationComp {
+impl Animation {
     pub fn new(action: MirAction, frame_count: u8, frame_interval: u32) -> Self {
         Self {
             action,
@@ -229,7 +225,7 @@ pub struct CombatStats {
 
 /// 玩家数据组件 (标记这是玩家实体)
 #[derive(Debug, Clone)]
-pub struct PlayerComp {
+pub struct PlayerData {
     pub id: u32,
     pub name: String,
     pub class: MirClass,
@@ -254,7 +250,7 @@ pub struct RemotePlayer {
 
 /// 怪物数据组件
 #[derive(Debug, Clone)]
-pub struct MonsterComp {
+pub struct MonsterData {
     pub id: u32,
     pub name: String,
     pub monster_index: u16,
@@ -314,7 +310,7 @@ pub enum AIAction {
 
 /// NPC 数据组件
 #[derive(Debug, Clone)]
-pub struct NPCComp {
+pub struct NPCData {
     pub id: u32,
     pub name: String,
     pub npc_index: u16,
@@ -327,7 +323,7 @@ pub struct NPCComp {
 
 /// 技能数据组件
 #[derive(Debug, Clone)]
-pub struct SpellComp {
+pub struct SpellData {
     pub spell_id: u16,
     pub caster_id: u32,
     pub target_pos: Point,
@@ -1432,3 +1428,6 @@ pub use crate::ecs::systems::trade_system::TradeWindow;
 
 pub const CELL_WIDTH: i32 = 48;
 pub const CELL_HEIGHT: i32 = 32;
+
+
+

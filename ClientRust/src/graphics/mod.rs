@@ -40,7 +40,7 @@ pub use ggez_manager_simple::GgezManager;
 pub use ggez_manager_simple::{Canvas, DrawParam, Color, Rect, Text, Mesh, DrawMode};
 
 // === wgpu 导出 (已废弃,已禁用) ===
-// pub use dx_manager::{DXManager, TextureHandle, BlendMode};
+// pub use dx_manager::{DXManager, TextureHandle, SpriteBlendMode};
 // pub use sprite_renderer::{SpriteRenderer, SpriteVertex, create_sprite_vertices};
 // pub use sprite_instanced_renderer::{SpriteInstancedRenderer, SpriteInstance, QuadVertex};
 
@@ -158,3 +158,4 @@ pub fn draw_sprite_blend(
     }
     Ok(())
 }
+

@@ -5,7 +5,7 @@
 use hecs::World;
 use crate::ecs::components::{
     LocalPlayer, Position, Health, Monster, Player, NetworkSync,
-    Equipment, MirClass, PlayerComp
+    Equipment, MirClass, PlayerData
 };
 use crate::network::NetworkCommand;
 use tokio::sync::mpsc;
@@ -158,7 +158,7 @@ impl CombatSystem {
             let mut attack = (10, 20);  // 默认攻击力
             let mut level = 1;
             
-            for (_, (_, player_comp)) in world.query::<(&LocalPlayer, &PlayerComp)>().iter() {
+            for (_, (_, player_comp)) in world.query::<(&LocalPlayer, &PlayerData)>().iter() {
                 level = 10; // TODO: 从实际数据获取
                 // TODO: 从装备计算攻击力
                 attack = match player_comp.class {
@@ -351,3 +351,4 @@ impl SkillEffectSystem {
         }
     }
 }
+

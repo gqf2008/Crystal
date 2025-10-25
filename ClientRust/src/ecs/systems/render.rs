@@ -1373,14 +1373,14 @@ impl RenderSystem {
         camera_pos: &Position,
         camera: &Camera,
     ) -> GameResult<()> {
-        use crate::ecs::components::{MonsterComp, AnimationComp};
+        use crate::ecs::components::{MonsterData, Animation};
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
         use mir2_shared::MirAction;
         
         // 遍历所有怪物实体
         for (_entity, (monster, pos, anim)) in 
-            world.query::<(&MonsterComp, &Position, &AnimationComp)>().iter() 
+            world.query::<(&MonsterData, &Position, &Animation)>().iter() 
         {
             // 获取怪物图库
             // 怪物库使用 LibraryArray::Monsters
@@ -1472,13 +1472,13 @@ impl RenderSystem {
         camera_pos: &Position,
         camera: &Camera,
     ) -> GameResult<()> {
-        use crate::ecs::components::{MonsterComp, Health};
+        use crate::ecs::components::{MonsterData, Health};
         use crate::ecs::systems::CameraSystem;
         use ggez::graphics::{Text, Mesh, DrawMode, Rect};
         
         // 遍历所有怪物实体
         for (_entity, (monster, pos, health)) in 
-            world.query::<(&MonsterComp, &Position, &Health)>().iter() 
+            world.query::<(&MonsterData, &Position, &Health)>().iter() 
         {
             // 跳过死亡怪物
             if health.current <= 0 {
@@ -1550,3 +1550,6 @@ impl RenderSystem {
         Ok(())
     }
 }
+
+
+

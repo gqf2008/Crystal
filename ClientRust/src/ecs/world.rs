@@ -37,9 +37,9 @@ impl GameWorld {
         self.world.spawn((
             Position::new(position.x as f32, position.y as f32),
             Velocity::zero(),
-            DirectionComp::new(MirDirection::Down),
-            SpriteComp::new(2, 0), // Objects.wil
-            AnimationComp::new(MirAction::Standing, 4, 200),
+            Direction::new(MirDirection::Down),
+            Sprite::new(2, 0), // Objects.wil
+            Animation::new(MirAction::Standing, 4, 200),
             Health::new(100),
             CombatStats {
                 level: 1,
@@ -50,7 +50,7 @@ impl GameWorld {
                 accuracy: 10,
                 agility: 10,
             },
-            PlayerComp {
+            PlayerData {
                 id: 0,
                 name,
                 class,
@@ -76,11 +76,11 @@ impl GameWorld {
         self.world.spawn((
             Position::new(position.x as f32, position.y as f32),
             Velocity::zero(),
-            DirectionComp::new(MirDirection::Down),
-            SpriteComp::new(2, 0),
-            AnimationComp::new(MirAction::Standing, 4, 200),
+            Direction::new(MirDirection::Down),
+            Sprite::new(2, 0),
+            Animation::new(MirAction::Standing, 4, 200),
             Health::new(100),
-            PlayerComp {
+            PlayerData {
                 id,
                 name,
                 class,
@@ -104,9 +104,9 @@ impl GameWorld {
         self.world.spawn((
             Position::new(position.x as f32, position.y as f32),
             Velocity::zero(),
-            DirectionComp::new(MirDirection::Down),
-            SpriteComp::new(4, monster_index as i32), // Monsters.wil
-            AnimationComp::new(MirAction::Standing, 4, 300),
+            Direction::new(MirDirection::Down),
+            Sprite::new(4, monster_index as i32), // Monsters.wil
+            Animation::new(MirAction::Standing, 4, 300),
             Health::new(50),
             CombatStats {
                 level: 1,
@@ -117,7 +117,7 @@ impl GameWorld {
                 accuracy: 8,
                 agility: 5,
             },
-            MonsterComp {
+            MonsterData {
                 id,
                 name,
                 monster_index,
@@ -150,9 +150,9 @@ impl GameWorld {
     ) -> hecs::Entity {
         self.world.spawn((
             Position::new(position.x as f32, position.y as f32),
-            DirectionComp::new(MirDirection::Down),
-            SpriteComp::new(3, npc_index as i32), // NPCs.wil
-            NPCComp {
+            Direction::new(MirDirection::Down),
+            Sprite::new(3, npc_index as i32), // NPCs.wil
+            NPCData {
                 id,
                 name,
                 npc_index,
@@ -182,9 +182,9 @@ impl GameWorld {
         self.world.spawn((
             Position::new(position.x as f32, position.y as f32),
             Velocity::new(vx, vy),
-            SpriteComp::with_blend(6, spell_id as i32, BlendModeComp::Add), // Magic.wil + ADD混合
-            AnimationComp::new(MirAction::Spell, 10, 100),
-            SpellComp {
+            Sprite::with_blend(6, spell_id as i32, SpriteBlendMode::Additive), // Magic.wil + ADD混合
+            Animation::new(MirAction::Spell, 10, 100),
+            SpellData {
                 spell_id,
                 caster_id,
                 target_pos,
@@ -206,7 +206,7 @@ impl GameWorld {
     ) -> hecs::Entity {
         self.world.spawn((
             Position::new(position.x as f32, position.y as f32),
-            SpriteComp::new(5, item_index as i32), // Items.wil
+            Sprite::new(5, item_index as i32), // Items.wil
             ItemDrop {
                 item_id,
                 item_index,
@@ -250,7 +250,7 @@ impl GameWorld {
     /// 根据 ID 查找怪物
     pub fn find_monster(&self, id: u32) -> Option<hecs::Entity> {
         self.world
-            .query::<&MonsterComp>()
+            .query::<&MonsterData>()
             .iter()
             .find(|(_, monster)| monster.id == id)
             .map(|(entity, _)| entity)
@@ -305,3 +305,6 @@ impl Default for GameWorld {
         Self::new()
     }
 }
+
+
+
