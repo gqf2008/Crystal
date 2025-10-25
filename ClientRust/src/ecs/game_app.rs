@@ -229,7 +229,28 @@ impl GameState {
         self.scene_type = scene_type;
         
         self.current_scene = match scene_type {
-            SceneType::Login => Box::new(LoginScene::new()),
+            SceneType::Login => {
+                // 🧹 返回登录场景时:
+                // 1. 先断开网络连接(服务器端清理会话)
+                // 2. 再重置GameClient状态(客户端清理数据)
+                // 这对于重新登录非常重要,避免旧账号数据干扰
+                
+                // 1️⃣ 发送断开连接命令
+                if let Err(e) = self.command_tx.send(crate::network::NetworkCommand::Disconnect) {
+                    tracing::error!("❌ 发送断开连接命令失败: {}", e);
+                }
+                tracing::info!("🔌 已发送断开连接命令");
+                
+                // 2️⃣ 重置GameClient状态
+                if let Some(network_manager) = &self.network_manager {
+                    let nm = network_manager.blocking_read();
+                    let gc = nm.game_client();
+                    let mut client = gc.write();
+                    client.reset_to_login();
+                }
+                
+                Box::new(LoginScene::new())
+            },
             SceneType::Select => {
                 // 从LoginScene传递角色列表
                 let characters = self.pending_characters.take().unwrap_or_else(Vec::new);
@@ -240,14 +261,20 @@ impl GameState {
                 Box::new(scene)
             },
             SceneType::Game => {
-                // 从网络客户端获取玩家初始位置
-                let player_location = if let Some(network_manager) = &self.network_manager {
+                // 🧹 在切换到游戏场景之前,清理旧的游戏对象
+                // 这对于切换账号/角色时非常重要,避免旧角色数据残留
+                self.clear_game_objects();
+                
+                // 从网络客户端获取玩家初始位置和地图信息
+                let (player_location, map_file_name) = if let Some(network_manager) = &self.network_manager {
                     let nm = network_manager.blocking_read();
                     let gc = nm.game_client();
                     let client = gc.read();
-                    client.player.as_ref().map(|p| (p.location.x, p.location.y))
+                    let location = client.player.as_ref().map(|p| (p.location.x, p.location.y));
+                    let map_name = client.map_info.as_ref().map(|m| m.file_name.clone());
+                    (location, map_name)
                 } else {
-                    None
+                    (None, None)
                 };
                 
                 if let Some((x, y)) = player_location {
@@ -256,13 +283,81 @@ impl GameState {
                     println!("⚠️ 未找到玩家位置，使用默认值(0, 0)");
                 }
                 
+                if let Some(ref map_name) = map_file_name {
+                    println!("✅ 从服务器获取地图名称: {}", map_name);
+                } else {
+                    println!("⚠️ 未找到地图信息，使用默认地图 '0'");
+                }
+                
                 // GameScene 使用固定的 UI 设计分辨率 1024×768
                 // 不需要传递配置的窗口分辨率
-                Box::new(GameScene::new(ctx, &mut self.world, player_location)?)
+                Box::new(GameScene::new(ctx, &mut self.world, player_location, map_file_name)?)
             },
         };
         
         Ok(())
+    }
+    
+    /// 清理所有游戏对象实体
+    /// 
+    /// 在切换到游戏场景之前调用,确保旧角色数据不会残留
+    /// 清理的对象包括: 玩家、怪物、NPC、物品掉落、地图瓦片等
+    fn clear_game_objects(&mut self) {
+        use crate::ecs::components::*;
+        
+        println!("🧹 开始清理旧游戏对象...");
+        
+        let mut to_despawn = Vec::new();
+        
+        // 1. 清理玩家实体 (包括本地玩家和其他玩家)
+        for (entity, _) in self.world.query::<&PlayerData>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 2. 清理怪物实体
+        for (entity, _) in self.world.query::<&MonsterData>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 3. 清理NPC实体
+        for (entity, _) in self.world.query::<&NPCData>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 4. 清理物品掉落实体
+        for (entity, _) in self.world.query::<&ItemDrop>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 5. 清理地图瓦片实体
+        for (entity, _) in self.world.query::<&MapTile>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 6. 清理地图数据实体
+        for (entity, _) in self.world.query::<&MapData>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 7. 清理动画瓦片实体
+        for (entity, _) in self.world.query::<&AnimatedTile>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 8. 清理门实体
+        for (entity, _) in self.world.query::<&Door>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 删除所有收集的实体
+        let count = to_despawn.len();
+        for entity in to_despawn {
+            if let Err(e) = self.world.despawn(entity) {
+                println!("⚠️ 删除实体失败: {:?}", e);
+            }
+        }
+        
+        println!("✅ 已清理 {} 个游戏对象和地图实体", count);
     }
     
     /// 获取当前场景类型

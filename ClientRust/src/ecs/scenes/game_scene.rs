@@ -99,7 +99,7 @@ impl GameScene {
     /// # 返回
     /// - `Ok(GameScene)`: 成功创建的游戏场景
     /// - `Err`: 初始化失败的错误信息
-    pub fn new(ctx: &mut Context, world: &mut World, player_grid_location: Option<(i32, i32)>) -> GameResult<Self> {
+    pub fn new(ctx: &mut Context, world: &mut World, player_grid_location: Option<(i32, i32)>, map_file_name: Option<String>) -> GameResult<Self> {
         println!("🗺️ 游戏场景初始化中...");
         
         // 初始化地图库
@@ -107,11 +107,17 @@ impl GameScene {
         initialize_all_libraries("Data").expect("初始化地图库失败");
         println!("✅ 地图库初始化完成");
         
+        // 使用服务器指定的地图,如果没有则使用默认地图 "0"
+        let map_name = map_file_name.unwrap_or_else(|| {
+            println!("⚠️ 未收到地图信息,使用默认地图 '0'");
+            "0".to_string()
+        });
+        
         // 加载地图
-        let map_path = "Map/0.map";
+        let map_path = format!("Map/{}.map", map_name);
         println!("🗺️ 正在加载地图: {}", map_path);
-        let reader = MapReader::new(map_path)?;
-        println!("✅ 地图加载完成: {}x{}", reader.width, reader.height);
+        let reader = MapReader::new(&map_path)?;
+        println!("✅ 地图加载完成: {}x{} (文件: {})", reader.width, reader.height, map_name);
         
         // 加载地图瓦片到 ECS
         MapLoader::load_map(world, reader)?;

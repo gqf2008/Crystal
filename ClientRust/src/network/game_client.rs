@@ -284,6 +284,36 @@ impl GameClient {
         self.event_tx = Some(tx);
     }
     
+    /// Reset client state (called when returning to login screen)
+    /// 重置客户端状态(返回登录界面时调用)
+    pub fn reset_to_login(&mut self) {
+        tracing::info!("🔄 重置GameClient状态到登录界面");
+        
+        // 清空玩家状态
+        self.player = None;
+        self.hero = None;
+        
+        // 清空世界状态
+        self.map_info = None;
+        self.objects.clear();
+        
+        // 清空UI状态
+        self.chat_messages.clear();
+        self.login_characters.clear();
+        
+        // 清空游戏系统状态
+        self.group = GroupSystem::default();
+        self.guild = GuildSystem::default();
+        self.friends = FriendSystem::default();
+        self.quests = QuestSystem::default();
+        self.trade = TradeSystem::default();
+        
+        // 保留 event_tx 和统计信息
+        // event_tx 和 packets_* 不需要重置
+        
+        tracing::info!("✅ GameClient状态已重置");
+    }
+    
     /// Send event to UI layer
     fn send_event(&self, event: GameEvent) {
         if let Some(tx) = &self.event_tx {

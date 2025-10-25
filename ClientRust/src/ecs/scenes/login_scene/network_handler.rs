@@ -47,7 +47,8 @@ impl LoginScene {
     fn on_disconnected(&mut self, reason: &str) {
         println!("❌ Disconnected: {}", reason);
         self.connecting = false;
-        self.login_enabled = false;
+        self.login_enabled = true;  // 🔓 断开连接,重新启用登录
+        tracing::info!("🔓 断开连接,重新启用登录按钮");
         self.message_box = Some(MessageBox::new(
             format!("Disconnected: {}", reason), 
             super::DESIGN_WIDTH, 
@@ -66,6 +67,8 @@ impl LoginScene {
             };
             self.show_message(msg);
             self.connecting = false;
+            self.login_enabled = true;  // 🔓 登录失败,重新启用登录
+            tracing::info!("🔓 登录失败,重新启用登录按钮");
         }
     }
     
@@ -73,6 +76,8 @@ impl LoginScene {
     fn on_login_banned(&mut self, reason: &str) {
         self.show_message(&format!("Account banned: {}", reason));
         self.connecting = false;
+        self.login_enabled = true;  // 🔓 账号被封禁,重新启用登录
+        tracing::info!("🔓 账号被封禁,重新启用登录按钮");
     }
     
     /// 处理新建账号服务器响应

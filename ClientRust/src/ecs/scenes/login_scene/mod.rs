@@ -93,12 +93,19 @@ impl LoginScene {
     }
     
     fn submit_login(&mut self, network_tx: &mpsc::UnboundedSender<NetworkCommand>) {
+        // 🔒 防止重复登录
+        if !self.login_enabled {
+            tracing::warn!("⚠️ 登录已在进行中,忽略重复请求");
+            return;
+        }
+        
         if let Some(cmd) = self.login_dialog.build_network_command() {
             if let Err(e) = network_tx.send(cmd) {
                 tracing::error!("❌ 发送登录命令失败: {}", e);
                 self.show_message("网络错误，无法发送登录请求");
                 return;
             }
+            tracing::info!("✅ 登录命令已发送,禁用重复提交");
             self.connecting = true;
             self.login_enabled = false;
         } else {
