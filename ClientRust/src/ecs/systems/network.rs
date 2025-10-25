@@ -444,15 +444,20 @@ impl NetworkSystem {
     ) -> Entity {
         let (world_x, world_y) = crate::ecs::coordinates::Coordinates::grid_to_world_center(location.x, location.y);
         
+        tracing::info!("🏪 创建NPC实体: ID={}, name={}, image={}, pos=({}, {})", object_id, name, image, world_x, world_y);
+        
         world.spawn((
             Position::new(world_x, world_y),
             Direction::new(direction),
             Animation::new(MirAction::Standing, 4, 200),
             NetworkSync::new(object_id, NetworkObjectType::NPC),
-            NPC::new(
-                name.to_string(),
-                format!("NPC#{}", image), // 使用image作为NPC类型标识
-            ),
+            // 使用NPCData而不是NPC,以便渲染系统能找到
+            NPCData {
+                id: object_id,
+                name: name.to_string(),
+                npc_index: image, // 使用服务器传来的NPC图像索引
+                dialogue_id: 0,
+            },
         ))
     }
 
@@ -467,10 +472,16 @@ impl NetworkSystem {
             Direction::new(direction),
             Animation::new(MirAction::Standing, 4, 200),
             NetworkSync::new(object_id, NetworkObjectType::Monster),
-            Monster::new(
-                name.to_string(),
-                image, // 使用服务器传来的怪物图像索引
-            ),
+            // 使用MonsterData而不是Monster,以便渲染系统能找到
+            MonsterData {
+                id: object_id,
+                name: name.to_string(),
+                monster_index: image, // 使用服务器传来的怪物图像索引
+                ai_mode: 0,
+                ai_type: 0,
+                spawn_x: world_x,
+                spawn_y: world_y,
+            },
             Health::new(100), // 默认100血,等待ObjectHealth packet更新实际百分比
             CombatStats {
                 level: 1,

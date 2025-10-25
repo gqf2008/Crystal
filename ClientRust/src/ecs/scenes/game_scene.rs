@@ -635,6 +635,9 @@ impl Scene for GameScene {
         // 渲染怪物
         RenderSystem::draw_monsters(ctx, canvas, world, &pos, &camera)?;
         
+        // 渲染NPC
+        RenderSystem::draw_npcs(ctx, canvas, world, &pos, &camera)?;
+        
         // 渲染地面物品
         RenderSystem::draw_items(ctx, canvas, world, &pos, &camera)?;
         

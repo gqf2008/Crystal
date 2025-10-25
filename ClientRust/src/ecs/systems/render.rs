@@ -1327,14 +1327,21 @@ impl RenderSystem {
         for (_entity, (monster, pos, anim)) in 
             world.query::<(&MonsterData, &Position, &Animation)>().iter() 
         {
+            // 🐛 调试信息
+            tracing::debug!("👹 绘制怪物: name={}, monster_index={}, pos=({:.1}, {:.1}), action={:?}, dir={}", 
+                monster.name, monster.monster_index, pos.x, pos.y, anim.action, anim.direction);
+            
             // 获取怪物图库
             // 怪物库使用 LibraryArray::Monsters
-            // 索引范围: 0-999
-            let lib_index = (monster.monster_index / 1000) as usize;
+            // monster_index 直接是基础索引,不需要除以1000
+            let lib_index = 0; // 默认使用Monster库0
             
             let lib = match get_library_from_array(LibraryArray::Monsters, lib_index) {
                 Some(lib) => lib,
-                None => continue, // 库不存在，跳过
+                None => {
+                    tracing::warn!("⚠️ 怪物图库 {} 不存在", lib_index);
+                    continue;
+                }
             };
             
             // 计算帧索引
@@ -1368,9 +1375,12 @@ impl RenderSystem {
             let direction_offset = (anim.direction as i32) * frames_per_direction;
             let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
             
-            // 怪物索引偏移
-            let monster_offset = (monster.monster_index % 1000) as i32;
-            let final_frame = draw_frame + monster_offset;
+            // 🔧 修复: monster_index 就是基础帧索引,直接加上动画偏移即可
+            let base_frame = (monster.monster_index as i32) * 360; // 每个怪物360帧(站立32+行走48+攻击48+...)
+            let final_frame = base_frame + draw_frame;
+            
+            tracing::debug!("  📊 帧计算: base={}, action_start={}, dir_offset={}, frame_idx={}, final={}", 
+                base_frame, action_frame_start, direction_offset, anim.frame_index, final_frame);
             
             // 转换为屏幕坐标
             let (screen_x, screen_y) = CameraSystem::world_to_screen(
@@ -1387,6 +1397,9 @@ impl RenderSystem {
                 let draw_x = screen_x + image_info.x as f32 * camera.zoom;
                 let draw_y = screen_y + image_info.y as f32 * camera.zoom;
                 
+                tracing::debug!("  🎨 绘制位置: screen=({:.1}, {:.1}), offset=({}, {}), final=({:.1}, {:.1})", 
+                    screen_x, screen_y, image_info.x, image_info.y, draw_x, draw_y);
+                
                 // 绘制精灵
                 if let Some(image) = &image_info.image {
                     canvas.draw(
@@ -1395,7 +1408,12 @@ impl RenderSystem {
                             .dest([draw_x, draw_y])
                             .scale([camera.zoom, camera.zoom]),
                     );
+                    tracing::debug!("  ✅ 怪物精灵绘制成功");
+                } else {
+                    tracing::warn!("  ⚠️ 怪物图像为空!");
                 }
+            } else {
+                tracing::warn!("  ⚠️ 无法获取怪物图像信息: frame={}", final_frame);
             }
         }
         
@@ -1490,6 +1508,83 @@ impl RenderSystem {
                 hp_color,
             )?;
             canvas.draw(&fg_rect, DrawParam::default());
+        }
+        
+        Ok(())
+    }
+
+    /// 绘制NPC
+    /// 
+    /// 参数：
+    /// - ctx: ggez 上下文
+    /// - canvas: 画布
+    /// - world: ECS 世界
+    /// - camera_pos: 相机位置
+    /// - camera: 相机组件
+    pub fn draw_npcs(
+        _ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        camera_pos: &Position,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        use crate::ecs::components::{NPCData, Animation};
+        use crate::graphics::libraries::{get_library_from_array, LibraryArray};
+        use crate::ecs::systems::CameraSystem;
+        use mir2_shared::MirAction;
+        
+        // 遍历所有NPC实体
+        for (_entity, (npc, pos, anim)) in 
+            world.query::<(&NPCData, &Position, &Animation)>().iter() 
+        {
+            // 获取NPC图库
+            // NPC库使用 LibraryArray::NPCs
+            let lib_index = (npc.npc_index / 1000) as usize;
+            
+            let lib = match get_library_from_array(LibraryArray::NPCs, lib_index) {
+                Some(lib) => lib,
+                None => continue, // 库不存在，跳过
+            };
+            
+            // 计算帧索引 - NPC通常只有站立动画
+            let action_frame_start = match anim.action {
+                MirAction::Standing => 0,
+                _ => 0,
+            };
+            
+            let frames_per_direction = 4; // NPC站立动画每方向4帧
+            let direction_offset = (anim.direction as i32) * frames_per_direction;
+            let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
+            
+            // NPC索引偏移
+            let npc_offset = (npc.npc_index % 1000) as i32;
+            let final_frame = draw_frame + npc_offset;
+            
+            // 转换为屏幕坐标
+            let (screen_x, screen_y) = CameraSystem::world_to_screen(
+                camera_pos,
+                camera,
+                pos.x,
+                pos.y,
+            );
+            
+            // 绘制NPC
+            let mut lib_locked = lib.lock().unwrap();
+            if let Ok(image_info) = lib_locked.get_image_info(final_frame as usize) {
+                // 计算绘制位置（考虑偏移）
+                let draw_x = screen_x + image_info.x as f32 * camera.zoom;
+                let draw_y = screen_y + image_info.y as f32 * camera.zoom;
+                
+                // 绘制精灵
+                if let Some(image) = &image_info.image {
+                    canvas.draw(
+                        image,
+                        DrawParam::default()
+                            .dest([draw_x, draw_y])
+                            .scale([camera.zoom, camera.zoom]),
+                    );
+                }
+            }
         }
         
         Ok(())
