@@ -9,6 +9,8 @@ pub mod render;
 pub mod network;
 pub mod monster;
 pub mod ui_system;
+pub mod input_system;  // 🆕 输入系统
+pub mod coordinate_system;  // 🆕 坐标系统
 pub mod magic_learning_system;
 pub mod magic_cast_system;
 pub mod item_system;
@@ -25,6 +27,8 @@ pub use render::RenderSystem;
 pub use network::NetworkSystem;
 pub use monster::MonsterSystem;
 pub use ui_system::UISystem;
+pub use input_system::InputSystem;  // 🆕 输入系统
+pub use coordinate_system::CoordinateSystem;  // 🆕 坐标系统
 pub use magic_learning_system::MagicLearningSystem;
 pub use magic_cast_system::MagicCastSystem;
 pub use item_system::ItemSystem;

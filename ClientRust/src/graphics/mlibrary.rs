@@ -953,7 +953,14 @@ impl MLibrary {
         color: ggez::graphics::Color,
         offset: bool,
     ) -> io::Result<()> {
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        // 🔧 使用 canvas 的屏幕坐标系,而不是物理像素
+        // canvas.screen_coordinates() 返回当前设置的逻辑坐标系 (如 1024×768)
+        let screen_rect = canvas.screen_coordinates().unwrap_or_else(|| {
+            // 如果没有设置,使用物理像素作为回退
+            let (w, h) = ctx.gfx.drawable_size();
+            ggez::graphics::Rect::new(0.0, 0.0, w, h)
+        });
+        let (screen_width, screen_height) = (screen_rect.w, screen_rect.h);
 
         // 获取或创建纹理
         let info = self.get_or_create_texture(ctx, index)?;
@@ -965,13 +972,35 @@ impl MLibrary {
             (x, y)
         };
 
+        // 调试输出 (只对index=1即主面板背景)
+        static mut DEBUG_COUNT: u32 = 0;
+        unsafe {
+            if index == 1 && DEBUG_COUNT < 3 {
+                println!("🔍 [mlibrary] index={}, pos=({}, {}), screen={}x{}", 
+                         index, draw_x, draw_y, screen_width, screen_height);
+                println!("🔍 [mlibrary] texture size: {}x{}", info.width, info.height);
+                DEBUG_COUNT += 1;
+            }
+        }
+
         // 屏幕裁剪检查
         if draw_x >= screen_width
             || draw_y >= screen_height
             || draw_x + (info.width as f32) < 0.0
             || draw_y + (info.height as f32) < 0.0
         {
+            unsafe {
+                if index == 1 && DEBUG_COUNT <= 3 {
+                    println!("❌ [mlibrary] 裁剪检查失败! 元素在屏幕外");
+                }
+            }
             return Ok(());
+        }
+
+        unsafe {
+            if index == 1 && DEBUG_COUNT <= 3 {
+                println!("✅ [mlibrary] 裁剪检查通过,即将调用 canvas.draw()");
+            }
         }
 
         // 绘制
@@ -980,6 +1009,17 @@ impl MLibrary {
                 image,
                 DrawParam::default().dest([draw_x, draw_y]).color(color),
             );
+            unsafe {
+                if index == 1 && DEBUG_COUNT <= 3 {
+                    println!("✅ [mlibrary] canvas.draw() 调用完成");
+                }
+            }
+        } else {
+            unsafe {
+                if index == 1 && DEBUG_COUNT <= 3 {
+                    println!("❌ [mlibrary] 纹理图像不存在!");
+                }
+            }
         }
 
         Ok(())

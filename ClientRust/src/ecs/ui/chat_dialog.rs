@@ -208,6 +208,11 @@ impl ChatDialog {
         self.input_text.clear();
     }
     
+    /// 检查输入框是否激活
+    pub fn is_input_active(&self) -> bool {
+        self.input_active
+    }
+    
     /// 输入字符
     pub fn input_char(&mut self, ch: char) {
         if !self.input_active {

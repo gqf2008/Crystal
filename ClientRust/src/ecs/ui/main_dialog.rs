@@ -262,15 +262,15 @@ impl MainDialog {
         let dialog_x = (self.screen_width - self.dialog_width) / 2.0;
         let dialog_y = self.screen_height - self.dialog_height;
         
-        // 调试输出 (只打印一次)
-        static mut PRINTED: bool = false;
+        // 调试输出 (只打印前3帧)
+        static mut PRINT_COUNT: u32 = 0;
         unsafe {
-            if !PRINTED {
-                println!("🖼️ MainDialog实际尺寸: bg_index={}, dialog_width={}, dialog_height={}", 
-                         self.bg_index, self.dialog_width, self.dialog_height);
-                println!("📐 屏幕尺寸: {}x{}, 面板位置: ({}, {})", 
-                         self.screen_width, self.screen_height, dialog_x, dialog_y);
-                PRINTED = true;
+            if PRINT_COUNT < 3 {
+                println!("🎨 [MainDialog::draw] 第 {} 帧", PRINT_COUNT + 1);
+                println!("� 屏幕尺寸: {}x{}", self.screen_width, self.screen_height);
+                println!("🖼️ 对话框尺寸: {}x{}", self.dialog_width, self.dialog_height);
+                println!("� 绘制位置: ({}, {})", dialog_x, dialog_y);
+                PRINT_COUNT += 1;
             }
         }
         
@@ -304,12 +304,39 @@ impl MainDialog {
         // 2. 绘制主界面背景 (Prguse_0/1/2)
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
             if let Ok(mut lib) = lib_arc.try_lock() {
-                let _ = lib.draw_with_color(
+                unsafe {
+                    if PRINT_COUNT <= 3 {
+                        println!("🎨 绘制主面板背景: index={}, pos=({}, {})", 
+                                 self.bg_index, dialog_x, dialog_y);
+                    }
+                }
+                let result = lib.draw_with_color(
                     ctx, canvas,
                     self.bg_index as usize,
                     dialog_x, dialog_y,
                     Color::WHITE, false
                 );
+                unsafe {
+                    if PRINT_COUNT <= 3 {
+                        match result {
+                            Ok(_) => println!("✅ 主面板背景绘制返回成功"),
+                            Err(ref e) => println!("❌ 主面板背景绘制失败: {:?}", e),
+                        }
+                    }
+                }
+                let _ = result;
+            } else {
+                unsafe {
+                    if PRINT_COUNT <= 3 {
+                        println!("❌ 无法锁定 Prguse 库");
+                    }
+                }
+            }
+        } else {
+            unsafe {
+                if PRINT_COUNT <= 3 {
+                    println!("❌ Prguse 库未加载");
+                }
             }
         }
         

@@ -31,6 +31,9 @@ impl NetworkSystem {
     /// 处理网络事件，更新World中的实体
     pub fn process_event(&mut self, world: &mut World, event: &GameEvent) {
         match event {
+            GameEvent::MapInformation { map_index, file_name, title } => {
+                self.handle_map_information(world, *map_index, file_name, title);
+            }
             GameEvent::ObjectSpawned { object } => {
                 self.handle_object_spawned(world, object);
             }
@@ -75,6 +78,42 @@ impl NetworkSystem {
         // TODO: 这里需要知道是哪个玩家移动了
         // 可能需要从 UserInformation 中获取当前玩家的 object_id
         // 或者服务器发送 ObjectWalked/ObjectRan 事件包含 object_id
+    }
+    
+    /// 处理地图信息事件 - 从服务器加载地图
+    fn handle_map_information(&mut self, world: &mut World, map_index: i32, file_name: &str, title: &str) {
+        tracing::info!("🗺️ 收到地图信息: {} ({}) - 索引: {}", title, file_name, map_index);
+        
+        // 构建地图文件路径
+        let map_path = format!("Map/{}.map", file_name);
+        
+        tracing::info!("📂 正在加载地图文件: {}", map_path);
+        
+        // 加载地图数据
+        use crate::objects::MapReader;
+        use crate::ecs::map_loader::MapLoader;
+        
+        match MapReader::new(&map_path) {
+            Ok(reader) => {
+                tracing::info!("✅ 地图文件加载成功: {}x{}", reader.width, reader.height);
+                
+                // 清除旧的地图瓦片
+                // TODO: 实现清除旧地图瓦片的逻辑
+                
+                // 加载新地图瓦片到 ECS
+                match MapLoader::load_map(world, reader) {
+                    Ok(_) => {
+                        tracing::info!("✅ 地图数据已加载到 ECS");
+                    }
+                    Err(e) => {
+                        tracing::error!("❌ 地图数据加载到 ECS 失败: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("❌ 地图文件加载失败: {} - {}", map_path, e);
+            }
+        }
     }
     
     /// 处理用户信息更新事件

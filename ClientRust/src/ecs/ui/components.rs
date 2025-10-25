@@ -443,6 +443,16 @@ impl ChatDialogComp {
             dialog: ChatDialog::new(x, y),
         }
     }
+    
+    /// 检查输入框是否激活
+    pub fn is_input_active(&self) -> bool {
+        self.dialog.is_input_active()
+    }
+    
+    /// 取消输入
+    pub fn deactivate_input(&mut self) {
+        self.dialog.deactivate_input();
+    }
 }
 
 /// 技能学习对话框组件
@@ -457,5 +467,16 @@ impl MagicLearningDialogComp {
             dialog: super::MagicLearningDialog::new(),
             is_open: false,
         }
+    }
+    
+    /// 检查是否打开
+    pub fn is_open(&self) -> bool {
+        self.is_open
+    }
+    
+    /// 切换显示/隐藏
+    pub fn toggle(&mut self) {
+        self.is_open = !self.is_open;
+        self.dialog.set_visible(self.is_open);
     }
 }

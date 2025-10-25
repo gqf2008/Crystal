@@ -80,6 +80,16 @@ impl MagicLearningDialog {
         }
     }
     
+    /// 设置可见性
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+        if !visible {
+            self.selected_index = None;
+            self.hover_index = None;
+            self.dragging_index = None;
+        }
+    }
+    
     pub fn show(&mut self) {
         self.visible = true;
     }

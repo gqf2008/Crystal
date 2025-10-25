@@ -12,6 +12,7 @@
 // ============================================================================
 
 use hecs::World;
+use tokio::sync::mpsc;
 
 // 🎯 从 components 导入统一的类型定义
 use crate::ecs::components::{
@@ -23,6 +24,9 @@ use crate::ecs::components::{
     MouseInput,
     MapData,
 };
+
+use crate::network::NetworkCommand;
+use mir2_shared::enums::MirDirection;
 
 /// 角色系统
 pub struct PlayerSystem;
@@ -80,7 +84,8 @@ impl PlayerSystem {
     /// - 移动更新
     /// - 动画更新
     /// - 摄像机跟随
-    pub fn update(world: &mut World) {
+    /// - 网络同步：发送移动命令到服务器
+    pub fn update(world: &mut World, network_tx: Option<&mpsc::UnboundedSender<NetworkCommand>>) {
         use crate::objects::pathfinder::PathFinder;
         use mir2_shared::Point;
         use crate::ecs::map_helper::MapHelper;
@@ -116,6 +121,11 @@ impl PlayerSystem {
         
         // 更新所有玩家
         for (_entity, (player, pos)) in world.query_mut::<(&mut Player, &mut Position)>() {
+            // 记录移动前的位置（用于检测是否真的发生了移动）
+            let old_grid_x = (pos.x / 48.0) as i32;
+            let old_grid_y = (pos.y / 32.0) as i32;
+            let old_direction = player.direction;
+            
             // 📍 计算鼠标指向的世界坐标
             let (mouse_world_x, mouse_world_y) = PlayerSystem::screen_to_world(
                 mouse_input.x, 
@@ -351,6 +361,46 @@ impl PlayerSystem {
             if player.frame_time >= player.action.frame_interval() {
                 player.frame_time = 0;
                 player.frame_index = (player.frame_index + 1) % player.action.frame_count();
+            }
+            
+            // 🌐 网络同步：检测位置或方向变化，发送到服务器
+            if let Some(network_tx) = network_tx {
+                let new_grid_x = (pos.x / 48.0) as i32;
+                let new_grid_y = (pos.y / 32.0) as i32;
+                
+                // 当格子位置或方向发生变化时，发送移动命令
+                if new_grid_x != old_grid_x || new_grid_y != old_grid_y || player.direction != old_direction {
+                    let direction = match player.direction {
+                        0 => MirDirection::Up,
+                        1 => MirDirection::UpRight,
+                        2 => MirDirection::Right,
+                        3 => MirDirection::DownRight,
+                        4 => MirDirection::Down,
+                        5 => MirDirection::DownLeft,
+                        6 => MirDirection::Left,
+                        7 => MirDirection::UpLeft,
+                        _ => MirDirection::Down,
+                    };
+                    
+                    // 根据动作类型发送不同的移动命令
+                    match player.action {
+                        PlayerAction::Run => {
+                            let _ = network_tx.send(NetworkCommand::Run { direction });
+                            tracing::debug!("🌐 发送跑步命令: direction={:?}, pos=({}, {})", direction, new_grid_x, new_grid_y);
+                        }
+                        PlayerAction::Walk => {
+                            let _ = network_tx.send(NetworkCommand::Walk { direction });
+                            tracing::debug!("🌐 发送行走命令: direction={:?}, pos=({}, {})", direction, new_grid_x, new_grid_y);
+                        }
+                        _ => {
+                            // 转身命令（不移动，只改变方向）
+                            if player.direction != old_direction && new_grid_x == old_grid_x && new_grid_y == old_grid_y {
+                                let _ = network_tx.send(NetworkCommand::Turn { direction });
+                                tracing::debug!("🌐 发送转身命令: direction={:?}", direction);
+                            }
+                        }
+                    }
+                }
             }
         }
         

@@ -151,4 +151,15 @@ impl SkillsDialogComp {
             is_open: false,
         }
     }
+    
+    /// 检查是否打开
+    pub fn is_open(&self) -> bool {
+        self.is_open
+    }
+    
+    /// 设置打开/关闭
+    pub fn set_open(&mut self, open: bool) {
+        self.is_open = open;
+        // SkillsDialog 本身没有 visible 字段，由 SkillsDialogComp 管理
+    }
 }

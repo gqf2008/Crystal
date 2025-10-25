@@ -387,7 +387,7 @@ impl EventHandler for MapViewerApp {
         CameraSystem::update(&mut self.world);
 
         // 更新角色系统
-        PlayerSystem::update(&mut self.world);
+        PlayerSystem::update(&mut self.world,None);
 
         Ok(())
     }

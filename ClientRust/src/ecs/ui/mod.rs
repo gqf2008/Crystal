@@ -19,6 +19,7 @@ pub mod options_dialog;    // 🆕 选项对话框
 pub mod friends_dialog;    // 🆕 好友对话框
 pub mod group_dialog;      // 🆕 组队对话框
 pub mod guild_dialog;      // 🆕 行会对话框
+pub mod buff_dialog;       // 🆕 Buff/Debuff 显示对话框
 
 // 重新导出常用类型
 pub use components::*;
@@ -38,3 +39,4 @@ pub use options_dialog::{OptionsDialog, OptionsDialogComp, OptionsTab};
 pub use friends_dialog::{FriendsDialog, FriendsDialogComp, FriendsTab, FriendInfo};
 pub use group_dialog::{GroupDialog, GroupDialogComp, GroupMember};
 pub use guild_dialog::{GuildDialog, GuildDialogComp, GuildTab, GuildMember};
+pub use buff_dialog::{BuffDialog, BuffDialogComp, BuffItem};
