@@ -750,14 +750,20 @@ impl Libraries {
             return Ok(());
         }
         
-        // 扫描目录中的所有 .lib 文件
+        // 扫描目录中的所有 .lib 文件 (不区分大小写)
         let pattern = format!("*{}.lib", suffix);
         let mut lib_files: Vec<_> = std::fs::read_dir(&full_path)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
                 let path = entry.path();
-                path.is_file() && 
-                path.extension().and_then(|s| s.to_str()) == Some("lib")
+                if !path.is_file() {
+                    return false;
+                }
+                // Windows不区分大小写,检查扩展名时也不区分
+                match path.extension().and_then(|s| s.to_str()) {
+                    Some(ext) => ext.eq_ignore_ascii_case("lib"),
+                    None => false
+                }
             })
             .collect();
         
@@ -805,17 +811,27 @@ impl Libraries {
         // 加载所有文件
         let mut loaded_count = 0;
         for i in 0..array_size {
-            let filename = format!("{}{}.lib", i.to_string().pad_to_width_with_char(padding.len(), '0'), suffix);
-            let file_path = full_path.join(&filename);
+            // Windows不区分大小写,尝试.lib和.Lib两种扩展名
+            let filename_lower = format!("{}{}.lib", i.to_string().pad_to_width_with_char(padding.len(), '0'), suffix);
+            let filename_upper = format!("{}{}.Lib", i.to_string().pad_to_width_with_char(padding.len(), '0'), suffix);
             
-            if file_path.exists() {
-                match self.load_to_array(array_type, i, &file_path) {
-                    Ok(_) => {
-                        loaded_count += 1;
-                    }
-                    Err(e) => {
-                        tracing::debug!("  ✗ 加载失败 [{}]: {} - {}", i, filename, e);
-                    }
+            let file_path_lower = full_path.join(&filename_lower);
+            let file_path_upper = full_path.join(&filename_upper);
+            
+            let file_path = if file_path_lower.exists() {
+                file_path_lower
+            } else if file_path_upper.exists() {
+                file_path_upper
+            } else {
+                continue; // 文件不存在,跳过
+            };
+            
+            match self.load_to_array(array_type, i, &file_path) {
+                Ok(_) => {
+                    loaded_count += 1;
+                }
+                Err(e) => {
+                    tracing::debug!("  ✗ 加载失败 [{}]: {} - {}", i, file_path.display(), e);
                 }
             }
         }
@@ -829,9 +845,11 @@ impl Libraries {
     /// 
     /// C# Reference: LoadGameLibraries() (line 241-289)
     pub fn init_game_libraries(&mut self) -> std::io::Result<()> {
+        println!("🎮🎮🎮 [LIBRARIES] 开始初始化游戏内容库...");
         tracing::info!("🎮 开始初始化游戏内容库...");
         
         // Monsters (怪物)
+        println!("👹 初始化 Monsters 库...");
         self.init_library_from_directory(
             LibraryArray::Monsters,
             "Monster",

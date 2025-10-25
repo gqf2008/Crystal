@@ -39,10 +39,22 @@ impl ClientRuntime {
 
     /// 初始化图像库系统（包括 MapLibs）
     pub fn init_graphics_libraries(data_path: &str) -> Result<()> {
+        println!("🚀🚀🚀 [RUNTIME] 开始初始化图像库系统, data_path = {}", data_path);
         tracing::info!("=== 初始化图像库系统 ===");
-        graphics::initialize_all_libraries(data_path).context("initializing graphics libraries")?;
-        tracing::info!("✅ 图像库初始化完成");
-        Ok(())
+        tracing::info!("📂 数据路径: {}", data_path);
+        
+        match graphics::initialize_all_libraries(data_path) {
+            Ok(_) => {
+                println!("✅✅✅ [RUNTIME] 图像库初始化成功!");
+                tracing::info!("✅ 图像库初始化完成");
+                Ok(())
+            }
+            Err(e) => {
+                println!("❌❌❌ [RUNTIME] 图像库初始化失败: {}", e);
+                tracing::error!("❌ 图像库初始化失败: {}", e);
+                Err(anyhow::anyhow!("initializing graphics libraries: {}", e))
+            }
+        }
     }
 
     /// 加载核心图形库（Data.lib, Prguse.lib等）

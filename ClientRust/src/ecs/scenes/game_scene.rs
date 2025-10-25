@@ -33,7 +33,7 @@ use tokio::sync::mpsc;
 use super::{Scene, SceneType};
 use crate::network::{NetworkCommand, game_client::GameEvent};
 use crate::ecs::{
-    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerData, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow},
+    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerData, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow, Animation},
     systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem},
     Coordinates, MapUtils,  // 坐标工具
     map_loader::MapLoader,
@@ -487,6 +487,12 @@ impl Scene for GameScene {
                 .unwrap_or(0);
             
             AnimationSystem::update(world, animation_count);
+            
+            // 🎬 更新怪物和NPC动画
+            let delta_ms = 50; // 约50ms/帧 (20fps动画)
+            for (_entity, anim) in world.query_mut::<&mut Animation>() {
+                anim.update(delta_ms);
+            }
         }
         
         // 🎯 更新鼠标按下时间计数器（用于长按检测）

@@ -1312,7 +1312,7 @@ impl RenderSystem {
     /// - camera_pos: 相机位置
     /// - camera: 相机组件
     pub fn draw_monsters(
-        _ctx: &mut Context,
+        ctx: &mut Context,
         canvas: &mut Canvas,
         world: &World,
         camera_pos: &Position,
@@ -1328,21 +1328,29 @@ impl RenderSystem {
             world.query::<(&MonsterData, &Position, &Animation)>().iter() 
         {
             // 🐛 调试信息
-            tracing::debug!("👹 绘制怪物: name={}, monster_index={}, pos=({:.1}, {:.1}), action={:?}, dir={}", 
+            println!("👹 绘制怪物: name={}, monster_index={}, pos=({:.1}, {:.1}), action={:?}, dir={}", 
                 monster.name, monster.monster_index, pos.x, pos.y, anim.action, anim.direction);
             
             // 获取怪物图库
-            // 怪物库使用 LibraryArray::Monsters
-            // monster_index 直接是基础索引,不需要除以1000
-            let lib_index = 0; // 默认使用Monster库0
+            // 传奇怪物库组织: 每个怪物有独立的库文件
+            // - 000.Lib = 怪物0 (所有帧)
+            // - 001.Lib = 怪物1 (所有帧)
+            // - 002.Lib = 怪物2 (所有帧)
+            // 所以 lib_index = monster_index
+            let lib_index = monster.monster_index as usize;
+            
+            println!("  🔍 尝试加载库: LibraryArray::Monsters[{}]", lib_index);
             
             let lib = match get_library_from_array(LibraryArray::Monsters, lib_index) {
                 Some(lib) => lib,
                 None => {
+                    println!("  ❌ 怪物图库 {} 不存在", lib_index);
                     tracing::warn!("⚠️ 怪物图库 {} 不存在", lib_index);
                     continue;
                 }
             };
+            
+            println!("  ✅ 怪物图库 {} 加载成功", lib_index);
             
             // 计算帧索引
             // 怪物动画布局（与玩家类似）:
@@ -1375,12 +1383,11 @@ impl RenderSystem {
             let direction_offset = (anim.direction as i32) * frames_per_direction;
             let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
             
-            // 🔧 修复: monster_index 就是基础帧索引,直接加上动画偏移即可
-            let base_frame = (monster.monster_index as i32) * 360; // 每个怪物360帧(站立32+行走48+攻击48+...)
-            let final_frame = base_frame + draw_frame;
+            // 🔧 修复: 每个怪物有独立的库文件,帧索引就是动画帧,不需要乘以360
+            let final_frame = draw_frame;
             
-            tracing::debug!("  📊 帧计算: base={}, action_start={}, dir_offset={}, frame_idx={}, final={}", 
-                base_frame, action_frame_start, direction_offset, anim.frame_index, final_frame);
+            println!("  📊 帧计算: lib_index={}, action_start={}, dir_offset={}, frame_idx={}, final={}", 
+                lib_index, action_frame_start, direction_offset, anim.frame_index, final_frame);
             
             // 转换为屏幕坐标
             let (screen_x, screen_y) = CameraSystem::world_to_screen(
@@ -1392,28 +1399,37 @@ impl RenderSystem {
             
             // 绘制怪物
             let mut lib_locked = lib.lock().unwrap();
-            if let Ok(image_info) = lib_locked.get_image_info(final_frame as usize) {
-                // 计算绘制位置（考虑偏移）
-                let draw_x = screen_x + image_info.x as f32 * camera.zoom;
-                let draw_y = screen_y + image_info.y as f32 * camera.zoom;
-                
-                tracing::debug!("  🎨 绘制位置: screen=({:.1}, {:.1}), offset=({}, {}), final=({:.1}, {:.1})", 
-                    screen_x, screen_y, image_info.x, image_info.y, draw_x, draw_y);
-                
-                // 绘制精灵
-                if let Some(image) = &image_info.image {
-                    canvas.draw(
-                        image,
-                        DrawParam::default()
-                            .dest([draw_x, draw_y])
-                            .scale([camera.zoom, camera.zoom]),
-                    );
-                    tracing::debug!("  ✅ 怪物精灵绘制成功");
-                } else {
-                    tracing::warn!("  ⚠️ 怪物图像为空!");
+            let lib_count = lib_locked.count();
+            println!("  📚 库中图像数量: {}, 请求帧: {}", lib_count, final_frame);
+            
+            // 🔧 使用 get_or_create_texture 确保图像被加载到GPU
+            match lib_locked.get_or_create_texture(ctx, final_frame as usize) {
+                Ok(image_info) => {
+                    // 计算绘制位置（考虑偏移）
+                    let draw_x = screen_x + image_info.x as f32 * camera.zoom;
+                    let draw_y = screen_y + image_info.y as f32 * camera.zoom;
+                    
+                    println!("  🎨 绘制位置: screen=({:.1}, {:.1}), offset=({}, {}), final=({:.1}, {:.1})", 
+                        screen_x, screen_y, image_info.x, image_info.y, draw_x, draw_y);
+                    
+                    // 绘制精灵
+                    if let Some(image) = &image_info.image {
+                        canvas.draw(
+                            image,
+                            DrawParam::default()
+                                .dest([draw_x, draw_y])
+                                .scale([camera.zoom, camera.zoom]),
+                        );
+                        println!("  ✅ 怪物精灵绘制成功");
+                    } else {
+                        println!("  ⚠️ 怪物图像为空 (image_info存在但image为None)!");
+                        tracing::warn!("  ⚠️ 怪物图像为空!");
+                    }
                 }
-            } else {
-                tracing::warn!("  ⚠️ 无法获取怪物图像信息: frame={}", final_frame);
+                Err(e) => {
+                    println!("  ❌ 无法获取/创建怪物纹理: frame={}, 库大小={}, 错误: {}", final_frame, lib_count, e);
+                    tracing::warn!("  ⚠️ 无法获取怪物图像信息: frame={}", final_frame);
+                }
             }
         }
         
