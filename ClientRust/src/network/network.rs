@@ -176,12 +176,21 @@ impl NetworkStack {
         if !self.is_connected() {
             if self.state == ConnectionState::Connected {
                 // Just lost connection
+                tracing::warn!("🔌 Connection lost - will retry in 5 seconds");
                 self.receive_queue.push_back(NetworkEvent::Disconnected);
                 self.disconnect();
             } else if now >= self.retry_time {
                 // Retry connection
+                tracing::info!("🔄 Attempting reconnect (attempt {})", self.connect_attempt + 1);
                 self.retry_time = now + Duration::from_secs(5);
-                let _ = self.connect(settings).await; // Ignore errors, will retry
+                match self.connect(settings).await {
+                    Ok(_) => {
+                        tracing::info!("✅ Reconnected successfully");
+                    }
+                    Err(e) => {
+                        tracing::warn!("❌ Reconnect failed: {} - will retry", e);
+                    }
+                }
             }
             return Ok(());
         }
@@ -189,6 +198,7 @@ impl NetworkStack {
         // Check connection timeout (5 seconds after connecting)
         if let Some(connected_time) = self.time_connected {
             if now > connected_time + Duration::from_secs(5) && !self.is_connected() {
+                tracing::warn!("⏱️ Connection timeout detected");
                 self.disconnect();
                 let _ = self.connect(settings).await;
                 return Ok(());
@@ -240,7 +250,8 @@ impl NetworkStack {
         // Non-blocking read
         match stream.try_read(&mut buf) {
             Ok(0) => {
-                // Connection closed
+                // Connection closed by server
+                tracing::warn!("🔌 Connection closed by server");
                 self.disconnect();
                 return Ok(());
             }
@@ -248,6 +259,7 @@ impl NetworkStack {
                 // Data received
                 self.raw_data.extend_from_slice(&buf[..n]);
                 self.bytes_received += n as u64;
+                tracing::trace!("📥 Received {} bytes (total: {})", n, self.bytes_received);
                 
                 // Process complete packets from buffer
                 self.process_received_data()?;
@@ -256,6 +268,7 @@ impl NetworkStack {
                 // No data available right now, that's ok
             }
             Err(e) => {
+                tracing::error!("❌ Network receive error: {}", e);
                 self.disconnect();
                 return Err(e.into());
             }
@@ -276,7 +289,14 @@ impl NetworkStack {
             let length = LittleEndian::read_u16(&self.raw_data[0..2]) as usize;
             
             if length < 4 {
+                tracing::error!("⚠️ Invalid packet length: {} - discarding buffer", length);
+                self.raw_data.clear(); // 清除损坏的数据
                 return Err(anyhow!("Invalid packet length: {}", length));
+            }
+            
+            // 检测异常大的包 (可能是损坏的数据)
+            if length > 65536 {
+                tracing::error!("⚠️ Suspiciously large packet: {} bytes - may be corrupted", length);
             }
 
             // Wait for complete packet

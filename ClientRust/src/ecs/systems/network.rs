@@ -63,6 +63,9 @@ impl NetworkSystem {
             GameEvent::ObjectPushed { object_id, direction, location } => {
                 self.handle_object_pushed(world, *object_id, *direction, location);
             }
+            GameEvent::ItemSpawned { object_id, item, location } => {
+                self.handle_item_spawned(world, *object_id, item, location);
+            }
             _ => {
                 // 其他事件由UISystem处理
             }
@@ -282,18 +285,18 @@ impl NetworkSystem {
 
         // 根据对象类型创建实体
         let entity = match object {
-            GameObject::Player { id, name, location } => {
-                self.create_other_player(world, *id, name, location)
+            GameObject::Player { id, name, location, class, gender, level, direction, .. } => {
+                self.create_other_player(world, *id, name, location, *class, *gender, *level, *direction)
             }
-            GameObject::Npc { id, name, location } => {
-                self.create_npc(world, *id, name, location)
+            GameObject::Npc { id, name, location, image, direction } => {
+                self.create_npc(world, *id, name, location, *image, *direction)
             }
-            GameObject::Monster { id, name, location, image, direction } => {
+            GameObject::Monster { id, name, location, image, direction, .. } => {
                 self.create_monster(world, *id, name, location, *image, *direction)
             }
             GameObject::Item { .. } => {
-                // TODO: 创建地面物品
-                tracing::debug!("暂不处理地面物品");
+                // Item通过ItemSpawned事件处理,不在这里创建
+                tracing::debug!("Item对象由ItemSpawned事件处理");
                 return;
             }
         };
@@ -315,36 +318,54 @@ impl NetworkSystem {
     }
 
     /// 创建其他玩家实体
-    fn create_other_player(&self, world: &mut World, object_id: u32, name: &str, location: &mir2_shared::Point) -> Entity {
+    fn create_other_player(
+        &self, 
+        world: &mut World, 
+        object_id: u32, 
+        name: &str, 
+        location: &mir2_shared::Point,
+        class: MirClass,
+        gender: MirGender,
+        level: u16,
+        direction: MirDirection,
+    ) -> Entity {
         let (world_x, world_y) = crate::ecs::coordinates::Coordinates::grid_to_world_center(location.x, location.y);
         
         world.spawn((
             Position::new(world_x, world_y),
-            Direction::new(MirDirection::Up),
+            Direction::new(direction),
             Animation::new(MirAction::Standing, 4, 200),
             NetworkSync::new(object_id, NetworkObjectType::Player),
             OtherPlayer::new(
                 name.to_string(),
-                MirClass::Warrior, // TODO: 从对象数据获取
-                MirGender::Male,   // TODO: 从对象数据获取
-                1,                 // TODO: 从对象数据获取
+                class,
+                gender,
+                level,
             ),
-            Health::new(100), // TODO: 从对象数据获取
+            Health::new(100), // TODO: 需要从ObjectHealth packet获取
         ))
     }
 
     /// 创建NPC实体
-    fn create_npc(&self, world: &mut World, object_id: u32, name: &str, location: &mir2_shared::Point) -> Entity {
+    fn create_npc(
+        &self, 
+        world: &mut World, 
+        object_id: u32, 
+        name: &str, 
+        location: &mir2_shared::Point,
+        image: u16,
+        direction: MirDirection,
+    ) -> Entity {
         let (world_x, world_y) = crate::ecs::coordinates::Coordinates::grid_to_world_center(location.x, location.y);
         
         world.spawn((
             Position::new(world_x, world_y),
-            Direction::new(MirDirection::Up),
+            Direction::new(direction),
             Animation::new(MirAction::Standing, 4, 200),
             NetworkSync::new(object_id, NetworkObjectType::NPC),
             NPC::new(
                 name.to_string(),
-                "Unknown".to_string(), // TODO: 从对象数据获取NPC类型
+                format!("NPC#{}", image), // 使用image作为NPC类型标识
             ),
         ))
     }
@@ -375,6 +396,28 @@ impl NetworkSystem {
                 agility: 10,
             },
         ))
+    }
+
+    /// 处理地面物品生成事件
+    fn handle_item_spawned(&mut self, world: &mut World, object_id: u32, item: &mir2_shared::UserItem, location: &mir2_shared::Point) {
+        let (world_x, world_y) = crate::ecs::coordinates::Coordinates::grid_to_world_center(location.x, location.y);
+        
+        let item_name = item.info.as_ref()
+            .map(|i| i.name.as_str())
+            .unwrap_or("Unknown");
+        
+        tracing::info!("💎 创建地面物品: ID={}, name={}, pos=({}, {})", object_id, item_name, world_x, world_y);
+        
+        // 创建地面物品实体
+        let entity = world.spawn((
+            Position::new(world_x, world_y),
+            NetworkSync::new(object_id, NetworkObjectType::Item),
+            // TODO: 添加 ItemDrop 组件用于渲染物品图标
+            // ItemDrop { item: item.clone() },
+        ));
+        
+        // 记录映射
+        self.object_map.insert(object_id, entity);
     }
 
     /// 处理对象转向事件

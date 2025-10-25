@@ -99,12 +99,45 @@ pub struct MapInfo {
     pub title: String,
 }
 
+/// GameObject - Complete game object data from server packets
+/// 游戏对象 - 从服务器数据包获取的完整游戏对象数据
 #[derive(Debug, Clone)]
 pub enum GameObject {
-    Player { id: u32, name: String, location: Point },
-    Monster { id: u32, name: String, location: Point, image: u16, direction: MirDirection },
-    Npc { id: u32, name: String, location: Point },
-    Item { id: u32, location: Point, item: UserItem },
+    Player { 
+        id: u32, 
+        name: String, 
+        location: Point,
+        class: MirClass,
+        gender: MirGender,
+        level: u16,
+        direction: MirDirection,
+        hair: u8,
+        weapon: i16,
+        armour: i16,
+        dead: bool,
+        hidden: bool,
+    },
+    Monster { 
+        id: u32, 
+        name: String, 
+        location: Point, 
+        image: u16, 
+        direction: MirDirection,
+        dead: bool,
+        hidden: bool,
+    },
+    Npc { 
+        id: u32, 
+        name: String, 
+        location: Point,
+        image: u16,
+        direction: MirDirection,
+    },
+    Item { 
+        id: u32, 
+        location: Point, 
+        item: UserItem,
+    },
 }
 
 // ==================== Game Systems ====================
@@ -637,12 +670,21 @@ impl PacketHandler for GameClient {
             id: packet.object_id,
             name: packet.name.clone(),
             location,
+            class: packet.class,
+            gender: packet.gender,
+            level: packet.level,
+            direction: packet.direction,
+            hair: packet.hair,
+            weapon: packet.weapon,
+            armour: packet.armour,
+            dead: packet.dead,
+            hidden: packet.hidden,
         };
         
         self.objects.insert(packet.object_id, obj.clone());
         self.send_event(GameEvent::ObjectSpawned { object: obj });
         
-        tracing::debug!("👤 Player {} spawned", packet.name);
+        tracing::debug!("👤 Player {} spawned (Lv{} {:?})", packet.name, packet.level, packet.class);
     }
     
     fn on_object_monster(&mut self, packet: packets::ObjectMonster) {
@@ -657,12 +699,14 @@ impl PacketHandler for GameClient {
             location,
             image: packet.image,
             direction: packet.direction,
+            dead: packet.dead,
+            hidden: packet.hidden,
         };
         
         self.objects.insert(packet.object_id, obj.clone());
         self.send_event(GameEvent::ObjectSpawned { object: obj });
         
-        tracing::debug!("👹 Monster {} spawned (image={})", packet.name, packet.image);
+        tracing::debug!("👹 Monster {} spawned (image={}, dead={})", packet.name, packet.image, packet.dead);
     }
     
     fn on_object_npc(&mut self, packet: packets::ObjectNpc) {
@@ -675,6 +719,8 @@ impl PacketHandler for GameClient {
             id: packet.object_id,
             name: packet.name.clone(),
             location,
+            image: packet.image,
+            direction: packet.direction,
         };
         
         self.objects.insert(packet.object_id, obj.clone());
