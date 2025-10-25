@@ -208,6 +208,9 @@ impl MapViewerApp {
                 path: Vec::new(),      // 🎯 寻路路径
                 path_index: 0,         // 🎯 路径索引
                 move_mode: MoveMode::Idle,  // 🎯 初始状态：空闲
+                last_move_time: std::time::Instant::now(),
+                move_delay: std::time::Duration::from_millis(600),
+                waiting_server_confirm: false,
             },
             Position {
                 x: spawn_x,

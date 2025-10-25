@@ -105,9 +105,8 @@ impl NetworkSystem {
                 player.waiting_server_confirm = false;
                 
                 if grid_diff_x > 0 || grid_diff_y > 0 {
-                    // 🎯 格子位置不同 - 服务器已移动到新格子
-                    // 立即同步到服务器确认的格子位置
-                    tracing::info!("✅ 同步到服务器新格子: ({}, {}) -> ({}, {})", 
+                    // 🎯 格子位置不同 - 同步到服务器位置
+                    tracing::info!("✅ 同步到服务器格子: ({}, {}) -> ({}, {})", 
                         current_grid_x, current_grid_y, location.x, location.y);
                     
                     position.x = world_x;
@@ -115,32 +114,48 @@ impl NetworkSystem {
                     player.target_x = world_x;
                     player.target_y = world_y;
                     
-                    // 🎯 服务器确认移动成功，可以移动到下一格了
+                    // 🎯 如果在自动寻路模式,更新路径索引到服务器位置
                     if player.move_mode == crate::ecs::components::MoveMode::AutoPathfinding 
-                        && !player.path.is_empty() 
-                        && player.path_index < player.path.len() {
-                        player.path_index += 1;
+                        && !player.path.is_empty() {
                         
-                        if player.path_index >= player.path.len() {
-                            // 到达终点
-                            player.move_mode = crate::ecs::components::MoveMode::Idle;
-                            player.is_moving = false;
-                            tracing::info!("✅ 到达目的地");
+                        // 查找服务器位置在路径中的索引
+                        let mut found_index = None;
+                        for (i, &(path_x, path_y)) in player.path.iter().enumerate() {
+                            if path_x == location.x && path_y == location.y {
+                                found_index = Some(i);
+                                break;
+                            }
+                        }
+                        
+                        if let Some(index) = found_index {
+                            // 找到了,设置到下一个waypoint
+                            player.path_index = index + 1;
+                            tracing::info!("🎯 路径同步: 服务器在索引 {}, 下一个目标索引 {}", index, player.path_index);
+                            
+                            if player.path_index >= player.path.len() {
+                                // 到达终点
+                                player.move_mode = crate::ecs::components::MoveMode::Idle;
+                                player.is_moving = false;
+                                tracing::info!("✅ 到达目的地");
+                            }
+                        } else {
+                            // 服务器位置不在路径上,可能是旧位置或有偏差
+                            // 如果偏差很大(>2格),清除移动状态
+                            if grid_diff_x > 2 || grid_diff_y > 2 {
+                                tracing::warn!("⚠️ 位置偏差过大! 客户端:({}, {}) 服务器:({}, {}) - 停止移动", 
+                                    current_grid_x, current_grid_y, location.x, location.y);
+                                player.move_mode = crate::ecs::components::MoveMode::Idle;
+                                player.is_moving = false;
+                                player.path.clear();
+                                player.path_index = 0;
+                            } else {
+                                // 偏差不大,可能是网络延迟,保持当前路径继续
+                                tracing::debug!("📍 服务器位置不在路径上,但偏差可接受,继续移动");
+                            }
                         }
                     }
-                    
-                    // 如果偏差太大（>1格），说明有异常，清除移动状态
-                    if grid_diff_x > 1 || grid_diff_y > 1 {
-                        tracing::warn!("⚠️ 位置偏差过大! 客户端:({}, {}) 服务器:({}, {}) - 停止移动", 
-                            current_grid_x, current_grid_y, location.x, location.y);
-                        player.move_mode = crate::ecs::components::MoveMode::Idle;
-                        player.is_moving = false;
-                        player.path.clear();
-                        player.path_index = 0;
-                    }
                 } else {
-                    // ✅ 同一个格子 - 服务器确认位置，但不打断客户端插值
-                    // 允许客户端继续平滑移动到下一格
+                    // ✅ 同一个格子 - 服务器确认位置,允许客户端继续
                     tracing::debug!("✅ 服务器确认当前格子: ({}, {}) - 保持客户端插值", location.x, location.y);
                 }
                 
