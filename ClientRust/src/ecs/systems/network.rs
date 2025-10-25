@@ -86,11 +86,11 @@ impl NetworkSystem {
             
             for (entity, (_local, position, player)) in query.iter() {
                 tracing::info!("🔍 找到本地玩家实体: entity={:?}", entity);
-                // 将格子坐标转换为世界坐标
-                let (world_x, world_y) = grid_to_world(location.x, location.y);
+                // 将格子坐标转换为世界坐标 (格子中心)
+                let (world_x, world_y) = crate::ecs::coordinate_system::CoordinateSystem::grid_to_world_center(location.x, location.y);
                 
                 // 🎯 使用统一的坐标转换函数 (避免 round vs floor 的差异)
-                let (current_grid_x, current_grid_y) = crate::ecs::map_helper::MapHelper::world_to_grid(position.x, position.y);
+                let (current_grid_x, current_grid_y) = crate::ecs::coordinate_system::CoordinateSystem::world_to_grid(position.x, position.y);
                 
                 tracing::info!("📊 位置对比: 客户端=({}, {}) world=({:.1}, {:.1}), 服务器=({}, {}) world=({:.1}, {:.1})",
                     current_grid_x, current_grid_y, position.x, position.y,
@@ -236,7 +236,7 @@ impl NetworkSystem {
         
         for (_entity, (_local_player, position, player, player_comp)) in query.iter() {
             // 更新位置（从格子坐标转换为世界坐标）
-            let (world_x, world_y) = grid_to_world(user_info.location_x, user_info.location_y);
+            let (world_x, world_y) = crate::ecs::coordinate_system::CoordinateSystem::grid_to_world_center(user_info.location_x, user_info.location_y);
             position.x = world_x;
             position.y = world_y;
             
@@ -316,7 +316,7 @@ impl NetworkSystem {
 
     /// 创建其他玩家实体
     fn create_other_player(&self, world: &mut World, object_id: u32, name: &str, location: &mir2_shared::Point) -> Entity {
-        let (world_x, world_y) = grid_to_world(location.x, location.y);
+        let (world_x, world_y) = crate::ecs::coordinate_system::CoordinateSystem::grid_to_world_center(location.x, location.y);
         
         world.spawn((
             Position::new(world_x, world_y),
@@ -335,7 +335,7 @@ impl NetworkSystem {
 
     /// 创建NPC实体
     fn create_npc(&self, world: &mut World, object_id: u32, name: &str, location: &mir2_shared::Point) -> Entity {
-        let (world_x, world_y) = grid_to_world(location.x, location.y);
+        let (world_x, world_y) = crate::ecs::coordinate_system::CoordinateSystem::grid_to_world_center(location.x, location.y);
         
         world.spawn((
             Position::new(world_x, world_y),
@@ -351,7 +351,7 @@ impl NetworkSystem {
 
     /// 创建怪物实体
     fn create_monster(&self, world: &mut World, object_id: u32, name: &str, location: &mir2_shared::Point, image: u16, direction: MirDirection) -> Entity {
-        let (world_x, world_y) = grid_to_world(location.x, location.y);
+        let (world_x, world_y) = crate::ecs::coordinate_system::CoordinateSystem::grid_to_world_center(location.x, location.y);
         
         tracing::info!("👹 创建怪物实体: ID={}, name={}, image={}, pos=({}, {})", object_id, name, image, world_x, world_y);
         
@@ -391,7 +391,7 @@ impl NetworkSystem {
     /// 处理对象移动事件（走路或跑步）
     fn handle_object_moved(&self, world: &mut World, object_id: u32, direction: mir2_shared::enums::MirDirection, location: &mir2_shared::Point, action: MirAction) {
         if let Some(&entity) = self.object_map.get(&object_id) {
-            let (world_x, world_y) = grid_to_world(location.x, location.y);
+            let (world_x, world_y) = crate::ecs::coordinate_system::CoordinateSystem::grid_to_world_center(location.x, location.y);
             
             // 分别获取各个组件
             if let Ok(mut pos) = world.get::<&mut Position>(entity) {
@@ -415,7 +415,7 @@ impl NetworkSystem {
     /// 处理对象攻击事件
     fn handle_object_attacked(&self, world: &mut World, object_id: u32, direction: mir2_shared::enums::MirDirection, location: &mir2_shared::Point) {
         if let Some(&entity) = self.object_map.get(&object_id) {
-            let (world_x, world_y) = grid_to_world(location.x, location.y);
+            let (world_x, world_y) = crate::ecs::coordinate_system::CoordinateSystem::grid_to_world_center(location.x, location.y);
             
             // 分别获取各个组件
             if let Ok(mut pos) = world.get::<&mut Position>(entity) {
@@ -438,7 +438,7 @@ impl NetworkSystem {
     /// 处理对象被推动事件
     fn handle_object_pushed(&self, world: &mut World, object_id: u32, direction: mir2_shared::enums::MirDirection, location: &mir2_shared::Point) {
         if let Some(&entity) = self.object_map.get(&object_id) {
-            let (world_x, world_y) = grid_to_world(location.x, location.y);
+            let (world_x, world_y) = crate::ecs::coordinate_system::CoordinateSystem::grid_to_world_center(location.x, location.y);
             
             // 分别获取各个组件
             if let Ok(mut pos) = world.get::<&mut Position>(entity) {
@@ -481,14 +481,5 @@ impl Default for NetworkSystem {
 // 辅助函数
 // ============================================================================
 
-/// 格子坐标转世界坐标
-fn grid_to_world(grid_x: i32, grid_y: i32) -> (f32, f32) {
-    const GRID_WIDTH: f32 = 48.0;
-    const GRID_HEIGHT: f32 = 32.0;
-    
-    // 转换到格子中心点
-    let world_x = grid_x as f32 * GRID_WIDTH + GRID_WIDTH / 2.0;
-    let world_y = grid_y as f32 * GRID_HEIGHT + GRID_HEIGHT / 2.0;
-    
-    (world_x, world_y)
-}
+// ❌ 已删除重复函数 - 使用 CoordinateSystem::grid_to_world_center() 替代
+

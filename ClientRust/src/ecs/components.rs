@@ -33,9 +33,12 @@ impl Position {
         }
     }
     
-    /// 转换为格子坐标 (使用floor确保一致性)
+    /// 转换为格子坐标
+    /// 
+    /// 🔄 委托给 CoordinateSystem 统一处理
+    #[inline]
     pub fn to_grid(&self) -> (i32, i32) {
-        ((self.x / 48.0).floor() as i32, (self.y / 32.0).floor() as i32)
+        crate::ecs::coordinate_system::CoordinateSystem::world_to_grid(self.x, self.y)
     }
 }
 
