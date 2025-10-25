@@ -55,6 +55,20 @@ impl RenderSystem {
         use crate::graphics::libraries::get_map_library;
         use std::time::Instant;
         
+        // 🐛 调试：首次绘制时输出信息
+        static mut FIRST_DRAW: bool = true;
+        static mut DRAW_COUNTER: u32 = 0;
+        unsafe {
+            DRAW_COUNTER += 1;
+            if FIRST_DRAW || DRAW_COUNTER % 300 == 0 {
+                tracing::info!(
+                    "🗺️ draw_tiles: camera_pos=({:.1}, {:.1}), zoom={:.2}, screen={}×{}",
+                    pos.x, pos.y, camera.zoom, camera.screen_width, camera.screen_height
+                );
+                FIRST_DRAW = false;
+            }
+        }
+        
         // 计算可见区域
         let projection_scale = 1.0 / camera.zoom;
         let half_width = camera.screen_width / 2.0 * projection_scale;
@@ -96,6 +110,16 @@ impl RenderSystem {
 
             // 如果区域变化，重新查询可见瓦片
             if area_changed {
+                // 🐛 调试：输出可见区域变化信息
+                unsafe {
+                    if DRAW_COUNTER % 300 == 0 {
+                        tracing::info!(
+                            "🔍 可见区域: grid_range=({},{})-({},{}), front_end_y={}, tiles将重建",
+                            start_x, start_y, end_x, end_y, front_end_y
+                        );
+                    }
+                }
+                
                 visible_area.visible_entities.clear();
 
                 // 🔥 收集可见实体（带 z_order 和 Y 坐标用于排序）
@@ -149,6 +173,16 @@ impl RenderSystem {
 
                 // 只保存实体ID
                 visible_area.visible_entities = visible_with_sort_key.into_iter().map(|(e, _, _)| e).collect();
+
+                // 🐛 调试：输出瓦片统计
+                unsafe {
+                    if DRAW_COUNTER % 300 == 0 {
+                        tracing::info!(
+                            "📊 可见瓦片数量: total={}",
+                            visible_area.visible_entities.len()
+                        );
+                    }
+                }
 
                 // 更新缓存
                 visible_area.start_x = start_x;
@@ -532,10 +566,13 @@ impl RenderSystem {
                 match mlib.get_or_create_texture(ctx, final_frame as usize) {
                     Ok(info) => {
                         if let Some(ref texture) = info.image {
-                            // 世界坐标转屏幕坐标
-                            // 角色 Position 是脚底位置，需要应用图像偏移量
-                            let world_x = player_pos.x + offset_x as f32;
-                            let world_y = player_pos.y + offset_y as f32 - char_h as f32;
+                            // 🎯 纹理位置计算:
+                            // player_pos 现在是格子中心(红点)
+                            // 纹理底边应该对齐格子底边，X轴居中
+                            use crate::ecs::{CELL_HEIGHT};
+                            let green_bottom_y = player_pos.y + (CELL_HEIGHT as f32 / 2.0);
+                            let world_x = player_pos.x - (char_w as f32 / 2.0);
+                            let world_y = green_bottom_y - char_h as f32;
                             
                             let (screen_x, screen_y) = CameraSystem::world_to_screen(
                                 camera_pos, 
@@ -578,6 +615,21 @@ impl RenderSystem {
     ) -> GameResult<()> {
         use crate::graphics::libraries::{get_library, LibraryName};
         use crate::ecs::systems::CameraSystem;
+        use crate::ecs::components::LocalPlayer;
+        
+        // 🔒 只有收到服务器位置确认后才绘制人物纹理
+        // 检查玩家实体是否有 NetworkSync 组件
+        let mut has_server_position = false;
+        for (_entity, (_local, _network_sync)) in world.query::<(&LocalPlayer, &crate::ecs::components::NetworkSync)>().iter() {
+            // 玩家实体有 NetworkSync 组件,说明已经收到服务器位置
+            has_server_position = true;
+            break;
+        }
+        
+        if !has_server_position {
+            // 还没收到服务器位置,不绘制纹理
+            return Ok(());
+        }
         use crate::ecs::components::{MapTile, TileLayer, PlayerAppearance};
         use mir2_shared::enums::{MirClass, MirGender};
         
@@ -596,9 +648,10 @@ impl RenderSystem {
         };
         
         // 🎨 根据职业和性别选择库
-        // CArmours(0) = 默认盔甲（战士/法师/道士通用）
-        // 不同职业和性别使用同一个库，但帧索引不同
-        // 暂时简化：所有职业都使用 CArmours
+        // 重要：原版C#客户端所有职业都使用 CArmours 库（男女通用）
+        // 性别差异通过 ArmourOffSet 帧偏移实现:
+        //   - 男性: offset = 0
+        //   - 女性: offset = 808 (普通动作) 或 352 (altAnim: 跑步/射箭)
         let library_index = armour_index.max(0);
         let library_name = LibraryName::CArmours(library_index as usize);
         
@@ -608,8 +661,16 @@ impl RenderSystem {
         let direction_offset = (player.direction as i32) * frames_per_direction;
         let draw_frame = action_frame_start + direction_offset + player.frame_index;
         
-        // 性别偏移（Female库已经分开，不需要偏移）
-        let final_frame = draw_frame;
+        // 🚺 性别帧偏移（原版逻辑）
+        // TODO: 支持 altAnim (跑步/射箭等特殊动作使用 ARArmours 库和不同偏移)
+        let armour_offset = match gender {
+            MirGender::Male => 0,
+            MirGender::Female => 808,  // 女性普通动作偏移
+        };
+        let final_frame = draw_frame + armour_offset;
+        
+        tracing::debug!("🎭 角色渲染: class={:?}, gender={:?}, armour={}, action={:?}, draw_frame={}, offset={}, final={}", 
+            class, gender, armour_index, player.action, draw_frame, armour_offset, final_frame);
         
         // 🎯 遮挡检测：检测角色是否被Front层瓦片遮挡
         // 遮挡条件：
@@ -618,7 +679,7 @@ impl RenderSystem {
         use crate::ecs::map_helper::MapHelper;
         use crate::ecs::{CELL_WIDTH, CELL_HEIGHT};
         
-        let mut has_front_overlap = false;
+        let mut _has_front_overlap = false;
         
         // 角色脚底的世界坐标和格子坐标
         let player_world_x = player_pos.x;
@@ -669,20 +730,25 @@ impl RenderSystem {
             let y_overlap = char_bottom > tile_top && char_top < tile_bottom;
             
             if x_overlap && y_overlap {
-                has_front_overlap = true;
+                _has_front_overlap = true;
                 break;
             }
         }
+        // 纹理尺寸和偏移量 (用于后续 AABB 计算)
+        let mut char_w = 48;
+        let mut char_h = 64;
+        let mut offset_x = 0;
+        let mut offset_y = 0;
         
         // ✅ 获取角色纹理 - 根据职业和性别使用对应的库
         if let Some(mlib) = get_library(library_name) {
             if let Ok(mut mlib) = mlib.lock() {
                 // 获取尺寸和偏移量
-                let (_char_w, char_h) = mlib
+                (char_w, char_h) = mlib
                     .get_size(final_frame as usize)
                     .unwrap_or((48, 64));
                 
-                let (offset_x, offset_y) = mlib
+                (offset_x, offset_y) = mlib
                     .get_offset(final_frame as usize)
                     .unwrap_or((0, 0));
                 
@@ -690,10 +756,33 @@ impl RenderSystem {
                 match mlib.get_or_create_texture(ctx, final_frame as usize) {
                     Ok(info) => {
                         if let Some(ref texture) = info.image {
-                            // 世界坐标转屏幕坐标
-                            // 角色 Position 是脚底位置，需要应用图像偏移量
-                            let world_x = player_pos.x + offset_x as f32;
-                            let world_y = player_pos.y + offset_y as f32 - char_h as f32;
+                            // 🎯 纹理位置计算:
+                            // player_pos 现在是格子中心(红点)
+                            // 纹理底边应该对齐格子底边，X轴居中
+                            // 
+                            // 格子底边Y = player_pos.y + CELL_HEIGHT/2
+                            // 纹理底边Y = world_y + char_h
+                            // 所以: world_y = player_pos.y + CELL_HEIGHT/2 - char_h
+                            // 
+                            // X方向: 居中对齐 = player_pos.x - char_w/2
+                            let green_bottom_y = player_pos.y + (CELL_HEIGHT as f32 / 2.0);
+                            let world_x = player_pos.x - (char_w as f32 / 2.0);
+                            let world_y = green_bottom_y - char_h as f32;
+                            
+                            // 🐛 调试: 打印位置计算
+                            static mut DEBUG_COUNTER: u32 = 0;
+                            unsafe {
+                                DEBUG_COUNTER += 1;
+                                if DEBUG_COUNTER % 60 == 0 {  // 每60帧打印一次
+                                    tracing::info!(
+                                        "🎨 纹理位置: player_pos=({:.1}, {:.1})[格子中心], char_size={}×{}, green_bottom={:.1}, world=({:.1}, {:.1})",
+                                        player_pos.x, player_pos.y,
+                                        char_w, char_h,
+                                        green_bottom_y,
+                                        world_x, world_y
+                                    );
+                                }
+                            }
                             
                             let (screen_x, screen_y) = CameraSystem::world_to_screen(
                                 camera_pos, 
@@ -719,6 +808,93 @@ impl RenderSystem {
                 }
             }
         }
+        
+        // 🐛 调试绘制:显示碰撞检测和渲染相关的边界
+        use ggez::graphics;
+        
+        // 1. 绘制人物所在格子边界(绿色) - 用于移动碰撞检测
+        //    服务器检查: ValidPoint(格子是否可行走) + cell.Objects(格子内对象阻挡)
+        //    红点(player_pos)应该在绿框的中心位置
+        let grid_world_x = player_pos.x - (CELL_WIDTH as f32 / 2.0);  // 格子左边 = 中心 - 半格宽
+        let grid_world_y = player_pos.y - (CELL_HEIGHT as f32 / 2.0);  // 格子顶边 = 中心 - 半格高
+        let (grid_screen_x, grid_screen_y) = CameraSystem::world_to_screen(
+            camera_pos,
+            camera,
+            grid_world_x,
+            grid_world_y,
+        );
+        
+        let grid_rect = graphics::Mesh::new_rectangle(
+            ctx,
+            graphics::DrawMode::stroke(2.0),
+            graphics::Rect::new(
+                grid_screen_x,
+                grid_screen_y,
+                CELL_WIDTH as f32 * camera.zoom,
+                CELL_HEIGHT as f32 * camera.zoom,
+            ),
+            Color::from_rgb(0, 255, 0), // 绿色边框
+        )?;
+        canvas.draw(&grid_rect, DrawParam::default());
+        
+        // 2. 绘制人物包围盒(黄色) - 应该完全包裹人物纹理
+        //    AABB用于与Front层瓦片做遮挡检测
+        //    黄框底边应该与绿框底边对齐，X轴居中对齐
+        //    绿框底边Y = player_pos.y + CELL_HEIGHT/2
+        //    黄框底边Y = char_top + char_h = 绿框底边Y
+        //    所以: char_top = player_pos.y + CELL_HEIGHT/2 - char_h
+        
+        let green_bottom_y = player_pos.y + (CELL_HEIGHT as f32 / 2.0);  // 绿框底边
+        let char_left = player_pos.x - (char_w as f32 / 2.0);  // 黄框X居中对齐
+        let char_top = green_bottom_y - char_h as f32;  // 黄框底边对齐绿框底边
+        let (char_screen_x, char_screen_y) = CameraSystem::world_to_screen(
+            camera_pos,
+            camera,
+            char_left,
+            char_top,
+        );
+        
+        let char_rect = graphics::Mesh::new_rectangle(
+            ctx,
+            graphics::DrawMode::stroke(2.0),
+            graphics::Rect::new(
+                char_screen_x,
+                char_screen_y,
+                char_w as f32 * camera.zoom,
+                char_h as f32 * camera.zoom,
+            ),
+            Color::from_rgb(255, 255, 0), // 黄色边框
+        )?;
+        canvas.draw(&char_rect, DrawParam::default());
+        
+        // 3. 绘制人物脚底中心点(红色圆点) - Position组件的实际位置
+        //    这是角色的锚点,用于计算纹理渲染位置和格子坐标
+        let (foot_screen_x, foot_screen_y) = CameraSystem::world_to_screen(
+            camera_pos,
+            camera,
+            player_pos.x,
+            player_pos.y,
+        );
+        
+        let foot_circle = graphics::Mesh::new_circle(
+            ctx,
+            graphics::DrawMode::fill(),
+            [foot_screen_x, foot_screen_y],
+            4.0 * camera.zoom,
+            0.1,
+            Color::from_rgb(255, 0, 0), // 红色圆点
+        )?;
+        canvas.draw(&foot_circle, DrawParam::default());
+        
+        // 4. 绘制坐标文字
+        let coord_text = graphics::Text::new(format!("({}, {})", player_grid_x, player_grid_y));
+        canvas.draw(
+            &coord_text,
+            DrawParam::default()
+                .dest([grid_screen_x + 5.0, grid_screen_y + 5.0])
+                .color(Color::from_rgb(255, 255, 255))
+                .scale([0.8, 0.8]),
+        );
         
         Ok(())
     }

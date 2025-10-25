@@ -30,6 +30,7 @@ impl NetworkSystem {
 
     /// 处理网络事件，更新World中的实体
     pub fn process_event(&mut self, world: &mut World, event: &GameEvent) {
+        tracing::debug!("🔄 NetworkSystem::process_event - 事件: {:?}", event);
         match event {
             GameEvent::MapInformation { map_index, file_name, title } => {
                 self.handle_map_information(world, *map_index, file_name, title);
@@ -41,6 +42,7 @@ impl NetworkSystem {
                 self.handle_object_removed(world, *object_id);
             }
             GameEvent::PlayerMoved { location } => {
+                tracing::info!("🚶 收到 PlayerMoved 事件: {:?}", location);
                 self.handle_player_moved(world, location);
             }
             GameEvent::UserInformation { user_info } => {
@@ -71,13 +73,81 @@ impl NetworkSystem {
         UISystem::process_event(world, event);
     }
     
-    /// 处理玩家移动事件
+    /// 处理玩家移动事件 - UserLocation 包确认位置
     fn handle_player_moved(&mut self, world: &mut World, location: &mir2_shared::Point) {
-        tracing::debug!("🚶 Player moved to: {:?}", location);
+        tracing::info!("🎯 handle_player_moved 被调用: grid=({}, {})", location.x, location.y);
         
-        // TODO: 这里需要知道是哪个玩家移动了
-        // 可能需要从 UserInformation 中获取当前玩家的 object_id
-        // 或者服务器发送 ObjectWalked/ObjectRan 事件包含 object_id
+        // 查找本地玩家实体
+        let mut player_entity = None;
+        let mut should_sync = false;
+        
+        {
+            let mut query = world.query::<(&LocalPlayer, &mut Position, &mut Player)>();
+            
+            for (entity, (_local, position, player)) in query.iter() {
+                tracing::info!("🔍 找到本地玩家实体: entity={:?}", entity);
+                // 将格子坐标转换为世界坐标
+                let (world_x, world_y) = grid_to_world(location.x, location.y);
+                
+                // 计算当前位置的格子坐标
+                let current_grid_x = (position.x / 48.0).round() as i32;
+                let current_grid_y = (position.y / 32.0).round() as i32;
+                
+                // 检查是否与服务器位置不一致(允许小误差)
+                let position_mismatch = (current_grid_x - location.x).abs() > 1 || 
+                                        (current_grid_y - location.y).abs() > 1;
+                
+                if position_mismatch {
+                    // 位置不匹配 - 服务器权威修正
+                    tracing::warn!("⚠️ 位置不同步! 客户端:({}, {}) 服务器:({}, {}) - 强制同步", 
+                        current_grid_x, current_grid_y, location.x, location.y);
+                    
+                    // 强制设置为服务器位置
+                    position.x = world_x;
+                    position.y = world_y;
+                    
+                    // 清除移动状态,避免继续朝错误位置移动
+                    player.move_mode = crate::ecs::components::MoveMode::Idle;
+                    player.is_moving = false;
+                } else {
+                    // 位置匹配 - 服务器确认,客户端预测正确
+                    tracing::debug!("✅ 位置已确认: grid=({}, {}) - 客户端预测正确", location.x, location.y);
+                    
+                    // 不修改position,保持客户端的平滑插值移动
+                    // 只标记位置已被服务器确认
+                }
+                
+                player_entity = Some(entity);
+                should_sync = true;
+                break;
+            }
+        }
+        
+        // 🔒 添加 NetworkSync 组件,标记已收到服务器位置
+        if let Some(entity) = player_entity {
+            if should_sync {
+                // 检查是否已有 NetworkSync 组件
+                let has_sync = world.get::<&crate::ecs::components::NetworkSync>(entity).is_ok();
+                
+                if !has_sync {
+                    // 首次收到服务器位置,添加 NetworkSync 组件
+                    if let Err(e) = world.insert_one(entity, crate::ecs::components::NetworkSync {
+                        object_id: 0, // 本地玩家的 object_id
+                        last_update: std::time::Instant::now(),
+                        object_type: crate::ecs::components::NetworkObjectType::Player,
+                    }) {
+                        tracing::error!("❌ 添加 NetworkSync 组件失败: {:?}", e);
+                    } else {
+                        tracing::info!("🔒 已添加 NetworkSync 组件 - 玩家纹理现在可以渲染");
+                    }
+                } else {
+                    // 更新现有的 NetworkSync 组件
+                    if let Ok(mut sync) = world.get::<&mut crate::ecs::components::NetworkSync>(entity) {
+                        sync.last_update = std::time::Instant::now();
+                    }
+                }
+            }
+        }
     }
     
     /// 处理地图信息事件 - 从服务器加载地图
@@ -372,5 +442,12 @@ impl Default for NetworkSystem {
 
 /// 格子坐标转世界坐标
 fn grid_to_world(grid_x: i32, grid_y: i32) -> (f32, f32) {
-    (grid_x as f32 * 48.0, grid_y as f32 * 32.0)
+    const GRID_WIDTH: f32 = 48.0;
+    const GRID_HEIGHT: f32 = 32.0;
+    
+    // 转换到格子中心点
+    let world_x = grid_x as f32 * GRID_WIDTH + GRID_WIDTH / 2.0;
+    let world_y = grid_y as f32 * GRID_HEIGHT + GRID_HEIGHT / 2.0;
+    
+    (world_x, world_y)
 }

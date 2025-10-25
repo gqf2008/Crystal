@@ -381,7 +381,7 @@ impl PacketHandler for GameClient {
     // ==================== Map & World ====================
     
     fn on_map_information(&mut self, packet: packets::MapInformation) {
-        tracing::info!("🗺️  Map: {} ({})", packet.title, packet.file_name);
+        tracing::info!("🗺️🗺️🗺️ Map: {} ({}) Index: {}", packet.title, packet.file_name, packet.map_index);
         
         let map_info = MapInfo {
             map_index: packet.map_index,
@@ -392,6 +392,7 @@ impl PacketHandler for GameClient {
         self.map_info = Some(map_info);
         
         // 发送地图信息事件到UI层
+        tracing::info!("🗺️🗺️🗺️ Sending MapInformation event to ECS");
         self.send_event(GameEvent::MapInformation {
             map_index: packet.map_index,
             file_name: packet.file_name,

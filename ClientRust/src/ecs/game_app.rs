@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::ecs::scenes::{Scene, SceneType, LoginScene, SelectScene, GameScene};
-use crate::network::{NetworkManager, GameEvent, NetworkCommand};
+use crate::network::{NetworkManager, GameEvent, NetworkCommand, GameObject};
 use crate::settings::ClientSettings;
 use mir2_shared::packets::CharacterSummary;
 
@@ -200,6 +200,19 @@ impl GameState {
                 SceneType::Game => {
                     // 将事件传递给GameScene处理
                     if let Some(game_scene) = self.current_scene.as_mut().as_any_mut().downcast_mut::<GameScene>() {
+                        let event_desc = match &event {
+                            GameEvent::PlayerMoved { location } => format!("PlayerMoved({}, {})", location.x, location.y),
+                            GameEvent::MapInformation { map_index, file_name, .. } => format!("MapInformation({}:{})", map_index, file_name),
+                            GameEvent::UserInformation { .. } => "UserInformation".to_string(),
+                            GameEvent::ObjectSpawned { object } => match object {
+                                GameObject::Player { id, name, .. } => format!("ObjectSpawned::Player({}:{})", id, name),
+                                GameObject::Monster { id, name, .. } => format!("ObjectSpawned::Monster({}:{})", id, name),
+                                GameObject::Npc { id, name, .. } => format!("ObjectSpawned::Npc({}:{})", id, name),
+                                GameObject::Item { id, .. } => format!("ObjectSpawned::Item({})", id),
+                            },
+                            _ => "其他事件".to_string(),
+                        };
+                        tracing::info!("🎮 GameApp: 传递事件到GameScene: {}", event_desc);
                         game_scene.handle_network_event(&mut self.world, &event);
                     }
                 }
@@ -227,9 +240,25 @@ impl GameState {
                 Box::new(scene)
             },
             SceneType::Game => {
+                // 从网络客户端获取玩家初始位置
+                let player_location = if let Some(network_manager) = &self.network_manager {
+                    let nm = network_manager.blocking_read();
+                    let gc = nm.game_client();
+                    let client = gc.read();
+                    client.player.as_ref().map(|p| (p.location.x, p.location.y))
+                } else {
+                    None
+                };
+                
+                if let Some((x, y)) = player_location {
+                    println!("✅ 从服务器获取玩家位置: ({}, {})", x, y);
+                } else {
+                    println!("⚠️ 未找到玩家位置，使用默认值(0, 0)");
+                }
+                
                 // GameScene 使用固定的 UI 设计分辨率 1024×768
                 // 不需要传递配置的窗口分辨率
-                Box::new(GameScene::new(ctx, &mut self.world)?)
+                Box::new(GameScene::new(ctx, &mut self.world, player_location)?)
             },
         };
         

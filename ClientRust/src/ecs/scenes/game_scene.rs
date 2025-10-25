@@ -99,7 +99,7 @@ impl GameScene {
     /// # 返回
     /// - `Ok(GameScene)`: 成功创建的游戏场景
     /// - `Err`: 初始化失败的错误信息
-    pub fn new(ctx: &mut Context, world: &mut World) -> GameResult<Self> {
+    pub fn new(ctx: &mut Context, world: &mut World, player_grid_location: Option<(i32, i32)>) -> GameResult<Self> {
         println!("🗺️ 游戏场景初始化中...");
         
         // 初始化地图库
@@ -123,11 +123,18 @@ impl GameScene {
             .map(|(_, data)| data.clone())
             .expect("地图数据未加载");
         
-        let (spawn_grid_x, spawn_grid_y) = MapHelper::find_center_walkable_position(&map_data);
-        let (spawn_x, spawn_y) = MapHelper::grid_to_world(spawn_grid_x, spawn_grid_y);
+        // ✅ 使用服务器发送的玩家位置，如果没有则使用地图中心
+        let (player_grid_x, player_grid_y) = if let Some((x, y)) = player_grid_location {
+            println!("✅ 使用服务器玩家位置: 格子({}, {})", x, y);
+            (x, y)
+        } else {
+            let (x, y) = MapHelper::find_center_walkable_position(&map_data);
+            println!("⚠️ 未找到服务器位置，使用地图中心: 格子({}, {})", x, y);
+            (x, y)
+        };
         
-        println!("🧙 出生位置: 格子({}, {}) -> 世界坐标({:.1}, {:.1})", 
-                 spawn_grid_x, spawn_grid_y, spawn_x, spawn_y);
+        let (player_world_x, player_world_y) = MapHelper::grid_to_world(player_grid_x, player_grid_y);
+        println!("� 玩家世界坐标: ({:.1}, {:.1})", player_world_x, player_world_y);
         
         // 创建相机实体
         // 使用 drawable_size() 获取窗口尺寸,ggez 会自动处理 DPI 缩放
@@ -136,7 +143,7 @@ impl GameScene {
                       screen_width, screen_height, 
                       CoordinateSystem::DESIGN_WIDTH, CoordinateSystem::DESIGN_HEIGHT);
         let camera_entity = world.spawn((
-            Position { x: spawn_x, y: spawn_y },
+            Position { x: player_world_x, y: player_world_y },  // 📍 使用玩家真实位置
             Camera {
                 zoom: 1.25,  // 初始缩放1.75x，让角色看起来更大
                 screen_width,
@@ -182,6 +189,7 @@ impl GameScene {
         MapLoader::spawn_test_monsters(world, &map_data, 15);
         println!("✅ 已生成 15 只测试怪物");
         
+        // ✅ 使用服务器发送的玩家真实位置创建角色实体
         // 创建玩家角色实体
         let _player_entity = world.spawn((
             Player {
@@ -190,14 +198,16 @@ impl GameScene {
                 frame_index: 0,
                 frame_time: 0,
                 speed: 0.0,
-                target_x: spawn_x,
-                target_y: spawn_y,
+                target_x: player_world_x,  // 📍 使用真实位置
+                target_y: player_world_y,  // 📍 使用真实位置
                 is_moving: false,
                 path: Vec::new(),
                 path_index: 0,
                 move_mode: MoveMode::Idle,
+                last_move_time: std::time::Instant::now(),
+                move_delay: std::time::Duration::from_millis(600), // 服务器MoveDelay
             },
-            Position { x: spawn_x, y: spawn_y },
+            Position { x: player_world_x, y: player_world_y },  // 📍 使用真实位置
             PlayerAppearance::default(),  // 默认外观（战士男）
             Inventory::default(),  // 默认背包（40格）
             Equipment::new(),  // 装备栏
@@ -215,6 +225,11 @@ impl GameScene {
             TargetSelection::new(),  // 目标选择
             QuestLog::new(),  // ✅ 任务日志（用于任务系统）
             TradeWindow::new(),  // ✅ 交易窗口（用于玩家交易）
+            crate::ecs::components::NetworkSync {  // ✅ 网络同步标记（立即允许渲染）
+                object_id: 0,
+                last_update: std::time::Instant::now(),
+                object_type: crate::ecs::components::NetworkObjectType::Player,
+            },
         ));
         
         println!("✅ 本地玩家已创建，包含任务日志和交易窗口组件");
@@ -477,6 +492,26 @@ impl Scene for GameScene {
             }
         }
         
+        // 🎯 同步摄像机位置到玩家位置（确保摄像机始终跟随玩家）
+        if let Some((_, (_, player_pos))) = world.query::<(&LocalPlayer, &Position)>().iter().next() {
+            if let Ok(mut cam_pos) = world.get::<&mut Position>(self.camera_entity) {
+                // 🐛 添加调试日志
+                static mut SYNC_COUNTER: u32 = 0;
+                unsafe {
+                    SYNC_COUNTER += 1;
+                    if SYNC_COUNTER == 1 || SYNC_COUNTER % 300 == 0 {  // 首次和每300帧
+                        tracing::info!(
+                            "📷 Camera同步: player=({:.1}, {:.1}), old_camera=({:.1}, {:.1})",
+                            player_pos.x, player_pos.y, cam_pos.x, cam_pos.y
+                        );
+                    }
+                }
+                
+                cam_pos.x = player_pos.x;
+                cam_pos.y = player_pos.y;
+            }
+        }
+        
         // 更新相机系统
         CameraSystem::update(world);
         
@@ -506,7 +541,61 @@ impl Scene for GameScene {
     }
     
     fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, world: &World) -> GameResult {
-        // 获取相机组件
+        // 🎯 在绘制前同步摄像机位置到玩家位置（确保首帧就正确）
+        // 必须在独立的作用域中完成，确保可变引用被drop
+        {
+            static mut DRAW_COUNT: u32 = 0;
+            unsafe { DRAW_COUNT += 1; }
+            
+            // 查找LocalPlayer - 需要保存query以延长生命周期
+            let mut player_query_iter = world.query::<(&LocalPlayer, &Position)>();
+            let player_opt = player_query_iter.iter().next();
+            
+            // 调试：输出是否找到玩家
+            unsafe {
+                if DRAW_COUNT <= 3 {
+                    if let Some((_, (_, player_pos))) = player_opt.as_ref() {
+                        tracing::info!(
+                            "🎮 draw#{}: 找到LocalPlayer, pos=({:.1}, {:.1})",
+                            DRAW_COUNT, player_pos.x, player_pos.y
+                        );
+                    } else {
+                        tracing::warn!("⚠️ draw#{}: 未找到LocalPlayer!", DRAW_COUNT);
+                    }
+                }
+            }
+            
+            if let Some((_, (_, player_pos))) = player_opt {
+                if let Ok(mut cam_pos) = world.get::<&mut Position>(self.camera_entity) {
+                    // 计算距离用于调试
+                    let distance = ((cam_pos.x - player_pos.x).powi(2) + (cam_pos.y - player_pos.y).powi(2)).sqrt();
+                    
+                    unsafe {
+                        if DRAW_COUNT <= 3 {
+                            tracing::info!(
+                                "📷 draw#{}: camera=({:.1}, {:.1}), distance={:.1}",
+                                DRAW_COUNT, cam_pos.x, cam_pos.y, distance
+                            );
+                        }
+                    }
+                    
+                    // 🎯 强制同步Camera到玩家位置（确保draw前Camera在正确位置）
+                    cam_pos.x = player_pos.x;
+                    cam_pos.y = player_pos.y;
+                    
+                    unsafe {
+                        if DRAW_COUNT <= 3 && distance > 1.0 {
+                            tracing::info!(
+                                "🎯 draw#{} Camera同步: distance={:.1} -> player=({:.1}, {:.1})",
+                                DRAW_COUNT, distance, player_pos.x, player_pos.y
+                            );
+                        }
+                    }
+                }
+            }
+        } // 作用域结束，可变引用被drop
+        
+        // 获取相机组件（现在获取的是更新后的值）
         let (pos, camera) = {
             let pos = world.get::<&Position>(self.camera_entity).unwrap().clone();
             let camera = world.get::<&Camera>(self.camera_entity).unwrap().clone();

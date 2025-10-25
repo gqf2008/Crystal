@@ -9,7 +9,7 @@ pub mod network_command;
 
 // Re-exports for convenience
 pub use network::{NetworkStack, NetworkEvent};
-pub use game_client::{GameClient, new_shared_client, GameEvent};
+pub use game_client::{GameClient, new_shared_client, GameEvent, GameObject};
 pub use network_manager::{NetworkManager, network_task};
 pub use network_command::NetworkCommand;
 

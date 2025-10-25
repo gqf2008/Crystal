@@ -52,10 +52,13 @@ impl MapHelper {
         !has_obstacle
     }
     
-    /// 🎯 格子坐标转世界坐标（中心点）
+    /// 🎯 格子坐标转世界坐标(格子中心位置)
+    /// 返回格子的中心点作为人物位置
+    /// X: 格子水平中心 (grid_x * 48 + 24)
+    /// Y: 格子垂直中心 (grid_y * 32 + 16)
     pub fn grid_to_world(grid_x: i32, grid_y: i32) -> (f32, f32) {
         let world_x = (grid_x * CELL_WIDTH + CELL_WIDTH / 2) as f32;
-        let world_y = (grid_y * CELL_HEIGHT + CELL_HEIGHT / 2) as f32;
+        let world_y = (grid_y * CELL_HEIGHT + CELL_HEIGHT / 2) as f32;  // 格子中心
         
         (world_x, world_y)
     }

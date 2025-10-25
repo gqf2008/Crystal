@@ -363,44 +363,78 @@ impl PlayerSystem {
                 player.frame_index = (player.frame_index + 1) % player.action.frame_count();
             }
             
-            // 🌐 网络同步：检测位置或方向变化，发送到服务器
+            // 🌐 网络同步：检测位置或方向变化,发送到服务器
             if let Some(network_tx) = network_tx {
                 let new_grid_x = (pos.x / 48.0) as i32;
                 let new_grid_y = (pos.y / 32.0) as i32;
                 
-                // 当格子位置或方向发生变化时，发送移动命令
-                if new_grid_x != old_grid_x || new_grid_y != old_grid_y || player.direction != old_direction {
-                    let direction = match player.direction {
-                        0 => MirDirection::Up,
-                        1 => MirDirection::UpRight,
-                        2 => MirDirection::Right,
-                        3 => MirDirection::DownRight,
-                        4 => MirDirection::Down,
-                        5 => MirDirection::DownLeft,
-                        6 => MirDirection::Left,
-                        7 => MirDirection::UpLeft,
-                        _ => MirDirection::Down,
-                    };
-                    
-                    // 根据动作类型发送不同的移动命令
-                    match player.action {
-                        PlayerAction::Run => {
-                            let _ = network_tx.send(NetworkCommand::Run { direction });
-                            tracing::debug!("🌐 发送跑步命令: direction={:?}, pos=({}, {})", direction, new_grid_x, new_grid_y);
-                        }
-                        PlayerAction::Walk => {
-                            let _ = network_tx.send(NetworkCommand::Walk { direction });
-                            tracing::debug!("🌐 发送行走命令: direction={:?}, pos=({}, {})", direction, new_grid_x, new_grid_y);
-                        }
-                        _ => {
-                            // 转身命令（不移动，只改变方向）
-                            if player.direction != old_direction && new_grid_x == old_grid_x && new_grid_y == old_grid_y {
-                                let _ = network_tx.send(NetworkCommand::Turn { direction });
-                                tracing::debug!("🌐 发送转身命令: direction={:?}", direction);
+                tracing::info!("🔍 位置检查: old=({}, {}) new=({}, {}) is_moving={}", 
+                    old_grid_x, old_grid_y, new_grid_x, new_grid_y, player.is_moving);
+                
+                // 🐛 调试：打印周围格子的障碍物状态
+                if new_grid_x != old_grid_x || new_grid_y != old_grid_y {
+                    for dx in -1..=1 {
+                        for dy in -1..=1 {
+                            let check_x = new_grid_x + dx;
+                            let check_y = new_grid_y + dy;
+                            let walkable = MapHelper::is_walkable(&map_data, check_x, check_y);
+                            if check_x >= 0 && check_x < map_data.width && check_y >= 0 && check_y < map_data.height {
+                                let cell = &map_data.cells[check_x as usize][check_y as usize];
+                                tracing::info!("🗺️ ({}, {}) walkable={} back_image=0x{:08X}", 
+                                    check_x, check_y, walkable, cell.back_image);
                             }
                         }
                     }
                 }
+                
+                // 当格子位置或方向发生变化时，发送移动命令
+                if new_grid_x != old_grid_x || new_grid_y != old_grid_y || player.direction != old_direction {
+                    // ⏱️ 检查是否超过服务器MoveDelay(600ms)
+                    let now = std::time::Instant::now();
+                    let elapsed = now.duration_since(player.last_move_time);
+                    
+                    if elapsed >= player.move_delay {
+                        let direction = match player.direction {
+                            0 => MirDirection::Up,
+                            1 => MirDirection::UpRight,
+                            2 => MirDirection::Right,
+                            3 => MirDirection::DownRight,
+                            4 => MirDirection::Down,
+                            5 => MirDirection::DownLeft,
+                            6 => MirDirection::Left,
+                            7 => MirDirection::UpLeft,
+                            _ => MirDirection::Down,
+                        };
+                        
+                        // 根据动作类型发送不同的移动命令
+                        match player.action {
+                            PlayerAction::Run => {
+                                let _ = network_tx.send(NetworkCommand::Run { direction });
+                                tracing::info!("🌐 发送跑步命令: direction={:?}, pos=({}, {})", direction, new_grid_x, new_grid_y);
+                                player.last_move_time = now; // 更新时间
+                            }
+                            PlayerAction::Walk => {
+                                let _ = network_tx.send(NetworkCommand::Walk { direction });
+                                tracing::info!("🌐 发送行走命令: direction={:?}, pos=({}, {})", direction, new_grid_x, new_grid_y);
+                                player.last_move_time = now; // 更新时间
+                            }
+                            _ => {
+                                // 转身命令（不移动，只改变方向）
+                                if player.direction != old_direction && new_grid_x == old_grid_x && new_grid_y == old_grid_y {
+                                    let _ = network_tx.send(NetworkCommand::Turn { direction });
+                                    tracing::info!("🌐 发送转身命令: direction={:?}", direction);
+                                    player.last_move_time = now; // 更新时间
+                                }
+                            }
+                        }
+                    } else {
+                        tracing::debug!("⏸️ 移动过快,跳过发送 (距上次 {}ms)", elapsed.as_millis());
+                    }
+                } else {
+                    tracing::debug!("⏸️ 位置未变化,不发送命令");
+                }
+            } else {
+                tracing::warn!("⚠️ network_tx 是 None,无法发送网络命令!");
             }
         }
         

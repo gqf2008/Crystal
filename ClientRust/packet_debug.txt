@@ -1,0 +1,216 @@
+﻿
+> 
+> ========================================
+> 🎮 Crystal Mir2 Client - Mir2X (ECS版本)
+> ========================================
+> 
+> [2m2025-10-25T03:36:56.255132Z[0m [32m INFO[0m === Crystal M
+ir2 Client (ECS版本) ===
+> [2m2025-10-25T03:36:56.255644Z[0m [32m INFO[0m 配置加载完成: ""
+> [2m2025-10-25T03:36:56.255968Z[0m [32m INFO[0m ✅ Tokio runti
+me 创建成功
+> [2m2025-10-25T03:36:56.256007Z[0m [32m INFO[0m === 初始化图像库系统 
+===
+> [2m2025-10-25T03:36:56.256036Z[0m [32m INFO[0m === 开始初始化所有库 
+===
+> [2m2025-10-25T03:36:56.256090Z[0m [32m INFO[0m 初始化 MapLibs[0
+-399]...
+> [2m2025-10-25T03:36:56.261645Z[0m [33m WARN[0m ✗ MapLibs[108
+] = Data/Map/ShandaMir2/Tiles9 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.262173Z[0m [33m WARN[0m ✗ MapLibs[109
+] = Data/Map/ShandaMir2/Tiles10 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.264025Z[0m [33m WARN[0m ✗ MapLibs[119
+] = Data/Map/ShandaMir2/SmTiles10 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.265594Z[0m [33m WARN[0m ✗ MapLibs[130
+] = Data/Map/ShandaMir2/Objects11 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.265623Z[0m [33m WARN[0m ✗ MapLibs[131
+] = Data/Map/ShandaMir2/Objects12 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.266809Z[0m [33m WARN[0m ✗ MapLibs[138
+] = Data/Map/ShandaMir2/Objects19 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.268295Z[0m [33m WARN[0m ✗ MapLibs[150
+] = Data/Map/ShandaMir2/Objects31 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.271742Z[0m [33m WARN[0m ✗ MapLibs[227
+] = Data/Map/WemadeMir3/wood/Object1c 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.271773Z[0m [33m WARN[0m ✗ MapLibs[228
+] = Data/Map/WemadeMir3/wood/Object2c 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.273029Z[0m [33m WARN[0m ✗ MapLibs[242
+] = Data/Map/WemadeMir3/sand/Object1c 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.273065Z[0m [33m WARN[0m ✗ MapLibs[243
+] = Data/Map/WemadeMir3/sand/Object2c 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.274474Z[0m [33m WARN[0m ✗ MapLibs[257
+] = Data/Map/WemadeMir3/snow/Object1c 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.274504Z[0m [33m WARN[0m ✗ MapLibs[258
+] = Data/Map/WemadeMir3/snow/Object2c 失败: 系统找不到指定的文件。 (os error 2)
+> [2m2025-10-25T03:36:56.275520Z[0m [33m WARN[0m ✗ MapLibs[272
+] = Data/Map/WemadeMir3/forest/Object1c 失败: 系统找不到指定的文件。 (os error 
+2)
+> [2m2025-10-25T03:36:56.275540Z[0m [33m WARN[0m ✗ MapLibs[273
+] = Data/Map/WemadeMir3/forest/Object2c 失败: 系统找不到指定的文件。 (os error 
+2)
+> [2m2025-10-25T03:36:56.275571Z[0m [33m WARN[0m ✗ MapLibs[300
+] = Data/Map/ShandaMir3/Tilesc 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275591Z[0m [33m WARN[0m ✗ MapLibs[301
+] = Data/Map/ShandaMir3/Tiles30c 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275610Z[0m [33m WARN[0m ✗ MapLibs[302
+] = Data/Map/ShandaMir3/Tiles5c 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275629Z[0m [33m WARN[0m ✗ MapLibs[303
+] = Data/Map/ShandaMir3/Smtilesc 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275647Z[0m [33m WARN[0m ✗ MapLibs[304
+] = Data/Map/ShandaMir3/Housesc 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275665Z[0m [33m WARN[0m ✗ MapLibs[305
+] = Data/Map/ShandaMir3/Cliffsc 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275684Z[0m [33m WARN[0m ✗ MapLibs[306
+] = Data/Map/ShandaMir3/Dungeonsc 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275703Z[0m [33m WARN[0m ✗ MapLibs[307
+] = Data/Map/ShandaMir3/Innersc 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275722Z[0m [33m WARN[0m ✗ MapLibs[308
+] = Data/Map/ShandaMir3/Furnituresc 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275741Z[0m [33m WARN[0m ✗ MapLibs[309
+] = Data/Map/ShandaMir3/Wallsc 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275760Z[0m [33m WARN[0m ✗ MapLibs[310
+] = Data/Map/ShandaMir3/smObjectsc 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275779Z[0m [33m WARN[0m ✗ MapLibs[311
+] = Data/Map/ShandaMir3/Animationsc 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275797Z[0m [33m WARN[0m ✗ MapLibs[312
+] = Data/Map/ShandaMir3/Object1c 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275816Z[0m [33m WARN[0m ✗ MapLibs[313
+] = Data/Map/ShandaMir3/Object2c 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275837Z[0m [33m WARN[0m ✗ MapLibs[315
+] = Data/Map/ShandaMir3/Tilescwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275856Z[0m [33m WARN[0m ✗ MapLibs[316
+] = Data/Map/ShandaMir3/Tiles30cwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275875Z[0m [33m WARN[0m ✗ MapLibs[317
+] = Data/Map/ShandaMir3/Tiles5cwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275893Z[0m [33m WARN[0m ✗ MapLibs[318
+] = Data/Map/ShandaMir3/Smtilescwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275912Z[0m [33m WARN[0m ✗ MapLibs[319
+] = Data/Map/ShandaMir3/Housescwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275932Z[0m [33m WARN[0m ✗ MapLibs[320
+] = Data/Map/ShandaMir3/Cliffscwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275952Z[0m [33m WARN[0m ✗ MapLibs[321
+] = Data/Map/ShandaMir3/Dungeonscwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275970Z[0m [33m WARN[0m ✗ MapLibs[322
+] = Data/Map/ShandaMir3/Innerscwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.275990Z[0m [33m WARN[0m ✗ MapLibs[323
+] = Data/Map/ShandaMir3/Furniturescwood 失败: 系统找不到指定的路径。 (os error 
+3)
+> [2m2025-10-25T03:36:56.276009Z[0m [33m WARN[0m ✗ MapLibs[324
+] = Data/Map/ShandaMir3/Wallscwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276028Z[0m [33m WARN[0m ✗ MapLibs[325
+] = Data/Map/ShandaMir3/smObjectscwood 失败: 系统找不到指定的路径。 (os error 3
+)
+> [2m2025-10-25T03:36:56.276048Z[0m [33m WARN[0m ✗ MapLibs[326
+] = Data/Map/ShandaMir3/Animationscwood 失败: 系统找不到指定的路径。 (os error 
+3)
+> [2m2025-10-25T03:36:56.276066Z[0m [33m WARN[0m ✗ MapLibs[327
+] = Data/Map/ShandaMir3/Object1cwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276086Z[0m [33m WARN[0m ✗ MapLibs[328
+] = Data/Map/ShandaMir3/Object2cwood 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276133Z[0m [33m WARN[0m ✗ MapLibs[330
+] = Data/Map/ShandaMir3/Tilescsand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276167Z[0m [33m WARN[0m ✗ MapLibs[331
+] = Data/Map/ShandaMir3/Tiles30csand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276187Z[0m [33m WARN[0m ✗ MapLibs[332
+] = Data/Map/ShandaMir3/Tiles5csand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276206Z[0m [33m WARN[0m ✗ MapLibs[333
+] = Data/Map/ShandaMir3/Smtilescsand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276225Z[0m [33m WARN[0m ✗ MapLibs[334
+] = Data/Map/ShandaMir3/Housescsand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276244Z[0m [33m WARN[0m ✗ MapLibs[335
+] = Data/Map/ShandaMir3/Cliffscsand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276263Z[0m [33m WARN[0m ✗ MapLibs[336
+] = Data/Map/ShandaMir3/Dungeonscsand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276282Z[0m [33m WARN[0m ✗ MapLibs[337
+] = Data/Map/ShandaMir3/Innerscsand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276302Z[0m [33m WARN[0m ✗ MapLibs[338
+] = Data/Map/ShandaMir3/Furniturescsand 失败: 系统找不到指定的路径。 (os error 
+3)
+> [2m2025-10-25T03:36:56.276323Z[0m [33m WARN[0m ✗ MapLibs[339
+] = Data/Map/ShandaMir3/Wallscsand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276342Z[0m [33m WARN[0m ✗ MapLibs[340
+] = Data/Map/ShandaMir3/smObjectscsand 失败: 系统找不到指定的路径。 (os error 3
+)
+> [2m2025-10-25T03:36:56.276361Z[0m [33m WARN[0m ✗ MapLibs[341
+] = Data/Map/ShandaMir3/Animationscsand 失败: 系统找不到指定的路径。 (os error 
+3)
+> [2m2025-10-25T03:36:56.276379Z[0m [33m WARN[0m ✗ MapLibs[342
+] = Data/Map/ShandaMir3/Object1csand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276398Z[0m [33m WARN[0m ✗ MapLibs[343
+] = Data/Map/ShandaMir3/Object2csand 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276418Z[0m [33m WARN[0m ✗ MapLibs[345
+] = Data/Map/ShandaMir3/Tilescsnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276436Z[0m [33m WARN[0m ✗ MapLibs[346
+] = Data/Map/ShandaMir3/Tiles30csnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276455Z[0m [33m WARN[0m ✗ MapLibs[347
+] = Data/Map/ShandaMir3/Tiles5csnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276474Z[0m [33m WARN[0m ✗ MapLibs[348
+] = Data/Map/ShandaMir3/Smtilescsnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276492Z[0m [33m WARN[0m ✗ MapLibs[349
+] = Data/Map/ShandaMir3/Housescsnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276512Z[0m [33m WARN[0m ✗ MapLibs[350
+] = Data/Map/ShandaMir3/Cliffscsnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276531Z[0m [33m WARN[0m ✗ MapLibs[351
+] = Data/Map/ShandaMir3/Dungeonscsnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276550Z[0m [33m WARN[0m ✗ MapLibs[352
+] = Data/Map/ShandaMir3/Innerscsnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276569Z[0m [33m WARN[0m ✗ MapLibs[353
+] = Data/Map/ShandaMir3/Furniturescsnow 失败: 系统找不到指定的路径。 (os error 
+3)
+> [2m2025-10-25T03:36:56.276588Z[0m [33m WARN[0m ✗ MapLibs[354
+] = Data/Map/ShandaMir3/Wallscsnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276606Z[0m [33m WARN[0m ✗ MapLibs[355
+] = Data/Map/ShandaMir3/smObjectscsnow 失败: 系统找不到指定的路径。 (os error 3
+)
+> [2m2025-10-25T03:36:56.276625Z[0m [33m WARN[0m ✗ MapLibs[356
+] = Data/Map/ShandaMir3/Animationscsnow 失败: 系统找不到指定的路径。 (os error 
+3)
+> [2m2025-10-25T03:36:56.276642Z[0m [33m WARN[0m ✗ MapLibs[357
+] = Data/Map/ShandaMir3/Object1csnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276661Z[0m [33m WARN[0m ✗ MapLibs[358
+] = Data/Map/ShandaMir3/Object2csnow 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276679Z[0m [33m WARN[0m ✗ MapLibs[360
+] = Data/Map/ShandaMir3/Tilescforest 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276699Z[0m [33m WARN[0m ✗ MapLibs[361
+] = Data/Map/ShandaMir3/Tiles30cforest 失败: 系统找不到指定的路径。 (os error 3
+)
+> [2m2025-10-25T03:36:56.276719Z[0m [33m WARN[0m ✗ MapLibs[362
+] = Data/Map/ShandaMir3/Tiles5cforest 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276739Z[0m [33m WARN[0m ✗ MapLibs[363
+] = Data/Map/ShandaMir3/Smtilescforest 失败: 系统找不到指定的路径。 (os error 3
+)
+> [2m2025-10-25T03:36:56.276757Z[0m [33m WARN[0m ✗ MapLibs[364
+] = Data/Map/ShandaMir3/Housescforest 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276775Z[0m [33m WARN[0m ✗ MapLibs[365
+] = Data/Map/ShandaMir3/Cliffscforest 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276794Z[0m [33m WARN[0m ✗ MapLibs[366
+] = Data/Map/ShandaMir3/Dungeonscforest 失败: 系统找不到指定的路径。 (os error 
+3)
+> [2m2025-10-25T03:36:56.276812Z[0m [33m WARN[0m ✗ MapLibs[367
+] = Data/Map/ShandaMir3/Innerscforest 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276831Z[0m [33m WARN[0m ✗ MapLibs[368
+] = Data/Map/ShandaMir3/Furniturescforest 失败: 系统找不到指定的路径。 (os erro
+r 3)
+> [2m2025-10-25T03:36:56.276850Z[0m [33m WARN[0m ✗ MapLibs[369
+] = Data/Map/ShandaMir3/Wallscforest 失败: 系统找不到指定的路径。 (os error 3)
+> [2m2025-10-25T03:36:56.276868Z[0m [33m WARN[0m ✗ MapLibs[370
+] = Data/Map/ShandaMir3/smObjectscforest 失败: 系统找不到指定的路径。 (os error
+ 3)
+> [2m2025-10-25T03:36:56.276887Z[0m [33m WARN[0m ✗ MapLibs[371
+] = Data/Map/ShandaMir3/Animationscforest 失败: 系统找不到指定的路径。 (os erro
+r 3)
+> [2m2025-10-25T03:36:56.276905Z[0m [33m WARN[0m ✗ MapLibs[372
+] = Data/Map/ShandaMir3/Object1cforest 失败: 系统找不到指定的路径。 (os error 3
+)
+> [2m2025-10-25T03:36:56.276922Z[0m [33m WARN[0m ✗ MapLibs[373
+] = Data/Map/ShandaMir3/Object2cforest 失败: 系统找不到指定的路径。 (os error 3
+)
+> [2m2025-10-25T03:36:56.276928Z[0m [32m INFO[0m ✓ MapLibs 初始化
+完成: 137/400 个库已加载
+> [2m2025-10-25T03:36:56.276947Z[0m [32m INFO[0m 加载库: ChrSel (
+Data/ChrSel)
+> [2m2025-10-25T03:36:56.277041Z[0m [32m INFO[0m ✓ 成功加载 ChrSel
+ (1146 张图像)
+> [2m2025-10-25T03:36:56.277053Z[0m [32m INFO[0m 加载库: Prguse (
+Data/Prguse)
+
+
