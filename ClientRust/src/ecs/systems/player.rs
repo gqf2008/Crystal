@@ -88,7 +88,7 @@ impl PlayerSystem {
     pub fn update(world: &mut World, network_tx: Option<&mpsc::UnboundedSender<NetworkCommand>>) {
         use crate::objects::pathfinder::PathFinder;
         use mir2_shared::Point;
-        use crate::ecs::map_helper::MapHelper;
+        use crate::ecs::{Coordinates, MapUtils};
         
         // 获取鼠标输入
         let mouse_input = world.query_mut::<&MouseInput>()
@@ -122,7 +122,7 @@ impl PlayerSystem {
         // 更新所有玩家
         for (_entity, (player, pos)) in world.query_mut::<(&mut Player, &mut Position)>() {
             // 🎯 记录移动前的格子位置 (使用统一的坐标转换)
-            let (old_grid_x, old_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
+            let (old_grid_x, old_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
             let old_direction = player.direction;
             
             // 📍 计算鼠标指向的世界坐标
@@ -144,7 +144,7 @@ impl PlayerSystem {
                 match player.move_mode {
                     MoveMode::Idle => {
                         // 空闲状态 → 双击触发寻路
-                        let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
+                        let (start_grid_x, start_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
                         
                         // ✅ 使用统一的屏幕坐标转世界坐标算法
                         let (mouse_world_x, mouse_world_y) = PlayerSystem::screen_to_world(
@@ -153,7 +153,7 @@ impl PlayerSystem {
                             &camera_pos, 
                             &camera
                         );
-                        let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
+                        let (target_grid_x, target_grid_y) = Coordinates::world_to_grid(mouse_world_x, mouse_world_y);
                         
                         tracing::info!("📍 寻路: 起点=({}, {}), 目标=({}, {})", 
                             start_grid_x, start_grid_y, target_grid_x, target_grid_y);
@@ -163,7 +163,7 @@ impl PlayerSystem {
                         let pathfinder = PathFinder::new(
                             map_data.width,
                             map_data.height,
-                            Box::new(move |p: Point| !MapHelper::is_walkable(&map_data_for_pathfinding, p.x, p.y))
+                            Box::new(move |p: Point| !MapUtils::is_walkable(&map_data_for_pathfinding, p.x, p.y))
                         );
                         
                         let start_point = Point::new(start_grid_x, start_grid_y);
@@ -191,14 +191,14 @@ impl PlayerSystem {
                     }
                     MoveMode::DirectFollow => {
                         // 直接跟随模式 → 单击切换到寻路
-                        let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
-                        let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
+                        let (start_grid_x, start_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
+                        let (target_grid_x, target_grid_y) = Coordinates::world_to_grid(mouse_world_x, mouse_world_y);
                         
                         let map_data_for_pathfinding = map_data.clone();
                         let pathfinder = PathFinder::new(
                             map_data.width,
                             map_data.height,
-                            Box::new(move |p: Point| !MapHelper::is_walkable(&map_data_for_pathfinding, p.x, p.y))
+                            Box::new(move |p: Point| !MapUtils::is_walkable(&map_data_for_pathfinding, p.x, p.y))
                         );
                         
                         let start_point = Point::new(start_grid_x, start_grid_y);
@@ -217,14 +217,14 @@ impl PlayerSystem {
                     }
                     MoveMode::AutoPathfinding => {
                         // 自动寻路模式 → 双击更新寻路目标位置
-                        let (start_grid_x, start_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
-                        let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
+                        let (start_grid_x, start_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
+                        let (target_grid_x, target_grid_y) = Coordinates::world_to_grid(mouse_world_x, mouse_world_y);
                         
                         let map_data_for_pathfinding = map_data.clone();
                         let pathfinder = PathFinder::new(
                             map_data.width,
                             map_data.height,
-                            Box::new(move |p: Point| !MapHelper::is_walkable(&map_data_for_pathfinding, p.x, p.y))
+                            Box::new(move |p: Point| !MapUtils::is_walkable(&map_data_for_pathfinding, p.x, p.y))
                         );
                         
                         let start_point = Point::new(start_grid_x, start_grid_y);
@@ -250,8 +250,8 @@ impl PlayerSystem {
                 let is_run = mouse_input.right_pressed;
                 
                 // 🎯 检查目标位置是否可行走
-                let (target_grid_x, target_grid_y) = MapHelper::world_to_grid(mouse_world_x, mouse_world_y);
-                let is_walkable = MapHelper::is_walkable(&map_data, target_grid_x, target_grid_y);
+                let (target_grid_x, target_grid_y) = Coordinates::world_to_grid(mouse_world_x, mouse_world_y);
+                let is_walkable = MapUtils::is_walkable(&map_data, target_grid_x, target_grid_y);
                 
                 if is_walkable {
                     match player.move_mode {
@@ -315,7 +315,7 @@ impl PlayerSystem {
                 // ⚠️ 如果正在等待服务器确认，完全停止Position更新
                 if !player.waiting_server_confirm && player.path_index < player.path.len() {
                     let (target_grid_x, target_grid_y) = player.path[player.path_index];
-                    let (target_x, target_y) = MapHelper::grid_to_world(target_grid_x, target_grid_y);
+                    let (target_x, target_y) = Coordinates::grid_to_world_center(target_grid_x, target_grid_y);
                     
                     let dx = target_x - pos.x;
                     let dy = target_y - pos.y;
@@ -392,8 +392,8 @@ impl PlayerSystem {
                 
                 if distance < player.speed * 2.0 {
                     // 检查最终位置是否可行走
-                    let (final_grid_x, final_grid_y) = MapHelper::world_to_grid(player.target_x, player.target_y);
-                    if MapHelper::is_walkable(&map_data, final_grid_x, final_grid_y) {
+                    let (final_grid_x, final_grid_y) = Coordinates::world_to_grid(player.target_x, player.target_y);
+                    if MapUtils::is_walkable(&map_data, final_grid_x, final_grid_y) {
                         pos.x = player.target_x;
                         pos.y = player.target_y;
                     } else {
@@ -412,8 +412,8 @@ impl PlayerSystem {
                     let next_y = pos.y + (dy / distance) * player.speed;
                     
                     // 检查下一步是否可行走
-                    let (next_grid_x, next_grid_y) = MapHelper::world_to_grid(next_x, next_y);
-                    if MapHelper::is_walkable(&map_data, next_grid_x, next_grid_y) {
+                    let (next_grid_x, next_grid_y) = Coordinates::world_to_grid(next_x, next_y);
+                    if MapUtils::is_walkable(&map_data, next_grid_x, next_grid_y) {
                         pos.x = next_x;
                         pos.y = next_y;
                     } else {
@@ -435,7 +435,7 @@ impl PlayerSystem {
             
             // 🔄 处理转身（不移动格子，只改变方向）
             if let Some(network_tx) = network_tx {
-                let (new_grid_x, new_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
+                let (new_grid_x, new_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
                 
                 if player.direction != old_direction 
                     && new_grid_x == old_grid_x 

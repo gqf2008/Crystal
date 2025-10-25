@@ -254,7 +254,7 @@ impl RenderSystem {
         player_positions: &[(f32, f32)],
     ) -> GameResult<()> {
         use crate::ecs::{CELL_WIDTH, CELL_HEIGHT, TileLayer, MapTile, VisibleArea};
-        use crate::ecs::map_helper::MapHelper;
+        use crate::ecs::Coordinates;
         
         // 获取可见区域的瓦片
         if let Ok(visible_area) = world.get::<&VisibleArea>(visible_area_entity) {
@@ -272,7 +272,7 @@ impl RenderSystem {
                     // 检查瓦片是否与任何角色重叠
                     let mut has_overlap = false;
                     for &(player_x, player_y) in player_positions {
-                        let (player_grid_x, player_grid_y) = MapHelper::world_to_grid(player_x, player_y);
+                        let (player_grid_x, player_grid_y) = Coordinates::world_to_grid(player_x, player_y);
                         
                         // 检查瓦片是否在角色上方附近
                         let dx = (tile.grid_x - player_grid_x).abs();
@@ -676,7 +676,7 @@ impl RenderSystem {
         // 遮挡条件：
         // 1. Front层瓦片的世界Y坐标 <= 角色脚底Y坐标（瓦片在前面绘制）
         // 2. Front层瓦片在屏幕空间与角色有重叠
-        use crate::ecs::map_helper::MapHelper;
+        use crate::ecs::Coordinates;
         use crate::ecs::{CELL_WIDTH, CELL_HEIGHT};
         
         let mut _has_front_overlap = false;
@@ -684,7 +684,7 @@ impl RenderSystem {
         // 角色脚底的世界坐标和格子坐标
         let player_world_x = player_pos.x;
         let player_world_y = player_pos.y;
-        let (player_grid_x, player_grid_y) = MapHelper::world_to_grid(player_world_x, player_world_y);
+        let (player_grid_x, player_grid_y) = Coordinates::world_to_grid(player_world_x, player_world_y);
         
         // 预先获取角色的尺寸信息（用于碰撞检测）
         // 🎯 使用稍大的检测范围，避免边缘临界状态导致闪烁
@@ -908,7 +908,7 @@ impl RenderSystem {
         camera_pos: &Position,
         camera: &Camera,
     ) -> GameResult<()> {
-        use crate::ecs::{Player, MapHelper};
+        use crate::ecs::{Player, Coordinates};
         use crate::ecs::systems::CameraSystem;
         use ggez::graphics;
         
@@ -934,7 +934,7 @@ impl RenderSystem {
             // 绘制从当前位置到第一个路径点的线段
             if let Some(&(first_x, first_y)) = player.path.get(player.path_index) {
                 // 第一个路径点的世界坐标
-                let (first_world_x, first_world_y) = MapHelper::grid_to_world(first_x, first_y);
+                let (first_world_x, first_world_y) = Coordinates::grid_to_world_center(first_x, first_y);
                 
                 // 转换到屏幕坐标
                 let (player_screen_x, player_screen_y) = CameraSystem::world_to_screen(
@@ -968,8 +968,8 @@ impl RenderSystem {
                 let (x2, y2) = player.path[i + 1];
                 
                 // 转换到世界坐标
-                let (world_x1, world_y1) = MapHelper::grid_to_world(x1, y1);
-                let (world_x2, world_y2) = MapHelper::grid_to_world(x2, y2);
+                let (world_x1, world_y1) = Coordinates::grid_to_world_center(x1, y1);
+                let (world_x2, world_y2) = Coordinates::grid_to_world_center(x2, y2);
                 
                 // 转换到屏幕坐标
                 let (screen_x1, screen_y1) = CameraSystem::world_to_screen(
@@ -1021,7 +1021,7 @@ impl RenderSystem {
                 }
                 
                 // 转换到世界坐标
-                let (world_x, world_y) = MapHelper::grid_to_world(x, y);
+                let (world_x, world_y) = Coordinates::grid_to_world_center(x, y);
                 
                 // 转换到屏幕坐标
                 let (screen_x, screen_y) = CameraSystem::world_to_screen(

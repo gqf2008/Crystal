@@ -35,8 +35,7 @@ use crate::network::{NetworkCommand, game_client::GameEvent};
 use crate::ecs::{
     components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerComp, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow},
     systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem},
-    Coordinates,  // 坐标工具
-    map_helper::MapHelper,
+    Coordinates, MapUtils,  // 坐标工具
     map_loader::MapLoader,
     ui::{ChatType, MainDialogComp, InventoryDialogComp, CharacterDialogComp, SkillBarComp, ChatDialogComp, MagicLearningDialogComp, QuestDialogComp, TradeDialogComp, SkillsDialogComp, OptionsDialogComp},
 };
@@ -129,12 +128,12 @@ impl GameScene {
             println!("✅ 使用服务器玩家位置: 格子({}, {})", x, y);
             (x, y)
         } else {
-            let (x, y) = MapHelper::find_center_walkable_position(&map_data);
+            let (x, y) = MapUtils::find_center_walkable_position(&map_data);
             println!("⚠️ 未找到服务器位置，使用地图中心: 格子({}, {})", x, y);
             (x, y)
         };
         
-        let (player_world_x, player_world_y) = MapHelper::grid_to_world(player_grid_x, player_grid_y);
+        let (player_world_x, player_world_y) = Coordinates::grid_to_world_center(player_grid_x, player_grid_y);
         println!("� 玩家世界坐标: ({:.1}, {:.1})", player_world_x, player_world_y);
         
         // 创建相机实体

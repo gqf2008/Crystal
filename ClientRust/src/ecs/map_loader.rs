@@ -190,7 +190,7 @@ impl MapLoader {
         use crate::ecs::components::{
             Position, MonsterComp, AIState, Health, AnimationComp, SpriteComp,
         };
-        use crate::ecs::map_helper::MapHelper;
+        use crate::ecs::{Coordinates, MapUtils};
         use mir2_shared::MirAction;
         use rand::Rng;
         
@@ -211,12 +211,12 @@ impl MapLoader {
             let grid_y = rng.gen_range(10..map_data.height - 10);
             
             // 检查是否可行走
-            if !MapHelper::is_walkable(map_data, grid_x, grid_y) {
+            if !MapUtils::is_walkable(map_data, grid_x, grid_y) {
                 continue;
             }
             
             // 转换为世界坐标
-            let (x, y) = MapHelper::grid_to_world(grid_x, grid_y);
+            let (x, y) = Coordinates::grid_to_world_center(grid_x, grid_y);
             
             // 随机AI类型
             let ai_type = (spawned % 3) as u8 + 1; // 1=近战, 2=远程, 3=巡逻

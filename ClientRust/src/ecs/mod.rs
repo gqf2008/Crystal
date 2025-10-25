@@ -7,8 +7,7 @@ pub mod components;
 pub mod systems;
 pub mod world;
 pub mod runtime;
-// Map Helper/Loader 模块
-pub mod map_helper;
+// Map Loader 模块
 pub mod map_loader;
 
 // 坐标工具模块 - 统一地图/世界/屏幕坐标转换 (不是 ECS System)
@@ -28,8 +27,7 @@ pub use components::*;
 pub use systems::*;
 pub use world::GameWorld;
 
-// Map Helper/Loader 导出
-pub use map_helper::MapHelper;
+// Map Loader 导出
 pub use map_loader::MapLoader;
 
 // 坐标工具导出

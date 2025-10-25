@@ -98,8 +98,9 @@ use mir2_client::ecs::{
     AnimationSystem,
     DoorSystem,
     RenderSystem,
-    // Helpers
-    MapHelper,
+    // Coordinate utilities
+    Coordinates,
+    MapUtils,
     MapLoader,
 };
 
@@ -141,8 +142,8 @@ impl MapViewerApp {
             .map(|(_, data)| data.clone())
             .expect("地图数据未加载");
         
-        let (spawn_grid_x, spawn_grid_y) = MapHelper::find_center_walkable_position(&map_data);
-        let (spawn_x, spawn_y) = MapHelper::grid_to_world(spawn_grid_x, spawn_grid_y);
+        let (spawn_grid_x, spawn_grid_y) = MapUtils::find_center_walkable_position(&map_data);
+        let (spawn_x, spawn_y) = Coordinates::grid_to_world_center(spawn_grid_x, spawn_grid_y);
         
         println!("🧙 出生位置: 格子({}, {}) -> 世界坐标({:.1}, {:.1})", 
                  spawn_grid_x, spawn_grid_y, spawn_x, spawn_y);

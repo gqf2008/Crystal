@@ -12,11 +12,6 @@
 /// - **格子中心点**: 用于物理位置 `grid_to_world_center()`
 /// - **Floor vs Round**: 必须用 `floor()` 而非 `round()` 避免坐标跳变
 /// 
-/// 📦 委托关系:
-/// - `MapHelper::grid_to_world()` → `Coordinates::grid_to_world_center()`
-/// - `MapHelper::world_to_grid()` → `Coordinates::world_to_grid()`
-/// - `Position::to_grid()` → `Coordinates::world_to_grid()`
-/// 
 /// 参考原版: Client/MirScenes/GameScene.cs MapControl
 
 use hecs::World;
