@@ -42,6 +42,13 @@ use crate::ecs::{
 use crate::objects::{MapReader};
 use crate::graphics::libraries::initialize_all_libraries;
 
+/// 🎯 实体类型枚举 (用于Y-sorting渲染)
+enum EntityType {
+    Monster(Entity),
+    NPC(Entity),
+    Player(Entity),
+}
+
 /// 游戏场景
 pub struct GameScene {
     /// 相机实体
@@ -615,7 +622,7 @@ impl Scene for GameScene {
             (pos, camera)
         };
         
-        let config = world.get::<&RenderConfig>(self.config_entity).unwrap().clone();
+        let config = world.get::<&RenderConfig>(self.config_entity).ok().map(|r| (*r).clone()).unwrap();
         
         // ==================== 地图层: 使用窗口逻辑坐标 ====================
         // 设置画布使用窗口的逻辑分辨率(如 1280×960)
@@ -627,32 +634,93 @@ impl Scene for GameScene {
             camera.screen_height, 
         ));
         
-        // 渲染地图瓦片
+        // 🎯 第一步: 渲染地面层 (Back + Middle层,跳过Front)
+        // 创建临时配置，禁用Front层
+        let mut ground_config = config.clone();
+        ground_config.show_front = false;
+        
         RenderSystem::draw_tiles(
             ctx,
             canvas,
             world,
             &pos,
             &camera,
-            &config,
+            &ground_config,
             self.visible_area_entity,
         )?;
         
-        // 渲染怪物
-        RenderSystem::draw_monsters(ctx, canvas, world, &pos, &camera)?;
+        // 🎯 第二步: Y-sorting渲染实体 (怪物、NPC、玩家)
+        // 收集所有需要排序的实体及其Y坐标
+        let mut entities_to_draw: Vec<(i32, EntityType)> = Vec::new();
         
-        // 渲染NPC
-        RenderSystem::draw_npcs(ctx, canvas, world, &pos, &camera)?;
+        // 收集怪物
+        for (entity, pos) in world.query::<&Position>().iter() {
+            if world.get::<&crate::ecs::components::MonsterData>(entity).is_ok() {
+                entities_to_draw.push((pos.y as i32, EntityType::Monster(entity)));
+            }
+        }
+        
+        // 收集NPC
+        for (entity, pos) in world.query::<&Position>().iter() {
+            if world.get::<&crate::ecs::components::NPCData>(entity).is_ok() {
+                entities_to_draw.push((pos.y as i32, EntityType::NPC(entity)));
+            }
+        }
+        
+        // 收集玩家
+        for (entity, pos) in world.query::<&Position>().iter() {
+            if world.get::<&crate::ecs::components::Player>(entity).is_ok() {
+                entities_to_draw.push((pos.y as i32, EntityType::Player(entity)));
+            }
+        }
+        
+        // 按Y坐标排序 (从小到大,远处先绘制)
+        entities_to_draw.sort_by_key(|(y, _)| *y);
+        
+        // 按顺序绘制
+        for (_y, entity_type) in entities_to_draw {
+            match entity_type {
+                EntityType::Monster(entity) => {
+                    if let Ok(entity_pos) = world.get::<&Position>(entity) {
+                        RenderSystem::draw_single_monster(ctx, canvas, world, entity, &entity_pos, &pos, &camera)?;
+                    }
+                }
+                EntityType::NPC(entity) => {
+                    if let Ok(entity_pos) = world.get::<&Position>(entity) {
+                        RenderSystem::draw_single_npc(ctx, canvas, world, entity, &entity_pos, &pos, &camera)?;
+                    }
+                }
+                EntityType::Player(entity) => {
+                    if let (Ok(player), Ok(player_pos)) = (
+                        world.get::<&Player>(entity),
+                        world.get::<&Position>(entity)
+                    ) {
+                        RenderSystem::draw_player_with_world(ctx, canvas, world, &player, &player_pos, &pos, &camera)?;
+                    }
+                }
+            }
+        }
         
         // 渲染地面物品
         RenderSystem::draw_items(ctx, canvas, world, &pos, &camera)?;
         
-        // 渲染角色
-        for (_entity, (player, player_pos)) in world.query::<(&Player, &Position)>().iter() {
-            RenderSystem::draw_player_with_world(ctx, canvas, world, player, player_pos, &pos, &camera)?;
-        }
+        // 🎯 第三步: 绘制前景层 (Front层,遮挡怪物和玩家)
+        // 创建临时配置，只显示Front层
+        let mut front_config = config.clone();
+        front_config.show_back = false;
+        front_config.show_middle = false;
         
-        // 渲染怪物血条和名称
+        RenderSystem::draw_tiles(
+            ctx,
+            canvas,
+            world,
+            &pos,
+            &camera,
+            &front_config,
+            self.visible_area_entity,
+        )?;
+        
+        // 渲染怪物血条和名称 (始终在最上层)
         RenderSystem::draw_monster_info(ctx, canvas, world, &pos, &camera)?;
         
         // 🎯 绘制网格 (调试用 - G键切换)

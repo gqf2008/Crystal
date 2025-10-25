@@ -417,10 +417,22 @@ impl NetworkSystem {
     ) -> Entity {
         let (world_x, world_y) = crate::ecs::coordinates::Coordinates::grid_to_world_center(location.x, location.y);
         
+        // 🎯 从玩家FrameSet获取动画配置
+        use crate::objects::frames::{PLAYER_FRAMES, get_frame};
+        
+        let action = MirAction::Standing;
+        let (frame_count, frame_interval) = if let Some(frame) = get_frame(&PLAYER_FRAMES, action) {
+            (frame.count as u8, frame.interval as u32)
+        } else {
+            // 玩家默认值:站立动画4帧,间隔200ms
+            tracing::warn!("⚠️ 玩家 {} 没有找到 {:?} 动画帧配置,使用默认值", name, action);
+            (4, 200)
+        };
+        
         world.spawn((
             Position::new(world_x, world_y),
             Direction::new(direction),
-            Animation::new(MirAction::Standing, 4, 200),
+            Animation::new(action, frame_count, frame_interval),
             NetworkSync::new(object_id, NetworkObjectType::Player),
             OtherPlayer::new(
                 name.to_string(),
@@ -446,10 +458,24 @@ impl NetworkSystem {
         
         tracing::info!("🏪 创建NPC实体: ID={}, name={}, image={}, pos=({}, {})", object_id, name, image, world_x, world_y);
         
+        // 🎯 从FrameSet获取NPC动画配置
+        use crate::objects::frames::{DEFAULT_NPC_FRAMES, get_frame};
+        
+        let action = MirAction::Standing;
+        let (frame_count, frame_interval) = if let Some(frame) = get_frame(&DEFAULT_NPC_FRAMES, action) {
+            (frame.count as u8, frame.interval as u32)
+        } else {
+            // NPC默认值:站立动画4帧,间隔200ms
+            tracing::warn!("⚠️ NPC {} 没有找到 {:?} 动画帧配置,使用默认值", name, action);
+            (4, 200)
+        };
+        
+        tracing::debug!("  📊 NPC动画配置: action={:?}, count={}, interval={}ms", action, frame_count, frame_interval);
+        
         world.spawn((
             Position::new(world_x, world_y),
             Direction::new(direction),
-            Animation::new(MirAction::Standing, 4, 200),
+            Animation::new(action, frame_count, frame_interval),
             NetworkSync::new(object_id, NetworkObjectType::NPC),
             // 使用NPCData而不是NPC,以便渲染系统能找到
             NPCData {
@@ -467,10 +493,25 @@ impl NetworkSystem {
         
         tracing::info!("👹 创建怪物实体: ID={}, name={}, image={}, pos=({}, {})", object_id, name, image, world_x, world_y);
         
+        // 🎯 从FrameSet获取动画配置(不要硬编码)
+        // DEFAULT_MONSTER_FRAMES定义了每个动作的帧数和间隔
+        use crate::objects::frames::{DEFAULT_MONSTER_FRAMES, get_frame};
+        
+        let action = MirAction::Standing;
+        let (frame_count, frame_interval) = if let Some(frame) = get_frame(&DEFAULT_MONSTER_FRAMES, action) {
+            (frame.count as u8, frame.interval as u32)
+        } else {
+            // 默认值:站立动画4帧,间隔100ms
+            tracing::warn!("⚠️ 怪物 {} 没有找到 {:?} 动画帧配置,使用默认值", name, action);
+            (4, 100)
+        };
+        
+        tracing::debug!("  📊 动画配置: action={:?}, count={}, interval={}ms", action, frame_count, frame_interval);
+        
         world.spawn((
             Position::new(world_x, world_y),
             Direction::new(direction),
-            Animation::new(MirAction::Standing, 4, 200),
+            Animation::new(action, frame_count, frame_interval),
             NetworkSync::new(object_id, NetworkObjectType::Monster),
             // 使用MonsterData而不是Monster,以便渲染系统能找到
             MonsterData {

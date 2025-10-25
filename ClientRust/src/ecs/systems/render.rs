@@ -1311,6 +1311,94 @@ impl RenderSystem {
     /// - world: ECS 世界
     /// - camera_pos: 相机位置
     /// - camera: 相机组件
+    /// 🎯 绘制单个怪物 (用于Y-sorting)
+    pub fn draw_single_monster(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        entity: hecs::Entity,
+        pos: &Position,
+        camera_pos: &Position,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        use crate::ecs::components::{MonsterData, Animation};
+        use crate::graphics::libraries::{get_library_from_array, LibraryArray};
+        use crate::ecs::systems::CameraSystem;
+        use mir2_shared::MirAction;
+        
+        // 获取怪物数据和动画
+        let monster = match world.get::<&MonsterData>(entity) {
+            Ok(m) => m,
+            Err(_) => return Ok(()),
+        };
+        
+        let anim = match world.get::<&Animation>(entity) {
+            Ok(a) => a,
+            Err(_) => return Ok(()),
+        };
+        
+        // 获取怪物图库
+        let lib_index = monster.monster_index as usize;
+        let lib = match get_library_from_array(LibraryArray::Monsters, lib_index) {
+            Some(lib) => lib,
+            None => return Ok(()),
+        };
+        
+        // 计算帧索引
+        let action_frame_start = match anim.action {
+            MirAction::Standing => 0,
+            MirAction::Walking => 32,
+            MirAction::Attack1 => 80,
+            MirAction::Struck => 128,
+            MirAction::Die => 144,
+            MirAction::Dead => 224,
+            _ => 0,
+        };
+        
+        let frames_per_direction = match anim.action {
+            MirAction::Standing => 4,
+            MirAction::Walking => 6,
+            MirAction::Attack1 => 6,
+            MirAction::Struck => 2,
+            MirAction::Die => 10,
+            MirAction::Dead => 1,
+            _ => 4,
+        };
+        
+        let direction_offset = (anim.direction as i32) * frames_per_direction;
+        let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
+        let final_frame = draw_frame;
+        
+        // 转换为屏幕坐标
+        let (screen_x, screen_y) = CameraSystem::world_to_screen(
+            camera_pos,
+            camera,
+            pos.x,
+            pos.y,
+        );
+        
+        // 绘制怪物
+        let mut lib_locked = lib.lock().unwrap();
+        match lib_locked.get_or_create_texture(ctx, final_frame as usize) {
+            Ok(image_info) => {
+                let draw_x = screen_x + image_info.x as f32 * camera.zoom;
+                let draw_y = screen_y + image_info.y as f32 * camera.zoom;
+                
+                if let Some(image) = &image_info.image {
+                    canvas.draw(
+                        image,
+                        DrawParam::default()
+                            .dest([draw_x, draw_y])
+                            .scale([camera.zoom, camera.zoom]),
+                    );
+                }
+            }
+            Err(_) => {}
+        }
+        
+        Ok(())
+    }
+
     pub fn draw_monsters(
         ctx: &mut Context,
         canvas: &mut Canvas,
@@ -1600,6 +1688,78 @@ impl RenderSystem {
                             .scale([camera.zoom, camera.zoom]),
                     );
                 }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// 🎯 绘制单个NPC (用于Y-sorting)
+    pub fn draw_single_npc(
+        _ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        entity: hecs::Entity,
+        pos: &Position,
+        camera_pos: &Position,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        use crate::ecs::components::{NPCData, Animation};
+        use crate::graphics::libraries::{get_library_from_array, LibraryArray};
+        use crate::ecs::systems::CameraSystem;
+        use mir2_shared::MirAction;
+        
+        // 获取NPC数据和动画
+        let npc = match world.get::<&NPCData>(entity) {
+            Ok(n) => n,
+            Err(_) => return Ok(()),
+        };
+        
+        let anim = match world.get::<&Animation>(entity) {
+            Ok(a) => a,
+            Err(_) => return Ok(()),
+        };
+        
+        // 获取NPC图库
+        let lib_index = (npc.npc_index / 1000) as usize;
+        let lib = match get_library_from_array(LibraryArray::NPCs, lib_index) {
+            Some(lib) => lib,
+            None => return Ok(()),
+        };
+        
+        // 计算帧索引
+        let action_frame_start = match anim.action {
+            MirAction::Standing => 0,
+            _ => 0,
+        };
+        
+        let frames_per_direction = 4;
+        let direction_offset = (anim.direction as i32) * frames_per_direction;
+        let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
+        let npc_offset = (npc.npc_index % 1000) as i32;
+        let final_frame = draw_frame + npc_offset;
+        
+        // 转换为屏幕坐标
+        let (screen_x, screen_y) = CameraSystem::world_to_screen(
+            camera_pos,
+            camera,
+            pos.x,
+            pos.y,
+        );
+        
+        // 绘制NPC
+        let mut lib_locked = lib.lock().unwrap();
+        if let Ok(image_info) = lib_locked.get_image_info(final_frame as usize) {
+            let draw_x = screen_x + image_info.x as f32 * camera.zoom;
+            let draw_y = screen_y + image_info.y as f32 * camera.zoom;
+            
+            if let Some(image) = &image_info.image {
+                canvas.draw(
+                    image,
+                    DrawParam::default()
+                        .dest([draw_x, draw_y])
+                        .scale([camera.zoom, camera.zoom]),
+                );
             }
         }
         
