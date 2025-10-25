@@ -50,9 +50,7 @@ impl RenderSystem {
         config: &RenderConfig,
         visible_area_entity: hecs::Entity,
     ) -> GameResult<()> {
-        use crate::ecs::{CELL_WIDTH, CELL_HEIGHT, TileLayer, MapTile, VisibleArea};
-        use crate::ecs::systems::CameraSystem;
-        use crate::graphics::libraries::get_map_library;
+        use crate::ecs::{TileLayer, MapTile, VisibleArea};
         use std::time::Instant;
         
         // 🐛 调试：首次绘制时输出信息
@@ -253,7 +251,7 @@ impl RenderSystem {
         visible_area_entity: hecs::Entity,
         player_positions: &[(f32, f32)],
     ) -> GameResult<()> {
-        use crate::ecs::{CELL_WIDTH, CELL_HEIGHT, TileLayer, MapTile, VisibleArea};
+        use crate::ecs::{TileLayer, MapTile, VisibleArea};
         use crate::ecs::Coordinates;
         
         // 获取可见区域的瓦片
@@ -264,7 +262,6 @@ impl RenderSystem {
                     if !matches!(tile.layer, TileLayer::Front) {
                         continue;
                     }
-                    
                     if !config.show_front {
                         continue;
                     }
@@ -307,7 +304,7 @@ impl RenderSystem {
         tile: &MapTile,
         pos: &Position,
         camera: &Camera,
-        config: &RenderConfig,
+        _config: &RenderConfig,
         alpha: f32,
     ) -> GameResult<()> {
         use crate::ecs::{CELL_WIDTH, CELL_HEIGHT};
@@ -558,7 +555,7 @@ impl RenderSystem {
                     .get_size(final_frame as usize)
                     .unwrap_or((48, 64));
                 
-                let (offset_x, offset_y) = mlib
+                let (_offset_x, _offset_y) = mlib
                     .get_offset(final_frame as usize)
                     .unwrap_or((0, 0));
                 
@@ -737,8 +734,6 @@ impl RenderSystem {
         // 纹理尺寸和偏移量 (用于后续 AABB 计算)
         let mut char_w = 48;
         let mut char_h = 64;
-        let mut offset_x = 0;
-        let mut offset_y = 0;
         
         // ✅ 获取角色纹理 - 根据职业和性别使用对应的库
         if let Some(mlib) = get_library(library_name) {
@@ -748,7 +743,7 @@ impl RenderSystem {
                     .get_size(final_frame as usize)
                     .unwrap_or((48, 64));
                 
-                (offset_x, offset_y) = mlib
+                let (_offset_x, _offset_y) = mlib
                     .get_offset(final_frame as usize)
                     .unwrap_or((0, 0));
                 
@@ -769,21 +764,6 @@ impl RenderSystem {
                             let green_bottom_y = player_pos.y + (CELL_HEIGHT as f32 / 2.0);
                             let world_x = player_pos.x + (CELL_WIDTH as f32 / 2.0) - (char_w as f32 / 2.0);
                             let world_y = green_bottom_y - char_h as f32;
-                            
-                            // 🐛 调试: 打印位置计算
-                            static mut DEBUG_COUNTER: u32 = 0;
-                            unsafe {
-                                DEBUG_COUNTER += 1;
-                                if DEBUG_COUNTER % 60 == 0 {  // 每60帧打印一次
-                                    tracing::info!(
-                                        "🎨 纹理位置: player_pos=({:.1}, {:.1})[格子中心], char_size={}×{}, green_bottom={:.1}, world=({:.1}, {:.1})",
-                                        player_pos.x, player_pos.y,
-                                        char_w, char_h,
-                                        green_bottom_y,
-                                        world_x, world_y
-                                    );
-                                }
-                            }
                             
                             let (screen_x, screen_y) = CameraSystem::world_to_screen(
                                 camera_pos, 
@@ -918,19 +898,6 @@ impl RenderSystem {
                 continue;
             }
 
-            // 🎯 一次性调试输出
-            static mut PATH_DEBUG_LOGGED: bool = false;
-            unsafe {
-                if !PATH_DEBUG_LOGGED {
-                    println!("🗺️ 路径绘制调试:");
-                    println!("  总路径点数: {}", player.path.len());
-                    println!("  当前路径索引: {}", player.path_index);
-                    println!("  摄像机位置: ({:.1}, {:.1})", camera_pos.x, camera_pos.y);
-                    println!("  屏幕尺寸: {:.0}x{:.0}", camera.screen_width, camera.screen_height);
-                    PATH_DEBUG_LOGGED = true;
-                }
-            }
-
             // 绘制从当前位置到第一个路径点的线段
             if let Some(&(first_x, first_y)) = player.path.get(player.path_index) {
                 // 第一个路径点的世界坐标
@@ -960,9 +927,6 @@ impl RenderSystem {
             }
 
             // 绘制路径点之间的连接线
-            let mut out_of_screen_count = 0;
-            let mut drawn_line_count = 0;
-            
             for i in player.path_index..(player.path.len() - 1) {
                 let (x1, y1) = player.path[i];
                 let (x2, y2) = player.path[i + 1];
@@ -984,7 +948,6 @@ impl RenderSystem {
                     && screen_x2.is_finite() && screen_y2.is_finite() {
                     
                     // 🎯 即使超出屏幕也绘制 (让GPU自己裁剪)
-                    // 只要坐标有效就绘制
                     if let Ok(line) = graphics::Mesh::new_line(
                         ctx,
                         &[[screen_x1, screen_y1], [screen_x2, screen_y2]],
@@ -992,25 +955,7 @@ impl RenderSystem {
                         Color::from_rgb(0, 255, 255), // 青色
                     ) {
                         canvas.draw(&line, DrawParam::default());
-                        drawn_line_count += 1;
-                        
-                        // 统计超出屏幕的线段
-                        let out1 = screen_x1 < 0.0 || screen_x1 > camera.screen_width 
-                                || screen_y1 < 0.0 || screen_y1 > camera.screen_height;
-                        let out2 = screen_x2 < 0.0 || screen_x2 > camera.screen_width 
-                                || screen_y2 < 0.0 || screen_y2 > camera.screen_height;
-                        if out1 || out2 {
-                            out_of_screen_count += 1;
-                        }
                     }
-                }
-            }
-            
-            // 🎯 调试输出:统计超出屏幕的线段数
-            unsafe {
-                if !PATH_DEBUG_LOGGED {
-                    println!("  绘制线段数: {}", drawn_line_count);
-                    println!("  超出屏幕的线段数: {}", out_of_screen_count);
                 }
             }
 
@@ -1367,7 +1312,7 @@ impl RenderSystem {
     /// - camera_pos: 相机位置
     /// - camera: 相机组件
     pub fn draw_monsters(
-        ctx: &mut Context,
+        _ctx: &mut Context,
         canvas: &mut Canvas,
         world: &World,
         camera_pos: &Position,

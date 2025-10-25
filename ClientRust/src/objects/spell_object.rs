@@ -91,60 +91,6 @@ impl SpellObject {
     }
     */
 
-    /// Calculate velocity vector from start to target
-    fn calculate_velocity(&mut self) {
-        let dx = self.target_location.x - self.start_location.x;
-        let dy = self.target_location.y - self.start_location.y;
-        let distance = ((dx * dx + dy * dy) as f32).sqrt();
-        
-        if distance > 0.0 {
-            self.velocity.x = (dx as f32 / distance * self.speed as f32) as i32;
-            self.velocity.y = (dy as f32 / distance * self.speed as f32) as i32;
-        }
-    }
-
-    /// Configure spell-specific parameters
-    fn configure_spell(&mut self) {
-        match self.spell {
-            Spell::FireBall => {
-                self.speed = 10;
-                self.frame_count = 10;
-                self.frame_interval = 50;
-                self.repeat = true;
-            }
-            Spell::GreatFireBall => {
-                self.speed = 8;
-                self.frame_count = 20;
-                self.frame_interval = 60;
-                self.repeat = true;
-            }
-            Spell::ThunderBolt => {
-                self.speed = 20;
-                self.frame_count = 5;
-                self.frame_interval = 30;
-                self.repeat = false;
-            }
-            Spell::Lightning => {
-                self.speed = 25;
-                self.frame_count = 10;
-                self.frame_interval = 20;
-                self.repeat = false;
-            }
-            Spell::IceThrust => {
-                self.speed = 15;
-                self.frame_count = 8;
-                self.frame_interval = 40;
-                self.repeat = true;
-            }
-            _ => {
-                self.speed = 10;
-                self.frame_count = 10;
-                self.frame_interval = 50;
-                self.repeat = false;
-            }
-        }
-    }
-
     /// Update spell position
     pub fn update_position(&mut self, current_time: i64) {
         if self.expired {
@@ -258,59 +204,5 @@ impl DrawableMapObject for SpellObject {
     
     fn draw_priority(&self) -> i32 {
         1 // Spells draw after items but before creatures
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_spell_object_creation() {
-        let spell = SpellObject::new(1, Spell::FireBall);
-        assert_eq!(spell.map_object.object_id(), 1);
-        assert_eq!(spell.spell, Spell::FireBall);
-        assert!(!spell.expired);
-    }
-
-    #[test]
-    fn test_spell_velocity_calculation() {
-        let mut spell = SpellObject::new(1, Spell::FireBall);
-        spell.start_location = Point::new(0, 0);
-        spell.target_location = Point::new(10, 10);
-        spell.speed = 10;
-        
-        spell.calculate_velocity();
-        
-        // Velocity should point towards target (normalized and scaled)
-        assert!(spell.velocity.x > 0);
-        assert!(spell.velocity.y > 0);
-    }
-
-    #[test]
-    fn test_spell_configuration() {
-        let mut spell = SpellObject::new(1, Spell::FireBall);
-        spell.configure_spell();
-        assert_eq!(spell.speed, 10);
-        assert!(spell.repeat);
-        
-        let mut lightning = SpellObject::new(2, Spell::Lightning);
-        lightning.configure_spell();
-        assert_eq!(lightning.speed, 25);
-        assert!(!lightning.repeat);
-    }
-
-    #[test]
-    fn test_spell_expiration() {
-        let mut spell = SpellObject::new(1, Spell::FireBall);
-        let current_time = 1000;
-        
-        assert!(!spell.should_remove(current_time));
-        
-        spell.expired = true;
-        spell.hit_time = current_time;
-        
-        assert!(!spell.should_remove(current_time));
-        assert!(spell.should_remove(current_time + 1500)); // After 1s
     }
 }

@@ -4,7 +4,7 @@
 
 use hecs::World;
 use std::time::Instant;
-use crate::ecs::components::{MapTile, TileLayer, AnimatedTile, Door, DoorState};
+use crate::ecs::components::{MapTile, AnimatedTile, Door, DoorState};
 
 /// 动画系统
 pub struct AnimationSystem;

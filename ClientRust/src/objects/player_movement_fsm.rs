@@ -1,7 +1,7 @@
 // player_movement_fsm.rs - 角色移动有限状态机
 // 处理平滑的格子移动和动画
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use mir2_shared::{enums::MirDirection, Point};
 
 /// 移动状态
@@ -237,37 +237,6 @@ impl PlayerMovementFSM {
                 
                 false
             }
-        }
-    }
-    
-    /// 根据两点计算方向 (使用 SharedRust 的标准实现)
-    fn calculate_direction(source: Point, dest: Point) -> MirDirection {
-        use mir2_shared::enums::MirDirection::*;
-        
-        if source.x < dest.x {
-            if source.y < dest.y {
-                return DownRight;
-            }
-            if source.y > dest.y {
-                return UpRight;
-            }
-            return Right;
-        }
-
-        if source.x > dest.x {
-            if source.y < dest.y {
-                return DownLeft;
-            }
-            if source.y > dest.y {
-                return UpLeft;
-            }
-            return Left;
-        }
-
-        if source.y < dest.y {
-            Down
-        } else {
-            Up
         }
     }
     

@@ -1,7 +1,5 @@
 // 网络命令 - UI线程发送给网络线程的命令
 
-use mir2_shared::packets::client;
-
 /// Commands that can be sent from UI thread to network thread
 #[derive(Debug, Clone)]
 pub enum NetworkCommand {

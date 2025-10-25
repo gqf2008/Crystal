@@ -298,20 +298,6 @@ impl PlayerSystem {
             // 🎯 移动逻辑
             // 1. 自动寻路模式：沿路径移动（等待服务器确认）
             if player.move_mode == MoveMode::AutoPathfinding && !player.path.is_empty() {
-                // 📊 调试日志 (降低频率到每3秒一次)
-                static mut DEBUG_COUNTER: u32 = 0;
-                unsafe {
-                    DEBUG_COUNTER += 1;
-                    if DEBUG_COUNTER % 180 == 0 {  // 60fps * 3秒 = 180帧
-                        tracing::info!("🎯 寻路状态: path_index={}/{}, waiting={}, pos=({:.1}, {:.1})", 
-                            player.path_index, player.path.len(), player.waiting_server_confirm, pos.x, pos.y);
-                        if player.path_index < player.path.len() {
-                            let (target_grid_x, target_grid_y) = player.path[player.path_index];
-                            tracing::info!("   当前目标格子: ({}, {})", target_grid_x, target_grid_y);
-                        }
-                    }
-                }
-                
                 // ⚠️ 如果正在等待服务器确认，完全停止Position更新
                 if !player.waiting_server_confirm && player.path_index < player.path.len() {
                     let (target_grid_x, target_grid_y) = player.path[player.path_index];

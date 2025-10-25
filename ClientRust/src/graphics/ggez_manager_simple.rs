@@ -1,8 +1,8 @@
 // Ggez Graphics Manager - 简化版本
-// 仅提供纹理管理功能，渲染由 Canvas 直接完成
+// 仅提供纹理管理功能,渲染由 Canvas 直接完成
 
 use ggez::{Context, GameResult};
-use ggez::graphics::{self, Image};
+use ggez::graphics::Image;
 use std::collections::HashMap;
 
 /// Ggez图形管理器（简化版）

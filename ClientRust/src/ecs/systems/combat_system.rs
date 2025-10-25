@@ -4,8 +4,7 @@
 
 use hecs::World;
 use crate::ecs::components::{
-    LocalPlayer, Position, Health, Monster, Player, NetworkSync,
-    Equipment, MirClass, PlayerData, CombatStats, NetworkObjectType
+    LocalPlayer, Position, Health, Monster, NetworkSync, CombatStats, NetworkObjectType
 };
 use crate::network::NetworkCommand;
 use tokio::sync::mpsc;
@@ -44,10 +43,10 @@ impl CombatSystem {
         target_level: u16,
     ) -> CombatResult {
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         
         // 1. 基础伤害 = 随机(最小攻击, 最大攻击)
-        let base_damage = rng.gen_range(attacker_attack.0..=attacker_attack.1);
+        let base_damage = rng.random_range(attacker_attack.0..=attacker_attack.1);
         
         // 2. 防御减伤
         let defense_reduction = (target_defense as f32 * 0.5).min(base_damage as f32 * 0.8);
@@ -62,7 +61,7 @@ impl CombatSystem {
         }
         
         // 4. 暴击判定 (10%概率)
-        let is_critical = rng.gen_ratio(1, 10);
+        let is_critical = rng.random_ratio(1, 10);
         if is_critical {
             damage = (damage as f32 * 1.5) as i32;
         }
@@ -83,10 +82,10 @@ impl CombatSystem {
         target_level: u16,
     ) -> CombatResult {
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         
         // 1. 基础伤害 = 随机(最小魔攻, 最大魔攻) + 技能威力
-        let base_damage = rng.gen_range(attacker_magic.0..=attacker_magic.1) + spell_power;
+        let base_damage = rng.random_range(attacker_magic.0..=attacker_magic.1) + spell_power;
         
         // 2. 魔法防御减伤
         let defense_reduction = (target_magic_defense as f32 * 0.3).min(base_damage as f32 * 0.7);
@@ -101,7 +100,7 @@ impl CombatSystem {
         }
         
         // 4. 暴击判定 (5%概率)
-        let is_critical = rng.gen_ratio(1, 20);
+        let is_critical = rng.random_ratio(1, 20);
         if is_critical {
             damage = (damage as f32 * 2.0) as i32;
         }
@@ -311,7 +310,7 @@ impl SkillEffectSystem {
     pub fn apply_skill_effect(
         world: &mut World,
         spell_type: crate::ecs::components::SpellType,
-        caster_id: u32,
+        _caster_id: u32,
         target_id: Option<u32>,
         location: Option<(i32, i32)>,
     ) {

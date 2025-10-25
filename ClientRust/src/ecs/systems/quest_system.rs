@@ -3,7 +3,7 @@
 // ============================================================================
 
 use hecs::World;
-use crate::ecs::components::{LocalPlayer, Position};
+use crate::ecs::components::LocalPlayer;
 use crate::network::NetworkCommand;
 use tokio::sync::mpsc;
 
@@ -428,7 +428,7 @@ impl QuestSystem {
     }
     
     /// 获取可接取的任务列表 (UI用)
-    pub fn get_available_quests(world: &World) -> Vec<Quest> {
+    pub fn get_available_quests(_world: &World) -> Vec<Quest> {
         // TODO: 从NPC或其他来源获取
         Vec::new()
     }
