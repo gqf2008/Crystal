@@ -206,6 +206,7 @@ impl GameScene {
                 move_mode: MoveMode::Idle,
                 last_move_time: std::time::Instant::now(),
                 move_delay: std::time::Duration::from_millis(600), // 服务器MoveDelay
+                waiting_server_confirm: false,  // 🎯 初始不等待确认
             },
             Position { x: player_world_x, y: player_world_y },  // 📍 使用真实位置
             PlayerAppearance::default(),  // 默认外观（战士男）

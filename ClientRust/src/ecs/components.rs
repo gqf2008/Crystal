@@ -495,6 +495,7 @@ pub struct Player {
     pub move_mode: MoveMode,
     pub last_move_time: std::time::Instant,  // 上次发送移动命令的时间
     pub move_delay: std::time::Duration,     // 移动命令间隔(服务器MoveDelay=600ms)
+    pub waiting_server_confirm: bool,        // 🎯 等待服务器确认移动
 }
 
 /// 角色动作

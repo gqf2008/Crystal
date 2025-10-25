@@ -93,28 +93,55 @@ impl NetworkSystem {
                 let current_grid_x = (position.x / 48.0).round() as i32;
                 let current_grid_y = (position.y / 32.0).round() as i32;
                 
-                // 检查是否与服务器位置不一致(允许小误差)
-                let position_mismatch = (current_grid_x - location.x).abs() > 1 || 
-                                        (current_grid_y - location.y).abs() > 1;
+                tracing::info!("📊 位置对比: 客户端=({}, {}) world=({:.1}, {:.1}), 服务器=({}, {}) world=({:.1}, {:.1})",
+                    current_grid_x, current_grid_y, position.x, position.y,
+                    location.x, location.y, world_x, world_y);
                 
-                if position_mismatch {
-                    // 位置不匹配 - 服务器权威修正
-                    tracing::warn!("⚠️ 位置不同步! 客户端:({}, {}) 服务器:({}, {}) - 强制同步", 
+                // 检查格子位置偏差
+                let grid_diff_x = (current_grid_x - location.x).abs();
+                let grid_diff_y = (current_grid_y - location.y).abs();
+                
+                // 🎯 清除等待服务器确认标志
+                player.waiting_server_confirm = false;
+                
+                if grid_diff_x > 0 || grid_diff_y > 0 {
+                    // 🎯 格子位置不同 - 服务器已移动到新格子
+                    // 立即同步到服务器确认的格子位置
+                    tracing::info!("✅ 同步到服务器新格子: ({}, {}) -> ({}, {})", 
                         current_grid_x, current_grid_y, location.x, location.y);
                     
-                    // 强制设置为服务器位置
                     position.x = world_x;
                     position.y = world_y;
+                    player.target_x = world_x;
+                    player.target_y = world_y;
                     
-                    // 清除移动状态,避免继续朝错误位置移动
-                    player.move_mode = crate::ecs::components::MoveMode::Idle;
-                    player.is_moving = false;
+                    // 🎯 服务器确认移动成功，可以移动到下一格了
+                    if player.move_mode == crate::ecs::components::MoveMode::AutoPathfinding 
+                        && !player.path.is_empty() 
+                        && player.path_index < player.path.len() {
+                        player.path_index += 1;
+                        
+                        if player.path_index >= player.path.len() {
+                            // 到达终点
+                            player.move_mode = crate::ecs::components::MoveMode::Idle;
+                            player.is_moving = false;
+                            tracing::info!("✅ 到达目的地");
+                        }
+                    }
+                    
+                    // 如果偏差太大（>1格），说明有异常，清除移动状态
+                    if grid_diff_x > 1 || grid_diff_y > 1 {
+                        tracing::warn!("⚠️ 位置偏差过大! 客户端:({}, {}) 服务器:({}, {}) - 停止移动", 
+                            current_grid_x, current_grid_y, location.x, location.y);
+                        player.move_mode = crate::ecs::components::MoveMode::Idle;
+                        player.is_moving = false;
+                        player.path.clear();
+                        player.path_index = 0;
+                    }
                 } else {
-                    // 位置匹配 - 服务器确认,客户端预测正确
-                    tracing::debug!("✅ 位置已确认: grid=({}, {}) - 客户端预测正确", location.x, location.y);
-                    
-                    // 不修改position,保持客户端的平滑插值移动
-                    // 只标记位置已被服务器确认
+                    // ✅ 同一个格子 - 服务器确认位置，但不打断客户端插值
+                    // 允许客户端继续平滑移动到下一格
+                    tracing::debug!("✅ 服务器确认当前格子: ({}, {}) - 保持客户端插值", location.x, location.y);
                 }
                 
                 player_entity = Some(entity);

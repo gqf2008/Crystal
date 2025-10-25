@@ -758,15 +758,16 @@ impl RenderSystem {
                         if let Some(ref texture) = info.image {
                             // 🎯 纹理位置计算:
                             // player_pos 现在是格子中心(红点)
-                            // 纹理底边应该对齐格子底边，X轴居中
+                            // 纹理底边应该对齐格子底边
                             // 
                             // 格子底边Y = player_pos.y + CELL_HEIGHT/2
                             // 纹理底边Y = world_y + char_h
                             // 所以: world_y = player_pos.y + CELL_HEIGHT/2 - char_h
                             // 
-                            // X方向: 居中对齐 = player_pos.x - char_w/2
+                            // ⚠️ X方向: 原工程中角色在格子右侧，所以需要向右偏移
+                            // 格子中心 + 半格宽度 = 格子右边缘
                             let green_bottom_y = player_pos.y + (CELL_HEIGHT as f32 / 2.0);
-                            let world_x = player_pos.x - (char_w as f32 / 2.0);
+                            let world_x = player_pos.x + (CELL_WIDTH as f32 / 2.0) - (char_w as f32 / 2.0);
                             let world_y = green_bottom_y - char_h as f32;
                             
                             // 🐛 调试: 打印位置计算

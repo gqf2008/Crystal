@@ -284,9 +284,10 @@ impl PlayerSystem {
             }
             
             // 🎯 移动逻辑
-            // 1. 自动寻路模式：沿路径移动
+            // 1. 自动寻路模式：沿路径移动（等待服务器确认）
             if player.move_mode == MoveMode::AutoPathfinding && !player.path.is_empty() {
-                if player.path_index < player.path.len() {
+                // ⚠️ 如果正在等待服务器确认，完全停止Position更新
+                if !player.waiting_server_confirm && player.path_index < player.path.len() {
                     let (target_grid_x, target_grid_y) = player.path[player.path_index];
                     let (target_x, target_y) = MapHelper::grid_to_world(target_grid_x, target_grid_y);
                     
@@ -294,25 +295,23 @@ impl PlayerSystem {
                     let dy = target_y - pos.y;
                     let distance = (dx * dx + dy * dy).sqrt();
                     
-                    if distance < player.speed * 2.0 {
-                        player.path_index += 1;
-                        
-                        if player.path_index >= player.path.len() {
-                            player.move_mode = MoveMode::Idle;
-                            player.is_moving = false;
-                            player.action = PlayerAction::Stand;
-                            player.path.clear();
-                            println!("✅ 到达目的地");
-                        }
-                    } else {
+                    // 🎯 只有距离足够大才移动（避免微小抖动）
+                    if distance > player.speed {
+                        // 平滑移动到目标格子中心
                         if distance > 10.0 {
                             let target_dir = Self::calculate_direction(dx, dy);
                             player.direction = Self::smooth_direction(player.direction, target_dir);
                         }
                         pos.x += (dx / distance) * player.speed;
                         pos.y += (dy / distance) * player.speed;
+                    } else {
+                        // ✅ 到达格子中心：锁定位置，准备发送命令
+                        pos.x = target_x;
+                        pos.y = target_y;
+                        // 注意：实际发送命令在后面的 if let Some(network_tx) 块中
                     }
                 }
+                // ✅ waiting_server_confirm=true 时：Position完全不变，只播放动画
             }
             // 2. 直接跟随模式：直线移动到鼠标位置（带碰撞检测）
             else if player.move_mode == MoveMode::DirectFollow && player.is_moving {
@@ -387,8 +386,14 @@ impl PlayerSystem {
                     }
                 }
                 
-                // 当格子位置或方向发生变化时，发送移动命令
-                if new_grid_x != old_grid_x || new_grid_y != old_grid_y || player.direction != old_direction {
+                // 🎯 发送移动命令逻辑
+                // 只在以下情况发送命令：
+                // 1. 格子位置改变（到达新格子中心）
+                // 2. 没有等待服务器确认
+                // 3. 距离上次移动超过MoveDelay
+                if (new_grid_x != old_grid_x || new_grid_y != old_grid_y) 
+                    && !player.waiting_server_confirm {
+                    
                     // ⏱️ 检查是否超过服务器MoveDelay(600ms)
                     let now = std::time::Instant::now();
                     let elapsed = now.duration_since(player.last_move_time);
@@ -411,24 +416,46 @@ impl PlayerSystem {
                             PlayerAction::Run => {
                                 let _ = network_tx.send(NetworkCommand::Run { direction });
                                 tracing::info!("🌐 发送跑步命令: direction={:?}, pos=({}, {})", direction, new_grid_x, new_grid_y);
-                                player.last_move_time = now; // 更新时间
+                                player.last_move_time = now;
+                                player.waiting_server_confirm = true;  // 🎯 设置等待标志
                             }
                             PlayerAction::Walk => {
                                 let _ = network_tx.send(NetworkCommand::Walk { direction });
                                 tracing::info!("🌐 发送行走命令: direction={:?}, pos=({}, {})", direction, new_grid_x, new_grid_y);
-                                player.last_move_time = now; // 更新时间
+                                player.last_move_time = now;
+                                player.waiting_server_confirm = true;  // 🎯 设置等待标志
                             }
                             _ => {
-                                // 转身命令（不移动，只改变方向）
-                                if player.direction != old_direction && new_grid_x == old_grid_x && new_grid_y == old_grid_y {
-                                    let _ = network_tx.send(NetworkCommand::Turn { direction });
-                                    tracing::info!("🌐 发送转身命令: direction={:?}", direction);
-                                    player.last_move_time = now; // 更新时间
-                                }
+                                // 其他动作不发送移动命令
                             }
                         }
-                    } else {
-                        tracing::debug!("⏸️ 移动过快,跳过发送 (距上次 {}ms)", elapsed.as_millis());
+                    }
+                }
+                // 🔄 单独处理转身（不移动格子，只改变方向）
+                else if player.direction != old_direction 
+                    && new_grid_x == old_grid_x 
+                    && new_grid_y == old_grid_y
+                    && !player.waiting_server_confirm {
+                    
+                    let now = std::time::Instant::now();
+                    let elapsed = now.duration_since(player.last_move_time);
+                    
+                    if elapsed >= player.move_delay {
+                        let direction = match player.direction {
+                            0 => MirDirection::Up,
+                            1 => MirDirection::UpRight,
+                            2 => MirDirection::Right,
+                            3 => MirDirection::DownRight,
+                            4 => MirDirection::Down,
+                            5 => MirDirection::DownLeft,
+                            6 => MirDirection::Left,
+                            7 => MirDirection::UpLeft,
+                            _ => MirDirection::Down,
+                        };
+                        
+                        let _ = network_tx.send(NetworkCommand::Turn { direction });
+                        tracing::info!("🌐 发送转身命令: direction={:?}", direction);
+                        player.last_move_time = now;
                     }
                 } else {
                     tracing::debug!("⏸️ 位置未变化,不发送命令");
