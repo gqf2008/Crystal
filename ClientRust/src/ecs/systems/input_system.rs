@@ -320,9 +320,10 @@ impl InputSystem {
     /// 拾取物品
     fn pickup_item(world: &mut World, network_tx: &mpsc::UnboundedSender<NetworkCommand>) {
         use crate::ecs::components::Position;
+        use crate::ecs::Coordinates;
         
         if let Some((_, pos)) = world.query::<&Position>().iter().next() {
-            let (grid_x, grid_y) = pos.to_grid();
+            let (grid_x, grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
             let _ = network_tx.send(NetworkCommand::PickupItem {
                 location: (grid_x, grid_y),
             });

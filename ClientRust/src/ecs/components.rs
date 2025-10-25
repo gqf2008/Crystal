@@ -32,14 +32,6 @@ impl Position {
             y: grid_y as f32 * 32.0,
         }
     }
-    
-    /// 转换为格子坐标
-    /// 
-    /// 🔄 委托给 Coordinates 统一处理
-    #[inline]
-    pub fn to_grid(&self) -> (i32, i32) {
-        crate::ecs::coordinates::Coordinates::world_to_grid(self.x, self.y)
-    }
 }
 
 /// 速度组件 - 移动实体必备
