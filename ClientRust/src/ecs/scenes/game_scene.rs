@@ -34,7 +34,8 @@ use super::{Scene, SceneType};
 use crate::network::{NetworkCommand, game_client::GameEvent};
 use crate::ecs::{
     components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerComp, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow},
-    systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem, CoordinateSystem},
+    systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem},
+    Coordinates,  // 坐标工具
     map_helper::MapHelper,
     map_loader::MapLoader,
     ui::{ChatType, MainDialogComp, InventoryDialogComp, CharacterDialogComp, SkillBarComp, ChatDialogComp, MagicLearningDialogComp, QuestDialogComp, TradeDialogComp, SkillsDialogComp, OptionsDialogComp},
@@ -141,7 +142,7 @@ impl GameScene {
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
         tracing::info!("📐 窗口尺寸: {}x{} | UI设计: {}x{}", 
                       screen_width, screen_height, 
-                      CoordinateSystem::DESIGN_WIDTH, CoordinateSystem::DESIGN_HEIGHT);
+                      Coordinates::DESIGN_WIDTH, Coordinates::DESIGN_HEIGHT);
         let camera_entity = world.spawn((
             Position { x: player_world_x, y: player_world_y },  // 📍 使用玩家真实位置
             Camera {
@@ -298,7 +299,7 @@ impl GameScene {
         // 创建主对话框实体
         // UI 使用固定设计分辨率 1024×768
         let main_dialog_entity = world.spawn((
-            MainDialogComp::new(CoordinateSystem::DESIGN_WIDTH, CoordinateSystem::DESIGN_HEIGHT),
+            MainDialogComp::new(Coordinates::DESIGN_WIDTH, Coordinates::DESIGN_HEIGHT),
         ));
         
         // 创建背包对话框实体
@@ -657,8 +658,8 @@ impl Scene for GameScene {
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,
-            CoordinateSystem::DESIGN_WIDTH,   // 1024 (UI 设计分辨率)
-            CoordinateSystem::DESIGN_HEIGHT,  // 768 (UI 设计分辨率)
+            Coordinates::DESIGN_WIDTH,   // 1024 (UI 设计分辨率)
+            Coordinates::DESIGN_HEIGHT,  // 768 (UI 设计分辨率)
         ));
         
         // 绘制FPS
@@ -676,7 +677,7 @@ impl Scene for GameScene {
         canvas.draw(
             &hint_text,
             DrawParam::default()
-                .dest([CoordinateSystem::DESIGN_WIDTH - 500.0, 10.0])
+                .dest([Coordinates::DESIGN_WIDTH - 500.0, 10.0])
                 .color(Color::from_rgb(200, 200, 200)),
         );
         
@@ -722,7 +723,7 @@ impl Scene for GameScene {
         network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult {
         // ✅ 使用 CoordinateSystem 转换为 UI 设计坐标 (1024×768)
-        let (ui_x, ui_y) = CoordinateSystem::window_to_ui_coords(ctx, x, y);
+        let (ui_x, ui_y) = Coordinates::window_to_ui_coords(ctx, x, y);
         
         // ✅ 委托给 InputSystem 处理所有鼠标点击逻辑
         InputSystem::process_mouse_click(world, button, ui_x, ui_y, x, y, network_tx);
@@ -753,7 +754,7 @@ impl Scene for GameScene {
         y: f32,
     ) -> GameResult {
         // ✅ 使用 CoordinateSystem 转换为 UI 设计坐标 (1024×768)
-        let (ui_x, ui_y) = CoordinateSystem::window_to_ui_coords(ctx, x, y);
+        let (ui_x, ui_y) = Coordinates::window_to_ui_coords(ctx, x, y);
         
         // ✅ 委托给 InputSystem 处理鼠标移动
         InputSystem::process_mouse_move(world, x, y, ui_x, ui_y);

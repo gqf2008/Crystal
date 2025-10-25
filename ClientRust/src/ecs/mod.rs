@@ -11,8 +11,8 @@ pub mod runtime;
 pub mod map_helper;
 pub mod map_loader;
 
-// 坐标系统模块 - 统一地图/世界/屏幕坐标转换
-pub mod coordinate_system;
+// 坐标工具模块 - 统一地图/世界/屏幕坐标转换 (不是 ECS System)
+pub mod coordinates;
 
 // UI 模块
 pub mod ui;
@@ -32,10 +32,10 @@ pub use world::GameWorld;
 pub use map_helper::MapHelper;
 pub use map_loader::MapLoader;
 
-// 坐标系统导出
-pub use coordinate_system::{
-    CoordinateSystem, ViewportConfig, ObjectRenderer,
-    CELL_WIDTH, CELL_HEIGHT
+// 坐标工具导出
+pub use coordinates::{
+    Coordinates, ViewportConfig, ObjectRenderer,
+    CELL_WIDTH, CELL_HEIGHT, MapUtils, CameraController
 };
 
 // UI 导出

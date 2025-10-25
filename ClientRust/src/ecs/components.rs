@@ -35,10 +35,10 @@ impl Position {
     
     /// 转换为格子坐标
     /// 
-    /// 🔄 委托给 CoordinateSystem 统一处理
+    /// 🔄 委托给 Coordinates 统一处理
     #[inline]
     pub fn to_grid(&self) -> (i32, i32) {
-        crate::ecs::coordinate_system::CoordinateSystem::world_to_grid(self.x, self.y)
+        crate::ecs::coordinates::Coordinates::world_to_grid(self.x, self.y)
     }
 }
 

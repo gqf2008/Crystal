@@ -6,12 +6,12 @@
 // 🔄 新代码请使用:
 //   - MapUtils::find_center_walkable_position()
 //   - MapUtils::is_walkable()
-//   - CoordinateSystem::grid_to_world_center()
-//   - CoordinateSystem::world_to_grid()
+//   - Coordinates::grid_to_world_center()
+//   - Coordinates::world_to_grid()
 // ============================================================================
 
 use crate::ecs::components::MapData;
-use crate::ecs::coordinate_system::{CoordinateSystem, MapUtils};
+use crate::ecs::coordinates::{Coordinates, MapUtils};
 
 pub struct MapHelper;
 
@@ -36,19 +36,19 @@ impl MapHelper {
     
     /// 🎯 格子坐标转世界坐标(格子中心位置)
     /// 
-    /// 🔄 委托给 CoordinateSystem
+    /// 🔄 委托给 Coordinates
     #[inline]
-    #[deprecated(note = "使用 CoordinateSystem::grid_to_world_center() 代替")]
+    #[deprecated(note = "使用 Coordinates::grid_to_world_center() 代替")]
     pub fn grid_to_world(grid_x: i32, grid_y: i32) -> (f32, f32) {
-        CoordinateSystem::grid_to_world_center(grid_x, grid_y)
+        Coordinates::grid_to_world_center(grid_x, grid_y)
     }
     
     /// 🎯 世界坐标转格子坐标
     /// 
-    /// 🔄 委托给 CoordinateSystem
+    /// 🔄 委托给 Coordinates
     #[inline]
-    #[deprecated(note = "使用 CoordinateSystem::world_to_grid() 代替")]
+    #[deprecated(note = "使用 Coordinates::world_to_grid() 代替")]
     pub fn world_to_grid(world_x: f32, world_y: f32) -> (i32, i32) {
-        CoordinateSystem::world_to_grid(world_x, world_y)
+        Coordinates::world_to_grid(world_x, world_y)
     }
 }

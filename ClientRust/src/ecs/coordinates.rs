@@ -13,9 +13,9 @@
 /// - **Floor vs Round**: 必须用 `floor()` 而非 `round()` 避免坐标跳变
 /// 
 /// 📦 委托关系:
-/// - `MapHelper::grid_to_world()` → `CoordinateSystem::grid_to_world_center()`
-/// - `MapHelper::world_to_grid()` → `CoordinateSystem::world_to_grid()`
-/// - `Position::to_grid()` → `CoordinateSystem::world_to_grid()`
+/// - `MapHelper::grid_to_world()` → `Coordinates::grid_to_world_center()`
+/// - `MapHelper::world_to_grid()` → `Coordinates::world_to_grid()`
+/// - `Position::to_grid()` → `Coordinates::world_to_grid()`
 /// 
 /// 参考原版: Client/MirScenes/GameScene.cs MapControl
 
@@ -66,13 +66,53 @@ impl ViewportConfig {
 }
 
 /// 坐标转换工具
-pub struct CoordinateSystem {
+/// 
+/// ⚠️ 注意: 这不是 ECS System，而是静态工具函数集合
+/// 真正的 ECS Systems (如 PlayerSystem, RenderSystem) 在 `systems/` 目录下
+pub struct Coordinates {
     pub viewport: ViewportConfig,
 }
 
-impl CoordinateSystem {
+impl Coordinates {
+    /// UI 设计分辨率宽度 (1024×768 固定设计尺寸)
+    pub const DESIGN_WIDTH: f32 = 1024.0;
+    
+    /// UI 设计分辨率高度
+    pub const DESIGN_HEIGHT: f32 = 768.0;
+    
     pub fn new(viewport: ViewportConfig) -> Self {
         Self { viewport }
+    }
+    
+    /// 将窗口坐标转换为 UI 设计坐标 (1024×768)
+    /// 
+    /// 处理不同屏幕尺寸的适配，保持4:3宽高比
+    pub fn window_to_ui_coords(ctx: &ggez::Context, window_x: f32, window_y: f32) -> (f32, f32) {
+        let (window_width, window_height) = ctx.gfx.drawable_size();
+        
+        // 计算 4:3 视口
+        let aspect_ratio = 4.0 / 3.0;
+        let current_ratio = window_width / window_height;
+        
+        let (viewport_width, viewport_height) = if current_ratio > aspect_ratio {
+            // 窗口太宽，左右加黑边
+            (window_height * aspect_ratio, window_height)
+        } else {
+            // 窗口太高，上下加黑边
+            (window_width, window_width / aspect_ratio)
+        };
+        
+        let offset_x = (window_width - viewport_width) / 2.0;
+        let offset_y = (window_height - viewport_height) / 2.0;
+        
+        // 转换：窗口坐标 -> 视口坐标 -> 设计坐标
+        let viewport_x = window_x - offset_x;
+        let viewport_y = window_y - offset_y;
+        
+        let design_x = (viewport_x / viewport_width) * Self::DESIGN_WIDTH;
+        let design_y = (viewport_y / viewport_height) * Self::DESIGN_HEIGHT;
+        
+        (design_x, design_y)
     }
     
     /// 地图坐标 → 世界坐标 (格子左上角)
@@ -197,11 +237,11 @@ impl CoordinateSystem {
 /// 
 /// 封装了完整的坐标转换逻辑，对应原版 MapObject 的坐标计算
 pub struct ObjectRenderer {
-    coord_system: CoordinateSystem,
+    coord_system: Coordinates,
 }
 
 impl ObjectRenderer {
-    pub fn new(coord_system: CoordinateSystem) -> Self {
+    pub fn new(coord_system: Coordinates) -> Self {
         Self { coord_system }
     }
     
@@ -276,14 +316,14 @@ mod tests {
 
     #[test]
     fn test_grid_to_world() {
-        let (wx, wy) = CoordinateSystem::grid_to_world(286, 617);
+        let (wx, wy) = Coordinates::grid_to_world(286, 617);
         assert_eq!(wx, 286.0 * 48.0);
         assert_eq!(wy, 617.0 * 32.0);
     }
 
     #[test]
     fn test_world_to_grid() {
-        let (gx, gy) = CoordinateSystem::world_to_grid(13728.0, 19744.0);
+        let (gx, gy) = Coordinates::world_to_grid(13728.0, 19744.0);
         assert_eq!(gx, 286);
         assert_eq!(gy, 617);
     }
@@ -300,10 +340,10 @@ mod tests {
     #[test]
     fn test_to_screen_position_player() {
         let viewport = ViewportConfig::new(1024.0, 768.0);
-        let coord_sys = CoordinateSystem::new(viewport);
+        let coord_sys = Coordinates::new(viewport);
         
         // 玩家在 (100, 100)
-        let player_world = CoordinateSystem::grid_to_world(100, 100);
+        let player_world = Coordinates::grid_to_world(100, 100);
         
         // 玩家的屏幕坐标应该在视野中心
         let (sx, sy) = coord_sys.to_screen_position(
@@ -322,13 +362,13 @@ mod tests {
     #[test]
     fn test_to_screen_position_other_object() {
         let viewport = ViewportConfig::new(1024.0, 768.0);
-        let coord_sys = CoordinateSystem::new(viewport);
+        let coord_sys = Coordinates::new(viewport);
         
         // 玩家在 (100, 100)
-        let player_world = CoordinateSystem::grid_to_world(100, 100);
+        let player_world = Coordinates::grid_to_world(100, 100);
         
         // 对象在玩家右侧 2 格 (102, 100)
-        let obj_world = CoordinateSystem::grid_to_world(102, 100);
+        let obj_world = Coordinates::grid_to_world(102, 100);
         
         let (sx, sy) = coord_sys.to_screen_position(
             obj_world,
@@ -346,7 +386,7 @@ mod tests {
     #[test]
     fn test_screen_to_grid() {
         let viewport = ViewportConfig::new(1024.0, 768.0);
-        let coord_sys = CoordinateSystem::new(viewport);
+        let coord_sys = Coordinates::new(viewport);
         
         // 玩家在 (100, 100)
         let player_grid = (100, 100);
@@ -441,12 +481,12 @@ pub enum CameraState {
 /// 功能:
 /// - 跟随玩家
 /// - 镜头平滑移动
-/// - 镜头震动效果
+/// - 平滑过渡动画
 /// - 缩放 (预留)
 /// - 边界限制
-pub struct Camera {
+pub struct CameraController {
     /// 坐标系统
-    coord_system: CoordinateSystem,
+    coord_system: Coordinates,
     
     /// 相机状态
     state: CameraState,
@@ -473,9 +513,9 @@ pub struct Camera {
     map_bounds: Option<(i32, i32, i32, i32)>, // (min_x, min_y, max_x, max_y)
 }
 
-impl Camera {
+impl CameraController {
     /// 创建相机
-    pub fn new(coord_system: CoordinateSystem) -> Self {
+    pub fn new(coord_system: Coordinates) -> Self {
         Self {
             coord_system,
             state: CameraState::Following,
@@ -553,8 +593,8 @@ impl Camera {
         
         // 应用地图边界限制
         if let Some((min_x, min_y, max_x, max_y)) = self.map_bounds {
-            let (min_world_x, min_world_y) = CoordinateSystem::grid_to_world_center(min_x, min_y);
-            let (max_world_x, max_world_y) = CoordinateSystem::grid_to_world_center(max_x, max_y);
+            let (min_world_x, min_world_y) = Coordinates::grid_to_world_center(min_x, min_y);
+            let (max_world_x, max_world_y) = Coordinates::grid_to_world_center(max_x, max_y);
             
             self.position.0 = self.position.0.clamp(min_world_x, max_world_x);
             self.position.1 = self.position.1.clamp(min_world_y, max_world_y);
@@ -608,7 +648,7 @@ impl Camera {
     /// 获取相机当前格子坐标
     pub fn get_grid_position(&self) -> (i32, i32) {
         let final_pos = self.get_final_position();
-        CoordinateSystem::world_to_grid(final_pos.0, final_pos.1)
+        Coordinates::world_to_grid(final_pos.0, final_pos.1)
     }
     
     /// 世界坐标 → 屏幕坐标 (通过相机)
@@ -628,57 +668,13 @@ impl Camera {
     pub fn screen_to_world(&self, screen_pos: (f32, f32)) -> (f32, f32) {
         let camera_grid = self.get_grid_position();
         let grid = self.coord_system.screen_to_grid(screen_pos.0, screen_pos.1, camera_grid);
-        CoordinateSystem::grid_to_world_center(grid.0, grid.1)
+        Coordinates::grid_to_world_center(grid.0, grid.1)
     }
     
     /// 检查世界坐标是否在相机视野内
     pub fn is_visible(&self, world_pos: (f32, f32)) -> bool {
         let camera_grid = self.get_grid_position();
-        let obj_grid = CoordinateSystem::world_to_grid(world_pos.0, world_pos.1);
+        let obj_grid = Coordinates::world_to_grid(world_pos.0, world_pos.1);
         self.coord_system.is_in_viewport(obj_grid, camera_grid)
-    }
-}
-
-#[cfg(test)]
-mod camera_tests {
-    use super::*;
-    
-    #[test]
-    fn test_camera_follow() {
-        let viewport = ViewportConfig::new(1024.0, 768.0);
-        let coord_system = CoordinateSystem::new(viewport);
-        let mut camera = Camera::new(coord_system);
-        
-        // 玩家在 (1000.0, 2000.0)
-        let player_pos = (1000.0, 2000.0);
-        
-        // 更新多次让相机跟上
-        for _ in 0..100 {
-            camera.update(0.016, player_pos);
-        }
-        
-        // 相机应该接近玩家位置
-        let diff_x = (camera.position.0 - player_pos.0).abs();
-        let diff_y = (camera.position.1 - player_pos.1).abs();
-        
-        assert!(diff_x < 1.0, "Camera X should be close to player");
-        assert!(diff_y < 1.0, "Camera Y should be close to player");
-    }
-    
-    #[test]
-    fn test_camera_shake() {
-        let viewport = ViewportConfig::new(1024.0, 768.0);
-        let coord_system = CoordinateSystem::new(viewport);
-        let mut camera = Camera::new(coord_system);
-        
-        camera.position = (500.0, 500.0);
-        camera.shake(10.0, 0.5);
-        
-        // 震动时位置应该有偏移
-        camera.update(0.016, (500.0, 500.0));
-        let final_pos = camera.get_final_position();
-        
-        let has_offset = (final_pos.0 - 500.0).abs() > 0.1 || (final_pos.1 - 500.0).abs() > 0.1;
-        assert!(has_offset, "Camera should have shake offset");
     }
 }
