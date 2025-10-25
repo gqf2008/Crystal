@@ -121,9 +121,8 @@ impl PlayerSystem {
         
         // 更新所有玩家
         for (_entity, (player, pos)) in world.query_mut::<(&mut Player, &mut Position)>() {
-            // 记录移动前的位置（用于检测是否真的发生了移动）
-            let old_grid_x = (pos.x / 48.0) as i32;
-            let old_grid_y = (pos.y / 32.0) as i32;
+            // 🎯 记录移动前的格子位置 (使用统一的坐标转换)
+            let (old_grid_x, old_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
             let old_direction = player.direction;
             
             // 📍 计算鼠标指向的世界坐标
@@ -436,8 +435,7 @@ impl PlayerSystem {
             
             // 🔄 处理转身（不移动格子，只改变方向）
             if let Some(network_tx) = network_tx {
-                let new_grid_x = (pos.x / 48.0) as i32;
-                let new_grid_y = (pos.y / 32.0) as i32;
+                let (new_grid_x, new_grid_y) = MapHelper::world_to_grid(pos.x, pos.y);
                 
                 if player.direction != old_direction 
                     && new_grid_x == old_grid_x 

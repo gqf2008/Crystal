@@ -33,9 +33,9 @@ impl Position {
         }
     }
     
-    /// 转换为格子坐标
+    /// 转换为格子坐标 (使用floor确保一致性)
     pub fn to_grid(&self) -> (i32, i32) {
-        ((self.x / 48.0) as i32, (self.y / 32.0) as i32)
+        ((self.x / 48.0).floor() as i32, (self.y / 32.0).floor() as i32)
     }
 }
 

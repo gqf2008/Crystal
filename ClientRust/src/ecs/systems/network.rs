@@ -89,9 +89,8 @@ impl NetworkSystem {
                 // 将格子坐标转换为世界坐标
                 let (world_x, world_y) = grid_to_world(location.x, location.y);
                 
-                // 计算当前位置的格子坐标
-                let current_grid_x = (position.x / 48.0).round() as i32;
-                let current_grid_y = (position.y / 32.0).round() as i32;
+                // 🎯 使用统一的坐标转换函数 (避免 round vs floor 的差异)
+                let (current_grid_x, current_grid_y) = crate::ecs::map_helper::MapHelper::world_to_grid(position.x, position.y);
                 
                 tracing::info!("📊 位置对比: 客户端=({}, {}) world=({:.1}, {:.1}), 服务器=({}, {}) world=({:.1}, {:.1})",
                     current_grid_x, current_grid_y, position.x, position.y,
