@@ -50,7 +50,7 @@ impl RenderSystem {
         config: &RenderConfig,
         visible_area_entity: hecs::Entity,
     ) -> GameResult<()> {
-        use crate::ecs::{TileLayer, MapTile, VisibleArea};
+        use crate::ecs::{TileLayer, MapTile, VisibleArea, CELL_WIDTH, CELL_HEIGHT};
         use std::time::Instant;
         
         // 🐛 调试：首次绘制时输出信息

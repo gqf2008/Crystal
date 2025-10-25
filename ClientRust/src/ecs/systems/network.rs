@@ -109,9 +109,11 @@ impl NetworkSystem {
                 // 🎯 清除等待服务器确认标志
                 player.waiting_server_confirm = false;
                 
-                if grid_diff_x > 0 || grid_diff_y > 0 {
-                    // 🎯 格子位置不同 - 同步到服务器位置
-                    tracing::info!("✅ 同步到服务器格子: ({}, {}) -> ({}, {})", 
+                // 🔧 修复: 只有当偏差大于1格时才强制同步,避免被旧的服务器数据拉回
+                // 1格内的偏差可能是网络延迟导致的,客户端预测应该优先
+                if grid_diff_x > 1 || grid_diff_y > 1 {
+                    // 🎯 偏差较大 - 强制同步到服务器位置
+                    tracing::warn!("⚠️ 位置偏差较大! 强制同步: ({}, {}) -> ({}, {})", 
                         current_grid_x, current_grid_y, location.x, location.y);
                     
                     position.x = world_x;
@@ -156,6 +158,33 @@ impl NetworkSystem {
                             } else {
                                 // 偏差不大,可能是网络延迟,保持当前路径继续
                                 tracing::debug!("📍 服务器位置不在路径上,但偏差可接受,继续移动");
+                            }
+                        }
+                    }
+                } else if grid_diff_x == 1 || grid_diff_y == 1 {
+                    // 🎯 1格偏差 - 可能是网络延迟,服务器数据稍慢
+                    // 客户端已经移动到下一格,不应该被拉回
+                    tracing::debug!("📡 收到服务器位置({}, {}),客户端已在({}, {}) - 保持客户端预测", 
+                        location.x, location.y, current_grid_x, current_grid_y);
+                    
+                    // 清除路径中已经过的点(避免走回头路)
+                    if player.move_mode == crate::ecs::components::MoveMode::AutoPathfinding 
+                        && !player.path.is_empty() {
+                        
+                        // 查找服务器位置在路径中的索引
+                        let mut found_index = None;
+                        for (i, &(path_x, path_y)) in player.path.iter().enumerate() {
+                            if path_x == location.x && path_y == location.y {
+                                found_index = Some(i);
+                                break;
+                            }
+                        }
+                        
+                        if let Some(index) = found_index {
+                            // 服务器还在旧位置,客户端已经前进,更新路径索引避免回退
+                            if index < player.path_index {
+                                tracing::debug!("✅ 服务器位置在路径索引{},客户端已到索引{} - 保持前进", 
+                                    index, player.path_index);
                             }
                         }
                     }
