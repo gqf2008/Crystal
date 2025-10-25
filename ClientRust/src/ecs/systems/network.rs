@@ -66,6 +66,9 @@ impl NetworkSystem {
             GameEvent::ItemSpawned { object_id, item, location } => {
                 self.handle_item_spawned(world, *object_id, item, location);
             }
+            GameEvent::ObjectHealthChanged { object_id, percent } => {
+                self.handle_object_health_changed(world, *object_id, *percent);
+            }
             _ => {
                 // 其他事件由UISystem处理
             }
@@ -196,12 +199,12 @@ impl NetworkSystem {
     
     /// 处理地图信息事件 - 从服务器加载地图
     fn handle_map_information(&mut self, world: &mut World, map_index: i32, file_name: &str, title: &str) {
-        tracing::info!("🗺️ 收到地图信息: {} ({}) - 索引: {}", title, file_name, map_index);
+        tracing::info!("🗺️ 收到地图信息: title='{}', file_name='{}', map_index={}", title, file_name, map_index);
         
         // 构建地图文件路径
         let map_path = format!("Map/{}.map", file_name);
         
-        tracing::info!("📂 正在加载地图文件: {}", map_path);
+        tracing::info!("📂 尝试加载地图文件: {}", map_path);
         
         // 加载地图数据
         use crate::objects::MapReader;
@@ -209,15 +212,15 @@ impl NetworkSystem {
         
         match MapReader::new(&map_path) {
             Ok(reader) => {
-                tracing::info!("✅ 地图文件加载成功: {}x{}", reader.width, reader.height);
+                tracing::info!("✅ 地图文件加载成功: {}x{} (文件: {})", reader.width, reader.height, map_path);
                 
-                // 清除旧的地图瓦片
-                // TODO: 实现清除旧地图瓦片的逻辑
+                // 清除旧的地图瓦片和地图数据
+                self.clear_old_map(world);
                 
                 // 加载新地图瓦片到 ECS
                 match MapLoader::load_map(world, reader) {
                     Ok(_) => {
-                        tracing::info!("✅ 地图数据已加载到 ECS");
+                        tracing::info!("✅ 地图数据已加载到 ECS (map_index={})", map_index);
                     }
                     Err(e) => {
                         tracing::error!("❌ 地图数据加载到 ECS 失败: {}", e);
@@ -225,9 +228,48 @@ impl NetworkSystem {
                 }
             }
             Err(e) => {
-                tracing::error!("❌ 地图文件加载失败: {} - {}", map_path, e);
+                tracing::error!("❌ 地图文件加载失败: {} - 错误: {}", map_path, e);
+                tracing::error!("   📍 请检查文件是否存在,以及file_name是否正确: '{}'", file_name);
             }
         }
+    }
+
+    /// 清除旧地图的所有瓦片和地图数据实体
+    fn clear_old_map(&mut self, world: &mut World) {
+        tracing::info!("🧹 开始清理旧地图数据...");
+        
+        let mut to_despawn = Vec::new();
+        
+        // 收集所有地图相关实体
+        // 1. MapTile 实体
+        for (entity, _tile) in world.query::<&MapTile>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 2. MapData 实体
+        for (entity, _data) in world.query::<&MapData>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 3. AnimatedTile 实体
+        for (entity, _anim) in world.query::<&AnimatedTile>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 4. Door 实体
+        for (entity, _door) in world.query::<&Door>().iter() {
+            to_despawn.push(entity);
+        }
+        
+        // 删除所有收集的实体
+        let count = to_despawn.len();
+        for entity in to_despawn {
+            if let Err(e) = world.despawn(entity) {
+                tracing::warn!("⚠️ 删除地图实体失败: {:?}", e);
+            }
+        }
+        
+        tracing::info!("✅ 已清理 {} 个旧地图实体", count);
     }
     
     /// 处理用户信息更新事件
@@ -342,7 +384,7 @@ impl NetworkSystem {
                 gender,
                 level,
             ),
-            Health::new(100), // TODO: 需要从ObjectHealth packet获取
+            Health::new(100), // 默认100血,等待ObjectHealth packet更新实际百分比
         ))
     }
 
@@ -385,7 +427,7 @@ impl NetworkSystem {
                 name.to_string(),
                 image, // 使用服务器传来的怪物图像索引
             ),
-            Health::new(100), // TODO: 从对象数据获取
+            Health::new(100), // 默认100血,等待ObjectHealth packet更新实际百分比
             CombatStats {
                 level: 1,
                 attack_min: 1,
@@ -408,16 +450,42 @@ impl NetworkSystem {
         
         tracing::info!("💎 创建地面物品: ID={}, name={}, pos=({}, {})", object_id, item_name, world_x, world_y);
         
+        // 获取物品图标索引
+        let item_index = item.info.as_ref()
+            .map(|i| i.image as u16)
+            .unwrap_or(0);
+        
         // 创建地面物品实体
         let entity = world.spawn((
             Position::new(world_x, world_y),
             NetworkSync::new(object_id, NetworkObjectType::Item),
-            // TODO: 添加 ItemDrop 组件用于渲染物品图标
-            // ItemDrop { item: item.clone() },
+            ItemDrop {
+                item_id: item.unique_id as u32,
+                item_index,
+                count: item.count as u32,
+                owner_id: None, // 服务器packet可能包含owner信息
+            },
         ));
         
         // 记录映射
         self.object_map.insert(object_id, entity);
+    }
+
+    /// 处理对象血量变化事件
+    fn handle_object_health_changed(&self, world: &mut World, object_id: u32, percent: u8) {
+        if let Some(&entity) = self.object_map.get(&object_id) {
+            if let Ok(mut health) = world.get::<&mut Health>(entity) {
+                // percent是百分比(0-100),更新当前血量
+                let new_current = (health.max as f32 * percent as f32 / 100.0) as i32;
+                health.current = new_current.clamp(0, health.max);
+                tracing::debug!("❤️ Object {} health updated: {}% ({}/{})", 
+                    object_id, percent, health.current, health.max);
+            } else {
+                tracing::warn!("⚠️ Object {} has no Health component", object_id);
+            }
+        } else {
+            tracing::debug!("⚠️ Received health update for unknown object: {}", object_id);
+        }
     }
 
     /// 处理对象转向事件

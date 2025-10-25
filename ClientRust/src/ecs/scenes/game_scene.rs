@@ -629,6 +629,9 @@ impl Scene for GameScene {
         // 渲染怪物
         RenderSystem::draw_monsters(ctx, canvas, world, &pos, &camera)?;
         
+        // 渲染地面物品
+        RenderSystem::draw_items(ctx, canvas, world, &pos, &camera)?;
+        
         // 渲染角色
         for (_entity, (player, player_pos)) in world.query::<(&Player, &Position)>().iter() {
             RenderSystem::draw_player_with_world(ctx, canvas, world, player, player_pos, &pos, &camera)?;

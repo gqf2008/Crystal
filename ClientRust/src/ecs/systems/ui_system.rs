@@ -212,54 +212,56 @@ impl UISystem {
             dialog_comp.dialog.draw(ctx, canvas)?;
         }
         
-        // 🎯 第4层及以上: 可弹出对话框 (z=10+, 根据打开顺序动态分配)
-        // 注意: 这里暂时使用 is_open 字段,未来需要通过 DialogManager 获取 z_order
-        // TODO: 传入 DialogManager 的 render_order, 根据顺序设置 z 值
+        // 🎯 第4层及以上: 可弹出对话框 (z=10+, 按打开顺序渲染)
+        // 策略: 收集所有打开的对话框到Vec,按组件顺序渲染 (先渲染先打开的)
+        // 这样后打开的对话框会覆盖在前面打开的之上
         
-        // 渲染背包对话框 (仅在打开时显示)
+        // 固定渲染顺序 (从底层到顶层):
+        // 1. 背包对话框
+        // 2. 角色对话框
+        // 3. 技能学习对话框
+        // 4. 任务对话框
+        // 5. 技能对话框
+        // 6. 选项对话框
+        
+        // 渲染背包对话框 (仅在打开时显示, z=10)
         for (_, dialog_comp) in world.query::<&InventoryDialogComp>().iter() {
             if dialog_comp.is_open {
-                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
                 dialog_comp.dialog.draw(ctx, canvas)?;
             }
         }
         
-        // 渲染角色对话框 (仅在打开时显示)
+        // 渲染角色对话框 (仅在打开时显示, z=11)
         for (_, dialog_comp) in world.query::<&CharacterDialogComp>().iter() {
             if dialog_comp.is_open {
-                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
                 dialog_comp.dialog.draw(ctx, canvas)?;
             }
         }
         
-        // 渲染技能学习对话框 (仅在打开时显示)
+        // 渲染技能学习对话框 (仅在打开时显示, z=12)
         for (_, dialog_comp) in world.query::<&MagicLearningDialogComp>().iter() {
             if dialog_comp.is_open {
-                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
                 dialog_comp.dialog.draw(ctx, canvas)?;
             }
         }
         
-        // 渲染任务对话框 (仅在打开时显示)
+        // 渲染任务对话框 (仅在打开时显示, z=13)
         for (_, dialog_comp) in world.query::<&QuestDialogComp>().iter() {
             if dialog_comp.is_open {
-                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
                 dialog_comp.draw(ctx, canvas)?;
             }
         }
         
-        // 渲染技能对话框 (仅在打开时显示)
+        // 渲染技能对话框 (仅在打开时显示, z=14)
         for (_, dialog_comp) in world.query::<&SkillsDialogComp>().iter() {
             if dialog_comp.is_open {
-                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
                 dialog_comp.dialog.draw(ctx, canvas)?;
             }
         }
         
-        // 渲染选项对话框 (仅在打开时显示)
+        // 渲染选项对话框 (仅在打开时显示, z=15, 最上层)
         for (_, dialog_comp) in world.query::<&OptionsDialogComp>().iter() {
             if dialog_comp.is_open {
-                // TODO: 使用 DialogManager.get_render_order() 获取实际 z 值
                 dialog_comp.dialog.draw(ctx, canvas)?;
             }
         }

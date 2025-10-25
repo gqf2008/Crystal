@@ -5,7 +5,7 @@
 use hecs::World;
 use crate::ecs::components::{
     LocalPlayer, Position, Health, Monster, Player, NetworkSync,
-    Equipment, MirClass, PlayerData
+    Equipment, MirClass, PlayerData, CombatStats, NetworkObjectType
 };
 use crate::network::NetworkCommand;
 use tokio::sync::mpsc;
@@ -153,30 +153,35 @@ impl CombatSystem {
     
     /// 本地预览伤害 (不修改实际数据)
     fn calculate_local_attack_preview(world: &World, target_id: u32) {
-        // 获取玩家攻击力 (简化版，实际应该从Equipment计算)
+        // 获取本地玩家的攻击力和等级 (从CombatStats获取)
         let (player_attack, player_level) = {
-            let mut attack = (10, 20);  // 默认攻击力
+            let mut attack = (5, 10);  // 默认攻击力(备用)
             let mut level = 1;
             
-            for (_, (_, player_comp)) in world.query::<(&LocalPlayer, &PlayerData)>().iter() {
-                level = 10; // TODO: 从实际数据获取
-                // TODO: 从装备计算攻击力
-                attack = match player_comp.class {
-                    MirClass::Warrior => (15, 30),
-                    MirClass::Wizard => (5, 15),
-                    MirClass::Taoist => (8, 20),
-                    MirClass::Assassin => (12, 25),
-                    MirClass::Archer => (10, 22),
-                };
+            for (_, (_local, combat_stats)) in world.query::<(&LocalPlayer, &CombatStats)>().iter() {
+                attack = (combat_stats.attack_min, combat_stats.attack_max);
+                level = combat_stats.level;
                 break;
             }
             
             (attack, level)
         };
         
-        // 获取目标防御力 (简化版)
-        let target_defense = 10; // TODO: 从怪物数据获取
-        let target_level = 5;    // TODO: 从怪物数据获取
+        // 获取目标怪物的防御力和等级 (从NetworkSync + CombatStats获取)
+        let (target_defense, target_level) = {
+            let mut defense = 0;
+            let mut level = 1;
+            
+            for (_, (sync, combat_stats)) in world.query::<(&NetworkSync, &CombatStats)>().iter() {
+                if sync.object_id == target_id && sync.object_type == NetworkObjectType::Monster {
+                    defense = combat_stats.defense;
+                    level = combat_stats.level;
+                    break;
+                }
+            }
+            
+            (defense, level)
+        };
         
         // 计算预期伤害
         let result = Self::calculate_physical_damage(

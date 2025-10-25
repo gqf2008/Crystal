@@ -245,6 +245,7 @@ pub enum GameEvent {
     PlayerStruck { attacker_id: u32, damage: i32, location: Point },
     PlayerDied { location: Point },
     ObjectDamaged { object_id: u32, damage: i32, damage_type: u8 },
+    ObjectHealthChanged { object_id: u32, percent: u8 },
     
     // Ground item events
     ItemSpawned { object_id: u32, item: UserItem, location: Point },
@@ -414,7 +415,10 @@ impl PacketHandler for GameClient {
     // ==================== Map & World ====================
     
     fn on_map_information(&mut self, packet: packets::MapInformation) {
-        tracing::info!("🗺️🗺️🗺️ Map: {} ({}) Index: {}", packet.title, packet.file_name, packet.map_index);
+        tracing::info!("🗺️ MapInformation packet received:");
+        tracing::info!("   📍 Title: '{}'", packet.title);
+        tracing::info!("   📍 FileName: '{}'", packet.file_name);
+        tracing::info!("   📍 MapIndex: {}", packet.map_index);
         
         let map_info = MapInfo {
             map_index: packet.map_index,
@@ -425,7 +429,7 @@ impl PacketHandler for GameClient {
         self.map_info = Some(map_info);
         
         // 发送地图信息事件到UI层
-        tracing::info!("🗺️🗺️🗺️ Sending MapInformation event to ECS");
+        tracing::info!("🗺️ Sending MapInformation event to ECS");
         self.send_event(GameEvent::MapInformation {
             map_index: packet.map_index,
             file_name: packet.file_name,
@@ -1413,6 +1417,11 @@ impl PacketHandler for GameClient {
     fn on_object_health(&mut self, packet: packets::ObjectHealth) {
         tracing::debug!("❤️ Object {} health: {}% (expires: {})", 
             packet.object_id, packet.percent, packet.expire);
+        
+        self.send_event(GameEvent::ObjectHealthChanged {
+            object_id: packet.object_id,
+            percent: packet.percent,
+        });
     }
     
     fn on_object_mana(&mut self, packet: packets::ObjectMana) {
