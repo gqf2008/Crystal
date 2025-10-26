@@ -152,6 +152,12 @@ pub enum NetworkCommand {
     // Shop/NPC System Commands
     // ========================================================================
     
+    /// Request NPC dialogue/interaction
+    /// Mirrors C# ClientPackets.NPCRequest
+    NPCRequest {
+        npc_object_id: u32,  // NPC's ObjectID
+    },
+    
     /// Buy item from NPC shop
     BuyItem {
         item_index: u64,  // Item's unique ID in shop

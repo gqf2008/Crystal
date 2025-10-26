@@ -493,13 +493,16 @@ impl Scene for GameScene {
                 .map(|t| t.animation_count)
                 .unwrap_or(0);
             
-            AnimationSystem::update(world, animation_count);
+            // 更新地图瓦片动画(水流、火焰等)
+            AnimationSystem::update_tiles(world, animation_count);
             
-            // 🎬 更新怪物和NPC动画
+            // 🎬 更新实体动画(Monster/NPC/Player等)
             let delta_ms = 50; // 约50ms/帧 (20fps动画)
-            for (_entity, anim) in world.query_mut::<&mut Animation>() {
-                anim.update(delta_ms);
-            }
+            AnimationSystem::update_entities(world, delta_ms);
+            
+            // 🏪 更新NPC动作切换(Standing/Harvest随机切换)
+            use crate::ecs::systems::animation::NPCActionSystem;
+            NPCActionSystem::update(world, delta_ms);
         }
         
         // 🎯 更新鼠标按下时间计数器（用于长按检测）

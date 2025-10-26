@@ -2,7 +2,7 @@
 // Mirrors the structure of Client/MirObjects/
 
 mod drawable;  // NEW: DrawableMapObject trait for all drawable objects
-pub(crate) mod frames;
+pub mod frames;  // 公开frames模块供测试使用
 #[cfg(test)]
 mod frames_test;
 mod map_object;

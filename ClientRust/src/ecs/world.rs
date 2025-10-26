@@ -157,6 +157,9 @@ impl GameWorld {
                 name,
                 npc_index,
                 dialogue_id: 0,
+                colour: 0, // 默认白色(无染色)
+                action_timer: 0,
+                next_action_delay: rand::random::<u32>() % 5000 + 3000,
             },
             RenderOrder::new(RenderLayer::Object, position.y),
         ))

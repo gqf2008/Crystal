@@ -173,11 +173,65 @@ impl InputSystem {
     fn handle_world_click(
         world: &mut World,
         button: MouseButton,
-        _x: f32,
-        _y: f32,
-        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        x: f32,
+        y: f32,
+        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) {
-        use crate::ecs::components::MouseInput;
+        use crate::ecs::components::{MouseInput, Position, Camera, NPCData, MonsterData, LocalPlayer};
+        use crate::ecs::systems::CameraSystem;
+        
+        // 左键点击检测NPC/怪物
+        if button == MouseButton::Left {
+            // 获取相机和玩家位置
+            let (camera_pos, camera) = {
+                let mut camera_query = world.query::<(&Position, &Camera)>();
+                if let Some((_, (pos, cam))) = camera_query.into_iter().next() {
+                    (pos.clone(), cam.clone())
+                } else {
+                    return;
+                }
+            };
+            
+            // 将屏幕坐标转换为世界坐标
+            let world_pos = CameraSystem::screen_to_world(&camera_pos, &camera, x, y);
+            
+            // 检查是否点击了NPC (优先级高于怪物)
+            let mut clicked_npc_id: Option<u32> = None;
+            let click_radius = 32.0; // 点击范围
+            
+            for (_entity, (npc, pos)) in world.query::<(&NPCData, &Position)>().iter() {
+                let dx = pos.x - world_pos.0;
+                let dy = pos.y - world_pos.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                
+                if distance < click_radius {
+                    clicked_npc_id = Some(npc.id);
+                    tracing::info!("🏪 点击NPC: {} (ID: {})", npc.name, npc.id);
+                    break;
+                }
+            }
+            
+            // 如果点击了NPC,发送NPCRequest
+            if let Some(npc_id) = clicked_npc_id {
+                if let Err(e) = network_tx.send(NetworkCommand::NPCRequest { npc_object_id: npc_id }) {
+                    tracing::error!("❌ 发送NPC请求失败: {}", e);
+                }
+                return; // 不继续处理怪物点击
+            }
+            
+            // 检查是否点击了怪物
+            for (_entity, (monster, pos)) in world.query::<(&MonsterData, &Position)>().iter() {
+                let dx = pos.x - world_pos.0;
+                let dy = pos.y - world_pos.1;
+                let distance = (dx * dx + dy * dy).sqrt();
+                
+                if distance < click_radius {
+                    tracing::info!("👹 点击怪物: {} (ID: {})", monster.name, monster.id);
+                    // TODO: 设置攻击目标
+                    break;
+                }
+            }
+        }
         
         // 更新鼠标输入状态
         if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {

@@ -24,6 +24,99 @@ use crate::ecs::components::{
 pub struct RenderSystem;
 
 impl RenderSystem {
+    /// 将i32 ARGB颜色转换为ggez::Color
+    fn argb_to_color(argb: i32) -> Color {
+        if argb == 0 {
+            return Color::WHITE; // 默认白色(无染色)
+        }
+        
+        let a = ((argb >> 24) & 0xFF) as u8;
+        let r = ((argb >> 16) & 0xFF) as u8;
+        let g = ((argb >> 8) & 0xFF) as u8;
+        let b = (argb & 0xFF) as u8;
+        
+        Color::from_rgba(r, g, b, a)
+    }
+    
+    /// 绘制NPC名字(带半透明黑色背景)
+    fn draw_npc_name(
+        ctx: &Context,
+        canvas: &mut Canvas,
+        name: &str,
+        center_x: f32,
+        y: f32,
+        camera: &Camera,
+    ) {
+        use ggez::graphics::{Text, TextFragment, PxScale, Rect, Mesh};
+        
+        // 创建文本
+        let text_fragment = TextFragment::new(name)
+            .scale(PxScale::from(14.0 * camera.zoom))
+            .color(Color::from_rgb(255, 255, 0)); // 黄色
+        let text = Text::new(text_fragment);
+        
+        // 计算文本尺寸
+        let text_dims = text.measure(ctx).unwrap();
+        let text_width = text_dims.x;
+        let text_height = text_dims.y;
+        
+        // 居中对齐
+        let text_x = center_x - text_width / 2.0;
+        
+        // 绘制半透明黑色背景
+        let bg_padding = 4.0 * camera.zoom;
+        let bg_rect = Rect::new(
+            text_x - bg_padding,
+            y - bg_padding,
+            text_width + bg_padding * 2.0,
+            text_height + bg_padding * 2.0,
+        );
+        
+        if let Ok(bg_mesh) = Mesh::new_rectangle(
+            ctx,
+            ggez::graphics::DrawMode::fill(),
+            bg_rect,
+            Color::from_rgba(0, 0, 0, 180),
+        ) {
+            canvas.draw(&bg_mesh, DrawParam::default());
+        }
+        
+        // 绘制文本
+        canvas.draw(&text, DrawParam::default().dest([text_x, y]));
+    }
+    
+    /// 绘制任务图标
+    fn draw_quest_icon(
+        ctx: &Context,
+        canvas: &mut Canvas,
+        icon: crate::ecs::components::QuestIcon,
+        center_x: f32,
+        y: f32,
+        camera: &Camera,
+    ) {
+        use crate::ecs::components::QuestIcon;
+        use ggez::graphics::{Text, TextFragment, PxScale};
+        
+        let (symbol, color) = match icon {
+            QuestIcon::None => return, // 无图标
+            QuestIcon::Available => ("!", Color::from_rgb(255, 255, 0)),    // 黄色感叹号
+            QuestIcon::Complete => ("?", Color::from_rgb(255, 255, 0)),     // 黄色问号
+            QuestIcon::Incomplete => ("?", Color::from_rgb(150, 150, 150)), // 灰色问号
+        };
+        
+        // 创建图标文本
+        let text_fragment = TextFragment::new(symbol)
+            .scale(PxScale::from(24.0 * camera.zoom))
+            .color(color);
+        let text = Text::new(text_fragment);
+        
+        // 居中绘制
+        let text_dims = text.measure(ctx).unwrap();
+        let text_x = center_x - text_dims.x / 2.0;
+        
+        canvas.draw(&text, DrawParam::default().dest([text_x, y]));
+    }
+    
     /// 创建 ADD 混合模式 (火焰/特效)
     pub fn create_blend_mode() -> BlendMode {
         BlendMode {
@@ -1626,7 +1719,7 @@ impl RenderSystem {
     /// - camera_pos: 相机位置
     /// - camera: 相机组件
     pub fn draw_npcs(
-        _ctx: &mut Context,
+        ctx: &mut Context,
         canvas: &mut Canvas,
         world: &World,
         camera_pos: &Position,
@@ -1635,7 +1728,6 @@ impl RenderSystem {
         use crate::ecs::components::{NPCData, Animation};
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
-        use mir2_shared::MirAction;
         
         // 遍历所有NPC实体
         for (_entity, (npc, pos, anim)) in 
@@ -1650,13 +1742,16 @@ impl RenderSystem {
                 None => continue, // 库不存在，跳过
             };
             
-            // 计算帧索引 - NPC通常只有站立动画
-            let action_frame_start = match anim.action {
-                MirAction::Standing => 0,
-                _ => 0,
+            // 🎯 使用FrameSet计算帧索引,支持不同动作
+            use crate::objects::frames::{DEFAULT_NPC_FRAMES, get_frame};
+            
+            let (action_frame_start, frames_per_direction) = if let Some(frame) = get_frame(&DEFAULT_NPC_FRAMES, anim.action) {
+                (frame.start, frame.count)
+            } else {
+                // 默认使用Standing动作
+                (0, 4)
             };
             
-            let frames_per_direction = 4; // NPC站立动画每方向4帧
             let direction_offset = (anim.direction as i32) * frames_per_direction;
             let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
             
@@ -1672,22 +1767,56 @@ impl RenderSystem {
                 pos.y,
             );
             
-            // 绘制NPC
+            // 🔧 使用 get_or_create_texture 确保图像被加载到GPU (与怪物渲染一致)
             let mut lib_locked = lib.lock().unwrap();
-            if let Ok(image_info) = lib_locked.get_image_info(final_frame as usize) {
-                // 计算绘制位置（考虑偏移）
-                let draw_x = screen_x + image_info.x as f32 * camera.zoom;
-                let draw_y = screen_y + image_info.y as f32 * camera.zoom;
-                
-                // 绘制精灵
-                if let Some(image) = &image_info.image {
-                    canvas.draw(
-                        image,
-                        DrawParam::default()
-                            .dest([draw_x, draw_y])
-                            .scale([camera.zoom, camera.zoom]),
-                    );
+            match lib_locked.get_or_create_texture(ctx, final_frame as usize) {
+                Ok(image_info) => {
+                    // 计算绘制位置（考虑偏移）
+                    let draw_x = screen_x + image_info.x as f32 * camera.zoom;
+                    let draw_y = screen_y + image_info.y as f32 * camera.zoom;
+                    
+                    // 🎨 应用NPC颜色染色
+                    let color = Self::argb_to_color(npc.colour);
+                    
+                    // 绘制主图像
+                    if let Some(image) = &image_info.image {
+                        canvas.draw(
+                            image,
+                            DrawParam::default()
+                                .dest([draw_x, draw_y])
+                                .scale([camera.zoom, camera.zoom])
+                                .color(color),
+                        );
+                    }
+                    
+                    // 🌟 绘制特效层
+                    if let Some(frame_data) = get_frame(&DEFAULT_NPC_FRAMES, anim.action) {
+                        if frame_data.effect_count > 0 {
+                            let effect_frame = frame_data.effect_start + direction_offset + anim.frame_index as i32;
+                            let final_effect_frame = effect_frame + npc_offset;
+                            
+                            if let Ok(effect_info) = lib_locked.get_or_create_texture(ctx, final_effect_frame as usize) {
+                                if let Some(effect_image) = &effect_info.image {
+                                    let effect_x = screen_x + effect_info.x as f32 * camera.zoom;
+                                    let effect_y = screen_y + effect_info.y as f32 * camera.zoom;
+                                    
+                                    canvas.draw(
+                                        effect_image,
+                                        DrawParam::default()
+                                            .dest([effect_x, effect_y])
+                                            .scale([camera.zoom, camera.zoom])
+                                            .color(color),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 🏷️ 绘制NPC名字
+                    drop(lib_locked); // 释放库锁
+                    Self::draw_npc_name(ctx, canvas, &npc.name, screen_x, screen_y - 40.0 * camera.zoom, camera);
                 }
+                Err(_) => {} // 忽略错误,继续下一个NPC
             }
         }
         
@@ -1696,7 +1825,7 @@ impl RenderSystem {
     
     /// 🎯 绘制单个NPC (用于Y-sorting)
     pub fn draw_single_npc(
-        _ctx: &mut Context,
+        ctx: &mut Context,
         canvas: &mut Canvas,
         world: &World,
         entity: hecs::Entity,
@@ -1707,7 +1836,6 @@ impl RenderSystem {
         use crate::ecs::components::{NPCData, Animation};
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
-        use mir2_shared::MirAction;
         
         // 获取NPC数据和动画
         let npc = match world.get::<&NPCData>(entity) {
@@ -1727,13 +1855,15 @@ impl RenderSystem {
             None => return Ok(()),
         };
         
-        // 计算帧索引
-        let action_frame_start = match anim.action {
-            MirAction::Standing => 0,
-            _ => 0,
+        // 🎯 使用FrameSet计算帧索引,支持不同动作
+        use crate::objects::frames::{DEFAULT_NPC_FRAMES, get_frame};
+        
+        let (action_frame_start, frames_per_direction) = if let Some(frame) = get_frame(&DEFAULT_NPC_FRAMES, anim.action) {
+            (frame.start, frame.count)
+        } else {
+            (0, 4) // 默认
         };
         
-        let frames_per_direction = 4;
         let direction_offset = (anim.direction as i32) * frames_per_direction;
         let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
         let npc_offset = (npc.npc_index % 1000) as i32;
@@ -1747,20 +1877,61 @@ impl RenderSystem {
             pos.y,
         );
         
-        // 绘制NPC
+        // 🔧 使用 get_or_create_texture 确保图像被加载
         let mut lib_locked = lib.lock().unwrap();
-        if let Ok(image_info) = lib_locked.get_image_info(final_frame as usize) {
-            let draw_x = screen_x + image_info.x as f32 * camera.zoom;
-            let draw_y = screen_y + image_info.y as f32 * camera.zoom;
-            
-            if let Some(image) = &image_info.image {
-                canvas.draw(
-                    image,
-                    DrawParam::default()
-                        .dest([draw_x, draw_y])
-                        .scale([camera.zoom, camera.zoom]),
-                );
+        
+        // 绘制主图像
+        match lib_locked.get_or_create_texture(ctx, final_frame as usize) {
+            Ok(image_info) => {
+                let draw_x = screen_x + image_info.x as f32 * camera.zoom;
+                let draw_y = screen_y + image_info.y as f32 * camera.zoom;
+                
+                // 🎨 应用NPC颜色染色
+                let color = Self::argb_to_color(npc.colour);
+                
+                if let Some(image) = &image_info.image {
+                    canvas.draw(
+                        image,
+                        DrawParam::default()
+                            .dest([draw_x, draw_y])
+                            .scale([camera.zoom, camera.zoom])
+                            .color(color),
+                    );
+                }
+                
+                // 🌟 绘制特效层 (武器、装饰等)
+                if let Some(frame_data) = get_frame(&DEFAULT_NPC_FRAMES, anim.action) {
+                    if frame_data.effect_count > 0 {
+                        let effect_frame = frame_data.effect_start + direction_offset + anim.frame_index as i32;
+                        let final_effect_frame = effect_frame + npc_offset;
+                        
+                        if let Ok(effect_info) = lib_locked.get_or_create_texture(ctx, final_effect_frame as usize) {
+                            if let Some(effect_image) = &effect_info.image {
+                                let effect_x = screen_x + effect_info.x as f32 * camera.zoom;
+                                let effect_y = screen_y + effect_info.y as f32 * camera.zoom;
+                                
+                                canvas.draw(
+                                    effect_image,
+                                    DrawParam::default()
+                                        .dest([effect_x, effect_y])
+                                        .scale([camera.zoom, camera.zoom])
+                                        .color(color), // 特效层也应用相同颜色
+                                );
+                            }
+                        }
+                    }
+                }
+                
+                // 🏷️ 绘制NPC名字(头顶上方)
+                drop(lib_locked); // 释放库锁,避免死锁
+                Self::draw_npc_name(ctx, canvas, &npc.name, screen_x, screen_y - 40.0 * camera.zoom, camera);
+                
+                // 📋 绘制任务图标(如果有)
+                if let Ok(quest_marker) = world.get::<&crate::ecs::components::QuestMarker>(entity) {
+                    Self::draw_quest_icon(ctx, canvas, quest_marker.icon, screen_x, screen_y - 60.0 * camera.zoom, camera);
+                }
             }
+            Err(_) => {}
         }
         
         Ok(())

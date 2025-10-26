@@ -315,6 +315,30 @@ pub struct NPCData {
     pub name: String,
     pub npc_index: u16,
     pub dialogue_id: u32,
+    pub colour: i32,  // NPC颜色染色 (ARGB格式)
+    pub action_timer: u32,  // 动作切换计时器(毫秒)
+    pub next_action_delay: u32,  // 下次切换延迟(毫秒)
+}
+
+/// NPC任务标识
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum QuestIcon {
+    None,           // 无任务
+    Available,      // 可接任务(黄色感叹号)
+    Complete,       // 可交任务(黄色问号)
+    Incomplete,     // 进行中任务(灰色问号)
+}
+
+/// 任务标记组件
+#[derive(Debug, Clone, Copy)]
+pub struct QuestMarker {
+    pub icon: QuestIcon,
+}
+
+impl QuestMarker {
+    pub fn new(icon: QuestIcon) -> Self {
+        Self { icon }
+    }
 }
 
 // ============================================================================

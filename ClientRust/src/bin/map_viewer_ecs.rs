@@ -383,7 +383,7 @@ impl EventHandler for MapViewerApp {
                 .map(|t| t.animation_count)
                 .unwrap_or(0);
 
-            AnimationSystem::update(&mut self.world, animation_count);
+            AnimationSystem::update_tiles(&mut self.world, animation_count);
             DoorSystem::update(&mut self.world);
         }
 

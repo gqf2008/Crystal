@@ -21,7 +21,7 @@ pub mod trade_system;
 // 重新导出
 pub use camera::CameraSystem;
 pub use player::PlayerSystem;
-pub use animation::{AnimationSystem, DoorSystem};
+pub use animation::{AnimationSystem, DoorSystem, NPCActionSystem};
 pub use render::RenderSystem;
 pub use network::NetworkSystem;
 pub use monster::MonsterSystem;

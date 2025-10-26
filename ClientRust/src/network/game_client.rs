@@ -131,6 +131,7 @@ pub enum GameObject {
         name: String, 
         location: Point,
         image: u16,
+        colour: i32,  // NPC颜色染色 (ARGB)
         direction: MirDirection,
     },
     Item { 
@@ -754,13 +755,14 @@ impl PacketHandler for GameClient {
             name: packet.name.clone(),
             location,
             image: packet.image,
+            colour: packet.colour,  // 添加颜色字段
             direction: packet.direction,
         };
         
         self.objects.insert(packet.object_id, obj.clone());
         self.send_event(GameEvent::ObjectSpawned { object: obj });
         
-        tracing::debug!("🏪 NPC {} spawned", packet.name);
+        tracing::debug!("🏪 NPC {} spawned (colour: 0x{:08X})", packet.name, packet.colour);
     }
     
     fn on_object_remove(&mut self, packet: packets::ObjectRemove) {

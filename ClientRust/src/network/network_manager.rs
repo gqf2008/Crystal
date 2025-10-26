@@ -256,6 +256,15 @@ impl NetworkManager {
             // Quest System Commands
             // ========================================================================
             
+            NetworkCommand::NPCRequest { npc_object_id } => {
+                tracing::info!("🏪 Requesting NPC dialogue: object_id={}", npc_object_id);
+                let packet = client::npc::CallNPC {
+                    object_id: npc_object_id,
+                    key: String::new(), // 通常为空字符串,服务器会处理
+                };
+                self.send_packet(&packet)?;
+            }
+            
             NetworkCommand::AcceptQuest { npc_index, quest_index } => {
                 tracing::info!("Accepting quest: npc_index={}, quest_index={}", npc_index, quest_index);
                 let packet = client::quest::AcceptQuest {

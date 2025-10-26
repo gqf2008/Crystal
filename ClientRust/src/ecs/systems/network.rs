@@ -374,8 +374,8 @@ impl NetworkSystem {
             GameObject::Player { id, name, location, class, gender, level, direction, .. } => {
                 self.create_other_player(world, *id, name, location, *class, *gender, *level, *direction)
             }
-            GameObject::Npc { id, name, location, image, direction } => {
-                self.create_npc(world, *id, name, location, *image, *direction)
+            GameObject::Npc { id, name, location, image, colour, direction } => {
+                self.create_npc(world, *id, name, location, *image, *colour, *direction)
             }
             GameObject::Monster { id, name, location, image, direction, .. } => {
                 self.create_monster(world, *id, name, location, *image, *direction)
@@ -452,11 +452,13 @@ impl NetworkSystem {
         name: &str, 
         location: &mir2_shared::Point,
         image: u16,
+        colour: i32,
         direction: MirDirection,
     ) -> Entity {
         let (world_x, world_y) = crate::ecs::coordinates::Coordinates::grid_to_world_center(location.x, location.y);
         
-        tracing::info!("🏪 创建NPC实体: ID={}, name={}, image={}, pos=({}, {})", object_id, name, image, world_x, world_y);
+        tracing::info!("🏪 创建NPC实体: ID={}, name={}, image={}, colour=0x{:08X}, pos=({}, {})", 
+            object_id, name, image, colour, world_x, world_y);
         
         // 🎯 从FrameSet获取NPC动画配置
         use crate::objects::frames::{DEFAULT_NPC_FRAMES, get_frame};
@@ -483,6 +485,9 @@ impl NetworkSystem {
                 name: name.to_string(),
                 npc_index: image, // 使用服务器传来的NPC图像索引
                 dialogue_id: 0,
+                colour,
+                action_timer: 0,
+                next_action_delay: rand::random::<u32>() % 5000 + 3000, // 3-8秒随机延迟
             },
         ))
     }
