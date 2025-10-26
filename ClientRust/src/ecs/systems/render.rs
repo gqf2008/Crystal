@@ -445,6 +445,15 @@ impl RenderSystem {
                             let (screen_x, screen_y) =
                                 CameraSystem::world_to_screen(pos, camera, world_x, final_y);
                             
+                            // 🔥 Front层使用ADD混合模式（去除黑圈）
+                            let old_blend_mode = if tile.use_blend {
+                                let current = canvas.blend_mode();
+                                canvas.set_blend_mode(ggez::graphics::BlendMode::ADD);
+                                Some(current)
+                            } else {
+                                None
+                            };
+                            
                             // 🎯 使用自定义透明度
                             let color = Color::from_rgba(255, 255, 255, (alpha * 255.0) as u8);
                             
@@ -455,6 +464,11 @@ impl RenderSystem {
                                     .scale([camera.zoom, camera.zoom])
                                     .color(color),
                             );
+                            
+                            // 恢复混合模式
+                            if let Some(old_mode) = old_blend_mode {
+                                canvas.set_blend_mode(old_mode);
+                            }
                         }
                     }
                     Err(_) => {}
@@ -530,7 +544,16 @@ impl RenderSystem {
                             }
                         }
 
-                        // 绘制瓦片（不切换混合模式，外部已设置）
+                        // 🔥 Front层使用ADD混合模式（去除黑圈）
+                        let old_blend_mode = if tile.use_blend && tile.layer == TileLayer::Front {
+                            let current = canvas.blend_mode();
+                            canvas.set_blend_mode(graphics::BlendMode::ADD);
+                            Some(current)
+                        } else {
+                            None
+                        };
+
+                        // 绘制瓦片
                         let color = Color::from_rgba(
                             (255.0 * tile.brightness) as u8,
                             (255.0 * tile.brightness) as u8,
@@ -545,6 +568,11 @@ impl RenderSystem {
                                 .scale([camera.zoom, camera.zoom])
                                 .color(color),
                         );
+
+                        // 恢复混合模式
+                        if let Some(old_mode) = old_blend_mode {
+                            canvas.set_blend_mode(old_mode);
+                        }
 
                         // 绘制边框 (调试用)
                         if config.show_borders {

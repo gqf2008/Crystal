@@ -47,6 +47,7 @@ enum EntityType {
     Monster(Entity),
     NPC(Entity),
     Player(Entity),
+    FrontTile(Entity),  // Front层瓦片参与Y-sorting
 }
 
 /// 游戏场景
@@ -390,6 +391,10 @@ impl GameScene {
         
         println!("✅ 游戏场景初始化完成！");
         
+        // 设置帮助面板的字体
+        let mut hotkey_help = HotkeyHelpPanel::new();
+        hotkey_help.set_font(ui_font_name.clone());
+        
         Ok(Self {
             camera_entity,
             time_entity,
@@ -397,7 +402,7 @@ impl GameScene {
             visible_area_entity,
             network_system: NetworkSystem::new(),
             ui_system: UISystem::new(),
-            hotkey_help: HotkeyHelpPanel::new(),
+            hotkey_help,
             ui_font_name,
             main_dialog_entity,
             inventory_dialog_entity,
@@ -674,7 +679,7 @@ impl Scene for GameScene {
             self.visible_area_entity,
         )?;
         
-        // 🎯 第二步: Y-sorting渲染实体 (怪物、NPC、玩家)
+        // 🎯 第二步: Y-sorting渲染实体 (怪物、NPC、玩家、Front层瓦片)
         // 收集所有需要排序的实体及其Y坐标
         let mut entities_to_draw: Vec<(i32, EntityType)> = Vec::new();
         
@@ -696,12 +701,29 @@ impl Scene for GameScene {
             }
         }
         
+        // 收集Front层瓦片 (按瓦片的Y坐标参与Y-sorting)
+        use crate::ecs::{VisibleArea, TileLayer};
+        let mut front_tile_count = 0;
+        if let Ok(visible_area) = world.get::<&VisibleArea>(self.visible_area_entity) {
+            for &entity in &visible_area.visible_entities {
+                if let Ok(tile) = world.get::<&crate::ecs::components::MapTile>(entity) {
+                    if matches!(tile.layer, TileLayer::Front) && config.show_front {
+                        // 使用瓦片底部的Y坐标 (grid_y * CELL_HEIGHT)
+                        let tile_y = tile.grid_y * crate::ecs::CELL_HEIGHT;
+                        entities_to_draw.push((tile_y, EntityType::FrontTile(entity)));
+                        front_tile_count += 1;
+                    }
+                }
+            }
+        }
+        
         // 🐛 调试日志:每隔60帧打印一次实体计数
         static mut FRAME_COUNTER: u32 = 0;
         unsafe {
             FRAME_COUNTER += 1;
             if FRAME_COUNTER % 60 == 0 {
-                tracing::debug!("🎯 Y-sorting: {} monsters, {} NPCs", monster_count, npc_count);
+                tracing::info!("🎯 Y-sorting: {} monsters, {} NPCs, {} front tiles", 
+                              monster_count, npc_count, front_tile_count);
             }
         }
         
@@ -736,27 +758,19 @@ impl Scene for GameScene {
                         RenderSystem::draw_player_with_world(ctx, canvas, world, &player, &player_pos, &pos, &camera)?;
                     }
                 }
+                EntityType::FrontTile(entity) => {
+                    // 绘制Front层瓦片
+                    if let Ok(tile) = world.get::<&crate::ecs::components::MapTile>(entity) {
+                        RenderSystem::draw_tile_fast(ctx, canvas, &tile, &pos, &camera, &config)?;
+                    }
+                }
             }
         }
         
         // 渲染地面物品
         RenderSystem::draw_items(ctx, canvas, world, &pos, &camera)?;
         
-        // 🎯 第三步: 绘制前景层 (Front层,遮挡怪物和玩家)
-        // 创建临时配置，只显示Front层
-        let mut front_config = config.clone();
-        front_config.show_back = false;
-        front_config.show_middle = false;
-        
-        RenderSystem::draw_tiles(
-            ctx,
-            canvas,
-            world,
-            &pos,
-            &camera,
-            &front_config,
-            self.visible_area_entity,
-        )?;
+        // ⚠️ Front层已经通过Y-sorting绘制,不需要单独绘制
         
         // 渲染怪物血条和名称 (始终在最上层)
         RenderSystem::draw_monster_info(ctx, canvas, world, &pos, &camera)?;

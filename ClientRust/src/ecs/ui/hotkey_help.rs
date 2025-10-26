@@ -2,12 +2,13 @@
 /// 显示所有游戏快捷键说明
 
 use ggez::{Context, GameResult};
-use ggez::graphics::{Canvas, DrawParam, Text, Color, Rect, PxScale};
+use ggez::graphics::{Canvas, DrawParam, Text, TextFragment, Color, Rect, PxScale};
 
 pub struct HotkeyHelpPanel {
     pub visible: bool,
     pub x: f32,
     pub y: f32,
+    font_name: Option<String>,
 }
 
 impl HotkeyHelpPanel {
@@ -16,7 +17,12 @@ impl HotkeyHelpPanel {
             visible: false, // 默认隐藏,按H键显示
             x: 20.0,
             y: 100.0,
+            font_name: None,
         }
+    }
+    
+    pub fn set_font(&mut self, font_name: String) {
+        self.font_name = Some(font_name);
     }
 
     pub fn toggle(&mut self) {
@@ -46,8 +52,12 @@ impl HotkeyHelpPanel {
 
         // 标题
         let title = "快捷键帮助 (按H键关闭)";
-        let mut title_text = Text::new(title);
-        title_text.set_scale(PxScale::from(font_size + 4.0));
+        let title_fragment = if let Some(ref font) = self.font_name {
+            TextFragment::new(title).font(font.as_str()).scale(PxScale::from(font_size + 4.0))
+        } else {
+            TextFragment::new(title).scale(PxScale::from(font_size + 4.0))
+        };
+        let mut title_text = Text::new(title_fragment);
         canvas.draw(
             &title_text,
             DrawParam::default()
@@ -94,8 +104,12 @@ impl HotkeyHelpPanel {
 
             if desc.is_empty() {
                 // 分类标题
-                let mut section_text = Text::new(*key);
-                section_text.set_scale(PxScale::from(font_size));
+                let section_fragment = if let Some(ref font) = self.font_name {
+                    TextFragment::new(*key).font(font.as_str()).scale(PxScale::from(font_size))
+                } else {
+                    TextFragment::new(*key).scale(PxScale::from(font_size))
+                };
+                let section_text = Text::new(section_fragment);
                 canvas.draw(
                     &section_text,
                     DrawParam::default()
@@ -107,8 +121,12 @@ impl HotkeyHelpPanel {
                 let key_color = Color::from_rgb(255, 200, 100);
                 let desc_color = Color::from_rgb(220, 220, 220);
 
-                let mut key_text = Text::new(*key);
-                key_text.set_scale(PxScale::from(font_size));
+                let key_fragment = if let Some(ref font) = self.font_name {
+                    TextFragment::new(*key).font(font.as_str()).scale(PxScale::from(font_size))
+                } else {
+                    TextFragment::new(*key).scale(PxScale::from(font_size))
+                };
+                let key_text = Text::new(key_fragment);
                 canvas.draw(
                     &key_text,
                     DrawParam::default()
@@ -116,8 +134,12 @@ impl HotkeyHelpPanel {
                         .color(key_color),
                 );
 
-                let mut desc_text = Text::new(*desc);
-                desc_text.set_scale(PxScale::from(font_size));
+                let desc_fragment = if let Some(ref font) = self.font_name {
+                    TextFragment::new(*desc).font(font.as_str()).scale(PxScale::from(font_size))
+                } else {
+                    TextFragment::new(*desc).scale(PxScale::from(font_size))
+                };
+                let desc_text = Text::new(desc_fragment);
                 canvas.draw(
                     &desc_text,
                     DrawParam::default()
