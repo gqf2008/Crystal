@@ -130,9 +130,9 @@ impl InputSystem {
             
             // === 调试快捷键 ===
             KeyB => Self::toggle_debug_borders(world),
-            KeyU => Self::toggle_npc_borders(world),     // U键 - NPC边框 (NPC User)
-            KeyI => Self::toggle_monster_borders(world), // I键 - Monster边框 (Monster Instance)
-            KeyY => Self::toggle_effect_borders(world),  // Y键 - 特效边框 (efFect)
+            F9 => Self::toggle_npc_borders(world),      // F9键 - NPC边框(青色)
+            F10 => Self::toggle_monster_borders(world), // F10键 - Monster边框(紫色)
+            F11 => Self::toggle_effect_borders(world),  // F11键 - 特效边框(绿色)
             KeyG => Self::toggle_debug_grid(world),
             KeyO => Self::toggle_debug_obstacles(world),
             KeyP => Self::toggle_debug_path(world),
@@ -432,7 +432,7 @@ impl InputSystem {
         
         for (_, config) in world.query_mut::<&mut RenderConfig>() {
             config.show_npc_borders = !config.show_npc_borders;
-            tracing::info!("👤 NPC边框 (N): {}", if config.show_npc_borders { "显示" } else { "隐藏" });
+            tracing::info!("👤 NPC边框 (F9): {}", if config.show_npc_borders { "显示" } else { "隐藏" });
             break;
         }
     }
@@ -443,7 +443,7 @@ impl InputSystem {
         
         for (_, config) in world.query_mut::<&mut RenderConfig>() {
             config.show_monster_borders = !config.show_monster_borders;
-            tracing::info!("👾 Monster边框 (M): {}", if config.show_monster_borders { "显示" } else { "隐藏" });
+            tracing::info!("👾 Monster边框 (F10): {}", if config.show_monster_borders { "显示" } else { "隐藏" });
             break;
         }
     }
@@ -454,7 +454,7 @@ impl InputSystem {
         
         for (_, config) in world.query_mut::<&mut RenderConfig>() {
             config.show_effect_borders = !config.show_effect_borders;
-            tracing::info!("✨ 特效边框 (E): {}", if config.show_effect_borders { "显示" } else { "隐藏" });
+            tracing::info!("✨ 特效边框 (F11): {}", if config.show_effect_borders { "显示" } else { "隐藏" });
             break;
         }
     }

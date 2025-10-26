@@ -37,7 +37,7 @@ use crate::ecs::{
     systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem},
     Coordinates, MapUtils,  // 坐标工具
     map_loader::MapLoader,
-    ui::{ChatType, MainDialogComp, InventoryDialogComp, CharacterDialogComp, SkillBarComp, ChatDialogComp, MagicLearningDialogComp, QuestDialogComp, TradeDialogComp, SkillsDialogComp, OptionsDialogComp},
+    ui::{ChatType, MainDialogComp, InventoryDialogComp, CharacterDialogComp, SkillBarComp, ChatDialogComp, MagicLearningDialogComp, QuestDialogComp, TradeDialogComp, SkillsDialogComp, OptionsDialogComp, HotkeyHelpPanel},
 };
 use crate::objects::{MapReader};
 use crate::graphics::libraries::initialize_all_libraries;
@@ -84,6 +84,9 @@ pub struct GameScene {
     
     /// UI 系统
     ui_system: UISystem,
+    
+    /// 按键帮助面板
+    hotkey_help: HotkeyHelpPanel,
     
     /// UI字体名称 (保留用于后续字体切换功能)
     #[allow(dead_code)]
