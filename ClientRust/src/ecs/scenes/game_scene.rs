@@ -462,6 +462,14 @@ impl Scene for GameScene {
         let max_fps = config.max_fps;
         drop(config);
         
+        // 计算实际的帧时间（在更新TimeTracker之前）
+        let delta_ms = if let Ok(time) = world.get::<&TimeTracker>(self.time_entity) {
+            let elapsed = time.last_frame_time.elapsed();
+            elapsed.as_millis().min(100) as u32 // 限制最大值防止卡顿时动画跳帧
+        } else {
+            16 // 默认约60fps
+        };
+        
         if let Ok(mut time) = world.get::<&mut TimeTracker>(self.time_entity) {
             let target_frame_time = std::time::Duration::from_secs_f32(1.0 / max_fps as f32);
             let elapsed = time.last_frame_time.elapsed();
@@ -496,8 +504,7 @@ impl Scene for GameScene {
             // 更新地图瓦片动画(水流、火焰等)
             AnimationSystem::update_tiles(world, animation_count);
             
-            // 🎬 更新实体动画(Monster/NPC/Player等)
-            let delta_ms = 50; // 约50ms/帧 (20fps动画)
+            // 🎬 更新实体动画(Monster/NPC/Player等) - 使用实际的帧时间
             AnimationSystem::update_entities(world, delta_ms);
             
             // 🏪 更新NPC动作切换(Standing/Harvest随机切换)

@@ -1437,29 +1437,17 @@ impl RenderSystem {
             None => return Ok(()),
         };
         
-        // 计算帧索引
-        let action_frame_start = match anim.action {
-            MirAction::Standing => 0,
-            MirAction::Walking => 32,
-            MirAction::Attack1 => 80,
-            MirAction::Struck => 128,
-            MirAction::Die => 144,
-            MirAction::Dead => 224,
-            _ => 0,
+        // 获取动作帧配置
+        use crate::objects::frames::{DEFAULT_MONSTER_FRAMES, get_frame};
+        let frame = match get_frame(&DEFAULT_MONSTER_FRAMES, anim.action) {
+            Some(f) => f,
+            None => return Ok(()), // 未定义的动作,不绘制
         };
         
-        let frames_per_direction = match anim.action {
-            MirAction::Standing => 4,
-            MirAction::Walking => 6,
-            MirAction::Attack1 => 6,
-            MirAction::Struck => 2,
-            MirAction::Die => 10,
-            MirAction::Dead => 1,
-            _ => 4,
-        };
-        
-        let direction_offset = (anim.direction as i32) * frames_per_direction;
-        let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
+        // 计算帧索引: Frame.Start + (Frame.OffSet * Direction) + FrameIndex
+        // 这与C#原版完全一致: DrawFrame = Frame.Start + (Frame.OffSet * (byte)Direction) + FrameIndex;
+        let direction_offset = frame.offset() * (anim.direction as i32);
+        let draw_frame = frame.start + direction_offset + anim.frame_index as i32;
         let final_frame = draw_frame;
         
         // 转换为屏幕坐标
@@ -1533,42 +1521,24 @@ impl RenderSystem {
             
             println!("  ✅ 怪物图库 {} 加载成功", lib_index);
             
-            // 计算帧索引
-            // 怪物动画布局（与玩家类似）:
-            //   - Standing: 每方向 4 帧
-            //   - Walking:  每方向 6 帧
-            //   - Attack1:  每方向 6 帧
-            //   - Die:      每方向 10 帧
-            //   - Dead:     每方向 1 帧
-            
-            let action_frame_start = match anim.action {
-                MirAction::Standing => 0,
-                MirAction::Walking => 32,    // 8方向 * 4帧 = 32
-                MirAction::Attack1 => 80,    // 32 + 8方向 * 6帧 = 80
-                MirAction::Struck => 128,    // 80 + 8方向 * 6帧 = 128
-                MirAction::Die => 144,       // 128 + 8方向 * 2帧 = 144
-                MirAction::Dead => 224,      // 144 + 8方向 * 10帧 = 224
-                _ => 0,
+            // 获取动作帧配置
+            use crate::objects::frames::{DEFAULT_MONSTER_FRAMES, get_frame};
+            let frame = match get_frame(&DEFAULT_MONSTER_FRAMES, anim.action) {
+                Some(f) => f,
+                None => {
+                    println!("  ⚠️ 未定义的怪物动作: {:?}", anim.action);
+                    continue;
+                }
             };
             
-            let frames_per_direction = match anim.action {
-                MirAction::Standing => 4,
-                MirAction::Walking => 6,
-                MirAction::Attack1 => 6,
-                MirAction::Struck => 2,
-                MirAction::Die => 10,
-                MirAction::Dead => 1,
-                _ => 4,
-            };
-            
-            let direction_offset = (anim.direction as i32) * frames_per_direction;
-            let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
-            
-            // 🔧 修复: 每个怪物有独立的库文件,帧索引就是动画帧,不需要乘以360
+            // 计算帧索引: Frame.Start + (Frame.OffSet * Direction) + FrameIndex
+            // 这与C#原版完全一致: DrawFrame = Frame.Start + (Frame.OffSet * (byte)Direction) + FrameIndex;
+            let direction_offset = frame.offset() * (anim.direction as i32);
+            let draw_frame = frame.start + direction_offset + anim.frame_index as i32;
             let final_frame = draw_frame;
             
-            println!("  📊 帧计算: lib_index={}, action_start={}, dir_offset={}, frame_idx={}, final={}", 
-                lib_index, action_frame_start, direction_offset, anim.frame_index, final_frame);
+            println!("  📊 帧计算: lib_index={}, frame_start={}, offset={}, dir_offset={}, frame_idx={}, final={}", 
+                lib_index, frame.start, frame.offset(), direction_offset, anim.frame_index, final_frame);
             
             // 转换为屏幕坐标
             let (screen_x, screen_y) = CameraSystem::world_to_screen(

@@ -524,10 +524,13 @@ impl NetworkSystem {
                 name: name.to_string(),
                 monster_index: image, // 使用服务器传来的怪物图像索引
                 ai_mode: 0,
-                ai_type: 0,
+                ai_type: 1, // 默认AI类型1(近战攻击型)
                 spawn_x: world_x,
                 spawn_y: world_y,
             },
+            // 添加AI和移动所需的组件
+            AIState::default(),
+            Velocity::zero(),
             Health::new(100), // 默认100血,等待ObjectHealth packet更新实际百分比
             CombatStats {
                 level: 1,
