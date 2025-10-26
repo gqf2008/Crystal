@@ -441,11 +441,11 @@ impl BuffDialog {
 
 /// Buff 对话框组件 (用于 ECS)
 #[derive(Debug, Clone)]
-pub struct BuffDialogComp {
+pub struct BuffDialogComponent {
     pub dialog: BuffDialog,
 }
 
-impl BuffDialogComp {
+impl BuffDialogComponent {
     pub fn new(screen_width: f32, screen_height: f32) -> Self {
         Self {
             dialog: BuffDialog::new(screen_width, screen_height),

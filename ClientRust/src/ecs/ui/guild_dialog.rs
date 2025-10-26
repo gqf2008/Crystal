@@ -162,12 +162,12 @@ impl GuildDialog {
 }
 
 /// 行会对话框组件
-pub struct GuildDialogComp {
+pub struct GuildDialogComponent {
     pub dialog: GuildDialog,
     pub is_open: bool,
 }
 
-impl GuildDialogComp {
+impl GuildDialogComponent {
     pub fn new() -> Self {
         Self {
             dialog: GuildDialog::new(),

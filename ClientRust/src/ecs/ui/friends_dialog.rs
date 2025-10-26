@@ -144,12 +144,12 @@ impl FriendsDialog {
 }
 
 /// 好友对话框组件
-pub struct FriendsDialogComp {
+pub struct FriendsDialogComponent {
     pub dialog: FriendsDialog,
     pub is_open: bool,
 }
 
-impl FriendsDialogComp {
+impl FriendsDialogComponent {
     pub fn new() -> Self {
         Self {
             dialog: FriendsDialog::new(),

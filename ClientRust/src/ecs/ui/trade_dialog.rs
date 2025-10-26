@@ -10,7 +10,7 @@ use mir2_shared::data::item::UserItem;
 
 /// 交易窗口UI组件
 #[derive(Debug, Clone)]
-pub struct TradeDialogComp {
+pub struct TradeDialogComponent {
     pub is_open: bool,
     pub x: f32,
     pub y: f32,
@@ -19,7 +19,7 @@ pub struct TradeDialogComp {
     pub trade_data: Option<TradeData>,
 }
 
-impl TradeDialogComp {
+impl TradeDialogComponent {
     pub fn new(x: f32, y: f32) -> Self {
         Self {
             is_open: false,

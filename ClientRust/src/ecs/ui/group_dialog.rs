@@ -144,12 +144,12 @@ impl GroupDialog {
 }
 
 /// 组队对话框组件
-pub struct GroupDialogComp {
+pub struct GroupDialogComponent {
     pub dialog: GroupDialog,
     pub is_open: bool,
 }
 
-impl GroupDialogComp {
+impl GroupDialogComponent {
     pub fn new() -> Self {
         Self {
             dialog: GroupDialog::new(),

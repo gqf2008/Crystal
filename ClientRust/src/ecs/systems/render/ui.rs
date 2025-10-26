@@ -25,9 +25,9 @@ use ggez::graphics::{Canvas, Color, Text, DrawParam, TextFragment, PxScale};
 use hecs::World;
 
 use crate::ecs::ui::{
-    MainDialogComp, InventoryDialogComp, CharacterDialogComp,
-    SkillBarComp, ChatDialogComp, MagicLearningDialogComp,
-    QuestDialogComp, SkillsDialogComp, OptionsDialogComp, HotkeyHelpPanel,
+    MainDialogComponent, InventoryDialogComponent, CharacterDialogComponent,
+    SkillBarComponent, ChatDialogComponent, MagicLearningDialogComponent,
+    QuestDialogComponent, SkillsDialogComponent, OptionsDialogComponent, HotkeyHelpPanel,
 };
 use crate::ecs::components::TimeTracker;
 use crate::ecs::Coordinates;
@@ -121,17 +121,17 @@ impl RenderSystem {
     let current_time = ctx.time.ticks() as u64;
     
     // 🎯 第1层: 主对话框 (z=0, 最底层, 始终显示)
-    for (_, dialog_comp) in world.query::<&MainDialogComp>().iter() {
+    for (_, dialog_comp) in world.query::<&MainDialogComponent>().iter() {
         dialog_comp.dialog.draw(ctx, canvas)?;
     }
     
     // 🎯 第2层: 技能栏 (z=1, 固定UI)
-    for (_, skill_bar_comp) in world.query::<&SkillBarComp>().iter() {
+    for (_, skill_bar_comp) in world.query::<&SkillBarComponent>().iter() {
         skill_bar_comp.dialog.draw(ctx, canvas, current_time)?;
     }
     
     // 🎯 第3层: 聊天对话框 (z=2, 固定UI, 始终显示)
-    for (_, dialog_comp) in world.query::<&ChatDialogComp>().iter() {
+    for (_, dialog_comp) in world.query::<&ChatDialogComponent>().iter() {
         dialog_comp.dialog.draw(ctx, canvas)?;
     }
     
@@ -148,42 +148,42 @@ impl RenderSystem {
     // 6. 选项对话框
     
     // 渲染背包对话框 (仅在打开时显示, z=10)
-    for (_, dialog_comp) in world.query::<&InventoryDialogComp>().iter() {
+    for (_, dialog_comp) in world.query::<&InventoryDialogComponent>().iter() {
         if dialog_comp.is_open {
             dialog_comp.dialog.draw(ctx, canvas)?;
         }
     }
     
     // 渲染角色对话框 (仅在打开时显示, z=11)
-    for (_, dialog_comp) in world.query::<&CharacterDialogComp>().iter() {
+    for (_, dialog_comp) in world.query::<&CharacterDialogComponent>().iter() {
         if dialog_comp.is_open {
             dialog_comp.dialog.draw(ctx, canvas)?;
         }
     }
     
     // 渲染技能学习对话框 (仅在打开时显示, z=12)
-    for (_, dialog_comp) in world.query::<&MagicLearningDialogComp>().iter() {
+    for (_, dialog_comp) in world.query::<&MagicLearningDialogComponent>().iter() {
         if dialog_comp.is_open {
             dialog_comp.dialog.draw(ctx, canvas)?;
         }
     }
     
     // 渲染任务对话框 (仅在打开时显示, z=13)
-    for (_, dialog_comp) in world.query::<&QuestDialogComp>().iter() {
+    for (_, dialog_comp) in world.query::<&QuestDialogComponent>().iter() {
         if dialog_comp.is_open {
             dialog_comp.draw(ctx, canvas)?;
         }
     }
     
     // 渲染技能对话框 (仅在打开时显示, z=14)
-    for (_, dialog_comp) in world.query::<&SkillsDialogComp>().iter() {
+    for (_, dialog_comp) in world.query::<&SkillsDialogComponent>().iter() {
         if dialog_comp.is_open {
             dialog_comp.dialog.draw(ctx, canvas)?;
         }
     }
     
     // 渲染选项对话框 (仅在打开时显示, z=15, 最上层)
-    for (_, dialog_comp) in world.query::<&OptionsDialogComp>().iter() {
+    for (_, dialog_comp) in world.query::<&OptionsDialogComponent>().iter() {
         if dialog_comp.is_open {
             dialog_comp.dialog.draw(ctx, canvas)?;
         }

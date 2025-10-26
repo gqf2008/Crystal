@@ -375,11 +375,11 @@ use super::{
 };
 
 /// 主对话框组件
-pub struct MainDialogComp {
+pub struct MainDialogComponent {
     pub dialog: MainDialog,
 }
 
-impl MainDialogComp {
+impl MainDialogComponent {
     pub fn new(screen_width: f32, screen_height: f32) -> Self {
         Self {
             dialog: MainDialog::new(screen_width, screen_height),
@@ -388,12 +388,12 @@ impl MainDialogComp {
 }
 
 /// 背包对话框组件
-pub struct InventoryDialogComp {
+pub struct InventoryDialogComponent {
     pub dialog: InventoryDialog,
     pub is_open: bool,
 }
 
-impl InventoryDialogComp {
+impl InventoryDialogComponent {
     pub fn new() -> Self {
         Self {
             dialog: InventoryDialog::new(),
@@ -403,12 +403,12 @@ impl InventoryDialogComp {
 }
 
 /// 角色对话框组件
-pub struct CharacterDialogComp {
+pub struct CharacterDialogComponent {
     pub dialog: CharacterDialog,
     pub is_open: bool,
 }
 
-impl CharacterDialogComp {
+impl CharacterDialogComponent {
     pub fn new() -> Self {
         Self {
             dialog: CharacterDialog::new(),
@@ -418,12 +418,12 @@ impl CharacterDialogComp {
 }
 
 /// 技能栏组件
-pub struct SkillBarComp {
+pub struct SkillBarComponent {
     pub dialog: SkillBarDialog,
     pub bar_index: u8,
 }
 
-impl SkillBarComp {
+impl SkillBarComponent {
     pub fn new(bar_index: u8) -> Self {
         Self {
             dialog: SkillBarDialog::new(bar_index),
@@ -433,11 +433,11 @@ impl SkillBarComp {
 }
 
 /// 聊天对话框组件
-pub struct ChatDialogComp {
+pub struct ChatDialogComponent {
     pub dialog: ChatDialog,
 }
 
-impl ChatDialogComp {
+impl ChatDialogComponent {
     pub fn new(x: f32, y: f32) -> Self {
         Self {
             dialog: ChatDialog::new(x, y),
@@ -456,12 +456,12 @@ impl ChatDialogComp {
 }
 
 /// 技能学习对话框组件
-pub struct MagicLearningDialogComp {
+pub struct MagicLearningDialogComponent {
     pub dialog: super::MagicLearningDialog,
     pub is_open: bool,
 }
 
-impl MagicLearningDialogComp {
+impl MagicLearningDialogComponent {
     pub fn new() -> Self {
         Self {
             dialog: super::MagicLearningDialog::new(),

@@ -147,12 +147,12 @@ impl OptionsDialog {
 }
 
 /// 选项对话框组件
-pub struct OptionsDialogComp {
+pub struct OptionsDialogComponent {
     pub dialog: OptionsDialog,
     pub is_open: bool,
 }
 
-impl OptionsDialogComp {
+impl OptionsDialogComponent {
     pub fn new() -> Self {
         Self {
             dialog: OptionsDialog::new(),

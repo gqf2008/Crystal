@@ -6,7 +6,7 @@ use hecs::{World, Entity};
 use crate::ecs::components::{
     MagicList, LearnableMagicList, SpellType, PlayerData, LocalPlayer
 };
-use crate::ecs::ui::MagicLearningDialogComp;
+use crate::ecs::ui::MagicLearningDialogComponent;
 use crate::network::NetworkCommand;
 use tokio::sync::mpsc;
 
@@ -45,7 +45,7 @@ impl MagicLearningSystem {
         };
         
         // 更新对话框显示
-        for (_, dialog_comp) in world.query_mut::<&mut MagicLearningDialogComp>() {
+        for (_, dialog_comp) in world.query_mut::<&mut MagicLearningDialogComponent>() {
             // 获取职业的可学技能列表
             let learnable = LearnableMagicList::init_for_class(player_info.1);
             let available = learnable.get_available(player_info.0, &learned_magics);

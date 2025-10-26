@@ -70,12 +70,12 @@ impl MiniMapDialog {
 }
 
 /// 小地图对话框组件
-pub struct MiniMapDialogComp {
+pub struct MiniMapDialogComponent {
     pub dialog: MiniMapDialog,
     pub is_open: bool,
 }
 
-impl MiniMapDialogComp {
+impl MiniMapDialogComponent {
     pub fn new() -> Self {
         Self {
             dialog: MiniMapDialog::new(),

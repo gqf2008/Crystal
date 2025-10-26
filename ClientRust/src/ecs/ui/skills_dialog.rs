@@ -139,12 +139,12 @@ impl SkillsDialog {
 }
 
 /// 技能对话框组件
-pub struct SkillsDialogComp {
+pub struct SkillsDialogComponent {
     pub dialog: SkillsDialog,
     pub is_open: bool,
 }
 
-impl SkillsDialogComp {
+impl SkillsDialogComponent {
     pub fn new() -> Self {
         Self {
             dialog: SkillsDialog::new(),
@@ -160,6 +160,6 @@ impl SkillsDialogComp {
     /// 设置打开/关闭
     pub fn set_open(&mut self, open: bool) {
         self.is_open = open;
-        // SkillsDialog 本身没有 visible 字段，由 SkillsDialogComp 管理
+        // SkillsDialog 本身没有 visible 字段，由 SkillsDialogComponent 管理
     }
 }

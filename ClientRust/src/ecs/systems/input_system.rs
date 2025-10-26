@@ -354,10 +354,10 @@ impl InputSystem {
     
     /// 检查是否有文本输入焦点
     fn has_text_input_focus(world: &World) -> bool {
-        use crate::ecs::ui::ChatDialogComp;
+        use crate::ecs::ui::ChatDialogComponent;
         
         // 检查聊天输入框是否激活
-        for (_, chat) in world.query::<&ChatDialogComp>().iter() {
+        for (_, chat) in world.query::<&ChatDialogComponent>().iter() {
             if chat.is_input_active() {
                 return true;
             }
@@ -367,9 +367,9 @@ impl InputSystem {
     
     /// 关闭文本输入
     fn close_text_input(world: &mut World) {
-        use crate::ecs::ui::ChatDialogComp;
+        use crate::ecs::ui::ChatDialogComponent;
         
-        for (_, chat) in world.query_mut::<&mut ChatDialogComp>() {
+        for (_, chat) in world.query_mut::<&mut ChatDialogComponent>() {
             chat.deactivate_input();
         }
     }
