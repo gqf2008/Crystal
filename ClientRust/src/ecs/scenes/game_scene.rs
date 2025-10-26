@@ -64,6 +64,9 @@ pub struct GameScene {
     /// 可见区域缓存实体
     visible_area_entity: Entity,
     
+    /// 调试计数器实体
+    debug_counters_entity: Entity,
+    
     /// UI 实体引用 (保留用于后续功能扩展)
     main_dialog_entity: Entity,
     #[allow(dead_code)]
@@ -82,9 +85,6 @@ pub struct GameScene {
     
     /// 网络同步系统
     network_system: NetworkSystem,
-    
-    /// UI 系统
-    ui_system: UISystem,
     
     /// UI字体名称 (保留用于后续字体切换功能)
     #[allow(dead_code)]
@@ -200,6 +200,9 @@ impl GameScene {
         
         // 创建可见区域缓存实体
         let visible_area_entity = world.spawn((VisibleArea::default(),));
+        
+        // 创建调试计数器实体
+        let debug_counters_entity = world.spawn((crate::ecs::components::DebugCounters::new(),));
         
         // 生成测试怪物
         println!("👹 正在生成测试怪物...");
@@ -399,8 +402,8 @@ impl GameScene {
             time_entity,
             config_entity,
             visible_area_entity,
+            debug_counters_entity,
             network_system: NetworkSystem::new(),
-            ui_system: UISystem::new(),
             ui_font_name,  // 保留用于后续字体切换功能
             main_dialog_entity,
             inventory_dialog_entity,
@@ -543,11 +546,9 @@ impl Scene for GameScene {
         // 🎯 同步摄像机位置到玩家位置（确保摄像机始终跟随玩家）
         if let Some((_, (_, player_pos))) = world.query::<(&LocalPlayer, &Position)>().iter().next() {
             if let Ok(mut cam_pos) = world.get::<&mut Position>(self.camera_entity) {
-                // 🐛 添加调试日志
-                static mut SYNC_COUNTER: u32 = 0;
-                unsafe {
-                    SYNC_COUNTER += 1;
-                    if SYNC_COUNTER == 1 || SYNC_COUNTER % 300 == 0 {  // 首次和每300帧
+                // � 使用 DebugCounters 组件记录日志（替代 unsafe static mut）
+                if let Ok(mut debug) = world.get::<&mut crate::ecs::components::DebugCounters>(self.debug_counters_entity) {
+                    if debug.should_log_sync() {
                         tracing::info!(
                             "📷 Camera同步: player=({:.1}, {:.1}), old_camera=({:.1}, {:.1})",
                             player_pos.x, player_pos.y, cam_pos.x, cam_pos.y
@@ -592,24 +593,32 @@ impl Scene for GameScene {
         // 🎯 在绘制前同步摄像机位置到玩家位置（确保首帧就正确）
         // 必须在独立的作用域中完成，确保可变引用被drop
         {
-            static mut DRAW_COUNT: u32 = 0;
-            unsafe { DRAW_COUNT += 1; }
+            // 📊 使用 DebugCounters 组件记录绘制日志（替代 unsafe static mut）
+            let should_log = if let Ok(mut debug) = world.get::<&mut crate::ecs::components::DebugCounters>(self.debug_counters_entity) {
+                debug.should_log_draw()
+            } else {
+                false
+            };
+            
+            let draw_count = if let Ok(debug) = world.get::<&crate::ecs::components::DebugCounters>(self.debug_counters_entity) {
+                debug.get_draw_count()
+            } else {
+                0
+            };
             
             // 查找LocalPlayer - 需要保存query以延长生命周期
             let mut player_query_iter = world.query::<(&LocalPlayer, &Position)>();
             let player_opt = player_query_iter.iter().next();
             
             // 调试：输出是否找到玩家
-            unsafe {
-                if DRAW_COUNT <= 3 {
-                    if let Some((_, (_, player_pos))) = player_opt.as_ref() {
-                        tracing::info!(
-                            "🎮 draw#{}: 找到LocalPlayer, pos=({:.1}, {:.1})",
-                            DRAW_COUNT, player_pos.x, player_pos.y
-                        );
-                    } else {
-                        tracing::warn!("⚠️ draw#{}: 未找到LocalPlayer!", DRAW_COUNT);
-                    }
+            if should_log {
+                if let Some((_, (_, player_pos))) = player_opt.as_ref() {
+                    tracing::info!(
+                        "🎮 draw#{}: 找到LocalPlayer, pos=({:.1}, {:.1})",
+                        draw_count, player_pos.x, player_pos.y
+                    );
+                } else {
+                    tracing::warn!("⚠️ draw#{}: 未找到LocalPlayer!", draw_count);
                 }
             }
             
@@ -618,26 +627,22 @@ impl Scene for GameScene {
                     // 计算距离用于调试
                     let distance = ((cam_pos.x - player_pos.x).powi(2) + (cam_pos.y - player_pos.y).powi(2)).sqrt();
                     
-                    unsafe {
-                        if DRAW_COUNT <= 3 {
-                            tracing::info!(
-                                "📷 draw#{}: camera=({:.1}, {:.1}), distance={:.1}",
-                                DRAW_COUNT, cam_pos.x, cam_pos.y, distance
-                            );
-                        }
+                    if should_log {
+                        tracing::info!(
+                            "📷 draw#{}: camera=({:.1}, {:.1}), distance={:.1}",
+                            draw_count, cam_pos.x, cam_pos.y, distance
+                        );
                     }
                     
                     // 🎯 强制同步Camera到玩家位置（确保draw前Camera在正确位置）
                     cam_pos.x = player_pos.x;
                     cam_pos.y = player_pos.y;
                     
-                    unsafe {
-                        if DRAW_COUNT <= 3 && distance > 1.0 {
-                            tracing::info!(
-                                "🎯 draw#{} Camera同步: distance={:.1} -> player=({:.1}, {:.1})",
-                                DRAW_COUNT, distance, player_pos.x, player_pos.y
-                            );
-                        }
+                    if should_log && distance > 1.0 {
+                        tracing::info!(
+                            "🎯 draw#{} Camera同步: distance={:.1} -> player=({:.1}, {:.1})",
+                            draw_count, distance, player_pos.x, player_pos.y
+                        );
                     }
                 }
             }
@@ -715,11 +720,9 @@ impl Scene for GameScene {
             }
         }
         
-        // 🐛 调试日志:每隔60帧打印一次实体计数
-        static mut FRAME_COUNTER: u32 = 0;
-        unsafe {
-            FRAME_COUNTER += 1;
-            if FRAME_COUNTER % 60 == 0 {
+        // � 使用 DebugCounters 组件记录 Y-sorting 日志（替代 unsafe static mut）
+        if let Ok(mut debug) = world.get::<&mut crate::ecs::components::DebugCounters>(self.debug_counters_entity) {
+            if debug.should_log_y_sorting() {
                 tracing::info!("🎯 Y-sorting: {} monsters, {} NPCs, {} front tiles", 
                               monster_count, npc_count, front_tile_count);
             }
