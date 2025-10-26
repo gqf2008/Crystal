@@ -1735,7 +1735,8 @@ impl RenderSystem {
         {
             // 获取NPC图库
             // NPC库使用 LibraryArray::NPCs
-            let lib_index = (npc.npc_index / 1000) as usize;
+            // ⚠️ 修复：不应该除以1000，直接使用npc_index作为库索引
+            let lib_index = npc.npc_index as usize;
             
             let lib = match get_library_from_array(LibraryArray::NPCs, lib_index) {
                 Some(lib) => lib,
@@ -1755,9 +1756,8 @@ impl RenderSystem {
             let direction_offset = (anim.direction as i32) * frames_per_direction;
             let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
             
-            // NPC索引偏移
-            let npc_offset = (npc.npc_index % 1000) as i32;
-            let final_frame = draw_frame + npc_offset;
+            // ⚠️ 修复：不需要npc_offset，直接使用draw_frame
+            let final_frame = draw_frame;
             
             // 转换为屏幕坐标
             let (screen_x, screen_y) = CameraSystem::world_to_screen(
@@ -1793,7 +1793,8 @@ impl RenderSystem {
                     if let Some(frame_data) = get_frame(&DEFAULT_NPC_FRAMES, anim.action) {
                         if frame_data.effect_count > 0 {
                             let effect_frame = frame_data.effect_start + direction_offset + anim.frame_index as i32;
-                            let final_effect_frame = effect_frame + npc_offset;
+                            // ⚠️ 修复：不需要npc_offset
+                            let final_effect_frame = effect_frame;
                             
                             if let Ok(effect_info) = lib_locked.get_or_create_texture(ctx, final_effect_frame as usize) {
                                 if let Some(effect_image) = &effect_info.image {
@@ -1849,7 +1850,8 @@ impl RenderSystem {
         };
         
         // 获取NPC图库
-        let lib_index = (npc.npc_index / 1000) as usize;
+        // ⚠️ 修复：不应该除以1000，直接使用npc_index作为库索引
+        let lib_index = npc.npc_index as usize;
         let lib = match get_library_from_array(LibraryArray::NPCs, lib_index) {
             Some(lib) => lib,
             None => return Ok(()),
@@ -1866,8 +1868,8 @@ impl RenderSystem {
         
         let direction_offset = (anim.direction as i32) * frames_per_direction;
         let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
-        let npc_offset = (npc.npc_index % 1000) as i32;
-        let final_frame = draw_frame + npc_offset;
+        // ⚠️ 修复：不需要npc_offset，直接使用draw_frame
+        let final_frame = draw_frame;
         
         // 转换为屏幕坐标
         let (screen_x, screen_y) = CameraSystem::world_to_screen(
@@ -1903,7 +1905,8 @@ impl RenderSystem {
                 if let Some(frame_data) = get_frame(&DEFAULT_NPC_FRAMES, anim.action) {
                     if frame_data.effect_count > 0 {
                         let effect_frame = frame_data.effect_start + direction_offset + anim.frame_index as i32;
-                        let final_effect_frame = effect_frame + npc_offset;
+                        // ⚠️ 修复：不需要npc_offset
+                        let final_effect_frame = effect_frame;
                         
                         if let Ok(effect_info) = lib_locked.get_or_create_texture(ctx, final_effect_frame as usize) {
                             if let Some(effect_image) = &effect_info.image {

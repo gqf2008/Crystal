@@ -62,20 +62,20 @@ impl NPCActionSystem {
             
             // 检查是否到达切换时间
             if npc.action_timer >= npc.next_action_delay {
-                // 检查当前动画是否接近循环点(最后一帧)
-                let is_near_loop = anim.frame_index >= anim.frame_count.saturating_sub(1);
+                // 根据权重选择新动作: Standing 70%, Harvest 30%
+                let roll = rand::rng().random_range(0..100);
+                let new_action = if roll < 70 {
+                    MirAction::Standing
+                } else {
+                    MirAction::Harvest
+                };
                 
-                if is_near_loop || anim.frame_count == 0 {
-                    // 根据权重选择新动作: Standing 70%, Harvest 30%
-                    let roll = rand::rng().random_range(0..100);
-                    let new_action = if roll < 70 {
-                        MirAction::Standing
-                    } else {
-                        MirAction::Harvest
-                    };
+                // 只有在真正需要切换动作时才处理
+                if new_action != anim.action {
+                    // 检查当前动画是否接近循环点(最后一帧) - 只有切换时才需要检查
+                    let is_near_loop = anim.frame_index >= anim.frame_count.saturating_sub(1);
                     
-                    // 只有真正改变时才切换
-                    if new_action != anim.action {
+                    if is_near_loop || anim.frame_count == 0 {
                         // 从FrameSet读取新动作的配置
                         if let Some(frame) = get_frame(&DEFAULT_NPC_FRAMES, new_action) {
                             tracing::debug!("🏪 NPC {} 切换动作: {:?} -> {:?}", npc.name, anim.action, new_action);
@@ -87,11 +87,11 @@ impl NPCActionSystem {
                             anim.frame_timer = 0;
                         }
                     }
-                    
-                    // 重置计时器,设置新的随机延迟
-                    npc.action_timer = 0;
-                    npc.next_action_delay = rand::rng().random_range(3000..8000);
                 }
+                
+                // 无论是否切换，都重置计时器以避免重复触发
+                npc.action_timer = 0;
+                npc.next_action_delay = rand::rng().random_range(3000..8000);
             }
         }
     }
