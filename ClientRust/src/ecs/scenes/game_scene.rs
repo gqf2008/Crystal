@@ -86,9 +86,6 @@ pub struct GameScene {
     /// UI 系统
     ui_system: UISystem,
     
-    /// 按键帮助面板
-    hotkey_help: HotkeyHelpPanel,
-    
     /// UI字体名称 (保留用于后续字体切换功能)
     #[allow(dead_code)]
     ui_font_name: String,
@@ -391,9 +388,11 @@ impl GameScene {
         
         println!("✅ 游戏场景初始化完成！");
         
-        // 设置帮助面板的字体
+        // 🎯 创建按键帮助面板组件并spawn到world
+        // 优化说明: HotkeyHelpPanel改为ECS组件,不再作为场景字段
         let mut hotkey_help = HotkeyHelpPanel::new();
         hotkey_help.set_font(ui_font_name.clone());
+        world.spawn((hotkey_help,));
         
         Ok(Self {
             camera_entity,
@@ -402,8 +401,7 @@ impl GameScene {
             visible_area_entity,
             network_system: NetworkSystem::new(),
             ui_system: UISystem::new(),
-            hotkey_help,
-            ui_font_name,
+            ui_font_name,  // 保留用于后续字体切换功能
             main_dialog_entity,
             inventory_dialog_entity,
             character_dialog_entity,
@@ -801,15 +799,8 @@ impl Scene for GameScene {
         
         // 🎯 使用 RenderSystem::draw_ui 统一渲染所有 UI（符合ECS设计原则）
         // 分层渲染: 调试UI -> 游戏UI -> 覆盖层UI
-        RenderSystem::draw_ui(
-            ctx, 
-            canvas, 
-            world, 
-            0,  // current_time TODO: 传递正确的时间
-            self.time_entity, 
-            &self.hotkey_help,
-            &self.ui_font_name
-        )?;
+        // 优化说明: 移除所有参数,直接从ctx和world查询所需数据
+        RenderSystem::draw_ui(ctx, canvas, world)?;
         
         Ok(())
     }
@@ -834,9 +825,13 @@ impl Scene for GameScene {
             }
             
             // H键 - 切换按键帮助面板
+            // 优化说明: 从world查询HotkeyHelpPanel组件并修改状态
             if keycode == KeyCode::KeyH {
-                self.hotkey_help.toggle();
-                tracing::info!("📖 按键帮助: {}", if self.hotkey_help.visible { "显示" } else { "隐藏" });
+                for (_entity, hotkey_help) in world.query::<&mut HotkeyHelpPanel>().iter() {
+                    hotkey_help.toggle();
+                    tracing::info!("📖 按键帮助: {}", if hotkey_help.visible { "显示" } else { "隐藏" });
+                    break; // 只需要第一个HotkeyHelpPanel
+                }
                 return Ok(None);
             }
             
