@@ -212,7 +212,7 @@ impl GameState {
                             },
                             _ => "其他事件".to_string(),
                         };
-                        tracing::info!("🎮 GameApp: 传递事件到GameScene: {}", event_desc);
+                      //  tracing::info!("🎮 GameApp: 传递事件到GameScene: {}", event_desc);
                         game_scene.handle_network_event(&mut self.world, &event);
                     }
                 }
