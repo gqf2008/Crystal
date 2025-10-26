@@ -14,9 +14,9 @@
 use hecs::{World, Entity};
 
 use crate::ecs::ui::{
-    MainDialogComponent, InventoryDialogComponent, CharacterDialogComponent,
-    SkillBarComponent, ChatDialogComponent, ChatType, MagicLearningDialogComponent,
-    QuestDialogComponent, SkillsDialogComponent, OptionsDialogComponent
+    MainDialog, InventoryDialog, CharacterDialog,
+    SkillBarDialog, ChatDialog, ChatType, MagicLearningDialog,
+    QuestDialog, SkillsDialog, OptionsDialog
 };
 use crate::network::game_client::GameEvent;
 use crate::ecs::components::{LocalPlayer, PlayerData, Mana, Health};
@@ -43,15 +43,15 @@ impl UISystem {
                 let text = format!("[{}] {}", message.sender, message.text);
                 
                 // 暂时都显示为系统消息 (TODO: 实现完整的ChatType映射)
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialogComponent>() {
-                    chat_comp.dialog.add_message(text.clone(), ChatType::System);
+                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
+                    chat_comp.add_message(text.clone(), ChatType::System);
                 }
             }
             
             // 系统消息
             GameEvent::SystemMessage { message } => {
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialogComponent>() {
-                    chat_comp.dialog.add_message(message.clone(), ChatType::System);
+                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
+                    chat_comp.add_message(message.clone(), ChatType::System);
                 }
             }
             
@@ -63,8 +63,8 @@ impl UISystem {
             // 经验值获得
             GameEvent::ExperienceGained { amount } => {
                 // 发送聊天消息
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialogComponent>() {
-                    chat_comp.dialog.add_message(
+                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
+                    chat_comp.add_message(
                         format!("📈 获得经验: +{}", amount),
                         ChatType::System
                     );
@@ -89,8 +89,8 @@ impl UISystem {
                     println!("🎉 恭喜升级! 等级: {}", level);
                     
                     // 显示升级消息
-                    for (_, chat_comp) in world.query_mut::<&mut ChatDialogComponent>() {
-                        chat_comp.dialog.add_message(
+                    for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
+                        chat_comp.add_message(
                             format!("🎉 恭喜升级! 等级提升至 {}", level),
                             ChatType::System
                         );
@@ -104,8 +104,8 @@ impl UISystem {
                     .map(|info| info.name.as_str())
                     .unwrap_or("未知物品");
                     
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialogComponent>() {
-                    chat_comp.dialog.add_message(
+                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
+                    chat_comp.add_message(
                         format!("获得物品: {} x{}", item_name, item.count),
                         ChatType::System
                     );
@@ -114,8 +114,8 @@ impl UISystem {
             
             // 物品丢失
             GameEvent::ItemLost { unique_id, count } => {
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialogComponent>() {
-                    chat_comp.dialog.add_message(
+                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
+                    chat_comp.add_message(
                         format!("失去物品 x{}", count),
                         ChatType::System
                     );
@@ -124,8 +124,8 @@ impl UISystem {
             
             // 技能学习
             GameEvent::MagicLearned { spell, level } => {
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialogComponent>() {
-                    chat_comp.dialog.add_message(
+                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
+                    chat_comp.add_message(
                         format!("✨ 学会技能: {:?} (等级 {})", spell, level),
                         ChatType::System
                     );
@@ -134,8 +134,8 @@ impl UISystem {
             
             // 技能升级
             GameEvent::MagicLevelUp { spell, level } => {
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialogComponent>() {
-                    chat_comp.dialog.add_message(
+                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
+                    chat_comp.add_message(
                         format!("⬆️ 技能升级: {:?} → 等级 {}", spell, level),
                         ChatType::System
                     );
@@ -158,8 +158,8 @@ impl UISystem {
             // 玩家受伤
             GameEvent::PlayerStruck { attacker_id, damage, location } => {
                 if *damage > 0 {
-                    for (_, chat_comp) in world.query_mut::<&mut ChatDialogComponent>() {
-                        chat_comp.dialog.add_message(
+                    for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
+                        chat_comp.add_message(
                             format!("受到伤害: -{}", damage),
                             ChatType::System
                         );
@@ -178,15 +178,15 @@ impl UISystem {
     
     /// 添加聊天消息
     pub fn add_chat_message(world: &mut World, _entity: Entity, text: String, chat_type: ChatType) {
-        for (_, chat_comp) in world.query_mut::<&mut ChatDialogComponent>() {
-            chat_comp.dialog.add_message(text.clone(), chat_type);
+        for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
+            chat_comp.add_message(text.clone(), chat_type);
         }
     }
     
     /// 设置金币
     pub fn set_gold(world: &mut World, gold: u32) {
-        for (_, inv_comp) in world.query_mut::<&mut InventoryDialogComponent>() {
-            inv_comp.dialog.set_gold(gold);
+        for (_, inv_comp) in world.query_mut::<&mut InventoryDialog>() {
+            inv_comp.set_gold(gold);
         }
     }
     
@@ -200,23 +200,19 @@ impl UISystem {
         
         match dialog_type {
             DialogType::Inventory => {
-                for (_, inv) in world.query_mut::<&mut InventoryDialogComponent>() {
-                    inv.is_open = !inv.is_open;
-                    inv.dialog.set_visible(inv.is_open);
-                    tracing::info!("📦 背包: {}", if inv.is_open { "打开" } else { "关闭" });
+                for (_, inv) in world.query_mut::<&mut InventoryDialog>() {
+                    inv.toggle();
                     break;
                 }
             }
             DialogType::Character => {
-                for (_, char_dlg) in world.query_mut::<&mut CharacterDialogComponent>() {
-                    char_dlg.is_open = !char_dlg.is_open;
-                    char_dlg.dialog.set_visible(char_dlg.is_open);
-                    tracing::info!("👤 角色: {}", if char_dlg.is_open { "打开" } else { "关闭" });
+                for (_, char_dlg) in world.query_mut::<&mut CharacterDialog>() {
+                    char_dlg.toggle();
                     break;
                 }
             }
             DialogType::Skills => {
-                for (_, skills) in world.query_mut::<&mut SkillsDialogComponent>() {
+                for (_, skills) in world.query_mut::<&mut SkillsDialog>() {
                     let is_open = skills.is_open();
                     skills.set_open(!is_open);
                     tracing::info!("⚔️ 技能: {}", if !is_open { "打开" } else { "关闭" });
@@ -227,7 +223,7 @@ impl UISystem {
                 // 先检查状态
                 let should_open = {
                     let mut should_open = false;
-                    for (_, quest) in world.query_mut::<&mut QuestDialogComponent>() {
+                    for (_, quest) in world.query_mut::<&mut QuestDialog>() {
                         should_open = !quest.is_open;
                         if quest.is_open {
                             quest.close();
@@ -242,7 +238,7 @@ impl UISystem {
                 // 打开时更新任务列表
                 if should_open {
                     let active_quests = crate::ecs::systems::QuestSystem::get_active_quests(world);
-                    for (_, quest) in world.query_mut::<&mut QuestDialogComponent>() {
+                    for (_, quest) in world.query_mut::<&mut QuestDialog>() {
                         quest.update_active_quests(active_quests);
                         break;
                     }
@@ -254,7 +250,7 @@ impl UISystem {
                 // 先切换状态
                 let was_closed = {
                     let mut was_closed = false;
-                    for (_, magic) in world.query_mut::<&mut MagicLearningDialogComponent>() {
+                    for (_, magic) in world.query_mut::<&mut MagicLearningDialog>() {
                         was_closed = !magic.is_open();
                         magic.toggle();
                         break;
@@ -270,7 +266,7 @@ impl UISystem {
                 tracing::info!("📖 技能学习: {}", if was_closed { "打开" } else { "关闭" });
             }
             DialogType::Trade => {
-                for (_, trade) in world.query_mut::<&mut crate::ecs::ui::TradeDialogComponent>() {
+                for (_, trade) in world.query_mut::<&mut crate::ecs::ui::TradeDialog>() {
                     if trade.is_open {
                         trade.close();
                         tracing::info!("🤝 交易: 关闭");
@@ -298,7 +294,7 @@ impl UISystem {
         let mut closed = false;
         
         // 优先级：交易 > 任务 > 技能学习 > 技能 > 角色 > 背包
-        for (_, trade) in world.query_mut::<&mut crate::ecs::ui::TradeDialogComponent>() {
+        for (_, trade) in world.query_mut::<&mut crate::ecs::ui::TradeDialog>() {
             if trade.is_open {
                 trade.close();
                 closed = true;
@@ -307,7 +303,7 @@ impl UISystem {
         }
         
         if !closed {
-            for (_, quest) in world.query_mut::<&mut QuestDialogComponent>() {
+            for (_, quest) in world.query_mut::<&mut QuestDialog>() {
                 if quest.is_open {
                     quest.close();
                     closed = true;
@@ -317,7 +313,7 @@ impl UISystem {
         }
         
         if !closed {
-            for (_, magic) in world.query_mut::<&mut MagicLearningDialogComponent>() {
+            for (_, magic) in world.query_mut::<&mut MagicLearningDialog>() {
                 if magic.is_open() {
                     magic.toggle();
                     closed = true;
@@ -327,7 +323,7 @@ impl UISystem {
         }
         
         if !closed {
-            for (_, skills) in world.query_mut::<&mut SkillsDialogComponent>() {
+            for (_, skills) in world.query_mut::<&mut SkillsDialog>() {
                 if skills.is_open() {
                     skills.set_open(false);
                     closed = true;
@@ -337,10 +333,9 @@ impl UISystem {
         }
         
         if !closed {
-            for (_, char_dlg) in world.query_mut::<&mut CharacterDialogComponent>() {
-                if char_dlg.is_open {
-                    char_dlg.is_open = false;
-                    char_dlg.dialog.set_visible(false);
+            for (_, char_dlg) in world.query_mut::<&mut CharacterDialog>() {
+                if char_dlg.is_open() {
+                    char_dlg.hide();
                     closed = true;
                     break;
                 }
@@ -348,10 +343,9 @@ impl UISystem {
         }
         
         if !closed {
-            for (_, inv) in world.query_mut::<&mut InventoryDialogComponent>() {
-                if inv.is_open {
-                    inv.is_open = false;
-                    inv.dialog.set_visible(false);
+            for (_, inv) in world.query_mut::<&mut InventoryDialog>() {
+                if inv.is_open() {
+                    inv.hide();
                     closed = true;
                     break;
                 }
@@ -380,12 +374,12 @@ impl UISystem {
         // 按优先级检查对话框点击（从上到下）
         
         // 1. 角色对话框
-        for (_, char_dlg) in world.query_mut::<&mut CharacterDialogComponent>() {
-            if !char_dlg.is_open {
+        for (_, char_dlg) in world.query_mut::<&mut CharacterDialog>() {
+            if !char_dlg.is_open() {
                 continue;
             }
             
-            if let Some(action) = char_dlg.dialog.on_mouse_down(ui_x, ui_y) {
+            if let Some(action) = char_dlg.on_mouse_down(ui_x, ui_y) {
                 match action {
                     CharacterAction::Close => {
                         tracing::info!("👤 角色对话框关闭");
@@ -402,12 +396,12 @@ impl UISystem {
         }
         
         // 2. 背包对话框
-        for (_, inv) in world.query_mut::<&mut InventoryDialogComponent>() {
-            if !inv.is_open {
+        for (_, inv) in world.query_mut::<&mut InventoryDialog>() {
+            if !inv.is_open() {
                 continue;
             }
             
-            if let Some(action) = inv.dialog.on_mouse_down(ui_x, ui_y) {
+            if let Some(action) = inv.on_mouse_down(ui_x, ui_y) {
                 match action {
                     InventoryAction::Close => {
                         tracing::info!("🎒 背包关闭");
@@ -422,8 +416,8 @@ impl UISystem {
         }
         
         // 3. 主对话框
-        for (_, main) in world.query_mut::<&mut MainDialogComponent>() {
-            if let Some(button) = main.dialog.on_mouse_down(ui_x, ui_y) {
+        for (_, main) in world.query_mut::<&mut MainDialog>() {
+            if let Some(button) = main.on_mouse_down(ui_x, ui_y) {
                 tracing::info!("🖱️ 点击主对话框按钮: {:?}", button);
                 
                 match button {
@@ -459,21 +453,21 @@ impl UISystem {
     /// 更新 UI hover 状态
     pub fn update_hover(world: &mut World, ui_x: f32, ui_y: f32) {
         // 更新主对话框
-        for (_, main) in world.query_mut::<&mut MainDialogComponent>() {
-            main.dialog.update_hover(ui_x, ui_y);
+        for (_, main) in world.query_mut::<&mut MainDialog>() {
+            main.update_hover(ui_x, ui_y);
         }
         
         // 更新角色对话框
-        for (_, char_dlg) in world.query_mut::<&mut CharacterDialogComponent>() {
-            if char_dlg.is_open {
-                char_dlg.dialog.update_hover(ui_x, ui_y);
+        for (_, char_dlg) in world.query_mut::<&mut CharacterDialog>() {
+            if char_dlg.is_open() {
+                char_dlg.update_hover(ui_x, ui_y);
             }
         }
         
         // 更新背包对话框
-        for (_, inv) in world.query_mut::<&mut InventoryDialogComponent>() {
-            if inv.is_open {
-                inv.dialog.update_hover(ui_x, ui_y);
+        for (_, inv) in world.query_mut::<&mut InventoryDialog>() {
+            if inv.is_open() {
+                inv.update_hover(ui_x, ui_y);
             }
         }
     }

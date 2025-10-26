@@ -130,6 +130,11 @@ impl InventoryDialog {
         self.visible
     }
     
+    /// 检查是否打开
+    pub fn is_open(&self) -> bool {
+        self.visible
+    }
+    
     /// 更新金币数
     pub fn set_gold(&mut self, gold: u32) {
         self.gold = gold;

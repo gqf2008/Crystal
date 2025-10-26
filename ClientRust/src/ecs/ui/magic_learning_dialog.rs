@@ -101,6 +101,11 @@ impl MagicLearningDialog {
         self.dragging_index = None;
     }
     
+    /// 检查是否打开
+    pub fn is_open(&self) -> bool {
+        self.visible
+    }
+    
     /// 检查点是否在对话框内
     pub fn contains_point(&self, x: f32, y: f32) -> bool {
         if !self.visible {

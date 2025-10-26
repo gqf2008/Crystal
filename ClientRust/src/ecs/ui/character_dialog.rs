@@ -235,6 +235,11 @@ impl CharacterDialog {
         self.visible
     }
     
+    /// 检查是否打开
+    pub fn is_open(&self) -> bool {
+        self.visible
+    }
+    
     pub fn switch_tab(&mut self, tab: CharacterTab) {
         self.current_tab = tab;
     }

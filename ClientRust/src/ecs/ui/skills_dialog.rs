@@ -34,6 +34,9 @@ impl SkillSlot {
 
 /// 技能对话框
 pub struct SkillsDialog {
+    /// 是否可见
+    pub visible: bool,
+    
     /// 背景图像索引 (Prguse2)
     background_index: u16,
     
@@ -60,6 +63,7 @@ impl SkillsDialog {
         }
         
         Self {
+            visible: false,
             background_index: 213, // 技能对话框背景 (需要从 C# 客户端确认)
             position: (100.0, 100.0),
             size: (300.0, 400.0),
@@ -136,30 +140,14 @@ impl SkillsDialog {
         }
         false
     }
-}
-
-/// 技能对话框组件
-pub struct SkillsDialogComponent {
-    pub dialog: SkillsDialog,
-    pub is_open: bool,
-}
-
-impl SkillsDialogComponent {
-    pub fn new() -> Self {
-        Self {
-            dialog: SkillsDialog::new(),
-            is_open: false,
-        }
-    }
     
     /// 检查是否打开
     pub fn is_open(&self) -> bool {
-        self.is_open
+        self.visible
     }
     
     /// 设置打开/关闭
     pub fn set_open(&mut self, open: bool) {
-        self.is_open = open;
-        // SkillsDialog 本身没有 visible 字段，由 SkillsDialogComponent 管理
+        self.visible = open;
     }
 }

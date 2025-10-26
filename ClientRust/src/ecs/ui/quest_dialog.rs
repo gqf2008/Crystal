@@ -9,7 +9,7 @@ use crate::ecs::systems::{Quest, QuestState, QuestObjective};
 
 /// 任务对话框组件
 #[derive(Debug, Clone)]
-pub struct QuestDialogComponent {
+pub struct QuestDialog {
     pub is_open: bool,
     pub x: f32,
     pub y: f32,
@@ -28,7 +28,7 @@ pub enum QuestViewMode {
     CompletedQuests, // 已完成的任务
 }
 
-impl QuestDialogComponent {
+impl QuestDialog {
     pub fn new(x: f32, y: f32) -> Self {
         Self {
             is_open: false,

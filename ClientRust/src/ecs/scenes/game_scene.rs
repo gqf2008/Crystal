@@ -37,7 +37,7 @@ use crate::ecs::{
     systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem},
     Coordinates, MapUtils,  // 坐标工具
     map_loader::MapLoader,
-    ui::{ChatType, MainDialogComponent, InventoryDialogComponent, CharacterDialogComponent, SkillBarComponent, ChatDialogComponent, MagicLearningDialogComponent, QuestDialogComponent, TradeDialogComponent, SkillsDialogComponent, OptionsDialogComponent, HotkeyHelpPanel},
+    ui::{ChatType, MainDialog, InventoryDialog, CharacterDialog, SkillBarDialog, ChatDialog, MagicLearningDialog, QuestDialog, TradeDialog, SkillsDialog, OptionsDialog, HotkeyHelpPanel},
 };
 use crate::objects::{MapReader};
 use crate::graphics::libraries::initialize_all_libraries;
@@ -323,53 +323,53 @@ impl GameScene {
         // 创建主对话框实体
         // UI 使用固定设计分辨率 1024×768
         let main_dialog_entity = world.spawn((
-            MainDialogComponent::new(Coordinates::DESIGN_WIDTH, Coordinates::DESIGN_HEIGHT),
+            MainDialog::new(Coordinates::DESIGN_WIDTH, Coordinates::DESIGN_HEIGHT),
         ));
         
         // 创建背包对话框实体
         let inventory_dialog_entity = world.spawn((
-            InventoryDialogComponent::new(),
+            InventoryDialog::new(),
         ));
         
         // 创建角色对话框实体
         let character_dialog_entity = world.spawn((
-            CharacterDialogComponent::new(),
+            CharacterDialog::new(),
         ));
         
         // 创建两个技能栏实体
         let skillbar_entities = [
-            world.spawn((SkillBarComponent::new(0),)),
-            world.spawn((SkillBarComponent::new(1),)),
+            world.spawn((SkillBarDialog::new(0),)),
+            world.spawn((SkillBarDialog::new(1),)),
         ];
         
         // 创建聊天对话框实体
         let chat_dialog_entity = world.spawn((
-            ChatDialogComponent::new(0.0, screen_height - 300.0), // 屏幕底部
+            ChatDialog::new(0.0, screen_height - 300.0), // 屏幕底部
         ));
         
         // 创建技能学习对话框实体
         let magic_learning_dialog_entity = world.spawn((
-            MagicLearningDialogComponent::new(),
+            MagicLearningDialog::new(),
         ));
         
         // 创建任务对话框实体
         let quest_dialog_entity = world.spawn((
-            QuestDialogComponent::new(100.0, 100.0),
+            QuestDialog::new(100.0, 100.0),
         ));
         
         // 创建技能对话框实体
         let _skills_dialog_entity = world.spawn((
-            SkillsDialogComponent::new(),
+            SkillsDialog::new(),
         ));
         
         // 创建选项对话框实体
         let _options_dialog_entity = world.spawn((
-            OptionsDialogComponent::new(),
+            OptionsDialog::new(),
         ));
         
         // 创建交易窗口实体
         let trade_dialog_entity = world.spawn((
-            TradeDialogComponent::new(300.0, 150.0),
+            TradeDialog::new(300.0, 150.0),
         ));
         
         // 添加欢迎消息
@@ -423,13 +423,13 @@ impl GameScene {
     // ========================================================================
     
     /// 获取聊天对话框的可变引用
-    fn get_chat_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut ChatDialogComponent> {
-        world.query_one_mut::<&mut ChatDialogComponent>(self.chat_dialog_entity).ok()
+    fn get_chat_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut ChatDialog> {
+        world.query_one_mut::<&mut ChatDialog>(self.chat_dialog_entity).ok()
     }
     
     /// 获取主对话框的可变引用
-    fn get_main_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut MainDialogComponent> {
-        world.query_one_mut::<&mut MainDialogComponent>(self.main_dialog_entity).ok()
+    fn get_main_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut MainDialog> {
+        world.query_one_mut::<&mut MainDialog>(self.main_dialog_entity).ok()
     }
     
     /// 加载中文字体
@@ -582,7 +582,7 @@ impl Scene for GameScene {
         
         // 更新聊天对话框（用于光标闪烁）
         if let Some(chat_dialog) = self.get_chat_dialog_mut(world) {
-            chat_dialog.dialog.update();
+            chat_dialog.update();
         }
         
         Ok(None)

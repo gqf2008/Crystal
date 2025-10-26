@@ -976,9 +976,9 @@ impl MLibrary {
         static mut DEBUG_COUNT: u32 = 0;
         unsafe {
             if index == 1 && DEBUG_COUNT < 3 {
-                println!("🔍 [mlibrary] index={}, pos=({}, {}), screen={}x{}", 
-                         index, draw_x, draw_y, screen_width, screen_height);
-                println!("🔍 [mlibrary] texture size: {}x{}", info.width, info.height);
+                // println!("🔍 [mlibrary] index={}, pos=({}, {}), screen={}x{}", 
+                //          index, draw_x, draw_y, screen_width, screen_height);
+                // println!("🔍 [mlibrary] texture size: {}x{}", info.width, info.height);
                 DEBUG_COUNT += 1;
             }
         }

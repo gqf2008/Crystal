@@ -368,115 +368,26 @@ impl ChatMessageType {
 // 符合 ECS 的数据驱动设计原则
 //
 // ============================================================================
+// 🎯 重构说明: 移除双层包装,Dialog类直接作为ECS组件
+// - MainDialog/InventoryDialog等直接作为组件使用
+// - 不再需要Component包装层
+// - 使用#[derive(Bundle)]简化多组件spawn
+// ============================================================================
 
-use super::{
-    MainDialog, InventoryDialog, CharacterDialog, 
-    SkillBarDialog, ChatDialog
-};
-
-/// 主对话框组件
-pub struct MainDialogComponent {
-    pub dialog: MainDialog,
-}
-
-impl MainDialogComponent {
-    pub fn new(screen_width: f32, screen_height: f32) -> Self {
-        Self {
-            dialog: MainDialog::new(screen_width, screen_height),
-        }
-    }
-}
-
-/// 背包对话框组件
-pub struct InventoryDialogComponent {
-    pub dialog: InventoryDialog,
-    pub is_open: bool,
-}
-
-impl InventoryDialogComponent {
-    pub fn new() -> Self {
-        Self {
-            dialog: InventoryDialog::new(),
-            is_open: false,
-        }
-    }
-}
-
-/// 角色对话框组件
-pub struct CharacterDialogComponent {
-    pub dialog: CharacterDialog,
-    pub is_open: bool,
-}
-
-impl CharacterDialogComponent {
-    pub fn new() -> Self {
-        Self {
-            dialog: CharacterDialog::new(),
-            is_open: false,
-        }
-    }
-}
-
-/// 技能栏组件
-pub struct SkillBarComponent {
-    pub dialog: SkillBarDialog,
-    pub bar_index: u8,
-}
-
-impl SkillBarComponent {
-    pub fn new(bar_index: u8) -> Self {
-        Self {
-            dialog: SkillBarDialog::new(bar_index),
-            bar_index,
-        }
-    }
-}
-
-/// 聊天对话框组件
-pub struct ChatDialogComponent {
-    pub dialog: ChatDialog,
-}
-
-impl ChatDialogComponent {
-    pub fn new(x: f32, y: f32) -> Self {
-        Self {
-            dialog: ChatDialog::new(x, y),
-        }
-    }
-    
-    /// 检查输入框是否激活
-    pub fn is_input_active(&self) -> bool {
-        self.dialog.is_input_active()
-    }
-    
-    /// 取消输入
-    pub fn deactivate_input(&mut self) {
-        self.dialog.deactivate_input();
-    }
-}
-
-/// 技能学习对话框组件
-pub struct MagicLearningDialogComponent {
-    pub dialog: super::MagicLearningDialog,
-    pub is_open: bool,
-}
-
-impl MagicLearningDialogComponent {
-    pub fn new() -> Self {
-        Self {
-            dialog: super::MagicLearningDialog::new(),
-            is_open: false,
-        }
-    }
-    
-    /// 检查是否打开
-    pub fn is_open(&self) -> bool {
-        self.is_open
-    }
-    
-    /// 切换显示/隐藏
-    pub fn toggle(&mut self) {
-        self.is_open = !self.is_open;
-        self.dialog.set_visible(self.is_open);
-    }
-}
+// ⚠️ 本文件已废弃,所有Dialog类直接作为ECS组件使用
+// 请参考:
+// - MainDialog (main_dialog.rs)
+// - InventoryDialog (inventory_dialog.rs)  
+// - CharacterDialog (character_dialog.rs)
+// - SkillBarDialog (skillbar_dialog.rs)
+// - ChatDialog (chat_dialog.rs)
+// - MagicLearningDialog (magic_learning_dialog.rs)
+// - QuestDialog (quest_dialog.rs)
+// - TradeDialog (trade_dialog.rs)
+// - SkillsDialog (skills_dialog.rs)
+// - OptionsDialog (options_dialog.rs)
+// - FriendsDialog (friends_dialog.rs)
+// - GroupDialog (group_dialog.rs)
+// - GuildDialog (guild_dialog.rs)
+// - MiniMapDialog (minimap_dialog.rs)
+// - BuffDialog (buff_dialog.rs)

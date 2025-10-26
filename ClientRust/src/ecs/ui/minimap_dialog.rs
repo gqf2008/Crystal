@@ -7,6 +7,9 @@ use ggez::graphics::{Canvas, Color, DrawParam, Rect};
 
 /// 小地图对话框
 pub struct MiniMapDialog {
+    /// 是否可见
+    pub visible: bool,
+    
     /// 背景图像索引 (Prguse2)
     background_index: u16,
     
@@ -24,6 +27,7 @@ impl MiniMapDialog {
     /// 创建新的小地图对话框
     pub fn new() -> Self {
         Self {
+            visible: false,
             background_index: 2081, // 小地图背景 (需要从 C# 客户端确认)
             position: (1024.0 - 150.0, 0.0), // 右上角
             size: (150.0, 150.0),
@@ -67,19 +71,14 @@ impl MiniMapDialog {
         }
         false
     }
-}
-
-/// 小地图对话框组件
-pub struct MiniMapDialogComponent {
-    pub dialog: MiniMapDialog,
-    pub is_open: bool,
-}
-
-impl MiniMapDialogComponent {
-    pub fn new() -> Self {
-        Self {
-            dialog: MiniMapDialog::new(),
-            is_open: false,
-        }
+    
+    /// 检查是否打开
+    pub fn is_open(&self) -> bool {
+        self.visible
+    }
+    
+    /// 设置打开/关闭  
+    pub fn set_open(&mut self, open: bool) {
+        self.visible = open;
     }
 }

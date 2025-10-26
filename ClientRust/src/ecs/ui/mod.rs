@@ -23,7 +23,7 @@ pub mod buff_dialog;       // 🆕 Buff/Debuff 显示对话框
 pub mod hotkey_help;       // 🆕 按键帮助面板
 
 // 重新导出常用类型
-pub use components::*;
+pub use components::*;  // 保留基础UI组件(HealthBar, ManaBar等)
 pub use button_widget::{ButtonWidget, ButtonGroup, ButtonState};
 pub use dialog_manager::{DialogManager, DialogType};
 pub use main_dialog::{MainDialog, MainDialogButton};
@@ -32,13 +32,13 @@ pub use character_dialog::{CharacterDialog, CharacterAction, CharacterTab, Equip
 pub use skillbar_dialog::{SkillBarDialog, SkillBarAction};
 pub use chat_dialog::{ChatDialog, ChatType};
 pub use magic_learning_dialog::{MagicLearningDialog, MagicLearningAction};
-pub use quest_dialog::{QuestDialogComponent, QuestAction, QuestViewMode};
-pub use trade_dialog::{TradeDialogComponent, TradeAction};
-pub use skills_dialog::{SkillsDialog, SkillsDialogComponent, SkillSlot};
-pub use minimap_dialog::{MiniMapDialog, MiniMapDialogComponent};
-pub use options_dialog::{OptionsDialog, OptionsDialogComponent, OptionsTab};
-pub use friends_dialog::{FriendsDialog, FriendsDialogComponent, FriendsTab, FriendInfo};
-pub use group_dialog::{GroupDialog, GroupDialogComponent, GroupMember};
-pub use guild_dialog::{GuildDialog, GuildDialogComponent, GuildTab, GuildMember};
-pub use buff_dialog::{BuffDialog, BuffDialogComponent, BuffItem};
+pub use quest_dialog::{QuestDialog, QuestAction, QuestViewMode};
+pub use trade_dialog::{TradeDialog, TradeAction};
+pub use skills_dialog::{SkillsDialog, SkillSlot};
+pub use minimap_dialog::MiniMapDialog;
+pub use options_dialog::{OptionsDialog, OptionsTab};
+pub use friends_dialog::{FriendsDialog, FriendsTab, FriendInfo};
+pub use group_dialog::{GroupDialog, GroupMember};
+pub use guild_dialog::{GuildDialog, GuildTab, GuildMember};
+pub use buff_dialog::{BuffDialog, BuffItem};
 pub use hotkey_help::HotkeyHelpPanel;

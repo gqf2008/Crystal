@@ -304,26 +304,26 @@ impl MainDialog {
         // 2. 绘制主界面背景 (Prguse_0/1/2)
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
             if let Ok(mut lib) = lib_arc.try_lock() {
-                unsafe {
-                    if PRINT_COUNT <= 3 {
-                        println!("🎨 绘制主面板背景: index={}, pos=({}, {})", 
-                                 self.bg_index, dialog_x, dialog_y);
-                    }
-                }
+                // unsafe {
+                //     if PRINT_COUNT <= 3 {
+                //         println!("🎨 绘制主面板背景: index={}, pos=({}, {})", 
+                //                  self.bg_index, dialog_x, dialog_y);
+                //     }
+                // }
                 let result = lib.draw_with_color(
                     ctx, canvas,
                     self.bg_index as usize,
                     dialog_x, dialog_y,
                     Color::WHITE, false
                 );
-                unsafe {
-                    if PRINT_COUNT <= 3 {
-                        match result {
-                            Ok(_) => println!("✅ 主面板背景绘制返回成功"),
-                            Err(ref e) => println!("❌ 主面板背景绘制失败: {:?}", e),
-                        }
-                    }
-                }
+                // unsafe {
+                //     if PRINT_COUNT <= 3 {
+                //         match result {
+                //             Ok(_) => println!("✅ 主面板背景绘制返回成功"),
+                //             Err(ref e) => println!("❌ 主面板背景绘制失败: {:?}", e),
+                //         }
+                //     }
+                // }
                 let _ = result;
             } else {
                 unsafe {

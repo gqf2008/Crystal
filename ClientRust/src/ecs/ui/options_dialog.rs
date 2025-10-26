@@ -16,6 +16,8 @@ pub enum OptionsTab {
 
 /// 选项对话框
 pub struct OptionsDialog {
+    /// 是否可见
+    pub visible: bool,
     /// 背景图像索引 (Prguse2)
     background_index: u16,
     
@@ -35,6 +37,7 @@ pub struct OptionsDialog {
 /// 临时设置
 #[derive(Debug, Clone)]
 pub struct TempSettings {
+    pub visible: bool,
     // 游戏设置
     pub show_monster_hp: bool,
     pub show_player_name: bool,
@@ -60,7 +63,9 @@ pub struct TempSettings {
 
 impl Default for TempSettings {
     fn default() -> Self {
+         
         Self {
+            visible: false,
             show_monster_hp: true,
             show_player_name: true,
             show_monster_name: true,
@@ -85,7 +90,9 @@ impl Default for TempSettings {
 impl OptionsDialog {
     /// 创建新的选项对话框
     pub fn new() -> Self {
+         
         Self {
+            visible: false,
             background_index: 1974, // 选项对话框背景 (需要从 C# 客户端确认)
             position: ((1024.0 - 500.0) / 2.0, (768.0 - 400.0) / 2.0), // 居中
             size: (500.0, 400.0),
@@ -144,19 +151,16 @@ impl OptionsDialog {
         }
         false
     }
-}
-
-/// 选项对话框组件
-pub struct OptionsDialogComponent {
-    pub dialog: OptionsDialog,
-    pub is_open: bool,
-}
-
-impl OptionsDialogComponent {
-    pub fn new() -> Self {
-        Self {
-            dialog: OptionsDialog::new(),
-            is_open: false,
-        }
+    
+    /// 检查是否打开
+    pub fn is_open(&self) -> bool {
+        self.visible
+    }
+    
+    /// 设置打开/关闭
+    pub fn set_open(&mut self, open: bool) {
+        self.visible = open;
     }
 }
+
+

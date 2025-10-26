@@ -34,6 +34,8 @@ pub enum FriendsTab {
 
 /// 好友对话框
 pub struct FriendsDialog {
+    /// 是否可见
+    pub visible: bool,
     /// 背景图像索引 (Prguse2)
     background_index: u16,
     
@@ -59,7 +61,9 @@ pub struct FriendsDialog {
 impl FriendsDialog {
     /// 创建新的好友对话框
     pub fn new() -> Self {
+          
         Self {
+            visible: false,
             background_index: 1920, // 好友对话框背景 (需要从 C# 客户端确认)
             position: (100.0, 100.0),
             size: (300.0, 400.0),
@@ -141,19 +145,16 @@ impl FriendsDialog {
         }
         false
     }
-}
-
-/// 好友对话框组件
-pub struct FriendsDialogComponent {
-    pub dialog: FriendsDialog,
-    pub is_open: bool,
-}
-
-impl FriendsDialogComponent {
-    pub fn new() -> Self {
-        Self {
-            dialog: FriendsDialog::new(),
-            is_open: false,
-        }
+    
+    /// 检查是否打开
+    pub fn is_open(&self) -> bool {
+        self.visible
+    }
+    
+    /// 设置打开/关闭
+    pub fn set_open(&mut self, open: bool) {
+        self.visible = open;
     }
 }
+
+

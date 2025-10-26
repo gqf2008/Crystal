@@ -35,6 +35,8 @@ pub struct GroupMember {
 
 /// 组队对话框
 pub struct GroupDialog {
+    /// 是否可见
+    pub visible: bool,
     /// 背景图像索引 (Prguse2)
     background_index: u16,
     
@@ -54,7 +56,9 @@ pub struct GroupDialog {
 impl GroupDialog {
     /// 创建新的组队对话框
     pub fn new() -> Self {
+         
         Self {
+            visible: false,
             background_index: 1928, // 组队对话框背景 (需要从 C# 客户端确认)
             position: (10.0, 200.0), // 左侧
             size: (200.0, 300.0),
@@ -141,19 +145,16 @@ impl GroupDialog {
         }
         false
     }
-}
-
-/// 组队对话框组件
-pub struct GroupDialogComponent {
-    pub dialog: GroupDialog,
-    pub is_open: bool,
-}
-
-impl GroupDialogComponent {
-    pub fn new() -> Self {
-        Self {
-            dialog: GroupDialog::new(),
-            is_open: false,
-        }
+    
+    /// 检查是否打开
+    pub fn is_open(&self) -> bool {
+        self.visible
+    }
+    
+    /// 设置打开/关闭
+    pub fn set_open(&mut self, open: bool) {
+        self.visible = open;
     }
 }
+
+

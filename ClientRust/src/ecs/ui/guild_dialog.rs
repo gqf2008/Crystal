@@ -35,6 +35,8 @@ pub enum GuildTab {
 
 /// 行会对话框
 pub struct GuildDialog {
+    /// 是否可见
+    pub visible: bool,
     /// 背景图像索引 (Prguse2)
     background_index: u16,
     
@@ -63,7 +65,9 @@ pub struct GuildDialog {
 impl GuildDialog {
     /// 创建新的行会对话框
     pub fn new() -> Self {
+           
         Self {
+            visible: false,
             background_index: 1930, // 行会对话框背景 (需要从 C# 客户端确认)
             position: (200.0, 100.0),
             size: (400.0, 500.0),
@@ -159,19 +163,16 @@ impl GuildDialog {
         }
         false
     }
-}
-
-/// 行会对话框组件
-pub struct GuildDialogComponent {
-    pub dialog: GuildDialog,
-    pub is_open: bool,
-}
-
-impl GuildDialogComponent {
-    pub fn new() -> Self {
-        Self {
-            dialog: GuildDialog::new(),
-            is_open: false,
-        }
+    
+    /// 检查是否打开
+    pub fn is_open(&self) -> bool {
+        self.visible
+    }
+    
+    /// 设置打开/关闭
+    pub fn set_open(&mut self, open: bool) {
+        self.visible = open;
     }
 }
+
+
