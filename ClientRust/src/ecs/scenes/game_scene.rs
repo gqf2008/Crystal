@@ -23,7 +23,7 @@
 // ============================================================================
 
 use ggez::{Context, GameResult};
-use ggez::graphics::{Canvas, Color, Text, DrawParam};
+use ggez::graphics::Canvas;
 use ggez::winit::event::MouseButton;
 use ggez::input::keyboard::KeyInput;
 use hecs::{World, Entity};
@@ -799,30 +799,17 @@ impl Scene for GameScene {
             Coordinates::DESIGN_HEIGHT,  // 768 (UI 设计分辨率)
         ));
         
-        // 绘制FPS
-        let time = world.get::<&TimeTracker>(self.time_entity).unwrap();
-        let fps_text = Text::new(format!("FPS: {:.1}", time.fps));
-        canvas.draw(
-            &fps_text,
-            DrawParam::default()
-                .dest([10.0, 10.0])
-                .color(Color::from_rgb(0, 255, 0)),
-        );
-        
-        // 绘制操作提示（移到右上角，使用设计坐标系）
-        let hint_text = Text::new("[WASD/方向键] 移动  [Shift+WASD] 跑动  [鼠标] 点击移动  [Esc] 返回");
-        canvas.draw(
-            &hint_text,
-            DrawParam::default()
-                .dest([Coordinates::DESIGN_WIDTH - 500.0, 10.0])
-                .color(Color::from_rgb(200, 200, 200)),
-        );
-        
-        // 🎯 使用 RenderSystem::draw_ui 渲染所有 UI组件（符合ECS设计原则）
-        RenderSystem::draw_ui(ctx, canvas, world, 0)?; // TODO: 传递正确的 current_time
-        
-        // 🎯 绘制按键帮助面板 (最后绘制,在最上层)
-        self.hotkey_help.draw(ctx, canvas)?;
+        // 🎯 使用 RenderSystem::draw_ui 统一渲染所有 UI（符合ECS设计原则）
+        // 分层渲染: 调试UI -> 游戏UI -> 覆盖层UI
+        RenderSystem::draw_ui(
+            ctx, 
+            canvas, 
+            world, 
+            0,  // current_time TODO: 传递正确的时间
+            self.time_entity, 
+            &self.hotkey_help,
+            &self.ui_font_name
+        )?;
         
         Ok(())
     }
@@ -922,34 +909,34 @@ impl Scene for GameScene {
         Ok(())
     }
     
-    fn on_resize(
-        &mut self,
-        _ctx: &mut Context,
-        world: &mut World,
-        width: f32,
-        height: f32,
-    ) -> GameResult {
-        // 忽略无效尺寸(避免启动时的闪烁)
-        if width <= 1.0 || height <= 1.0 {
-            println!("⚠️ 忽略无效窗口尺寸: {}x{}", width, height);
-            return Ok(());
-        }
+    // fn on_resize(
+    //     &mut self,
+    //     _ctx: &mut Context,
+    //     world: &mut World,
+    //     width: f32,
+    //     height: f32,
+    // ) -> GameResult {
+    //     // 忽略无效尺寸(避免启动时的闪烁)
+    //     if width <= 1.0 || height <= 1.0 {
+    //         println!("⚠️ 忽略无效窗口尺寸: {}x{}", width, height);
+    //         return Ok(());
+    //     }
         
-        // 更新相机尺寸
-        if let Ok(mut camera) = world.get::<&mut Camera>(self.camera_entity) {
-            camera.screen_width = width;
-            camera.screen_height = height;
-        }
+    //     // 更新相机尺寸
+    //     if let Ok(mut camera) = world.get::<&mut Camera>(self.camera_entity) {
+    //         camera.screen_width = width;
+    //         camera.screen_height = height;
+    //     }
         
-        // 更新主对话框尺寸
-        if let Some(main_dialog) = self.get_main_dialog_mut(world) {
-            main_dialog.dialog.resize(width, height);
-        }
+    //     // 更新主对话框尺寸
+    //     if let Some(main_dialog) = self.get_main_dialog_mut(world) {
+    //         main_dialog.dialog.resize(width, height);
+    //     }
         
-        println!("📐 窗口调整: {}x{}", width, height);
+    //     println!("📐 窗口调整: {}x{}", width, height);
         
-        Ok(())
-    }
+    //     Ok(())
+    // }
     
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self

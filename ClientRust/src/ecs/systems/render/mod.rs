@@ -10,13 +10,6 @@ mod player;
 mod tiles;
 mod ui;  // UI渲染方法 (RenderSystem::draw_ui)
 
-// 重新导出所有公共函数
-pub use debug::*;
-pub use item::*;
-pub use monster::*;
-pub use npc::*;
-pub use player::*;
-pub use tiles::*;
 
 use ggez::{Context};
 use ggez::graphics::{self, Canvas, DrawParam, Color, BlendMode, BlendComponent, BlendFactor, BlendOperation, Text, TextFragment, PxScale, Rect, Mesh};
