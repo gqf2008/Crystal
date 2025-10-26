@@ -8,6 +8,7 @@ mod monster;
 mod npc;
 mod player;
 mod tiles;
+mod ui;  // UI渲染方法 (RenderSystem::draw_ui)
 
 // 重新导出所有公共函数
 pub use debug::*;

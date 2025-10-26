@@ -818,8 +818,8 @@ impl Scene for GameScene {
                 .color(Color::from_rgb(200, 200, 200)),
         );
         
-        // 🎯 只使用 UISystem 渲染所有 UI组件（移除UIRenderer避免重复绘制）
-        self.ui_system.draw(ctx, canvas, world, 0)?; // TODO: 传递正确的 current_time
+        // 🎯 使用 RenderSystem::draw_ui 渲染所有 UI组件（符合ECS设计原则）
+        RenderSystem::draw_ui(ctx, canvas, world, 0)?; // TODO: 传递正确的 current_time
         
         // 🎯 绘制按键帮助面板 (最后绘制,在最上层)
         self.hotkey_help.draw(ctx, canvas)?;

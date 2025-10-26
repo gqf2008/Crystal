@@ -4,14 +4,14 @@
 //
 // 职责:
 // - 处理 UI 事件 (聊天消息、金币变化、物品获得等)
-// - 统一渲染所有 UI 组件
+// - 管理 UI 状态和数据更新
 // - 解耦 UI 更新逻辑
+//
+// 注意: UI渲染由 RenderSystem::draw_ui 负责，符合ECS设计原则
 //
 // ============================================================================
 
 use hecs::{World, Entity};
-use ggez::{Context, GameResult};
-use ggez::graphics::Canvas;
 
 use crate::ecs::ui::{
     MainDialogComp, InventoryDialogComp, CharacterDialogComp,
@@ -170,103 +170,6 @@ impl UISystem {
             // 其他事件暂不处理
             _ => {}
         }
-    }
-    
-    /// 渲染所有 UI 组件
-    /// 
-    /// 使用 DrawParam.z() 控制绘制顺序:
-    /// - z = 0: 主对话框(MainDialog) - 最底层,始终显示
-    /// - z = 1: 技能栏(SkillBar) - 底层固定UI
-    /// - z = 2: 聊天对话框(Chat) - 底层固定UI  
-    /// - z = 10-100: 可弹出对话框,根据 DialogManager 的 z_order 动态分配
-    ///   - 先打开的 z 值小,后打开的 z 值大,显示在上层
-    ///   - 点击对话框时会提升到最上层(最大 z 值)
-    pub fn draw(
-        &self,
-        ctx: &mut Context,
-        canvas: &mut Canvas,
-        world: &World,
-        current_time: u64,
-    ) -> GameResult {
-        // 调试输出 (只打印前3次)
-        static mut DRAW_COUNT: u32 = 0;
-        unsafe {
-            if DRAW_COUNT < 3 {
-                println!("🎨 [UISystem::draw] 调用 #{}", DRAW_COUNT + 1);
-                DRAW_COUNT += 1;
-            }
-        }
-        
-        // 🎯 第1层: 主对话框 (z=0, 最底层, 始终显示)
-        for (_, dialog_comp) in world.query::<&MainDialogComp>().iter() {
-            dialog_comp.dialog.draw(ctx, canvas)?;
-        }
-        
-        // 🎯 第2层: 技能栏 (z=1, 固定UI)
-        for (_, skill_bar_comp) in world.query::<&SkillBarComp>().iter() {
-            skill_bar_comp.dialog.draw(ctx, canvas, current_time)?;
-        }
-        
-        // 🎯 第3层: 聊天对话框 (z=2, 固定UI, 始终显示)
-        for (_, dialog_comp) in world.query::<&ChatDialogComp>().iter() {
-            dialog_comp.dialog.draw(ctx, canvas)?;
-        }
-        
-        // 🎯 第4层及以上: 可弹出对话框 (z=10+, 按打开顺序渲染)
-        // 策略: 收集所有打开的对话框到Vec,按组件顺序渲染 (先渲染先打开的)
-        // 这样后打开的对话框会覆盖在前面打开的之上
-        
-        // 固定渲染顺序 (从底层到顶层):
-        // 1. 背包对话框
-        // 2. 角色对话框
-        // 3. 技能学习对话框
-        // 4. 任务对话框
-        // 5. 技能对话框
-        // 6. 选项对话框
-        
-        // 渲染背包对话框 (仅在打开时显示, z=10)
-        for (_, dialog_comp) in world.query::<&InventoryDialogComp>().iter() {
-            if dialog_comp.is_open {
-                dialog_comp.dialog.draw(ctx, canvas)?;
-            }
-        }
-        
-        // 渲染角色对话框 (仅在打开时显示, z=11)
-        for (_, dialog_comp) in world.query::<&CharacterDialogComp>().iter() {
-            if dialog_comp.is_open {
-                dialog_comp.dialog.draw(ctx, canvas)?;
-            }
-        }
-        
-        // 渲染技能学习对话框 (仅在打开时显示, z=12)
-        for (_, dialog_comp) in world.query::<&MagicLearningDialogComp>().iter() {
-            if dialog_comp.is_open {
-                dialog_comp.dialog.draw(ctx, canvas)?;
-            }
-        }
-        
-        // 渲染任务对话框 (仅在打开时显示, z=13)
-        for (_, dialog_comp) in world.query::<&QuestDialogComp>().iter() {
-            if dialog_comp.is_open {
-                dialog_comp.draw(ctx, canvas)?;
-            }
-        }
-        
-        // 渲染技能对话框 (仅在打开时显示, z=14)
-        for (_, dialog_comp) in world.query::<&SkillsDialogComp>().iter() {
-            if dialog_comp.is_open {
-                dialog_comp.dialog.draw(ctx, canvas)?;
-            }
-        }
-        
-        // 渲染选项对话框 (仅在打开时显示, z=15, 最上层)
-        for (_, dialog_comp) in world.query::<&OptionsDialogComp>().iter() {
-            if dialog_comp.is_open {
-                dialog_comp.dialog.draw(ctx, canvas)?;
-            }
-        }
-        
-        Ok(())
     }
     
     // ========================================================================
