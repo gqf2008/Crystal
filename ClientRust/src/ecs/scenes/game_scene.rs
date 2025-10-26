@@ -189,6 +189,9 @@ impl GameScene {
             show_obstacles: false,
             show_animations: true,
             show_borders: false,
+            show_npc_borders: false,
+            show_monster_borders: false,
+            show_effect_borders: false,
             show_path: false,
             max_fps: 160,
             enable_lod: true,
@@ -222,7 +225,15 @@ impl GameScene {
                 waiting_server_confirm: false,  // 🎯 初始不等待确认
             },
             Position { x: player_world_x, y: player_world_y },  // 📍 使用真实位置
-            PlayerAppearance::default(),  // 默认外观（战士男）
+            PlayerAppearance {
+                class: MirClass::Warrior,
+                gender: MirGender::Female,  // 🚺 设置为女性角色
+                hair: 0,
+                weapon: -1,
+                armour: 0,
+                weapon_effect: 0,
+                wing_effect: 0,
+            },
             Inventory::default(),  // 默认背包（40格）
             Equipment::new(),  // 装备栏
             LocalPlayer,  // 本地玩家标记
@@ -230,7 +241,7 @@ impl GameScene {
                 id: 1,
                 name: "勇士".to_string(),
                 class: MirClass::Warrior,
-                gender: MirGender::Male,
+                gender: MirGender::Female,  // 🚺 保持一致
                 exp: 750,
                 gold: 100,
             },
@@ -692,12 +703,12 @@ impl Scene for GameScene {
             match entity_type {
                 EntityType::Monster(entity) => {
                     if let Ok(entity_pos) = world.get::<&Position>(entity) {
-                        RenderSystem::draw_single_monster(ctx, canvas, world, entity, &entity_pos, &pos, &camera)?;
+                        RenderSystem::draw_single_monster(ctx, canvas, world, entity, &entity_pos, &pos, &camera, &config)?;
                     }
                 }
                 EntityType::NPC(entity) => {
                     if let Ok(entity_pos) = world.get::<&Position>(entity) {
-                        RenderSystem::draw_single_npc(ctx, canvas, world, entity, &entity_pos, &pos, &camera)?;
+                        RenderSystem::draw_single_npc(ctx, canvas, world, entity, &entity_pos, &pos, &camera, &config)?;
                     }
                 }
                 EntityType::Player(entity) => {

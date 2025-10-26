@@ -130,6 +130,9 @@ impl InputSystem {
             
             // === 调试快捷键 ===
             KeyB => Self::toggle_debug_borders(world),
+            KeyU => Self::toggle_npc_borders(world),     // U键 - NPC边框 (NPC User)
+            KeyI => Self::toggle_monster_borders(world), // I键 - Monster边框 (Monster Instance)
+            KeyY => Self::toggle_effect_borders(world),  // Y键 - 特效边框 (efFect)
             KeyG => Self::toggle_debug_grid(world),
             KeyO => Self::toggle_debug_obstacles(world),
             KeyP => Self::toggle_debug_path(world),
@@ -419,6 +422,39 @@ impl InputSystem {
         for (_, config) in world.query_mut::<&mut RenderConfig>() {
             config.show_borders = !config.show_borders;
             tracing::info!("🖼️ 纹理边框 (B): {}", if config.show_borders { "显示" } else { "隐藏" });
+            break;
+        }
+    }
+    
+    /// 切换NPC边框显示
+    fn toggle_npc_borders(world: &mut World) {
+        use crate::ecs::components::RenderConfig;
+        
+        for (_, config) in world.query_mut::<&mut RenderConfig>() {
+            config.show_npc_borders = !config.show_npc_borders;
+            tracing::info!("👤 NPC边框 (N): {}", if config.show_npc_borders { "显示" } else { "隐藏" });
+            break;
+        }
+    }
+    
+    /// 切换Monster边框显示
+    fn toggle_monster_borders(world: &mut World) {
+        use crate::ecs::components::RenderConfig;
+        
+        for (_, config) in world.query_mut::<&mut RenderConfig>() {
+            config.show_monster_borders = !config.show_monster_borders;
+            tracing::info!("👾 Monster边框 (M): {}", if config.show_monster_borders { "显示" } else { "隐藏" });
+            break;
+        }
+    }
+    
+    /// 切换特效边框显示
+    fn toggle_effect_borders(world: &mut World) {
+        use crate::ecs::components::RenderConfig;
+        
+        for (_, config) in world.query_mut::<&mut RenderConfig>() {
+            config.show_effect_borders = !config.show_effect_borders;
+            tracing::info!("✨ 特效边框 (E): {}", if config.show_effect_borders { "显示" } else { "隐藏" });
             break;
         }
     }

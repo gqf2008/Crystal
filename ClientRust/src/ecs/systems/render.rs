@@ -12,7 +12,7 @@
 //   - draw_obstacles: 障碍物可视化 (完整)
 
 use ggez::{Context, GameResult};
-use ggez::graphics::{Canvas, DrawParam, Color, BlendMode, BlendComponent, BlendFactor, BlendOperation};
+use ggez::graphics::{self, Canvas, DrawParam, Color, BlendMode, BlendComponent, BlendFactor, BlendOperation};
 use hecs::World;
 
 // 从共享模块导入类型
@@ -1413,8 +1413,9 @@ impl RenderSystem {
         pos: &Position,
         camera_pos: &Position,
         camera: &Camera,
+        config: &RenderConfig,
     ) -> GameResult<()> {
-        use crate::ecs::components::{MonsterData, Animation};
+        use crate::ecs::components::{MonsterData, Animation, Direction};
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
         use mir2_shared::MirAction;
@@ -1429,6 +1430,13 @@ impl RenderSystem {
             Ok(a) => a,
             Err(_) => return Ok(()),
         };
+        
+        // 获取Direction组件
+        let dir = match world.get::<&Direction>(entity) {
+            Ok(d) => d,
+            Err(_) => return Ok(()), // 如果没有Direction组件,跳过
+        };
+        let direction = dir.current as u8;
         
         // 获取怪物图库
         let lib_index = monster.monster_index as usize;
@@ -1446,7 +1454,8 @@ impl RenderSystem {
         
         // 计算帧索引: Frame.Start + (Frame.OffSet * Direction) + FrameIndex
         // 这与C#原版完全一致: DrawFrame = Frame.Start + (Frame.OffSet * (byte)Direction) + FrameIndex;
-        let direction_offset = frame.offset() * (anim.direction as i32);
+        // 使用Direction组件的值
+        let direction_offset = frame.offset() * (direction as i32);
         let draw_frame = frame.start + direction_offset + anim.frame_index as i32;
         let final_frame = draw_frame;
         
@@ -1472,6 +1481,22 @@ impl RenderSystem {
                             .dest([draw_x, draw_y])
                             .scale([camera.zoom, camera.zoom]),
                     );
+                    
+                    // 🔲 调试边框
+                    if config.show_monster_borders {
+                        let image_width = image.width() as f32 * camera.zoom;
+                        let image_height = image.height() as f32 * camera.zoom;
+                        let rect = graphics::Rect::new(draw_x, draw_y, image_width, image_height);
+                        let mesh = graphics::Mesh::new_rectangle(
+                            ctx,
+                            graphics::DrawMode::stroke(1.0),
+                            rect,
+                            graphics::Color::from_rgb(255, 0, 255), // 紫色
+                        ).ok();
+                        if let Some(mesh) = mesh {
+                            canvas.draw(&mesh, DrawParam::default());
+                        }
+                    }
                 }
             }
             Err(_) => {}
@@ -1486,19 +1511,23 @@ impl RenderSystem {
         world: &World,
         camera_pos: &Position,
         camera: &Camera,
+        config: &RenderConfig,
     ) -> GameResult<()> {
-        use crate::ecs::components::{MonsterData, Animation};
+        use crate::ecs::components::{MonsterData, Animation, Direction};
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
         use mir2_shared::MirAction;
         
-        // 遍历所有怪物实体
-        for (_entity, (monster, pos, anim)) in 
-            world.query::<(&MonsterData, &Position, &Animation)>().iter() 
+        // 遍历所有怪物实体 - 包含Direction组件以获取正确的方向
+        for (_entity, (monster, pos, anim, dir)) in 
+            world.query::<(&MonsterData, &Position, &Animation, &Direction)>().iter() 
         {
+            // 使用Direction组件的current值而不是Animation.direction
+            let direction = dir.current as u8;
+            
             // 🐛 调试信息
             println!("👹 绘制怪物: name={}, monster_index={}, pos=({:.1}, {:.1}), action={:?}, dir={}", 
-                monster.name, monster.monster_index, pos.x, pos.y, anim.action, anim.direction);
+                monster.name, monster.monster_index, pos.x, pos.y, anim.action, direction);
             
             // 获取怪物图库
             // 传奇怪物库组织: 每个怪物有独立的库文件
@@ -1533,12 +1562,13 @@ impl RenderSystem {
             
             // 计算帧索引: Frame.Start + (Frame.OffSet * Direction) + FrameIndex
             // 这与C#原版完全一致: DrawFrame = Frame.Start + (Frame.OffSet * (byte)Direction) + FrameIndex;
-            let direction_offset = frame.offset() * (anim.direction as i32);
+            // 使用Direction组件的值而不是Animation.direction
+            let direction_offset = frame.offset() * (direction as i32);
             let draw_frame = frame.start + direction_offset + anim.frame_index as i32;
             let final_frame = draw_frame;
             
-            println!("  📊 帧计算: lib_index={}, frame_start={}, offset={}, dir_offset={}, frame_idx={}, final={}", 
-                lib_index, frame.start, frame.offset(), direction_offset, anim.frame_index, final_frame);
+            println!("  📊 帧计算: lib_index={}, frame_start={}, offset={}, dir={}, dir_offset={}, frame_idx={}, final={}", 
+                lib_index, frame.start, frame.offset(), direction, direction_offset, anim.frame_index, final_frame);
             
             // 转换为屏幕坐标
             let (screen_x, screen_y) = CameraSystem::world_to_screen(
@@ -1572,6 +1602,22 @@ impl RenderSystem {
                                 .scale([camera.zoom, camera.zoom]),
                         );
                         println!("  ✅ 怪物精灵绘制成功");
+                        
+                        // 🔲 调试边框
+                        if config.show_monster_borders {
+                            let image_width = image.width() as f32 * camera.zoom;
+                            let image_height = image.height() as f32 * camera.zoom;
+                            let rect = graphics::Rect::new(draw_x, draw_y, image_width, image_height);
+                            let mesh = graphics::Mesh::new_rectangle(
+                                ctx,
+                                graphics::DrawMode::stroke(1.0),
+                                rect,
+                                graphics::Color::from_rgb(255, 0, 255), // 紫色
+                            ).ok();
+                            if let Some(mesh) = mesh {
+                                canvas.draw(&mesh, DrawParam::default());
+                            }
+                        }
                     } else {
                         println!("  ⚠️ 怪物图像为空 (image_info存在但image为None)!");
                         tracing::warn!("  ⚠️ 怪物图像为空!");
@@ -1694,15 +1740,19 @@ impl RenderSystem {
         world: &World,
         camera_pos: &Position,
         camera: &Camera,
+        config: &RenderConfig,
     ) -> GameResult<()> {
-        use crate::ecs::components::{NPCData, Animation};
+        use crate::ecs::components::{NPCData, Animation, Direction};
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
         
-        // 遍历所有NPC实体
-        for (_entity, (npc, pos, anim)) in 
-            world.query::<(&NPCData, &Position, &Animation)>().iter() 
+        // 遍历所有NPC实体 - 包含Direction组件以获取正确的方向
+        for (_entity, (npc, pos, anim, dir)) in 
+            world.query::<(&NPCData, &Position, &Animation, &Direction)>().iter() 
         {
+            // 使用Direction组件的current值而不是Animation.direction
+            let direction = dir.current as u8;
+            
             // 获取NPC图库
             // NPC库使用 LibraryArray::NPCs
             // ⚠️ 修复：不应该除以1000，直接使用npc_index作为库索引
@@ -1723,7 +1773,8 @@ impl RenderSystem {
                 (0, 4)
             };
             
-            let direction_offset = (anim.direction as i32) * frames_per_direction;
+            // 使用Direction组件的值而不是Animation.direction
+            let direction_offset = (direction as i32) * frames_per_direction;
             let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
             
             // ⚠️ 修复：不需要npc_offset，直接使用draw_frame
@@ -1757,6 +1808,22 @@ impl RenderSystem {
                                 .scale([camera.zoom, camera.zoom])
                                 .color(color),
                         );
+                        
+                        // 🔲 调试边框
+                        if config.show_npc_borders {
+                            let image_width = image.width() as f32 * camera.zoom;
+                            let image_height = image.height() as f32 * camera.zoom;
+                            let rect = graphics::Rect::new(draw_x, draw_y, image_width, image_height);
+                            let mesh = graphics::Mesh::new_rectangle(
+                                ctx,
+                                graphics::DrawMode::stroke(1.0),
+                                rect,
+                                graphics::Color::from_rgb(0, 255, 255), // 青色
+                            ).ok();
+                            if let Some(mesh) = mesh {
+                                canvas.draw(&mesh, DrawParam::default());
+                            }
+                        }
                     }
                     
                     // 🌟 绘制特效层
@@ -1803,8 +1870,9 @@ impl RenderSystem {
         pos: &Position,
         camera_pos: &Position,
         camera: &Camera,
+        config: &RenderConfig,
     ) -> GameResult<()> {
-        use crate::ecs::components::{NPCData, Animation};
+        use crate::ecs::components::{NPCData, Animation, Direction};
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
         
@@ -1818,6 +1886,13 @@ impl RenderSystem {
             Ok(a) => a,
             Err(_) => return Ok(()),
         };
+        
+        // 获取Direction组件
+        let dir = match world.get::<&Direction>(entity) {
+            Ok(d) => d,
+            Err(_) => return Ok(()), // 如果没有Direction组件,跳过
+        };
+        let direction = dir.current as u8;
         
         // 获取NPC图库
         // ⚠️ 修复：不应该除以1000，直接使用npc_index作为库索引
@@ -1836,7 +1911,8 @@ impl RenderSystem {
             (0, 4) // 默认
         };
         
-        let direction_offset = (anim.direction as i32) * frames_per_direction;
+        // 使用Direction组件的值
+        let direction_offset = (direction as i32) * frames_per_direction;
         let draw_frame = action_frame_start + direction_offset + anim.frame_index as i32;
         // ⚠️ 修复：不需要npc_offset，直接使用draw_frame
         let final_frame = draw_frame;
@@ -1869,6 +1945,22 @@ impl RenderSystem {
                             .scale([camera.zoom, camera.zoom])
                             .color(color),
                     );
+                    
+                    // 🔲 调试边框
+                    if config.show_npc_borders {
+                        let image_width = image.width() as f32 * camera.zoom;
+                        let image_height = image.height() as f32 * camera.zoom;
+                        let rect = graphics::Rect::new(draw_x, draw_y, image_width, image_height);
+                        let mesh = graphics::Mesh::new_rectangle(
+                            ctx,
+                            graphics::DrawMode::stroke(1.0),
+                            rect,
+                            graphics::Color::from_rgb(0, 255, 255), // 青色
+                        ).ok();
+                        if let Some(mesh) = mesh {
+                            canvas.draw(&mesh, DrawParam::default());
+                        }
+                    }
                 }
                 
                 // 🌟 绘制特效层 (武器、装饰等)

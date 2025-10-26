@@ -187,6 +187,9 @@ impl MapViewerApp {
             show_obstacles: false,
             show_animations: true,
             show_borders: false,
+            show_npc_borders: false,
+            show_monster_borders: false,
+            show_effect_borders: false,
             show_path: false,  // 🎯 默认不显示路径
             max_fps: 160,  // 🎯 最高160帧
             enable_lod: true,  // 🎯 启用LOD优化

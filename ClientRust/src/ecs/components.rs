@@ -887,6 +887,9 @@ pub struct RenderConfig {
     pub show_obstacles: bool,
     pub show_animations: bool,
     pub show_borders: bool,
+    pub show_npc_borders: bool,      // NPC边框调试
+    pub show_monster_borders: bool,  // Monster边框调试
+    pub show_effect_borders: bool,   // 特效边框调试
     pub show_path: bool,
     pub max_fps: u32,
     pub enable_lod: bool,
@@ -902,6 +905,9 @@ impl Default for RenderConfig {
             show_obstacles: false,
             show_animations: true,
             show_borders: false,
+            show_npc_borders: false,
+            show_monster_borders: false,
+            show_effect_borders: false,
             show_path: false,
             max_fps: 60,
             enable_lod: false,
