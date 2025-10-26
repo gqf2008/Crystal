@@ -354,18 +354,27 @@ impl NetworkSystem {
     fn handle_object_spawned(&mut self, world: &mut World, object: &crate::network::game_client::GameObject) {
         use crate::network::game_client::GameObject;
 
-        let (object_id, object_type) = match object {
-            GameObject::Player { id, .. } => (*id, "Player"),
-            GameObject::Monster { id, .. } => (*id, "Monster"),
-            GameObject::Npc { id, .. } => (*id, "Npc"),
-            GameObject::Item { id, .. } => (*id, "Item"),
+        let (object_id, object_type, object_name) = match object {
+            GameObject::Player { id, name, .. } => (*id, "Player", name.clone()),
+            GameObject::Monster { id, name, .. } => (*id, "Monster", name.clone()),
+            GameObject::Npc { id, name, .. } => (*id, "Npc", name.clone()),
+            GameObject::Item { id, .. } => (*id, "Item", "Item".to_string()),
         };
 
-        tracing::info!("🌟 生成网络对象: ID={}, 类型={}", object_id, object_type);
+        // 🔥 NPC 闪烁调试日志
+        if object_type == "Npc" {
+            tracing::warn!("🔷 [NPC闪烁调试] 收到 ObjectSpawned: ID={}, name={}", object_id, object_name);
+        } else {
+            tracing::info!("🌟 生成网络对象: ID={}, 类型={}", object_id, object_type);
+        }
 
         // 检查是否已存在
         if self.object_map.contains_key(&object_id) {
-            tracing::warn!("⚠️ 对象已存在: ID={}", object_id);
+            if object_type == "Npc" {
+                tracing::warn!("⚠️ [NPC闪烁调试] NPC 对象已存在: ID={}, name={} - 跳过创建", object_id, object_name);
+            } else {
+                tracing::warn!("⚠️ 对象已存在: ID={}", object_id);
+            }
             return;
         }
 
@@ -395,17 +404,18 @@ impl NetworkSystem {
     fn handle_object_removed(&mut self, world: &mut World, object_id: u32) {
         if let Some(entity) = self.object_map.remove(&object_id) {
             // 🐛 添加详细日志:检查实体类型
-            let entity_type = if world.get::<&crate::ecs::components::NPCData>(entity).is_ok() {
-                "NPC"
-            } else if world.get::<&crate::ecs::components::MonsterData>(entity).is_ok() {
-                "Monster"
+            let (entity_type, entity_name) = if let Ok(npc) = world.get::<&crate::ecs::components::NPCData>(entity) {
+                ("NPC", npc.name.clone())
+            } else if let Ok(monster) = world.get::<&crate::ecs::components::MonsterData>(entity) {
+                ("Monster", monster.name.clone())
             } else if world.get::<&crate::ecs::components::Player>(entity).is_ok() {
-                "Player"
+                ("Player", "OtherPlayer".to_string())
             } else {
-                "Unknown"
+                ("Unknown", "?".to_string())
             };
             
-            tracing::warn!("🗑️ 移除网络对象: ID={}, type={}", object_id, entity_type);
+            // 🔥 关键日志：NPC 被移除
+            tracing::warn!("🗑️ [NPC闪烁调试] 移除网络对象: ID={}, type={}, name={}", object_id, entity_type, entity_name);
             if let Err(e) = world.despawn(entity) {
                 tracing::warn!("⚠️ 删除实体失败: {:?}", e);
             }

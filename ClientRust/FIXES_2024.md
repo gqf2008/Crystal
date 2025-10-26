@@ -47,23 +47,43 @@
 
 ---
 
-### 3. ⏳ NPC闪烁问题 (调查中)
+### 3. ✅ NPC闪烁问题 (已修复)
 
-**问题**: 公告牌NPC时有时无,差不多1秒交替出现一次
+**问题**: 公告牌NPC时有时无,差不多1-2秒一次闪烁
 
-**当前调查**:
-- 终端日志没有`ObjectRemoved`事件,说明NPC实体没有被删除
-- 可能是渲染条件问题,例如纹理加载失败或渲染判断逻辑
+**根本原因**: 
+- NPC动画系统使用 `DEFAULT_NPC_FRAMES` 配置,其中 `Harvest` 动作定义为 `Frame::basic(12, 10, ...)`
+- 公告牌NPC(库索引45)只有7帧图像(索引0-6)
+- 当NPC切换到 `Harvest` 动作时,计算出的帧索引(10, 11等)超出范围
+- `get_or_create_texture` 返回错误,导致NPC不显示
 
-**已采取措施**:
-1. 将Y-sorting调试日志从`debug`提升到`info`级别
-2. 日志显示monster/NPC/front_tiles数量
-3. 等待用户测试查看日志输出
+**日志证据**:
+```
+⚠️ [NPC闪烁] NPC BorderVillage_Board 纹理加载失败! 
+frame=10, lib_index=45, error=Custom { 
+  kind: InvalidInput, 
+  error: "图像索引 10 超出范围 (max: 6)" 
+}
+```
 
-**待验证**:
-- 检查`RenderSystem::draw_single_npc`的条件
-- 检查纹理加载是否成功
-- 查看日志确认NPC是否一直在`entities_to_draw`中
+**解决方案**:
+在 `render_system/npc.rs::draw_single_npc` 中添加降级处理:
+1. 尝试加载计算出的帧索引
+2. 如果失败(帧超出范围),降级到第0帧(默认显示)
+3. 如果连第0帧都失败,才跳过NPC
+
+**效果**:
+- NPC始终显示(使用第0帧作为降级方案)
+- 不再闪烁消失
+- 日志降级为 `debug` 级别,避免刷屏
+
+**修改文件**:
+- `src/ecs/systems/render_system/npc.rs`: 添加帧索引降级处理
+- `src/ecs/systems/network_system.rs`: 添加调试日志(已移除)
+
+**后续优化** (可选):
+- 为不同NPC配置独立的FrameSet
+- 或者限制NPC动作只使用 `Standing`
 
 ---
 
