@@ -2,14 +2,14 @@
 // ECS Systems - 系统模块
 // ============================================================================
 
-pub mod camera;
-pub mod player;
-pub mod animation;
-pub mod render;
-pub mod network;
-pub mod monster;
+pub mod camera_system;
+pub mod player_system;
+pub mod animation_system;
+pub mod render_system;
+pub mod network_system;
+pub mod monster_system;
 pub mod ui_system;
-pub mod input_system;  // 🆕 输入系统
+pub mod input_system;
 pub mod magic_learning_system;
 pub mod magic_cast_system;
 pub mod item_system;
@@ -19,12 +19,12 @@ pub mod quest_system;
 pub mod trade_system;
 
 // 重新导出
-pub use camera::CameraSystem;
-pub use player::PlayerSystem;
-pub use animation::{AnimationSystem, DoorSystem, NPCActionSystem};
-pub use render::RenderSystem;
-pub use network::NetworkSystem;
-pub use monster::MonsterSystem;
+pub use camera_system::CameraSystem;
+pub use player_system::PlayerSystem;
+pub use animation_system::{AnimationSystem, DoorSystem, NPCActionSystem};
+pub use render_system::RenderSystem;
+pub use network_system::NetworkSystem;
+pub use monster_system::MonsterSystem;
 pub use ui_system::UISystem;
 pub use input_system::InputSystem;  // 🆕 输入系统
 pub use magic_learning_system::MagicLearningSystem;

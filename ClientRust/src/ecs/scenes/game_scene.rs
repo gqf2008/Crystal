@@ -526,7 +526,7 @@ impl Scene for GameScene {
             AnimationSystem::update_entities(world, delta_ms);
             
             // 🏪 更新NPC动作切换(Standing/Harvest随机切换)
-            use crate::ecs::systems::animation::NPCActionSystem;
+            use crate::ecs::systems::animation_system::NPCActionSystem;
             NPCActionSystem::update(world, delta_ms);
         }
         

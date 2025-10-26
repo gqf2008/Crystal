@@ -997,11 +997,11 @@ impl MLibrary {
             return Ok(());
         }
 
-        unsafe {
-            if index == 1 && DEBUG_COUNT <= 3 {
-                println!("✅ [mlibrary] 裁剪检查通过,即将调用 canvas.draw()");
-            }
-        }
+        // unsafe {
+        //     if index == 1 && DEBUG_COUNT <= 3 {
+        //         println!("✅ [mlibrary] 裁剪检查通过,即将调用 canvas.draw()");
+        //     }
+        // }
 
         // 绘制
         if let Some(ref image) = info.image {
@@ -1009,11 +1009,11 @@ impl MLibrary {
                 image,
                 DrawParam::default().dest([draw_x, draw_y]).color(color),
             );
-            unsafe {
-                if index == 1 && DEBUG_COUNT <= 3 {
-                    println!("✅ [mlibrary] canvas.draw() 调用完成");
-                }
-            }
+            // unsafe {
+            //     if index == 1 && DEBUG_COUNT <= 3 {
+            //         println!("✅ [mlibrary] canvas.draw() 调用完成");
+            //     }
+            // }
         } else {
             unsafe {
                 if index == 1 && DEBUG_COUNT <= 3 {
