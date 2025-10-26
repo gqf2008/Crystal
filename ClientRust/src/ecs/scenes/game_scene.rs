@@ -397,6 +397,7 @@ impl GameScene {
             visible_area_entity,
             network_system: NetworkSystem::new(),
             ui_system: UISystem::new(),
+            hotkey_help: HotkeyHelpPanel::new(),
             ui_font_name,
             main_dialog_entity,
             inventory_dialog_entity,
@@ -678,16 +679,29 @@ impl Scene for GameScene {
         let mut entities_to_draw: Vec<(i32, EntityType)> = Vec::new();
         
         // 收集怪物
+        let mut monster_count = 0;
         for (entity, pos) in world.query::<&Position>().iter() {
             if world.get::<&crate::ecs::components::MonsterData>(entity).is_ok() {
                 entities_to_draw.push((pos.y as i32, EntityType::Monster(entity)));
+                monster_count += 1;
             }
         }
         
         // 收集NPC
+        let mut npc_count = 0;
         for (entity, pos) in world.query::<&Position>().iter() {
             if world.get::<&crate::ecs::components::NPCData>(entity).is_ok() {
                 entities_to_draw.push((pos.y as i32, EntityType::NPC(entity)));
+                npc_count += 1;
+            }
+        }
+        
+        // 🐛 调试日志:每隔60帧打印一次实体计数
+        static mut FRAME_COUNTER: u32 = 0;
+        unsafe {
+            FRAME_COUNTER += 1;
+            if FRAME_COUNTER % 60 == 0 {
+                tracing::debug!("🎯 Y-sorting: {} monsters, {} NPCs", monster_count, npc_count);
             }
         }
         
@@ -793,6 +807,9 @@ impl Scene for GameScene {
         // 🎯 只使用 UISystem 渲染所有 UI组件（移除UIRenderer避免重复绘制）
         self.ui_system.draw(ctx, canvas, world, 0)?; // TODO: 传递正确的 current_time
         
+        // 🎯 绘制按键帮助面板 (最后绘制,在最上层)
+        self.hotkey_help.draw(ctx, canvas)?;
+        
         Ok(())
     }
     
@@ -813,6 +830,13 @@ impl Scene for GameScene {
             // Esc 键特殊处理 - 返回选择角色界面
             if keycode == KeyCode::Escape {
                 return Ok(Some(SceneType::Select));
+            }
+            
+            // H键 - 切换按键帮助面板
+            if keycode == KeyCode::KeyH {
+                self.hotkey_help.toggle();
+                tracing::info!("📖 按键帮助: {}", if self.hotkey_help.visible { "显示" } else { "隐藏" });
+                return Ok(None);
             }
             
             // ✅ 所有其他键盘输入交给 InputSystem 处理

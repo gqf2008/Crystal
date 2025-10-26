@@ -693,6 +693,113 @@ impl RenderSystem {
         Ok(())
     }
 
+    /// 绘制角色武器
+    /// 
+    /// # 参数
+    /// - `appearance`: 角色外观(包含武器索引)
+    /// - `player`: 玩家组件(动作、方向、帧)
+    /// - `camera_pos/camera`: 相机信息
+    /// - `player_pos`: 角色位置
+    /// - `body_frame`: 身体帧索引(用于计算武器帧偏移)
+    /// - `world_x/world_y`: 身体纹理的世界坐标
+    /// - `char_w/char_h`: 身体纹理尺寸
+    #[allow(clippy::too_many_arguments)]
+    fn draw_weapon(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        appearance: &crate::ecs::components::PlayerAppearance,
+        player: &Player,
+        camera_pos: &Position,
+        camera: &Camera,
+        _player_pos: &Position,
+        _body_frame: i32,
+        world_x: f32,
+        world_y: f32,
+        _char_w: i16,
+        _char_h: i16,
+    ) -> GameResult<()> {
+        // 如果没有装备武器,跳过
+        if appearance.weapon < 0 {
+            return Ok(());
+        }
+        
+        use crate::graphics::libraries::{get_library_from_array, LibraryArray};
+        use crate::ecs::systems::CameraSystem;
+        use mir2_shared::enums::MirGender;
+        
+        // 🗡️ CWeapon库 (武器纹理) - 使用LibraryArray
+        let weapon_index = appearance.weapon as usize;
+        
+        // 计算武器帧索引 (与身体相同的动作和方向)
+        let action_frame_start = player.action.frame_start();
+        let frames_per_direction = player.action.frame_count();
+        let direction_offset = (player.direction as i32) * frames_per_direction;
+        let draw_frame = action_frame_start + direction_offset + player.frame_index;
+        
+        // 🚺 性别帧偏移
+        let weapon_offset = match appearance.gender {
+            MirGender::Male => 0,
+            MirGender::Female => 808,
+        };
+        let final_weapon_frame = draw_frame + weapon_offset;
+        
+        // 获取武器纹理
+        if let Some(wlib) = get_library_from_array(LibraryArray::CWeapons, weapon_index) {
+            if let Ok(mut wlib) = wlib.lock() {
+                match wlib.get_or_create_texture(ctx, final_weapon_frame as usize) {
+                    Ok(info) => {
+                        if let Some(ref texture) = info.image {
+                            // 武器与身体使用相同的位置 (原版逻辑)
+                            let (screen_x, screen_y) = CameraSystem::world_to_screen(
+                                camera_pos, 
+                                camera, 
+                                world_x,
+                                world_y
+                            );
+                            
+                            canvas.draw(
+                                texture,
+                                DrawParam::default()
+                                    .dest([screen_x, screen_y])
+                                    .scale([camera.zoom, camera.zoom])
+                                    .color(Color::WHITE),
+                            );
+                            
+                            // 🌟 绘制武器特效 (CWeaponEffect库)
+                            if appearance.weapon_effect > 0 {
+                                let effect_index = appearance.weapon_effect as usize;
+                                if let Some(elib) = get_library_from_array(LibraryArray::CWeaponEffect, effect_index) {
+                                    if let Ok(mut elib) = elib.lock() {
+                                        match elib.get_or_create_texture(ctx, final_weapon_frame as usize) {
+                                            Ok(effect_info) => {
+                                                if let Some(ref effect_texture) = effect_info.image {
+                                                    // 武器特效使用混合模式 (0.4透明度)
+                                                    canvas.set_blend_mode(Self::create_blend_mode());
+                                                    canvas.draw(
+                                                        effect_texture,
+                                                        DrawParam::default()
+                                                            .dest([screen_x, screen_y])
+                                                            .scale([camera.zoom, camera.zoom])
+                                                            .color(Color::from_rgba(255, 255, 255, 102)), // 40% alpha = 102
+                                                    );
+                                                    canvas.set_blend_mode(BlendMode::ALPHA);
+                                                }
+                                            }
+                                            Err(_) => {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
     /// 绘制角色（带Front层重叠检测）
     pub fn draw_player_with_world(
         ctx: &mut Context,
@@ -827,6 +934,8 @@ impl RenderSystem {
         // 纹理尺寸和偏移量 (用于后续 AABB 计算)
         let mut char_w = 48;
         let mut char_h = 64;
+        let world_x;
+        let world_y;
         
         // ✅ 获取角色纹理 - 根据职业和性别使用对应的库
         if let Some(mlib) = get_library(library_name) {
@@ -839,6 +948,23 @@ impl RenderSystem {
                 let (_offset_x, _offset_y) = mlib
                     .get_offset(final_frame as usize)
                     .unwrap_or((0, 0));
+                
+                // 计算纹理位置
+                let green_bottom_y = player_pos.y + (CELL_HEIGHT as f32 / 2.0);
+                world_x = player_pos.x + (CELL_WIDTH as f32 / 2.0) - (char_w as f32 / 2.0);
+                world_y = green_bottom_y - char_h as f32;
+                
+                // 🗡️ 左侧方向:先绘制武器(在身体后面)
+                // player.direction 是 u8: 0=Up, 1=UpRight, 2=Right, 3=DownRight, 4=Down, 5=DownLeft, 6=Left, 7=UpLeft
+                let draw_weapon_back = matches!(player.direction, 
+                    0 | 6 | 7 | 5); // Up, Left, UpLeft, DownLeft
+                
+                if draw_weapon_back {
+                    if let Some(ref app) = appearance {
+                        Self::draw_weapon(ctx, canvas, app, player, camera_pos, camera, 
+                            player_pos, final_frame, world_x, world_y, char_w, char_h)?;
+                    }
+                }
                 
                 // 获取纹理
                 match mlib.get_or_create_texture(ctx, final_frame as usize) {
@@ -854,9 +980,6 @@ impl RenderSystem {
                             // 
                             // ⚠️ X方向: 原工程中角色在格子右侧，所以需要向右偏移
                             // 格子中心 + 半格宽度 = 格子右边缘
-                            let green_bottom_y = player_pos.y + (CELL_HEIGHT as f32 / 2.0);
-                            let world_x = player_pos.x + (CELL_WIDTH as f32 / 2.0) - (char_w as f32 / 2.0);
-                            let world_y = green_bottom_y - char_h as f32;
                             
                             let (screen_x, screen_y) = CameraSystem::world_to_screen(
                                 camera_pos, 
@@ -876,9 +999,46 @@ impl RenderSystem {
                                     .scale([camera.zoom, camera.zoom])
                                     .color(color),
                             );
+                            
+                            // 🗡️ 绘制武器 (CWeapon库)
+                            // 根据方向决定武器层级:
+                            // - 左侧方向: 武器在身体后面(已在前面绘制)
+                            // - 右侧方向: 武器在身体前面(在这里绘制)
+                            // player.direction 是 u8: 0=Up, 1=UpRight, 2=Right, 3=DownRight, 4=Down, 5=DownLeft, 6=Left, 7=UpLeft
+                            let draw_weapon_front = matches!(player.direction, 
+                                1 | 2 | 3 | 4); // UpRight, Right, DownRight, Down
+                            
+                            if draw_weapon_front {
+                                if let Some(ref app) = appearance {
+                                    Self::draw_weapon(ctx, canvas, app, player, camera_pos, camera, 
+                                        player_pos, final_frame, world_x, world_y, char_w, char_h)?;
+                                }
+                            }
                         }
                     }
                     Err(_) => {}
+                }
+            } else {
+                // 没有纹理时,先尝试绘制武器(左侧方向)
+                let draw_weapon_back = matches!(player.direction, 
+                    0 | 6 | 7 | 5); // Up, Left, UpLeft, DownLeft
+                
+                if draw_weapon_back {
+                    if let Some(app) = &appearance {
+                        Self::draw_weapon(ctx, canvas, app, player, camera_pos, camera, 
+                            player_pos, 0, 0.0, 0.0, 48, 64)?;
+                    }
+                }
+            }
+        } else {
+            // 身体纹理获取失败前,先绘制武器(左侧方向)
+            let draw_weapon_back = matches!(player.direction, 
+                0 | 6 | 7 | 5); // Up, Left, UpLeft, DownLeft
+            
+            if draw_weapon_back {
+                if let Some(app) = &appearance {
+                    Self::draw_weapon(ctx, canvas, app, player, camera_pos, camera, 
+                        player_pos, 0, 0.0, 0.0, 48, 64)?;
                 }
             }
         }
@@ -1418,7 +1578,6 @@ impl RenderSystem {
         use crate::ecs::components::{MonsterData, Animation, Direction};
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
-        use mir2_shared::MirAction;
         
         // 获取怪物数据和动画
         let monster = match world.get::<&MonsterData>(entity) {
@@ -1516,7 +1675,6 @@ impl RenderSystem {
         use crate::ecs::components::{MonsterData, Animation, Direction};
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
-        use mir2_shared::MirAction;
         
         // 遍历所有怪物实体 - 包含Direction组件以获取正确的方向
         for (_entity, (monster, pos, anim, dir)) in 

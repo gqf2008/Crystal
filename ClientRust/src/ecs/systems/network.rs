@@ -394,7 +394,18 @@ impl NetworkSystem {
     /// 处理对象移除事件
     fn handle_object_removed(&mut self, world: &mut World, object_id: u32) {
         if let Some(entity) = self.object_map.remove(&object_id) {
-            tracing::info!("🗑️ 移除网络对象: ID={}", object_id);
+            // 🐛 添加详细日志:检查实体类型
+            let entity_type = if world.get::<&crate::ecs::components::NPCData>(entity).is_ok() {
+                "NPC"
+            } else if world.get::<&crate::ecs::components::MonsterData>(entity).is_ok() {
+                "Monster"
+            } else if world.get::<&crate::ecs::components::Player>(entity).is_ok() {
+                "Player"
+            } else {
+                "Unknown"
+            };
+            
+            tracing::warn!("🗑️ 移除网络对象: ID={}, type={}", object_id, entity_type);
             if let Err(e) = world.despawn(entity) {
                 tracing::warn!("⚠️ 删除实体失败: {:?}", e);
             }
