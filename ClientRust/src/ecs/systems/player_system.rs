@@ -376,22 +376,32 @@ impl PlayerSystem {
                             player.collision_detected = true;
                             player.collision_target_grid = Some((target_grid_x, target_grid_y));
                         } else {
-                            // 平滑移动到目标格子中心
+                            // 🎬 原版C#不修改Position（CurrentLocation）
+                            // Position只在服务器确认时更新
+                            // 动画插值由MovementAnimation::offset_move提供平滑效果
+                            
+                            // 平滑移动方向
                             if distance > 10.0 {
                                 let target_dir = Self::calculate_direction(dx, dy);
                                 player.direction = Self::smooth_direction(player.direction, target_dir);
                             }
-                            pos.x += (dx / distance) * player.speed;
-                            pos.y += (dy / distance) * player.speed;
+                            
+                            // ⚠️ 不再修改Position - 使用动画帧插值代替
+                            // pos.x += (dx / distance) * player.speed;
+                            // pos.y += (dy / distance) * player.speed;
                             
                             // 清除碰撞标记
                             player.collision_detected = false;
                             player.collision_target_grid = None;
                         }
                     } else {
-                        // ✅ 到达格子中心：锁定位置,准备下一步
-                        pos.x = target_x;
-                        pos.y = target_y;
+                        // ✅ 到达格子中心（距离 <= player.speed）
+                        // 🎬 原版C#：不修改Position，等待服务器确认
+                        // 动画帧插值会自动完成最后的平滑过渡
+                        
+                        // ⚠️ 不再锁定位置 - Position由服务器确认
+                        // pos.x = target_x;
+                        // pos.y = target_y;
                         
                         // 🔍 检查是否还有下一个格子
                         let next_index = player.path_index + 1;
@@ -512,8 +522,13 @@ impl PlayerSystem {
                     // 检查最终位置是否可行走
                     let (final_grid_x, final_grid_y) = Coordinates::world_to_grid(player.target_x, player.target_y);
                     if MapUtils::is_walkable(&map_data, final_grid_x, final_grid_y) {
-                        pos.x = player.target_x;
-                        pos.y = player.target_y;
+                        // 🎬 原版C#：不修改Position，等待服务器确认
+                        // pos.x = player.target_x;
+                        // pos.y = player.target_y;
+                        
+                        // 到达目标，停止移动
+                        player.is_moving = false;
+                        player.action = PlayerAction::Stand;
                     } else {
                         // 目标不可行走，停止移动
                         player.is_moving = false;
@@ -540,8 +555,9 @@ impl PlayerSystem {
                         current_grid_x, current_grid_y, next_grid_x, next_grid_y, crossed_grid);
                     
                     if MapUtils::is_walkable(&map_data, next_grid_x, next_grid_y) {
-                        pos.x = next_x;
-                        pos.y = next_y;
+                        // 🎬 原版C#：不修改Position，使用动画帧插值
+                        // pos.x = next_x;
+                        // pos.y = next_y;
                         
                         // 清除碰撞标记
                         player.collision_detected = false;

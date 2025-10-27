@@ -90,9 +90,10 @@ impl NetworkSystem {
         let mut should_sync = false;
         
         {
-            let mut query = world.query::<(&LocalPlayer, &mut Position, &mut Player)>();
+            // 🎬 同时查询MovementAnimation组件以更新动画状态
+            let mut query = world.query::<(&LocalPlayer, &mut Position, &mut Player, Option<&mut crate::ecs::components::MovementAnimation>)>();
             
-            for (entity, (_local, position, player)) in query.iter() {
+            for (entity, (_local, position, player, movement_anim)) in query.iter() {
                 tracing::info!("🔍 找到本地玩家实体: entity={:?}", entity);
                 // 将格子坐标转换为世界坐标 (格子中心)
                 let (world_x, world_y) = crate::ecs::coordinates::Coordinates::grid_to_world_center(location.x, location.y);
@@ -151,6 +152,14 @@ impl NetworkSystem {
                     player.target_x = world_x;
                     player.target_y = world_y;
                     println!("  🔄 [同步] 强制更新位置: world=({:.1}, {:.1})", world_x, world_y);
+                    
+                    // 🎬 同步更新MovementAnimation的current_grid
+                    if let Some(ref mut anim) = movement_anim {
+                        anim.current_grid = (location.x, location.y);
+                        anim.movement_grid = (location.x, location.y);
+                        anim.offset_move = (0.0, 0.0);
+                        tracing::debug!("🎬 同步MovementAnimation: current_grid=({}, {})", location.x, location.y);
+                    }
                     
                     // 🎯 如果在自动寻路模式,更新路径索引到服务器位置
                     if player.move_mode == crate::ecs::components::MoveMode::AutoPathfinding 
@@ -238,12 +247,25 @@ impl NetworkSystem {
                             position.y = world_y;
                             player.target_x = world_x;
                             player.target_y = world_y;
+                            
+                            // 🎬 同步更新MovementAnimation
+                            if let Some(ref mut anim) = movement_anim {
+                                anim.current_grid = (location.x, location.y);
+                                anim.movement_grid = (location.x, location.y);
+                                anim.offset_move = (0.0, 0.0);
+                            }
                         }
                     }
                 } else {
                     // ✅ 同一个格子 - 服务器确认位置,允许客户端继续
                     println!("  ✅ [同步] 位置一致: 保持客户端插值");
                     tracing::debug!("✅ 服务器确认当前格子: ({}, {}) - 保持客户端插值", location.x, location.y);
+                    
+                    // 🎬 服务器确认当前格子，更新MovementAnimation的current_grid
+                    if let Some(ref mut anim) = movement_anim {
+                        anim.current_grid = (location.x, location.y);
+                        tracing::debug!("🎬 确认current_grid=({}, {})", location.x, location.y);
+                    }
                 }
                 
                 player_entity = Some(entity);
