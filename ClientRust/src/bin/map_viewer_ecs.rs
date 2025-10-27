@@ -90,6 +90,9 @@ use mir2_client::ecs::{
     RenderConfig,
     TimeTracker,
     VisibleArea,
+    LocalPlayer,      // 🎯 本地玩家标记
+    NetworkSync,      // 🎯 网络同步组件
+    NetworkObjectType, // 🎯 网络对象类型
     CELL_WIDTH, 
     CELL_HEIGHT,
     // Systems
@@ -98,6 +101,7 @@ use mir2_client::ecs::{
     AnimationSystem,
     DoorSystem,
     RenderSystem,
+    OcclusionSystem,  // 🎯 遮挡系统
     // Coordinate utilities
     Coordinates,
     MapUtils,
@@ -115,6 +119,7 @@ struct MapViewerApp {
     config_entity: Entity,
     visible_area_entity: Entity,
     ui_font_name: String,  // 🎨 中文UI字体名称
+    occlusion_system: OcclusionSystem,  // 🎯 遮挡系统
 }
 
 impl MapViewerApp {
@@ -215,10 +220,18 @@ impl MapViewerApp {
                 last_move_time: std::time::Instant::now(),
                 move_delay: std::time::Duration::from_millis(600),
                 waiting_server_confirm: false,
+                collision_detected: false,  // 🎯 碰撞调试
+                collision_target_grid: None,  // 🎯 碰撞调试
             },
             Position {
                 x: spawn_x,
                 y: spawn_y,
+            },
+            LocalPlayer,  // 🎯 本地玩家标记
+            NetworkSync {  // 🎯 网络同步组件（map_viewer 不需要真实同步，只是为了让渲染系统工作）
+                object_id: 1,
+                last_update: std::time::Instant::now(),
+                object_type: NetworkObjectType::Player,
             },
         ));
 
@@ -239,6 +252,9 @@ impl MapViewerApp {
         // 🎨 加载中文字体
         let ui_font_name = Self::load_chinese_font(ctx)?;
 
+        // 🎯 创建遮挡系统
+        let occlusion_system = OcclusionSystem::new();
+
         Ok(Self {
             world,
             camera_entity,
@@ -246,6 +262,7 @@ impl MapViewerApp {
             config_entity,
             visible_area_entity,
             ui_font_name,
+            occlusion_system,
         })
     }
 
@@ -396,6 +413,10 @@ impl EventHandler for MapViewerApp {
         // 更新角色系统
         PlayerSystem::update(&mut self.world,None);
 
+        // 🎯 遮挡系统已禁用 - 改用简单的混合模式+绘制顺序处理遮挡
+        // let delta_time = ctx.time.delta().as_secs_f32();
+        // self.occlusion_system.update(&mut self.world, delta_time);
+
         Ok(())
     }
 
@@ -432,8 +453,50 @@ impl EventHandler for MapViewerApp {
             RenderSystem::draw_obstacles(ctx, &mut canvas, &self.world, &pos, &camera)?;
         }
 
-        // 渲染角色
+        // 渲染角色（带遮挡检测）
         for (_entity, (player, player_pos)) in self.world.query::<(&Player, &Position)>().iter() {
+            // 🎯 默认使用 ALPHA 混合（正常显示）
+            canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+            
+            // 计算角色所在的格子坐标
+            let grid_x = (player_pos.x / mir2_client::ecs::CELL_WIDTH as f32) as i32;
+            let grid_y = (player_pos.y / mir2_client::ecs::CELL_HEIGHT as f32) as i32;
+            
+            // 查询该格子及周围的 Front 层瓦片，决定是否被遮挡
+            use mir2_client::graphics::get_map_library;
+            use mir2_client::ecs::components::{MapTile, TileLayer};
+            
+            for (_, tile) in self.world.query::<&MapTile>().iter() {
+                // 检查周围2x2格子范围内的 Front 层瓦片
+                if (tile.grid_x - grid_x).abs() <= 1
+                    && (tile.grid_y - grid_y).abs() <= 1
+                    && matches!(tile.layer, TileLayer::Front) 
+                {
+                    // 获取纹理信息
+                    if let Some(lib) = get_map_library(tile.library_index) {
+                        if let Ok(mut lib_guard) = lib.lock() {
+                            if let Ok(info) = lib_guard.get_or_create_texture(ctx, tile.image_index as usize) {
+                                if let Some(ref texture) = info.image {
+                                    // 计算瓦片世界坐标（纹理左上角）
+                                    let tile_world_y = tile.grid_y as f32 * mir2_client::ecs::CELL_HEIGHT as f32;
+                                    
+                                    // 计算纹理底部Y坐标
+                                    let tile_bottom_y = tile_world_y + texture.height() as f32;
+                                    
+                                    // 🎯 关键判断：角色被遮挡时使用 ADD 混合
+                                    // 当角色Y + 85 < 瓦片底部Y 时，说明角色在建筑物后面（被遮挡）
+                                    if player_pos.y + 85.0 < tile_bottom_y {
+                                        // 被遮挡：使用 ADD 混合，产生半透明效果让玩家能看到角色
+                                        canvas.set_blend_mode(graphics::BlendMode::ADD);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
             RenderSystem::draw_player_with_world(ctx, &mut canvas, &self.world, player, player_pos, &pos, &camera)?;
         }
 
@@ -441,6 +504,9 @@ impl EventHandler for MapViewerApp {
         if config.show_path {
             RenderSystem::draw_path(ctx, &mut canvas, &self.world, &pos, &camera)?;
         }
+        
+        // 🎯 绘制碰撞调试信息 (始终显示)
+        RenderSystem::draw_collision_debug(ctx, &mut canvas, &self.world, &pos, &camera)?;
 
         // 绘制 UI 文本（使用中文字体）
         let time = self.world.get::<&TimeTracker>(self.time_entity).unwrap();
@@ -756,7 +822,7 @@ impl EventHandler for MapViewerApp {
         
         let mut camera = self.world.get::<&mut Camera>(self.camera_entity).unwrap();
         camera.screen_width = actual_width;
-        camera.screen_height = actual_height;
+        camera.screen_height = actual_height; 
         Ok(())
     }
 }

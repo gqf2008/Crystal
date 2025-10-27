@@ -254,6 +254,10 @@ impl PlayerSystem {
                 let is_walkable = MapUtils::is_walkable(&map_data, target_grid_x, target_grid_y);
                 
                 if is_walkable {
+                    // 清除碰撞标记
+                    player.collision_detected = false;
+                    player.collision_target_grid = None;
+                    
                     match player.move_mode {
                         MoveMode::Idle | MoveMode::DirectFollow => {
                             player.target_x = mouse_world_x;
@@ -298,6 +302,12 @@ impl PlayerSystem {
             // 🎯 移动逻辑
             // 1. 自动寻路模式：沿路径移动（等待服务器确认）
             if player.move_mode == MoveMode::AutoPathfinding && !player.path.is_empty() {
+                let (current_grid_x, current_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
+                println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                println!("🗺️ [寻路] path_index={}/{} waiting={} current=({},{})", 
+                    player.path_index, player.path.len(), player.waiting_server_confirm,
+                    current_grid_x, current_grid_y);
+                
                 // ⚠️ 如果正在等待服务器确认，完全停止Position更新
                 if !player.waiting_server_confirm && player.path_index < player.path.len() {
                     let (target_grid_x, target_grid_y) = player.path[player.path_index];
@@ -307,59 +317,135 @@ impl PlayerSystem {
                     let dy = target_y - pos.y;
                     let distance = (dx * dx + dy * dy).sqrt();
                     
+                    // 计算距离上次移动的时间
+                    let now = std::time::Instant::now();
+                    let time_since_last_move = now.duration_since(player.last_move_time).as_millis();
+                    
+                    println!("  🎯 目标[{}]: grid=({},{}) dist={:.1} time_since_last={}ms", 
+                        player.path_index, target_grid_x, target_grid_y, distance, time_since_last_move);
+                    
                     // 🎯 只有距离足够大才移动（避免微小抖动）
                     if distance > player.speed {
-                        // 平滑移动到目标格子中心
-                        if distance > 10.0 {
-                            let target_dir = Self::calculate_direction(dx, dy);
-                            player.direction = Self::smooth_direction(player.direction, target_dir);
+                        // 🔍 检查目标格子是否可行走（在接近前检查）
+                        if !MapUtils::is_walkable(&map_data, target_grid_x, target_grid_y) {
+                            // 目标格子不可达，停止移动并标记碰撞
+                            println!("🚫 [AutoPath] 目标格子 ({},{}) 不可达！停止移动", target_grid_x, target_grid_y);
+                            player.is_moving = false;
+                            player.move_mode = MoveMode::Idle;
+                            player.action = PlayerAction::Stand;
+                            player.collision_detected = true;
+                            player.collision_target_grid = Some((target_grid_x, target_grid_y));
+                        } else {
+                            // 平滑移动到目标格子中心
+                            if distance > 10.0 {
+                                let target_dir = Self::calculate_direction(dx, dy);
+                                player.direction = Self::smooth_direction(player.direction, target_dir);
+                            }
+                            pos.x += (dx / distance) * player.speed;
+                            pos.y += (dy / distance) * player.speed;
+                            
+                            // 清除碰撞标记
+                            player.collision_detected = false;
+                            player.collision_target_grid = None;
                         }
-                        pos.x += (dx / distance) * player.speed;
-                        pos.y += (dy / distance) * player.speed;
                     } else {
-                        // ✅ 到达格子中心：锁定位置,立即发送命令
+                        // ✅ 到达格子中心：锁定位置,准备下一步
                         pos.x = target_x;
                         pos.y = target_y;
                         
-                        // 🌐 立即发送移动命令并等待服务器确认
+                        // 🔍 检查是否还有下一个格子
+                        let next_index = player.path_index + 1;
+                        if next_index >= player.path.len() {
+                            // 📍 已到达路径终点
+                            println!("✅ [寻路] 到达路径终点: grid=({}, {})", target_grid_x, target_grid_y);
+                            player.is_moving = false;
+                            player.move_mode = MoveMode::Idle;
+                            player.action = PlayerAction::Stand;
+                            player.path_index = player.path.len(); // 标记完成
+                            continue;
+                        }
+                        
+                        // 🌐 准备发送下一个格子的移动命令
                         if let Some(network_tx) = network_tx {
                             let now = std::time::Instant::now();
                             let elapsed = now.duration_since(player.last_move_time);
                             
                             if elapsed >= player.move_delay {
-                                let direction = match player.direction {
-                                    0 => MirDirection::Up,
-                                    1 => MirDirection::UpRight,
-                                    2 => MirDirection::Right,
-                                    3 => MirDirection::DownRight,
-                                    4 => MirDirection::Down,
-                                    5 => MirDirection::DownLeft,
-                                    6 => MirDirection::Left,
-                                    7 => MirDirection::UpLeft,
-                                    _ => MirDirection::Down,
+                                // 📍 当前已到达的格子
+                                let (current_grid_x, current_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
+                                
+                                // 🎯 下一个目标格子
+                                let (next_target_x, next_target_y) = player.path[next_index];
+                                
+                                // 🎯 计算从当前格子到下一个格子的方向
+                                let grid_dx = next_target_x as i32 - current_grid_x as i32;
+                                let grid_dy = next_target_y as i32 - current_grid_y as i32;
+                                
+                                // 根据格子偏移计算方向
+                                let direction = match (grid_dx, grid_dy) {
+                                    (0, -1) => MirDirection::Up,           // 上
+                                    (1, -1) => MirDirection::UpRight,      // 右上
+                                    (1, 0) => MirDirection::Right,         // 右
+                                    (1, 1) => MirDirection::DownRight,     // 右下
+                                    (0, 1) => MirDirection::Down,          // 下
+                                    (-1, 1) => MirDirection::DownLeft,     // 左下
+                                    (-1, 0) => MirDirection::Left,         // 左
+                                    (-1, -1) => MirDirection::UpLeft,      // 左上
+                                    _ => {
+                                        // ⚠️ 如果不是相邻格子，说明路径计算错误
+                                        tracing::error!("❌ 路径错误! current=({}, {}), next=({}, {}), offset=({}, {})",
+                                            current_grid_x, current_grid_y, next_target_x, next_target_y, grid_dx, grid_dy);
+                                        // 停止移动
+                                        player.is_moving = false;
+                                        player.move_mode = MoveMode::Idle;
+                                        player.action = PlayerAction::Stand;
+                                        continue;
+                                    }
                                 };
                                 
                                 match player.action {
                                     PlayerAction::Run => {
                                         let _ = network_tx.send(NetworkCommand::Run { direction });
-                                        tracing::info!("🌐 到达格子中心,发送跑步命令: direction={:?}, target=({}, {})", 
-                                            direction, target_grid_x, target_grid_y);
+                                        println!("🌐 [网络] 发送Run命令: current=({},{}) → next=({},{}) dir={:?}", 
+                                            current_grid_x, current_grid_y, next_target_x, next_target_y, direction);
+                                        tracing::info!("🌐 发送Run: current=({},{}) → next=({},{}) offset=({},{}) dir={:?}", 
+                                            current_grid_x, current_grid_y, next_target_x, next_target_y, 
+                                            grid_dx, grid_dy, direction);
                                     }
                                     PlayerAction::Walk => {
                                         let _ = network_tx.send(NetworkCommand::Walk { direction });
-                                        tracing::info!("🌐 到达格子中心,发送行走命令: direction={:?}, target=({}, {})", 
-                                            direction, target_grid_x, target_grid_y);
+                                        println!("🌐 [网络] 发送Walk命令: current=({},{}) → next=({},{}) dir={:?}", 
+                                            current_grid_x, current_grid_y, next_target_x, next_target_y, direction);
+                                        tracing::info!("🌐 发送Walk: current=({},{}) → next=({},{}) offset=({},{}) dir={:?}", 
+                                            current_grid_x, current_grid_y, next_target_x, next_target_y, 
+                                            grid_dx, grid_dy, direction);
                                     }
                                     _ => {}
                                 }
                                 
                                 player.last_move_time = now;
                                 player.waiting_server_confirm = true;
+                                println!("⏸️ [网络] 设置waiting_server_confirm=true，等待服务器确认");
+                                println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                
+                                // ⏸️ 等待服务器确认后再递增 path_index
+                                // 服务器确认在 network_system.rs 中处理
                             }
+                        } else {
+                            // 🎯 离线模式（无网络）：直接递增 path_index，不等待确认
+                            player.path_index += 1;
+                            println!("✅ [离线模式] 到达格子 ({},{})，递增 path_index 到 {}/{}",
+                                target_grid_x, target_grid_y, player.path_index, player.path.len());
                         }
                     }
                 } else {
                     // 🚫 路径已走完或等待确认
+                    if player.waiting_server_confirm {
+                        println!("⏸️ [等待] waiting_server_confirm=true, 暂停位置更新直到服务器响应");
+                        println!("  📍 当前停留在: grid=({}, {}) world=({:.1}, {:.1})", 
+                            current_grid_x, current_grid_y, pos.x, pos.y);
+                        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    }
                     if player.path_index >= player.path.len() {
                         tracing::info!("✅ 路径完成: path_index={} >= path.len()={}, 停止移动", 
                             player.path_index, player.path.len());
@@ -399,15 +485,92 @@ impl PlayerSystem {
                     
                     // 检查下一步是否可行走
                     let (next_grid_x, next_grid_y) = Coordinates::world_to_grid(next_x, next_y);
+                    
+                    // 🎯 检测是否跨越格子边界
+                    let (current_grid_x, current_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
+                    let crossed_grid = next_grid_x != current_grid_x || next_grid_y != current_grid_y;
+                    
+                    println!("🔍 [DirectFollow] 检查移动: current=({},{}) next=({},{}) crossed={}", 
+                        current_grid_x, current_grid_y, next_grid_x, next_grid_y, crossed_grid);
+                    
                     if MapUtils::is_walkable(&map_data, next_grid_x, next_grid_y) {
                         pos.x = next_x;
                         pos.y = next_y;
+                        
+                        // 清除碰撞标记
+                        player.collision_detected = false;
+                        player.collision_target_grid = None;
+                        
+                        println!("  ✅ 可移动");
+                        
+                        // 🌐 跨越格子边界时发送移动命令到服务器（不等待确认）
+                        if crossed_grid {
+                            if let Some(network_tx) = network_tx {
+                                let now = std::time::Instant::now();
+                                let elapsed = now.duration_since(player.last_move_time);
+                                
+                                if elapsed >= player.move_delay {
+                                    // 🎯 计算从当前格子到下一格子的方向
+                                    let grid_dx = next_grid_x as i32 - current_grid_x as i32;
+                                    let grid_dy = next_grid_y as i32 - current_grid_y as i32;
+                                    
+                                    let direction = match (grid_dx, grid_dy) {
+                                        (0, -1) => MirDirection::Up,
+                                        (1, -1) => MirDirection::UpRight,
+                                        (1, 0) => MirDirection::Right,
+                                        (1, 1) => MirDirection::DownRight,
+                                        (0, 1) => MirDirection::Down,
+                                        (-1, 1) => MirDirection::DownLeft,
+                                        (-1, 0) => MirDirection::Left,
+                                        (-1, -1) => MirDirection::UpLeft,
+                                        _ => {
+                                            tracing::warn!("⚠️ [DirectFollow] 格子偏移异常: ({}, {})", grid_dx, grid_dy);
+                                            match player.direction {
+                                                0 => MirDirection::Up,
+                                                1 => MirDirection::UpRight,
+                                                2 => MirDirection::Right,
+                                                3 => MirDirection::DownRight,
+                                                4 => MirDirection::Down,
+                                                5 => MirDirection::DownLeft,
+                                                6 => MirDirection::Left,
+                                                7 => MirDirection::UpLeft,
+                                                _ => MirDirection::Down,
+                                            }
+                                        }
+                                    };
+                                    
+                                    match player.action {
+                                        PlayerAction::Run => {
+                                            let _ = network_tx.send(NetworkCommand::Run { direction });
+                                            println!("🌐 [DirectFollow] 发送Run: old=({},{}) → next=({},{}) offset=({},{}) dir={:?}", 
+                                                current_grid_x, current_grid_y, next_grid_x, next_grid_y, 
+                                                grid_dx, grid_dy, direction);
+                                        }
+                                        PlayerAction::Walk => {
+                                            let _ = network_tx.send(NetworkCommand::Walk { direction });
+                                            println!("🌐 [DirectFollow] 发送Walk: old=({},{}) → next=({},{}) offset=({},{}) dir={:?}", 
+                                                current_grid_x, current_grid_y, next_grid_x, next_grid_y, 
+                                                grid_dx, grid_dy, direction);
+                                        }
+                                        _ => {}
+                                    }
+                                    
+                                    player.last_move_time = now;
+                                    // ⚠️ DirectFollow不设置waiting_server_confirm，继续移动
+                                }
+                            }
+                        }
                     } else {
                         // 🎯 遇到障碍物，暂停移动但保持DirectFollow模式和当前动画
                         // 这样角色会继续播放走/跑动画（原地踏步效果）
                         player.is_moving = false;
                         // 不改变 action，保持走/跑动画
                         // 不改变 move_mode，保持 DirectFollow 状态
+                        
+                        // 🎯 记录碰撞信息（用于可视化调试）
+                        player.collision_detected = true;
+                        player.collision_target_grid = Some((next_grid_x, next_grid_y));
+                        println!("🚫 碰撞检测: 无法移动到 ({}, {})", next_grid_x, next_grid_y);
                     }
                 }
             }

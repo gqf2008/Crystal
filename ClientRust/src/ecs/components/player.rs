@@ -65,6 +65,9 @@ pub struct Player {
     pub last_move_time: Instant,  // 上次发送移动命令的时间
     pub move_delay: Duration,     // 移动命令间隔(服务器MoveDelay=600ms)
     pub waiting_server_confirm: bool,        // 🎯 等待服务器确认移动
+    // 🎯 碰撞调试信息
+    pub collision_detected: bool,  // 是否检测到碰撞
+    pub collision_target_grid: Option<(i32, i32)>,  // 碰撞的目标格子
 }
 
 /// 角色动作

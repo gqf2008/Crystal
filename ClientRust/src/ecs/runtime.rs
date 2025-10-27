@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use tokio::runtime::{Builder, Runtime};
 
 use crate::graphics;
+use crate::network as net;
 use crate::settings::ClientSettings;
-use crate::version;
-use crate::network as net; // Use network module as 'net'
+use crate::version; // Use network module as 'net'
 
 pub struct ClientRuntime {
     pub settings: ClientSettings,
@@ -15,9 +15,16 @@ pub struct ClientRuntime {
 impl ClientRuntime {
     /// 初始化日志系统
     pub fn init_logging(log_level: &str) {
+        use std::fs::File;
+        use tracing_subscriber::fmt::writer::MakeWriterExt;
+
+        let file = File::create("game.log").expect("creating log file");
+        let file_writer = file.with_max_level(tracing::Level::INFO);
+
         tracing_subscriber::fmt()
             .with_env_filter(log_level)
             .with_target(false)
+            .with_writer(file_writer.and(std::io::stdout)) // 同时输出到文件和控制台
             .init();
     }
 
@@ -39,10 +46,13 @@ impl ClientRuntime {
 
     /// 初始化图像库系统（包括 MapLibs）
     pub fn init_graphics_libraries(data_path: &str) -> Result<()> {
-        println!("🚀🚀🚀 [RUNTIME] 开始初始化图像库系统, data_path = {}", data_path);
+        println!(
+            "🚀🚀🚀 [RUNTIME] 开始初始化图像库系统, data_path = {}",
+            data_path
+        );
         tracing::info!("=== 初始化图像库系统 ===");
         tracing::info!("📂 数据路径: {}", data_path);
-        
+
         match graphics::initialize_all_libraries(data_path) {
             Ok(_) => {
                 println!("✅✅✅ [RUNTIME] 图像库初始化成功!");
@@ -152,7 +162,7 @@ impl ClientRuntime {
     //     let settings = Self::load_config(use_test_config)?;
     //     let tokio = Self::create_tokio_runtime()?;
     //     Self::load_core_libraries()?;
-     
+
     //     let runtime = Self { settings, tokio };
 
     //    runtime

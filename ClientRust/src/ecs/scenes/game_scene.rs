@@ -33,22 +33,14 @@ use tokio::sync::mpsc;
 use super::{Scene, SceneType};
 use crate::network::{NetworkCommand, game_client::GameEvent};
 use crate::ecs::{
-    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerData, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow, Animation},
-    systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem},
+    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerData, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow},
+    systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem, OcclusionSystem},  // 🆕 添加 OcclusionSystem
     Coordinates, MapUtils,  // 坐标工具
     map_loader::MapLoader,
     ui::{ChatType, MainDialog, InventoryDialog, CharacterDialog, SkillBarDialog, ChatDialog, MagicLearningDialog, QuestDialog, TradeDialog, SkillsDialog, OptionsDialog, HotkeyHelpPanel},
 };
 use crate::objects::{MapReader};
 use crate::graphics::libraries::initialize_all_libraries;
-
-/// 🎯 实体类型枚举 (用于Y-sorting渲染)
-enum EntityType {
-    Monster(Entity),
-    NPC(Entity),
-    Player(Entity),
-    FrontTile(Entity),  // Front层瓦片参与Y-sorting
-}
 
 /// 游戏场景
 pub struct GameScene {
@@ -85,6 +77,9 @@ pub struct GameScene {
     
     /// 网络同步系统
     network_system: NetworkSystem,
+    
+    /// 🆕 遮挡检测系统
+    occlusion_system: OcclusionSystem,
     
     /// UI字体名称 (保留用于后续字体切换功能)
     #[allow(dead_code)]
@@ -225,8 +220,10 @@ impl GameScene {
                 path_index: 0,
                 move_mode: MoveMode::Idle,
                 last_move_time: std::time::Instant::now(),
-                move_delay: std::time::Duration::from_millis(600), // 服务器MoveDelay
+                move_delay: std::time::Duration::from_millis(700), // 服务器MoveDelay=600ms + 余量
                 waiting_server_confirm: false,  // 🎯 初始不等待确认
+                collision_detected: false,  // 🎯 碰撞调试
+                collision_target_grid: None,  // 🎯 碰撞调试
             },
             Position { x: player_world_x, y: player_world_y },  // 📍 使用真实位置
             PlayerAppearance {
@@ -404,6 +401,7 @@ impl GameScene {
             visible_area_entity,
             debug_counters_entity,
             network_system: NetworkSystem::new(),
+            occlusion_system: OcclusionSystem::new(),  // 🆕 初始化遮挡检测系统
             ui_font_name,  // 保留用于后续字体切换功能
             main_dialog_entity,
             inventory_dialog_entity,
@@ -581,6 +579,9 @@ impl Scene for GameScene {
         let delta_time = 1.0 / max_fps as f32;
         MonsterSystem::update(world, delta_time);
         
+        // 🆕 更新遮挡检测系统（计算 Front 层瓦片的透明度）
+        self.occlusion_system.update(world, delta_time);
+        
         // 更新聊天对话框（用于光标闪烁）
         if let Some(chat_dialog) = self.get_chat_dialog_mut(world) {
             chat_dialog.update();
@@ -667,129 +668,17 @@ impl Scene for GameScene {
             camera.screen_height, 
         ));
         
-        // 🎯 第一步: 渲染地面层 (Back + Middle层,跳过Front)
-        // 创建临时配置，禁用Front层
-        let mut ground_config = config.clone();
-        ground_config.show_front = false;
-        
-        RenderSystem::draw_tiles(
+        // 🎯 使用统一的渲染入口
+        RenderSystem::draw_game_world(
             ctx,
             canvas,
             world,
             &pos,
             &camera,
-            &ground_config,
+            &config,
             self.visible_area_entity,
+            self.debug_counters_entity,
         )?;
-        
-        // 🎯 第二步: Y-sorting渲染实体 (怪物、NPC、玩家、Front层瓦片)
-        // 收集所有需要排序的实体及其Y坐标
-        let mut entities_to_draw: Vec<(i32, EntityType)> = Vec::new();
-        
-        // 收集怪物
-        let mut monster_count = 0;
-        for (entity, pos) in world.query::<&Position>().iter() {
-            if world.get::<&crate::ecs::components::MonsterData>(entity).is_ok() {
-                entities_to_draw.push((pos.y as i32, EntityType::Monster(entity)));
-                monster_count += 1;
-            }
-        }
-        
-        // 收集NPC
-        let mut npc_count = 0;
-        for (entity, pos) in world.query::<&Position>().iter() {
-            if world.get::<&crate::ecs::components::NPCData>(entity).is_ok() {
-                entities_to_draw.push((pos.y as i32, EntityType::NPC(entity)));
-                npc_count += 1;
-            }
-        }
-        
-        // 收集Front层瓦片 (按瓦片的Y坐标参与Y-sorting)
-        use crate::ecs::{VisibleArea, TileLayer};
-        let mut front_tile_count = 0;
-        if let Ok(visible_area) = world.get::<&VisibleArea>(self.visible_area_entity) {
-            for &entity in &visible_area.visible_entities {
-                if let Ok(tile) = world.get::<&crate::ecs::components::MapTile>(entity) {
-                    if matches!(tile.layer, TileLayer::Front) && config.show_front {
-                        // 使用瓦片底部的Y坐标 (grid_y * CELL_HEIGHT)
-                        let tile_y = tile.grid_y * crate::ecs::CELL_HEIGHT;
-                        entities_to_draw.push((tile_y, EntityType::FrontTile(entity)));
-                        front_tile_count += 1;
-                    }
-                }
-            }
-        }
-        
-        // � 使用 DebugCounters 组件记录 Y-sorting 日志（替代 unsafe static mut）
-        if let Ok(mut debug) = world.get::<&mut crate::ecs::components::DebugCounters>(self.debug_counters_entity) {
-            if debug.should_log_y_sorting() {
-                tracing::info!("🎯 Y-sorting: {} monsters, {} NPCs, {} front tiles", 
-                              monster_count, npc_count, front_tile_count);
-            }
-        }
-        
-        // 收集玩家
-        for (entity, pos) in world.query::<&Position>().iter() {
-            if world.get::<&crate::ecs::components::Player>(entity).is_ok() {
-                entities_to_draw.push((pos.y as i32, EntityType::Player(entity)));
-            }
-        }
-        
-        // 按Y坐标排序 (从小到大,远处先绘制)
-        entities_to_draw.sort_by_key(|(y, _)| *y);
-        
-        // 按顺序绘制
-        for (_y, entity_type) in entities_to_draw {
-            match entity_type {
-                EntityType::Monster(entity) => {
-                    if let Ok(entity_pos) = world.get::<&Position>(entity) {
-                        RenderSystem::draw_single_monster(ctx, canvas, world, entity, &entity_pos, &pos, &camera, &config)?;
-                    }
-                }
-                EntityType::NPC(entity) => {
-                    if let Ok(entity_pos) = world.get::<&Position>(entity) {
-                        RenderSystem::draw_single_npc(ctx, canvas, world, entity, &entity_pos, &pos, &camera, &config)?;
-                    }
-                }
-                EntityType::Player(entity) => {
-                    if let (Ok(player), Ok(player_pos)) = (
-                        world.get::<&Player>(entity),
-                        world.get::<&Position>(entity)
-                    ) {
-                        RenderSystem::draw_player_with_world(ctx, canvas, world, &player, &player_pos, &pos, &camera)?;
-                    }
-                }
-                EntityType::FrontTile(entity) => {
-                    // 绘制Front层瓦片
-                    if let Ok(tile) = world.get::<&crate::ecs::components::MapTile>(entity) {
-                        RenderSystem::draw_tile_fast(ctx, canvas, &tile, &pos, &camera, &config)?;
-                    }
-                }
-            }
-        }
-        
-        // 渲染地面物品
-        RenderSystem::draw_items(ctx, canvas, world, &pos, &camera)?;
-        
-        // ⚠️ Front层已经通过Y-sorting绘制,不需要单独绘制
-        
-        // 渲染怪物血条和名称 (始终在最上层)
-        RenderSystem::draw_monster_info(ctx, canvas, world, &pos, &camera)?;
-        
-        // 🎯 绘制网格 (调试用 - G键切换)
-        if config.show_grid {
-            RenderSystem::draw_grid(ctx, canvas, world, &pos, &camera)?;
-        }
-        
-        // 🎯 绘制障碍物 (调试用 - O键切换)
-        if config.show_obstacles {
-            RenderSystem::draw_obstacles(ctx, canvas, world, &pos, &camera)?;
-        }
-        
-        // 🎯 绘制寻路路径 (调试用 - P键切换)
-        if config.show_path {
-            RenderSystem::draw_path(ctx, canvas, world, &pos, &camera)?;
-        }
         
         // ==================== UI 层: 使用设计坐标 1024×768 ====================
         // 设置画布使用设计分辨率坐标系,ggez 会自动缩放

@@ -104,16 +104,32 @@ impl RenderSystem {
                             
                             // 🎯 角色与Front层使用ADD混合
                             // 当角色在树木、建筑等Front层物体下方时，使用ADD混合实现半透明遮挡效果
+                            // 使用 60% 亮度让 ADD 混合效果更明显
                             canvas.set_blend_mode(Self::create_blend_mode());
                             canvas.draw(
                                 texture,
                                 DrawParam::default()
                                     .dest([screen_x, screen_y])
                                     .scale([camera.zoom, camera.zoom])
-                                    .color(Color::WHITE),
+                                    .color(Color::from_rgba(153, 153, 153, 255)),  // 60% 亮度
                             );
                             // 恢复默认混合模式
                             canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+
+                            // 🔍 遮挡调试：绘制青色边框，表示角色正在使用ADD混合模式
+                            let rect = graphics::Rect::new(
+                                screen_x,
+                                screen_y,
+                                char_w as f32 * camera.zoom,
+                                char_h as f32 * camera.zoom,
+                            );
+                            let mesh = graphics::Mesh::new_rectangle(
+                                ctx,
+                                graphics::DrawMode::stroke(2.0),
+                                rect,
+                                Color::from_rgb(0, 255, 255),  // 青色边框
+                            )?;
+                            canvas.draw(&mesh, DrawParam::default());
                         }
                     }
                     Err(_) => {}
@@ -188,13 +204,17 @@ impl RenderSystem {
                                 world_y
                             );
                             
+                            // 🎯 武器也使用 ADD 混合模式，与角色保持一致
+                            // 使用 60% 亮度
+                            canvas.set_blend_mode(Self::create_blend_mode());
                             canvas.draw(
                                 texture,
                                 DrawParam::default()
                                     .dest([screen_x, screen_y])
                                     .scale([camera.zoom, camera.zoom])
-                                    .color(Color::WHITE),
+                                    .color(Color::from_rgba(153, 153, 153, 255)),  // 60% 亮度
                             );
+                            canvas.set_blend_mode(graphics::BlendMode::ALPHA);
                             
                             // 🌟 绘制武器特效 (CWeaponEffect库)
                             if appearance.weapon_effect > 0 {
@@ -418,16 +438,15 @@ impl RenderSystem {
                                 world_y
                             );
                             
-                            // 🎯 角色始终保持完全可见（不改变透明度）
-                            // 遮挡效果由渲染顺序控制：Front层绘制在角色之后
-                            let color = Color::WHITE;
+                            // 🎯 角色始终使用 ALPHA 混合模式绘制
+                            canvas.set_blend_mode(graphics::BlendMode::ALPHA);
                             
                             canvas.draw(
                                 texture,
                                 DrawParam::default()
                                     .dest([screen_x, screen_y])
                                     .scale([camera.zoom, camera.zoom])
-                                    .color(color),
+                                    .color(Color::WHITE),
                             );
                             
                             // 🗡️ 绘制武器 (CWeapon库)
@@ -473,6 +492,7 @@ impl RenderSystem {
             }
         }
         
+        /* 🐛 旧的调试绘制代码 - 已禁用，使用新的遮挡调试边框
         // 🐛 调试绘制:显示碰撞检测和渲染相关的边界
         
         // 1. 绘制人物所在格子边界(绿色) - 用于移动碰撞检测
@@ -558,6 +578,7 @@ impl RenderSystem {
                 .color(Color::from_rgb(255, 255, 255))
                 .scale([0.8, 0.8]),
         );
+        */
         
         Ok(())
     }

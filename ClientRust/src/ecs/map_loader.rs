@@ -13,7 +13,7 @@ use crate::objects::{MapReader, CellInfo};
 use std::time::Instant;
 
 use crate::ecs::components::{
-    MapData, MapTile, TileLayer, AnimatedTile, Door, DoorState,
+    MapData, MapTile, TileLayer, AnimatedTile, Door, DoorState, TileOcclusion,  // 🆕 添加 TileOcclusion
     CELL_WIDTH, CELL_HEIGHT,
 };
 
@@ -156,6 +156,9 @@ impl MapLoader {
 
         let mut builder = hecs::EntityBuilder::new();
         builder.add(tile);
+        
+        // 🆕 添加遮挡组件（用于动态透明度控制）
+        builder.add(TileOcclusion::new());
 
         // 添加动画组件
         if has_animation {

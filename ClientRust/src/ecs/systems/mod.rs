@@ -17,6 +17,7 @@ pub mod npc_system;
 pub mod combat_system;
 pub mod quest_system;
 pub mod trade_system;
+pub mod occlusion_system;  // 🆕 遮挡检测系统
 
 // 重新导出
 pub use camera_system::CameraSystem;
@@ -34,3 +35,4 @@ pub use npc_system::NPCSystem;
 pub use combat_system::{CombatSystem, SkillEffectSystem, DamageType, CombatResult};
 pub use quest_system::{QuestSystem, Quest, QuestLog, QuestState, QuestObjective, QuestReward};
 pub use trade_system::{TradeSystem, ShopSystem, TradeWindow, TradeData, TradeState, ShopData, ShopItem};
+pub use occlusion_system::OcclusionSystem;  // 🆕 遮挡检测系统

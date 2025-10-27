@@ -63,3 +63,28 @@ pub struct MapData {
 /// 常量
 pub const CELL_WIDTH: i32 = 48;
 pub const CELL_HEIGHT: i32 = 32;
+
+/// 瓦片遮挡效果组件
+/// 用于实现角色被前景瓦片遮挡时的半透明效果
+#[derive(Debug, Clone)]
+pub struct TileOcclusion {
+    /// 当前透明度 (0.0 = 完全透明, 1.0 = 完全不透明)
+    pub current_alpha: f32,
+    /// 是否正在遮挡角色
+    pub is_occluding: bool,
+}
+
+impl TileOcclusion {
+    pub fn new() -> Self {
+        Self {
+            current_alpha: 1.0,
+            is_occluding: false,
+        }
+    }
+}
+
+impl Default for TileOcclusion {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -81,6 +81,8 @@ impl NetworkSystem {
     
     /// 处理玩家移动事件 - UserLocation 包确认位置
     fn handle_player_moved(&mut self, world: &mut World, location: &mir2_shared::Point) {
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("🌐 [网络] 收到服务器位置: grid=({}, {})", location.x, location.y);
         tracing::info!("🎯 handle_player_moved 被调用: grid=({}, {})", location.x, location.y);
         
         // 查找本地玩家实体
@@ -98,6 +100,12 @@ impl NetworkSystem {
                 // 🎯 使用统一的坐标转换函数 (避免 round vs floor 的差异)
                 let (current_grid_x, current_grid_y) = crate::ecs::coordinates::Coordinates::world_to_grid(position.x, position.y);
                 
+                println!("  📊 位置对比:");
+                println!("    客户端: grid=({}, {}) world=({:.1}, {:.1})", 
+                    current_grid_x, current_grid_y, position.x, position.y);
+                println!("    服务器: grid=({}, {}) world=({:.1}, {:.1})", 
+                    location.x, location.y, world_x, world_y);
+                
                 tracing::info!("📊 位置对比: 客户端=({}, {}) world=({:.1}, {:.1}), 服务器=({}, {}) world=({:.1}, {:.1})",
                     current_grid_x, current_grid_y, position.x, position.y,
                     location.x, location.y, world_x, world_y);
@@ -106,13 +114,35 @@ impl NetworkSystem {
                 let grid_diff_x = (current_grid_x - location.x).abs();
                 let grid_diff_y = (current_grid_y - location.y).abs();
                 
+                println!("  📏 偏差: x={} y={}", grid_diff_x, grid_diff_y);
+                
                 // 🎯 清除等待服务器确认标志
+                let was_waiting = player.waiting_server_confirm;
                 player.waiting_server_confirm = false;
+                if was_waiting {
+                    println!("  ✅ [同步] 清除waiting_server_confirm标志 (之前=true)");
+                    println!("  📊 [同步] 当前状态: move_mode={:?} is_moving={} path_index={}/{}", 
+                        player.move_mode, player.is_moving, player.path_index, player.path.len());
+                } else {
+                    println!("  ℹ️ [同步] waiting_server_confirm已经是false");
+                }
+                
+                // 🎯 修复: DirectFollow模式优先使用客户端预测，不同步服务器位置
+                if player.move_mode == crate::ecs::components::MoveMode::DirectFollow {
+                    println!("  🎮 [同步] DirectFollow模式: 忽略服务器位置，使用客户端预测");
+                    tracing::debug!("🎮 DirectFollow模式: 忽略服务器位置，使用客户端预测");
+                    player_entity = Some(entity);
+                    should_sync = true;
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    continue; // 跳过位置同步
+                }
                 
                 // 🔧 修复: 只有当偏差大于1格时才强制同步,避免被旧的服务器数据拉回
                 // 1格内的偏差可能是网络延迟导致的,客户端预测应该优先
                 if grid_diff_x > 1 || grid_diff_y > 1 {
                     // 🎯 偏差较大 - 强制同步到服务器位置
+                    println!("  ⚠️ [同步] 位置偏差较大! 强制同步: ({}, {}) -> ({}, {})", 
+                        current_grid_x, current_grid_y, location.x, location.y);
                     tracing::warn!("⚠️ 位置偏差较大! 强制同步: ({}, {}) -> ({}, {})", 
                         current_grid_x, current_grid_y, location.x, location.y);
                     
@@ -120,6 +150,7 @@ impl NetworkSystem {
                     position.y = world_y;
                     player.target_x = world_x;
                     player.target_y = world_y;
+                    println!("  🔄 [同步] 强制更新位置: world=({:.1}, {:.1})", world_x, world_y);
                     
                     // 🎯 如果在自动寻路模式,更新路径索引到服务器位置
                     if player.move_mode == crate::ecs::components::MoveMode::AutoPathfinding 
@@ -180,20 +211,26 @@ impl NetworkSystem {
                         }
                         
                         if let Some(index) = found_index {
-                            // 🎯 服务器确认了这个位置,下次应该从下一个点开始
+                            // 🎯 服务器确认了这个位置，递增 path_index
                             let old_index = player.path_index;
                             player.path_index = index + 1;
-                            tracing::info!("✅ 服务器确认位置({}, {}),路径索引: {} -> {}", 
+                            
+                            println!("  ✅ [同步] 服务器确认位置({}, {}), path_index: {} -> {} (路径长度: {})", 
+                                location.x, location.y, old_index, player.path_index, player.path.len());
+                            tracing::info!("✅ 服务器确认位置({}, {}), path_index: {} -> {}", 
                                 location.x, location.y, old_index, player.path_index);
                             
                             if player.path_index >= player.path.len() {
                                 // 到达终点
                                 player.move_mode = crate::ecs::components::MoveMode::Idle;
                                 player.is_moving = false;
+                                println!("  🏁 [同步] 到达目的地");
                                 tracing::info!("✅ 到达目的地");
                             }
                         } else {
                             // 服务器位置不在路径上,可能路径已过时
+                            println!("  ⚠️ [同步] 服务器位置({}, {})不在路径上,客户端在({}, {}) - 以服务器为准", 
+                                location.x, location.y, current_grid_x, current_grid_y);
                             tracing::warn!("⚠️ 服务器位置({}, {})不在路径上,客户端在({}, {}) - 以服务器为准", 
                                 location.x, location.y, current_grid_x, current_grid_y);
                             // 同步到服务器位置
@@ -205,11 +242,13 @@ impl NetworkSystem {
                     }
                 } else {
                     // ✅ 同一个格子 - 服务器确认位置,允许客户端继续
+                    println!("  ✅ [同步] 位置一致: 保持客户端插值");
                     tracing::debug!("✅ 服务器确认当前格子: ({}, {}) - 保持客户端插值", location.x, location.y);
                 }
                 
                 player_entity = Some(entity);
                 should_sync = true;
+                println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                 break;
             }
         }

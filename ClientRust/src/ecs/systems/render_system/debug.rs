@@ -1,7 +1,7 @@
 ﻿use super::RenderSystem;
 use crate::ecs::components::{Camera, Position};
 use ggez::{
-    graphics::{Canvas, Color, DrawParam},
+    graphics::{Canvas, Color, DrawParam, Text, TextFragment},
     Context, GameResult,
 };
 use hecs::World;
@@ -277,6 +277,84 @@ impl RenderSystem {
                                 canvas.draw(&text, DrawParam::default().dest([text_x, text_y]));
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+    
+    /// 🎯 绘制碰撞调试信息
+    /// 当玩家遇到障碍物时，用不同颜色高亮显示：
+    /// - 玩家当前格子：绿色背景
+    /// - 碰撞目标格子：红色背景
+    pub fn draw_collision_debug(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        camera_pos: &Position,
+        camera: &Camera,
+    ) -> GameResult<()> {
+        use crate::ecs::{Coordinates, Player, CELL_WIDTH, CELL_HEIGHT};
+        use crate::ecs::systems::CameraSystem;
+        use ggez::graphics;
+
+        // 查询玩家的碰撞信息
+        for (_entity, (player, player_pos)) in world.query::<(&Player, &Position)>().iter() {
+            // 绘制玩家当前格子（绿色背景）
+            let (current_grid_x, current_grid_y) = Coordinates::world_to_grid(player_pos.x, player_pos.y);
+            let (current_world_x, current_world_y) = Coordinates::grid_to_world(current_grid_x, current_grid_y);
+            let (screen_x, screen_y) = CameraSystem::world_to_screen(camera_pos, camera, current_world_x, current_world_y);
+            
+            // 绘制半透明绿色背景
+            if let Ok(rect) = graphics::Mesh::new_rectangle(
+                ctx,
+                graphics::DrawMode::fill(),
+                graphics::Rect::new(
+                    screen_x,
+                    screen_y,
+                    CELL_WIDTH as f32 * camera.zoom,
+                    CELL_HEIGHT as f32 * camera.zoom,
+                ),
+                Color::from_rgba(0, 255, 0, 128), // 半透明绿色
+            ) {
+                canvas.draw(&rect, DrawParam::default());
+            }
+            
+            // 如果检测到碰撞，绘制碰撞目标格子（红色背景）
+            if player.collision_detected {
+                if let Some((collision_x, collision_y)) = player.collision_target_grid {
+                    let (collision_world_x, collision_world_y) = Coordinates::grid_to_world(collision_x, collision_y);
+                    let (screen_x, screen_y) = CameraSystem::world_to_screen(camera_pos, camera, collision_world_x, collision_world_y);
+                    
+                    // 绘制半透明红色背景
+                    if let Ok(rect) = graphics::Mesh::new_rectangle(
+                        ctx,
+                        graphics::DrawMode::fill(),
+                        graphics::Rect::new(
+                            screen_x,
+                            screen_y,
+                            CELL_WIDTH as f32 * camera.zoom,
+                            CELL_HEIGHT as f32 * camera.zoom,
+                        ),
+                        Color::from_rgba(255, 0, 0, 128), // 半透明红色
+                    ) {
+                        canvas.draw(&rect, DrawParam::default());
+                    }
+                    
+                    // 绘制 X 标记
+                    if camera.zoom > 0.5 {
+                        let text = Text::new(
+                            TextFragment::new("⚠")
+                                .scale(32.0)
+                                .color(Color::from_rgb(255, 255, 255)),
+                        );
+
+                        let text_x = screen_x + (CELL_WIDTH as f32 * camera.zoom - 16.0) / 2.0;
+                        let text_y = screen_y + (CELL_HEIGHT as f32 * camera.zoom - 32.0) / 2.0;
+
+                        canvas.draw(&text, DrawParam::default().dest([text_x, text_y]));
                     }
                 }
             }

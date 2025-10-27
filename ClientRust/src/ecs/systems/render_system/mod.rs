@@ -11,13 +11,283 @@ mod tiles;
 mod ui;  // UI渲染方法 (RenderSystem::draw_ui)
 
 
-use ggez::{Context};
+use ggez::{Context, GameResult};
 use ggez::graphics::{self, Canvas, DrawParam, Color, BlendMode, BlendComponent, BlendFactor, BlendOperation, Text, TextFragment, PxScale, Rect, Mesh};
-use crate::ecs::components::{Camera, QuestIcon};
+use hecs::World;
+use crate::ecs::components::{Camera, QuestIcon, Position, RenderConfig, Player, MapTile, VisibleArea};
+use crate::ecs::{TileLayer, CELL_HEIGHT};
+
+/// 实体类型枚举（用于Y-sorting）
+#[derive(Debug, Clone, Copy)]
+enum EntityType {
+    Monster(hecs::Entity),
+    NPC(hecs::Entity),
+    Player(hecs::Entity),
+    FrontTile(hecs::Entity),
+}
+
 /// 渲染系统主结构
 pub struct RenderSystem;
 
 impl RenderSystem {
+    /// 🎯 统一渲染入口：渲染整个游戏世界
+    pub fn draw_game_world(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        pos: &Position,
+        camera: &Camera,
+        config: &RenderConfig,
+        visible_area_entity: hecs::Entity,
+        debug_counters_entity: hecs::Entity,
+    ) -> GameResult {
+        // ==================== 第一步: 渲染地面层 (Back + Middle) ====================
+        let mut ground_config = config.clone();
+        ground_config.show_front = false;
+        
+        Self::draw_tiles(
+            ctx,
+            canvas,
+            world,
+            pos,
+            camera,
+            &ground_config,
+            visible_area_entity,
+        )?;
+        
+        // ==================== 第二步: 渲染前景层（Front 层建筑物）====================
+        // 🎯 参考 atlas.rs：先绘制所有建筑物
+        if config.show_front {
+            // 只绘制 Front 层
+            let mut front_only_config = config.clone();
+            front_only_config.show_back = false;
+            front_only_config.show_middle = false;
+            front_only_config.show_front = true;
+            
+            Self::draw_tiles(
+                ctx,
+                canvas,
+                world,
+                pos,
+                camera,
+                &front_only_config,
+                visible_area_entity,
+            )?;
+        }
+        
+        // ==================== 第三步: 渲染角色/怪物/NPC ====================
+        // 🎯 参考 atlas.rs：建筑物绘制完后再绘制角色
+        Self::draw_all_entities(ctx, canvas, world, pos, camera, config)?;
+        
+        // ==================== 第四步: 顶层信息 ====================
+        Self::draw_items(ctx, canvas, world, pos, camera)?;
+        Self::draw_monster_info(ctx, canvas, world, pos, camera)?;
+        
+        // ==================== 调试层 ====================
+        if config.show_grid {
+            Self::draw_grid(ctx, canvas, world, pos, camera)?;
+        }
+        if config.show_obstacles {
+            Self::draw_obstacles(ctx, canvas, world, pos, camera)?;
+        }
+        if config.show_path {
+            Self::draw_path(ctx, canvas, world, pos, camera)?;
+        }
+        
+        Ok(())
+    }
+    
+    /// 收集所有需要 Y-sorting 的实体
+    fn collect_sorted_entities(
+        world: &World,
+        config: &RenderConfig,
+        visible_area_entity: hecs::Entity,
+        debug_counters_entity: hecs::Entity,
+    ) -> GameResult<Vec<(i32, EntityType)>> {
+        let mut entities = Vec::new();
+        
+        // 收集怪物
+        let mut monster_count = 0;
+        for (entity, pos) in world.query::<&Position>().iter() {
+            if world.get::<&crate::ecs::components::MonsterData>(entity).is_ok() {
+                // 🎯 使用怪物底部的Y坐标
+                let monster_y = pos.y as i32 + CELL_HEIGHT;
+                entities.push((monster_y, EntityType::Monster(entity)));
+                monster_count += 1;
+            }
+        }
+        
+        // 收集NPC
+        let mut npc_count = 0;
+        for (entity, pos) in world.query::<&Position>().iter() {
+            if world.get::<&crate::ecs::components::NPCData>(entity).is_ok() {
+                // 🎯 使用NPC底部的Y坐标
+                let npc_y = pos.y as i32 + CELL_HEIGHT;
+                entities.push((npc_y, EntityType::NPC(entity)));
+                npc_count += 1;
+            }
+        }
+        
+        // 收集玩家
+        for (entity, pos) in world.query::<&Position>().iter() {
+            if world.get::<&Player>(entity).is_ok() {
+                // 🎯 使用角色底部的Y坐标（pos.y 是格子顶部，+ CELL_HEIGHT 是底部）
+                let player_y = pos.y as i32 + CELL_HEIGHT;
+                entities.push((player_y, EntityType::Player(entity)));
+            }
+        }
+        
+        // 收集Front层瓦片（参与Y-sorting）
+        let mut front_tile_count = 0;
+        if let Ok(visible_area) = world.get::<&VisibleArea>(visible_area_entity) {
+            for &entity in &visible_area.visible_entities {
+                if let Ok(tile) = world.get::<&MapTile>(entity) {
+                    if matches!(tile.layer, TileLayer::Front) && config.show_front {
+                        // 🎯 使用瓦片格子底部的Y坐标作为排序依据
+                        // 这样建筑物会根据其所在格子的Y位置进行排序
+                        // grid_y 越大 = 越靠后 = 排序值越大
+                        let tile_y = (tile.grid_y + 1) * CELL_HEIGHT;
+                        entities.push((tile_y, EntityType::FrontTile(entity)));
+                        front_tile_count += 1;
+                    }
+                }
+            }
+        }
+        
+        // 📊 记录 Y-sorting 日志
+        if let Ok(mut debug) = world.get::<&mut crate::ecs::components::DebugCounters>(debug_counters_entity) {
+            if debug.should_log_y_sorting() {
+                tracing::info!(
+                    "🎯 Y-sorting: {} monsters, {} NPCs, {} front tiles",
+                    monster_count, npc_count, front_tile_count
+                );
+            }
+        }
+        
+        // Y-sorting: 按Y坐标排序（从小到大，远处先绘制）
+        entities.sort_by_key(|(y, _)| *y);
+        
+        Ok(entities)
+    }
+    
+    /// 按Y排序顺序渲染所有实体
+    fn render_sorted_entities(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        entities: &[(i32, EntityType)],
+        pos: &Position,
+        camera: &Camera,
+        config: &RenderConfig,
+    ) -> GameResult {
+        for (_y, entity_type) in entities {
+            match entity_type {
+                EntityType::Monster(entity) => {
+                    if let Ok(entity_pos) = world.get::<&Position>(*entity) {
+                        Self::draw_single_monster(ctx, canvas, world, *entity, &entity_pos, pos, camera, config)?;
+                    }
+                }
+                EntityType::NPC(entity) => {
+                    if let Ok(entity_pos) = world.get::<&Position>(*entity) {
+                        Self::draw_single_npc(ctx, canvas, world, *entity, &entity_pos, pos, camera, config)?;
+                    }
+                }
+                EntityType::Player(entity) => {
+                    if let (Ok(player), Ok(player_pos)) = (
+                        world.get::<&Player>(*entity),
+                        world.get::<&Position>(*entity)
+                    ) {
+                        Self::draw_player_with_world(ctx, canvas, world, &player, &player_pos, pos, camera)?;
+                    }
+                }
+                EntityType::FrontTile(entity) => {
+                    if let Ok(tile) = world.get::<&MapTile>(*entity) {
+                        // � Front 层瓦片默认使用 ALPHA 混合
+                        canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 1.0)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 绘制所有角色、怪物、NPC（不包括Front层瓦片）
+    /// 🎯 参考 atlas.rs：在建筑物绘制完后，根据位置动态切换混合模式
+    fn draw_all_entities(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        pos: &Position,
+        camera: &Camera,
+        config: &RenderConfig,
+    ) -> GameResult {
+        use crate::graphics::libraries::get_library;
+        
+        // 绘制所有怪物
+        for (entity, entity_pos) in world.query::<&Position>().iter() {
+            if world.get::<&crate::ecs::components::MonsterData>(entity).is_ok() {
+                Self::draw_single_monster(ctx, canvas, world, entity, &entity_pos, pos, camera, config)?;
+            }
+        }
+        
+        // 绘制所有NPC
+        for (entity, entity_pos) in world.query::<&Position>().iter() {
+            if world.get::<&crate::ecs::components::NPCData>(entity).is_ok() {
+                Self::draw_single_npc(ctx, canvas, world, entity, &entity_pos, pos, camera, config)?;
+            }
+        }
+        
+        // 绘制所有玩家（关键：动态切换混合模式）
+        for (entity, (player, player_pos)) in world.query::<(&Player, &Position)>().iter() {
+            // 🎯 默认使用 ALPHA 混合（正常显示）
+            canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+            
+            // 计算角色所在的格子坐标
+            let grid_x = (player_pos.x / crate::ecs::CELL_WIDTH as f32) as i32;
+            let grid_y = (player_pos.y / crate::ecs::CELL_HEIGHT as f32) as i32;
+            
+            // 查询该格子及周围的 Front 层瓦片，决定是否被遮挡
+            for (_, tile) in world.query::<&MapTile>().iter() {
+                // 检查周围2x2格子范围内的 Front 层瓦片
+                if (tile.grid_x - grid_x).abs() <= 1
+                    && (tile.grid_y - grid_y).abs() <= 1
+                    && matches!(tile.layer, TileLayer::Front) 
+                {
+                    // 获取纹理信息
+                    use crate::graphics::get_map_library;
+                    
+                    if let Some(lib) = get_map_library(tile.library_index) {
+                        if let Ok(mut lib_guard) = lib.lock() {
+                            if let Ok(info) = lib_guard.get_or_create_texture(ctx, tile.image_index as usize) {
+                                if let Some(ref texture) = info.image {
+                                    // 计算瓦片世界坐标（纹理左上角）
+                                    let tile_world_y = tile.grid_y as f32 * crate::ecs::CELL_HEIGHT as f32;
+                                    
+                                    // 计算纹理底部Y坐标
+                                    let tile_bottom_y = tile_world_y + texture.height() as f32;
+                                    
+                                    // 🎯 关键判断：角色被遮挡时使用 ADD 混合
+                                    // 当角色Y + 85 < 瓦片底部Y 时，说明角色在建筑物后面（被遮挡）
+                                    if player_pos.y + 85.0 < tile_bottom_y {
+                                        // 被遮挡：使用 ADD 混合，产生半透明效果让玩家能看到角色
+                                        canvas.set_blend_mode(graphics::BlendMode::ADD);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 绘制角色
+            Self::draw_player_with_world(ctx, canvas, world, &player, &player_pos, pos, camera)?;
+        }
+        
+        Ok(())
+    }
+
     /// 绘制NPC名字(带半透明黑色背景)
     pub(crate) fn draw_npc_name(
         ctx: &Context,

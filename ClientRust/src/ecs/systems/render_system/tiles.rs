@@ -149,11 +149,22 @@ impl RenderSystem {
                         _ => {}
                     }
 
+                    // 🆕 获取遮挡透明度（仅 Front 层）
+                    let alpha = if tile.layer == TileLayer::Front {
+                        if let Ok(occlusion) = world.get::<&crate::ecs::components::TileOcclusion>(entity) {
+                            occlusion.current_alpha
+                        } else {
+                            1.0
+                        }
+                    } else {
+                        1.0
+                    };
+
                     // 按混合模式分组
                     if tile.use_blend {
-                        blend_tiles.push(tile);
+                        blend_tiles.push((tile, alpha));
                     } else {
-                        normal_tiles.push(tile);
+                        normal_tiles.push((tile, alpha));
                     }
                 }
             }
@@ -161,16 +172,16 @@ impl RenderSystem {
             // 先渲染普通瓦片
             if !normal_tiles.is_empty() {
                 canvas.set_blend_mode(BlendMode::ALPHA);
-                for tile in normal_tiles {
-                    Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config)?;
+                for (tile, alpha) in normal_tiles {
+                    Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, alpha)?;
                 }
             }
 
             // 再渲染混合瓦片
             if !blend_tiles.is_empty() {
                 canvas.set_blend_mode(Self::create_blend_mode());
-                for tile in blend_tiles {
-                    Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config)?;
+                for (tile, alpha) in blend_tiles {
+                    Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, alpha)?;
                 }
                 canvas.set_blend_mode(BlendMode::ALPHA);
             }
@@ -187,6 +198,7 @@ impl RenderSystem {
         pos: &Position,
         camera: &Camera,
         config: &RenderConfig,
+        alpha: f32,  // 🆕 透明度参数（用于遮挡效果）
     ) -> GameResult<()> {
         if let Some(mlib) = get_map_library(tile.library_index) {
             if let Ok(mut mlib) = mlib.lock() {
@@ -241,12 +253,12 @@ impl RenderSystem {
                                 None
                             };
 
-                            // 绘制瓦片
+                            // 绘制瓦片（正常亮度，不使用遮挡透明度）
                             let color = Color::from_rgba(
                                 (255.0 * tile.brightness) as u8,
                                 (255.0 * tile.brightness) as u8,
                                 (255.0 * tile.brightness) as u8,
-                                255,
+                                255,  // 始终完全不透明
                             );
 
                             canvas.draw(
@@ -330,9 +342,9 @@ impl RenderSystem {
                     }
                     
                     if has_overlap {
-                        Self::draw_tile_with_alpha(ctx, canvas, &tile, pos, camera, config, 0.4)?;
+                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 0.4)?;
                     } else {
-                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config)?;
+                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 1.0)?;
                     }
                 }
             }
