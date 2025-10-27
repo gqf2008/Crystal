@@ -223,7 +223,7 @@ impl MapViewerApp {
                 collision_detected: false,  // 🎯 碰撞调试
                 collision_target_grid: None,  // 🎯 碰撞调试
                 // 🎯 走/跑机制
-                can_run: false,  // 初始不能跑，需要先走路
+                can_run: true,  // map_viewer离线模式，允许直接跑
                 last_run_time: std::time::Instant::now(),
                 run_cooldown: std::time::Duration::from_millis(900),  // 900ms冷却
             },

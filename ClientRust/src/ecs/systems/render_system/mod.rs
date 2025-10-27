@@ -223,13 +223,27 @@ impl RenderSystem {
         // 收集所有需要渲染的对象及其 Y 坐标
         let mut render_objects: Vec<(i32, RenderObject)> = Vec::new();
         
-        // 1. 收集所有 Front 层瓦片
+        // 1. 收集可见区域内的 Front 层瓦片（性能优化）
         if config.show_front {
-            for (entity, tile) in world.query::<&MapTile>().iter() {
-                if matches!(tile.layer, TileLayer::Front) {
-                    // Front 层瓦片使用格子底部的 Y 坐标
-                    let tile_bottom_y = (tile.grid_y + 1) * CELL_HEIGHT;
-                    render_objects.push((tile_bottom_y, RenderObject::FrontTile(entity)));
+            if let Some(visible_entity) = visible_area_entity {
+                if let Ok(visible_area) = world.get::<&VisibleArea>(visible_entity) {
+                    for &entity in &visible_area.visible_entities {
+                        if let Ok(tile) = world.get::<&MapTile>(entity) {
+                            if matches!(tile.layer, TileLayer::Front) {
+                                // Front 层瓦片使用格子底部的 Y 坐标
+                                let tile_bottom_y = (tile.grid_y + 1) * CELL_HEIGHT;
+                                render_objects.push((tile_bottom_y, RenderObject::FrontTile(entity)));
+                            }
+                        }
+                    }
+                }
+            } else {
+                // 如果没有VisibleArea，回退到查询所有瓦片（兼容模式）
+                for (entity, tile) in world.query::<&MapTile>().iter() {
+                    if matches!(tile.layer, TileLayer::Front) {
+                        let tile_bottom_y = (tile.grid_y + 1) * CELL_HEIGHT;
+                        render_objects.push((tile_bottom_y, RenderObject::FrontTile(entity)));
+                    }
                 }
             }
         }
@@ -315,7 +329,8 @@ impl RenderSystem {
                                 let tile_world_y = tile.grid_y as f32 * crate::ecs::CELL_HEIGHT as f32;
                                 let tile_bottom_y = tile_world_y + texture.height() as f32;
                                 
-                                if player_pos.y < tile_bottom_y {
+                                // 🎯 正确的遮挡判断：玩家Y坐标 > 瓦片底部Y，说明玩家在建筑物后面（被遮挡）
+                                if player_pos.y > tile_bottom_y {
                                     canvas.set_blend_mode(graphics::BlendMode {
                                         color: graphics::BlendComponent {
                                             src_factor: graphics::BlendFactor::SrcAlpha,
@@ -339,9 +354,8 @@ impl RenderSystem {
         
         // 绘制玩家
         if let Ok(player) = world.get::<&Player>(entity) {
-            // 🎬 尝试获取MovementAnimation组件
-            let movement_anim = world.get::<&crate::ecs::components::MovementAnimation>(entity).ok();
-            Self::draw_player(ctx, canvas, &player, player_pos, pos, camera, movement_anim)?;
+            // � 绘制玩家（已设置好混合模式，draw_player_with_world会自动查询MovementAnimation）
+            Self::draw_player_with_world(ctx, canvas, world, &*player, player_pos, pos, camera)?;
         }
         
         // 恢复默认混合模式

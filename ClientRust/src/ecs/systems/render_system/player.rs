@@ -3,7 +3,7 @@
 // ============================================================================
 
 use super::RenderSystem;
-use crate::ecs::components::{Player, Position, Camera, PlayerAppearance, LocalPlayer, MovementAnimation};
+use crate::ecs::components::{Player, Position, Camera, PlayerAppearance, LocalPlayer, MovementAnimation, PlayerAction};
 use ggez::{Context, GameResult, graphics::{self, Canvas, DrawParam, Color}};
 use hecs::World;
 
@@ -295,24 +295,9 @@ impl RenderSystem {
         use crate::ecs::systems::CameraSystem;
         
         // 🎬 尝试获取MovementAnimation组件用于动画帧插值
-        let movement_anim = world.query::<(&LocalPlayer, &MovementAnimation)>()
-            .iter()
-            .next()
-            .map(|(_, (_, anim))| anim);
+        let mut movement_anim_query = world.query::<(&LocalPlayer, &MovementAnimation)>();
+        let movement_anim = movement_anim_query.iter().next().map(|(_, (_, anim))| anim);
         
-        // 🔒 只有收到服务器位置确认后才绘制人物纹理
-        // 检查玩家实体是否有 NetworkSync 组件
-        let mut has_server_position = false;
-        for (_entity, (_local, _network_sync)) in world.query::<(&LocalPlayer, &crate::ecs::components::NetworkSync)>().iter() {
-            // 玩家实体有 NetworkSync 组件,说明已经收到服务器位置
-            has_server_position = true;
-            break;
-        }
-        
-        if !has_server_position {
-            // 还没收到服务器位置,不绘制纹理
-            return Ok(());
-        }
         use crate::ecs::components::{MapTile, TileLayer};
         use mir2_shared::enums::{MirClass, MirGender};
         
@@ -330,13 +315,31 @@ impl RenderSystem {
             (MirClass::Warrior, MirGender::Male, 0)
         };
         
-        // 🎨 根据职业和性别选择库
-        // 重要：原版C#客户端所有职业都使用 CArmours 库（男女通用）
-        // 性别差异通过 ArmourOffSet 帧偏移实现:
-        //   - 男性: offset = 0
-        //   - 女性: offset = 808 (普通动作) 或 352 (altAnim: 跑步/射箭)
+        // 🎨 根据职业、动作和性别选择库
+        // 原版C#逻辑:
+        //   - 战士/道士/法师: 所有动作使用 CArmours
+        //   - 弓箭手: 跑步/射箭使用 ARArmours (altAnim=true)
         let library_index = armour_index.max(0);
-        let library_name = LibraryName::CArmours(library_index as usize);
+        
+        // 🏹 弓箭手特殊处理：跑步使用ARArmours库
+        let (library_name, use_alt_anim) = match class {
+            MirClass::Archer => {
+                match player.action {
+                    PlayerAction::Run => {
+                        // 弓箭手跑步使用ARArmours库
+                        (LibraryName::ARArmours(library_index as usize), true)
+                    }
+                    _ => {
+                        // 其他动作使用CArmours库
+                        (LibraryName::CArmours(library_index as usize), false)
+                    }
+                }
+            }
+            _ => {
+                // 战士/道士/法师：所有动作使用CArmours库
+                (LibraryName::CArmours(library_index as usize), false)
+            }
+        };
         
         // 计算 DrawFrame
         let action_frame_start = player.action.frame_start();
@@ -345,12 +348,44 @@ impl RenderSystem {
         let draw_frame = action_frame_start + direction_offset + player.frame_index;
         
         // 🚺 性别帧偏移（原版逻辑）
-        // TODO: 支持 altAnim (跑步/射箭等特殊动作使用 ARArmours 库和不同偏移)
-        let armour_offset = match gender {
-            MirGender::Male => 0,
-            MirGender::Female => 808,  // 女性普通动作偏移
+        let armour_offset = if use_alt_anim {
+            // 弓箭手ARArmours库使用不同的偏移
+            match gender {
+                MirGender::Male => 0,
+                MirGender::Female => 352,  // 女性ARArmours偏移
+            }
+        } else {
+            // 普通CArmours库偏移
+            match gender {
+                MirGender::Male => 0,
+                MirGender::Female => 808,  // 女性CArmours偏移
+            }
         };
         let final_frame = draw_frame + armour_offset;
+        
+        // 🐛 DEBUG: 打印详细的动作信息
+        static mut LAST_ACTION: Option<PlayerAction> = None;
+        static mut FRAME_LOG_COUNT: i32 = 0;
+        unsafe {
+            let should_log = LAST_ACTION.is_none() || LAST_ACTION.unwrap() != player.action || FRAME_LOG_COUNT < 3;
+            if should_log {
+                println!("\n🎭 === 角色动画帧计算 ===");
+                println!("职业: {:?}, 性别: {:?}, 盔甲: {}", class, gender, armour_index);
+                println!("动作: {:?} (frame_start={})", player.action, action_frame_start);
+                println!("方向: {} ({}帧/方向)", player.direction, frames_per_direction);
+                println!("当前帧: {}/{}", player.frame_index, frames_per_direction);
+                println!("DrawFrame: {} + {} + {} = {}", action_frame_start, direction_offset, player.frame_index, draw_frame);
+                println!("使用库: {:?} (altAnim={})", library_name, use_alt_anim);
+                println!("性别偏移: {}", armour_offset);
+                println!("FinalFrame: {} + {} = {}", draw_frame, armour_offset, final_frame);
+                println!("========================\n");
+                FRAME_LOG_COUNT += 1;
+                if LAST_ACTION.is_none() || LAST_ACTION.unwrap() != player.action {
+                    LAST_ACTION = Some(player.action);
+                    FRAME_LOG_COUNT = 0;
+                }
+            }
+        }
         
         tracing::debug!("🎭 角色渲染: class={:?}, gender={:?}, armour={}, action={:?}, draw_frame={}, offset={}, final={}", 
             class, gender, armour_index, player.action, draw_frame, armour_offset, final_frame);

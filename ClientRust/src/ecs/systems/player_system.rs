@@ -196,50 +196,67 @@ impl PlayerSystem {
                         let start_point = Point::new(start_grid_x, start_grid_y);
                         let target_point = Point::new(target_grid_x, target_grid_y);
                         
-                        if let Some(path) = pathfinder.find_path(start_point, target_point) {
-                            player.path = path.iter().map(|p| (p.x, p.y)).collect();
-                            // 🎯 跳过路径的第一个点(起点),从第二个点开始移动
-                            player.path_index = if player.path.len() > 1 { 1 } else { 0 };
-                            player.is_moving = true;
-                            player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
-                            player.speed = if is_run { 1.6 } else { 1.33 };
-                            player.move_mode = MoveMode::AutoPathfinding;
-                            player.waiting_server_confirm = false;  // 🔓 清除等待标志
-                            
-                            tracing::info!("🗺️ 寻路成功: {} 个路径点 ({}), 起点=({}, {}), 第一个目标=({}, {}), path_index={}", 
-                                player.path.len(), if is_run { "跑" } else { "走" },
-                                player.path[0].0, player.path[0].1,
-                                if player.path.len() > 1 { player.path[1].0 } else { player.path[0].0 },
-                                if player.path.len() > 1 { player.path[1].1 } else { player.path[0].1 },
-                                player.path_index);
+                        // 🎯 检查起点和终点是否相同
+                        if start_grid_x == target_grid_x && start_grid_y == target_grid_y {
+                            tracing::info!("⚠️ 起点==终点 ({}, {})，忽略寻路", start_grid_x, start_grid_y);
+                        } else if let Some(path) = pathfinder.find_path(start_point, target_point) {
+                            // 🎯 检查路径是否有效（至少2个点）
+                            if path.len() < 2 {
+                                tracing::warn!("⚠️ 路径太短 ({}个点)，忽略", path.len());
+                            } else {
+                                player.path = path.iter().map(|p| (p.x, p.y)).collect();
+                                // 🎯 跳过路径的第一个点(起点),从第二个点开始移动
+                                player.path_index = 1;
+                                player.is_moving = true;
+                                player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
+                                // 🎯 统一速度：走路1.8, 跑步2.5
+                                player.speed = if is_run { 2.5 } else { 1.8 };
+                                player.move_mode = MoveMode::AutoPathfinding;
+                                player.waiting_server_confirm = false;  // 🔓 清除等待标志
+                                
+                                tracing::info!("🗺️ 寻路成功: {} 个路径点 ({}), 起点=({}, {}), 第一个目标=({}, {}), path_index={}", 
+                                    player.path.len(), if is_run { "跑" } else { "走" },
+                                    player.path[0].0, player.path[0].1,
+                                    player.path[1].0, player.path[1].1,
+                                    player.path_index);
+                            }
                         } else {
                             tracing::warn!("❌ 寻路失败: 无法到达目标 ({}, {})", target_grid_x, target_grid_y);
                         }
                     }
                     MoveMode::DirectFollow => {
-                        // 直接跟随模式 → 单击切换到寻路
+                        // 直接跟随模式 → 双击切换到寻路
                         let (start_grid_x, start_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
                         let (target_grid_x, target_grid_y) = Coordinates::world_to_grid(mouse_world_x, mouse_world_y);
                         
-                        let map_data_for_pathfinding = map_data.clone();
-                        let pathfinder = PathFinder::new(
-                            map_data.width,
-                            map_data.height,
-                            Box::new(move |p: Point| !MapUtils::is_walkable(&map_data_for_pathfinding, p.x, p.y))
-                        );
-                        
-                        let start_point = Point::new(start_grid_x, start_grid_y);
-                        let target_point = Point::new(target_grid_x, target_grid_y);
-                        
-                        if let Some(path) = pathfinder.find_path(start_point, target_point) {
-                            player.path = path.iter().map(|p| (p.x, p.y)).collect();
-                            player.path_index = if player.path.len() > 1 { 1 } else { 0 };
-                            player.is_moving = true;
-                            player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
-                            // 🎯 统一速度：走路1.8, 跑步2.5
-                            player.speed = if is_run { 2.5 } else { 1.8 };
-                            player.move_mode = MoveMode::AutoPathfinding;
-                            println!("🎯 切换到寻路模式: {} 个路径点", player.path.len());
+                        // 🎯 检查起点和终点是否相同
+                        if start_grid_x == target_grid_x && start_grid_y == target_grid_y {
+                            tracing::info!("⚠️ [DirectFollow] 起点==终点，忽略寻路");
+                        } else {
+                            let map_data_for_pathfinding = map_data.clone();
+                            let pathfinder = PathFinder::new(
+                                map_data.width,
+                                map_data.height,
+                                Box::new(move |p: Point| !MapUtils::is_walkable(&map_data_for_pathfinding, p.x, p.y))
+                            );
+                            
+                            let start_point = Point::new(start_grid_x, start_grid_y);
+                            let target_point = Point::new(target_grid_x, target_grid_y);
+                            
+                            if let Some(path) = pathfinder.find_path(start_point, target_point) {
+                                if path.len() < 2 {
+                                    tracing::warn!("⚠️ [DirectFollow] 路径太短");
+                                } else {
+                                    player.path = path.iter().map(|p| (p.x, p.y)).collect();
+                                    player.path_index = 1;
+                                    player.is_moving = true;
+                                    player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
+                                    player.speed = if is_run { 2.5 } else { 1.8 };
+                                    player.move_mode = MoveMode::AutoPathfinding;
+                                    player.waiting_server_confirm = false;
+                                    tracing::info!("🎯 [DirectFollow→寻路] {} 个路径点", player.path.len());
+                                }
+                            }
                         }
                     }
                     MoveMode::AutoPathfinding => {
@@ -247,25 +264,35 @@ impl PlayerSystem {
                         let (start_grid_x, start_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
                         let (target_grid_x, target_grid_y) = Coordinates::world_to_grid(mouse_world_x, mouse_world_y);
                         
-                        let map_data_for_pathfinding = map_data.clone();
-                        let pathfinder = PathFinder::new(
-                            map_data.width,
-                            map_data.height,
-                            Box::new(move |p: Point| !MapUtils::is_walkable(&map_data_for_pathfinding, p.x, p.y))
-                        );
-                        
-                        let start_point = Point::new(start_grid_x, start_grid_y);
-                        let target_point = Point::new(target_grid_x, target_grid_y);
-                        
-                        if let Some(path) = pathfinder.find_path(start_point, target_point) {
-                            player.path = path.iter().map(|p| (p.x, p.y)).collect();
-                            player.path_index = if player.path.len() > 1 { 1 } else { 0 };
-                            player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
-                            // 🎯 统一速度：走路1.8, 跑步2.5
-                            player.speed = if is_run { 2.5 } else { 1.8 };
-                            println!("✅ 寻路目标已更新: {} 个路径点 ({})", player.path.len(), if is_run { "跑" } else { "走" });
+                        // 🎯 检查起点和终点是否相同
+                        if start_grid_x == target_grid_x && start_grid_y == target_grid_y {
+                            tracing::info!("⚠️ [AutoPath] 起点==终点，忽略");
                         } else {
-                            println!("❌ 新目标寻路失败: 无法到达");
+                            let map_data_for_pathfinding = map_data.clone();
+                            let pathfinder = PathFinder::new(
+                                map_data.width,
+                                map_data.height,
+                                Box::new(move |p: Point| !MapUtils::is_walkable(&map_data_for_pathfinding, p.x, p.y))
+                            );
+                            
+                            let start_point = Point::new(start_grid_x, start_grid_y);
+                            let target_point = Point::new(target_grid_x, target_grid_y);
+                            
+                            if let Some(path) = pathfinder.find_path(start_point, target_point) {
+                                if path.len() < 2 {
+                                    tracing::warn!("⚠️ [AutoPath] 路径太短");
+                                } else {
+                                    player.path = path.iter().map(|p| (p.x, p.y)).collect();
+                                    player.path_index = 1;
+                                    player.action = if is_run { PlayerAction::Run } else { PlayerAction::Walk };
+                                    player.speed = if is_run { 2.5 } else { 1.8 };
+                                    player.waiting_server_confirm = false;
+                                    tracing::info!("✅ [AutoPath] 更新目标: {} 个路径点 ({})", 
+                                        player.path.len(), if is_run { "跑" } else { "走" });
+                                }
+                            } else {
+                                tracing::warn!("❌ [AutoPath] 新目标寻路失败");
+                            }
                         }
                     }
                 }
@@ -276,18 +303,24 @@ impl PlayerSystem {
                   || (mouse_input.right_pressed && mouse_input.right_press_time >= 5) {
                 let mut is_run = mouse_input.right_pressed;
                 
+                println!("🖱️ [长按] left={}, right={}, is_run初始={}", 
+                    mouse_input.left_pressed, mouse_input.right_pressed, is_run);
+                
                 // 🎯 跑步限制：如果想跑但不能跑，强制改为走
                 let now = std::time::Instant::now();
                 if is_run {
                     if !player.can_run {
-                        tracing::info!("🚫 [长按] 不能跑步: can_run=false, 强制改为走路");
+                        println!("🚫 [长按] 不能跑步: can_run=false, 强制改为走路");
                         is_run = false;
                     } else if now.duration_since(player.last_run_time) > player.run_cooldown {
-                        tracing::info!("⏰ [长按] 跑步冷却超时，重置 can_run=false, 强制改为走路");
+                        println!("⏰ [长按] 跑步冷却超时 ({}ms)，重置 can_run=false, 强制改为走路",
+                            now.duration_since(player.last_run_time).as_millis());
                         player.can_run = false;
                         is_run = false;
                     }
                 }
+                
+                println!("🏃 [长按] 最终决定: is_run={}, can_run={}", is_run, player.can_run);
                 
                 // 🎯 检查目标位置是否可行走
                 let (target_grid_x, target_grid_y) = Coordinates::world_to_grid(mouse_world_x, mouse_world_y);
@@ -308,6 +341,9 @@ impl PlayerSystem {
                             player.speed = if is_run { 2.5 } else { 1.8 };
                             player.move_mode = MoveMode::DirectFollow;
                             player.path.clear();
+                            
+                            println!("✅ [DirectFollow] 设置动作: {:?} (frame_start={}), 速度: {}", 
+                                player.action, player.action.frame_start(), player.speed);
                         }
                         MoveMode::AutoPathfinding => {
                             player.target_x = mouse_world_x;
@@ -317,7 +353,8 @@ impl PlayerSystem {
                             player.speed = if is_run { 2.5 } else { 1.8 };
                             player.move_mode = MoveMode::DirectFollow;
                             player.path.clear();
-                            println!("🎯 切换到直接跟随模式");
+                            println!("🎯 切换到直接跟随模式: 动作={:?} (frame_start={})", 
+                                player.action, player.action.frame_start());
                         }
                     }
                 }
@@ -376,9 +413,10 @@ impl PlayerSystem {
                             player.collision_detected = true;
                             player.collision_target_grid = Some((target_grid_x, target_grid_y));
                         } else {
-                            // 🎬 原版C#不修改Position（CurrentLocation）
-                            // Position只在服务器确认时更新
-                            // 动画插值由MovementAnimation::offset_move提供平滑效果
+                            // ✅ 逐帧移动Position（朝目标格子移动）
+                            // 这是必须的！否则人物会停在原地
+                            pos.x += (dx / distance) * player.speed;
+                            pos.y += (dy / distance) * player.speed;
                             
                             // 平滑移动方向
                             if distance > 10.0 {
@@ -386,22 +424,23 @@ impl PlayerSystem {
                                 player.direction = Self::smooth_direction(player.direction, target_dir);
                             }
                             
-                            // ⚠️ 不再修改Position - 使用动画帧插值代替
-                            // pos.x += (dx / distance) * player.speed;
-                            // pos.y += (dy / distance) * player.speed;
-                            
                             // 清除碰撞标记
                             player.collision_detected = false;
                             player.collision_target_grid = None;
                         }
                     } else {
                         // ✅ 到达格子中心（距离 <= player.speed）
-                        // 🎬 原版C#：不修改Position，等待服务器确认
-                        // 动画帧插值会自动完成最后的平滑过渡
+                        // 🎬 原版C#机制：
+                        // 1. CurrentLocation（Position）更新到目标格子
+                        // 2. Movement更新到下一个目标
+                        // 3. OffSetMove（动画插值）提供平滑过渡
                         
-                        // ⚠️ 不再锁定位置 - Position由服务器确认
-                        // pos.x = target_x;
-                        // pos.y = target_y;
+                        // ✅ 更新Position到当前到达的格子
+                        pos.x = target_x;
+                        pos.y = target_y;
+                        
+                        println!("✅ [到达] grid=({}, {}) pos=({:.1}, {:.1})", 
+                            target_grid_x, target_grid_y, pos.x, pos.y);
                         
                         // 🔍 检查是否还有下一个格子
                         let next_index = player.path_index + 1;
@@ -522,9 +561,9 @@ impl PlayerSystem {
                     // 检查最终位置是否可行走
                     let (final_grid_x, final_grid_y) = Coordinates::world_to_grid(player.target_x, player.target_y);
                     if MapUtils::is_walkable(&map_data, final_grid_x, final_grid_y) {
-                        // 🎬 原版C#：不修改Position，等待服务器确认
-                        // pos.x = player.target_x;
-                        // pos.y = player.target_y;
+                        // ✅ 更新Position到目标位置
+                        pos.x = player.target_x;
+                        pos.y = player.target_y;
                         
                         // 到达目标，停止移动
                         player.is_moving = false;
@@ -555,9 +594,9 @@ impl PlayerSystem {
                         current_grid_x, current_grid_y, next_grid_x, next_grid_y, crossed_grid);
                     
                     if MapUtils::is_walkable(&map_data, next_grid_x, next_grid_y) {
-                        // 🎬 原版C#：不修改Position，使用动画帧插值
-                        // pos.x = next_x;
-                        // pos.y = next_y;
+                        // ✅ 更新Position（逐帧移动）
+                        pos.x = next_x;
+                        pos.y = next_y;
                         
                         // 清除碰撞标记
                         player.collision_detected = false;
@@ -629,16 +668,52 @@ impl PlayerSystem {
                             }
                         }
                     } else {
-                        // 🎯 遇到障碍物，暂停移动但保持DirectFollow模式和当前动画
-                        // 这样角色会继续播放走/跑动画（原地踏步效果）
-                        player.is_moving = false;
-                        // 不改变 action，保持走/跑动画
-                        // 不改变 move_mode，保持 DirectFollow 状态
+                        // 🎯 遇到障碍物，自动切换到寻路模式
+                        let (current_grid_x, current_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
+                        let (target_grid_x, target_grid_y) = Coordinates::world_to_grid(player.target_x, player.target_y);
                         
-                        // 🎯 记录碰撞信息（用于可视化调试）
+                        // 检查是否已经标记过这个障碍
+                        let should_pathfind = if let Some((blocked_x, blocked_y)) = player.collision_target_grid {
+                            // 如果障碍物位置变化，说明是新的障碍，需要重新寻路
+                            blocked_x != next_grid_x || blocked_y != next_grid_y
+                        } else {
+                            // 第一次遇到障碍
+                            true
+                        };
+                        
+                        if should_pathfind {
+                            tracing::info!("🚧 [DirectFollow] 遇到障碍 ({}, {})，切换到寻路模式", next_grid_x, next_grid_y);
+                            
+                            // 尝试寻路绕过障碍
+                            let map_data_for_pathfinding = map_data.clone();
+                            let pathfinder = PathFinder::new(
+                                map_data.width,
+                                map_data.height,
+                                Box::new(move |p: Point| !MapUtils::is_walkable(&map_data_for_pathfinding, p.x, p.y))
+                            );
+                            
+                            let start_point = Point::new(current_grid_x, current_grid_y);
+                            let target_point = Point::new(target_grid_x, target_grid_y);
+                            
+                            if let Some(path) = pathfinder.find_path(start_point, target_point) {
+                                player.path = path.iter().map(|p| (p.x, p.y)).collect();
+                                player.path_index = if player.path.len() > 1 { 1 } else { 0 };
+                                player.is_moving = true;
+                                player.move_mode = MoveMode::AutoPathfinding;
+                                player.waiting_server_confirm = false;
+                                
+                                tracing::info!("✅ [避障] 找到绕行路径: {} 个路径点", player.path.len());
+                            } else {
+                                // 寻路失败，停止移动
+                                player.is_moving = false;
+                                player.action = PlayerAction::Stand;
+                                tracing::warn!("❌ [避障] 无法找到绕行路径");
+                            }
+                        }
+                        
+                        // 记录碰撞信息
                         player.collision_detected = true;
                         player.collision_target_grid = Some((next_grid_x, next_grid_y));
-                        println!("🚫 碰撞检测: 无法移动到 ({}, {})", next_grid_x, next_grid_y);
                     }
                 }
             }
@@ -781,18 +856,23 @@ impl PlayerSystem {
     /// 核心原理:
     /// - 根据动画帧进度计算offset_move
     /// - 更新movement_grid指向目标格子
-    /// - 不修改Position（只在服务器确认时更新）
+    /// - Position在移动逻辑中逐帧更新
     /// 
     /// 这个System完全独立，符合ECS单一职责原则
     pub fn update_movement_animation(world: &mut World) {
         use crate::ecs::components::MovementAnimation;
+        use crate::ecs::Coordinates;
         
-        for (_, (player, movement_anim)) in world.query_mut::<(&Player, &mut MovementAnimation)>() {
+        for (_, (player, pos, movement_anim)) in world.query_mut::<(&Player, &Position, &mut MovementAnimation)>() {
             // 只有在移动时才更新插值
             if !player.is_moving {
                 // 停止移动时清零偏移
                 movement_anim.offset_move = (0.0, 0.0);
                 movement_anim.move_distance = 0;
+                // 同步current_grid和movement_grid到当前位置
+                let (grid_x, grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
+                movement_anim.current_grid = (grid_x, grid_y);
+                movement_anim.movement_grid = (grid_x, grid_y);
                 continue;
             }
             
@@ -807,16 +887,35 @@ impl PlayerSystem {
                 _ => 0,
             };
             
-            // 如果有移动距离，更新offset_move
+            // 如果有移动距离，更新offset_move和movement_grid
             if move_distance > 0 {
                 movement_anim.move_distance = move_distance;
                 movement_anim.update_offset(frame_index, frame_count, player.direction);
                 
-                // 🎯 更新movement_grid（目标格子位置）
-                if player.path_index < player.path.len() {
-                    let (target_grid_x, target_grid_y) = player.path[player.path_index];
-                    movement_anim.movement_grid = (target_grid_x, target_grid_y);
+                // 🎯 根据移动模式更新movement_grid
+                match player.move_mode {
+                    MoveMode::AutoPathfinding => {
+                        // 寻路模式：使用path中的目标格子
+                        if player.path_index < player.path.len() {
+                            let (target_grid_x, target_grid_y) = player.path[player.path_index];
+                            movement_anim.movement_grid = (target_grid_x, target_grid_y);
+                        }
+                    }
+                    MoveMode::DirectFollow => {
+                        // 直接跟随模式：根据target位置计算目标格子
+                        let (target_grid_x, target_grid_y) = Coordinates::world_to_grid(player.target_x, player.target_y);
+                        movement_anim.movement_grid = (target_grid_x, target_grid_y);
+                    }
+                    MoveMode::Idle => {
+                        // 空闲状态：movement_grid = current_grid
+                        let (grid_x, grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
+                        movement_anim.movement_grid = (grid_x, grid_y);
+                    }
                 }
+                
+                // 更新current_grid为当前Position所在格子
+                let (grid_x, grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
+                movement_anim.current_grid = (grid_x, grid_y);
             } else {
                 movement_anim.offset_move = (0.0, 0.0);
                 movement_anim.move_distance = 0;

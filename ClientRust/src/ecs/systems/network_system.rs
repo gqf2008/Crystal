@@ -93,7 +93,7 @@ impl NetworkSystem {
             // 🎬 同时查询MovementAnimation组件以更新动画状态
             let mut query = world.query::<(&LocalPlayer, &mut Position, &mut Player, Option<&mut crate::ecs::components::MovementAnimation>)>();
             
-            for (entity, (_local, position, player, movement_anim)) in query.iter() {
+            for (entity, (_local, position, player, mut movement_anim)) in query.iter() {
                 tracing::info!("🔍 找到本地玩家实体: entity={:?}", entity);
                 // 将格子坐标转换为世界坐标 (格子中心)
                 let (world_x, world_y) = crate::ecs::coordinates::Coordinates::grid_to_world_center(location.x, location.y);
