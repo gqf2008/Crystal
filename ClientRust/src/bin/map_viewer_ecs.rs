@@ -79,7 +79,9 @@ use mir2_client::ecs::{
     Draggable,
     Player,
     PlayerAction,
+    PlayerAppearance,
     MoveMode,
+    MovementAnimation,
     MapTile,
     TileLayer,
     AnimatedTile,
@@ -97,7 +99,8 @@ use mir2_client::ecs::{
     CELL_HEIGHT,
     // Systems
     CameraSystem,
-    PlayerSystem,
+    MovementSystem,   // 🆕 移动系统
+    PathfindingSystem, // 🆕 寻路系统
     AnimationSystem,
     DoorSystem,
     RenderSystem,
@@ -231,6 +234,19 @@ impl MapViewerApp {
                 x: spawn_x,
                 y: spawn_y,
             },
+            PlayerAppearance {
+                class: mir2_shared::enums::MirClass::Warrior,
+                gender: mir2_shared::enums::MirGender::Male,
+                hair: 0,
+                weapon: -1,
+                armour: 0,
+                weapon_effect: 0,
+                wing_effect: 0,
+            },
+            MovementAnimation::new(
+                (spawn_x / 48.0) as i32,
+                (spawn_y / 32.0) as i32,
+            ),
             LocalPlayer,  // 🎯 本地玩家标记
             NetworkSync {  // 🎯 网络同步组件（map_viewer 不需要真实同步，只是为了让渲染系统工作）
                 object_id: 1,
@@ -414,8 +430,14 @@ impl EventHandler for MapViewerApp {
         // 🎯 摄像机系统 - 边缘滚屏 + 跟随角色
         CameraSystem::update(&mut self.world);
 
-        // 更新角色系统
-        PlayerSystem::update(&mut self.world,None);
+        // 🆕 更新寻路系统
+        PathfindingSystem::update(&mut self.world, None);
+        
+        // 🆕 更新移动系统
+        MovementSystem::update(&mut self.world, None);
+        
+        // � 更新角色移动动画（帧插值，让移动更流畅）
+        AnimationSystem::update_movement_animation(&mut self.world);
 
         // 🎯 遮挡系统已禁用 - 改用简单的混合模式+绘制顺序处理遮挡
         // let delta_time = ctx.time.delta().as_secs_f32();

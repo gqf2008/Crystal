@@ -101,15 +101,30 @@ impl RenderSystem {
                             
                             let (draw_world_x, draw_world_y) = if let Some(anim) = movement_anim {
                                 // 🎯 使用动画帧插值计算位置
-                                use crate::ecs::{CELL_WIDTH, CELL_HEIGHT};
+                                use crate::ecs::Coordinates;
                                 
-                                // Movement位置（目标格子中心）
-                                let movement_world_x = anim.movement_grid.0 as f32 * CELL_WIDTH as f32;
-                                let movement_world_y = anim.movement_grid.1 as f32 * CELL_HEIGHT as f32;
+                                // Movement位置（目标格子中心）- 使用grid_to_world_center转换
+                                let (movement_world_x, movement_world_y) = Coordinates::grid_to_world_center(
+                                    anim.movement_grid.0,
+                                    anim.movement_grid.1
+                                );
                                 
                                 // 应用offset_move插值
                                 let draw_x = movement_world_x - anim.offset_move.0;
                                 let draw_y = movement_world_y - anim.offset_move.1;
+                                
+                                // 🎯 调试：每60帧打印一次渲染位置
+                                static mut RENDER_FRAME_COUNT: u32 = 0;
+                                unsafe {
+                                    RENDER_FRAME_COUNT += 1;
+                                    if RENDER_FRAME_COUNT % 60 == 0 {
+                                        println!("🖼️ [渲染] movement_grid=({},{}) → world_center=({:.1},{:.1}) - offset=({:.1},{:.1}) = draw=({:.1},{:.1})",
+                                            anim.movement_grid.0, anim.movement_grid.1,
+                                            movement_world_x, movement_world_y,
+                                            anim.offset_move.0, anim.offset_move.1,
+                                            draw_x, draw_y);
+                                    }
+                                }
                                 
                                 (draw_x, draw_y)
                             } else {

@@ -348,6 +348,26 @@ impl InputSystem {
         }
     }
     
+    /// 更新鼠标输入状态（每帧调用）
+    /// 用于更新长按计时器和清除双击事件
+    pub fn update_mouse_input(world: &mut World) {
+        use crate::ecs::components::MouseInput;
+        
+        if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
+            // 更新长按计时器
+            if mouse_input.left_pressed {
+                mouse_input.left_press_time += 1;
+            }
+            if mouse_input.right_pressed {
+                mouse_input.right_press_time += 1;
+            }
+            
+            // 清除双击事件（单帧事件）
+            mouse_input.left_double_clicked = false;
+            mouse_input.right_double_clicked = false;
+        }
+    }
+    
     // ========================================================================
     // 辅助方法
     // ========================================================================

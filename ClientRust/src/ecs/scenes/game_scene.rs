@@ -34,7 +34,7 @@ use super::{Scene, SceneType};
 use crate::network::{NetworkCommand, game_client::GameEvent};
 use crate::ecs::{
     components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerData, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow},
-    systems::{CameraSystem, PlayerSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem, OcclusionSystem},  // 🆕 添加 OcclusionSystem
+    systems::{CameraSystem, MovementSystem, PathfindingSystem, RenderSystem, AnimationSystem, NetworkSystem, MonsterSystem, UISystem, InputSystem, OcclusionSystem},  // 🆕 使用新的系统
     Coordinates, MapUtils,  // 坐标工具
     map_loader::MapLoader,
     ui::{ChatType, MainDialog, InventoryDialog, CharacterDialog, SkillBarDialog, ChatDialog, MagicLearningDialog, QuestDialog, TradeDialog, SkillsDialog, OptionsDialog, HotkeyHelpPanel},
@@ -567,21 +567,17 @@ impl Scene for GameScene {
         // 更新相机系统
         CameraSystem::update(world);
         
-        // 更新角色系统（会处理双击事件）- 传递 network_tx 用于位置同步
-        PlayerSystem::update(world, Some(network_tx));
+        // 🆕 更新寻路系统（处理双击事件和输入）
+        PathfindingSystem::update(world, Some(network_tx));
         
-        // � 更新动画帧插值系统（原版C#的OffSetMove机制）
-        PlayerSystem::update_movement_animation(world);
+        // 🆕 更新移动系统（处理移动逻辑和Position更新）
+        MovementSystem::update(world, Some(network_tx));
         
-        // �🎯 重置双击标志（在PlayerSystem处理完之后清除，避免重复触发）
-        if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
-            if mouse_input.left_double_clicked {
-                mouse_input.left_double_clicked = false;
-            }
-            if mouse_input.right_double_clicked {
-                mouse_input.right_double_clicked = false;
-            }
-        }
+        // 🆕 更新动画帧插值系统（原版C#的OffSetMove机制）
+        AnimationSystem::update_movement_animation(world);
+        
+        // � 更新鼠标输入状态（清除双击事件，更新长按计时器）
+        InputSystem::update_mouse_input(world);
         
         // 更新怪物系统
         let delta_time = 1.0 / max_fps as f32;
