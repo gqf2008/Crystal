@@ -3,12 +3,15 @@
 // ============================================================================
 
 use super::RenderSystem;
-use crate::ecs::components::{Player, Position, Camera, PlayerAppearance, LocalPlayer};
+use crate::ecs::components::{Player, Position, Camera, PlayerAppearance, LocalPlayer, MovementAnimation};
 use ggez::{Context, GameResult, graphics::{self, Canvas, DrawParam, Color}};
 use hecs::World;
 
 impl RenderSystem {
     /// 绘制角色（简化版本，不包含Front层遮挡检测）
+    /// 
+    /// 🎬 使用动画帧插值（MovementAnimation）计算绘制位置
+    /// 参考: Client/MirObjects/PlayerObject.cs Line 1000-1050
     pub fn draw_player(
         ctx: &mut Context,
         canvas: &mut Canvas,
@@ -16,6 +19,7 @@ impl RenderSystem {
         player_pos: &Position,
         camera_pos: &Position,
         camera: &Camera,
+        movement_anim: Option<&MovementAnimation>,  // 🆕 可选的动画插值组件
     ) -> GameResult<()> {
         use crate::graphics::libraries::{get_library, LibraryName};
         use crate::ecs::systems::CameraSystem;
@@ -87,12 +91,38 @@ impl RenderSystem {
                 match mlib.get_or_create_texture(ctx, final_frame as usize) {
                     Ok(info) => {
                         if let Some(ref texture) = info.image {
+                            // � 动画帧插值位置计算 (原版C#机制)
+                            // 参考: PlayerObject.cs Line 1000-1050
+                            //
+                            // 如果有MovementAnimation组件，使用插值计算绘制位置:
+                            //   DrawLocation = Movement * CellSize - OffSetMove
+                            //
+                            // 如果没有，使用Position（兼容旧代码）
+                            
+                            let (draw_world_x, draw_world_y) = if let Some(anim) = movement_anim {
+                                // 🎯 使用动画帧插值计算位置
+                                use crate::ecs::{CELL_WIDTH, CELL_HEIGHT};
+                                
+                                // Movement位置（目标格子中心）
+                                let movement_world_x = anim.movement_grid.0 as f32 * CELL_WIDTH as f32;
+                                let movement_world_y = anim.movement_grid.1 as f32 * CELL_HEIGHT as f32;
+                                
+                                // 应用offset_move插值
+                                let draw_x = movement_world_x - anim.offset_move.0;
+                                let draw_y = movement_world_y - anim.offset_move.1;
+                                
+                                (draw_x, draw_y)
+                            } else {
+                                // 📍 兼容模式：使用Position
+                                (player_pos.x, player_pos.y)
+                            };
+                            
                             // 🎯 纹理位置计算:
-                            // player_pos 现在是格子中心(红点)
+                            // draw_world 现在是格子中心(红点)
                             // 纹理底边应该对齐格子底边，X轴居中
                             use crate::ecs::{CELL_HEIGHT};
-                            let green_bottom_y = player_pos.y + (CELL_HEIGHT as f32 / 2.0);
-                            let world_x = player_pos.x - (char_w as f32 / 2.0);
+                            let green_bottom_y = draw_world_y + (CELL_HEIGHT as f32 / 2.0);
+                            let world_x = draw_world_x - (char_w as f32 / 2.0);
                             let world_y = green_bottom_y - char_h as f32;
                             
                             let (screen_x, screen_y) = CameraSystem::world_to_screen(
@@ -264,6 +294,12 @@ impl RenderSystem {
         use crate::graphics::libraries::{get_library, LibraryName};
         use crate::ecs::systems::CameraSystem;
         
+        // 🎬 尝试获取MovementAnimation组件用于动画帧插值
+        let movement_anim = world.query::<(&LocalPlayer, &MovementAnimation)>()
+            .iter()
+            .next()
+            .map(|(_, (_, anim))| anim);
+        
         // 🔒 只有收到服务器位置确认后才绘制人物纹理
         // 检查玩家实体是否有 NetworkSync 组件
         let mut has_server_position = false;
@@ -399,9 +435,27 @@ impl RenderSystem {
                     .get_offset(final_frame as usize)
                     .unwrap_or((0, 0));
                 
+                // 🎬 动画帧插值位置计算 (原版C#机制)
+                // 如果有MovementAnimation组件，使用插值计算绘制位置
+                let (draw_world_x, draw_world_y) = if let Some(anim) = movement_anim {
+                    // 🎯 使用动画帧插值计算位置
+                    // Movement位置（目标格子中心）
+                    let movement_world_x = anim.movement_grid.0 as f32 * CELL_WIDTH as f32;
+                    let movement_world_y = anim.movement_grid.1 as f32 * CELL_HEIGHT as f32;
+                    
+                    // 应用offset_move插值
+                    let draw_x = movement_world_x - anim.offset_move.0;
+                    let draw_y = movement_world_y - anim.offset_move.1;
+                    
+                    (draw_x, draw_y)
+                } else {
+                    // 📍 兼容模式：使用Position
+                    (player_pos.x, player_pos.y)
+                };
+                
                 // 计算纹理位置
-                let green_bottom_y = player_pos.y + (CELL_HEIGHT as f32 / 2.0);
-                world_x = player_pos.x + (CELL_WIDTH as f32 / 2.0) - (char_w as f32 / 2.0);
+                let green_bottom_y = draw_world_y + (CELL_HEIGHT as f32 / 2.0);
+                world_x = draw_world_x + (CELL_WIDTH as f32 / 2.0) - (char_w as f32 / 2.0);
                 world_y = green_bottom_y - char_h as f32;
                 
                 // 🗡️ 左侧方向:先绘制武器(在身体后面)

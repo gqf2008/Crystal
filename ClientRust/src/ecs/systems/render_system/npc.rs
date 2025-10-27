@@ -150,6 +150,11 @@ impl RenderSystem {
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
         
+        // 🚫 遮挡检测：如果NPC被 Front 层遮挡，则不绘制
+        if RenderSystem::is_occluded_by_front_layer(ctx, world, pos) {
+            return Ok(());
+        }
+        
         // 获取NPC数据和动画
         let npc = match world.get::<&NPCData>(entity) {
             Ok(n) => n,

@@ -224,8 +224,13 @@ impl GameScene {
                 waiting_server_confirm: false,  // 🎯 初始不等待确认
                 collision_detected: false,  // 🎯 碰撞调试
                 collision_target_grid: None,  // 🎯 碰撞调试
+                // 🎯 走/跑机制
+                can_run: false,  // 初始不能跑，需要先走路
+                last_run_time: std::time::Instant::now(),
+                run_cooldown: std::time::Duration::from_millis(900),  // 900ms冷却
             },
             Position { x: player_world_x, y: player_world_y },  // 📍 使用真实位置
+            crate::ecs::components::MovementAnimation::new(player_grid_x, player_grid_y),  // 🎬 动画帧插值组件
             PlayerAppearance {
                 class: MirClass::Warrior,
                 gender: MirGender::Female,  // 🚺 设置为女性角色
@@ -565,7 +570,10 @@ impl Scene for GameScene {
         // 更新角色系统（会处理双击事件）- 传递 network_tx 用于位置同步
         PlayerSystem::update(world, Some(network_tx));
         
-        // 🎯 重置双击标志（在PlayerSystem处理完之后清除，避免重复触发）
+        // � 更新动画帧插值系统（原版C#的OffSetMove机制）
+        PlayerSystem::update_movement_animation(world);
+        
+        // �🎯 重置双击标志（在PlayerSystem处理完之后清除，避免重复触发）
         if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
             if mouse_input.left_double_clicked {
                 mouse_input.left_double_clicked = false;

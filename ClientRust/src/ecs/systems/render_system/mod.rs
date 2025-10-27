@@ -55,29 +55,10 @@ impl RenderSystem {
             visible_area_entity,
         )?;
         
-        // ==================== 第二步: 渲染前景层（Front 层建筑物）====================
-        // 🎯 参考 atlas.rs：先绘制所有建筑物
-        if config.show_front {
-            // 只绘制 Front 层
-            let mut front_only_config = config.clone();
-            front_only_config.show_back = false;
-            front_only_config.show_middle = false;
-            front_only_config.show_front = true;
-            
-            Self::draw_tiles(
-                ctx,
-                canvas,
-                world,
-                pos,
-                camera,
-                &front_only_config,
-                visible_area_entity,
-            )?;
-        }
-        
-        // ==================== 第三步: 渲染角色/怪物/NPC ====================
-        // 🎯 参考 atlas.rs：建筑物绘制完后再绘制角色
-        Self::draw_all_entities(ctx, canvas, world, pos, camera, config)?;
+        // ==================== 第二步: 渲染 Front 层建筑物 + 角色/怪物（按 Y 排序）====================
+        // 🎯 原版逻辑：按 Y 行逐行绘制，每行内 Front 层在对象之前绘制
+        // 这样实现正确的遮挡关系：上方的对象被下方的建筑物遮挡
+        Self::draw_front_and_entities_sorted(ctx, canvas, world, pos, camera, config, Some(visible_area_entity))?;
         
         // ==================== 第四步: 顶层信息 ====================
         Self::draw_items(ctx, canvas, world, pos, camera)?;
@@ -209,6 +190,163 @@ impl RenderSystem {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// 🎯 按 Y 坐标排序绘制 Front 层和所有实体（原版逻辑）
+    /// 
+    /// 原版 C# 逻辑：所有对象（包括 Front 层瓦片、角色）按照底部Y坐标排序后绘制
+    /// 
+    /// 这样实现正确的 Y-sorting：
+    /// - Y 坐标小的对象先绘制（在后面）
+    /// - Y 坐标大的对象后绘制（在前面）
+    /// - 实现正确的前后遮挡关系
+    fn draw_front_and_entities_sorted(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        pos: &Position,
+        camera: &Camera,
+        config: &RenderConfig,
+        visible_area_entity: Option<hecs::Entity>,
+    ) -> GameResult {
+        use crate::ecs::CELL_HEIGHT;
+        
+        // 定义渲染对象类型
+        enum RenderObject {
+            FrontTile(hecs::Entity),
+            Monster(hecs::Entity, Position),
+            NPC(hecs::Entity, Position),
+            Player(hecs::Entity, Position),
+        }
+        
+        // 收集所有需要渲染的对象及其 Y 坐标
+        let mut render_objects: Vec<(i32, RenderObject)> = Vec::new();
+        
+        // 1. 收集所有 Front 层瓦片
+        if config.show_front {
+            for (entity, tile) in world.query::<&MapTile>().iter() {
+                if matches!(tile.layer, TileLayer::Front) {
+                    // Front 层瓦片使用格子底部的 Y 坐标
+                    let tile_bottom_y = (tile.grid_y + 1) * CELL_HEIGHT;
+                    render_objects.push((tile_bottom_y, RenderObject::FrontTile(entity)));
+                }
+            }
+        }
+        
+        // 2. 收集所有怪物
+        for (entity, entity_pos) in world.query::<&Position>().iter() {
+            if world.get::<&crate::ecs::components::MonsterData>(entity).is_ok() {
+                // 使用角色底部的 Y 坐标（角色站立点）
+                let entity_bottom_y = entity_pos.y as i32 + CELL_HEIGHT;
+                render_objects.push((entity_bottom_y, RenderObject::Monster(entity, entity_pos.clone())));
+            }
+        }
+        
+        // 3. 收集所有 NPC
+        for (entity, entity_pos) in world.query::<&Position>().iter() {
+            if world.get::<&crate::ecs::components::NPCData>(entity).is_ok() {
+                let entity_bottom_y = entity_pos.y as i32 + CELL_HEIGHT;
+                render_objects.push((entity_bottom_y, RenderObject::NPC(entity, entity_pos.clone())));
+            }
+        }
+        
+        // 4. 收集所有玩家
+        for (entity, (_, entity_pos)) in world.query::<(&Player, &Position)>().iter() {
+            let entity_bottom_y = entity_pos.y as i32 + CELL_HEIGHT;
+            render_objects.push((entity_bottom_y, RenderObject::Player(entity, entity_pos.clone())));
+        }
+        
+        // 5. 按 Y 坐标排序（从小到大，先绘制后面的对象）
+        render_objects.sort_by_key(|(y, _)| *y);
+        
+        // 6. 按顺序绘制所有对象
+        for (_, render_obj) in render_objects {
+            match render_obj {
+                RenderObject::FrontTile(entity) => {
+                    if let Ok(tile) = world.get::<&MapTile>(entity) {
+                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 1.0)?;
+                    }
+                }
+                RenderObject::Monster(entity, entity_pos) => {
+                    Self::draw_single_monster(ctx, canvas, world, entity, &entity_pos, pos, camera, config)?;
+                }
+                RenderObject::NPC(entity, entity_pos) => {
+                    Self::draw_single_npc(ctx, canvas, world, entity, &entity_pos, pos, camera, config)?;
+                }
+                RenderObject::Player(entity, entity_pos) => {
+                    Self::draw_player_with_occlusion(ctx, canvas, world, entity, &entity_pos, pos, camera, config)?;
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// 绘制玩家（带遮挡检测）
+    fn draw_player_with_occlusion(
+        ctx: &mut Context,
+        canvas: &mut Canvas,
+        world: &World,
+        entity: hecs::Entity,
+        player_pos: &Position,
+        pos: &Position,
+        camera: &Camera,
+        config: &RenderConfig,
+    ) -> GameResult {
+        // 默认使用 ALPHA 混合
+        canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+        
+        // 计算角色所在的格子坐标
+        let grid_x = (player_pos.x / crate::ecs::CELL_WIDTH as f32) as i32;
+        let grid_y = (player_pos.y / crate::ecs::CELL_HEIGHT as f32) as i32;
+        
+        // 查询该格子及周围的 Front 层瓦片，决定是否被遮挡
+        for (_, tile) in world.query::<&MapTile>().iter() {
+            if (tile.grid_x - grid_x).abs() <= 1
+                && (tile.grid_y - grid_y).abs() <= 1
+                && matches!(tile.layer, TileLayer::Front) 
+            {
+                use crate::graphics::get_map_library;
+                if let Some(lib) = get_map_library(tile.library_index) {
+                    if let Ok(mut lib_guard) = lib.lock() {
+                        if let Ok(info) = lib_guard.get_or_create_texture(ctx, tile.image_index as usize) {
+                            if let Some(ref texture) = info.image {
+                                let tile_world_y = tile.grid_y as f32 * crate::ecs::CELL_HEIGHT as f32;
+                                let tile_bottom_y = tile_world_y + texture.height() as f32;
+                                
+                                if player_pos.y < tile_bottom_y {
+                                    canvas.set_blend_mode(graphics::BlendMode {
+                                        color: graphics::BlendComponent {
+                                            src_factor: graphics::BlendFactor::SrcAlpha,
+                                            dst_factor: graphics::BlendFactor::OneMinusSrcAlpha,
+                                            operation: graphics::BlendOperation::Add,
+                                        },
+                                        alpha: graphics::BlendComponent {
+                                            src_factor: graphics::BlendFactor::One,
+                                            dst_factor: graphics::BlendFactor::OneMinusSrcAlpha,
+                                            operation: graphics::BlendOperation::Add,
+                                        },
+                                    });
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 绘制玩家
+        if let Ok(player) = world.get::<&Player>(entity) {
+            // 🎬 尝试获取MovementAnimation组件
+            let movement_anim = world.get::<&crate::ecs::components::MovementAnimation>(entity).ok();
+            Self::draw_player(ctx, canvas, &player, player_pos, pos, camera, movement_anim)?;
+        }
+        
+        // 恢复默认混合模式
+        canvas.set_blend_mode(graphics::BlendMode::ALPHA);
+        
         Ok(())
     }
 

@@ -9,6 +9,88 @@ use hecs::World;
 
 impl RenderSystem {
 
+    /// 检测实体是否被 Front 层遮挡
+    /// 
+    /// 返回 true 表示被遮挡，不应该绘制
+    /// 
+    /// 遮挡条件：
+    /// 1. Front层瓦片的格子Y坐标 < 实体的格子Y坐标（瓦片在实体前面）
+    /// 2. 瓦片的底部Y坐标 > 实体的底部Y坐标（瓦片足够高，会挡住实体）
+    /// 3. X坐标有重叠
+    pub fn is_occluded_by_front_layer(
+        ctx: &mut Context,
+        world: &World,
+        entity_pos: &Position,
+    ) -> bool {
+        use crate::ecs::components::{MapTile, TileLayer};
+        use crate::ecs::{CELL_WIDTH, CELL_HEIGHT};
+        
+        // 计算实体所在的格子坐标
+        let entity_grid_x = (entity_pos.x / CELL_WIDTH as f32) as i32;
+        let entity_grid_y = (entity_pos.y / CELL_HEIGHT as f32) as i32;
+        
+        // 实体的底部Y坐标（站立点）
+        let entity_bottom_y = entity_pos.y + CELL_HEIGHT as f32;
+        
+        // 检查周围的 Front 层瓦片是否遮挡实体
+        for (_, tile) in world.query::<&MapTile>().iter() {
+            if !matches!(tile.layer, TileLayer::Front) {
+                continue;
+            }
+            
+            // 只检查附近的瓦片（性能优化）
+            if (tile.grid_x - entity_grid_x).abs() > 3 || (tile.grid_y - entity_grid_y).abs() > 3 {
+                continue;
+            }
+            
+            // 🚫 关键判断：瓦片的格子必须在实体的前面（Y坐标更小）
+            // 如果瓦片和实体在同一行或后面，不会遮挡
+            if tile.grid_y >= entity_grid_y {
+                continue;
+            }
+            
+            // 获取瓦片的图像信息来判断其实际高度和位置
+            use crate::graphics::get_map_library;
+            if let Some(lib) = get_map_library(tile.library_index) {
+                if let Ok(mut lib_guard) = lib.lock() {
+                    if let Ok(info) = lib_guard.get_or_create_texture(ctx, tile.image_index as usize) {
+                        if let Some(ref texture) = info.image {
+                            // 瓦片的世界坐标（格子左上角）
+                            let tile_world_x = tile.grid_x as f32 * CELL_WIDTH as f32;
+                            let tile_world_y = tile.grid_y as f32 * CELL_HEIGHT as f32;
+                            
+                            // 瓦片的实际绘制位置（考虑偏移）
+                            let tile_draw_x = tile_world_x + info.x as f32;
+                            let tile_draw_y = tile_world_y + info.y as f32;
+                            
+                            // 瓦片的底部Y坐标
+                            let tile_bottom_y = tile_draw_y + texture.height() as f32;
+                            
+                            // 瓦片的右边X坐标
+                            let tile_right_x = tile_draw_x + texture.width() as f32;
+                            
+                            // 检查瓦片是否足够高，能够遮挡实体
+                            // 瓦片的底部必须超过实体的底部，才能遮挡
+                            if tile_bottom_y > entity_bottom_y {
+                                // 进一步检查X坐标是否重叠
+                                // 实体通常位于格子中心，我们假设实体占据一个格子的范围
+                                let entity_left_x = entity_pos.x;
+                                let entity_right_x = entity_pos.x + CELL_WIDTH as f32;
+                                
+                                // 如果X坐标有重叠，说明实体被瓦片遮挡
+                                if entity_left_x < tile_right_x && entity_right_x > tile_draw_x {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        false
+    }
+
     /// 绘制怪物
     /// 
     /// 参数：
@@ -31,6 +113,11 @@ impl RenderSystem {
         use crate::ecs::components::{MonsterData, Animation, Direction};
         use crate::graphics::libraries::{get_library_from_array, LibraryArray};
         use crate::ecs::systems::CameraSystem;
+        
+        // 🚫 遮挡检测：如果怪物被 Front 层遮挡，则不绘制
+        if Self::is_occluded_by_front_layer(ctx, world, pos) {
+            return Ok(());
+        }
         
         // 获取怪物数据和动画
         let monster = match world.get::<&MonsterData>(entity) {
@@ -267,6 +354,11 @@ impl RenderSystem {
         {
             // 跳过死亡怪物
             if health.current <= 0 {
+                continue;
+            }
+            
+            // 🚫 遮挡检测：如果怪物被 Front 层遮挡，则不绘制血条和名称
+            if Self::is_occluded_by_front_layer(ctx, world, pos) {
                 continue;
             }
             

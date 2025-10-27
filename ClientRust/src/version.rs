@@ -28,8 +28,8 @@ fn hash_reader<R: Read>(mut reader: R) -> Result<Vec<u8>> {
         hasher.consume(&buffer[..read]);
     }
 
-    let digest = hasher.compute();
-    Ok(digest.0.to_vec())
+    let digest = hasher.finalize();
+    Ok(digest.to_vec())
 }
 
 pub fn hash_to_hex(bytes: &[u8]) -> String {

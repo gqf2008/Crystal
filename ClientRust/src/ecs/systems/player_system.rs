@@ -121,6 +121,16 @@ impl PlayerSystem {
         
         // 更新所有玩家
         for (_entity, (player, pos)) in world.query_mut::<(&mut Player, &mut Position)>() {
+            // 🎯 检查跑步冷却（每帧检查）
+            let now = std::time::Instant::now();
+            if now.duration_since(player.last_run_time) > player.run_cooldown {
+                if player.can_run {
+                    tracing::info!("⏰ 跑步冷却超时 ({}ms)，重置 can_run=false", 
+                        now.duration_since(player.last_run_time).as_millis());
+                    player.can_run = false;
+                }
+            }
+            
             // 🎯 记录移动前的格子位置 (使用统一的坐标转换)
             let (old_grid_x, old_grid_y) = Coordinates::world_to_grid(pos.x, pos.y);
             let old_direction = player.direction;
@@ -136,10 +146,27 @@ impl PlayerSystem {
             // 🎯 状态机：处理鼠标输入
             // 1. 双击事件 → 切换到自动寻路模式
             if mouse_input.left_double_clicked || mouse_input.right_double_clicked {
-                let is_run = mouse_input.right_double_clicked;  // 右键=跑,左键=走
+                let mut is_run = mouse_input.right_double_clicked;  // 右键=跑,左键=走
                 
-                tracing::info!("🖱️ 检测到双击! left={}, right={}, is_run={}", 
-                    mouse_input.left_double_clicked, mouse_input.right_double_clicked, is_run);
+                // 🎯 跑步限制：必须先走路才能跑（类似原版）
+                let now = std::time::Instant::now();
+                if is_run {
+                    // 检查是否允许跑步
+                    if !player.can_run {
+                        // 不能跑，强制改为走
+                        tracing::info!("� 不能跑步: can_run=false, 强制改为走路");
+                        is_run = false;
+                    } else if now.duration_since(player.last_run_time) > player.run_cooldown {
+                        // 超过900ms没有跑/走，重置can_run
+                        tracing::info!("⏰ 跑步冷却超时 ({}ms)，重置 can_run=false, 强制改为走路", 
+                            now.duration_since(player.last_run_time).as_millis());
+                        player.can_run = false;
+                        is_run = false;
+                    }
+                }
+                
+                tracing::info!("�🖱️ 检测到双击! left={}, right={}, is_run={}, can_run={}", 
+                    mouse_input.left_double_clicked, mouse_input.right_double_clicked, is_run, player.can_run);
                 
                 match player.move_mode {
                     MoveMode::Idle => {
@@ -247,7 +274,20 @@ impl PlayerSystem {
             // 🎯 优化：降低延时从30帧→5帧，提升操作灵敏度
             else if (mouse_input.left_pressed && mouse_input.left_press_time >= 5) 
                   || (mouse_input.right_pressed && mouse_input.right_press_time >= 5) {
-                let is_run = mouse_input.right_pressed;
+                let mut is_run = mouse_input.right_pressed;
+                
+                // 🎯 跑步限制：如果想跑但不能跑，强制改为走
+                let now = std::time::Instant::now();
+                if is_run {
+                    if !player.can_run {
+                        tracing::info!("🚫 [长按] 不能跑步: can_run=false, 强制改为走路");
+                        is_run = false;
+                    } else if now.duration_since(player.last_run_time) > player.run_cooldown {
+                        tracing::info!("⏰ [长按] 跑步冷却超时，重置 can_run=false, 强制改为走路");
+                        player.can_run = false;
+                        is_run = false;
+                    }
+                }
                 
                 // 🎯 检查目标位置是否可行走
                 let (target_grid_x, target_grid_y) = Coordinates::world_to_grid(mouse_world_x, mouse_world_y);
@@ -411,6 +451,8 @@ impl PlayerSystem {
                                         tracing::info!("🌐 发送Run: current=({},{}) → next=({},{}) offset=({},{}) dir={:?}", 
                                             current_grid_x, current_grid_y, next_target_x, next_target_y, 
                                             grid_dx, grid_dy, direction);
+                                        // 🎯 更新跑步时间
+                                        player.last_run_time = now;
                                     }
                                     PlayerAction::Walk => {
                                         let _ = network_tx.send(NetworkCommand::Walk { direction });
@@ -419,6 +461,10 @@ impl PlayerSystem {
                                         tracing::info!("🌐 发送Walk: current=({},{}) → next=({},{}) offset=({},{}) dir={:?}", 
                                             current_grid_x, current_grid_y, next_target_x, next_target_y, 
                                             grid_dx, grid_dy, direction);
+                                        // 🎯 走路后允许跑步
+                                        player.can_run = true;
+                                        player.last_run_time = now;
+                                        tracing::info!("✅ Walking → can_run=true");
                                     }
                                     _ => {}
                                 }
@@ -545,12 +591,18 @@ impl PlayerSystem {
                                             println!("🌐 [DirectFollow] 发送Run: old=({},{}) → next=({},{}) offset=({},{}) dir={:?}", 
                                                 current_grid_x, current_grid_y, next_grid_x, next_grid_y, 
                                                 grid_dx, grid_dy, direction);
+                                            // 🎯 更新跑步时间
+                                            player.last_run_time = now;
                                         }
                                         PlayerAction::Walk => {
                                             let _ = network_tx.send(NetworkCommand::Walk { direction });
                                             println!("🌐 [DirectFollow] 发送Walk: old=({},{}) → next=({},{}) offset=({},{}) dir={:?}", 
                                                 current_grid_x, current_grid_y, next_grid_x, next_grid_y, 
                                                 grid_dx, grid_dy, direction);
+                                            // 🎯 走路后允许跑步
+                                            player.can_run = true;
+                                            player.last_run_time = now;
+                                            tracing::info!("✅ [DirectFollow] Walking → can_run=true");
                                         }
                                         _ => {}
                                     }
@@ -702,6 +754,56 @@ impl PlayerSystem {
                     camera_pos.x += dx * 0.08;
                     camera_pos.y += dy * 0.08;
                 }
+            }
+        }
+    }
+    
+    /// 🎬 更新动画帧插值 - 实现原版C#的OffSetMove机制
+    /// 
+    /// 参考: Client/MirObjects/PlayerObject.cs Line 864-1000
+    /// 
+    /// 核心原理:
+    /// - 根据动画帧进度计算offset_move
+    /// - 更新movement_grid指向目标格子
+    /// - 不修改Position（只在服务器确认时更新）
+    /// 
+    /// 这个System完全独立，符合ECS单一职责原则
+    pub fn update_movement_animation(world: &mut World) {
+        use crate::ecs::components::MovementAnimation;
+        
+        for (_, (player, movement_anim)) in world.query_mut::<(&Player, &mut MovementAnimation)>() {
+            // 只有在移动时才更新插值
+            if !player.is_moving {
+                // 停止移动时清零偏移
+                movement_anim.offset_move = (0.0, 0.0);
+                movement_anim.move_distance = 0;
+                continue;
+            }
+            
+            // 获取当前动画帧信息
+            let frame_count = player.action.frame_count();
+            let frame_index = player.frame_index;
+            
+            // 计算移动距离（格子数）
+            let move_distance = match player.action {
+                crate::ecs::components::PlayerAction::Walk => 1,
+                crate::ecs::components::PlayerAction::Run => 2,  // 原版跑步移动2格
+                _ => 0,
+            };
+            
+            // 如果有移动距离，更新offset_move
+            if move_distance > 0 {
+                movement_anim.move_distance = move_distance;
+                movement_anim.update_offset(frame_index, frame_count, player.direction);
+                
+                // 🎯 更新movement_grid（目标格子位置）
+                if player.path_index < player.path.len() {
+                    let (target_grid_x, target_grid_y) = player.path[player.path_index];
+                    movement_anim.movement_grid = (target_grid_x, target_grid_y);
+                }
+            } else {
+                movement_anim.offset_move = (0.0, 0.0);
+                movement_anim.move_distance = 0;
             }
         }
     }

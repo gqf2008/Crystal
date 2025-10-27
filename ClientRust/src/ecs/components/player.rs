@@ -68,6 +68,10 @@ pub struct Player {
     // 🎯 碰撞调试信息
     pub collision_detected: bool,  // 是否检测到碰撞
     pub collision_target_grid: Option<(i32, i32)>,  // 碰撞的目标格子
+    // 🎯 走/跑机制
+    pub can_run: bool,            // 是否允许跑步（需要先走路才能设置为true）
+    pub last_run_time: Instant,   // 上次跑步/走路的时间
+    pub run_cooldown: Duration,   // 跑步冷却时间（900ms）
 }
 
 /// 角色动作
