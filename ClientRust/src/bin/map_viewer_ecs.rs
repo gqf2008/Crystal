@@ -462,31 +462,50 @@ impl EventHandler for MapViewerApp {
             let grid_x = (player_pos.x / mir2_client::ecs::CELL_WIDTH as f32) as i32;
             let grid_y = (player_pos.y / mir2_client::ecs::CELL_HEIGHT as f32) as i32;
             
+            // 🎯 计算角色脚底的世界坐标（参考 player.rs）
+            let player_foot_y = player_pos.y + (mir2_client::ecs::CELL_HEIGHT as f32 / 2.0);
+            
             // 查询该格子及周围的 Front 层瓦片，决定是否被遮挡
             use mir2_client::graphics::get_map_library;
             use mir2_client::ecs::components::{MapTile, TileLayer};
+            use mir2_client::ecs::{CELL_WIDTH, CELL_HEIGHT};
             
+            // 查询周围的 Front 层瓦片
             for (_, tile) in self.world.query::<&MapTile>().iter() {
                 // 检查周围2x2格子范围内的 Front 层瓦片
                 if (tile.grid_x - grid_x).abs() <= 1
                     && (tile.grid_y - grid_y).abs() <= 1
                     && matches!(tile.layer, TileLayer::Front) 
                 {
+                    
                     // 获取纹理信息
                     if let Some(lib) = get_map_library(tile.library_index) {
                         if let Ok(mut lib_guard) = lib.lock() {
+                            // 获取瓦片尺寸
+                            let (tile_w, tile_h) = lib_guard
+                                .get_size(tile.image_index as usize)
+                                .unwrap_or((CELL_WIDTH as i16, CELL_HEIGHT as i16));
+                            
                             if let Ok(info) = lib_guard.get_or_create_texture(ctx, tile.image_index as usize) {
-                                if let Some(ref texture) = info.image {
-                                    // 计算瓦片世界坐标（纹理左上角）
-                                    let tile_world_y = tile.grid_y as f32 * mir2_client::ecs::CELL_HEIGHT as f32;
+                                if info.image.is_some() {
+                                    // 🎯 参考 tiles.rs 计算瓦片的实际Y坐标（底部对齐）
+                                    let world_y = (tile.grid_y * CELL_HEIGHT) as f32;
+                                    let adjusted_y = if (tile_w as i32 != CELL_WIDTH
+                                        || tile_h as i32 != CELL_HEIGHT)
+                                        && (tile_w as i32 != CELL_WIDTH * 2
+                                            || tile_h as i32 != CELL_HEIGHT * 2)
+                                    {
+                                        world_y + CELL_HEIGHT as f32 - tile_h as f32
+                                    } else {
+                                        world_y
+                                    };
                                     
                                     // 计算纹理底部Y坐标
-                                    let tile_bottom_y = tile_world_y + texture.height() as f32;
+                                    let tile_bottom_y = adjusted_y + tile_h as f32;
                                     
-                                    // 🎯 关键判断：角色被遮挡时使用 ADD 混合
-                                    // 当角色Y + 85 < 瓦片底部Y 时，说明角色在建筑物后面（被遮挡）
-                                    if player_pos.y + 85.0 < tile_bottom_y {
-                                        // 被遮挡：使用 ADD 混合，产生半透明效果让玩家能看到角色
+                                    // 🎯 关键判断：角色脚底 < 瓦片底部，说明角色在建筑物后面
+                                    if player_foot_y < tile_bottom_y {
+                                        // 被遮挡：使用 ADD 混合（半透明发光效果）
                                         canvas.set_blend_mode(graphics::BlendMode::ADD);
                                         break;
                                     }
