@@ -4,7 +4,7 @@
 // 职责：纯物理运动，应用速度到位置
 // 
 // 工作流程：
-// 1. 读取 VelocityComponent（由 LocalPredictionSystem 或 InterpolationSystem 写入）
+// 1. 读取 MovementVelocity（由 LocalPredictionSystem 或 InterpolationSystem 写入）
 // 2. 计算新位置：position += velocity * dt
 // 3. 写入 Position 组件
 //
@@ -15,7 +15,7 @@
 // ============================================================================
 
 use hecs::World;
-use crate::ecs::components::{Position, movement::VelocityComponent};
+use crate::ecs::components::{Position, movement::MovementVelocity};
 
 pub struct MovementSystem;
 
@@ -26,18 +26,29 @@ impl MovementSystem {
 
     /// 🎯 Layer 2 核心：纯物理运动（应用速度到位置）
     /// 
-    /// 执行顺序：在所有写入 VelocityComponent 的系统之后
+    /// 执行顺序：在所有写入 MovementVelocity 的系统之后
     /// 
     /// 数据流：
-    /// - 读取：VelocityComponent（速度）
+    /// - 读取：MovementVelocity（速度）
     /// - 写入：Position（位置）
     pub fn update(world: &mut World, dt: f32) {
+        let mut entity_count = 0;
         for (_entity, (position, velocity)) in world
-            .query_mut::<(&mut Position, &VelocityComponent)>()
+            .query_mut::<(&mut Position, &MovementVelocity)>()
         {
+            entity_count += 1;
+            let old_x = position.x;
+            let old_y = position.y;
+            
             // 应用速度到位置（简单的欧拉积分）
             position.x += velocity.x * dt;
             position.y += velocity.y * dt;
+
+            // 只在有移动时输出调试信息
+            if velocity.magnitude() > 0.01 {
+                println!("[MovementSystem] ⚡ 实体移动: ({:.1}, {:.1}) -> ({:.1}, {:.1}), 速度: ({:.2}, {:.2}), dt: {:.3}",
+                    old_x, old_y, position.x, position.y, velocity.x, velocity.y, dt);
+            }
 
             // 可选：限制速度最大值（防止穿墙）
             let speed = velocity.magnitude();
@@ -50,6 +61,10 @@ impl MovementSystem {
                     position.y
                 );
             }
+        }
+        
+        if entity_count == 0 {
+            println!("[MovementSystem] ⚠️ 没有找到任何具有 Position + MovementVelocity 的实体!");
         }
     }
 
@@ -64,7 +79,7 @@ impl MovementSystem {
     /// 辅助方法：停止指定实体的移动
     #[allow(dead_code)]
     pub fn stop_movement(world: &mut World, entity: hecs::Entity) {
-        if let Ok(mut velocity) = world.get::<&mut VelocityComponent>(entity) {
+        if let Ok(mut velocity) = world.get::<&mut MovementVelocity>(entity) {
             velocity.set(0.0, 0.0);
         }
     }

@@ -137,7 +137,7 @@ use crate::ecs::components::SpellType;
 
 /// 玩家输入组件 - 存储玩家的输入意图
 #[derive(Debug, Clone)]
-pub struct PlayerInputComponent {
+pub struct PlayerInput {
     /// 移动目标（世界坐标）
     pub move_to: Option<(f32, f32)>,
     
@@ -163,7 +163,7 @@ pub struct PlayerInputComponent {
     pub turn_to: Option<MirDirection>,
 }
 
-impl PlayerInputComponent {
+impl PlayerInput {
     pub fn new() -> Self {
         Self {
             move_to: None,
@@ -216,7 +216,7 @@ impl PlayerInputComponent {
     }
 }
 
-impl Default for PlayerInputComponent {
+impl Default for PlayerInput {
     fn default() -> Self {
         Self::new()
     }

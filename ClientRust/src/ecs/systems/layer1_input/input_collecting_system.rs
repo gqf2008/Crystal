@@ -5,7 +5,7 @@
 // 职责（Layer 1: 输入与网络层）：
 // - 捕获所有鼠标/键盘输入
 // - 双击/长按检测
-// - 转换为游戏命令，写入 PlayerInputComponent
+// - 转换为游戏命令，写入 PlayerInput
 //
 // 不负责：
 // - ❌ 寻路计算（由 LocalPredictionSystem 调用 PathfindingService）
@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 
 use crate::network::NetworkCommand;
 use crate::ecs::components::{
-    PlayerInputComponent, MouseInput, LocalPlayer, Camera, Position,
+    PlayerInput, MouseInput, LocalPlayer, Camera, Position,
 };
 use crate::ecs::Coordinates;
 
@@ -142,7 +142,7 @@ impl InputCollectingSystem {
             .unwrap_or((Position { x: 0.0, y: 0.0 }, Camera { zoom: 1.0, screen_width: 1280.0, screen_height: 720.0 }));
         
         // 🎯 处理本地玩家的输入
-        for (_entity, (_, player_input)) in world.query_mut::<(&LocalPlayer, &mut PlayerInputComponent)>() {
+        for (_entity, (_, player_input)) in world.query_mut::<(&LocalPlayer, &mut PlayerInput)>() {
             // 清除上一帧的输入
             player_input.clear();
             

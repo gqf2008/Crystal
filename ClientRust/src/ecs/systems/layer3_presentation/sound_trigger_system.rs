@@ -17,7 +17,7 @@
 
 use hecs::{CommandBuffer, Entity, World};
 // use crate::game_event::GameEvent;  // TODO: 等待GameEvent系统实现后启用
-use crate::ecs::components::{SoundTriggerComponent, SoundType};
+use crate::ecs::components::{SoundTrigger, SoundType};
 
 /// 音效触发系统（Layer 3）
 /// 
@@ -63,7 +63,7 @@ impl SoundTriggerSystem {
     #[allow(dead_code)]
     /// 触发攻击音效
     fn trigger_attack_sound(cmd: &mut CommandBuffer, entity: Entity) {
-        let sound = SoundTriggerComponent::once("attack.wav", SoundType::CharacterAction);
+        let sound = SoundTrigger::once("attack.wav", SoundType::CharacterAction);
         cmd.insert(entity, (sound,));
     }
     
@@ -78,14 +78,14 @@ impl SoundTriggerSystem {
             "hit_light.wav"
         };
         
-        let sound = SoundTriggerComponent::once(sound_file, SoundType::CharacterAction);
+        let sound = SoundTrigger::once(sound_file, SoundType::CharacterAction);
         cmd.insert(entity, (sound,));
     }
     
     #[allow(dead_code)]
     /// 触发死亡音效
     fn trigger_death_sound(cmd: &mut CommandBuffer, entity: Entity) {
-        let sound = SoundTriggerComponent::once("death.wav", SoundType::CharacterAction);
+        let sound = SoundTrigger::once("death.wav", SoundType::CharacterAction);
         cmd.insert(entity, (sound,));
     }
     
@@ -100,42 +100,42 @@ impl SoundTriggerSystem {
             _ => "spell_generic.wav",
         };
         
-        let sound = SoundTriggerComponent::once(sound_file, SoundType::Spell);
+        let sound = SoundTrigger::once(sound_file, SoundType::Spell);
         cmd.insert(entity, (sound,));
     }
     
     #[allow(dead_code)]
     /// 触发技能命中音效
     fn trigger_spell_hit_sound(cmd: &mut CommandBuffer, entity: Entity) {
-        let sound = SoundTriggerComponent::once("spell_impact.wav", SoundType::Spell);
+        let sound = SoundTrigger::once("spell_impact.wav", SoundType::Spell);
         cmd.insert(entity, (sound,));
     }
     
     #[allow(dead_code)]
     /// 触发拾取音效
     fn trigger_pickup_sound(cmd: &mut CommandBuffer, entity: Entity) {
-        let sound = SoundTriggerComponent::once("item_pickup.wav", SoundType::Item);
+        let sound = SoundTrigger::once("item_pickup.wav", SoundType::Item);
         cmd.insert(entity, (sound,));
     }
     
     #[allow(dead_code)]
     /// 触发物品使用音效
     fn trigger_item_use_sound(cmd: &mut CommandBuffer, entity: Entity) {
-        let sound = SoundTriggerComponent::once("item_use.wav", SoundType::Item);
+        let sound = SoundTrigger::once("item_use.wav", SoundType::Item);
         cmd.insert(entity, (sound,));
     }
     
     #[allow(dead_code)]
     /// 触发装备音效
     fn trigger_equip_sound(cmd: &mut CommandBuffer, entity: Entity) {
-        let sound = SoundTriggerComponent::once("item_equip.wav", SoundType::Item);
+        let sound = SoundTrigger::once("item_equip.wav", SoundType::Item);
         cmd.insert(entity, (sound,));
     }
     
     #[allow(dead_code)]
     /// 触发UI音效（创建临时实体）
     fn trigger_ui_sound(cmd: &mut CommandBuffer, sound_file: &str) {
-        let sound = SoundTriggerComponent::once(sound_file, SoundType::UI);
+        let sound = SoundTrigger::once(sound_file, SoundType::UI);
         // UI音效不绑定到任何实体，创建临时实体
         cmd.spawn((sound,));
     }
@@ -143,7 +143,7 @@ impl SoundTriggerSystem {
     #[allow(dead_code)]
     /// 触发升级音效
     fn trigger_levelup_sound(cmd: &mut CommandBuffer, entity: Entity) {
-        let sound = SoundTriggerComponent::once("levelup.wav", SoundType::System)
+        let sound = SoundTrigger::once("levelup.wav", SoundType::System)
             .with_volume(0.8);
         cmd.insert(entity, (sound,));
     }
@@ -151,7 +151,7 @@ impl SoundTriggerSystem {
     #[allow(dead_code)]
     /// 触发任务完成音效
     fn trigger_quest_complete_sound(cmd: &mut CommandBuffer) {
-        let sound = SoundTriggerComponent::once("quest_complete.wav", SoundType::System);
+        let sound = SoundTrigger::once("quest_complete.wav", SoundType::System);
         cmd.spawn((sound,));
     }
 }

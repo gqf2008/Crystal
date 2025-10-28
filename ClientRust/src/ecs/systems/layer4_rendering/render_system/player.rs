@@ -486,22 +486,9 @@ impl RenderSystem {
                     .unwrap_or((0, 0));
                 
                 // 🎬 动画帧插值位置计算 (原版C#机制)
-                // 如果有MovementAnimation组件，使用插值计算绘制位置
-                let (draw_world_x, draw_world_y) = if let Some(anim) = movement_anim {
-                    // 🎯 使用动画帧插值计算位置
-                    // Movement位置（目标格子中心）
-                    let movement_world_x = anim.movement_grid.0 as f32 * CELL_WIDTH as f32;
-                    let movement_world_y = anim.movement_grid.1 as f32 * CELL_HEIGHT as f32;
-                    
-                    // 应用offset_move插值
-                    let draw_x = movement_world_x - anim.offset_move.0;
-                    let draw_y = movement_world_y - anim.offset_move.1;
-                    
-                    (draw_x, draw_y)
-                } else {
-                    // 📍 兼容模式：使用Position
-                    (player_pos.x, player_pos.y)
-                };
+                // ⚠️ map_viewer 模式：直接使用Position，不使用MovementAnimation插值
+                // 因为map_viewer没有AnimationSystem来更新offset_move
+                let (draw_world_x, draw_world_y) = (player_pos.x, player_pos.y);
                 
                 // 计算纹理位置
                 let green_bottom_y = draw_world_y + (CELL_HEIGHT as f32 / 2.0);

@@ -13,7 +13,7 @@
 /// - Layer 4的SoundPlaybackSystem读取此组件并实际播放音效
 /// - 播放后立即移除（一次性触发）
 #[derive(Debug, Clone)]
-pub struct SoundTriggerComponent {
+pub struct SoundTrigger {
     /// 音效文件名（如 "attack.wav"）
     pub sound_file: String,
     
@@ -27,7 +27,7 @@ pub struct SoundTriggerComponent {
     pub looping: bool,
 }
 
-impl SoundTriggerComponent {
+impl SoundTrigger {
     /// 创建一次性音效触发
     pub fn once(sound_file: impl Into<String>, sound_type: SoundType) -> Self {
         Self {
@@ -80,7 +80,7 @@ pub enum SoundType {
     System,
 }
 
-impl Default for SoundTriggerComponent {
+impl Default for SoundTrigger {
     fn default() -> Self {
         Self {
             sound_file: String::new(),
@@ -94,10 +94,10 @@ impl Default for SoundTriggerComponent {
 /// 持续音效组件（用于循环播放的环境音等）
 /// 
 /// # 与SoundTriggerComponent的区别
-/// - SoundTriggerComponent: 一次性触发，播放后移除
-/// - PersistentSoundComponent: 持续存在，需要手动停止
+/// - SoundTrigger: 一次性触发，播放后移除
+/// - PersistentSound: 持续存在，需要手动停止
 #[derive(Debug, Clone)]
-pub struct PersistentSoundComponent {
+pub struct PersistentSound {
     /// 音效文件名
     pub sound_file: String,
     
@@ -114,7 +114,7 @@ pub struct PersistentSoundComponent {
     pub looping: bool,
 }
 
-impl PersistentSoundComponent {
+impl PersistentSound {
     /// 创建持续音效
     pub fn new(sound_file: impl Into<String>, sound_type: SoundType, looping: bool) -> Self {
         Self {

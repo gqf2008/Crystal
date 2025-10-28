@@ -16,17 +16,21 @@ impl RenderSystem {
         camera: &Camera,
     ) -> GameResult<()> {
         use crate::ecs::systems::CameraSystem;
-        use crate::ecs::{Coordinates, Player};
+        use crate::ecs::components::Path;
+        use crate::ecs::Coordinates;
         use ggez::graphics;
 
-        // 查询玩家的路径信息
-        for (_entity, (player, player_pos)) in world.query::<(&Player, &Position)>().iter() {
-            if player.path.is_empty() {
+        // 查询玩家的路径信息 (使用 Path)
+        for (_entity, (path_comp, player_pos)) in world.query::<(&Path, &Position)>().iter() {
+            if path_comp.waypoints.is_empty() || !path_comp.is_valid {
                 continue;
             }
+            
+            let path_points = &path_comp.waypoints;
+            let current_index = path_comp.current_index;
 
             // 绘制从当前位置到第一个路径点的线段
-            if let Some(&(first_x, first_y)) = player.path.get(player.path_index) {
+            if let Some(&(first_x, first_y)) = path_points.get(current_index) {
                 // 第一个路径点的世界坐标
                 let (first_world_x, first_world_y) =
                     Coordinates::grid_to_world_center(first_x, first_y);
@@ -37,8 +41,7 @@ impl RenderSystem {
                 let (first_screen_x, first_screen_y) =
                     CameraSystem::world_to_screen(camera_pos, camera, first_world_x, first_world_y);
 
-                // 🎯 绘制连接线前,检查坐标是否合理
-                // 即使超出屏幕也绘制,但避免极端值导致的渲染问题
+                // 绘制连接线前,检查坐标是否合理
                 if player_screen_x.is_finite()
                     && player_screen_y.is_finite()
                     && first_screen_x.is_finite()
@@ -59,9 +62,9 @@ impl RenderSystem {
             }
 
             // 绘制路径点之间的连接线
-            for i in player.path_index..(player.path.len() - 1) {
-                let (x1, y1) = player.path[i];
-                let (x2, y2) = player.path[i + 1];
+            for i in current_index..(path_points.len() - 1) {
+                let (x1, y1) = path_points[i];
+                let (x2, y2) = path_points[i + 1];
 
                 // 转换到世界坐标
                 let (world_x1, world_y1) = Coordinates::grid_to_world_center(x1, y1);
@@ -73,13 +76,13 @@ impl RenderSystem {
                 let (screen_x2, screen_y2) =
                     CameraSystem::world_to_screen(camera_pos, camera, world_x2, world_y2);
 
-                // 🎯 检查坐标是否合理 (允许超出屏幕,但必须是有限值)
+                // 检查坐标是否合理 (允许超出屏幕,但必须是有限值)
                 if screen_x1.is_finite()
                     && screen_y1.is_finite()
                     && screen_x2.is_finite()
                     && screen_y2.is_finite()
                 {
-                    // 🎯 即使超出屏幕也绘制 (让GPU自己裁剪)
+                    // 即使超出屏幕也绘制 (让GPU自己裁剪)
                     if let Ok(line) = graphics::Mesh::new_line(
                         ctx,
                         &[[screen_x1, screen_y1], [screen_x2, screen_y2]],
@@ -92,8 +95,8 @@ impl RenderSystem {
             }
 
             // 绘制路径点标记 (小圆点)
-            for (idx, &(x, y)) in player.path.iter().enumerate() {
-                if idx < player.path_index {
+            for (idx, &(x, y)) in path_points.iter().enumerate() {
+                if idx < current_index {
                     continue; // 跳过已经走过的点
                 }
 
@@ -104,11 +107,11 @@ impl RenderSystem {
                 let (screen_x, screen_y) =
                     CameraSystem::world_to_screen(camera_pos, camera, world_x, world_y);
 
-                // 🎯 只绘制有效坐标的路径点
+                // 只绘制有效坐标的路径点
                 if screen_x.is_finite() && screen_y.is_finite() {
                     // 绘制圆点
                     // 当前目标点用更大的红色圆圈
-                    let (radius, color) = if idx == player.path_index {
+                    let (radius, color) = if idx == current_index {
                         (6.0, Color::from_rgb(255, 0, 0)) // 红色,大圆
                     } else {
                         (3.0, Color::from_rgb(255, 255, 0)) // 黄色,小圆

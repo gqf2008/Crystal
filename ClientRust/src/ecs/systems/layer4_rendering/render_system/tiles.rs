@@ -173,7 +173,7 @@ impl RenderSystem {
             if !normal_tiles.is_empty() {
                 canvas.set_blend_mode(BlendMode::ALPHA);
                 for (tile, alpha) in normal_tiles {
-                    Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, alpha)?;
+                    Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, alpha, world)?;
                 }
             }
 
@@ -181,7 +181,7 @@ impl RenderSystem {
             if !blend_tiles.is_empty() {
                 canvas.set_blend_mode(Self::create_blend_mode());
                 for (tile, alpha) in blend_tiles {
-                    Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, alpha)?;
+                    Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, alpha, world)?;
                 }
                 canvas.set_blend_mode(BlendMode::ALPHA);
             }
@@ -199,6 +199,7 @@ impl RenderSystem {
         camera: &Camera,
         config: &RenderConfig,
         alpha: f32,  // 🆕 透明度参数（用于遮挡效果）
+        world: &World,  // 🆕 World引用（用于查询MapData进行碰撞检测）
     ) -> GameResult<()> {
         if let Some(mlib) = get_map_library(tile.library_index) {
             if let Ok(mut mlib) = mlib.lock() {
@@ -230,6 +231,45 @@ impl RenderSystem {
 
                             let (screen_x, screen_y) =
                                 CameraSystem::world_to_screen(pos, camera, world_x, adjusted_y);
+                            
+                            // 🚧 绘制碰撞格子的半透明红色背景（仅Back层）
+                            if tile.layer == TileLayer::Back && config.show_obstacles {
+                                // 从world查询MapData
+                                use crate::ecs::components::MapData;
+                                if let Some((_, map_data)) = world.query::<&MapData>().iter().next() {
+                                    // 检查该格子是否有障碍物 (back_image 的第 29 位)
+                                    if tile.grid_x >= 0 && tile.grid_x < map_data.width 
+                                        && tile.grid_y >= 0 && tile.grid_y < map_data.height {
+                                        let cell = &map_data.cells[tile.grid_x as usize][tile.grid_y as usize];
+                                        let has_obstacle = (cell.back_image & 0x20000000) != 0;
+                                        
+                                        if has_obstacle {
+                                            // 计算格子在屏幕上的位置（对齐到格子底部）
+                                            let grid_world_x = (tile.grid_x * CELL_WIDTH) as f32;
+                                            let grid_world_y = (tile.grid_y * CELL_HEIGHT) as f32;
+                                            let (grid_screen_x, grid_screen_y) = 
+                                                CameraSystem::world_to_screen(pos, camera, grid_world_x, grid_world_y);
+                                            
+                                            // 绘制半透明红色背景
+                                            if let Ok(rect) = graphics::Mesh::new_rectangle(
+                                                ctx,
+                                                graphics::DrawMode::fill(),
+                                                graphics::Rect::new(
+                                                    grid_screen_x,
+                                                    grid_screen_y,
+                                                    CELL_WIDTH as f32 * camera.zoom,
+                                                    CELL_HEIGHT as f32 * camera.zoom,
+                                                ),
+                                                Color::from_rgba(255, 0, 0, 100), // 半透明红色
+                                            ) {
+                                                canvas.draw(&rect, DrawParam::default());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+
 
                             // 🚀 屏幕剔除
                             let tile_screen_w = tile_w as f32 * camera.zoom;
@@ -342,9 +382,9 @@ impl RenderSystem {
                     }
                     
                     if has_overlap {
-                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 0.4)?;
+                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 0.4, world)?;
                     } else {
-                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 1.0)?;
+                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 1.0, world)?;
                     }
                 }
             }

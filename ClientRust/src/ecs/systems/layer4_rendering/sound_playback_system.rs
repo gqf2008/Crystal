@@ -20,7 +20,7 @@ use hecs::{CommandBuffer, Entity, World};
 use ggez::{Context, GameResult};
 // use ggez::audio::{Source, SoundSource};  // TODO: GGEZ音频API待确认
 use std::collections::HashMap;
-use crate::ecs::components::{SoundTriggerComponent, PersistentSoundComponent, SoundType};
+use crate::ecs::components::{SoundTrigger, PersistentSound, SoundType};
 
 /// 音效播放系统（Layer 4）
 /// 
@@ -74,11 +74,11 @@ impl SoundPlaybackSystem {
         
         // 暂时只移除SoundTriggerComponent（避免累积）
         let mut entities_to_remove = Vec::new();
-        for (entity, _trigger) in world.query::<&SoundTriggerComponent>().iter() {
+        for (entity, _trigger) in world.query::<&SoundTrigger>().iter() {
             entities_to_remove.push(entity);
         }
         for entity in entities_to_remove {
-            cmd.remove::<(SoundTriggerComponent,)>(entity);
+            cmd.remove::<(SoundTrigger,)>(entity);
         }
         
         Ok(())
@@ -99,7 +99,7 @@ impl SoundPlaybackSystem {
         let mut entities_to_remove = Vec::new();
         
         // 查询所有带有SoundTriggerComponent的实体
-        for (entity, _trigger) in world.query::<&SoundTriggerComponent>().iter() {
+        for (entity, _trigger) in world.query::<&SoundTrigger>().iter() {
             // TODO: 播放音效
             // self.play_sound(ctx, trigger)?;
             
@@ -109,7 +109,7 @@ impl SoundPlaybackSystem {
         
         // 移除已播放的触发组件
         for entity in entities_to_remove {
-            cmd.remove::<(SoundTriggerComponent,)>(entity);
+            cmd.remove::<(SoundTrigger,)>(entity);
         }
         
         Ok(())
@@ -117,7 +117,7 @@ impl SoundPlaybackSystem {
     
     #[allow(dead_code)]
     /// 播放单个音效
-    fn play_sound(&mut self, _ctx: &mut Context, trigger: &SoundTriggerComponent) -> GameResult {
+    fn play_sound(&mut self, _ctx: &mut Context, trigger: &SoundTrigger) -> GameResult {
         // 计算最终音量
         let _final_volume = self.calculate_volume(trigger);
         
@@ -148,7 +148,7 @@ impl SoundPlaybackSystem {
     #[allow(dead_code)]
     /// 处理持续音效（背景音乐、环境音）
     fn process_persistent_sounds(&mut self, _ctx: &mut Context, world: &World) -> GameResult {
-        for (entity, persistent) in world.query::<&PersistentSoundComponent>().iter() {
+        for (entity, persistent) in world.query::<&PersistentSound>().iter() {
             if persistent.is_playing {
                 // 检查是否已在播放
                 if !self.playing_sounds.contains_key(&entity) {
@@ -171,7 +171,7 @@ impl SoundPlaybackSystem {
     // ========================================================================
     
     /// 计算最终音量（考虑音效类型和全局设置）
-    fn calculate_volume(&self, trigger: &SoundTriggerComponent) -> f32 {
+    fn calculate_volume(&self, trigger: &SoundTrigger) -> f32 {
         let type_volume = match trigger.sound_type {
             SoundType::BackgroundMusic => self.bgm_volume,
             _ => self.sfx_volume,
@@ -181,7 +181,7 @@ impl SoundPlaybackSystem {
     }
     
     /// 计算持续音效的音量
-    fn calculate_persistent_volume(&self, persistent: &PersistentSoundComponent) -> f32 {
+    fn calculate_persistent_volume(&self, persistent: &PersistentSound) -> f32 {
         let type_volume = match persistent.sound_type {
             SoundType::BackgroundMusic => self.bgm_volume,
             _ => self.sfx_volume,
@@ -235,7 +235,7 @@ mod tests {
     fn test_volume_calculation() {
         let system = SoundPlaybackSystem::new();
         
-        let trigger = SoundTriggerComponent {
+        let trigger = SoundTrigger {
             sound_file: "test.wav".to_string(),
             sound_type: SoundType::BackgroundMusic,
             volume: 0.5,

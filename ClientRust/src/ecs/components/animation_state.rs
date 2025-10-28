@@ -69,7 +69,7 @@ impl AnimationState {
 
 /// 动画状态组件 - 决策层
 #[derive(Debug, Clone)]
-pub struct AnimationStateComponent {
+pub struct AnimationControl {
     /// 当前动画状态
     pub current_state: AnimationState,
     
@@ -95,7 +95,7 @@ pub struct AnimationStateComponent {
     pub current_frame: u8,
 }
 
-impl AnimationStateComponent {
+impl AnimationControl {
     pub fn new() -> Self {
         Self {
             current_state: AnimationState::Idle,
@@ -142,8 +142,9 @@ impl AnimationStateComponent {
     }
 }
 
-impl Default for AnimationStateComponent {
+impl Default for AnimationControl {
     fn default() -> Self {
         Self::new()
     }
 }
+

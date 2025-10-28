@@ -18,7 +18,7 @@
 use hecs::World;
 use crate::ecs::components::{
     Position, MonsterData, Animation, Health, AIState, Velocity,
-    Player, MirAction,
+    Player, MirAction, AnimationControl,
 };
 
 /// 怪物系统 - 处理所有怪物的AI和行为

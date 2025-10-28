@@ -10,13 +10,13 @@
 // - 游戏逻辑（Monster/NPC/Combat/Magic）
 //
 // 输入组件：
-// - PlayerInputComponent（Layer 1 写入）
-// - ServerStateComponent（Layer 1 写入）
+// - PlayerInput（Layer 1 写入）
+// - ServerState（Layer 1 写入）
 //
 // 输出组件：
-// - MovementStateComponent（移动状态）
-// - VelocityComponent（速度）
-// - PathComponent（路径）
+// - MovementState（移动状态）
+// - MovementVelocity（速度）
+// - Path（路径）
 //
 // ============================================================================
 

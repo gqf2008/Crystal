@@ -4,10 +4,10 @@
 // 职责：客户端预测玩家移动，实现零延迟响应
 // 
 // 工作流程：
-// 1. 读取 PlayerInputComponent（由 InputCollectingSystem 写入）
+// 1. 读取 PlayerInput（由 InputCollectingSystem 写入）
 // 2. 调用 PathfindingService.find_path() 计算路径
-// 3. 立即写入 VelocityComponent（不等服务器确认）
-// 4. 写入 PredictionComponent（记录预测状态）
+// 3. 立即写入 MovementVelocity（不等服务器确认）
+// 4. 写入 Prediction（记录预测状态）
 //
 // 设计原则：
 // - 客户端预测 = 零延迟操作感
@@ -21,9 +21,9 @@ use crate::ecs::components::{
     LocalPlayer,
     Position,
     Player,
-    input::PlayerInputComponent,
-    movement::{VelocityComponent, PathComponent, MovementStateComponent, MovementState},
-    prediction::PredictionComponent,
+    input::PlayerInput,
+    movement::{MovementVelocity, Path, MovementState, Movement},
+    prediction::Prediction,
 };
 use crate::algorithms::Pathfinding;
 use crate::ecs::coordinates::Coordinates;
@@ -36,94 +36,174 @@ impl LocalPredictionSystem {
         Self
     }
 
+    /// 根据速度向量计算8方向
+    /// 返回 0-7: 0=Up, 1=UpRight, 2=Right, 3=DownRight, 4=Down, 5=DownLeft, 6=Left, 7=UpLeft
+    fn calculate_direction(dx: f32, dy: f32) -> u8 {
+        if dx.abs() < 0.01 && dy.abs() < 0.01 {
+            return 4; // 默认朝下
+        }
+        
+        // 计算角度 (atan2 返回 -π 到 π)
+        let angle = f32::atan2(dy, dx);
+        
+        // 转换为 0-8 的索引（每个方向 45 度 = π/4）
+        // 右=0°, 右下=45°, 下=90°, 左下=135°, 左=180°/-180°, 左上=-135°, 上=-90°, 右上=-45°
+        let slice = ((angle + std::f32::consts::PI + std::f32::consts::PI / 8.0) / (std::f32::consts::PI / 4.0)) as i32;
+        
+        // 映射到游戏的8方向: 0=Up, 1=UpRight, 2=Right, 3=DownRight, 4=Down, 5=DownLeft, 6=Left, 7=UpLeft
+        match slice % 8 {
+            0 => 6, // 左 (180°)
+            1 => 7, // 左上 (-135°)
+            2 => 0, // 上 (-90°)
+            3 => 1, // 右上 (-45°)
+            4 => 2, // 右 (0°)
+            5 => 3, // 右下 (45°)
+            6 => 4, // 下 (90°)
+            7 => 5, // 左下 (135°)
+            _ => 4, // 默认朝下
+        }
+    }
+
     /// 🎯 Layer 2 核心：本地预测系统（客户端立即响应，不等服务器）
     /// 
     /// 执行顺序：在 InputCollectingSystem 之后，ClientNetworkSystem 发送命令之前
     /// 
     /// 数据流：
-    /// - 读取：PlayerInputComponent（点击位置、按键）
+    /// - 读取：PlayerInput（点击位置、按键）
     /// - 调用：PathfindingService（寻路计算）
-    /// - 写入：VelocityComponent（速度）、PathComponent（路径）、PredictionComponent（预测状态）
+    /// - 写入：MovementVelocity（速度）、Path（路径）、Prediction（预测状态）
     pub fn update(world: &mut World, map_data: &MapData, _dt: f32) {
         // 遍历所有本地玩家（通常只有一个）
-        for (_entity, (position, player, input, mut velocity, mut path, mut movement_state, mut prediction)) in world
+        let mut player_count = 0;
+        
+        // 🐛 调试：检查查询是否找到玩家
+        static mut FIRST_CALL: bool = true;
+        unsafe {
+            if FIRST_CALL {
+                println!("[LocalPredictionSystem] 🔍 首次调用，开始查询玩家...");
+                FIRST_CALL = false;
+            }
+        }
+        
+        for (_entity, (position, mut player, mut input, mut velocity, mut path, mut movement_state, mut prediction)) in world
             .query_mut::<(
                 &Position,
-                &Player,
-                &PlayerInputComponent,
-                Option<&mut VelocityComponent>,
-                Option<&mut PathComponent>,
-                Option<&mut MovementStateComponent>,
-                Option<&mut PredictionComponent>,
+                &mut Player,  // 改为可变，以便更新direction
+                &mut PlayerInput,  // 改为可变，以便清除 move_to
+                Option<&mut MovementVelocity>,
+                Option<&mut Path>,
+                Option<&mut Movement>,
+                Option<&mut Prediction>,
             )>()
             .with::<&LocalPlayer>()
         {
-            // 1️⃣ 检查是否有新的移动输入
+            player_count += 1;
+            
+            // 1️⃣ 检查是否有新的移动输入（只处理一次，然后清除）
             if let Some((target_x, target_y)) = input.move_to {
                 let (current_gx, current_gy) = Coordinates::world_to_grid(position.x, position.y);
                 let (target_gx, target_gy) = Coordinates::world_to_grid(target_x, target_y);
 
                 // 调用寻路算法
                 if let Some(path_points) = Pathfinding::find_path(map_data, (current_gx, current_gy), (target_gx, target_gy)) {
-                    tracing::info!(
-                        "[LocalPredictionSystem] 🎯 客户端预测寻路: ({}, {}) -> ({}, {}), 路径长度: {}",
-                        current_gx,
-                        current_gy,
-                        target_gx,
-                        target_gy,
-                        path_points.len()
-                    );
+                    println!("[LocalPredictionSystem] 🎯 新路径: ({}, {}) -> ({}, {}), 长度: {}, 路径点: {:?}",
+                        current_gx, current_gy, target_gx, target_gy, path_points.len(), 
+                        if path_points.len() <= 10 { format!("{:?}", path_points) } else { format!("[{} points]", path_points.len()) });
 
                     // 2️⃣ 写入路径组件（使用格子坐标）
                     if let Some(path) = path.as_deref_mut() {
                         path.set_path(path_points.clone());
-                    }
-
-                    // 3️⃣ 计算第一步的速度（需要转换为世界坐标来计算方向）
-                    let run_speed = if input.is_running { 5.0 } else { 3.0 };
-                    if let Some(velocity) = velocity.as_deref_mut() {
-                        if path_points.len() > 1 {
-                            // 获取下一个格子的世界坐标中心
-                            let (next_wx, next_wy) = Coordinates::grid_to_world_center(path_points[1].0, path_points[1].1);
-                            let dx = next_wx - position.x;
-                            let dy = next_wy - position.y;
-                            let distance = (dx * dx + dy * dy).sqrt();
-                            if distance > 0.01 {
-                                velocity.set((dx / distance) * run_speed, (dy / distance) * run_speed);
-                            }
-                        }
-                    }
-
-                    // 4️⃣ 更新移动状态
-                    if let Some(movement_state) = movement_state.as_deref_mut() {
-                        movement_state.state = if input.is_running {
-                            MovementState::Running
-                        } else {
-                            MovementState::Walking
-                        };
+                        println!("[LocalPredictionSystem] 📋 路径已设置, 当前索引: {}, 当前waypoint: {:?}",
+                            path.current_index, path.current_waypoint());
                     }
 
                     // 5️⃣ 记录预测状态（用于后续校正）
                     if let Some(prediction) = prediction.as_deref_mut() {
                         prediction.predicted_position = position.clone();
                         prediction.last_input_sequence += 1;
-                        tracing::debug!(
-                            "[LocalPredictionSystem] 记录预测状态: seq={}, pos=({}, {})",
-                            prediction.last_input_sequence,
-                            position.x,
-                            position.y
-                        );
                     }
                 } else {
-                    tracing::warn!(
-                        "[LocalPredictionSystem] ⚠️ 寻路失败: ({}, {}) -> ({}, {})",
-                        current_gx,
-                        current_gy,
-                        target_gx,
-                        target_gy
-                    );
+                    println!("[LocalPredictionSystem] ⚠️ 寻路失败: ({}, {}) -> ({}, {})",
+                        current_gx, current_gy, target_gx, target_gy);
+                }
+                
+                // 🔥 清除移动输入（处理完就清除，避免下帧重复处理）
+                input.move_to = None;
+                
+                // 4️⃣ 更新移动状态
+                if let Some(movement_state) = movement_state.as_deref_mut() {
+                    movement_state.state = if input.is_running {
+                        MovementState::Running
+                    } else {
+                        MovementState::Walking
+                    };
                 }
             }
+            
+            // 3️⃣ 更新速度朝向当前waypoint（每帧都执行，无论是否有新输入）
+            // 传奇标准速度：每格48像素
+            // 走路：150px/s (约3格/秒)，跑步：250px/s (约5格/秒)
+            let run_speed = if input.is_running { 250.0 } else { 150.0 };
+            
+            if let (Some(path_comp), Some(velocity_comp)) = (path.as_deref_mut(), velocity.as_deref_mut()) {
+                if let Some(target_waypoint) = path_comp.current_waypoint() {
+                    let (target_wx, target_wy) = Coordinates::grid_to_world_center(target_waypoint.0, target_waypoint.1);
+                    let dx = target_wx - position.x;
+                    let dy = target_wy - position.y;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    
+                    println!("[LocalPredictionSystem] 当前位置: ({:.1}, {:.1}), waypoint: ({}, {}), 目标中心: ({:.1}, {:.1}), dx: {:.1}, dy: {:.1}, distance: {:.1}",
+                        position.x, position.y, target_waypoint.0, target_waypoint.1, target_wx, target_wy, dx, dy, distance);
+                    
+                    // 检查是否到达waypoint（使用半格距离作为阈值：24像素）
+                    if distance > 24.0 {
+                        // 归一化方向向量
+                        let norm_dx = dx / distance;
+                        let norm_dy = dy / distance;
+                        
+                        // 设置速度
+                        velocity_comp.set(norm_dx * run_speed, norm_dy * run_speed);
+                        
+                        // 🐛 调试：确认速度已设置
+                        println!("[LocalPredictionSystem] ✅ 速度已设置: ({:.2}, {:.2}), magnitude: {:.2}",
+                            velocity_comp.x, velocity_comp.y, velocity_comp.magnitude());
+                        
+                        // 🎯 更新玩家朝向
+                        let new_direction = Self::calculate_direction(norm_dx, norm_dy);
+                        player.direction = new_direction;
+                        
+                        println!("[LocalPredictionSystem] 设置速度: ({:.2}, {:.2}), 方向: {} (dx={:.2}, dy={:.2})",
+                            norm_dx * run_speed, norm_dy * run_speed, new_direction, norm_dx, norm_dy);
+                    } else {
+                        // 到达当前waypoint,前进到下一个
+                        let old_index = path_comp.current_index;
+                        let old_wp = target_waypoint;
+                        
+                        println!("[LocalPredictionSystem] ✅ 到达waypoint {:?} (索引{}), 前进到下一个",
+                            old_wp, old_index);
+                        
+                        if !path_comp.advance() {
+                            // 路径完成，停止移动
+                            velocity_comp.set(0.0, 0.0);
+                            println!("[LocalPredictionSystem] ✅ 路径完成,停止移动");
+                        } else {
+                            let new_index = path_comp.current_index;
+                            let new_wp = path_comp.current_waypoint();
+                            println!("[LocalPredictionSystem] 📍 新waypoint: {:?} (索引{}), 路径总长: {}",
+                                new_wp, new_index, path_comp.waypoints.len());
+                        }
+                    }
+                } else {
+                    // 没有路径，停止移动
+                    if velocity_comp.magnitude() > 0.01 {
+                        velocity_comp.set(0.0, 0.0);
+                    }
+                }
+            }
+        }
+        
+        if player_count == 0 {
+            println!("[LocalPredictionSystem] ⚠️ 没有找到具有 LocalPlayer 标记的实体!");
         }
     }
 

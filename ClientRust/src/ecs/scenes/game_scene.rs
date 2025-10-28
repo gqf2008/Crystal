@@ -585,7 +585,7 @@ impl Scene for GameScene {
         // TODO: 实现 ClientNetworkSystem::receive_updates
         //   - 需要将网络事件队列传入
         //   - 处理 ObjectSpawned, ObjectRemoved, MapInformation 等事件
-        //   - 更新 ServerStateComponent（用于 Reconciliation）
+        //   - 更新 ServerState（用于 Reconciliation）
         
         // Layer 2: 核心逻辑层 ✅
         // 获取 MapData 引用（寻路需要）

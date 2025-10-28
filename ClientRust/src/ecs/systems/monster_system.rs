@@ -176,7 +176,7 @@ impl MonsterSystem {
     /// 更新怪物移动
     fn update_movement(world: &mut World, delta_time: f32) {
         for (_entity, (pos, ai_state, anim, velocity)) in 
-            world.query::<(&mut Position, &AIState, &mut Animation, Option<&mut Velocity>)>().iter() 
+            world.query::<(&mut Position, &AIState, &mut AnimationControl, Option<&mut Velocity>)>().iter() 
         {
             match ai_state.current_action {
                 crate::ecs::components::AIAction::Chase | 
@@ -251,7 +251,7 @@ impl MonsterSystem {
     }
     
     /// 根据移动方向更新朝向
-    fn update_direction_from_movement(anim: &mut Animation, vx: f32, vy: f32) {
+    fn update_direction_from_movement(anim: &mut AnimationControl, vx: f32, vy: f32) {
         // 计算8方向
         let angle = vy.atan2(vx).to_degrees();
         let direction = ((angle + 22.5) / 45.0).floor() as i32;

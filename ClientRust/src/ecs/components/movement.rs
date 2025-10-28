@@ -3,9 +3,9 @@
 // ============================================================================
 //
 // 符合ECS架构的移动组件设计
-// - VelocityComponent: 速度（每帧移动量）
-// - PathComponent: 寻路路径
-// - MovementStateComponent: 移动状态
+// - MovementVelocity: 速度（每帧移动量）
+// - Path: 寻路路径
+// - MovementState: 移动状态
 //
 // ============================================================================
 
@@ -13,7 +13,7 @@ use std::time::Instant;
 
 /// 速度组件 - 实体的移动速度（每帧）
 #[derive(Debug, Clone)]
-pub struct VelocityComponent {
+pub struct MovementVelocity {
     /// X轴速度（像素/帧）
     pub x: f32,
     /// Y轴速度（像素/帧）
@@ -22,7 +22,7 @@ pub struct VelocityComponent {
     pub max_speed: f32,
 }
 
-impl VelocityComponent {
+impl MovementVelocity {
     pub fn new(max_speed: f32) -> Self {
         Self {
             x: 0.0,
@@ -58,7 +58,7 @@ impl VelocityComponent {
 
 /// 路径组件 - 存储寻路路径
 #[derive(Debug, Clone)]
-pub struct PathComponent {
+pub struct Path {
     /// 路径点列表（格子坐标）
     pub waypoints: Vec<(i32, i32)>,
     /// 当前路径点索引
@@ -67,7 +67,7 @@ pub struct PathComponent {
     pub is_valid: bool,
 }
 
-impl PathComponent {
+impl Path {
     pub fn new() -> Self {
         Self {
             waypoints: Vec::new(),
@@ -111,7 +111,7 @@ impl PathComponent {
     }
 }
 
-/// 移动状态组件
+/// 移动状态枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MovementState {
     /// 静止
@@ -124,13 +124,14 @@ pub enum MovementState {
     Knocked,
 }
 
+/// 移动状态组件 - 存储实体的移动状态
 #[derive(Debug, Clone)]
-pub struct MovementStateComponent {
+pub struct Movement {
     pub state: MovementState,
     pub last_change_time: Instant,
 }
 
-impl MovementStateComponent {
+impl Movement {
     pub fn new() -> Self {
         Self {
             state: MovementState::Idle,
@@ -150,7 +151,7 @@ impl MovementStateComponent {
     }
 }
 
-impl Default for MovementStateComponent {
+impl Default for Movement {
     fn default() -> Self {
         Self::new()
     }

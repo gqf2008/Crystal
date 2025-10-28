@@ -185,7 +185,7 @@ impl RenderSystem {
                     if let Ok(tile) = world.get::<&MapTile>(*entity) {
                         // � Front 层瓦片默认使用 ALPHA 混合
                         canvas.set_blend_mode(graphics::BlendMode::ALPHA);
-                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 1.0)?;
+                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 1.0, world)?;
                     }
                 }
             }
@@ -279,7 +279,7 @@ impl RenderSystem {
             match render_obj {
                 RenderObject::FrontTile(entity) => {
                     if let Ok(tile) = world.get::<&MapTile>(entity) {
-                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 1.0)?;
+                        Self::draw_tile_fast(ctx, canvas, &tile, pos, camera, config, 1.0, world)?;
                     }
                 }
                 RenderObject::Monster(entity, entity_pos) => {

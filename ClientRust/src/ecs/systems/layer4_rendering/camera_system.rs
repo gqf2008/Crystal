@@ -80,8 +80,17 @@ impl CameraSystem {
         
         // 直接将相机位置设置为玩家位置（角色始终居中）
         for (_entity, (camera_pos, _camera)) in world.query_mut::<(&mut Position, &Camera)>() {
+            let old_cam_x = camera_pos.x;
+            let old_cam_y = camera_pos.y;
+            
             camera_pos.x = target_x;
             camera_pos.y = target_y;
+            
+            // 只在摄像机移动时输出
+            if (old_cam_x - target_x).abs() > 0.1 || (old_cam_y - target_y).abs() > 0.1 {
+                println!("[CameraSystem] 📷 摄像机跟随: ({:.1}, {:.1}) -> ({:.1}, {:.1})",
+                    old_cam_x, old_cam_y, target_x, target_y);
+            }
         }
     }
     

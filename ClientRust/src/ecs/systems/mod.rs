@@ -21,7 +21,7 @@ pub mod layer4_rendering;
 pub mod layer5_ui;
 
 // 重新导出各层系统
-pub use layer1_input::{InputCollectingSystem, ClientNetworkSystem};
+pub use layer1_input::{InputCollectingSystem, ClientNetworkSystem, MockNetworkSystem, MockNetworkConfig};
 pub use layer2_logic::{
     LocalPredictionSystem, MovementSystemV2, ReconciliationSystem, InterpolationSystem,
     MonsterSystem, NPCSystem, CombatSystem, MagicCastSystem,

@@ -4,7 +4,7 @@
 // 职责：对其他玩家/怪物/NPC 应用平滑插值移动
 // 
 // 工作流程：
-// 1. 读取 InterpolationComponent（由 ClientNetworkSystem 或 ReconciliationSystem 写入）
+// 1. 读取 Interpolation（由 ClientNetworkSystem 或 ReconciliationSystem 写入）
 // 2. 计算插值进度：progress = elapsed_time / duration
 // 3. 线性插值：position = lerp(from, to, progress)
 // 4. 写入 Position 组件
@@ -19,7 +19,7 @@ use hecs::World;
 use crate::ecs::components::{
     Position,
     LocalPlayer,
-    prediction::InterpolationComponent,
+    prediction::Interpolation,
 };
 
 pub struct InterpolationSystem;
@@ -34,12 +34,12 @@ impl InterpolationSystem {
     /// 执行顺序：在 ClientNetworkSystem 接收移动数据之后
     /// 
     /// 数据流：
-    /// - 读取：InterpolationComponent（插值状态）
+    /// - 读取：Interpolation（插值状态）
     /// - 写入：Position（平滑插值后的位置）
     pub fn update(world: &mut World, dt: f32) {
         // 遍历所有非本地玩家的实体（怪物、其他玩家、NPC等）
         for (_entity, (position, interpolation)) in world
-            .query_mut::<(&mut Position, &mut InterpolationComponent)>()
+            .query_mut::<(&mut Position, &mut Interpolation)>()
             .without::<&LocalPlayer>() // 排除本地玩家（本地玩家使用客户端预测）
         {
             // 1️⃣ 检查是否正在插值
@@ -47,7 +47,7 @@ impl InterpolationSystem {
                 continue;
             }
 
-            // 2️⃣ 更新插值（InterpolationComponent 有内置的 update 方法）
+            // 2️⃣ 更新插值（Interpolation 有内置的 update 方法）
             if let Some(new_pos) = interpolation.update(dt) {
                 *position = new_pos;
                 
@@ -68,7 +68,7 @@ impl InterpolationSystem {
     pub fn snap_to_target(world: &mut World, entity: hecs::Entity) {
         if let Ok((mut position, mut interpolation)) = world.query_one_mut::<(
             &mut Position,
-            &mut InterpolationComponent,
+            &mut Interpolation,
         )>(entity) {
             if interpolation.is_active {
                 *position = interpolation.to_position.clone();

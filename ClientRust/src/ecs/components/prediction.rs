@@ -3,8 +3,8 @@
 // ============================================================================
 //
 // 用于实现客户端预测和状态调和
-// - PredictionComponent: 预测状态
-// - ServerStateComponent: 服务器权威状态
+// - Prediction: 预测状态
+// - ServerState: 服务器权威状态
 //
 // ============================================================================
 
@@ -13,7 +13,7 @@ use crate::ecs::components::Position;
 
 /// 客户端预测组件
 #[derive(Debug, Clone)]
-pub struct PredictionComponent {
+pub struct Prediction {
     /// 客户端预测的位置
     pub predicted_position: Position,
     
@@ -33,7 +33,7 @@ pub struct PredictionComponent {
     pub last_input_sequence: u32,
 }
 
-impl PredictionComponent {
+impl Prediction {
     pub fn new(initial_pos: Position) -> Self {
         Self {
             predicted_position: initial_pos.clone(),
@@ -71,7 +71,7 @@ impl PredictionComponent {
 
 /// 服务器状态组件 - 存储服务器权威状态
 #[derive(Debug, Clone)]
-pub struct ServerStateComponent {
+pub struct ServerState {
     /// 服务器位置
     pub position: Position,
     
@@ -85,7 +85,7 @@ pub struct ServerStateComponent {
     pub sequence_number: u32,
 }
 
-impl ServerStateComponent {
+impl ServerState {
     pub fn new(position: Position, direction: u8) -> Self {
         Self {
             position,
@@ -114,7 +114,7 @@ impl ServerStateComponent {
 
 /// 插值组件 - 用于平滑其他玩家的移动
 #[derive(Debug, Clone)]
-pub struct InterpolationComponent {
+pub struct Interpolation {
     /// 起始位置
     pub from_position: Position,
     
@@ -134,7 +134,7 @@ pub struct InterpolationComponent {
     pub is_active: bool,
 }
 
-impl InterpolationComponent {
+impl Interpolation {
     pub fn new() -> Self {
         Self {
             from_position: Position { x: 0.0, y: 0.0 },
@@ -185,7 +185,7 @@ impl InterpolationComponent {
     }
 }
 
-impl Default for InterpolationComponent {
+impl Default for Interpolation {
     fn default() -> Self {
         Self::new()
     }

@@ -12,8 +12,8 @@
 //
 // 输入组件（只读）：
 // - Position
-// - AnimationStateComponent（Layer 3 写入）
-// - SoundTriggerComponent（Layer 3 写入）
+// - AnimationState（Layer 3 写入）
+// - SoundTrigger（Layer 3 写入）
 // - Camera
 // - MapData
 //

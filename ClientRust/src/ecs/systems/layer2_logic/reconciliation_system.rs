@@ -4,8 +4,8 @@
 // 职责：比较客户端预测与服务器权威状态，校正误差
 // 
 // 工作流程：
-// 1. 读取 ServerStateComponent（由 ClientNetworkSystem 写入）
-// 2. 读取 PredictionComponent（由 LocalPredictionSystem 写入）
+// 1. 读取 ServerState（由 ClientNetworkSystem 写入）
+// 2. 读取 Prediction（由 LocalPredictionSystem 写入）
 // 3. 计算误差：|predicted_pos - server_pos|
 // 4. 如果误差 > 阈值（50px），则平滑插值到正确位置
 //
@@ -19,7 +19,7 @@ use hecs::World;
 use crate::ecs::components::{
     LocalPlayer,
     Position,
-    prediction::{PredictionComponent, ServerStateComponent, InterpolationComponent},
+    prediction::{Prediction, ServerState, Interpolation},
 };
 
 pub struct ReconciliationSystem;
@@ -34,15 +34,15 @@ impl ReconciliationSystem {
     /// 执行顺序：在 ClientNetworkSystem 接收服务器数据之后
     /// 
     /// 数据流：
-    /// - 读取：ServerStateComponent（服务器权威位置）、PredictionComponent（客户端预测）
-    /// - 写入：Position（校正后的位置）、InterpolationComponent（平滑插值）
+    /// - 读取：ServerState（服务器权威位置）、Prediction（客户端预测）
+    /// - 写入：Position（校正后的位置）、Interpolation（平滑插值）
     pub fn update(world: &mut World, _dt: f32) {
         for (_entity, (position, server_state, prediction, mut interpolation)) in world
             .query_mut::<(
                 &mut Position,
-                &ServerStateComponent,
-                &mut PredictionComponent,
-                Option<&mut InterpolationComponent>,
+                &ServerState,
+                &mut Prediction,
+                Option<&mut Interpolation>,
             )>()
             .with::<&LocalPlayer>() // 只校正本地玩家
         {
@@ -114,8 +114,8 @@ impl ReconciliationSystem {
     pub fn force_sync_to_server(world: &mut World, entity: hecs::Entity) {
         if let Ok((mut position, server_state, mut prediction)) = world.query_one_mut::<(
             &mut Position,
-            &ServerStateComponent,
-            &mut PredictionComponent,
+            &ServerState,
+            &mut Prediction,
         )>(entity) {
             *position = server_state.position.clone();
             prediction.predicted_position = server_state.position.clone();

@@ -9,15 +9,15 @@
 // - 粒子特效创建（未来）
 //
 // 输入组件：
-// - MovementStateComponent（Layer 2 写入）
+// - MovementState（Layer 2 写入）
 // - Player（方向、武器等）
 // - GameEvent（事件列表）
 // - AIAction（怪物AI状态）
 // - Velocity（移动速度）
 //
 // 输出组件：
-// - AnimationStateComponent（动画状态）
-// - SoundTriggerComponent（音效触发）
+// - AnimationState（动画状态）
+// - SoundTrigger（音效触发）
 // - Animation（怪物动画）
 // - ParticleEmitterComponent（未来）
 //

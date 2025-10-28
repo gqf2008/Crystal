@@ -8,13 +8,15 @@
 // - 转换为游戏命令
 //
 // 输出组件：
-// - PlayerInputComponent（玩家输入意图）
-// - ServerStateComponent（服务器权威状态）
+// - PlayerInput（玩家输入意图）
+// - ServerState（服务器权威状态）
 //
 // ============================================================================
 
 pub mod input_collecting_system;
 pub mod client_network_system;
+pub mod mock_network_system;
 
 pub use input_collecting_system::InputCollectingSystem;
 pub use client_network_system::ClientNetworkSystem;
+pub use mock_network_system::{MockNetworkSystem, MockNetworkConfig};

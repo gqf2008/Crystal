@@ -3,8 +3,8 @@
 // ============================================================================
 //
 // 职责（Layer 1: 输入与网络层）：
-// 1. 发送：读取 PlayerInputComponent，序列化后发给服务器
-// 2. 接收：接收服务器权威数据，写入 ServerStateComponent
+// 1. 发送：读取 PlayerInput，序列化后发给服务器
+// 2. 接收：接收服务器权威数据，写入 ServerState
 //
 // 不负责：
 // - ❌ 游戏逻辑（由其他系统处理）
@@ -34,7 +34,7 @@ impl ClientNetworkSystem {
         }
     }
     
-    /// 🎯 发送命令到服务器（读取 PlayerInputComponent）
+    /// 🎯 发送命令到服务器（读取 PlayerInput）
     pub fn send_commands(
         world: &mut World,
         network_tx: Option<&mpsc::UnboundedSender<NetworkCommand>>,
@@ -47,7 +47,7 @@ impl ClientNetworkSystem {
         // 查找本地玩家
         for (_entity, (_, player_input, player)) in world.query_mut::<(
             &LocalPlayer,
-            &PlayerInputComponent,
+            &PlayerInput,
             &mut Player,
         )>() {
             // 1. 处理移动命令
@@ -93,7 +93,7 @@ impl ClientNetworkSystem {
         }
     }
     
-    /// 🎯 处理服务器事件（写入 ServerStateComponent）
+    /// 🎯 处理服务器事件（写入 ServerState）
     pub fn process_event(&mut self, world: &mut World, event: &GameEvent) {
         match event {
             GameEvent::MapInformation { map_index, file_name, title } => {
@@ -137,7 +137,7 @@ impl ClientNetworkSystem {
         for (_entity, (_, player, server_state)) in world.query_mut::<(
             &LocalPlayer,
             &mut Player,
-            Option<&mut ServerStateComponent>,
+            Option<&mut ServerState>,
         )>() {
             // 将格子坐标转换为世界坐标
             let (world_x, world_y) = Coordinates::grid_to_world_center(location.x, location.y);
@@ -171,8 +171,8 @@ impl ClientNetworkSystem {
             // 更新其他玩家/怪物的服务器状态和插值
             if let Ok((current_pos, mut server_state, mut interpolation)) = world.query_one_mut::<(
                 &Position,
-                Option<&mut ServerStateComponent>,
-                Option<&mut InterpolationComponent>,
+                Option<&mut ServerState>,
+                Option<&mut Interpolation>,
             )>(entity) {
                 let (world_x, world_y) = Coordinates::grid_to_world_center(location.x, location.y);
                 let server_position = Position { x: world_x, y: world_y };
@@ -221,8 +221,8 @@ impl ClientNetworkSystem {
         //         let entity = world.spawn((
         //             Position { x: location.x, y: location.y },
         //             Player { id: *id, name: name.clone(), direction: *direction, ... },
-        //             ServerStateComponent::default(),
-        //             InterpolationComponent::default(),
+        //             ServerState::default(),
+        //             Interpolation::default(),
         //         ));
         //         self.object_map.insert(*id, entity);
         //     }
