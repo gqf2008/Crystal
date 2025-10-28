@@ -108,18 +108,10 @@ use mir2_client::ecs::{
     DEFAULT_MAX_SPEED,
     CELL_WIDTH, 
     CELL_HEIGHT,
-    // Systems (标准 ECS 五层架构)
-    // Layer 1: 输入与网络层
-    InputCollectingSystem,   // 输入收集（鼠标、键盘 → PlayerInput）
-    
-    // Layer 2: 逻辑与规则层
-    LocalPredictionSystem,   // 客户端预测（寻路、碰撞检测）
-    MovementSystemV2,        // 移动（应用速度到位置）
-    
-    // Layer 3: 表现与渲染层
-    PlayerAnimationSystem,   // 玩家动画（更新 frame_index）
-    CameraSystem,            // 相机控制（拖拽、缩放、跟随）
-    RenderSystem,            // 渲染（瓦片、角色、调试信息）
+    // Systems (实际使用的系统)
+    CameraSystem,      // 相机控制（拖拽、缩放、跟随）
+    RenderSystem,      // 渲染（瓦片、角色、调试信息）
+    MovementSystemV2,  // 移动（应用速度到位置）
     // Coordinate utilities
     Coordinates,
     MapUtils,
@@ -140,6 +132,33 @@ struct MapViewerApp {
 }
 
 impl MapViewerApp {
+    /// 计算8方向（基于角度）
+    /// 返回 0-7: 0=Up, 1=UpRight, 2=Right, 3=DownRight, 4=Down, 5=DownLeft, 6=Left, 7=UpLeft
+    fn calculate_direction_8way(dx: f32, dy: f32) -> u8 {
+        if dx.abs() < 0.01 && dy.abs() < 0.01 {
+            return 4; // 默认朝下
+        }
+        
+        // 计算角度 (atan2 返回 -π 到 π)
+        let angle = f32::atan2(dy, dx);
+        
+        // 转换为 0-8 的索引（每个方向 45 度 = π/4）
+        let slice = ((angle + std::f32::consts::PI + std::f32::consts::PI / 8.0) / (std::f32::consts::PI / 4.0)) as i32;
+        
+        // 映射到游戏的8方向
+        match slice % 8 {
+            0 => 6, // 左 (180°)
+            1 => 7, // 左上 (-135°)
+            2 => 0, // 上 (-90°)
+            3 => 1, // 右上 (-45°)
+            4 => 2, // 右 (0°)
+            5 => 3, // 右下 (45°)
+            6 => 4, // 下 (90°)
+            7 => 5, // 左下 (135°)
+            _ => 4, // 默认朝下
+        }
+    }
+    
     fn new(ctx: &mut Context, map_path: &str) -> GameResult<Self> {
         // 初始化库
         println!(" 正在初始化地图库...");
@@ -451,21 +470,97 @@ impl EventHandler for MapViewerApp {
             }
         }
 
-        // ============================================================================
-        // 标准 ECS 五层架构 - 系统调用顺序
-        // ============================================================================
-        
-        // 摄像机系统（提前更新，确保坐标转换正确）
+        // 更新动画系统（已禁用 - map_viewer 不需要瓦片动画）
+        // let show_animations = self.world.get::<&RenderConfig>(self.config_entity).map(|c| c.show_animations).unwrap_or(true);
+        // if show_animations {
+        //     AnimationSystem::update_tiles(&mut self.world, animation_count);
+        //     DoorSystem::update(&mut self.world);
+        // }
+
+        //  摄像机系统 - 边缘滚屏 + 跟随角色
         CameraSystem::update(&mut self.world);
 
-        // Layer 1: 输入收集系统
-        // 将鼠标/键盘输入转换为 PlayerInput 组件
-        InputCollectingSystem::update(&mut self.world, ctx);
 
-        // Layer 2: 逻辑层 - 客户端预测（寻路）
+        // 处理鼠标输入 - 转换为 PlayerInput
+        // ✅ 支持长按移动：左键长按=走路，右键长按=跑步
+        // 🎯 单击/短按不移动，只有持续按下才会跟随鼠标移动
+        let mouse_move_target: Option<(f32, f32, bool)> = {
+            if let Some((_, mouse_input)) = self.world.query_mut::<&mut MouseInput>().into_iter().next() {
+                // ✅ 检查长按状态（而不是双击）
+                // 只有当鼠标按钮持续按下时才移动（press_time > 0 表示按住中）
+                if mouse_input.left_pressed {
+                    // 左键长按 -> 走路
+                    Some((mouse_input.x, mouse_input.y, false))
+                } else if mouse_input.right_pressed {
+                    // 右键长按 -> 跑步
+                    Some((mouse_input.x, mouse_input.y, true))
+                } else {
+                    None
+                }
+            } else { None }
+        };
+        
+        if let Some((mouse_x, mouse_y, is_running)) = mouse_move_target {
+            // 获取相机信息用于坐标转换（先获取值，避免借用冲突）
+            let world_x;
+            let world_y;
+            {
+                let pos = self.world.get::<&Position>(self.camera_entity).unwrap();
+                let cam = self.world.get::<&Camera>(self.camera_entity).unwrap();
+                world_x = pos.x + (mouse_x - cam.screen_width / 2.0) / cam.zoom;
+                world_y = pos.y + (mouse_y - cam.screen_height / 2.0) / cam.zoom;
+            }
+            
+            // ✅ 长按模式：直接朝向鼠标方向移动（不使用寻路）
+            // 🎯 直接设置速度方向，让角色自由旋转跟随鼠标
+            for (_, (player_pos, player, player_input, velocity)) in self.world
+                .query_mut::<(&Position, &mut Player, &mut PlayerInput, Option<&mut MovementVelocity>)>()
+                .into_iter()
+            {
+                // 计算朝向鼠标的方向
+                let dx = world_x - player_pos.x;
+                let dy = world_y - player_pos.y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                
+                // 只有当鼠标距离角色足够远时才移动（避免抖动）
+                if distance > 10.0 {
+                    // 归一化方向
+                    let norm_dx = dx / distance;
+                    let norm_dy = dy / distance;
+                    
+                    // 设置速度（直接朝向鼠标）
+                    if let Some(vel) = velocity {
+                        let speed = if is_running { vel.run_speed } else { vel.walk_speed };
+                        vel.set(norm_dx * speed, norm_dy * speed);
+                        
+                        // ✅ 更新角色朝向（8方向）
+                        player.direction = Self::calculate_direction_8way(norm_dx, norm_dy);
+                    }
+                    
+                    // 设置运行状态
+                    player_input.is_running = is_running;
+                } else {
+                    // 太近了，停止移动
+                    if let Some(vel) = velocity {
+                        vel.stop();
+                    }
+                }
+            }
+        } else {
+            // ✅ 鼠标释放时，清除移动目标，停止移动
+            for (_, velocity) in self.world.query_mut::<&mut MovementVelocity>().into_iter() {
+                velocity.stop();
+            }
+        }
+
+        //  使用新的移动系统（五层架构）
         let delta_time = ctx.time.delta().as_secs_f32();
         
-        // 获取地图数据用于寻路
+        // 🔧 禁用寻路系统：改为直接跟随鼠标（不触发自动寻路）
+        // 原因：避免角色在两个坐标间来回走动
+        // 现在直接在长按逻辑中设置速度和方向
+        /*
+        // 获取map_data引用（用于寻路）
         if let Some(map_data) = self.world.query_mut::<&MapData>()
             .into_iter()
             .next()
@@ -475,12 +570,78 @@ impl EventHandler for MapViewerApp {
                 LocalPredictionSystem::update(&mut self.world, &*map_data, delta_time);
             }
         }
+        */
         
-        // Layer 2: 移动系统（应用速度到位置）
+        // Mock 网络系统：模拟服务器响应
+        // 注意：必须在 LocalPredictionSystem 之后调用，这样才能捕获到玩家的移动命令
+        // 🔧 暂时禁用：Mock系统有bug，会导致角色来回震荡
+        // TODO: 修复Mock系统的服务器位置模拟逻辑
+        /*
+        if let Some(map_data) = self.world.query_mut::<&MapData>()
+            .into_iter()
+            .next()
+            .map(|(_, m)| m as *const MapData) 
+        {
+            unsafe {
+                self.mock_network.update(&mut self.world, &*map_data, delta_time);
+            }
+        }
+        */
+        
         MovementSystemV2::update(&mut self.world, delta_time);
         
-        // Layer 3: 玩家动画系统（更新动画帧）
-        PlayerAnimationSystem::update(&mut self.world);
+        // 🎬 更新 Player 状态（is_moving, frame_index等）
+        // ✅ ECS架构：从 PlayerInput.is_running 读取跑步状态，而不是用速度阈值判断
+        for (_, (player, velocity, input)) in self.world.query_mut::<(&mut Player, &MovementVelocity, &PlayerInput)>() {
+            let speed = velocity.magnitude();
+            
+            // 🐛 调试：输出速度信息
+            static mut DEBUG_COUNTER: u32 = 0;
+            unsafe {
+                DEBUG_COUNTER += 1;
+                if DEBUG_COUNTER % 60 == 0 || speed > 1.0 {  // 每秒输出一次或移动时输出
+                    println!("[PlayerState] 速度: {:.2} (vx={:.2}, vy={:.2}), 动作: {:?}, is_moving: {}, is_running: {}",
+                        speed, velocity.x, velocity.y, player.action, player.is_moving, input.is_running);
+                }
+            }
+            
+            if speed > 1.0 {  // 移动中
+                player.is_moving = true;
+                
+                // ✅ 正确的逻辑：从 PlayerInput.is_running 读取跑步状态
+                // 长按右键 -> is_running=true -> PlayerAction::Run
+                // 单击右键 -> is_running=false -> PlayerAction::Walk
+                if input.is_running {
+                    player.action = PlayerAction::Run;
+                } else {
+                    player.action = PlayerAction::Walk;
+                }
+                
+                // 更新动画帧
+                player.frame_time += 1;
+                let frame_interval = player.action.frame_interval();
+                if player.frame_time >= frame_interval {
+                    player.frame_time = 0;
+                    player.frame_index += 1;
+                    let frame_count = player.action.frame_count();
+                    if player.frame_index >= frame_count {
+                        player.frame_index = 0;
+                    }
+                }
+            } else {  // 静止
+                player.is_moving = false;
+                player.action = PlayerAction::Stand;
+                player.frame_index = 0;
+                player.frame_time = 0;
+            }
+        }
+        
+        //  map_viewer 不需要角色动画（AnimationSystem 已删除）
+        // AnimationSystem::update_movement_animation(&mut self.world);
+
+        //  遮挡系统已禁用 - 改用简单的混合模式+绘制顺序处理遮挡
+        // let delta_time = ctx.time.delta().as_secs_f32();
+        // self.occlusion_system.update(&mut self.world, delta_time);
 
         Ok(())
     }

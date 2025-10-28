@@ -11,6 +11,15 @@
 
 use std::time::Instant;
 
+/// 默认走路速度（像素/秒）
+pub const DEFAULT_WALK_SPEED: f32 = 100.0;
+
+/// 默认跑步速度（像素/秒）
+pub const DEFAULT_RUN_SPEED: f32 = 180.0;
+
+/// 默认最大速度（像素/秒）
+pub const DEFAULT_MAX_SPEED: f32 = 300.0;
+
 /// 速度组件 - 实体的移动速度（每帧）
 #[derive(Debug, Clone)]
 pub struct MovementVelocity {
@@ -20,6 +29,10 @@ pub struct MovementVelocity {
     pub y: f32,
     /// 最大速度
     pub max_speed: f32,
+    /// 走路速度（像素/秒）
+    pub walk_speed: f32,
+    /// 跑步速度（像素/秒）
+    pub run_speed: f32,
 }
 
 impl MovementVelocity {
@@ -28,6 +41,19 @@ impl MovementVelocity {
             x: 0.0,
             y: 0.0,
             max_speed,
+            walk_speed: DEFAULT_WALK_SPEED,
+            run_speed: DEFAULT_RUN_SPEED,
+        }
+    }
+    
+    /// 创建带自定义速度的移动组件
+    pub fn with_speeds(max_speed: f32, walk_speed: f32, run_speed: f32) -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            max_speed,
+            walk_speed,
+            run_speed,
         }
     }
     

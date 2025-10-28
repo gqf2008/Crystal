@@ -99,36 +99,66 @@ impl LocalPredictionSystem {
         {
             player_count += 1;
             
-            // 1️⃣ 检查是否有新的移动输入（只处理一次，然后清除）
+            // 1️⃣ 检查是否有新的移动输入
             if let Some((target_x, target_y)) = input.move_to {
-                let (current_gx, current_gy) = Coordinates::world_to_grid(position.x, position.y);
-                let (target_gx, target_gy) = Coordinates::world_to_grid(target_x, target_y);
-
-                // 调用寻路算法
-                if let Some(path_points) = Pathfinding::find_path(map_data, (current_gx, current_gy), (target_gx, target_gy)) {
-                    println!("[LocalPredictionSystem] 🎯 新路径: ({}, {}) -> ({}, {}), 长度: {}, 路径点: {:?}",
-                        current_gx, current_gy, target_gx, target_gy, path_points.len(), 
-                        if path_points.len() <= 10 { format!("{:?}", path_points) } else { format!("[{} points]", path_points.len()) });
-
-                    // 2️⃣ 写入路径组件（使用格子坐标）
-                    if let Some(path) = path.as_deref_mut() {
-                        path.set_path(path_points.clone());
-                        println!("[LocalPredictionSystem] 📋 路径已设置, 当前索引: {}, 当前waypoint: {:?}",
-                            path.current_index, path.current_waypoint());
-                    }
-
-                    // 5️⃣ 记录预测状态（用于后续校正）
-                    if let Some(prediction) = prediction.as_deref_mut() {
-                        prediction.predicted_position = position.clone();
-                        prediction.last_input_sequence += 1;
-                    }
-                } else {
-                    println!("[LocalPredictionSystem] ⚠️ 寻路失败: ({}, {}) -> ({}, {})",
-                        current_gx, current_gy, target_gx, target_gy);
-                }
+                // 🎯 区分两种移动模式：
+                // - use_pathfinding = true: 双击移动，使用 A* 寻路（避障）
+                // - use_pathfinding = false: 长按移动，直接朝向目标（不避障）
                 
-                // 🔥 清除移动输入（处理完就清除，避免下帧重复处理）
-                input.move_to = None;
+                if input.use_pathfinding {
+                    // === 模式 1: 自动寻路（双击）===
+                    let (current_gx, current_gy) = Coordinates::world_to_grid(position.x, position.y);
+                    let (target_gx, target_gy) = Coordinates::world_to_grid(target_x, target_y);
+
+                    // 调用寻路算法
+                    if let Some(path_points) = Pathfinding::find_path(map_data, (current_gx, current_gy), (target_gx, target_gy)) {
+                        println!("[LocalPredictionSystem] 🎯 寻路模式: ({}, {}) -> ({}, {}), 长度: {}",
+                            current_gx, current_gy, target_gx, target_gy, path_points.len());
+
+                        // 2️⃣ 写入路径组件
+                        if let Some(path) = path.as_deref_mut() {
+                            path.set_path(path_points.clone());
+                        }
+
+                        // 5️⃣ 记录预测状态
+                        if let Some(prediction) = prediction.as_deref_mut() {
+                            prediction.predicted_position = position.clone();
+                            prediction.last_input_sequence += 1;
+                        }
+                    } else {
+                        println!("[LocalPredictionSystem] ⚠️ 寻路失败: ({}, {}) -> ({}, {})",
+                            current_gx, current_gy, target_gx, target_gy);
+                    }
+                    
+                    // 清除移动输入（寻路模式只处理一次）
+                    input.move_to = None;
+                } else {
+                    // === 模式 2: 直接跟随（长按）===
+                    let dx = target_x - position.x;
+                    let dy = target_y - position.y;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    
+                    if distance > 10.0 {
+                        let norm_dx = dx / distance;
+                        let norm_dy = dy / distance;
+                        
+                        // 直接设置速度
+                        if let Some(vel) = velocity.as_deref_mut() {
+                            let speed = if input.is_running { vel.run_speed } else { vel.walk_speed };
+                            vel.set(norm_dx * speed, norm_dy * speed);
+                            
+                            // 更新朝向
+                            player.direction = Self::calculate_direction(norm_dx, norm_dy);
+                        }
+                    } else {
+                        // 太近了，停止
+                        if let Some(vel) = velocity.as_deref_mut() {
+                            vel.stop();
+                        }
+                    }
+                    
+                    // 注意：长按模式不清除 move_to（需要每帧更新）
+                }
                 
                 // 4️⃣ 更新移动状态
                 if let Some(movement_state) = movement_state.as_deref_mut() {

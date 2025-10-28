@@ -24,11 +24,13 @@
 // ============================================================================
 
 pub mod animation_state_system;
+pub mod player_animation_system;  // 玩家动画帧更新
 pub mod npc_action_system;
 pub mod sound_trigger_system;
 pub mod monster_animation_state_system;
 
 pub use animation_state_system::AnimationStateSystem;
+pub use player_animation_system::PlayerAnimationSystem;
 pub use npc_action_system::NPCActionSystem;
 pub use sound_trigger_system::SoundTriggerSystem;
 pub use monster_animation_state_system::MonsterAnimationStateSystem;

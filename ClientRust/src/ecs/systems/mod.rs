@@ -20,13 +20,14 @@ pub mod layer3_presentation;
 pub mod layer4_rendering;
 pub mod layer5_ui;
 
+use ggez::graphics::Canvas;
 // 重新导出各层系统
 pub use layer1_input::{InputCollectingSystem, ClientNetworkSystem, MockNetworkSystem, MockNetworkConfig};
 pub use layer2_logic::{
     LocalPredictionSystem, MovementSystemV2, ReconciliationSystem, InterpolationSystem,
     MonsterSystem, NPCSystem, CombatSystem, MagicCastSystem,
 };
-pub use layer3_presentation::{AnimationStateSystem, NPCActionSystem, MonsterAnimationStateSystem};
+pub use layer3_presentation::{AnimationStateSystem, PlayerAnimationSystem, NPCActionSystem, MonsterAnimationStateSystem};
 pub use layer4_rendering::{
     RenderSystem, CameraSystem, OcclusionSystem,
     AnimationPlaybackSystem, TileAnimationSystem, MovementInterpolationSystem,
@@ -56,3 +57,15 @@ pub use layer5_ui::{
 pub use layer2_logic::combat_system::{SkillEffectSystem, DamageType, CombatResult};
 pub use layer5_ui::quest_system::{Quest, QuestState, QuestObjective, QuestReward};
 pub use layer5_ui::trade_system::{ShopSystem, TradeData, TradeState, ShopData, ShopItem};
+
+/// ECS 系统抽象
+pub trait System {
+    fn update(&mut self, ctx: &mut ggez::Context,world: &mut hecs::World, dt: f32){
+
+    }
+}
+
+/// ECS 绘制系统抽象
+pub trait DrawSystem: System {
+    fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut ggez::graphics::Canvas,world: &mut hecs::World) ;
+}

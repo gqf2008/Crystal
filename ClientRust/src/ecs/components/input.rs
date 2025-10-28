@@ -144,6 +144,9 @@ pub struct PlayerInput {
     /// 移动类型（行走/奔跑）
     pub is_running: bool,
     
+    /// 移动模式：true=自动寻路（双击），false=直接跟随（长按）
+    pub use_pathfinding: bool,
+    
     /// 攻击目标实体
     pub attack_target: Option<hecs::Entity>,
     
@@ -168,6 +171,7 @@ impl PlayerInput {
         Self {
             move_to: None,
             is_running: false,
+            use_pathfinding: true,  // 默认使用寻路
             attack_target: None,
             cast_spell: None,
             spell_target_pos: None,
@@ -192,6 +196,14 @@ impl PlayerInput {
     pub fn set_move(&mut self, target: (f32, f32), is_running: bool) {
         self.move_to = Some(target);
         self.is_running = is_running;
+        self.use_pathfinding = true;  // 设置移动时默认使用寻路
+    }
+    
+    /// 设置直接跟随指令（不使用寻路）
+    pub fn set_follow(&mut self, target: (f32, f32), is_running: bool) {
+        self.move_to = Some(target);
+        self.is_running = is_running;
+        self.use_pathfinding = false;  // 直接跟随模式
     }
     
     /// 设置攻击指令

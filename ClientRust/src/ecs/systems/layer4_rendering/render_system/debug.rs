@@ -306,9 +306,8 @@ impl RenderSystem {
         // 查询玩家的碰撞信息
         for (_entity, (player, player_pos)) in world.query::<(&Player, &Position)>().iter() {
             // 绘制玩家当前格子（绿色背景）
-            let (current_grid_x, current_grid_y) = Coordinates::world_to_grid(player_pos.x, player_pos.y);
-            let (current_world_x, current_world_y) = Coordinates::grid_to_world(current_grid_x, current_grid_y);
-            let (screen_x, screen_y) = CameraSystem::world_to_screen(camera_pos, camera, current_world_x, current_world_y);
+            // ✨ 直接使用精确的像素坐标，实现平滑跟随
+            let (screen_x, screen_y) = CameraSystem::world_to_screen(camera_pos, camera, player_pos.x, player_pos.y);
             
             // 绘制半透明绿色背景
             if let Ok(rect) = graphics::Mesh::new_rectangle(

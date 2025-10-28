@@ -146,7 +146,7 @@ impl InputCollectingSystem {
             // 清除上一帧的输入
             player_input.clear();
             
-            // 1. 双击 → 移动指令
+            // 1. 双击 → 移动指令（自动寻路）
             if mouse_input.left_double_clicked || mouse_input.right_double_clicked {
                 let is_running = mouse_input.right_double_clicked;
                 
@@ -154,13 +154,13 @@ impl InputCollectingSystem {
                 let world_x = camera_pos.x + (mouse_input.x - camera.screen_width / 2.0) / camera.zoom;
                 let world_y = camera_pos.y + (mouse_input.y - camera.screen_height / 2.0) / camera.zoom;
                 
-                // 写入移动指令
+                // 写入移动指令（使用寻路）
                 player_input.set_move((world_x, world_y), is_running);
                 
-                tracing::info!("🖱️ 双击移动: ({:.1}, {:.1}) 跑={}", world_x, world_y, is_running);
+                tracing::info!("🖱️ 双击移动（寻路）: ({:.1}, {:.1}) 跑={}", world_x, world_y, is_running);
             }
             
-            // 2. 长按 → 持续移动指令
+            // 2. 长按 → 直接跟随指令（不使用寻路，每帧更新目标）
             else if (mouse_input.left_pressed && mouse_input.left_press_time >= 5) 
                   || (mouse_input.right_pressed && mouse_input.right_press_time >= 5) {
                 let is_running = mouse_input.right_pressed;
@@ -169,8 +169,8 @@ impl InputCollectingSystem {
                 let world_x = camera_pos.x + (mouse_input.x - camera.screen_width / 2.0) / camera.zoom;
                 let world_y = camera_pos.y + (mouse_input.y - camera.screen_height / 2.0) / camera.zoom;
                 
-                // 写入移动指令
-                player_input.set_move((world_x, world_y), is_running);
+                // 写入直接跟随指令（不使用寻路）
+                player_input.set_follow((world_x, world_y), is_running);
             }
         }
         
