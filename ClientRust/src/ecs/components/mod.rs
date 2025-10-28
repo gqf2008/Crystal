@@ -16,6 +16,12 @@ pub mod render;
 pub mod input;
 pub mod network;
 
+// 🆕 新架构组件
+pub mod movement;        // 移动相关组件
+pub mod prediction;      // 预测和插值组件
+pub mod animation_state; // 动画状态组件
+pub mod sound;           // 音效组件
+
 // ============================================================================
 // 统一导出所有组件
 // ============================================================================
@@ -53,15 +59,21 @@ pub use input::*;
 // 网络组件
 pub use network::*;
 
+// 🆕 新架构组件导出
+pub use movement::*;
+pub use prediction::*;
+pub use animation_state::*;
+pub use sound::*;
+
 // ============================================================================
 // 其他系统组件的重新导出
 // ============================================================================
 
 // QuestLog 组件在 quest_system.rs 中定义，在这里重新导出
-pub use crate::ecs::systems::quest_system::QuestLog;
+pub use crate::ecs::systems::layer5_ui::quest_system::QuestLog;
 
 // TradeWindow 组件在 trade_system.rs 中定义，在这里重新导出
-pub use crate::ecs::systems::trade_system::TradeWindow;
+pub use crate::ecs::systems::layer5_ui::trade_system::TradeWindow;
 
 // ============================================================================
 // 公共导出 - 确保外部可以使用

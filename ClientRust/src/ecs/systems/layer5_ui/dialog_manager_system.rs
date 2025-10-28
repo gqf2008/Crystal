@@ -1,203 +1,35 @@
 // ============================================================================
-// UI 系统 - 统一管理所有 UI 更新
+// 对话框管理系统 - 管理所有对话框的打开/关闭/切换
 // ============================================================================
 //
 // 职责:
-// - 处理 UI 事件 (聊天消息、金币变化、物品获得等)
-// - 管理 UI 状态和数据更新
-// - 解耦 UI 更新逻辑
+// - 对话框显示状态管理
+// - 对话框切换逻辑
+// - 对话框层级控制(z-order)
+// - UI 点击事件处理
+// - UI hover 状态更新
 //
-// 注意: UI渲染由 RenderSystem::draw_ui 负责，符合ECS设计原则
+// 注意: 从 UISystem 中拆分出来，专注于对话框管理
 //
 // ============================================================================
 
 use hecs::{World, Entity};
-
 use crate::ecs::ui::{
     MainDialog, InventoryDialog, CharacterDialog,
     SkillBarDialog, ChatDialog, ChatType, MagicLearningDialog,
-    QuestDialog, SkillsDialog, OptionsDialog
+    QuestDialog, SkillsDialog, OptionsDialog, DialogType
 };
-use crate::network::game_client::GameEvent;
-use crate::ecs::components::{LocalPlayer, PlayerData, Mana, Health};
 
-/// UI 系统
-pub struct UISystem;
+/// 对话框管理系统
+pub struct DialogManagerSystem;
 
-impl UISystem {
+impl DialogManagerSystem {
     pub fn new() -> Self {
         Self
     }
     
-    /// 更新所有 UI 组件
-    pub fn update(&mut self, _world: &mut World) {
-        // UI 更新主要通过事件驱动,在 process_event 中处理
-        // 这里保留用于未来需要主动更新的UI逻辑
-    }
-    
-    /// 处理游戏事件并更新UI
-    pub fn process_event(world: &mut World, event: &GameEvent) {
-        match event {
-            // 聊天消息
-            GameEvent::ChatReceived { message } => {
-                let text = format!("[{}] {}", message.sender, message.text);
-                
-                // 暂时都显示为系统消息 (TODO: 实现完整的ChatType映射)
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
-                    chat_comp.add_message(text.clone(), ChatType::System);
-                }
-            }
-            
-            // 系统消息
-            GameEvent::SystemMessage { message } => {
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
-                    chat_comp.add_message(message.clone(), ChatType::System);
-                }
-            }
-            
-            // 金币变化
-            GameEvent::GoldChanged { gold } => {
-                Self::set_gold(world, *gold);
-            }
-            
-            // 经验值获得
-            GameEvent::ExperienceGained { amount } => {
-                // 发送聊天消息
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
-                    chat_comp.add_message(
-                        format!("📈 获得经验: +{}", amount),
-                        ChatType::System
-                    );
-                }
-            }
-            
-            // 等级提升
-            GameEvent::LevelChanged { object_id, level } => {
-                // 检查是否是本地玩家
-                let is_local_player = {
-                    let mut found = false;
-                    for (_, (_, player_comp)) in world.query::<(&LocalPlayer, &PlayerData)>().iter() {
-                        if player_comp.id == *object_id {
-                            found = true;
-                            break;
-                        }
-                    }
-                    found
-                };
-                
-                if is_local_player {
-                    println!("🎉 恭喜升级! 等级: {}", level);
-                    
-                    // 显示升级消息
-                    for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
-                        chat_comp.add_message(
-                            format!("🎉 恭喜升级! 等级提升至 {}", level),
-                            ChatType::System
-                        );
-                    }
-                }
-            }
-            
-            // 物品获得
-            GameEvent::ItemGained { item, grid_type } => {
-                let item_name = item.info.as_ref()
-                    .map(|info| info.name.as_str())
-                    .unwrap_or("未知物品");
-                    
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
-                    chat_comp.add_message(
-                        format!("获得物品: {} x{}", item_name, item.count),
-                        ChatType::System
-                    );
-                }
-            }
-            
-            // 物品丢失
-            GameEvent::ItemLost { unique_id, count } => {
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
-                    chat_comp.add_message(
-                        format!("失去物品 x{}", count),
-                        ChatType::System
-                    );
-                }
-            }
-            
-            // 技能学习
-            GameEvent::MagicLearned { spell, level } => {
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
-                    chat_comp.add_message(
-                        format!("✨ 学会技能: {:?} (等级 {})", spell, level),
-                        ChatType::System
-                    );
-                }
-            }
-            
-            // 技能升级
-            GameEvent::MagicLevelUp { spell, level } => {
-                for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
-                    chat_comp.add_message(
-                        format!("⬆️ 技能升级: {:?} → 等级 {}", spell, level),
-                        ChatType::System
-                    );
-                }
-            }
-            
-            // 用户信息更新 (HP/MP等)
-            GameEvent::UserInformation { user_info } => {
-                // 更新血量
-                for (_, (_, health)) in world.query_mut::<(&LocalPlayer, &mut Health)>() {
-                    health.current = user_info.hp.max(0);
-                }
-                
-                // 更新魔法值
-                for (_, (_, mana)) in world.query_mut::<(&LocalPlayer, &mut Mana)>() {
-                    mana.current = user_info.mp.max(0);
-                }
-            }
-            
-            // 玩家受伤
-            GameEvent::PlayerStruck { attacker_id, damage, location } => {
-                if *damage > 0 {
-                    for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
-                        chat_comp.add_message(
-                            format!("受到伤害: -{}", damage),
-                            ChatType::System
-                        );
-                    }
-                }
-            }
-            
-            // 其他事件暂不处理
-            _ => {}
-        }
-    }
-    
-    // ========================================================================
-    // 辅助方法 - 通过 Entity 获取 UI 组件
-    // ========================================================================
-    
-    /// 添加聊天消息
-    pub fn add_chat_message(world: &mut World, _entity: Entity, text: String, chat_type: ChatType) {
-        for (_, chat_comp) in world.query_mut::<&mut ChatDialog>() {
-            chat_comp.add_message(text.clone(), chat_type);
-        }
-    }
-    
-    /// 设置金币
-    pub fn set_gold(world: &mut World, gold: u32) {
-        for (_, inv_comp) in world.query_mut::<&mut InventoryDialog>() {
-            inv_comp.set_gold(gold);
-        }
-    }
-    
-    // ========================================================================
-    // 对话框管理方法 (供 InputSystem 调用)
-    // ========================================================================
-    
     /// 切换对话框显示/隐藏
-    pub fn toggle_dialog(world: &mut World, dialog_type: crate::ecs::ui::DialogType) {
-        use crate::ecs::ui::DialogType;
-        
+    pub fn toggle_dialog(world: &mut World, dialog_type: DialogType) {
         match dialog_type {
             DialogType::Inventory => {
                 for (_, inv) in world.query_mut::<&mut InventoryDialog>() {
@@ -422,25 +254,25 @@ impl UISystem {
                 
                 match button {
                     MainDialogButton::Inventory => {
-                        Self::toggle_dialog(world, crate::ecs::ui::DialogType::Inventory);
+                        Self::toggle_dialog(world, DialogType::Inventory);
                     }
                     MainDialogButton::Character => {
-                        Self::toggle_dialog(world, crate::ecs::ui::DialogType::Character);
+                        Self::toggle_dialog(world, DialogType::Character);
                     }
                     MainDialogButton::Skills => {
-                        Self::toggle_dialog(world, crate::ecs::ui::DialogType::Skills);
+                        Self::toggle_dialog(world, DialogType::Skills);
                     }
                     MainDialogButton::Quest => {
-                        Self::toggle_dialog(world, crate::ecs::ui::DialogType::Quest);
+                        Self::toggle_dialog(world, DialogType::Quest);
                     }
                     MainDialogButton::Options => {
-                        Self::toggle_dialog(world, crate::ecs::ui::DialogType::Options);
+                        Self::toggle_dialog(world, DialogType::Options);
                     }
                     MainDialogButton::Menu => {
-                        Self::toggle_dialog(world, crate::ecs::ui::DialogType::Menu);
+                        Self::toggle_dialog(world, DialogType::Menu);
                     }
                     MainDialogButton::GameShop => {
-                        Self::toggle_dialog(world, crate::ecs::ui::DialogType::GameShop);
+                        Self::toggle_dialog(world, DialogType::GameShop);
                     }
                 }
                 return true;
@@ -472,5 +304,3 @@ impl UISystem {
         }
     }
 }
-
-

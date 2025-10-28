@@ -28,6 +28,9 @@ pub mod objects;           // ✅ 不依赖 winit/wgpu
 // ECS 模块 (GGEZ + hecs 架构)
 pub mod ecs;               // 🆕 轻量级 ECS 架构 (推荐)
 
+// 🆕 算法模块 - 游戏通用算法（寻路、碰撞检测等）
+pub mod algorithms;
+
 // Bevy 模块 (新架构 - 暂时禁用)
 // pub mod bevy;              // Bevy 0.17.2 ECS 架构 (已搁置,使用 GGEZ + hecs)
 

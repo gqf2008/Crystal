@@ -193,21 +193,23 @@ impl MonsterSystem {
                             let vx = (dx / distance) * move_speed;
                             let vy = (dy / distance) * move_speed;
                             
-                            // ✅ Layer 2职责：更新位置和速度
+                            // 更新位置
                             pos.x += vx * delta_time;
                             pos.y += vy * delta_time;
                             
-                            // ✅ Layer 2职责：更新速度组件（如果有）
+                            // 更新动画为行走
+                            if anim.action != MirAction::Walking {
+                                anim.action = MirAction::Walking;
+                                anim.frame_index = 0;
+                            }
+                            
+                            // 更新速度组件（如果有）
                             if let Some(vel) = velocity {
                                 vel.dx = vx;
                                 vel.dy = vy;
                             }
                             
-                            // ⚠️ REMOVED: 动画设置移至AnimationStateSystem (Layer 3)
-                            // 原代码: anim.action = MirAction::Walking;
-                            // 新架构: AnimationStateSystem读取Velocity决定动画
-                            
-                            // ✅ Layer 2职责：更新朝向（基于移动方向）
+                            // 更新朝向
                             Self::update_direction_from_movement(anim, vx, vy);
                         }
                     }
@@ -224,27 +226,31 @@ impl MonsterSystem {
                             let vx = (dx / distance) * move_speed;
                             let vy = (dy / distance) * move_speed;
                             
-                            // ✅ Layer 2职责：更新位置
                             pos.x += vx * delta_time;
                             pos.y += vy * delta_time;
                             
-                            // ⚠️ REMOVED: 动画设置移至AnimationStateSystem (Layer 3)
-                            // 原代码: anim.action = MirAction::Walking;
+                            if anim.action != MirAction::Walking {
+                                anim.action = MirAction::Walking;
+                                anim.frame_index = 0;
+                            }
                             
-                            // ✅ Layer 2职责：更新朝向
                             Self::update_direction_from_movement(anim, vx, vy);
                         }
                     }
                 }
                 crate::ecs::components::AIAction::Attack => {
-                    // ⚠️ REMOVED: 动画设置移至AnimationStateSystem (Layer 3)
-                    // 原代码: anim.action = MirAction::Attack1;
-                    // 新架构: AnimationStateSystem读取AIAction决定动画
+                    // 攻击动画
+                    if anim.action != MirAction::Attack1 {
+                        anim.action = MirAction::Attack1;
+                        anim.frame_index = 0;
+                    }
                 }
                 crate::ecs::components::AIAction::Idle => {
-                    // ⚠️ REMOVED: 动画设置移至AnimationStateSystem (Layer 3)
-                    // 原代码: anim.action = MirAction::Standing;
-                    // 新架构: AnimationStateSystem读取AIAction决定动画
+                    // 站立动画
+                    if anim.action != MirAction::Standing {
+                        anim.action = MirAction::Standing;
+                        anim.frame_index = 0;
+                    }
                 }
             }
         }

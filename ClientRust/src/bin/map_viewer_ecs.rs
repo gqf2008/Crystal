@@ -97,14 +97,13 @@ use mir2_client::ecs::{
     NetworkObjectType, // 🎯 网络对象类型
     CELL_WIDTH, 
     CELL_HEIGHT,
-    // Systems
+    // Systems (使用新的五层架构系统)
     CameraSystem,
-    MovementSystem,   // 🆕 移动系统
-    PathfindingSystem, // 🆕 寻路系统
-    AnimationSystem,
-    DoorSystem,
     RenderSystem,
     OcclusionSystem,  // 🎯 遮挡系统
+    // 🆕 使用新的移动和寻路系统
+    LocalPredictionSystem,
+    MovementSystemV2,
     // Coordinate utilities
     Coordinates,
     MapUtils,
@@ -423,21 +422,32 @@ impl EventHandler for MapViewerApp {
                 .map(|t| t.animation_count)
                 .unwrap_or(0);
 
-            AnimationSystem::update_tiles(&mut self.world, animation_count);
-            DoorSystem::update(&mut self.world);
+            // 🆕 map_viewer 不需要动画系统（AnimationSystem 已删除）
+            // AnimationSystem::update_tiles(&mut self.world, animation_count);
+            // DoorSystem::update(&mut self.world);
         }
 
         // 🎯 摄像机系统 - 边缘滚屏 + 跟随角色
         CameraSystem::update(&mut self.world);
 
-        // 🆕 更新寻路系统
-        PathfindingSystem::update(&mut self.world, None);
+        // 🆕 使用新的移动系统（五层架构）
+        let delta_time = ctx.time.delta().as_secs_f32();
         
-        // 🆕 更新移动系统
-        MovementSystem::update(&mut self.world, None);
+        // 获取map_data引用（用于寻路）
+        if let Some(map_data) = self.world.query_mut::<&MapData>()
+            .into_iter()
+            .next()
+            .map(|(_, m)| m as *const MapData) 
+        {
+            unsafe {
+                LocalPredictionSystem::update(&mut self.world, &*map_data, delta_time);
+            }
+        }
         
-        // � 更新角色移动动画（帧插值，让移动更流畅）
-        AnimationSystem::update_movement_animation(&mut self.world);
+        MovementSystemV2::update(&mut self.world, delta_time);
+        
+        // 🆕 map_viewer 不需要角色动画（AnimationSystem 已删除）
+        // AnimationSystem::update_movement_animation(&mut self.world);
 
         // 🎯 遮挡系统已禁用 - 改用简单的混合模式+绘制顺序处理遮挡
         // let delta_time = ctx.time.delta().as_secs_f32();

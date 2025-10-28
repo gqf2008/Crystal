@@ -127,3 +127,97 @@ impl Default for TargetSelection {
         Self::new()
     }
 }
+
+// ============================================================================
+// 玩家输入组件 - 存储玩家的输入意图（符合ECS架构）
+// ============================================================================
+
+use mir2_shared::enums::MirDirection;
+use crate::ecs::components::SpellType;
+
+/// 玩家输入组件 - 存储玩家的输入意图
+#[derive(Debug, Clone)]
+pub struct PlayerInputComponent {
+    /// 移动目标（世界坐标）
+    pub move_to: Option<(f32, f32)>,
+    
+    /// 移动类型（行走/奔跑）
+    pub is_running: bool,
+    
+    /// 攻击目标实体
+    pub attack_target: Option<hecs::Entity>,
+    
+    /// 施放技能
+    pub cast_spell: Option<SpellType>,
+    
+    /// 施法目标位置
+    pub spell_target_pos: Option<(f32, f32)>,
+    
+    /// 施法目标实体
+    pub spell_target_entity: Option<hecs::Entity>,
+    
+    /// 拾取物品位置
+    pub pickup_at: Option<(i32, i32)>,
+    
+    /// 转向方向
+    pub turn_to: Option<MirDirection>,
+}
+
+impl PlayerInputComponent {
+    pub fn new() -> Self {
+        Self {
+            move_to: None,
+            is_running: false,
+            attack_target: None,
+            cast_spell: None,
+            spell_target_pos: None,
+            spell_target_entity: None,
+            pickup_at: None,
+            turn_to: None,
+        }
+    }
+    
+    /// 清除所有输入
+    pub fn clear(&mut self) {
+        self.move_to = None;
+        self.attack_target = None;
+        self.cast_spell = None;
+        self.spell_target_pos = None;
+        self.spell_target_entity = None;
+        self.pickup_at = None;
+        self.turn_to = None;
+    }
+    
+    /// 设置移动指令
+    pub fn set_move(&mut self, target: (f32, f32), is_running: bool) {
+        self.move_to = Some(target);
+        self.is_running = is_running;
+    }
+    
+    /// 设置攻击指令
+    pub fn set_attack(&mut self, target: hecs::Entity) {
+        self.attack_target = Some(target);
+    }
+    
+    /// 设置施法指令
+    pub fn set_cast_spell(&mut self, spell: SpellType, target_pos: Option<(f32, f32)>, target_entity: Option<hecs::Entity>) {
+        self.cast_spell = Some(spell);
+        self.spell_target_pos = target_pos;
+        self.spell_target_entity = target_entity;
+    }
+    
+    /// 是否有任何输入
+    pub fn has_input(&self) -> bool {
+        self.move_to.is_some()
+            || self.attack_target.is_some()
+            || self.cast_spell.is_some()
+            || self.pickup_at.is_some()
+            || self.turn_to.is_some()
+    }
+}
+
+impl Default for PlayerInputComponent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
