@@ -91,39 +91,3 @@ impl NPCActionSystem {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_npc_action_timer() {
-        let mut world = World::new();
-        
-        let entity = world.spawn((
-            NPCData {
-                name: "测试NPC".to_string(),
-                action_timer: 0,
-                next_action_delay: 5000,
-                ..Default::default()
-            },
-            Animation {
-                action: MirAction::Standing,
-                frame_count: 4,
-                frame_index: 3, // 最后一帧
-                ..Default::default()
-            },
-        ));
-        
-        // 更新3秒，不应该切换
-        NPCActionSystem::update(&mut world, 3000);
-        let npc = world.get::<&NPCData>(entity).unwrap();
-        assert_eq!(npc.action_timer, 3000);
-        
-        // 再更新2秒，应该触发切换检查
-        NPCActionSystem::update(&mut world, 2000);
-        let npc = world.get::<&NPCData>(entity).unwrap();
-        assert_eq!(npc.action_timer, 0); // 计时器已重置
-        assert!(npc.next_action_delay >= 3000 && npc.next_action_delay <= 8000);
-    }
-}

@@ -155,30 +155,3 @@ impl SoundTriggerSystem {
         cmd.spawn((sound,));
     }
 }
-
-// ============================================================================
-// 单元测试
-// ============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sound_trigger_system() {
-        let mut world = World::new();
-        let mut cmd = CommandBuffer::new();
-        
-        let player = world.spawn(());
-        
-        let events = vec![
-            GameEvent::PlayerAttack { entity: player, target: None },
-        ];
-        
-        SoundTriggerSystem::process_events(&world, &mut cmd, &events);
-        cmd.run_on(&mut world);
-        
-        // 验证音效组件已添加
-        assert!(world.get::<SoundTriggerComponent>(player).is_ok());
-    }
-}

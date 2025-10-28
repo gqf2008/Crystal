@@ -22,7 +22,7 @@
 
 // 核心移动系统
 pub mod local_prediction_system;
-pub mod movement_system_v2;
+pub mod movement_system;
 pub mod reconciliation_system;
 pub mod interpolation_system;
 
@@ -33,7 +33,7 @@ pub mod combat_system;
 pub mod magic_cast_system;
 
 pub use local_prediction_system::LocalPredictionSystem;
-pub use movement_system_v2::MovementSystem as MovementSystemV2;
+pub use movement_system::MovementSystem as MovementSystemV2;
 pub use reconciliation_system::ReconciliationSystem;
 pub use interpolation_system::InterpolationSystem;
 pub use monster_system::MonsterSystem;

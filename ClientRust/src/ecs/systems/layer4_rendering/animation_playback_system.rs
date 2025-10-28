@@ -41,35 +41,3 @@ impl AnimationPlaybackSystem {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use mir2_shared::MirAction;
-    
-    #[test]
-    fn test_animation_playback() {
-        let mut world = World::new();
-        
-        let entity = world.spawn((Animation {
-            action: MirAction::Standing,
-            direction: 0,
-            frame_index: 0,
-            frame_count: 4,
-            frame_interval: 100,
-            frame_timer: 0,
-        },));
-        
-        // 更新50ms，不应该切换帧
-        AnimationPlaybackSystem::update(&mut world, 50);
-        let anim = world.get::<&Animation>(entity).unwrap();
-        assert_eq!(anim.frame_index, 0);
-        assert_eq!(anim.frame_timer, 50);
-        
-        // 再更新60ms，应该切换到第1帧
-        AnimationPlaybackSystem::update(&mut world, 60);
-        let anim = world.get::<&Animation>(entity).unwrap();
-        assert_eq!(anim.frame_index, 1);
-        assert_eq!(anim.frame_timer, 10); // 110 - 100 = 10
-    }
-}

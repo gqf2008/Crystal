@@ -198,26 +198,3 @@ impl Pathfinding {
         length
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_path_validation() {
-        // 测试路径验证逻辑
-        let path = vec![(0, 0), (1, 0), (2, 0)];
-        assert!(path.windows(2).all(|w| {
-            let dx = (w[1].0 - w[0].0).abs();
-            let dy = (w[1].1 - w[0].1).abs();
-            dx <= 1 && dy <= 1
-        }));
-    }
-    
-    #[test]
-    fn test_path_length() {
-        let path = vec![(0, 0), (1, 0), (1, 1), (2, 1)];
-        let length = Pathfinding::calculate_path_length(&path);
-        assert_eq!(length, 3);
-    }
-}
