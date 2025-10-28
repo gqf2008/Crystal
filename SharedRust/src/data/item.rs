@@ -504,6 +504,15 @@ impl UserItem {
         }
 
         let slot_count = reader.read_i32::<LittleEndian>()?;
+        
+        // 验证 slot_count 是否合理 (最大100个槽位，防止内存溢出)
+        if slot_count < 0 || slot_count > 100 {
+            return Err(SharedError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Invalid slot_count: {}, expected 0-100", slot_count),
+            )));
+        }
+        
         let mut slots = Vec::with_capacity(slot_count as usize);
         for _ in 0..slot_count {
             let is_null = read_bool(reader)?;
