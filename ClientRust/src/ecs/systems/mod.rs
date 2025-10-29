@@ -43,6 +43,49 @@
 // ============================================================================
 
 // ============================================================================
+//
+// # 熱血傳奇ECS系統職責說明表
+
+// | 階段 | 系統名稱 | 優先級 | 職責說明 |
+// |------|----------|--------|----------|
+// | **第一階段：輸入和網絡** | NetworkRecvSystem | 50 | 接收並解析網絡數據包，將數據存入組件 |
+// | | InputSystem | 100 | 處理玩家輸入（鍵盤、鼠標、觸控），轉換為輸入事件 |
+// | | PlayerControlSystem | 110 | 將輸入事件轉換為玩家具體行為（移動、攻擊、使用技能） |
+// | | GameEventSystem | 120 | 管理遊戲事件分發（任務、系統、UI事件），協調系統間通信 |
+// | **第二階段：AI和決策** | MonsterAISystem | 200 | 怪物AI邏輯（巡邏、追擊、攻擊決策、狀態切換） |
+// | | NpcAISystem | 210 | NPC行為邏輯（對話觸發、任務發放、商店交互） |
+// | | DialogueSystem | 220 | 處理對話樹、選項分支、對話進度管理 |
+// | **第三階段：戰鬥和技能** | SkillSystem | 300 | 技能釋放邏輯、冷卻計算、技能效果應用 |
+// | | CombatSystem | 310 | 戰鬥傷害計算、命中判定、爆擊處理、死亡判斷 |
+// | **第四階段：移動和物理** | MovementSystem | 400 | 實體移動更新、路徑追蹤、速度方向計算 |
+// | | CollisionSystem | 410 | 碰撞檢測與響應、障礙物判斷、實體間碰撞 |
+// | | CameraFollowSystem | 420 | 相機跟隨邏輯、目標追蹤、平滑移動、邊界限制 |
+// | **第五階段：狀態更新** | AnimationSystem | 500 | 動畫狀態機更新、幀切換、動畫混合 |
+// | | ParticleSystem | 510 | 粒子效果更新、生命期管理、位置速度計算 |
+// | | SoundSystem | 520 | 音效觸發管理、3D音效位置計算、音量控制 |
+// | | CameraSystem | 530 | 相機矩陣計算、震動效果、過場動畫、最終視圖矩陣 |
+// | **第六階段：網絡發送** | NetworkSendSystem | 600 | 收集狀態變化，組裝並發送網絡數據包 |
+// | | SyncSystem | 610 | 狀態同步驗證、數據壓縮、斷線重連處理 |
+// | **第七階段：渲染** | MapRenderSystem | 1000 | 地圖圖層渲染、地形繪製、遮罩處理 |
+// | | SpriteRenderSystem | 1010 | 精靈實體渲染、排序、批處理優化 |
+// | | EffectRenderSystem | 1020 | 特效渲染（技能特效、光影、後處理） |
+// | | UIRenderSystem | 1030 | UI界面渲染、HUD、文字顯示 |
+// | | DebugSystem | 1100 | 調試信息顯示、性能統計、開發工具 |
+//
+// ============================================================================
+
+// ## 系統依賴關係說明
+
+// 1. **數據流動**：網絡接收 → 輸入處理 → 控制響應 → 事件觸發 → AI決策 → 戰鬥計算 → 移動物理 → 狀態更新 → 網絡發送 → 渲染顯示
+
+// 2. **關鍵依賴**：
+//    - PlayerControlSystem 依賴 InputSystem 的輸入數據
+//    - CameraFollowSystem 依賴 MovementSystem 的位置更新
+//    - CameraSystem 依賴 CameraFollowSystem 的跟隨邏輯
+//    - 所有戰鬥相關系統依賴 GameEventSystem 的事件通知
+
+// 3. **渲染順序**：地圖 → 實體 → 特效 → UI → 調試信息（從底層到頂層）
+// ============================================================================
 // 系统优先级常量定义
 // ============================================================================
 /// 系统优先级常量，用于控制系统执行顺序（数字越小越优先）
@@ -85,21 +128,35 @@ pub mod priority {
     pub const DEBUG_RENDER: u32 = 1100;
 }
 
-// 六阶段架构模块
+// 六阶段架构模块（已弃用，保留以备迁移）
 pub mod layer1_input;
 pub mod layer2_logic;
 pub mod layer3_presentation;
 pub mod layer4_rendering;
 pub mod layer5_ui;
-// pub mod update;
-// pub mod render;
+
+// 🆕 7层架构：update 和 render 模块
+pub mod update;
+pub mod render;
 
 use ggez::graphics::Canvas;
 use ggez::GameResult;
-// 重新导出各层系统
-pub use layer1_input::{
-    ClientNetworkSystem, InputCollectingSystem, MockNetworkConfig, MockNetworkSystem,
+
+// 重新导出各层系统（保持向后兼容）
+// 注意：新代码应使用 update:: 和 render:: 模块
+
+// Layer 1 - 向后兼容导出（指向新位置）
+pub use update::input::{
+    InputSystem as InputCollectingSystem,  // 别名保持兼容
 };
+
+// 保留旧的 ClientNetworkSystem（game_scene.rs 使用）
+pub use layer1_input::ClientNetworkSystem;
+// 向后兼容别名
+pub type NetworkSystem = layer1_input::ClientNetworkSystem;
+
+pub use layer1_input::{MockNetworkConfig, MockNetworkSystem};
+
 pub use layer2_logic::{
     CombatSystem, InterpolationSystem, LocalPredictionSystem, MagicCastSystem, MonsterSystem,
     MovementSystemV2, NPCSystem, ReconciliationSystem,
@@ -393,7 +450,7 @@ impl SystemScheduler {
     }
 
     /// 添加系统（自动判断类型）
-    pub fn add_system<S>(&mut self, system: S)
+    pub fn add_system<S>(&mut self, system: S)->&mut Self
     where
         S: Schedulable + 'static,
     {
@@ -407,7 +464,9 @@ impl SystemScheduler {
                 self.draw_systems.sort_by_key(|s| s.priority());
             }
         }
-    }    pub fn update(&mut self, world: &mut hecs::World, delay_time: f32) -> GameResult {
+        self
+    }    
+    pub fn update(&mut self, world: &mut hecs::World, delay_time: f32) -> GameResult {
         for system in &mut self.update_systems {
             if system.is_enabled() {
                 system.update(world, delay_time)?;
