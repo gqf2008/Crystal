@@ -1,3 +1,5 @@
+#![feature(specialization)]
+#![allow(incomplete_features)]
 //! Legend of Mir 2 - Rust Edition
 //! 
 //! 将传奇世界客户端从 C# 移植到 Rust
