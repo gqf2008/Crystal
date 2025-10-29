@@ -5,6 +5,8 @@
 
 pub mod components;
 pub mod systems;
+pub mod system_scheduler;
+pub mod game_scene_scheduler;  // 🆕 GameScene专用调度器
 pub mod world;
 pub mod runtime;
 // Map Loader 模块
@@ -25,6 +27,8 @@ pub mod ime_handler;
 
 pub use components::*;
 pub use systems::*;
+pub use system_scheduler::{SystemScheduler, SystemStats};
+pub use game_scene_scheduler::GameSceneScheduler;  // 🆕 导出GameScene调度器
 pub use world::GameWorld;
 
 // Map Loader 导出

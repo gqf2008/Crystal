@@ -150,6 +150,9 @@ pub enum MovementState {
     Knocked,
 }
 
+/// MovementType 别名 (用于系统兼容)
+pub type MovementType = MovementState;
+
 /// 移动状态组件 - 存储实体的移动状态
 #[derive(Debug, Clone)]
 pub struct Movement {

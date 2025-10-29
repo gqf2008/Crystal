@@ -9,7 +9,104 @@
 // ============================================================================
 
 use std::time::Instant;
+use std::collections::VecDeque;
 use crate::ecs::components::Position;
+
+/// 预测的位置记录
+#[derive(Debug, Clone)]
+pub struct PredictedPosition {
+    /// 位置
+    pub position: (i32, i32),
+    /// 时间戳(毫秒)
+    pub timestamp: u64,
+    /// 输入序列号
+    pub sequence: u32,
+}
+
+impl PredictedPosition {
+    pub fn new(position: (i32, i32), timestamp: u64, sequence: u32) -> Self {
+        Self {
+            position,
+            timestamp,
+            sequence,
+        }
+    }
+}
+
+/// 预测状态组件 (用于客户端预测系统)
+#[derive(Debug, Clone)]
+pub struct PredictionState {
+    /// 预测位置历史
+    pub predicted_positions: VecDeque<PredictedPosition>,
+    /// 当前修正目标
+    pub correction_target: Option<(i32, i32)>,
+    /// 预测权重 (0.0-1.0, 根据延迟调整)
+    pub prediction_weight: f32,
+    /// 最大历史记录数
+    pub max_history: usize,
+    /// 修正速度 (0.0-1.0)
+    pub correction_speed: f32,
+}
+
+impl PredictionState {
+    pub fn new() -> Self {
+        Self {
+            predicted_positions: VecDeque::new(),
+            correction_target: None,
+            prediction_weight: 1.0,
+            max_history: 10,
+            correction_speed: 0.3,
+        }
+    }
+
+    /// 添加预测位置
+    pub fn add_predicted_position(&mut self, position: (i32, i32), timestamp: u64, sequence: u32) {
+        // 添加新记录
+        self.predicted_positions.push_back(PredictedPosition::new(position, timestamp, sequence));
+        
+        // 限制历史记录数量
+        while self.predicted_positions.len() > self.max_history {
+            self.predicted_positions.pop_front();
+        }
+    }
+
+    /// 获取最近的预测位置
+    pub fn latest_predicted_position(&self) -> Option<&PredictedPosition> {
+        self.predicted_positions.back()
+    }
+
+    /// 清理旧的预测记录
+    pub fn cleanup_old_predictions(&mut self, current_time: u64, max_age_ms: u64) {
+        self.predicted_positions.retain(|p| current_time - p.timestamp <= max_age_ms);
+    }
+
+    /// 设置修正目标
+    pub fn set_correction_target(&mut self, target: (i32, i32)) {
+        self.correction_target = Some(target);
+    }
+
+    /// 清除修正目标
+    pub fn clear_correction_target(&mut self) {
+        self.correction_target = None;
+    }
+
+    /// 根据延迟调整预测权重
+    pub fn adjust_prediction_weight(&mut self, latency_ms: u64) {
+        self.prediction_weight = if latency_ms > 200 {
+            0.5 // 高延迟,降低预测权重
+        } else if latency_ms > 100 {
+            0.7
+        } else {
+            1.0 // 低延迟,完全信任预测
+        };
+    }
+}
+
+impl Default for PredictionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// 客户端预测组件
 #[derive(Debug, Clone)]

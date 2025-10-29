@@ -7,6 +7,100 @@
 // ============================================================================
 
 use std::time::Instant;
+use std::collections::VecDeque;
+
+/// 动作类型枚举 (对应 C# MapObject.Action)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionType {
+    /// 站立
+    Standing,
+    /// 行走
+    Walking,
+    /// 奔跑
+    Running,
+    /// 攻击1
+    Attack1,
+    /// 攻击2
+    Attack2,
+    /// 攻击3
+    Attack3,
+    /// 受击
+    Struck,
+    /// 死亡
+    Die,
+    /// 已死亡
+    Dead,
+    /// 施法
+    Spell,
+    /// 采集
+    Harvest,
+    /// 魔法施放
+    MagicCast,
+}
+
+impl ActionType {
+    /// 获取动作的帧数
+    pub fn frame_count(&self) -> u32 {
+        match self {
+            ActionType::Standing => 4,
+            ActionType::Walking => 6,
+            ActionType::Running => 6,
+            ActionType::Attack1 | ActionType::Attack2 | ActionType::Attack3 => 6,
+            ActionType::Struck => 2,
+            ActionType::Die => 10,
+            ActionType::Dead => 1,
+            ActionType::Spell | ActionType::MagicCast => 10,
+            ActionType::Harvest => 8,
+        }
+    }
+
+    /// 是否循环播放
+    pub fn is_looping(&self) -> bool {
+        matches!(
+            self,
+            ActionType::Standing | ActionType::Walking | ActionType::Running | ActionType::Harvest
+        )
+    }
+}
+
+/// 排队的动作 (用于动作队列)
+#[derive(Debug, Clone)]
+pub struct QueuedAction {
+    /// 动作类型
+    pub action: ActionType,
+    /// 动作方向 (可选)
+    pub direction: Option<u8>,
+    /// 目标位置 (可选)
+    pub target_position: Option<(i32, i32)>,
+    /// 优先级 (数字越大优先级越高)
+    pub priority: u8,
+}
+
+impl QueuedAction {
+    pub fn new(action: ActionType) -> Self {
+        Self {
+            action,
+            direction: None,
+            target_position: None,
+            priority: 0,
+        }
+    }
+
+    pub fn with_direction(mut self, direction: u8) -> Self {
+        self.direction = Some(direction);
+        self
+    }
+
+    pub fn with_target(mut self, position: (i32, i32)) -> Self {
+        self.target_position = Some(position);
+        self
+    }
+
+    pub fn with_priority(mut self, priority: u8) -> Self {
+        self.priority = priority;
+        self
+    }
+}
 
 /// 动画状态枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

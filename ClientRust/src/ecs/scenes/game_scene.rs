@@ -44,6 +44,7 @@ use crate::ecs::{
         RenderSystem, AnimationPlaybackSystem, TileAnimationSystem, MovementInterpolationSystem,  // Layer 4: 渲染
         KeyboardShortcutSystem, MouseEventSystem,  // Layer 5: 输入事件处理（替代 InputSystem）
     },
+    GameSceneScheduler,  // 🆕 GameScene系统调度器
     Coordinates, MapUtils,  // 坐标工具
     map_loader::MapLoader,
     ui::{ChatType, MainDialog, InventoryDialog, CharacterDialog, SkillBarDialog, ChatDialog, MagicLearningDialog, QuestDialog, TradeDialog, SkillsDialog, OptionsDialog, HotkeyHelpPanel},
@@ -87,8 +88,8 @@ pub struct GameScene {
     /// 网络同步系统
     network_system: ClientNetworkSystem,
     
-    /// 🆕 遮挡检测系统
-    occlusion_system: OcclusionSystem,
+    ///  系统调度器 - 统一管理所有ECS系统
+    system_scheduler: GameSceneScheduler,
     
     /// UI字体名称 (保留用于后续字体切换功能)
     #[allow(dead_code)]
@@ -415,7 +416,7 @@ impl GameScene {
             visible_area_entity,
             debug_counters_entity,
             network_system: ClientNetworkSystem::new(),
-            occlusion_system: OcclusionSystem::new(),  // 🆕 初始化遮挡检测系统
+            system_scheduler: GameSceneScheduler::new(),  // 🎯 初始化GameScene调度器
             ui_font_name,  // 保留用于后续字体切换功能
             main_dialog_entity,
             inventory_dialog_entity,
@@ -529,7 +530,7 @@ impl Scene for GameScene {
             .unwrap_or(true);
         
         // 获取动画计数器（Layer 4动画系统需要）
-        let animation_count = world
+        let animation_count: i32 = world
             .get::<&TimeTracker>(self.time_entity)
             .map(|t| t.animation_count)
             .unwrap_or(0);
@@ -572,74 +573,21 @@ impl Scene for GameScene {
         CameraSystem::update(world);
         
         // ========================================
-        // 🆕 五层架构系统（按顺序执行）✅ 已集成
+        // � 使用GameSceneScheduler统一管理所有系统 ✅
         // ========================================
         
         // 计算 delta_time（秒）
         let delta_time = delta_ms as f32 / 1000.0;
         
-        // Layer 1: 输入和网络层 ✅
-        InputCollectingSystem::update(world, _ctx);
-        ClientNetworkSystem::send_commands(world, Some(network_tx));
-        
-        // TODO: 实现 ClientNetworkSystem::receive_updates
-        //   - 需要将网络事件队列传入
-        //   - 处理 ObjectSpawned, ObjectRemoved, MapInformation 等事件
-        //   - 更新 ServerState（用于 Reconciliation）
-        
-        // Layer 2: 核心逻辑层 ✅
-        // 获取 MapData 引用（寻路需要）
-        let map_data_opt = world.query_mut::<&crate::ecs::components::MapData>()
-            .into_iter()
-            .next()
-            .map(|(_, data)| data as *const _);
-        
-        if let Some(map_data_ptr) = map_data_opt {
-            // SAFETY: 我们在这个作用域内不会修改 MapData
-            let map_data = unsafe { &*map_data_ptr };
-            LocalPredictionSystem::update(world, map_data, delta_time);
-        }
-        
-        MovementSystemV2::update(world, delta_time);
-        ReconciliationSystem::update(world, delta_time);
-        InterpolationSystem::update(world, delta_time);
-        
-        // Layer 3: 表现层 ✅
-        AnimationStateSystem::update(world, delta_time);
-        MonsterAnimationStateSystem::update(world);  // 🆕 怪物动画决策
-        NPCActionSystem::update(world, delta_ms);  // 🏪 NPC动作决策
-        
-        // Layer 4: 渲染准备层 ✅
-        TileAnimationSystem::update(world, animation_count);  // 地图瓦片动画
-        AnimationPlaybackSystem::update(world, delta_ms);  // 实体动画播放
-        MovementInterpolationSystem::update(world);  // 移动插值
-        
-        // Layer 4: 实际渲染 - 在 draw() 方法中 ✅
-        // Layer 5: UI层 - 事件驱动，通过 process_network_events 调用 ✅
-        
-        // ========================================
-        // ⚠️ 废弃系统已禁用（功能已被新架构完全替代）
-        // ========================================
-        // 以下系统已被注释，功能已由五层架构系统完全接管：
-        //   - PathfindingSystem    -> ✅ LocalPredictionSystem (Layer 2)
-        //   - MovementSystem       -> ✅ MovementSystemV2 (Layer 2)
-        //   - InputSystem          -> ✅ InputCollectingSystem (Layer 1) + 事件处理保留
-        
-        // ❌ 已禁用：寻路系统（功能已被 LocalPredictionSystem 替代）
-        // PathfindingSystem::update(world, Some(network_tx));
-        
-        // ❌ 已禁用：旧移动系统（功能已被 MovementSystemV2 替代）
-        // MovementSystem::update(world, Some(network_tx));
-        
-        // ✅ 鼠标输入状态更新（长按计时、双击清除）
-        MouseEventSystem::update_mouse_input(world);
-        
-        // 更新怪物系统
-        let delta_time = 1.0 / max_fps as f32;
-        MonsterSystem::update(world, delta_time);
-        
-        // 🆕 更新遮挡检测系统（计算 Front 层瓦片的透明度）
-        self.occlusion_system.update(world, delta_time);
+        // 🎯 一行代码搞定所有系统更新！
+        self.system_scheduler.update(
+            _ctx,
+            world,
+            delta_time,
+            delta_ms,
+            animation_count,
+            Some(network_tx),
+        )?;
         
         // 更新聊天对话框（用于光标闪烁）
         if let Some(chat_dialog) = self.get_chat_dialog_mut(world) {

@@ -10,6 +10,12 @@ impl DrawSystem for MapRenderSystem {
         canvas: &mut ggez::graphics::Canvas,
         world: &hecs::World,
     ) -> GameResult {
+        //  canvas.set_screen_coordinates(ggez::graphics::Rect::new(
+        //     0.0,
+        //     0.0,
+        //     camera.screen_width,  
+        //     camera.screen_height, 
+        // ));
         // 在这里实现地图渲染逻辑
         Ok(())
     }

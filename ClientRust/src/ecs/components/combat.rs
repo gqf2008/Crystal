@@ -3,6 +3,192 @@
 // ============================================================================
 
 pub use mir2_shared::{MirClass, MirGender};
+use std::time::Instant;
+
+/// Buff类型枚举
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuffType {
+    /// 中毒
+    Poison,
+    /// 流血
+    Bleeding,
+    /// 攻击加成
+    AttackBoost,
+    /// 防御加成
+    DefenseBoost,
+    /// 速度加成
+    SpeedBoost,
+    /// 魔法护盾
+    MagicShield,
+}
+
+impl BuffType {
+    /// 获取Buff的默认持续时间(毫秒)
+    pub fn default_duration(&self) -> u64 {
+        match self {
+            BuffType::Poison | BuffType::Bleeding => 10000, // 10秒
+            BuffType::AttackBoost | BuffType::DefenseBoost | BuffType::SpeedBoost => 60000, // 60秒
+            BuffType::MagicShield => 30000, // 30秒
+        }
+    }
+
+    /// 是否是负面Buff
+    pub fn is_debuff(&self) -> bool {
+        matches!(self, BuffType::Poison | BuffType::Bleeding)
+    }
+}
+
+/// Buff实例
+#[derive(Debug, Clone)]
+pub struct Buff {
+    /// Buff类型
+    pub buff_type: BuffType,
+    /// 剩余持续时间(毫秒)
+    pub remaining_duration: u64,
+    /// 叠加层数
+    pub stack_count: u8,
+    /// 效果强度(可选)
+    pub strength: Option<i32>,
+    /// 开始时间
+    pub start_time: Instant,
+}
+
+impl Buff {
+    pub fn new(buff_type: BuffType) -> Self {
+        Self {
+            buff_type,
+            remaining_duration: buff_type.default_duration(),
+            stack_count: 1,
+            strength: None,
+            start_time: Instant::now(),
+        }
+    }
+
+    pub fn with_duration(mut self, duration: u64) -> Self {
+        self.remaining_duration = duration;
+        self
+    }
+
+    pub fn with_strength(mut self, strength: i32) -> Self {
+        self.strength = Some(strength);
+        self
+    }
+
+    /// 更新Buff(返回是否已过期)
+    pub fn update(&mut self, delta_ms: u64) -> bool {
+        if self.remaining_duration > delta_ms {
+            self.remaining_duration -= delta_ms;
+            false
+        } else {
+            self.remaining_duration = 0;
+            true // 已过期
+        }
+    }
+}
+
+/// Buff列表组件
+#[derive(Debug, Clone)]
+pub struct BuffList {
+    /// 活动的Buff列表
+    pub active_buffs: Vec<Buff>,
+}
+
+impl BuffList {
+    pub fn new() -> Self {
+        Self {
+            active_buffs: Vec::new(),
+        }
+    }
+
+    /// 添加Buff
+    pub fn add_buff(&mut self, buff: Buff) {
+        // 检查是否已存在相同类型的Buff
+        if let Some(existing) = self.active_buffs.iter_mut().find(|b| b.buff_type == buff.buff_type) {
+            // 刷新持续时间并增加层数
+            existing.remaining_duration = buff.remaining_duration;
+            existing.stack_count = (existing.stack_count + 1).min(99);
+        } else {
+            self.active_buffs.push(buff);
+        }
+    }
+
+    /// 移除Buff
+    pub fn remove_buff(&mut self, buff_type: BuffType) {
+        self.active_buffs.retain(|b| b.buff_type != buff_type);
+    }
+
+    /// 检查是否有某个Buff
+    pub fn has_buff(&self, buff_type: BuffType) -> bool {
+        self.active_buffs.iter().any(|b| b.buff_type == buff_type)
+    }
+
+    /// 清理过期的Buff
+    pub fn cleanup_expired(&mut self, delta_ms: u64) {
+        self.active_buffs.retain_mut(|buff| !buff.update(delta_ms));
+    }
+}
+
+impl Default for BuffList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 生命/魔法恢复计时器
+#[derive(Debug, Clone)]
+pub struct RegenTimer {
+    /// HP恢复计时器(毫秒)
+    pub hp_timer: u64,
+    /// MP恢复计时器(毫秒)
+    pub mp_timer: u64,
+    /// HP恢复间隔(毫秒)
+    pub hp_interval: u64,
+    /// MP恢复间隔(毫秒)
+    pub mp_interval: u64,
+}
+
+impl RegenTimer {
+    pub fn new() -> Self {
+        Self {
+            hp_timer: 0,
+            mp_timer: 0,
+            hp_interval: 10000, // 默认10秒
+            mp_interval: 10000, // 默认10秒
+        }
+    }
+
+    /// 更新计时器
+    pub fn update(&mut self, delta_ms: u64) {
+        self.hp_timer += delta_ms;
+        self.mp_timer += delta_ms;
+    }
+
+    /// 检查HP是否应该恢复
+    pub fn should_regen_hp(&self) -> bool {
+        self.hp_timer >= self.hp_interval
+    }
+
+    /// 检查MP是否应该恢复
+    pub fn should_regen_mp(&self) -> bool {
+        self.mp_timer >= self.mp_interval
+    }
+
+    /// 重置HP计时器
+    pub fn reset_hp_timer(&mut self) {
+        self.hp_timer = 0;
+    }
+
+    /// 重置MP计时器
+    pub fn reset_mp_timer(&mut self) {
+        self.mp_timer = 0;
+    }
+}
+
+impl Default for RegenTimer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// 生命值组件
 #[derive(Debug, Clone, Copy)]

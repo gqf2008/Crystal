@@ -60,6 +60,23 @@ pub struct MapData {
     pub height: i32,
 }
 
+/// 地图边界组件 (用于碰撞检测)
+#[derive(Debug, Clone, Copy)]
+pub struct MapBounds {
+    pub width: i32,
+    pub height: i32,
+}
+
+impl MapBounds {
+    pub fn new(width: i32, height: i32) -> Self {
+        Self { width, height }
+    }
+
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        x >= 0 && y >= 0 && x < self.width && y < self.height
+    }
+}
+
 /// 常量
 pub const CELL_WIDTH: i32 = 48;
 pub const CELL_HEIGHT: i32 = 32;
