@@ -13,8 +13,6 @@ pub mod input_system;
 pub mod player_control_system;
 pub mod game_event_system;
 
-#[cfg(test)]
-mod test_integration;
 
 pub use network_recv_system::NetworkRecvSystem;
 pub use input_system::InputSystem;

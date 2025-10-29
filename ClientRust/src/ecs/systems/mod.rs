@@ -145,9 +145,27 @@ use ggez::GameResult;
 // 重新导出各层系统（保持向后兼容）
 // 注意：新代码应使用 update:: 和 render:: 模块
 
-// Layer 1 - 向后兼容导出（指向新位置）
+// Layer 1 (Input) - 向后兼容导出
 pub use update::input::{
-    InputSystem as InputCollectingSystem,  // 别名保持兼容
+    InputSystem as InputCollectingSystem,
+    NetworkRecvSystem,
+    PlayerControlSystem,
+    GameEventSystem,
+};
+
+// Layer 2 (Decision) - 向后兼容导出
+pub use update::decision::{
+    MonsterAISystem,
+    NpcAISystem,
+    NpcDialogueSystem,
+};
+
+// Layer 3 (Combat & Skills) - 向后兼容导出
+pub use update::combat_skill::{
+    SkillSystem,
+    CombatSystem as CombatSystemV2,
+    DamageType,
+    CombatResult,
 };
 
 // 保留旧的 ClientNetworkSystem（game_scene.rs 使用）
@@ -180,8 +198,12 @@ pub use layer5_ui::{
     UISystem,
 };
 
-// 重新导出其他系统的特殊类型
-pub use layer2_logic::combat_system::{CombatResult, DamageType, SkillEffectSystem};
+// 重新导出其他系统的特殊类型（旧Layer 2系统）
+pub use layer2_logic::combat_system::{
+    CombatResult as OldCombatResult, 
+    DamageType as OldDamageType, 
+    SkillEffectSystem
+};
 pub use layer5_ui::quest_system::{Quest, QuestObjective, QuestReward, QuestState};
 pub use layer5_ui::trade_system::{ShopData, ShopItem, ShopSystem, TradeData, TradeState};
 

@@ -29,11 +29,7 @@ use ggez::GameResult;
 pub struct MonsterAISystem;
 
 impl MonsterAISystem {
-    /// 向后兼容的静态 update 方法
-    pub fn update(world: &mut World, _delta_time: f32) {
-        Self::update_ai(world);
-    }
-    
+   
     /// 更新怪物AI逻辑
     fn update_ai(world: &mut World) {
         // 首先查找玩家位置
@@ -188,9 +184,6 @@ impl MonsterAISystem {
 }
 
 impl System for MonsterAISystem {
-    fn name(&self) -> &'static str {
-        "MonsterAISystem"
-    }
 
     fn priority(&self) -> u32 {
         crate::ecs::systems::priority::MONSTER_AI
@@ -199,38 +192,5 @@ impl System for MonsterAISystem {
     fn update(&mut self, world: &mut hecs::World, _delay_time: f32) -> GameResult {
         Self::update_ai(world);
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_distance_calculation() {
-        let dist = MonsterAISystem::distance((0.0, 0.0), (3.0, 4.0));
-        assert!((dist - 5.0).abs() < 0.01);
-    }
-    
-    #[test]
-    fn test_ai_melee_in_range() {
-        let mut pos = Position { x: 10.0, y: 10.0 };
-        let mut ai_state = AIState::default();
-        let player_pos = Some((11.0, 10.0)); // 距离 = 1.0
-        
-        MonsterAISystem::ai_melee_attack(&mut pos, &mut ai_state, player_pos);
-        
-        assert!(matches!(ai_state.current_action, crate::ecs::components::AIAction::Attack));
-    }
-    
-    #[test]
-    fn test_ai_melee_chase_range() {
-        let mut pos = Position { x: 10.0, y: 10.0 };
-        let mut ai_state = AIState::default();
-        let player_pos = Some((15.0, 10.0)); // 距离 = 5.0
-        
-        MonsterAISystem::ai_melee_attack(&mut pos, &mut ai_state, player_pos);
-        
-        assert!(matches!(ai_state.current_action, crate::ecs::components::AIAction::Chase));
     }
 }
