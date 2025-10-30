@@ -8,8 +8,10 @@ pub mod systems;
 pub mod system_scheduler;
 pub mod game_scene_scheduler;  // 🆕 GameScene专用调度器
 pub mod parallel_scheduler;    // 🆕 并行系统调度器
+pub mod map_viewer_scheduler;  // 🆕 MapViewer专用调度器（串行）
 pub mod world;
 pub mod runtime;
+pub mod resources;  // 🆕 全局游戏资源 (Resources)
 // Map Loader 模块
 pub mod map_loader;
 
@@ -28,9 +30,13 @@ pub mod ime_handler;
 
 pub use components::*;
 pub use systems::*;
+pub use systems::update::state_update::{MapUpdateSystem, MapManager};  // 🆕 导出地图更新系统
+pub use systems::update::state_update::{EventCleanupSystem, EventCollectorSystem};  // 🆕 导出事件系统
 pub use system_scheduler::{SystemScheduler, SystemStats};
+pub use resources::*;  // 🆕 导出全局资源
 pub use game_scene_scheduler::GameSceneScheduler;  // 🆕 导出GameScene调度器
 pub use parallel_scheduler::{ParallelScheduler, ExecutionMode, ParallelSystemStats};  // 🆕 导出并行调度器
+pub use map_viewer_scheduler::MapViewerScheduler;  // 🆕 导出MapViewer调度器（串行）
 pub use world::GameWorld;
 
 // Map Loader 导出

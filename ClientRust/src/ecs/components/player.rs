@@ -12,8 +12,11 @@ pub struct PlayerData {
     pub name: String,
     pub class: MirClass,
     pub gender: MirGender,
+    pub level: u16,           // ➕ 玩家等级
     pub exp: i64,
+    pub max_experience: i64,  // ➕ 升级所需经验
     pub gold: u32,
+    pub credit: u32,          // ➕ 元宝/点数
 }
 
 /// 本地玩家标记 (只有一个)
@@ -139,5 +142,54 @@ impl Default for PlayerAppearance {
             weapon_effect: 0,
             wing_effect: 0,
         }
+    }
+}
+
+/// 可见性组件 - 控制实体是否可见
+#[derive(Debug, Clone, Copy)]
+pub struct Visibility {
+    /// 是否隐身（隐身术、潜行等）
+    pub hidden: bool,
+    /// 是否死亡（死亡状态会影响渲染）
+    pub dead: bool,
+}
+
+impl Visibility {
+    pub fn new() -> Self {
+        Self {
+            hidden: false,
+            dead: false,
+        }
+    }
+    
+    pub fn is_visible(&self) -> bool {
+        !self.hidden
+    }
+}
+
+impl Default for Visibility {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 公会成员组件
+#[derive(Debug, Clone)]
+pub struct GuildMembership {
+    pub guild_name: String,
+    pub rank: u8,  // 0=会长, 1=副会长, 2=成员
+}
+
+impl GuildMembership {
+    pub fn new(guild_name: String, rank: u8) -> Self {
+        Self { guild_name, rank }
+    }
+    
+    pub fn is_leader(&self) -> bool {
+        self.rank == 0
+    }
+    
+    pub fn is_officer(&self) -> bool {
+        self.rank <= 1
     }
 }

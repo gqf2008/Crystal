@@ -136,7 +136,7 @@ impl SystemScheduler {
     pub fn new() -> Self {
         let mut scheduler = Self {
             // Layer 1
-            player_control: PlayerControlSystem,
+            player_control: PlayerControlSystem::new(),
             player_control_enabled: true,
 
             // Layer 2

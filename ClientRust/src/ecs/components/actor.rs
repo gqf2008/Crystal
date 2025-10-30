@@ -9,11 +9,19 @@ pub use mir2_shared::{MirClass, MirGender};
 pub struct MonsterData {
     pub id: u32,
     pub name: String,
-    pub monster_index: u16,
+    pub monster_index: u16,  // 也可称为 image (怪物外观索引)
     pub ai_mode: u8,
     pub ai_type: u8,         // AI 类型 (0=无, 1=近战, 2=远程, 3=巡逻)
     pub spawn_x: f32,        // 出生点 X
     pub spawn_y: f32,        // 出生点 Y
+    pub direction: u8,       // ➕ 朝向 (0-7 八方向)
+}
+
+impl MonsterData {
+    /// 获取怪物外观索引（与 image 字段对应）
+    pub fn image(&self) -> u16 {
+        self.monster_index
+    }
 }
 
 /// AI 状态组件
@@ -65,11 +73,19 @@ pub enum AIAction {
 pub struct NPCData {
     pub id: u32,
     pub name: String,
-    pub npc_index: u16,
+    pub npc_index: u16,      // 也可称为 image (NPC外观索引)
     pub dialogue_id: u32,
-    pub colour: i32,  // NPC颜色染色 (ARGB格式)
-    pub action_timer: u32,  // 动作切换计时器(毫秒)
+    pub colour: i32,         // NPC颜色染色 (ARGB格式)
+    pub action_timer: u32,   // 动作切换计时器(毫秒)
     pub next_action_delay: u32,  // 下次切换延迟(毫秒)
+    pub direction: u8,       // ➕ 朝向 (0-7 八方向)
+}
+
+impl NPCData {
+    /// 获取NPC外观索引（与 image 字段对应）
+    pub fn image(&self) -> u16 {
+        self.npc_index
+    }
 }
 
 /// NPC任务标识

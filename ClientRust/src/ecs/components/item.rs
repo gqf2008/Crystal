@@ -220,3 +220,109 @@ impl Equipment {
         slot_ref.take()
     }
 }
+
+/// 仓库组件 - 玩家的仓库存储
+#[derive(Debug, Clone)]
+pub struct Storage {
+    /// 仓库物品列表
+    pub items: Vec<Option<mir2_shared::data::item::UserItem>>,
+    /// 仓库容量（默认80格）
+    pub capacity: usize,
+}
+
+impl Default for Storage {
+    fn default() -> Self {
+        Self::new(80) // 默认80格仓库
+    }
+}
+
+impl Storage {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            items: vec![None; capacity],
+            capacity,
+        }
+    }
+    
+    /// 添加物品到仓库
+    pub fn add_item(&mut self, item: mir2_shared::data::item::UserItem) -> bool {
+        for slot in &mut self.items {
+            if slot.is_none() {
+                *slot = Some(item);
+                return true;
+            }
+        }
+        false
+    }
+    
+    /// 移除指定格子的物品
+    pub fn remove_item(&mut self, slot_index: usize) -> Option<mir2_shared::data::item::UserItem> {
+        if slot_index < self.items.len() {
+            self.items[slot_index].take()
+        } else {
+            None
+        }
+    }
+    
+    /// 获取指定格子的物品引用
+    pub fn get_item(&self, slot_index: usize) -> Option<&mir2_shared::data::item::UserItem> {
+        if slot_index < self.items.len() {
+            self.items[slot_index].as_ref()
+        } else {
+            None
+        }
+    }
+}
+
+/// 任务背包组件 - 存储任务物品
+#[derive(Debug, Clone)]
+pub struct QuestInventory {
+    /// 任务物品列表
+    pub items: Vec<Option<mir2_shared::data::item::UserItem>>,
+    /// 容量（默认40格）
+    pub capacity: usize,
+}
+
+impl Default for QuestInventory {
+    fn default() -> Self {
+        Self::new(40) // 默认40格任务背包
+    }
+}
+
+impl QuestInventory {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            items: vec![None; capacity],
+            capacity,
+        }
+    }
+    
+    /// 添加任务物品
+    pub fn add_item(&mut self, item: mir2_shared::data::item::UserItem) -> bool {
+        for slot in &mut self.items {
+            if slot.is_none() {
+                *slot = Some(item);
+                return true;
+            }
+        }
+        false
+    }
+    
+    /// 移除指定格子的任务物品
+    pub fn remove_item(&mut self, slot_index: usize) -> Option<mir2_shared::data::item::UserItem> {
+        if slot_index < self.items.len() {
+            self.items[slot_index].take()
+        } else {
+            None
+        }
+    }
+    
+    /// 获取指定格子的任务物品引用
+    pub fn get_item(&self, slot_index: usize) -> Option<&mir2_shared::data::item::UserItem> {
+        if slot_index < self.items.len() {
+            self.items[slot_index].as_ref()
+        } else {
+            None
+        }
+    }
+}

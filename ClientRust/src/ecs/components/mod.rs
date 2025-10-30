@@ -22,6 +22,7 @@ pub mod prediction;      // 预测和插值组件
 pub mod animation_state; // 动画状态组件
 pub mod sound;           // 音效组件
 pub mod particle;        // 粒子组件
+pub mod events;          // 🆕 全局事件组件
 
 // ============================================================================
 // 统一导出所有组件
@@ -66,6 +67,7 @@ pub use prediction::*;
 pub use animation_state::*;
 pub use sound::*;
 pub use particle::*;
+pub use events::*;  // 🆕 全局事件组件导出
 
 // ============================================================================
 // 其他系统组件的重新导出

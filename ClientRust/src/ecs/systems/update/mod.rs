@@ -16,6 +16,7 @@ pub mod combat_skill;
 pub mod physics_movement;
 pub mod state_update;
 pub mod network_sync;
+pub mod network_event_system;  // 🆕 网络事件系统
 
 // 重新导出所有系统
 pub use input::*;
@@ -24,3 +25,4 @@ pub use combat_skill::*;
 pub use physics_movement::*;
 pub use state_update::*;
 pub use network_sync::*;
+pub use network_event_system::NetworkEventSystem;  // 🆕 导出网络事件系统

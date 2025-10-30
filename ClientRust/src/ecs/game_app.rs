@@ -15,10 +15,10 @@ use ggez::event::EventHandler;
 use ggez::graphics::{Canvas, Color};
 use hecs::World;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::thread;
 
 use crate::ecs::scenes::{Scene, SceneType, LoginScene, SelectScene, GameScene};
-use crate::network::{NetworkManager, GameEvent, NetworkCommand, GameObject};
+use crate::network::NetContext;
 use crate::settings::ClientSettings;
 use mir2_shared::packets::CharacterSummary;
 
@@ -33,14 +33,11 @@ pub struct GameState {
     /// 场景类型
     scene_type: SceneType,
     
-    /// 网络管理器（可选，使用 tokio::sync::RwLock 以支持跨 await 的 Send）
-    network_manager: Option<Arc<tokio::sync::RwLock<NetworkManager>>>,
+    /// 网络线程句柄（🔄 改用 std::thread）
+    network_thread: Option<thread::JoinHandle<()>>,
     
-    /// 事件接收器（从网络线程接收）
-    event_rx: mpsc::UnboundedReceiver<GameEvent>,
-    
-    /// 命令发送器（发送到网络线程）
-    command_tx: mpsc::UnboundedSender<NetworkCommand>,
+    /// 网络上下文（✨ 唯一的网络接口）
+    net_ctx: Arc<crate::network::NetContext>,
     
     /// 客户端设置
     settings: Arc<parking_lot::RwLock<ClientSettings>>,
@@ -50,6 +47,9 @@ pub struct GameState {
     
     /// 场景间临时数据 - 选中的角色索引（SelectScene → GameScene）
     selected_character_index: Option<i32>,
+    
+    /// 🆕 网络事件系统（处理 GameEvent 并更新 ECS 组件）
+    network_event_system: crate::ecs::systems::update::NetworkEventSystem,
 }
 impl GameState {
     /// 创建新的游戏应用
@@ -58,55 +58,21 @@ impl GameState {
     /// - `ctx`: ggez 上下文
     /// - `settings`: 客户端配置（由 ClientRuntime 加载）
     pub fn new(
-        ctx: &mut Context,
+        _ctx: &mut Context,
         settings: ClientSettings,
     ) -> GameResult<Self> {
         println!("🎮 游戏应用初始化中...");
         
         let settings_arc = Arc::new(parking_lot::RwLock::new(settings));
         
-        // 创建事件和命令通道
-        let (event_tx, event_rx) = mpsc::unbounded_channel::<GameEvent>();
-        let (command_tx, command_rx) = mpsc::unbounded_channel::<NetworkCommand>();
+        // ✨ 使用 Builder 模式创建网络模块（隐藏所有内部细节）
+        let net_ctx = crate::network::NetworkBuilder::new(settings_arc.clone())
+            .build()
+            .expect("Failed to initialize network");
+        let net_ctx = Arc::new(net_ctx);
         
-        // 创建网络管理器
-        let network_manager = NetworkManager::new(
-            settings_arc.clone(),
-            event_tx.clone(),
-            command_rx,
-        );
-        
-        let network_manager_arc = Arc::new(tokio::sync::RwLock::new(network_manager));
-        
-        // 启动网络任务（使用 tokio::spawn，类似 CrystalGame）
-        {
-            let nm_clone = network_manager_arc.clone();
-            tokio::spawn(async move {
-                tracing::info!("🌐 网络任务启动");
-                
-                // 自动连接到服务器
-                {
-                    let mut nm = nm_clone.write().await;
-                    if let Err(e) = nm.connect().await {
-                        tracing::error!("❌ 初始连接失败: {}", e);
-                    } else {
-                        tracing::info!("✅ 已连接到服务器");
-                    }
-                }
-                
-                // 进入网络处理循环
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
-                    
-                    let mut nm = nm_clone.write().await;
-                    if let Err(e) = nm.process().await {
-                        tracing::error!("⚠️ 网络处理错误: {}", e);
-                        // 发生错误后等待一段时间再重试
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                    }
-                }
-            });
-        }
+        // 🆕 创建网络事件系统（处理 GameEvent 并更新 ECS 组件）
+        let network_event_system = crate::ecs::systems::update::NetworkEventSystem::new(net_ctx.clone());
         
         println!("✅ 网络系统初始化完成");
         
@@ -120,107 +86,41 @@ impl GameState {
             world,
             current_scene: Box::new(login_scene),
             scene_type: SceneType::Login,
-            network_manager: Some(network_manager_arc),
-            event_rx,
-            command_tx,
+            network_thread: None,
+            net_ctx,
             settings: settings_arc,
             pending_characters: None,
             selected_character_index: None,
+            network_event_system,
         })
     }
     
-    /// 发送网络命令
-    pub fn send_command(&self, command: NetworkCommand) {
-        if let Err(e) = self.command_tx.send(command) {
-            eprintln!("❌ 发送网络命令失败: {}", e);
-        }
+    /// 获取网络上下文引用（供场景使用）
+    #[inline]
+    pub fn net_ctx(&self) -> Arc<NetContext> {
+        self.net_ctx.clone()
     }
+}
+
+/// 优雅关闭
+impl Drop for GameState {
+    fn drop(&mut self) {
+        tracing::info!("🛑 Shutting down GameState...");
+        
+        // 发送断开连接请求
+        if let Err(e) = self.net_ctx.send(crate::network::handlers::GameEvent::DisconnectRequest) {
+            tracing::error!("Failed to send disconnect: {:?}", e);
+        }
+        
+        tracing::info!("✅ GameState shutdown complete");
+    }
+}
+
+impl GameState {
     
-    /// 处理网络事件并分发到当前场景
-    fn process_network_events(&mut self, ctx: &mut Context) -> GameResult<Option<SceneType>> {
-        let mut next_scene = None;
-        let mut events_to_process = Vec::new();
-        
-        // 收集所有待处理的网络事件
-        while let Ok(event) = self.event_rx.try_recv() {
-            events_to_process.push(event);
-        }
-        
-        // 分发事件到当前场景
-        for event in events_to_process {
-            // 先处理全局事件（连接/断开）
-            match &event {
-                GameEvent::Connected => {
-                    println!("✅ 已连接到服务器");
-                }
-                GameEvent::Disconnected { reason } => {
-                    println!("⚠️ 与服务器断开连接: {}", reason);
-                    // 断开连接时返回登录场景
-                    if self.scene_type != SceneType::Login {
-                        next_scene = Some(SceneType::Login);
-                    }
-                }
-                _ => {}
-            }
-            
-            // 将事件分发到当前场景
-            match self.scene_type {
-                SceneType::Login => {
-                    // LoginScene特殊处理：登录成功需要切换场景并传递角色列表
-                    if let GameEvent::LoginSuccess { ref characters } = event {
-                        println!("✅ 登录成功！收到 {} 个角色", characters.len());
-                        // 保存角色列表，准备切换到SelectScene
-                        self.pending_characters = Some(characters.clone());
-                        next_scene = Some(SceneType::Select);
-                    }
-                    
-                    // 将事件传递给LoginScene处理
-                    if let Some(login_scene) = self.current_scene.as_mut().as_any_mut().downcast_mut::<LoginScene>() {
-                        login_scene.handle_network_event(&event);
-                    }
-                }
-                SceneType::Select => {
-                    // SelectScene特殊处理：开始游戏成功
-                    if let GameEvent::StartGameResponse { result } = event {
-                        if result == 0 {
-                            println!("🎮 开始游戏成功");
-                            // 获取SelectScene中选中的角色索引
-                            if let Some(select_scene) = self.current_scene.as_mut().as_any_mut().downcast_mut::<SelectScene>() {
-                                self.selected_character_index = Some(select_scene.get_selected_character_index());
-                            }
-                            next_scene = Some(SceneType::Game);
-                        }
-                    }
-                    
-                    // 将事件传递给SelectScene处理
-                    if let Some(select_scene) = self.current_scene.as_mut().as_any_mut().downcast_mut::<SelectScene>() {
-                        select_scene.handle_network_event(&event);
-                    }
-                }
-                SceneType::Game => {
-                    // 将事件传递给GameScene处理
-                    if let Some(game_scene) = self.current_scene.as_mut().as_any_mut().downcast_mut::<GameScene>() {
-                        let event_desc = match &event {
-                            GameEvent::PlayerMoved { location } => format!("PlayerMoved({}, {})", location.x, location.y),
-                            GameEvent::MapInformation { map_index, file_name, .. } => format!("MapInformation({}:{})", map_index, file_name),
-                            GameEvent::UserInformation { .. } => "UserInformation".to_string(),
-                            GameEvent::ObjectSpawned { object } => match object {
-                                GameObject::Player { id, name, .. } => format!("ObjectSpawned::Player({}:{})", id, name),
-                                GameObject::Monster { id, name, .. } => format!("ObjectSpawned::Monster({}:{})", id, name),
-                                GameObject::Npc { id, name, .. } => format!("ObjectSpawned::Npc({}:{})", id, name),
-                                GameObject::Item { id, .. } => format!("ObjectSpawned::Item({})", id),
-                            },
-                            _ => "其他事件".to_string(),
-                        };
-                      //  tracing::info!("🎮 GameApp: 传递事件到GameScene: {}", event_desc);
-                        game_scene.handle_network_event(&mut self.world, &event);
-                    }
-                }
-            }
-        }
-        
-        Ok(next_scene)
-    }
+    // 注意：process_network_events() 方法已移除
+    // 新架构中，NetworkEventSystem 直接处理网络事件并更新 ECS 组件
+    // 场景切换相关的事件应通过 ECS 的全局资源或事件队列处理
     
     /// 切换场景
     pub fn switch_scene(&mut self, ctx: &mut Context, scene_type: SceneType) -> GameResult {
@@ -230,24 +130,11 @@ impl GameState {
         
         self.current_scene = match scene_type {
             SceneType::Login => {
-                // 🧹 返回登录场景时:
-                // 1. 先断开网络连接(服务器端清理会话)
-                // 2. 再重置GameClient状态(客户端清理数据)
-                // 这对于重新登录非常重要,避免旧账号数据干扰
-                
-                // 1️⃣ 发送断开连接命令
+                // 🧹 返回登录场景时发送断开连接命令
                 if let Err(e) = self.command_tx.send(crate::network::NetworkCommand::Disconnect) {
                     tracing::error!("❌ 发送断开连接命令失败: {}", e);
                 }
                 tracing::info!("🔌 已发送断开连接命令");
-                
-                // 2️⃣ 重置GameClient状态
-                if let Some(network_manager) = &self.network_manager {
-                    let nm = network_manager.blocking_read();
-                    let gc = nm.game_client();
-                    let mut client = gc.write();
-                    client.reset_to_login();
-                }
                 
                 Box::new(LoginScene::new())
             },
@@ -265,33 +152,14 @@ impl GameState {
                 // 这对于切换账号/角色时非常重要,避免旧角色数据残留
                 self.clear_game_objects();
                 
-                // 从网络客户端获取玩家初始位置和地图信息
-                let (player_location, map_file_name) = if let Some(network_manager) = &self.network_manager {
-                    let nm = network_manager.blocking_read();
-                    let gc = nm.game_client();
-                    let client = gc.read();
-                    let location = client.player.as_ref().map(|p| (p.location.x, p.location.y));
-                    let map_name = client.map_info.as_ref().map(|m| m.file_name.clone());
-                    (location, map_name)
-                } else {
-                    (None, None)
-                };
-                
-                if let Some((x, y)) = player_location {
-                    println!("✅ 从服务器获取玩家位置: ({}, {})", x, y);
-                } else {
-                    println!("⚠️ 未找到玩家位置，使用默认值(0, 0)");
-                }
-                
-                if let Some(ref map_name) = map_file_name {
-                    println!("✅ 从服务器获取地图名称: {}", map_name);
-                } else {
-                    println!("⚠️ 未找到地图信息，使用默认地图 '0'");
-                }
+                // 🆕 新架构：GameClient 不再存储状态
+                // 玩家位置、地图信息将通过 GameEvent (MapInformation, UserLocation) 获取
+                // GameEventSystem 会创建对应的 ECS 实体
+                println!("⏳ 等待服务器发送地图信息和玩家位置...");
                 
                 // GameScene 使用固定的 UI 设计分辨率 1024×768
                 // 不需要传递配置的窗口分辨率
-                Box::new(GameScene::new(ctx, &mut self.world, player_location, map_file_name)?)
+                Box::new(GameScene::new(ctx, &mut self.world, None, None)?)
             },
         };
         
@@ -368,13 +236,25 @@ impl GameState {
 
 impl EventHandler for GameState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
+        // 🆕 运行网络事件系统（处理 GameEvent 并更新 ECS 组件）
+        // 创建临时的 GameWorld 来访问 world
+        let mut game_world = crate::ecs::world::GameWorld {
+            world: std::mem::take(&mut self.world),
+            start_time: std::time::Instant::now(),
+        };
+        
+        self.network_event_system.update(&mut game_world);
+        
+        // 归还 world
+        self.world = game_world.world;
+        
         // 处理网络事件并分发到场景（可能触发场景切换）
         if let Some(next_scene) = self.process_network_events(ctx)? {
             self.switch_scene(ctx, next_scene)?;
         }
         
         // 更新当前场景
-        if let Some(next_scene) = self.current_scene.update(ctx, &mut self.world, &self.command_tx)? {
+        if let Some(next_scene) = self.current_scene.update(ctx, &mut self.world, &self.net_ctx)? {
             // 场景请求切换
             self.switch_scene(ctx, next_scene)?;
         }
@@ -399,7 +279,7 @@ impl EventHandler for GameState {
         x: f32,
         y: f32,
     ) -> GameResult {
-        self.current_scene.on_mouse_down(ctx, &mut self.world, button, x, y, &self.command_tx)
+        self.current_scene.on_mouse_down(ctx, &mut self.world, button, x, y, &self.net_ctx)
     }
     
     fn mouse_button_up_event(
@@ -409,7 +289,7 @@ impl EventHandler for GameState {
         x: f32,
         y: f32,
     ) -> GameResult {
-        self.current_scene.on_mouse_up(ctx, &mut self.world, button, x, y, &self.command_tx)
+        self.current_scene.on_mouse_up(ctx, &mut self.world, button, x, y, &self.net_ctx)
     }
     
     fn mouse_motion_event(
@@ -430,7 +310,7 @@ impl EventHandler for GameState {
         _repeated: bool,
     ) -> GameResult {
         // 处理场景切换
-        if let Some(new_scene_type) = self.current_scene.on_key_down(ctx, &mut self.world, input, &self.command_tx)? {
+        if let Some(new_scene_type) = self.current_scene.on_key_down(ctx, &mut self.world, input, &self.net_ctx)? {
             self.switch_scene(ctx, new_scene_type)?;
         }
         Ok(())
@@ -455,3 +335,10 @@ impl EventHandler for GameState {
         self.current_scene.on_resize(ctx, &mut self.world, logical_width, logical_height)
     }
 }
+
+// ============================================================================
+// NetEventListener 实现
+// ============================================================================
+// 注意：NetEventListener 实现已移除
+// 新架构中，NetworkEventSystem 直接处理 GameEvent 并更新 ECS 组件
+// ============================================================================

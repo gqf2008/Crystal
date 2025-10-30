@@ -2648,6 +2648,7 @@ dependencies = [
  "chrono",
  "config",
  "criterion",
+ "crossbeam-channel",
  "env_logger",
  "flate2",
  "futures-util",

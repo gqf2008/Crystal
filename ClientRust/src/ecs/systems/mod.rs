@@ -148,7 +148,7 @@ use ggez::GameResult;
 // Layer 1 (Input) - 向后兼容导出
 pub use update::input::{
     InputSystem as InputCollectingSystem,
-    NetworkRecvSystem,
+    NetworkSyncSystem,
     PlayerControlSystem,
     GameEventSystem,
 };
