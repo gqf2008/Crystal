@@ -124,6 +124,9 @@ use mir2_client::ecs::{
     Coordinates,
     MapUtils,
     MapLoader,
+    // 🆕 并行调度器
+    ParallelScheduler,
+    ExecutionMode,
 };
 
 // ============================================================================
@@ -137,6 +140,7 @@ struct MapViewerApp {
     config_entity: Entity,
     visible_area_entity: Entity,
     ui_font_name: String,  //  中文UI字体名称
+    scheduler: ParallelScheduler,  // 🆕 并行系统调度器
 }
 
 impl MapViewerApp {
@@ -295,6 +299,24 @@ impl MapViewerApp {
         //  加载中文字体
         let ui_font_name = Self::load_chinese_font(ctx)?;
 
+        // 🆕 创建并行调度器（默认使用并行模式）
+        let mut scheduler = ParallelScheduler::new(ExecutionMode::Parallel);
+        
+        // map_viewer 只需要部分系统，禁用不需要的
+        scheduler.disable_system("ClientNetworkSystem");  // 无网络
+        scheduler.disable_system("ReconciliationSystem");  // 无服务器同步
+        scheduler.disable_system("InterpolationSystem");   // 无服务器插值
+        scheduler.disable_system("MonsterAnimationStateSystem");  // 无怪物
+        scheduler.disable_system("NPCActionSystem");       // 无NPC
+        scheduler.disable_system("TileAnimationSystem");   // 暂时禁用地图动画
+        scheduler.disable_system("AnimationPlaybackSystem");  // 使用 PlayerAnimationSystem 代替
+        scheduler.disable_system("MouseEventSystem");      // 使用自定义鼠标处理
+        scheduler.disable_system("MonsterSystem");         // 无怪物
+        scheduler.disable_system("OcclusionSystem");       // 使用自定义遮挡检测
+        scheduler.disable_system("CameraSystem");          // 使用自定义相机系统
+        
+        println!("🚀 并行调度器已启动 (模式: {:?})", scheduler.execution_mode());
+
         Ok(Self {
             world,
             camera_entity,
@@ -302,6 +324,7 @@ impl MapViewerApp {
             config_entity,
             visible_area_entity,
             ui_font_name,
+            scheduler,  // 🆕 添加调度器
         })
     }
 
@@ -452,34 +475,33 @@ impl EventHandler for MapViewerApp {
         }
 
         // ============================================================================
-        // 标准 ECS 五层架构 - 系统调用顺序
+        // 🆕 使用并行系统调度器 - 替代手动系统调用
         // ============================================================================
         
         // 摄像机系统（提前更新，确保坐标转换正确）
         CameraSystem::update(&mut self.world);
 
-        // Layer 1: 输入收集系统
-        // 将鼠标/键盘输入转换为 PlayerInput 组件
-        InputCollectingSystem::update(&mut self.world, ctx);
-
-        // Layer 2: 逻辑层 - 客户端预测（寻路）
+        // 准备调度器参数
         let delta_time = ctx.time.delta().as_secs_f32();
+        let delta_ms = (delta_time * 1000.0) as u32;
+        let animation_count = {
+            let time = self.world.get::<&TimeTracker>(self.time_entity).unwrap();
+            time.animation_count
+        };
         
-        // 获取地图数据用于寻路
-        if let Some(map_data) = self.world.query_mut::<&MapData>()
-            .into_iter()
-            .next()
-            .map(|(_, m)| m as *const MapData) 
-        {
-            unsafe {
-                LocalPredictionSystem::update(&mut self.world, &*map_data, delta_time);
-            }
-        }
+        // 🚀 调用并行调度器（自动执行所有启用的系统）
+        // 启用的系统: InputCollectingSystem, LocalPredictionSystem, MovementSystemV2
+        // 禁用的系统: 网络、怪物、NPC、动画等（map_viewer 不需要）
+        self.scheduler.update(
+            ctx,
+            &mut self.world,
+            delta_time,
+            delta_ms,
+            animation_count,
+            None,  // 无网络发送器
+        )?;
         
-        // Layer 2: 移动系统（应用速度到位置）
-        MovementSystemV2::update(&mut self.world, delta_time);
-        
-        // Layer 3: 玩家动画系统（更新动画帧）
+        // 玩家动画系统（调度器中没有，手动调用）
         PlayerAnimationSystem::update(&mut self.world);
 
         Ok(())
@@ -609,8 +631,14 @@ impl EventHandler for MapViewerApp {
             0.0
         };
         
+        // 获取调度器模式
+        let scheduler_mode = match self.scheduler.execution_mode() {
+            ExecutionMode::Sequential => "串行",
+            ExecutionMode::Parallel => "并行",
+        };
+        
         let ui_text = format!(
-            " 性能: {:.1} FPS ({:.2}ms/帧) | 最大: {} FPS | LOD: {}\n\
+            " 性能: {:.1} FPS ({:.2}ms/帧) | 最大: {} FPS | LOD: {} | 调度器: {} 🚀\n\
               渲染: {} 瓦片 | GPU 使用率: ~65%\n\
               位置: ({:.0}, {:.0}) | 缩放: {:.2}x\n\
               图层: Back={} Middle={} Front={}\n\
@@ -620,11 +648,13 @@ impl EventHandler for MapViewerApp {
               调试: [G]网格 [O]障碍 [B]边框 [P]路径\n\
               显示: [1/2/3]图层 [A]动画 [L]LOD\n\
               边框: [F9]怪物 [F10]NPC [F11]特效\n\
+              调度器: [F12]切换串行/并行 [F5]性能报告\n\
               其他: [M]选择地图 [+/-]调整帧率 [ESC]退出",
             time.fps,
             frame_time,
             config.max_fps,
             if config.enable_lod { "开" } else { "关" },
+            scheduler_mode,
             visible_count,
             pos.x,
             pos.y,
@@ -875,6 +905,21 @@ impl EventHandler for MapViewerApp {
                     let mut config = self.world.get::<&mut RenderConfig>(self.config_entity).unwrap();
                     config.max_fps = (config.max_fps.saturating_sub(10)).max(30);
                     println!(" 最大FPS (- 键): {} 帧", config.max_fps);
+                }
+                KeyCode::F12 => {
+                    // 🆕 切换并行/串行执行模式
+                    let current_mode = self.scheduler.execution_mode();
+                    let new_mode = match current_mode {
+                        ExecutionMode::Sequential => ExecutionMode::Parallel,
+                        ExecutionMode::Parallel => ExecutionMode::Sequential,
+                    };
+                    self.scheduler.set_execution_mode(new_mode);
+                    println!("🔄 调度器模式切换 (F12): {:?} → {:?}", current_mode, new_mode);
+                }
+                KeyCode::F5 => {
+                    // 🆕 打印性能报告
+                    println!("\n========== 性能统计 ==========");
+                    self.scheduler.print_performance_report();
                 }
                 KeyCode::Escape => {
                     ctx.request_quit();

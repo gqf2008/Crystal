@@ -63,6 +63,7 @@ futures-util = "0.3" # For Stream trait (used in downloader)
 # ========== Ggez + hecs (ECS架构) ==========
 ggez = "=0.10.0-rc0" # Includes winit re-export (use ggez::winit::*)
 hecs = "0.10"        # 轻量级高性能 ECS 库
+rayon = "1.8"        # 并行执行 ECS 系统
 # egui = "0.27"  # 暂时禁用,egui_ggez 不兼容 ggez 0.10-rc0
 # egui_ggez = "0.3"  # 在 crates.io 上不存在或不兼容
 assets_manager = "0.13.3"
