@@ -350,8 +350,8 @@ impl ChangePasswordDialog {
     }
     
     /// 构建网络命令
-    pub fn build_network_command(&self) -> crate::network::NetworkCommand {
-        crate::network::NetworkCommand::ChangePassword {
+    pub fn build_network_command(&self) -> crate::network::handlers::GameEvent {
+        crate::network::handlers::GameEvent::ChangePasswordRequest {
             account_id: self.account_id.clone(),
             current_password: self.current_password.clone(),
             new_password: self.new_password.clone(),
@@ -435,7 +435,7 @@ impl DialogWithValidation for ChangePasswordDialog {
         self.get_validation_error()
     }
     
-    fn build_network_command(&self) -> crate::network::NetworkCommand {
+    fn build_network_command(&self) -> crate::network::handlers::GameEvent {
         self.build_network_command()
     }
 }

@@ -1,8 +1,8 @@
 //! 对话框管理器 - 减少重复代码
 
 use ggez::winit::keyboard::KeyCode;
-use tokio::sync::mpsc;
-use crate::network::NetworkCommand;
+use std::sync::Arc;
+use crate::network::{NetContext, handlers::GameEvent};
 
 /// 通用的对话框action trait
 pub trait DialogWithValidation {
@@ -22,7 +22,7 @@ pub trait DialogWithValidation {
     fn get_validation_error(&self) -> String;
     
     /// 构建网络命令
-    fn build_network_command(&self) -> NetworkCommand;
+    fn build_network_command(&self) -> GameEvent;
 }
 
 /// 键盘处理结果
@@ -42,7 +42,7 @@ pub fn handle_dialog_keycode<D>(
     dialog: &mut D,
     keycode: KeyCode,
     text: Option<&str>,
-    network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+    net_ctx: &Arc<NetContext>,
     error_context: &str,
 ) -> DialogKeyResult
 where
@@ -61,7 +61,7 @@ where
         KeyCode::Enter => {
             if dialog.can_submit() {
                 let cmd = dialog.build_network_command();
-                if let Err(e) = network_tx.send(cmd) {
+                if let Err(e) = net_ctx.send(cmd) {
                     tracing::error!("❌ {}: {}", error_context, e);
                     return DialogKeyResult::SendError(format!("网络错误，无法发送{}请求", error_context));
                 }

@@ -25,7 +25,7 @@ use hecs::World;
 use crate::ecs::components::{
     LocalPlayer, Position, Health, Monster, NetworkSync, CombatStats, NetworkObjectType
 };
-use crate::network::NetworkCommand;
+use crate::network::handlers::GameEvent as NetworkCommand;
 use tokio::sync::mpsc;
 use mir2_shared::enums::MirDirection;
 use ggez::GameResult;
@@ -265,9 +265,9 @@ impl CombatSystem {
         println!("⚔️ 攻击怪物: ID={}", target_id);
         
         // 发送攻击命令到服务器
-        let _ = network_tx.send(NetworkCommand::Attack {
+        let _ = network_tx.send(NetworkCommand::AttackRequest {
             direction,
-            spell: mir2_shared::enums::Spell::None,
+            spell: 0, // Spell::None
         });
         
         // 本地预计算伤害 (实际伤害由服务器计算)

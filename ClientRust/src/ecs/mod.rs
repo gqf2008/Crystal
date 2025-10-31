@@ -4,15 +4,13 @@
 // ============================================================================
 
 pub mod components;
-pub mod systems;
-pub mod system_scheduler;
-pub mod game_scene_scheduler;  // 🆕 GameScene专用调度器
-pub mod parallel_scheduler;    // 🆕 并行系统调度器
-pub mod map_viewer_scheduler;  // 🆕 MapViewer专用调度器（串行）
-pub mod world;
+pub mod resources;
 pub mod runtime;
-pub mod resources;  // 🆕 全局游戏资源 (Resources)
-// Map Loader 模块
+pub mod system_scheduler;
+pub mod systems;
+pub mod update_render_parallel_scheduler; // ✅ update/+render/ 架构的并行调度器
+pub mod world; // 🆕 全局游戏资源 (Resources)
+               // Map Loader 模块
 pub mod map_loader;
 
 // 坐标工具模块 - 统一地图/世界/屏幕坐标转换 (不是 ECS System)
@@ -28,15 +26,15 @@ pub mod scenes;
 // IME 输入处理
 pub mod ime_handler;
 
+use std::ops::{Deref, DerefMut};
+
 pub use components::*;
-pub use systems::*;
-pub use systems::update::state_update::{MapUpdateSystem, MapManager};  // 🆕 导出地图更新系统
-pub use systems::update::state_update::{EventCleanupSystem, EventCollectorSystem};  // 🆕 导出事件系统
+pub use resources::*; // 🆕 导出全局资源
 pub use system_scheduler::{SystemScheduler, SystemStats};
-pub use resources::*;  // 🆕 导出全局资源
-pub use game_scene_scheduler::GameSceneScheduler;  // 🆕 导出GameScene调度器
-pub use parallel_scheduler::{ParallelScheduler, ExecutionMode, ParallelSystemStats};  // 🆕 导出并行调度器
-pub use map_viewer_scheduler::MapViewerScheduler;  // 🆕 导出MapViewer调度器（串行）
+pub use systems::update::state_update::{EventCleanupSystem, EventCollectorSystem}; // 🆕 导出事件系统
+pub use systems::update::state_update::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
+pub use systems::*;
+pub use update_render_parallel_scheduler::{ExecutionMode, UpdateRenderParallelScheduler}; // ✅ 新并行调度器
 pub use world::GameWorld;
 
 // Map Loader 导出
@@ -44,16 +42,18 @@ pub use map_loader::MapLoader;
 
 // 坐标工具导出
 pub use coordinates::{
-    Coordinates, ViewportConfig, ObjectRenderer,
-    CELL_WIDTH, CELL_HEIGHT, MapUtils, CameraController
+    CameraController, Coordinates, MapUtils, ObjectRenderer, ViewportConfig, CELL_HEIGHT,
+    CELL_WIDTH,
 };
 
 // UI 导出
-pub use ui::{CharacterStatus, HealthBar, ManaBar, ExpBar, SkillBar, ChatWindow};
+pub use ui::{CharacterStatus, ChatWindow, ExpBar, HealthBar, ManaBar, SkillBar};
 
 // 游戏应用导出
 pub use game_app::GameState;
-pub use scenes::{Scene, SceneType, LoginScene, SelectScene, GameScene};
+pub use scenes::{GameScene, LoginScene, Scene, SceneType, SelectScene};
+
+use crate::ClientSettings;
 
 // ============================================================================
 // 架构说明

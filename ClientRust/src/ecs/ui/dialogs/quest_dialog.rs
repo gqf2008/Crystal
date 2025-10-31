@@ -5,7 +5,46 @@
 use ggez::{Context, GameResult};
 use ggez::graphics::{Canvas, Color, Rect, Text, DrawParam, PxScale};
 use ggez::mint::Point2;
-use crate::ecs::systems::{Quest, QuestState, QuestObjective};
+use mir2_shared::data::client_data::{ClientQuestInfo, ClientQuestProgress};
+use mir2_shared::enums::{QuestState, QuestType, QuestIcon};
+
+/// Quest显示数据 - 组合Info和Progress
+#[derive(Debug, Clone)]
+pub struct Quest {
+    pub info: ClientQuestInfo,
+    pub progress: Option<ClientQuestProgress>,
+}
+
+impl Quest {
+    pub fn new(info: ClientQuestInfo, progress: Option<ClientQuestProgress>) -> Self {
+        Self { info, progress }
+    }
+    
+    // 快捷访问属性
+    pub fn index(&self) -> i32 { self.info.index }
+    pub fn name(&self) -> &str { &self.info.name }
+    pub fn completed(&self) -> bool { 
+        self.progress.as_ref().map_or(false, |p| p.completed) 
+    }
+    pub fn taken(&self) -> bool { 
+        self.progress.as_ref().map_or(false, |p| p.taken) 
+    }
+    pub fn id(&self) -> Option<i32> { 
+        self.progress.as_ref().map(|p| p.id) 
+    }
+    pub fn objectives(&self) -> &Vec<String> { 
+        &self.info.task_description 
+    }
+    pub fn reward(&self) -> String {
+        format!("金币: {}, 经验: {}, 信誉: {}", 
+                self.info.reward_gold, 
+                self.info.reward_exp, 
+                self.info.reward_credit)
+    }
+    pub fn description(&self) -> String {
+        self.info.description.join("\n")
+    }
+}
 
 /// 任务对话框组件
 #[derive(Debug, Clone)]
@@ -160,8 +199,8 @@ impl QuestDialog {
                     } else if mouse_x >= self.x + 280.0 && mouse_x <= self.x + 380.0 {
                         if let Some(index) = self.selected_index {
                             if let Some(quest) = self.active_quests.get(index) {
-                                if quest.completed {  // ✅ 使用completed字段
-                                    return Some(QuestAction::SubmitQuest(quest.id));
+                                if quest.completed() {  // ✅ 使用completed方法
+                                    return Some(QuestAction::SubmitQuest(quest.id().unwrap_or(0)));
                                 }
                             }
                         }
@@ -319,15 +358,15 @@ impl QuestDialog {
             }
             
             // 绘制任务名称，根据状态显示颜色
-            let name_color = if quest.completed {
+            let name_color = if quest.completed() {
                 Color::from_rgb(100, 255, 100)  // 已完成 - 绿色
-            } else if quest.taken {
+            } else if quest.taken() {
                 Color::from_rgb(200, 200, 200)  // 进行中 - 灰白色
             } else {
                 Color::from_rgb(255, 255, 100)  // 可接取 - 黄色
             };
             
-            let name_text = Text::new(&quest.name);
+            let name_text = Text::new(quest.name());
             canvas.draw(
                 &name_text,
                 DrawParam::default()
@@ -337,9 +376,9 @@ impl QuestDialog {
             );
             
             // 绘制状态标签
-            let status = if quest.completed {
+            let status = if quest.completed() {
                 "可交付"
-            } else if quest.taken {
+            } else if quest.taken() {
                 "进行中"
             } else {
                 "可接取"
@@ -372,7 +411,7 @@ impl QuestDialog {
             canvas.draw(&line_mesh, DrawParam::default());
             
             // 绘制任务描述
-            let desc_text = Text::new(&quest.description);
+            let desc_text = Text::new(quest.description());
             canvas.draw(
                 &desc_text,
                 DrawParam::default()
@@ -383,13 +422,9 @@ impl QuestDialog {
             
             // 绘制目标进度
             let mut obj_y = details_y + 50.0;
-            for objective in &quest.objectives {
-                let progress_text = Text::new(objective.get_progress_text());
-                let color = if objective.is_complete() {
-                    Color::from_rgb(100, 255, 100)
-                } else {
-                    Color::from_rgb(200, 200, 200)
-                };
+            for objective in quest.objectives() {
+                let progress_text = Text::new(objective);
+                let color = Color::from_rgb(200, 200, 200);
                 
                 canvas.draw(
                     &progress_text,
@@ -413,12 +448,7 @@ impl QuestDialog {
                     .scale([14.0f32 / 40.0, 14.0f32 / 40.0]),
             );
             
-            let reward_info = format!(
-                "金币: {}  经验: {}  物品: {}个",
-                quest.reward.gold,
-                quest.reward.experience,
-                quest.reward.items.len()
-            );
+            let reward_info = quest.reward();
             let reward_text = Text::new(reward_info);
             canvas.draw(
                 &reward_text,
@@ -442,7 +472,7 @@ impl QuestDialog {
                 
                 // "交付任务" 按钮 (只有完成状态才显示)
                 if let Some(quest) = self.get_selected_quest() {
-                    if quest.completed {  // ✅ 使用completed字段
+                    if quest.completed() {  // ✅ 使用completed方法
                         self.draw_button(ctx, canvas, self.x + 280.0, button_y, 100.0, 35.0, "交付任务", Color::from_rgb(50, 150, 50))?;
                     }
                 }

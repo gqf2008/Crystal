@@ -8,13 +8,14 @@
 //! - PlayerControlSystem(110) - 从 GlobalEvents 读取并处理玩家控制
 //! - GameEventSystem(120) - 游戏事件分发
 
-pub mod network_sync_system_v2;  // 🆕 新版本
+// TODO: network_sync_system_v2 依赖旧的network::protocol，暂时禁用
+// pub mod network_sync_system_v2;  // 🆕 新版本
 pub mod input_system;
 pub mod player_control_system;
 pub mod game_event_system;
 
 
-pub use network_sync_system_v2::NetworkSyncSystem;  // 🆕 导出新版本
+// pub use network_sync_system_v2::NetworkSyncSystem;  // 🆕 导出新版本
 pub use input_system::InputSystem;
 pub use player_control_system::PlayerControlSystem;
 pub use game_event_system::{GameEventSystem, InternalEvent};

@@ -128,14 +128,7 @@ pub mod priority {
     pub const DEBUG_RENDER: u32 = 1100;
 }
 
-// 六阶段架构模块（已弃用，保留以备迁移）
-pub mod layer1_input;
-pub mod layer2_logic;
-pub mod layer3_presentation;
-pub mod layer4_rendering;
-pub mod layer5_ui;
-
-// 🆕 7层架构：update 和 render 模块
+// ✅ update/+render/ 架构（推荐）
 pub mod update;
 pub mod render;
 
@@ -148,7 +141,8 @@ use ggez::GameResult;
 // Layer 1 (Input) - 向后兼容导出
 pub use update::input::{
     InputSystem as InputCollectingSystem,
-    NetworkSyncSystem,
+    // TODO: NetworkSyncSystem已禁用（依赖旧network::protocol）
+    // NetworkSyncSystem,
     PlayerControlSystem,
     GameEventSystem,
 };
@@ -168,44 +162,27 @@ pub use update::combat_skill::{
     CombatResult,
 };
 
-// 保留旧的 ClientNetworkSystem（game_scene.rs 使用）
-pub use layer1_input::ClientNetworkSystem;
-// 向后兼容别名
-pub type NetworkSystem = layer1_input::ClientNetworkSystem;
-
-pub use layer1_input::{MockNetworkConfig, MockNetworkSystem};
-
-pub use layer2_logic::{
-    CombatSystem, InterpolationSystem, LocalPredictionSystem, MagicCastSystem, MonsterSystem,
-    MovementSystemV2, NPCSystem, ReconciliationSystem,
-};
-pub use layer3_presentation::{
-    AnimationStateSystem, MonsterAnimationStateSystem, NPCActionSystem, PlayerAnimationSystem,
-};
-pub use layer4_rendering::{
-    AnimationPlaybackSystem, CameraSystem, MovementInterpolationSystem, OcclusionSystem,
-    RenderSystem, TileAnimationSystem,
-};
-pub use layer5_ui::{
-    DialogManagerSystem,
-    ItemSystem,
-    KeyboardShortcutSystem,
-    MagicLearningSystem,
-    MouseEventSystem, // 🆕 输入事件处理系统
-    QuestSystem,
-    TradeSystem,
-    UIEventDispatcher, // 🆕 UI系统拆分后的子系统
-    UISystem,
+// Layer 4 (Physics & Movement) - 向后兼容导出
+pub use update::physics_movement::{
+    MovementSystem,
+    CollisionSystem,
 };
 
-// 重新导出其他系统的特殊类型（旧Layer 2系统）
-pub use layer2_logic::combat_system::{
-    CombatResult as OldCombatResult, 
-    DamageType as OldDamageType, 
-    SkillEffectSystem
+// Layer 5 (State Update) - 向后兼容导出  
+pub use update::state_update::{
+    AnimationSystem,
+    ParticleSystem,
+    HealthRegenSystem,
+    SoundSystem,
+    CameraSystem,
 };
-pub use layer5_ui::quest_system::{Quest, QuestObjective, QuestReward, QuestState};
-pub use layer5_ui::trade_system::{ShopData, ShopItem, ShopSystem, TradeData, TradeState};
+
+// Layer 6 (Network Sync) - 向后兼容导出
+pub use update::network_sync::{
+    ClientPredictionSystem,
+    NetworkSendSystem,
+    SyncSystem,
+};
 
 // ============================================================================
 // 系统 Trait 设计

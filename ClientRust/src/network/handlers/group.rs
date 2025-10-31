@@ -7,12 +7,6 @@ use std::io::Cursor;
 
 pub struct GroupHandler;
 
-impl GroupHandler {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 impl PacketHandler for GroupHandler {
     fn handle(&self, header: &PacketHeader, payload: &[u8]) -> Vec<GameEvent> {
         let mut events = Vec::new();
@@ -63,11 +57,5 @@ impl PacketHandler for GroupHandler {
         }
         
         events
-    }
-}
-
-impl Default for GroupHandler {
-    fn default() -> Self {
-        Self::new()
     }
 }

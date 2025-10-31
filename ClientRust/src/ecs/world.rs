@@ -131,6 +131,7 @@ impl GameWorld {
                 ai_type: 0,        // 无AI
                 spawn_x: position.x as f32,
                 spawn_y: position.y as f32,
+                direction: 0,      // 默认朝向
             },
             AIState {
                 current_action: crate::ecs::components::AIAction::Idle,
@@ -166,6 +167,7 @@ impl GameWorld {
                 colour: 0, // 默认白色(无染色)
                 action_timer: 0,
                 next_action_delay: rand::random::<u32>() % 5000 + 3000,
+                direction: 0, // 默认朝向
             },
             RenderOrder::new(RenderLayer::Object, position.y),
         ))

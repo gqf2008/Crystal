@@ -26,7 +26,7 @@ use crate::ecs::components::{
     SpellType, MagicList, Mana, LocalPlayer, TargetSelection, TargetType,
     Position, Monster, Player, NPC, NetworkSync, Animation
 };
-use crate::network::NetworkCommand;
+use crate::network::handlers::GameEvent as NetworkCommand;
 use tokio::sync::mpsc;
 use mir2_shared::enums::MirDirection;
 use ggez::GameResult;
@@ -203,7 +203,7 @@ impl SkillSystem {
         let (direction, target_id, location) = Self::get_target_info(world);
         
         // 5. 发送施法命令
-        let _ = network_tx.send(NetworkCommand::Magic {
+        let _ = network_tx.send(NetworkCommand::MagicRequest {
             spell: spell as u8,
             direction,
             target_id,

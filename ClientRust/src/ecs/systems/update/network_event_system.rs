@@ -279,17 +279,18 @@ impl NetworkEventSystem {
             .ok_or_else(|| anyhow::anyhow!("Local player not found"))?;
         
         // 检查是否已有 Mana 组件
-        match game_world.world.get::<&mut Mana>(entity) {
-            Ok(mut mana) => {
+        let has_mana = game_world.world.get::<&Mana>(entity).is_ok();
+        
+        if has_mana {
+            if let Ok(mut mana) = game_world.world.get::<&mut Mana>(entity) {
                 mana.current = current as i32;
                 mana.max = max as i32;
                 tracing::debug!("💙 MP: {}/{}", current, max);
             }
-            Err(_) => {
-                // 添加 Mana 组件
-                let _ = game_world.world.insert_one(entity, Mana::new(max as i32));
-                tracing::debug!("💙 MP component added: {}/{}", current, max);
-            }
+        } else {
+            // 添加 Mana 组件
+            let _ = game_world.world.insert_one(entity, Mana::new(max as i32));
+            tracing::debug!("💙 MP component added: {}/{}", current, max);
         }
         
         Ok(())

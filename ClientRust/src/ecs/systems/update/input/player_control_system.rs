@@ -37,7 +37,7 @@ use crate::ecs::components::{
     PlayerInput, LocalPlayer, Player, Position, Camera,
     PlayerAction, MoveMode, NPCData, MonsterData
 };
-use crate::network::NetworkCommand;
+use crate::network::handlers::GameEvent as NetworkCommand;
 
 /// 鼠标状态追踪（用于双击和长按检测）
 #[derive(Debug)]
@@ -283,7 +283,7 @@ impl PlayerControlSystem {
             
             if distance < CLICK_RADIUS {
                 tracing::info!("🏪 点击NPC: {} (ID: {})", npc.name, npc.id);
-                return Some(NetworkCommand::NPCRequest { 
+                return Some(NetworkCommand::NPCCallRequest { 
                     npc_object_id: npc.id 
                 });
             }

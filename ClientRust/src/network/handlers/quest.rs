@@ -5,12 +5,6 @@ use crate::network::handlers::{GameEvent, PacketHandler};
 
 pub struct QuestHandler;
 
-impl QuestHandler {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 impl PacketHandler for QuestHandler {
     fn handle(&self, header: &PacketHeader, _payload: &[u8]) -> Vec<GameEvent> {
         let mut events = Vec::new();
@@ -24,11 +18,5 @@ impl PacketHandler for QuestHandler {
         }
         
         events
-    }
-}
-
-impl Default for QuestHandler {
-    fn default() -> Self {
-        Self::new()
     }
 }

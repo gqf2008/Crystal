@@ -10,12 +10,6 @@ use std::io::Cursor;
 /// Character handler - processes character-related packets
 pub struct CharacterHandler;
 
-impl CharacterHandler {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 impl PacketHandler for CharacterHandler {
     fn handle(&self, header: &PacketHeader, payload: &[u8]) -> Vec<GameEvent> {
         let mut events = Vec::new();
@@ -24,9 +18,11 @@ impl PacketHandler for CharacterHandler {
         match header.opcode as u16 {
             // LoginSuccess
             x if x == ServerPacketIds::LoginSuccess as u16 => {
-                if let Ok(_packet) = server::LoginSuccess::read_body(&mut cursor) {
-                    events.push(GameEvent::LoginSuccess);
-                    tracing::info!("✅ Login successful");
+                if let Ok(packet) = server::LoginSuccess::read_body(&mut cursor) {
+                    tracing::info!("✅ Login successful, received {} characters", packet.characters.len());
+                    events.push(GameEvent::LoginSuccess { 
+                        characters: packet.characters 
+                    });
                 }
             }
             
@@ -96,19 +92,13 @@ impl PacketHandler for CharacterHandler {
     }
 }
 
-impl Default for CharacterHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     
     #[test]
     fn test_character_handler_creation() {
-        let handler = CharacterHandler::new();
+        let handler = CharacterHandler;
         // Test with a dummy packet
         let events = handler.handle(&PacketHeader::new(4, 0x0010), &[]);
         assert_eq!(events.len(), 1);

@@ -134,9 +134,9 @@ impl LoginDialog {
     }
     
     /// 构建登录的网络命令(如果凭证有效)
-    pub fn build_network_command(&self) -> Option<crate::network::NetworkCommand> {
+    pub fn build_network_command(&self) -> Option<crate::network::handlers::GameEvent> {
         self.get_credentials().map(|(username, password)| {
-            crate::network::NetworkCommand::Login { username, password }
+            crate::network::handlers::GameEvent::LoginRequest { username, password }
         })
     }
     

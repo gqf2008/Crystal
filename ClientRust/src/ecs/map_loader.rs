@@ -243,6 +243,7 @@ impl MapLoader {
                     ai_type,
                     spawn_x: x,
                     spawn_y: y,
+                    direction: 0,
                 },
                 AIState::default(),
                 Velocity { dx: 0.0, dy: 0.0 },  // 🆕 添加速度组件（MonsterAnimationStateSystem需要）

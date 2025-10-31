@@ -35,21 +35,12 @@ fn main() -> Result<()> {
     let settings = ClientRuntime::load_config(false)?;
     tracing::info!("配置加载完成: {:?}", settings.launcher.server_name);
 
-    // 3. 创建 Tokio runtime (使用 ClientRuntime 统一方法)
-    let runtime = ClientRuntime::create_tokio_runtime()?;
-    let _guard = runtime.enter();
-    tracing::info!("✅ Tokio runtime 创建成功");
-
     // 4. 初始化图像库系统 (使用 ClientRuntime 统一方法)
-    println!("🔧🔧🔧 [mir2x.rs] 即将调用 init_graphics_libraries");
     tracing::info!("🔧 [mir2x.rs] 即将调用 init_graphics_libraries");
-    
     if let Err(e) = ClientRuntime::init_graphics_libraries("Data") {
-        println!("❌❌❌ [mir2x.rs] 图像库初始化失败: {}", e);
         tracing::error!("图像库初始化失败: {}", e);
         tracing::warn!("将继续运行,但部分图像可能无法显示");
     } else {
-        println!("✅✅✅ [mir2x.rs] 图像库初始化成功返回");
         tracing::info!("✅ [mir2x.rs] 图像库初始化成功");
     }
 

@@ -9,9 +9,14 @@ use crate::ecs::ui::ButtonGroup;
 
 
 /// 角色选择主界面 UI 组件
-/// 负责管理角色列表显示、选中状态、预览动画等
+/// 
+/// ⚠️ **架构权衡**: 
+/// - 理想ECS: SelectScene应该直接从World查询角色数据来绘制
+/// - 当前实现: 缓存Vec<SelectInfo>以简化渲染逻辑
+/// - **World是权威数据源**, 这里只是从World加载的只读缓存
+/// - TODO: 重构成纯UI状态 + draw时传入角色数据
 pub struct CharacterSelect {
-    /// 角色列表数据
+    /// 🔄 从World加载的角色数据缓存(只读)
     characters: Vec<SelectInfo>,
     
     /// 当前选中的角色索引 (-1 表示未选中)
@@ -28,10 +33,12 @@ pub struct CharacterSelect {
 }
 
 impl CharacterSelect {
-    /// 创建新的角色选择组件
-    pub fn new(characters: Vec<SelectInfo>) -> Self {
+    /// 创建空的角色选择组件
+    /// 🆕 ECS架构: 初始为空,SelectScene.update()会从World加载数据
+    pub fn new() -> Self {
+        tracing::info!("🎭 创建CharacterSelect (将从World加载数据)");
         Self {
-            characters,
+            characters: Vec::new(),
             selected_index: -1,
             animation_frame: 0,
             animation_timer: 0.0,
@@ -86,6 +93,22 @@ impl CharacterSelect {
     /// 添加新角色到列表开头
     pub fn add_character(&mut self, character: SelectInfo) {
         self.characters.insert(0, character);
+    }
+    
+    /// 清空角色列表
+    pub fn clear_characters(&mut self) {
+        self.characters.clear();
+        self.selected_index = -1;
+    }
+    
+    /// 检查角色列表是否为空
+    pub fn is_empty(&self) -> bool {
+        self.characters.is_empty()
+    }
+    
+    /// 获取角色列表长度
+    pub fn len(&self) -> usize {
+        self.characters.len()
     }
     
     /// 根据角色索引删除角色

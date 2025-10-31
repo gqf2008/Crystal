@@ -5,8 +5,21 @@
 use ggez::{Context, GameResult};
 use ggez::graphics::{Canvas, Color, Rect, Text, DrawParam, PxScale};
 use ggez::mint::Point2;
-use crate::ecs::systems::TradeData;
 use mir2_shared::data::item::UserItem;
+
+/// 交易数据 - 包装SharedRust的trade packets
+#[derive(Debug, Clone)]
+pub struct TradeData {
+    pub partner_name: String,
+    pub my_items: Vec<Option<UserItem>>,
+    pub partner_items: Vec<Option<UserItem>>,
+    pub my_gold: u32,
+    pub partner_gold: u32,
+    pub my_locked: bool,
+    pub partner_locked: bool,
+    pub confirmed: bool,
+    pub partner_confirmed: bool,
+}
 
 /// 交易窗口UI组件
 #[derive(Debug, Clone)]
@@ -259,7 +272,7 @@ impl TradeDialog {
         canvas: &mut Canvas,
         start_x: f32,
         start_y: f32,
-        items: &[(u8, UserItem)],
+        items: &[Option<UserItem>],
         is_locked: bool,
     ) -> GameResult {
         let cell_size = 40.0;
@@ -296,17 +309,19 @@ impl TradeDialog {
                 canvas.draw(&border_mesh, DrawParam::default());
                 
                 // 绘制物品 (如果有)
-                let slot = (row * cols + col) as u8;
-                if let Some((_, item)) = items.iter().find(|(s, _)| *s == slot) {
-                    // TODO: 绘制物品图标
-                    let item_text = Text::new("物");
-                    canvas.draw(
-                        &item_text,
-                        DrawParam::default()
-                            .dest(Point2 { x: cell_x + 10.0, y: cell_y + 10.0 })
-                            .color(Color::from_rgb(255, 255, 100))
-                            .scale([16.0f32 / 40.0, 16.0f32 / 40.0]),
-                    );
+                let index = (row * cols + col) as usize;
+                if index < items.len() {
+                    if let Some(item) = &items[index] {
+                        // TODO: 绘制物品图标
+                        let item_text = Text::new("物");
+                        canvas.draw(
+                            &item_text,
+                            DrawParam::default()
+                                .dest(Point2 { x: cell_x + 10.0, y: cell_y + 10.0 })
+                                .color(Color::from_rgb(255, 255, 100))
+                                .scale([16.0f32 / 40.0, 16.0f32 / 40.0]),
+                        );
+                    }
                 }
             }
         }
@@ -320,7 +335,7 @@ impl TradeDialog {
         canvas: &mut Canvas,
         start_x: f32,
         start_y: f32,
-        items: &[UserItem],
+        items: &[Option<UserItem>],
     ) -> GameResult {
         let cell_size = 40.0;
         let cols = 5;
@@ -351,15 +366,17 @@ impl TradeDialog {
                 // 绘制对方的物品
                 let index = (row * cols + col) as usize;
                 if index < items.len() {
-                    // TODO: 绘制物品图标
-                    let item_text = Text::new("物");
-                    canvas.draw(
-                        &item_text,
-                        DrawParam::default()
-                            .dest(Point2 { x: cell_x + 10.0, y: cell_y + 10.0 })
-                            .color(Color::from_rgb(200, 200, 255))
-                            .scale([16.0f32 / 40.0, 16.0f32 / 40.0]),
-                    );
+                    if let Some(item) = &items[index] {
+                        // TODO: 绘制物品图标
+                        let item_text = Text::new("物");
+                        canvas.draw(
+                            &item_text,
+                            DrawParam::default()
+                                .dest(Point2 { x: cell_x + 10.0, y: cell_y + 10.0 })
+                                .color(Color::from_rgb(200, 200, 255))
+                                .scale([16.0f32 / 40.0, 16.0f32 / 40.0]),
+                        );
+                    }
                 }
             }
         }

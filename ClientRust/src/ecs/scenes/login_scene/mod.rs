@@ -20,17 +20,23 @@ use ggez::graphics::Canvas;
 use ggez::input::keyboard::KeyInput;
 use ggez::winit::event::MouseButton;
 use ggez::winit::keyboard::{KeyCode, PhysicalKey};
-use tokio::sync::mpsc;
+use std::sync::Arc;
 use hecs::World;
 
 use super::{Scene, SceneType};
-use crate::network::NetworkCommand;
+use crate::network::{NetContext, handlers::GameEvent};
 use crate::graphics::{LibraryName, draw_sprite_at};
 
 /// 登录场景
 pub struct LoginScene {
     connecting: bool,
     login_enabled: bool,
+    version_verified: bool, // 🆕 ClientVersion是否已被服务器验证
+    should_switch_scene: bool, // 🆕 登录成功后请求切换场景
+    /// 如果用户在 ClientVersion 未验证前尝试登录,把命令缓存起来,验证通过后自动发送
+    pending_login: Option<crate::network::handlers::GameEvent>,
+    /// 🆕 登录节流: 上次提交登录的时间
+    last_login_attempt: Option<std::time::Instant>,
     background_frame: usize,
     animation_timer: f32,
     animation_paused: bool,
@@ -50,6 +56,10 @@ impl LoginScene {
         Self {
             connecting: false,
             login_enabled: true,
+            version_verified: false, // 🆕 初始未验证
+            should_switch_scene: false, // 🆕 初始不切换场景
+            pending_login: None,
+            last_login_attempt: None, // 🆕 初始未尝试登录
             background_frame: 0,
             animation_timer: 0.0,
             animation_paused: true,
@@ -62,7 +72,6 @@ impl LoginScene {
     }
     
     pub fn show_message(&mut self, message: &str) {
-        tracing::info!("📬 显示消息框: {}", message);
         self.message_box = Some(MessageBox::new(message.to_string(), DESIGN_WIDTH, DESIGN_HEIGHT));
     }
     
@@ -92,7 +101,31 @@ impl LoginScene {
         (design_x, design_y)
     }
     
-    fn submit_login(&mut self, network_tx: &mpsc::UnboundedSender<NetworkCommand>) {
+    fn submit_login(&mut self, net_ctx: &Arc<NetContext>) {
+        // 🔒 节流: 防止短时间内重复提交 (1秒冷却)
+        if let Some(last_attempt) = self.last_login_attempt {
+            if last_attempt.elapsed() < std::time::Duration::from_secs(1) {
+                tracing::warn!("⚠️ 登录请求过于频繁,请稍后再试 (需等待1秒)");
+                self.show_message("请不要频繁点击，稍后再试");
+                return;
+            }
+        }
+        
+        // 🔒 检查版本是否已验证
+        if !self.version_verified {
+            tracing::warn!("⚠️ ClientVersion尚未验证,将缓存登录请求并在验证通过后自动发送");
+            // 如果有可用的登录命令,保存以便在版本验证通过后自动发送
+            if let Some(cmd) = self.login_dialog.build_network_command() {
+                self.pending_login = Some(cmd);
+                self.show_message("正在等待版本校验，登录将在验证通过后自动发送");
+                self.last_login_attempt = Some(std::time::Instant::now()); // 🆕 记录尝试时间
+            } else {
+                // 没有有效凭证,提示用户输入
+                self.show_message("请输入账号和密码");
+            }
+            return;
+        }
+        
         // 🔒 防止重复登录
         if !self.login_enabled {
             tracing::warn!("⚠️ 登录已在进行中,忽略重复请求");
@@ -100,7 +133,7 @@ impl LoginScene {
         }
         
         if let Some(cmd) = self.login_dialog.build_network_command() {
-            if let Err(e) = network_tx.send(cmd) {
+            if let Err(e) = net_ctx.send(cmd) {
                 tracing::error!("❌ 发送登录命令失败: {}", e);
                 self.show_message("网络错误，无法发送登录请求");
                 return;
@@ -108,6 +141,7 @@ impl LoginScene {
             tracing::info!("✅ 登录命令已发送,禁用重复提交");
             self.connecting = true;
             self.login_enabled = false;
+            self.last_login_attempt = Some(std::time::Instant::now()); // 🆕 记录登录时间
         } else {
             self.show_message("请输入账号和密码");
         }
@@ -119,14 +153,27 @@ impl Scene for LoginScene {
         self
     }
     
-    fn update(&mut self, ctx: &mut Context, _world: &mut World, _network_tx: &mpsc::UnboundedSender<NetworkCommand>) -> GameResult<Option<SceneType>> {
+    fn update(&mut self, ctx: &mut Context, world: &mut World, net_ctx: &Arc<NetContext>) -> GameResult<Option<SceneType>> {
+        // 🔄 处理网络事件
+        while let Some(event) = net_ctx.try_recv() {
+            self.handle_network_event(&event, net_ctx, world);
+        }
+        
         let dt = ctx.time.delta().as_secs_f32();
         if !self.animation_paused {
             self.animation_timer += dt;
             if self.animation_timer >= 0.1 {
-                // C#原版: AnimationCount = 19, 即0-18帧
-                self.background_frame = (self.background_frame + 1) % 19;
+                self.background_frame += 1;
                 self.animation_timer = 0.0;
+                
+                // 🆕 动画播放完19帧(0-18)后切换场景
+                if self.background_frame >= 19 {
+                    self.background_frame = 0; // 重置到第0帧
+                    if self.should_switch_scene {
+                        tracing::info!("🎬 登录成功动画播放完成,切换到角色选择场景");
+                        return Ok(Some(SceneType::Select));
+                    }
+                }
             }
         }
         self.login_dialog.update(dt);
@@ -145,30 +192,17 @@ impl Scene for LoginScene {
     }
     
     fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, _world: &World) -> GameResult {
-        // 动态获取当前窗口大小
-        let window_size = ctx.gfx.drawable_size();
-        let window_width = window_size.0;
-        let window_height = window_size.1;
-        
-        // 强制保持4:3比例
-        let aspect_ratio = 4.0 / 3.0;
-        let current_ratio = window_width / window_height;
-        
-        let (viewport_width, viewport_height) = if current_ratio > aspect_ratio {
-            // 窗口太宽，限制宽度
-            (window_height * aspect_ratio, window_height)
-        } else {
-            // 窗口太高，限制高度
-            (window_width, window_width / aspect_ratio)
-        };
-        
-        // 设置画布使用设计分辨率坐标系（1024x768）
-        // ggez会自动缩放到viewport大小
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(0.0, 0.0, DESIGN_WIDTH, DESIGN_HEIGHT));
         
         // 绘制背景动画(ChrSel库, 1024x768原始尺寸，直接铺满设计坐标系)
         let bg_index = self.background_frame as i32;
         let _ = draw_sprite_at(ctx, canvas, &LibraryName::ChrSel, bg_index, 0.0, 0.0);
+        
+        // 🆕 登录成功后播放动画时,不再绘制UI界面(只保留背景动画)
+        if !self.animation_paused {
+            // 动画播放中,跳过所有UI绘制
+            return Ok(());
+        }
         
         // 更新对话框位置(在设计坐标系中居中)
         let dialog_w = 328.0;
@@ -248,7 +282,7 @@ impl Scene for LoginScene {
         Ok(())
     }
     
-    fn on_mouse_down(&mut self, ctx: &mut Context, _world: &mut World, _button: MouseButton, x: f32, y: f32, network_tx: &mpsc::UnboundedSender<NetworkCommand>) -> GameResult {
+    fn on_mouse_down(&mut self, ctx: &mut Context, _world: &mut World, _button: MouseButton, x: f32, y: f32, net_ctx: &Arc<NetContext>) -> GameResult {
         // 将窗口坐标转换为设计坐标系
         let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
         
@@ -302,7 +336,7 @@ impl Scene for LoginScene {
                 ChangePasswordAction::Submit => {
                     // 构建并发送网络命令
                     let cmd = dialog.build_network_command();
-                    if let Err(e) = network_tx.send(cmd) {
+                    if let Err(e) = net_ctx.send(cmd) {
                         tracing::error!("❌ 发送修改密码命令失败: {}", e);
                         self.show_message("网络错误，无法发送修改密码请求");
                     }
@@ -325,7 +359,7 @@ impl Scene for LoginScene {
                 NewAccountAction::Submit => {
                     // 构建并发送网络命令
                     let cmd = dialog.build_network_command();
-                    if let Err(e) = network_tx.send(cmd) {
+                    if let Err(e) = net_ctx.send(cmd) {
                         tracing::error!("❌ 发送注册命令失败: {}", e);
                         self.show_message("网络错误，无法发送注册请求");
                     }
@@ -344,7 +378,7 @@ impl Scene for LoginScene {
         // 处理登录对话框
         let action = self.login_dialog.on_mouse_down(design_x, design_y);
         match action {
-            DialogAction::Login => self.submit_login(network_tx),
+            DialogAction::Login => self.submit_login(net_ctx),
             DialogAction::OpenNewAccount => {
                 tracing::info!("🆕 打开新建账号对话框");
                 let mut dialog = NewAccountDialog::new(DESIGN_WIDTH, DESIGN_HEIGHT);
@@ -379,7 +413,7 @@ impl Scene for LoginScene {
         Ok(())
     }
     
-    fn on_key_down(&mut self, _ctx: &mut Context, _world: &mut World, input: KeyInput, network_tx: &mpsc::UnboundedSender<NetworkCommand>) -> GameResult<Option<SceneType>> {
+    fn on_key_down(&mut self, _ctx: &mut Context, _world: &mut World, input: KeyInput, net_ctx: &Arc<NetContext>) -> GameResult<Option<SceneType>> {
         // 虚拟键盘优先级最高(处理ESC/Backspace/Enter/Space)
         if let Some(keyboard) = &mut self.virtual_keyboard {
             if let ggez::winit::event::KeyEvent {
@@ -446,7 +480,7 @@ impl Scene for LoginScene {
                     dialog,
                     keycode,
                     text.as_deref(),
-                    network_tx,
+                    net_ctx,
                     "发送修改密码命令失败",
                 );
                 match result {
@@ -472,7 +506,7 @@ impl Scene for LoginScene {
                     dialog,
                     keycode,
                     text.as_deref(),
-                    network_tx,
+                    net_ctx,
                     "发送注册命令失败",
                 );
                 match result {
@@ -498,7 +532,7 @@ impl Scene for LoginScene {
                 KeyCode::Enter => {
                     let action = self.login_dialog.on_enter();
                     if action == DialogAction::Login {
-                        self.submit_login(network_tx);
+                        self.submit_login(net_ctx);
                     }
                 }
                 KeyCode::Backspace => self.login_dialog.on_backspace(),

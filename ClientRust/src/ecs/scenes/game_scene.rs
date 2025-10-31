@@ -28,23 +28,17 @@ use ggez::winit::event::MouseButton;
 use ggez::input::keyboard::KeyInput;
 use hecs::{World, Entity};
 use std::time::Instant;
-use tokio::sync::mpsc;
+use std::sync::Arc;
 
 use super::{Scene, SceneType};
-use crate::network::{NetworkCommand, game_client::GameEvent};
+use crate::network::{NetContext, handlers::GameEvent};
 use crate::ecs::{
-    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerData, TargetSelection, MirClass, MirGender, Equipment, QuestLog, TradeWindow},
+    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerData, TargetSelection, MirClass, MirGender, Equipment},
     systems::{
-        // 保留的旧系统（仍在使用）
-        CameraSystem, MonsterSystem, UISystem, OcclusionSystem,
-        // 新系统（五层架构 - 完整版）
-        InputCollectingSystem, ClientNetworkSystem,  // Layer 1: 输入与网络
-        LocalPredictionSystem, MovementSystemV2, ReconciliationSystem, InterpolationSystem,  // Layer 2: 核心逻辑
-        AnimationStateSystem, NPCActionSystem, MonsterAnimationStateSystem,  // Layer 3: 表现决策
-        RenderSystem, AnimationPlaybackSystem, TileAnimationSystem, MovementInterpolationSystem,  // Layer 4: 渲染
-        KeyboardShortcutSystem, MouseEventSystem,  // Layer 5: 输入事件处理（替代 InputSystem）
+        // TODO: 很多系统已删除，GameScene需要重构以使用UpdateRenderParallelScheduler
+        CameraSystem,
     },
-    GameSceneScheduler,  // 🆕 GameScene系统调度器
+    UpdateRenderParallelScheduler, ExecutionMode,  // 🆕 update/render调度器
     Coordinates, MapUtils,  // 坐标工具
     map_loader::MapLoader,
     ui::{ChatType, MainDialog, InventoryDialog, CharacterDialog, SkillBarDialog, ChatDialog, MagicLearningDialog, QuestDialog, TradeDialog, SkillsDialog, OptionsDialog, HotkeyHelpPanel},
@@ -85,11 +79,11 @@ pub struct GameScene {
     #[allow(dead_code)]
     trade_dialog_entity: Entity,
     
-    /// 网络同步系统
-    network_system: ClientNetworkSystem,
+    /// 网络同步系统 (TODO: 已删除，需重构)
+    // network_system: ClientNetworkSystem,
     
     ///  系统调度器 - 统一管理所有ECS系统
-    system_scheduler: GameSceneScheduler,
+    system_scheduler: UpdateRenderParallelScheduler,
     
     /// UI字体名称 (保留用于后续字体切换功能)
     #[allow(dead_code)]
@@ -258,14 +252,18 @@ impl GameScene {
                 name: "勇士".to_string(),
                 class: MirClass::Warrior,
                 gender: MirGender::Female,  // 🚺 保持一致
+                level: 1,
                 exp: 750,
+                max_experience: 1000,
                 gold: 100,
+                credit: 0,
             },
             MagicList::new(),  // 已学技能列表
             LearnableMagicList::new(),  // 可学技能列表
             TargetSelection::new(),  // 目标选择
-            QuestLog::new(),  // ✅ 任务日志（用于任务系统）
-            TradeWindow::new(),  // ✅ 交易窗口（用于玩家交易）
+            // TODO: QuestLog和TradeWindow已从components删除
+            // QuestLog::new(),  // ✅ 任务日志（用于任务系统）
+            // TradeWindow::new(),  // ✅ 交易窗口（用于玩家交易）
             crate::ecs::components::NetworkSync {  // ✅ 网络同步标记（立即允许渲染）
                 object_id: 0,
                 last_update: std::time::Instant::now(),
@@ -388,18 +386,19 @@ impl GameScene {
         ));
         
         // 添加欢迎消息
-        UISystem::add_chat_message(
-            world,
-            chat_dialog_entity,
-            "欢迎来到传奇世界！".to_string(),
-            ChatType::System,
-        );
-        UISystem::add_chat_message(
-            world,
-            chat_dialog_entity,
-            "游戏测试中...".to_string(),
-            ChatType::Normal,
-        );
+        // TODO: UISystem已删除，需要重新实现聊天消息功能
+        // UISystem::add_chat_message(
+        //     world,
+        //     chat_dialog_entity,
+        //     "欢迎来到传奇世界！".to_string(),
+        //     ChatType::System,
+        // );
+        // UISystem::add_chat_message(
+        //     world,
+        //     chat_dialog_entity,
+        //     "游戏测试中...".to_string(),
+        //     ChatType::Normal,
+        // );
         
         println!("✅ 游戏场景初始化完成！");
         
@@ -415,8 +414,9 @@ impl GameScene {
             config_entity,
             visible_area_entity,
             debug_counters_entity,
-            network_system: ClientNetworkSystem::new(),
-            system_scheduler: GameSceneScheduler::new(),  // 🎯 初始化GameScene调度器
+            // TODO: network_system已删除
+            // network_system: ClientNetworkSystem::new(),
+            system_scheduler: UpdateRenderParallelScheduler::new(ExecutionMode::Sequential),
             ui_font_name,  // 保留用于后续字体切换功能
             main_dialog_entity,
             inventory_dialog_entity,
@@ -430,8 +430,9 @@ impl GameScene {
     }
     
     /// 处理网络事件（由GameApp调用）
-    pub fn handle_network_event(&mut self, world: &mut World, event: &GameEvent) {
-        self.network_system.process_event(world, event);
+    pub fn handle_network_event(&mut self, _world: &mut World, _event: &GameEvent) {
+        // TODO: network_system已删除，需要重新实现网络事件处理
+        // self.network_system.process_event(world, event);
     }
     
     // ========================================================================
@@ -489,7 +490,7 @@ impl Scene for GameScene {
         &mut self, 
         _ctx: &mut Context, 
         world: &mut World,
-        network_tx: &mpsc::UnboundedSender<NetworkCommand>
+        _net_ctx: &Arc<NetContext>
     ) -> GameResult<Option<SceneType>> {
         // 帧率限制
         let config = world.get::<&RenderConfig>(self.config_entity).unwrap();
@@ -570,24 +571,19 @@ impl Scene for GameScene {
         }
         
         // 更新相机系统
-        CameraSystem::update(world);
+        // TODO: CameraSystem需要实现System trait才能工作
+        // CameraSystem::update(world);
         
         // ========================================
-        // � 使用GameSceneScheduler统一管理所有系统 ✅
+        // 使用UpdateRenderParallelScheduler执行update层系统
         // ========================================
         
         // 计算 delta_time（秒）
         let delta_time = delta_ms as f32 / 1000.0;
         
-        // 🎯 一行代码搞定所有系统更新！
-        self.system_scheduler.update(
-            _ctx,
-            world,
-            delta_time,
-            delta_ms,
-            animation_count,
-            Some(network_tx),
-        )?;
+        // TODO: UpdateRenderParallelScheduler.update() 需要传入world和delta
+        // 旧系统需要重构才能正常工作
+        self.system_scheduler.update(world, delta_time)?;
         
         // 更新聊天对话框（用于光标闪烁）
         if let Some(chat_dialog) = self.get_chat_dialog_mut(world) {
@@ -676,16 +672,17 @@ impl Scene for GameScene {
         ));
         
         // 🎯 使用统一的渲染入口
-        RenderSystem::draw_game_world(
-            ctx,
-            canvas,
-            world,
-            &pos,
-            &camera,
-            &config,
-            self.visible_area_entity,
-            self.debug_counters_entity,
-        )?;
+        // TODO: RenderSystem已删除，需要使用UpdateRenderParallelScheduler的render方法
+        // RenderSystem::draw_game_world(
+        //     ctx,
+        //     canvas,
+        //     world,
+        //     &pos,
+        //     &camera,
+        //     &config,
+        //     self.visible_area_entity,
+        //     self.debug_counters_entity,
+        // )?;
         
         // ==================== UI 层: 使用设计坐标 1024×768 ====================
         // 设置画布使用设计分辨率坐标系,ggez 会自动缩放
@@ -699,7 +696,8 @@ impl Scene for GameScene {
         // 🎯 使用 RenderSystem::draw_ui 统一渲染所有 UI（符合ECS设计原则）
         // 分层渲染: 调试UI -> 游戏UI -> 覆盖层UI
         // 优化说明: 移除所有参数,直接从ctx和world查询所需数据
-        RenderSystem::draw_ui(ctx, canvas, world)?;
+        // TODO: RenderSystem已删除，需要重新实现UI渲染
+        // RenderSystem::draw_ui(ctx, canvas, world)?;
         
         Ok(())
     }
@@ -709,7 +707,7 @@ impl Scene for GameScene {
         _ctx: &mut Context,
         world: &mut World,
         input: KeyInput,
-        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        _net_ctx: &Arc<NetContext>,
     ) -> GameResult<Option<SceneType>> {
         use ggez::winit::keyboard::KeyCode;
         
@@ -735,102 +733,13 @@ impl Scene for GameScene {
             }
             
             // ✅ 键盘快捷键处理（UI切换、物品拾取、技能释放等）
-            KeyboardShortcutSystem::process_keyboard(world, keycode, network_tx);
+            // TODO: KeyboardShortcutSystem已删除
+            // KeyboardShortcutSystem::process_keyboard(world, keycode, network_tx);
         }
         
         Ok(None)
     }
     
-    fn on_mouse_down(
-        &mut self,
-        ctx: &mut Context,
-        world: &mut World,
-        button: MouseButton,
-        x: f32,
-        y: f32,
-        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
-    ) -> GameResult {
-        // ✅ 使用 CoordinateSystem 转换为 UI 设计坐标 (1024×768)
-        let (ui_x, ui_y) = Coordinates::window_to_ui_coords(ctx, x, y);
-        
-        // ✅ 鼠标点击事件处理（UI层优先，然后游戏世界）
-        MouseEventSystem::process_mouse_click(world, button, ui_x, ui_y, x, y, network_tx);
-        
-        Ok(())
-    }
-    
-    fn on_mouse_up(
-        &mut self,
-        _ctx: &mut Context,
-        world: &mut World,
-        button: MouseButton,
-        x: f32,
-        y: f32,
-        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
-    ) -> GameResult {
-        // ✅ 鼠标释放事件处理
-        MouseEventSystem::process_mouse_up(world, button);
-        
-        Ok(())
-    }
-    
-    fn on_mouse_move(
-        &mut self,
-        ctx: &mut Context,
-        world: &mut World,
-        x: f32,
-        y: f32,
-    ) -> GameResult {
-        // ✅ 使用 CoordinateSystem 转换为 UI 设计坐标 (1024×768)
-        let (ui_x, ui_y) = Coordinates::window_to_ui_coords(ctx, x, y);
-        
-        // ✅ 鼠标移动事件处理（更新鼠标坐标）
-        MouseEventSystem::process_mouse_move(world, x, y);
-        
-        Ok(())
-    }
-    
-    fn on_mouse_wheel(
-        &mut self,
-        _ctx: &mut Context,
-        world: &mut World,
-        x: f32,
-        y: f32,
-    ) -> GameResult {
-        // ✅ 鼠标滚轮事件处理（缩放）
-        MouseEventSystem::process_mouse_wheel(world, y);
-        
-        Ok(())
-    }
-    
-    // fn on_resize(
-    //     &mut self,
-    //     _ctx: &mut Context,
-    //     world: &mut World,
-    //     width: f32,
-    //     height: f32,
-    // ) -> GameResult {
-    //     // 忽略无效尺寸(避免启动时的闪烁)
-    //     if width <= 1.0 || height <= 1.0 {
-    //         println!("⚠️ 忽略无效窗口尺寸: {}x{}", width, height);
-    //         return Ok(());
-    //     }
-        
-    //     // 更新相机尺寸
-    //     if let Ok(mut camera) = world.get::<&mut Camera>(self.camera_entity) {
-    //         camera.screen_width = width;
-    //         camera.screen_height = height;
-    //     }
-        
-    //     // 更新主对话框尺寸
-    //     if let Some(main_dialog) = self.get_main_dialog_mut(world) {
-    //         main_dialog.dialog.resize(width, height);
-    //     }
-        
-    //     println!("📐 窗口调整: {}x{}", width, height);
-        
-    //     Ok(())
-    // }
     
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self

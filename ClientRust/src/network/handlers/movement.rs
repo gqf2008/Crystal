@@ -7,12 +7,6 @@ use std::io::Cursor;
 
 pub struct MovementHandler;
 
-impl MovementHandler {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 impl PacketHandler for MovementHandler {
     fn handle(&self, header: &PacketHeader, payload: &[u8]) -> Vec<GameEvent> {
         let mut events = Vec::new();
@@ -37,11 +31,5 @@ impl PacketHandler for MovementHandler {
         }
         
         events
-    }
-}
-
-impl Default for MovementHandler {
-    fn default() -> Self {
-        Self::new()
     }
 }

@@ -177,7 +177,7 @@ impl ActiveQuests {
     /// 添加任务
     pub fn add_quest(&mut self, quest: ClientQuestProgress) {
         // 检查是否已存在
-        if let Some(existing) = self.quests.iter_mut().find(|q| q.index == quest.index) {
+        if let Some(existing) = self.quests.iter_mut().find(|q| q.id == quest.id) {
             *existing = quest; // 更新现有任务
         } else {
             self.quests.push(quest); // 添加新任务
@@ -185,13 +185,13 @@ impl ActiveQuests {
     }
     
     /// 移除任务
-    pub fn remove_quest(&mut self, index: i32) {
-        self.quests.retain(|q| q.index != index);
+    pub fn remove_quest(&mut self, id: i32) {
+        self.quests.retain(|q| q.id != id);
     }
     
     /// 查找任务
-    pub fn find_quest(&self, index: i32) -> Option<&ClientQuestProgress> {
-        self.quests.iter().find(|q| q.index == index)
+    pub fn find_quest(&self, id: i32) -> Option<&ClientQuestProgress> {
+        self.quests.iter().find(|q| q.id == id)
     }
     
     /// 获取任务数量

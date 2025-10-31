@@ -51,10 +51,12 @@ pub enum GameEvent {
     Connected,
     Disconnected { reason: String },
     KeepAliveReceived { time: i64 },
+    ClientVersionResponse { result: u8 }, // 0: Wrong Version, 1: Correct Version
     
     // 客户端 → 服务器
     DisconnectRequest,
     KeepAliveSend { time: i64 },
+    ClientVersionSend { version_hash: Vec<u8> },
     
     // ========================================================================
     // 认证事件（Authentication Events）
@@ -78,7 +80,7 @@ pub enum GameEvent {
     },
     
     // 服务器 → 客户端
-    LoginSuccess,
+    LoginSuccess { characters: Vec<mir2_shared::SelectInfo> },
     LoginFailed { reason: String },
     NewAccountSuccess,
     NewAccountFailed { reason: String },

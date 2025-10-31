@@ -6,12 +6,6 @@ use crate::network::handlers::{GameEvent, PacketHandler};
 
 pub struct TradeHandler;
 
-impl TradeHandler {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 impl PacketHandler for TradeHandler {
     fn handle(&self, header: &PacketHeader, _payload: &[u8]) -> Vec<GameEvent> {
         let mut events = Vec::new();
@@ -32,11 +26,5 @@ impl PacketHandler for TradeHandler {
         }
         
         events
-    }
-}
-
-impl Default for TradeHandler {
-    fn default() -> Self {
-        Self::new()
     }
 }

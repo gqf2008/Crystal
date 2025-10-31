@@ -10,12 +10,6 @@ use std::io::Cursor;
 /// Connection handler - processes connection-related packets
 pub struct ConnectionHandler;
 
-impl ConnectionHandler {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 impl PacketHandler for ConnectionHandler {
     fn handle(&self, header: &PacketHeader, payload: &[u8]) -> Vec<GameEvent> {
         let mut events = Vec::new();
@@ -27,6 +21,17 @@ impl PacketHandler for ConnectionHandler {
                 if let Ok(_packet) = server::Connected::read_body(&mut cursor) {
                     events.push(GameEvent::Connected);
                     tracing::info!("✅ Connected to server");
+                }
+            }
+            
+            x if x == ServerPacketIds::ClientVersion as u16 => {
+                if let Ok(packet) = server::ClientVersion::read_body(&mut cursor) {
+                    events.push(GameEvent::ClientVersionResponse { result: packet.result });
+                    if packet.result == 1 {
+                        tracing::info!("✅ ClientVersion accepted by server");
+                    } else {
+                        tracing::error!("❌ ClientVersion rejected by server (wrong version)");
+                    }
                 }
             }
             
@@ -58,19 +63,13 @@ impl PacketHandler for ConnectionHandler {
     }
 }
 
-impl Default for ConnectionHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     
     #[test]
     fn test_connection_handler_creation() {
-        let handler = ConnectionHandler::new();
+        let handler = ConnectionHandler;
         assert!(handler.handle(&PacketHeader::new(4, 0x0001), &[]).len() > 0);
     }
 }

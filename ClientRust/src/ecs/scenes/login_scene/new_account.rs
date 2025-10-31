@@ -528,8 +528,8 @@ impl NewAccountDialog {
     }
     
     /// 构建新建账号的网络命令
-    pub fn build_network_command(&self) -> crate::network::NetworkCommand {
-        crate::network::NetworkCommand::NewAccount {
+    pub fn build_network_command(&self) -> crate::network::handlers::GameEvent {
+        crate::network::handlers::GameEvent::NewAccountRequest {
             account_id: self.registration.account_id.clone(),
             password: self.registration.password.clone(),
             birth_date: 0, // TODO: 解析birth_date字符串转timestamp
@@ -562,7 +562,7 @@ impl DialogWithValidation for NewAccountDialog {
         self.get_validation_error()
     }
     
-    fn build_network_command(&self) -> crate::network::NetworkCommand {
+    fn build_network_command(&self) -> crate::network::handlers::GameEvent {
         self.build_network_command()
     }
 }

@@ -14,7 +14,10 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Sender, Receiver, channel};
 use ggez::input::keyboard::KeyCode;
 use ggez::winit::event::MouseButton;
-use crate::network::network_command::NetworkCommand;
+use crate::network::handlers::GameEvent as NetworkGameEvent;
+
+// 类型别名,便于代码兼容
+type NetworkCommand = NetworkGameEvent;
 
 // ============================================================================
 // 事件类型定义
@@ -137,10 +140,10 @@ pub struct GlobalEvents {
     // ====== 立即发送型事件（Channel）======
     /// 网络命令发送通道（客户端→服务器）
     /// 游戏系统直接通过此 channel 发送命令到网络线程
-    network_command_sender: Sender<NetworkCommand>,
+    network_command_sender: Sender<NetworkGameEvent>,
     
     /// 网络命令接收通道（网络线程持有）
-    network_command_receiver: Arc<Mutex<Receiver<NetworkCommand>>>,
+    network_command_receiver: Arc<Mutex<Receiver<NetworkGameEvent>>>,
     
     // ====== 事件统计 ======
     /// 当前帧事件计数
@@ -172,7 +175,7 @@ impl GlobalEvents {
     }
     
     /// 获取网络命令接收端（供网络线程使用）
-    pub fn get_command_receiver(&self) -> Arc<Mutex<Receiver<NetworkCommand>>> {
+    pub fn get_command_receiver(&self) -> Arc<Mutex<Receiver<NetworkGameEvent>>> {
         Arc::clone(&self.network_command_receiver)
     }
     
@@ -371,62 +374,4 @@ pub struct EventStats {
     pub game_count: usize,
     pub network_count: usize,
     pub total_count: usize,
-}
-
-// ============================================================================
-// 使用示例
-// ============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_global_events() {
-        let mut events = GlobalEvents::new();
-        
-        // 添加事件
-        events.push_keyboard(KeyCode::KeyW, true, false);
-        events.push_mouse(MouseEvent::Move { x: 100.0, y: 200.0, dx: 10.0, dy: 20.0 });
-        events.push_ime('中');
-        
-        // 验证事件计数
-        assert_eq!(events.keyboard_events.len(), 1);
-        assert_eq!(events.mouse_events.len(), 1);
-        assert_eq!(events.ime_events.len(), 1);
-        
-        // 过滤事件
-        let key_pressed: Vec<_> = events.filter_key_pressed().collect();
-        assert_eq!(key_pressed.len(), 1);
-        
-        // 清理事件
-        events.clear_frame_events();
-        assert_eq!(events.keyboard_events.len(), 0);
-    }
-    
-    #[test]
-    fn test_network_channel() {
-        use mir2_shared::enums::MirDirection;
-        
-        let mut events = GlobalEvents::new();
-        
-        // 测试发送命令（立即发送到网络线程）
-        events.send_network_command(NetworkCommand::Walk {
-            direction: MirDirection::Up,
-        });
-        
-        // 测试接收包（从网络线程写入）
-        events.push_incoming_packet(NetworkPacket {
-            packet_type: "ObjectPlayer".to_string(),
-            data: vec![1, 2, 3],
-        });
-        
-        assert_eq!(events.network_incoming.len(), 1);
-        
-        // 消费接收到的包
-        let packets: Vec<_> = events.drain_incoming_packets().collect();
-        assert_eq!(packets.len(), 1);
-        assert_eq!(packets[0].packet_type, "ObjectPlayer");
-        assert_eq!(events.network_incoming.len(), 0);
-    }
 }

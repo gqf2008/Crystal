@@ -3,8 +3,8 @@
 //! 
 //! 遵循单一职责原则：所有UI相关的操作逻辑都在此模块
 
-use tokio::sync::mpsc;
-use crate::network::NetworkCommand;
+use std::sync::Arc;
+use crate::network::{NetContext, handlers::GameEvent};
 use mir2_shared::enums::{MirClass, MirGender};
 use super::{SelectScene, BottomButton, NewCharacterDialog, CreditsDialog};
 use super::new_character_dialog::DialogButton;
@@ -21,11 +21,12 @@ impl SelectScene {
     pub(super) fn handle_button_click(
         &mut self,
         button: BottomButton,
-        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        world: &hecs::World,
+        _net_ctx: &Arc<NetContext>,
     ) {
         match button {
             BottomButton::StartGame => {
-                self.start_game();
+                self.start_game(world);
             }
             BottomButton::NewCharacter => {
                 self.open_new_character_dialog();
@@ -64,7 +65,7 @@ impl SelectScene {
                         dialog.name, dialog.selected_class, dialog.selected_gender);
                     
                     if let Some(tx) = &self.command_tx {
-                        if let Err(e) = tx.send(crate::network::NetworkCommand::NewCharacter {
+                        if let Err(e) = tx.send(crate::network::handlers::GameEvent::NewCharacterRequest {
                             name: dialog.name.clone(),
                             class: dialog.selected_class as u8,
                             gender: dialog.selected_gender as u8,
@@ -122,7 +123,7 @@ impl SelectScene {
         self.handle_dialog_button_click(button);
     }
 
-    /// 开始游戏
+    /// 开始游戏 - 从World读取选中的角色
     /// 
     /// Mirrors C# StartGame():
     /// ```csharp
@@ -131,21 +132,31 @@ impl SelectScene {
     ///     Network.Enqueue(new C.StartGame { CharacterIndex = Characters[_selected].Index });
     /// }
     /// ```
-    pub(super) fn start_game(&mut self) {
-        let selected_index = self.character_select.get_selected_index();
-        let character_count = self.character_select.get_characters().len();
+    pub(super) fn start_game(&mut self, world: &hecs::World) {
+        use crate::ecs::components::CharacterList;
+        
+        // 🆕 从World读取选中的角色
+        let (selected_index, character) = if let Some((_, char_list)) = world.query::<&CharacterList>().iter().next() {
+            let idx = char_list.selected_index;
+            let char = char_list.get_selected().cloned();
+            (idx, char)
+        } else {
+            (-1, None)
+        };
+        
+        let character_count = self.character_select_ui.get_characters().len();
         tracing::info!("🎮 start_game() called - selected_index={}, characters.len()={}", 
             selected_index, character_count);
         
-        if let Some(character) = self.character_select.get_selected_character() {
+        if let Some(character) = character {
             tracing::info!("🎮 Starting game with character: {} (index={})", character.name, character.index);
             
             // Send StartGame command to network thread
             if let Some(command_tx) = &self.command_tx {
-                use crate::network::NetworkCommand;
+                use crate::network::handlers::GameEvent;
                 
                 tracing::info!("📡 Network command channel available, sending StartGame...");
-                if command_tx.send(NetworkCommand::StartGame {
+                if command_tx.send(GameEvent::StartGameRequest {
                     character_index: character.index,
                 }).is_ok() {
                     tracing::info!("✅ Sent StartGame command for character index {}", character.index);
@@ -156,8 +167,6 @@ impl SelectScene {
                 tracing::error!("❌ Network command channel not available (command_tx is None)");
             }
         } else {
-            let selected_index = self.character_select.get_selected_index();
-            let character_count = self.character_select.get_characters().len();
             tracing::warn!("⚠️ Cannot start game: No character selected (selected_index={}, len={})", 
                 selected_index, character_count);
         }
@@ -203,7 +212,7 @@ impl SelectScene {
     /// }
     /// ```
     pub(super) fn open_delete_character_dialog(&mut self) {
-        let Some(character) = self.character_select.get_selected_character() else {
+        let Some(character) = self.character_select_ui.get_selected_character() else {
             tracing::warn!("⚠️ 没有选中角色,无法删除");
             
             // 🆕 显示消息框提示用户
@@ -263,8 +272,8 @@ impl SelectScene {
             
             // 发送删除命令到网络层
             if let Some(tx) = &self.command_tx {
-                use crate::network::NetworkCommand;
-                if let Err(e) = tx.send(NetworkCommand::DeleteCharacter { index: character_index }) {
+                use crate::network::handlers::GameEvent;
+                if let Err(e) = tx.send(GameEvent::DeleteCharacterRequest { index: character_index }) {
                     tracing::error!("❌ 发送删除角色命令失败: {}", e);
                     dialog.deleting = false;
                     dialog.error_message = Some("网络错误,无法发送删除请求".to_string());

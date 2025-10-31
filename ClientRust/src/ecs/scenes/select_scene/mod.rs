@@ -1,4 +1,4 @@
-﻿// SelectScene - Character selection scene
+// SelectScene - Character selection scene
 // Mirrors Client/MirScenes/SelectScene.cs
 
 // UI 组件子模块（每个组件负责自己的绘制和事件处理）
@@ -13,6 +13,7 @@ mod network_handler;
 mod ui_actions; // UI 交互逻辑（按钮点击、对话框打开、游戏启动等） // 网络事件处理（服务器响应处理）
 
 use character_select::CharacterSelect;
+use crate::ecs::components::CharacterList; // 🆕 导入CharacterList组件
 
 pub use credits_dialog::CreditsDialog;
 pub use delete_character_dialog::DeleteCharacterDialog;
@@ -22,12 +23,12 @@ pub use new_character_dialog::NewCharacterDialog; // 🆕 导出消息框
 use ggez::graphics::Canvas;
 use ggez::{Context, GameResult};
 use hecs::World;
-use tokio::sync::mpsc;
+use std::sync::Arc;
 
 use super::ui::InputBox; // 🆕 只导入 InputBox
 use super::{Scene, SceneType};
 use crate::ecs::ui::{ButtonGroup, ButtonWidget}; // ButtonGroup 从原路径导入
-use crate::network::NetworkCommand;
+use crate::network::{NetContext, handlers::GameEvent};
 use mir2_shared::SelectInfo;
 
 // 设计分辨率常量 (与 LoginScene 保持一致)
@@ -36,8 +37,8 @@ const DESIGN_HEIGHT: f32 = 768.0;
 
 
 pub struct SelectScene {
-    // 🆕 角色选择主界面组件（封装角色列表、选中状态、动画等）
-    character_select: CharacterSelect,
+    // 🆕 角色选择UI状态(只维护选中索引、动画帧等UI状态)
+    character_select_ui: CharacterSelect,
 
     // Dialogs
     /// Mirrors C# `private NewCharacterDialog _character`
@@ -52,7 +53,7 @@ pub struct SelectScene {
     pub input_box: Option<InputBox>,
 
     // Network
-    command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>>,
+    command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::handlers::GameEvent>>,
 
     // Scene transition
     pub pending_scene_change: Option<SceneType>,
@@ -75,8 +76,10 @@ enum BottomButton {
 }
 
 impl SelectScene {
-    /// Create new select scene with character list
-    ///
+    /// Create new select scene
+    /// 
+    /// 🆕 ECS 架构: 角色数据从 World 查询,不再通过参数传递
+    /// 
     /// Mirrors C# constructor:
     /// ```csharp
     /// public SelectScene(List<SelectInfo> characters)
@@ -86,7 +89,7 @@ impl SelectScene {
     ///     // ... initialize UI
     /// }
     /// ```
-    pub fn new(characters: Vec<SelectInfo>) -> Self {
+    pub fn new() -> Self {
         // 创建底部按钮组
         let mut bottom_buttons = ButtonGroup::new();
 
@@ -154,15 +157,11 @@ impl SelectScene {
             .with_tooltip("退出游戏 (ESC)"),
         );
 
-        // 排序角色列表
-        let mut sorted_characters = characters;
-        sorted_characters.sort_by(|a, b| b.last_access.cmp(&a.last_access));
-
-        // 创建角色选择组件
-        let character_select = CharacterSelect::new(sorted_characters);
+        // 🆕 ECS架构: CharacterSelect只维护UI状态
+        let character_select_ui = CharacterSelect::new();
 
         Self {
-            character_select,
+            character_select_ui,
             new_character_dialog: None,
             delete_character_dialog: None,
             credits_dialog: None,
@@ -179,7 +178,7 @@ impl SelectScene {
     /// 设置网络命令发送器
     pub fn set_command_sender(
         &mut self,
-        tx: tokio::sync::mpsc::UnboundedSender<crate::network::NetworkCommand>,
+        tx: tokio::sync::mpsc::UnboundedSender<crate::network::handlers::GameEvent>,
     ) {
         self.command_tx = Some(tx);
     }
@@ -191,16 +190,27 @@ impl SelectScene {
     /// _selected = index;
     /// UpdateInterface();
     /// ```
-    pub fn select_character(&mut self, index: i32) {
-        self.character_select.select_character(index);
-        if let Some(character) = self.character_select.get_selected_character() {
+    pub fn select_character(&mut self, index: i32, world: &mut hecs::World) {
+        // 更新World中的选择状态
+        if let Some((_, mut char_list)) = world.query::<&mut CharacterList>().iter().next() {
+            char_list.set_selected(index);
+            tracing::debug!("🎯 选择角色索引: {}", index);
+        }
+        
+        // 同步到UI层 (用于动画等)
+        self.character_select_ui.select_character(index);
+        if let Some(character) = self.character_select_ui.get_selected_character() {
             println!("Selected character: {}", character.name);
         }
     }
 
-    /// 获取当前选中的角色索引
-    pub fn get_selected_character_index(&self) -> i32 {
-        self.character_select.get_selected_index()
+    /// 获取当前选中的角色索引 (从World读取)
+    pub fn get_selected_character_index(&self, world: &hecs::World) -> i32 {
+        if let Some((_, char_list)) = world.query::<&CharacterList>().iter().next() {
+            char_list.selected_index
+        } else {
+            -1
+        }
     }
 
     fn window_to_design_coords(&self, ctx: &Context, window_x: f32, window_y: f32) -> (f32, f32) {
@@ -231,7 +241,7 @@ impl SelectScene {
 
 impl Default for SelectScene {
     fn default() -> Self {
-        Self::new(Vec::new())
+        Self::new()
     }
 }
 
@@ -243,9 +253,34 @@ impl Scene for SelectScene {
     fn update(
         &mut self,
         ctx: &mut Context,
-        _world: &mut World,
-        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        world: &mut World,
+        net_ctx: &Arc<NetContext>,
     ) -> GameResult<Option<SceneType>> {
+        // 🔄 从World同步角色列表到UI缓存
+        // 🆕 正确架构: World存储CharacterList组件(单一实体)
+        if self.character_select_ui.is_empty() {
+            if let Some((entity, char_list)) = world.query::<&crate::ecs::components::CharacterList>().iter().next() {
+                tracing::info!("💾 从World加载CharacterList: Entity({:?}), {} 个角色", entity, char_list.characters.len());
+                
+                // 同步到UI缓存(排序后)
+                let mut characters = char_list.characters.clone();
+                characters.sort_by(|a, b| b.last_access.cmp(&a.last_access));
+                
+                for character in characters {
+                    self.character_select_ui.add_character(character);
+                }
+                
+                tracing::info!("✅ UI缓存同步完成: {} 个角色", self.character_select_ui.len());
+            } else {
+                tracing::warn!("⚠️ World中没有CharacterList组件");
+            }
+        }
+        
+        // 🔄 处理网络事件
+        while let Some(event) = net_ctx.try_recv() {
+            self.handle_network_event(&event);
+        }
+        
         let delta = ctx.time.delta().as_secs_f32();
 
         // 更新 NewCharacterDialog 动画和计时器
@@ -259,7 +294,7 @@ impl Scene for SelectScene {
         }
 
         // 🆕 更新角色选择组件（动画）
-        self.character_select.update(delta);
+        self.character_select_ui.update(delta);
 
         // 🆕 处理消息框结果
         if let Some(ref mut message_box) = self.message_box {
@@ -275,7 +310,7 @@ impl Scene for SelectScene {
                     MessageBoxResult::Yes => {
                         tracing::debug!("✅ 消息框: 用户点击Yes - 显示输入框");
                         // 删除角色确认后，显示输入框验证
-                        if self.character_select.get_selected_character().is_some() {
+                        if self.character_select_ui.get_selected_character().is_some() {
                             let mut input_box =
                                 InputBox::new("Please enter the character's name.".to_string());
                             input_box.show(ctx); // ✅ 传入 ctx 启用 IME
@@ -297,11 +332,11 @@ impl Scene for SelectScene {
                 tracing::info!("✅ 输入框确认: {}", input_text);
 
                 // 验证角色名并发送删除请求
-                if let Some(character) = self.character_select.get_selected_character() {
+                if let Some(character) = self.character_select_ui.get_selected_character() {
                     if input_text == character.name {
                         tracing::info!("🗑️ 发送删除角色请求: index={}", character.index);
                         // 发送 DeleteCharacter 包
-                        let _ = network_tx.send(NetworkCommand::DeleteCharacter {
+                        let _ = net_ctx.send(GameEvent::DeleteCharacterRequest {
                             index: character.index,
                         });
                     } else {
@@ -345,7 +380,7 @@ impl Scene for SelectScene {
         ));
 
         // 🆕 使用 CharacterSelect 组件绘制主界面
-        self.character_select
+        self.character_select_ui
             .draw(ctx, canvas, &self.bottom_buttons)?;
 
         // TODO: 8. 绘制 NewCharacterDialog (最上层)
@@ -381,11 +416,11 @@ impl Scene for SelectScene {
     fn on_mouse_down(
         &mut self,
         ctx: &mut Context,
-        _world: &mut World,
+        world: &mut World,
         button: ggez::winit::event::MouseButton,
         x: f32,
         y: f32,
-        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        net_ctx: &Arc<NetContext>,
     ) -> GameResult {
         use ggez::winit::event::MouseButton;
 
@@ -446,9 +481,9 @@ impl Scene for SelectScene {
         }
 
         // 2. 处理角色槽位点击 (右侧垂直布局) - 使用设计坐标
-        if let Some(slot_index) = self.character_select.check_slot_click(design_x, design_y) {
-            self.select_character(slot_index as i32);
-            if let Some(character) = self.character_select.get_selected_character() {
+        if let Some(slot_index) = self.character_select_ui.check_slot_click(design_x, design_y) {
+            self.select_character(slot_index as i32, world);
+            if let Some(character) = self.character_select_ui.get_selected_character() {
                 tracing::info!("🖱️ 选中角色: {}", character.name);
             }
             return Ok(());
@@ -465,11 +500,11 @@ impl Scene for SelectScene {
 
             // 根据按钮ID分发事件
             match button_id {
-                1 => self.handle_button_click(BottomButton::StartGame, network_tx),
-                2 => self.handle_button_click(BottomButton::NewCharacter, network_tx),
-                3 => self.handle_button_click(BottomButton::DeleteCharacter, network_tx),
-                4 => self.handle_button_click(BottomButton::Credits, network_tx),
-                5 => self.handle_button_click(BottomButton::ExitGame, network_tx),
+                1 => self.handle_button_click(BottomButton::StartGame, world, net_ctx),
+                2 => self.handle_button_click(BottomButton::NewCharacter, world, net_ctx),
+                3 => self.handle_button_click(BottomButton::DeleteCharacter, world, net_ctx),
+                4 => self.handle_button_click(BottomButton::Credits, world, net_ctx),
+                5 => self.handle_button_click(BottomButton::ExitGame, world, net_ctx),
                 _ => {}
             }
             return Ok(());
@@ -485,7 +520,7 @@ impl Scene for SelectScene {
         _button: ggez::winit::event::MouseButton,
         x: f32,
         y: f32,
-        _network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        _net_ctx: &Arc<NetContext>,
     ) -> GameResult {
         // 🔧 转换窗口坐标为设计坐标
         let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
@@ -574,9 +609,9 @@ impl Scene for SelectScene {
     fn on_key_down(
         &mut self,
         ctx: &mut Context, // ✅ 去掉下划线，需要传给InputBox
-        _world: &mut World,
+        world: &mut World,
         input: ggez::input::keyboard::KeyInput,
-        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
+        net_ctx: &Arc<NetContext>,
     ) -> GameResult<Option<SceneType>> {
         use ggez::winit::keyboard::KeyCode;
 
@@ -638,39 +673,45 @@ impl Scene for SelectScene {
                     }
                 }
                 KeyCode::Enter | KeyCode::NumpadEnter => {
-                    // Enter 键开始游戏
-                    if self.character_select.get_selected_index() >= 0 {
-                        self.handle_button_click(BottomButton::StartGame, network_tx);
+                    // Enter 键开始游戏 - 从World读取选中状态
+                    let selected_index = if let Some((_, char_list)) = world.query::<&CharacterList>().iter().next() {
+                        char_list.selected_index
+                    } else {
+                        -1
+                    };
+                    
+                    if selected_index >= 0 {
+                        self.handle_button_click(BottomButton::StartGame, world, net_ctx);
                     }
                 }
                 KeyCode::Digit1 | KeyCode::Numpad1 => {
-                    if !self.character_select.get_characters().is_empty() {
-                        self.select_character(0);
-                        if let Some(character) = self.character_select.get_selected_character() {
+                    if !self.character_select_ui.get_characters().is_empty() {
+                        self.select_character(0, world);
+                        if let Some(character) = self.character_select_ui.get_selected_character() {
                             tracing::info!("⌨️ 键盘选中角色1: {}", character.name);
                         }
                     }
                 }
                 KeyCode::Digit2 | KeyCode::Numpad2 => {
-                    if self.character_select.get_characters().len() > 1 {
-                        self.select_character(1);
-                        if let Some(character) = self.character_select.get_selected_character() {
+                    if self.character_select_ui.get_characters().len() > 1 {
+                        self.select_character(1, world);
+                        if let Some(character) = self.character_select_ui.get_selected_character() {
                             tracing::info!("⌨️ 键盘选中角色2: {}", character.name);
                         }
                     }
                 }
                 KeyCode::Digit3 | KeyCode::Numpad3 => {
-                    if self.character_select.get_characters().len() > 2 {
-                        self.select_character(2);
-                        if let Some(character) = self.character_select.get_selected_character() {
+                    if self.character_select_ui.get_characters().len() > 2 {
+                        self.select_character(2, world);
+                        if let Some(character) = self.character_select_ui.get_selected_character() {
                             tracing::info!("⌨️ 键盘选中角色3: {}", character.name);
                         }
                     }
                 }
                 KeyCode::Digit4 | KeyCode::Numpad4 => {
-                    if self.character_select.get_characters().len() > 3 {
-                        self.select_character(3);
-                        if let Some(character) = self.character_select.get_selected_character() {
+                    if self.character_select_ui.get_characters().len() > 3 {
+                        self.select_character(3, world);
+                        if let Some(character) = self.character_select_ui.get_selected_character() {
                             tracing::info!("⌨️ 键盘选中角色4: {}", character.name);
                         }
                     }

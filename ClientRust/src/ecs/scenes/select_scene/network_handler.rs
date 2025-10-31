@@ -1,7 +1,7 @@
 //! 网络事件处理模块
 //! 负责处理来自服务器的游戏事件响应
 
-use crate::network::game_client::GameEvent;
+use crate::network::handlers::GameEvent;
 use crate::ecs::scenes::SceneType;
 use super::SelectScene;
 
@@ -11,35 +11,20 @@ impl SelectScene {
     /// 根据事件类型分发到具体的处理方法
     pub fn handle_network_event(&mut self, event: &GameEvent) {
         match event {
-            GameEvent::SystemMessage { message } => {
-                self.handle_system_message(message);
+            GameEvent::LoginSuccess { characters } => {
+                self.handle_login_success(characters);
             }
             GameEvent::Disconnected { reason } => {
                 self.handle_disconnected(reason);
             }
-            GameEvent::DeleteCharacterSuccess { character_index } => {
-                self.handle_delete_character_success(*character_index);
+            GameEvent::CharacterDeleted { index } => {
+                self.handle_delete_character_success(*index as i32);
             }
-            GameEvent::DeleteCharacterResponse { result } => {
-                self.handle_delete_character_response(*result);
+            GameEvent::CharacterCreated { name } => {
+                self.handle_new_character_success_simple(name);
             }
-            GameEvent::NewCharacterResponse { result } => {
-                self.handle_new_character_response(*result);
-            }
-            GameEvent::NewCharacterSuccess { character } => {
-                self.handle_new_character_success(character.clone());
-            }
-            GameEvent::PlayerSpawned { player } => {
-                self.handle_player_spawned(player);
-            }
-            GameEvent::StartGameResponse { result } => {
-                self.handle_start_game_response(*result);
-            }
-            GameEvent::StartGameBanned { reason, expiry_date } => {
-                self.handle_start_game_banned(reason, expiry_date);
-            }
-            GameEvent::StartGameDelay { milliseconds } => {
-                self.handle_start_game_delay(*milliseconds);
+            GameEvent::StartGame { delay } => {
+                self.handle_start_game_delay(*delay as i64);
             }
             _ => {
                 // 忽略其他事件
@@ -47,12 +32,30 @@ impl SelectScene {
         }
     }
 
-    // ========== 系统消息处理 ==========
+    // ========== 登录成功处理 ==========
 
-    fn handle_system_message(&self, message: &str) {
-        println!("System message: {}", message);
-        // TODO: Display in UI
+    /// 处理登录成功并接收角色列表
+    fn handle_login_success(&mut self, characters: &[mir2_shared::SelectInfo]) {
+        tracing::info!("🎮 收到角色列表: {} 个角色", characters.len());
+        
+        // 清空现有角色列表
+        self.character_select_ui.clear_characters();
+        
+        // 添加所有角色
+        for character in characters {
+            tracing::info!("  - 角色: {} (Lv.{} {:?} {:?})", 
+                character.name, 
+                character.level,
+                character.class,
+                character.gender
+            );
+            self.character_select_ui.add_character(character.clone());
+        }
+        
+        tracing::info!("✅ 角色列表加载完成");
     }
+
+    // ========== 系统消息处理 ==========
 
     fn handle_disconnected(&self, reason: &str) {
         println!("Disconnected: {}", reason);
@@ -69,77 +72,37 @@ impl SelectScene {
         self.delete_character_dialog = None;
         
         // 2. 从角色列表移除已删除的角色
-        if self.character_select.remove_character_by_index(character_index) {
+        if self.character_select_ui.remove_character_by_index(character_index) {
             tracing::info!("📋 已从列表移除角色 (index={}), 剩余角色数: {}", 
-                character_index, self.character_select.character_count());
+                character_index, self.character_select_ui.character_count());
         }
         
         // TODO: 显示成功消息框 "Your character was deleted successfully."
     }
 
-    /// 处理删除角色响应（错误情况）
-    fn handle_delete_character_response(&mut self, result: u8) {
-        tracing::info!("⚠️ 删除角色响应: result={}", result);
-        if let Some(dialog) = &mut self.delete_character_dialog {
-            dialog.deleting = false;
-            if result != 0 {
-                // 删除失败
-                dialog.error_message = Some(format!("删除失败 (错误代码: {})", result));
-            }
-        }
-    }
-
     // ========== 创建角色处理 ==========
 
-    /// 处理创建角色响应（错误情况）
-    /// 
-    /// C# SelectScene.NewCharacter(S.NewCharacter p)
-    fn handle_new_character_response(&mut self, result: u8) {
-        tracing::info!("📝 创建角色响应: result={}", result);
-        if let Some(dialog) = &mut self.new_character_dialog {
-            dialog.creating = false;
-            
-            let error_msg = match result {
-                0 => "Creating new characters is currently disabled.",
-                1 => "Your Character Name is not acceptable.",
-                2 => "The gender you selected does not exist.\nContact a GM for assistance.",
-                3 => "The class you selected does not exist.\nContact a GM for assistance.",
-                4 => "You cannot make more than 4 Characters.",
-                5 => "A Character with this name already exists.",
-                _ => "Unknown error occurred.",
-            };
-            
-            tracing::warn!("❌ 创建角色失败: {}", error_msg);
-            
-            // 🆕 显示MessageBox提示用户
-            let mut message_box = super::MessageBox::new(
-                error_msg.to_string(),
-                super::MessageBoxButtons::Ok,
-                super::DESIGN_WIDTH,
-                super::DESIGN_HEIGHT
-            );
-            message_box.show();
-            self.message_box = Some(message_box);
-            
-            // 同时在对话框内显示错误（如果用户关闭MessageBox后还想看）
-            dialog.error_message = Some(error_msg.to_string());
-        }
-    }
-
-    /// 处理角色创建成功事件
-    fn handle_new_character_success(&mut self, character: mir2_shared::SelectInfo) {
-        tracing::info!("✅ 角色创建成功: {}", character.name);
+    /// 处理角色创建成功事件 (简化版 - 只有名称)
+    fn handle_new_character_success_simple(&mut self, name: &str) {
+        tracing::info!("✅ 角色创建成功: {}", name);
         
         // 1. 关闭新建角色对话框
         self.new_character_dialog = None;
         
-        // 2. 将新角色添加到列表开头
-        self.character_select.add_character(character.clone());
+        // 2. 显示成功消息
+        let mut message_box = super::MessageBox::new(
+            format!("Character '{}' created successfully!", name),
+            super::MessageBoxButtons::Ok,
+            super::DESIGN_WIDTH,
+            super::DESIGN_HEIGHT
+        );
+        message_box.show();
+        self.message_box = Some(message_box);
         
         // 3. 选中新创建的角色
-        self.character_select.select_character(0);
+        self.character_select_ui.select_character(0);
         
-        tracing::info!("📋 新角色已添加到列表, 总角色数: {}", self.character_select.character_count());
+        tracing::info!("📋 新角色已添加到列表, 总角色数: {}", self.character_select_ui.character_count());
         
         // TODO: 显示成功消息框 "Your character was created successfully."
     }
@@ -149,11 +112,12 @@ impl SelectScene {
     /// 处理玩家生成事件
     /// 
     /// 注意: 某些服务器实现不发送 StartGameResponse，而是直接发送 PlayerSpawned
-    fn handle_player_spawned(&mut self, player: &crate::network::game_client::PlayerState) {
-        tracing::info!("🎮 玩家已生成: {} (Lv.{}, HP:{}/{}, MP:{}/{})", 
-            player.name, player.level, player.health, player.max_health, player.mana, player.max_mana);
-        tracing::info!("📍 位置: ({}, {})", 
-            player.location.x, player.location.y);
+    fn handle_player_spawned(&mut self, _player: &()) {
+        // TODO: PlayerState已从game_client移除，需要使用新的网络事件结构
+        // tracing::info!("🎮 玩家已生成: {} (Lv.{}, HP:{}/{}, MP:{}/{})", 
+        //     player.name, player.level, player.health, player.max_health, player.mana, player.max_mana);
+        // tracing::info!("📍 位置: ({}, {})", 
+        //     player.location.x, player.location.y);
         tracing::info!("✅ 切换到游戏场景...");
         
         self.pending_scene_change = Some(SceneType::Game);

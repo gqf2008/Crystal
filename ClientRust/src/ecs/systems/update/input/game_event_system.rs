@@ -89,8 +89,8 @@ impl GameEventSystem {
             GameEvent::Disconnected { reason } => {
                 tracing::warn!("📡 事件总线: 断开连接 - {}", reason);
             }
-            GameEvent::ChatReceived { message } => {
-                tracing::info!("📡 聊天: {} - {}", message.sender, message.text);
+            GameEvent::ChatMessage { sender, message, chat_type } => {
+                tracing::info!("📡 聊天({:?}): {} - {}", chat_type, sender, message);
             }
             _ => {}
         }

@@ -15,6 +15,7 @@ pub mod map;
 pub mod render;
 pub mod input;
 pub mod network;
+pub mod character_select;  // 🆕 角色选择组件
 
 // 🆕 新架构组件
 pub mod movement;        // 移动相关组件
@@ -61,6 +62,9 @@ pub use input::*;
 // 网络组件
 pub use network::*;
 
+// 角色选择组件
+pub use character_select::*;  // 🆕 角色选择组件导出
+
 // 🆕 新架构组件导出
 pub use movement::*;
 pub use prediction::*;
@@ -74,10 +78,12 @@ pub use events::*;  // 🆕 全局事件组件导出
 // ============================================================================
 
 // QuestLog 组件在 quest_system.rs 中定义，在这里重新导出
-pub use crate::ecs::systems::layer5_ui::quest_system::QuestLog;
+// TODO: layer5_ui已删除，需要从新位置导入或重新实现
+// pub use crate::ecs::systems::layer5_ui::quest_system::QuestLog;
 
 // TradeWindow 组件在 trade_system.rs 中定义，在这里重新导出
-pub use crate::ecs::systems::layer5_ui::trade_system::TradeWindow;
+// TODO: layer5_ui已删除，需要从新位置导入或重新实现
+// pub use crate::ecs::systems::layer5_ui::trade_system::TradeWindow;
 
 // ============================================================================
 // 公共导出 - 确保外部可以使用
