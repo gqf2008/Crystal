@@ -93,72 +93,65 @@ pub struct GameScene {
 impl GameScene {
     /// 创建新的游戏场景
     /// 
-    /// # 功能
-    /// - 初始化地图库
-    /// - 加载地图数据
-    /// - 创建相机、玩家、UI 等实体
-    /// - 初始化各个系统
-    /// 
-    /// # 参数
-    /// - `ctx`: ggez 上下文
-    /// - `world`: ECS 世界
+    /// # 架构设计 (完全ECS化)
+    /// - GameScene只是一个场景编排器，不持有任何游戏数据
+    /// - 不在构造函数中创建实体或加载资源
+    /// - 所有实体创建由首次update调用的initialize()方法完成
+    /// - Context和World通过Scene trait的方法参数自动传递
     /// 
     /// # 返回
-    /// - `Ok(GameScene)`: 成功创建的游戏场景
-    /// - `Err`: 初始化失败的错误信息
-    pub fn new(ctx: &mut Context, world: &mut World, player_grid_location: Option<(i32, i32)>, map_file_name: Option<String>) -> GameResult<Self> {
-        println!("🗺️ 游戏场景初始化中...");
+    /// - `Self`: 游戏场景实例（纯粹的系统调度器）
+    pub fn new() -> Self {
+        println!("🎮 GameScene构造函数 - 创建空壳场景");
+        println!("⏳ 等待首次update进行初始化...");
         
-        // 初始化地图库
-        println!("📚 正在初始化地图库...");
-        initialize_all_libraries("Data").expect("初始化地图库失败");
-        println!("✅ 地图库初始化完成");
+        Self {
+            // 所有实体ID设为占位值，在首次update时初始化
+            camera_entity: Entity::DANGLING,
+            time_entity: Entity::DANGLING,
+            config_entity: Entity::DANGLING,
+            visible_area_entity: Entity::DANGLING,
+            debug_counters_entity: Entity::DANGLING,
+            main_dialog_entity: Entity::DANGLING,
+            inventory_dialog_entity: Entity::DANGLING,
+            character_dialog_entity: Entity::DANGLING,
+            skillbar_entities: [Entity::DANGLING, Entity::DANGLING],
+            chat_dialog_entity: Entity::DANGLING,
+            magic_learning_dialog_entity: Entity::DANGLING,
+            quest_dialog_entity: Entity::DANGLING,
+            trade_dialog_entity: Entity::DANGLING,
+            system_scheduler: UpdateRenderParallelScheduler::new(ExecutionMode::Sequential),
+            ui_font_name: String::from("default"),
+        }
+    }
+    
+    /// 标记：场景是否已完成初始化
+    fn is_initialized(&self) -> bool {
+        self.camera_entity != Entity::DANGLING
+    }
+    
+    /// 初始化场景实体（在首次update时调用）
+    /// 
+    /// Context和World由Scene trait的update方法传递，不需要在构造函数中传递
+    fn initialize(&mut self, ctx: &mut Context, world: &mut World) -> GameResult {
+        if self.is_initialized() {
+            return Ok(());
+        }
         
-        // 使用服务器指定的地图,如果没有则使用默认地图 "0"
-        let map_name = map_file_name.unwrap_or_else(|| {
-            println!("⚠️ 未收到地图信息,使用默认地图 '0'");
-            "0".to_string()
-        });
+        println!("🎮 GameScene首次初始化...");
         
-        // 加载地图
-        let map_path = format!("Map/{}.map", map_name);
-        println!("🗺️ 正在加载地图: {}", map_path);
-        let reader = MapReader::new(&map_path)?;
-        println!("✅ 地图加载完成: {}x{} (文件: {})", reader.width, reader.height, map_name);
+        // 初始化图形库
+        println!("📚 正在初始化图形库...");
+        initialize_all_libraries("Data").expect("初始化图形库失败");
+        println!("✅ 图形库初始化完成");
         
-        // 加载地图瓦片到 ECS
-        MapLoader::load_map(world, reader)?;
-        
-        // 找到出生点
-        let map_data = world.query_mut::<&crate::ecs::components::MapData>()
-            .into_iter()
-            .next()
-            .map(|(_, data)| data.clone())
-            .expect("地图数据未加载");
-        
-        // ✅ 使用服务器发送的玩家位置，如果没有则使用地图中心
-        let (player_grid_x, player_grid_y) = if let Some((x, y)) = player_grid_location {
-            println!("✅ 使用服务器玩家位置: 格子({}, {})", x, y);
-            (x, y)
-        } else {
-            let (x, y) = MapUtils::find_center_walkable_position(&map_data);
-            println!("⚠️ 未找到服务器位置，使用地图中心: 格子({}, {})", x, y);
-            (x, y)
-        };
-        
-        let (player_world_x, player_world_y) = Coordinates::grid_to_world_center(player_grid_x, player_grid_y);
-        println!("� 玩家世界坐标: ({:.1}, {:.1})", player_world_x, player_world_y);
+        let (screen_width, screen_height) = ctx.gfx.drawable_size();
         
         // 创建相机实体
-        // 使用 drawable_size() 获取窗口尺寸,ggez 会自动处理 DPI 缩放
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
-        tracing::info!("📐 窗口尺寸: {}x{} | UI设计: {}x{}", 
-                      screen_width, screen_height, 
-                      Coordinates::DESIGN_WIDTH, Coordinates::DESIGN_HEIGHT);
-        let camera_entity = world.spawn((
-            Position { x: player_world_x, y: player_world_y },  // 📍 使用玩家真实位置
+        self.camera_entity = world.spawn((
+            Position { x: 0.0, y: 0.0 },
             Camera {
-                zoom: 1.25,  // 初始缩放1.75x，让角色看起来更大
+                zoom: 1.25,
                 screen_width,
                 screen_height,
             },
@@ -172,7 +165,7 @@ impl GameScene {
         ));
         
         // 创建时间跟踪实体
-        let time_entity = world.spawn((TimeTracker {
+        self.time_entity = world.spawn((TimeTracker {
             animation_count: 0,
             frame_count: 0,
             fps: 0.0,
@@ -181,7 +174,7 @@ impl GameScene {
         },));
         
         // 创建渲染配置实体
-        let config_entity = world.spawn((RenderConfig {
+        self.config_entity = world.spawn((RenderConfig {
             show_back: true,
             show_middle: true,
             show_front: true,
@@ -198,83 +191,13 @@ impl GameScene {
         },));
         
         // 创建可见区域缓存实体
-        let visible_area_entity = world.spawn((VisibleArea::default(),));
+        self.visible_area_entity = world.spawn((VisibleArea::default(),));
         
         // 创建调试计数器实体
-        let debug_counters_entity = world.spawn((crate::ecs::components::DebugCounters::new(),));
-        
-        // 生成测试怪物
-        println!("👹 正在生成测试怪物...");
-        MapLoader::spawn_test_monsters(world, &map_data, 15);
-        println!("✅ 已生成 15 只测试怪物");
-        
-        // ✅ 使用服务器发送的玩家真实位置创建角色实体
-        // 创建玩家角色实体
-        let _player_entity = world.spawn((
-            Player {
-                direction: 4,  // 朝下
-                action: PlayerAction::Stand,
-                frame_index: 0,
-                frame_time: 0,
-                speed: 0.0,
-                target_x: player_world_x,  // 📍 使用真实位置
-                target_y: player_world_y,  // 📍 使用真实位置
-                is_moving: false,
-                path: Vec::new(),
-                path_index: 0,
-                move_mode: MoveMode::Idle,
-                last_move_time: std::time::Instant::now(),
-                move_delay: std::time::Duration::from_millis(700), // 服务器MoveDelay=600ms + 余量
-                waiting_server_confirm: false,  // 🎯 初始不等待确认
-                collision_detected: false,  // 🎯 碰撞调试
-                collision_target_grid: None,  // 🎯 碰撞调试
-                // 🎯 走/跑机制
-                can_run: false,  // 初始不能跑，需要先走路
-                last_run_time: std::time::Instant::now(),
-                run_cooldown: std::time::Duration::from_millis(900),  // 900ms冷却
-            },
-            Position { x: player_world_x, y: player_world_y },  // 📍 使用真实位置
-            crate::ecs::components::MovementAnimation::new(player_grid_x, player_grid_y),  // 🎬 动画帧插值组件
-            PlayerAppearance {
-                class: MirClass::Warrior,
-                gender: MirGender::Female,  // 🚺 设置为女性角色
-                hair: 0,
-                weapon: -1,
-                armour: 0,
-                weapon_effect: 0,
-                wing_effect: 0,
-            },
-            Inventory::default(),  // 默认背包（40格）
-            Equipment::new(),  // 装备栏
-            LocalPlayer,  // 本地玩家标记
-            PlayerData {
-                id: 1,
-                name: "勇士".to_string(),
-                class: MirClass::Warrior,
-                gender: MirGender::Female,  // 🚺 保持一致
-                level: 1,
-                exp: 750,
-                max_experience: 1000,
-                gold: 100,
-                credit: 0,
-            },
-            MagicList::new(),  // 已学技能列表
-            LearnableMagicList::new(),  // 可学技能列表
-            TargetSelection::new(),  // 目标选择
-            // TODO: QuestLog和TradeWindow已从components删除
-            // QuestLog::new(),  // ✅ 任务日志（用于任务系统）
-            // TradeWindow::new(),  // ✅ 交易窗口（用于玩家交易）
-            crate::ecs::components::NetworkSync {  // ✅ 网络同步标记（立即允许渲染）
-                object_id: 0,
-                last_update: std::time::Instant::now(),
-                object_type: crate::ecs::components::NetworkObjectType::Player,
-            },
-        ));
-        
-        println!("✅ 本地玩家已创建，包含任务日志和交易窗口组件");
+        self.debug_counters_entity = world.spawn((crate::ecs::components::DebugCounters::new(),));
         
         // 创建鼠标输入状态实体
-        let _mouse_input_entity = world.spawn((MouseInput {
+        world.spawn((MouseInput {
             left_pressed: false,
             right_pressed: false,
             left_double_clicked: false,
@@ -287,152 +210,62 @@ impl GameScene {
             y: 0.0,
         },));
         
-        // 角色状态
-        let _status_entity = world.spawn((
-            crate::ecs::ui::CharacterStatus {
-                name: "勇士".to_string(),
-                level: 10,
-                health: 120,
-                max_health: 150,
-                mana: 45,
-                max_mana: 80,
-                experience: 750,
-                max_experience: 1000,
-            },
-        ));
-        
-        // 血条
-        let _health_bar_entity = world.spawn((crate::ecs::ui::HealthBar::default(),));
-        
-        // 魔法条
-        let _mana_bar_entity = world.spawn((crate::ecs::ui::ManaBar::default(),));
-        
-        // 经验条
-        let _exp_bar_entity = world.spawn((crate::ecs::ui::ExpBar::new(screen_width, screen_height),));
-        
-        // 技能栏
-        let _skill_bar_entity = world.spawn((crate::ecs::ui::SkillBar::default(),));
-        
-        // 聊天窗口
-        let mut chat = crate::ecs::ui::ChatWindow::new(screen_width, screen_height);
-        // 添加一些测试消息
-        chat.add_message(crate::ecs::ui::ChatMessage {
-            sender: "系统".to_string(),
-            content: "欢迎来到传奇世界！".to_string(),
-            msg_type: crate::ecs::ui::ChatMessageType::System,
-            timestamp: Instant::now(),
-        });
-        chat.add_message(crate::ecs::ui::ChatMessage {
-            sender: "GM".to_string(),
-            content: "游戏测试中...".to_string(),
-            msg_type: crate::ecs::ui::ChatMessageType::Normal,
-            timestamp: Instant::now(),
-        });
-        let _chat_entity = world.spawn((chat,));
-        
         // 加载中文字体
-        let ui_font_name = Self::load_chinese_font(ctx)?;
+        self.ui_font_name = Self::load_chinese_font(ctx)?;
         
-        // 创建主对话框实体
-        // UI 使用固定设计分辨率 1024×768
-        let main_dialog_entity = world.spawn((
+        // 创建UI对话框实体
+        self.main_dialog_entity = world.spawn((
             MainDialog::new(Coordinates::DESIGN_WIDTH, Coordinates::DESIGN_HEIGHT),
         ));
         
-        // 创建背包对话框实体
-        let inventory_dialog_entity = world.spawn((
-            InventoryDialog::new(),
-        ));
+        self.inventory_dialog_entity = world.spawn((InventoryDialog::new(),));
+        self.character_dialog_entity = world.spawn((CharacterDialog::new(),));
         
-        // 创建角色对话框实体
-        let character_dialog_entity = world.spawn((
-            CharacterDialog::new(),
-        ));
-        
-        // 创建两个技能栏实体
-        let skillbar_entities = [
+        self.skillbar_entities = [
             world.spawn((SkillBarDialog::new(0),)),
             world.spawn((SkillBarDialog::new(1),)),
         ];
         
-        // 创建聊天对话框实体
-        let chat_dialog_entity = world.spawn((
-            ChatDialog::new(0.0, screen_height - 300.0), // 屏幕底部
-        ));
+        self.chat_dialog_entity = world.spawn((ChatDialog::new(0.0, screen_height - 300.0),));
+        self.magic_learning_dialog_entity = world.spawn((MagicLearningDialog::new(),));
+        self.quest_dialog_entity = world.spawn((QuestDialog::new(100.0, 100.0),));
+        self.trade_dialog_entity = world.spawn((TradeDialog::new(300.0, 150.0),));
         
-        // 创建技能学习对话框实体
-        let magic_learning_dialog_entity = world.spawn((
-            MagicLearningDialog::new(),
-        ));
+        world.spawn((SkillsDialog::new(),));
+        world.spawn((OptionsDialog::new(),));
         
-        // 创建任务对话框实体
-        let quest_dialog_entity = world.spawn((
-            QuestDialog::new(100.0, 100.0),
-        ));
-        
-        // 创建技能对话框实体
-        let _skills_dialog_entity = world.spawn((
-            SkillsDialog::new(),
-        ));
-        
-        // 创建选项对话框实体
-        let _options_dialog_entity = world.spawn((
-            OptionsDialog::new(),
-        ));
-        
-        // 创建交易窗口实体
-        let trade_dialog_entity = world.spawn((
-            TradeDialog::new(300.0, 150.0),
-        ));
-        
-        // 添加欢迎消息
-        // TODO: UISystem已删除，需要重新实现聊天消息功能
-        // UISystem::add_chat_message(
-        //     world,
-        //     chat_dialog_entity,
-        //     "欢迎来到传奇世界！".to_string(),
-        //     ChatType::System,
-        // );
-        // UISystem::add_chat_message(
-        //     world,
-        //     chat_dialog_entity,
-        //     "游戏测试中...".to_string(),
-        //     ChatType::Normal,
-        // );
-        
-        println!("✅ 游戏场景初始化完成！");
-        
-        // 🎯 创建按键帮助面板组件并spawn到world
-        // 优化说明: HotkeyHelpPanel改为ECS组件,不再作为场景字段
+        // 创建按键帮助面板
         let mut hotkey_help = HotkeyHelpPanel::new();
-        hotkey_help.set_font(ui_font_name.clone());
+        hotkey_help.set_font(self.ui_font_name.clone());
         world.spawn((hotkey_help,));
         
-        Ok(Self {
-            camera_entity,
-            time_entity,
-            config_entity,
-            visible_area_entity,
-            debug_counters_entity,
-            // TODO: network_system已删除
-            // network_system: ClientNetworkSystem::new(),
-            system_scheduler: UpdateRenderParallelScheduler::new(ExecutionMode::Sequential),
-            ui_font_name,  // 保留用于后续字体切换功能
-            main_dialog_entity,
-            inventory_dialog_entity,
-            character_dialog_entity,
-            skillbar_entities,
-            chat_dialog_entity,
-            magic_learning_dialog_entity,
-            quest_dialog_entity,
-            trade_dialog_entity,
-        })
+        println!("✅ GameScene初始化完成！");
+        Ok(())
     }
     
-    /// 处理网络事件（由GameApp调用）
-    pub fn handle_network_event(&mut self, _world: &mut World, _event: &GameEvent) {
-        // TODO: network_system已删除，需要重新实现网络事件处理
-        // self.network_system.process_event(world, event);
+    /// 创建新的游戏场景
+    /// 
+    /// # 架构设计 (完全ECS化)
+    /// - GameScene只是一个场景编排器，不持有任何游戏数据
+    /// - 不在构造函数中创建实体或加载资源
+    /// - 所有实体创建由NetworkEventSystem在update循环中处理服务器事件时完成
+    /// - 只初始化系统调度器
+    /// 
+    /// # 返回
+    /// - `Self`: 游戏场景实例（纯粹的系统调度器）
+
+    
+    // ========================================================================
+    // 网络事件处理 (委托给NetworkEventSystem)
+    // ========================================================================
+    
+    /// 处理网络事件（委托给NetworkEventSystem）
+    /// 
+    /// GameScene作为场景编排器，不直接处理网络事件细节
+    /// 所有网络事件处理逻辑都在NetworkEventSystem中
+    pub fn handle_network_event(&mut self, world: &mut World, event: &GameEvent) {
+        // 委托给NetworkEventSystem处理
+        crate::ecs::systems::NetworkEventSystem::process_event(world, event);
     }
     
     // ========================================================================
@@ -488,10 +321,18 @@ impl GameScene {
 impl Scene for GameScene {
     fn update(
         &mut self, 
-        _ctx: &mut Context, 
+        ctx: &mut Context, 
         world: &mut World,
-        _net_ctx: &Arc<NetContext>
+        net_ctx: &Arc<NetContext>
     ) -> GameResult<Option<SceneType>> {
+        // 🎯 首次update时初始化场景实体
+        self.initialize(ctx, world)?;
+        
+        // 🆕 处理网络事件
+        for event in net_ctx.try_recv() {
+            self.handle_network_event(world, &event);
+        }
+        
         // 帧率限制
         let config = world.get::<&RenderConfig>(self.config_entity).unwrap();
         let max_fps = config.max_fps;

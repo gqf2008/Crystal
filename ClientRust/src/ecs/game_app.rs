@@ -111,7 +111,12 @@ impl GameState {
             SceneType::Select => {
                 // SelectScene 将从 World 查询角色数据 (ECS 架构)
                 println!("🎭 创建SelectScene (角色数据在 World 中)");
-                let scene = SelectScene::new();
+                let mut scene = SelectScene::new();
+                
+                // 🔗 设置网络命令发送器，使场景能够发送StartGame等命令
+                scene.set_command_sender(self.net_ctx.command_sender());
+                tracing::info!("✅ SelectScene网络命令通道已设置");
+                
                 Box::new(scene)
             }
             SceneType::Game => {
@@ -119,14 +124,16 @@ impl GameState {
                 // 这对于切换账号/角色时非常重要,避免旧角色数据残留
                 self.clear_game_objects();
 
-                // 🆕 新架构：GameClient 不再存储状态
-                // 玩家位置、地图信息将通过 GameEvent (MapInformation, UserLocation) 获取
-                // GameEventSystem 会创建对应的 ECS 实体
-                println!("⏳ 等待服务器发送地图信息和玩家位置...");
+                // 🎯 ECS架构：完全延迟初始化
+                // - GameScene::new() 不需要任何参数，只创建空壳
+                // - 首次update时才初始化实体（需要Context和World）
+                // - NetworkEventSystem处理服务器事件创建游戏数据
+                
+                println!("🎮 切换到游戏场景...");
+                println!("⏳ 等待服务器发送MapInformation和UserInformation事件");
 
-                // GameScene 使用固定的 UI 设计分辨率 1024×768
-                // 不需要传递配置的窗口分辨率
-                Box::new(GameScene::new(ctx, &mut self.world, None, None)?)
+                // GameScene是纯粹的场景编排器，构造函数不需要参数
+                Box::new(GameScene::new())
             }
         };
 

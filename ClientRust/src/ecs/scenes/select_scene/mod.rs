@@ -259,20 +259,40 @@ impl Scene for SelectScene {
         // 🔄 从World同步角色列表到UI缓存
         // 🆕 正确架构: World存储CharacterList组件(单一实体)
         if self.character_select_ui.is_empty() {
-            if let Some((entity, char_list)) = world.query::<&crate::ecs::components::CharacterList>().iter().next() {
-                tracing::info!("💾 从World加载CharacterList: Entity({:?}), {} 个角色", entity, char_list.characters.len());
-                
-                // 同步到UI缓存(排序后)
-                let mut characters = char_list.characters.clone();
-                characters.sort_by(|a, b| b.last_access.cmp(&a.last_access));
-                
-                for character in characters {
-                    self.character_select_ui.add_character(character);
+            // 📦 Step 1: 先提取数据(只在借用作用域内)
+            let (should_select, first_name) = {
+                if let Some((entity, char_list)) = world.query::<&crate::ecs::components::CharacterList>().iter().next() {
+                    tracing::info!("💾 从World加载CharacterList: Entity({:?}), {} 个角色", entity, char_list.characters.len());
+                    
+                    // 同步到UI缓存(排序后)
+                    let mut characters = char_list.characters.clone();
+                    characters.sort_by(|a, b| b.last_access.cmp(&a.last_access));
+                    
+                    for character in &characters {
+                        self.character_select_ui.add_character(character.clone());
+                    }
+                    
+                    tracing::info!("✅ UI缓存同步完成: {} 个角色", self.character_select_ui.len());
+                    
+                    // 准备默认选中数据
+                    let should_select = !characters.is_empty();
+                    let first_name = if should_select {
+                        Some(characters[0].name.clone())
+                    } else {
+                        None
+                    };
+                    
+                    (should_select, first_name)
+                } else {
+                    tracing::warn!("⚠️ World中没有CharacterList组件");
+                    (false, None)
                 }
-                
-                tracing::info!("✅ UI缓存同步完成: {} 个角色", self.character_select_ui.len());
-            } else {
-                tracing::warn!("⚠️ World中没有CharacterList组件");
+            }; // ← 查询借用在这里结束
+            
+            // ✅ Step 2: 在借用释放后修改 World
+            if should_select {
+                self.select_character(0, world);
+                tracing::info!("🎯 默认选中第一个角色: {}", first_name.unwrap());
             }
         }
         

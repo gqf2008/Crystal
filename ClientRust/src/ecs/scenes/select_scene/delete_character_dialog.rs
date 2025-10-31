@@ -3,7 +3,6 @@
 
 use ggez::{Context, GameResult};
 use ggez::graphics::{self, Color, DrawParam, Rect, Canvas};
-use ggez::input::keyboard::KeyCode;
 use ggez::mint::Point2;
 
 /// Character deletion confirmation dialog

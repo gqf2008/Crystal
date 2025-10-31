@@ -9,11 +9,11 @@
 //   tx.send(GameEvent::LoginRequest {...});  // 游戏 → 网络
 //   let events = rx.try_iter().collect();    // 网络 → 游戏
 
+use crate::network::handlers::GameEvent;
 use anyhow::Result;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::io::{Read, Write};
-
-use crate::network::handlers::GameEvent;
+use std::time::Duration;
 
 /// 网络客户端 - 零大小类型
 ///
@@ -101,13 +101,13 @@ fn read_loop<S: Read + Send>(mut stream: S, tx: Sender<GameEvent>, to_write: Sen
             if matches!(event, GameEvent::Connected) {
                 // 立即发送ClientVersion到write线程
                 if let Err(e) = to_write.send(GameEvent::ClientVersionSend {
-                    version_hash: vec![0u8; 16] // TODO: 计算实际MD5
+                    version_hash: vec![0u8; 16], // TODO: 计算实际MD5
                 }) {
                     tracing::error!("Failed to send ClientVersionSend: {}", e);
                 }
                 tracing::info!("📤 Auto-sending ClientVersion to write thread");
             }
-            
+
             if tx.send(event).is_err() {
                 tracing::error!("Game thread disconnected");
                 return;
@@ -117,44 +117,61 @@ fn read_loop<S: Read + Send>(mut stream: S, tx: Sender<GameEvent>, to_write: Sen
 }
 
 /// 写线程：持续接收 GameEvent 并转换为 packet
+///
+/// 自动心跳机制: 如果超过 5 秒没有发送任何包,自动发送 KeepAlive 防止服务器超时断开
 fn write_loop<S: Write + Send>(mut stream: S, rx: Receiver<GameEvent>) {
+    let heartbeat_interval = Duration::from_secs(5); // 5秒发送一次心跳 (服务器超时是10秒)
+
     loop {
-        // 接收 GameEvent
-        let event = match rx.recv() {
-            Ok(e) => e,
-            Err(_) => {
+        // 使用 heartbeat_interval 作为超时时间,这样每个心跳周期都会检查一次
+        match rx.recv_timeout(heartbeat_interval) {
+            Ok(event) => {
+                // 收到游戏层的事件,立即发送
+                if let Err(e) = handle_outbound_event(&mut stream, event) {
+                    tracing::error!("Send packet error: {}", e);
+                    return;
+                }
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                // 超时 = 游戏层在 heartbeat_interval 时间内没有发送任何事件
+                // 发送心跳包
+                let keep_alive = GameEvent::KeepAliveSend {
+                    time: chrono::Utc::now().timestamp_millis(),
+                };
+                if let Err(e) = handle_outbound_event(&mut stream, keep_alive) {
+                    tracing::error!("❌ Send KeepAlive error: {}", e);
+                    return;
+                }
+                tracing::info!("💓 Auto-sent KeepAlive (preventing timeout)");
+            }
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
                 tracing::info!("Game thread closed, stopping write thread");
                 return;
             }
-        };
-
-        // 转换为 packet 并发送
-        if let Err(e) = handle_outbound_event(&mut stream, event) {
-            tracing::error!("Send packet error: {}", e);
-            return;
         }
     }
 }
 
 /// 分发 packet 到对应的 handler
-/// 
+///
 /// 根据 ServerPacketIds 枚举将不同类型的 packet 路由到专门的 handler 处理
 fn dispatch_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) -> Vec<GameEvent> {
     use crate::network::handlers::*;
     use mir2_shared::enums::ServerPacketIds as SP;
-    
+
     let opcode = header.opcode as u16;
-    
+
     // 根据 opcode 分发到对应的 handler
     match opcode {
         // ===== Connection & Authentication =====
         x if x == SP::Connected as u16
             || x == SP::ClientVersion as u16
             || x == SP::Disconnect as u16
-            || x == SP::KeepAlive as u16 => {
+            || x == SP::KeepAlive as u16 =>
+        {
             ConnectionHandler.handle(header, payload)
         }
-        
+
         // ===== Character Management =====
         x if x == SP::NewAccount as u16
             || x == SP::ChangePassword as u16
@@ -173,20 +190,22 @@ fn dispatch_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) 
             || x == SP::UserSlotsRefresh as u16
             || x == SP::LogOutSuccess as u16
             || x == SP::LogOutFailed as u16
-            || x == SP::ReturnToLogin as u16 => {
+            || x == SP::ReturnToLogin as u16 =>
+        {
             CharacterHandler.handle(header, payload)
         }
-        
+
         // ===== Map & World =====
         x if x == SP::MapInformation as u16
             || x == SP::NewMapInfo as u16
             || x == SP::WorldMapSetup as u16
             || x == SP::SearchMapResult as u16
             || x == SP::MapChanged as u16
-            || x == SP::TimeOfDay as u16 => {
+            || x == SP::TimeOfDay as u16 =>
+        {
             MovementHandler.handle(header, payload)
         }
-        
+
         // ===== Movement & Position =====
         x if x == SP::UserLocation as u16
             || x == SP::ObjectPlayer as u16
@@ -208,10 +227,11 @@ fn dispatch_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) 
             || x == SP::ObjectDash as u16
             || x == SP::UserDashFail as u16
             || x == SP::ObjectDashFail as u16
-            || x == SP::ObjectSitDown as u16 => {
+            || x == SP::ObjectSitDown as u16 =>
+        {
             MovementHandler.handle(header, payload)
         }
-        
+
         // ===== Combat & Battle =====
         x if x == SP::ObjectAttack as u16
             || x == SP::Struck as u16
@@ -240,16 +260,16 @@ fn dispatch_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) 
             || x == SP::Revived as u16
             || x == SP::ObjectRevived as u16
             || x == SP::ObjectHealth as u16
-            || x == SP::ObjectMana as u16 => {
+            || x == SP::ObjectMana as u16 =>
+        {
             CombatHandler.handle(header, payload)
         }
-        
+
         // ===== Chat =====
-        x if x == SP::Chat as u16
-            || x == SP::ObjectChat as u16 => {
+        x if x == SP::Chat as u16 || x == SP::ObjectChat as u16 => {
             ChatHandler.handle(header, payload)
         }
-        
+
         // ===== Items & Inventory =====
         x if x == SP::NewItemInfo as u16
             || x == SP::NewHeroInfo as u16
@@ -287,10 +307,11 @@ fn dispatch_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) 
             || x == SP::ItemSealChanged as u16
             || x == SP::EquipSlotItem as u16
             || x == SP::CombineItem as u16
-            || x == SP::ItemUpgraded as u16 => {
+            || x == SP::ItemUpgraded as u16 =>
+        {
             ItemHandler.handle(header, payload)
         }
-        
+
         // ===== NPC & Shop =====
         x if x == SP::NPCResponse as u16
             || x == SP::NPCGoods as u16
@@ -323,10 +344,11 @@ fn dispatch_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) 
             || x == SP::AwakeningLockedItem as u16
             || x == SP::Awakening as u16
             || x == SP::NPCPearlGoods as u16
-            || x == SP::NPCRequestInput as u16 => {
+            || x == SP::NPCRequestInput as u16 =>
+        {
             NpcHandler.handle(header, payload)
         }
-        
+
         // ===== Group =====
         x if x == SP::SwitchGroup as u16
             || x == SP::DeleteGroup as u16
@@ -334,10 +356,11 @@ fn dispatch_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) 
             || x == SP::GroupInvite as u16
             || x == SP::AddMember as u16
             || x == SP::GroupMembersMap as u16
-            || x == SP::SendMemberLocation as u16 => {
+            || x == SP::SendMemberLocation as u16 =>
+        {
             GroupHandler.handle(header, payload)
         }
-        
+
         // ===== Guild =====
         x if x == SP::GuildNoticeChange as u16
             || x == SP::GuildMemberChange as u16
@@ -351,30 +374,33 @@ fn dispatch_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) 
             || x == SP::GuildRequestWar as u16
             || x == SP::GuildBuffList as u16
             || x == SP::GuildTerritoryPage as u16
-            || x == SP::PurchaseGuildTerritory as u16 => {
+            || x == SP::PurchaseGuildTerritory as u16 =>
+        {
             GuildHandler.handle(header, payload)
         }
-        
+
         // ===== Trade =====
         x if x == SP::TradeRequest as u16
             || x == SP::TradeAccept as u16
             || x == SP::TradeGold as u16
             || x == SP::TradeItem as u16
             || x == SP::TradeConfirm as u16
-            || x == SP::TradeCancel as u16 => {
+            || x == SP::TradeCancel as u16 =>
+        {
             TradeHandler.handle(header, payload)
         }
-        
+
         // ===== Quest =====
         x if x == SP::ChangeQuest as u16
             || x == SP::CompleteQuest as u16
             || x == SP::ShareQuest as u16
             || x == SP::NewQuestInfo as u16
             || x == SP::GainedQuestItem as u16
-            || x == SP::DeleteQuestItem as u16 => {
+            || x == SP::DeleteQuestItem as u16 =>
+        {
             QuestHandler.handle(header, payload)
         }
-        
+
         // ===== 其他系统功能（暂未分类处理）=====
         x if x == SP::PlayerUpdate as u16
             || x == SP::PlayerInspect as u16
@@ -471,16 +497,21 @@ fn dispatch_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) 
             || x == SP::ExpireTimer as u16
             || x == SP::UpdateNotice as u16
             || x == SP::Roll as u16
-            || x == SP::SetCompass as u16 => {
+            || x == SP::SetCompass as u16 =>
+        {
             // 暂时返回 UnhandledPacket，等待后续实现
             tracing::debug!("📦 未实现的系统功能 packet: 0x{:04X}", opcode);
-            vec![GameEvent::UnhandledPacket { opcode: header.opcode }]
+            vec![GameEvent::UnhandledPacket {
+                opcode: header.opcode,
+            }]
         }
-        
+
         // 完全未知的 packet
         _ => {
             tracing::warn!("⚠️ 完全未知的 packet opcode: 0x{:04X}", opcode);
-            vec![GameEvent::UnhandledPacket { opcode: header.opcode }]
+            vec![GameEvent::UnhandledPacket {
+                opcode: header.opcode,
+            }]
         }
     }
 }
@@ -502,7 +533,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             serialize_packet(stream, &packet)?;
             tracing::info!("✅ Login packet serialized and sent");
         }
-        
+
         GameEvent::NewAccountRequest {
             account_id,
             password,
@@ -523,7 +554,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::ChangePasswordRequest {
             account_id,
             current_password,
@@ -536,9 +567,13 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         // ===== 角色管理 =====
-        GameEvent::NewCharacterRequest { name, class, gender } => {
+        GameEvent::NewCharacterRequest {
+            name,
+            class,
+            gender,
+        } => {
             use mir2_shared::enums::{MirClass, MirGender};
             let packet = client::NewCharacter {
                 name,
@@ -547,35 +582,35 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::DeleteCharacterRequest { index } => {
             let packet = client::DeleteCharacter {
                 character_index: index,
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::StartGameRequest { character_index } => {
             let packet = client::StartGame { character_index };
             serialize_packet(stream, &packet)?;
         }
-        
+
         // ===== 移动相关 =====
         GameEvent::WalkRequest { direction } => {
             let packet = client::movement::Walk { direction };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::RunRequest { direction } => {
             let packet = client::movement::Run { direction };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::TurnRequest { direction } => {
             let packet = client::movement::Turn { direction };
             serialize_packet(stream, &packet)?;
         }
-        
+
         // ===== 战斗相关 =====
         GameEvent::AttackRequest { direction, spell } => {
             use mir2_shared::enums::Spell;
@@ -585,14 +620,14 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::MagicRequest {
             spell,
             direction,
             target_id,
             location,
         } => {
-            use mir2_shared::{Point, enums::Spell};
+            use mir2_shared::{enums::Spell, Point};
             let (x, y) = location.unwrap_or((0, 0));
             let packet = client::combat::Magic {
                 spell: Spell::try_from(spell).unwrap_or(Spell::None),
@@ -602,21 +637,24 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         // ===== 聊天相关 =====
-        GameEvent::ChatRequest { message, chat_type: _ } => {
+        GameEvent::ChatRequest {
+            message,
+            chat_type: _,
+        } => {
             let packet = client::Chat { message };
             serialize_packet(stream, &packet)?;
             tracing::trace!("💬 Sent chat: {}", packet.message);
         }
-        
+
         // ===== 物品相关 =====
         GameEvent::PickupItemRequest { location: _ } => {
             // PickUp packet 没有参数，客户端自动拾取脚下的物品
             let packet = client::item::PickUp;
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::DropItemRequest { unique_id, count } => {
             let packet = client::item::DropItem {
                 unique_id,
@@ -625,12 +663,12 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::UseItemRequest { unique_id } => {
             let packet = client::item::UseItem { unique_id };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::MoveItemRequest { grid, from, to } => {
             use mir2_shared::enums::MirGridType;
             let packet = client::item::MoveItem {
@@ -640,14 +678,14 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         // ===== 组队相关 =====
         GameEvent::GroupInviteRequest { player_name } => {
             // 在 Mir2 中，组队邀请通过 AddMember 实现
             let packet = client::group::AddMember { name: player_name };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::GroupAcceptRequest => {
             // 接受组队邀请
             let packet = client::group::GroupInvite {
@@ -655,7 +693,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::GroupDeclineRequest => {
             // 拒绝组队邀请
             let packet = client::group::GroupInvite {
@@ -663,18 +701,18 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::GroupLeaveRequest => {
             // 离开组队（通过删除自己实现）
             tracing::warn!("GroupLeaveRequest not implemented - no direct packet");
         }
-        
+
         // ===== 公会相关 =====
         GameEvent::GuildInviteRequest { player_name: _ } => {
             // 公会邀请由服务器处理，客户端无法直接发起
             tracing::warn!("GuildInviteRequest not implemented - server-side only");
         }
-        
+
         GameEvent::GuildAcceptRequest => {
             // 接受公会邀请
             let packet = client::guild::GuildInvite {
@@ -682,7 +720,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::GuildDeclineRequest => {
             // 拒绝公会邀请
             let packet = client::guild::GuildInvite {
@@ -690,40 +728,40 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::GuildLeaveRequest => {
             // 离开公会（通过EditGuildMember实现）
             tracing::warn!("GuildLeaveRequest not implemented - use EditGuildMember");
         }
-        
+
         // ===== 交易相关 =====
         GameEvent::TradeRequest => {
             let packet = client::trade::TradeRequest;
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::TradeReplyRequest { accept } => {
             let packet = client::trade::TradeReply {
                 accept_invite: accept,
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::TradeGoldRequest { amount } => {
             let packet = client::trade::TradeGold { amount };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::TradeConfirmRequest { locked } => {
             let packet = client::trade::TradeConfirm { locked };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::TradeCancelRequest => {
             let packet = client::trade::TradeCancel;
             serialize_packet(stream, &packet)?;
         }
-        
+
         // ===== NPC 相关 =====
         GameEvent::NPCCallRequest { npc_object_id } => {
             let packet = client::CallNPC {
@@ -732,7 +770,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::BuyItemRequest {
             item_index,
             count,
@@ -746,7 +784,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::SellItemRequest { unique_id, count } => {
             let packet = client::npc::SellItem {
                 unique_id,
@@ -754,12 +792,12 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::RepairItemRequest { unique_id } => {
             let packet = client::npc::RepairItem { unique_id };
             serialize_packet(stream, &packet)?;
         }
-        
+
         // ===== 任务相关 =====
         GameEvent::AcceptQuestRequest {
             npc_index,
@@ -771,7 +809,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::FinishQuestRequest {
             quest_index,
             selected_item,
@@ -782,42 +820,42 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::AbandonQuestRequest { quest_index } => {
             let packet = client::quest::AbandonQuest {
                 quest_index: quest_index as i32,
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::ShareQuestRequest { quest_index } => {
             let packet = client::quest::ShareQuest {
                 quest_index: quest_index as i32,
             };
             serialize_packet(stream, &packet)?;
         }
-        
+
         // ===== 连接相关 =====
         GameEvent::KeepAliveSend { time } => {
             let packet = client::KeepAlive { time };
             serialize_packet(stream, &packet)?;
         }
-        
+
         GameEvent::ClientVersionSend { version_hash } => {
             tracing::info!("📤 Sending ClientVersion packet");
-            let packet = client::ClientVersion { 
-                version_hash: version_hash.clone() 
+            let packet = client::ClientVersion {
+                version_hash: version_hash.clone(),
             };
             serialize_packet(stream, &packet)?;
             tracing::info!("✅ ClientVersion packet sent");
         }
-        
+
         GameEvent::DisconnectRequest => {
             // 断开连接不需要发送packet，直接返回
             tracing::info!("Disconnect requested");
             return Ok(());
         }
-        
+
         // ===== 未实现的事件 =====
         _ => {
             tracing::warn!("⚠️ Unhandled outgoing event: {:?}", event);

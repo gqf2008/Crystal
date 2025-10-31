@@ -128,9 +128,12 @@ pub mod priority {
     pub const DEBUG_RENDER: u32 = 1100;
 }
 
-// ✅ update/+render/ 架构（推荐）
+// ✅ update/render 架构（推荐）
 pub mod update;
 pub mod render;
+pub mod network_event_system;  // 🆕 网络事件系统
+
+pub use network_event_system::NetworkEventSystem;
 
 use ggez::graphics::Canvas;
 use ggez::GameResult;
