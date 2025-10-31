@@ -92,14 +92,6 @@ pub struct GameScene {
 
 impl GameScene {
     /// 创建新的游戏场景
-    /// 
-    /// # 架构设计 (完全ECS化)
-    /// - GameScene只是一个场景编排器，不持有任何游戏数据
-    /// - 不在构造函数中创建实体或加载资源
-    /// - 所有实体创建由首次update调用的initialize()方法完成
-    /// - Context和World通过Scene trait的方法参数自动传递
-    /// 
-    /// # 返回
     /// - `Self`: 游戏场景实例（纯粹的系统调度器）
     pub fn new() -> Self {
         println!("🎮 GameScene构造函数 - 创建空壳场景");
@@ -435,6 +427,11 @@ impl Scene for GameScene {
     }
     
     fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, world: &World) -> GameResult {
+        // ⚠️ 如果还未初始化，跳过绘制
+        if !self.is_initialized() {
+            return Ok(());
+        }
+        
         // 🎯 在绘制前同步摄像机位置到玩家位置（确保首帧就正确）
         // 必须在独立的作用域中完成，确保可变引用被drop
         {

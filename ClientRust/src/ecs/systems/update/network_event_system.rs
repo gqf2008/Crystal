@@ -68,6 +68,12 @@ impl NetworkEventSystem {
             // ========================================================================
             // 角色信息 (UserInformation)
             // ========================================================================
+            GameEvent::UserInformation { location_x, location_y, hp, mp, gold } => {
+                tracing::info!("🎮 收到UserInformation，创建游戏世界: 位置({}, {}), HP={}, MP={}, Gold={}", 
+                              location_x, location_y, hp, mp, gold);
+                self.initialize_game_world(game_world, location_x, location_y, hp, mp, gold)
+            }
+            
             GameEvent::PlayerLocationChanged { x, y } => {
                 self.update_local_player_position(game_world, x, y)
             }
@@ -221,6 +227,85 @@ impl NetworkEventSystem {
                 Ok(())
             }
         }
+    }
+    
+    // ========================================================================
+    // 游戏世界初始化
+    // ========================================================================
+    
+    /// 初始化游戏世界（收到 UserInformation 后调用）
+    /// 
+    /// 创建必需的游戏实体：
+    /// 1. LocalPlayer - 本地玩家实体（带Position、Health、Mana等组件）
+    /// 2. GlobalEvents - 全局事件队列（用于系统间通信）
+    /// 3. MapData - 地图数据（TODO: 等待服务器MapInformation）
+    fn initialize_game_world(
+        &mut self,
+        game_world: &mut GameWorld,
+        location_x: i32,
+        location_y: i32,
+        hp: i32,
+        mp: i32,
+        gold: u32,
+    ) -> anyhow::Result<()> {
+        use crate::ecs::components::{
+            LocalPlayer, Position, Health, Mana, PlayerAppearance, GlobalEvents, Direction
+        };
+        use mir2_shared::enums::{MirClass, MirGender, MirDirection};
+        
+        let world = &mut game_world.world;
+        
+        // 1. 检查是否已存在 LocalPlayer
+        let has_local_player = world.query::<&LocalPlayer>().iter().next().is_some();
+        if has_local_player {
+            tracing::warn!("⚠️ LocalPlayer 已存在，跳过初始化");
+            return Ok(());
+        }
+        
+        // 2. 创建 GlobalEvents 组件（如果不存在）
+        let has_global_events = world.query::<&GlobalEvents>().iter().next().is_some();
+        if !has_global_events {
+            world.spawn((GlobalEvents::new(),));
+            tracing::info!("✅ 创建 GlobalEvents 组件");
+        }
+        
+        // 3. 创建本地玩家实体
+        // TODO: 从CharacterList获取角色外观信息（职业、性别、装备等）
+        // 目前使用默认值
+        let player_entity = world.spawn((
+            LocalPlayer,
+            Position {
+                x: location_x as f32,
+                y: location_y as f32,
+            },
+            Direction::new(MirDirection::Up), // 默认朝上
+            Health {
+                current: hp,
+                max: hp, // TODO: 服务器应该发送max_hp
+            },
+            Mana {
+                current: mp,
+                max: mp, // TODO: 服务器应该发送max_mp
+            },
+            // TODO: Gold组件不存在，暂时不添加。后续可从Inventory中获取金币数量
+            PlayerAppearance {
+                class: MirClass::Warrior, // TODO: 从CharacterList获取
+                gender: MirGender::Male,   // TODO: 从CharacterList获取
+                hair: 0,
+                weapon: -1,       // -1 表示无武器
+                armour: 0,        // 默认盔甲
+                weapon_effect: 0,
+                wing_effect: 0,
+            },
+        ));
+        
+        // 缓存玩家实体ID
+        self.local_player_entity = Some(player_entity);
+        
+        tracing::info!("✅ 游戏世界初始化完成: LocalPlayer({:?}) at ({}, {})", 
+                      player_entity, location_x, location_y);
+        
+        Ok(())
     }
     
     // ========================================================================

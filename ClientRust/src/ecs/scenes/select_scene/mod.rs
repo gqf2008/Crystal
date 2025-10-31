@@ -52,9 +52,6 @@ pub struct SelectScene {
     pub message_box: Option<MessageBox>,
     pub input_box: Option<InputBox>,
 
-    // Network
-    command_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::network::handlers::GameEvent>>,
-
     // Scene transition
     pub pending_scene_change: Option<SceneType>,
 
@@ -167,20 +164,11 @@ impl SelectScene {
             credits_dialog: None,
             message_box: None,
             input_box: None,
-            command_tx: None,
             pending_scene_change: None,
             bottom_buttons, // 🆕 使用 ButtonGroup
             hovered_button: None,
             pressed_button: None,
         }
-    }
-
-    /// 设置网络命令发送器
-    pub fn set_command_sender(
-        &mut self,
-        tx: tokio::sync::mpsc::UnboundedSender<crate::network::handlers::GameEvent>,
-    ) {
-        self.command_tx = Some(tx);
     }
 
     /// Select character by index
@@ -490,7 +478,7 @@ impl Scene for SelectScene {
         if let Some(ref mut dialog) = self.new_character_dialog {
             if dialog.visible {
                 if let Some(button) = dialog.handle_mouse_down(design_x as i32, design_y as i32) {
-                    self.handle_new_character_button(button);
+                    self.handle_new_character_button(button, net_ctx);
                     return Ok(()); // 对话框消费了点击事件
                 }
             }

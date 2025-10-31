@@ -26,6 +26,11 @@ impl SelectScene {
             GameEvent::StartGame { delay } => {
                 self.handle_start_game_delay(*delay as i64);
             }
+            GameEvent::UserInformation { location_x, location_y, .. } => {
+                // 🎯 收到UserInformation表示服务器已准备好，切换到游戏场景
+                tracing::info!("✅ 收到UserInformation，玩家位置({}, {})，切换到游戏场景...", location_x, location_y);
+                self.pending_scene_change = Some(SceneType::Game);
+            }
             _ => {
                 // 忽略其他事件
             }

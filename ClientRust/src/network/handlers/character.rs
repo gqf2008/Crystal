@@ -57,24 +57,13 @@ impl PacketHandler for CharacterHandler {
             // UserInformation (player data after login)
             x if x == ServerPacketIds::UserInformation as u16 => {
                 if let Ok(packet) = server::UserInformation::read_body(&mut cursor) {
-                    // Generate multiple events for complete player state
-                    events.push(GameEvent::PlayerLocationChanged {
-                        x: packet.location_x,
-                        y: packet.location_y,
-                    });
-                    
-                    events.push(GameEvent::HealthChanged {
-                        current: packet.hp as u32,
-                        max: packet.hp as u32,  // UserInformation没有max_hp字段
-                    });
-                    
-                    events.push(GameEvent::ManaChanged {
-                        current: packet.mp as u32,
-                        max: packet.mp as u32,  // UserInformation没有max_mp字段
-                    });
-                    
-                    events.push(GameEvent::GoldChanged {
-                        amount: packet.gold,
+                    // 🎯 推送UserInformation事件（SelectScene监听此事件切换到GameScene）
+                    events.push(GameEvent::UserInformation {
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        hp: packet.hp,
+                        mp: packet.mp,
+                        gold: packet.gold,
                     });
                     
                     tracing::info!("📊 User information loaded for player at ({}, {})", 

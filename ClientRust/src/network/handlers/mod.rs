@@ -100,6 +100,13 @@ pub enum GameEvent {
     CharacterCreated { name: String },
     CharacterDeleted { index: u32 },
     StartGame { delay: i32 },
+    UserInformation {  // 🎯 玩家进入游戏后的完整状态信息
+        location_x: i32,
+        location_y: i32,
+        hp: i32,
+        mp: i32,
+        gold: u32,
+    },
     
     // ========================================================================
     // 地图事件（Map Events）

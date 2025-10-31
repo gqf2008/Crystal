@@ -71,6 +71,10 @@ pub struct ImeEvent {
 /// 游戏逻辑事件（网络同步等）
 #[derive(Debug, Clone)]
 pub enum GameEvent {
+    /// 开始游戏（选择角色界面 → 游戏场景）
+    StartGame {
+        character_index: i32,
+    },
     /// 玩家移动请求
     PlayerMoveRequest {
         target_x: f32,

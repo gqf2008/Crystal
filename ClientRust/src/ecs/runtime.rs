@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use tokio::runtime::{Builder, Runtime};
 
 use crate::graphics;
 use crate::network as net;
@@ -8,8 +7,6 @@ use crate::version; // Use network module as 'net'
 
 pub struct ClientRuntime {
     pub settings: ClientSettings,
-    // pub keybinds: KeyBindSettings,  // TODO: 需要实现
-    pub tokio: Runtime,
 }
 
 impl ClientRuntime {
@@ -33,15 +30,6 @@ impl ClientRuntime {
         let settings =
             ClientSettings::load(use_test_config, None).context("loading client settings")?;
         Ok(settings)
-    }
-
-    /// 创建 Tokio runtime
-    pub fn create_tokio_runtime() -> Result<Runtime> {
-        Builder::new_multi_thread()
-            .enable_all()
-            .thread_name("mir2-client")
-            .build()
-            .context("building tokio runtime")
     }
 
     /// 初始化图像库系统（包括 MapLibs）
@@ -155,67 +143,5 @@ impl ClientRuntime {
         anyhow::bail!("无法加载任何可用的中文字体")
     }
 
-    // /// 完整的 bootstrap 流程（原有方法，用于传统启动）
-    // pub fn bootstrap(use_test_config: bool) -> Result<()> {
-    //     Self::init_logging("info");
-
-    //     let settings = Self::load_config(use_test_config)?;
-    //     let tokio = Self::create_tokio_runtime()?;
-    //     Self::load_core_libraries()?;
-
-    //     let runtime = Self { settings, tokio };
-
-    //    runtime
-    // }
-
-    // /// 创建 ClientRuntime 实例（供 ggez 等新架构使用）
-    // pub fn new(use_test_config: bool) -> Result<Self> {
-    //     let settings = Self::load_config(use_test_config)?;
-    //     let tokio = Self::create_tokio_runtime()?;
-
-    //     Ok(Self { settings, tokio })
-    // }
-
-    // fn run(self) -> Result<()> {
-    //     let Self { settings, tokio } = self;
-
-    //     tokio.block_on(async move {
-    //         // TODO: Initialize audio engine (not yet implemented)
-    //         // let audio = audio::AudioEngine::new(&settings.sound).context("initializing audio")?;
-
-    //         let mut net = net::NetworkStack::new(&settings.network);
-    //         net.connect(&settings.network)
-    //             .await
-    //             .context("initializing network")?;
-
-    //         let _version_hash = match version::client_binary_hash() {
-    //             Ok(hash) => {
-    //                 tracing::info!(
-    //                     hash = %version::hash_to_hex(&hash),
-    //                     "computed client version hash"
-    //                 );
-    //                 hash
-    //             }
-    //             Err(err) => {
-    //                 tracing::warn!(
-    //                     error = %err,
-    //                     "failed to compute client version hash, falling back to empty hash"
-    //                 );
-    //                 Vec::new()
-    //             }
-    //         };
-
-    //         // TODO: Launch UI (Forms-based windows)
-    //         // let launch_result = crate::ui::launch(&settings)
-    //         //     .await
-    //         //     .context("running ui")?;
-
-    //         // Save settings
-    //         settings.save().context("saving settings")?;
-
-    //         tracing::info!("Client completed");
-
-    //         Ok(())
-    //     })
-    // }
+   
 }

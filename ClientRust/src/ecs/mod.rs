@@ -6,9 +6,9 @@
 pub mod components;
 pub mod resources;
 pub mod runtime;
-pub mod system_scheduler;
+// pub mod system_scheduler;
 pub mod systems;
-pub mod update_render_parallel_scheduler; // ✅ update/+render/ 架构的并行调度器
+// pub mod update_render_parallel_scheduler; // ✅ update/+render/ 架构的并行调度器
 pub mod world; // 🆕 全局游戏资源 (Resources)
                // Map Loader 模块
 pub mod map_loader;
@@ -30,11 +30,11 @@ use std::ops::{Deref, DerefMut};
 
 pub use components::*;
 pub use resources::*; // 🆕 导出全局资源
-pub use system_scheduler::{SystemScheduler, SystemStats};
+//pub use system_scheduler::{SystemScheduler, SystemStats};
 pub use systems::update::state_update::{EventCleanupSystem, EventCollectorSystem}; // 🆕 导出事件系统
 pub use systems::update::state_update::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
 pub use systems::*;
-pub use update_render_parallel_scheduler::{ExecutionMode, UpdateRenderParallelScheduler}; // ✅ 新并行调度器
+//pub use update_render_parallel_scheduler::{ExecutionMode, UpdateRenderParallelScheduler}; // ✅ 新并行调度器
 pub use world::GameWorld;
 
 // Map Loader 导出
