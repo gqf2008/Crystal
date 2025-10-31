@@ -1,1071 +1,469 @@
-# ECS Systems - 五层架构完整文档
-**创建日期**: 2025-10-28  
-**版本**: v2.0 (五层架构重构版)  
-**状态**: ✅ 完整实现，编译通过
+# ECS Systems 架构文档 v3.0
 
-> 💡 **快速导航**: 本文档包含快速参考和详细说明。如需深入了解，请查看各章节。
-
----
-
-## 📚 目录
-
-1. [目录组织](#-目录组织)
-2. [五层架构设计](#-五层架构设计原则)
-3. [系统清单](#-系统清单完整列表)
-4. [数据流与调用顺序](#-数据流向)
-5. [关键设计模式](#-关键设计模式)
-6. [性能优化指南](#-性能优化指南)
-7. [下一步迭代计划](#-下一步迭代计划)
-8. [使用指南](#-使用指南)
-9. [常见问题](#-常见问题faq)
-10. [废弃系统](#-废弃系统deprecated)
+**版本**: v3.0 (重构完成版)  
+**最后更新**: 2025-01-XX  
+**状态**: ✅ 架构就绪，实现进行中
 
 ---
 
-## 📁 目录组织
+## 📚 快速导航
+
+- [架构概览](#-架构概览)
+- [系统清单](#-系统清单)
+- [数据流](#-数据流)
+- [使用指南](#-使用指南)
+- [架构审查报告](./ARCHITECTURE_REVIEW.md)
+
+---
+
+## 🏗️ 架构概览
+
+### 目录结构
 
 ```
 systems/
-├── layer1_input/          # Layer 1: 输入与网络层 (2系统, 468行)
-│   ├── input_collecting_system.rs   - 输入收集（鼠标/键盘/双击检测）
-│   ├── client_network_system.rs     - 网络通信（发送/接收包）
-│   └── mod.rs
+├── mod.rs                      # 主模块：系统类型定义、Schedulable trait
+├── README_v3.md                # 本文档
+├── ARCHITECTURE_REVIEW.md      # 架构审查报告
 │
-├── layer2_logic/          # Layer 2: 核心逻辑层 (8系统, 1,645行)
-│   ├── local_prediction_system.rs   - 客户端预测（寻路+零延迟）
-│   ├── movement_system.rs           - 物理移动（速度→位置）
-│   ├── reconciliation_system.rs     - 服务器校正（误差修正）
-│   ├── interpolation_system.rs      - 平滑插值（其他玩家/怪物）
-│   ├── monster_system.rs            - 怪物AI（326行）
-│   ├── npc_system.rs                - NPC交互（158行）
-│   ├── combat_system.rs             - 战斗逻辑（350行）
-│   ├── magic_cast_system.rs         - 技能施法（421行）
-│   └── mod.rs
+├── logic/                      # 游戏逻辑系统 (优先级 50-900)
+│   ├── input/                  # Layer 1: 输入层 (50-199)
+│   │   ├── input_system.rs             - 输入收集
+│   │   ├── player_control_system.rs    - 玩家控制
+│   │   └── game_event_system.rs        - 事件分发
+│   │
+│   ├── decision/               # Layer 2: 决策层 (200-299)
+│   │   ├── monster_ai_system.rs        - 怪物AI
+│   │   ├── npc_ai_system.rs            - NPC AI
+│   │   └── npc_dialogue_system.rs      - NPC对话
+│   │
+│   ├── combat_skill/           # Layer 3: 战斗技能层 (300-399)
+│   │   ├── skill_system.rs             - 技能系统
+│   │   └── combat_system.rs            - 战斗系统
+│   │
+│   ├── physics_movement/       # Layer 4: 物理移动层 (400-499)
+│   │   ├── movement_system.rs          - 移动系统
+│   │   ├── collision_system.rs         - 碰撞检测
+│   │   └── camera_follow_system.rs     - 相机跟随
+│   │
+│   ├── state_update/           # Layer 5: 状态更新层 (500-599)
+│   │   ├── animation_system.rs         - 动画更新
+│   │   ├── particle_system.rs          - 粒子特效
+│   │   ├── health_regen_system.rs      - 生命恢复
+│   │   ├── sound_system.rs             - 音效系统
+│   │   ├── camera_system.rs            - 相机系统
+│   │   └── map_update_system.rs        - 地图更新
+│   │
+│   └── event_cleanup_system.rs # Layer 6: 事件清理 (900)
 │
-├── layer3_presentation/   # Layer 3: 表现状态层 (4系统, 510行)
-│   ├── animation_state_system.rs         - 玩家动画状态决策
-│   ├── monster_animation_state_system.rs - 怪物动画状态决策
-│   ├── npc_action_system.rs              - NPC动作切换决策
-│   ├── sound_trigger_system.rs           - 音效触发决策
-│   └── mod.rs
-│
-├── layer4_rendering/      # Layer 4: 渲染层 (9+子模块, 4,144行)
-│   ├── render_system/               - 渲染系统（模块化，524行）
-│   │   ├── mod.rs                   - Y-sorting 核心
-│   │   ├── player.rs                - 角色渲染（684行）
-│   │   ├── monster.rs               - 怪物渲染（424行）
-│   │   ├── npc.rs                   - NPC + 特效渲染（299行）
-│   │   ├── tiles.rs                 - 地图渲染（396行）
-│   │   ├── item.rs                  - 物品渲染（67行）
-│   │   ├── ui.rs                    - UI渲染（211行）
-│   │   └── debug.rs                 - 调试渲染（323行）
-│   ├── camera_system.rs             - 相机系统（边缘滚动+跟随）
-│   ├── occlusion_system.rs          - 遮挡透明度
-│   ├── animation_playback_system.rs - 动画帧播放
-│   ├── tile_animation_system.rs     - 地图瓦片动画
-│   ├── movement_interpolation_system.rs - 移动插值
-│   ├── sound_playback_system.rs     - 音效播放（243行）
-│   ├── hud_render_system.rs         - HUD渲染（345行）
-│   ├── ui_render_system.rs          - UI渲染（186行）
-│   └── mod.rs
-│
-├── layer5_ui/             # Layer 5: UI 层 (9系统, 2,476行)
-│   ├── dialog_manager_system.rs     - 对话框管理（303行）
-│   ├── ui_event_dispatcher.rs       - UI事件分发（183行）
-│   ├── keyboard_shortcut_system.rs  - 键盘快捷键（205行）
-│   ├── mouse_event_system.rs        - 鼠标事件（212行）
-│   ├── item_system.rs               - 物品系统（326行）
-│   ├── quest_system.rs              - 任务系统（430行）
-│   ├── trade_system.rs              - 交易系统（385行）
-│   ├── magic_learning_system.rs     - 技能学习（164行）
-│   ├── ui_system.rs                 - 向后兼容入口（68行）
-│   └── mod.rs
-│
-├── mod.rs                 # 主模块导出
-├── README.md              # 本文档
-└── SYSTEM_CALL_ORDER.rs   # 系统调用顺序示例代码
+└── render/                     # 渲染系统 (优先级 1000-1999)
+    ├── map_system.rs           - 地图渲染
+    ├── sprite_system.rs        - 精灵渲染
+    ├── effect_system.rs        - 特效渲染
+    ├── ui_system.rs            - UI渲染
+    └── debug_system.rs         - 调试渲染（混合系统）
 ```
 
 **统计数据**:
-- **总系统数**: 32+ 系统
-- **总代码行数**: 9,243 行
-- **平均系统大小**: ~289 行（远低于500行限制）
-- **废弃系统**: 已全部删除 ✅
+- **总系统数**: 16 个系统
+- **逻辑系统**: 11 个（纯 System trait）
+- **渲染系统**: 4 个（纯 DrawSystem trait）
+- **混合系统**: 1 个（DebugSystem，HybridSystem trait）
 
 ---
 
-## 🎯 五层架构设计原则
+## 🎯 设计原则
 
-### 架构总览
+### 三类系统架构
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 5: UI层 (事件驱动)                                     │
-│ - UI事件处理、对话框管理、物品/任务/交易系统                  │
-│ - 不负责UI渲染（渲染由Layer 4完成）                           │
-└─────────────────────────────────────────────────────────────┘
-                              ↑
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 4: 渲染层 (只读组件)                                   │
-│ - 纯渲染逻辑、相机变换、Y-sorting、遮挡透明度、音效播放       │
-│ - 只读组件，不修改游戏逻辑状态                                │
-└─────────────────────────────────────────────────────────────┘
-                              ↑
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 3: 表现状态层 (决策)                                   │
-│ - 动画状态决策、音效触发决策、怪物动画决策                    │
-│ - 根据游戏逻辑状态决定表现效果（不实际播放）                  │
-└─────────────────────────────────────────────────────────────┘
-                              ↑
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 2: 核心逻辑层 (游戏规则)                               │
-│ - 客户端预测、物理移动、服务器校正、平滑插值                  │
-│ - 游戏核心规则（战斗、魔法、怪物AI、NPC交互）                 │
-└─────────────────────────────────────────────────────────────┘
-                              ↑
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 1: 输入与网络层 (数据采集)                             │
-│ - 捕获原始输入（鼠标/键盘）、接收网络数据包、转换为游戏命令   │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│ System (纯逻辑系统)                                    │
+│ - 只实现 update(&mut World, dt) -> GameResult        │
+│ - 用于: AI、物理、战斗、网络等逻辑处理                 │
+│ - 示例: MovementSystem, CombatSystem, AISystem       │
+└──────────────────────────────────────────────────────┘
+              ↓ 数据流 (组件读写)
+┌──────────────────────────────────────────────────────┐
+│ DrawSystem (纯渲染系统)                                │
+│ - 只实现 draw(&mut Canvas, &World) -> GameResult     │
+│ - 用于: 地图、精灵、UI等纯渲染任务                     │
+│ - 示例: MapRenderSystem, SpriteRenderSystem          │
+└──────────────────────────────────────────────────────┘
+              ↓ 特殊需求
+┌──────────────────────────────────────────────────────┐
+│ HybridSystem (混合系统)                                │
+│ - 同时实现 update() 和 draw()                         │
+│ - 用于: 粒子系统、调试系统等需要双重逻辑的场景         │
+│ - 示例: DebugSystem (收集性能数据 + 渲染)             │
+│ - ⚠️ 谨慎使用，大部分系统应该是纯系统                 │
+└──────────────────────────────────────────────────────┘
 ```
 
 ### 核心设计原则
 
-1. ✅ **单向数据流**: Layer 1 → Layer 2 → Layer 3 → Layer 4 → Layer 5
-2. ✅ **职责分离**: 每层只负责特定功能，不越界
+1. ✅ **职责分离**: logic/ 处理游戏逻辑，render/ 负责渲染
+2. ✅ **单向数据流**: Layer 1 → Layer 2 → ... → Layer 6 → Render
 3. ✅ **组件驱动**: 系统通过读写组件通信，不直接调用
-4. ✅ **无状态系统**: 系统本身不保存状态，所有状态存储在组件中
-5. ✅ **可测试性**: 每层可独立测试，易于单元测试
+4. ✅ **无状态系统**: 系统本身不保存状态，所有状态在 World 中
+5. ✅ **优先级排序**: 通过 `priority()` 明确执行顺序
 
 ---
 
-## 📊 系统清单（完整列表）
+## 📊 系统清单
 
-### Layer 1: 输入与网络层 (Input & Network)
+### Logic Systems (优先级 50-900)
 
-| 系统 | 文件 | 行数 | 职责 |
-|------|------|------|------|
-| **InputCollectingSystem** | `input_collecting_system.rs` | 205 | 输入收集、双击检测、写入PlayerInputComponent |
-| **ClientNetworkSystem** | `client_network_system.rs` | 263 | 接收网络包、写入ServerStateComponent |
+#### Layer 1: Input & Network (50-199)
 
-**职责**: 原始数据采集
-- 捕获鼠标/键盘输入
-- 接收网络数据包
-- 转换为游戏命令
-- 双击/长按检测
+| 系统 | 优先级 | 职责 | 状态 |
+|------|--------|------|------|
+| NetworkSyncSystem | 50 | 从网络线程接收数据包 → GlobalEvents | ⚠️ 禁用中 |
+| InputSystem | 100 | 收集键盘/鼠标输入 → GlobalEvents | ✅ 就绪 |
+| PlayerControlSystem | 110 | 处理玩家控制逻辑 | ✅ 就绪 |
+| GameEventSystem | 120 | 分发游戏事件 | ⚠️ 职责待明确 |
 
-**输出组件**:
-- `PlayerInputComponent` - 玩家输入意图（移动目标、按键）
-- `ServerStateComponent` - 服务器权威状态（位置校正、服务器事件）
+**输出组件**: GlobalEvents（keyboard_events, mouse_events, network_incoming, game_events）
 
 ---
 
-### Layer 2: 核心逻辑层 (Core Logic)
+#### Layer 2: AI & Decision (200-299)
 
-| 系统 | 文件 | 行数 | 职责 |
-|------|------|------|------|
-| **LocalPredictionSystem** | `local_prediction_system.rs` | 125 | 客户端预测移动，调用寻路算法 |
-| **MovementSystemV2** | `movement_system.rs` | 64 | 纯物理运动，应用速度到位置 |
-| **ReconciliationSystem** | `reconciliation_system.rs` | 122 | 服务器校正，修正预测误差 |
-| **InterpolationSystem** | `interpolation_system.rs` | 79 | 其他实体平滑插值移动 |
-| **MonsterSystem** | `monster_system.rs` | 326 | 怪物AI、攻击逻辑、死亡处理 |
-| **NPCSystem** | `npc_system.rs` | 158 | NPC对话、任务触发、商店交互 |
-| **CombatSystem** | `combat_system.rs` | 350 | 战斗计算、伤害系统、技能效果 |
-| **MagicCastSystem** | `magic_cast_system.rs` | 421 | 魔法施放、MP消耗、冷却管理 |
+| 系统 | 优先级 | 职责 | 状态 |
+|------|--------|------|------|
+| MonsterAISystem | 200 | 怪物AI逻辑 | ✅ 就绪 |
+| NpcAISystem | 210 | NPC AI逻辑 | ✅ 就绪 |
+| NpcDialogueSystem | 220 | NPC对话逻辑 | ✅ 就绪 |
 
-**职责**: 游戏规则执行
-- **客户端预测**: 零延迟响应玩家输入
-- **物理移动**: 纯物理运动，应用速度到位置
-- **服务器校正**: 比较预测与服务器状态，校正误差
-- **平滑插值**: 对其他玩家/怪物应用平滑移动
-- **游戏核心规则**: 战斗系统、魔法系统、怪物AI、NPC交互
-
-**输入组件**:
-- `PlayerInputComponent` (Layer 1 写入)
-- `ServerStateComponent` (Layer 1 写入)
-
-**输出组件**:
-- `MovementStateComponent` - 移动状态
-- `VelocityComponent` - 速度向量
-- `PathComponent` - 路径队列
-- `PredictionComponent` - 预测状态
-
-#### 💡 客户端预测工作流
-
-```
-玩家点击地面
-    ↓
-LocalPredictionSystem
-├─ 读取 PlayerInputComponent
-├─ 调用寻路算法（A*）
-├─ 立即写入 Velocity（不等服务器）
-└─ 记录 PredictionComponent
-    ↓
-MovementSystemV2
-└─ 应用速度 → 更新 Position
-    ↓
-ClientNetworkSystem
-└─ 发送移动命令到服务器
-    ↓ (100ms 网络延迟)
-服务器返回权威位置
-    ↓
-ReconciliationSystem
-├─ 比较预测 vs 服务器状态
-└─ 如果误差 > 阈值，平滑校正
-```
+**设计评价**: ⭐⭐⭐⭐⭐ 职责最清晰的层
 
 ---
 
-### Layer 3: 表现状态层 (Presentation State)
+#### Layer 3: Combat & Skills (300-399)
 
-| 系统 | 文件 | 行数 | 职责 |
-|------|------|------|------|
-| **AnimationStateSystem** | `animation_state_system.rs` | 166 | 玩家动画状态决策 |
-| **MonsterAnimationStateSystem** | `monster_animation_state_system.rs` | 68 | 怪物动画状态决策 |
-| **NPCActionSystem** | `npc_action_system.rs` | 90 | NPC动作状态决策 |
-| **SoundTriggerSystem** | `sound_trigger_system.rs` | 154 | 音效触发决策 |
+| 系统 | 优先级 | 职责 | 状态 |
+|------|--------|------|------|
+| SkillSystem | 300 | 技能施放、冷却管理、MP消耗 | ✅ 就绪 |
+| CombatSystem | 310 | 伤害计算、命中判定、暴击 | ✅ 就绪 |
 
-**职责**: 表现决策（不实际渲染/播放）
-- **动画状态决策**: 根据移动状态决定播放什么动画（Idle/Walk/Run/Attack）
-- **音效触发决策**: 根据游戏事件决定播放什么音效
-- **怪物动画决策**: 根据怪物AI状态决定动画
-- **NPC动作决策**: 根据对话状态决定NPC动画
-- **粒子特效创建**: (未来扩展)
-
-**输入组件**:
-- `MovementStateComponent` (Layer 2 写入)
-- `Player` (方向、武器等)
-- `GameEvent` (事件列表)
-- `AIAction` (怪物AI状态)
-- `Velocity` (移动速度)
-
-**输出组件**:
-- `AnimationStateComponent` - 动画状态
-- `SoundTriggerComponent` - 音效触发（Layer 4 读取并播放）
-- `Animation` (怪物动画)
-- `ParticleEmitterComponent` - 粒子发射器（未来）
-
-**重要**: Layer 3 只决定"应该播放什么"，不实际播放！
+**输入依赖**: Layer 1 的玩家输入, Layer 2 的AI决策  
+**输出影响**: 修改 Health/Mana 组件, 发布网络命令, 触发特效
 
 ---
 
-### Layer 4: 渲染层 (Rendering)
+#### Layer 4: Physics & Movement (400-499)
 
-| 系统 | 文件 | 行数 | 职责 |
-|------|------|------|------|
-| **RenderSystem** | `render_system/mod.rs` | 524 | 主渲染系统，Y-sorting，地图/角色渲染 |
-| └─ `tiles.rs` | | 396 | 地图瓦片渲染（Back/Middle/Front三层） |
-| └─ `player.rs` | | 684 | 玩家角色渲染、装备显示 |
-| └─ `monster.rs` | | 424 | 怪物渲染、名字/血条显示 |
-| └─ `npc.rs` | | 299 | NPC渲染、对话图标显示 |
-| └─ `item.rs` | | 67 | 地面物品渲染 |
-| └─ `debug.rs` | | 323 | 调试信息渲染（网格、坐标、碰撞框） |
-| └─ `ui.rs` | | 211 | UI渲染（对话框、背包等） |
-| **CameraSystem** | `camera_system.rs` | 133 | 相机边缘滚动、跟随玩家、平滑移动 |
-| **OcclusionSystem** | `occlusion_system.rs` | 134 | 计算遮挡透明度（玩家前方物体半透明） |
-| **AnimationPlaybackSystem** | `animation_playback_system.rs` | 40 | 动画帧播放（读取Layer 3的AnimationState） |
-| **TileAnimationSystem** | `tile_animation_system.rs` | 53 | 地图动画瓦片更新 |
-| **MovementInterpolationSystem** | `movement_interpolation_system.rs` | 101 | 渲染插值（平滑移动显示） |
-| **SoundPlaybackSystem** | `sound_playback_system.rs` | 243 | 音效播放（读取Layer 3的SoundTrigger） |
-| **HUDRenderSystem** | `hud_render_system.rs` | 345 | HUD渲染（血条、MP条、经验条、小地图） |
-| **UIRenderSystem** | `ui_render_system.rs` | 186 | UI渲染（对话框UI渲染，数据来自Layer 5） |
-
-**职责**: 纯渲染逻辑，不包含游戏逻辑
-- **纯渲染**: 从组件读取数据，绘制到屏幕
-- **Y-sorting**: 深度排序，确保正确遮挡关系
-- **相机变换**: 世界坐标 → 屏幕坐标
-- **遮挡透明度**: 玩家前方物体半透明
-- **音效播放**: 读取Layer 3的音效触发决策，实际播放
-- **HUD渲染**: 生命值、魔法值、经验条、小地图
-- **UI渲染**: 对话框、背包、技能栏（数据来自Layer 5）
-
-**输入组件（只读）**:
-- `Position`
-- `AnimationStateComponent` (Layer 3 写入)
-- `SoundTriggerComponent` (Layer 3 写入)
-- `Camera`
-- `MapData`
-
-**输出**: 屏幕图像、音频播放
-
-#### 🎨 渲染流程
-
-```
-RenderSystem::draw_game_world()
-│
-├─ 1. 渲染地面层 (Back + Middle)
-│  └─ draw_tiles() [TileAnimationSystem 更新动画瓦片]
-│
-├─ 2. 渲染实体层 (玩家、怪物、NPC、物品)
-│  ├─ 收集所有实体
-│  ├─ Y-sorting（按Y坐标排序）
-│  ├─ draw_player() [读取 AnimationStateComponent]
-│  ├─ draw_monster() [读取 Animation]
-│  ├─ draw_npc()
-│  └─ draw_item()
-│
-├─ 3. 渲染前景层 (Front tiles)
-│  └─ OcclusionSystem 计算透明度
-│
-├─ 4. 渲染 HUD
-│  └─ HUDRenderSystem::draw()
-│
-└─ 5. 渲染 UI
-   └─ UIRenderSystem::draw() [读取 Layer 5 的对话框数据]
-```
+| 系统 | 优先级 | 职责 | 状态 |
+|------|--------|------|------|
+| MovementSystem | 400 | 纯物理移动: Position += Velocity * dt | ✅ 就绪 |
+| CollisionSystem | 410 | 碰撞检测与位置修正 | ✅ 就绪 |
+| CameraFollowSystem | 420 | 相机跟随玩家移动 | ⚠️ 与CameraSystem重叠 |
 
 ---
 
-### Layer 5: UI层 (User Interface)
+#### Layer 5: State Update (500-599)
 
-| 系统 | 文件 | 行数 | 职责 |
-|------|------|------|------|
-| **DialogManagerSystem** | `dialog_manager_system.rs` | 303 | 对话框管理（打开/关闭/层级） |
-| **UIEventDispatcher** | `ui_event_dispatcher.rs` | 183 | UI事件分发（点击/悬停/输入） |
-| **KeyboardShortcutSystem** | `keyboard_shortcut_system.rs` | 205 | 键盘快捷键处理（F1-F12） |
-| **MouseEventSystem** | `mouse_event_system.rs` | 212 | 鼠标事件处理（点击/拖拽） |
-| **ItemSystem** | `item_system.rs` | 326 | 背包系统、装备穿戴、物品使用 |
-| **QuestSystem** | `quest_system.rs` | 430 | 任务系统、任务进度追踪 |
-| **TradeSystem** | `trade_system.rs` | 385 | 交易系统、商店系统 |
-| **MagicLearningSystem** | `magic_learning_system.rs` | 164 | 技能学习、技能升级 |
-| **UISystem** | `ui_system.rs` | 68 | 向后兼容入口（实际功能已拆分） |
-
-**职责**: UI 交互和数据管理
-- **UI事件处理**: 按钮点击、输入框、对话框交互
-- **UI数据更新**: 背包、任务列表、交易界面
-- **对话框管理**: 打开/关闭对话框、层级管理
-- **键盘快捷键**: F1-F12快捷键处理
-- **鼠标事件**: 鼠标悬停、拖拽、右键菜单
-
-**输入**: 游戏事件（GameEvent）、用户输入
-
-**输出**: UI 组件数据更新
-
-**重要说明**:
-- ❌ **不负责UI渲染**: UI渲染由 Layer 4 的 `UIRenderSystem` 完成
-- ✅ **事件驱动**: 系统响应用户输入，更新UI数据
-- ✅ **对话框架构**: 使用 Dialog 组件存储UI状态，Render System 读取并渲染
-
-#### 📦 UI系统重构历史
-
-```
-旧架构 (已废弃):
-  UISystem (470行) - 包含所有UI逻辑
-
-新架构 (当前):
-  ├─ DialogManagerSystem (303行) - 对话框管理
-  ├─ UIEventDispatcher (183行) - 事件分发
-  ├─ KeyboardShortcutSystem (205行) - 快捷键
-  └─ MouseEventSystem (212行) - 鼠标事件
-  
-重构完成时间: 2025-10-28
-拆分原因: UISystem 过大（470行），职责不清晰
-```
+| 系统 | 优先级 | 职责 | 状态 |
+|------|--------|------|------|
+| AnimationSystem | 500 | 动画帧更新、状态切换 | ✅ 就绪 |
+| ParticleSystem | 510 | 粒子特效更新 | ✅ 就绪 |
+| HealthRegenSystem | 515 | 生命值/魔法值自动恢复 | ✅ 就绪 |
+| SoundSystem | 520 | 音效播放 | ✅ 就绪 |
+| CameraSystem | 530 | 相机控制（边缘滚动、缩放） | ⚠️ 与CameraFollowSystem重叠 |
+| MapUpdateSystem | 540 | 地图动画瓦片、光照更新 | ✅ 就绪 |
 
 ---
 
-## � 数据流向
+#### Layer 6: Event Cleanup (900)
 
-### 数据流示意图
+| 系统 | 优先级 | 职责 | 状态 |
+|------|--------|------|------|
+| EventCleanupSystem | 900 | 清理 GlobalEvents，防止事件污染 | ✅ 就绪 |
+
+**设计亮点**: 
+- 优先级最低，确保所有系统处理完事件后再清理
+- 只清理临时事件，保留统计数据
+- 不清理网络命令 channel（由网络线程消费）
+
+---
+
+### Render Systems (优先级 1000-1999)
+
+| 系统 | 优先级 | 类型 | 职责 | 状态 |
+|------|--------|------|------|------|
+| MapRenderSystem | 1000 | DrawSystem | 渲染地图瓦片 | 🚧 空实现 |
+| SpriteRenderSystem | 1100 | DrawSystem | 渲染精灵（玩家/怪物/NPC） | 🚧 空实现 |
+| EffectRenderSystem | 1200 | DrawSystem | 渲染粒子特效 | 🚧 空实现 |
+| UIRenderSystem | 1300 | DrawSystem | 渲染UI界面 | 🚧 空实现 |
+| DebugSystem | u32::MAX-1 | HybridSystem | 渲染调试信息 | 🚧 空实现 |
+
+**注意**: 所有渲染系统当前都是空实现（框架已就位）
+
+---
+
+## 🔄 数据流
+
+### GlobalEvents 事件总线
 
 ```
 用户输入/网络包
     ↓
-┌─────────────────────────────────────────┐
-│ Layer 1: InputCollectingSystem          │
-│          ClientNetworkSystem             │
-├─────────────────────────────────────────┤
-│ 写入: PlayerInputComponent               │
-│       ServerStateComponent               │
-└─────────────────────────────────────────┘
-    ↓ (读取输入组件)
-┌─────────────────────────────────────────┐
-│ Layer 2: LocalPredictionSystem          │
-│          MovementSystemV2                │
-│          ReconciliationSystem            │
-│          InterpolationSystem             │
-├─────────────────────────────────────────┤
-│ 写入: VelocityComponent                  │
-│       PathComponent                      │
-│       MovementStateComponent             │
-│       PredictionComponent                │
-└─────────────────────────────────────────┘
-    ↓ (读取移动状态)
-┌─────────────────────────────────────────┐
-│ Layer 3: AnimationStateSystem            │
-│          MonsterAnimationStateSystem     │
-│          NPCActionSystem                 │
-│          SoundTriggerSystem              │
-├─────────────────────────────────────────┤
-│ 写入: AnimationStateComponent            │
-│       SoundTriggerComponent              │
-└─────────────────────────────────────────┘
-    ↓ (读取表现状态)
-┌─────────────────────────────────────────┐
-│ Layer 4: RenderSystem                    │
-│          CameraSystem                    │
-│          AnimationPlaybackSystem         │
-│          SoundPlaybackSystem             │
-├─────────────────────────────────────────┤
-│ 输出: 屏幕图像 + 音频播放                 │
-└─────────────────────────────────────────┘
-    ↓ (UI事件)
-┌─────────────────────────────────────────┐
-│ Layer 5: DialogManagerSystem             │
-│          UIEventDispatcher               │
-│          ItemSystem / QuestSystem        │
-├─────────────────────────────────────────┤
-│ 输出: UI 组件数据更新                     │
-└─────────────────────────────────────────┘
+InputSystem (Layer 1)
+    ↓
+GlobalEvents 组件
+├─ keyboard_events    (键盘事件队列)
+├─ mouse_events       (鼠标事件队列)
+├─ ime_events         (IME输入事件)
+├─ game_events        (游戏事件队列)
+└─ network_incoming   (网络数据包队列)
+    ↓
+PlayerControlSystem (Layer 1)
+AISystem (Layer 2)
+CombatSystem (Layer 3)
+... (其他系统读取并处理)
+    ↓
+EventCleanupSystem (Layer 6)
+清理所有事件队列
 ```
 
-### 组件读写权限表
+### 系统执行顺序
 
-| 组件 | Layer 1 | Layer 2 | Layer 3 | Layer 4 | Layer 5 |
-|------|---------|---------|---------|---------|---------|
-| **PlayerInputComponent** | ✍️ 写 | 📖 读 | - | - | - |
-| **ServerStateComponent** | ✍️ 写 | 📖 读 | - | - | - |
-| **VelocityComponent** | - | ✍️ 写 | 📖 读 | 📖 读 | - |
-| **PathComponent** | - | ✍️ 写 | 📖 读 | - | - |
-| **MovementStateComponent** | - | ✍️ 写 | 📖 读 | - | - |
-| **PredictionComponent** | - | ✍️ 写 | - | - | - |
-| **AnimationStateComponent** | - | - | ✍️ 写 | 📖 读 | - |
-| **SoundTriggerComponent** | - | - | ✍️ 写 | 📖 读 | - |
-| **Position** | - | ✍️ 写 | 📖 读 | 📖 读 | 📖 读 |
-| **Camera** | - | - | - | ✍️ 写 | - |
-| **Dialog** | - | - | - | 📖 读 | ✍️ 写 |
+```
+每帧循环:
 
-**重要**: 严格遵守读写权限，避免跨层写入导致的数据竞争！
+Update 阶段 (logic 系统):
+  50  → NetworkSyncSystem     (接收网络包)
+  100 → InputSystem           (收集输入)
+  110 → PlayerControlSystem   (玩家控制)
+  120 → GameEventSystem       (事件分发)
+  ────────────────────────────
+  200 → MonsterAISystem       (怪物AI)
+  210 → NpcAISystem           (NPC AI)
+  220 → NpcDialogueSystem     (对话逻辑)
+  ────────────────────────────
+  300 → SkillSystem           (技能施放)
+  310 → CombatSystem          (战斗计算)
+  ────────────────────────────
+  400 → MovementSystem        (物理移动)
+  410 → CollisionSystem       (碰撞检测)
+  420 → CameraFollowSystem    (相机跟随)
+  ────────────────────────────
+  500 → AnimationSystem       (动画更新)
+  510 → ParticleSystem        (粒子更新)
+  515 → HealthRegenSystem     (生命恢复)
+  520 → SoundSystem           (音效播放)
+  530 → CameraSystem          (相机控制)
+  540 → MapUpdateSystem       (地图更新)
+  ────────────────────────────
+  900 → EventCleanupSystem    (事件清理)
 
----
-
-## 🔄 系统调用顺序
-
-### 游戏主循环执行顺序
-
-
-```rust
-// ============================================================================
-// 游戏主循环 (game_scene.rs)
-// ============================================================================
-
-fn update(&mut self, ctx: &mut Context) -> GameResult {
-    let delta_time = ctx.time.delta().as_secs_f32();
-    
-    // ==================== Layer 1: 输入与网络层 ====================
-    InputCollectingSystem::update(&mut self.world, ctx);
-    ClientNetworkSystem::send_commands(&mut self.world, &self.network_tx);
-    
-    // ==================== Layer 2: 核心逻辑层 ====================
-    // 客户端预测与移动
-    LocalPredictionSystem::update(&mut self.world, &self.map_data, delta_time);
-    MovementSystemV2::update(&mut self.world, delta_time);
-    ReconciliationSystem::update(&mut self.world, delta_time);
-    InterpolationSystem::update(&mut self.world, delta_time);
-    
-    // 游戏逻辑
-    MonsterSystem::update(&mut self.world, delta_time);
-    NPCSystem::update(&mut self.world, delta_time);
-    CombatSystem::update(&mut self.world, delta_time);
-    MagicCastSystem::update(&mut self.world, delta_time);
-    
-    // ==================== Layer 3: 表现状态层 ====================
-    AnimationStateSystem::update(&mut self.world, delta_time);
-    MonsterAnimationStateSystem::update(&mut self.world, delta_time);
-    NPCActionSystem::update(&mut self.world, delta_time);
-    SoundTriggerSystem::update(&mut self.world, delta_time);
-    
-    // ==================== Layer 4: 渲染准备 ====================
-    CameraSystem::update(&mut self.world);
-    OcclusionSystem::update(&mut self.world);
-    TileAnimationSystem::update(&mut self.world, animation_count);
-    AnimationPlaybackSystem::update(&mut self.world, delta_time);
-    MovementInterpolationSystem::update(&mut self.world);
-    
-    Ok(())
-}
-
-fn draw(&mut self, ctx: &mut Context) -> GameResult {
-    let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
-    
-    // ==================== Layer 4: 渲染执行 ====================
-    RenderSystem::draw_game_world(
-        ctx, &mut canvas, &self.world,
-        &self.player_pos, &self.camera, &self.render_config,
-        self.visible_area_entity, self.debug_counters_entity
-    )?;
-    
-    HUDRenderSystem::draw(ctx, &mut canvas, &self.world)?;
-    UIRenderSystem::draw(ctx, &mut canvas, &self.world)?;
-    SoundPlaybackSystem::update(&mut self.world, &self.audio_engine);
-    
-    canvas.finish(ctx)?;
-    Ok(())
-}
-
-// ==================== Layer 5: UI事件处理 ====================
-fn mouse_button_down_event(&mut self, ctx: &mut Context, button: MouseButton, x: f32, y: f32) {
-    KeyboardShortcutSystem::process_mouse_down(&mut self.world, button, x, y);
-    MouseEventSystem::process_mouse_down(&mut self.world, button, x, y);
-    DialogManagerSystem::process_mouse_down(&mut self.world, button, x, y);
-}
-
-fn key_down_event(&mut self, ctx: &mut Context, input: KeyInput) {
-    KeyboardShortcutSystem::process_key_down(&mut self.world, input.keycode);
-}
+Draw 阶段 (render 系统):
+  1000 → MapRenderSystem      (地图渲染)
+  1100 → SpriteRenderSystem   (精灵渲染)
+  1200 → EffectRenderSystem   (特效渲染)
+  1300 → UIRenderSystem       (UI渲染)
+  MAX  → DebugSystem          (调试渲染)
 ```
 
 ---
 
-## 🎨 关键设计模式
+## 🛠️ 使用指南
 
-### 1. 客户端预测 + 服务器校正模式
+### 如何添加新系统
 
-**问题**: 网络延迟导致操作不流畅  
-**解决方案**: 客户端立即响应，服务器事后校正
+#### 1. 创建系统文件
+
+选择合适的目录：
+- 逻辑系统 → `logic/<layer>/`
+- 渲染系统 → `render/`
 
 ```rust
-// 客户端预测（LocalPredictionSystem）
-pub fn update(world: &mut World, map_data: &MapData, _dt: f32) {
-    // 1. 读取玩家输入
-    let input = world.get::<PlayerInputComponent>(player_entity);
+// logic/combat_skill/damage_system.rs
+
+use crate::ecs::systems::System;
+use ggez::GameResult;
+
+pub struct DamageSystem;
+
+impl DamageSystem {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl System for DamageSystem {
+    fn priority(&self) -> u32 {
+        315 // 在 CombatSystem 之后执行
+    }
+
+    fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
+        // 实现伤害计算逻辑
+        Ok(())
+    }
+}
+```
+
+#### 2. 在模块中注册
+
+编辑对应的 `mod.rs`:
+
+```rust
+// logic/combat_skill/mod.rs
+
+pub mod damage_system;  // 添加模块声明
+pub use damage_system::DamageSystem;  // 导出系统
+```
+
+#### 3. 使用宏批量注册
+
+在 `logic/mod.rs` 中添加到宏调用:
+
+```rust
+logic_system!(
+    // ... 现有系统
+    super::combat_skill::DamageSystem,  // 添加新系统
+);
+```
+
+#### 4. 在 SystemScheduler 中初始化
+
+编辑 `game_scene.rs`:
+
+```rust
+fn create_system_scheduler() -> SystemScheduler {
+    let mut scheduler = SystemScheduler::new();
     
-    // 2. 立即计算路径并移动（不等服务器）
-    let path = Pathfinding::find_path(...);
-    velocity.set(path.next_velocity());
+    // ... 现有系统
     
-    // 3. 记录预测状态
-    prediction.record(position, velocity, sequence_number);
-}
-
-// 服务器校正（ReconciliationSystem）
-pub fn update(world: &mut World, _dt: f32) {
-    // 1. 读取服务器权威位置
-    let server_state = world.get::<ServerStateComponent>(player_entity);
+    // Layer 3: Combat & Skills
+    scheduler.add_system(SkillSystem);
+    scheduler.add_system(CombatSystem);
+    scheduler.add_system(DamageSystem::new());  // 添加新系统
     
-    // 2. 比较预测 vs 服务器
-    let error = server_state.position - prediction.position;
-    
-    // 3. 如果误差过大，平滑校正
-    if error.length() > THRESHOLD {
-        position.smooth_correct(server_state.position, LERP_FACTOR);
-    }
-}
-```
-
-### 2. 状态机模式（动画状态管理）
-
-**问题**: 复杂的动画切换逻辑难以维护  
-**解决方案**: 使用状态机管理动画转换
-
-```rust
-pub enum AnimationState {
-    Idle,
-    Walk,
-    Run,
-    Attack,
-    Spell,
-    Die,
-}
-
-impl AnimationStateSystem {
-    pub fn update(world: &mut World, _dt: f32) {
-        for (movement_state, mut animation_state) in world.query_mut::<...>() {
-            let desired_state = match movement_state.state {
-                MovementState::Idle => AnimationState::Idle,
-                MovementState::Walking => AnimationState::Walk,
-                MovementState::Running => AnimationState::Run,
-            };
-            
-            // 状态切换逻辑
-            if animation_state.current != desired_state {
-                animation_state.transition_to(desired_state);
-            }
-        }
-    }
-}
-```
-
-### 3. 事件驱动模式（音效/UI）
-
-**问题**: 直接调用导致耦合严重  
-**解决方案**: 使用事件队列解耦
-
-```rust
-// Layer 3: 触发音效事件
-SoundTriggerSystem::update(world, events) {
-    for event in events {
-        match event {
-            GameEvent::Attack => {
-                // 写入音效触发组件
-                world.insert_one(entity, SoundTrigger {
-                    sound_id: "attack_sword.wav",
-                    volume: 1.0,
-                });
-            }
-        }
-    }
-}
-
-// Layer 4: 播放音效
-SoundPlaybackSystem::update(world, audio_engine) {
-    for (entity, sound_trigger) in world.query::<&SoundTrigger>() {
-        audio_engine.play(sound_trigger.sound_id, sound_trigger.volume);
-        // 播放后移除触发组件
-        world.remove_one::<SoundTrigger>(entity);
-    }
-}
-```
-
-### 4. Y-Sorting 渲染模式
-
-**问题**: 2D游戏需要正确的深度排序  
-**解决方案**: 按Y坐标排序渲染
-
-```rust
-impl RenderSystem {
-    pub fn draw_game_world(...) {
-        // 1. 收集所有实体
-        let mut entities = Vec::new();
-        for (entity, (pos, _)) in world.query::<(&Position, &Player)>() {
-            entities.push((entity, pos.y));
-        }
-        
-        // 2. Y-sorting（Y值越大越靠前）
-        entities.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        
-        // 3. 按顺序渲染
-        for (entity, _) in entities {
-            Self::draw_entity(entity, ...);
-        }
-    }
-}
-```
-
----
-
-## ⚡ 性能优化指南
-
-### 1. 系统执行频率优化
-
-不是所有系统都需要每帧执行：
-
-```rust
-// 高频系统（每帧执行，60 FPS）
-- InputCollectingSystem
-- MovementSystemV2
-- RenderSystem
-
-// 中频系统（每 100ms 执行，10 FPS）
-- MonsterSystem                   // 怪物AI
-- NPCSystem                       // NPC逻辑
-- ReconciliationSystem            // 服务器校正
-
-// 低频系统（按需执行）
-- TradeSystem                     // 仅在交易时
-- QuestSystem                     // 仅在任务更新时
-- DialogManagerSystem             // 仅在UI事件时
-```
-
-### 2. 组件查询优化
-
-```rust
-// ❌ 坏：每次查询所有组件
-for (entity, (pos, vel, anim, player, ...)) in world.query::<(
-    &Position, &Velocity, &Animation, &Player, ...
-)>() {
-    // ...
-}
-
-// ✅ 好：只查询需要的组件
-for (entity, (pos, vel)) in world.query::<(&Position, &Velocity)>() {
-    // ...
-}
-
-// ✅ 更好：使用 with 过滤
-for (entity, pos) in world.query::<&Position>()
-    .with::<&LocalPlayer>()  // 只查询本地玩家
-{
     // ...
 }
 ```
 
-### 3. 避免重复计算
+### 如何调试系统
+
+#### 1. 启用日志
+
+在系统中添加日志:
 
 ```rust
-// ❌ 坏：每次都计算
-for (entity, pos) in world.query::<&Position>() {
-    let screen_pos = world_to_screen(pos.x, pos.y, camera);  // 重复计算
-}
-
-// ✅ 好：缓存计算结果
-let camera_transform = camera.get_transform();  // 计算一次
-for (entity, pos) in world.query::<&Position>() {
-    let screen_pos = camera_transform.apply(pos);  // 直接使用
-}
-```
-
-### 4. 渲染批处理
-
-```rust
-// ❌ 坏：每个瓦片单独绘制
-for tile in tiles {
-    canvas.draw(&tile.image, tile.pos);  // 1000 次 draw call
-}
-
-// ✅ 好：批量绘制
-let mut instances = Vec::new();
-for tile in tiles {
-    instances.push(DrawParam::new().dest(tile.pos));
-}
-canvas.draw_instance_array(&tile_image, instances);  // 1 次 draw call
-```
-
-### 5. 视锥剔除
-
-```rust
-// 只渲染屏幕可见的实体
-let visible_rect = camera.get_visible_rect();
-for (entity, pos) in world.query::<&Position>() {
-    if !visible_rect.contains(pos.x, pos.y) {
-        continue;  // 跳过不可见实体
+impl System for MySystem {
+    fn update(&mut self, world: &mut World, dt: f32) -> GameResult {
+        tracing::debug!("MySystem::update() 开始执行");
+        // ... 逻辑
+        tracing::debug!("MySystem::update() 执行完毕");
+        Ok(())
     }
-    // 渲染...
 }
 ```
 
----
-
-## 🚀 下一步迭代计划
-
-### 短期目标（1-2周）
-
-#### 1. 完善网络同步 🔴 高优先级
-**负责系统**: `ClientNetworkSystem`, `ReconciliationSystem`
-
-- [ ] 实现完整的客户端预测与服务器校正
-- [ ] 添加网络丢包处理
-- [ ] 优化插值算法（Hermite插值）
-- [ ] 添加网络延迟显示（Ping值）
-
-**参考文件**:
-- `src/ecs/systems/layer1_input/client_network_system.rs`
-- `src/ecs/systems/layer2_logic/reconciliation_system.rs`
-- `src/ecs/systems/layer2_logic/interpolation_system.rs`
-
-#### 2. 优化怪物AI系统 🟡 中优先级
-**负责系统**: `MonsterSystem`, `MonsterAnimationStateSystem`
-
-- [ ] 实现多种怪物AI模式（巡逻、追击、逃跑）
-- [ ] 添加怪物技能系统
-- [ ] 优化寻路性能（使用 A* 缓存）
-- [ ] 添加怪物群体行为（组队攻击）
-
-**参考文件**:
-- `src/ecs/systems/layer2_logic/monster_system.rs`
-- `src/ecs/systems/layer3_presentation/monster_animation_state_system.rs`
-- `src/algorithms/pathfinding.rs`
-
-#### 3. 完善UI系统 🟡 中优先级
-**负责系统**: `DialogManagerSystem`, `ItemSystem`, `QuestSystem`
-
-- [ ] 实现拖拽功能（物品拖拽）
-- [ ] 添加右键菜单
-- [ ] 优化对话框层级管理
-- [ ] 实现背包自动整理
-
-**参考文件**:
-- `src/ecs/systems/layer5_ui/dialog_manager_system.rs`
-- `src/ecs/systems/layer5_ui/item_system.rs`
-- `src/ecs/systems/layer5_ui/mouse_event_system.rs`
-
-### 中期目标（3-4周）
-
-#### 4. 技能系统重构 🟡 中优先级
-**负责系统**: `MagicCastSystem`, `CombatSystem`
-
-- [ ] 统一技能/魔法系统架构
-- [ ] 添加技能冷却可视化
-- [ ] 实现技能连招系统
-- [ ] 添加 Buff/Debuff 系统
-
-**参考文件**:
-- `src/ecs/systems/layer2_logic/magic_cast_system.rs`
-- `src/ecs/systems/layer2_logic/combat_system.rs`
-
-#### 5. 粒子特效系统 🟢 低优先级
-**负责系统**: 新系统 `ParticleSystem`（Layer 3）
-
-- [ ] 设计粒子特效架构
-- [ ] 实现基础粒子系统（位置、速度、生命周期）
-- [ ] 添加预设特效（爆炸、火焰、闪电）
-- [ ] 集成到技能系统
-
-**建议架构**:
-```
-Layer 3: ParticleEmissionSystem（创建粒子发射器）
-         ↓
-Layer 4: ParticleRenderSystem（渲染粒子）
-```
-
-#### 6. 地图编辑器集成 🟢 低优先级
-**负责系统**: `RenderSystem`, `MapData`
-
-- [ ] 实时地图预览
-- [ ] 地图动画播放
-- [ ] 碰撞编辑可视化
-- [ ] 导出优化
-
-### 长期目标（1-2月）
-
-#### 7. 多人游戏完整支持
-- [ ] 实现完整的服务器架构
-- [ ] 添加房间/频道系统
-- [ ] 实现玩家间交互（组队、PK、交易）
-- [ ] 添加反作弊机制
-
-#### 8. 性能优化
-- [ ] 实现 ECS 并行化（使用 Rayon）
-- [ ] 优化渲染管线（合并 draw call）
-- [ ] 添加性能分析工具
-- [ ] 优化内存使用
-
-#### 9. 可扩展性改进
-- [ ] 插件系统（热加载模块）
-- [ ] 脚本系统（Lua/Rhai）
-- [ ] 配置热重载
-- [ ] 模组支持
-
----
-
-## 📝 使用指南
-
-### 导入系统
+#### 2. 使用 GlobalEvents 日志
 
 ```rust
-use crate::ecs::systems::{
-    // Layer 1: 输入与网络层
-    InputCollectingSystem, ClientNetworkSystem,
-    
-    // Layer 2: 核心逻辑层
-    LocalPredictionSystem, MovementSystemV2,
-    ReconciliationSystem, InterpolationSystem,
-    MonsterSystem, NPCSystem, CombatSystem, MagicCastSystem,
-    
-    // Layer 3: 表现状态层
-    AnimationStateSystem, MonsterAnimationStateSystem,
-    NPCActionSystem, SoundTriggerSystem,
-    
-    // Layer 4: 渲染层
-    RenderSystem, CameraSystem, OcclusionSystem,
-    AnimationPlaybackSystem, TileAnimationSystem,
-    MovementInterpolationSystem, SoundPlaybackSystem,
-    HUDRenderSystem, UIRenderSystem,
-    
-    // Layer 5: UI层
-    DialogManagerSystem, UIEventDispatcher,
-    KeyboardShortcutSystem, MouseEventSystem,
-    ItemSystem, QuestSystem, TradeSystem, MagicLearningSystem,
-};
+if let Some((_, events)) = world.query::<&GlobalEvents>().iter().next() {
+    if events.enable_logging {
+        tracing::info!("当前事件数: {}", events.frame_event_count);
+    }
+}
 ```
 
-### 添加新系统
+#### 3. 使用 DebugSystem
 
-1. **确定系统属于哪一层**（参考[决策树](#新系统层级决策树)）
-2. 在对应的 `layerN_xxx/` 目录创建文件
-3. 在该层的 `mod.rs` 中添加模块声明和导出
-4. 在主 `systems/mod.rs` 中重新导出（如需要）
-5. 在 `game_scene.rs` 的正确位置按顺序调用
-6. 添加系统文档注释（职责、输入输出组件）
-7. 编写单元测试
-8. 更新本README文档
-
-#### 新系统层级决策树
-
-```
-是否涉及输入/网络？
-├─ 是 → Layer 1
-└─ 否 → 是否涉及游戏逻辑（移动/战斗/AI）？
-       ├─ 是 → Layer 2
-       └─ 否 → 是否涉及表现决策（动画/音效选择）？
-              ├─ 是 → Layer 3
-              └─ 否 → 是否涉及渲染/音效播放？
-                     ├─ 是 → Layer 4
-                     └─ 否 → Layer 5 (UI)
-```
-
-### 删除系统检查清单
-
-- [ ] 确认没有其他系统依赖
-- [ ] 移除模块声明和导出
-- [ ] 从主循环中移除调用
-- [ ] 删除相关组件（如果不再使用）
-- [ ] 更新本README文档
-- [ ] 删除相关测试
+DebugSystem 可以显示:
+- FPS
+- 实体数量
+- 碰撞框
+- 网格
+- 坐标轴
 
 ---
 
-## 🐛 常见问题（FAQ）
+## ⚠️ 已知问题
 
-### Q1: 为什么要分五层？三层不够吗？
+### 🔴 严重问题
 
-**A**: 三层架构（输入-逻辑-渲染）在简单游戏中够用，但复杂游戏会遇到问题：
-- **Layer 2-3 分离**: 游戏逻辑（移动）与表现逻辑（动画）分离，便于独立测试
-- **Layer 3-4 分离**: 决策（播放什么动画）与执行（实际渲染）分离，便于换渲染器
-- **Layer 5 独立**: UI逻辑复杂，独立成层便于管理
+1. **NetworkSyncSystem 缺失**
+   - 状态: 已禁用（依赖旧协议）
+   - 影响: 网络数据包谁负责接收？
+   - 解决方案: 见 [ARCHITECTURE_REVIEW.md](./ARCHITECTURE_REVIEW.md)
 
-### Q2: 客户端预测会导致不同步吗？
+2. **README.md 严重过时**
+   - 状态: 描述 v2.0 的五层架构（已废弃）
+   - 影响: 误导新开发者
+   - 解决方案: 使用本文档（README_v3.md）
 
-**A**: 不会，因为有 `ReconciliationSystem` 校正：
-1. 客户端预测是临时的，给玩家即时反馈
-2. 服务器返回权威状态后，校正误差
-3. 使用平滑插值，玩家感知不到跳跃
+### ⚠️ 中等问题
 
-**关键代码**: `src/ecs/systems/layer2_logic/reconciliation_system.rs`
+3. **GameEventSystem 职责不清**
+   - 问题: 与 GlobalEvents 功能重叠
+   - 建议: 明确职责或重命名为 `GameEventDispatcher`
 
-### Q3: 为什么渲染系统不能修改组件？
+4. **Camera 系统职责重复**
+   - 问题: `CameraFollowSystem` (Layer 4) vs `CameraSystem` (Layer 5)
+   - 建议: 合并或明确划分职责
 
-**A**: 渲染系统只负责显示，不应影响游戏逻辑：
-- **测试性**: 可以禁用渲染系统，游戏逻辑仍正常运行
-- **可移植性**: 可以替换渲染器（GGEZ → Bevy），不影响逻辑
-- **性能**: 渲染可以在单独线程，不阻塞逻辑
+5. **EventCleanupSystem 位置**
+   - 问题: 位于 `logic/` 下，但它不属于任何子层
+   - 建议: 移到 `systems/event_cleanup_system.rs`（顶层）
 
-### Q4: 系统之间如何通信？
+### 💡 改进建议
 
-**A**: 通过组件，不直接调用：
-```rust
-// ❌ 坏：直接调用
-AnimationSystem::play_animation(entity, "walk");
+6. **渲染系统未实现**
+   - 状态: 所有 render/ 系统都是空实现
+   - 优先级: P3（实现后再评估设计）
 
-// ✅ 好：写入组件
-world.insert_one(entity, AnimationStateComponent {
-    state: AnimationState::Walk,
-});
+7. **模块文档不一致**
+   - 问题: 部分 mod.rs 缺少详细文档
+   - 建议: 参考 `logic/combat_skill/mod.rs` 的文档风格
 
-// Layer 4 的 AnimationPlaybackSystem 读取组件并播放
-```
-
-### Q5: 如何调试系统执行顺序？
-
-**A**: 添加日志：
-```rust
-tracing::debug!("[LayerX] SystemName::update() START");
-// 系统逻辑
-tracing::debug!("[LayerX] SystemName::update() END");
-```
-
-查看控制台输出，确认执行顺序是否正确。
-
-### Q6: 新增一个系统应该放在哪一层？
-
-**A**: 参考上面的[新系统层级决策树](#新系统层级决策树)
-
-### Q7: 为什么有两个 MonsterSystem？
-
-**A**: 不是两个，是不同层的系统：
-- `layer2_logic/monster_system.rs`: 怪物AI、攻击逻辑（游戏规则）
-- `layer3_presentation/monster_animation_state_system.rs`: 怪物动画决策（表现逻辑）
-
-两者职责不同，不要混淆！
-
-### Q8: 系统可以跨层读取组件吗？
-
-**A**: 可以读取，但不能写入：
-- ✅ Layer 4 可以读取 Layer 2 的 `Position`
-- ❌ Layer 4 不能写入 Layer 2 的 `Position`
-- 原则：**只能读取底层组件，不能写入底层组件**
+详细分析见: [ARCHITECTURE_REVIEW.md](./ARCHITECTURE_REVIEW.md)
 
 ---
 
-## 🚫 废弃系统（deprecated/）
+## 📚 相关文档
 
-### 废弃状态
-
-| 旧系统 | 替代方案 | 状态 | 删除时间 |
-|--------|----------|------|---------|
-| `AnimationSystem::update_tiles` | `TileAnimationSystem` (Layer 4) | ✅ 已删除 | 2025-10-28 |
-| `AnimationSystem::update_entities` | `AnimationPlaybackSystem` (Layer 4) | ✅ 已删除 | 2025-10-28 |
-| `AnimationSystem::update_movement_animation` | `MovementInterpolationSystem` (Layer 4) | ✅ 已删除 | 2025-10-28 |
-| `AnimationSystem::NPCActionSystem` | `NPCActionSystem` (Layer 3) | ✅ 已删除 | 2025-10-28 |
-| `MovementSystem` | `MovementSystemV2` (Layer 2) | ✅ 已删除 | 2025-10-28 |
-| `PathfindingSystem` | `LocalPredictionSystem` (Layer 2) | ✅ 已删除 | 2025-10-28 |
-| `InputSystem` | `InputCollectingSystem` (Layer 1) | ✅ 已删除 | 2025-10-28 |
-| `NetworkSystem` | `ClientNetworkSystem` (Layer 1) | ✅ 已删除 | 2025-10-28 |
-| `DoorSystem` | (仅在 map_viewer 中使用) | ✅ 已删除 | 2025-10-28 |
-
-**清理完成**: 所有废弃系统已全部删除，deprecated/ 目录已移除 ✅
+- **[ARCHITECTURE_REVIEW.md](./ARCHITECTURE_REVIEW.md)**: 完整的架构审查报告
+- **[systems/mod.rs](./mod.rs)**: 主模块，系统类型定义
+- **[logic/combat_skill/mod.rs](./logic/combat_skill/mod.rs)**: 最佳文档示例
 
 ---
 
-## 🎉 架构优势
+## 🎯 总体评价
 
-1. ✅ **职责清晰**: 每层只做一件事，易于理解和维护
-2. ✅ **易于测试**: 层与层之间通过组件解耦，便于单元测试
-3. ✅ **可维护性**: 文件平均 289 行，远低于 500 行限制
-4. ✅ **可扩展性**: 新功能容易定位到对应层级
-5. ✅ **数据流清晰**: Layer 1 → 2 → 3 → 4 → 5，单向数据流
-6. ✅ **性能优化**: 可以独立优化每一层，不影响其他层
-7. ✅ **团队协作**: 不同层可以并行开发，减少冲突
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| **架构设计** | ⭐⭐⭐⭐☆ (8/10) | logic/render 分离清晰，子层划分合理 |
+| **职责边界** | ⭐⭐⭐☆☆ (6/10) | 大部分清晰，但事件系统设计混乱 |
+| **ECS原则** | ⭐⭐⭐⭐⭐ (10/10) | 严格遵守 ECS 设计思想 |
+| **文档质量** | ⭐⭐☆☆☆ (4/10) | 旧文档过时，新文档正在建设中 |
+| **可维护性** | ⭐⭐⭐⭐☆ (8/10) | 宏注册优雅，但缺少部分文档 |
 
----
-
-## 📚 参考资料
-
-### 内部文档
-- `SYSTEM_CALL_ORDER.rs`: 系统调用顺序示例代码
-- `../components/`: 组件定义
-- `../mod.rs`: ECS模块总入口
-
-### 外部资源
-- [ECS 架构设计](https://github.com/SanderMertens/ecs-faq)
-- [客户端预测与服务器校正](https://www.gabrielgambetta.com/client-side-prediction-server-reconciliation.html)
-- [GGEZ 渲染优化](https://ggez.rs/docs/guides/performance/)
-- [Hecs ECS 文档](https://docs.rs/hecs/)
+**最终评分**: 📊 **7.2/10** (良好，有改进空间)
 
 ---
 
-## 🔧 维护指南
+## 📝 更新日志
 
-### 文档更新频率
-- **系统增删**: 立即更新
-- **架构调整**: 立即更新
-- **性能优化**: 季度更新
-- **常见问题**: 按需更新
+### v3.0 (2025-01-XX)
+- ✅ 重构为 logic/render 双模块架构
+- ✅ 引入三类系统 (System/DrawSystem/HybridSystem)
+- ✅ 添加 GlobalEvents 事件总线
+- ✅ 添加 EventCleanupSystem（优先级 900）
+- ✅ 添加宏注册机制
+- ✅ 完成架构审查和文档重写
 
-### 代码审查要点
-- [ ] 系统是否放在正确的层级？
-- [ ] 是否遵守组件读写权限？
-- [ ] 是否添加了文档注释？
-- [ ] 是否更新了README？
-- [ ] 是否添加了单元测试？
-
----
-
-**文档版本**: v2.0  
-**最后更新**: 2025-10-28  
-**架构状态**: ✅ 完整实现，编译通过  
-**系统总数**: 32+ 系统  
-**代码总行数**: 9,243 行  
-**维护者**: ECS架构团队
+### v2.0 (2025-10-28)
+- 五层架构 (layer1-5/)
+- 32+ 系统
+- 9,243 行代码
+- 已废弃 ❌
 
 ---
 
-## 🎯 总结
-
-本项目采用**严格分层的ECS架构**，实现了清晰的职责分离和单向数据流：
-
-1. **Layer 1 (输入层)**: 捕获输入  写入 `PlayerInputComponent`
-2. **Layer 2 (逻辑层)**: 读取输入  客户端预测  物理移动  服务器校正
-3. **Layer 3 (表现层)**: 读取逻辑状态  决定动画/音效
-4. **Layer 4 (渲染层)**: 读取表现状态  实际渲染/播放
-5. **Layer 5 (UI层)**: 处理UI事件  更新UI数据
-
-**核心原则**:
--  单向数据流（Layer 1  2  3  4  5）
--  职责分离（每层只做一件事）
--  组件驱动（系统通过组件通信）
--  可测试性（每层独立测试）
-
-**当前状态**: 架构重构完成，32+ 系统，9,243 行代码，编译通过 
-
-**下一步**: 完善网络同步、优化怪物AI、完善UI系统
+**维护者**: ECS 架构团队  
+**最后审查**: 2025-01-XX  
+**下次审查**: 实现渲染系统后
