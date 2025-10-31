@@ -22,48 +22,76 @@
 //
 // ============================================================================
 
-use ggez::{Context, GameResult};
 use ggez::graphics::Canvas;
-use ggez::winit::event::MouseButton;
 use ggez::input::keyboard::KeyInput;
-use hecs::{World, Entity};
-use std::time::Instant;
+use ggez::{Context, GameResult};
+use hecs::{Entity, World};
 use std::sync::Arc;
+use std::time::Instant;
 
 use super::{Scene, SceneType};
-use crate::network::{NetContext, handlers::GameEvent};
+use crate::ecs::systems::{
+    // Layer 7
+    logic::EventCleanupSystem,
+    // Layer 5
+    AnimationSystem,
+    CameraSystem,
+
+    CollisionSystem,
+    CombatSystemV2 as CombatSystem,
+    HealthRegenSystem,
+    // Layer 2
+    MonsterAISystem,
+    // Layer 4
+    MovementSystem,
+    NpcDialogueSystem,
+    ParticleSystem,
+    // Layer 1
+    PlayerControlSystem,
+    // Layer 3
+    SkillSystem,
+    SoundSystem,
+    SystemScheduler, // ✅ 显式导入系统类型标记 trait
+};
 use crate::ecs::{
-    components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerData, TargetSelection, MirClass, MirGender, Equipment},
-    systems::{
-        SystemScheduler,  // ✅ 使用 SystemScheduler 管理所有 ECS 系统
-        CameraSystem,
+    components::{
+        Camera, Draggable, Equipment, Inventory, LearnableMagicList, LocalPlayer, MagicList,
+        MirClass, MirGender, MouseInput, MoveMode, Player, PlayerAction, PlayerAppearance,
+        PlayerData, Position, RenderConfig, TargetSelection, TimeTracker, VisibleArea,
+    },
+    map_loader::MapLoader,
+
+    ui::{
+        CharacterDialog, ChatDialog, ChatType, HotkeyHelpPanel, InventoryDialog,
+        MagicLearningDialog, MainDialog, OptionsDialog, QuestDialog, SkillBarDialog, SkillsDialog,
+        TradeDialog,
     },
     // 🔒 暂时注释掉旧调度器
     // UpdateRenderParallelScheduler, ExecutionMode,
-    Coordinates, MapUtils,  // 坐标工具
-    map_loader::MapLoader,
-    ui::{ChatType, MainDialog, InventoryDialog, CharacterDialog, SkillBarDialog, ChatDialog, MagicLearningDialog, QuestDialog, TradeDialog, SkillsDialog, OptionsDialog, HotkeyHelpPanel},
+    Coordinates,
+    MapUtils, // 坐标工具
 };
-use crate::objects::{MapReader};
 use crate::graphics::libraries::initialize_all_libraries;
+use crate::network::{handlers::GameEvent, NetContext};
+use crate::objects::MapReader;
 
 /// 游戏场景
 pub struct GameScene {
     /// 相机实体
     camera_entity: Entity,
-    
+
     /// 时间跟踪实体
     time_entity: Entity,
-    
+
     /// 渲染配置实体
     config_entity: Entity,
-    
+
     /// 可见区域缓存实体
     visible_area_entity: Entity,
-    
+
     /// 调试计数器实体
     debug_counters_entity: Entity,
-    
+
     /// UI 实体引用 (保留用于后续功能扩展)
     main_dialog_entity: Entity,
     #[allow(dead_code)]
@@ -79,13 +107,13 @@ pub struct GameScene {
     quest_dialog_entity: Entity,
     #[allow(dead_code)]
     trade_dialog_entity: Entity,
-    
+
     /// 网络同步系统 (TODO: 已删除，需重构)
     // network_system: ClientNetworkSystem,
-    
+
     ///  系统调度器 - 统一管理所有ECS系统
     system_scheduler: SystemScheduler,
-    
+
     /// UI字体名称 (保留用于后续字体切换功能)
     #[allow(dead_code)]
     ui_font_name: String,
@@ -97,7 +125,7 @@ impl GameScene {
     pub fn new() -> Self {
         println!("🎮 GameScene构造函数 - 创建空壳场景");
         println!("⏳ 等待首次update进行初始化...");
-        
+
         Self {
             // 所有实体ID设为占位值，在首次update时初始化
             camera_entity: Entity::DANGLING,
@@ -117,9 +145,9 @@ impl GameScene {
             ui_font_name: String::from("default"),
         }
     }
-    
+
     /// 创建并初始化所有 ECS 系统
-    /// 
+    ///
     /// 按照六层架构顺序添加系统：
     /// 1. 输入与网络 (50-199)
     /// 2. AI 与决策 (200-299)
@@ -129,110 +157,51 @@ impl GameScene {
     /// 6. 网络同步 (600-699)
     /// 7. 事件清理 (900) - 最低优先级
     fn create_system_scheduler() -> SystemScheduler {
-        use crate::ecs::systems::{
-            SystemScheduler, IntoSystemKind,  // ✅ 显式导入系统类型标记 trait
-            // Layer 1
-            PlayerControlSystem,
-            // Layer 2
-            MonsterAISystem, NpcDialogueSystem,
-            // Layer 3
-            SkillSystem, CombatSystemV2 as CombatSystem,
-            // Layer 4
-            MovementSystem, CollisionSystem,
-            // Layer 5
-            AnimationSystem, ParticleSystem, HealthRegenSystem, SoundSystem, CameraSystem,
-            // Layer 6
-            ClientPredictionSystem, NetworkSendSystem, SyncSystem,
-            // Layer 7
-            update::EventCleanupSystem,
-        };
-        
         let mut scheduler = SystemScheduler::new();
-        
-        println!("🎯 初始化 ECS 系统...");
-        
+
+        tracing::info!("🎯 初始化 ECS 系统...");
+
         // ===== Layer 1: 输入与网络 (50-199) =====
-        scheduler.add_system(PlayerControlSystem::new());
-        println!("  ✅ PlayerControlSystem (110)");
-        
-        // ===== Layer 2: AI 与决策 (200-299) =====
-        scheduler.add_system(MonsterAISystem);
-        println!("  ✅ MonsterAISystem (200)");
-        
-        scheduler.add_system(NpcDialogueSystem::new());
-        println!("  ✅ NpcDialogueSystem (220)");
-        
-        // ===== Layer 3: 战斗与技能 (300-399) =====
-        scheduler.add_system(SkillSystem);
-        println!("  ✅ SkillSystem (300)");
-        
-        scheduler.add_system(CombatSystem);
-        println!("  ✅ CombatSystem (310)");
-        
-        // ===== Layer 4: 移动与物理 (400-499) =====
-        scheduler.add_system(MovementSystem);
-        println!("  ✅ MovementSystem (400)");
-        
-        scheduler.add_system(CollisionSystem::new());
-        println!("  ✅ CollisionSystem (410)");
-        
-        // ===== Layer 5: 状态更新 (500-599) =====
-        scheduler.add_system(AnimationSystem::new());
-        println!("  ✅ AnimationSystem (500)");
-        
-        scheduler.add_system(ParticleSystem);
-        println!("  ✅ ParticleSystem (510)");
-        
-        scheduler.add_system(HealthRegenSystem);
-        println!("  ✅ HealthRegenSystem (515)");
-        
-        scheduler.add_system(SoundSystem::new());
-        println!("  ✅ SoundSystem (520)");
-        
-        scheduler.add_system(CameraSystem::new());
-        println!("  ✅ CameraSystem (530)");
-        
-        // ===== Layer 6: 网络同步 (600-699) =====
-        scheduler.add_system(ClientPredictionSystem);
-        println!("  ✅ ClientPredictionSystem (595)");
-        
-        scheduler.add_system(NetworkSendSystem);
-        println!("  ✅ NetworkSendSystem (600)");
-        
-        scheduler.add_system(SyncSystem);
-        println!("  ✅ SyncSystem (610)");
-        
-        // ===== Layer 7: 事件清理 (900) - 最低优先级 =====
-        scheduler.add_system(EventCleanupSystem::new());
-        println!("  ✅ EventCleanupSystem (900)");
-        
-        println!("✅ ECS 系统初始化完成！");
-        
+        scheduler
+            .add_system(PlayerControlSystem::new())
+            .add_system(MonsterAISystem)
+            .add_system(NpcDialogueSystem::new())
+            .add_system(SkillSystem)
+            .add_system(CombatSystem)
+            .add_system(MovementSystem)
+            .add_system(CollisionSystem::new())
+            .add_system(AnimationSystem::new())
+            .add_system(ParticleSystem)
+            .add_system(HealthRegenSystem)
+            .add_system(SoundSystem::new())
+            .add_system(CameraSystem::new())
+            .add_system(EventCleanupSystem::new());
+        tracing::info!("✅ ECS 系统初始化完成！");
         scheduler
     }
-    
+
     /// 标记：场景是否已完成初始化
     fn is_initialized(&self) -> bool {
         self.camera_entity != Entity::DANGLING
     }
-    
+
     /// 初始化场景实体（在首次update时调用）
-    /// 
+    ///
     /// Context和World由Scene trait的update方法传递，不需要在构造函数中传递
     fn initialize(&mut self, ctx: &mut Context, world: &mut World) -> GameResult {
         if self.is_initialized() {
             return Ok(());
         }
-        
+
         println!("🎮 GameScene首次初始化...");
-        
+
         // 初始化图形库
         println!("📚 正在初始化图形库...");
         initialize_all_libraries("Data").expect("初始化图形库失败");
         println!("✅ 图形库初始化完成");
-        
+
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
-        
+
         // 创建相机实体
         self.camera_entity = world.spawn((
             Position { x: 0.0, y: 0.0 },
@@ -249,7 +218,7 @@ impl GameScene {
                 drag_start_pos_y: 0.0,
             },
         ));
-        
+
         // 创建时间跟踪实体
         self.time_entity = world.spawn((TimeTracker {
             animation_count: 0,
@@ -258,7 +227,7 @@ impl GameScene {
             last_fps_update: Instant::now(),
             last_frame_time: Instant::now(),
         },));
-        
+
         // 创建渲染配置实体
         self.config_entity = world.spawn((RenderConfig {
             show_back: true,
@@ -275,13 +244,13 @@ impl GameScene {
             max_fps: 160,
             enable_lod: true,
         },));
-        
+
         // 创建可见区域缓存实体
         self.visible_area_entity = world.spawn((VisibleArea::default(),));
-        
+
         // 创建调试计数器实体
         self.debug_counters_entity = world.spawn((crate::ecs::components::DebugCounters::new(),));
-        
+
         // 创建鼠标输入状态实体
         world.spawn((MouseInput {
             left_pressed: false,
@@ -295,139 +264,126 @@ impl GameScene {
             x: 0.0,
             y: 0.0,
         },));
-        
+
         // 加载中文字体
         self.ui_font_name = Self::load_chinese_font(ctx)?;
-        
+
         // 创建UI对话框实体
-        self.main_dialog_entity = world.spawn((
-            MainDialog::new(Coordinates::DESIGN_WIDTH, Coordinates::DESIGN_HEIGHT),
-        ));
-        
+        self.main_dialog_entity = world.spawn((MainDialog::new(
+            Coordinates::DESIGN_WIDTH,
+            Coordinates::DESIGN_HEIGHT,
+        ),));
+
         self.inventory_dialog_entity = world.spawn((InventoryDialog::new(),));
         self.character_dialog_entity = world.spawn((CharacterDialog::new(),));
-        
+
         self.skillbar_entities = [
             world.spawn((SkillBarDialog::new(0),)),
             world.spawn((SkillBarDialog::new(1),)),
         ];
-        
+
         self.chat_dialog_entity = world.spawn((ChatDialog::new(0.0, screen_height - 300.0),));
         self.magic_learning_dialog_entity = world.spawn((MagicLearningDialog::new(),));
         self.quest_dialog_entity = world.spawn((QuestDialog::new(100.0, 100.0),));
         self.trade_dialog_entity = world.spawn((TradeDialog::new(300.0, 150.0),));
-        
+
         world.spawn((SkillsDialog::new(),));
         world.spawn((OptionsDialog::new(),));
-        
+
         // 创建按键帮助面板
         let mut hotkey_help = HotkeyHelpPanel::new();
         hotkey_help.set_font(self.ui_font_name.clone());
         world.spawn((hotkey_help,));
-        
+
         // 🆕 创建全局事件总线（核心组件，必须在其他系统之前创建）
         world.spawn((crate::ecs::components::GlobalEvents::new(),));
         println!("✅ 创建 GlobalEvents 全局事件总线");
-        
+
         println!("✅ GameScene初始化完成！");
         Ok(())
     }
-    
+
     /// 创建新的游戏场景
-    /// 
+    ///
     /// # 架构设计 (完全ECS化)
     /// - GameScene只是一个场景编排器，不持有任何游戏数据
     /// - 不在构造函数中创建实体或加载资源
     /// - 所有实体创建由NetworkEventSystem在update循环中处理服务器事件时完成
     /// - 只初始化系统调度器
-    /// 
+    ///
     /// # 返回
     /// - `Self`: 游戏场景实例（纯粹的系统调度器）
 
-    
-    // ========================================================================
-    // 网络事件处理 (委托给NetworkEventSystem)
-    // ========================================================================
-    
-    /// 处理网络事件（委托给NetworkEventSystem）
-    /// 
-    /// GameScene作为场景编排器，不直接处理网络事件细节
-    /// 所有网络事件处理逻辑都在NetworkEventSystem中
-    pub fn handle_network_event(&mut self, world: &mut World, event: &GameEvent) {
-        // 委托给NetworkEventSystem处理
-        crate::ecs::systems::NetworkEventSystem::process_event(world, event);
-    }
-    
     // ========================================================================
     // UI 组件访问辅助方法
     // ========================================================================
-    
+
     /// 获取聊天对话框的可变引用
     fn get_chat_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut ChatDialog> {
-        world.query_one_mut::<&mut ChatDialog>(self.chat_dialog_entity).ok()
+        world
+            .query_one_mut::<&mut ChatDialog>(self.chat_dialog_entity)
+            .ok()
     }
-    
+
     /// 获取主对话框的可变引用
     fn get_main_dialog_mut<'a>(&self, world: &'a mut World) -> Option<&'a mut MainDialog> {
-        world.query_one_mut::<&mut MainDialog>(self.main_dialog_entity).ok()
+        world
+            .query_one_mut::<&mut MainDialog>(self.main_dialog_entity)
+            .ok()
     }
-    
+
     /// 加载中文字体
     fn load_chinese_font(ctx: &mut Context) -> GameResult<String> {
         use ggez::graphics::FontData;
         use std::path::Path;
-        
+
         let font_configs = [
             ("C:/Windows/Fonts/msyh.ttc", "Microsoft YaHei"),
             ("C:/Windows/Fonts/simsun.ttc", "SimSun"),
         ];
-        
+
         for (path, font_name) in &font_configs {
             if Path::new(path).exists() {
                 match std::fs::read(path) {
-                    Ok(bytes) => {
-                        match FontData::from_vec(bytes) {
-                            Ok(font_data) => {
-                                ctx.gfx.add_font(*font_name, font_data);
-                                println!("✅ 成功加载中文字体: {}", font_name);
-                                return Ok(font_name.to_string());
-                            }
-                            Err(e) => {
-                                println!("⚠️ 字体数据创建失败: {}", e);
-                            }
+                    Ok(bytes) => match FontData::from_vec(bytes) {
+                        Ok(font_data) => {
+                            ctx.gfx.add_font(*font_name, font_data);
+                            println!("✅ 成功加载中文字体: {}", font_name);
+                            return Ok(font_name.to_string());
                         }
-                    }
+                        Err(e) => {
+                            println!("⚠️ 字体数据创建失败: {}", e);
+                        }
+                    },
                     Err(e) => {
                         println!("⚠️ 字体文件读取失败: {}", e);
                     }
                 }
             }
         }
-        
+
         Ok(String::from("default"))
     }
 }
 
 impl Scene for GameScene {
     fn update(
-        &mut self, 
-        ctx: &mut Context, 
+        &mut self,
+        ctx: &mut Context,
         world: &mut World,
-        net_ctx: &Arc<NetContext>
+        net_ctx: &Arc<NetContext>,
     ) -> GameResult<Option<SceneType>> {
         // 🎯 首次update时初始化场景实体
         self.initialize(ctx, world)?;
-        
+
         // 🆕 处理网络事件
-        for event in net_ctx.try_recv() {
-            self.handle_network_event(world, &event);
-        }
-        
+        for event in net_ctx.try_recv() {}
+
         // 帧率限制
         let config = world.get::<&RenderConfig>(self.config_entity).unwrap();
         let max_fps = config.max_fps;
         drop(config);
-        
+
         // 计算实际的帧时间（在更新TimeTracker之前）
         let delta_ms = if let Ok(time) = world.get::<&TimeTracker>(self.time_entity) {
             let elapsed = time.last_frame_time.elapsed();
@@ -435,44 +391,44 @@ impl Scene for GameScene {
         } else {
             16 // 默认约60fps
         };
-        
+
         if let Ok(mut time) = world.get::<&mut TimeTracker>(self.time_entity) {
             let target_frame_time = std::time::Duration::from_secs_f32(1.0 / max_fps as f32);
             let elapsed = time.last_frame_time.elapsed();
-            
+
             if elapsed < target_frame_time {
                 return Ok(None);
             }
-            
+
             time.last_frame_time = Instant::now();
             time.animation_count += 1;
             time.frame_count += 1;
-            
+
             if time.last_fps_update.elapsed().as_secs_f32() >= 1.0 {
                 time.fps = time.frame_count as f32 / time.last_fps_update.elapsed().as_secs_f32();
                 time.frame_count = 0;
                 time.last_fps_update = Instant::now();
             }
         }
-        
+
         // 更新动画系统
         let show_animations = world
             .get::<&RenderConfig>(self.config_entity)
             .map(|c| c.show_animations)
             .unwrap_or(true);
-        
+
         // 获取动画计数器（Layer 4动画系统需要）
         let animation_count: i32 = world
             .get::<&TimeTracker>(self.time_entity)
             .map(|t| t.animation_count)
             .unwrap_or(0);
-        
+
         if show_animations {
             // ========================================================================
             // 🎯 Layer 4动画更新已统一到下面的五层架构部分
             // ========================================================================
         }
-        
+
         // 🎯 更新鼠标按下时间计数器（用于长按检测）
         if let Some((_, mouse_input)) = world.query_mut::<&mut MouseInput>().into_iter().next() {
             if mouse_input.left_pressed {
@@ -482,131 +438,155 @@ impl Scene for GameScene {
                 mouse_input.right_press_time += 1;
             }
         }
-        
+
         // 🎯 同步摄像机位置到玩家位置（确保摄像机始终跟随玩家）
-        if let Some((_, (_, player_pos))) = world.query::<(&LocalPlayer, &Position)>().iter().next() {
+        if let Some((_, (_, player_pos))) = world.query::<(&LocalPlayer, &Position)>().iter().next()
+        {
             if let Ok(mut cam_pos) = world.get::<&mut Position>(self.camera_entity) {
                 // � 使用 DebugCounters 组件记录日志（替代 unsafe static mut）
-                if let Ok(mut debug) = world.get::<&mut crate::ecs::components::DebugCounters>(self.debug_counters_entity) {
+                if let Ok(mut debug) = world
+                    .get::<&mut crate::ecs::components::DebugCounters>(self.debug_counters_entity)
+                {
                     if debug.should_log_sync() {
                         tracing::info!(
                             "📷 Camera同步: player=({:.1}, {:.1}), old_camera=({:.1}, {:.1})",
-                            player_pos.x, player_pos.y, cam_pos.x, cam_pos.y
+                            player_pos.x,
+                            player_pos.y,
+                            cam_pos.x,
+                            cam_pos.y
                         );
                     }
                 }
-                
+
                 cam_pos.x = player_pos.x;
                 cam_pos.y = player_pos.y;
             }
         }
-        
+
         // 更新相机系统
         // TODO: CameraSystem需要实现System trait才能工作
         // CameraSystem::update(world);
-        
+
         // ========================================
         // 使用UpdateRenderParallelScheduler执行update层系统
         // ========================================
-        
+
         // 计算 delta_time（秒）
         let delta_time = delta_ms as f32 / 1000.0;
-        
+
         // TODO: UpdateRenderParallelScheduler.update() 需要传入world和delta
         // 旧系统需要重构才能正常工作
         self.system_scheduler.update(world, delta_time)?;
-        
+
         // 更新聊天对话框（用于光标闪烁）
         if let Some(chat_dialog) = self.get_chat_dialog_mut(world) {
             chat_dialog.update();
         }
-        
+
         Ok(None)
     }
-    
+
     fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, world: &World) -> GameResult {
         // ⚠️ 如果还未初始化，跳过绘制
         if !self.is_initialized() {
             return Ok(());
         }
-        
+
         // 🎯 在绘制前同步摄像机位置到玩家位置（确保首帧就正确）
         // 必须在独立的作用域中完成，确保可变引用被drop
         {
             // 📊 使用 DebugCounters 组件记录绘制日志（替代 unsafe static mut）
-            let should_log = if let Ok(mut debug) = world.get::<&mut crate::ecs::components::DebugCounters>(self.debug_counters_entity) {
+            let should_log = if let Ok(mut debug) =
+                world.get::<&mut crate::ecs::components::DebugCounters>(self.debug_counters_entity)
+            {
                 debug.should_log_draw()
             } else {
                 false
             };
-            
-            let draw_count = if let Ok(debug) = world.get::<&crate::ecs::components::DebugCounters>(self.debug_counters_entity) {
+
+            let draw_count = if let Ok(debug) =
+                world.get::<&crate::ecs::components::DebugCounters>(self.debug_counters_entity)
+            {
                 debug.get_draw_count()
             } else {
                 0
             };
-            
+
             // 查找LocalPlayer - 需要保存query以延长生命周期
             let mut player_query_iter = world.query::<(&LocalPlayer, &Position)>();
             let player_opt = player_query_iter.iter().next();
-            
+
             // 调试：输出是否找到玩家
             if should_log {
                 if let Some((_, (_, player_pos))) = player_opt.as_ref() {
                     tracing::info!(
                         "🎮 draw#{}: 找到LocalPlayer, pos=({:.1}, {:.1})",
-                        draw_count, player_pos.x, player_pos.y
+                        draw_count,
+                        player_pos.x,
+                        player_pos.y
                     );
                 } else {
                     tracing::warn!("⚠️ draw#{}: 未找到LocalPlayer!", draw_count);
                 }
             }
-            
+
             if let Some((_, (_, player_pos))) = player_opt {
                 if let Ok(mut cam_pos) = world.get::<&mut Position>(self.camera_entity) {
                     // 计算距离用于调试
-                    let distance = ((cam_pos.x - player_pos.x).powi(2) + (cam_pos.y - player_pos.y).powi(2)).sqrt();
-                    
+                    let distance = ((cam_pos.x - player_pos.x).powi(2)
+                        + (cam_pos.y - player_pos.y).powi(2))
+                    .sqrt();
+
                     if should_log {
                         tracing::info!(
                             "📷 draw#{}: camera=({:.1}, {:.1}), distance={:.1}",
-                            draw_count, cam_pos.x, cam_pos.y, distance
+                            draw_count,
+                            cam_pos.x,
+                            cam_pos.y,
+                            distance
                         );
                     }
-                    
+
                     // 🎯 强制同步Camera到玩家位置（确保draw前Camera在正确位置）
                     cam_pos.x = player_pos.x;
                     cam_pos.y = player_pos.y;
-                    
+
                     if should_log && distance > 1.0 {
                         tracing::info!(
                             "🎯 draw#{} Camera同步: distance={:.1} -> player=({:.1}, {:.1})",
-                            draw_count, distance, player_pos.x, player_pos.y
+                            draw_count,
+                            distance,
+                            player_pos.x,
+                            player_pos.y
                         );
                     }
                 }
             }
         } // 作用域结束，可变引用被drop
-        
+
         // 获取相机组件（现在获取的是更新后的值）
         let (pos, camera) = {
             let pos = world.get::<&Position>(self.camera_entity).unwrap().clone();
             let camera = world.get::<&Camera>(self.camera_entity).unwrap().clone();
             (pos, camera)
         };
-        
-        let config = world.get::<&RenderConfig>(self.config_entity).ok().map(|r| (*r).clone()).unwrap();
-        
+
+        let config = world
+            .get::<&RenderConfig>(self.config_entity)
+            .ok()
+            .map(|r| (*r).clone())
+            .unwrap();
+
         // ==================== 地图层: 使用窗口逻辑坐标 ====================
         // 设置画布使用窗口的逻辑分辨率(如 1280×960)
         // 这样 RenderSystem 的世界坐标转换才能正确工作
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,
-            camera.screen_width,  
-            camera.screen_height, 
+            camera.screen_width,
+            camera.screen_height,
         ));
-        
+
         // 🎯 使用统一的渲染入口
         // TODO: RenderSystem已删除，需要使用UpdateRenderParallelScheduler的render方法
         // RenderSystem::draw_game_world(
@@ -619,25 +599,25 @@ impl Scene for GameScene {
         //     self.visible_area_entity,
         //     self.debug_counters_entity,
         // )?;
-        
+
         // ==================== UI 层: 使用设计坐标 1024×768 ====================
         // 设置画布使用设计分辨率坐标系,ggez 会自动缩放
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,
-            Coordinates::DESIGN_WIDTH,   // 1024 (UI 设计分辨率)
-            Coordinates::DESIGN_HEIGHT,  // 768 (UI 设计分辨率)
+            Coordinates::DESIGN_WIDTH,  // 1024 (UI 设计分辨率)
+            Coordinates::DESIGN_HEIGHT, // 768 (UI 设计分辨率)
         ));
-        
+
         // 🎯 使用 RenderSystem::draw_ui 统一渲染所有 UI（符合ECS设计原则）
         // 分层渲染: 调试UI -> 游戏UI -> 覆盖层UI
         // 优化说明: 移除所有参数,直接从ctx和world查询所需数据
         // TODO: RenderSystem已删除，需要重新实现UI渲染
         // RenderSystem::draw_ui(ctx, canvas, world)?;
-        
+
         Ok(())
     }
-    
+
     fn on_key_down(
         &mut self,
         _ctx: &mut Context,
@@ -646,7 +626,7 @@ impl Scene for GameScene {
         _net_ctx: &Arc<NetContext>,
     ) -> GameResult<Option<SceneType>> {
         use ggez::winit::keyboard::KeyCode;
-        
+
         if let ggez::winit::event::KeyEvent {
             physical_key: ggez::winit::keyboard::PhysicalKey::Code(keycode),
             ..
@@ -656,29 +636,34 @@ impl Scene for GameScene {
             if keycode == KeyCode::Escape {
                 return Ok(Some(SceneType::Select));
             }
-            
+
             // H键 - 切换按键帮助面板
             // 优化说明: 从world查询HotkeyHelpPanel组件并修改状态
             if keycode == KeyCode::KeyH {
                 for (_entity, hotkey_help) in world.query::<&mut HotkeyHelpPanel>().iter() {
                     hotkey_help.toggle();
-                    tracing::info!("📖 按键帮助: {}", if hotkey_help.visible { "显示" } else { "隐藏" });
+                    tracing::info!(
+                        "📖 按键帮助: {}",
+                        if hotkey_help.visible {
+                            "显示"
+                        } else {
+                            "隐藏"
+                        }
+                    );
                     break; // 只需要第一个HotkeyHelpPanel
                 }
                 return Ok(None);
             }
-            
+
             // ✅ 键盘快捷键处理（UI切换、物品拾取、技能释放等）
             // TODO: KeyboardShortcutSystem已删除
             // KeyboardShortcutSystem::process_keyboard(world, keycode, network_tx);
         }
-        
+
         Ok(None)
     }
-    
-    
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
 }
-

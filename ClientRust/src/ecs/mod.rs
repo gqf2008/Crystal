@@ -27,11 +27,8 @@ pub mod scenes;
 pub mod ime_handler;
 
 pub use resources::*; // 🆕 导出全局资源
-//pub use system_scheduler::{SystemScheduler, SystemStats};
-pub use systems::update::state_update::{EventCleanupSystem, EventCollectorSystem}; // 🆕 导出事件系统
-pub use systems::update::state_update::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
+pub use systems::logic::state_update::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
 pub use systems::*;
-//pub use update_render_parallel_scheduler::{ExecutionMode, UpdateRenderParallelScheduler}; // ✅ 新并行调度器
 pub use world::GameWorld;
 
 // Map Loader 导出

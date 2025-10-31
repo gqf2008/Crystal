@@ -52,9 +52,9 @@
 //   动画状态、粒子更新、音效触发、相机矩阵计算（准备渲染）
 //   - AnimationSystem(500) → ParticleSystem(510, Hybrid) → SoundSystem(520) → CameraSystem(530)
 //
-// **阶段 6: 网络同步 (600-699)**
-//   状态收集与发送
-//   - NetworkSendSystem(600) → SyncSystem(610)
+// **阶段 6: 事件清理 (900)**
+//   每帧结束清理 GlobalEvents 中的临时事件，防止事件污染
+//   - EventCleanupSystem(900)
 //
 // ### Draw 阶段 (1000-1999)
 //
@@ -64,14 +64,16 @@
 //     → UIRenderSystem(1030) → DebugSystem(1100, Hybrid)
 //
 // ## 数据流
-// 网络/输入 → AI决策 → 战斗技能 → 移动物理 → 状态更新 → 网络发送 → 渲染输出
+// 网络/输入 → AI决策 → 战斗技能 → 移动物理 → 状态更新 → 事件清理 → 渲染输出
 //
 // ## 关键设计
-// 1. CameraFollowSystem(420) 在移动阶段更新跟随逻辑
-// 2. CameraSystem(530) 在状态更新阶段计算最终矩阵
-// 3. GameEventSystem(120) 统一管理系统间事件通信
-// 4. PlayerControlSystem(110) 专门处理玩家控制转换
-// 5. ParticleSystem(510) 和 DebugSystem(1100) 使用 HybridSystem 同时处理逻辑和渲染
+// 1. **InputSystem** 负责收集所有输入源（键盘/鼠标/网络）并写入 GlobalEvents 组件
+// 2. **PlayerControlSystem** 从 GlobalEvents 读取输入和网络数据，更新玩家状态（包含位置修正逻辑）
+// 3. **GameEventSystem** 统一管理系统间事件通信
+// 4. **EventCleanupSystem** 在每帧最后清理临时事件，防止下一帧重复处理
+// 5. **CameraFollowSystem(420)** 在移动阶段更新跟随逻辑
+// 6. **CameraSystem(530)** 在状态更新阶段计算最终矩阵
+// 7. **ParticleSystem(510)** 和 **DebugSystem(1100)** 使用 HybridSystem 同时处理逻辑和渲染
 //
 // ============================================================================
 
@@ -81,10 +83,9 @@
 //
 // | 阶段 | 系统名称 | 类型 | 优先级 | 职责说明 |
 // |------|----------|------|--------|----------|
-// | **第一阶段：输入和网络** | NetworkRecvSystem | System | 50 | 接收并解析网络数据包，将数据存入组件 |
-// | | InputSystem | System | 100 | 处理玩家输入（键盘、鼠标、触控），转换为输入事件 |
-// | | PlayerControlSystem | System | 110 | 将输入事件转换为玩家具体行为（移动、攻击、使用技能） |
-// | | GameEventSystem | System | 120 | 管理游戏事件分发（任务、系统、UI事件），协调系统间通信 |
+// | **第一阶段：输入和网络** | InputSystem | System | 100 | [Input] 收集所有输入源（键盘/鼠标/网络数据包）并写入 GlobalEvents 组件 |
+// | | PlayerControlSystem | System | 110 | [Update] 从 GlobalEvents 读取输入和网络数据，更新玩家状态，包含位置修正算法 |
+// | | GameEventSystem | System | 120 | [Update] 管理游戏事件分发（任务、系统、UI事件），协调系统间通信 |
 // | **第二阶段：AI和决策** | MonsterAISystem | System | 200 | 怪物AI逻辑（巡逻、追击、攻击决策、状态切换） |
 // | | NpcAISystem | System | 210 | NPC行为逻辑（对话触发、任务发放、商店交互） |
 // | | DialogueSystem | System | 220 | 处理对话树、选项分支、对话进度管理 |
@@ -97,8 +98,7 @@
 // | | ParticleSystem | **Hybrid** | 510 | **[Update]** 粒子生命期管理、位置速度计算<br>**[Draw]** 粒子效果渲染 |
 // | | SoundSystem | System | 520 | 音效触发管理、3D音效位置计算、音量控制 |
 // | | CameraSystem | System | 530 | 相机矩阵计算、震动效果、过场动画、最终视图矩阵 |
-// | **第六阶段：网络发送** | NetworkSendSystem | System | 600 | 收集状态变化，组装并发送网络数据包 |
-// | | SyncSystem | System | 610 | 状态同步验证、数据压缩、断线重连处理 |
+// | **第六阶段：事件清理** | EventCleanupSystem | System | 900 | 清理 GlobalEvents 中的临时事件，防止下一帧重复处理 |
 // | **第七阶段：渲染** | MapRenderSystem | DrawSystem | 1000 | 地图图层渲染、地形绘制、遮罩处理 |
 // | | SpriteRenderSystem | DrawSystem | 1010 | 精灵实体渲染、排序、批处理优化 |
 // | | EffectRenderSystem | DrawSystem | 1020 | 特效渲染（技能特效、光影、后处理） |
@@ -159,9 +159,8 @@ pub mod priority {
     pub const SOUND: u32 = 520;
     pub const CAMERA: u32 = 530;
 
-    // 阶段 6: 网络同步 (600-699)
-    pub const NETWORK_SEND: u32 = 600;
-    pub const SYNC: u32 = 610;
+    // 阶段 6: 网络同步与事件清理 (600-699)
+    pub const EVENT_CLEANUP: u32 = 900;
 
     // 阶段 7: 渲染 (1000-1999)
     pub const MAP_RENDER: u32 = 1000;
@@ -172,11 +171,8 @@ pub mod priority {
 }
 
 // ✅ update/render 架构（推荐）
-pub mod network_event_system;
 pub mod render;
-pub mod update; // 🆕 网络事件系统
-
-pub use network_event_system::NetworkEventSystem;
+pub mod logic;
 
 use ggez::graphics::Canvas;
 use ggez::GameResult;
@@ -188,26 +184,26 @@ pub use ecs_macros::{HybridSystem, LogicSystem, RenderSystem};
 // 注意：新代码应使用 update:: 和 render:: 模块
 
 // Layer 1 (Input) - 向后兼容导出
-pub use update::input::{InputSystem as InputCollectingSystem, PlayerControlSystem};
+pub use logic::input::{InputSystem as InputCollectingSystem, PlayerControlSystem};
 
 // Layer 2 (Decision) - 向后兼容导出
-pub use update::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
+pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
 
 // Layer 3 (Combat & Skills) - 向后兼容导出
-pub use update::combat_skill::{
+pub use logic::combat_skill::{
     CombatResult, CombatSystem as CombatSystemV2, DamageType, SkillSystem,
 };
 
 // Layer 4 (Physics & Movement) - 向后兼容导出
-pub use update::physics_movement::{CollisionSystem, MovementSystem};
+pub use logic::physics_movement::{CollisionSystem, MovementSystem};
 
 // Layer 5 (State Update) - 向后兼容导出
-pub use update::state_update::{
+pub use logic::state_update::{
     AnimationSystem, CameraSystem, HealthRegenSystem, ParticleSystem, SoundSystem,
 };
 
-// Layer 6 (Network Sync) - 向后兼容导出
-pub use update::network_sync::{ClientPredictionSystem, NetworkSendSystem, SyncSystem};
+// Layer 6 (Event Cleanup) - 向后兼容导出
+pub use logic::EventCleanupSystem;
 
 // ============================================================================
 // 系统 Trait 设计

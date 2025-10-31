@@ -18,13 +18,12 @@
 //
 // ============================================================================
 
-use hecs::World;
-use ggez::GameResult;
-use crate::ecs::systems::{System, priority};
 use crate::ecs::components::GlobalEvents;
+use crate::ecs::systems::System;
+use ggez::GameResult;
 
 /// 事件清理系统
-/// 
+///
 /// 每帧结束时清理所有临时事件，防止事件在下一帧被重复处理。
 pub struct EventCleanupSystem;
 
@@ -35,37 +34,33 @@ impl EventCleanupSystem {
 }
 
 impl System for EventCleanupSystem {
-    fn name(&self) -> &'static str {
-        "EventCleanupSystem"
-    }
-    
     fn priority(&self) -> u32 {
-        900  // 最低优先级，确保所有系统都处理完事件后再清理
+        900 // 最低优先级，确保所有系统都处理完事件后再清理
     }
-    
+
     fn update(&mut self, world: &mut hecs::World, _delay_time: f32) -> GameResult {
         // 查询 GlobalEvents 组件
         let mut query = world.query::<&mut GlobalEvents>();
-        
+
         if let Some((_, events)) = query.iter().next() {
             let frame_count = events.frame_event_count;
-            
+
             // 清理所有事件队列
             events.keyboard_events.clear();
             events.mouse_events.clear();
             events.ime_events.clear();
             events.game_events.clear();
             events.network_incoming.clear();
-            
+
             // 重置帧计数器
             events.frame_event_count = 0;
-            
+
             // 日志输出（可选）
             if events.enable_logging && frame_count > 0 {
                 tracing::debug!("🧹 清理 {} 个事件", frame_count);
             }
         }
-        
+
         Ok(())
     }
 }
