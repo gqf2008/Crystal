@@ -35,10 +35,11 @@ use crate::network::{NetContext, handlers::GameEvent};
 use crate::ecs::{
     components::{Position, Camera, Player, PlayerAction, MoveMode, Draggable, MouseInput, TimeTracker, RenderConfig, VisibleArea, PlayerAppearance, Inventory, MagicList, LearnableMagicList, LocalPlayer, PlayerData, TargetSelection, MirClass, MirGender, Equipment},
     systems::{
-        // TODO: 很多系统已删除，GameScene需要重构以使用UpdateRenderParallelScheduler
+        SystemScheduler,  // ✅ 使用 SystemScheduler 管理所有 ECS 系统
         CameraSystem,
     },
-    UpdateRenderParallelScheduler, ExecutionMode,  // 🆕 update/render调度器
+    // 🔒 暂时注释掉旧调度器
+    // UpdateRenderParallelScheduler, ExecutionMode,
     Coordinates, MapUtils,  // 坐标工具
     map_loader::MapLoader,
     ui::{ChatType, MainDialog, InventoryDialog, CharacterDialog, SkillBarDialog, ChatDialog, MagicLearningDialog, QuestDialog, TradeDialog, SkillsDialog, OptionsDialog, HotkeyHelpPanel},
@@ -83,7 +84,7 @@ pub struct GameScene {
     // network_system: ClientNetworkSystem,
     
     ///  系统调度器 - 统一管理所有ECS系统
-    system_scheduler: UpdateRenderParallelScheduler,
+    system_scheduler: SystemScheduler,
     
     /// UI字体名称 (保留用于后续字体切换功能)
     #[allow(dead_code)]
@@ -112,9 +113,102 @@ impl GameScene {
             magic_learning_dialog_entity: Entity::DANGLING,
             quest_dialog_entity: Entity::DANGLING,
             trade_dialog_entity: Entity::DANGLING,
-            system_scheduler: UpdateRenderParallelScheduler::new(ExecutionMode::Sequential),
+            system_scheduler: Self::create_system_scheduler(),
             ui_font_name: String::from("default"),
         }
+    }
+    
+    /// 创建并初始化所有 ECS 系统
+    /// 
+    /// 按照六层架构顺序添加系统：
+    /// 1. 输入与网络 (50-199)
+    /// 2. AI 与决策 (200-299)
+    /// 3. 战斗与技能 (300-399)
+    /// 4. 移动与物理 (400-499)
+    /// 5. 状态更新 (500-599)
+    /// 6. 网络同步 (600-699)
+    /// 7. 事件清理 (900) - 最低优先级
+    fn create_system_scheduler() -> SystemScheduler {
+        use crate::ecs::systems::{
+            SystemScheduler, IntoSystemKind,  // ✅ 显式导入系统类型标记 trait
+            // Layer 1
+            PlayerControlSystem,
+            // Layer 2
+            MonsterAISystem, NpcDialogueSystem,
+            // Layer 3
+            SkillSystem, CombatSystemV2 as CombatSystem,
+            // Layer 4
+            MovementSystem, CollisionSystem,
+            // Layer 5
+            AnimationSystem, ParticleSystem, HealthRegenSystem, SoundSystem, CameraSystem,
+            // Layer 6
+            ClientPredictionSystem, NetworkSendSystem, SyncSystem,
+            // Layer 7
+            update::EventCleanupSystem,
+        };
+        
+        let mut scheduler = SystemScheduler::new();
+        
+        println!("🎯 初始化 ECS 系统...");
+        
+        // ===== Layer 1: 输入与网络 (50-199) =====
+        scheduler.add_system(PlayerControlSystem::new());
+        println!("  ✅ PlayerControlSystem (110)");
+        
+        // ===== Layer 2: AI 与决策 (200-299) =====
+        scheduler.add_system(MonsterAISystem);
+        println!("  ✅ MonsterAISystem (200)");
+        
+        scheduler.add_system(NpcDialogueSystem::new());
+        println!("  ✅ NpcDialogueSystem (220)");
+        
+        // ===== Layer 3: 战斗与技能 (300-399) =====
+        scheduler.add_system(SkillSystem);
+        println!("  ✅ SkillSystem (300)");
+        
+        scheduler.add_system(CombatSystem);
+        println!("  ✅ CombatSystem (310)");
+        
+        // ===== Layer 4: 移动与物理 (400-499) =====
+        scheduler.add_system(MovementSystem);
+        println!("  ✅ MovementSystem (400)");
+        
+        scheduler.add_system(CollisionSystem::new());
+        println!("  ✅ CollisionSystem (410)");
+        
+        // ===== Layer 5: 状态更新 (500-599) =====
+        scheduler.add_system(AnimationSystem::new());
+        println!("  ✅ AnimationSystem (500)");
+        
+        scheduler.add_system(ParticleSystem);
+        println!("  ✅ ParticleSystem (510)");
+        
+        scheduler.add_system(HealthRegenSystem);
+        println!("  ✅ HealthRegenSystem (515)");
+        
+        scheduler.add_system(SoundSystem::new());
+        println!("  ✅ SoundSystem (520)");
+        
+        scheduler.add_system(CameraSystem::new());
+        println!("  ✅ CameraSystem (530)");
+        
+        // ===== Layer 6: 网络同步 (600-699) =====
+        scheduler.add_system(ClientPredictionSystem);
+        println!("  ✅ ClientPredictionSystem (595)");
+        
+        scheduler.add_system(NetworkSendSystem);
+        println!("  ✅ NetworkSendSystem (600)");
+        
+        scheduler.add_system(SyncSystem);
+        println!("  ✅ SyncSystem (610)");
+        
+        // ===== Layer 7: 事件清理 (900) - 最低优先级 =====
+        scheduler.add_system(EventCleanupSystem::new());
+        println!("  ✅ EventCleanupSystem (900)");
+        
+        println!("✅ ECS 系统初始化完成！");
+        
+        scheduler
     }
     
     /// 标记：场景是否已完成初始化
@@ -230,6 +324,10 @@ impl GameScene {
         let mut hotkey_help = HotkeyHelpPanel::new();
         hotkey_help.set_font(self.ui_font_name.clone());
         world.spawn((hotkey_help,));
+        
+        // 🆕 创建全局事件总线（核心组件，必须在其他系统之前创建）
+        world.spawn((crate::ecs::components::GlobalEvents::new(),));
+        println!("✅ 创建 GlobalEvents 全局事件总线");
         
         println!("✅ GameScene初始化完成！");
         Ok(())

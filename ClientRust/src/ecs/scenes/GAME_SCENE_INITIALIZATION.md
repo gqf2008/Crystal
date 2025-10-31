@@ -504,3 +504,11 @@ cargo run --bin mir2x 2>&1 | Select-String "WARN"
 ---
 
 **文档维护**: 此文档应随代码实现同步更新
+
+在组件都已经设计完整的情况下
+1、首先初始化游戏场景里的核心/基础/全局实体组件
+2、使用systems模块里的SystemScheduler初始化所有ECS系统，ecs目录下的两个调度器先注释掉
+3、我不确定ECS强依赖的实体/组件是在游戏场景中初始化还是在ECS系统里初始化
+4、我看到好几个network_开头的ECS系统，需要清理下
+5、game_event_system应该是不需要了，因为游戏事件通过GloabEvent组件统一传递，消费由各ECS系统主动读取后处理
+6、最后的event_cleanup_system非常重要，也是最低优先级的系统，需求清理全局事件以防止污染

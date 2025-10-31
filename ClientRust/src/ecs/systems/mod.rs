@@ -1,90 +1,133 @@
 // ============================================================================
-// ECS Systems - 六阶段架构系统
+// ECS Systems - 三类系统架构 (System / DrawSystem / HybridSystem)
 // ============================================================================
 //
-// 架构设计：
-// 
-// 阶段 1: 输入与网络 (50-199)
-//   - 接收网络数据、处理输入、玩家控制、事件分发
-//   - 系统：NetworkRecvSystem(50) → InputSystem(100) → PlayerControlSystem(110) → GameEventSystem(120)
+// ## 系统分类
 //
-// 阶段 2: AI 与决策 (200-299)
-//   - AI 行为逻辑、对话处理
-//   - 系统：MonsterAISystem(200) → NpcAISystem(210) → DialogueSystem(220)
+// ### 1. System - 纯逻辑系统（只有 update）
+//    实现 `System` trait，只需提供 `update()` 方法。
+//    用于 AI、物理、网络、战斗等纯逻辑处理。
+//    
+//    示例：MovementSystem, AISystem, CombatSystem
 //
-// 阶段 3: 战斗与技能 (300-399)
-//   - 技能释放、战斗计算
-//   - 系统：SkillSystem(300) → CombatSystem(310)
+// ### 2. DrawSystem - 纯渲染系统（只有 draw）
+//    实现 `DrawSystem` trait，只需提供 `draw()` 方法。
+//    用于地图渲染、UI渲染等不需要逻辑更新的渲染任务。
+//    
+//    示例：MapRenderSystem, UIRenderSystem
 //
-// 阶段 4: 移动与物理 (400-499)
-//   - 实体移动、碰撞检测、相机跟随（逻辑层）
-//   - 系统：MovementSystem(400) → CollisionSystem(410) → CameraFollowSystem(420)
+// ### 3. HybridSystem - 混合系统（update + draw）
+//    实现 `HybridSystem` trait，同时提供 `update()` 和 `draw()` 方法。
+//    用于粒子系统、调试系统等需要逻辑更新和渲染的系统。
+//    
+//    示例：ParticleSystem, DebugSystem
 //
-// 阶段 5: 状态更新 (500-599)
-//   - 动画状态、粒子更新、音效触发、相机矩阵计算（准备渲染）
-//   - 系统：AnimationSystem(500) → ParticleSystem(510) → SoundSystem(520) → CameraSystem(530)
+// ## 执行流程
 //
-// 阶段 6: 网络同步 (600-699)
-//   - 状态收集与发送
-//   - 系统：NetworkSendSystem(600) → SyncSystem(610)
+// 每帧执行顺序：
+// 1. **Update 阶段**：按优先级执行所有 System 和 HybridSystem 的 update()
+// 2. **Draw 阶段**：按优先级执行所有 DrawSystem 和 HybridSystem 的 draw()
 //
-// 阶段 7: 渲染 (1000-1999) [DrawSystem]
-//   - 纯渲染输出，按层级顺序
-//   - 系统：MapRenderSystem(1000) → SpriteRenderSystem(1010) → EffectRenderSystem(1020) → UIRenderSystem(1030) → DebugSystem(1100)
+// ## 系统优先级设计（六阶段架构）
 //
-// 数据流：网络/输入 → AI决策 → 战斗技能 → 移动物理 → 状态更新 → 网络发送 → 渲染输出
+// ### Update 阶段 (50-699)
 //
-// 关键改进：
+// **阶段 1: 输入与网络 (50-199)**
+//   接收网络数据、处理输入、玩家控制、事件分发
+//   - NetworkRecvSystem(50) → InputSystem(100) → PlayerControlSystem(110) → GameEventSystem(120)
+//
+// **阶段 2: AI 与决策 (200-299)**
+//   AI 行为逻辑、对话处理
+//   - MonsterAISystem(200) → NpcAISystem(210) → DialogueSystem(220)
+//
+// **阶段 3: 战斗与技能 (300-399)**
+//   技能释放、战斗计算
+//   - SkillSystem(300) → CombatSystem(310)
+//
+// **阶段 4: 移动与物理 (400-499)**
+//   实体移动、碰撞检测、相机跟随（逻辑层）
+//   - MovementSystem(400) → CollisionSystem(410) → CameraFollowSystem(420)
+//
+// **阶段 5: 状态更新 (500-599)**
+//   动画状态、粒子更新、音效触发、相机矩阵计算（准备渲染）
+//   - AnimationSystem(500) → ParticleSystem(510, Hybrid) → SoundSystem(520) → CameraSystem(530)
+//
+// **阶段 6: 网络同步 (600-699)**
+//   状态收集与发送
+//   - NetworkSendSystem(600) → SyncSystem(610)
+//
+// ### Draw 阶段 (1000-1999)
+//
+// **阶段 7: 渲染 (1000-1999)**
+//   按层级顺序渲染
+//   - MapRenderSystem(1000) → SpriteRenderSystem(1010) → EffectRenderSystem(1020) 
+//     → UIRenderSystem(1030) → DebugSystem(1100, Hybrid)
+//
+// ## 数据流
+// 网络/输入 → AI决策 → 战斗技能 → 移动物理 → 状态更新 → 网络发送 → 渲染输出
+//
+// ## 关键设计
 // 1. CameraFollowSystem(420) 在移动阶段更新跟随逻辑
 // 2. CameraSystem(530) 在状态更新阶段计算最终矩阵
 // 3. GameEventSystem(120) 统一管理系统间事件通信
 // 4. PlayerControlSystem(110) 专门处理玩家控制转换
+// 5. ParticleSystem(510) 和 DebugSystem(1100) 使用 HybridSystem 同时处理逻辑和渲染
 //
 // ============================================================================
 
 // ============================================================================
 //
-// # 熱血傳奇ECS系統職責說明表
-
-// | 階段 | 系統名稱 | 優先級 | 職責說明 |
-// |------|----------|--------|----------|
-// | **第一階段：輸入和網絡** | NetworkRecvSystem | 50 | 接收並解析網絡數據包，將數據存入組件 |
-// | | InputSystem | 100 | 處理玩家輸入（鍵盤、鼠標、觸控），轉換為輸入事件 |
-// | | PlayerControlSystem | 110 | 將輸入事件轉換為玩家具體行為（移動、攻擊、使用技能） |
-// | | GameEventSystem | 120 | 管理遊戲事件分發（任務、系統、UI事件），協調系統間通信 |
-// | **第二階段：AI和決策** | MonsterAISystem | 200 | 怪物AI邏輯（巡邏、追擊、攻擊決策、狀態切換） |
-// | | NpcAISystem | 210 | NPC行為邏輯（對話觸發、任務發放、商店交互） |
-// | | DialogueSystem | 220 | 處理對話樹、選項分支、對話進度管理 |
-// | **第三階段：戰鬥和技能** | SkillSystem | 300 | 技能釋放邏輯、冷卻計算、技能效果應用 |
-// | | CombatSystem | 310 | 戰鬥傷害計算、命中判定、爆擊處理、死亡判斷 |
-// | **第四階段：移動和物理** | MovementSystem | 400 | 實體移動更新、路徑追蹤、速度方向計算 |
-// | | CollisionSystem | 410 | 碰撞檢測與響應、障礙物判斷、實體間碰撞 |
-// | | CameraFollowSystem | 420 | 相機跟隨邏輯、目標追蹤、平滑移動、邊界限制 |
-// | **第五階段：狀態更新** | AnimationSystem | 500 | 動畫狀態機更新、幀切換、動畫混合 |
-// | | ParticleSystem | 510 | 粒子效果更新、生命期管理、位置速度計算 |
-// | | SoundSystem | 520 | 音效觸發管理、3D音效位置計算、音量控制 |
-// | | CameraSystem | 530 | 相機矩陣計算、震動效果、過場動畫、最終視圖矩陣 |
-// | **第六階段：網絡發送** | NetworkSendSystem | 600 | 收集狀態變化，組裝並發送網絡數據包 |
-// | | SyncSystem | 610 | 狀態同步驗證、數據壓縮、斷線重連處理 |
-// | **第七階段：渲染** | MapRenderSystem | 1000 | 地圖圖層渲染、地形繪製、遮罩處理 |
-// | | SpriteRenderSystem | 1010 | 精靈實體渲染、排序、批處理優化 |
-// | | EffectRenderSystem | 1020 | 特效渲染（技能特效、光影、後處理） |
-// | | UIRenderSystem | 1030 | UI界面渲染、HUD、文字顯示 |
-// | | DebugSystem | 1100 | 調試信息顯示、性能統計、開發工具 |
+// # 热血传奇 ECS 系统职责说明表
+//
+// | 阶段 | 系统名称 | 类型 | 优先级 | 职责说明 |
+// |------|----------|------|--------|----------|
+// | **第一阶段：输入和网络** | NetworkRecvSystem | System | 50 | 接收并解析网络数据包，将数据存入组件 |
+// | | InputSystem | System | 100 | 处理玩家输入（键盘、鼠标、触控），转换为输入事件 |
+// | | PlayerControlSystem | System | 110 | 将输入事件转换为玩家具体行为（移动、攻击、使用技能） |
+// | | GameEventSystem | System | 120 | 管理游戏事件分发（任务、系统、UI事件），协调系统间通信 |
+// | **第二阶段：AI和决策** | MonsterAISystem | System | 200 | 怪物AI逻辑（巡逻、追击、攻击决策、状态切换） |
+// | | NpcAISystem | System | 210 | NPC行为逻辑（对话触发、任务发放、商店交互） |
+// | | DialogueSystem | System | 220 | 处理对话树、选项分支、对话进度管理 |
+// | **第三阶段：战斗和技能** | SkillSystem | System | 300 | 技能释放逻辑、冷却计算、技能效果应用 |
+// | | CombatSystem | System | 310 | 战斗伤害计算、命中判定、暴击处理、死亡判断 |
+// | **第四阶段：移动和物理** | MovementSystem | System | 400 | 实体移动更新、路径追踪、速度方向计算 |
+// | | CollisionSystem | System | 410 | 碰撞检测与响应、障碍物判断、实体间碰撞 |
+// | | CameraFollowSystem | System | 420 | 相机跟随逻辑、目标追踪、平滑移动、边界限制 |
+// | **第五阶段：状态更新** | AnimationSystem | System | 500 | 动画状态机更新、帧切换、动画混合 |
+// | | ParticleSystem | **Hybrid** | 510 | **[Update]** 粒子生命期管理、位置速度计算<br>**[Draw]** 粒子效果渲染 |
+// | | SoundSystem | System | 520 | 音效触发管理、3D音效位置计算、音量控制 |
+// | | CameraSystem | System | 530 | 相机矩阵计算、震动效果、过场动画、最终视图矩阵 |
+// | **第六阶段：网络发送** | NetworkSendSystem | System | 600 | 收集状态变化，组装并发送网络数据包 |
+// | | SyncSystem | System | 610 | 状态同步验证、数据压缩、断线重连处理 |
+// | **第七阶段：渲染** | MapRenderSystem | DrawSystem | 1000 | 地图图层渲染、地形绘制、遮罩处理 |
+// | | SpriteRenderSystem | DrawSystem | 1010 | 精灵实体渲染、排序、批处理优化 |
+// | | EffectRenderSystem | DrawSystem | 1020 | 特效渲染（技能特效、光影、后处理） |
+// | | UIRenderSystem | DrawSystem | 1030 | UI界面渲染、HUD、文字显示 |
+// | | DebugSystem | **Hybrid** | 1100 | **[Update]** 性能统计收集、数据采样<br>**[Draw]** 调试信息显示、开发工具 |
 //
 // ============================================================================
-
-// ## 系統依賴關係說明
-
-// 1. **數據流動**：網絡接收 → 輸入處理 → 控制響應 → 事件觸發 → AI決策 → 戰鬥計算 → 移動物理 → 狀態更新 → 網絡發送 → 渲染顯示
-
-// 2. **關鍵依賴**：
-//    - PlayerControlSystem 依賴 InputSystem 的輸入數據
-//    - CameraFollowSystem 依賴 MovementSystem 的位置更新
-//    - CameraSystem 依賴 CameraFollowSystem 的跟隨邏輯
-//    - 所有戰鬥相關系統依賴 GameEventSystem 的事件通知
-
-// 3. **渲染順序**：地圖 → 實體 → 特效 → UI → 調試信息（從底層到頂層）
+//
+// ## 系统类型说明
+//
+// - **System**: 纯逻辑系统，只实现 `update()` 方法，用于游戏逻辑处理
+// - **DrawSystem**: 纯渲染系统，只实现 `draw()` 方法，用于图形绘制
+// - **Hybrid**: 混合系统，同时实现 `update()` 和 `draw()` 方法，用于需要状态更新和渲染的系统
+//
+// ## 系统依赖关系说明
+//
+// 1. **数据流动**：
+//    网络接收 → 输入处理 → 控制响应 → 事件触发 → AI决策 → 战斗计算 
+//    → 移动物理 → 状态更新 → 网络发送 → 渲染显示
+//
+// 2. **关键依赖**：
+//    - PlayerControlSystem 依赖 InputSystem 的输入数据
+//    - CameraFollowSystem 依赖 MovementSystem 的位置更新
+//    - CameraSystem 依赖 CameraFollowSystem 的跟随逻辑
+//    - 所有战斗相关系统依赖 GameEventSystem 的事件通知
+//    - HybridSystem 的 update 在逻辑阶段执行，draw 在渲染阶段执行
+//
+// 3. **渲染顺序**：地图 → 实体 → 特效 → UI → 调试信息（从底层到顶层）
+//
 // ============================================================================
 // 系统优先级常量定义
 // ============================================================================
@@ -129,196 +172,176 @@ pub mod priority {
 }
 
 // ✅ update/render 架构（推荐）
-pub mod update;
+pub mod network_event_system;
 pub mod render;
-pub mod network_event_system;  // 🆕 网络事件系统
+pub mod update; // 🆕 网络事件系统
 
 pub use network_event_system::NetworkEventSystem;
 
 use ggez::graphics::Canvas;
 use ggez::GameResult;
 
+// 重新导出派生宏
+pub use ecs_macros::{HybridSystem, LogicSystem, RenderSystem};
+
 // 重新导出各层系统（保持向后兼容）
 // 注意：新代码应使用 update:: 和 render:: 模块
 
 // Layer 1 (Input) - 向后兼容导出
-pub use update::input::{
-    InputSystem as InputCollectingSystem,
-    // TODO: NetworkSyncSystem已禁用（依赖旧network::protocol）
-    // NetworkSyncSystem,
-    PlayerControlSystem,
-    GameEventSystem,
-};
+pub use update::input::{InputSystem as InputCollectingSystem, PlayerControlSystem};
 
 // Layer 2 (Decision) - 向后兼容导出
-pub use update::decision::{
-    MonsterAISystem,
-    NpcAISystem,
-    NpcDialogueSystem,
-};
+pub use update::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
 
 // Layer 3 (Combat & Skills) - 向后兼容导出
 pub use update::combat_skill::{
-    SkillSystem,
-    CombatSystem as CombatSystemV2,
-    DamageType,
-    CombatResult,
+    CombatResult, CombatSystem as CombatSystemV2, DamageType, SkillSystem,
 };
 
 // Layer 4 (Physics & Movement) - 向后兼容导出
-pub use update::physics_movement::{
-    MovementSystem,
-    CollisionSystem,
-};
+pub use update::physics_movement::{CollisionSystem, MovementSystem};
 
-// Layer 5 (State Update) - 向后兼容导出  
+// Layer 5 (State Update) - 向后兼容导出
 pub use update::state_update::{
-    AnimationSystem,
-    ParticleSystem,
-    HealthRegenSystem,
-    SoundSystem,
-    CameraSystem,
+    AnimationSystem, CameraSystem, HealthRegenSystem, ParticleSystem, SoundSystem,
 };
 
 // Layer 6 (Network Sync) - 向后兼容导出
-pub use update::network_sync::{
-    ClientPredictionSystem,
-    NetworkSendSystem,
-    SyncSystem,
-};
+pub use update::network_sync::{ClientPredictionSystem, NetworkSendSystem, SyncSystem};
 
 // ============================================================================
 // 系统 Trait 设计
 // ============================================================================
 //
-// 本 ECS 系统基于 Rust nightly 的 specialization 特性实现了优雅的双 trait 架构：
+// 本 ECS 系统实现了三类系统架构：
 //
-// 1. System trait - 更新系统
-//    - 必须实现 update() 方法
+// ## 1. System - 纯逻辑系统
+//    - 只需实现 `update()` 方法
+//    - 用于 AI、物理、网络、战斗等纯逻辑处理
 //    - 提供默认的元数据方法：name、is_enabled、priority
 //
-// 2. DrawSystem trait - 绘制系统
-//    - 必须实现 draw() 方法
+// ## 2. DrawSystem - 纯渲染系统
+//    - 只需实现 `draw()` 方法
+//    - 用于地图渲染、UI渲染等不需要逻辑更新的渲染任务
 //    - 提供默认的元数据方法：name、is_enabled、priority
-//    - 通过 specialization blanket impl 自动获得 System trait 实现
-//    - blanket impl 会桥接元数据方法并提供默认空 update()
 //
-// 核心特性：
-// - 单一入口：scheduler.add_system() 自动判断系统类型并路由到正确的队列
-// - 类型安全：基于 trait bound 的编译期检查，DrawSystem 和 System 分离
-// - 职责分离：update_systems 和 draw_systems 独立存储和调度
-// - 灵活扩展：DrawSystem 可选择性覆盖 update() 实现自定义逻辑
-// - 方法覆盖：可以只覆盖需要的元数据方法，其他使用默认实现
+// ## 3. HybridSystem - 混合系统
+//    - 同时实现 `update()` 和 `draw()` 方法
+//    - 用于粒子系统、调试系统等需要逻辑更新和渲染的系统
+//    - 提供默认的元数据方法：name、is_enabled、priority
+//    - update() 在逻辑阶段执行，draw() 在渲染阶段执行
 //
-// 使用示例：
+// ## 核心特性
+// - **类型安全**：三种系统类型在编译期严格区分
+// - **职责分离**：System 专注逻辑，DrawSystem 专注渲染，HybridSystem 同时处理两者
+// - **自动调度**：调度器根据系统类型自动在正确的阶段调用相应方法
+// - **灵活扩展**：所有元数据方法都有默认实现，只需覆盖需要的方法
+// - **优先级控制**：通过 priority 常量精确控制系统执行顺序
 //
-// 1. 纯更新系统（逻辑系统）：
+// ## 使用示例
+//
+// ### 1. System - 纯逻辑系统
 //    ```rust
+//    use crate::ecs::systems::priority;
+//    
 //    struct MovementSystem;
+//    
 //    impl System for MovementSystem {
-//        fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
-//            // 移动逻辑
-//            Ok(())
-//        }
-//    }
-//    scheduler.add_system(MovementSystem); // 自动归入 update_systems
-//    ```
-//
-// 2. 纯绘制系统（无更新逻辑）：
-//    ```rust
-//    struct RenderSystem;
-//    impl DrawSystem for RenderSystem {
-//        fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, world: &hecs::World) -> GameResult {
-//            // 绘制逻辑
-//            Ok(())
-//        }
-//    }
-//    scheduler.add_system(RenderSystem); // 自动归入 draw_systems
-//    // System trait 自动实现，update 为空 ✅
-//    ```
-//
-// 3. 带自定义更新的绘制系统（如粒子系统）：
-//    ```rust
-//    struct ParticleSystem;
-//    impl DrawSystem for ParticleSystem {
-//        fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, world: &hecs::World) -> GameResult {
-//            // 绘制粒子
-//            Ok(())
-//        }
-//    }
-//    // 显式实现 System 覆盖默认的空 update
-//    impl System for ParticleSystem {
-//        fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
-//            // 更新粒子状态
-//            Ok(())
-//        }
-//    }
-//    scheduler.add_system(ParticleSystem); // 自动归入 draw_systems
-//    // 调度器会在 draw 阶段调用 DrawSystem::draw()
-//    // 如果实现了自定义 update，不会被自动调用（需要手动在 draw 中调用或在 update 队列中注册）
-//    ```
-//
-// 4. 自定义元数据（只覆盖需要的方法）：
-//    ```rust
-//    use crate::ecs::systems::priority;
-//    
-//    struct HighPriorityRenderer;
-//    impl DrawSystem for HighPriorityRenderer {
-//        fn priority(&self) -> u32 { priority::MAP_RENDER }  // 使用预定义优先级
-//        // name 和 is_enabled 使用默认实现 ✅
-//        
-//        fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, world: &hecs::World) -> GameResult {
-//            Ok(())
-//        }
-//    }
-//    
-//    struct CustomNameSystem;
-//    impl System for CustomNameSystem {
-//        fn name(&self) -> &'static str { "MyCustomSystem" }
-//        fn priority(&self) -> u32 { priority::MOVEMENT }  // 使用预定义优先级
-//        // is_enabled 使用默认实现 ✅
+//        fn priority(&self) -> u32 { priority::MOVEMENT }  // 400
 //        
 //        fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
+//            // 更新实体位置
 //            Ok(())
 //        }
 //    }
+//    
+//    // 使用声明宏注册
+//    logic_system!(MovementSystem);
 //    ```
 //
-// 5. 使用优先级常量（推荐）：
+// ### 2. DrawSystem - 纯渲染系统
 //    ```rust
 //    use crate::ecs::systems::priority;
-//    
-//    struct NetworkRecvSystem;
-//    impl System for NetworkRecvSystem {
-//        fn priority(&self) -> u32 { priority::NETWORK_RECV }  // 50
-//        fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
-//            Ok(())
-//        }
-//    }
 //    
 //    struct MapRenderSystem;
+//    
 //    impl DrawSystem for MapRenderSystem {
 //        fn priority(&self) -> u32 { priority::MAP_RENDER }  // 1000
-//        fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, world: &hecs::World) -> GameResult {
+//        
+//        fn draw(
+//            &mut self, 
+//            ctx: &mut Context, 
+//            canvas: &mut Canvas, 
+//            world: &hecs::World
+//        ) -> GameResult {
+//            // 绘制地图
 //            Ok(())
 //        }
 //    }
 //    
-//    // 添加系统时会自动按优先级排序
-//    scheduler.add_system(NetworkRecvSystem);
-//    scheduler.add_system(MapRenderSystem);
+//    // 使用声明宏注册
+//    draw_system!(MapRenderSystem);
 //    ```
 //
-// 调度流程：
-// - update 阶段：遍历 update_systems，调用 System::update()
-// - draw 阶段：遍历 draw_systems，调用 DrawSystem::draw()
+// ### 3. HybridSystem - 混合系统
+//    ```rust
+//    use crate::ecs::systems::priority;
+//    
+//    struct ParticleSystem;
+//    
+//    impl HybridSystem for ParticleSystem {
+//        fn priority(&self) -> u32 { priority::PARTICLE }  // 510
+//        
+//        fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
+//            // 更新粒子生命周期和位置
+//            Ok(())
+//        }
+//        
+//        fn draw(
+//            &mut self, 
+//            ctx: &mut Context, 
+//            canvas: &mut Canvas, 
+//            world: &hecs::World
+//        ) -> GameResult {
+//            // 绘制粒子效果
+//            Ok(())
+//        }
+//    }
+//    
+//    // 使用声明宏注册
+//    hybrid_system!(ParticleSystem);
+//    ```
 //
-// 实现细节：
-// - DrawSystem 的元数据方法（name/is_enabled/priority）通过 blanket impl 桥接到 System
-// - 如果在 DrawSystem 中覆盖了元数据方法，System 会自动使用覆盖后的值
-// - DrawSystem 的默认 update 实现为空操作，不会影响性能
+// ### 4. 批量注册系统
+//    ```rust
+//    // 批量注册多个纯逻辑系统
+//    logic_system!(
+//        MovementSystem,
+//        CollisionSystem,
+//        AISystem,
+//    );
+//    
+//    // 批量注册多个纯渲染系统
+//    draw_system!(
+//        MapRenderSystem,
+//        SpriteRenderSystem,
+//        UIRenderSystem,
+//    );
+//    
+//    // 批量注册多个混合系统
+//    hybrid_system!(
+//        ParticleSystem,
+//        DebugSystem,
+//    );
+//    ```
 //
-// 注意事项：
+// ## 调度流程
+//
+// 每帧执行顺序：
+// 1. **Update 阶段**：按优先级执行所有 System 和 HybridSystem 的 update()
+// 2. **Draw 阶段**：按优先级执行所有 DrawSystem 和 HybridSystem 的 draw()
+//
+// ## 设计要点
 // - 需要 Rust nightly 工具链：`rustup default nightly`
 // - 需要在 crate root 添加：`#![feature(specialization)]` 和 `#![allow(incomplete_features)]`
 // - System 和 DrawSystem 的元数据方法需要分别定义（代码重复但功能独立）
@@ -326,50 +349,46 @@ pub use update::network_sync::{
 // ============================================================================
 
 /// ECS 更新系统抽象
-/// 
+///
 /// 所有需要在逻辑更新阶段执行的系统都应实现此 trait。
 pub trait System {
     /// 系统名称，默认使用类型全名
     fn name(&self) -> &'static str {
         std::any::type_name::<Self>()
     }
-    
+
     /// 是否启用，默认为 true
     fn is_enabled(&self) -> bool {
         true
     }
-    
+
     /// 优先级（数字越小越优先），默认为 100
     fn priority(&self) -> u32 {
         100
     }
-    
     /// 更新方法，每帧在逻辑阶段调用
     fn update(&mut self, world: &mut hecs::World, delay_time: f32) -> GameResult;
 }
 
-/// ECS 绘制系统抽象
-/// 
-/// 所有需要在渲染阶段执行的系统都应实现此 trait。
-/// System 会自动实现（通过 blanket impl，带默认空 update）。
-/// 
-/// 如需在绘制系统中执行更新逻辑（如粒子系统），可显式实现 System trait 覆盖默认行为。
+/// ECS 绘制系统抽象（纯渲染，无逻辑更新）
+///
+/// 所有**纯渲染**系统应实现此 trait（如 MapRenderSystem、UIRenderSystem）。
+/// 如需同时执行更新和渲染，请使用 `HybridSystem` trait。
 pub trait DrawSystem {
     /// 系统名称，默认使用类型全名
     fn name(&self) -> &'static str {
         std::any::type_name::<Self>()
     }
-    
+
     /// 是否启用，默认为 true
     fn is_enabled(&self) -> bool {
         true
     }
-    
+
     /// 优先级（数字越小越优先），默认为 100
     fn priority(&self) -> u32 {
         100
     }
-    
     /// 绘制方法，每帧在渲染阶段调用
     fn draw(
         &mut self,
@@ -379,138 +398,409 @@ pub trait DrawSystem {
     ) -> GameResult;
 }
 
-// ============================================================================
-// Specialization Blanket Implementation
-// ============================================================================
-//
-// 使用 specialization 为所有 DrawSystem 自动实现 System trait。
-// 提供默认空 update() 实现，允许纯绘制系统无需手动实现 update。
-// 元数据方法从 DrawSystem 桥接到 System。
-// 如果 DrawSystem 需要自定义 update 逻辑，可显式实现 System trait 覆盖此默认实现。
-// ============================================================================
-default impl<T> System for T
-where
-    T: DrawSystem + ?Sized,
-{
+/// ECS 混合系统抽象（同时需要更新和渲染）
+///
+/// 用于需要在逻辑阶段更新状态、在渲染阶段绘制的系统（如粒子系统、调试系统）。
+///
+/// # 与 DrawSystem 的区别
+/// - `DrawSystem`: 纯渲染，无逻辑更新（如地图渲染、UI渲染）
+/// - `HybridSystem`: 需要逻辑更新 + 渲染（如粒子效果、调试信息）
+/// - `System`: 纯逻辑，无渲染（如 AI、物理、网络）
+///
+/// # 用法
+/// ```rust
+/// #[derive(HybridSystem)]
+/// struct ParticleSystem;
+///
+/// impl HybridSystem for ParticleSystem {
+///     fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
+///         // 更新粒子状态（位置、生命周期等）
+///         Ok(())
+///     }
+///     
+///     fn draw(
+///         &mut self,
+///         ctx: &mut ggez::Context,
+///         canvas: &mut ggez::graphics::Canvas,
+///         world: &hecs::World,
+///     ) -> GameResult {
+///         // 绘制粒子
+///         Ok(())
+///     }
+/// }
+/// ```
+pub trait HybridSystem {
+    /// 系统名称，默认使用类型全名
     fn name(&self) -> &'static str {
-        DrawSystem::name(self)
+        std::any::type_name::<Self>()
     }
-    
+
+    /// 是否启用，默认为 true
     fn is_enabled(&self) -> bool {
-        DrawSystem::is_enabled(self)
+        true
     }
-    
+
+    /// 优先级（数字越小越优先），默认为 100
     fn priority(&self) -> u32 {
-        DrawSystem::priority(self)
+        100
     }
-    
-    fn update(&mut self, _world: &mut hecs::World, _delay_time: f32) -> GameResult {
-        Ok(())
-    }
+    /// 更新方法，每帧在逻辑阶段调用（必须实现）
+    fn update(&mut self, world: &mut hecs::World, delay_time: f32) -> GameResult;
+
+    /// 绘制方法，每帧在渲染阶段调用（必须实现）
+    fn draw(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        world: &hecs::World,
+    ) -> GameResult;
 }
 
 pub enum SystemKind {
     Update(Box<dyn System>),
     Draw(Box<dyn DrawSystem>),
+    Hybrid(Box<dyn HybridSystem>),
 }
 
-pub trait Schedulable: System {
+/// 系统类型标记 trait - 用于在编译期判断系统应归入哪个队列
+pub trait IntoSystemKind {
     fn into_kind(self: Box<Self>) -> SystemKind;
 }
 
-// 默认实现：所有 System 都归为 Update
-default impl<T> Schedulable for T
-where
-    T: System + 'static,
-{
-    fn into_kind(self: Box<Self>) -> SystemKind {
-        SystemKind::Update(self)
-    }
+// ============================================================================
+// 声明式宏 - 可选的批量实现方式（与派生宏功能相同）
+// ============================================================================
+//
+// 推荐使用派生宏（`#[derive(LogicSystem)]` 等）为单个系统添加支持。
+// 声明式宏适合批量为多个系统实现，两种方式可以混用。
+//
+// 示例对比：
+// - 派生宏（推荐）：`#[derive(LogicSystem)] struct MySystem;`
+// - 声明式宏（批量）：`impl_system!(System1, System2, System3);`
+// ============================================================================
+
+/// 为纯逻辑系统批量实现 IntoSystemKind
+///
+/// 等价于为每个类型添加 `#[derive(LogicSystem)]`
+///
+/// # 用法
+/// ```rust
+/// logic_system!(MovementSystem, CollisionSystem, AISystem);
+/// ```
+#[macro_export]
+macro_rules! logic_system {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl $crate::ecs::systems::IntoSystemKind for $ty {
+                fn into_kind(self: Box<Self>) -> $crate::ecs::systems::SystemKind {
+                    $crate::ecs::systems::SystemKind::Update(self)
+                }
+            }
+        )+
+    };
 }
 
-// 特化：DrawSystem 归为 Draw
-default impl<T> Schedulable for T
-where
-    T: DrawSystem + 'static,
-{
-    fn into_kind(self: Box<Self>) -> SystemKind {
-        SystemKind::Draw(self)
+/// 为纯渲染系统批量实现 IntoSystemKind
+///
+/// 等价于为每个类型添加 `#[derive(RenderSystem)]`
+///
+/// # 用法
+/// ```rust
+/// draw_system!(MapRenderer, UIRenderer);
+/// ```
+#[macro_export]
+macro_rules! draw_system {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl $crate::ecs::systems::IntoSystemKind for $ty {
+                fn into_kind(self: Box<Self>) -> $crate::ecs::systems::SystemKind {
+                    $crate::ecs::systems::SystemKind::Draw(self)
+                }
+            }
+        )+
+    };
+}
+
+/// 为混合系统批量实现 IntoSystemKind
+///
+/// 等价于为每个类型添加 `#[derive(HybridSystem)]`
+///
+/// # 用法
+/// ```rust
+/// hybrid_system!(ParticleSystem, DebugSystem);
+/// ```
+#[macro_export]
+macro_rules! hybrid_system {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl $crate::ecs::systems::IntoSystemKind for $ty {
+                fn into_kind(self: Box<Self>) -> $crate::ecs::systems::SystemKind {
+                    $crate::ecs::systems::SystemKind::Hybrid(self)
+                }
+            }
+        )+
+    };
+}
+
+/// 系统调度器的内部存储结构
+enum SystemEntry {
+    Update {
+        system: Box<dyn System>,
+        priority: u32,
+    },
+    Draw {
+        system: Box<dyn DrawSystem>,
+        priority: u32,
+    },
+    Hybrid {
+        system: Box<dyn HybridSystem>,
+        priority: u32,
+    },
+}
+
+impl SystemEntry {
+    fn priority(&self) -> u32 {
+        match self {
+            SystemEntry::Update { priority, .. } => *priority,
+            SystemEntry::Draw { priority, .. } => *priority,
+            SystemEntry::Hybrid { priority, .. } => *priority,
+        }
+    }
+
+    fn is_enabled(&self) -> bool {
+        match self {
+            SystemEntry::Update { system, .. } => system.is_enabled(),
+            SystemEntry::Draw { system, .. } => system.is_enabled(),
+            SystemEntry::Hybrid { system, .. } => system.is_enabled(),
+        }
     }
 }
 
 pub struct SystemScheduler {
-    update_systems: Vec<Box<dyn System>>,
-    draw_systems: Vec<Box<dyn DrawSystem>>,
+    systems: Vec<SystemEntry>,
 }
 
 impl SystemScheduler {
     pub fn new() -> Self {
         Self {
-            update_systems: Vec::new(),
-            draw_systems: Vec::new(),
+            systems: Vec::new(),
         }
     }
 
     /// 添加系统（自动判断类型）
-    pub fn add_system<S>(&mut self, system: S)->&mut Self
+    pub fn add_system<S>(&mut self, system: S) -> &mut Self
     where
-        S: Schedulable + 'static,
+        S: IntoSystemKind + 'static,
     {
-        match Schedulable::into_kind(Box::new(system)) {
+        match IntoSystemKind::into_kind(Box::new(system)) {
             SystemKind::Update(sys) => {
-                self.update_systems.push(sys);
-                self.update_systems.sort_by_key(|s| s.priority());
+                let priority = sys.priority();
+                self.systems.push(SystemEntry::Update {
+                    system: sys,
+                    priority,
+                });
             }
             SystemKind::Draw(sys) => {
-                self.draw_systems.push(sys);
-                self.draw_systems.sort_by_key(|s| s.priority());
+                let priority = sys.priority();
+                self.systems.push(SystemEntry::Draw {
+                    system: sys,
+                    priority,
+                });
+            }
+            SystemKind::Hybrid(sys) => {
+                let priority = sys.priority();
+                self.systems.push(SystemEntry::Hybrid {
+                    system: sys,
+                    priority,
+                });
             }
         }
+
+        // 按优先级排序（数字越小越优先）
+        self.systems.sort_by_key(|entry| entry.priority());
         self
-    }    
+    }
+
+    /// 逻辑更新阶段 - 按优先级统一调度所有系统的 update
     pub fn update(&mut self, world: &mut hecs::World, delay_time: f32) -> GameResult {
-        for system in &mut self.update_systems {
-            if system.is_enabled() {
-                system.update(world, delay_time)?;
+        for entry in &mut self.systems {
+            if !entry.is_enabled() {
+                continue;
+            }
+
+            match entry {
+                SystemEntry::Update { system, .. } => {
+                    system.update(world, delay_time)?;
+                }
+                SystemEntry::Hybrid { system, .. } => {
+                    system.update(world, delay_time)?;
+                }
+                SystemEntry::Draw { .. } => {
+                    // 纯渲染系统无需更新
+                }
             }
         }
+
         Ok(())
     }
 
+    /// 渲染阶段 - 调度 DrawSystem 和 HybridSystem 的 draw 方法
     pub fn draw(&mut self, ctx: &mut ggez::Context, world: &hecs::World) -> GameResult {
         let mut canvas = Canvas::from_frame(ctx, ggez::graphics::Color::BLACK);
-        for system in &mut self.draw_systems {
-            if system.is_enabled() {
-                system.draw(ctx, &mut canvas, world)?;
+
+        for entry in &mut self.systems {
+            if !entry.is_enabled() {
+                continue;
+            }
+
+            match entry {
+                SystemEntry::Draw { system, .. } => {
+                    system.draw(ctx, &mut canvas, world)?;
+                }
+                SystemEntry::Hybrid { system, .. } => {
+                    system.draw(ctx, &mut canvas, world)?;
+                }
+                SystemEntry::Update { .. } => {
+                    // 纯逻辑系统无需渲染
+                }
             }
         }
+
         Ok(())
     }
 }
 
-// pub struct A;
+mod tests {
+    use super::*;
+    #[derive(RenderSystem)]
+    pub struct TestDrawSystem;
 
-// // A 只需实现 DrawSystem，System 会通过 specialization 自动实现
-// impl DrawSystem for A {
-//     // 只覆盖 priority，其他使用默认值
-//     fn priority(&self) -> u32 {
-//         50
-//     }
-    
-//     fn draw(
-//         &mut self,
-//         _ctx: &mut ggez::Context,
-//         _canvas: &mut ggez::graphics::Canvas,
-//         _world: &hecs::World,
-//     ) -> GameResult {
-//         Ok(())
-//     }
-// }
+    impl DrawSystem for TestDrawSystem {
+        fn priority(&self) -> u32 {
+            50
+        }
+        fn draw(
+            &mut self,
+            _ctx: &mut ggez::Context,
+            _canvas: &mut ggez::graphics::Canvas,
+            _world: &hecs::World,
+        ) -> GameResult {
+            Ok(())
+        }
+    }
 
-// // 如果想自定义 update，可以单独实现 System 覆盖默认实现
-// impl System for A {
-//     fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
-//         // 自定义更新逻辑
-//         Ok(())
-//     }
-// }
+    /// 测试系统
+    #[derive(LogicSystem)]
+    pub struct TestSystem;
+
+    impl System for TestSystem {
+        fn update(&mut self, _world: &mut hecs::World, _delay_time: f32) -> GameResult {
+            println!("TestSystem::update called");
+            Ok(())
+        }
+    }
+
+    #[derive(HybridSystem)]
+    pub struct TestDebugSystem;
+
+    impl HybridSystem for TestDebugSystem {
+        fn priority(&self) -> u32 {
+            50
+        }
+        fn update(&mut self, _world: &mut hecs::World, _dt: f32) -> GameResult {
+            // 混合系统的更新逻辑（必须实现）
+            Ok(())
+        }
+
+        fn draw(
+            &mut self,
+            _ctx: &mut ggez::Context,
+            _canvas: &mut ggez::graphics::Canvas,
+            _world: &hecs::World,
+        ) -> GameResult {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_add_system() {
+        let mut scheduler = SystemScheduler::new();
+
+        // 这应该能编译通过
+        scheduler.add_system(TestSystem);
+        scheduler.add_system(TestDrawSystem);
+        scheduler.add_system(TestDebugSystem); // 添加绘制系统
+        println!("✅ Test passed!");
+    }
+
+    #[test]
+    fn test_system_execution_order() {
+        use std::sync::{Arc, Mutex};
+
+        // 测试系统执行顺序
+        #[derive(LogicSystem)]
+        struct EarlySystem(Arc<Mutex<Vec<String>>>);
+
+        impl System for EarlySystem {
+            fn update(&mut self, _world: &mut hecs::World, _dt: f32) -> GameResult {
+                self.0.lock().unwrap().push("Early(100)".to_string());
+                Ok(())
+            }
+        }
+
+        #[derive(HybridSystem)]
+        struct LateHybridSystem(Arc<Mutex<Vec<String>>>);
+
+        impl HybridSystem for LateHybridSystem {
+            fn priority(&self) -> u32 {
+                200
+            }
+            fn update(&mut self, _world: &mut hecs::World, _dt: f32) -> GameResult {
+                self.0.lock().unwrap().push("LateHybrid(200)".to_string());
+                Ok(())
+            }
+            fn draw(
+                &mut self,
+                _ctx: &mut ggez::Context,
+                _canvas: &mut ggez::graphics::Canvas,
+                _world: &hecs::World,
+            ) -> GameResult {
+                Ok(())
+            }
+        }
+
+        #[derive(LogicSystem)]
+        struct MiddleSystem(Arc<Mutex<Vec<String>>>);
+
+        impl System for MiddleSystem {
+            fn priority(&self) -> u32 {
+                150
+            }
+            fn update(&mut self, _world: &mut hecs::World, _dt: f32) -> GameResult {
+                self.0.lock().unwrap().push("Middle(150)".to_string());
+                Ok(())
+            }
+        }
+
+        let execution_order = Arc::new(Mutex::new(Vec::new()));
+
+        let mut scheduler = SystemScheduler::new();
+        scheduler.add_system(LateHybridSystem(execution_order.clone()));
+        scheduler.add_system(EarlySystem(execution_order.clone()));
+        scheduler.add_system(MiddleSystem(execution_order.clone()));
+
+        let mut world = hecs::World::new();
+        scheduler.update(&mut world, 0.016).unwrap();
+
+        let order = execution_order.lock().unwrap();
+        println!("执行顺序: {:?}", *order);
+
+        // 验证按优先级顺序执行：100 -> 150 -> 200
+        assert_eq!(order.len(), 3);
+        assert_eq!(order[0], "Early(100)");
+        assert_eq!(order[1], "Middle(150)");
+        assert_eq!(order[2], "LateHybrid(200)");
+
+        println!("✅ 系统按优先级正确排序执行！");
+    }
+}

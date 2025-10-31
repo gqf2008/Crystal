@@ -21,3 +21,18 @@ pub use sprite_system::SpriteRenderSystem;
 pub use effect_system::EffectRenderSystem;
 pub use ui_system::UIRenderSystem;
 pub use debug_system::DebugSystem;
+
+// ============================================================================
+// 为所有渲染系统批量实现 IntoSystemKind
+// ============================================================================
+
+// 为纯渲染系统实现 IntoSystemKind
+crate::draw_system!(
+    MapRenderSystem,
+    SpriteRenderSystem,
+    EffectRenderSystem,
+    UIRenderSystem,
+);
+
+// DebugSystem 是混合系统
+crate::hybrid_system!(DebugSystem);
