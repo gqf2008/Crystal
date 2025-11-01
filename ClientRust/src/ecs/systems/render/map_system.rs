@@ -67,8 +67,20 @@ impl DrawSystem for MapRenderSystem {
                 200.0  // Back/Middle 层保持 200 像素
             };
             
-            // 静态瓦片
-            for (_, tile) in world.query::<&MapTile>().iter().filter(|(_, t)| matches!(t.layer, layer)) {
+            // 先收集所有有动画的瓦片实体（避免重复绘制）
+            use crate::ecs::components::AnimatedTile;
+            let mut animated_entities = std::collections::HashSet::new();
+            for (entity, (tile, _)) in world.query::<(&MapTile, &AnimatedTile)>().iter().filter(|(_, (t, _))| matches!(t.layer, layer)) {
+                animated_entities.insert(entity);
+            }
+            
+            // 静态瓦片（排除有动画的）
+            for (entity, tile) in world.query::<&MapTile>().iter().filter(|(_, t)| matches!(t.layer, layer)) {
+                // 如果这个实体有动画，跳过（稍后在动画瓦片部分绘制）
+                if animated_entities.contains(&entity) {
+                    continue;
+                }
+                
                 // 计算瓦片的世界坐标
                 let world_x = (tile.grid_x * CELL_WIDTH) as f32;
                 let world_y = (tile.grid_y * CELL_HEIGHT) as f32;
@@ -92,7 +104,6 @@ impl DrawSystem for MapRenderSystem {
             }
             
             // 动画瓦片（使用 AnimatedTile 计算当前帧）
-            use crate::ecs::components::AnimatedTile;
             for (_, (tile, anim)) in world.query::<(&MapTile, &AnimatedTile)>().iter().filter(|(_, (t, _))| matches!(t.layer, layer)) {
                 let world_x = (tile.grid_x * CELL_WIDTH) as f32;
                 let world_y = (tile.grid_y * CELL_HEIGHT) as f32;
@@ -136,10 +147,16 @@ impl DrawSystem for MapRenderSystem {
                                 // 关键：图像 UV 坐标在左下角！
                                 // 需要将图像左下角对齐到网格坐标
                                 // 
-                                // 静态层（无动画）：不使用 info.x/y 偏移
-                                // 动态层（有动画）：使用 info.x/y 偏移（但目前我们还没有动画）
-                                let adjusted_x = world_x;  // 静态层不使用 info.x
-                                let adjusted_y = world_y - tile_h as f32;  // 静态层不使用 info.y
+                                // 规则：
+                                // - Back/Middle 层：永远不使用 info.x/y 偏移
+                                // - Front 层：如果该格子有动画（is_anim），使用 info.x/y 偏移
+                                let (adjusted_x, adjusted_y) = if matches!(layer, TileLayer::Front) && is_anim {
+                                    // Front 层有动画：使用 info 偏移
+                                    (world_x + info.x as f32, world_y - tile_h as f32 + info.y as f32)
+                                } else {
+                                    // 其他情况：不使用偏移
+                                    (world_x, world_y - tile_h as f32)
+                                };
                                 
                                 // 世界坐标 -> 屏幕坐标
                                 let screen_x = (adjusted_x - camera_pos.x) * camera.zoom
