@@ -97,10 +97,10 @@
 // | **第五阶段：状态更新** | AnimationSystem | System | 500 | 动画状态机更新、帧切换、动画混合 |
 // | | ParticleSystem | **Hybrid** | 510 | **[Update]** 粒子生命期管理、位置速度计算<br>**[Draw]** 粒子效果渲染 |
 // | | SoundSystem | System | 520 | 音效触发管理、3D音效位置计算、音量控制 |
-// | | CameraSystem | System | 530 | 相机矩阵计算、震动效果、过场动画、最终视图矩阵 |
-// | **第六阶段：事件清理** | EventCleanupSystem | System | 900 | 清理 GlobalEvents 中的临时事件，防止下一帧重复处理 |
+// | | CameraSystem | System | 530 | 相机控制（模式切换、拖拽、缩放、震动）- **注意**: 坐标变换由渲染系统执行 |
+// | **第六阶段：事件清理** | ~~EventCleanupSystem~~ | ~~System~~ | ~~900~~ | ⚠️ **已废弃** - 由 `GlobalEvents` 组件 + `GameState::clear_global_events()` 实现 |
 // | **第七阶段：渲染** | MapRenderSystem | DrawSystem | 1000 | 地图图层渲染、地形绘制、遮罩处理 |
-// | | SpriteRenderSystem | DrawSystem | 1010 | 精灵实体渲染、排序、批处理优化 |
+// | | EntityRenderSystem | DrawSystem | 1020 | 实体渲染（玩家/怪物）- 查询 `(Position, Sprite)` + 深度排序 + 视锥裁剪 |
 // | | EffectRenderSystem | DrawSystem | 1020 | 特效渲染（技能特效、光影、后处理） |
 // | | UIRenderSystem | DrawSystem | 1030 | UI界面渲染、HUD、文字显示 |
 // | | DebugSystem | **Hybrid** | 1100 | **[Update]** 性能统计收集、数据采样<br>**[Draw]** 调试信息显示、开发工具 |
@@ -116,15 +116,17 @@
 // ## 系统依赖关系说明
 //
 // 1. **数据流动**：
-//    网络接收 → 输入处理 → 控制响应 → 事件触发 → AI决策 → 战斗计算
-//    → 移动物理 → 状态更新 → 网络发送 → 渲染显示
+//    GlobalEvents(网络接收) → 输入处理 → 控制响应 → 事件触发 → AI决策 → 战斗计算
+//    → 移动物理 → 状态更新 → 渲染显示 → GameState(事件清理)
 //
 // 2. **关键依赖**：
-//    - PlayerControlSystem 依赖 InputSystem 的输入数据
+//    - PlayerControlSystem 依赖 GlobalEvents.input_events 的输入数据
 //    - CameraFollowSystem 依赖 MovementSystem 的位置更新
 //    - CameraSystem 依赖 CameraFollowSystem 的跟随逻辑
 //    - 所有战斗相关系统依赖 GameEventSystem 的事件通知
 //    - HybridSystem 的 update 在逻辑阶段执行，draw 在渲染阶段执行
+//    - 事件清理由 GameState::clear_global_events() 在帧结束时执行
+//    - **坐标变换**：由各渲染系统独立执行（读取 Camera 组件），非统一矩阵
 //
 // 3. **渲染顺序**：地图 → 实体 → 特效 → UI → 调试信息（从底层到顶层）
 //
@@ -134,7 +136,7 @@
 /// 系统优先级常量，用于控制系统执行顺序（数字越小越优先）
 pub mod priority {
     // 阶段 1: 输入与网络 (50-199)
-    pub const NETWORK_RECV: u32 = 50;
+    // pub const NETWORK_RECV: u32 = 50;  // ⚠️ 已废弃 - 由 GlobalEvents 组件实现
     pub const INPUT: u32 = 100;
     pub const PLAYER_CONTROL: u32 = 110;
     pub const GAME_EVENT: u32 = 120;
@@ -160,11 +162,11 @@ pub mod priority {
     pub const CAMERA: u32 = 530;
 
     // 阶段 6: 网络同步与事件清理 (600-699)
-    pub const EVENT_CLEANUP: u32 = 900;
+    // pub const EVENT_CLEANUP: u32 = 900;  // ⚠️ 已废弃 - 由 GameState::clear_global_events() 实现
 
     // 阶段 7: 渲染 (1000-1999)
     pub const MAP_RENDER: u32 = 1000;
-    pub const SPRITE_RENDER: u32 = 1010;
+    pub const ENTITY_RENDER: u32 = 1020;  // EntityRenderSystem: 实体渲染（玩家/怪物）
     pub const EFFECT_RENDER: u32 = 1020;
     pub const UI_RENDER: u32 = 1030;
     pub const DEBUG_RENDER: u32 = 1100;
