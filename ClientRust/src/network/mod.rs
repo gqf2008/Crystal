@@ -5,6 +5,7 @@
 pub mod handlers;         // GameEvent 定义
 pub mod builder;          // NetworkBuilder + NetContext
 mod client;               // 内部实现：Network (Read + Write + 两线程)
+mod mock;                 // 模拟网络实现（用于开发工具）
 
 // 导出
 pub use builder::{NetworkBuilder, NetContext};
