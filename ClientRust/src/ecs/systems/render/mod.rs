@@ -99,12 +99,14 @@
 
 pub mod map_system;
 pub mod sprite_system;
+pub mod entity_render_system;
 pub mod effect_system;
 pub mod ui_system;
 pub mod debug_system;
 
 pub use map_system::MapRenderSystem;
 pub use sprite_system::SpriteRenderSystem;
+pub use entity_render_system::EntityRenderSystem;
 pub use effect_system::EffectRenderSystem;
 pub use ui_system::UIRenderSystem;
 pub use debug_system::DebugSystem;
@@ -117,6 +119,7 @@ pub use debug_system::DebugSystem;
 crate::draw_system!(
     MapRenderSystem,
     SpriteRenderSystem,
+    EntityRenderSystem,
     EffectRenderSystem,
     UIRenderSystem,
 );

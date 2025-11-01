@@ -499,7 +499,7 @@ impl Scene for GameScene {
         // 优化说明: 移除所有参数,直接从ctx和world查询所需数据
         // TODO: RenderSystem已删除，需要重新实现UI渲染
         // RenderSystem::draw_ui(ctx, canvas, world)?;
-        self.system_scheduler.draw(ctx, world);
+        self.system_scheduler.draw(ctx, canvas, world)?;
         Ok(())
     }
 

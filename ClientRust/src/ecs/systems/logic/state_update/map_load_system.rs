@@ -1,0 +1,181 @@
+//! 地图加载系统 (MapLoadSystem)
+//! 
+//! **优先级**: 510 (STATE_UPDATE)
+//! **职责**: 处理地图切换和加载
+//! 
+//! ## ECS 架构
+//! 
+//! ### 输入
+//! - 从 `GlobalEvents.net_events.gameplay` 读取 `GameEvent::MapChanged` 事件
+//! 
+//! ### 输出
+//! - 加载新地图的 MapData 和瓦片实体
+//! - 更新 MapManager 组件状态
+//! 
+//! ### 组件依赖
+//! - **读取**: GlobalEvents (net_events)
+//! - **写入**: MapData, MapManager
+//! 
+//! ## 地图加载流程
+//! 
+//! 1. 监听 `MapChanged` 事件 → 获取地图文件名
+//! 2. 使用 `MapReader::new()` 读取地图文件
+//! 3. 使用 `MapLoader::load_map()` 加载瓦片到 World
+//! 4. 更新 MapManager 状态
+//! 
+//! ## 示例
+//! 
+//! ```rust
+//! // 服务器发送地图切换事件
+//! net_events.gameplay.push(GameEvent::MapChanged {
+//!     map_index: 0,
+//!     file_name: "0".to_string(),  // Map/0.map
+//!     title: "比奇城".to_string(),
+//! });
+//! 
+//! // MapLoadSystem 自动加载地图
+//! ```
+
+use hecs::World;
+use ggez::{Context, GameResult};
+use tracing::{info, error};
+
+use crate::ecs::components::{MapData, GlobalEvents};
+use crate::ecs::MapLoader;
+use crate::objects::MapReader;
+
+/// 地图管理组件
+/// 
+/// **单例组件**: 记录当前地图状态
+pub struct MapManager {
+    /// 当前加载的地图索引
+    pub current_map_index: i32,
+    /// 当前地图文件名（不含路径和扩展名）
+    pub current_map_file: String,
+    /// 当前地图标题
+    pub current_map_title: String,
+    /// 是否正在加载中
+    pub is_loading: bool,
+}
+
+impl MapManager {
+    pub fn new() -> Self {
+        Self {
+            current_map_index: -1,
+            current_map_file: String::new(),
+            current_map_title: String::new(),
+            is_loading: false,
+        }
+    }
+}
+
+/// 地图加载系统
+/// 
+/// **优先级**: 510 (STATE_UPDATE 层)
+pub struct MapLoadSystem;
+
+impl MapLoadSystem {
+    /// 更新地图状态
+    /// 
+    /// 从 GlobalEvents 读取地图切换事件，执行加载
+    pub fn update(world: &mut World, ctx: &mut Context) -> GameResult {
+        // ====================================================================
+        // 1. 读取网络事件
+        // ====================================================================
+        
+        let events = {
+            let mut query = world.query::<&GlobalEvents>();
+            if let Some((_, global_events)) = query.iter().next() {
+                global_events.net_events.clone()
+            } else {
+                return Ok(()); // 没有 GlobalEvents 组件
+            }
+        };
+
+        // ====================================================================
+        // 2. 查找地图切换事件（使用新的过滤方法）
+        // ====================================================================
+        
+        let map_changes = {
+            let mut query = world.query::<&GlobalEvents>();
+            if let Some((_, global_events)) = query.iter().next() {
+                global_events.get_map_changes()
+            } else {
+                return Ok(()); // 没有 GlobalEvents 组件
+            }
+        };
+
+        // 如果没有地图切换事件，直接返回
+        if map_changes.is_empty() {
+            return Ok(());
+        }
+
+        // 处理第一个地图切换事件（通常一帧只有一个）
+        let (map_index, map_file, map_title) = &map_changes[0];
+        info!("📂 收到地图切换事件: index={}, file={}, title={}", 
+              map_index, map_file, map_title);
+
+        // ====================================================================
+        // 3. 执行地图加载
+        // ====================================================================
+        
+        info!("🗺️  开始加载地图: Map/{}.map", map_file);
+        
+        let map_path = format!("Map/{}.map", map_file);
+        let map_index = *map_index;
+        let map_file = map_file.clone();
+        let map_title = map_title.clone();
+        
+        match MapReader::new(&map_path) {
+            Ok(reader) => {
+                info!("✅ 地图文件读取成功: {}x{}", reader.width, reader.height);
+                
+                // 删除旧地图数据（瓦片实体）
+                Self::clear_old_map_data(world);
+                
+                // 加载地图瓦片
+                if let Err(e) = MapLoader::load_map(world, reader) {
+                    error!("❌ 地图瓦片加载失败: {}", e);
+                    return Err(e);
+                }
+                
+                // 创建/更新 MapManager
+                world.spawn((MapManager {
+                    current_map_index: map_index,
+                    current_map_file: map_file.clone(),
+                    current_map_title: map_title.clone(),
+                    is_loading: false,
+                },));
+                
+                info!("✅ 地图加载完成: {}", map_title);
+            }
+            Err(e) => {
+                error!("❌ 地图文件读取失败: {}", e);
+                return Err(ggez::GameError::ResourceLoadError(
+                    format!("Failed to load map: {}", e)
+                ));
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// 清除旧地图数据
+    /// 
+    /// 删除所有带有 MapData 的实体（地图瓦片）
+    fn clear_old_map_data(world: &mut World) {
+        // 收集所有地图相关实体
+        let entities_to_remove: Vec<_> = world
+            .query::<&MapData>()
+            .iter()
+            .map(|(entity, _)| entity)
+            .collect();
+
+        // 删除实体
+        for entity in entities_to_remove {
+            let _ = world.despawn(entity);
+        }
+
+        info!("🧹 已清除旧地图数据");
+    }
+}

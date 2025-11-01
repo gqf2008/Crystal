@@ -201,52 +201,184 @@ impl GlobalEvents {
     //     self.total_event_count += 1;
     // }
 
-    // // ========================================================================
-    // // 事件过滤方法（为不同系统提供便捷访问）
-    // // ========================================================================
+    // ========================================================================
+    // 事件过滤方法（为不同系统提供便捷访问）
+    // ========================================================================
 
-    // /// 过滤键盘按下事件
-    // pub fn filter_key_pressed(&self) -> impl Iterator<Item = &KeyboardEvent> {
-    //     self.keyboard_events
-    //         .iter()
-    //         .filter(|e| e.pressed && !e.repeat)
-    // }
+    /// 过滤键盘按下事件（不包括重复按键）
+    pub fn filter_key_pressed(&self) -> impl Iterator<Item = &InputEvent> + '_ {
+        self.input_events
+            .iter()
+            .filter(|e| matches!(e, InputEvent::KeyDown { repeat: false, .. }))
+    }
 
-    // /// 过滤键盘释放事件
-    // pub fn filter_key_released(&self) -> impl Iterator<Item = &KeyboardEvent> {
-    //     self.keyboard_events.iter().filter(|e| !e.pressed)
-    // }
+    /// 过滤键盘释放事件
+    pub fn filter_key_released(&self) -> impl Iterator<Item = &InputEvent> + '_ {
+        self.input_events
+            .iter()
+            .filter(|e| matches!(e, InputEvent::KeyUp { .. }))
+    }
 
-    // /// 过滤特定按键
-    // pub fn filter_key(&self, keycode: KeyCode) -> impl Iterator<Item = &KeyboardEvent> {
-    //     self.keyboard_events
-    //         .iter()
-    //         .filter(move |e| e.keycode == keycode)
-    // }
+    /// 过滤特定按键（包括按下和释放）
+    pub fn filter_key(&self, keycode: KeyCode) -> impl Iterator<Item = &InputEvent> + '_ {
+        self.input_events
+            .iter()
+            .filter(move |e| match e {
+                InputEvent::KeyDown { keycode: k, .. } | InputEvent::KeyUp { keycode: k, .. } => *k == keycode,
+                _ => false,
+            })
+    }
 
-    // /// 过滤鼠标移动事件
-    // pub fn filter_mouse_move(&self) -> impl Iterator<Item = &MouseEvent> {
-    //     self.mouse_events
-    //         .iter()
-    //         .filter(|e| matches!(e, MouseEvent::Move { .. }))
-    // }
+    /// 过滤鼠标移动事件
+    pub fn filter_mouse_move(&self) -> impl Iterator<Item = &InputEvent> + '_ {
+        self.input_events
+            .iter()
+            .filter(|e| matches!(e, InputEvent::MouseMove { .. }))
+    }
 
-    // /// 过滤鼠标按钮按下
-    // pub fn filter_mouse_button_down(
-    //     &self,
-    //     button: MouseButton,
-    // ) -> impl Iterator<Item = &MouseEvent> {
-    //     self.mouse_events
-    //         .iter()
-    //         .filter(move |e| matches!(e, MouseEvent::ButtonDown { button: b, .. } if *b == button))
-    // }
+    /// 过滤鼠标按钮按下事件
+    pub fn filter_mouse_button_down(&self, button: MouseButton) -> impl Iterator<Item = &InputEvent> + '_ {
+        self.input_events
+            .iter()
+            .filter(move |e| matches!(e, InputEvent::MouseDown { button: b, .. } if *b == button))
+    }
 
-    // /// 过滤鼠标滚轮
-    // pub fn filter_mouse_wheel(&self) -> impl Iterator<Item = &MouseEvent> {
-    //     self.mouse_events
-    //         .iter()
-    //         .filter(|e| matches!(e, MouseEvent::Wheel { .. }))
-    // }
+    /// 过滤鼠标按钮释放事件
+    pub fn filter_mouse_button_up(&self, button: MouseButton) -> impl Iterator<Item = &InputEvent> + '_ {
+        self.input_events
+            .iter()
+            .filter(move |e| matches!(e, InputEvent::MouseUp { button: b, .. } if *b == button))
+    }
+
+    /// 过滤鼠标滚轮事件
+    pub fn filter_mouse_wheel(&self) -> impl Iterator<Item = &InputEvent> + '_ {
+        self.input_events
+            .iter()
+            .filter(|e| matches!(e, InputEvent::MouseWheel { .. }))
+    }
+
+    /// 过滤 IME 字符输入事件
+    pub fn filter_ime(&self) -> impl Iterator<Item = &InputEvent> + '_ {
+        self.input_events
+            .iter()
+            .filter(|e| matches!(e, InputEvent::Ime { .. }))
+    }
+
+    // ========================================================================
+    // 网络事件过滤方法（为不同系统提供便捷访问）
+    // ========================================================================
+
+    /// 过滤连接事件
+    pub fn filter_connection_events(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.connection.iter()
+    }
+
+    /// 过滤认证事件
+    pub fn filter_auth_events(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.auth.iter()
+    }
+
+    /// 过滤角色管理事件
+    pub fn filter_character_events(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.character.iter()
+    }
+
+    /// 过滤玩家状态事件
+    pub fn filter_player_state_events(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.player_state.iter()
+    }
+
+    /// 过滤战斗事件
+    pub fn filter_combat_events(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.combat.iter()
+    }
+
+    /// 过滤聊天消息
+    pub fn filter_chat_events(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.chat.iter()
+    }
+
+    /// 过滤世界对象事件
+    pub fn filter_world_object_events(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.world_objects.iter()
+    }
+
+    /// 过滤地图事件
+    pub fn filter_map_events(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.map.iter()
+    }
+
+    /// 过滤物品事件
+    pub fn filter_item_events(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.items.iter()
+    }
+
+    /// 过滤 NPC 事件
+    pub fn filter_npc_events(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.npc.iter()
+    }
+
+    /// 过滤地图切换事件
+    pub fn filter_map_changed(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.map
+            .iter()
+            .filter(|e| matches!(e, GameEvent::MapChanged { .. }))
+    }
+
+    /// 过滤玩家信息事件
+    pub fn filter_user_information(&self) -> impl Iterator<Item = &GameEvent> + '_ {
+        self.net_events.character
+            .iter()
+            .filter(|e| matches!(e, GameEvent::UserInformation { .. }))
+    }
+
+    /// 检查是否有登录成功事件
+    pub fn has_login_success(&self) -> bool {
+        self.net_events.auth
+            .iter()
+            .any(|e| matches!(e, GameEvent::LoginSuccess { .. }))
+    }
+
+    /// 检查是否有断开连接事件
+    pub fn has_disconnected(&self) -> bool {
+        self.net_events.connection
+            .iter()
+            .any(|e| matches!(e, GameEvent::Disconnected { .. }))
+    }
+
+    /// 获取所有需要处理的地图切换事件
+    pub fn get_map_changes(&self) -> Vec<(i32, String, String)> {
+        self.net_events.map
+            .iter()
+            .filter_map(|e| {
+                if let GameEvent::MapChanged { map_index, file_name, title } = e {
+                    Some((*map_index, file_name.clone(), title.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// 过滤特定类型的游戏事件（泛型过滤器）
+    pub fn filter_event_type<F>(&self, predicate: F) -> Vec<&GameEvent>
+    where
+        F: Fn(&GameEvent) -> bool
+    {
+        self.net_events.connection.iter()
+            .chain(self.net_events.auth.iter())
+            .chain(self.net_events.character.iter())
+            .chain(self.net_events.player_state.iter())
+            .chain(self.net_events.combat.iter())
+            .chain(self.net_events.chat.iter())
+            .chain(self.net_events.world_objects.iter())
+            .chain(self.net_events.map.iter())
+            .chain(self.net_events.items.iter())
+            .chain(self.net_events.npc.iter())
+            .chain(self.net_events.other.iter())
+            .filter(|e| predicate(e))
+            .collect()
+    }
 
     // ========================================================================
     // 帧管理方法

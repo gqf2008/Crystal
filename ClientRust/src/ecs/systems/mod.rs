@@ -638,9 +638,7 @@ impl SystemScheduler {
     }
 
     /// 渲染阶段 - 调度 DrawSystem 和 HybridSystem 的 draw 方法
-    pub fn draw(&mut self, ctx: &mut ggez::Context, world: &hecs::World) -> GameResult {
-        let mut canvas = Canvas::from_frame(ctx, ggez::graphics::Color::BLACK);
-
+    pub fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut Canvas, world: &hecs::World) -> GameResult {
         for entry in &mut self.systems {
             if !entry.is_enabled() {
                 continue;
@@ -648,10 +646,10 @@ impl SystemScheduler {
 
             match entry {
                 SystemEntry::Draw { system, .. } => {
-                    system.draw(ctx, &mut canvas, world)?;
+                    system.draw(ctx, canvas, world)?;
                 }
                 SystemEntry::Hybrid { system, .. } => {
-                    system.draw(ctx, &mut canvas, world)?;
+                    system.draw(ctx, canvas, world)?;
                 }
                 SystemEntry::Update { .. } => {
                     // 纯逻辑系统无需渲染

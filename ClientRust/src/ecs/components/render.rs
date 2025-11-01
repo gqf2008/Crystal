@@ -77,7 +77,7 @@ impl Default for RenderConfig {
             show_monster_borders: false,
             show_effect_borders: false,
             show_path: false,
-            max_fps: 60,
+            max_fps: 120,
             enable_lod: false,
         }
     }

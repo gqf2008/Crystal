@@ -25,18 +25,17 @@ mod map_viewer;
 use ggez::conf::{WindowMode, WindowSetup};
 use ggez::event::{self, EventHandler};
 use ggez::graphics::{Canvas, Color};
-use ggez::input::keyboard::{KeyCode, KeyInput};
+use ggez::input::keyboard::KeyInput;
 use ggez::winit::event::MouseButton;
 use ggez::{Context, ContextBuilder, GameResult};
 use hecs::World;
 
 use map_viewer::scene::MapViewerScene;
 
-use mir2_client::ecs::components::{GlobalEvents, InputEvent, MouseInput};
+use mir2_client::ecs::components::{GlobalEvents, InputEvent};
 use mir2_client::ecs::scenes::Scene;
 use mir2_client::ecs::WorldExt;
 use mir2_client::network::{NetworkBuilder, handlers::GameEvent};
-use mir2_client::objects::MapReader;
 use mir2_client::settings::ClientSettings;
 
 /// 地图查看器应用
@@ -45,8 +44,6 @@ struct MapViewerApp {
     world: World,
     /// 地图查看器场景
     scene: MapViewerScene,
-    /// 鼠标位置
-    mouse_pos: (f32, f32),
 }
 
 impl MapViewerApp {
@@ -89,142 +86,24 @@ impl MapViewerApp {
         Ok(Self {
             world,
             scene,
-            mouse_pos: (0.0, 0.0),
         })
     }
 
-    /// 处理网络事件
-    fn handle_network_events(&mut self) {
-        // 收集网络事件
-        let game_events = {
-            let net_ctx = self.world.network();
-            net_ctx.recv_all()
-        };
-
-        // 处理事件
-        for event in game_events {
-            match event {
-                GameEvent::MapChanged { file_name, .. } => {
-                    tracing::info!("🗺️  收到地图变更事件: {}", file_name);
-                    
-                    // 加载地图
-                    match MapReader::new(&file_name) {
-                        Ok(map_reader) => {
-                            tracing::info!(
-                                "✅ 成功加载地图: {} ({}x{})",
-                                file_name,
-                                map_reader.width,
-                                map_reader.height
-                            );
-                            
-                            // 使用 MapLoader 加载地图瓦片到 ECS
-                            use mir2_client::ecs::MapLoader;
-                            if let Err(e) = MapLoader::load_map(&mut self.world, map_reader) {
-                                tracing::error!("❌ 加载地图瓦片失败: {:?}", e);
-                            } else {
-                                tracing::info!("✅ 地图瓦片已加载到 ECS");
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!("❌ 加载地图失败 {}: {:?}", file_name, e);
-                        }
-                    }
-                }
-                GameEvent::Connected => {
-                    tracing::info!("✅ 网络已连接");
-                }
-                GameEvent::StartGame { .. } => {
-                    tracing::info!("🎮 游戏开始");
-                }
-                _ => {
-                    tracing::debug!("📥 收到网络事件: {:?}", event);
-                }
-            }
-        }
-    }
-
-    /// 处理输入事件
-    fn handle_input_events(&mut self, ctx: &mut Context) {
-        // 先收集需要处理的事件
-        let input_events = {
-            let global_events = self.world.global_events();
-            global_events.input_events.clone()
-        };
-
-        // 然后处理事件
-        for event in input_events {
-            match event {
-                InputEvent::KeyDown { keycode, .. } => {
-                    if keycode == KeyCode::Escape {
-                        tracing::info!("👋 用户按下 ESC，退出程序");
-                        ctx.request_quit();
-                    }
-                }
-                InputEvent::MouseMove { x, y, .. } => {
-                    self.mouse_pos = (x, y);
-
-                    // 更新 MouseInput 组件
-                    if let Some((_, mouse_input)) =
-                        self.world.query_mut::<&mut MouseInput>().into_iter().next()
-                    {
-                        mouse_input.x = x;
-                        mouse_input.y = y;
-                    }
-                }
-                InputEvent::MouseDown { button, x, y } => {
-                    if button == MouseButton::Left {
-                        if let Some((_, mouse_input)) =
-                            self.world.query_mut::<&mut MouseInput>().into_iter().next()
-                        {
-                            mouse_input.left_pressed = true;
-                            mouse_input.left_press_time = 0;
-                            mouse_input.x = x;
-                            mouse_input.y = y;
-                        }
-                    } else if button == MouseButton::Right {
-                        if let Some((_, mouse_input)) =
-                            self.world.query_mut::<&mut MouseInput>().into_iter().next()
-                        {
-                            mouse_input.right_pressed = true;
-                            mouse_input.right_press_time = 0;
-                            mouse_input.x = x;
-                            mouse_input.y = y;
-                        }
-                    }
-                }
-                InputEvent::MouseUp { button, .. } => {
-                    if button == MouseButton::Left {
-                        if let Some((_, mouse_input)) =
-                            self.world.query_mut::<&mut MouseInput>().into_iter().next()
-                        {
-                            mouse_input.left_pressed = false;
-                        }
-                    } else if button == MouseButton::Right {
-                        if let Some((_, mouse_input)) =
-                            self.world.query_mut::<&mut MouseInput>().into_iter().next()
-                        {
-                            mouse_input.right_pressed = false;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+ #[inline]
+    fn collect_network_events(&mut self) {
+        let events = self.world.network().recv_categorized();
+        self.world.global_events_mut().net_events = events;
     }
 }
 
 impl EventHandler for MapViewerApp {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        // 处理网络事件
-        self.handle_network_events();
-
-        // 处理输入事件
-        self.handle_input_events(ctx);
-
-        // 更新场景
+       self.collect_network_events();
+        // MapViewerApp 只负责收集事件到 GlobalEvents
+        // 所有的逻辑处理由 Scene 完成
         self.scene.update(ctx, &mut self.world)?;
 
-        // 清理事件（在每帧结束时）
+        // 清理每帧事件
         self.world.global_events_mut().clear_frame_events();
 
         Ok(())
@@ -314,6 +193,28 @@ impl EventHandler for MapViewerApp {
                     text: input.event.text,
                     timestamp: std::time::Instant::now(),
                 });
+        }
+        Ok(())
+    }
+
+    fn resize_event(&mut self, _ctx: &mut Context, width: f32, height: f32) -> GameResult {
+        // 在高 DPI 显示器上，ggez 传递的是物理像素，需要转换为逻辑像素
+        // let scale_factor = ctx.gfx.window().scale_factor() as f32;
+        // let logical_width = width / scale_factor;
+        // let logical_height = height / scale_factor;
+        // self.current_scene
+        //     .on_resize(ctx, &mut self.world, logical_width, logical_height)
+
+        if let Some((_, events)) = self
+            .world
+            .query_mut::<&mut GlobalEvents>()
+            .into_iter()
+            .next()
+        {
+            events
+                .input_events
+                .push(InputEvent::Resize { width, height });
+            tracing::info!("🖥️ 窗口调整大小: ({:.1}, {:.1})", width, height);
         }
         Ok(())
     }
