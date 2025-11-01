@@ -75,10 +75,8 @@ impl MapManager {
 pub struct MapLoadSystem;
 
 impl MapLoadSystem {
-    /// 更新地图状态
-    /// 
-    /// 从 GlobalEvents 读取地图切换事件，执行加载
-    pub fn update(world: &mut World, ctx: &mut Context) -> GameResult {
+    /// 内部加载逻辑
+    fn do_update(world: &mut World) -> GameResult {
         // ====================================================================
         // 1. 读取网络事件
         // ====================================================================
@@ -119,9 +117,10 @@ impl MapLoadSystem {
         // 3. 执行地图加载
         // ====================================================================
         
-        info!("🗺️  开始加载地图: Map/{}.map", map_file);
+        info!("🗺️  开始加载地图: {}", map_file);
         
-        let map_path = format!("Map/{}.map", map_file);
+        // map_file 已经是完整路径 (例如 "Map/0.map"), 直接使用
+        let map_path = map_file.clone();
         let map_index = *map_index;
         let map_file = map_file.clone();
         let map_title = map_title.clone();
@@ -177,5 +176,21 @@ impl MapLoadSystem {
         }
 
         info!("🧹 已清除旧地图数据");
+    }
+}
+
+// ============================================================================
+// System Trait 实现
+// ============================================================================
+
+use crate::ecs::systems::System;
+
+impl System for MapLoadSystem {
+    fn priority(&self) -> u32 {
+        510  // STATE_UPDATE 层，地图加载优先级（与注释中的优先级保持一致）
+    }
+
+    fn update(&mut self, world: &mut World, _delay_time: f32) -> GameResult {
+        Self::do_update(world)
     }
 }

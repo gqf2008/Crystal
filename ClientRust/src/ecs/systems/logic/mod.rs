@@ -34,5 +34,6 @@ crate::logic_system!(
     update::SoundSystem,
     update::CameraSystem,
     update::HealthRegenSystem,
+    update::MapLoadSystem,
     // update::MapUpdateSystem,  // ⚠️ 尚未实现 System trait
 );
