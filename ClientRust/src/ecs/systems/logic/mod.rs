@@ -30,6 +30,7 @@ crate::logic_system!(
     physics::CameraFollowSystem,
     // Layer 5: State Update (500-599)
     update::AnimationSystem,
+    update::TileAnimationSystem,
     update::ParticleSystem,
     update::SoundSystem,
     update::CameraSystem,

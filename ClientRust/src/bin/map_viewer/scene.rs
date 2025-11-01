@@ -125,8 +125,7 @@ impl MapViewerScene {
     /// 创建系统调度器（只包含必要的系统）
     fn create_system_scheduler() -> SystemScheduler {
         use mir2_client::ecs::render::{MapRenderSystem, DebugSystem};
-        use mir2_client::ecs::systems::logic::CameraFollowSystem;
-        use mir2_client::ecs::systems::logic::MapLoadSystem;
+        use mir2_client::ecs::systems::logic::{CameraFollowSystem, MapLoadSystem, TileAnimationSystem};
         
         let mut scheduler = SystemScheduler::new();
 
@@ -135,7 +134,8 @@ impl MapViewerScene {
         // 添加逻辑系统
         scheduler
             .add_system(MovementSystem)              // 移动系统
-            .add_system(AnimationSystem::new())      // 动画系统
+            .add_system(AnimationSystem::new())      // 角色动画系统
+            .add_system(TileAnimationSystem::new())  // 瓦片动画系统
             .add_system(MapLoadSystem)               // 地图加载系统 → 从 GlobalEvents 读取 MapChanged 事件
             .add_system(CameraSystem::new())         // 相机系统（拖拽、缩放）→ 从 GlobalEvents 读取鼠标事件
             .add_system(CameraFollowSystem)          // 相机跟随

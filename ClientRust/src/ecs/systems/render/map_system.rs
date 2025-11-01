@@ -58,7 +58,8 @@ impl DrawSystem for MapRenderSystem {
             }
             
             // 收集该层的所有瓦片（包括动画瓦片）
-            let mut tiles_to_draw: Vec<(i32, i32, i16, usize, bool)> = Vec::new();
+            // 元组: (grid_x, grid_y, lib_index, img_index, is_anim, use_blend)
+            let mut tiles_to_draw: Vec<(i32, i32, i16, usize, bool, bool)> = Vec::new();
             
             // Front 层需要更大的底部视口（建筑物是长条形，UV坐标在左下角）
             let bottom_extra = if matches!(layer, TileLayer::Front) {
@@ -100,6 +101,7 @@ impl DrawSystem for MapRenderSystem {
                     tile.library_index,
                     tile.image_index as usize,
                     false,  // 不是动画瓦片
+                    tile.use_blend,
                 ));
             }
             
@@ -125,11 +127,12 @@ impl DrawSystem for MapRenderSystem {
                     tile.library_index,
                     tile.image_index as usize,  // 应该根据动画帧计算
                     true,  // 是动画瓦片
+                    tile.use_blend,
                 ));
             }
             
             // 渲染该层的瓦片
-            for (grid_x, grid_y, lib_index, img_index, is_anim) in tiles_to_draw {
+            for (grid_x, grid_y, lib_index, img_index, is_anim, use_blend) in tiles_to_draw {
                 if let Some(lib) = get_map_library(lib_index) {
                     if let Ok(mut lib_guard) = lib.lock() {
                         // 先获取尺寸
@@ -164,13 +167,28 @@ impl DrawSystem for MapRenderSystem {
                                 let screen_y = (adjusted_y - camera_pos.y) * camera.zoom
                                     + camera.screen_height / 2.0;
                                 
-                                // 绘制
+                                // 🔥 如果需要混合模式（火焰等动画），使用 ADD 混合
+                                let old_blend_mode = if use_blend {
+                                    let current = canvas.blend_mode();
+                                    canvas.set_blend_mode(ggez::graphics::BlendMode::ADD);
+                                    Some(current)
+                                } else {
+                                    None
+                                };
+                                
+                                // 绘制（使用白色作为颜色，确保 alpha 混合正确）
                                 canvas.draw(
                                     image,
                                     DrawParam::default()
                                         .dest([screen_x, screen_y])
-                                        .scale([camera.zoom, camera.zoom]),
+                                        .scale([camera.zoom, camera.zoom])
+                                        .color(ggez::graphics::Color::WHITE),
                                 );
+                                
+                                // 恢复原来的混合模式
+                                if let Some(old_mode) = old_blend_mode {
+                                    canvas.set_blend_mode(old_mode);
+                                }
                             }
                         }
                     }

@@ -162,7 +162,11 @@ impl ImageInfo {
         reader.read_exact(&mut compressed_data)?;
 
         // 解压主图像（已转换为RGBA并处理黑色背景）
-        let main_image = Self::decompress_image(&compressed_data, self.width, self.height)?;
+        let mut main_image = Self::decompress_image(&compressed_data, self.width, self.height)?;
+        
+        // 🔧 黑色背景透明化（火焰等动画必需）
+        Self::bgra_to_transparent(&mut main_image);
+        
         self.bgra_data = Some(main_image.clone()); // 保存原始数据副本
         
         // 🔧 使用RGBA格式创建纹理（已从BGRA转换）
@@ -187,7 +191,10 @@ impl ImageInfo {
             reader.read_exact(&mut mask_compressed)?;
 
             // 解压遮罩层（使用主图像的宽高，因为C#代码中遮罩使用Width/Height）
-            let mask_data = Self::decompress_image(&mask_compressed, self.width, self.height)?;
+            let mut mask_data = Self::decompress_image(&mask_compressed, self.width, self.height)?;
+            
+            // 🔧 黑色背景透明化
+           // Self::bgra_to_transparent(&mut mask_data);
             
             // 🔧 使用RGBA格式创建遮罩纹理（已从BGRA转换）
             self.mask_image = Some(ggez::graphics::Image::from_pixels(
@@ -274,32 +281,32 @@ impl ImageInfo {
     }
 
     
-    // /// BGRA黑色背景透明化
-    // /// DirectX的alpha值已经正确：alpha=0透明，alpha>0可见
-    // /// 但某些库文件的黑色背景alpha可能是255，需要转为0
-    // fn bgra_to_transparent(data: &mut [u8]) {
-    //     for chunk in data.chunks_exact_mut(4) {
-    //         let b = chunk[0];
-    //         let g = chunk[1];
-    //         let r = chunk[2];
-    //         let a = chunk[3];
+    /// BGRA黑色背景透明化
+    /// DirectX的alpha值已经正确：alpha=0透明，alpha>0可见
+    /// 但某些库文件的黑色背景alpha可能是255，需要转为0
+    fn bgra_to_transparent(data: &mut [u8]) {
+        for chunk in data.chunks_exact_mut(4) {
+            let b = chunk[0];
+            let g = chunk[1];
+            let r = chunk[2];
+            let a = chunk[3];
             
-    //         // 🔧 纯黑色背景透明化（匹配C#原版逻辑）
-    //         // C# 原版: if (pixels[i] == 0 && pixels[i + 1] == 0 && pixels[i + 2] == 0) pixels[i + 3] = 0;
-    //         // 
-    //         // 但由于DXT压缩/解压可能导致精度损失，纯黑(0,0,0)可能变成接近黑(1,1,1)或(2,2,2)
-    //         // 所以放宽到 RGB < 3 来容错
-    //         //
-    //         // 注意：金黄色等有色像素不会被误判（它们的RGB值远大于3）
-    //         let is_near_black = r < 3 && g < 3 && b < 3; // 接近纯黑（容忍DXT压缩误差）
-    //         let is_opaque = a > 250;                     // 完全不透明
+            // 🔧 纯黑色背景透明化（匹配C#原版逻辑）
+            // C# 原版: if (pixels[i] == 0 && pixels[i + 1] == 0 && pixels[i + 2] == 0) pixels[i + 3] = 0;
+            // 
+            // 但由于DXT压缩/解压可能导致精度损失，纯黑(0,0,0)可能变成接近黑(1,1,1)或(2,2,2)
+            // 所以放宽到 RGB < 3 来容错
+            //
+            // 注意：金黄色等有色像素不会被误判（它们的RGB值远大于3）
+            let is_near_black = r < 3 && g < 3 && b < 3; // 接近纯黑（容忍DXT压缩误差）
+            let is_opaque = a > 250;                     // 完全不透明
             
-    //         if is_near_black && is_opaque {
-    //             chunk[3] = 0;  // 纯黑背景 → 完全透明
-    //         }
-    //         // 其他所有情况保持原始alpha值
-    //     }
-    // }
+            if is_near_black && is_opaque {
+                chunk[3] = 0;  // 纯黑背景 → 完全透明
+            }
+            // 其他所有情况保持原始alpha值
+        }
+    }
 
     // fn apply_auto_alpha(rgba: &mut [u8]) {
     //     for chunk in rgba.chunks_exact_mut(4) {
