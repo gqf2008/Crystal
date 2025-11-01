@@ -58,7 +58,7 @@ impl DrawSystem for MapRenderSystem {
             }
             
             // 收集该层的所有瓦片
-            let mut tiles_to_draw: Vec<(i32, i32, usize, usize)> = Vec::new();
+            let mut tiles_to_draw: Vec<(i32, i32, i16, usize)> = Vec::new();
             
             for (_, tile) in world.query::<&MapTile>().iter() {
                 if !matches!(tile.layer, layer) {
@@ -82,7 +82,7 @@ impl DrawSystem for MapRenderSystem {
                     tile.grid_x,
                     tile.grid_y,
                     tile.library_index,
-                    tile.image_index,
+                    tile.image_index as usize,
                 ));
             }
             
@@ -90,14 +90,14 @@ impl DrawSystem for MapRenderSystem {
             for (grid_x, grid_y, lib_index, img_index) in tiles_to_draw {
                 if let Some(lib) = get_map_library(lib_index) {
                     if let Ok(mut lib_guard) = lib.lock() {
+                        // 先获取尺寸
+                        let (tile_w, tile_h) = lib_guard
+                            .get_size(img_index)
+                            .unwrap_or((CELL_WIDTH as i16, CELL_HEIGHT as i16));
+                        
                         // 获取纹理信息
                         if let Ok(info) = lib_guard.get_or_create_texture(ctx, img_index) {
                             if let Some(image) = &info.image {
-                                // 获取瓦片尺寸
-                                let (tile_w, tile_h) = lib_guard
-                                    .get_size(img_index)
-                                    .unwrap_or((CELL_WIDTH as i16, CELL_HEIGHT as i16));
-                                
                                 // 计算世界坐标
                                 let world_x = (grid_x * CELL_WIDTH) as f32;
                                 let world_y = (grid_y * CELL_HEIGHT) as f32;

@@ -322,7 +322,7 @@ impl EventHandler for MapViewerApp {
 fn main() -> GameResult {
     // 创建 ggez 上下文
     let (mut ctx, event_loop) = ContextBuilder::new("map_viewer_v3", "Crystal")
-        .window_setup(WindowSetup::default().title("Map Viewer V3 - Crystal"))
+        .window_setup(WindowSetup::default().title("Map Viewer V3 - Crystal").vsync(false))
         .window_mode(WindowMode::default().dimensions(1600.0, 1200.0))
         .build()?;
 

@@ -127,9 +127,9 @@ impl MapViewerScene {
 
     /// 创建系统调度器（只包含必要的系统）
     fn create_system_scheduler() -> SystemScheduler {
-        use mir2_client::ecs::render::MapRenderSystem;
+        use mir2_client::ecs::render::{MapRenderSystem, DebugSystem};
         use mir2_client::ecs::systems::logic::{
-            CameraFollowSystem, DebugSystem, PlayerControlSystem,
+            CameraFollowSystem, PlayerControlSystem,
         };
         
         let mut scheduler = SystemScheduler::new();
@@ -142,9 +142,9 @@ impl MapViewerScene {
             .add_system(MovementSystem)              // 移动系统
             .add_system(AnimationSystem::new())      // 动画系统
             .add_system(CameraSystem::new())         // 相机系统（拖拽、缩放）
-            .add_system(CameraFollowSystem::new())   // 相机跟随
+            .add_system(CameraFollowSystem)          // 相机跟随（无需 new）
             .add_system(MapRenderSystem)             // 地图渲染系统
-            .add_system(DebugSystem::new());         // 调试系统（FPS、坐标）
+            .add_system(DebugSystem);                // 调试系统（FPS、坐标）
 
         tracing::info!("✅ 地图查看器系统初始化完成！");
         scheduler
