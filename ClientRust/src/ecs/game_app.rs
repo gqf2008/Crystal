@@ -19,32 +19,8 @@ use hecs::World;
 
 use crate::ecs::components::{GlobalEvents, InputEvent};
 use crate::ecs::scenes::{GameScene, LoginScene, Scene, SceneType, SelectScene};
-use crate::network::NetContext;
 use crate::settings::ClientSettings;
 
-pub struct MockScene;
-
-impl Scene for MockScene {
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-    fn update(
-        &mut self,
-        _ctx: &mut Context,
-        _world: &mut hecs::World,
-    ) -> GameResult<Option<SceneType>> {
-        Ok(None)
-    }
-
-    fn draw(
-        &mut self,
-        _ctx: &mut Context,
-        _canvas: &mut Canvas,
-        _world: &hecs::World,
-    ) -> GameResult<()> {
-        Ok(())
-    }
-}
 /// 游戏主应用
 pub struct GameState {
     /// ECS World
@@ -67,7 +43,7 @@ impl GameState {
         let net_ctx = crate::network::NetworkBuilder::new(settings.network.clone())
             .build()
             .expect("Failed to initialize network");
-        
+
         let mut world = World::new();
         world
             .spawn_settings(settings)
@@ -138,12 +114,13 @@ impl GameState {
 
         Ok(())
     }
-
+    #[inline]
     fn collect_network_events(&mut self) {
         let events = self.world.network().recv_categorized();
         self.world.global_events_mut().net_events = events;
     }
 
+    #[inline]
     fn clear_global_events(&mut self) {
         self.world.global_events_mut().clear_frame_events();
     }
@@ -151,6 +128,7 @@ impl GameState {
     ///
     /// 在切换到游戏场景之前调用,确保旧角色数据不会残留
     /// 清理的对象包括: 玩家、怪物、NPC、物品掉落、地图瓦片等
+    #[inline]
     fn clear_game_objects(&mut self) {
         use crate::ecs::components::*;
 
@@ -244,8 +222,7 @@ impl EventHandler for GameState {
         x: f32,
         y: f32,
     ) -> GameResult {
-        // self.current_scene
-        //     .on_mouse_down(ctx, &mut self.world, button, x, y)
+      
         if let Some((_, events)) = self
             .world
             .query_mut::<&mut GlobalEvents>()
