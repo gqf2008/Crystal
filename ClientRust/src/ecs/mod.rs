@@ -14,7 +14,7 @@ pub mod world; // 🆕 全局游戏资源 (Resources)
 pub mod map_loader;
 
 // 坐标工具模块 - 统一地图/世界/屏幕坐标转换 (不是 ECS System)
-pub mod coordinates;
+pub mod coord;
 
 // UI 模块
 pub mod ui;
@@ -26,9 +26,8 @@ pub mod scenes;
 // IME 输入处理
 pub mod ime_handler;
 
-use reqwest::Client;
 pub use resources::*; // 🆕 导出全局资源
-pub use systems::logic::state_update::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
+pub use systems::logic::update::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
 pub use systems::*;
 pub use world::GameWorld;
 
@@ -36,8 +35,8 @@ pub use world::GameWorld;
 pub use map_loader::MapLoader;
 
 // 坐标工具导出
-pub use coordinates::{
-    CameraController, Coordinates, MapUtils, ObjectRenderer, ViewportConfig, CELL_HEIGHT,
+pub use coord::{
+    CameraController, Coord, MapUtils, ObjectRenderer, ViewportConfig, CELL_HEIGHT,
     CELL_WIDTH,
 };
 

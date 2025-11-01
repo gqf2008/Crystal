@@ -16,7 +16,7 @@
 
 use hecs::World;
 use ggez::GameResult;
-use crate::ecs::components::{LocalPlayer, Position, Camera};
+use crate::ecs::components::{LocalPlayer, Position, Camera, CameraMode};
 use crate::ecs::systems::{System, priority};
 
 /// 摄像机跟随系统
@@ -38,12 +38,15 @@ impl System for CameraFollowSystem {
             pos
         };
 
-        // 如果找到玩家,更新摄像机位置
+        // 如果找到玩家,更新摄像机位置（仅在 FollowPlayer 模式下）
         if let Some((player_x, player_y)) = player_pos {
-            for (_, (camera_pos, _camera)) in world.query_mut::<(&mut Position, &Camera)>() {
-                // 直接跟随(可以后续改为平滑跟随)
-                camera_pos.x = player_x;
-                camera_pos.y = player_y;
+            for (_, (camera_pos, _camera, mode)) in world.query_mut::<(&mut Position, &Camera, &CameraMode)>() {
+                // 仅在跟随模式下更新相机位置
+                if *mode == CameraMode::FollowPlayer {
+                    // 直接跟随(可以后续改为平滑跟随)
+                    camera_pos.x = player_x;
+                    camera_pos.y = player_y;
+                }
             }
         }
 

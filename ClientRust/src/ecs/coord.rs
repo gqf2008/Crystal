@@ -64,11 +64,11 @@ impl ViewportConfig {
 /// 
 /// ⚠️ 注意: 这不是 ECS System，而是静态工具函数集合
 /// 真正的 ECS Systems (如 PlayerSystem, RenderSystem) 在 `systems/` 目录下
-pub struct Coordinates {
+pub struct Coord {
     pub viewport: ViewportConfig,
 }
 
-impl Coordinates {
+impl Coord {
     /// UI 设计分辨率宽度 (1024×768 固定设计尺寸)
     pub const DESIGN_WIDTH: f32 = 1024.0;
     
@@ -232,11 +232,11 @@ impl Coordinates {
 /// 
 /// 封装了完整的坐标转换逻辑，对应原版 MapObject 的坐标计算
 pub struct ObjectRenderer {
-    coord_system: Coordinates,
+    coord_system: Coord,
 }
 
 impl ObjectRenderer {
-    pub fn new(coord_system: Coordinates) -> Self {
+    pub fn new(coord_system: Coord) -> Self {
         Self { coord_system }
     }
     
@@ -311,14 +311,14 @@ mod tests {
 
     #[test]
     fn test_grid_to_world() {
-        let (wx, wy) = Coordinates::grid_to_world(286, 617);
+        let (wx, wy) = Coord::grid_to_world(286, 617);
         assert_eq!(wx, 286.0 * 48.0);
         assert_eq!(wy, 617.0 * 32.0);
     }
 
     #[test]
     fn test_world_to_grid() {
-        let (gx, gy) = Coordinates::world_to_grid(13728.0, 19744.0);
+        let (gx, gy) = Coord::world_to_grid(13728.0, 19744.0);
         assert_eq!(gx, 286);
         assert_eq!(gy, 617);
     }
@@ -335,10 +335,10 @@ mod tests {
     #[test]
     fn test_to_screen_position_player() {
         let viewport = ViewportConfig::new(1024.0, 768.0);
-        let coord_sys = Coordinates::new(viewport);
+        let coord_sys = Coord::new(viewport);
         
         // 玩家在 (100, 100)
-        let player_world = Coordinates::grid_to_world(100, 100);
+        let player_world = Coord::grid_to_world(100, 100);
         
         // 玩家的屏幕坐标应该在视野中心
         let (sx, sy) = coord_sys.to_screen_position(
@@ -357,13 +357,13 @@ mod tests {
     #[test]
     fn test_to_screen_position_other_object() {
         let viewport = ViewportConfig::new(1024.0, 768.0);
-        let coord_sys = Coordinates::new(viewport);
+        let coord_sys = Coord::new(viewport);
         
         // 玩家在 (100, 100)
-        let player_world = Coordinates::grid_to_world(100, 100);
+        let player_world = Coord::grid_to_world(100, 100);
         
         // 对象在玩家右侧 2 格 (102, 100)
-        let obj_world = Coordinates::grid_to_world(102, 100);
+        let obj_world = Coord::grid_to_world(102, 100);
         
         let (sx, sy) = coord_sys.to_screen_position(
             obj_world,
@@ -381,7 +381,7 @@ mod tests {
     #[test]
     fn test_screen_to_grid() {
         let viewport = ViewportConfig::new(1024.0, 768.0);
-        let coord_sys = Coordinates::new(viewport);
+        let coord_sys = Coord::new(viewport);
         
         // 玩家在 (100, 100)
         let player_grid = (100, 100);
@@ -481,7 +481,7 @@ pub enum CameraState {
 /// - 边界限制
 pub struct CameraController {
     /// 坐标系统
-    coord_system: Coordinates,
+    coord_system: Coord,
     
     /// 相机状态
     state: CameraState,
@@ -510,7 +510,7 @@ pub struct CameraController {
 
 impl CameraController {
     /// 创建相机
-    pub fn new(coord_system: Coordinates) -> Self {
+    pub fn new(coord_system: Coord) -> Self {
         Self {
             coord_system,
             state: CameraState::Following,
@@ -588,8 +588,8 @@ impl CameraController {
         
         // 应用地图边界限制
         if let Some((min_x, min_y, max_x, max_y)) = self.map_bounds {
-            let (min_world_x, min_world_y) = Coordinates::grid_to_world_center(min_x, min_y);
-            let (max_world_x, max_world_y) = Coordinates::grid_to_world_center(max_x, max_y);
+            let (min_world_x, min_world_y) = Coord::grid_to_world_center(min_x, min_y);
+            let (max_world_x, max_world_y) = Coord::grid_to_world_center(max_x, max_y);
             
             self.position.0 = self.position.0.clamp(min_world_x, max_world_x);
             self.position.1 = self.position.1.clamp(min_world_y, max_world_y);
@@ -643,7 +643,7 @@ impl CameraController {
     /// 获取相机当前格子坐标
     pub fn get_grid_position(&self) -> (i32, i32) {
         let final_pos = self.get_final_position();
-        Coordinates::world_to_grid(final_pos.0, final_pos.1)
+        Coord::world_to_grid(final_pos.0, final_pos.1)
     }
     
     /// 世界坐标 → 屏幕坐标 (通过相机)
@@ -663,13 +663,13 @@ impl CameraController {
     pub fn screen_to_world(&self, screen_pos: (f32, f32)) -> (f32, f32) {
         let camera_grid = self.get_grid_position();
         let grid = self.coord_system.screen_to_grid(screen_pos.0, screen_pos.1, camera_grid);
-        Coordinates::grid_to_world_center(grid.0, grid.1)
+        Coord::grid_to_world_center(grid.0, grid.1)
     }
     
     /// 检查世界坐标是否在相机视野内
     pub fn is_visible(&self, world_pos: (f32, f32)) -> bool {
         let camera_grid = self.get_grid_position();
-        let obj_grid = Coordinates::world_to_grid(world_pos.0, world_pos.1);
+        let obj_grid = Coord::world_to_grid(world_pos.0, world_pos.1);
         self.coord_system.is_in_viewport(obj_grid, camera_grid)
     }
 }

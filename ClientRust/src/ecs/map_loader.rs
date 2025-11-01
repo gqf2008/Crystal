@@ -193,7 +193,7 @@ impl MapLoader {
         use crate::ecs::components::{
             Position, MonsterData, AIState, Health, Animation, Sprite, Velocity,  // 🆕 添加Velocity
         };
-        use crate::ecs::{Coordinates, MapUtils};
+        use crate::ecs::{Coord, MapUtils};
         use mir2_shared::MirAction;
         use rand::Rng;
         
@@ -219,7 +219,7 @@ impl MapLoader {
             }
             
             // 转换为世界坐标
-            let (x, y) = Coordinates::grid_to_world_center(grid_x, grid_y);
+            let (x, y) = Coord::grid_to_world_center(grid_x, grid_y);
             
             // 随机AI类型
             let ai_type = (spawned % 3) as u8 + 1; // 1=近战, 2=远程, 3=巡逻

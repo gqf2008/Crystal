@@ -14,7 +14,7 @@
 use hecs::World;
 use ggez::GameResult;
 use ggez::input::mouse::MouseButton;
-use crate::ecs::components::{Camera, Draggable, InputEvent, Position};
+use crate::ecs::components::{Camera, CameraMode, Draggable, InputEvent, Position};
 use crate::ecs::systems::{System, priority};
 use crate::ecs::WorldExt;
 
@@ -22,8 +22,9 @@ use crate::ecs::WorldExt;
 /// 
 /// 职责：
 /// - 从 GlobalEvents 读取鼠标事件
+/// - 处理相机模式切换（拖拽时切换到 Manual 模式）
 /// - 处理相机拖拽（中键）
-/// - 处理相机缩放（滚轮）
+/// - 处理相机缩放（滚轮，所有模式下都生效）
 /// - 计算震动效果
 pub struct CameraSystem {
     /// 震动强度
@@ -144,25 +145,27 @@ impl System for CameraSystem {
             global_events.input_events.clone()
         };
 
-        // 2. 查询 Camera + Draggable + Position 组件
+        // 2. 查询 Camera + Draggable + Position + CameraMode 组件
         let mut camera_query: Vec<_> = world
-            .query_mut::<(&mut Camera, &mut Draggable, &mut Position)>()
+            .query_mut::<(&mut Camera, &mut Draggable, &mut Position, &mut CameraMode)>()
             .into_iter()
             .collect();
 
-        if let Some((_, (camera, draggable, pos))) = camera_query.first_mut() {
+        if let Some((_, (ref mut camera, ref mut draggable, ref mut pos, ref mut mode))) = camera_query.first_mut() {
             // 3. 处理鼠标事件
             for event in &input_events {
                 match event {
                     InputEvent::MouseDown { button, x, y } => {
                         if *button == MouseButton::Middle {
+                            // 切换到手动控制模式
+                            **mode = CameraMode::Manual;
                             // 开始拖拽
                             draggable.is_dragging = true;
                             draggable.drag_start_x = *x;
                             draggable.drag_start_y = *y;
                             draggable.drag_start_pos_x = pos.x;
                             draggable.drag_start_pos_y = pos.y;
-                            tracing::debug!("📹 开始拖拽相机: ({:.0}, {:.0})", x, y);
+                            tracing::debug!("📹 切换到手动模式并开始拖拽相机: ({:.0}, {:.0})", x, y);
                         }
                     }
                     InputEvent::MouseMove { x, y, .. } => {

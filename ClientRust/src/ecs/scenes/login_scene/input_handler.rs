@@ -3,7 +3,7 @@
 //! 负责处理所有与服务器通信相关的事件响应
 
 use super::LoginScene;
-use crate::ecs::WorldExt;
+use crate::ecs::{Coord, WorldExt};
 use ggez::winit::event::MouseButton;
 use ggez::winit::keyboard::KeyCode;
 use ggez::{Context, GameResult};
@@ -15,7 +15,6 @@ use super::login::DialogAction;
 use super::new_account::{NewAccountAction, NewAccountDialog};
 use super::virtual_keyboard::{FocusedInput, VirtualKeyboard, VirtualKeyboardAction};
 use super::SceneType;
-use super::{DESIGN_HEIGHT, DESIGN_WIDTH};
 use crate::ecs::components::InputEvent;
 
 impl LoginScene {
@@ -168,7 +167,7 @@ impl LoginScene {
             DialogAction::Login => self.submit_login(world),
             DialogAction::OpenNewAccount => {
                 tracing::info!("🆕 打开新建账号对话框");
-                let mut dialog = NewAccountDialog::new(DESIGN_WIDTH, DESIGN_HEIGHT);
+                let mut dialog = NewAccountDialog::new(Coord::DESIGN_WIDTH, Coord::DESIGN_HEIGHT);
                 dialog.show();
                 self.new_account_dialog = Some(dialog);
             }
@@ -180,13 +179,13 @@ impl LoginScene {
                     .get_credentials()
                     .map(|(id, pwd)| (Some(id), Some(pwd)))
                     .unwrap_or((None, None));
-                let mut dialog = ChangePasswordDialog::new(DESIGN_WIDTH, DESIGN_HEIGHT);
+                let mut dialog = ChangePasswordDialog::new(Coord::DESIGN_WIDTH, Coord::DESIGN_HEIGHT);
                 dialog.show(account_id, password);
                 self.change_password_dialog = Some(dialog);
             }
             DialogAction::OpenViewKey => {
                 tracing::info!("⌨️ 打开虚拟键盘");
-                let mut keyboard = VirtualKeyboard::new(DESIGN_WIDTH, DESIGN_HEIGHT);
+                let mut keyboard = VirtualKeyboard::new(Coord::DESIGN_WIDTH, Coord::DESIGN_HEIGHT);
                 // 根据当前焦点决定虚拟键盘输入目标
                 let focused = if self.login_dialog.account_input.focused {
                     FocusedInput::Account

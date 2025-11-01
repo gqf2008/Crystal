@@ -14,7 +14,7 @@ mod ui_actions; // UI 交互逻辑（按钮点击、对话框打开、游戏启�
 mod input_handler; // 输入事件处理（键盘、鼠标、IME等）
 
 use crate::ecs::components::CharacterList;
-use crate::ecs::WorldExt;
+use crate::ecs::{Coord, WorldExt};
 use character_select::CharacterSelect; // 🆕 导入CharacterList组件
 
 pub use credits_dialog::CreditsDialog;
@@ -32,10 +32,6 @@ use super::{Scene, SceneType};
 use crate::ecs::ui::{ButtonGroup, ButtonWidget}; // ButtonGroup 从原路径导入
 use crate::network::{handlers::GameEvent, NetContext};
 use mir2_shared::SelectInfo;
-
-// 设计分辨率常量 (与 LoginScene 保持一致)
-const DESIGN_WIDTH: f32 = 1024.0;
-const DESIGN_HEIGHT: f32 = 768.0;
 
 pub struct SelectScene {
     // 🆕 角色选择UI状态(只维护选中索引、动画帧等UI状态)
@@ -221,8 +217,8 @@ impl SelectScene {
         let viewport_x = window_x - offset_x;
         let viewport_y = window_y - offset_y;
 
-        let design_x = (viewport_x / viewport_width) * DESIGN_WIDTH;
-        let design_y = (viewport_y / viewport_height) * DESIGN_HEIGHT;
+        let design_x = (viewport_x / viewport_width) * Coord::DESIGN_WIDTH;
+        let design_y = (viewport_y / viewport_height) * Coord::DESIGN_HEIGHT;
 
         (design_x, design_y)
     }
@@ -358,8 +354,8 @@ impl Scene for SelectScene {
                         let mut msg = MessageBox::new(
                             "Incorrect Entry.".to_string(),
                             MessageBoxButtons::Ok,
-                            DESIGN_WIDTH,
-                            DESIGN_HEIGHT,
+                            Coord::DESIGN_WIDTH,
+                            Coord::DESIGN_HEIGHT,
                         );
                         msg.show();
                         self.message_box = Some(msg);
@@ -389,8 +385,8 @@ impl Scene for SelectScene {
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,
-            DESIGN_WIDTH,
-            DESIGN_HEIGHT,
+            Coord::DESIGN_WIDTH,
+            Coord::DESIGN_HEIGHT,
         ));
 
         // 🆕 使用 CharacterSelect 组件绘制主界面

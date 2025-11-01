@@ -2,6 +2,10 @@
 // UpdateRenderParallelScheduler - update/+render/ 架构的并行调度器
 // ============================================================================
 //
+// ⚠️ **废弃模块 - DEPRECATED**
+// 此模块已被废弃，实验性并行调度器未被采用。
+// 保留代码仅供参考，计划后续移除。
+//
 // **设计原则**:
 // - 保持 update/+render/ 架构的清晰职责分离
 // - 为独立系统添加并行执行支持（Layer 5）
@@ -30,8 +34,8 @@ use crate::ecs::systems::{System, priority};
 use crate::ecs::systems::update::input::PlayerControlSystem;
 use crate::ecs::systems::update::decision::{MonsterAISystem, NpcDialogueSystem};
 use crate::ecs::systems::update::combat_skill::{SkillSystem, CombatSystem};
-use crate::ecs::systems::update::physics_movement::{MovementSystem, CollisionSystem};
-use crate::ecs::systems::update::state_update::{
+use crate::ecs::systems::logic::physics::{MovementSystem, CollisionSystem};
+use crate::ecs::systems::logic::update::{
     AnimationSystem, ParticleSystem, HealthRegenSystem, SoundSystem, CameraSystem,
 };
 use crate::ecs::systems::update::network_sync::{

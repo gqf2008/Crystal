@@ -23,7 +23,7 @@ use ggez::{Context, GameResult};
 use hecs::World;
 
 use super::{Scene, SceneType};
-use crate::ecs::WorldExt;
+use crate::ecs::{Coord, WorldExt};
 use crate::graphics::{draw_sprite_at, LibraryName};
 
 /// 登录场景
@@ -46,9 +46,6 @@ pub struct LoginScene {
     virtual_keyboard: Option<VirtualKeyboard>,
 }
 
-// 设计分辨率：UI纹理的原始设计分辨率（4:3比例）
-const DESIGN_WIDTH: f32 = 1024.0;
-const DESIGN_HEIGHT: f32 = 768.0;
 
 impl LoginScene {
     pub fn new() -> Self {
@@ -62,7 +59,7 @@ impl LoginScene {
             background_frame: 0,
             animation_timer: 0.0,
             animation_paused: true,
-            login_dialog: LoginDialog::new(DESIGN_WIDTH, DESIGN_HEIGHT),
+            login_dialog: LoginDialog::new(Coord::DESIGN_WIDTH, Coord::DESIGN_HEIGHT),
             new_account_dialog: None,
             change_password_dialog: None,
             message_box: None,
@@ -73,8 +70,8 @@ impl LoginScene {
     pub fn show_message(&mut self, message: &str) {
         self.message_box = Some(MessageBox::new(
             message.to_string(),
-            DESIGN_WIDTH,
-            DESIGN_HEIGHT,
+            Coord::DESIGN_WIDTH,
+            Coord::DESIGN_HEIGHT,
         ));
     }
 
@@ -98,8 +95,8 @@ impl LoginScene {
         let viewport_x = window_x - offset_x;
         let viewport_y = window_y - offset_y;
 
-        let design_x = (viewport_x / viewport_width) * DESIGN_WIDTH;
-        let design_y = (viewport_y / viewport_height) * DESIGN_HEIGHT;
+        let design_x = (viewport_x / viewport_width) * Coord::DESIGN_WIDTH;
+        let design_y = (viewport_y / viewport_height) * Coord::DESIGN_HEIGHT;
 
         (design_x, design_y)
     }
@@ -196,8 +193,8 @@ impl Scene for LoginScene {
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,
-            DESIGN_WIDTH,
-            DESIGN_HEIGHT,
+            Coord::DESIGN_WIDTH,
+            Coord::DESIGN_HEIGHT,
         ));
 
         // 绘制背景动画(ChrSel库, 1024x768原始尺寸，直接铺满设计坐标系)
@@ -213,8 +210,8 @@ impl Scene for LoginScene {
         // 更新对话框位置(在设计坐标系中居中)
         let dialog_w = 328.0;
         let dialog_h = 220.0;
-        self.login_dialog.x = (DESIGN_WIDTH - dialog_w) / 2.0;
-        self.login_dialog.y = (DESIGN_HEIGHT - dialog_h) / 2.0;
+        self.login_dialog.x = (Coord::DESIGN_WIDTH - dialog_w) / 2.0;
+        self.login_dialog.y = (Coord::DESIGN_HEIGHT - dialog_h) / 2.0;
         self.login_dialog.update_positions();
 
         // 更新新建账号对话框位置
@@ -229,7 +226,7 @@ impl Scene for LoginScene {
 
         // 更新消息框位置
         if let Some(msg_box) = &mut self.message_box {
-            msg_box.update_positions(DESIGN_WIDTH, DESIGN_HEIGHT);
+            msg_box.update_positions(Coord::DESIGN_WIDTH, Coord::DESIGN_HEIGHT);
         }
 
         // 绘制所有UI元素(在设计坐标系中)

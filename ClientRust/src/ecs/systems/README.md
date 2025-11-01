@@ -41,12 +41,12 @@ systems/
 │   │   ├── skill_system.rs             - 技能系统
 │   │   └── combat_system.rs            - 战斗系统
 │   │
-│   ├── physics_movement/       # Layer 4: 物理移动层 (400-499)
+│   ├── physics/                # Layer 4: 物理移动层 (400-499)
 │   │   ├── movement_system.rs          - 移动系统
 │   │   ├── collision_system.rs         - 碰撞检测
 │   │   └── camera_follow_system.rs     - 相机跟随
 │   │
-│   └── state_update/           # Layer 5: 状态更新层 (500-599)
+│   └── update/                 # Layer 5: 状态更新层 (500-599)
     ├── animation_system.rs         - 动画更新
     ├── particle_system.rs          - 粒子特效
     ├── health_regen_system.rs      - 生命恢复

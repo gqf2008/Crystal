@@ -195,10 +195,10 @@ pub use logic::combat_skill::{
 };
 
 // Layer 4 (Physics & Movement) - 向后兼容导出
-pub use logic::physics_movement::{CollisionSystem, MovementSystem};
+pub use logic::physics::{CollisionSystem, MovementSystem};
 
 // Layer 5 (State Update) - 向后兼容导出
-pub use logic::state_update::{
+pub use logic::update::{
     AnimationSystem, CameraSystem, HealthRegenSystem, ParticleSystem, SoundSystem,
 };
 

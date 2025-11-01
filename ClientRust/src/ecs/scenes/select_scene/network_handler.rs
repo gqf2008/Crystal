@@ -2,7 +2,7 @@
 //! 负责处理来自服务器的游戏事件响应
 
 use super::SelectScene;
-use crate::ecs::WorldExt;
+use crate::ecs::{Coord, WorldExt};
 use crate::ecs::scenes::SceneType;
 use crate::network::handlers::GameEvent;
 
@@ -118,8 +118,8 @@ impl SelectScene {
         let mut message_box = super::MessageBox::new(
             format!("Character '{}' created successfully!", name),
             super::MessageBoxButtons::Ok,
-            super::DESIGN_WIDTH,
-            super::DESIGN_HEIGHT,
+            Coord::DESIGN_WIDTH,
+            Coord::DESIGN_HEIGHT,
         );
         message_box.show();
         self.message_box = Some(message_box);

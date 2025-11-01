@@ -4,6 +4,8 @@
 use ggez::graphics::{Color, PxScale, Text, DrawParam};
 use ggez::mint::Vector2;
 
+use crate::ecs::Coord;
+
 #[derive(Debug, Clone)]
 pub struct CreditsDialog {
     pub visible: bool,
@@ -157,15 +159,13 @@ impl CreditsDialog {
             return Ok(());
         }
         
-        // 设计分辨率 1024x768
-        let design_width = 1024.0;
-        let design_height = 768.0;
+       
         
         // 1. 绘制半透明黑色背景遮罩
         let bg_rect = Mesh::new_rectangle(
             ctx,
             DrawMode::fill(),
-            Rect::new(0.0, 0.0, design_width, design_height),
+            Rect::new(0.0, 0.0, Coord::DESIGN_WIDTH, Coord::DESIGN_HEIGHT),
             Color::from_rgba(0, 0, 0, 200),
         )?;
         canvas.draw(&bg_rect, DrawParam::default());
@@ -174,8 +174,8 @@ impl CreditsDialog {
         // 居中显示，使用单个背景框即可
         let box_width = 464.0;
         let box_height = 260.0;
-        let content_x = (design_width - box_width) / 2.0;  // 约280
-        let content_y = (design_height - box_height) / 2.0; // 约254
+        let content_x = (Coord::DESIGN_WIDTH - box_width) / 2.0;  // 约280
+        let content_y = (Coord::DESIGN_HEIGHT - box_height) / 2.0; // 约254
         
         // 绘制单个背景
         let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 360, content_x, content_y);

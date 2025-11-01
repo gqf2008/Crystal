@@ -5,7 +5,7 @@
 
 use super::new_character_dialog::DialogButton;
 use super::{BottomButton, CreditsDialog, NewCharacterDialog, SelectScene};
-use crate::ecs::WorldExt;
+use crate::ecs::{Coord, WorldExt};
 use crate::network::NetContext;
 use mir2_shared::enums::{MirClass, MirGender};
 use std::sync::Arc;
@@ -250,8 +250,8 @@ impl SelectScene {
             let mut message_box = super::MessageBox::new(
                 "Please select a character first.".to_string(),
                 super::MessageBoxButtons::Ok,
-                super::DESIGN_WIDTH,
-                super::DESIGN_HEIGHT,
+                Coord::DESIGN_WIDTH,
+                Coord::DESIGN_HEIGHT,
             );
             message_box.show();
             self.message_box = Some(message_box);
@@ -264,8 +264,8 @@ impl SelectScene {
         let mut message_box = super::MessageBox::new(
             format!("Are you sure you want to Delete\nthe character {}?\n\nThis action cannot be undone!", character.name),
             super::MessageBoxButtons::YesNo,
-            super::DESIGN_WIDTH,
-            super::DESIGN_HEIGHT
+            Coord::DESIGN_WIDTH,
+            Coord::DESIGN_HEIGHT
         );
         message_box.show();
         self.message_box = Some(message_box);

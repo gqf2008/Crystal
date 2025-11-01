@@ -2,6 +2,10 @@
 // SystemScheduler - 统一系统调度器
 // ============================================================================
 //
+// ⚠️ **废弃模块 - DEPRECATED**
+// 此模块已被废弃，但仍在 GameScene 和 map_viewer 中使用。
+// 计划迁移到新的系统调度架构后移除。
+//
 // **职责**:
 // - 管理所有18个ECS系统的生命周期
 // - 按优先级顺序执行系统 (50-610)
@@ -29,8 +33,8 @@ use crate::ecs::systems::{System, priority};
 use crate::ecs::systems::update::input::PlayerControlSystem;
 use crate::ecs::systems::update::decision::{MonsterAISystem, NpcDialogueSystem};
 use crate::ecs::systems::update::combat_skill::{SkillSystem, CombatSystem};
-use crate::ecs::systems::update::physics_movement::{MovementSystem, CollisionSystem};
-use crate::ecs::systems::update::state_update::{
+use crate::ecs::systems::logic::physics::{MovementSystem, CollisionSystem};
+use crate::ecs::systems::logic::update::{
     AnimationSystem, ParticleSystem, HealthRegenSystem, SoundSystem, CameraSystem,
 };
 use crate::ecs::systems::update::network_sync::{

@@ -16,7 +16,7 @@ use crate::ecs::components::{
     LocalPlayer, NetworkSync, NetworkObjectType, PlayerInput, MovementVelocity,
     Path, Movement, Prediction, GlobalEvents,
 };
-use crate::ecs::{Coordinates, MapUtils, MapLoader};
+use crate::ecs::{Coord, MapUtils, MapLoader};
 use crate::objects::MapReader;
 use mir2_shared::enums::{MirClass, MirGender};
 
@@ -107,7 +107,7 @@ impl MapUpdateSystem {
                         .expect("地图数据未加载");
                     
                     let (spawn_grid_x, spawn_grid_y) = MapUtils::find_center_walkable_position(&map_data);
-                    let (spawn_x, spawn_y) = Coordinates::grid_to_world_center(spawn_grid_x, spawn_grid_y);
+                    let (spawn_x, spawn_y) = Coord::grid_to_world_center(spawn_grid_x, spawn_grid_y);
                     
                     println!("🎯 出生位置: 格子({}, {}) -> 世界坐标({:.1}, {:.1})", 
                              spawn_grid_x, spawn_grid_y, spawn_x, spawn_y);

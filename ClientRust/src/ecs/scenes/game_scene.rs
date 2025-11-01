@@ -53,9 +53,10 @@ use crate::ecs::systems::{
 };
 use crate::ecs::{
     components::{
-        Camera, Draggable, Equipment, Inventory, LearnableMagicList, LocalPlayer, MagicList,
-        MirClass, MirGender, MouseInput, MoveMode, Player, PlayerAction, PlayerAppearance,
-        PlayerData, Position, RenderConfig, TargetSelection, TimeTracker, VisibleArea,
+        Camera, CameraMode, Draggable, Equipment, Inventory, LearnableMagicList, LocalPlayer, 
+        MagicList, MirClass, MirGender, MouseInput, MoveMode, Player, PlayerAction, 
+        PlayerAppearance, PlayerData, Position, RenderConfig, TargetSelection, TimeTracker, 
+        VisibleArea,
     },
     map_loader::MapLoader,
 
@@ -66,7 +67,7 @@ use crate::ecs::{
     },
     // 🔒 暂时注释掉旧调度器
     // UpdateRenderParallelScheduler, ExecutionMode,
-    Coordinates,
+    Coord,
     MapUtils, // 坐标工具
 };
 use crate::graphics::libraries::initialize_all_libraries;
@@ -133,6 +134,7 @@ impl GameScene {
                 screen_width,
                 screen_height,
             },
+            CameraMode::FollowPlayer, // 默认跟随玩家模式
             Draggable {
                 is_dragging: false,
                 drag_start_x: 0.0,
@@ -192,8 +194,8 @@ impl GameScene {
 
         // 创建UI对话框实体
         let main_dialog_entity = world.spawn((MainDialog::new(
-            Coordinates::DESIGN_WIDTH,
-            Coordinates::DESIGN_HEIGHT,
+            Coord::DESIGN_WIDTH,
+            Coord::DESIGN_HEIGHT,
         ),));
 
         let inventory_dialog_entity = world.spawn((InventoryDialog::new(),));

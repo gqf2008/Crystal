@@ -62,7 +62,7 @@
 // ## 注意事项
 //
 // ⚠️ **CameraSystem 职责重复**: 
-//    - 与 `physics_movement/camera_follow_system.rs` 存在职责重叠
+//    - 与 `physics/camera_follow_system.rs` 存在职责重叠
 //    - 建议合并为一个系统（见 ARCHITECTURE_REVIEW.md）
 //
 // ⚠️ **SoundSystem vs Layer 4 的 SoundPlaybackSystem**:

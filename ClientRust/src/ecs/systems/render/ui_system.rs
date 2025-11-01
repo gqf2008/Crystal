@@ -1,4 +1,4 @@
-use crate::ecs::{Coordinates, systems::DrawSystem};
+use crate::ecs::{Coord, systems::DrawSystem};
 use ggez::GameResult;
 
 
@@ -15,8 +15,8 @@ impl DrawSystem for UIRenderSystem {
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,
-            Coordinates::DESIGN_WIDTH,   // 1024 (UI 设计分辨率)
-            Coordinates::DESIGN_HEIGHT,  // 768 (UI 设计分辨率)
+            Coord::DESIGN_WIDTH,   // 1024 (UI 设计分辨率)
+            Coord::DESIGN_HEIGHT,  // 768 (UI 设计分辨率)
         ));
         // 在这里实现地图渲染逻辑
         Ok(())

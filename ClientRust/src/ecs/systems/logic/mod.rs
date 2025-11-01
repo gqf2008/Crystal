@@ -1,15 +1,15 @@
 pub mod combat_skill;
 pub mod decision;
 pub mod input;
-pub mod physics_movement;
-pub mod state_update;
+pub mod physics;
+pub mod update;
 
 // 重新导出所有系统
 pub use combat_skill::*;
 pub use decision::*;
 pub use input::*;
-pub use physics_movement::*;
-pub use state_update::*;
+pub use physics::*;
+pub use update::*;
 
 // ============================================================================
 // 为所有纯逻辑系统批量实现 IntoSystemKind
@@ -25,14 +25,14 @@ crate::logic_system!(
     combat_skill::SkillSystem,
     combat_skill::CombatSystem,
     // Layer 4: Physics & Movement (400-499)
-    physics_movement::MovementSystem,
-    physics_movement::CollisionSystem,
-    physics_movement::CameraFollowSystem,
+    physics::MovementSystem,
+    physics::CollisionSystem,
+    physics::CameraFollowSystem,
     // Layer 5: State Update (500-599)
-    state_update::AnimationSystem,
-    state_update::ParticleSystem,
-    state_update::SoundSystem,
-    state_update::CameraSystem,
-    state_update::HealthRegenSystem,
-    // state_update::MapUpdateSystem,  // ⚠️ 尚未实现 System trait
+    update::AnimationSystem,
+    update::ParticleSystem,
+    update::SoundSystem,
+    update::CameraSystem,
+    update::HealthRegenSystem,
+    // update::MapUpdateSystem,  // ⚠️ 尚未实现 System trait
 );

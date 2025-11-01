@@ -27,6 +27,23 @@ impl RenderOrder {
     }
 }
 
+/// 相机模式 - 控制相机行为
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CameraMode {
+    /// 跟随玩家模式 - CameraFollowSystem 自动更新相机位置
+    FollowPlayer,
+    /// 手动控制模式 - 用户可以拖拽相机，不自动跟随
+    Manual,
+    /// 固定模式 - 相机位置固定，不响应任何输入
+    Fixed,
+}
+
+impl Default for CameraMode {
+    fn default() -> Self {
+        CameraMode::FollowPlayer
+    }
+}
+
 /// 相机组件 - 视口控制
 #[derive(Debug, Clone)]
 pub struct Camera {

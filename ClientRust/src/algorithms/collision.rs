@@ -25,9 +25,9 @@ impl Collision {
         center_y: f32,
         radius: f32,
     ) -> bool {
-        use crate::ecs::Coordinates;
+        use crate::ecs::Coord;
         
-        let (grid_x, grid_y) = Coordinates::world_to_grid(center_x, center_y);
+        let (grid_x, grid_y) = Coord::world_to_grid(center_x, center_y);
         let grid_radius = (radius / 48.0).ceil() as i32;
         
         for dy in -grid_radius..=grid_radius {
