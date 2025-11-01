@@ -35,7 +35,7 @@ use map_viewer::scene::MapViewerScene;
 use mir2_client::ecs::components::{GlobalEvents, InputEvent};
 use mir2_client::ecs::scenes::Scene;
 use mir2_client::ecs::WorldExt;
-use mir2_client::network::{NetworkBuilder, handlers::GameEvent};
+use mir2_client::network::{handlers::GameEvent, NetworkBuilder};
 use mir2_client::settings::ClientSettings;
 
 /// 地图查看器应用
@@ -65,7 +65,7 @@ impl MapViewerApp {
 
         // 创建模拟网络（使用 mock 模式）
         let net_ctx = NetworkBuilder::new(settings.network.clone())
-            .mock(true)  // 启用模拟网络
+            .mock(true) // 启用模拟网络
             .build()
             .expect("Failed to create mock network");
 
@@ -76,20 +76,15 @@ impl MapViewerApp {
         let scene = MapViewerScene::new(ctx)?;
 
         // 发送开始游戏请求，触发地图加载
-        let _ = net_ctx.send(GameEvent::StartGameRequest {
-            character_index: 0,
-        });
+        let _ = net_ctx.send(GameEvent::StartGameRequest { character_index: 0 });
         tracing::info!("📤 已发送 StartGameRequest，等待地图加载...");
 
         tracing::info!("✅ Map Viewer V3 启动完成");
 
-        Ok(Self {
-            world,
-            scene,
-        })
+        Ok(Self { world, scene })
     }
 
- #[inline]
+    #[inline]
     fn collect_network_events(&mut self) {
         let events = self.world.network().recv_categorized();
         self.world.global_events_mut().net_events = events;
@@ -98,7 +93,7 @@ impl MapViewerApp {
 
 impl EventHandler for MapViewerApp {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-       self.collect_network_events();
+        self.collect_network_events();
         // MapViewerApp 只负责收集事件到 GlobalEvents
         // 所有的逻辑处理由 Scene 完成
         self.scene.update(ctx, &mut self.world)?;
@@ -223,8 +218,17 @@ impl EventHandler for MapViewerApp {
 fn main() -> GameResult {
     // 创建 ggez 上下文
     let (mut ctx, event_loop) = ContextBuilder::new("map_viewer_v3", "Crystal")
-        .window_setup(WindowSetup::default().title("Map Viewer V3 - Crystal").vsync(false))
-        .window_mode(WindowMode::default().dimensions(1600.0, 1200.0))
+        .window_setup(
+            WindowSetup::default()
+                .title("Map Viewer V3 - Crystal")
+                .vsync(false),
+        )
+        .window_mode(
+            WindowMode::default()
+                .dimensions(1600.0, 1200.0)
+                .resizable(true)
+                .resize_on_scale_factor_change(true),
+        )
         .build()?;
 
     // 创建应用

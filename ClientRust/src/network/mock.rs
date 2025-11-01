@@ -198,10 +198,17 @@ impl MockNetwork {
                     map_reader.height
                 );
                 
-                // 发送 MapChanged 事件
+                // 提取纯文件名（不含路径和扩展名）
+                // 例如: "Map/0.map" -> "0"
+                let file_name = map_path
+                    .trim_start_matches("Map/")
+                    .trim_end_matches(".map")
+                    .to_string();
+                
+                // 发送 MapChanged 事件 (与 C# Server 格式一致)
                 let _ = response_tx.send(GameEvent::MapChanged {
                     map_index,
-                    file_name: map_path.to_string(),
+                    file_name,  // 只发送纯文件名 "0"
                     title: title.to_string(),
                 });
                 

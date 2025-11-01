@@ -117,10 +117,10 @@ impl MapLoadSystem {
         // 3. 执行地图加载
         // ====================================================================
         
-        info!("🗺️  开始加载地图: {}", map_file);
+        info!("🗺️  开始加载地图: {} (文件: {})", map_title, map_file);
         
-        // map_file 已经是完整路径 (例如 "Map/0.map"), 直接使用
-        let map_path = map_file.clone();
+        // map_file 是纯文件名 (例如 "0"), 需要拼接成 "Map/0.map"
+        let map_path = format!("Map/{}.map", map_file);
         let map_index = *map_index;
         let map_file = map_file.clone();
         let map_title = map_title.clone();

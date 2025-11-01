@@ -18,7 +18,7 @@ use hecs::{Entity, World};
 use std::time::Instant;
 
 use mir2_client::ecs::components::{
-    Camera, Draggable, MouseInput, Position, RenderConfig, TimeTracker, VisibleArea,
+    Camera, CameraMode, Draggable, MouseInput, Position, RenderConfig, TimeTracker, VisibleArea,
 };
 use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::{
@@ -155,13 +155,18 @@ impl MapViewerScene {
 
         // 在实际的 World 中重新创建所有实体
         // 相机实体（由 CameraSystem 使用）
+        // 初始位置设置为屏幕中心的一半，使地图 (0,0) 对齐到屏幕左上角
         world.spawn((
-            Position { x: 50.0, y: 50.0 },
+            Position { 
+                x: screen_width / 2.0, 
+                y: screen_height / 2.0 
+            },
             Camera {
                 zoom: 1.0,
                 screen_width,
                 screen_height,
             },
+            CameraMode::Manual,  // 地图查看器使用手动模式
             Draggable {
                 is_dragging: false,
                 drag_start_x: 0.0,
