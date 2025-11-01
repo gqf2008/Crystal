@@ -4,7 +4,7 @@
 
 use std::io::{Read, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::data::stats::SharedResult;
+use crate::data::stats::{SharedResult, SharedError};
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::item::UserItem;
 use crate::data::client_data::ClientMagic;
@@ -75,7 +75,13 @@ impl Packet for UserInformation {
 
         // Read inventory
         let inventory = if reader.read_u8()? != 0 {
-            let count = reader.read_i32::<LittleEndian>()? as usize;
+            let count = reader.read_i32::<LittleEndian>()?;
+            const MAX_INVENTORY_SIZE: i32 = 1000; // 合理上限
+            if count < 0 || count > MAX_INVENTORY_SIZE {
+                eprintln!("[UserInformation] Invalid inventory count: {}", count);
+                return Err(SharedError::PacketTooLarge(count as usize));
+            }
+            let count = count as usize;
             let mut items = Vec::with_capacity(count);
             for _ in 0..count {
                 if reader.read_u8()? != 0 {
@@ -91,7 +97,13 @@ impl Packet for UserInformation {
 
         // Read equipment
         let equipment = if reader.read_u8()? != 0 {
-            let count = reader.read_i32::<LittleEndian>()? as usize;
+            let count = reader.read_i32::<LittleEndian>()?;
+            const MAX_EQUIPMENT_SIZE: i32 = 100; // 合理上限
+            if count < 0 || count > MAX_EQUIPMENT_SIZE {
+                eprintln!("[UserInformation] Invalid equipment count: {}", count);
+                return Err(SharedError::PacketTooLarge(count as usize));
+            }
+            let count = count as usize;
             let mut items = Vec::with_capacity(count);
             for _ in 0..count {
                 if reader.read_u8()? != 0 {
@@ -107,7 +119,13 @@ impl Packet for UserInformation {
 
         // Read quest inventory
         let quest_inventory = if reader.read_u8()? != 0 {
-            let count = reader.read_i32::<LittleEndian>()? as usize;
+            let count = reader.read_i32::<LittleEndian>()?;
+            const MAX_QUEST_INVENTORY_SIZE: i32 = 500; // 合理上限
+            if count < 0 || count > MAX_QUEST_INVENTORY_SIZE {
+                eprintln!("[UserInformation] Invalid quest inventory count: {}", count);
+                return Err(SharedError::PacketTooLarge(count as usize));
+            }
+            let count = count as usize;
             let mut items = Vec::with_capacity(count);
             for _ in 0..count {
                 if reader.read_u8()? != 0 {
@@ -127,7 +145,13 @@ impl Packet for UserInformation {
         let expanded_storage_expiry_time = reader.read_i64::<LittleEndian>()?;
 
         // Read magics
-        let magic_count = reader.read_i32::<LittleEndian>()? as usize;
+        let magic_count = reader.read_i32::<LittleEndian>()?;
+        const MAX_MAGIC_COUNT: i32 = 500;
+        if magic_count < 0 || magic_count > MAX_MAGIC_COUNT {
+            eprintln!("[UserInformation] Invalid magic_count: {}", magic_count);
+            return Err(SharedError::PacketTooLarge(magic_count as usize));
+        }
+        let magic_count = magic_count as usize;
         let mut magics = Vec::with_capacity(magic_count);
         for _ in 0..magic_count {
             magics.push(ClientMagic::read_from(reader)?);
@@ -135,6 +159,11 @@ impl Packet for UserInformation {
 
         // Skip intelligent creatures for now
         let creature_count = reader.read_i32::<LittleEndian>()?;
+        const MAX_CREATURE_COUNT: i32 = 100;
+        if creature_count < 0 || creature_count > MAX_CREATURE_COUNT {
+            eprintln!("[UserInformation] Invalid creature_count: {}", creature_count);
+            return Err(SharedError::PacketTooLarge(creature_count as usize));
+        }
         for _ in 0..creature_count {
             // Skip creature data - not implemented yet
             let _ = reader.read_u8()?; // Placeholder

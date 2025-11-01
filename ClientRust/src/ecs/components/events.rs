@@ -54,11 +54,11 @@ use ggez::winit::keyboard::SmolStr;
 pub enum InputEvent {
     KeyDown {
         keycode: KeyCode,
-        repeat: bool,  // 是否是重复按键
+        repeat: bool, // 是否是重复按键
         text: Option<SmolStr>,
         timestamp: std::time::Instant,
     },
-     KeyUp {
+    KeyUp {
         keycode: KeyCode,
         text: Option<SmolStr>,
         timestamp: std::time::Instant,
@@ -298,10 +298,13 @@ impl GlobalEvents {
     ///
     /// 应该在每帧结束时调用，防止事件被重放
     pub fn clear_frame_events(&mut self) {
-        self.input_events.clear();
-        self.net_events.clear();
+        if self.has_events() {
+            self.input_events.clear();
+            self.net_events.clear();
+        }
+
         if self.enable_logging && self.frame_event_count > 0 {
-            println!("🧹 清理事件: {} 个", self.frame_event_count);
+            tracing::debug!("🧹 清理事件: {} 个", self.frame_event_count);
         }
         self.frame_event_count = 0;
     }

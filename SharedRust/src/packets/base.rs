@@ -22,6 +22,19 @@ impl PacketHeader {
     pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let length = reader.read_u16::<LittleEndian>()?;
         let opcode = reader.read_i16::<LittleEndian>()?;
+        
+        // 🔒 安全检查: 验证包头的合理性
+        // 包长度必须至少等于包头大小(4字节)
+        if (length as usize) < Self::HEADER_SIZE {
+            return Err(SharedError::InvalidPacketLength(length));
+        }
+        
+        // 包长度不应超过64KB(u16最大值,但实际游戏包应该更小)
+        const MAX_REASONABLE_PACKET_SIZE: u16 = 65535; // u16::MAX
+        if length > MAX_REASONABLE_PACKET_SIZE {
+            return Err(SharedError::PacketTooLarge(length as usize));
+        }
+        
         Ok(Self { length, opcode })
     }
 
@@ -76,7 +89,24 @@ pub fn deserialize_packet<R: Read, P: Packet>(reader: &mut R) -> SharedResult<P>
         });
     }
 
-    let body_len = header.length as usize - PacketHeader::HEADER_SIZE;
+    // 🔒 安全检查: 使用 checked_sub 防止溢出
+    let body_len = match (header.length as usize).checked_sub(PacketHeader::HEADER_SIZE) {
+        Some(len) => len,
+        None => {
+            eprintln!("❌ ERROR: header.length={} < HEADER_SIZE={}", header.length, PacketHeader::HEADER_SIZE);
+            return Err(SharedError::InvalidPacketLength(header.length));
+        }
+    };
+    
+    // 🔒 安全检查: 防止巨量内存分配 (51GB 崩溃修复)
+    const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB 上限
+    if body_len > MAX_BODY_SIZE {
+        eprintln!("❌ FATAL: body_len={} exceeds MAX_BODY_SIZE={}", body_len, MAX_BODY_SIZE);
+        eprintln!("   header.length={}, opcode={}", header.length, header.opcode);
+        return Err(SharedError::PacketTooLarge(body_len));
+    }
+    
+    eprintln!("DEBUG: Allocating body vec of {} bytes (opcode={})", body_len, header.opcode);
     let mut body = vec![0u8; body_len];
     reader.read_exact(&mut body)?;
     let payload = if P::is_compressed() {

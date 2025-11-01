@@ -11,7 +11,7 @@
 
 use crate::network::handlers::GameEvent;
 use anyhow::Result;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{bounded, Receiver, Sender};
 use std::io::{Read, Write};
 use std::time::Duration;
 
@@ -20,6 +20,7 @@ use std::time::Duration;
 /// 此结构体本身不存储任何数据，只提供静态的 `new()` 方法来创建网络连接。
 /// 实际的网络 IO 由内部启动的两个线程处理，通过 channels 与游戏线程通信。
 pub struct Network;
+
 
 impl Network {
     /// 创建并启动网络客户端
@@ -32,8 +33,8 @@ impl Network {
         W: Write + Send + 'static,
         R: Read + Send + 'static,
     {
-        let (game_to_net_tx, game_to_net_rx) = unbounded();
-        let (net_to_game_tx, net_to_game_rx) = unbounded();
+        let (game_to_net_tx, game_to_net_rx) = bounded(1024);
+        let (net_to_game_tx, net_to_game_rx) = bounded(1024);
 
         // 读线程：packet → GameEvent
         {
@@ -67,7 +68,6 @@ fn read_loop<S: Read + Send>(mut stream: S, tx: Sender<GameEvent>, to_write: Sen
     use mir2_shared::packets::PacketHeader;
 
     loop {
-        // 读取 packet header (4 bytes: length + opcode)
         let header = {
             match PacketHeader::read_from(&mut stream) {
                 Ok(h) => h,
@@ -83,6 +83,13 @@ fn read_loop<S: Read + Send>(mut stream: S, tx: Sender<GameEvent>, to_write: Sen
 
         // 读取 payload
         let payload_len = (header.length as usize).saturating_sub(PacketHeader::HEADER_SIZE);
+       
+        const MAX_PAYLOAD: usize = 1024 * 1024;
+        if payload_len > MAX_PAYLOAD {
+            tracing::error!("FATAL: payload_len {} > MAX {}", payload_len, MAX_PAYLOAD);
+            break;
+        }
+        
         let mut payload = vec![0u8; payload_len];
         {
             if let Err(e) = stream.read_exact(&mut payload) {
@@ -95,7 +102,7 @@ fn read_loop<S: Read + Send>(mut stream: S, tx: Sender<GameEvent>, to_write: Sen
         }
 
         // 转换为 GameEvent（使用现有的 handlers）
-        let events = dispatch_packet(&header, &payload);
+        let events = decode_packet(&header, &payload);
         for event in events {
             // 特殊处理：Connected事件后自动发送ClientVersion
             if matches!(event, GameEvent::Connected) {
@@ -155,7 +162,7 @@ fn write_loop<S: Write + Send>(mut stream: S, rx: Receiver<GameEvent>) {
 /// 分发 packet 到对应的 handler
 ///
 /// 根据 ServerPacketIds 枚举将不同类型的 packet 路由到专门的 handler 处理
-fn dispatch_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) -> Vec<GameEvent> {
+fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) -> Vec<GameEvent> {
     use crate::network::handlers::*;
     use mir2_shared::enums::ServerPacketIds as SP;
 

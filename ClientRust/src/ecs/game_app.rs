@@ -19,8 +19,32 @@ use hecs::World;
 
 use crate::ecs::components::{GlobalEvents, InputEvent};
 use crate::ecs::scenes::{GameScene, LoginScene, Scene, SceneType, SelectScene};
+use crate::network::NetContext;
 use crate::settings::ClientSettings;
 
+pub struct MockScene;
+
+impl Scene for MockScene {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn update(
+        &mut self,
+        _ctx: &mut Context,
+        _world: &mut hecs::World,
+    ) -> GameResult<Option<SceneType>> {
+        Ok(None)
+    }
+
+    fn draw(
+        &mut self,
+        _ctx: &mut Context,
+        _canvas: &mut Canvas,
+        _world: &hecs::World,
+    ) -> GameResult<()> {
+        Ok(())
+    }
+}
 /// 游戏主应用
 pub struct GameState {
     /// ECS World
@@ -43,9 +67,10 @@ impl GameState {
         let net_ctx = crate::network::NetworkBuilder::new(settings.network.clone())
             .build()
             .expect("Failed to initialize network");
+        
         let mut world = World::new();
         world
-            .spawn_settings(settings.clone())
+            .spawn_settings(settings)
             .spawn_network(net_ctx)
             .spawn_global_events(GlobalEvents::new());
         // 创建初始场景（登录场景）
@@ -77,6 +102,10 @@ impl GameState {
     /// 切换场景
     pub fn switch_scene(&mut self, ctx: &mut Context, scene_type: SceneType) -> GameResult {
         tracing::info!("🔄 切换场景: {:?} -> {:?}", self.scene_type, scene_type);
+
+        // 🧹 场景切换前清理全局事件,避免旧场景事件污染新场景
+        self.clear_global_events();
+
         self.scene_type = scene_type;
         self.current_scene = match scene_type {
             SceneType::Login => {
@@ -189,6 +218,7 @@ impl GameState {
 impl EventHandler for GameState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         self.collect_network_events();
+
         // 更新当前场景（Scene 自己会处理需要的网络事件）
         if let Some(next_scene) = self.current_scene.update(ctx, &mut self.world)? {
             // 场景请求切换

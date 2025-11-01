@@ -93,9 +93,10 @@ pub trait WorldExt {
     fn global_events_mut(&mut self) -> &mut GlobalEvents;
 }
 
-pub const SETTING_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x1);
-pub const NETWORK_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x2);
-pub const GAME_EVENTS_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x3);
+// 使用有效的Entity ID (高32位为generation=1, 低32位为index)
+pub const SETTING_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x100000001);
+pub const NETWORK_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x100000002);
+pub const GAME_EVENTS_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x100000003);
 
 impl WorldExt for hecs::World {
     fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self {

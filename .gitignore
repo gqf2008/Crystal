@@ -373,3 +373,4 @@ FodyWeavers.xsd
 ClientRust/map_viewer.exe
 ClientRust/map_viewer_ecs.exe
 ClientRust/mir2x.exe
+*.txt
