@@ -1,19 +1,31 @@
 // ============================================================================
-// Map Viewer V2 - 使用串行调度器的地图查看器
+// Map Viewer V2 - 简化版地图查看器（开发工具）
 // ============================================================================
 //
-// 功能:
-// - 使用 MapViewerScheduler 串行调度器统一管理所有系统
-// - 完整地图渲染 (Back/Middle/Front 三层)
-// - 角色控制：左键走路、右键跑步（自动寻路避障）
-// - 鼠标中键拖拽移动相机、滚轮缩放
-// - 显示坐标、FPS、性能统计
-// - M键选择地图文件
-// - 调试功能：G(网格) O(障碍) B(边框) P(路径)
-// - 显示控制：1/2/3(图层) A(动画) L(LOD)
+// ⚠️ 状态: 暂时禁用，等待重构
+// 
+// 原因: 依赖了已删除的组件和系统：
+// - Player, PlayerAction, PlayerAppearance 等旧组件
+// - RenderSystem, MapViewerScheduler 等旧系统
+// - NetworkSync, PlayerInput 等网络组件
 //
-// 运行: cargo run --bin map_viewer_v2 --release
+// 解决方案: 
+// 1. 使用 #[cfg(feature = "dev-tools")] 条件编译
+// 2. 或者重写使用新的 ECS 架构
+// 3. 或者直接使用 mir2x 主程序的地图查看功能
 //
+// ============================================================================
+
+// 暂时提供一个空的 main 函数，避免编译错误
+fn main() {
+    eprintln!("⚠️ map_viewer_v2 暂时禁用");
+    eprintln!("请使用主程序: cargo run --bin mir2x");
+    std::process::exit(1);
+}
+
+/*
+// ============================================================================
+// 以下代码已注释，等待重构
 // ============================================================================
 
 use ggez::winit::event::MouseButton;
@@ -33,19 +45,13 @@ use std::time::Instant;
 use std::path::Path as FilePath;
 
 use mir2_client::ecs::{
-    // Components
-    Position, Camera, Draggable, Player, PlayerAction, PlayerAppearance, MoveMode,
-    MovementAnimation, MapData, MouseInput, RenderConfig, TimeTracker, VisibleArea,
-    LocalPlayer, NetworkSync, NetworkObjectType, PlayerInput, MovementVelocity,
-    Path, Movement, Prediction, MapManager,
-    // 速度常量
-    DEFAULT_WALK_SPEED, DEFAULT_RUN_SPEED, DEFAULT_MAX_SPEED,
-    // Systems
-    CameraSystem, RenderSystem, MapUpdateSystem,
+    // ✅ 新架构：从 components 模块导入
+    components::{
+        Position, Camera, Draggable, RenderConfig, TimeTracker, VisibleArea,
+        MapData, MapTile, TileLayer,
+    },
     // Utilities
     Coordinates, MapUtils, MapLoader,
-    // 🆕 串行调度器
-    MapViewerScheduler,
 };
 
 // ============================================================================

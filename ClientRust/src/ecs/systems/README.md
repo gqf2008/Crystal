@@ -46,15 +46,13 @@ systems/
 │   │   ├── collision_system.rs         - 碰撞检测
 │   │   └── camera_follow_system.rs     - 相机跟随
 │   │
-│   ├── state_update/           # Layer 5: 状态更新层 (500-599)
-│   │   ├── animation_system.rs         - 动画更新
-│   │   ├── particle_system.rs          - 粒子特效
-│   │   ├── health_regen_system.rs      - 生命恢复
-│   │   ├── sound_system.rs             - 音效系统
-│   │   ├── camera_system.rs            - 相机系统
-│   │   └── map_update_system.rs        - 地图更新
-│   │
-│   └── event_cleanup_system.rs # Layer 6: 事件清理 (900)
+│   └── state_update/           # Layer 5: 状态更新层 (500-599)
+    ├── animation_system.rs         - 动画更新
+    ├── particle_system.rs          - 粒子特效
+    ├── health_regen_system.rs      - 生命恢复
+    ├── sound_system.rs             - 音效系统
+    ├── camera_system.rs            - 相机系统
+    └── map_update_system.rs        - 地图更新
 │
 └── render/                     # 渲染系统 (优先级 1000-1999)
     ├── map_system.rs           - 地图渲染
@@ -65,10 +63,11 @@ systems/
 ```
 
 **统计数据**:
-- **总系统数**: 16 个系统
-- **逻辑系统**: 11 个（纯 System trait）
+- **总系统数**: 15 个系统
+- **逻辑系统**: 10 个（纯 System trait）
 - **渲染系统**: 4 个（纯 DrawSystem trait）
 - **混合系统**: 1 个（DebugSystem，HybridSystem trait）
+- **事件清理**: 由 GameState 统一处理（非独立系统）
 
 ---
 
@@ -179,16 +178,13 @@ systems/
 
 ---
 
-#### Layer 6: Event Cleanup (900)
+#### Layer 6: 事件清理
 
-| 系统 | 优先级 | 职责 | 状态 |
-|------|--------|------|------|
-| EventCleanupSystem | 900 | 清理 GlobalEvents，防止事件污染 | ✅ 就绪 |
-
-**设计亮点**: 
-- 优先级最低，确保所有系统处理完事件后再清理
-- 只清理临时事件，保留统计数据
-- 不清理网络命令 channel（由网络线程消费）
+**说明**: 
+- ❌ **没有独立的 EventCleanupSystem**
+- ✅ 事件清理由 `GameState::update()` 在每帧结束时统一处理
+- ✅ 调用 `world.global_events_mut().clear_frame_events()` 清理
+- ✅ 确保所有场景/系统处理完事件后再清理，防止事件污染
 
 ---
 
@@ -227,7 +223,7 @@ AISystem (Layer 2)
 CombatSystem (Layer 3)
 ... (其他系统读取并处理)
     ↓
-EventCleanupSystem (Layer 6)
+GameState::clear_global_events()
 清理所有事件队列
 ```
 
@@ -259,8 +255,8 @@ Update 阶段 (logic 系统):
   520 → SoundSystem           (音效播放)
   530 → CameraSystem          (相机控制)
   540 → MapUpdateSystem       (地图更新)
-  ────────────────────────────
-  900 → EventCleanupSystem    (事件清理)
+
+⚠️ 事件清理: 由 GameState::update() 在所有系统执行完后统一清理
 
 Draw 阶段 (render 系统):
   1000 → MapRenderSystem      (地图渲染)
@@ -411,10 +407,6 @@ DebugSystem 可以显示:
    - 问题: `CameraFollowSystem` (Layer 4) vs `CameraSystem` (Layer 5)
    - 建议: 合并或明确划分职责
 
-5. **EventCleanupSystem 位置**
-   - 问题: 位于 `logic/` 下，但它不属于任何子层
-   - 建议: 移到 `systems/event_cleanup_system.rs`（顶层）
-
 ### 💡 改进建议
 
 6. **渲染系统未实现**
@@ -453,11 +445,11 @@ DebugSystem 可以显示:
 
 ## 📝 更新日志
 
-### v3.0 (2025-01-XX)
+### v3.0 (2025-11-01)
 - ✅ 重构为 logic/render 双模块架构
 - ✅ 引入三类系统 (System/DrawSystem/HybridSystem)
 - ✅ 添加 GlobalEvents 事件总线
-- ✅ 添加 EventCleanupSystem（优先级 900）
+- ✅ 事件清理由 GameState 统一处理
 - ✅ 添加宏注册机制
 - ✅ 完成架构审查和文档重写
 
@@ -470,5 +462,16 @@ DebugSystem 可以显示:
 ---
 
 **维护者**: ECS 架构团队  
-**最后审查**: 2025-01-XX  
+**最后审查**: 2025-11-01  
 **下次审查**: 实现渲染系统后
+
+---
+
+## 🗑️ 已删除的过时文档
+
+以下早期设计文档已删除（包含错误的 EventCleanupSystem 信息）：
+- ❌ `docs/EVENT_SYSTEM.md`
+- ❌ `docs/NETWORK_EVENT_ARCHITECTURE.md`
+- ❌ `docs/GLOBAL_EVENTS_REFACTOR_SUMMARY.md`
+
+最新的事件系统说明请参考：[docs/事件清理机制说明.md](../../../docs/事件清理机制说明.md)

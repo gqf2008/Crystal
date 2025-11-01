@@ -68,6 +68,35 @@ components/
 | **Name** | 显示名称 | 显示实体必需 |
 | **LocalPlayer** | 本地玩家标记 | 仅本地玩家 |
 
+### 0. 全局事件组件 (events.rs) ⭐ 重要
+
+**GlobalEvents** - 全局事件总线（单例组件）：
+
+| 字段 | 类型 | 用途 |
+|------|------|------|
+| **input_events** | `Vec<InputEvent>` | 键盘、鼠标、IME事件 |
+| **net_events** | `CategorizedEvents` | 分类网络事件（11个类别） |
+| **frame_event_count** | `usize` | 当前帧事件计数 |
+| **total_event_count** | `u64` | 总事件计数 |
+| **enable_logging** | `bool` | 是否启用事件日志 |
+
+**使用方式**:
+```rust
+// 读取事件（场景/系统）
+let events = world.global_events();
+for event in &events.input_events {
+    // 处理事件
+}
+
+// 清理事件（GameState）
+world.global_events_mut().clear_frame_events();
+```
+
+**生命周期**: 由 `GameState` 管理
+- 收集阶段：`collect_network_events()`, ggez 事件回调
+- 处理阶段：`Scene::update()`, 各个 ECS 系统
+- 清理阶段：`clear_global_events()` 每帧结束时调用
+
 ### 2. 移动组件 (movement.rs)
 
 处理移动和寻路：

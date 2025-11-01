@@ -53,7 +53,7 @@ scenes/
 
 ## 🏗 场景架构
 
-### Scene Trait
+### Scene Trait (重构后)
 
 所有场景都实现 `Scene` trait：
 
@@ -63,11 +63,13 @@ pub trait Scene {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
     
     /// 更新场景逻辑（返回场景切换）
+    /// 
+    /// ⚠️ 重构后不再接收输入事件参数！
+    /// 所有事件从 world.global_events() 读取
     fn update(
         &mut self,
         ctx: &mut Context,
         world: &mut World,
-        network_tx: &mpsc::UnboundedSender<NetworkCommand>,
     ) -> GameResult<Option<SceneType>>;
     
     /// 绘制场景
@@ -77,16 +79,14 @@ pub trait Scene {
         canvas: &mut Canvas, 
         world: &World
     ) -> GameResult;
-    
-    // 输入事件
-    fn on_mouse_down(&mut self, ...) -> GameResult;
-    fn on_mouse_up(&mut self, ...) -> GameResult;
-    fn on_mouse_move(&mut self, ...) -> GameResult;
-    fn on_key_down(&mut self, ...) -> GameResult;
-    fn on_key_up(&mut self, ...) -> GameResult;
-    fn on_text_input(&mut self, ...) -> GameResult;
 }
 ```
+
+**重构说明**:
+- ✅ **移除所有输入事件方法**: 不再有 `on_mouse_down`, `on_key_down` 等
+- ✅ **统一事件来源**: 场景从 `world.global_events()` 读取所有事件
+- ✅ **简化接口**: Scene 只需实现 3 个方法
+- ✅ **事件清理**: 由 `GameState::update()` 在每帧结束时统一清理
 
 ### 场景生命周期
 

@@ -1,46 +1,4 @@
-//! 全局事件系统组件
-//!
-//! 这是一个事件驱动的 ECS 架构核心组件。
-//!
-//! ## 设计原则
-//!
-//! 1. **统一事件管理**: 所有游戏事件（键盘、鼠标、IME、游戏逻辑、网络）统一在 GlobalEvents 中管理
-//! 2. **Vec 缓存输入事件**: 键盘/鼠标/IME 使用 Vec 缓存,支持多系统并发读取
-//! 3. **Vec 缓存网络事件**: 服务器→客户端的游戏事件使用 Vec 缓存 (由 NetworkSyncSystem 写入)
-//! 4. **Channel 发送网络命令**: 客户端→服务器使用 Channel 立即发送,消除延迟
-//! 5. **每帧清理**: EventCleanupSystem 在帧末清理所有 Vec,防止事件重放
-//! 6. **统一事件类型**: 游戏场景统一使用 GameEvent,network 模块负责协议转换
-//!
-//! ## 网络架构
-//!
-//! ```
-//! ┌─────────────────────────────────────────────────────────┐
-//! │                   NetworkSyncSystem                      │
-//! │                      (优先级 50)                         │
-//! ├─────────────────────────────────────────────────────────┤
-//! │  📥 服务器 → 客户端                                      │
-//! │     NetContext.try_recv() → GameEvent                   │
-//! │     写入 GlobalEvents.network_incoming                   │
-//! │                                                          │
-//! │  📤 客户端 → 服务器                                      │
-//! │     读取 GlobalEvents.network_outgoing (Channel)         │
-//! │     GameEvent → ServerPacket → NetContext.send()        │
-//! └─────────────────────────────────────────────────────────┘
-//! ```
-//!
-//! ## 数据流
-//!
-//! ```
-//! 输入系统 (InputSystem)
-//!     ↓
-//! GlobalEvents.keyboard_events / mouse_events
-//!     ↓
-//! 逻辑系统 (PlayerControlSystem, GameEventDispatcher...)
-//!     ↓ (产生游戏命令)
-//! GlobalEvents.send_network_command() → Channel
-//!     ↓ (立即发送,无延迟)
-//! NetworkSyncSystem → NetContext → 服务器
-//! ```
+
 
 use ggez::input::keyboard::KeyCode;
 use ggez::winit::event::MouseButton;
