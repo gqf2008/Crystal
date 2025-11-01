@@ -17,6 +17,7 @@
 
 use hecs::World;
 use ggez::GameResult;
+use ggez::input::keyboard::KeyCode;
 use ggez::input::mouse::MouseButton;
 use crate::ecs::components::{Camera, CameraMode, Draggable, InputEvent, Position};
 use crate::ecs::systems::{System, priority};
@@ -156,11 +157,29 @@ impl System for CameraSystem {
             .collect();
 
         if let Some((_, (ref mut camera, ref mut draggable, ref mut pos, ref mut mode))) = camera_query.first_mut() {
-            // 3. 处理鼠标事件
+            // 3. 检查 Ctrl 键是否按下
+            let mut ctrl_pressed = false;
+            for event in &input_events {
+                if let InputEvent::KeyDown { keycode: KeyCode::ControlLeft | KeyCode::ControlRight, .. } = event {
+                    ctrl_pressed = true;
+                }
+            }
+
+            // 4. 处理输入事件
             for event in &input_events {
                 match event {
+                    InputEvent::Resize { width, height } => {
+                        // 更新相机屏幕尺寸
+                        camera.screen_width = *width;
+                        camera.screen_height = *height;
+                        tracing::debug!("📐 相机尺寸更新: {}x{}", width, height);
+                    }
                     InputEvent::MouseDown { button, x, y } => {
-                        if *button == MouseButton::Middle {
+                        // Ctrl+左键 或 中键 都可以拖拽
+                        let should_drag = (*button == MouseButton::Left && ctrl_pressed) 
+                                       || *button == MouseButton::Middle;
+                        
+                        if should_drag {
                             // 切换到手动控制模式
                             **mode = CameraMode::Manual;
                             // 开始拖拽
@@ -182,10 +201,21 @@ impl System for CameraSystem {
                         }
                     }
                     InputEvent::MouseUp { button, .. } => {
-                        if *button == MouseButton::Middle && draggable.is_dragging {
+                        // 左键或中键抬起时结束拖拽
+                        let should_end_drag = (*button == MouseButton::Left || *button == MouseButton::Middle) 
+                                            && draggable.is_dragging;
+                        
+                        if should_end_drag {
                             // 结束拖拽
                             draggable.is_dragging = false;
                             tracing::debug!("📹 结束拖拽相机: 最终位置 ({:.0}, {:.0})", pos.x, pos.y);
+                        }
+                    }
+                    InputEvent::KeyUp { keycode: KeyCode::ControlLeft | KeyCode::ControlRight, .. } => {
+                        // Ctrl 键抬起时也结束拖拽（如果正在拖拽）
+                        if draggable.is_dragging {
+                            draggable.is_dragging = false;
+                            tracing::debug!("📹 Ctrl 键抬起，结束拖拽相机: 最终位置 ({:.0}, {:.0})", pos.x, pos.y);
                         }
                     }
                     InputEvent::MouseWheel { x: _scroll_x, y: scroll_y } => {

@@ -57,22 +57,26 @@ impl DrawSystem for MapRenderSystem {
                 continue;
             }
             
-            // 收集该层的所有瓦片
-            let mut tiles_to_draw: Vec<(i32, i32, i16, usize)> = Vec::new();
+            // 收集该层的所有瓦片（包括动画瓦片）
+            let mut tiles_to_draw: Vec<(i32, i32, i16, usize, bool)> = Vec::new();
             
-            for (_, tile) in world.query::<&MapTile>().iter() {
-                if !matches!(tile.layer, layer) {
-                    continue;
-                }
-                
+            // Front 层需要更大的底部视口（建筑物是长条形，UV坐标在左下角）
+            let bottom_extra = if matches!(layer, TileLayer::Front) {
+                800.0  // Front 层底部额外扩展 800 像素
+            } else {
+                200.0  // Back/Middle 层保持 200 像素
+            };
+            
+            // 静态瓦片
+            for (_, tile) in world.query::<&MapTile>().iter().filter(|(_, t)| matches!(t.layer, layer)) {
                 // 计算瓦片的世界坐标
                 let world_x = (tile.grid_x * CELL_WIDTH) as f32;
                 let world_y = (tile.grid_y * CELL_HEIGHT) as f32;
                 
-                // 简单的视口裁剪（预估瓦片可能很大，所以给较大的边界）
+                // 视口裁剪（Front 层底部扩大）
                 if world_x > view_right + 200.0
                     || world_x < view_left - 200.0
-                    || world_y > view_bottom + 200.0
+                    || world_y > view_bottom + bottom_extra
                     || world_y < view_top - 200.0
                 {
                     continue;
@@ -83,11 +87,38 @@ impl DrawSystem for MapRenderSystem {
                     tile.grid_y,
                     tile.library_index,
                     tile.image_index as usize,
+                    false,  // 不是动画瓦片
+                ));
+            }
+            
+            // 动画瓦片（使用 AnimatedTile 计算当前帧）
+            use crate::ecs::components::AnimatedTile;
+            for (_, (tile, anim)) in world.query::<(&MapTile, &AnimatedTile)>().iter().filter(|(_, (t, _))| matches!(t.layer, layer)) {
+                let world_x = (tile.grid_x * CELL_WIDTH) as f32;
+                let world_y = (tile.grid_y * CELL_HEIGHT) as f32;
+                
+                // 使用与静态瓦片相同的视口裁剪规则
+                if world_x > view_right + 200.0
+                    || world_x < view_left - 200.0
+                    || world_y > view_bottom + bottom_extra
+                    || world_y < view_top - 200.0
+                {
+                    continue;
+                }
+                
+                // 计算当前帧（简化版本，实际应该由 AnimationSystem 更新）
+                // 这里临时使用基础图像索引
+                tiles_to_draw.push((
+                    tile.grid_x,
+                    tile.grid_y,
+                    tile.library_index,
+                    tile.image_index as usize,  // 应该根据动画帧计算
+                    true,  // 是动画瓦片
                 ));
             }
             
             // 渲染该层的瓦片
-            for (grid_x, grid_y, lib_index, img_index) in tiles_to_draw {
+            for (grid_x, grid_y, lib_index, img_index, is_anim) in tiles_to_draw {
                 if let Some(lib) = get_map_library(lib_index) {
                     if let Ok(mut lib_guard) = lib.lock() {
                         // 先获取尺寸
@@ -95,26 +126,23 @@ impl DrawSystem for MapRenderSystem {
                             .get_size(img_index)
                             .unwrap_or((CELL_WIDTH as i16, CELL_HEIGHT as i16));
                         
-                        // 获取纹理信息
+                        // 获取纹理信息（包括偏移量）
                         if let Ok(info) = lib_guard.get_or_create_texture(ctx, img_index) {
                             if let Some(image) = &info.image {
-                                // 计算世界坐标
+                                // 计算世界坐标（格子坐标）
                                 let world_x = (grid_x * CELL_WIDTH) as f32;
                                 let world_y = (grid_y * CELL_HEIGHT) as f32;
                                 
-                                // 调整 Y 坐标（底部对齐）
-                                let adjusted_y = if (tile_w as i32 != CELL_WIDTH
-                                    || tile_h as i32 != CELL_HEIGHT)
-                                    && (tile_w as i32 != CELL_WIDTH * 2
-                                        || tile_h as i32 != CELL_HEIGHT * 2)
-                                {
-                                    world_y + CELL_HEIGHT as f32 - tile_h as f32
-                                } else {
-                                    world_y
-                                };
+                                // 关键：图像 UV 坐标在左下角！
+                                // 需要将图像左下角对齐到网格坐标
+                                // 
+                                // 静态层（无动画）：不使用 info.x/y 偏移
+                                // 动态层（有动画）：使用 info.x/y 偏移（但目前我们还没有动画）
+                                let adjusted_x = world_x;  // 静态层不使用 info.x
+                                let adjusted_y = world_y - tile_h as f32;  // 静态层不使用 info.y
                                 
                                 // 世界坐标 -> 屏幕坐标
-                                let screen_x = (world_x - camera_pos.x) * camera.zoom
+                                let screen_x = (adjusted_x - camera_pos.x) * camera.zoom
                                     + camera.screen_width / 2.0;
                                 let screen_y = (adjusted_y - camera_pos.y) * camera.zoom
                                     + camera.screen_height / 2.0;

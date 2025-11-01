@@ -18,7 +18,8 @@ use hecs::{Entity, World};
 use std::time::Instant;
 
 use mir2_client::ecs::components::{
-    Camera, CameraMode, Draggable, MouseInput, Position, RenderConfig, TimeTracker, VisibleArea,
+    Camera, CameraMode, Draggable, MouseInput, Position, RenderConfig, 
+    TimeTracker, VisibleArea,
 };
 use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::{
@@ -238,20 +239,8 @@ impl Scene for MapViewerScene {
             self.initialize_world(world, screen_width, screen_height);
         }
 
-        // 帧率限制
-        let config = world.get::<&RenderConfig>(self.config_entity).unwrap();
-        let max_fps = config.max_fps;
-        drop(config);
-
+        // 更新 FPS 统计（不控制帧率）
         if let Ok(mut time) = world.get::<&mut TimeTracker>(self.time_entity) {
-            let target_frame_time = std::time::Duration::from_secs_f32(1.0 / max_fps as f32);
-            let elapsed = time.last_frame_time.elapsed();
-
-            if elapsed < target_frame_time {
-                return Ok(None);
-            }
-
-            time.last_frame_time = Instant::now();
             time.animation_count += 1;
             time.frame_count += 1;
 
@@ -262,8 +251,7 @@ impl Scene for MapViewerScene {
             }
         }
 
-        // // 运行所有系统（update 阶段）
-        // let delta_ms = 8.0; // 约 60fps
+        // 运行所有系统（update 阶段）
         self.system_scheduler.update(world, ctx.time.delta().as_secs_f32())?;
 
         Ok(None)

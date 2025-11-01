@@ -158,6 +158,14 @@ impl EventHandler for MapViewerApp {
         Ok(())
     }
 
+    fn mouse_wheel_event(&mut self, _ctx: &mut Context, x: f32, y: f32) -> GameResult {
+        self.world
+            .global_events_mut()
+            .input_events
+            .push(InputEvent::MouseWheel { x, y });
+        Ok(())
+    }
+
     fn key_down_event(
         &mut self,
         _ctx: &mut Context,
@@ -221,7 +229,7 @@ fn main() -> GameResult {
         .window_setup(
             WindowSetup::default()
                 .title("Map Viewer V3 - Crystal")
-                .vsync(false),
+                .vsync(true),  // 启用垂直同步，限制帧率到屏幕刷新率
         )
         .window_mode(
             WindowMode::default()

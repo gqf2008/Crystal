@@ -73,11 +73,11 @@ impl HybridSystem for DebugSystem {
             text: debug_text,
             color: Some(Color::WHITE),
             font: None,
-            scale: Some(ggez::graphics::PxScale::from(16.0)),
+            scale: Some(ggez::graphics::PxScale::from(24.0)),  // 从 16.0 增大到 24.0
         });
 
         // 绘制半透明黑色背景
-        let bg_rect = ggez::graphics::Rect::new(5.0, 5.0, 200.0, 80.0);
+        let bg_rect = ggez::graphics::Rect::new(5.0, 5.0, 250.0, 100.0);  // 调整背景大小
         let bg_mesh = ggez::graphics::Mesh::new_rectangle(
             ctx,
             ggez::graphics::DrawMode::fill(),

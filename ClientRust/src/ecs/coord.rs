@@ -14,8 +14,6 @@
 /// 
 /// 参考原版: Client/MirScenes/GameScene.cs MapControl
 
-use hecs::World;
-
 /// 地图格子宽度 (像素)
 pub const CELL_WIDTH: i32 = 48;
 
