@@ -1,14 +1,12 @@
 pub mod combat_skill;
 pub mod decision;
-pub mod event_cleanup_system;
 pub mod input;
 pub mod physics_movement;
-pub mod state_update; // 🧹 事件清理系统
+pub mod state_update;
 
 // 重新导出所有系统
 pub use combat_skill::*;
 pub use decision::*;
-pub use event_cleanup_system::EventCleanupSystem;
 pub use input::*;
 pub use physics_movement::*;
 pub use state_update::*;
@@ -18,8 +16,6 @@ pub use state_update::*;
 // ============================================================================
 
 crate::logic_system!(
-    // Layer 1: Input (50-199)
-    input::InputSystem,
     input::PlayerControlSystem,
     // Layer 2: Decision (200-299)
     decision::MonsterAISystem,
@@ -39,7 +35,4 @@ crate::logic_system!(
     state_update::CameraSystem,
     state_update::HealthRegenSystem,
     // state_update::MapUpdateSystem,  // ⚠️ 尚未实现 System trait
-
-    // Layer 6: Event Cleanup (900)
-    EventCleanupSystem,
 );

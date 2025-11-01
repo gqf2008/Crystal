@@ -2,7 +2,7 @@
 
 use ggez::winit::keyboard::KeyCode;
 use std::sync::Arc;
-use crate::network::{NetContext, handlers::GameEvent};
+use crate::{ecs::WorldExt, network::{NetContext, handlers::GameEvent}};
 
 /// 通用的对话框action trait
 pub trait DialogWithValidation {
@@ -40,9 +40,9 @@ pub enum DialogKeyResult {
 /// 处理标准对话框键盘输入的辅助函数
 pub fn handle_dialog_keycode<D>(
     dialog: &mut D,
-    keycode: KeyCode,
+    keycode: &KeyCode,
     text: Option<&str>,
-    net_ctx: &Arc<NetContext>,
+    world: &mut hecs::World,
     error_context: &str,
 ) -> DialogKeyResult
 where
@@ -61,7 +61,7 @@ where
         KeyCode::Enter => {
             if dialog.can_submit() {
                 let cmd = dialog.build_network_command();
-                if let Err(e) = net_ctx.send(cmd) {
+                if let Err(e) = world.network().send(cmd) {
                     tracing::error!("❌ {}: {}", error_context, e);
                     return DialogKeyResult::SendError(format!("网络错误，无法发送{}请求", error_context));
                 }

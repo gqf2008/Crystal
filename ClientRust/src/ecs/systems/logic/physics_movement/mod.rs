@@ -52,10 +52,10 @@
 //
 // ## 注意事项
 //
-// ⚠️ **CameraFollowSystem vs CameraSystem**: 
-//    - CameraFollowSystem (Layer 4): 更新相机位置（跟随逻辑）
-//    - CameraSystem (Layer 5): 相机渲染配置（边缘滚动、缩放）
-//    - 建议合并为一个系统（见 ARCHITECTURE_REVIEW.md）
+// ✅ **CameraFollowSystem vs CameraSystem 职责划分**: 
+//    - CameraFollowSystem (Layer 4): 更新相机位置（跟随玩家移动）
+//    - CameraSystem (Layer 5): 相机特效（震动、矩阵计算）
+//    - 职责明确，无需合并
 //
 // ============================================================================
 

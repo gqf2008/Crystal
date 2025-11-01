@@ -7,19 +7,19 @@
 // ### 1. System - 纯逻辑系统（只有 update）
 //    实现 `System` trait，只需提供 `update()` 方法。
 //    用于 AI、物理、网络、战斗等纯逻辑处理。
-//    
+//
 //    示例：MovementSystem, AISystem, CombatSystem
 //
 // ### 2. DrawSystem - 纯渲染系统（只有 draw）
 //    实现 `DrawSystem` trait，只需提供 `draw()` 方法。
 //    用于地图渲染、UI渲染等不需要逻辑更新的渲染任务。
-//    
+//
 //    示例：MapRenderSystem, UIRenderSystem
 //
 // ### 3. HybridSystem - 混合系统（update + draw）
 //    实现 `HybridSystem` trait，同时提供 `update()` 和 `draw()` 方法。
 //    用于粒子系统、调试系统等需要逻辑更新和渲染的系统。
-//    
+//
 //    示例：ParticleSystem, DebugSystem
 //
 // ## 执行流程
@@ -60,7 +60,7 @@
 //
 // **阶段 7: 渲染 (1000-1999)**
 //   按层级顺序渲染
-//   - MapRenderSystem(1000) → SpriteRenderSystem(1010) → EffectRenderSystem(1020) 
+//   - MapRenderSystem(1000) → SpriteRenderSystem(1010) → EffectRenderSystem(1020)
 //     → UIRenderSystem(1030) → DebugSystem(1100, Hybrid)
 //
 // ## 数据流
@@ -116,7 +116,7 @@
 // ## 系统依赖关系说明
 //
 // 1. **数据流动**：
-//    网络接收 → 输入处理 → 控制响应 → 事件触发 → AI决策 → 战斗计算 
+//    网络接收 → 输入处理 → 控制响应 → 事件触发 → AI决策 → 战斗计算
 //    → 移动物理 → 状态更新 → 网络发送 → 渲染显示
 //
 // 2. **关键依赖**：
@@ -171,8 +171,8 @@ pub mod priority {
 }
 
 // ✅ update/render 架构（推荐）
-pub mod render;
 pub mod logic;
+pub mod render;
 
 use ggez::graphics::Canvas;
 use ggez::GameResult;
@@ -184,7 +184,7 @@ pub use ecs_macros::{HybridSystem, LogicSystem, RenderSystem};
 // 注意：新代码应使用 update:: 和 render:: 模块
 
 // Layer 1 (Input) - 向后兼容导出
-pub use logic::input::{InputSystem as InputCollectingSystem, PlayerControlSystem};
+pub use logic::input::PlayerControlSystem;
 
 // Layer 2 (Decision) - 向后兼容导出
 pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
@@ -201,9 +201,6 @@ pub use logic::physics_movement::{CollisionSystem, MovementSystem};
 pub use logic::state_update::{
     AnimationSystem, CameraSystem, HealthRegenSystem, ParticleSystem, SoundSystem,
 };
-
-// Layer 6 (Event Cleanup) - 向后兼容导出
-pub use logic::EventCleanupSystem;
 
 // ============================================================================
 // 系统 Trait 设计
@@ -239,18 +236,18 @@ pub use logic::EventCleanupSystem;
 // ### 1. System - 纯逻辑系统
 //    ```rust
 //    use crate::ecs::systems::priority;
-//    
+//
 //    struct MovementSystem;
-//    
+//
 //    impl System for MovementSystem {
 //        fn priority(&self) -> u32 { priority::MOVEMENT }  // 400
-//        
+//
 //        fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
 //            // 更新实体位置
 //            Ok(())
 //        }
 //    }
-//    
+//
 //    // 使用声明宏注册
 //    logic_system!(MovementSystem);
 //    ```
@@ -258,23 +255,23 @@ pub use logic::EventCleanupSystem;
 // ### 2. DrawSystem - 纯渲染系统
 //    ```rust
 //    use crate::ecs::systems::priority;
-//    
+//
 //    struct MapRenderSystem;
-//    
+//
 //    impl DrawSystem for MapRenderSystem {
 //        fn priority(&self) -> u32 { priority::MAP_RENDER }  // 1000
-//        
+//
 //        fn draw(
-//            &mut self, 
-//            ctx: &mut Context, 
-//            canvas: &mut Canvas, 
+//            &mut self,
+//            ctx: &mut Context,
+//            canvas: &mut Canvas,
 //            world: &hecs::World
 //        ) -> GameResult {
 //            // 绘制地图
 //            Ok(())
 //        }
 //    }
-//    
+//
 //    // 使用声明宏注册
 //    draw_system!(MapRenderSystem);
 //    ```
@@ -282,28 +279,28 @@ pub use logic::EventCleanupSystem;
 // ### 3. HybridSystem - 混合系统
 //    ```rust
 //    use crate::ecs::systems::priority;
-//    
+//
 //    struct ParticleSystem;
-//    
+//
 //    impl HybridSystem for ParticleSystem {
 //        fn priority(&self) -> u32 { priority::PARTICLE }  // 510
-//        
+//
 //        fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
 //            // 更新粒子生命周期和位置
 //            Ok(())
 //        }
-//        
+//
 //        fn draw(
-//            &mut self, 
-//            ctx: &mut Context, 
-//            canvas: &mut Canvas, 
+//            &mut self,
+//            ctx: &mut Context,
+//            canvas: &mut Canvas,
 //            world: &hecs::World
 //        ) -> GameResult {
 //            // 绘制粒子效果
 //            Ok(())
 //        }
 //    }
-//    
+//
 //    // 使用声明宏注册
 //    hybrid_system!(ParticleSystem);
 //    ```
@@ -316,14 +313,14 @@ pub use logic::EventCleanupSystem;
 //        CollisionSystem,
 //        AISystem,
 //    );
-//    
+//
 //    // 批量注册多个纯渲染系统
 //    draw_system!(
 //        MapRenderSystem,
 //        SpriteRenderSystem,
 //        UIRenderSystem,
 //    );
-//    
+//
 //    // 批量注册多个混合系统
 //    hybrid_system!(
 //        ParticleSystem,

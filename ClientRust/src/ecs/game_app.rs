@@ -10,14 +10,15 @@
 //
 // ============================================================================
 
+use super::WorldExt;
 use ggez::event::EventHandler;
 use ggez::graphics::{Canvas, Color};
+use ggez::winit::keyboard::{KeyCode, PhysicalKey};
 use ggez::{Context, GameResult};
 use hecs::World;
-use std::sync::Arc;
 
+use crate::ecs::components::{GlobalEvents, InputEvent};
 use crate::ecs::scenes::{GameScene, LoginScene, Scene, SceneType, SelectScene};
-use crate::network::NetContext;
 use crate::settings::ClientSettings;
 
 /// 游戏主应用
@@ -30,9 +31,6 @@ pub struct GameState {
 
     /// 场景类型
     scene_type: SceneType,
-
-    /// 网络上下文（✨ 唯一的网络接口）
-    net_ctx: Arc<crate::network::NetContext>,
 }
 impl GameState {
     /// 创建新的游戏应用
@@ -41,32 +39,22 @@ impl GameState {
     /// - `ctx`: ggez 上下文
     /// - `settings`: 客户端配置（由 ClientRuntime 加载）
     pub fn new(_ctx: &mut Context, settings: ClientSettings) -> GameResult<Self> {
-        println!("🎮 游戏应用初始化中...");
-        // ✨ 使用 Builder 模式创建网络模块（隐藏所有内部细节）
-        let net_ctx = crate::network::NetworkBuilder::new(settings.network)
+        tracing::info!("🎮 游戏应用初始化中...");
+        let net_ctx = crate::network::NetworkBuilder::new(settings.network.clone())
             .build()
             .expect("Failed to initialize network");
-
-        let net_ctx = Arc::new(net_ctx);
-
-        // 创建 ECS World
-        let world = World::new();
-
+        let mut world = World::new();
+        world
+            .spawn_settings(settings.clone())
+            .spawn_network(net_ctx)
+            .spawn_global_events(GlobalEvents::new());
         // 创建初始场景（登录场景）
         let login_scene = LoginScene::new();
-
         Ok(Self {
             world,
             current_scene: Box::new(login_scene),
             scene_type: SceneType::Login,
-            net_ctx,
         })
-    }
-
-    /// 获取网络上下文引用（供场景使用）
-    #[inline]
-    pub fn net_ctx(&self) -> Arc<NetContext> {
-        self.net_ctx.clone()
     }
 }
 
@@ -74,32 +62,28 @@ impl GameState {
 impl Drop for GameState {
     fn drop(&mut self) {
         tracing::info!("🛑 Shutting down GameState...");
-
-        // 发送断开连接请求
         if let Err(e) = self
-            .net_ctx
+            .world
+            .network()
             .send(crate::network::handlers::GameEvent::DisconnectRequest)
         {
             tracing::error!("Failed to send disconnect: {:?}", e);
         }
-
         tracing::info!("✅ GameState shutdown complete");
     }
 }
 
 impl GameState {
-   
     /// 切换场景
     pub fn switch_scene(&mut self, ctx: &mut Context, scene_type: SceneType) -> GameResult {
-        println!("🔄 切换场景: {:?} -> {:?}", self.scene_type, scene_type);
-
+        tracing::info!("🔄 切换场景: {:?} -> {:?}", self.scene_type, scene_type);
         self.scene_type = scene_type;
-
         self.current_scene = match scene_type {
             SceneType::Login => {
                 // 🧹 返回登录场景时发送断开连接命令
                 if let Err(e) = self
-                    .net_ctx
+                    .world
+                    .network()
                     .send(crate::network::handlers::GameEvent::DisconnectRequest)
                 {
                     tracing::error!("❌ 发送断开连接命令失败: {}", e);
@@ -119,13 +103,21 @@ impl GameState {
                 // 这对于切换账号/角色时非常重要,避免旧角色数据残留
                 self.clear_game_objects();
                 // GameScene是纯粹的场景编排器，构造函数不需要参数
-                Box::new(GameScene::new())
+                Box::new(GameScene::spawn(ctx, &mut self.world))
             }
         };
 
         Ok(())
     }
 
+    fn collect_network_events(&mut self) {
+        let events = self.world.network().recv_categorized();
+        self.world.global_events_mut().net_events = events;
+    }
+
+    fn clear_global_events(&mut self) {
+        self.world.global_events_mut().clear_frame_events();
+    }
     /// 清理所有游戏对象实体
     ///
     /// 在切换到游戏场景之前调用,确保旧角色数据不会残留
@@ -196,15 +188,13 @@ impl GameState {
 
 impl EventHandler for GameState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
+        self.collect_network_events();
         // 更新当前场景（Scene 自己会处理需要的网络事件）
-        if let Some(next_scene) = self
-            .current_scene
-            .update(ctx, &mut self.world, &self.net_ctx)?
-        {
+        if let Some(next_scene) = self.current_scene.update(ctx, &mut self.world)? {
             // 场景请求切换
             self.switch_scene(ctx, next_scene)?;
         }
-
+        self.clear_global_events();
         Ok(())
     }
 
@@ -212,86 +202,175 @@ impl EventHandler for GameState {
         let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
         // 绘制当前场景
         self.current_scene.draw(ctx, &mut canvas, &self.world)?;
-
         canvas.finish(ctx)?;
+
         Ok(())
     }
 
     fn mouse_button_down_event(
         &mut self,
-        ctx: &mut Context,
+        _ctx: &mut Context,
         button: ggez::winit::event::MouseButton,
         x: f32,
         y: f32,
     ) -> GameResult {
-        self.current_scene
-            .on_mouse_down(ctx, &mut self.world, button, x, y, &self.net_ctx)
-    }
-
-    fn mouse_button_up_event(
-        &mut self,
-        ctx: &mut Context,
-        button: ggez::winit::event::MouseButton,
-        x: f32,
-        y: f32,
-    ) -> GameResult {
-        self.current_scene
-            .on_mouse_up(ctx, &mut self.world, button, x, y, &self.net_ctx)
-    }
-
-    fn mouse_motion_event(
-        &mut self,
-        ctx: &mut Context,
-        x: f32,
-        y: f32,
-        _dx: f32,
-        _dy: f32,
-    ) -> GameResult {
-        self.current_scene.on_mouse_move(ctx, &mut self.world, x, y)
-    }
-
-    fn key_down_event(
-        &mut self,
-        ctx: &mut Context,
-        input: ggez::input::keyboard::KeyInput,
-        _repeated: bool,
-    ) -> GameResult {
-        // 处理场景切换
-        if let Some(new_scene_type) =
-            self.current_scene
-                .on_key_down(ctx, &mut self.world, input, &self.net_ctx)?
+        // self.current_scene
+        //     .on_mouse_down(ctx, &mut self.world, button, x, y)
+        if let Some((_, events)) = self
+            .world
+            .query_mut::<&mut GlobalEvents>()
+            .into_iter()
+            .next()
         {
-            self.switch_scene(ctx, new_scene_type)?;
+            events
+                .input_events
+                .push(InputEvent::MouseDown { button, x, y });
+            tracing::trace!("🖱️ 鼠标按下: {:?} at ({:.1}, {:.1})", button, x, y);
         }
         Ok(())
     }
 
-    fn mouse_wheel_event(&mut self, ctx: &mut Context, x: f32, y: f32) -> GameResult {
-        self.current_scene
-            .on_mouse_wheel(ctx, &mut self.world, x, y)
+    fn mouse_button_up_event(
+        &mut self,
+        _ctx: &mut Context,
+        button: ggez::winit::event::MouseButton,
+        x: f32,
+        y: f32,
+    ) -> GameResult {
+        if let Some((_, events)) = self
+            .world
+            .query_mut::<&mut GlobalEvents>()
+            .into_iter()
+            .next()
+        {
+            events
+                .input_events
+                .push(InputEvent::MouseUp { button, x, y });
+            tracing::trace!("🖱️ 鼠标抬起: {:?} at ({:.1}, {:.1})", button, x, y);
+        }
+        Ok(())
     }
 
-    fn text_input_event(&mut self, ctx: &mut Context, character: char) -> GameResult {
-        // 转发 IME 输入到当前场景
-        // 将 char 转换为 String
-        tracing::debug!("🔥 GameState::text_input_event 被调用: '{}'", character);
-        self.current_scene
-            .on_text_input(ctx, &mut self.world, character.to_string())
+    fn mouse_motion_event(
+        &mut self,
+        _ctx: &mut Context,
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    ) -> GameResult {
+        if let Some((_, events)) = self
+            .world
+            .query_mut::<&mut GlobalEvents>()
+            .into_iter()
+            .next()
+        {
+            events
+                .input_events
+                .push(InputEvent::MouseMove { x, y, dx, dy });
+            // 鼠标移动事件太频繁，不记录日志
+        }
+        Ok(())
     }
 
-    fn resize_event(&mut self, ctx: &mut Context, width: f32, height: f32) -> GameResult {
+    fn key_down_event(
+        &mut self,
+        _ctx: &mut Context,
+        input: ggez::input::keyboard::KeyInput,
+        repeated: bool,
+    ) -> GameResult {
+        if let Some((_, events)) = self
+            .world
+            .query_mut::<&mut GlobalEvents>()
+            .into_iter()
+            .next()
+        {
+            events.input_events.push(InputEvent::KeyDown {
+                keycode: if let PhysicalKey::Code(key) = input.event.physical_key {
+                    key
+                } else {
+                    KeyCode::Abort
+                },
+                repeat: repeated,
+                text: input.event.text,
+                timestamp: std::time::Instant::now(),
+            });
+        }
+        Ok(())
+    }
+
+    fn key_up_event(
+        &mut self,
+        _ctx: &mut Context,
+        input: ggez::input::keyboard::KeyInput,
+    ) -> Result<(), ggez::GameError> {
+        if let Some((_, events)) = self
+            .world
+            .query_mut::<&mut GlobalEvents>()
+            .into_iter()
+            .next()
+        {
+            events.input_events.push(InputEvent::KeyUp {
+                keycode: if let PhysicalKey::Code(key) = input.event.physical_key {
+                    key
+                } else {
+                    KeyCode::Abort
+                },
+                text: input.event.text,
+                timestamp: std::time::Instant::now(),
+            });
+        }
+        Ok(())
+    }
+
+    fn mouse_wheel_event(&mut self, _ctx: &mut Context, x: f32, y: f32) -> GameResult {
+        if let Some((_, events)) = self
+            .world
+            .query_mut::<&mut GlobalEvents>()
+            .into_iter()
+            .next()
+        {
+            events.input_events.push(InputEvent::MouseWheel { x, y });
+            tracing::trace!("🖱️ 鼠标滚轮: ({:.1}, {:.1})", x, y);
+        }
+        Ok(())
+    }
+
+    fn text_input_event(&mut self, _ctx: &mut Context, character: char) -> GameResult {
+        if let Some((_, events)) = self
+            .world
+            .query_mut::<&mut GlobalEvents>()
+            .into_iter()
+            .next()
+        {
+            events.input_events.push(InputEvent::Ime {
+                character,
+                timestamp: std::time::Instant::now(),
+            });
+            tracing::trace!("📝 文本输入: '{}'", character);
+        }
+        Ok(())
+    }
+
+    fn resize_event(&mut self, _ctx: &mut Context, width: f32, height: f32) -> GameResult {
         // 在高 DPI 显示器上，ggez 传递的是物理像素，需要转换为逻辑像素
-        let scale_factor = ctx.gfx.window().scale_factor() as f32;
-        let logical_width = width / scale_factor;
-        let logical_height = height / scale_factor;
-        self.current_scene
-            .on_resize(ctx, &mut self.world, logical_width, logical_height)
+        // let scale_factor = ctx.gfx.window().scale_factor() as f32;
+        // let logical_width = width / scale_factor;
+        // let logical_height = height / scale_factor;
+        // self.current_scene
+        //     .on_resize(ctx, &mut self.world, logical_width, logical_height)
+
+        if let Some((_, events)) = self
+            .world
+            .query_mut::<&mut GlobalEvents>()
+            .into_iter()
+            .next()
+        {
+            events
+                .input_events
+                .push(InputEvent::Resize { width, height });
+            tracing::info!("🖥️ 窗口调整大小: ({:.1}, {:.1})", width, height);
+        }
+        Ok(())
     }
 }
-
-// ============================================================================
-// NetEventListener 实现
-// ============================================================================
-// 注意：NetEventListener 实现已移除
-// 新架构中，NetworkEventSystem 直接处理 GameEvent 并更新 ECS 组件
-// ============================================================================

@@ -4,24 +4,23 @@
 // 1. 连接服务器 (TcpStream)
 // 2. 创建 Network（内部自动启动读写线程）
 // 3. 返回 NetContext 给游戏层
-
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
 use std::net::TcpStream;
-
 use super::client::Network;
 use super::handlers::GameEvent;
 use crate::settings::NetworkSettings;
 
+
+
 /// 网络上下文 - 游戏层唯一接口
+#[derive(Clone)]
 pub struct NetContext {
     outbound: Sender<GameEvent>,
     inbound: Receiver<GameEvent>,
 }
 
 impl NetContext {
-    // ========== 基础方法 ==========
-
     /// 发送事件到网络
     #[inline]
     pub fn send(&self, event: GameEvent) -> Result<()> {
@@ -29,6 +28,14 @@ impl NetContext {
             .send(event)
             .map_err(|_| anyhow::anyhow!("Network disconnected"))
     }
+
+    // pub fn outbound_sender(&self) -> Sender<GameEvent> {
+    //     self.outbound.clone()
+    // }
+
+    // pub fn inbound_receiver(&self) -> Receiver<GameEvent> {
+    //     self.inbound.clone()
+    // }
 
     /// 接收所有待处理事件（非阻塞）
     #[inline]
@@ -186,7 +193,7 @@ impl NetContext {
 }
 
 /// 分类的网络事件
-#[derive(Default)]
+#[derive(Default,Clone)]
 pub struct CategorizedEvents {
     pub connection: Vec<GameEvent>,
     pub auth: Vec<GameEvent>,
@@ -199,6 +206,58 @@ pub struct CategorizedEvents {
     pub items: Vec<GameEvent>,
     pub npc: Vec<GameEvent>,
     pub other: Vec<GameEvent>,
+}
+
+impl CategorizedEvents {
+    /// 获取所有事件的总数
+    pub fn total_count(&self) -> usize {
+        self.connection.len()
+            + self.auth.len()
+            + self.character.len()
+            + self.player_state.len()
+            + self.combat.len()
+            + self.chat.len()
+            + self.world_objects.len()
+            + self.map.len()
+            + self.items.len()
+            + self.npc.len()
+            + self.other.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.total_count() == 0
+    }
+
+    pub fn clear(&mut self) {
+        self.connection.clear();
+        self.auth.clear();
+        self.character.clear();
+        self.player_state.clear();
+        self.combat.clear();
+        self.chat.clear();
+        self.world_objects.clear();
+        self.map.clear();
+        self.items.clear();
+        self.npc.clear();
+        self.other.clear();
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &GameEvent> {
+        self.connection
+            .iter()
+            .chain(self.auth.iter())
+            .chain(self.character.iter())
+            .chain(self.player_state.iter())
+            .chain(self.combat.iter())
+            .chain(self.chat.iter())
+            .chain(self.world_objects.iter())
+            .chain(self.map.iter())
+            .chain(self.items.iter())
+            .chain(self.npc.iter())
+            .chain(self.other.iter())
+    }
+
+    
 }
 
 /// 网络构建器

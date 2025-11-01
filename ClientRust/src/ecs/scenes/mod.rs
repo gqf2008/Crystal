@@ -41,84 +41,8 @@ pub trait Scene {
         &mut self,
         ctx: &mut Context,
         world: &mut World,
-        net_ctx: &Arc<NetContext>,
     ) -> GameResult<Option<SceneType>>;
 
     fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, world: &World) -> GameResult;
 
-    fn on_mouse_down(
-        &mut self,
-        _ctx: &mut Context,
-        _world: &mut World,
-        _button: ggez::winit::event::MouseButton,
-        _x: f32,
-        _y: f32,
-        _net_ctx: &Arc<NetContext>,
-    ) -> GameResult {
-        Ok(())
-    }
-
-    fn on_mouse_up(
-        &mut self,
-        _ctx: &mut Context,
-        _world: &mut World,
-        _button: ggez::winit::event::MouseButton,
-        _x: f32,
-        _y: f32,
-        _net_ctx: &Arc<NetContext>,
-    ) -> GameResult {
-        Ok(())
-    }
-
-    fn on_mouse_move(
-        &mut self,
-        _ctx: &mut Context,
-        _world: &mut World,
-        _x: f32,
-        _y: f32,
-    ) -> GameResult {
-        Ok(())
-    }
-
-    fn on_key_down(
-        &mut self,
-        _ctx: &mut Context,
-        _world: &mut World,
-        _input: KeyInput,
-        _net_ctx: &Arc<NetContext>,
-    ) -> GameResult<Option<SceneType>> {
-        Ok(None)
-    }
-    
-    /// 文本输入事件 (IME)
-    fn on_text_input(
-        &mut self,
-        _ctx: &mut Context,
-        _world: &mut World,
-        _character: String,
-    ) -> GameResult {
-        Ok(())
-    }
-    
-    /// 鼠标滚轮事件
-    fn on_mouse_wheel(
-        &mut self,
-        _ctx: &mut Context,
-        _world: &mut World,
-        _x: f32,
-        _y: f32,
-    ) -> GameResult {
-        Ok(())
-    }
-    
-    /// 窗口大小调整事件
-    fn on_resize(
-        &mut self,
-        _ctx: &mut Context,
-        _world: &mut World,
-        _width: f32,
-        _height: f32,
-    ) -> GameResult {
-        Ok(())
-    }
 }

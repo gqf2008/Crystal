@@ -26,6 +26,7 @@ pub mod scenes;
 // IME 输入处理
 pub mod ime_handler;
 
+use reqwest::Client;
 pub use resources::*; // 🆕 导出全局资源
 pub use systems::logic::state_update::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
 pub use systems::*;
@@ -47,6 +48,8 @@ pub use ui::{CharacterStatus, ChatWindow, ExpBar, HealthBar, ManaBar, SkillBar};
 pub use game_app::GameState;
 pub use scenes::{GameScene, LoginScene, Scene, SceneType, SelectScene};
 
+use crate::ecs::components::GlobalEvents;
+use crate::network::NetContext;
 use crate::ClientSettings;
 
 // ============================================================================
@@ -79,3 +82,61 @@ use crate::ClientSettings;
 // - NetworkSystem: 同步远程玩家
 //
 // ============================================================================
+
+pub trait WorldExt {
+    fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self;
+    fn spawn_network(&mut self, net_ctx: NetContext) -> &mut Self;
+    fn spawn_global_events(&mut self, events: GlobalEvents) -> &mut Self;
+    fn settings(&self) -> hecs::Ref<'_, ClientSettings>;
+    fn network(&self) -> hecs::Ref<'_, crate::network::NetContext>;
+    fn global_events(&self) -> hecs::Ref<'_, GlobalEvents>;
+    fn global_events_mut(&mut self) -> &mut GlobalEvents;
+}
+
+pub const SETTING_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x1);
+pub const NETWORK_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x2);
+pub const GAME_EVENTS_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x3);
+
+impl WorldExt for hecs::World {
+    fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self {
+        self.spawn_at(
+            SETTING_ENTITY.unwrap_or(hecs::Entity::DANGLING),
+            (settings,),
+        );
+        self
+    }
+    fn spawn_network(&mut self, net_ctx: NetContext) -> &mut Self {
+        self.spawn_at(NETWORK_ENTITY.unwrap_or(hecs::Entity::DANGLING), (net_ctx,));
+        self
+    }
+
+    fn spawn_global_events(&mut self, events: GlobalEvents) -> &mut Self {
+        self.spawn_at(
+            GAME_EVENTS_ENTITY.unwrap_or(hecs::Entity::DANGLING),
+            (events,),
+        );
+        self
+    }
+
+    fn settings(&self) -> hecs::Ref<'_, ClientSettings> {
+        self.get::<&ClientSettings>(SETTING_ENTITY.unwrap_or(hecs::Entity::DANGLING))
+            .expect("GameWorld ClientSettings not found")
+    }
+
+    fn network(&self) -> hecs::Ref<'_, crate::network::NetContext> {
+        self.get::<&NetContext>(NETWORK_ENTITY.unwrap_or(hecs::Entity::DANGLING))
+            .expect("GameWorld NetContext not found")
+    }
+
+    fn global_events(&self) -> hecs::Ref<'_, GlobalEvents> {
+        self.get::<&GlobalEvents>(GAME_EVENTS_ENTITY.unwrap_or(hecs::Entity::DANGLING))
+            .expect("GameWorld GlobalEvents not found")
+    }
+
+    fn global_events_mut(&mut self) -> &mut GlobalEvents {
+        self.query_one_mut::<&mut GlobalEvents>(
+            GAME_EVENTS_ENTITY.unwrap_or(hecs::Entity::DANGLING),
+        )
+        .expect("GameWorld GlobalEvents not found")
+    }
+}

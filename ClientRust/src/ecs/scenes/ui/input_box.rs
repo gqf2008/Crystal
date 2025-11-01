@@ -238,7 +238,7 @@ impl InputBox {
     }
     
     /// 按键事件
-    pub fn on_key_down(&mut self, key: ggez::winit::keyboard::KeyCode, ctx: &mut Context) {
+    pub fn on_key_down(&mut self, key: &ggez::winit::keyboard::KeyCode, ctx: &mut Context) {
         if !self.visible {
             return;
         }

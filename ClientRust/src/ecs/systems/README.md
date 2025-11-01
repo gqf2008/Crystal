@@ -118,12 +118,17 @@ systems/
 
 | 系统 | 优先级 | 职责 | 状态 |
 |------|--------|------|------|
-| NetworkSyncSystem | 50 | 从网络线程接收数据包 → GlobalEvents | ⚠️ 禁用中 |
+| ~~NetworkSyncSystem~~ | ~~50~~ | ~~从网络线程接收数据包~~ | ❌ **已废弃** |
 | InputSystem | 100 | 收集键盘/鼠标输入 → GlobalEvents | ✅ 就绪 |
 | PlayerControlSystem | 110 | 处理玩家控制逻辑 | ✅ 就绪 |
-| GameEventSystem | 120 | 分发游戏事件 | ⚠️ 职责待明确 |
+| GameEventDispatcher | 120 | 分发游戏事件 | ✅ 就绪 |
 
-**输出组件**: GlobalEvents（keyboard_events, mouse_events, network_incoming, game_events）
+**输出组件**: GlobalEvents（keyboard_events, mouse_events, game_events）
+
+**网络架构说明**: 
+- ❌ NetworkSyncSystem 已废弃
+- 当前网络事件由 Scene 直接从 `NetContext.try_recv()` 读取
+- GameScene 的网络同步需要重新设计
 
 ---
 
