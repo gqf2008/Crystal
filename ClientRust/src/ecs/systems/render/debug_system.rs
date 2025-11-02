@@ -79,11 +79,11 @@ impl HybridSystem for DebugSystem {
             show_grid = config.show_grid;
             show_borders = config.show_borders;
             
-            // 构建图层状态字符串
+            // 构建图层状态字符串 (顺序: F M B 对应按键 1/2/3)
             let mut layers = Vec::new();
-            if show_back { layers.push("B"); } else { layers.push("b"); }
-            if show_middle { layers.push("M"); } else { layers.push("m"); }
             if show_front { layers.push("F"); } else { layers.push("f"); }
+            if show_middle { layers.push("M"); } else { layers.push("m"); }
+            if show_back { layers.push("B"); } else { layers.push("b"); }
             layer_status = format!("Layers: {} (1/2/3)", layers.join(" "));
             break;
         }
@@ -404,18 +404,18 @@ impl DebugSystem {
         };
 
         match keycode {
-            // 图层切换
+            // 图层切换 (与 C# 版本一致: 1=Front, 2=Middle, 3=Back)
             KeyCode::Digit1 => {
-                config.show_back = !config.show_back;
-                tracing::info!("🖼️ Back 层: {}", if config.show_back { "显示" } else { "隐藏" });
+                config.show_front = !config.show_front;
+                tracing::info!("🖼️ Front 层: {}", if config.show_front { "显示" } else { "隐藏" });
             }
             KeyCode::Digit2 => {
                 config.show_middle = !config.show_middle;
                 tracing::info!("🖼️ Middle 层: {}", if config.show_middle { "显示" } else { "隐藏" });
             }
             KeyCode::Digit3 => {
-                config.show_front = !config.show_front;
-                tracing::info!("🖼️ Front 层: {}", if config.show_front { "显示" } else { "隐藏" });
+                config.show_back = !config.show_back;
+                tracing::info!("🖼️ Back 层: {}", if config.show_back { "显示" } else { "隐藏" });
             }
             
             // 调试显示选项
