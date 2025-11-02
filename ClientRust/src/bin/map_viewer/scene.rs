@@ -56,6 +56,7 @@ impl MapViewerScene {
         println!("========================================");
         println!("\n📋 操作说明：");
         println!("  • ESC      - 退出程序");
+        println!("  • M        - 打开地图选择对话框");
         println!("  • 1/2/3    - 切换 Front/Middle/Back 层 (前景/中间/背景)");
         println!("  • G        - 切换网格显示");
         println!("  • O        - 切换障碍物显示");
@@ -126,7 +127,7 @@ impl MapViewerScene {
     /// 创建系统调度器（只包含必要的系统）
     fn create_system_scheduler() -> SystemScheduler {
         use mir2_client::ecs::render::{MapRenderSystem, DebugSystem};
-        use mir2_client::ecs::systems::logic::{CameraFollowSystem, MapLoadSystem, TileAnimationSystem};
+        use mir2_client::ecs::systems::logic::{CameraFollowSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem};
         
         let mut scheduler = SystemScheduler::new();
 
@@ -137,6 +138,7 @@ impl MapViewerScene {
             .add_system(MovementSystem)              // 移动系统
             .add_system(AnimationSystem::new())      // 角色动画系统
             .add_system(TileAnimationSystem::new())  // 瓦片动画系统
+            .add_system(MapUpdateSystem::new())      // 地图更新系统 (M键切换地图)
             .add_system(MapLoadSystem)               // 地图加载系统 → 从 GlobalEvents 读取 MapChanged 事件
             .add_system(CameraSystem::new())         // 相机系统（拖拽、缩放）→ 从 GlobalEvents 读取鼠标事件
             .add_system(CameraFollowSystem)          // 相机跟随
@@ -222,6 +224,15 @@ impl MapViewerScene {
             y: 0.0,
         },));
 
+        // 地图管理器组件（用于地图状态跟踪）
+        use mir2_client::ecs::systems::logic::map_load_system::MapManager;
+        world.spawn((MapManager {
+            current_map_index: 0,
+            current_map_file: "0".to_string(),
+            current_map_title: "比奇城".to_string(),
+            is_loading: false,
+        },));
+
         self.initialized = true;
         tracing::info!("✅ MapViewerScene World 初始化完成");
     }
@@ -253,7 +264,7 @@ impl Scene for MapViewerScene {
             }
         }
 
-        // 运行所有系统（update 阶段）
+        // 运行所有系统（update 阶段）- MapUpdateSystem 会自动检查地图切换请求
         self.system_scheduler.update(world, ctx.time.delta().as_secs_f32())?;
 
         Ok(None)

@@ -395,6 +395,14 @@ impl DebugSystem {
 
     /// 处理调试相关的键盘按键
     fn handle_keycode(world: &mut hecs::World, keycode: KeyCode) {
+        // M键需要特殊处理，因为它会借用整个 world
+        if keycode == KeyCode::KeyM {
+            tracing::info!("🗺️ 打开地图选择对话框");
+            use crate::ecs::systems::logic::update::MapUpdateSystem;
+            MapUpdateSystem::trigger_map_selection(world);
+            return;
+        }
+
         // 查找 RenderConfig 组件
         let mut config_query = world.query::<&mut RenderConfig>();
         let config = if let Some((_, cfg)) = config_query.iter().next() {

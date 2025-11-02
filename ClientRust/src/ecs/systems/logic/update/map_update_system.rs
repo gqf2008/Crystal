@@ -20,70 +20,49 @@ use crate::ecs::{Coord, MapUtils, MapLoader};
 use crate::objects::MapReader;
 use mir2_shared::enums::{MirClass, MirGender};
 
-/// 地图管理组件
-/// 
-/// 用于控制地图加载和切换的状态
-pub struct MapManager {
-    /// 当前加载的地图路径
-    pub current_map_path: String,
-    /// 是否需要重新加载地图
-    pub needs_reload: bool,
-    /// 待加载的地图路径
-    pub pending_map_path: Option<String>,
-}
+// 使用 map_load_system 中定义的 MapManager
+use super::map_load_system::MapManager;
 
-impl MapManager {
-    pub fn new(map_path: String) -> Self {
-        Self {
-            current_map_path: map_path,
-            needs_reload: false,
-            pending_map_path: None,
-        }
-    }
+/// 地图切换请求组件
+/// 
+/// 用于存储 M 键触发的地图切换请求
+pub struct MapSwitchRequest {
+    /// 待加载的地图文件路径
+    pub map_path: String,
 }
 
 /// 地图更新系统
 /// 
 /// 在每帧检查是否需要切换地图，如果需要则执行地图加载和实体重建
-pub struct MapUpdateSystem {
-    pub current_map_path: String,
-    /// 是否需要重新加载地图
-    pub needs_reload: bool,
-    /// 待加载的地图路径
-    pub pending_map_path: Option<String>,
-}
+pub struct MapUpdateSystem;
 
 impl MapUpdateSystem {
-    pub fn new(initial_map_path: String) -> Self {
-        Self {
-            current_map_path: initial_map_path,
-            needs_reload: false,
-            pending_map_path: None,
-        }
+    pub fn new() -> Self {
+        Self
     }
-}
-impl MapUpdateSystem {
-    /// 更新地图状态
+    
+    /// 内部更新逻辑
     /// 
-    /// 检查 MapManager 组件，如果 needs_reload 为 true，则加载新地图
-    pub fn update(world: &mut World, ctx: &mut Context) -> GameResult {
+    /// 检查 MapSwitchRequest 组件，如果存在则执行地图切换
+    fn do_update(world: &mut World) -> GameResult {
         
-        // 查询 MapManager 组件并立即获取数据
-        let (needs_reload, pending_path) = {
-            let mut query = world.query::<&MapManager>();
-            if let Some((_, manager)) = query.iter().next() {
-                (manager.needs_reload, manager.pending_map_path.clone())
+        // 查询 MapSwitchRequest 组件
+        let map_path = {
+            let mut query = world.query::<&MapSwitchRequest>();
+            if let Some((_, request)) = query.iter().next() {
+                Some(request.map_path.clone())
             } else {
-                return Ok(());  // 没有 MapManager 组件
+                None
             }
         };
 
-        if !needs_reload {
-            return Ok(());  // 不需要重新加载
-        }
-
-        if let Some(new_path) = pending_path {
-            println!("🗺️  MapUpdateSystem: 正在加载地图 {}", new_path);
+        if let Some(new_path) = map_path {
+            tracing::info!("🗺️  MapUpdateSystem: 正在加载地图 {}", new_path);
+            
+            // 在清空世界前,保存需要保留的组件
+            use crate::ecs::WorldExt;
+            let net_ctx = (*world.network()).clone();
+            let settings = (*world.settings()).clone();
             
             // 加载新地图
             match MapReader::new(&new_path) {
@@ -112,33 +91,44 @@ impl MapUpdateSystem {
                     println!("🎯 出生位置: 格子({}, {}) -> 世界坐标({:.1}, {:.1})", 
                              spawn_grid_x, spawn_grid_y, spawn_x, spawn_y);
                     
-                    // 重新创建所有实体
-                    Self::recreate_entities(world, ctx, spawn_x, spawn_y);
+                    // 获取屏幕尺寸（从相机组件或默认值）
+                    let (screen_width, screen_height) = world.query::<&Camera>()
+                        .into_iter()
+                        .next()
+                        .map(|(_, cam)| (cam.screen_width, cam.screen_height))
+                        .unwrap_or((1600.0, 1200.0));
                     
-                    // 重新创建 MapManager
+                    // 重新创建所有实体
+                    Self::recreate_entities(world, spawn_x, spawn_y, screen_width, screen_height);
+                    
+                    // 恢复全局组件 - 使用固定实体ID
+                    use crate::ecs::{NETWORK_ENTITY, SETTING_ENTITY};
+                    if let Some(entity_id) = SETTING_ENTITY {
+                        world.spawn_at(entity_id, (settings,));
+                    }
+                    if let Some(entity_id) = NETWORK_ENTITY {
+                        world.spawn_at(entity_id, (net_ctx,));
+                    }
+                    
+                    // 重新创建 MapManager（使用文件名）
+                    let map_file = std::path::Path::new(&new_path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    
                     world.spawn((MapManager {
-                        current_map_path: new_path.clone(),
-                        needs_reload: false,
-                        pending_map_path: None,
+                        current_map_index: -1,
+                        current_map_file: map_file,
+                        current_map_title: String::from("未知地图"),
+                        is_loading: false,
                     },));
                     
-                    println!("✅ 地图切换完成");
+                    tracing::info!("✅ 地图切换完成: {}", new_path);
                 }
                 Err(e) => {
-                    eprintln!("❌ 地图读取失败: {}", e);
-                    // 重置标志
-                    for (_, manager) in world.query::<&mut MapManager>().iter() {
-                        manager.needs_reload = false;
-                        manager.pending_map_path = None;
-                        break;
-                    }
+                    tracing::error!("❌ 地图读取失败: {}", e);
                 }
-            }
-        } else {
-            // 没有待加载路径，重置标志
-            for (_, manager) in world.query::<&mut MapManager>().iter() {
-                manager.needs_reload = false;
-                break;
             }
         }
         
@@ -148,36 +138,44 @@ impl MapUpdateSystem {
     /// 触发地图选择对话框
     /// 
     /// 打开文件选择器，让用户选择新地图
-    fn trigger_map_selection(world: &mut World) {
+    pub fn trigger_map_selection(world: &mut World) {
         if let Some(path) = FileDialog::new()
             .add_filter("Map files", &["map"])
             .set_directory("Map")
             .pick_file()
         {
             let path_str = path.to_string_lossy().to_string();
-            println!("📂 用户选择地图: {}", path_str);
+            tracing::info!("📂 用户选择地图: {}", path_str);
             
-            // 更新 MapManager
-            for (_, manager) in world.query::<&mut MapManager>().iter() {
-                manager.pending_map_path = Some(path_str.clone());
-                manager.needs_reload = true;
-                break;
+            // 删除旧的 MapSwitchRequest（如果存在）
+            let to_remove: Vec<_> = world.query::<&MapSwitchRequest>()
+                .iter()
+                .map(|(e, _)| e)
+                .collect();
+            for entity in to_remove {
+                let _ = world.despawn(entity);
             }
+            
+            // 创建新的地图切换请求
+            world.spawn((MapSwitchRequest {
+                map_path: path_str,
+            },));
         }
     }
     
     /// 重新创建所有必要的实体
-    fn recreate_entities(world: &mut World, ctx: &Context, spawn_x: f32, spawn_y: f32) {
-        let screen = ctx.gfx.drawable_size();
+    fn recreate_entities(world: &mut World, spawn_x: f32, spawn_y: f32, screen_width: f32, screen_height: f32) {
+        use crate::ecs::components::{CameraMode, MouseInput};
         
         // 创建相机实体
         world.spawn((
             Position { x: spawn_x, y: spawn_y },
             Camera {
                 zoom: 1.0,
-                screen_width: screen.0,
-                screen_height: screen.1,
+                screen_width,
+                screen_height,
             },
+            CameraMode::Manual,  // 地图查看器使用手动模式
             Draggable {
                 is_dragging: false,
                 drag_start_x: 0.0,
@@ -211,7 +209,7 @@ impl MapUpdateSystem {
             show_path: false,
             max_fps: 160,
             enable_lod: true,
-            enable_camera_drag: false,  // 正常游戏禁用拖拽
+            enable_camera_drag: true,  // 地图查看器启用鼠标拖拽功能
         },));
         
         // 创建可见区域缓存实体
@@ -271,7 +269,42 @@ impl MapUpdateSystem {
             Prediction::new(Position { x: spawn_x, y: spawn_y }),
         ));
         
-        // 创建 GlobalEvents 组件 (新架构)
-        world.spawn((GlobalEvents::new(),));
+        // 创建 GlobalEvents 组件 (新架构) - 使用固定的实体ID
+        use crate::ecs::GAME_EVENTS_ENTITY;
+        if let Some(entity_id) = GAME_EVENTS_ENTITY {
+            world.spawn_at(entity_id, (GlobalEvents::new(),));
+        } else {
+            world.spawn((GlobalEvents::new(),));
+        }
+        
+        // 创建鼠标输入状态实体（地图查看器需要）
+        world.spawn((MouseInput {
+            left_pressed: false,
+            right_pressed: false,
+            left_double_clicked: false,
+            right_double_clicked: false,
+            left_press_time: 0,
+            right_press_time: 0,
+            left_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
+            right_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
+            x: 0.0,
+            y: 0.0,
+        },));
+    }
+}
+
+// ============================================================================
+// System Trait 实现
+// ============================================================================
+
+use crate::ecs::systems::System;
+
+impl System for MapUpdateSystem {
+    fn priority(&self) -> u32 {
+        500  // STATE_UPDATE 层，在地图加载之前执行
+    }
+
+    fn update(&mut self, world: &mut World, _delay_time: f32) -> GameResult {
+        Self::do_update(world)
     }
 }

@@ -86,7 +86,7 @@ pub use health_regen_system::HealthRegenSystem;
 pub use particle_system::ParticleSystem;
 pub use sound_system::SoundSystem;
 pub use camera_system::CameraSystem;
-pub use map_update_system::{MapUpdateSystem, MapManager as OldMapManager};
+pub use map_update_system::{MapUpdateSystem, MapSwitchRequest};
 pub use map_load_system::{MapLoadSystem, MapManager};
 pub use tile_animation_system::TileAnimationSystem;
 
