@@ -16,7 +16,7 @@
 
 use hecs::World;
 use ggez::GameResult;
-use crate::ecs::components::{AnimatedTile, MapTile};
+use crate::ecs::components::{AnimatedTile, MapTile, RenderConfig};
 use crate::ecs::systems::{System, priority};
 
 /// 瓦片动画系统
@@ -70,6 +70,21 @@ impl System for TileAnimationSystem {
     }
 
     fn update(&mut self, world: &mut World, delta_time: f32) -> GameResult {
+        // 检查是否启用动画
+        let animations_enabled = {
+            let mut config_query = world.query::<&RenderConfig>();
+            config_query
+                .iter()
+                .next()
+                .map(|(_, cfg)| cfg.show_animations)
+                .unwrap_or(true) // 默认启用
+        };
+
+        // 如果动画被禁用，直接返回
+        if !animations_enabled {
+            return Ok(());
+        }
+
         // 累积时间
         self.accumulated_time += delta_time;
 
