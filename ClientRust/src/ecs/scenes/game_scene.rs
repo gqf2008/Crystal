@@ -168,6 +168,7 @@ impl GameScene {
             show_path: false,
             max_fps: 160,
             enable_lod: true,
+            enable_camera_drag: false,  // 正常游戏禁用拖拽
         },));
 
         // 创建可见区域缓存实体

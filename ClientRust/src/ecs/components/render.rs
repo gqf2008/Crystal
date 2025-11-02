@@ -78,6 +78,7 @@ pub struct RenderConfig {
     pub show_path: bool,
     pub max_fps: u32,
     pub enable_lod: bool,
+    pub enable_camera_drag: bool,    // 是否允许鼠标拖拽相机（地图查看器专用）
 }
 
 impl Default for RenderConfig {
@@ -96,6 +97,7 @@ impl Default for RenderConfig {
             show_path: false,
             max_fps: 120,
             enable_lod: false,
+            enable_camera_drag: false,  // 默认禁用（正常游戏不需要）
         }
     }
 }

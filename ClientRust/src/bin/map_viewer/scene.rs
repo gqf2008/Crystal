@@ -112,6 +112,7 @@ impl MapViewerScene {
             show_path: false,
             max_fps: 60,
             enable_lod: true,
+            enable_camera_drag: true,  // 地图查看器启用鼠标拖拽功能
         },));
 
         Ok(Self {
@@ -201,6 +202,7 @@ impl MapViewerScene {
             show_path: false,
             max_fps: 60,
             enable_lod: true,
+            enable_camera_drag: true,  // 地图查看器启用鼠标拖拽功能
         },));
 
         // 可见区域缓存实体

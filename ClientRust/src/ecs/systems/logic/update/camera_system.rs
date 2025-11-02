@@ -19,7 +19,7 @@ use hecs::World;
 use ggez::GameResult;
 use ggez::input::keyboard::KeyCode;
 use ggez::input::mouse::MouseButton;
-use crate::ecs::components::{Camera, CameraMode, Draggable, InputEvent, Position};
+use crate::ecs::components::{Camera, CameraMode, Draggable, InputEvent, Position, RenderConfig};
 use crate::ecs::systems::{System, priority};
 use crate::ecs::WorldExt;
 
@@ -150,22 +150,31 @@ impl System for CameraSystem {
             global_events.input_events.clone()
         };
 
-        // 2. 查询 Camera + Draggable + Position + CameraMode 组件
+        // 2. 读取配置：是否启用相机拖拽
+        let camera_drag_enabled = world.query::<&RenderConfig>()
+            .iter()
+            .next()
+            .map(|(_, cfg)| cfg.enable_camera_drag)
+            .unwrap_or(false);
+
+        // 3. 查询 Camera + Draggable + Position + CameraMode 组件
         let mut camera_query: Vec<_> = world
             .query_mut::<(&mut Camera, &mut Draggable, &mut Position, &mut CameraMode)>()
             .into_iter()
             .collect();
 
         if let Some((_, (ref mut camera, ref mut draggable, ref mut pos, ref mut mode))) = camera_query.first_mut() {
-            // 3. 检查 Ctrl 键是否按下
+            // 4. 检查 Ctrl 键是否按下（仅在启用拖拽时）
             let mut ctrl_pressed = false;
-            for event in &input_events {
-                if let InputEvent::KeyDown { keycode: KeyCode::ControlLeft | KeyCode::ControlRight, .. } = event {
-                    ctrl_pressed = true;
+            if camera_drag_enabled {
+                for event in &input_events {
+                    if let InputEvent::KeyDown { keycode: KeyCode::ControlLeft | KeyCode::ControlRight, .. } = event {
+                        ctrl_pressed = true;
+                    }
                 }
             }
 
-            // 4. 处理输入事件
+            // 5. 处理输入事件
             for event in &input_events {
                 match event {
                     InputEvent::Resize { width, height } => {
@@ -174,8 +183,8 @@ impl System for CameraSystem {
                         camera.screen_height = *height;
                         tracing::debug!("📐 相机尺寸更新: {}x{}", width, height);
                     }
-                    InputEvent::MouseDown { button, x, y } => {
-                        // Ctrl+左键 或 中键 都可以拖拽
+                    InputEvent::MouseDown { button, x, y } if camera_drag_enabled => {
+                        // Ctrl+左键 或 中键 都可以拖拽（仅在启用拖拽功能时）
                         let should_drag = (*button == MouseButton::Left && ctrl_pressed) 
                                        || *button == MouseButton::Middle;
                         
@@ -191,7 +200,7 @@ impl System for CameraSystem {
                             tracing::debug!("📹 切换到手动模式并开始拖拽相机: ({:.0}, {:.0})", x, y);
                         }
                     }
-                    InputEvent::MouseMove { x, y, .. } => {
+                    InputEvent::MouseMove { x, y, .. } if camera_drag_enabled => {
                         if draggable.is_dragging {
                             // 更新拖拽
                             let dx = (*x - draggable.drag_start_x) / camera.zoom;
@@ -200,7 +209,7 @@ impl System for CameraSystem {
                             pos.y = draggable.drag_start_pos_y - dy;
                         }
                     }
-                    InputEvent::MouseUp { button, .. } => {
+                    InputEvent::MouseUp { button, .. } if camera_drag_enabled => {
                         // 左键或中键抬起时结束拖拽
                         let should_end_drag = (*button == MouseButton::Left || *button == MouseButton::Middle) 
                                             && draggable.is_dragging;
@@ -211,7 +220,7 @@ impl System for CameraSystem {
                             tracing::debug!("📹 结束拖拽相机: 最终位置 ({:.0}, {:.0})", pos.x, pos.y);
                         }
                     }
-                    InputEvent::KeyUp { keycode: KeyCode::ControlLeft | KeyCode::ControlRight, .. } => {
+                    InputEvent::KeyUp { keycode: KeyCode::ControlLeft | KeyCode::ControlRight, .. } if camera_drag_enabled => {
                         // Ctrl 键抬起时也结束拖拽（如果正在拖拽）
                         if draggable.is_dragging {
                             draggable.is_dragging = false;
