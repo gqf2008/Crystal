@@ -59,10 +59,17 @@ impl MapUpdateSystem {
         if let Some(new_path) = map_path {
             tracing::info!("🗺️  MapUpdateSystem: 正在加载地图 {}", new_path);
             
-            // 在清空世界前,保存需要保留的组件
+            // 在清空世界前,保存需要保留的组件和相机状态
             use crate::ecs::WorldExt;
             let net_ctx = (*world.network()).clone();
             let settings = (*world.settings()).clone();
+            
+            // 保存相机位置和状态
+            let (camera_pos, camera_zoom, screen_width, screen_height) = world.query::<(&Position, &Camera)>()
+                .into_iter()
+                .next()
+                .map(|(_, (pos, cam))| (pos.clone(), cam.zoom, cam.screen_width, cam.screen_height))
+                .unwrap_or((Position { x: 800.0, y: 600.0 }, 1.0, 1600.0, 1200.0));
             
             // 加载新地图
             match MapReader::new(&new_path) {
@@ -91,15 +98,8 @@ impl MapUpdateSystem {
                     println!("🎯 出生位置: 格子({}, {}) -> 世界坐标({:.1}, {:.1})", 
                              spawn_grid_x, spawn_grid_y, spawn_x, spawn_y);
                     
-                    // 获取屏幕尺寸（从相机组件或默认值）
-                    let (screen_width, screen_height) = world.query::<&Camera>()
-                        .into_iter()
-                        .next()
-                        .map(|(_, cam)| (cam.screen_width, cam.screen_height))
-                        .unwrap_or((1600.0, 1200.0));
-                    
-                    // 重新创建所有实体
-                    Self::recreate_entities(world, spawn_x, spawn_y, screen_width, screen_height);
+                    // 重新创建所有实体 - 使用保存的相机位置和缩放
+                    Self::recreate_entities(world, spawn_x, spawn_y, screen_width, screen_height, camera_pos, camera_zoom);
                     
                     // 恢复全局组件 - 使用固定实体ID
                     use crate::ecs::{NETWORK_ENTITY, SETTING_ENTITY};
@@ -164,14 +164,22 @@ impl MapUpdateSystem {
     }
     
     /// 重新创建所有必要的实体
-    fn recreate_entities(world: &mut World, spawn_x: f32, spawn_y: f32, screen_width: f32, screen_height: f32) {
+    fn recreate_entities(
+        world: &mut World, 
+        spawn_x: f32, 
+        spawn_y: f32, 
+        screen_width: f32, 
+        screen_height: f32,
+        camera_pos: Position,
+        camera_zoom: f32,
+    ) {
         use crate::ecs::components::{CameraMode, MouseInput};
         
-        // 创建相机实体
+        // 创建相机实体 - 使用保存的相机位置和缩放
         world.spawn((
-            Position { x: spawn_x, y: spawn_y },
+            camera_pos,
             Camera {
-                zoom: 1.0,
+                zoom: camera_zoom,
                 screen_width,
                 screen_height,
             },
