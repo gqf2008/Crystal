@@ -147,7 +147,7 @@ impl MockNetwork {
                 let _ = response_tx.send(GameEvent::StartGame { delay: 500 });
 
                 // 加载地图并发送 MapChanged 事件
-                Self::load_and_send_map(&response_tx, "Map/0.map", 0, "比奇城");
+                Self::load_and_send_map(&response_tx, "Map/n0.map", 0, "盟重土城");
 
                 // 模拟玩家信息
                 let _ = response_tx.send(GameEvent::UserInformation {
