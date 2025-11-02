@@ -455,9 +455,11 @@ impl System for PlayerControlSystem {
            world.network().send(command).ok();
         }
 
-        // 处理本地玩家的命令
-        for (_entity, (_, player_input, player)) in
-            world.query_mut::<(&LocalPlayer, &mut PlayerInput, &mut Player)>()
+        // 处理本地玩家的命令（需要同时访问 Path 和 MovementVelocity）
+        use crate::ecs::components::movement::{Path, MovementVelocity};
+        
+        for (_entity, (_, player_input, player, path, velocity)) in
+            world.query_mut::<(&LocalPlayer, &mut PlayerInput, &mut Player, &mut Path, &mut MovementVelocity)>()
         {
             // 清除上一帧的输入
             player_input.clear();
@@ -471,6 +473,22 @@ impl System for PlayerControlSystem {
                 let (world_x, world_y) =
                     Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera);
 
+                // 转换为格子坐标
+                let target_grid_x = (world_x / 48.0).round() as i32;
+                let target_grid_y = (world_y / 32.0).round() as i32;
+
+                // 🆕 设置路径（目前简单的单点路径，后续可以接入 A* 寻路）
+                path.set_path(vec![(target_grid_x, target_grid_y)]);
+                
+                // 设置速度（让 MovementSystem 自动处理方向，这里只设置 max_speed）
+                if is_running && player.can_run {
+                    velocity.max_speed = velocity.run_speed;
+                    player.action = PlayerAction::Run;
+                } else {
+                    velocity.max_speed = velocity.walk_speed;
+                    player.action = PlayerAction::Walk;
+                }
+
                 // 写入移动命令
                 player_input.set_move((world_x, world_y), is_running);
 
@@ -479,17 +497,10 @@ impl System for PlayerControlSystem {
                 player.target_y = world_y;
                 player.is_moving = true;
                 player.move_mode = MoveMode::AutoPathfinding;
-                player.action = if is_running && player.can_run {
-                    PlayerAction::Run
-                } else {
-                    PlayerAction::Walk
-                };
 
                 tracing::info!(
-                    "🖱️ 双击移动（寻路）: 世界坐标({:.1}, {:.1}), 跑步={}",
-                    world_x,
-                    world_y,
-                    is_running
+                    "🖱️ 双击移动（寻路）: 网格({}, {}), 像素({:.1}, {:.1}), 跑步={}",
+                    target_grid_x, target_grid_y, world_x, world_y, is_running
                 );
             }
             // 检测长按 → 跟随命令（不使用寻路）
@@ -501,6 +512,22 @@ impl System for PlayerControlSystem {
                 let (world_x, world_y) =
                     Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera);
 
+                // 转换为格子坐标
+                let target_grid_x = (world_x / 48.0).round() as i32;
+                let target_grid_y = (world_y / 32.0).round() as i32;
+
+                // 🆕 设置路径（长按直接设置目标点）
+                path.set_path(vec![(target_grid_x, target_grid_y)]);
+                
+                // 设置速度（让 MovementSystem 自动处理方向，这里只设置 max_speed）
+                if is_running && player.can_run {
+                    velocity.max_speed = velocity.run_speed;
+                    player.action = PlayerAction::Run;
+                } else {
+                    velocity.max_speed = velocity.walk_speed;
+                    player.action = PlayerAction::Walk;
+                }
+
                 // 写入跟随命令
                 player_input.set_follow((world_x, world_y), is_running);
 
@@ -509,18 +536,13 @@ impl System for PlayerControlSystem {
                 player.target_y = world_y;
                 player.is_moving = true;
                 player.move_mode = MoveMode::DirectFollow;
-                player.action = if is_running && player.can_run {
-                    PlayerAction::Run
-                } else {
-                    PlayerAction::Walk
-                };
-
-                tracing::info!(
-                    "🖱️ 长按跟随: 世界坐标({:.1}, {:.1}), 跑步={}",
-                    world_x,
-                    world_y,
-                    is_running
-                );
+            }
+            // 没有输入时，如果路径已完成，切换到站立
+            else if !path.is_valid || velocity.magnitude() < 0.1 {
+                player.is_moving = false;
+                player.action = PlayerAction::Stand;
+                player.move_mode = MoveMode::Idle;
+                velocity.stop();
             }
         }
 

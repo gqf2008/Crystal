@@ -149,6 +149,11 @@ impl HybridSystem for DebugSystem {
                 if config.show_obstacles {
                     Self::draw_obstacles(ctx, canvas, world, &camera, &pos)?;
                 }
+                
+                // 绘制路径 (P键切换)
+                if config.show_path {
+                    Self::draw_paths(ctx, canvas, world, &camera, &pos)?;
+                }
             }
         }
 
@@ -394,6 +399,98 @@ impl DebugSystem {
     }
 
     /// 处理调试相关的键盘按键
+    /// 绘制角色路径（用于调试寻路）
+    fn draw_paths(
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        world: &hecs::World,
+        camera: &Camera,
+        camera_pos: &Position,
+    ) -> GameResult {
+        use crate::ecs::components::{Path, Position as EntityPosition, LocalPlayer};
+        use crate::ecs::{CELL_HEIGHT, CELL_WIDTH};
+        use ggez::graphics::{Color, Mesh, DrawMode, DrawParam};
+
+        // 只绘制本地玩家的路径
+        for (_, (_, path, pos)) in world.query::<(&LocalPlayer, &Path, &EntityPosition)>().iter() {
+            if !path.is_valid || path.waypoints.is_empty() {
+                continue;
+            }
+
+            // 转换世界坐标到屏幕坐标
+            let world_to_screen = |wx: f32, wy: f32| -> [f32; 2] {
+                let screen_x = (wx - camera_pos.x) * camera.zoom + camera.screen_width / 2.0;
+                let screen_y = (wy - camera_pos.y) * camera.zoom + camera.screen_height / 2.0;
+                [screen_x, screen_y]
+            };
+
+            // 网格坐标到世界坐标 (网格中心点)
+            let grid_to_world = |gx: i32, gy: i32| -> (f32, f32) {
+                let wx = (gx * CELL_WIDTH) as f32 + CELL_WIDTH as f32 / 2.0;
+                let wy = (gy * CELL_HEIGHT) as f32 + CELL_HEIGHT as f32 / 2.0;
+                (wx, wy)
+            };
+
+            // 1. 绘制从当前位置到第一个路径点的黄色线段
+            if let Some(&first_waypoint) = path.waypoints.first() {
+                let (target_wx, target_wy) = grid_to_world(first_waypoint.0, first_waypoint.1);
+                let start_screen = world_to_screen(pos.x, pos.y);
+                let end_screen = world_to_screen(target_wx, target_wy);
+
+                let line = Mesh::new_line(
+                    ctx,
+                    &[start_screen, end_screen],
+                    2.0 * camera.zoom,
+                    Color::from_rgb(255, 255, 0), // 黄色
+                )?;
+                canvas.draw(&line, DrawParam::default());
+            }
+
+            // 2. 绘制路径点之间的青色线段
+            for i in 0..path.waypoints.len().saturating_sub(1) {
+                let (wx1, wy1) = grid_to_world(path.waypoints[i].0, path.waypoints[i].1);
+                let (wx2, wy2) = grid_to_world(path.waypoints[i + 1].0, path.waypoints[i + 1].1);
+
+                let start_screen = world_to_screen(wx1, wy1);
+                let end_screen = world_to_screen(wx2, wy2);
+
+                let line = Mesh::new_line(
+                    ctx,
+                    &[start_screen, end_screen],
+                    2.0 * camera.zoom,
+                    Color::from_rgb(0, 255, 255), // 青色
+                )?;
+                canvas.draw(&line, DrawParam::default());
+            }
+
+            // 3. 绘制路径点标记
+            for (i, &(gx, gy)) in path.waypoints.iter().enumerate() {
+                let (wx, wy) = grid_to_world(gx, gy);
+                let screen_pos = world_to_screen(wx, wy);
+
+                // 第一个路径点（当前目标）用红色大圆
+                let (color, radius) = if i == 0 {
+                    (Color::from_rgb(255, 0, 0), 6.0 * camera.zoom)
+                } else {
+                    // 后续路径点用黄色小圆
+                    (Color::from_rgb(255, 255, 0), 3.0 * camera.zoom)
+                };
+
+                let circle = Mesh::new_circle(
+                    ctx,
+                    DrawMode::fill(),
+                    [0.0, 0.0],
+                    radius,
+                    0.5,
+                    color,
+                )?;
+                canvas.draw(&circle, DrawParam::default().dest(screen_pos));
+            }
+        }
+
+        Ok(())
+    }
+
     fn handle_keycode(world: &mut hecs::World, keycode: KeyCode) {
         // M键需要特殊处理，因为它会借用整个 world
         if keycode == KeyCode::KeyM {

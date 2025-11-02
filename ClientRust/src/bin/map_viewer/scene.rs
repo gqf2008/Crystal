@@ -19,12 +19,13 @@ use std::time::Instant;
 
 use mir2_client::ecs::components::{
     Camera, CameraMode, Draggable, MouseInput, Position, RenderConfig, 
-    TimeTracker, VisibleArea,
+    TimeTracker, VisibleArea, GlobalEvents, PlayerInput,
 };
 use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::{
     AnimationSystem, CameraSystem, MovementSystem, SystemScheduler,
 };
+use mir2_client::ecs::systems::logic::PlayerControlSystem;
 use mir2_client::graphics::libraries::initialize_all_libraries;
 
 /// 地图查看器场景
@@ -130,7 +131,7 @@ impl MapViewerScene {
 
     /// 创建系统调度器（只包含必要的系统）
     fn create_system_scheduler() -> SystemScheduler {
-        use mir2_client::ecs::render::{MapRenderSystem, DebugSystem};
+        use mir2_client::ecs::render::{MapRenderSystem, CharacterRenderSystem, DebugSystem};
         use mir2_client::ecs::systems::logic::{CameraFollowSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem};
         
         let mut scheduler = SystemScheduler::new();
@@ -139,6 +140,7 @@ impl MapViewerScene {
 
         // 添加逻辑系统
         scheduler
+            .add_system(PlayerControlSystem::new())  // 🆕 玩家控制系统（优先级110） - 处理玩家输入
             .add_system(MovementSystem)              // 移动系统
             .add_system(AnimationSystem::new())      // 角色动画系统
             .add_system(TileAnimationSystem::new())  // 瓦片动画系统
@@ -147,6 +149,7 @@ impl MapViewerScene {
             .add_system(CameraSystem::new())         // 相机系统（拖拽、缩放）→ 从 GlobalEvents 读取鼠标事件
             .add_system(CameraFollowSystem)          // 相机跟随
             .add_system(MapRenderSystem)             // 地图渲染系统
+            .add_system(CharacterRenderSystem)       // 角色渲染系统
             .add_system(DebugSystem);                // 调试系统（键盘快捷键、FPS显示）→ 从 GlobalEvents 读取
 
         tracing::info!("✅ 地图查看器系统初始化完成！");
@@ -174,7 +177,7 @@ impl MapViewerScene {
                 screen_width,
                 screen_height,
             },
-            CameraMode::Manual,  // 地图查看器使用手动模式
+            CameraMode::FollowPlayer,  // 🎯 改为跟随玩家模式
             Draggable {
                 is_dragging: false,
                 drag_start_x: 0.0,
@@ -216,6 +219,9 @@ impl MapViewerScene {
         // 可见区域缓存实体
         world.spawn((VisibleArea::default(),));
 
+        // 🆕 全局事件实体（由 Scene 写入输入事件，各系统读取）
+        world.spawn((GlobalEvents::new(),));
+
         // 鼠标输入状态实体（由鼠标输入系统修改）
         world.spawn((MouseInput {
             left_pressed: false,
@@ -238,6 +244,63 @@ impl MapViewerScene {
             current_map_title: "比奇城".to_string(),
             is_loading: false,
         },));
+
+        // 🆕 创建测试玩家
+        use mir2_client::ecs::components::{Player, PlayerAppearance, PlayerAction, LocalPlayer};
+        use mir2_client::ecs::components::CELL_WIDTH;
+        use mir2_client::ecs::components::movement::{MovementVelocity, Path};
+        use mir2_shared::enums::{MirClass, MirGender};
+        
+        let player_entity = world.spawn((
+            // 位置：盟重土城传送点（已知的安全位置）
+            Position {
+                x: (332 * 48) as f32,  // 传送点 X - 盟重土城中心传送点位置
+                y: (327 * 32) as f32,  // 传送点 Y
+            },
+            // 🆕 移动速度组件（MovementSystem 需要）
+            MovementVelocity::new(200.0),  // 200像素/秒的移动速度
+            // 🆕 路径组件（MovementSystem 需要）
+            Path::new(),
+            // 玩家状态
+            Player {
+                direction: 0,  // 朝向下
+                action: PlayerAction::Stand,
+                frame_index: 0,
+                frame_time: 0,
+                speed: 5.0,
+                target_x: 0.0,
+                target_y: 0.0,
+                is_moving: false,
+                path: Vec::new(),
+                path_index: 0,
+                move_mode: mir2_client::ecs::components::MoveMode::Idle,
+                last_move_time: Instant::now(),
+                move_delay: std::time::Duration::from_millis(600),
+                waiting_server_confirm: false,
+                collision_detected: false,
+                collision_target_grid: None,
+                can_run: false,
+                last_run_time: Instant::now(),
+                run_cooldown: std::time::Duration::from_millis(900),
+            },
+            // 玩家外观
+            PlayerAppearance {
+                class: MirClass::Warrior,
+                gender: MirGender::Male,
+                hair: 0,
+                weapon: -1,  // 无武器
+                armour: 0,
+                weapon_effect: 0,
+                wing_effect: 0,
+            },
+            // 🆕 玩家输入组件（由 PlayerControlSystem 写入）
+            PlayerInput::default(),
+            // 本地玩家标记
+            LocalPlayer,
+        ));
+
+        tracing::info!("🎮 已创建测试玩家实体: entity={:?}, grid=(332, 327), pixel=({}, {})", 
+            player_entity, 332 * 48, 327 * 32);
 
         self.initialized = true;
         tracing::info!("✅ MapViewerScene World 初始化完成");

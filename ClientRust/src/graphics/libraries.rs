@@ -1065,6 +1065,15 @@ impl Libraries {
             ""
         )?;
         
+        // 🆕 Character Human Effects (人物特效 - 包括角色身体动画)
+        println!("🧍 初始化 CHumEffect 库...");
+        self.init_library_from_directory(
+            LibraryArray::CHumEffect,
+            "CHumEffect",
+            "00",
+            ""
+        )?;
+        
         tracing::info!("✓ 游戏内容库初始化完成");
         
         Ok(())
