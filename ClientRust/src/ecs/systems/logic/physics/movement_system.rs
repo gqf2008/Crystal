@@ -18,7 +18,7 @@
 
 use hecs::World;
 use ggez::GameResult;
-use crate::ecs::components::{Position, movement::{MovementVelocity, Path}};
+use crate::ecs::components::{Position, movement::{MovementVelocity, Path}, Player, player::PlayerAction};
 use crate::ecs::systems::{System, priority};
 
 /// 移动系统 - 实现格子对齐的移动逻辑
@@ -29,20 +29,64 @@ const CELL_WIDTH: f32 = 48.0;
 const CELL_HEIGHT: f32 = 32.0;
 const ARRIVAL_THRESHOLD: f32 = 5.0; // 到达阈值(像素)
 
+impl MovementSystem {
+    /// 根据移动向量计算8方向
+    /// 
+    /// C# 参考: MapObject.PointToDirection()
+    /// ```
+    ///     7  0  1
+    ///      \ | /
+    ///    6 - · - 2
+    ///      / | \
+    ///     5  4  3
+    /// ```
+    fn calculate_direction(dx: f32, dy: f32) -> u8 {
+        if dx.abs() < 0.01 && dy.abs() < 0.01 {
+            return 0; // 静止，保持当前方向
+        }
+        
+        let angle = dy.atan2(dx).to_degrees();
+        
+        // 将角度转换为0-360度
+        let normalized_angle = if angle < 0.0 {
+            angle + 360.0
+        } else {
+            angle
+        };
+        
+        // 8方向划分 (每个方向45度)
+        // 0度 = 东 (右), 90度 = 南 (下), 180度 = 西 (左), 270度 = 北 (上)
+        match normalized_angle as i32 {
+            337..=360 | 0..=22 => 2,   // 东 (右)
+            23..=67 => 3,               // 东南
+            68..=112 => 4,              // 南 (下)
+            113..=157 => 5,             // 西南
+            158..=202 => 6,             // 西 (左)
+            203..=247 => 7,             // 西北
+            248..=292 => 0,             // 北 (上)
+            293..=336 => 1,             // 东北
+            _ => 0,
+        }
+    }
+}
+
 impl System for MovementSystem {
     fn priority(&self) -> u32 {
         priority::MOVEMENT
     }
 
     fn update(&mut self, world: &mut World, delay_time: f32) -> GameResult {
-        // 方案1: 路径跟随移动 (有Path组件的实体)
-        for (_, (position, velocity, path)) in world.query_mut::<(
+        // 🎯 处理有Player组件的实体（玩家、NPC等）
+        for (_, (position, velocity, path, player)) in world.query_mut::<(
             &mut Position,
             &mut MovementVelocity,
             &mut Path,
+            &mut Player,
         )>() {
             if !path.is_valid {
                 velocity.stop();
+                player.action = PlayerAction::Stand;
+                player.is_moving = false;
                 continue;
             }
 
@@ -66,15 +110,30 @@ impl System for MovementSystem {
                     if !path.advance() {
                         // 路径结束,停止移动
                         velocity.stop();
+                        player.action = PlayerAction::Stand;
+                        player.is_moving = false;
                     }
                 } else {
-                    // 设置速度方向 (归一化)
-                    let speed = if velocity.magnitude() > velocity.run_speed * 0.9 {
+                    // 🎯 计算8方向
+                    player.direction = Self::calculate_direction(dx, dy);
+                    
+                    // 🎯 根据速度判断走/跑
+                    let is_running = velocity.max_speed > velocity.walk_speed * 1.5;
+                    let speed = if is_running {
                         velocity.run_speed
                     } else {
                         velocity.walk_speed
                     };
                     
+                    // 🎯 设置动作状态
+                    player.action = if is_running {
+                        PlayerAction::Run
+                    } else {
+                        PlayerAction::Walk
+                    };
+                    player.is_moving = true;
+                    
+                    // 设置速度方向 (归一化)
                     velocity.set(
                         (dx / distance) * speed,
                         (dy / distance) * speed
@@ -87,20 +146,55 @@ impl System for MovementSystem {
             }
         }
 
-        // 方案2: 直接速度移动 (简单处理,不检查Path)
-        // 注意: 如果实体同时有Path,会被上面的循环处理,这里跳过
-        for (_, (position, velocity)) in world.query_mut::<(
+        // 🎯 处理没有Player组件的通用实体（怪物、道具等）
+        // 先收集所有有Player组件的实体ID
+        let player_entities: Vec<_> = world.query::<&Player>()
+            .iter()
+            .map(|(entity, _)| entity)
+            .collect();
+        
+        for (entity, (position, velocity, path)) in world.query_mut::<(
             &mut Position,
-            &MovementVelocity,
+            &mut MovementVelocity,
+            &mut Path,
         )>() {
-            // 如果速度很小,认为是静止状态,跳过
-            if velocity.magnitude() < 0.1 {
+            // 跳过已经有Player组件的实体（避免重复处理）
+            if player_entities.contains(&entity) {
                 continue;
             }
             
-            // 应用速度 (这会影响所有有速度的实体,包括有Path的)
-            // 实际上Path的处理已经在上面完成,这里会重复
-            // 为了避免重复,我们简化为只处理有Path的情况
+            if !path.is_valid {
+                velocity.stop();
+                continue;
+            }
+
+            if let Some(target) = path.current_waypoint() {
+                let target_x = target.0 as f32 * CELL_WIDTH;
+                let target_y = target.1 as f32 * CELL_HEIGHT;
+
+                let dx = target_x - position.x;
+                let dy = target_y - position.y;
+                let distance = (dx * dx + dy * dy).sqrt();
+
+                if distance < ARRIVAL_THRESHOLD {
+                    position.x = target_x;
+                    position.y = target_y;
+                    
+                    if !path.advance() {
+                        velocity.stop();
+                    }
+                } else {
+                    let speed = velocity.max_speed;
+                    
+                    velocity.set(
+                        (dx / distance) * speed,
+                        (dy / distance) * speed
+                    );
+
+                    position.x += velocity.x * delay_time;
+                    position.y += velocity.y * delay_time;
+                }
+            }
         }
 
         Ok(())

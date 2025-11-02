@@ -12,10 +12,12 @@
 use std::time::Instant;
 
 /// 默认走路速度（像素/秒）
-pub const DEFAULT_WALK_SPEED: f32 = 100.0;
+/// 参考：传奇2中走路速度约为 1格/0.5秒 = 48px/0.5s = 96px/s
+pub const DEFAULT_WALK_SPEED: f32 = 96.0;
 
 /// 默认跑步速度（像素/秒）
-pub const DEFAULT_RUN_SPEED: f32 = 180.0;
+/// 参考：传奇2中跑步速度约为走路的1.5倍 = 144px/s
+pub const DEFAULT_RUN_SPEED: f32 = 144.0;
 
 /// 默认最大速度（像素/秒）
 pub const DEFAULT_MAX_SPEED: f32 = 300.0;
