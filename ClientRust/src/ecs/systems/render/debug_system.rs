@@ -62,10 +62,47 @@ impl HybridSystem for DebugSystem {
             break;
         }
 
+        // 读取图层显示状态
+        let mut layer_status = String::from("Layers: ");
+        let mut show_back = true;
+        let mut show_middle = true;
+        let mut show_front = true;
+        let mut show_obstacles = false;
+        let mut show_grid = false;
+        let mut show_borders = false;
+        
+        for (_, config) in world.query::<&RenderConfig>().iter() {
+            show_back = config.show_back;
+            show_middle = config.show_middle;
+            show_front = config.show_front;
+            show_obstacles = config.show_obstacles;
+            show_grid = config.show_grid;
+            show_borders = config.show_borders;
+            
+            // 构建图层状态字符串
+            let mut layers = Vec::new();
+            if show_back { layers.push("B"); } else { layers.push("b"); }
+            if show_middle { layers.push("M"); } else { layers.push("m"); }
+            if show_front { layers.push("F"); } else { layers.push("f"); }
+            layer_status = format!("Layers: {} (1/2/3)", layers.join(" "));
+            break;
+        }
+
+        // 构建调试选项状态
+        let mut debug_options = Vec::new();
+        if show_grid { debug_options.push("Grid"); }
+        if show_borders { debug_options.push("Border"); }
+        if show_obstacles { debug_options.push("Obstacle"); }
+        let debug_status = if debug_options.is_empty() {
+            String::from("Debug: None")
+        } else {
+            format!("Debug: {}", debug_options.join(", "))
+        };
+
         // 2. 构建调试文本
         let debug_text = format!(
-            "FPS: {:.1}\nCamera: ({:.0}, {:.0})\nZoom: {:.2}x\nEntities: {}",
-            fps, camera_pos.0, camera_pos.1, camera_zoom, entity_count
+            "FPS: {:.1}\nCamera: ({:.0}, {:.0})\nZoom: {:.2}x\nEntities: {}\n{}\n{}",
+            fps, camera_pos.0, camera_pos.1, camera_zoom, entity_count, layer_status, debug_status
         );
 
         // 3. 绘制调试文本（左上角，黑色背景，白色文字）
@@ -73,11 +110,11 @@ impl HybridSystem for DebugSystem {
             text: debug_text,
             color: Some(Color::WHITE),
             font: None,
-            scale: Some(ggez::graphics::PxScale::from(24.0)),  // 从 16.0 增大到 24.0
+            scale: Some(ggez::graphics::PxScale::from(20.0)),
         });
 
         // 绘制半透明黑色背景
-        let bg_rect = ggez::graphics::Rect::new(5.0, 5.0, 250.0, 100.0);  // 调整背景大小
+        let bg_rect = ggez::graphics::Rect::new(5.0, 5.0, 350.0, 160.0);  // 调整背景大小以容纳更多信息
         let bg_mesh = ggez::graphics::Mesh::new_rectangle(
             ctx,
             ggez::graphics::DrawMode::fill(),
@@ -106,6 +143,11 @@ impl HybridSystem for DebugSystem {
                 // 绘制瓦片边框
                 if config.show_borders {
                     Self::draw_tile_borders(ctx, canvas, world, &camera, &pos, &config)?;
+                }
+
+                // 绘制障碍物
+                if config.show_obstacles {
+                    Self::draw_obstacles(ctx, canvas, world, &camera, &pos)?;
                 }
             }
         }
@@ -260,6 +302,90 @@ impl DebugSystem {
                     )?;
 
                     canvas.draw(&border_mesh, DrawParam::default());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 绘制障碍物格子（暗红色半透明）
+    fn draw_obstacles(
+        ctx: &mut ggez::Context,
+        canvas: &mut ggez::graphics::Canvas,
+        world: &hecs::World,
+        camera: &Camera,
+        camera_pos: &Position,
+    ) -> GameResult {
+        use crate::ecs::{CELL_HEIGHT, CELL_WIDTH};
+        use crate::ecs::components::MapData;
+        use ggez::graphics::{Color, Mesh, DrawMode, DrawParam};
+
+        // 障碍物颜色：暗红色半透明
+        let obstacle_color = Color::from_rgba(180, 0, 0, 120);
+
+        // 计算视口范围
+        let half_width = (camera.screen_width / 2.0) / camera.zoom;
+        let half_height = (camera.screen_height / 2.0) / camera.zoom;
+        let view_left = camera_pos.x - half_width;
+        let view_right = camera_pos.x + half_width;
+        let view_top = camera_pos.y - half_height;
+        let view_bottom = camera_pos.y + half_height;
+
+        // 计算格子范围
+        let start_x = (view_left / CELL_WIDTH as f32).floor() as i32;
+        let end_x = (view_right / CELL_WIDTH as f32).ceil() as i32;
+        let start_y = (view_top / CELL_HEIGHT as f32).floor() as i32;
+        let end_y = (view_bottom / CELL_HEIGHT as f32).ceil() as i32;
+
+        // 获取地图数据
+        for (_, map) in world.query::<&MapData>().iter() {
+            for grid_y in start_y..=end_y {
+                for grid_x in start_x..=end_x {
+                    // 边界检查
+                    if grid_x < 0 || grid_y < 0 || grid_x >= map.width || grid_y >= map.height {
+                        continue;
+                    }
+
+                    // 获取单元格 (cells 是 Vec<Vec<CellInfo>>)
+                    if grid_x as usize >= map.cells.len() {
+                        continue;
+                    }
+                    if grid_y as usize >= map.cells[grid_x as usize].len() {
+                        continue;
+                    }
+
+                    let cell = &map.cells[grid_x as usize][grid_y as usize];
+
+                    // 检查是否有障碍物标记 (back_image 的第 29 位)
+                    let has_obstacle = (cell.back_image & 0x20000000) != 0;
+                    
+                    if has_obstacle {
+                        // 计算世界坐标（向上偏移一个网格）
+                        let world_x = (grid_x * CELL_WIDTH) as f32;
+                        let world_y = ((grid_y - 1) * CELL_HEIGHT) as f32;
+
+                        // 转换到屏幕坐标
+                        let screen_x = (world_x - camera_pos.x) * camera.zoom + camera.screen_width / 2.0;
+                        let screen_y = (world_y - camera_pos.y) * camera.zoom + camera.screen_height / 2.0;
+
+                        // 绘制半透明矩形
+                        let rect = ggez::graphics::Rect::new(
+                            screen_x,
+                            screen_y,
+                            CELL_WIDTH as f32 * camera.zoom,
+                            CELL_HEIGHT as f32 * camera.zoom,
+                        );
+
+                        let mesh = Mesh::new_rectangle(
+                            ctx,
+                            DrawMode::fill(),
+                            rect,
+                            obstacle_color,
+                        )?;
+
+                        canvas.draw(&mesh, DrawParam::default());
+                    }
                 }
             }
         }
