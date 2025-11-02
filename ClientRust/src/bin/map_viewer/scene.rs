@@ -56,7 +56,7 @@ impl MapViewerScene {
         println!("========================================");
         println!("\n📋 操作说明：");
         println!("  • ESC      - 退出程序");
-        println!("  • 1/2/3    - 切换 Back/Middle/Front 层");
+        println!("  • 1/2/3    - 切换 Front/Middle/Back 层 (前景/中间/背景)");
         println!("  • G        - 切换网格显示");
         println!("  • O        - 切换障碍物显示");
         println!("  • B        - 切换边框显示");
