@@ -70,7 +70,9 @@ pub struct RenderConfig {
     pub show_front: bool,
     pub show_grid: bool,
     pub show_obstacles: bool,
-    pub show_animations: bool,
+    pub show_animations: bool,        // 是否播放动画
+    pub show_static_tiles: bool,      // 是否显示静态瓦片
+    pub show_animated_tiles: bool,    // 是否显示动画瓦片
     pub show_borders: bool,
     pub show_npc_borders: bool,      // NPC边框调试
     pub show_monster_borders: bool,  // Monster边框调试
@@ -90,6 +92,8 @@ impl Default for RenderConfig {
             show_grid: false,
             show_obstacles: false,
             show_animations: true,
+            show_static_tiles: true,      // 默认显示静态瓦片
+            show_animated_tiles: true,    // 默认显示动画瓦片
             show_borders: false,
             show_npc_borders: false,
             show_monster_borders: false,

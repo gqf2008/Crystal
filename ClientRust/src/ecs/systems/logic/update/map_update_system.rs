@@ -210,6 +210,8 @@ impl MapUpdateSystem {
             show_grid: false,
             show_obstacles: false,
             show_animations: true,
+            show_static_tiles: true,
+            show_animated_tiles: true,
             show_borders: false,
             show_npc_borders: false,
             show_monster_borders: false,

@@ -63,6 +63,8 @@ impl MapViewerScene {
         println!("  • B        - 切换边框显示");
         println!("  • P        - 切换路径显示");
         println!("  • A        - 切换动画播放");
+        println!("  • S        - 切换静态瓦片显示");
+        println!("  • D        - 切换动画瓦片显示");
         println!("  • L        - 切换 LOD");
         println!("  • F9       - 切换怪物边框");
         println!("  • F10      - 切换 NPC 边框");
@@ -106,6 +108,8 @@ impl MapViewerScene {
             show_grid: false,
             show_obstacles: false,
             show_animations: true,
+            show_static_tiles: true,
+            show_animated_tiles: true,
             show_borders: false,
             show_npc_borders: false,
             show_monster_borders: false,
@@ -197,6 +201,8 @@ impl MapViewerScene {
             show_grid: false,
             show_obstacles: false,
             show_animations: true,
+            show_static_tiles: true,
+            show_animated_tiles: true,
             show_borders: false,
             show_npc_borders: false,
             show_monster_borders: false,

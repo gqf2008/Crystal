@@ -71,16 +71,18 @@ impl DrawSystem for MapRenderSystem {
             // 先收集所有有动画的瓦片实体（避免重复绘制）
             use crate::ecs::components::AnimatedTile;
             let mut animated_entities = std::collections::HashSet::new();
-            for (entity, (tile, _)) in world.query::<(&MapTile, &AnimatedTile)>().iter().filter(|(_, (t, _))| matches!(t.layer, layer)) {
+            let current_layer = *layer;  // 解引用以便在 filter 中使用
+            for (entity, (tile, _)) in world.query::<(&MapTile, &AnimatedTile)>().iter().filter(|(_, (t, _))| t.layer == current_layer) {
                 animated_entities.insert(entity);
             }
             
             // 静态瓦片（排除有动画的）
-            for (entity, tile) in world.query::<&MapTile>().iter().filter(|(_, t)| matches!(t.layer, layer)) {
-                // 如果这个实体有动画，跳过（稍后在动画瓦片部分绘制）
-                if animated_entities.contains(&entity) {
-                    continue;
-                }
+            if config.show_static_tiles {  // ✅ 静态瓦片开关
+                for (entity, tile) in world.query::<&MapTile>().iter().filter(|(_, t)| t.layer == current_layer) {
+                    // 如果这个实体有动画，跳过（稍后在动画瓦片部分绘制）
+                    if animated_entities.contains(&entity) {
+                        continue;
+                    }
                 
                 // 计算瓦片的世界坐标
                 let world_x = (tile.grid_x * CELL_WIDTH) as f32;
@@ -95,40 +97,47 @@ impl DrawSystem for MapRenderSystem {
                     continue;
                 }
                 
-                tiles_to_draw.push((
-                    tile.grid_x,
-                    tile.grid_y,
-                    tile.library_index,
-                    tile.image_index as usize,
-                    false,  // 不是动画瓦片
-                    tile.use_blend,
-                ));
-            }
+                    tiles_to_draw.push((
+                        tile.grid_x,
+                        tile.grid_y,
+                        tile.library_index,
+                        tile.image_index as usize,
+                        false,  // 不是动画瓦片
+                        tile.use_blend,
+                    ));
+                }
+            }  // ✅ 静态瓦片 if 块结束
             
             // 动画瓦片（使用 AnimatedTile 计算当前帧）
-            for (_, (tile, anim)) in world.query::<(&MapTile, &AnimatedTile)>().iter().filter(|(_, (t, _))| matches!(t.layer, layer)) {
-                let world_x = (tile.grid_x * CELL_WIDTH) as f32;
-                let world_y = (tile.grid_y * CELL_HEIGHT) as f32;
-                
-                // 使用与静态瓦片相同的视口裁剪规则
-                if world_x > view_right + 200.0
-                    || world_x < view_left - 200.0
-                    || world_y > view_bottom + bottom_extra
-                    || world_y < view_top - 200.0
-                {
-                    continue;
+            // ✅ 动画瓦片开关（独立于 show_animations 播放控制）
+            if config.show_animated_tiles {
+                // 根据 config.show_animations 决定是否播放动画（暂停时仍显示第一帧）
+                if config.show_animations {
+                    for (_, (tile, anim)) in world.query::<(&MapTile, &AnimatedTile)>().iter().filter(|(_, (t, _))| t.layer == current_layer) {
+                        let world_x = (tile.grid_x * CELL_WIDTH) as f32;
+                        let world_y = (tile.grid_y * CELL_HEIGHT) as f32;
+                        
+                        // 使用与静态瓦片相同的视口裁剪规则
+                        if world_x > view_right + 200.0
+                            || world_x < view_left - 200.0
+                            || world_y > view_bottom + bottom_extra
+                            || world_y < view_top - 200.0
+                        {
+                            continue;
+                        }
+                        
+                        // 计算当前帧（简化版本，实际应该由 AnimationSystem 更新）
+                        // 这里临时使用基础图像索引
+                        tiles_to_draw.push((
+                            tile.grid_x,
+                            tile.grid_y,
+                            tile.library_index,
+                            tile.image_index as usize,  // 应该根据动画帧计算
+                            true,  // 是动画瓦片
+                            tile.use_blend,
+                        ));
+                    }
                 }
-                
-                // 计算当前帧（简化版本，实际应该由 AnimationSystem 更新）
-                // 这里临时使用基础图像索引
-                tiles_to_draw.push((
-                    tile.grid_x,
-                    tile.grid_y,
-                    tile.library_index,
-                    tile.image_index as usize,  // 应该根据动画帧计算
-                    true,  // 是动画瓦片
-                    tile.use_blend,
-                ));
             }
             
             // 渲染该层的瓦片
@@ -147,24 +156,82 @@ impl DrawSystem for MapRenderSystem {
                                 let world_x = (grid_x * CELL_WIDTH) as f32;
                                 let world_y = (grid_y * CELL_HEIGHT) as f32;
                                 
-                                // 关键：图像 UV 坐标在左下角！
-                                // 需要将图像左下角对齐到网格坐标
+                                // MapEditor 渲染逻辑 (Main.cs:785-1030)
                                 // 
-                                // 规则：
-                                // - Back/Middle 层：永远不使用 info.x/y 偏移
-                                // - Front 层：如果该格子有动画（is_anim），使用 info.x/y 偏移
-                                let (adjusted_x, adjusted_y) = if matches!(layer, TileLayer::Front) && is_anim {
-                                    // Front 层有动画：使用 info 偏移
-                                    (world_x + info.x as f32, world_y - tile_h as f32 + info.y as f32)
+                                // Back层 (line 971-993):
+                                //   永远: drawY = Y * CellHeight
+                                //
+                                // Middle层 (line 919-970):
+                                //   - 标准尺寸: drawY = Y * CellHeight
+                                //   - 非标准尺寸: drawY = (Y+1) * CellHeight - Height
+                                //
+                                // Front层 (line 785-876):
+                                //   - 标准尺寸: drawY = Y * CellHeight
+                                //   - 非标准尺寸 + 无动画: drawY = (Y+1) * CellHeight - Height
+                                //   - 非标准尺寸 + 动画 + 混合 + 新地图库(100-199): drawY = (Y+1) * CellHeight - 3*CellHeight
+                                //   - 非标准尺寸 + 动画(其他情况): drawY = (Y+1) * CellHeight - Height
+                                
+                                let is_standard_size = (tile_w == CELL_WIDTH as i16 && tile_h == CELL_HEIGHT as i16)
+                                    || (tile_w == CELL_WIDTH as i16 * 2 && tile_h == CELL_HEIGHT as i16 * 2);
+                                
+                                let adjusted_x = world_x;
+                                let adjusted_y = if matches!(layer, TileLayer::Back) {
+                                    // Back层: 永远直接使用Y坐标
+                                    world_y
+                                } else if is_standard_size {
+                                    // Middle层和Front层的标准尺寸: 直接使用Y坐标
+                                    world_y
                                 } else {
-                                    // 其他情况：不使用偏移
-                                    (world_x, world_y - tile_h as f32)
+                                    // 非标准尺寸的偏移计算
+                                    // GameScene.cs:11967-11972 - blend 特殊处理仅用于 Front 层
+                                    if matches!(layer, TileLayer::Front) && use_blend {
+                                        // Front层 + 混合模式: 检查库索引
+                                        if lib_index == 14 || lib_index == 27 || (lib_index > 99 && lib_index < 199) {
+                                            // 特殊库: 使用 -3*CellHeight 偏移（灯光效果）
+                                            // C#: drawY - (3 * CellHeight) = (y+1)*48 - 144 = (y-2)*48
+                                            // Rust: world_y = y*48, 所以 y*48 - 2*48 = (y-2)*48
+                                            world_y - (2 * CELL_HEIGHT) as f32
+                                        } else {
+                                            // 普通混合: 使用标准非标准偏移
+                                            // C#: drawY - s.Height = (y+1)*48 - Height
+                                            // Rust: y*48 + 48 - Height
+                                            world_y + CELL_HEIGHT as f32 - tile_h as f32
+                                        }
+                                    } else {
+                                        // 非 blend 或非 Front 层: 标准非标准尺寸偏移
+                                        // C#: drawY - s.Height (MapEditor 和 Middle 层都用这个)
+                                        world_y + CELL_HEIGHT as f32 - tile_h as f32
+                                    }
+                                };
+                                
+                                // 判断是否应用图像内部偏移（基于C# GameScene.cs:11967-11980）
+                                let should_apply_offset = if matches!(layer, TileLayer::Front) {
+                                    if use_blend {
+                                        // Blend tiles: special libs (14/27/100-199) OR specific indices (2723-2732)
+                                        lib_index == 14 || lib_index == 27 || 
+                                        (lib_index > 99 && lib_index < 199) ||
+                                        (img_index >= 2723 && img_index <= 2732)
+                                    } else if lib_index == 28 {
+                                        // Lib 28: apply offset if non-empty
+                                        info.x != 0 || info.y != 0
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    // Back/Middle layers: never apply offset
+                                    false
+                                };
+
+                                let (adjusted_x_final, adjusted_y_final) = if should_apply_offset {
+                                    (adjusted_x + info.x as f32, adjusted_y + info.y as f32)
+                                } else {
+                                    (adjusted_x, adjusted_y)
                                 };
                                 
                                 // 世界坐标 -> 屏幕坐标
-                                let screen_x = (adjusted_x - camera_pos.x) * camera.zoom
+                                let screen_x = (adjusted_x_final - camera_pos.x) * camera.zoom
                                     + camera.screen_width / 2.0;
-                                let screen_y = (adjusted_y - camera_pos.y) * camera.zoom
+                                let screen_y = (adjusted_y_final - camera_pos.y) * camera.zoom
                                     + camera.screen_height / 2.0;
                                 
                                 // 🔥 如果需要混合模式（火焰等动画），使用 ADD 混合

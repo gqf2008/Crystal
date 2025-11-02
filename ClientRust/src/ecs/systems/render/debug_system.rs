@@ -447,6 +447,14 @@ impl DebugSystem {
                 config.show_animations = !config.show_animations;
                 tracing::info!("🎬 动画: {}", if config.show_animations { "播放" } else { "暂停" });
             }
+            KeyCode::KeyS => {
+                config.show_static_tiles = !config.show_static_tiles;
+                tracing::info!("🗿 静态瓦片: {}", if config.show_static_tiles { "显示" } else { "隐藏" });
+            }
+            KeyCode::KeyD => {
+                config.show_animated_tiles = !config.show_animated_tiles;
+                tracing::info!("🎞️ 动画瓦片: {}", if config.show_animated_tiles { "显示" } else { "隐藏" });
+            }
             KeyCode::KeyL => {
                 config.enable_lod = !config.enable_lod;
                 tracing::info!("🔍 LOD: {}", if config.enable_lod { "启用" } else { "禁用" });
