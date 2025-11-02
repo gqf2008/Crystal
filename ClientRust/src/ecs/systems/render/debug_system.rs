@@ -361,9 +361,9 @@ impl DebugSystem {
                     let has_obstacle = (cell.back_image & 0x20000000) != 0;
                     
                     if has_obstacle {
-                        // 计算世界坐标（向上偏移一个网格）
+                        // 计算世界坐标（与格子位置对齐）
                         let world_x = (grid_x * CELL_WIDTH) as f32;
-                        let world_y = ((grid_y - 1) * CELL_HEIGHT) as f32;
+                        let world_y = (grid_y * CELL_HEIGHT) as f32;
 
                         // 转换到屏幕坐标
                         let screen_x = (world_x - camera_pos.x) * camera.zoom + camera.screen_width / 2.0;
