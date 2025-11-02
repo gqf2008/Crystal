@@ -933,7 +933,7 @@ impl Libraries {
         self.init_library_from_directory(
             LibraryArray::CArmours,
             "CArmour",
-            "000",
+            "00",  // ✅ 修复：文件名是00.Lib而不是000.lib
             ""
         )?;
         
@@ -941,7 +941,7 @@ impl Libraries {
         self.init_library_from_directory(
             LibraryArray::CWeapons,
             "CWeapon",
-            "000",
+            "00",  // ✅ 修复：文件名是00.Lib而不是000.lib
             ""
         )?;
         
@@ -949,7 +949,7 @@ impl Libraries {
         self.init_library_from_directory(
             LibraryArray::CHair,
             "CHair",
-            "000",
+            "00",  // ✅ 修复：文件名是00.Lib而不是000.lib
             ""
         )?;
         
@@ -965,7 +965,7 @@ impl Libraries {
         self.init_library_from_directory(
             LibraryArray::AArmours,
             "AArmour",
-            "000",
+            "00",  // ✅ 修复：文件名是00.Lib
             ""
         )?;
         
@@ -989,7 +989,7 @@ impl Libraries {
         self.init_library_from_directory(
             LibraryArray::AHair,
             "AHair",
-            "000",
+            "00",  // ✅ 修复
             ""
         )?;
         
@@ -997,7 +997,7 @@ impl Libraries {
         self.init_library_from_directory(
             LibraryArray::ARArmours,
             "ARArmour",
-            "000",
+            "00",  // ✅ 修复
             ""
         )?;
         
@@ -1005,7 +1005,7 @@ impl Libraries {
         self.init_library_from_directory(
             LibraryArray::ARWeapons,
             "ARWeapon",
-            "000",
+            "00",  // ✅ 修复
             ""
         )?;
         
@@ -1013,7 +1013,7 @@ impl Libraries {
         self.init_library_from_directory(
             LibraryArray::ARHair,
             "ARHair",
-            "000",
+            "00",  // ✅ 修复
             ""
         )?;
         
