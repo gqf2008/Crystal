@@ -149,7 +149,7 @@ impl CreditsDialog {
     /// 绘制Credits对话框 (使用新的绘制系统)
     pub fn draw(
         &self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
     ) -> ggez::GameResult {
         use crate::graphics::{LibraryName, draw_sprite_at};

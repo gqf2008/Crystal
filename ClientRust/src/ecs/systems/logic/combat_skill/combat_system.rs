@@ -123,7 +123,7 @@ impl System for CombatSystem {
                 }
                 
                 // 3. 计算攻击方向（朝向目标）
-                let direction = Self::calculate_attack_direction(ctx.world, target_id);
+                let direction = Self::calculate_attack_direction(&ctx.world, target_id);
                 
                 // 4. 发送攻击命令到网络（如果网络发送器存在）
                 // TODO: 从 World 中获取 NetworkCommand sender
@@ -133,7 +133,7 @@ impl System for CombatSystem {
                 // });
                 
                 // 5. 本地预览伤害（不修改实际数据，实际伤害由服务器计算）
-                Self::calculate_local_attack_preview(ctx.world, target_id);
+                Self::calculate_local_attack_preview(&ctx.world, target_id);
                 
                 tracing::info!("⚔️ 攻击怪物: ID={}", target_id);
             }

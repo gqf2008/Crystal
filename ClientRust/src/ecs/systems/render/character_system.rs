@@ -25,7 +25,7 @@
 
 use hecs::World;
 use ggez::GameResult;
-use ggez::graphics::{Canvas, DrawParam, Color};
+use ggez::graphics::{Canvas, Color, DrawParam, GraphicsContext};
 
 use crate::ecs::GameContext;
 use crate::ecs::components::{
@@ -118,7 +118,7 @@ impl CharacterRenderSystem {
 
     /// 渲染单个角色
     fn render_character(
-        ctx: &mut GameContext,
+        ctx: &mut GraphicsContext,
         canvas: &mut Canvas,
         player: &Player,
         pos: &Position,
@@ -128,8 +128,8 @@ impl CharacterRenderSystem {
         cam_y: f32,
         zoom: f32,
     ) -> GameResult {
-        let screen_width = ctx.gfx.drawable_size().0;
-        let screen_height = ctx.gfx.drawable_size().1;
+        let screen_width = ctx.drawable_size().0;
+        let screen_height = ctx.drawable_size().1;
 
         // 计算屏幕坐标
         let (screen_x, screen_y) = Self::world_to_screen(
@@ -149,7 +149,9 @@ impl CharacterRenderSystem {
         
         // 1️⃣ 绘制身体 (CArmours库 - 盔甲/服装)
         let armour_index = appearance.armour.max(0) as usize; // 0 = 默认裸体
+        tracing::info!("🎯 尝试获取身体库: armour_index={}", armour_index);
         if let Some(body_lib) = get_library_from_array(LibraryArray::CArmours, armour_index) {
+            tracing::info!("✅ 获取到身体库锁");
             let mut body_lib = body_lib.lock().unwrap();
             
             // 应用性别偏移 (C# ArmourOffSet)
@@ -160,19 +162,28 @@ impl CharacterRenderSystem {
             };
             
             let body_frame = (frame_index + armour_offset) as usize;
+            tracing::info!("🎨 计算帧索引: frame_index={}, offset={}, body_frame={}", frame_index, armour_offset, body_frame);
             
-            if let Ok(info) = body_lib.get_or_create_texture(ctx.as_ggez_context(), body_frame) {
-                let draw_x = screen_x - (info.x as f32) * zoom;
-                let draw_y = screen_y - (info.y as f32) * zoom;
-                
-                if let Some(ref image) = info.image {
-                    canvas.draw(
-                        image,
-                        DrawParam::new()
-                            .dest([draw_x, draw_y])
-                            .scale([zoom, zoom])
-                            .color(color),
-                    );
+            tracing::info!("📦 尝试获取或创建纹理: body_frame={}", body_frame);
+            match body_lib.get_or_create_texture(ctx, body_frame) {
+                Ok(info) => {
+                    tracing::info!("✅ 成功获取纹理信息");
+                    let draw_x = screen_x - (info.x as f32) * zoom;
+                    let draw_y = screen_y - (info.y as f32) * zoom;
+                    
+                    if let Some(ref image) = info.image {
+                        canvas.draw(
+                            image,
+                            DrawParam::new()
+                                .dest([draw_x, draw_y])
+                                .scale([zoom, zoom])
+                                .color(color),
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("❌ 获取纹理失败: {:?}", e);
+                    return Ok(()); // 跳过渲染，避免崩溃
                 }
             }
         }
@@ -191,8 +202,8 @@ impl CharacterRenderSystem {
                 };
                 
                 let hair_frame = (frame_index + hair_offset) as usize;
-                
-                if let Ok(info) = hair_lib.get_or_create_texture(ctx.as_ggez_context(), hair_frame) {
+
+                if let Ok(info) = hair_lib.get_or_create_texture(ctx, hair_frame) {
                     let draw_x = screen_x - (info.x as f32) * zoom;
                     let draw_y = screen_y - (info.y as f32) * zoom;
                     
@@ -230,12 +241,14 @@ impl CharacterRenderSystem {
 
 // 实现 DrawSystem trait
 impl crate::ecs::systems::DrawSystem for CharacterRenderSystem {
-    fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
-        let world = &ctx.world;
+    fn draw(&mut self, ctx: &mut GraphicsContext, canvas: &mut Canvas, world: &hecs::World) -> GameResult {
+        tracing::info!("👤 CharacterRenderSystem::draw() 开始");
         // 获取相机变换
         let Some((cam_x, cam_y, zoom)) = Self::get_camera_transform(world) else {
+            tracing::info!("⏭️  CharacterRenderSystem: 没有相机，跳过渲染");
             return Ok(());
         };
+        tracing::info!("✅ CharacterRenderSystem: 有相机，继续渲染");
 
         // 获取时间追踪器
         let time_tracker = {

@@ -139,7 +139,7 @@ impl CharacterSelect {
 
 impl CharacterSelect {
     /// 绘制整个角色选择界面
-    pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas, button_group: &ButtonGroup) -> GameResult {
+    pub fn draw(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas, button_group: &ButtonGroup) -> GameResult {
         // 1. 绘制背景和标题
         self.draw_background(ctx, canvas)?;
         
@@ -159,7 +159,7 @@ impl CharacterSelect {
     }
     
     /// 绘制背景和标题
-    fn draw_background(&self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    fn draw_background(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         // 1. 绘制背景 Prguse_65
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
             if let Ok(mut lib) = lib_arc.try_lock() {
@@ -192,7 +192,7 @@ impl CharacterSelect {
     }
     
     /// 绘制角色槽位列表 (右侧垂直布局)
-    fn draw_character_slots(&self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    fn draw_character_slots(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         // C# 代码中的原始位置: (637, 194), (637, 298), (637, 402), (637, 506)
         let character_button_positions = [
             (637.0, 194.0),
@@ -240,7 +240,7 @@ impl CharacterSelect {
     
     /// 绘制单个角色的信息文本
     fn draw_character_info(
-        _ctx: &mut Context,
+        _ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut Canvas,
         character: &SelectInfo,
         slot_x: f32,
@@ -283,7 +283,7 @@ impl CharacterSelect {
     /// 绘制选中角色的预览动画 (左侧中央)
     fn draw_character_preview(
         &self,
-        ctx: &mut Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut Canvas,
         character: &SelectInfo,
     ) -> GameResult {
@@ -333,7 +333,7 @@ impl CharacterSelect {
     
     /// 绘制最后登录时间
     fn draw_last_access(
-        ctx: &mut Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut Canvas,
         character: &SelectInfo,
     ) -> GameResult {
@@ -363,7 +363,7 @@ impl CharacterSelect {
     
     /// 绘制底部按钮
     pub fn draw_bottom_buttons(
-        ctx: &mut Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut Canvas,
         button_group: &ButtonGroup,
     ) -> GameResult {
@@ -390,7 +390,7 @@ impl CharacterSelect {
     
     /// 绘制按钮工具提示
     pub fn draw_button_tooltips(
-        ctx: &mut Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut Canvas,
         button_group: &ButtonGroup,
     ) -> GameResult {
@@ -460,3 +460,4 @@ impl CharacterSelect {
         None
     }
 }
+

@@ -394,11 +394,13 @@ impl ChangePasswordDialog {
         ChangePasswordAction::None
     }
     
-    pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> anyhow::Result<()> {
+    pub fn draw(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> anyhow::Result<()> {
         if !self.visible { return Ok(()); }
         
         // 绘制对话框背景 - C#: Index = 50, Library = Prguse
         draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 50, self.x, self.y)?;
+        
+       
         
         // 绘制所有输入框
         self.account_input.draw(ctx, canvas)?;
@@ -447,3 +449,4 @@ pub enum ChangePasswordAction {
     Cancel,
     ValidationFailed(String),
 }
+

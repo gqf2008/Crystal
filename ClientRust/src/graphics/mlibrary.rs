@@ -154,7 +154,7 @@ impl ImageInfo {
     /// - 如果has_mask为true，会读取第二层图像数据
     pub fn create_texture<R: std::io::Read + Seek>(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         reader: &mut R,
     ) -> Result<(), std::io::Error> {
         // 读取主图像的压缩数据
@@ -191,7 +191,7 @@ impl ImageInfo {
             reader.read_exact(&mut mask_compressed)?;
 
             // 解压遮罩层（使用主图像的宽高，因为C#代码中遮罩使用Width/Height）
-            let mut mask_data = Self::decompress_image(&mask_compressed, self.width, self.height)?;
+            let mask_data = Self::decompress_image(&mask_compressed, self.width, self.height)?;
             
             // 🔧 黑色背景透明化
            // Self::bgra_to_transparent(&mut mask_data);
@@ -655,7 +655,7 @@ impl MLibrary {
     /// - ✅ 自动缓存纹理，重复调用零开销
     pub fn get_or_create_texture(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         index: usize,
     ) -> io::Result<&ImageInfo> {
         // 检查索引范围
@@ -868,7 +868,7 @@ impl MLibrary {
     /// - 然后调用 `ImageInfo::get_true_size()` 计算实际边界
     pub fn get_true_size(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         index: usize,
     ) -> io::Result<(i16, i16)> {
         // 检查索引范围
@@ -907,13 +907,13 @@ impl MLibrary {
     /// ```
     pub fn draw(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
         y: f32,
     ) -> io::Result<()> {
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let (screen_width, screen_height) = ctx.drawable_size();
         // 屏幕裁剪检查
         if x >= screen_width || y >= screen_height {
             return Ok(());
@@ -952,7 +952,7 @@ impl MLibrary {
     /// ```
     pub fn draw_with_color(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
@@ -964,7 +964,7 @@ impl MLibrary {
         // canvas.screen_coordinates() 返回当前设置的逻辑坐标系 (如 1024×768)
         let screen_rect = canvas.screen_coordinates().unwrap_or_else(|| {
             // 如果没有设置,使用物理像素作为回退
-            let (w, h) = ctx.gfx.drawable_size();
+            let (w, h) = ctx.drawable_size();
             ggez::graphics::Rect::new(0.0, 0.0, w, h)
         });
         let (screen_width, screen_height) = (screen_rect.w, screen_rect.h);
@@ -1035,7 +1035,7 @@ impl MLibrary {
     /// 带缩放的绘制 - 支持摄像机缩放
     pub fn draw_with_scale(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
@@ -1086,7 +1086,7 @@ impl MLibrary {
     /// ```
     pub fn draw_with_opacity(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
@@ -1095,7 +1095,7 @@ impl MLibrary {
         offset: bool,
         opacity: f32,
     ) -> io::Result<()> {
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let (screen_width, screen_height) = ctx.drawable_size();
 
         // 获取或创建纹理
         let info = self.get_or_create_texture(ctx, index)?;
@@ -1152,7 +1152,7 @@ impl MLibrary {
     /// ```
     pub fn draw_blend(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
@@ -1161,7 +1161,7 @@ impl MLibrary {
         offset: bool,
         rate: f32,
     ) -> io::Result<()> {
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let (screen_width, screen_height) = ctx.drawable_size();
 
         // 获取或创建纹理
         let info = self.get_or_create_texture(ctx, index)?;
@@ -1217,7 +1217,7 @@ impl MLibrary {
     /// ```
     pub fn draw_section(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         section_x: f32,
@@ -1229,7 +1229,7 @@ impl MLibrary {
         color: ggez::graphics::Color,
         offset: bool,
     ) -> io::Result<()> {
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let (screen_width, screen_height) = ctx.drawable_size();
 
         // 获取或创建纹理
         let info = self.get_or_create_texture(ctx, index)?;
@@ -1297,7 +1297,7 @@ impl MLibrary {
     /// ```
     pub fn draw_section_with_opacity(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         section_x: f32,
@@ -1309,7 +1309,7 @@ impl MLibrary {
         color: ggez::graphics::Color,
         opacity: f32,
     ) -> io::Result<()> {
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let (screen_width, screen_height) = ctx.drawable_size();
 
         // 获取或创建纹理
         let info = self.get_or_create_texture(ctx, index)?;
@@ -1377,7 +1377,7 @@ impl MLibrary {
     /// ```
     pub fn draw_scaled(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
@@ -1386,7 +1386,7 @@ impl MLibrary {
         height: f32,
         color: ggez::graphics::Color,
     ) -> io::Result<()> {
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let (screen_width, screen_height) = ctx.drawable_size();
 
         // 获取或创建纹理
         let info = self.get_or_create_texture(ctx, index)?;
@@ -1433,7 +1433,7 @@ impl MLibrary {
     /// ```
     pub fn draw_tinted(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
@@ -1442,7 +1442,7 @@ impl MLibrary {
         tint: ggez::graphics::Color,
         offset: bool,
     ) -> io::Result<()> {
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let (screen_width, screen_height) = ctx.drawable_size();
 
         // 获取或创建纹理
         let info = self.get_or_create_texture(ctx, index)?;
@@ -1502,13 +1502,13 @@ impl MLibrary {
     /// ```
     pub fn draw_up(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
         y: f32,
     ) -> io::Result<()> {
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let (screen_width, screen_height) = ctx.drawable_size();
 
         // 屏幕裁剪检查
         if x >= screen_width {
@@ -1559,13 +1559,13 @@ impl MLibrary {
     /// ```
     pub fn draw_up_blend(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         index: usize,
         x: f32,
         y: f32,
     ) -> io::Result<()> {
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let (screen_width, screen_height) = ctx.drawable_size();
 
         // 获取或创建纹理
         let info = self.get_or_create_texture(ctx, index)?;
@@ -1612,7 +1612,7 @@ impl MLibrary {
     /// ```
     pub fn visible_pixel(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut ggez::graphics::GraphicsContext,
         index: usize,
         x: i32,
         y: i32,
@@ -1886,3 +1886,5 @@ mod tests {
         assert_eq!(open_index, 1040); // 1000 + 4 * 10
     }
 }
+
+

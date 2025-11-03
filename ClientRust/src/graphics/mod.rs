@@ -29,7 +29,7 @@ pub use libraries::get_all_map_libraries;
 
 /// 简单的精灵绘制辅助函数
 pub fn draw_sprite_at(
-    ctx: &mut ggez::Context,
+    ctx: &mut ggez::graphics::GraphicsContext,
     canvas: &mut ggez::graphics::Canvas,
     library_name: &LibraryName,
     index: i32,
@@ -54,7 +54,7 @@ pub fn draw_sprite_at(
 /// 带偏移量的精灵绘制辅助函数（使用纹理自带的偏移量）
 /// UseOffSet = true 时使用此函数
 pub fn draw_sprite_with_offset(
-    ctx: &mut ggez::Context,
+    ctx: &mut ggez::graphics::GraphicsContext,
     canvas: &mut ggez::graphics::Canvas,
     library_name: &LibraryName,
     index: i32,
@@ -81,7 +81,7 @@ pub fn draw_sprite_with_offset(
 
 /// 带缩放的精灵绘制辅助函数
 pub fn draw_sprite_scaled(
-    ctx: &mut ggez::Context,
+    ctx: &mut ggez::graphics::GraphicsContext,
     canvas: &mut ggez::graphics::Canvas,
     library_name: &LibraryName,
     index: i32,
@@ -113,7 +113,7 @@ pub fn draw_sprite_scaled(
 /// 带混合效果的精灵绘制辅助函数（对应 C# 的 DrawBlend）
 /// 使用 alpha blending 和指定的混合率
 pub fn draw_sprite_blend(
-    ctx: &mut ggez::Context,
+    ctx: &mut ggez::graphics::GraphicsContext,
     canvas: &mut ggez::graphics::Canvas,
     library_name: &LibraryName,
     index: i32,
@@ -131,4 +131,5 @@ pub fn draw_sprite_blend(
     }
     Ok(())
 }
+
 

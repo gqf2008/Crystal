@@ -1,6 +1,6 @@
 //! 文本输入框组件
 
-use ggez::{Context, graphics::{Canvas, Color, DrawMode, Rect, Mesh, Text, PxScale}};
+use ggez::{Context, graphics::{Canvas, Color, DrawMode, GraphicsContext, Mesh, PxScale, Rect, Text}};
 
 #[derive(Debug, Clone)]
 pub struct TextInput {
@@ -60,7 +60,7 @@ impl TextInput {
         }
     }
     
-    pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> anyhow::Result<()> {
+    pub fn draw(&self, ctx: &mut GraphicsContext, canvas: &mut Canvas) -> anyhow::Result<()> {
         if !self.visible { return Ok(()); }
         let rect = Rect::new(self.x, self.y, self.width, self.height);
         

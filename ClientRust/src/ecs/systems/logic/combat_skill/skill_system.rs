@@ -132,7 +132,7 @@ impl System for SkillSystem {
             }
 
             // 3. 获取目标信息
-            let (direction, target_id, location) = Self::get_target_info(ctx.world);
+            let (direction, target_id, location) = Self::get_target_info(&ctx.world);
 
             // 4. 发送施法命令到网络（如果网络发送器存在）
             // TODO: 从 World 中获取 NetworkCommand sender

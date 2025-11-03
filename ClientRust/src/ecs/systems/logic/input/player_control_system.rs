@@ -211,10 +211,10 @@ impl System for PlayerControlSystem {
     }
 
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
-        // ✅ 零拷贝：直接访问 ggez Context
-        let mouse_left_pressed = ctx.ctx.mouse.button_pressed(MouseButton::Left);
-        let mouse_right_pressed = ctx.ctx.mouse.button_pressed(MouseButton::Right);
-        let mouse_pos = ctx.ctx.mouse.position();
+        // ✅ 零拷贝：直接访问 GameContext
+        let mouse_left_pressed = ctx.mouse.button_pressed(MouseButton::Left);
+        let mouse_right_pressed = ctx.mouse.button_pressed(MouseButton::Right);
+        let mouse_pos = ctx.mouse.position();
 
         // 更新鼠标位置 (Point2 使用 .x, .y 访问)
         let mouse_pos_tuple = (mouse_pos.x, mouse_pos.y);
@@ -280,7 +280,7 @@ impl System for PlayerControlSystem {
             ));
 
         // 处理双击（移动到目标，使用寻路）
-        let double_click_pos = if let Some((screen_x, screen_y)) =
+        let double_click_left = if let Some((screen_x, screen_y)) =
             self.detect_double_click(MouseButton::Left)
         {
             Some(Self::screen_to_world(
@@ -293,9 +293,36 @@ impl System for PlayerControlSystem {
             None
         };
 
-        // 处理长按（连续移动，直接跑动）
-        let long_press_pos =
+        let double_click_right = if let Some((screen_x, screen_y)) =
+            self.detect_double_click(MouseButton::Right)
+        {
+            Some(Self::screen_to_world(
+                screen_x,
+                screen_y,
+                &camera_pos,
+                &camera,
+            ))
+        } else {
+            None
+        };
+
+        // 处理长按（连续移动）
+        // 左键长按 = 走路
+        let long_press_left =
             if let Some((screen_x, screen_y)) = self.detect_long_press(MouseButton::Left) {
+                Some(Self::screen_to_world(
+                    screen_x,
+                    screen_y,
+                    &camera_pos,
+                    &camera,
+                ))
+            } else {
+                None
+            };
+
+        // 右键长按 = 跑步
+        let long_press_right =
+            if let Some((screen_x, screen_y)) = self.detect_long_press(MouseButton::Right) {
                 Some(Self::screen_to_world(
                     screen_x,
                     screen_y,
@@ -312,20 +339,36 @@ impl System for PlayerControlSystem {
             .query_mut::<(&mut PlayerInput, &Player, &LocalPlayer)>()
             .into_iter()
         {
-            // 应用双击移动（自动寻路）
-            if let Some((world_x, world_y)) = double_click_pos {
+            // 应用左键双击移动（走路 + 寻路）
+            if let Some((world_x, world_y)) = double_click_left {
                 player_input.move_to = Some((world_x, world_y));
                 player_input.is_running = false;
                 player_input.use_pathfinding = true;
-                tracing::debug!("🚶 双击移动到 ({:.1}, {:.1}) [寻路]", world_x, world_y);
+                tracing::debug!("🚶 左键双击走路到 ({:.1}, {:.1}) [寻路]", world_x, world_y);
             }
 
-            // 应用长按跟随（直接移动）
-            if let Some((world_x, world_y)) = long_press_pos {
+            // 应用右键双击移动（跑步 + 寻路）
+            if let Some((world_x, world_y)) = double_click_right {
+                player_input.move_to = Some((world_x, world_y));
+                player_input.is_running = true;
+                player_input.use_pathfinding = true;
+                tracing::debug!("🏃 右键双击跑步到 ({:.1}, {:.1}) [寻路]", world_x, world_y);
+            }
+
+            // 应用左键长按跟随（走路 + 直接移动）
+            if let Some((world_x, world_y)) = long_press_left {
+                player_input.move_to = Some((world_x, world_y));
+                player_input.is_running = false;
+                player_input.use_pathfinding = false;
+                tracing::debug!("🚶 左键长按走路到 ({:.1}, {:.1}) [直接]", world_x, world_y);
+            }
+
+            // 应用右键长按跟随（跑步 + 直接移动）
+            if let Some((world_x, world_y)) = long_press_right {
                 player_input.move_to = Some((world_x, world_y));
                 player_input.is_running = true;
                 player_input.use_pathfinding = false;
-                tracing::debug!("🏃 长按跑动到 ({:.1}, {:.1}) [直接]", world_x, world_y);
+                tracing::debug!("🏃 右键长按跑步到 ({:.1}, {:.1}) [直接]", world_x, world_y);
             }
         }
 

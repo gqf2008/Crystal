@@ -295,12 +295,12 @@ impl InventoryDialog {
     /// 
     /// 参数:
     /// - z_index: 绘制层级(越大越靠前), 默认为 50
-    pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    pub fn draw(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         self.draw_with_z(ctx, canvas, 50)
     }
     
     /// 绘制背包对话框(带 z-index 参数)
-    pub fn draw_with_z(&self, ctx: &mut Context, canvas: &mut Canvas, z_index: i32) -> GameResult {
+    pub fn draw_with_z(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas, z_index: i32) -> GameResult {
         if !self.visible {
             return Ok(());
         }
@@ -452,3 +452,4 @@ pub enum InventoryAction {
     /// 结束拖拽 (from_slot, to_slot)
     EndDrag { from: usize, to: Option<usize> },
 }
+

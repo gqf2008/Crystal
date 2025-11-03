@@ -1,5 +1,5 @@
 use crate::ecs::{Coord, systems::DrawSystem};
-use ggez::GameResult;
+use ggez::{GameResult, graphics::GraphicsContext};
 
 
 pub struct UIRenderSystem;
@@ -7,9 +7,9 @@ pub struct UIRenderSystem;
 impl DrawSystem for UIRenderSystem {
     fn draw(
         &mut self,
-        ctx: &mut ggez::Context,
+        _ctx: &mut GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
+        _world: &hecs::World,
     ) -> GameResult {
         
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(

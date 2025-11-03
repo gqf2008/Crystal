@@ -58,6 +58,9 @@ pub struct SelectScene {
     // UI state (保留用于对话框)
     hovered_button: Option<BottomButton>, // TODO: 可以删除,由 ButtonGroup 管理
     pressed_button: Option<BottomButton>, // TODO: 可以删除,由 ButtonGroup 管理
+
+    // ✅ 性能优化：缓存常用实体 ID，避免每次查询 World (O(1) vs O(n))
+    character_list_entity: Option<hecs::Entity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +168,7 @@ impl SelectScene {
             bottom_buttons, // 🆕 使用 ButtonGroup
             hovered_button: None,
             pressed_button: None,
+            character_list_entity: None, // ✅ 延迟初始化，在首次查询时缓存
         }
     }
 
@@ -198,8 +202,8 @@ impl SelectScene {
         }
     }
 
-    fn window_to_design_coords(&self, ctx: &Context, window_x: f32, window_y: f32) -> (f32, f32) {
-        let (window_width, window_height) = ctx.gfx.drawable_size();
+    fn window_to_design_coords(&self, game_ctx: &GameContext, window_x: f32, window_y: f32) -> (f32, f32) {
+        let (window_width, window_height) = game_ctx.drawable_size();
         // 计算4:3视口
         let aspect_ratio = 4.0 / 3.0;
         let current_ratio = window_width / window_height;
@@ -284,14 +288,14 @@ impl Scene for SelectScene {
             self.handle_network_event(game_ctx);
             // ✅ Step 2: 在借用释放后修改 World
             if should_select {
-                self.select_character(0, game_ctx.world);
+                self.select_character(0, &mut game_ctx.world);
                 tracing::info!("🎯 默认选中第一个角色: {}", first_name.unwrap());
             }
         }
 
       
 
-        let delta = game_ctx.ctx.time.delta().as_secs_f32();
+        let delta = game_ctx.time.delta().as_secs_f32();
 
         // 更新 NewCharacterDialog 动画和计时器
         if let Some(dialog) = &mut self.new_character_dialog {
@@ -323,7 +327,7 @@ impl Scene for SelectScene {
                         if self.character_select_ui.get_selected_character().is_some() {
                             let mut input_box =
                                 InputBox::new("Please enter the character's name.".to_string());
-                            input_box.show(game_ctx.ctx); // ✅ 传入 ctx 启用 IME
+                            input_box.show(game_ctx.as_ggez_context()); // ✅ 传入 ctx 启用 IME
                             self.input_box = Some(input_box);
                         }
                     }
@@ -364,12 +368,12 @@ impl Scene for SelectScene {
                 }
 
                 // ✅ 关闭输入框时禁用 IME
-                input_box.hide(game_ctx.ctx);
+                input_box.hide(game_ctx.as_ggez_context());
                 self.input_box = None;
             } else if input_box.cancelled {
                 tracing::info!("❌ 输入框取消");
                 // ✅ 关闭输入框时禁用 IME
-                input_box.hide(game_ctx.ctx);
+                input_box.hide(game_ctx.as_ggez_context());
                 self.input_box = None;
             }
         }
@@ -392,12 +396,12 @@ impl Scene for SelectScene {
 
         // 🆕 使用 CharacterSelect 组件绘制主界面
         self.character_select_ui
-            .draw(ctx.ctx, canvas, &self.bottom_buttons)?;
+            .draw(&mut ctx.gfx, canvas, &self.bottom_buttons)?;
 
         // TODO: 8. 绘制 NewCharacterDialog (最上层)
         if let Some(ref mut dialog) = self.new_character_dialog {
             if dialog.visible {
-                dialog.draw(ctx.ctx, canvas)?;
+                dialog.draw(&mut ctx.gfx, canvas)?;
             }
         }
 
@@ -407,18 +411,18 @@ impl Scene for SelectScene {
         // 10. 🆕 绘制 CreditsDialog (最上层)
         if let Some(ref dialog) = self.credits_dialog {
             if dialog.visible {
-                let _ = dialog.draw(ctx.ctx, canvas);
+                let _ = dialog.draw(&mut ctx.gfx, canvas);
             }
         }
 
         // 11. 🆕 绘制消息框 (最上层)
         if let Some(ref message_box) = self.message_box {
-            let _ = message_box.draw(ctx.ctx, canvas); // 使用正确的 MessageBox
+            let _ = message_box.draw(&mut ctx.gfx, canvas); // 使用正确的 MessageBox
         }
 
         // 12. 🆕 绘制输入框 (最上层)
         if let Some(ref mut input_box) = self.input_box {
-            input_box.draw(ctx.ctx, canvas)?;
+            input_box.draw(&mut ctx.gfx, canvas)?;
         }
 
         Ok(())

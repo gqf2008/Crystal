@@ -15,12 +15,12 @@
 
 use anyhow::Result;
 use ggez::{
-    conf::{NumSamples, WindowMode, WindowSetup},
-    ContextBuilder,
+    conf::{Conf, NumSamples, WindowMode, WindowSetup},
+    filesystem::Filesystem,
 };
 
-use mir2_client::ecs::runtime::ClientRuntime;
-use mir2_client::ecs::{ime_handler, GameState};
+use mir2_client::ecs::{game_context::GameContextBuilder, runtime::ClientRuntime};
+use mir2_client::ecs::{ime_handler, GameContext, GameState};
 
 fn main() -> Result<()> {
     println!("\n========================================");
@@ -44,7 +44,7 @@ fn main() -> Result<()> {
         tracing::info!("✅ [mir2x.rs] 图像库初始化成功");
     }
 
-    // 5. 创建 ggez Context (从配置读取窗口尺寸，但强制调整为4:3比例)
+    // 5. 创建 GameContext (从配置读取窗口尺寸，但强制调整为4:3比例)
     let resolution = settings.resolution();
     tracing::info!(
         "🎨 请求的窗口分辨率: {}x{}",
@@ -55,7 +55,9 @@ fn main() -> Result<()> {
     let initial_width = resolution.width as f32;
     let initial_height = (initial_width * 3.0 / 4.0).round(); // 强制4:3比例
 
-    let (mut ctx, event_loop) = ContextBuilder::new("mir2x", "Crystal")
+    // 创建 Filesystem (使用与 ContextBuilder 相同的参数)
+    let settings_clone = settings.clone();
+    let (mut ctx, event_loop) = GameContextBuilder::new("mir2x", "Crystal")
         .window_setup(
             WindowSetup::default()
                 .title(&format!(
@@ -63,7 +65,7 @@ fn main() -> Result<()> {
                     settings.launcher.server_name
                 ))
                 .samples(NumSamples::Four) // 4x MSAA
-                .vsync(true), // 开启垂直同步，锁定 60 FPS
+                .vsync(true),
         )
         .window_mode(
             WindowMode::default()
@@ -74,21 +76,21 @@ fn main() -> Result<()> {
                 .maximized(false)
                 .resize_on_scale_factor_change(true),
         )
+        .with_font(
+            "resources/font/AlibabaPuHuiTi-3-55-Regular.ttf",
+            "AlibabaPuHuiTi",
+        )
+        .with_settings(settings_clone)
         .build()?;
-    let (w, h) = ctx.gfx.drawable_size();
+
+    let (w, h) = ctx.drawable_size();
     tracing::info!("🎨 实际创建的窗口分辨率: {}x{}", w, h);
 
-    // 6. 添加中文字体支持 (使用 ClientRuntime 统一路径)
-    ClientRuntime::load_font_to_context(
-        &mut ctx,
-        "resources/font/AlibabaPuHuiTi-3-55-Regular.ttf",
-        "AlibabaPuHuiTi",
-    )?;
-    // 8. 创建游戏应用 (传入配置和 runtime，像 CrystalGame 一样)
-    let game = GameState::new(&mut ctx, settings)?;
+    // 8. 创建游戏应用
+    let game = GameState::new(&mut ctx)?;
 
     // 9. 运行自定义事件循环 (完整支持 IME)
     tracing::info!("启动自定义事件循环 (IME 支持)");
-    ime_handler::run_with_ime(ctx, event_loop, game)?;
+    ime_handler::run(ctx, event_loop, game)?;
     Ok(())
 }

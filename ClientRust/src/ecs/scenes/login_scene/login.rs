@@ -200,7 +200,7 @@ impl LoginDialog {
         }
     }
     
-    pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> anyhow::Result<()> {
+    pub fn draw(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> anyhow::Result<()> {
         if !self.visible { return Ok(()); }
         
         // 1. 绘制对话框背景 (Prguse:1084 - 328x220纹理)
@@ -216,10 +216,12 @@ impl LoginDialog {
         draw_sprite_at(ctx, canvas, &LibraryName::Title, 32, 
                       self.x + Self::OFFSET_PASSWORD_LABEL_X, self.y + Self::OFFSET_PASSWORD_LABEL_Y)?;
         
+       
+        
         // 3. 绘制输入框
         self.account_input.draw(ctx, canvas)?;
         self.password_input.draw(ctx, canvas)?;
-        
+    
         // 4. 绘制按钮
         self.ok_button.draw(ctx, canvas)?;
         self.new_account_button.draw(ctx, canvas)?;
@@ -233,3 +235,4 @@ impl LoginDialog {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogAction { None, Login, OpenNewAccount, OpenChangePassword, OpenViewKey, Exit }
+

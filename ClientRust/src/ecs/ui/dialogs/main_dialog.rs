@@ -257,7 +257,7 @@ impl MainDialog {
     }
     
     /// 绘制主界面
-    pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    pub fn draw(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         // 使用从图像库获取的真实尺寸 (与C#的Size属性一致)
         let dialog_x = (self.screen_width - self.dialog_width) / 2.0;
         let dialog_y = self.screen_height - self.dialog_height;
@@ -385,7 +385,7 @@ impl MainDialog {
     }
     
     /// 绘制生命球（使用Prguse_4双球或Prguse_6单球纹理）
-    fn draw_health_orb(&self, ctx: &mut Context, canvas: &mut Canvas, x: f32, y: f32) -> GameResult {
+    fn draw_health_orb(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas, x: f32, y: f32) -> GameResult {
         let health_percent = self.health / 100.0;
         let hp_only = self.level < 26;  // 26级以下只显示生命
         
@@ -416,7 +416,7 @@ impl MainDialog {
     }
     
     /// 绘制魔法球（只在26级以上且不是HP-only时绘制）
-    fn draw_mana_orb(&self, ctx: &mut Context, canvas: &mut Canvas, x: f32, y: f32) -> GameResult {
+    fn draw_mana_orb(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas, x: f32, y: f32) -> GameResult {
         if self.level < 26 {
             return Ok(());  // 26级以下不显示魔法
         }
@@ -445,7 +445,7 @@ impl MainDialog {
     }
     
     /// 绘制经验条
-    fn draw_experience_bar(&self, ctx: &mut Context, canvas: &mut Canvas, x: f32, y: f32) -> GameResult {
+    fn draw_experience_bar(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas, x: f32, y: f32) -> GameResult {
         let exp_percent = self.experience / 100.0;
         let bar_width = 85.0 * exp_percent;
         
@@ -461,7 +461,7 @@ impl MainDialog {
     }
     
     /// 绘制负重条
-    fn draw_weight_bar(&self, ctx: &mut Context, canvas: &mut Canvas, x: f32, y: f32) -> GameResult {
+    fn draw_weight_bar(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas, x: f32, y: f32) -> GameResult {
         let weight_percent = self.weight.0 as f32 / self.weight.1 as f32;
         let bar_width = 90.0 * weight_percent;
         
@@ -485,7 +485,7 @@ impl MainDialog {
     }
     
     /// 绘制标签文字
-    fn draw_labels(&self, ctx: &mut Context, canvas: &mut Canvas, dialog_x: f32, dialog_y: f32) -> GameResult {
+    fn draw_labels(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas, dialog_x: f32, dialog_y: f32) -> GameResult {
         // 等级标签 (左上角)
         let level_text = format!("Lv.{}", self.level);
         let mut text = Text::new(&level_text);
@@ -536,7 +536,7 @@ impl MainDialog {
     }
     
     /// 绘制工具提示
-    fn draw_tooltip(&self, ctx: &mut Context, canvas: &mut Canvas, text: &str, x: f32, y: f32) -> GameResult {
+    fn draw_tooltip(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas, text: &str, x: f32, y: f32) -> GameResult {
         let mut tooltip = Text::new(text);
         tooltip.set_font("AlibabaPuHuiTi");
         tooltip.set_scale(14.0);
@@ -574,3 +574,4 @@ pub enum MainDialogButton {
     Menu,        // 菜单
     GameShop,    // 商城
 }
+

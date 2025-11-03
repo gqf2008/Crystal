@@ -13,20 +13,26 @@
 // ============================================================================
 
 use ggez::graphics::Canvas;
-use ggez::{Context, GameResult};
+use ggez::GameResult;
 use hecs::{Entity, World};
-use std::time::Instant;
-
+use mir2_client::ecs::components::movement::{MovementVelocity, Path};
+use mir2_client::ecs::components::MoveMode;
 use mir2_client::ecs::components::{
     Camera, CameraMode, Draggable, MouseInput, PlayerInput, Position, RenderConfig, TimeTracker,
     VisibleArea,
 };
+use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance};
+use mir2_client::ecs::render::{CharacterRenderSystem, DebugSystem, MapRenderSystem};
 use mir2_client::ecs::scenes::{Scene, SceneType};
+use mir2_client::ecs::systems::logic::map_load_system::MapManager;
+use mir2_client::ecs::systems::logic::{
+    CameraFollowSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem,
+};
 use mir2_client::ecs::systems::{AnimationSystem, MovementSystem, SystemScheduler};
-use mir2_client::ecs::GameContext;
-// use mir2_client::ecs::systems::logic::PlayerControlSystem; // 已废弃
+use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem};
 use mir2_client::graphics::libraries::initialize_all_libraries;
-
+use mir2_shared::enums::{MirClass, MirGender};
+use std::time::Instant;
 /// 地图查看器场景
 ///
 /// 职责：
@@ -78,7 +84,7 @@ impl MapViewerScene {
     }
 
     /// 创建新的地图查看器场景
-    pub fn new(_ctx: &mut Context) -> GameResult<Self> {
+    pub fn new(_ctx: &mut GameContext) -> GameResult<Self> {
         // 打印帮助信息
         Self::print_help();
 
@@ -129,11 +135,6 @@ impl MapViewerScene {
 
     /// 创建系统调度器（只包含必要的系统 - V1旧版）
     fn create_system_scheduler() -> SystemScheduler {
-        use mir2_client::ecs::render::{CharacterRenderSystem, MapRenderSystem};
-        use mir2_client::ecs::systems::logic::{
-            CameraFollowSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem,
-        };
-
         let mut scheduler = SystemScheduler::new();
 
         tracing::info!("🎯 初始化地图查看器系统 (V1)...");
@@ -141,16 +142,17 @@ impl MapViewerScene {
         // 添加逻辑系统 (V1)
         scheduler
             // PlayerControlSystem 迁移到 V2
+            .add_system(PlayerControlSystem::new())
             .add_system(MovementSystem) // 移动系统
             .add_system(AnimationSystem::new()) // 角色动画系统
             .add_system(TileAnimationSystem::new()) // 瓦片动画系统
             .add_system(MapUpdateSystem::new()) // 地图更新系统 (M键切换地图)
             .add_system(MapLoadSystem) // 地图加载系统 → 从 GameContext 读取 MapChanged 事件
-            // CameraSystem 迁移到 V2
+            .add_system(CameraSystem::new())
             .add_system(CameraFollowSystem) // 相机跟随
             .add_system(MapRenderSystem) // 地图渲染系统
-            .add_system(CharacterRenderSystem); // 角色渲染系统
-                                                // DebugSystem 迁移到 V2
+            .add_system(CharacterRenderSystem)
+            .add_system(DebugSystem); // 角色渲染系统
 
         tracing::info!("✅ 地图查看器 V1 系统初始化完成！");
         scheduler
@@ -234,7 +236,7 @@ impl MapViewerScene {
         },));
 
         // 地图管理器组件（用于地图状态跟踪）
-        use mir2_client::ecs::systems::logic::map_load_system::MapManager;
+
         world.spawn((MapManager {
             current_map_index: 0,
             current_map_file: "0".to_string(),
@@ -243,10 +245,6 @@ impl MapViewerScene {
         },));
 
         // 🆕 创建测试玩家
-        use mir2_client::ecs::components::movement::{MovementVelocity, Path};
-        use mir2_client::ecs::components::CELL_WIDTH;
-        use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance};
-        use mir2_shared::enums::{MirClass, MirGender};
 
         let player_entity = world.spawn((
             // 位置：盟重土城传送点（已知的安全位置）
@@ -271,7 +269,7 @@ impl MapViewerScene {
                 is_moving: false,
                 path: Vec::new(),
                 path_index: 0,
-                move_mode: mir2_client::ecs::components::MoveMode::Idle,
+                move_mode: MoveMode::Idle,
                 last_move_time: Instant::now(),
                 move_delay: std::time::Duration::from_millis(600),
                 waiting_server_confirm: false,
@@ -314,18 +312,19 @@ impl Scene for MapViewerScene {
         self
     }
 
-    fn update(
-        &mut self,
-        game_ctx: &mut mir2_client::ecs::GameContext,
-    ) -> GameResult<Option<SceneType>> {
+    fn update(&mut self, ctx: &mut GameContext) -> GameResult<Option<SceneType>> {
+        tracing::info!("🔄 MapViewerScene::update() called");
+        
         // 首次更新时初始化 World
         if !self.initialized {
-            let (screen_width, screen_height) = game_ctx.ctx.gfx.drawable_size();
-            self.initialize_world(game_ctx.world, screen_width, screen_height);
+            tracing::info!("🔧 Initializing World...");
+            let (screen_width, screen_height) = ctx.drawable_size();
+            self.initialize_world(&mut ctx.world, screen_width, screen_height);
         }
 
+        tracing::info!("📊 Updating FPS stats...");
         // 更新 FPS 统计（不控制帧率）
-        if let Ok(mut time) = game_ctx.world.get::<&mut TimeTracker>(self.time_entity) {
+        if let Ok(mut time) = ctx.world.get::<&mut TimeTracker>(self.time_entity) {
             time.animation_count += 1;
             time.frame_count += 1;
 
@@ -336,15 +335,19 @@ impl Scene for MapViewerScene {
             }
         }
 
-        let dt = game_ctx.ctx.time.delta().as_secs_f32();
-        self.system_scheduler.update(game_ctx, dt)?;
+        tracing::info!("🎮 Running system scheduler update...");
+        let dt = ctx.time.delta().as_secs_f32();
+        self.system_scheduler.update(ctx, dt)?;
 
+        tracing::info!("✅ MapViewerScene::update() completed");
         Ok(None)
     }
 
-    fn draw(&mut self, game_ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
-        self.system_scheduler
-            .draw(game_ctx.ctx, canvas, game_ctx.world)?;
+    fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
+        tracing::info!("🎨 MapViewerScene::draw() called");
+         let (ctx, world) = ctx.split_gfx_world();
+        self.system_scheduler.draw(ctx, canvas, world)?;
+        tracing::info!("✅ MapViewerScene::draw() completed");
         Ok(())
     }
 }

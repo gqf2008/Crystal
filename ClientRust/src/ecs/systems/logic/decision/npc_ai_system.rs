@@ -100,7 +100,7 @@ impl System for NpcAISystem {
     }
 
     fn update(&mut self,  ctx:&mut GameContext, _delay_time: f32) -> GameResult {
-        Self::update_npc_ai(ctx.world);
+        Self::update_npc_ai(&mut ctx.world);
         Ok(())
     }
 }

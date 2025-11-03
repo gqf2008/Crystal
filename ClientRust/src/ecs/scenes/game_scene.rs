@@ -353,7 +353,8 @@ impl Scene for GameScene {
     }
 
     fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
-        self.system_scheduler.draw(ctx, canvas)?;
+        let (ctx, world) = ctx.split_gfx_world();
+        self.system_scheduler.draw(ctx, canvas, world)?;
         Ok(())
     }
 

@@ -132,7 +132,7 @@ impl InputBox {
     }
     
     /// 绘制输入框
-    pub fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    pub fn draw(&mut self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         if !self.visible {
             return Ok(());
         }
@@ -167,7 +167,6 @@ impl InputBox {
                 .color(Color::WHITE),
         );
         
-        // 绘制输入框
         let _ = self.input.draw(ctx, canvas);
         
         // 绘制 OK 按钮（Title Index=200/201）

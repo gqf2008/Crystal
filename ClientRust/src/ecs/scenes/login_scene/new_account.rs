@@ -504,11 +504,13 @@ impl NewAccountDialog {
         NewAccountAction::None
     }
     
-    pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> anyhow::Result<()> {
+    pub fn draw(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> anyhow::Result<()> {
         if !self.visible { return Ok(()); }
         
         // 绘制对话框背景 - C#原版: Index=63, Library=Prguse
         draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 63, self.x, self.y)?;
+        
+        
         
         // 绘制所有输入框(按C#原版顺序)
         self.account_input.draw(ctx, canvas)?;
@@ -574,3 +576,4 @@ pub enum NewAccountAction {
     Cancel,
     ValidationFailed(String), // 验证失败,携带错误消息
 }
+

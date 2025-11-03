@@ -55,7 +55,7 @@ impl CameraSystem {
         self.shake_intensity = intensity;
     }
 
-    /// 处理缩放
+    /// 处理缩放 - 以鼠标位置为中心进行缩放
     fn handle_zoom(
         camera: &mut Camera,
         pos: &mut Position,
@@ -70,18 +70,27 @@ impl CameraSystem {
         let old_zoom = camera.zoom;
         let zoom_speed = 0.1;
 
+        // 1. 计算缩放前鼠标指向的世界坐标（这个坐标需要保持不变）
+        let world_x_before = pos.x + (mouse_x - camera.screen_width / 2.0) / old_zoom;
+        let world_y_before = pos.y + (mouse_y - camera.screen_height / 2.0) / old_zoom;
+
+        // 2. 更新缩放值
         if scroll_y > 0.0 {
             camera.zoom = (camera.zoom + zoom_speed).min(3.0);
         } else if scroll_y < 0.0 {
             camera.zoom = (camera.zoom - zoom_speed).max(0.5);
         }
 
-        // 以鼠标位置为中心缩放
-        let center_x = mouse_x - camera.screen_width / 2.0;
-        let center_y = mouse_y - camera.screen_height / 2.0;
-
-        pos.x += center_x / old_zoom - center_x / camera.zoom;
-        pos.y += center_y / old_zoom - center_y / camera.zoom;
+        // 3. 根据新的缩放值，反推相机位置，使得鼠标仍指向 world_before
+        // 公式：world = camera + (screen - screen_center) / zoom
+        // 变换：camera = world - (screen - screen_center) / zoom
+        pos.x = world_x_before - (mouse_x - camera.screen_width / 2.0) / camera.zoom;
+        pos.y = world_y_before - (mouse_y - camera.screen_height / 2.0) / camera.zoom;
+        
+        tracing::debug!(
+            "🔍 缩放: {:.2} -> {:.2}, 鼠标世界坐标={:.1},{:.1}, 相机位置={:.1},{:.1}",
+            old_zoom, camera.zoom, world_x_before, world_y_before, pos.x, pos.y
+        );
     }
 
     /// 计算震动偏移
@@ -115,15 +124,15 @@ impl System for CameraSystem {
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         // ✅ 零拷贝方式：直接从 GameContext 访问输入
         
-        // 🖱️ 鼠标状态 - 直接从 Context 读取，零拷贝！
-        let mouse_left = ctx.ctx.mouse.button_pressed(MouseButton::Left);
-        let mouse_middle = ctx.ctx.mouse.button_pressed(MouseButton::Middle);
-        let mouse_pos = ctx.ctx.mouse.position();
+        // 🖱️ 鼠标状态 - 直接从 GameContext 读取，零拷贝！
+        let mouse_left = ctx.mouse.button_pressed(MouseButton::Left);
+        let mouse_middle = ctx.mouse.button_pressed(MouseButton::Middle);
+        let mouse_pos = ctx.mouse.position();
         
         // ⌨️ 使用 InputContext API 访问键盘和其他事件
         let ctrl_pressed = ctx.input().ctrl_pressed();
         
-        let resize_event = ctx.input_events.iter()
+        let resize_event = ctx.frame_input_events.iter()
             .find_map(|e| if let InputEvent::Resize { width, height } = e {
                 Some((*width, *height))
             } else { None });

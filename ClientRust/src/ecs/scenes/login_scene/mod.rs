@@ -1,4 +1,4 @@
-﻿//! LoginScene模块 - 简洁OOP架构
+//! LoginScene模块 - 简洁OOP架构
 mod change_password;
 mod dialog_manager;
 mod input_handler;
@@ -76,8 +76,8 @@ impl LoginScene {
     }
 
     /// 将窗口坐标转换为设计坐标系（1280x960）
-    fn window_to_design_coords(&self, ctx: &Context, window_x: f32, window_y: f32) -> (f32, f32) {
-        let (window_width, window_height) = ctx.gfx.drawable_size();
+    fn window_to_design_coords(&self, game_ctx: &GameContext, window_x: f32, window_y: f32) -> (f32, f32) {
+        let (window_width, window_height) = game_ctx.drawable_size();
         // 计算4:3视口
         let aspect_ratio = 4.0 / 3.0;
         let current_ratio = window_width / window_height;
@@ -157,7 +157,8 @@ impl Scene for LoginScene {
         self.handle_input_event(game_ctx)?;
         self.handle_network_event(game_ctx);
 
-        let dt = game_ctx.ctx.time.delta().as_secs_f32();
+        // 更新逻辑
+        let dt = game_ctx.time.delta().as_secs_f32();
         if !self.animation_paused {
             self.animation_timer += dt;
             if self.animation_timer >= 0.1 {
@@ -199,7 +200,7 @@ impl Scene for LoginScene {
 
         // 绘制背景动画(ChrSel库, 1024x768原始尺寸，直接铺满设计坐标系)
         let bg_index = self.background_frame as i32;
-        let _ = draw_sprite_at(ctx.ctx, canvas, &LibraryName::ChrSel, bg_index, 0.0, 0.0);
+        let _ = draw_sprite_at(&mut ctx.gfx, canvas, &LibraryName::ChrSel, bg_index, 0.0, 0.0);
 
         // 🆕 登录成功后播放动画时,不再绘制UI界面(只保留背景动画)
         if !self.animation_paused {
@@ -230,25 +231,26 @@ impl Scene for LoginScene {
         }
 
         // 绘制所有UI元素(在设计坐标系中)
-        let _ = self.login_dialog.draw(ctx.ctx, canvas);
+        let _ = self.login_dialog.draw(&mut ctx.gfx, canvas);
 
         if let Some(dialog) = &self.new_account_dialog {
-            let _ = dialog.draw(ctx.ctx, canvas);
+            let _ = dialog.draw(&mut ctx.gfx, canvas);
         }
 
         if let Some(dialog) = &self.change_password_dialog {
-            let _ = dialog.draw(ctx.ctx, canvas);
+            let _ = dialog.draw(&mut ctx.gfx, canvas);
         }
 
         if let Some(msg_box) = &self.message_box {
-            let _ = msg_box.draw(ctx.ctx, canvas);
+            let _ = msg_box.draw(&mut ctx.gfx, canvas);
         }
 
         // 虚拟键盘在最上层
         if let Some(keyboard) = &self.virtual_keyboard {
-            let _ = keyboard.draw(ctx.ctx, canvas);
+            let _ = keyboard.draw(&mut ctx.gfx, canvas);
         }
 
         Ok(())
     }
 }
+

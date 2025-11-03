@@ -191,7 +191,7 @@ impl System for MonsterAISystem {
     }
 
     fn update(&mut self,  ctx:&mut GameContext, _delay_time: f32) -> GameResult {
-        Self::update_ai(ctx.world);
+        Self::update_ai(&mut ctx.world);
         Ok(())
     }
 }

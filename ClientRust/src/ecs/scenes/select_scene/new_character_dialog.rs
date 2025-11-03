@@ -419,7 +419,7 @@ impl NewCharacterDialog {
     }
     
     /// 绘制对话框
-    pub fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut ggez::graphics::Canvas) -> ggez::GameResult {
+    pub fn draw(&mut self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut ggez::graphics::Canvas) -> ggez::GameResult {
         use ggez::graphics::{Color, Text, PxScale, DrawParam};
         use crate::graphics::{LibraryName, draw_sprite_at};
         
@@ -428,7 +428,8 @@ impl NewCharacterDialog {
         }
         
         // 1. 绘制对话框背景 (Prguse_73) - 不使用偏移
-        let _ = draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 73, self.x, self.y);
+        draw_sprite_at(ctx, canvas, &LibraryName::Prguse, 73, self.x, self.y)
+            .map_err(|e| ggez::GameError::CustomError(format!("{:?}", e)))?;
         
         // 2. 绘制标题 (Title_20) - 不使用偏移
         let _ = draw_sprite_at(ctx, canvas, &LibraryName::Title, 20, self.x + 206.0, self.y + 11.0);

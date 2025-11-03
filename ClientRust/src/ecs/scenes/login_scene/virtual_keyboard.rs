@@ -224,7 +224,7 @@ impl VirtualKeyboard {
     }
     
     /// 绘制虚拟键盘
-    pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> anyhow::Result<()> {
+    pub fn draw(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> anyhow::Result<()> {
         if !self.visible {
             return Ok(());
         }
@@ -262,3 +262,4 @@ pub enum VirtualKeyboardAction {
     Delete,          // 删除字符
     Input(char),     // 输入字符
 }
+

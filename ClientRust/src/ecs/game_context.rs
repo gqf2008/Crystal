@@ -22,6 +22,9 @@ use crate::{
     network::{builder::CategorizedEvents, NetContext, NetworkBuilder},
     ClientSettings,
 };
+use ggez::conf;
+use ggez::graphics::FontData;
+use ggez::input::gamepad::gilrs::ev;
 use ggez::{
     conf::Conf,
     context::{ContextFields, Has, HasMut},
@@ -31,7 +34,192 @@ use ggez::{
     timer::TimeContext,
 };
 use hecs::World;
+use std::borrow::Cow;
+use std::path;
+use std::path::Path;
+/// A builder object for creating a [`Context`](struct.Context.html).
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameContextBuilder {
+    pub(crate) game_id: String,
+    pub(crate) author: String,
+    pub(crate) conf: conf::Conf,
+    pub(crate) resources_dir_name: path::PathBuf,
+    pub(crate) resources_zip_name: path::PathBuf,
+    pub(crate) paths: Vec<path::PathBuf>,
+    pub(crate) memory_zip_files: Vec<Cow<'static, [u8]>>,
+    pub(crate) load_conf_file: bool,
+    pub(crate) font_paths: Vec<(path::PathBuf, String)>,
+    pub(crate)  settings: ClientSettings,
+}
 
+impl GameContextBuilder {
+    /// Create a new `ContextBuilder` with default settings.
+    pub fn new(game_id: &str, author: &str) -> Self {
+        Self {
+            game_id: game_id.to_string(),
+            author: author.to_string(),
+            conf: conf::Conf::default(),
+            resources_dir_name: "resources".into(),
+            resources_zip_name: "resources.zip".into(),
+            paths: vec![],
+            memory_zip_files: vec![],
+            load_conf_file: true,
+            font_paths: vec![],
+            settings: ClientSettings::default(),
+        }
+    }
+
+    /// Sets the window setup settings.
+    #[must_use]
+    pub fn window_setup(mut self, setup: conf::WindowSetup) -> Self {
+        self.conf.window_setup = setup;
+        self
+    }
+
+    /// Sets the window mode settings.
+    #[must_use]
+    pub fn window_mode(mut self, mode: conf::WindowMode) -> Self {
+        self.conf.window_mode = mode;
+        self
+    }
+
+    /// Sets the graphics backend.
+    #[must_use]
+    pub fn backend(mut self, backend: conf::Backend) -> Self {
+        self.conf.backend = backend;
+        self
+    }
+
+    /// Sets all the config options, overriding any previous
+    /// ones from [`window_setup()`](#method.window_setup),
+    /// [`window_mode()`](#method.window_mode), and
+    /// [`backend()`](#method.backend).  These are used as
+    /// defaults and are overridden by any external config
+    /// file found.
+    #[must_use]
+    pub fn default_conf(mut self, conf: conf::Conf) -> Self {
+        self.conf = conf;
+        self
+    }
+
+    /// Sets resources dir name.
+    /// Default resources dir name is `resources`.
+    #[must_use]
+    pub fn resources_dir_name(mut self, new_name: impl Into<path::PathBuf>) -> Self {
+        self.resources_dir_name = new_name.into();
+        self
+    }
+
+    /// Sets resources zip name.
+    /// Default resources dir name is `resources.zip`.
+    #[must_use]
+    pub fn resources_zip_name(mut self, new_name: impl Into<path::PathBuf>) -> Self {
+        self.resources_zip_name = new_name.into();
+        self
+    }
+
+    /// Add a new read-only filesystem path to the places to search
+    /// for resources.
+    #[must_use]
+    pub fn add_resource_path<T>(mut self, path: T) -> Self
+    where
+        T: Into<path::PathBuf>,
+    {
+        self.paths.push(path.into());
+        self
+    }
+
+    /// Add a new zip file from bytes whose contents will be searched
+    /// for resources. The zip file will be stored in-memory.
+    /// You can pass it a static slice, a `Vec` of bytes, etc.
+    ///
+    /// ```ignore
+    /// use ggez::context::ContextBuilder;
+    /// let _ = ContextBuilder::new()
+    ///     .add_zipfile_bytes(include_bytes!("../resources.zip").to_vec())
+    ///     .build();
+    /// ```
+    #[must_use]
+    pub fn add_zipfile_bytes<B>(mut self, bytes: B) -> Self
+    where
+        B: Into<Cow<'static, [u8]>>,
+    {
+        let cow = bytes.into();
+        self.memory_zip_files.push(cow);
+        self
+    }
+
+    /// Specifies whether or not to load the `conf.toml` file if it
+    /// exists and use its settings to override the provided values.
+    /// Defaults to `true` which is usually what you want, but being
+    /// able to fiddle with it is sometimes useful for debugging.
+    #[must_use]
+    pub fn with_conf_file(mut self, load_conf_file: bool) -> Self {
+        self.load_conf_file = load_conf_file;
+        self
+    }
+
+    pub fn with_font(
+        mut self,
+        font_path: impl Into<path::PathBuf>,
+        name: impl Into<String>,
+    ) -> Self {
+        self.font_paths.push((font_path.into(), name.into()));
+        self
+    }
+
+    pub fn with_settings(mut self, settings: ClientSettings) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    /// Build a `Context`
+    pub fn build(
+        self,
+    ) -> ggez::GameResult<(GameContext, ggez::winit::event_loop::EventLoop<()>)> {
+        let fs = Filesystem::new(
+            self.game_id.as_ref(),
+            self.author.as_ref(),
+            &self.resources_dir_name,
+            &self.resources_zip_name,
+        )?;
+
+        for path in &self.paths {
+            fs.mount(path, true);
+        }
+
+        for zipfile_bytes in self.memory_zip_files {
+            fs.add_zip_file(std::io::Cursor::new(zipfile_bytes))?;
+        }
+
+        let config = if self.load_conf_file {
+            fs.read_config().unwrap_or(self.conf)
+        } else {
+            self.conf
+        };
+
+        let (mut ctx, event_loop) = GameContext::builder(self.game_id, config, fs, self.settings)?;
+
+        ctx.gfx.window().set_ime_allowed(true);
+        // 1. 尝试加载指定字体
+        for (font_path, font_name) in &self.font_paths {
+            if Path::new(&font_path).exists() {
+                match std::fs::read(&font_path) {
+                    Ok(font_bytes) => {
+                        ctx.gfx.add_font(font_name, FontData::from_vec(font_bytes)?);
+                        tracing::debug!("✓ 字体加载成功: {} ({})", font_name, font_path.display());
+                    }
+                    Err(e) => {
+                        tracing::warn!("⚠ 字体加载失败: {} - {}", font_path.display(), e);
+                    }
+                }
+            } else {
+                tracing::warn!("⚠ 字体文件不存在: {}", font_path.display());
+            }
+        }
+        Ok((ctx, event_loop))
+    }
+}
 /// 自定义游戏上下文
 ///
 /// 包含 ggez 的所有核心组件 + ECS World + 网络上下文
@@ -59,6 +247,8 @@ impl GameContext {
     /// 创建 GameContext 的构建器函数
     ///
     /// 用于 ContextBuilder::custom_build()
+    ///
+    ///
     pub fn builder(
         game_id: String,
         conf: Conf,
@@ -100,13 +290,62 @@ impl GameContext {
         Ok((ctx, event_loop))
     }
 
-    /// 获取 ggez::Context 的可变引用
+    /// ⚠️ **危险方法** - 使用 transmute 转换为 ggez::Context
     ///
-    /// 用于需要原始 ggez Context 的场景（如渲染）
+    /// **问题**：
+    /// - GameContext 和 ggez::Context 的内存布局不同
+    /// - transmute 假设两个类型完全相同，这是错误的
+    /// - 某些 ggez API 可能会导致内存访问违规 (STATUS_ACCESS_VIOLATION)
     ///
-    /// 安全性：GameContext 通过实现 Has/HasMut trait 保证与 ggez::Context 兼容
+    /// **✅ 推荐做法**：
+    /// - 对于纹理创建：使用 `&mut ctx.gfx` (GraphicsContext)
+    /// - 对于窗口控制：使用 `ctx.gfx.window()` 
+    /// - 对于文件系统：使用 `&ctx.fs`
+    ///
+    /// **❌ 不要用于**：
+    /// - 图库的 `get_or_create_texture()` - 会崩溃！改用 `&mut ctx.gfx`
+    /// - 任何可能访问 Context 内部字段的操作
+    ///
+    /// **仅用于**：
+    /// - IME 输入框控制（window.set_ime_allowed）
+    /// - 少数需要完整 Context 的 UI 组件
+    ///
+    /// 用于需要原始 ggez Context 的场景（如 IME 控制）
     pub fn as_ggez_context(&mut self) -> &mut ggez::Context {
+        // ⚠️ 这是一个 HACK：假设 GameContext 的前几个字段与 ggez::Context 兼容
+        // 这只对简单的窗口操作（如 set_ime_allowed）有效
+        // 对于复杂操作（如创建纹理）会导致崩溃！
         unsafe { std::mem::transmute(self) }
+    }
+
+    /// 安全地分离借用 ggez 组件和 World
+    ///
+    /// 这个方法允许同时可变借用 GraphicsContext 和 World，
+    /// 避免了 as_ggez_context() 导致的整体借用问题
+    ///
+    /// # 返回
+    /// - GraphicsContext 的可变引用
+    /// - World 的可变引用
+    pub fn split_gfx_world(&mut self) -> (&mut GraphicsContext, &mut World) {
+        (&mut self.gfx, &mut self.world)
+    }
+
+    /// 获取窗口尺寸（常用操作的便捷方法）
+    #[inline]
+    pub fn drawable_size(&self) -> (f32, f32) {
+        self.gfx.drawable_size()
+    }
+
+    /// 获取 World 的可变引用
+    #[inline]
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
+    /// 获取 GraphicsContext 的可变引用
+    #[inline]
+    pub fn gfx_mut(&mut self) -> &mut GraphicsContext {
+        &mut self.gfx
     }
 
     #[inline]
@@ -167,7 +406,6 @@ impl GameContext {
 
         println!("✅ 已清理 {} 个游戏对象和地图实体", count);
     }
-
 
     pub fn collect_network_events(&mut self) {
         let events = self.network().recv_categorized();
@@ -633,21 +871,30 @@ impl<'a> InputContext<'a> {
 
     /// 鼠标左键是否按下
     pub fn mouse_left_pressed(&self) -> bool {
-        self.ctx.mouse.button_pressed(ggez::input::mouse::MouseButton::Left)
+        self.ctx
+            .mouse
+            .button_pressed(ggez::input::mouse::MouseButton::Left)
     }
 
     /// 鼠标右键是否按下
     pub fn mouse_right_pressed(&self) -> bool {
-        self.ctx.mouse.button_pressed(ggez::input::mouse::MouseButton::Right)
+        self.ctx
+            .mouse
+            .button_pressed(ggez::input::mouse::MouseButton::Right)
     }
 
     /// 鼠标中键是否按下
     pub fn mouse_middle_pressed(&self) -> bool {
-        self.ctx.mouse.button_pressed(ggez::input::mouse::MouseButton::Middle)
+        self.ctx
+            .mouse
+            .button_pressed(ggez::input::mouse::MouseButton::Middle)
     }
 
     /// 鼠标按钮是否按下
-    pub fn mouse_button_pressed(&self, button: ggez::input::mouse::MouseButton) -> Option<(ggez::input::mouse::MouseButton, f32, f32)> {
+    pub fn mouse_button_pressed(
+        &self,
+        button: ggez::input::mouse::MouseButton,
+    ) -> Option<(ggez::input::mouse::MouseButton, f32, f32)> {
         if self.ctx.mouse.button_pressed(button) {
             let pos = self.ctx.mouse.position();
             Some((button, pos.x, pos.y))
@@ -681,42 +928,57 @@ impl<'a> InputContext<'a> {
 
     /// 鼠标移动事件
     pub fn mouse_motion(&self) -> impl Iterator<Item = (f32, f32, f32, f32)> + '_ {
-        self.ctx.frame_input_events.iter().filter_map(|event| match event {
-            InputEvent::MouseMove { x, y, dx, dy } => Some((*x, *y, *dx, *dy)),
-            _ => None,
-        })
+        self.ctx
+            .frame_input_events
+            .iter()
+            .filter_map(|event| match event {
+                InputEvent::MouseMove { x, y, dx, dy } => Some((*x, *y, *dx, *dy)),
+                _ => None,
+            })
     }
 
     /// 鼠标滚轮事件
     pub fn mouse_wheel(&self) -> impl Iterator<Item = (f32, f32)> + '_ {
-        self.ctx.frame_input_events.iter().filter_map(|event| match event {
-            InputEvent::MouseWheel { x, y } => Some((*x, *y)),
-            _ => None,
-        })
+        self.ctx
+            .frame_input_events
+            .iter()
+            .filter_map(|event| match event {
+                InputEvent::MouseWheel { x, y } => Some((*x, *y)),
+                _ => None,
+            })
     }
 
     /// 鼠标进入或离开窗口
     pub fn mouse_entered_or_leaved(&self) -> Option<bool> {
-        self.ctx.frame_input_events.iter().find_map(|event| match event {
-            InputEvent::MouseEnterOrLeave { entered } => Some(*entered),
-            _ => None,
-        })
+        self.ctx
+            .frame_input_events
+            .iter()
+            .find_map(|event| match event {
+                InputEvent::MouseEnterOrLeave { entered } => Some(*entered),
+                _ => None,
+            })
     }
 
     /// 鼠标进入窗口
     pub fn mouse_entered(&self) -> Option<bool> {
-        self.ctx.frame_input_events.iter().find_map(|event| match event {
-            InputEvent::MouseEnterOrLeave { entered } => Some(*entered),
-            _ => None,
-        })
+        self.ctx
+            .frame_input_events
+            .iter()
+            .find_map(|event| match event {
+                InputEvent::MouseEnterOrLeave { entered } => Some(*entered),
+                _ => None,
+            })
     }
 
     /// 鼠标离开窗口
     pub fn mouse_leaved(&self) -> Option<bool> {
-        self.ctx.frame_input_events.iter().find_map(|event| match event {
-            InputEvent::MouseEnterOrLeave { entered } => Some(!*entered),
-            _ => None,
-        })
+        self.ctx
+            .frame_input_events
+            .iter()
+            .find_map(|event| match event {
+                InputEvent::MouseEnterOrLeave { entered } => Some(!*entered),
+                _ => None,
+            })
     }
 
     /// 获取鼠标到屏幕中心的距离
@@ -767,19 +1029,32 @@ impl<'a> InputContext<'a> {
     }
 
     /// 获取当前按下的所有按键
-    pub fn pressed_keys(&self) -> impl Iterator<Item = (ggez::input::keyboard::KeyCode, Option<ggez::winit::keyboard::SmolStr>)> + '_ {
-        self.ctx.keyboard.pressed_physical_keys.iter().filter_map(|&k| {
-            if let ggez::winit::keyboard::PhysicalKey::Code(key) = k {
-                Some((key, None))
-            } else {
-                None
-            }
-        })
+    pub fn pressed_keys(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            ggez::input::keyboard::KeyCode,
+            Option<ggez::winit::keyboard::SmolStr>,
+        ),
+    > + '_ {
+        self.ctx
+            .keyboard
+            .pressed_physical_keys
+            .iter()
+            .filter_map(|&k| {
+                if let ggez::winit::keyboard::PhysicalKey::Code(key) = k {
+                    Some((key, None))
+                } else {
+                    None
+                }
+            })
     }
 
     /// 检查指定键是否按下
     pub fn key_pressed(&self, key: ggez::input::keyboard::KeyCode) -> bool {
-        self.ctx.keyboard.is_physical_key_pressed(&ggez::winit::keyboard::PhysicalKey::Code(key))
+        self.ctx
+            .keyboard
+            .is_physical_key_pressed(&ggez::winit::keyboard::PhysicalKey::Code(key))
     }
 
     /// 检查 Shift 键是否按下

@@ -114,10 +114,10 @@ impl MapLoadSystem {
                 info!("✅ 地图文件读取成功: {}x{}", reader.width, reader.height);
                 
                 // 删除旧地图数据（瓦片实体）
-                Self::clear_old_map_data(ctx.world);
+                Self::clear_old_map_data(&mut ctx.world);
                 
                 // 加载地图瓦片
-                if let Err(e) = MapLoader::load_map(ctx.world, reader) {
+                if let Err(e) = MapLoader::load_map(&mut ctx.world, reader) {
                     error!("❌ 地图瓦片加载失败: {}", e);
                     return Err(e);
                 }

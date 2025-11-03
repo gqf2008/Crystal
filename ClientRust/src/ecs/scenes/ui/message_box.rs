@@ -112,14 +112,18 @@ impl MessageBox {
     }
     
     /// 绘制消息框
-    pub fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    pub fn draw(&mut self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         if !self.visible {
             return Ok(());
         }
         
         // 绘制半透明背景遮罩
+        // HACK: Mesh::new_rectangle 需要完整的 ggez::Context
+        let ggez_ctx = unsafe { 
+            std::mem::transmute::<&mut ggez::graphics::GraphicsContext, &mut Context>(ctx) 
+        };
         let screen_rect = ggez::graphics::Mesh::new_rectangle(
-            ctx,
+            ggez_ctx,
             ggez::graphics::DrawMode::fill(),
             ggez::graphics::Rect::new(0.0, 0.0, 1024.0, 768.0),
             Color::from_rgba(0, 0, 0, 128),
@@ -161,7 +165,7 @@ impl MessageBox {
     }
     
     /// 绘制 OK 按钮
-    fn draw_ok_button(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    fn draw_ok_button(&mut self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         let button_x = self.x + (self.width - 80.0) / 2.0;
         let button_y = self.y + self.height - 60.0;
         
@@ -180,7 +184,7 @@ impl MessageBox {
     }
     
     /// 绘制 Yes/No 按钮
-    fn draw_yes_no_buttons(&mut self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    fn draw_yes_no_buttons(&mut self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         let button_y = self.y + self.height - 60.0;
         let yes_x = self.x + (self.width / 2.0) - 90.0;
         let no_x = self.x + (self.width / 2.0) + 10.0;

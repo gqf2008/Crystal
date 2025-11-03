@@ -23,13 +23,13 @@ impl LoginScene {
                     self.on_connected();
                 }
                 GameEvent::ClientVersionResponse { result } => {
-                    self.on_client_version_response(*result, game_ctx.world);
+                    self.on_client_version_response(*result, &mut game_ctx.world);
                 }
                 GameEvent::Disconnected { reason } => {
                     self.on_disconnected(reason);
                 }
                 GameEvent::LoginSuccess { characters } => {
-                    self.on_login_success(characters, game_ctx.world);
+                    self.on_login_success(characters, &mut game_ctx.world);
                 }
                 GameEvent::LoginFailed { reason } => {
                     self.on_login_failed(reason);

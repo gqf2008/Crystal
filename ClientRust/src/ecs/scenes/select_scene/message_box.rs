@@ -195,7 +195,7 @@ impl MessageBox {
     }
 
     /// 绘制消息框
-    pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> anyhow::Result<()> {
+    pub fn draw(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> anyhow::Result<()> {
         if !self.visible {
             return Ok(());
         }

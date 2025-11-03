@@ -287,7 +287,7 @@ impl<T: EventHandler<GameContext>> ApplicationHandler<()> for GameAppHandler<T> 
 /// 自定义事件循环 - 完整支持 IME
 ///
 /// 替代 ggez::event::run()，手动实现事件分发
-pub fn run_with_ime<T: EventHandler<GameContext> + 'static>(
+pub fn run<T: EventHandler<GameContext> + 'static>(
     ctx: GameContext,
     event_loop: EventLoop<()>,
     game: T,

@@ -333,7 +333,7 @@ impl CharacterDialog {
         None
     }
     
-    pub fn draw(&self, _ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    pub fn draw(&self, _ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         if !self.visible {
             return Ok(());
         }
@@ -401,7 +401,7 @@ impl CharacterDialog {
         Ok(())
     }
     
-    fn draw_tabs(&self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    fn draw_tabs(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         let tab_y = self.y + 70.0;
         let tab_height = 20.0;
         
@@ -448,7 +448,7 @@ impl CharacterDialog {
         Ok(())
     }
     
-    fn draw_equipment_page(&self, ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    fn draw_equipment_page(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         let page_y = self.y + 100.0;
         
         // 绘制角色模型区域 (简化版 - 用矩形表示)
@@ -526,7 +526,7 @@ impl CharacterDialog {
         Ok(())
     }
     
-    fn draw_status_page(&self, _ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    fn draw_status_page(&self, _ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         let page_y = self.y + 100.0;
         let line_height = 18.0;
         
@@ -569,7 +569,7 @@ impl CharacterDialog {
         Ok(())
     }
     
-    fn draw_stats_page(&self, _ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    fn draw_stats_page(&self, _ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         let page_y = self.y + 100.0;
         let line_height = 18.0;
         
@@ -617,7 +617,7 @@ impl CharacterDialog {
         Ok(())
     }
     
-    fn draw_skills_page(&self, _ctx: &mut Context, canvas: &mut Canvas) -> GameResult {
+    fn draw_skills_page(&self, _ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         let page_y = self.y + 120.0;
         
         let hint_text = Text::new("请使用 [M] 键打开技能栏");
@@ -639,3 +639,4 @@ pub enum CharacterAction {
     SwitchTab(CharacterTab),
     EquipmentClick(EquipmentSlot),
 }
+

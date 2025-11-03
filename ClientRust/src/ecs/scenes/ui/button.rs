@@ -56,7 +56,7 @@ impl Button {
         self.hovered = self.contains(mouse_x, mouse_y);
     }
     
-    pub fn draw(&self, ctx: &mut Context, canvas: &mut Canvas) -> anyhow::Result<()> {
+    pub fn draw(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> anyhow::Result<()> {
         if !self.visible { return Ok(()); }
         let index = if self.pressed && self.enabled {
             self.pressed_sprite_index

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_RESOURCES_PATH: &str = "resources";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq,Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientSettings {
     #[serde(rename = "UseTestConfig")]
@@ -300,7 +300,7 @@ fn add_optional_file(
     )
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct GraphicsSettings {
     pub full_screen: bool,
@@ -339,7 +339,7 @@ impl GraphicsSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct NetworkSettings {
     pub use_config: bool,
@@ -372,7 +372,7 @@ impl NetworkSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct LogSettings {
     pub log_errors: bool,
@@ -390,7 +390,7 @@ impl Default for LogSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct SoundSettings {
     #[serde(rename = "SoundPath")]
@@ -448,7 +448,7 @@ impl SoundSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GameSettings {
     #[serde(rename = "AccountID")]
@@ -555,7 +555,7 @@ impl GameSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct ChatSettings {
     pub show_normal_chat: bool,
@@ -581,7 +581,7 @@ impl Default for ChatSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct FilterSettings {
     pub filter_normal_chat: bool,
@@ -705,7 +705,7 @@ impl Default for QuestTracking {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct LauncherSettings {
     #[serde(rename = "Enabled")]

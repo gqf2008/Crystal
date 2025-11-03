@@ -5,6 +5,7 @@ use ggez::winit::event::MouseButton;
 use ggez::winit::keyboard::KeyCode;
 use ggez::{Context, GameResult};
 use hecs::World;
+use smallvec::SmallVec;
 
 use super::SceneType;
 use super::SelectScene;
@@ -14,37 +15,38 @@ impl SelectScene {
     ///
     /// 使用 GameContext 提供的事件迭代器
     pub(crate) fn handle_input_event(&mut self, game_ctx: &mut GameContext) -> GameResult {
-        let mouse_moves: Vec<_> = game_ctx.input().mouse_motion().collect();
-        let mouse_downs: Vec<_> = if let Some((btn, x, y)) = game_ctx.input().mouse_button_pressed(MouseButton::Left) {
-            vec![(btn, x, y)]
+        // ✅ 使用 SmallVec 避免小数组的堆分配（栈上分配，零成本）
+        let mouse_moves: SmallVec<[_; 4]> = game_ctx.input().mouse_motion().collect();
+        let mouse_downs: SmallVec<[_; 1]> = if let Some((btn, x, y)) = game_ctx.input().mouse_button_pressed(MouseButton::Left) {
+            let mut v = SmallVec::new();
+            v.push((btn, x, y));
+            v
         } else {
-            vec![]
+            SmallVec::new()
         };
-        let key_downs: Vec<_> = game_ctx
-            .input()
-            .pressed_keys()
-            .map(|(k, t)| (k, t.map(|s| s.to_string())))
-            .collect();
-        let text_inputs: Vec<_> = game_ctx.input().text_input().collect();
+        // ✅ 直接使用 SmolStr，避免不必要的 String 分配
+        let key_downs: SmallVec<[_; 8]> = game_ctx.input().pressed_keys().collect();
+        let text_inputs: SmallVec<[_; 4]> = game_ctx.input().text_input().collect();
 
         // 1️⃣ 处理鼠标移动事件
         for (x, y, _dx, _dy) in mouse_moves {
-            self.on_mouse_move(game_ctx.ctx, game_ctx.world, x, y)?;
+            self.on_mouse_move(game_ctx, x, y)?;
         }
 
         // 2️⃣ 处理鼠标按下事件
         for (button, x, y) in mouse_downs {
-            self.on_mouse_down(game_ctx.ctx, game_ctx.world, &button, x, y)?;
+            self.on_mouse_down(game_ctx, &button, x, y)?;
         }
 
         // 3️⃣ 处理键盘按下事件
         for (keycode, text) in key_downs {
-            self.on_key_down(game_ctx.ctx, game_ctx.world, &keycode, text.as_deref())?;
+            // SmolStr 可以直接解引用为 &str
+            self.on_key_down(game_ctx, &keycode, text.as_ref().map(|s| s.as_str()))?;
         }
 
         // 4️⃣ 处理文本输入事件
         for character in text_inputs {
-            self.on_text_input(game_ctx.ctx, game_ctx.world, character.to_string())?;
+            self.on_text_input(game_ctx, character.to_string())?;
         }
 
         Ok(())
@@ -52,8 +54,7 @@ impl SelectScene {
 
     fn on_mouse_down(
         &mut self,
-        ctx: &mut Context,
-        world: &mut World,
+        game_ctx: &mut GameContext,
         button: &ggez::winit::event::MouseButton,
         x: f32,
         y: f32,
@@ -61,7 +62,7 @@ impl SelectScene {
         use ggez::winit::event::MouseButton;
 
         // 🔧 转换窗口坐标为设计坐标
-        let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
+        let (design_x, design_y) = self.window_to_design_coords(game_ctx, x, y);
 
         // 调试：输出转换后的坐标
         tracing::debug!(
@@ -81,7 +82,8 @@ impl SelectScene {
         // 🆕 0. 优先处理输入框（最上层）
         if let Some(ref mut input_box) = self.input_box {
             if input_box.visible {
-                input_box.on_mouse_down(design_x, design_y, ctx); // ✅ 传入 ctx
+                let ggez_ctx = game_ctx.as_ggez_context();
+                input_box.on_mouse_down(design_x, design_y, ggez_ctx);
                 return Ok(()); // 输入框消费了事件
             }
         }
@@ -106,7 +108,7 @@ impl SelectScene {
         if let Some(ref mut dialog) = self.new_character_dialog {
             if dialog.visible {
                 if let Some(button) = dialog.handle_mouse_down(design_x as i32, design_y as i32) {
-                    self.handle_new_character_button(button, world);
+                    self.handle_new_character_button(button, game_ctx.world_mut());
                     return Ok(()); // 对话框消费了点击事件
                 }
             }
@@ -121,7 +123,7 @@ impl SelectScene {
             .character_select_ui
             .check_slot_click(design_x, design_y)
         {
-            self.select_character(slot_index as i32, world);
+            self.select_character(slot_index as i32, game_ctx.world_mut());
             if let Some(character) = self.character_select_ui.get_selected_character() {
                 tracing::info!("🖱️ 选中角色: {}", character.name);
             }
@@ -138,6 +140,7 @@ impl SelectScene {
             );
 
             // 根据按钮ID分发事件
+            let world = game_ctx.world_mut();
             match button_id {
                 1 => self.handle_button_click(BottomButton::StartGame, world),
                 2 => self.handle_button_click(BottomButton::NewCharacter, world),
@@ -154,14 +157,13 @@ impl SelectScene {
 
     fn on_mouse_up(
         &mut self,
-        ctx: &mut Context,
-        _world: &mut World,
+        game_ctx: &mut GameContext,
         _button: ggez::winit::event::MouseButton,
         x: f32,
         y: f32,
     ) -> GameResult {
         // 🔧 转换窗口坐标为设计坐标
-        let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
+        let (design_x, design_y) = self.window_to_design_coords(game_ctx, x, y);
 
         // 🆕 处理新建角色对话框鼠标释放
         if let Some(ref mut dialog) = self.new_character_dialog {
@@ -183,13 +185,12 @@ impl SelectScene {
 
     fn on_mouse_move(
         &mut self,
-        ctx: &mut Context,
-        _world: &mut World,
+        game_ctx: &mut GameContext,
         x: f32,
         y: f32,
     ) -> GameResult {
         // 🔧 转换窗口坐标为设计坐标
-        let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
+        let (design_x, design_y) = self.window_to_design_coords(game_ctx, x, y);
 
         // 🆕 0. 优先处理输入框鼠标移动
         if let Some(ref mut input_box) = self.input_box {
@@ -246,8 +247,7 @@ impl SelectScene {
 
     fn on_key_down(
         &mut self,
-        ctx: &mut Context, // ✅ 去掉下划线，需要传给InputBox
-        world: &mut World,
+        game_ctx: &mut GameContext,
         key: &KeyCode,
         text: Option<&str>,
     ) -> GameResult<Option<SceneType>> {
@@ -276,7 +276,8 @@ impl SelectScene {
         // 处理输入框按键
         if let Some(ref mut input_box) = self.input_box {
             if input_box.visible {
-                input_box.on_key_down(key, ctx); // ✅ 传入 ctx
+                let ggez_ctx = game_ctx.as_ggez_context();
+                input_box.on_key_down(key, ggez_ctx);
                                                  // 检查是否已确认或取消
                 if input_box.confirmed || input_box.cancelled {
                     // 在update中处理结果
@@ -304,12 +305,23 @@ impl SelectScene {
             }
             KeyCode::Enter | KeyCode::NumpadEnter => {
                 // Enter 键开始游戏 - 从World读取选中状态
-                let selected_index =
-                    if let Some((_, char_list)) = world.query::<&CharacterList>().iter().next() {
+                let world = game_ctx.world_mut();
+                
+                // ✅ 性能优化：使用缓存的实体 ID，O(1) 访问替代 O(n) 查询
+                let selected_index = if let Some(entity) = self.character_list_entity {
+                    // 快速路径：直接通过实体 ID 获取
+                    world.get::<&CharacterList>(entity)
+                        .map(|char_list| char_list.selected_index)
+                        .unwrap_or(-1)
+                } else {
+                    // 慢速路径：首次查询并缓存实体 ID
+                    if let Some((entity, char_list)) = world.query::<&CharacterList>().iter().next() {
+                        self.character_list_entity = Some(entity);
                         char_list.selected_index
                     } else {
                         -1
-                    };
+                    }
+                };
 
                 if selected_index >= 0 {
                     self.handle_button_click(BottomButton::StartGame, world);
@@ -317,6 +329,7 @@ impl SelectScene {
             }
             KeyCode::Digit1 | KeyCode::Numpad1 => {
                 if !self.character_select_ui.get_characters().is_empty() {
+                    let world = game_ctx.world_mut();
                     self.select_character(0, world);
                     if let Some(character) = self.character_select_ui.get_selected_character() {
                         tracing::info!("⌨️ 键盘选中角色1: {}", character.name);
@@ -325,6 +338,7 @@ impl SelectScene {
             }
             KeyCode::Digit2 | KeyCode::Numpad2 => {
                 if self.character_select_ui.get_characters().len() > 1 {
+                    let world = game_ctx.world_mut();
                     self.select_character(1, world);
                     if let Some(character) = self.character_select_ui.get_selected_character() {
                         tracing::info!("⌨️ 键盘选中角色2: {}", character.name);
@@ -333,6 +347,7 @@ impl SelectScene {
             }
             KeyCode::Digit3 | KeyCode::Numpad3 => {
                 if self.character_select_ui.get_characters().len() > 2 {
+                    let world = game_ctx.world_mut();
                     self.select_character(2, world);
                     if let Some(character) = self.character_select_ui.get_selected_character() {
                         tracing::info!("⌨️ 键盘选中角色3: {}", character.name);
@@ -341,6 +356,7 @@ impl SelectScene {
             }
             KeyCode::Digit4 | KeyCode::Numpad4 => {
                 if self.character_select_ui.get_characters().len() > 3 {
+                    let world = game_ctx.world_mut();
                     self.select_character(3, world);
                     if let Some(character) = self.character_select_ui.get_selected_character() {
                         tracing::info!("⌨️ 键盘选中角色4: {}", character.name);
@@ -356,8 +372,7 @@ impl SelectScene {
     /// 🆕 文本输入事件 (IME 支持)
     fn on_text_input(
         &mut self,
-        _ctx: &mut Context,
-        _world: &mut World,
+        game_ctx: &mut GameContext,
         character: String,
     ) -> GameResult {
         tracing::debug!("📝 SelectScene::on_text_input: '{}'", character);

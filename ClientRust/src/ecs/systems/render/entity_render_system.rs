@@ -48,7 +48,7 @@
 
 use hecs::World;
 use ggez::{Context, GameResult};
-use ggez::graphics::{Canvas, DrawParam, Color, Rect};
+use ggez::graphics::{Canvas, Color, DrawParam, GraphicsContext, Rect};
 use tracing::{info, debug};
 
 use crate::ecs::components::{Position, Sprite, Camera, Player, Monster};
@@ -134,15 +134,14 @@ impl EntityRenderSystem {
 impl DrawSystem for EntityRenderSystem {
     fn draw(
         &mut self,
-        ctx: &mut Context,
+        ctx: &mut GraphicsContext,
         canvas: &mut Canvas,
-        world: &World,
+        world: &hecs::World,
     ) -> GameResult {
         // ====================================================================
         // 1. 获取相机视图范围
         // ====================================================================
-        
-        let (screen_width, screen_height) = ctx.gfx.drawable_size();
+        let (screen_width, screen_height) = ctx.drawable_size();
         
         let Some((min_x, min_y, max_x, max_y, zoom)) = 
             Self::get_camera_view_bounds(world, screen_width, screen_height) 

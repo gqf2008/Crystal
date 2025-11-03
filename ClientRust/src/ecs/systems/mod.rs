@@ -176,7 +176,7 @@ pub mod priority {
 pub mod logic;
 pub mod render;
 
-use ggez::graphics::Canvas;
+use ggez::graphics::{Canvas, GraphicsContext};
 use ggez::GameResult;
 
 // 重新导出派生宏
@@ -390,8 +390,9 @@ pub trait DrawSystem {
     /// 绘制方法，每帧在渲染阶段调用
     fn draw(
         &mut self,
-        ctx: &mut GameContext,
+         ctx: &mut GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
+        world: &hecs::World,
     ) -> GameResult;
 }
 
@@ -417,8 +418,9 @@ pub trait HybridSystem {
     /// 绘制方法，每帧在渲染阶段调用（必须实现）
     fn draw(
         &mut self,
-        ctx: &mut GameContext,
+        ctx: &mut GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
+        world: &hecs::World,
     ) -> GameResult;
 }
 
@@ -596,7 +598,9 @@ impl SystemScheduler {
 
             match entry {
                 SystemEntry::Update { system, .. } => {
+                    tracing::trace!("🔄 Executing system update: {}", system.name());
                     system.update(ctx, delay_time)?;
+                    tracing::trace!("✅ System update completed: {}", system.name());
                 }
                 SystemEntry::Hybrid { system, .. } => {
                     system.update(ctx, delay_time)?;
@@ -613,9 +617,11 @@ impl SystemScheduler {
     /// 渲染阶段 - 调度 DrawSystem 和 HybridSystem 的 draw 方法
     pub fn draw(
         &mut self,
-        ctx: &mut GameContext,
-        canvas: &mut Canvas,
+         ctx: &mut GraphicsContext,
+        canvas: &mut ggez::graphics::Canvas,
+        world: &hecs::World,
     ) -> GameResult {
+        tracing::trace!("🎨 Starting draw phase");
         for entry in &mut self.systems {
             if !entry.is_enabled() {
                 continue;
@@ -623,10 +629,14 @@ impl SystemScheduler {
 
             match entry {
                 SystemEntry::Draw { system, .. } => {
-                    system.draw(ctx, canvas)?;
+                    tracing::trace!("🎨 Drawing system: {}", system.name());
+                    system.draw(ctx, canvas, world)?;
+                    tracing::trace!("✅ System draw completed: {}", system.name());
                 }
                 SystemEntry::Hybrid { system, .. } => {
-                    system.draw(ctx, canvas)?;
+                    tracing::trace!("🎨 Drawing hybrid system: {}", system.name());
+                    system.draw(ctx, canvas, world)?;
+                    tracing::trace!("✅ Hybrid system draw completed: {}", system.name());
                 }
                 SystemEntry::Update { .. } => {
                     // 纯逻辑系统无需渲染

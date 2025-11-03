@@ -309,6 +309,6 @@ impl System for MapUpdateSystem {
     }
 
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
-        Self::do_update(ctx.world)
+        Self::do_update(&mut ctx.world)
     }
 }

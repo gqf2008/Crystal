@@ -23,174 +23,141 @@
 mod map_viewer;
 
 use ggez::conf::{WindowMode, WindowSetup};
-use ggez::event::{self, EventHandler};
+use ggez::event::EventHandler;
 use ggez::graphics::{Canvas, Color};
-use ggez::input::keyboard::KeyInput;
-use ggez::winit::event::MouseButton;
-use ggez::{Context, ContextBuilder, GameResult};
-use hecs::World;
+use ggez::GameResult;
 
 use map_viewer::scene::MapViewerScene;
-
 use mir2_client::ecs::components::InputEvent;
+use mir2_client::ecs::game_context::GameContextBuilder;
 use mir2_client::ecs::scenes::Scene;
-use mir2_client::network::{ NetworkBuilder};
+use mir2_client::ecs::{ime_handler, GameContext};
 use mir2_client::settings::ClientSettings;
 
 /// 地图查看器应用
 struct MapViewerApp {
-    /// ECS World
-    world: World,
     /// 地图查看器场景
     scene: MapViewerScene,
-    /// 帧输入事件缓冲
-    frame_input_events: Vec<InputEvent>,
 }
 
 impl MapViewerApp {
-    fn new(ctx: &mut Context) -> GameResult<Self> {
+    fn new(ctx: &mut GameContext) -> GameResult<Self> {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::INFO)
             .init();
 
         tracing::info!("🗺️  Map Viewer V3 启动中...");
-
-        // 创建 ECS World
-        let mut world = World::new();
-
-        // 创建默认配置
-        let settings = ClientSettings::default();
-
-        // 创建模拟网络（使用 mock 模式）
-        let _net_ctx = NetworkBuilder::new(settings.network.clone())
-         
-            .build()
-            .expect("Failed to create mock network");
-
-        // 注意：网络功能在此测试工具中暂时禁用
-        // world.spawn_settings(settings);
-        // world.spawn_network(net_ctx.clone());
-
         // 创建场景
         let scene = MapViewerScene::new(ctx)?;
 
-        // 发送开始游戏请求，触发地图加载
-        // let _ = net_ctx.send(GameEvent::StartGameRequest { character_index: 0 });
-        tracing::info!("📤 地图查看器已启动（网络功能已禁用）");
+        // 🎮 发送开始游戏请求，触发 MockNetwork 加载地图
+        use mir2_client::ecs::WorldExt;
+        use mir2_client::network::handlers::GameEvent;
+        let net_ctx = ctx.world.network();
+        if let Err(e) = net_ctx.send(GameEvent::StartGameRequest { character_index: 0 }) {
+            tracing::error!("❌ 发送 StartGameRequest 失败: {}", e);
+        } else {
+            tracing::info!("📤 已发送 StartGameRequest，等待 MockNetwork 加载地图");
+        }
 
         tracing::info!("✅ Map Viewer V3 启动完成");
 
-        Ok(Self {
-            world,
-            scene,
-            frame_input_events: Vec::new(),
-        })
+        Ok(Self { scene })
     }
 
     // 网络功能已禁用
 }
 
-impl EventHandler for MapViewerApp {
-    fn update(&mut self, ctx: &mut Context) -> GameResult {
+impl EventHandler<GameContext> for MapViewerApp {
+    fn update(&mut self, ctx: &mut GameContext) -> GameResult {
         // ✅ 创建 GameContext 并传递给场景
-        let mut game_ctx = mir2_client::ecs::GameContext::new(ctx, &mut self.world);
-        
-        // 移动事件到 GameContext
-        game_ctx.input_events = std::mem::take(&mut self.frame_input_events);
-        
-        self.scene.update(&mut game_ctx)?;
-        
-        // 清理事件
-        self.frame_input_events.clear();
-
+        ctx.collect_network_events();
+        self.scene.update(ctx)?;
+        ctx.clear_frame_events();
         Ok(())
     }
 
-    fn draw(&mut self, ctx: &mut Context) -> GameResult {
+    fn draw(&mut self, ctx: &mut GameContext) -> GameResult {
         let mut canvas = Canvas::from_frame(ctx, Color::from_rgb(0, 0, 0));
-
-        // 创建 GameContext 用于绘制
-        let mut game_ctx = mir2_client::ecs::GameContext::new(ctx, &mut self.world);
-        
         // 绘制场景
-        self.scene.draw(&mut game_ctx, &mut canvas)?;
-
+        self.scene.draw(ctx, &mut canvas)?;
         // 提交画布
         canvas.finish(ctx)?;
         Ok(())
     }
 
+    fn mouse_enter_or_leave(
+        &mut self,
+        ctx: &mut GameContext,
+        entered: bool,
+    ) -> Result<(), ggez::GameError> {
+        tracing::debug!(
+            "🖱️ 鼠标{}",
+            if entered {
+                "进入窗口"
+            } else {
+                "离开窗口"
+            }
+        );
+        ctx.push_input_event(InputEvent::MouseEnterOrLeave { entered });
+
+        Ok(())
+    }
+
+    fn mouse_wheel_event(
+        &mut self,
+        ctx: &mut GameContext,
+        x: f32,
+        y: f32,
+    ) -> Result<(), ggez::GameError> {
+        tracing::debug!("🖱️ 鼠标滚轮: ({:.1}, {:.1})", x, y);
+        ctx.push_input_event(InputEvent::MouseWheel { x, y });
+
+        Ok(())
+    }
+
     fn mouse_motion_event(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut GameContext,
         x: f32,
         y: f32,
         dx: f32,
         dy: f32,
-    ) -> GameResult {
-        self.frame_input_events
-            .push(InputEvent::MouseMove { x, y, dx, dy });
+    ) -> Result<(), ggez::GameError> {
+        tracing::debug!("🖱️ 鼠标移动: ({:.1}, {:.1}), Δ({:.1}, {:.1})", x, y, dx, dy);
+        ctx.push_input_event(InputEvent::MouseMove { x, y, dx, dy });
+
         Ok(())
     }
 
-    fn mouse_button_down_event(
+    fn text_input_event(
         &mut self,
-        _ctx: &mut Context,
-        _button: MouseButton,
-        _x: f32,
-        _y: f32,
-    ) -> GameResult {
-        // MouseDown 事件已被移除
+        ctx: &mut GameContext,
+        character: char,
+    ) -> Result<(), ggez::GameError> {
+        tracing::debug!("⌨️ 输入字符: '{}'", character);
+        ctx.push_input_event(InputEvent::Ime {
+            character,
+            timestamp: std::time::Instant::now(),
+        });
         Ok(())
     }
 
-    fn mouse_button_up_event(
-        &mut self,
-        _ctx: &mut Context,
-        _button: MouseButton,
-        _x: f32,
-        _y: f32,
-    ) -> GameResult {
-        // MouseUp 事件已被移除
-        Ok(())
-    }
-
-    fn mouse_wheel_event(&mut self, _ctx: &mut Context, x: f32, y: f32) -> GameResult {
-        self.frame_input_events
-            .push(InputEvent::MouseWheel { x, y });
-        Ok(())
-    }
-
-    fn key_down_event(
-        &mut self,
-        _ctx: &mut Context,
-        _input: KeyInput,
-        _repeated: bool,
-    ) -> GameResult {
-        // KeyDown 事件已被移除 - 使用 ggez Context 的键盘状态
-        Ok(())
-    }
-
-    fn key_up_event(&mut self, _ctx: &mut Context, _input: KeyInput) -> GameResult {
-        // KeyUp 事件已被移除
-        Ok(())
-    }
-
-    fn resize_event(&mut self, _ctx: &mut Context, width: f32, height: f32) -> GameResult {
-        self.frame_input_events
-            .push(InputEvent::Resize { width, height });
-        tracing::info!("🖥️ 窗口调整大小: ({:.1}, {:.1})", width, height);
+    fn resize_event(&mut self, ctx: &mut GameContext, width: f32, height: f32) -> Result<(), ggez::GameError> {
+        tracing::info!("🔄 窗口尺寸改变: 新尺寸 = {:.1}x{:.1}", width, height);
+        ctx.push_input_event(InputEvent::Resize { width, height });
         Ok(())
     }
 }
 
-fn main() -> GameResult {
-    // 创建 ggez 上下文
-    let (mut ctx, event_loop) = ContextBuilder::new("map_viewer_v3", "Crystal")
+fn main() -> anyhow::Result<()> {
+    let mut settings = ClientSettings::default();
+    settings.network.use_mock = true;
+    let (mut ctx, event_loop) = GameContextBuilder::new("map_viewer_v3", "Crystal")
         .window_setup(
             WindowSetup::default()
                 .title("Map Viewer V3 - Crystal")
-                .vsync(true),  // 启用垂直同步，限制帧率到屏幕刷新率
+                .vsync(true), // 启用垂直同步，限制帧率到屏幕刷新率
         )
         .window_mode(
             WindowMode::default()
@@ -198,11 +165,16 @@ fn main() -> GameResult {
                 .resizable(true)
                 .resize_on_scale_factor_change(true),
         )
+        .with_font(
+            "resources/font/AlibabaPuHuiTi-3-55-Regular.ttf",
+            "AlibabaPuHuiTi",
+        )
+        .with_settings(settings)
         .build()?;
 
     // 创建应用
     let app = MapViewerApp::new(&mut ctx)?;
 
     // 运行事件循环
-    event::run(ctx, event_loop, app)
+    ime_handler::run(ctx, event_loop, app)
 }

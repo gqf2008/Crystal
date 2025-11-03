@@ -123,7 +123,7 @@ impl System for NpcDialogueSystem {
     }
 
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
-        self.process_dialogs(ctx.world);
+        self.process_dialogs(&mut ctx.world);
         Ok(())
     }
 }
