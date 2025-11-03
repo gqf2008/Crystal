@@ -17,6 +17,7 @@
 
 use hecs::World;
 use ggez::GameResult;
+use crate::ecs::GameContext;
 use crate::ecs::components::{Position, movement::MovementVelocity, map::MapBounds};
 use crate::ecs::systems::{System, priority};
 
@@ -56,11 +57,11 @@ impl System for CollisionSystem {
         priority::COLLISION
     }
 
-    fn update(&mut self, world: &mut World, _delay_time: f32) -> GameResult {
+    fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         // 获取地图边界
         let map_bounds = {
             let mut bounds = None;
-            for (_, map_bounds) in world.query::<&MapBounds>().iter() {
+            for (_, map_bounds) in ctx.world.query::<&MapBounds>().iter() {
                 bounds = Some(MapBounds {
                     width: map_bounds.width,
                     height: map_bounds.height,
@@ -77,12 +78,12 @@ impl System for CollisionSystem {
 
         // 收集所有实体的位置(用于实体间碰撞检测)
         let mut entity_positions: Vec<(hecs::Entity, f32, f32)> = Vec::new();
-        for (entity, pos) in world.query::<&Position>().iter() {
+        for (entity, pos) in ctx.world.query::<&Position>().iter() {
             entity_positions.push((entity, pos.x, pos.y));
         }
 
         // 检测并修正碰撞
-        for (entity, (pos, vel)) in world.query_mut::<(&mut Position, &mut MovementVelocity)>() {
+        for (entity, (pos, vel)) in ctx.world.query_mut::<(&mut Position, &mut MovementVelocity)>() {
             // 1. 检查地图边界碰撞
             if !Self::is_within_bounds(pos.x, pos.y, &bounds) {
                 // 越界,限制到边界内并停止移动

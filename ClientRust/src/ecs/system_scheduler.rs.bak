@@ -263,6 +263,74 @@ impl SystemScheduler {
         Ok(())
     }
 
+    /// 执行所有启用的系统 (新版本 - 使用 GameContext)
+    /// 
+    /// 此方法支持同时调用 System (旧) 和 SystemV2 (新) trait 的系统。
+    /// 已迁移到 SystemV2 的系统将直接接收 GameContext，获得零拷贝性能。
+    /// 未迁移的系统仍然使用 world 参数。
+    pub fn update_with_context(
+        &mut self,
+        ctx: &mut crate::ecs::GameContext,
+        delta_time: f32,
+    ) -> GameResult {
+        // 宏简化系统执行和统计记录 (V1 - 旧系统)
+        macro_rules! run_system {
+            ($enabled:expr, $name:literal, $system:expr) => {
+                if $enabled {
+                    let start = Instant::now();
+                    $system.update(ctx.world, delta_time)?;
+                    let duration = start.elapsed();
+                    if let Some(stats) = self.stats.get_mut($name) {
+                        stats.record_execution(duration);
+                    }
+                }
+            };
+        }
+
+        // TODO: 为已迁移到 SystemV2 的系统添加新宏
+        // macro_rules! run_system_v2 {
+        //     ($enabled:expr, $name:literal, $system:expr) => {
+        //         if $enabled {
+        //             let start = Instant::now();
+        //             $system.update(ctx, delta_time)?;
+        //             let duration = start.elapsed();
+        //             if let Some(stats) = self.stats.get_mut($name) {
+        //                 stats.record_execution(duration);
+        //             }
+        //         }
+        //     };
+        // }
+
+        // Layer 1: Input Processing
+        run_system!(self.player_control_enabled, "PlayerControlSystem", self.player_control);
+
+        // Layer 2: Decision Making
+        run_system!(self.monster_ai_enabled, "MonsterAISystem", self.monster_ai);
+        run_system!(self.npc_dialogue_enabled, "NpcDialogueSystem", self.npc_dialogue);
+
+        // Layer 3: Combat & Skills
+        run_system!(self.skill_enabled, "SkillSystem", self.skill);
+        run_system!(self.combat_enabled, "CombatSystem", self.combat);
+
+        // Layer 4: Physics & Movement
+        run_system!(self.movement_enabled, "MovementSystem", self.movement);
+        run_system!(self.collision_enabled, "CollisionSystem", self.collision);
+
+        // Layer 5: State Update
+        run_system!(self.animation_enabled, "AnimationSystem", self.animation);
+        run_system!(self.particle_enabled, "ParticleSystem", self.particle);
+        run_system!(self.health_regen_enabled, "HealthRegenSystem", self.health_regen);
+        run_system!(self.sound_enabled, "SoundSystem", self.sound);
+        run_system!(self.camera_enabled, "CameraSystem", self.camera);
+
+        // Layer 6: Network Sync
+        run_system!(self.client_prediction_enabled, "ClientPredictionSystem", self.client_prediction);
+        run_system!(self.network_send_enabled, "NetworkSendSystem", self.network_send);
+        run_system!(self.sync_enabled, "SyncSystem", self.sync);
+
+        Ok(())
+    }
+
     /// 启用系统
     pub fn enable_system(&mut self, name: &str) {
         match name {

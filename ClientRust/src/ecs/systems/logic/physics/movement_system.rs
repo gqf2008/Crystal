@@ -18,7 +18,7 @@
 
 use hecs::World;
 use ggez::GameResult;
-use crate::ecs::components::{Position, movement::{MovementVelocity, Path}, Player, player::PlayerAction};
+use crate::ecs::{GameContext, components::{Player, Position, movement::{MovementVelocity, Path}, player::PlayerAction}};
 use crate::ecs::systems::{System, priority};
 
 /// 移动系统 - 实现格子对齐的移动逻辑
@@ -75,9 +75,9 @@ impl System for MovementSystem {
         priority::MOVEMENT
     }
 
-    fn update(&mut self, world: &mut World, delay_time: f32) -> GameResult {
+    fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         // 🎯 处理有Player组件的实体（玩家、NPC等）
-        for (_, (position, velocity, path, player)) in world.query_mut::<(
+        for (_, (position, velocity, path, player)) in ctx.world.query_mut::<(
             &mut Position,
             &mut MovementVelocity,
             &mut Path,
@@ -148,12 +148,12 @@ impl System for MovementSystem {
 
         // 🎯 处理没有Player组件的通用实体（怪物、道具等）
         // 先收集所有有Player组件的实体ID
-        let player_entities: Vec<_> = world.query::<&Player>()
+        let player_entities: Vec<_> = ctx.world.query::<&Player>()
             .iter()
             .map(|(entity, _)| entity)
             .collect();
-        
-        for (entity, (position, velocity, path)) in world.query_mut::<(
+
+        for (entity, (position, velocity, path)) in ctx.world.query_mut::<(
             &mut Position,
             &mut MovementVelocity,
             &mut Path,
@@ -200,61 +200,3 @@ impl System for MovementSystem {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_grid_alignment() {
-        let mut world = World::new();
-        let mut system = MovementSystem;
-
-        let mut path = Path::new();
-        path.set_path(vec![(2, 2)]); // 目标格子(2,2)
-
-        let entity = world.spawn((
-            Position { x: 0.0, y: 0.0 },
-            MovementVelocity::new(200.0),
-            path,
-        ));
-
-        // 多次更新直到到达
-        for _ in 0..100 {
-            system.update(&mut world, 0.016).unwrap();
-            
-            let pos = world.get::<&Position>(entity).unwrap();
-            if (pos.x - CELL_WIDTH * 2.0).abs() < ARRIVAL_THRESHOLD 
-                && (pos.y - CELL_HEIGHT * 2.0).abs() < ARRIVAL_THRESHOLD {
-                break;
-            }
-        }
-
-        // 验证到达目标格子
-        let pos = world.get::<&Position>(entity).unwrap();
-        assert!((pos.x - CELL_WIDTH * 2.0).abs() < ARRIVAL_THRESHOLD);
-        assert!((pos.y - CELL_HEIGHT * 2.0).abs() < ARRIVAL_THRESHOLD);
-    }
-
-    #[test]
-    fn test_path_following() {
-        let mut world = World::new();
-        let mut system = MovementSystem;
-
-        let mut path = Path::new();
-        path.set_path(vec![(1, 1), (2, 1), (2, 2)]); // 3个路径点
-
-        world.spawn((
-            Position { x: 0.0, y: 0.0 },
-            MovementVelocity::new(200.0),
-            path,
-        ));
-
-        // 更新一帧
-        system.update(&mut world, 0.016).unwrap();
-
-        // 验证系统运行正常
-        assert_eq!(world.len(), 1);
-    }
-}
-

@@ -1,51 +1,52 @@
-use super::character_select::CharacterSelect;
-use crate::ecs::components::{CharacterList, InputEvent};
+use crate::ecs::components::CharacterList;
 use crate::ecs::scenes::select_scene::BottomButton;
-use crate::ecs::WorldExt; // 🆕 导入CharacterList组件
-
-use super::credits_dialog::CreditsDialog;
-use super::delete_character_dialog::DeleteCharacterDialog;
-use super::message_box::{MessageBox, MessageBoxButtons, MessageBoxResult};
-use super::new_character_dialog::NewCharacterDialog; // 🆕 导出消息框
-
-use super::SelectScene;
-use ggez::graphics::Canvas;
+use crate::ecs::GameContext; // ✅ 使用 GameContext 代替 WorldExt
+use ggez::winit::event::MouseButton;
 use ggez::winit::keyboard::KeyCode;
 use ggez::{Context, GameResult};
 use hecs::World;
-use std::sync::Arc;
 
-use super::super::ui::InputBox; // 🆕 只导入 InputBox
-use super::{Scene, SceneType};
-use crate::ecs::ui::{ButtonGroup, ButtonWidget}; // ButtonGroup 从原路径导入
-use crate::network::{handlers::GameEvent, NetContext};
-use mir2_shared::SelectInfo;
+use super::SceneType;
+use super::SelectScene;
 
 impl SelectScene {
-    pub(crate) fn handle_input_event(
-        &mut self,
-        ctx: &mut Context,
-        world: &mut World,
-    ) -> GameResult {
-        let input = world.global_events().input_events.clone();
-        for event in input.iter() {
-            match event {
-                InputEvent::KeyDown { keycode, text, .. } => {
-                    self.on_key_down(ctx, world, keycode, text.as_deref())?;
-                }
-                InputEvent::Ime { character, .. } => {
-                    self.on_text_input(ctx, world, character.to_string());
-                }
-                InputEvent::MouseMove { x, y, dx, dy } => {
-                    self.on_mouse_move(ctx, world, *x, *y)?;
-                }
-                InputEvent::MouseDown { button, x, y } => {
-                    self.on_mouse_down(ctx, world, button, *x, *y)?;
-                }
+    /// 基于 InputContext 的输入事件处理
+    ///
+    /// 使用 GameContext 提供的事件迭代器，避免直接访问 GlobalEvents
+    pub(crate) fn handle_input_event(&mut self, game_ctx: &mut GameContext) -> GameResult {
+        let mouse_moves: Vec<_> = game_ctx.input().mouse_motion().collect();
+        let mouse_downs: Vec<_> = if let Some((btn, x, y)) = game_ctx.input().mouse_button_pressed(MouseButton::Left) {
+            vec![(btn, x, y)]
+        } else {
+            vec![]
+        };
+        let key_downs: Vec<_> = game_ctx
+            .input()
+            .pressed_keys()
+            .map(|(k, t)| (k, t.map(|s| s.to_string())))
+            .collect();
+        let text_inputs: Vec<_> = game_ctx.input().text_input().collect();
 
-                _ => {}
-            }
+        // 1️⃣ 处理鼠标移动事件
+        for (x, y, _dx, _dy) in mouse_moves {
+            self.on_mouse_move(game_ctx.ctx, game_ctx.world, x, y)?;
         }
+
+        // 2️⃣ 处理鼠标按下事件
+        for (button, x, y) in mouse_downs {
+            self.on_mouse_down(game_ctx.ctx, game_ctx.world, &button, x, y)?;
+        }
+
+        // 3️⃣ 处理键盘按下事件
+        for (keycode, text) in key_downs {
+            self.on_key_down(game_ctx.ctx, game_ctx.world, &keycode, text.as_deref())?;
+        }
+
+        // 4️⃣ 处理文本输入事件
+        for character in text_inputs {
+            self.on_text_input(game_ctx.ctx, game_ctx.world, character.to_string())?;
+        }
+
         Ok(())
     }
 

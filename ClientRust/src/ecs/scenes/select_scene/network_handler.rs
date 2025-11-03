@@ -2,7 +2,7 @@
 //! 负责处理来自服务器的游戏事件响应
 
 use super::SelectScene;
-use crate::ecs::{Coord, WorldExt};
+use crate::ecs::{Coord, GameContext};
 use crate::ecs::scenes::SceneType;
 use crate::network::handlers::GameEvent;
 
@@ -11,9 +11,17 @@ impl SelectScene {
     /// 处理网络事件（在 GameApp 中调用）
     ///
     /// 根据事件类型分发到具体的处理方法
-    pub fn handle_network_event(&mut self, world: &mut hecs::World) {
-        let events = world.global_events().net_events.clone();
-        for event in events.iter() {
+    pub fn handle_network_event(&mut self, game_ctx: &mut GameContext) {
+   
+        // 处理所有类别的网络事件
+        let all_events: Vec<GameEvent> =  game_ctx.net_events().connection.iter()
+            .chain(game_ctx.net_events().auth.iter())
+            .chain(game_ctx.net_events().character.iter())
+            .chain(game_ctx.net_events().player_state.iter())
+            .cloned()
+            .collect();
+            
+        for event in all_events.iter() {
             match event {
                 GameEvent::LoginSuccess { characters } => {
                     self.handle_login_success(characters);

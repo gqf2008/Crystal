@@ -18,6 +18,7 @@
 // ============================================================================
 
 use hecs::World;
+use crate::ecs::GameContext;
 use crate::ecs::components::{
     Position, MonsterData, Health, AIState,
     Player,
@@ -189,8 +190,8 @@ impl System for MonsterAISystem {
         crate::ecs::systems::priority::MONSTER_AI
     }
 
-    fn update(&mut self, world: &mut hecs::World, _delay_time: f32) -> GameResult {
-        Self::update_ai(world);
+    fn update(&mut self,  ctx:&mut GameContext, _delay_time: f32) -> GameResult {
+        Self::update_ai(ctx.world);
         Ok(())
     }
 }

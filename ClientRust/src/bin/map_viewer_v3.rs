@@ -32,10 +32,9 @@ use hecs::World;
 
 use map_viewer::scene::MapViewerScene;
 
-use mir2_client::ecs::components::{GlobalEvents, InputEvent};
+use mir2_client::ecs::components::InputEvent;
 use mir2_client::ecs::scenes::Scene;
-use mir2_client::ecs::WorldExt;
-use mir2_client::network::{handlers::GameEvent, NetworkBuilder};
+use mir2_client::network::{ NetworkBuilder};
 use mir2_client::settings::ClientSettings;
 
 /// 地图查看器应用
@@ -44,6 +43,8 @@ struct MapViewerApp {
     world: World,
     /// 地图查看器场景
     scene: MapViewerScene,
+    /// 帧输入事件缓冲
+    frame_input_events: Vec<InputEvent>,
 }
 
 impl MapViewerApp {
@@ -57,49 +58,50 @@ impl MapViewerApp {
         // 创建 ECS World
         let mut world = World::new();
 
-        // 添加全局事件组件
-        world.spawn_global_events(GlobalEvents::new());
-
         // 创建默认配置
         let settings = ClientSettings::default();
 
         // 创建模拟网络（使用 mock 模式）
-        let net_ctx = NetworkBuilder::new(settings.network.clone())
+        let _net_ctx = NetworkBuilder::new(settings.network.clone())
             .mock(true) // 启用模拟网络
             .build()
             .expect("Failed to create mock network");
 
-        world.spawn_settings(settings);
-        world.spawn_network(net_ctx.clone());
+        // 注意：网络功能在此测试工具中暂时禁用
+        // world.spawn_settings(settings);
+        // world.spawn_network(net_ctx.clone());
 
         // 创建场景
         let scene = MapViewerScene::new(ctx)?;
 
         // 发送开始游戏请求，触发地图加载
-        let _ = net_ctx.send(GameEvent::StartGameRequest { character_index: 0 });
-        tracing::info!("📤 已发送 StartGameRequest，等待地图加载...");
+        // let _ = net_ctx.send(GameEvent::StartGameRequest { character_index: 0 });
+        tracing::info!("📤 地图查看器已启动（网络功能已禁用）");
 
         tracing::info!("✅ Map Viewer V3 启动完成");
 
-        Ok(Self { world, scene })
+        Ok(Self {
+            world,
+            scene,
+            frame_input_events: Vec::new(),
+        })
     }
 
-    #[inline]
-    fn collect_network_events(&mut self) {
-        let events = self.world.network().recv_categorized();
-        self.world.global_events_mut().net_events = events;
-    }
+    // 网络功能已禁用
 }
 
 impl EventHandler for MapViewerApp {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        self.collect_network_events();
-        // MapViewerApp 只负责收集事件到 GlobalEvents
-        // 所有的逻辑处理由 Scene 完成
-        self.scene.update(ctx, &mut self.world)?;
-
-        // 清理每帧事件
-        self.world.global_events_mut().clear_frame_events();
+        // ✅ 创建 GameContext 并传递给场景
+        let mut game_ctx = mir2_client::ecs::GameContext::new(ctx, &mut self.world);
+        
+        // 移动事件到 GameContext
+        game_ctx.input_events = std::mem::take(&mut self.frame_input_events);
+        
+        self.scene.update(&mut game_ctx)?;
+        
+        // 清理事件
+        self.frame_input_events.clear();
 
         Ok(())
     }
@@ -107,8 +109,11 @@ impl EventHandler for MapViewerApp {
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         let mut canvas = Canvas::from_frame(ctx, Color::from_rgb(0, 0, 0));
 
+        // 创建 GameContext 用于绘制
+        let mut game_ctx = mir2_client::ecs::GameContext::new(ctx, &mut self.world);
+        
         // 绘制场景
-        self.scene.draw(ctx, &mut canvas, &self.world)?;
+        self.scene.draw(&mut game_ctx, &mut canvas)?;
 
         // 提交画布
         canvas.finish(ctx)?;
@@ -123,9 +128,7 @@ impl EventHandler for MapViewerApp {
         dx: f32,
         dy: f32,
     ) -> GameResult {
-        self.world
-            .global_events_mut()
-            .input_events
+        self.frame_input_events
             .push(InputEvent::MouseMove { x, y, dx, dy });
         Ok(())
     }
@@ -133,35 +136,27 @@ impl EventHandler for MapViewerApp {
     fn mouse_button_down_event(
         &mut self,
         _ctx: &mut Context,
-        button: MouseButton,
-        x: f32,
-        y: f32,
+        _button: MouseButton,
+        _x: f32,
+        _y: f32,
     ) -> GameResult {
-        self.world
-            .global_events_mut()
-            .input_events
-            .push(InputEvent::MouseDown { button, x, y });
+        // MouseDown 事件已被移除
         Ok(())
     }
 
     fn mouse_button_up_event(
         &mut self,
         _ctx: &mut Context,
-        button: MouseButton,
-        x: f32,
-        y: f32,
+        _button: MouseButton,
+        _x: f32,
+        _y: f32,
     ) -> GameResult {
-        self.world
-            .global_events_mut()
-            .input_events
-            .push(InputEvent::MouseUp { button, x, y });
+        // MouseUp 事件已被移除
         Ok(())
     }
 
     fn mouse_wheel_event(&mut self, _ctx: &mut Context, x: f32, y: f32) -> GameResult {
-        self.world
-            .global_events_mut()
-            .input_events
+        self.frame_input_events
             .push(InputEvent::MouseWheel { x, y });
         Ok(())
     }
@@ -169,56 +164,22 @@ impl EventHandler for MapViewerApp {
     fn key_down_event(
         &mut self,
         _ctx: &mut Context,
-        input: KeyInput,
-        repeated: bool,
+        _input: KeyInput,
+        _repeated: bool,
     ) -> GameResult {
-        if let ggez::winit::keyboard::PhysicalKey::Code(code) = input.event.physical_key {
-            self.world
-                .global_events_mut()
-                .input_events
-                .push(InputEvent::KeyDown {
-                    keycode: code,
-                    repeat: repeated,
-                    text: input.event.text,
-                    timestamp: std::time::Instant::now(),
-                });
-        }
+        // KeyDown 事件已被移除 - 使用 ggez Context 的键盘状态
         Ok(())
     }
 
-    fn key_up_event(&mut self, _ctx: &mut Context, input: KeyInput) -> GameResult {
-        if let ggez::winit::keyboard::PhysicalKey::Code(code) = input.event.physical_key {
-            self.world
-                .global_events_mut()
-                .input_events
-                .push(InputEvent::KeyUp {
-                    keycode: code,
-                    text: input.event.text,
-                    timestamp: std::time::Instant::now(),
-                });
-        }
+    fn key_up_event(&mut self, _ctx: &mut Context, _input: KeyInput) -> GameResult {
+        // KeyUp 事件已被移除
         Ok(())
     }
 
     fn resize_event(&mut self, _ctx: &mut Context, width: f32, height: f32) -> GameResult {
-        // 在高 DPI 显示器上，ggez 传递的是物理像素，需要转换为逻辑像素
-        // let scale_factor = ctx.gfx.window().scale_factor() as f32;
-        // let logical_width = width / scale_factor;
-        // let logical_height = height / scale_factor;
-        // self.current_scene
-        //     .on_resize(ctx, &mut self.world, logical_width, logical_height)
-
-        if let Some((_, events)) = self
-            .world
-            .query_mut::<&mut GlobalEvents>()
-            .into_iter()
-            .next()
-        {
-            events
-                .input_events
-                .push(InputEvent::Resize { width, height });
-            tracing::info!("🖥️ 窗口调整大小: ({:.1}, {:.1})", width, height);
-        }
+        self.frame_input_events
+            .push(InputEvent::Resize { width, height });
+        tracing::info!("🖥️ 窗口调整大小: ({:.1}, {:.1})", width, height);
         Ok(())
     }
 }

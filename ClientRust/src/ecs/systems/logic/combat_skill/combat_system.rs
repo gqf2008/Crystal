@@ -22,6 +22,7 @@
 // ============================================================================
 
 use hecs::World;
+use crate::ecs::GameContext;
 use crate::ecs::components::{
     LocalPlayer, Position, Health, Monster, NetworkSync, CombatStats, NetworkObjectType
 };
@@ -69,12 +70,12 @@ impl System for CombatSystem {
         priority::COMBAT
     }
 
-    fn update(&mut self, world: &mut World, _delay_time: f32) -> GameResult {
+    fn update(&mut self, ctx:&mut GameContext, _delay_time: f32) -> GameResult {
         // 检查玩家是否有攻击意图
         let attack_request = {
             let mut request = None;
-            
-            for (_, (_, input)) in world.query::<(&LocalPlayer, &crate::ecs::components::PlayerInput)>().iter() {
+
+            for (_, (_, input)) in ctx.world.query::<(&LocalPlayer, &crate::ecs::components::PlayerInput)>().iter() {
                 if let Some(target_entity) = input.attack_target {
                     request = Some(target_entity);
                     break;
@@ -90,10 +91,9 @@ impl System for CombatSystem {
             let target_id = {
                 let mut id = None;
                 
-                if let Ok(sync) = world.get::<&NetworkSync>(target_entity) {
+                if let Ok(sync) = ctx.world.get::<&NetworkSync>(target_entity) {
                     id = Some(sync.object_id);
                 }
-                
                 id
             };
             
@@ -101,7 +101,7 @@ impl System for CombatSystem {
                 // 2. 检查目标是否存在且为怪物
                 let target_exists = {
                     let mut exists = false;
-                    for (_, (_, net_sync)) in world.query::<(&Monster, &NetworkSync)>().iter() {
+                    for (_, (_, net_sync)) in ctx.world.query::<(&Monster, &NetworkSync)>().iter() {
                         if net_sync.object_id == target_id {
                             exists = true;
                             break;
@@ -114,7 +114,7 @@ impl System for CombatSystem {
                     tracing::warn!("⚠️ 攻击目标不存在");
                     
                     // 清除攻击输入
-                    for (_, (_, input)) in world.query_mut::<(&LocalPlayer, &mut crate::ecs::components::PlayerInput)>() {
+                    for (_, (_, input)) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::ecs::components::PlayerInput)>() {
                         input.attack_target = None;
                         break;
                     }
@@ -123,7 +123,7 @@ impl System for CombatSystem {
                 }
                 
                 // 3. 计算攻击方向（朝向目标）
-                let direction = Self::calculate_attack_direction(world, target_id);
+                let direction = Self::calculate_attack_direction(ctx.world, target_id);
                 
                 // 4. 发送攻击命令到网络（如果网络发送器存在）
                 // TODO: 从 World 中获取 NetworkCommand sender
@@ -133,13 +133,13 @@ impl System for CombatSystem {
                 // });
                 
                 // 5. 本地预览伤害（不修改实际数据，实际伤害由服务器计算）
-                Self::calculate_local_attack_preview(world, target_id);
+                Self::calculate_local_attack_preview(ctx.world, target_id);
                 
                 tracing::info!("⚔️ 攻击怪物: ID={}", target_id);
             }
             
             // 6. 清除攻击输入
-            for (_, (_, input)) in world.query_mut::<(&LocalPlayer, &mut crate::ecs::components::PlayerInput)>() {
+            for (_, (_, input)) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::ecs::components::PlayerInput)>() {
                 input.attack_target = None;
             }
         }

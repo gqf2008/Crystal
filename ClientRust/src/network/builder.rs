@@ -21,6 +21,19 @@ pub struct NetContext {
 }
 
 impl NetContext {
+    /// 创建空的 NetContext (用于测试/占位)
+    /// 
+    /// 注意：这个上下文无法实际发送或接收网络数据
+    /// 正常使用请通过 NetworkBuilder::build() 创建
+    pub fn new() -> Self {
+        use crossbeam_channel::unbounded;
+        let (tx, rx) = unbounded();
+        Self {
+            outbound: tx,
+            inbound: rx,
+        }
+    }
+    
     /// 发送事件到网络
     #[inline]
     pub fn send(&self, event: GameEvent) -> Result<()> {

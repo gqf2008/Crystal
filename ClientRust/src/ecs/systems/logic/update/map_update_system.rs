@@ -14,9 +14,10 @@ use crate::ecs::components::{
     Position, Camera, Draggable, Player, PlayerAction, PlayerAppearance, MoveMode,
     MovementAnimation, MapData, RenderConfig, TimeTracker, VisibleArea,
     LocalPlayer, NetworkSync, NetworkObjectType, PlayerInput, MovementVelocity,
-    Path, Movement, Prediction, GlobalEvents,
+    Path, Movement, Prediction, /* GlobalEvents, */
 };
-use crate::ecs::{Coord, MapUtils, MapLoader};
+use crate::ecs::{Coord, GameContext, MapLoader, MapUtils};
+// ⚠️ GlobalEvents 已废弃 - 该系统使用旧 System trait，需要迁移到 SystemV2 + GameContext
 use crate::objects::MapReader;
 use mir2_shared::enums::{MirClass, MirGender};
 
@@ -279,13 +280,14 @@ impl MapUpdateSystem {
             Prediction::new(Position { x: spawn_x, y: spawn_y }),
         ));
         
-        // 创建 GlobalEvents 组件 (新架构) - 使用固定的实体ID
-        use crate::ecs::GAME_EVENTS_ENTITY;
-        if let Some(entity_id) = GAME_EVENTS_ENTITY {
-            world.spawn_at(entity_id, (GlobalEvents::new(),));
-        } else {
-            world.spawn((GlobalEvents::new(),));
-        }
+        // ⚠️ GlobalEvents 已废弃 - 不再创建此组件
+        // 使用 GameContext 传递输入事件
+        // use crate::ecs::GAME_EVENTS_ENTITY;
+        // if let Some(entity_id) = GAME_EVENTS_ENTITY {
+        //     world.spawn_at(entity_id, (GlobalEvents::empty(),));
+        // } else {
+        //     world.spawn((GlobalEvents::empty(),));
+        // }
         
         // 创建鼠标输入状态实体（地图查看器需要）
         world.spawn((MouseInput {
@@ -314,7 +316,7 @@ impl System for MapUpdateSystem {
         500  // STATE_UPDATE 层，在地图加载之前执行
     }
 
-    fn update(&mut self, world: &mut World, _delay_time: f32) -> GameResult {
-        Self::do_update(world)
+    fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
+        Self::do_update(ctx.world)
     }
 }

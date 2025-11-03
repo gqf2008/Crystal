@@ -33,8 +33,8 @@ crate::logic_system!(
     update::TileAnimationSystem,
     update::ParticleSystem,
     update::SoundSystem,
-    update::CameraSystem,
     update::HealthRegenSystem,
     update::MapLoadSystem,
     update::MapUpdateSystem,
+    update::CameraSystem,
 );

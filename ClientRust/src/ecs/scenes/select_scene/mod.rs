@@ -14,7 +14,7 @@ mod ui_actions; // UI 交互逻辑（按钮点击、对话框打开、游戏启�
 mod input_handler; // 输入事件处理（键盘、鼠标、IME等）
 
 use crate::ecs::components::CharacterList;
-use crate::ecs::{Coord, WorldExt};
+use crate::ecs::{Coord, GameContext, WorldExt};
 use character_select::CharacterSelect; // 🆕 导入CharacterList组件
 
 pub use credits_dialog::CreditsDialog;
@@ -235,15 +235,15 @@ impl Scene for SelectScene {
         self
     }
 
-    fn update(&mut self, ctx: &mut Context, world: &mut World) -> GameResult<Option<SceneType>> {
-        self.handle_input_event(ctx, world)?;
+    fn update(&mut self, game_ctx: &mut crate::ecs::GameContext) -> GameResult<Option<SceneType>> {
+        self.handle_input_event(game_ctx)?;
 
         // 🔄 从World同步角色列表到UI缓存
         // 🆕 正确架构: World存储CharacterList组件(单一实体)
         if self.character_select_ui.is_empty() {
             // 📦 Step 1: 先提取数据(只在借用作用域内)
             let (should_select, first_name) = {
-                if let Some((entity, char_list)) = world
+                if let Some((entity, char_list)) = game_ctx.world
                     .query::<&crate::ecs::components::CharacterList>()
                     .iter()
                     .next()
@@ -281,17 +281,17 @@ impl Scene for SelectScene {
                     (false, None)
                 }
             }; // ← 查询借用在这里结束
-            self.handle_network_event(world);
+            self.handle_network_event(game_ctx);
             // ✅ Step 2: 在借用释放后修改 World
             if should_select {
-                self.select_character(0, world);
+                self.select_character(0, game_ctx.world);
                 tracing::info!("🎯 默认选中第一个角色: {}", first_name.unwrap());
             }
         }
 
       
 
-        let delta = ctx.time.delta().as_secs_f32();
+        let delta = game_ctx.ctx.time.delta().as_secs_f32();
 
         // 更新 NewCharacterDialog 动画和计时器
         if let Some(dialog) = &mut self.new_character_dialog {
@@ -323,7 +323,7 @@ impl Scene for SelectScene {
                         if self.character_select_ui.get_selected_character().is_some() {
                             let mut input_box =
                                 InputBox::new("Please enter the character's name.".to_string());
-                            input_box.show(ctx); // ✅ 传入 ctx 启用 IME
+                            input_box.show(game_ctx.ctx); // ✅ 传入 ctx 启用 IME
                             self.input_box = Some(input_box);
                         }
                     }
@@ -346,7 +346,8 @@ impl Scene for SelectScene {
                     if input_text == character.name {
                         tracing::info!("🗑️ 发送删除角色请求: index={}", character.index);
                         // 发送 DeleteCharacter 包
-                        let _ = world.network().send(GameEvent::DeleteCharacterRequest {
+                        use crate::ecs::WorldExt;
+                        let _ = game_ctx.world.network().send(GameEvent::DeleteCharacterRequest {
                             index: character.index,
                         });
                     } else {
@@ -363,12 +364,12 @@ impl Scene for SelectScene {
                 }
 
                 // ✅ 关闭输入框时禁用 IME
-                input_box.hide(ctx);
+                input_box.hide(game_ctx.ctx);
                 self.input_box = None;
             } else if input_box.cancelled {
                 tracing::info!("❌ 输入框取消");
                 // ✅ 关闭输入框时禁用 IME
-                input_box.hide(ctx);
+                input_box.hide(game_ctx.ctx);
                 self.input_box = None;
             }
         }
@@ -381,7 +382,7 @@ impl Scene for SelectScene {
         Ok(None)
     }
 
-    fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, _world: &World) -> GameResult {
+    fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,
@@ -391,12 +392,12 @@ impl Scene for SelectScene {
 
         // 🆕 使用 CharacterSelect 组件绘制主界面
         self.character_select_ui
-            .draw(ctx, canvas, &self.bottom_buttons)?;
+            .draw(ctx.ctx, canvas, &self.bottom_buttons)?;
 
         // TODO: 8. 绘制 NewCharacterDialog (最上层)
         if let Some(ref mut dialog) = self.new_character_dialog {
             if dialog.visible {
-                dialog.draw(ctx, canvas)?;
+                dialog.draw(ctx.ctx, canvas)?;
             }
         }
 
@@ -406,18 +407,18 @@ impl Scene for SelectScene {
         // 10. 🆕 绘制 CreditsDialog (最上层)
         if let Some(ref dialog) = self.credits_dialog {
             if dialog.visible {
-                let _ = dialog.draw(ctx, canvas);
+                let _ = dialog.draw(ctx.ctx, canvas);
             }
         }
 
         // 11. 🆕 绘制消息框 (最上层)
         if let Some(ref message_box) = self.message_box {
-            let _ = message_box.draw(ctx, canvas); // 使用正确的 MessageBox
+            let _ = message_box.draw(ctx.ctx, canvas); // 使用正确的 MessageBox
         }
 
         // 12. 🆕 绘制输入框 (最上层)
         if let Some(ref mut input_box) = self.input_box {
-            input_box.draw(ctx, canvas)?;
+            input_box.draw(ctx.ctx, canvas)?;
         }
 
         Ok(())

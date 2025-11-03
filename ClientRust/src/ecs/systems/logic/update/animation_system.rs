@@ -19,6 +19,7 @@
 
 use hecs::World;
 use ggez::GameResult;
+use crate::ecs::GameContext;
 use crate::ecs::components::animation_state::{AnimationControl, AnimationState};
 use crate::ecs::systems::{System, priority};
 
@@ -69,11 +70,11 @@ impl System for AnimationSystem {
         priority::ANIMATION
     }
 
-    fn update(&mut self, world: &mut World, delay_time: f32) -> GameResult {
+    fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         self.accumulated_time += delay_time;
 
         // 更新所有动画控制器
-        for (_, control) in world.query_mut::<&mut AnimationControl>() {
+        for (_, control) in ctx.world.query_mut::<&mut AnimationControl>() {
             Self::update_animation_frame(control, delay_time);
         }
 

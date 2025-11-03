@@ -40,8 +40,9 @@ use hecs::World;
 use ggez::{Context, GameResult};
 use tracing::{info, error};
 
-use crate::ecs::components::{MapData, GlobalEvents};
-use crate::ecs::MapLoader;
+use crate::ecs::components::{MapData /*, GlobalEvents */};
+use crate::ecs::{GameContext, MapLoader};
+// ⚠️ GlobalEvents 已废弃 - 该系统使用旧 System trait，需要迁移到 SystemV2 + GameContext
 use crate::objects::MapReader;
 
 /// 地图管理组件
@@ -77,32 +78,31 @@ pub struct MapLoadSystem;
 impl MapLoadSystem {
     /// 内部加载逻辑
     fn do_update(world: &mut World) -> GameResult {
-        // ====================================================================
-        // 1. 读取网络事件
-        // ====================================================================
+        // ⚠️ 该系统已废弃 - GlobalEvents 不再存在
+        // 需要迁移到 SystemV2 trait 并使用 GameContext
+        tracing::warn!("⚠️ MapLoadSystem 使用已废弃的 System trait，应迁移到 SystemV2 + GameContext");
+        return Ok(());
         
-        let events = {
-            let mut query = world.query::<&GlobalEvents>();
-            if let Some((_, global_events)) = query.iter().next() {
-                global_events.net_events.clone()
-            } else {
-                return Ok(()); // 没有 GlobalEvents 组件
-            }
-        };
+        // 旧代码：读取网络事件
+        // let events = {
+        //     let mut query = world.query::<&GlobalEvents>();
+        //     if let Some((_, global_events)) = query.iter().next() {
+        //         global_events.net_events.clone()
+        //     } else {
+        //         return Ok(()); // 没有 GlobalEvents 组件
+        //     }
+        // };
 
-        // ====================================================================
-        // 2. 查找地图切换事件（使用新的过滤方法）
-        // ====================================================================
-        
-        let map_changes = {
-            let mut query = world.query::<&GlobalEvents>();
-            if let Some((_, global_events)) = query.iter().next() {
-                global_events.get_map_changes()
-            } else {
-                return Ok(()); // 没有 GlobalEvents 组件
-            }
-        };
+        // let map_changes = {
+        //     let mut query = world.query::<&GlobalEvents>();
+        //     if let Some((_, global_events)) = query.iter().next() {
+        //         global_events.get_map_changes()
+        //     } else {
+        //         return Ok(()); // 没有 GlobalEvents 组件
+        //     }
+        // };
 
+       /* 以下代码已废弃 - 需要使用 GameContext 重写
         // 如果没有地图切换事件，直接返回
         if map_changes.is_empty() {
             return Ok(());
@@ -157,6 +157,7 @@ impl MapLoadSystem {
         }
         
         Ok(())
+        */ // 结束废弃代码块
     }
 
     /// 清除旧地图数据
@@ -190,7 +191,7 @@ impl System for MapLoadSystem {
         510  // STATE_UPDATE 层，地图加载优先级（与注释中的优先级保持一致）
     }
 
-    fn update(&mut self, world: &mut World, _delay_time: f32) -> GameResult {
-        Self::do_update(world)
+    fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
+        Self::do_update(ctx.world)
     }
 }

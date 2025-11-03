@@ -16,6 +16,7 @@
 
 use hecs::World;
 use ggez::GameResult;
+use crate::ecs::GameContext;
 use crate::ecs::components::{AnimatedTile, MapTile, RenderConfig};
 use crate::ecs::systems::{System, priority};
 
@@ -69,10 +70,10 @@ impl System for TileAnimationSystem {
         priority::ANIMATION + 5 // 505, 稍微晚于角色动画
     }
 
-    fn update(&mut self, world: &mut World, delta_time: f32) -> GameResult {
+    fn update(&mut self, ctx: &mut GameContext, delta_time: f32) -> GameResult {
         // 检查是否启用动画
         let animations_enabled = {
-            let mut config_query = world.query::<&RenderConfig>();
+            let mut config_query = ctx.world.query::<&RenderConfig>();
             config_query
                 .iter()
                 .next()
@@ -95,7 +96,7 @@ impl System for TileAnimationSystem {
         }
 
         // 更新所有动画瓦片的 image_index
-        for (_, (tile, anim)) in world.query_mut::<(&mut MapTile, &AnimatedTile)>() {
+        for (_, (tile, anim)) in ctx.world.query_mut::<(&mut MapTile, &AnimatedTile)>() {
             let frame_offset = self.calculate_frame_offset(anim.frame_count, anim.frame_interval);
             tile.image_index = anim.base_image_index + frame_offset;
         }

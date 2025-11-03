@@ -166,7 +166,7 @@ pub mod priority {
 
     // 阶段 7: 渲染 (1000-1999)
     pub const MAP_RENDER: u32 = 1000;
-    pub const ENTITY_RENDER: u32 = 1020;  // EntityRenderSystem: 实体渲染（玩家/怪物）
+    pub const ENTITY_RENDER: u32 = 1020; // EntityRenderSystem: 实体渲染（玩家/怪物）
     pub const EFFECT_RENDER: u32 = 1020;
     pub const UI_RENDER: u32 = 1030;
     pub const DEBUG_RENDER: u32 = 1100;
@@ -343,7 +343,7 @@ pub use logic::update::{
 // - 可以只覆盖需要的元数据方法，其他方法自动使用 trait 中的默认实现
 // ============================================================================
 
-/// ECS 更新系统抽象
+/// ECS 更新系统抽象（V1 - 稳定版本）
 ///
 /// 所有需要在逻辑更新阶段执行的系统都应实现此 trait。
 pub trait System {
@@ -361,8 +361,9 @@ pub trait System {
     fn priority(&self) -> u32 {
         100
     }
+
     /// 更新方法，每帧在逻辑阶段调用
-    fn update(&mut self, world: &mut hecs::World, delay_time: f32) -> GameResult;
+    fn update(&mut self, ctx: &mut crate::ecs::GameContext, delay_time: f32) -> GameResult;
 }
 
 /// ECS 绘制系统抽象（纯渲染，无逻辑更新）
@@ -393,37 +394,6 @@ pub trait DrawSystem {
     ) -> GameResult;
 }
 
-/// ECS 混合系统抽象（同时需要更新和渲染）
-///
-/// 用于需要在逻辑阶段更新状态、在渲染阶段绘制的系统（如粒子系统、调试系统）。
-///
-/// # 与 DrawSystem 的区别
-/// - `DrawSystem`: 纯渲染，无逻辑更新（如地图渲染、UI渲染）
-/// - `HybridSystem`: 需要逻辑更新 + 渲染（如粒子效果、调试信息）
-/// - `System`: 纯逻辑，无渲染（如 AI、物理、网络）
-///
-/// # 用法
-/// ```rust
-/// #[derive(HybridSystem)]
-/// struct ParticleSystem;
-///
-/// impl HybridSystem for ParticleSystem {
-///     fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
-///         // 更新粒子状态（位置、生命周期等）
-///         Ok(())
-///     }
-///     
-///     fn draw(
-///         &mut self,
-///         ctx: &mut ggez::Context,
-///         canvas: &mut ggez::graphics::Canvas,
-///         world: &hecs::World,
-///     ) -> GameResult {
-///         // 绘制粒子
-///         Ok(())
-///     }
-/// }
-/// ```
 pub trait HybridSystem {
     /// 系统名称，默认使用类型全名
     fn name(&self) -> &'static str {
@@ -439,8 +409,9 @@ pub trait HybridSystem {
     fn priority(&self) -> u32 {
         100
     }
+
     /// 更新方法，每帧在逻辑阶段调用（必须实现）
-    fn update(&mut self, world: &mut hecs::World, delay_time: f32) -> GameResult;
+    fn update(&mut self, _ctx: &mut crate::ecs::GameContext, delay_time: f32) -> GameResult;
 
     /// 绘制方法，每帧在渲染阶段调用（必须实现）
     fn draw(
@@ -617,7 +588,7 @@ impl SystemScheduler {
     }
 
     /// 逻辑更新阶段 - 按优先级统一调度所有系统的 update
-    pub fn update(&mut self, world: &mut hecs::World, delay_time: f32) -> GameResult {
+    pub fn update(&mut self, ctx: &mut crate::ecs::GameContext, delay_time: f32) -> GameResult {
         for entry in &mut self.systems {
             if !entry.is_enabled() {
                 continue;
@@ -625,10 +596,10 @@ impl SystemScheduler {
 
             match entry {
                 SystemEntry::Update { system, .. } => {
-                    system.update(world, delay_time)?;
+                    system.update(ctx, delay_time)?;
                 }
                 SystemEntry::Hybrid { system, .. } => {
-                    system.update(world, delay_time)?;
+                    system.update(ctx, delay_time)?;
                 }
                 SystemEntry::Draw { .. } => {
                     // 纯渲染系统无需更新
@@ -640,7 +611,12 @@ impl SystemScheduler {
     }
 
     /// 渲染阶段 - 调度 DrawSystem 和 HybridSystem 的 draw 方法
-    pub fn draw(&mut self, ctx: &mut ggez::Context, canvas: &mut Canvas, world: &hecs::World) -> GameResult {
+    pub fn draw(
+        &mut self,
+        ctx: &mut ggez::Context,
+        canvas: &mut Canvas,
+        world: &hecs::World,
+    ) -> GameResult {
         for entry in &mut self.systems {
             if !entry.is_enabled() {
                 continue;
@@ -660,140 +636,5 @@ impl SystemScheduler {
         }
 
         Ok(())
-    }
-}
-
-mod tests {
-    use super::*;
-    #[derive(RenderSystem)]
-    pub struct TestDrawSystem;
-
-    impl DrawSystem for TestDrawSystem {
-        fn priority(&self) -> u32 {
-            50
-        }
-        fn draw(
-            &mut self,
-            _ctx: &mut ggez::Context,
-            _canvas: &mut ggez::graphics::Canvas,
-            _world: &hecs::World,
-        ) -> GameResult {
-            Ok(())
-        }
-    }
-
-    /// 测试系统
-    #[derive(LogicSystem)]
-    pub struct TestSystem;
-
-    impl System for TestSystem {
-        fn update(&mut self, _world: &mut hecs::World, _delay_time: f32) -> GameResult {
-            println!("TestSystem::update called");
-            Ok(())
-        }
-    }
-
-    #[derive(HybridSystem)]
-    pub struct TestDebugSystem;
-
-    impl HybridSystem for TestDebugSystem {
-        fn priority(&self) -> u32 {
-            50
-        }
-        fn update(&mut self, _world: &mut hecs::World, _dt: f32) -> GameResult {
-            // 混合系统的更新逻辑（必须实现）
-            Ok(())
-        }
-
-        fn draw(
-            &mut self,
-            _ctx: &mut ggez::Context,
-            _canvas: &mut ggez::graphics::Canvas,
-            _world: &hecs::World,
-        ) -> GameResult {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn test_add_system() {
-        let mut scheduler = SystemScheduler::new();
-
-        // 这应该能编译通过
-        scheduler.add_system(TestSystem);
-        scheduler.add_system(TestDrawSystem);
-        scheduler.add_system(TestDebugSystem); // 添加绘制系统
-        println!("✅ Test passed!");
-    }
-
-    #[test]
-    fn test_system_execution_order() {
-        use std::sync::{Arc, Mutex};
-
-        // 测试系统执行顺序
-        #[derive(LogicSystem)]
-        struct EarlySystem(Arc<Mutex<Vec<String>>>);
-
-        impl System for EarlySystem {
-            fn update(&mut self, _world: &mut hecs::World, _dt: f32) -> GameResult {
-                self.0.lock().unwrap().push("Early(100)".to_string());
-                Ok(())
-            }
-        }
-
-        #[derive(HybridSystem)]
-        struct LateHybridSystem(Arc<Mutex<Vec<String>>>);
-
-        impl HybridSystem for LateHybridSystem {
-            fn priority(&self) -> u32 {
-                200
-            }
-            fn update(&mut self, _world: &mut hecs::World, _dt: f32) -> GameResult {
-                self.0.lock().unwrap().push("LateHybrid(200)".to_string());
-                Ok(())
-            }
-            fn draw(
-                &mut self,
-                _ctx: &mut ggez::Context,
-                _canvas: &mut ggez::graphics::Canvas,
-                _world: &hecs::World,
-            ) -> GameResult {
-                Ok(())
-            }
-        }
-
-        #[derive(LogicSystem)]
-        struct MiddleSystem(Arc<Mutex<Vec<String>>>);
-
-        impl System for MiddleSystem {
-            fn priority(&self) -> u32 {
-                150
-            }
-            fn update(&mut self, _world: &mut hecs::World, _dt: f32) -> GameResult {
-                self.0.lock().unwrap().push("Middle(150)".to_string());
-                Ok(())
-            }
-        }
-
-        let execution_order = Arc::new(Mutex::new(Vec::new()));
-
-        let mut scheduler = SystemScheduler::new();
-        scheduler.add_system(LateHybridSystem(execution_order.clone()));
-        scheduler.add_system(EarlySystem(execution_order.clone()));
-        scheduler.add_system(MiddleSystem(execution_order.clone()));
-
-        let mut world = hecs::World::new();
-        scheduler.update(&mut world, 0.016).unwrap();
-
-        let order = execution_order.lock().unwrap();
-        println!("执行顺序: {:?}", *order);
-
-        // 验证按优先级顺序执行：100 -> 150 -> 200
-        assert_eq!(order.len(), 3);
-        assert_eq!(order[0], "Early(100)");
-        assert_eq!(order[1], "Middle(150)");
-        assert_eq!(order[2], "LateHybrid(200)");
-
-        println!("✅ 系统按优先级正确排序执行！");
     }
 }

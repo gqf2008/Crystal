@@ -10,20 +10,19 @@
 //
 // ============================================================================
 
-use super::WorldExt;
+use super::WorldExt; // 用于 network(), spawn_settings() 等方法
 use ggez::event::EventHandler;
 use ggez::graphics::{Canvas, Color};
-use ggez::winit::keyboard::{KeyCode, PhysicalKey};
 use ggez::{Context, GameResult};
 use hecs::World;
 
-use crate::ecs::components::{GlobalEvents, InputEvent};
+use crate::ecs::components::InputEvent;
 use crate::ecs::scenes::{GameScene, LoginScene, Scene, SceneType, SelectScene};
 use crate::settings::ClientSettings;
 
 /// 游戏主应用
 pub struct GameState {
-    /// ECS World
+    /// ECS World（包含 NetContext, ClientSettings 等单例组件）
     world: World,
 
     /// 当前场景
@@ -31,6 +30,9 @@ pub struct GameState {
 
     /// 场景类型
     scene_type: SceneType,
+
+    /// 本帧收集的输入事件（在 EventHandler 回调中收集，在 update 中使用）
+    frame_input_events: Vec<InputEvent>,
 }
 impl GameState {
     /// 创建新的游戏应用
@@ -38,23 +40,21 @@ impl GameState {
     /// # 参数
     /// - `ctx`: ggez 上下文
     /// - `settings`: 客户端配置（由 ClientRuntime 加载）
-    pub fn new(_ctx: &mut Context, settings: ClientSettings) -> GameResult<Self> {
+    pub fn new(ctx: &mut Context, settings: ClientSettings) -> GameResult<Self> {
         tracing::info!("🎮 游戏应用初始化中...");
         let net_ctx = crate::network::NetworkBuilder::new(settings.network.clone())
             .build()
             .expect("Failed to initialize network");
 
         let mut world = World::new();
-        world
-            .spawn_settings(settings)
-            .spawn_network(net_ctx)
-            .spawn_global_events(GlobalEvents::new());
+        world.spawn_settings(settings).spawn_network(net_ctx);
         // 创建初始场景（登录场景）
         let login_scene = LoginScene::new();
         Ok(Self {
             world,
             current_scene: Box::new(login_scene),
             scene_type: SceneType::Login,
+            frame_input_events: Vec::new(),
         })
     }
 }
@@ -78,10 +78,6 @@ impl GameState {
     /// 切换场景
     pub fn switch_scene(&mut self, ctx: &mut Context, scene_type: SceneType) -> GameResult {
         tracing::info!("🔄 切换场景: {:?} -> {:?}", self.scene_type, scene_type);
-
-        // 🧹 场景切换前清理全局事件,避免旧场景事件污染新场景
-        self.clear_global_events();
-
         self.scene_type = scene_type;
         self.current_scene = match scene_type {
             SceneType::Login => {
@@ -114,16 +110,7 @@ impl GameState {
 
         Ok(())
     }
-    #[inline]
-    fn collect_network_events(&mut self) {
-        let events = self.world.network().recv_categorized();
-        self.world.global_events_mut().net_events = events;
-    }
 
-    #[inline]
-    fn clear_global_events(&mut self) {
-        self.world.global_events_mut().clear_frame_events();
-    }
     /// 清理所有游戏对象实体
     ///
     /// 在切换到游戏场景之前调用,确保旧角色数据不会残留
@@ -195,66 +182,58 @@ impl GameState {
 
 impl EventHandler for GameState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
-        self.collect_network_events();
+        // 创建 GameContext 并传入本帧收集的输入事件
+        let mut game_ctx = crate::ecs::GameContext::new(ctx, &mut self.world);
+        game_ctx.input_events = std::mem::take(&mut self.frame_input_events);
 
-        // 更新当前场景（Scene 自己会处理需要的网络事件）
-        if let Some(next_scene) = self.current_scene.update(ctx, &mut self.world)? {
+        // 🎮 更新当前场景（Scene 使用 GameContext 访问所有状态）
+        if let Some(next_scene) = self.current_scene.update(&mut game_ctx)? {
             // 场景请求切换
             self.switch_scene(ctx, next_scene)?;
         }
-        self.clear_global_events();
+
+        // ✅ 清空输入事件，为下一帧准备
+        self.frame_input_events.clear();
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
+        let mut ctx = crate::ecs::GameContext::new(ctx, &mut self.world);
         // 绘制当前场景
-        self.current_scene.draw(ctx, &mut canvas, &self.world)?;
-        canvas.finish(ctx)?;
+        self.current_scene.draw(&mut ctx, &mut canvas)?;
+        canvas.finish(ctx.ctx)?;
 
         Ok(())
     }
 
-    fn mouse_button_down_event(
+    fn mouse_enter_or_leave(
         &mut self,
         _ctx: &mut Context,
-        button: ggez::winit::event::MouseButton,
-        x: f32,
-        y: f32,
-    ) -> GameResult {
-      
-        if let Some((_, events)) = self
-            .world
-            .query_mut::<&mut GlobalEvents>()
-            .into_iter()
-            .next()
-        {
-            events
-                .input_events
-                .push(InputEvent::MouseDown { button, x, y });
-            tracing::trace!("🖱️ 鼠标按下: {:?} at ({:.1}, {:.1})", button, x, y);
-        }
+        entered: bool,
+    ) -> Result<(), ggez::GameError> {
+        self.frame_input_events
+            .push(InputEvent::MouseEnterOrLeave { entered });
+        tracing::trace!(
+            "🖱️ 鼠标{}",
+            if entered {
+                "进入窗口"
+            } else {
+                "离开窗口"
+            }
+        );
         Ok(())
     }
 
-    fn mouse_button_up_event(
+    fn mouse_wheel_event(
         &mut self,
         _ctx: &mut Context,
-        button: ggez::winit::event::MouseButton,
         x: f32,
         y: f32,
-    ) -> GameResult {
-        if let Some((_, events)) = self
-            .world
-            .query_mut::<&mut GlobalEvents>()
-            .into_iter()
-            .next()
-        {
-            events
-                .input_events
-                .push(InputEvent::MouseUp { button, x, y });
-            tracing::trace!("🖱️ 鼠标抬起: {:?} at ({:.1}, {:.1})", button, x, y);
-        }
+    ) -> Result<(), ggez::GameError> {
+        self.frame_input_events
+            .push(InputEvent::MouseWheel { x, y });
+        tracing::trace!("🖱️ 鼠标滚轮: ({:.1}, {:.1})", x, y);
         Ok(())
     }
 
@@ -265,119 +244,15 @@ impl EventHandler for GameState {
         y: f32,
         dx: f32,
         dy: f32,
-    ) -> GameResult {
-        if let Some((_, events)) = self
-            .world
-            .query_mut::<&mut GlobalEvents>()
-            .into_iter()
-            .next()
-        {
-            events
-                .input_events
-                .push(InputEvent::MouseMove { x, y, dx, dy });
-            // 鼠标移动事件太频繁，不记录日志
-        }
-        Ok(())
-    }
-
-    fn key_down_event(
-        &mut self,
-        _ctx: &mut Context,
-        input: ggez::input::keyboard::KeyInput,
-        repeated: bool,
-    ) -> GameResult {
-        if let Some((_, events)) = self
-            .world
-            .query_mut::<&mut GlobalEvents>()
-            .into_iter()
-            .next()
-        {
-            events.input_events.push(InputEvent::KeyDown {
-                keycode: if let PhysicalKey::Code(key) = input.event.physical_key {
-                    key
-                } else {
-                    KeyCode::Abort
-                },
-                repeat: repeated,
-                text: input.event.text,
-                timestamp: std::time::Instant::now(),
-            });
-        }
-        Ok(())
-    }
-
-    fn key_up_event(
-        &mut self,
-        _ctx: &mut Context,
-        input: ggez::input::keyboard::KeyInput,
     ) -> Result<(), ggez::GameError> {
-        if let Some((_, events)) = self
-            .world
-            .query_mut::<&mut GlobalEvents>()
-            .into_iter()
-            .next()
-        {
-            events.input_events.push(InputEvent::KeyUp {
-                keycode: if let PhysicalKey::Code(key) = input.event.physical_key {
-                    key
-                } else {
-                    KeyCode::Abort
-                },
-                text: input.event.text,
-                timestamp: std::time::Instant::now(),
-            });
-        }
+        self.frame_input_events
+            .push(InputEvent::MouseMove { x, y, dx, dy });
         Ok(())
     }
 
-    fn mouse_wheel_event(&mut self, _ctx: &mut Context, x: f32, y: f32) -> GameResult {
-        if let Some((_, events)) = self
-            .world
-            .query_mut::<&mut GlobalEvents>()
-            .into_iter()
-            .next()
-        {
-            events.input_events.push(InputEvent::MouseWheel { x, y });
-            tracing::trace!("🖱️ 鼠标滚轮: ({:.1}, {:.1})", x, y);
-        }
-        Ok(())
-    }
-
-    fn text_input_event(&mut self, _ctx: &mut Context, character: char) -> GameResult {
-        if let Some((_, events)) = self
-            .world
-            .query_mut::<&mut GlobalEvents>()
-            .into_iter()
-            .next()
-        {
-            events.input_events.push(InputEvent::Ime {
-                character,
-                timestamp: std::time::Instant::now(),
-            });
-            tracing::trace!("📝 文本输入: '{}'", character);
-        }
-        Ok(())
-    }
-
-    fn resize_event(&mut self, _ctx: &mut Context, width: f32, height: f32) -> GameResult {
-        // 在高 DPI 显示器上，ggez 传递的是物理像素，需要转换为逻辑像素
-        // let scale_factor = ctx.gfx.window().scale_factor() as f32;
-        // let logical_width = width / scale_factor;
-        // let logical_height = height / scale_factor;
-        // self.current_scene
-        //     .on_resize(ctx, &mut self.world, logical_width, logical_height)
-
-        if let Some((_, events)) = self
-            .world
-            .query_mut::<&mut GlobalEvents>()
-            .into_iter()
-            .next()
-        {
-            events
-                .input_events
-                .push(InputEvent::Resize { width, height });
-            tracing::info!("🖥️ 窗口调整大小: ({:.1}, {:.1})", width, height);
-        }
+    fn text_input_event(&mut self, _ctx: &mut Context, character: char) -> Result<(), ggez::GameError> {
+        self.frame_input_events
+            .push(InputEvent::Ime { character, timestamp: std::time::Instant::now() });
         Ok(())
     }
 }

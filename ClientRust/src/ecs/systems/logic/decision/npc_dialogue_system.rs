@@ -14,7 +14,7 @@
 //
 // ============================================================================
 
-use crate::ecs::systems::System;
+use crate::ecs::{GameContext, systems::System};
 use ggez::GameResult;
 use hecs::World;
 use std::collections::HashMap;
@@ -122,8 +122,8 @@ impl System for NpcDialogueSystem {
         crate::ecs::systems::priority::DIALOGUE
     }
 
-    fn update(&mut self, world: &mut hecs::World, _delay_time: f32) -> GameResult {
-        self.process_dialogs(world);
+    fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
+        self.process_dialogs(ctx.world);
         Ok(())
     }
 }

@@ -12,6 +12,7 @@ pub mod systems;
 pub mod world; // 🆕 全局游戏资源 (Resources)
                // Map Loader 模块
 pub mod map_loader;
+pub mod game_context; // 🆕 GameContext - 零拷贝输入访问
 
 // 坐标工具模块 - 统一地图/世界/屏幕坐标转换 (不是 ECS System)
 pub mod coord;
@@ -30,6 +31,7 @@ pub use resources::*; // 🆕 导出全局资源
 pub use systems::logic::update::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
 pub use systems::*;
 pub use world::GameWorld;
+pub use game_context::{GameContext, InputContext}; // 🆕 导出 GameContext
 
 // Map Loader 导出
 pub use map_loader::MapLoader;
@@ -46,8 +48,6 @@ pub use ui::{CharacterStatus, ChatWindow, ExpBar, HealthBar, ManaBar, SkillBar};
 // 游戏应用导出
 pub use game_app::GameState;
 pub use scenes::{GameScene, LoginScene, Scene, SceneType, SelectScene};
-
-use crate::ecs::components::GlobalEvents;
 use crate::network::NetContext;
 use crate::ClientSettings;
 
@@ -82,20 +82,53 @@ use crate::ClientSettings;
 //
 // ============================================================================
 
+/// WorldExt trait - ECS World 扩展方法
+/// 
+/// 提供便捷方法用于访问单例组件（settings, network, global_events）
+/// 
+/// ## 使用方法
+/// 
+/// ```rust
+/// use crate::ecs::WorldExt;
+/// 
+/// // 初始化阶段
+/// world.spawn_settings(settings);
+/// world.spawn_network(net_ctx);
+/// world.spawn_global_events(GlobalEvents::new(ctx));
+/// 
+/// // 访问单例组件
+/// let settings = world.settings();
+/// let network = world.network();
+/// ```
+/// 
+/// ## 注意
+/// 
+/// ⚠️ **GlobalEvents 访问方法已移除**：
+/// - `global_events()` ❌ 已移除
+/// - `global_events_mut()` ❌ 已移除
+/// - `global_events_opt()` ❌ 已移除
+/// 
+/// 请使用 **GameContext API** 访问事件：
+/// ```rust
+/// fn run(&mut self, ctx: GameContext) {
+///     let input_events = ctx.input_events();
+///     let net_events = ctx.net_events();
+///     
+///     for key in ctx.filter_key_pressed() {
+///         // 处理按键...
+///     }
+/// }
+/// ```
 pub trait WorldExt {
     fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self;
     fn spawn_network(&mut self, net_ctx: NetContext) -> &mut Self;
-    fn spawn_global_events(&mut self, events: GlobalEvents) -> &mut Self;
     fn settings(&self) -> hecs::Ref<'_, ClientSettings>;
     fn network(&self) -> hecs::Ref<'_, crate::network::NetContext>;
-    fn global_events(&self) -> hecs::Ref<'_, GlobalEvents>;
-    fn global_events_mut(&mut self) -> &mut GlobalEvents;
 }
 
 // 使用有效的Entity ID (高32位为generation=1, 低32位为index)
 pub const SETTING_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x100000001);
 pub const NETWORK_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x100000002);
-pub const GAME_EVENTS_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x100000003);
 
 impl WorldExt for hecs::World {
     fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self {
@@ -110,14 +143,6 @@ impl WorldExt for hecs::World {
         self
     }
 
-    fn spawn_global_events(&mut self, events: GlobalEvents) -> &mut Self {
-        self.spawn_at(
-            GAME_EVENTS_ENTITY.unwrap_or(hecs::Entity::DANGLING),
-            (events,),
-        );
-        self
-    }
-
     fn settings(&self) -> hecs::Ref<'_, ClientSettings> {
         self.get::<&ClientSettings>(SETTING_ENTITY.unwrap_or(hecs::Entity::DANGLING))
             .expect("GameWorld ClientSettings not found")
@@ -126,17 +151,5 @@ impl WorldExt for hecs::World {
     fn network(&self) -> hecs::Ref<'_, crate::network::NetContext> {
         self.get::<&NetContext>(NETWORK_ENTITY.unwrap_or(hecs::Entity::DANGLING))
             .expect("GameWorld NetContext not found")
-    }
-
-    fn global_events(&self) -> hecs::Ref<'_, GlobalEvents> {
-        self.get::<&GlobalEvents>(GAME_EVENTS_ENTITY.unwrap_or(hecs::Entity::DANGLING))
-            .expect("GameWorld GlobalEvents not found")
-    }
-
-    fn global_events_mut(&mut self) -> &mut GlobalEvents {
-        self.query_one_mut::<&mut GlobalEvents>(
-            GAME_EVENTS_ENTITY.unwrap_or(hecs::Entity::DANGLING),
-        )
-        .expect("GameWorld GlobalEvents not found")
     }
 }

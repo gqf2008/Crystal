@@ -103,7 +103,7 @@ pub mod entity_render_system;
 pub mod character_system;
 pub mod effect_system;
 pub mod ui_system;
-pub mod debug_system;
+pub mod debug_system;  // ✅ V2 版本 - 使用 GameContext
 
 pub use map_system::MapRenderSystem;
 pub use sprite_system::SpriteRenderSystem;
@@ -111,7 +111,7 @@ pub use entity_render_system::EntityRenderSystem;
 pub use character_system::CharacterRenderSystem;
 pub use effect_system::EffectRenderSystem;
 pub use ui_system::UIRenderSystem;
-pub use debug_system::DebugSystem;
+pub use debug_system::DebugSystem;  // ✅ V2 版本（V1 已删除）
 
 // ============================================================================
 // 为所有渲染系统批量实现 IntoSystemKind
@@ -126,6 +126,6 @@ crate::draw_system!(
     EffectRenderSystem,
     UIRenderSystem,
 );
-
-// DebugSystem 是混合系统
-crate::hybrid_system!(DebugSystem);
+crate::hybrid_system!(
+    DebugSystem,
+);

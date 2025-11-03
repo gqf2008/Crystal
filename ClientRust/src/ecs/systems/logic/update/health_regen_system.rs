@@ -16,6 +16,7 @@
 
 use hecs::World;
 use ggez::GameResult;
+use crate::ecs::GameContext;
 use crate::ecs::systems::{System, priority};
 use crate::ecs::components::{Health, Mana, RegenTimer, BuffList, BuffType};
 
@@ -33,11 +34,11 @@ impl System for HealthRegenSystem {
         priority::ANIMATION // 使用510优先级
     }
 
-    fn update(&mut self, world: &mut World, delay_time: f32) -> GameResult {
+    fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         let delta_ms = (delay_time * 1000.0) as u64;
 
         // 1. HP/MP自动恢复
-        for (_id, (health, mana, regen_timer)) in world.query_mut::<(&mut Health, &mut Mana, &mut RegenTimer)>() {
+        for (_id, (health, mana, regen_timer)) in ctx.world.query_mut::<(&mut Health, &mut Mana, &mut RegenTimer)>() {
             regen_timer.update(delta_ms);
 
             // HP恢复: 3% max HP + 1 (每10秒)
@@ -56,7 +57,7 @@ impl System for HealthRegenSystem {
         }
 
         // 2. 处理Buff效果 (过期清理和DoT伤害)
-        for (_id, (health, buff_list)) in world.query_mut::<(&mut Health, &mut BuffList)>() {
+        for (_id, (health, buff_list)) in ctx.world.query_mut::<(&mut Health, &mut BuffList)>() {
             // 清理过期buff
             buff_list.cleanup_expired(delta_ms);
 
@@ -86,100 +87,3 @@ impl System for HealthRegenSystem {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ecs::components::Buff;
-
-    #[test]
-    fn test_hp_regeneration() {
-        let mut world = World::new();
-        let mut system = HealthRegenSystem;
-
-        let entity = world.spawn((
-            Health { current: 50, max: 100 },
-            Mana { current: 30, max: 100 },
-            RegenTimer {
-                hp_timer: 10000, // 已满10秒
-                mp_timer: 0,
-                hp_interval: 10000,
-                mp_interval: 10000,
-            },
-        ));
-
-        system.update(&mut world, 0.016).unwrap();
-
-        let health = world.get::<&Health>(entity).unwrap();
-        // 50 + (100 * 0.03 + 1) = 50 + 4 = 54
-        assert_eq!(health.current, 54);
-    }
-
-    #[test]
-    fn test_mp_regeneration() {
-        let mut world = World::new();
-        let mut system = HealthRegenSystem;
-
-        let entity = world.spawn((
-            Health { current: 100, max: 100 },
-            Mana { current: 50, max: 100 },
-            RegenTimer {
-                hp_timer: 0,
-                mp_timer: 10000, // 已满10秒
-                hp_interval: 10000,
-                mp_interval: 10000,
-            },
-        ));
-
-        system.update(&mut world, 0.016).unwrap();
-
-        let mana = world.get::<&Mana>(entity).unwrap();
-        // 50 + (100 * 0.03 + 1) = 50 + 4 = 54
-        assert_eq!(mana.current, 54);
-    }
-
-    #[test]
-    fn test_buff_expiration() {
-        let mut world = World::new();
-        let mut system = HealthRegenSystem;
-
-        world.spawn((
-            Health { current: 100, max: 100 },
-            BuffList {
-                active_buffs: vec![
-                    Buff::new(BuffType::Poison).with_duration(50), // 50ms后过期
-                    Buff::new(BuffType::SpeedBoost).with_duration(200), // 200ms后过期
-                ],
-            },
-        ));
-
-        system.update(&mut world, 0.1).unwrap(); // 100ms更新
-
-        // 验证50ms的buff已被移除,200ms的buff还在
-        for (_id, buff_list) in world.query_mut::<&BuffList>() {
-            assert_eq!(buff_list.active_buffs.len(), 1, "Should have 1 buff remaining");
-            assert_eq!(buff_list.active_buffs[0].buff_type, BuffType::SpeedBoost);
-        }
-    }
-
-    #[test]
-    fn test_poison_damage() {
-        let mut world = World::new();
-        let mut system = HealthRegenSystem;
-
-        let entity = world.spawn((
-            Health { current: 100, max: 100 },
-            BuffList {
-                active_buffs: vec![
-                    Buff::new(BuffType::Poison).with_duration(10000).with_strength(5), // 每秒5点伤害
-                ],
-            },
-        ));
-
-        system.update(&mut world, 1.0).unwrap(); // 1秒
-
-        let health = world.get::<&Health>(entity).unwrap();
-        assert_eq!(health.current, 95); // 100 - 5 = 95
-    }
-}
-

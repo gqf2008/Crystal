@@ -3,7 +3,7 @@
 //! 负责处理所有与服务器通信相关的事件响应
 
 use super::LoginScene;
-use crate::ecs::{Coord, WorldExt};
+use crate::ecs::{Coord, GameContext};
 use ggez::winit::event::MouseButton;
 use ggez::winit::keyboard::KeyCode;
 use ggez::{Context, GameResult};
@@ -15,7 +15,6 @@ use super::login::DialogAction;
 use super::new_account::{NewAccountAction, NewAccountDialog};
 use super::virtual_keyboard::{FocusedInput, VirtualKeyboard, VirtualKeyboardAction};
 use super::SceneType;
-use crate::ecs::components::InputEvent;
 
 impl LoginScene {
     fn on_mouse_move(
@@ -25,7 +24,6 @@ impl LoginScene {
         x: f32,
         y: f32,
     ) -> GameResult {
-        // 将窗口坐标转换为设计坐标系（1280x960）
         let (design_x, design_y) = self.window_to_design_coords(ctx, x, y);
 
         // 虚拟键盘优先级最高,但也更新背后的界面(允许悬停效果)
@@ -122,6 +120,7 @@ impl LoginScene {
                 ChangePasswordAction::Submit => {
                     // 构建并发送网络命令
                     let cmd = dialog.build_network_command();
+                    use crate::ecs::WorldExt;
                     if let Err(e) = world.network().send(cmd) {
                         tracing::error!("❌ 发送修改密码命令失败: {}", e);
                         self.show_message("网络错误，无法发送修改密码请求");
@@ -145,6 +144,7 @@ impl LoginScene {
                 NewAccountAction::Submit => {
                     // 构建并发送网络命令
                     let cmd = dialog.build_network_command();
+                    use crate::ecs::WorldExt;
                     if let Err(e) = world.network().send(cmd) {
                         tracing::error!("❌ 发送注册命令失败: {}", e);
                         self.show_message("网络错误，无法发送注册请求");
@@ -342,29 +342,44 @@ impl LoginScene {
         Ok(())
     }
 
-    pub(crate) fn handle_input_event(&mut self, ctx: &mut Context, world: &mut World) -> GameResult {
-        let input = world.global_events().input_events.clone();
-        for event in input.iter() {
-            match event {
-                InputEvent::KeyDown { keycode, text, .. } => {
-                    self.on_key_down(world, keycode, text.as_deref())?;
-                }
-
-                InputEvent::Ime { character, .. } => {
-                    self.on_text_input(world, character.to_string());
-                }
-                InputEvent::MouseWheel { .. } => {}
-                InputEvent::MouseMove { x, y, dx, dy } => {
-                    self.on_mouse_move(ctx, world, *x, *y)?;
-                }
-                InputEvent::MouseDown { button, x, y } => {
-                    self.on_mouse_down(ctx, world, button, *x, *y)?;
-                }
-                InputEvent::MouseUp { .. } => {}
-                InputEvent::Resize { .. } => {}
-                _ => {}
-            }
+    /// 基于 InputContext 的输入事件处理
+    /// 
+    /// 使用 GameContext 提供的事件迭代器，避免直接访问 GlobalEvents
+    pub(crate) fn handle_input_event(&mut self, game_ctx: &mut GameContext) -> GameResult {
+        // ⚠️ 先收集所有事件，避免借用冲突
+        // 迭代器持有 game_ctx 的不可变借用，但处理函数需要可变借用 ctx/world
+        
+        let mouse_moves: Vec<_> = game_ctx.input().mouse_motion().collect();
+        let mouse_downs: Vec<_> = if let Some((btn, x, y)) = game_ctx.input().mouse_button_pressed(MouseButton::Left) {
+            vec![(btn, x, y)]
+        } else {
+            vec![]
+        };
+        let key_downs: Vec<_> = game_ctx.input().pressed_keys()
+            .map(|(k, t)| (k, t.map(|s| s.to_string())))
+            .collect();
+        let text_inputs: Vec<_> = game_ctx.input().text_input().collect();
+        
+        // 1️⃣ 处理鼠标移动事件
+        for (x, y, _dx, _dy) in mouse_moves {
+            self.on_mouse_move(game_ctx.ctx, game_ctx.world, x, y)?;
         }
+        
+        // 2️⃣ 处理鼠标按下事件
+        for (button, x, y) in mouse_downs {
+            self.on_mouse_down(game_ctx.ctx, game_ctx.world, &button, x, y)?;
+        }
+        
+        // 3️⃣ 处理键盘按下事件
+        for (keycode, text) in key_downs {
+            self.on_key_down(game_ctx.world, &keycode, text.as_deref())?;
+        }
+        
+        // 4️⃣ 处理文本输入事件
+        for character in text_inputs {
+            self.on_text_input(game_ctx.world, character.to_string())?;
+        }
+        
         Ok(())
     }
 }

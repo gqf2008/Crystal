@@ -14,6 +14,7 @@
 //
 // ============================================================================
 
+use crate::ecs::GameContext;
 use crate::ecs::systems::System;
 use crate::ecs::components::{Position, NPC, AIState, LocalPlayer};
 use ggez::GameResult;
@@ -98,8 +99,8 @@ impl System for NpcAISystem {
         crate::ecs::systems::priority::NPC_AI
     }
 
-    fn update(&mut self, world: &mut hecs::World, _delay_time: f32) -> GameResult {
-        Self::update_npc_ai(world);
+    fn update(&mut self,  ctx:&mut GameContext, _delay_time: f32) -> GameResult {
+        Self::update_npc_ai(ctx.world);
         Ok(())
     }
 }

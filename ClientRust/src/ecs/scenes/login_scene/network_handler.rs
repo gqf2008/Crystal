@@ -3,26 +3,33 @@
 //! 负责处理所有与服务器通信相关的事件响应
 
 use super::LoginScene;
-use crate::ecs::WorldExt;
+use crate::ecs::GameContext;
 use crate::network::GameEvent;
 
 impl LoginScene {
     /// 处理网络事件
-    pub(crate) fn handle_network_event(&mut self, world: &mut hecs::World) {
-        let events = world.global_events().net_events.clone();
-        for event in events.iter() {
+    pub(crate) fn handle_network_event(&mut self, game_ctx: &mut GameContext) {
+        
+        // 处理所有类别的网络事件
+        let all_events: Vec<GameEvent> = game_ctx.net_events.connection.iter()
+            .chain(game_ctx.net_events.auth.iter())
+            .chain(game_ctx.net_events.character.iter())
+            .cloned()
+            .collect();
+            
+        for event in all_events.iter() {
             match event {
                 GameEvent::Connected => {
                     self.on_connected();
                 }
                 GameEvent::ClientVersionResponse { result } => {
-                    self.on_client_version_response(*result, world);
+                    self.on_client_version_response(*result, game_ctx.world);
                 }
                 GameEvent::Disconnected { reason } => {
                     self.on_disconnected(reason);
                 }
                 GameEvent::LoginSuccess { characters } => {
-                    self.on_login_success(characters, world);
+                    self.on_login_success(characters, game_ctx.world);
                 }
                 GameEvent::LoginFailed { reason } => {
                     self.on_login_failed(reason);
@@ -59,6 +66,7 @@ impl LoginScene {
             self.version_verified = true;
             // 如果之前有用户尝试过登录但由于版本未验证而被缓存,现在自动发送
             if let Some(cmd) = self.pending_login.take() {
+                use crate::ecs::WorldExt;
                 match world.network().send(cmd) {
                     Ok(()) => {
                         tracing::info!("📤 已发送缓存的登录请求");

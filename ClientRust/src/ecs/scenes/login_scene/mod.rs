@@ -23,7 +23,7 @@ use ggez::{Context, GameResult};
 use hecs::World;
 
 use super::{Scene, SceneType};
-use crate::ecs::{Coord, WorldExt};
+use crate::ecs::{Coord, GameContext, WorldExt};
 use crate::graphics::{draw_sprite_at, LibraryName};
 
 /// 登录场景
@@ -153,11 +153,11 @@ impl Scene for LoginScene {
         self
     }
 
-    fn update(&mut self, ctx: &mut Context, world: &mut World) -> GameResult<Option<SceneType>> {
-        self.handle_input_event(ctx, world)?;
-        self.handle_network_event(world);
+    fn update(&mut self, game_ctx: &mut crate::ecs::GameContext) -> GameResult<Option<SceneType>> {
+        self.handle_input_event(game_ctx)?;
+        self.handle_network_event(game_ctx);
 
-        let dt = ctx.time.delta().as_secs_f32();
+        let dt = game_ctx.ctx.time.delta().as_secs_f32();
         if !self.animation_paused {
             self.animation_timer += dt;
             if self.animation_timer >= 0.1 {
@@ -189,7 +189,7 @@ impl Scene for LoginScene {
         Ok(None)
     }
 
-    fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, _world: &World) -> GameResult {
+    fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,
@@ -199,7 +199,7 @@ impl Scene for LoginScene {
 
         // 绘制背景动画(ChrSel库, 1024x768原始尺寸，直接铺满设计坐标系)
         let bg_index = self.background_frame as i32;
-        let _ = draw_sprite_at(ctx, canvas, &LibraryName::ChrSel, bg_index, 0.0, 0.0);
+        let _ = draw_sprite_at(ctx.ctx, canvas, &LibraryName::ChrSel, bg_index, 0.0, 0.0);
 
         // 🆕 登录成功后播放动画时,不再绘制UI界面(只保留背景动画)
         if !self.animation_paused {
@@ -230,23 +230,23 @@ impl Scene for LoginScene {
         }
 
         // 绘制所有UI元素(在设计坐标系中)
-        let _ = self.login_dialog.draw(ctx, canvas);
+        let _ = self.login_dialog.draw(ctx.ctx, canvas);
 
         if let Some(dialog) = &self.new_account_dialog {
-            let _ = dialog.draw(ctx, canvas);
+            let _ = dialog.draw(ctx.ctx, canvas);
         }
 
         if let Some(dialog) = &self.change_password_dialog {
-            let _ = dialog.draw(ctx, canvas);
+            let _ = dialog.draw(ctx.ctx, canvas);
         }
 
         if let Some(msg_box) = &self.message_box {
-            let _ = msg_box.draw(ctx, canvas);
+            let _ = msg_box.draw(ctx.ctx, canvas);
         }
 
         // 虚拟键盘在最上层
         if let Some(keyboard) = &self.virtual_keyboard {
-            let _ = keyboard.draw(ctx, canvas);
+            let _ = keyboard.draw(ctx.ctx, canvas);
         }
 
         Ok(())
