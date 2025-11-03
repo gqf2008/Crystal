@@ -5,7 +5,7 @@
 // **架构升级** (2025-11-03):
 // - 从 System trait 迁移到 SystemV2 trait
 // - 使用 GameContext 实现零拷贝输入访问
-// - 消除每帧 GlobalEvents 克隆开销
+// - 使用 GameContext 零拷贝访问输入
 //
 // **性能提升**:
 // - 旧版本: ~500ns/帧 (克隆 MouseContext + KeyboardContext)
@@ -35,7 +35,8 @@ use crate::ecs::{
     components::{
         Camera, LocalPlayer, Player, PlayerInput, Position,
     },
-    GameContext, System,
+    GameContext,
+    systems::System,
 };
 use ggez::input::mouse::MouseButton;
 use ggez::GameResult;
@@ -73,7 +74,6 @@ impl Default for MouseState {
     }
 }
 
-/// 玩家控制系统 V2 (零拷贝版本)
 pub struct PlayerControlSystem {
     mouse_state: MouseState,
     double_click_threshold: Duration,

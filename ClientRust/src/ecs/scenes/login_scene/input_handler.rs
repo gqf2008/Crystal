@@ -344,7 +344,7 @@ impl LoginScene {
 
     /// 基于 InputContext 的输入事件处理
     /// 
-    /// 使用 GameContext 提供的事件迭代器，避免直接访问 GlobalEvents
+    /// 使用 GameContext 提供的事件迭代器
     pub(crate) fn handle_input_event(&mut self, game_ctx: &mut GameContext) -> GameResult {
         // ⚠️ 先收集所有事件，避免借用冲突
         // 迭代器持有 game_ctx 的不可变借用，但处理函数需要可变借用 ctx/world

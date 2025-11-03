@@ -5,7 +5,7 @@
 // **架构升级** (2025-11-03):
 // - 从 System trait 迁移到 SystemV2 trait
 // - 使用 GameContext 实现零拷贝输入访问
-// - 消除每帧 ~250ns 的 GlobalEvents 克隆开销
+// - 使用 GameContext 零拷贝访问输入
 //
 // **性能提升**:
 // - 旧版本: ~250ns/帧 (克隆 MouseContext + 迭代 InputEvent)

@@ -7,7 +7,7 @@ use ggez::GameResult;
 ///
 /// **改进点**:
 /// - ✅ 使用 GameContext 零拷贝访问 ggez Context (用于渲染)
-/// - ✅ 从 GlobalEvents 读取 KeyDown 事件 (仍需边缘检测)
+/// - ✅ 从 GameContext 读取按键事件 (使用边缘检测)
 ///
 /// **职责**:
 /// - 检测调试快捷键（图层切换、网格、边框等）

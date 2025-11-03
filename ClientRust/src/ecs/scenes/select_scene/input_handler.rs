@@ -12,7 +12,7 @@ use super::SelectScene;
 impl SelectScene {
     /// 基于 InputContext 的输入事件处理
     ///
-    /// 使用 GameContext 提供的事件迭代器，避免直接访问 GlobalEvents
+    /// 使用 GameContext 提供的事件迭代器
     pub(crate) fn handle_input_event(&mut self, game_ctx: &mut GameContext) -> GameResult {
         let mouse_moves: Vec<_> = game_ctx.input().mouse_motion().collect();
         let mouse_downs: Vec<_> = if let Some((btn, x, y)) = game_ctx.input().mouse_button_pressed(MouseButton::Left) {

@@ -2,39 +2,49 @@
 
 ## 🚀 快速开始
 
-### 创建 SystemV2
+### 创建 System
 
 ```rust
-use crate::ecs::{GameContext, SystemV2};
+use crate::ecs::{GameContext, systems::System};
 use ggez::GameResult;
 
 pub struct MySystem;
 
-impl SystemV2 for MySystem {
+impl System for MySystem {
     fn priority(&self) -> u32 { 500 }
     
     fn update(&mut self, ctx: &mut GameContext, dt: f32) -> GameResult {
-        // 访问输入
+        // 访问输入 (零拷贝)
         let mouse_left = ctx.ctx.mouse.button_pressed(MouseButton::Left);
         let mouse_pos = ctx.ctx.mouse.position();
+        
+        // 或使用便捷方法
+        let (x, y) = ctx.input().mouse_position();
         
         // 访问 World
         let mut query = ctx.world.query::<&Camera>();
         
         // 访问网络
-        // let net = ctx.network;
+        let network = ctx.network();
+        
+        // 访问网络事件
+        for msg in ctx.net_events().server_messages() {
+            // 处理消息
+        }
         
         Ok(())
     }
 }
 ```
 
-### 迁移清单
+### 使用清单
 
-- [ ] `impl System` → `impl SystemV2`
-- [ ] `world` → `ctx.world`
-- [ ] `world.global_events().mouse` → `ctx.ctx.mouse`
-- [ ] 测试功能是否正常
+- ✅ 使用 `GameContext` 访问所有资源
+- ✅ `ctx.world` 访问 ECS World
+- ✅ `ctx.ctx.mouse/keyboard` 零拷贝输入访问
+- ✅ `ctx.input()` 使用便捷输入方法
+- ✅ `ctx.net_events()` 访问分类网络事件
+- ✅ 测试功能是否正常
 
 ## 📋 常用操作
 
@@ -72,12 +82,20 @@ for (entity, pos) in query.into_iter() {
 }
 ```
 
-### 网络事件 (临时)
+### 网络事件
 ```rust
-let mut query = ctx.world.query::<&GlobalEvents>();
-if let Some((_, events)) = query.iter().next() {
-    for msg in &events.net_events.server_messages {
-        // 处理消息
+// 访问分类事件
+for msg in ctx.net_events().server_messages() {
+    // 处理消息
+}
+
+// 按类别过滤
+for event in ctx.connection_events() {
+    // 连接事件
+}
+
+for event in ctx.map_events() {
+    // 地图事件
     }
 }
 ```

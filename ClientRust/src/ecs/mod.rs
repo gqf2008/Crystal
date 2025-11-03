@@ -84,7 +84,7 @@ use crate::ClientSettings;
 
 /// WorldExt trait - ECS World 扩展方法
 /// 
-/// 提供便捷方法用于访问单例组件（settings, network, global_events）
+/// 提供便捷方法用于访问单例组件（settings, network）
 /// 
 /// ## 使用方法
 /// 
@@ -94,7 +94,6 @@ use crate::ClientSettings;
 /// // 初始化阶段
 /// world.spawn_settings(settings);
 /// world.spawn_network(net_ctx);
-/// world.spawn_global_events(GlobalEvents::new(ctx));
 /// 
 /// // 访问单例组件
 /// let settings = world.settings();
@@ -103,10 +102,7 @@ use crate::ClientSettings;
 /// 
 /// ## 注意
 /// 
-/// ⚠️ **GlobalEvents 访问方法已移除**：
-/// - `global_events()` ❌ 已移除
-/// - `global_events_mut()` ❌ 已移除
-/// - `global_events_opt()` ❌ 已移除
+/// 输入/网络事件现在通过 `GameContext` 访问，不再使用单独的组件
 /// 
 /// 请使用 **GameContext API** 访问事件：
 /// ```rust

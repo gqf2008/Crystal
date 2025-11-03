@@ -14,10 +14,9 @@ use crate::ecs::components::{
     Position, Camera, Draggable, Player, PlayerAction, PlayerAppearance, MoveMode,
     MovementAnimation, MapData, RenderConfig, TimeTracker, VisibleArea,
     LocalPlayer, NetworkSync, NetworkObjectType, PlayerInput, MovementVelocity,
-    Path, Movement, Prediction, /* GlobalEvents, */
+    Path, Movement, Prediction,
 };
 use crate::ecs::{Coord, GameContext, MapLoader, MapUtils};
-// ⚠️ GlobalEvents 已废弃 - 该系统使用旧 System trait，需要迁移到 SystemV2 + GameContext
 use crate::objects::MapReader;
 use mir2_shared::enums::{MirClass, MirGender};
 
@@ -280,14 +279,7 @@ impl MapUpdateSystem {
             Prediction::new(Position { x: spawn_x, y: spawn_y }),
         ));
         
-        // ⚠️ GlobalEvents 已废弃 - 不再创建此组件
-        // 使用 GameContext 传递输入事件
-        // use crate::ecs::GAME_EVENTS_ENTITY;
-        // if let Some(entity_id) = GAME_EVENTS_ENTITY {
-        //     world.spawn_at(entity_id, (GlobalEvents::empty(),));
-        // } else {
-        //     world.spawn((GlobalEvents::empty(),));
-        // }
+        // 输入事件现在通过 GameContext 传递，无需单独组件
         
         // 创建鼠标输入状态实体（地图查看器需要）
         world.spawn((MouseInput {

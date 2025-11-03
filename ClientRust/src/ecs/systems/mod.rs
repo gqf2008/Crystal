@@ -53,8 +53,8 @@
 //   - AnimationSystem(500) → ParticleSystem(510, Hybrid) → SoundSystem(520) → CameraSystem(530)
 //
 // **阶段 6: 事件清理 (900)**
-//   每帧结束清理 GlobalEvents 中的临时事件，防止事件污染
-//   - EventCleanupSystem(900)
+//   每帧结束清理 GameContext 中的临时事件，防止事件污染
+//   - 由 GameState 在帧结束时自动处理
 //
 // ### Draw 阶段 (1000-1999)
 //
@@ -67,10 +67,10 @@
 // 网络/输入 → AI决策 → 战斗技能 → 移动物理 → 状态更新 → 事件清理 → 渲染输出
 //
 // ## 关键设计
-// 1. **InputSystem** 负责收集所有输入源（键盘/鼠标/网络）并写入 GlobalEvents 组件
-// 2. **PlayerControlSystem** 从 GlobalEvents 读取输入和网络数据，更新玩家状态（包含位置修正逻辑）
+// 1. **GameContext** 提供零拷贝的输入/网络事件访问
+// 2. **PlayerControlSystem** 从 GameContext 读取输入和网络数据，更新玩家状态（包含位置修正逻辑）
 // 3. **GameEventSystem** 统一管理系统间事件通信
-// 4. **EventCleanupSystem** 在每帧最后清理临时事件，防止下一帧重复处理
+// 4. **事件清理** 在每帧最后由 GameState 清理临时事件，防止下一帧重复处理
 // 5. **CameraFollowSystem(420)** 在移动阶段更新跟随逻辑
 // 6. **CameraSystem(530)** 在状态更新阶段计算最终矩阵
 // 7. **ParticleSystem(510)** 和 **DebugSystem(1100)** 使用 HybridSystem 同时处理逻辑和渲染
@@ -83,8 +83,8 @@
 //
 // | 阶段 | 系统名称 | 类型 | 优先级 | 职责说明 |
 // |------|----------|------|--------|----------|
-// | **第一阶段：输入和网络** | InputSystem | System | 100 | [Input] 收集所有输入源（键盘/鼠标/网络数据包）并写入 GlobalEvents 组件 |
-// | | PlayerControlSystem | System | 110 | [Update] 从 GlobalEvents 读取输入和网络数据，更新玩家状态，包含位置修正算法 |
+// | **第一阶段：输入和网络** | GameContext | - | - | [Input] 通过 GameContext 提供零拷贝的输入/网络事件访问 |
+// | | PlayerControlSystem | System | 110 | [Update] 从 GameContext 读取输入和网络数据，更新玩家状态，包含位置修正算法 |
 // | | GameEventSystem | System | 120 | [Update] 管理游戏事件分发（任务、系统、UI事件），协调系统间通信 |
 // | **第二阶段：AI和决策** | MonsterAISystem | System | 200 | 怪物AI逻辑（巡逻、追击、攻击决策、状态切换） |
 // | | NpcAISystem | System | 210 | NPC行为逻辑（对话触发、任务发放、商店交互） |
@@ -98,7 +98,7 @@
 // | | ParticleSystem | **Hybrid** | 510 | **[Update]** 粒子生命期管理、位置速度计算<br>**[Draw]** 粒子效果渲染 |
 // | | SoundSystem | System | 520 | 音效触发管理、3D音效位置计算、音量控制 |
 // | | CameraSystem | System | 530 | 相机控制（模式切换、拖拽、缩放、震动）- **注意**: 坐标变换由渲染系统执行 |
-// | **第六阶段：事件清理** | ~~EventCleanupSystem~~ | ~~System~~ | ~~900~~ | ⚠️ **已废弃** - 由 `GlobalEvents` 组件 + `GameState::clear_global_events()` 实现 |
+// | **第六阶段：事件清理** | ~~EventCleanupSystem~~ | ~~System~~ | ~~900~~ | ⚠️ **已废弃** - 由 `GameState` 在帧结束时自动清理事件 |
 // | **第七阶段：渲染** | MapRenderSystem | DrawSystem | 1000 | 地图图层渲染、地形绘制、遮罩处理 |
 // | | EntityRenderSystem | DrawSystem | 1020 | 实体渲染（玩家/怪物）- 查询 `(Position, Sprite)` + 深度排序 + 视锥裁剪 |
 // | | EffectRenderSystem | DrawSystem | 1020 | 特效渲染（技能特效、光影、后处理） |
@@ -116,16 +116,16 @@
 // ## 系统依赖关系说明
 //
 // 1. **数据流动**：
-//    GlobalEvents(网络接收) → 输入处理 → 控制响应 → 事件触发 → AI决策 → 战斗计算
+//    GameContext(网络/输入) → 控制响应 → 事件触发 → AI决策 → 战斗计算
 //    → 移动物理 → 状态更新 → 渲染显示 → GameState(事件清理)
 //
 // 2. **关键依赖**：
-//    - PlayerControlSystem 依赖 GlobalEvents.input_events 的输入数据
+//    - PlayerControlSystem 依赖 GameContext 的输入/网络事件数据
 //    - CameraFollowSystem 依赖 MovementSystem 的位置更新
 //    - CameraSystem 依赖 CameraFollowSystem 的跟随逻辑
 //    - 所有战斗相关系统依赖 GameEventSystem 的事件通知
 //    - HybridSystem 的 update 在逻辑阶段执行，draw 在渲染阶段执行
-//    - 事件清理由 GameState::clear_global_events() 在帧结束时执行
+//    - 事件清理由 GameState 在帧结束时自动执行
 //    - **坐标变换**：由各渲染系统独立执行（读取 Camera 组件），非统一矩阵
 //
 // 3. **渲染顺序**：地图 → 实体 → 特效 → UI → 调试信息（从底层到顶层）
@@ -136,7 +136,7 @@
 /// 系统优先级常量，用于控制系统执行顺序（数字越小越优先）
 pub mod priority {
     // 阶段 1: 输入与网络 (50-199)
-    // pub const NETWORK_RECV: u32 = 50;  // ⚠️ 已废弃 - 由 GlobalEvents 组件实现
+    // pub const NETWORK_RECV: u32 = 50;  // ⚠️ 已废弃 - 由 GameContext 实现
     pub const INPUT: u32 = 100;
     pub const PLAYER_CONTROL: u32 = 110;
     pub const GAME_EVENT: u32 = 120;

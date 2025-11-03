@@ -6,14 +6,14 @@
 //! ## ECS 架构
 //! 
 //! ### 输入
-//! - 从 `GlobalEvents.net_events.gameplay` 读取 `GameEvent::MapChanged` 事件
+//! - 从 `GameContext.net_events().map_changed()` 读取地图切换事件
 //! 
 //! ### 输出
 //! - 加载新地图的 MapData 和瓦片实体
 //! - 更新 MapManager 组件状态
 //! 
 //! ### 组件依赖
-//! - **读取**: GlobalEvents (net_events)
+//! - **读取**: GameContext (net_events)
 //! - **写入**: MapData, MapManager
 //! 
 //! ## 地图加载流程
@@ -26,23 +26,17 @@
 //! ## 示例
 //! 
 //! ```rust
-//! // 服务器发送地图切换事件
-//! net_events.gameplay.push(GameEvent::MapChanged {
-//!     map_index: 0,
-//!     file_name: "0".to_string(),  // Map/0.map
-//!     title: "比奇城".to_string(),
-//! });
+//! // 通过网络接收地图切换事件后，系统会自动处理：
+//! // ctx.net_events().map_changed() -> [(map_index, file_name, title)]
 //! 
 //! // MapLoadSystem 自动加载地图
 //! ```
 
-use hecs::World;
-use ggez::{Context, GameResult};
+use ggez::GameResult;
 use tracing::{info, error};
 
-use crate::ecs::components::{MapData /*, GlobalEvents */};
+use crate::ecs::components::MapData;
 use crate::ecs::{GameContext, MapLoader};
-// ⚠️ GlobalEvents 已废弃 - 该系统使用旧 System trait，需要迁移到 SystemV2 + GameContext
 use crate::objects::MapReader;
 
 /// 地图管理组件
@@ -76,33 +70,23 @@ impl MapManager {
 pub struct MapLoadSystem;
 
 impl MapLoadSystem {
-    /// 内部加载逻辑
-    fn do_update(world: &mut World) -> GameResult {
-        // ⚠️ 该系统已废弃 - GlobalEvents 不再存在
-        // 需要迁移到 SystemV2 trait 并使用 GameContext
-        tracing::warn!("⚠️ MapLoadSystem 使用已废弃的 System trait，应迁移到 SystemV2 + GameContext");
-        return Ok(());
+    /// 内部加载逻辑（使用 GameContext）
+    fn do_update(ctx: &mut GameContext) -> GameResult {
+        use crate::network::handlers::GameEvent;
         
-        // 旧代码：读取网络事件
-        // let events = {
-        //     let mut query = world.query::<&GlobalEvents>();
-        //     if let Some((_, global_events)) = query.iter().next() {
-        //         global_events.net_events.clone()
-        //     } else {
-        //         return Ok(()); // 没有 GlobalEvents 组件
-        //     }
-        // };
+        // 从 GameContext 读取地图切换事件
+        let map_changes: Vec<(i32, String, String)> = ctx
+            .map_events()
+            .iter()
+            .filter_map(|event| {
+                if let GameEvent::MapChanged { map_index, file_name, title } = event {
+                    Some((*map_index, file_name.clone(), title.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        // let map_changes = {
-        //     let mut query = world.query::<&GlobalEvents>();
-        //     if let Some((_, global_events)) = query.iter().next() {
-        //         global_events.get_map_changes()
-        //     } else {
-        //         return Ok(()); // 没有 GlobalEvents 组件
-        //     }
-        // };
-
-       /* 以下代码已废弃 - 需要使用 GameContext 重写
         // 如果没有地图切换事件，直接返回
         if map_changes.is_empty() {
             return Ok(());
@@ -114,7 +98,7 @@ impl MapLoadSystem {
               map_index, map_file, map_title);
 
         // ====================================================================
-        // 3. 执行地图加载
+        // 执行地图加载
         // ====================================================================
         
         info!("🗺️  开始加载地图: {} (文件: {})", map_title, map_file);
@@ -130,16 +114,16 @@ impl MapLoadSystem {
                 info!("✅ 地图文件读取成功: {}x{}", reader.width, reader.height);
                 
                 // 删除旧地图数据（瓦片实体）
-                Self::clear_old_map_data(world);
+                Self::clear_old_map_data(ctx.world);
                 
                 // 加载地图瓦片
-                if let Err(e) = MapLoader::load_map(world, reader) {
+                if let Err(e) = MapLoader::load_map(ctx.world, reader) {
                     error!("❌ 地图瓦片加载失败: {}", e);
                     return Err(e);
                 }
                 
                 // 创建/更新 MapManager
-                world.spawn((MapManager {
+                ctx.world.spawn((MapManager {
                     current_map_index: map_index,
                     current_map_file: map_file.clone(),
                     current_map_title: map_title.clone(),
@@ -157,13 +141,12 @@ impl MapLoadSystem {
         }
         
         Ok(())
-        */ // 结束废弃代码块
     }
 
     /// 清除旧地图数据
     /// 
     /// 删除所有带有 MapData 的实体（地图瓦片）
-    fn clear_old_map_data(world: &mut World) {
+    fn clear_old_map_data(world: &mut hecs::World) {
         // 收集所有地图相关实体
         let entities_to_remove: Vec<_> = world
             .query::<&MapData>()
@@ -192,6 +175,6 @@ impl System for MapLoadSystem {
     }
 
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
-        Self::do_update(ctx.world)
+        Self::do_update(ctx)
     }
 }

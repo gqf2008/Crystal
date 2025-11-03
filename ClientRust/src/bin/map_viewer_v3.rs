@@ -4,7 +4,7 @@
 //
 // 功能：
 // - 使用新的 SystemScheduler 调度器
-// - 使用 GlobalEvents 事件系统
+// - 使用 GameContext 事件系统
 // - 使用 MockNetwork 模拟网络（无需真实服务器）
 // - 支持地图浏览、缩放、拖拽
 //

@@ -12,7 +12,7 @@ use ggez::input::mouse::MouseButton;
 /// 3. 现代 ECS 模式：参考 Bevy、Amethyst 的 Resources 设计
 ///
 /// 架构演进：
-/// - 旧架构：GlobalEvents 每帧克隆输入状态 (~1μs 开销)
+/// - 旧架构：每帧克隆输入状态 (~1μs 开销)
 /// - 新架构：GameContext 持有引用，零拷贝访问
 use ggez::Context;
 use ggez::winit::keyboard::SmolStr;

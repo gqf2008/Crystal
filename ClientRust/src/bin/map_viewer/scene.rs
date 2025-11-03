@@ -35,7 +35,7 @@ use mir2_client::graphics::libraries::initialize_all_libraries;
 /// - 控制帧率
 ///
 /// **架构**:
-/// - V1 系统: 使用 GlobalEvents (旧架构)
+/// - V1 系统: 使用 GameContext (新架构)
 /// - V2 系统: 使用 GameContext 零拷贝 (新架构)
 pub struct MapViewerScene {
     /// 时间跟踪实体
@@ -145,7 +145,7 @@ impl MapViewerScene {
             .add_system(AnimationSystem::new()) // 角色动画系统
             .add_system(TileAnimationSystem::new()) // 瓦片动画系统
             .add_system(MapUpdateSystem::new()) // 地图更新系统 (M键切换地图)
-            .add_system(MapLoadSystem) // 地图加载系统 → 从 GlobalEvents 读取 MapChanged 事件
+            .add_system(MapLoadSystem) // 地图加载系统 → 从 GameContext 读取 MapChanged 事件
             // CameraSystem 迁移到 V2
             .add_system(CameraFollowSystem) // 相机跟随
             .add_system(MapRenderSystem) // 地图渲染系统
@@ -217,7 +217,7 @@ impl MapViewerScene {
         // 可见区域缓存实体
         world.spawn((VisibleArea::default(),));
 
-        // ⚠️ GlobalEvents 已废弃 - 使用 GameContext 传递事件
+        // 事件通过 GameContext 传递
 
         // 鼠标输入状态实体（由鼠标输入系统修改）
         world.spawn((MouseInput {
