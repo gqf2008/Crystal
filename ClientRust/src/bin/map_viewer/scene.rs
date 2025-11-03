@@ -21,14 +21,14 @@ use mir2_client::ecs::components::{
     Camera, CameraMode, Draggable, MouseInput, PlayerInput, Position, RenderConfig, TimeTracker,
     VisibleArea,
 };
-use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance};
+use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance, PlayerStateMachine};
 use mir2_client::ecs::render::{CharacterRenderSystem, DebugSystem, MapRenderSystem};
 use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::logic::map_load_system::MapManager;
 use mir2_client::ecs::systems::logic::{
     CameraFollowSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem,
 };
-use mir2_client::ecs::systems::{AnimationSystem, MovementSystem, SystemScheduler};
+use mir2_client::ecs::systems::{AnimationSystem, PathfindingSystem, PlayerStateSystem, MovementSystem, SystemScheduler};
 use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem};
 use mir2_client::graphics::libraries::initialize_all_libraries;
 use mir2_shared::enums::{MirClass, MirGender};
@@ -143,6 +143,8 @@ impl MapViewerScene {
         scheduler
             // PlayerControlSystem 迁移到 V2
             .add_system(PlayerControlSystem::new())
+            .add_system(PathfindingSystem::new()) // 寻路系统 (将 PlayerInput 转换为 Path)
+            .add_system(PlayerStateSystem::new()) // 状态机系统 (管理角色状态转换)
             .add_system(MovementSystem) // 移动系统
             .add_system(AnimationSystem::new()) // 角色动画系统
             .add_system(TileAnimationSystem::new()) // 瓦片动画系统
@@ -295,6 +297,8 @@ impl MapViewerScene {
             },
             // 🆕 玩家输入组件（由 PlayerControlSystem 写入）
             PlayerInput::default(),
+            // 🆕 玩家状态机组件（管理角色状态转换）
+            PlayerStateMachine::new(),
             // 本地玩家标记
             LocalPlayer,
         ));

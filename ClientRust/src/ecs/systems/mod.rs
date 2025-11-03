@@ -149,6 +149,8 @@ pub mod priority {
     // 阶段 3: 战斗与技能 (300-399)
     pub const SKILL: u32 = 300;
     pub const COMBAT: u32 = 310;
+    pub const PATHFINDING: u32 = 350;  // 寻路系统 (在移动之前)
+    pub const PLAYER_STATE: u32 = 380; // 玩家状态机 (在寻路和移动之间)
 
     // 阶段 4: 移动与物理 (400-499)
     pub const MOVEMENT: u32 = 400;
@@ -197,7 +199,7 @@ pub use logic::combat_skill::{
 };
 
 // Layer 4 (Physics & Movement) - 向后兼容导出
-pub use logic::physics::{CollisionSystem, MovementSystem};
+pub use logic::physics::{PathfindingSystem, PlayerStateSystem, MovementSystem, CollisionSystem};
 
 // Layer 5 (State Update) - 向后兼容导出
 pub use logic::update::{

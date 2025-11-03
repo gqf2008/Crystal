@@ -24,6 +24,7 @@ pub mod animation_state; // 动画状态组件
 pub mod sound;           // 音效组件
 pub mod particle;        // 粒子组件
 pub mod events;          // 🆕 全局事件组件
+pub mod state_machine;   // 🆕 状态机组件
 
 // ============================================================================
 // 统一导出所有组件
@@ -72,6 +73,7 @@ pub use animation_state::*;
 pub use sound::*;
 pub use particle::*;
 pub use events::*;  // 🆕 全局事件组件导出
+pub use state_machine::*;  // 🆕 状态机组件导出
 
 // ============================================================================
 // 其他系统组件的重新导出

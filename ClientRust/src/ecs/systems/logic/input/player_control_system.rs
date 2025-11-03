@@ -149,7 +149,7 @@ impl PlayerControlSystem {
         }
     }
 
-    /// 检测长按事件
+    /// 检测长按事件 - 返回当前鼠标位置(用于跟随移动)
     fn detect_long_press(&self, button: MouseButton) -> Option<(f32, f32)> {
         let now = Instant::now();
         match button {
@@ -158,7 +158,8 @@ impl PlayerControlSystem {
                     if self.mouse_state.left_pressed
                         && now.duration_since(start) > self.long_press_threshold
                     {
-                        self.mouse_state.left_press_position
+                        // 返回当前鼠标位置,而不是按下时的位置
+                        Some(self.mouse_state.current_position)
                     } else {
                         None
                     }
@@ -171,7 +172,8 @@ impl PlayerControlSystem {
                     if self.mouse_state.right_pressed
                         && now.duration_since(start) > self.long_press_threshold
                     {
-                        self.mouse_state.right_press_position
+                        // 返回当前鼠标位置,而不是按下时的位置
+                        Some(self.mouse_state.current_position)
                     } else {
                         None
                     }
@@ -360,7 +362,6 @@ impl System for PlayerControlSystem {
                 player_input.move_to = Some((world_x, world_y));
                 player_input.is_running = false;
                 player_input.use_pathfinding = false;
-                tracing::debug!("🚶 左键长按走路到 ({:.1}, {:.1}) [直接]", world_x, world_y);
             }
 
             // 应用右键长按跟随（跑步 + 直接移动）
@@ -368,7 +369,17 @@ impl System for PlayerControlSystem {
                 player_input.move_to = Some((world_x, world_y));
                 player_input.is_running = true;
                 player_input.use_pathfinding = false;
-                tracing::debug!("🏃 右键长按跑步到 ({:.1}, {:.1}) [直接]", world_x, world_y);
+            }
+            
+            // 检测松开 - 如果是长按模式(非寻路)且鼠标都松开了,立即停止
+            if !player_input.use_pathfinding {
+                // 长按模式:必须持续按住才会移动
+                if !self.mouse_state.left_pressed && !self.mouse_state.right_pressed {
+                    if player_input.move_to.is_some() {
+                        player_input.move_to = None;
+                        tracing::debug!("⏹️ 鼠标松开,停止移动");
+                    }
+                }
             }
         }
 

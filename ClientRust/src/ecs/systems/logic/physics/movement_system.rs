@@ -85,8 +85,7 @@ impl System for MovementSystem {
         )>() {
             if !path.is_valid {
                 velocity.stop();
-                player.action = PlayerAction::Stand;
-                player.is_moving = false;
+                // 不再设置 player.action 和 is_moving,交给 PlayerStateSystem 管理
                 continue;
             }
 
@@ -110,8 +109,7 @@ impl System for MovementSystem {
                     if !path.advance() {
                         // 路径结束,停止移动
                         velocity.stop();
-                        player.action = PlayerAction::Stand;
-                        player.is_moving = false;
+                        // 不再设置 player.action 和 is_moving
                     }
                 } else {
                     // 🎯 计算8方向
@@ -125,13 +123,7 @@ impl System for MovementSystem {
                         velocity.walk_speed
                     };
                     
-                    // 🎯 设置动作状态
-                    player.action = if is_running {
-                        PlayerAction::Run
-                    } else {
-                        PlayerAction::Walk
-                    };
-                    player.is_moving = true;
+                    // 不再设置动作状态,交给 PlayerStateSystem 管理
                     
                     // 设置速度方向 (归一化)
                     velocity.set(

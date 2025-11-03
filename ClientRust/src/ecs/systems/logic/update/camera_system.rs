@@ -178,7 +178,7 @@ impl System for CameraSystem {
                 tracing::debug!("📐 相机尺寸更新(resize事件): {}x{}", width, height);
             }
 
-            // 处理鼠标拖拽
+            // 处理鼠标拖拽 - 只有中键或Ctrl+左键才触发地图拖拽
             if camera_drag_enabled {
                 let should_drag = (mouse_left && ctrl_pressed) || mouse_middle;
                 
@@ -205,6 +205,9 @@ impl System for CameraSystem {
                     }
                 }
             }
+            
+            // TODO: 处理角色移动 - 左键/右键单独点击时让角色移动
+            // 这部分逻辑应该在角色移动系统中实现,这里只负责相机控制
 
             // 🔍 处理滚轮缩放
             if let Some(scroll) = scroll_y {

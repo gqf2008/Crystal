@@ -59,10 +59,14 @@
 //
 // ============================================================================
 
+pub mod pathfinding_system;
+pub mod player_state_system;
 pub mod movement_system;
 pub mod collision_system;
 pub mod camera_follow_system;
 
+pub use pathfinding_system::PathfindingSystem;
+pub use player_state_system::PlayerStateSystem;
 pub use movement_system::MovementSystem;
 pub use collision_system::CollisionSystem;
 pub use camera_follow_system::CameraFollowSystem;
