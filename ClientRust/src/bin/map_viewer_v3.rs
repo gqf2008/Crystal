@@ -63,7 +63,7 @@ impl MapViewerApp {
 
         // 创建模拟网络（使用 mock 模式）
         let _net_ctx = NetworkBuilder::new(settings.network.clone())
-            .mock(true) // 启用模拟网络
+         
             .build()
             .expect("Failed to create mock network");
 

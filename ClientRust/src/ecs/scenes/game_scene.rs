@@ -24,7 +24,7 @@
 
 use ggez::graphics::Canvas;
 use ggez::input::keyboard::KeyInput;
-use ggez::{Context, GameResult};
+use ggez::GameResult;
 use hecs::{Entity, World};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -122,12 +122,12 @@ pub struct GameScene {
 }
 
 impl GameScene {
-    pub fn spawn(ctx: &mut Context, world: &mut World) -> Self {
+    pub fn spawn(ctx: &mut GameContext) -> Self {
         // 初始化图形库
         println!("📚 正在初始化图形库...");
         initialize_all_libraries("Data").expect("初始化图形库失败");
         println!("✅ 图形库初始化完成");
-
+        let world = &mut ctx.world;
         let (screen_width, screen_height) = ctx.gfx.drawable_size();
         // 创建相机实体
         let camera_entity = world.spawn((
@@ -353,7 +353,7 @@ impl Scene for GameScene {
     }
 
     fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
-        self.system_scheduler.draw(ctx.ctx, canvas, ctx.world)?;
+        self.system_scheduler.draw(ctx, canvas)?;
         Ok(())
     }
 

@@ -11,36 +11,42 @@
 //
 // ============================================================================
 
+use crate::ecs::GameContext;
 use anyhow::Result;
-use ggez::{Context, event::EventHandler};
-use ggez::winit::application::ApplicationHandler;
-use ggez::winit::event_loop::{EventLoop, ActiveEventLoop, ControlFlow};
-use ggez::winit::event::{WindowEvent, DeviceEvent, StartCause, DeviceId};
-use ggez::winit::window::WindowId;
-use ggez::winit::event::{ElementState, Ime};
-use ggez::context::{HasMut, ContextFields};
-use ggez::input::keyboard::{KeyboardContext, KeyInput};
-use ggez::input::mouse::MouseContext;
+use ggez::context::{ContextFields, HasMut};
+use ggez::event::EventHandler;
 use ggez::graphics::GraphicsContext;
+use ggez::input::keyboard::{KeyInput, KeyboardContext};
+use ggez::input::mouse::MouseContext;
+use ggez::winit::application::ApplicationHandler;
+use ggez::winit::event::{DeviceEvent, DeviceId, StartCause, WindowEvent};
+use ggez::winit::event::{ElementState, Ime};
+use ggez::winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use ggez::winit::window::WindowId;
 
-/// 自定义 ApplicationHandler - 完整支持 IME
-pub struct CustomAppHandler<T: EventHandler> {
-    ctx: Context,
+/// 游戏 ApplicationHandler - 完整支持 IME 和 GameContext
+///
+/// 集成了 GameContext，提供：
+/// - 完整的 IME 支持（中文输入）
+/// - 输入事件收集（frame_input_events）
+/// - 网络事件收集
+pub struct GameAppHandler<T: EventHandler<GameContext>> {
+    ctx: GameContext,
     game: T,
-    ime_enabled: bool,  // 🆕 跟踪 IME 状态
+    ime_enabled: bool, // 🆕 跟踪 IME 状态
 }
 
-impl<T: EventHandler> CustomAppHandler<T> {
-    pub fn new(ctx: Context, game: T) -> Self {
-        Self { 
-            ctx, 
+impl<T: EventHandler<GameContext>> GameAppHandler<T> {
+    pub fn new(ctx: GameContext, game: T) -> Self {
+        Self {
+            ctx,
             game,
-            ime_enabled: false,  // 默认 IME 未启用
+            ime_enabled: false, // 默认 IME 未启用
         }
     }
 }
 
-impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
+impl<T: EventHandler<GameContext>> ApplicationHandler<()> for GameAppHandler<T> {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, _: StartCause) {
         // 检查是否请求退出
         if HasMut::<ContextFields>::retrieve_mut(&mut self.ctx).quit_requested {
@@ -50,36 +56,38 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
             event_loop.exit();
             return;
         }
-        
+
         event_loop.set_control_flow(ControlFlow::Poll);
     }
-    
+
     fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
-    
+
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
         mut window_id: WindowId,
-        mut event: WindowEvent,
+        event: WindowEvent,
     ) {
-        // 🔍 记录所有 KeyboardInput 事件
         if let WindowEvent::KeyboardInput { ref event, .. } = event {
             if let Some(ref text) = event.text {
-                tracing::debug!("🔍 [window_event] KeyboardInput 收到: text='{}', physical_key={:?}", 
-                    text, event.physical_key);
+                tracing::debug!(
+                    "🔍 [window_event] KeyboardInput 收到: text='{}', physical_key={:?}",
+                    text,
+                    event.physical_key
+                );
             }
         }
-        
+
         // ===== 首先检查 IME 事件 (这是获取中文的唯一方法!) =====
         if let WindowEvent::Ime(ref ime_event) = event {
             match ime_event {
                 Ime::Enabled => {
                     tracing::debug!("IME 已启用");
-                    self.ime_enabled = true;  // 🆕 记录 IME 状态
+                    self.ime_enabled = true; // 🆕 记录 IME 状态
                 }
                 Ime::Disabled => {
                     tracing::debug!("IME 已禁用");
-                    self.ime_enabled = false;  // 🆕 记录 IME 状态
+                    self.ime_enabled = false; // 🆕 记录 IME 状态
                 }
                 Ime::Preedit(text, _) => {
                     tracing::debug!("IME 拼音: {}", text);
@@ -87,7 +95,7 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
                 }
                 Ime::Commit(text) => {
                     tracing::info!("✓ IME 确认中文: {}", text);
-                    // 将字符串拆分为字符，逐个调用 text_input_event
+                    // 将字符串拆分为字符，逐个添加到输入事件并调用 text_input_event
                     for ch in text.chars() {
                         if let Err(e) = self.game.text_input_event(&mut self.ctx, ch) {
                             tracing::warn!("IME commit 字符处理失败: {}", e);
@@ -98,7 +106,7 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
             // IME 事件不转发给 ggez
             return;
         }
-        
+
         // ===== 转发事件给 ggez 更新内部状态 =====
         // 🔥 清除 KeyboardInput.text 字段，防止 ggez 重复处理文本输入
         let mut event_for_ggez = event.clone();
@@ -107,7 +115,7 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
             event.text = None;
         }
         ggez::event::process_window_event(&mut self.ctx, &mut window_id, &mut event_for_ggez);
-        
+
         // ===== 手动调用 EventHandler 方法 =====
         match event {
             WindowEvent::CloseRequested => {
@@ -121,29 +129,41 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
                 let _ = self.game.focus_event(&mut self.ctx, gained);
             }
             WindowEvent::Resized(size) => {
-                let _ = self.game.resize_event(&mut self.ctx, size.width as f32, size.height as f32);
+                let _ =
+                    self.game
+                        .resize_event(&mut self.ctx, size.width as f32, size.height as f32);
             }
-            WindowEvent::KeyboardInput { event: key_event, .. } => {
+            WindowEvent::KeyboardInput {
+                event: key_event, ..
+            } => {
                 let mods = HasMut::<KeyboardContext>::retrieve_mut(&mut self.ctx).active_modifiers;
-                let repeat = HasMut::<KeyboardContext>::retrieve_mut(&mut self.ctx).is_key_repeated();
-                let input = KeyInput { event: key_event.clone(), mods };
-                
+                let repeat =
+                    HasMut::<KeyboardContext>::retrieve_mut(&mut self.ctx).is_key_repeated();
+                let input = KeyInput {
+                    event: key_event.clone(),
+                    mods,
+                };
+
                 match input.event.state {
                     ElementState::Pressed => {
                         let _ = self.game.key_down_event(&mut self.ctx, input, repeat);
-                        
+
                         // 🔥 只在非重复按键时处理文本输入
                         // repeat = true 表示按键重复，不应该再次输入字符
                         if let Some(text) = &key_event.text {
-                            tracing::debug!("⌨️ KeyboardInput.text = '{}', repeat = {}, ime_enabled = {}", 
-                                text, repeat, self.ime_enabled);
-                            
+                            tracing::debug!(
+                                "⌨️ KeyboardInput.text = '{}', repeat = {}, ime_enabled = {}",
+                                text,
+                                repeat,
+                                self.ime_enabled
+                            );
+
                             // 跳过重复按键的文本输入
                             if repeat {
                                 tracing::debug!("⌨️ 跳过重复按键的文本输入");
                                 return;
                             }
-                            
+
                             if !self.ime_enabled {
                                 // 过滤控制字符（如退格键 \x08、回车 \r 等）
                                 // 只接受可打印字符
@@ -153,7 +173,7 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
                                         tracing::debug!("⌨️ 跳过控制字符: U+{:04X}", ch as u32);
                                         continue;
                                     }
-                                    
+
                                     tracing::debug!("⌨️ 键盘文本输入: '{}'", ch);
                                     if let Err(e) = self.game.text_input_event(&mut self.ctx, ch) {
                                         tracing::warn!("键盘文本输入处理失败: {}", e);
@@ -173,17 +193,33 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
                 let position = HasMut::<MouseContext>::retrieve_mut(&mut self.ctx).position();
                 match state {
                     ElementState::Pressed => {
-                        let _ = self.game.mouse_button_down_event(&mut self.ctx, button, position.x, position.y);
+                        let _ = self.game.mouse_button_down_event(
+                            &mut self.ctx,
+                            button,
+                            position.x,
+                            position.y,
+                        );
                     }
                     ElementState::Released => {
-                        let _ = self.game.mouse_button_up_event(&mut self.ctx, button, position.x, position.y);
+                        let _ = self.game.mouse_button_up_event(
+                            &mut self.ctx,
+                            button,
+                            position.x,
+                            position.y,
+                        );
                     }
                 }
             }
             WindowEvent::CursorMoved { .. } => {
                 let position = HasMut::<MouseContext>::retrieve_mut(&mut self.ctx).position();
                 let delta = HasMut::<MouseContext>::retrieve_mut(&mut self.ctx).last_delta();
-                let _ = self.game.mouse_motion_event(&mut self.ctx, position.x, position.y, delta.x, delta.y);
+                let _ = self.game.mouse_motion_event(
+                    &mut self.ctx,
+                    position.x,
+                    position.y,
+                    delta.x,
+                    delta.y,
+                );
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let (x, y) = match delta {
@@ -198,7 +234,7 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
             _ => {}
         }
     }
-    
+
     fn device_event(
         &mut self,
         _event_loop: &ActiveEventLoop,
@@ -208,39 +244,39 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
         // 转发设备事件给 ggez
         ggez::event::process_device_event(&mut self.ctx, &mut device_id, &mut event);
     }
-    
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         // 更新定时器
         HasMut::<ggez::timer::TimeContext>::retrieve_mut(&mut self.ctx).tick();
-        
+
         // 更新游戏逻辑
         if let Err(e) = self.game.update(&mut self.ctx) {
             tracing::error!("Update error: {}", e);
             event_loop.exit();
             return;
         }
-        
+
         // 开始绘制帧
         if let Err(e) = HasMut::<GraphicsContext>::retrieve_mut(&mut self.ctx).begin_frame() {
             tracing::error!("Begin frame error: {}", e);
             event_loop.exit();
             return;
         }
-        
+
         // 绘制游戏画面
         if let Err(e) = self.game.draw(&mut self.ctx) {
             tracing::error!("Draw error: {}", e);
             event_loop.exit();
             return;
         }
-        
+
         // 结束绘制帧
         if let Err(e) = HasMut::<GraphicsContext>::retrieve_mut(&mut self.ctx).end_frame() {
             tracing::error!("End frame error: {}", e);
             event_loop.exit();
             return;
         }
-        
+
         // 保存输入状态
         HasMut::<MouseContext>::retrieve_mut(&mut self.ctx).reset_delta();
         HasMut::<KeyboardContext>::retrieve_mut(&mut self.ctx).save_keyboard_state();
@@ -251,13 +287,13 @@ impl<T: EventHandler> ApplicationHandler<()> for CustomAppHandler<T> {
 /// 自定义事件循环 - 完整支持 IME
 ///
 /// 替代 ggez::event::run()，手动实现事件分发
-pub fn run_with_ime<T: EventHandler + 'static>(
-    ctx: Context,
+pub fn run_with_ime<T: EventHandler<GameContext> + 'static>(
+    ctx: GameContext,
     event_loop: EventLoop<()>,
     game: T,
 ) -> Result<()> {
-    let mut app = CustomAppHandler::new(ctx, game);
-    
+    let mut app = GameAppHandler::new(ctx, game);
+
     event_loop
         .run_app(&mut app)
         .map_err(|e| anyhow::anyhow!("事件循环错误: {}", e))

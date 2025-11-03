@@ -13,6 +13,7 @@ pub mod world; // 🆕 全局游戏资源 (Resources)
                // Map Loader 模块
 pub mod map_loader;
 pub mod game_context; // 🆕 GameContext - 零拷贝输入访问
+pub mod custom_context; // 🆕 CustomContext - 自定义 ggez Context 包装器
 
 // 坐标工具模块 - 统一地图/世界/屏幕坐标转换 (不是 ECS System)
 pub mod coord;
@@ -32,7 +33,6 @@ pub use systems::logic::update::{MapManager, MapUpdateSystem}; // 🆕 导出地
 pub use systems::*;
 pub use world::GameWorld;
 pub use game_context::{GameContext, InputContext}; // 🆕 导出 GameContext
-
 // Map Loader 导出
 pub use map_loader::MapLoader;
 

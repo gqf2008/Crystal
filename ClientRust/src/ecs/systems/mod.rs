@@ -204,6 +204,8 @@ pub use logic::update::{
     AnimationSystem, CameraSystem, HealthRegenSystem, ParticleSystem, SoundSystem,
 };
 
+use crate::ecs::GameContext;
+
 // ============================================================================
 // 系统 Trait 设计
 // ============================================================================
@@ -388,9 +390,8 @@ pub trait DrawSystem {
     /// 绘制方法，每帧在渲染阶段调用
     fn draw(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut GameContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
     ) -> GameResult;
 }
 
@@ -411,14 +412,13 @@ pub trait HybridSystem {
     }
 
     /// 更新方法，每帧在逻辑阶段调用（必须实现）
-    fn update(&mut self, _ctx: &mut crate::ecs::GameContext, delay_time: f32) -> GameResult;
+    fn update(&mut self, _ctx: &mut GameContext, delay_time: f32) -> GameResult;
 
     /// 绘制方法，每帧在渲染阶段调用（必须实现）
     fn draw(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut GameContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
     ) -> GameResult;
 }
 
@@ -613,9 +613,8 @@ impl SystemScheduler {
     /// 渲染阶段 - 调度 DrawSystem 和 HybridSystem 的 draw 方法
     pub fn draw(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut GameContext,
         canvas: &mut Canvas,
-        world: &hecs::World,
     ) -> GameResult {
         for entry in &mut self.systems {
             if !entry.is_enabled() {
@@ -624,10 +623,10 @@ impl SystemScheduler {
 
             match entry {
                 SystemEntry::Draw { system, .. } => {
-                    system.draw(ctx, canvas, world)?;
+                    system.draw(ctx, canvas)?;
                 }
                 SystemEntry::Hybrid { system, .. } => {
-                    system.draw(ctx, canvas, world)?;
+                    system.draw(ctx, canvas)?;
                 }
                 SystemEntry::Update { .. } => {
                     // 纯逻辑系统无需渲染

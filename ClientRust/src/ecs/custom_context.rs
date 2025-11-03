@@ -8,7 +8,7 @@
 //!
 //! 架构：
 //! ```
-//! GameContext
+//! CustomContext
 //! ├─ ggez 核心组件 (fs, gfx, keyboard, mouse, gamepad, time)
 //! ├─ ECS World (hecs)
 //! ├─ NetContext (网络)
@@ -35,7 +35,7 @@ use hecs::World;
 /// 自定义游戏上下文
 ///
 /// 包含 ggez 的所有核心组件 + ECS World + 网络上下文
-pub struct GameContext {
+pub struct CustomContext {
     // ===== ggez 核心组件 =====
     pub fs: Filesystem,
     pub gfx: GraphicsContext,
@@ -55,8 +55,8 @@ pub struct GameContext {
     pub frame_input_events: Vec<InputEvent>,
 }
 
-impl GameContext {
-    /// 创建 GameContext 的构建器函数
+impl CustomContext {
+    /// 创建 CustomContext 的构建器函数
     ///
     /// 用于 ContextBuilder::custom_build()
     pub fn builder(
@@ -104,70 +104,10 @@ impl GameContext {
     ///
     /// 用于需要原始 ggez Context 的场景（如渲染）
     ///
-    /// 安全性：GameContext 通过实现 Has/HasMut trait 保证与 ggez::Context 兼容
+    /// 安全性：CustomContext 通过实现 Has/HasMut trait 保证与 ggez::Context 兼容
     pub fn as_ggez_context(&mut self) -> &mut ggez::Context {
         unsafe { std::mem::transmute(self) }
     }
-
-    #[inline]
-    pub fn clear_game_objects(&mut self) {
-        use crate::ecs::components::*;
-
-        println!("🧹 开始清理旧游戏对象...");
-
-        let mut to_despawn = Vec::new();
-
-        // 1. 清理玩家实体 (包括本地玩家和其他玩家)
-        for (entity, _) in self.world.query::<&PlayerData>().iter() {
-            to_despawn.push(entity);
-        }
-
-        // 2. 清理怪物实体
-        for (entity, _) in self.world.query::<&MonsterData>().iter() {
-            to_despawn.push(entity);
-        }
-
-        // 3. 清理NPC实体
-        for (entity, _) in self.world.query::<&NPCData>().iter() {
-            to_despawn.push(entity);
-        }
-
-        // 4. 清理物品掉落实体
-        for (entity, _) in self.world.query::<&ItemDrop>().iter() {
-            to_despawn.push(entity);
-        }
-
-        // 5. 清理地图瓦片实体
-        for (entity, _) in self.world.query::<&MapTile>().iter() {
-            to_despawn.push(entity);
-        }
-
-        // 6. 清理地图数据实体
-        for (entity, _) in self.world.query::<&MapData>().iter() {
-            to_despawn.push(entity);
-        }
-
-        // 7. 清理动画瓦片实体
-        for (entity, _) in self.world.query::<&AnimatedTile>().iter() {
-            to_despawn.push(entity);
-        }
-
-        // 8. 清理门实体
-        for (entity, _) in self.world.query::<&Door>().iter() {
-            to_despawn.push(entity);
-        }
-
-        // 删除所有收集的实体
-        let count = to_despawn.len();
-        for entity in to_despawn {
-            if let Err(e) = self.world.despawn(entity) {
-                println!("⚠️ 删除实体失败: {:?}", e);
-            }
-        }
-
-        println!("✅ 已清理 {} 个游戏对象和地图实体", count);
-    }
-
 
     pub fn collect_network_events(&mut self) {
         let events = self.network().recv_categorized();
@@ -188,51 +128,51 @@ impl GameContext {
 // ============================================================================
 // 实现 ggez 的 Has/HasMut trait
 // ============================================================================
-// 这些实现允许 GameContext 作为 ggez::Context 的替代品使用
+// 这些实现允许 CustomContext 作为 ggez::Context 的替代品使用
 
-impl Has<Filesystem> for GameContext {
+impl Has<Filesystem> for CustomContext {
     #[inline]
     fn retrieve(&self) -> &Filesystem {
         &self.fs
     }
 }
 
-impl Has<GraphicsContext> for GameContext {
+impl Has<GraphicsContext> for CustomContext {
     #[inline]
     fn retrieve(&self) -> &GraphicsContext {
         &self.gfx
     }
 }
 
-impl Has<KeyboardContext> for GameContext {
+impl Has<KeyboardContext> for CustomContext {
     #[inline]
     fn retrieve(&self) -> &KeyboardContext {
         &self.keyboard
     }
 }
 
-impl Has<MouseContext> for GameContext {
+impl Has<MouseContext> for CustomContext {
     #[inline]
     fn retrieve(&self) -> &MouseContext {
         &self.mouse
     }
 }
 
-impl Has<GamepadContext> for GameContext {
+impl Has<GamepadContext> for CustomContext {
     #[inline]
     fn retrieve(&self) -> &GamepadContext {
         &self.gamepad
     }
 }
 
-impl Has<TimeContext> for GameContext {
+impl Has<TimeContext> for CustomContext {
     #[inline]
     fn retrieve(&self) -> &TimeContext {
         &self.time
     }
 }
 
-impl Has<ContextFields> for GameContext {
+impl Has<ContextFields> for CustomContext {
     #[inline]
     fn retrieve(&self) -> &ContextFields {
         &self.fields
@@ -241,42 +181,42 @@ impl Has<ContextFields> for GameContext {
 
 // ===== HasMut 实现 =====
 
-impl HasMut<ContextFields> for GameContext {
+impl HasMut<ContextFields> for CustomContext {
     #[inline]
     fn retrieve_mut(&mut self) -> &mut ContextFields {
         &mut self.fields
     }
 }
 
-impl HasMut<GraphicsContext> for GameContext {
+impl HasMut<GraphicsContext> for CustomContext {
     #[inline]
     fn retrieve_mut(&mut self) -> &mut GraphicsContext {
         &mut self.gfx
     }
 }
 
-impl HasMut<TimeContext> for GameContext {
+impl HasMut<TimeContext> for CustomContext {
     #[inline]
     fn retrieve_mut(&mut self) -> &mut TimeContext {
         &mut self.time
     }
 }
 
-impl HasMut<KeyboardContext> for GameContext {
+impl HasMut<KeyboardContext> for CustomContext {
     #[inline]
     fn retrieve_mut(&mut self) -> &mut KeyboardContext {
         &mut self.keyboard
     }
 }
 
-impl HasMut<MouseContext> for GameContext {
+impl HasMut<MouseContext> for CustomContext {
     #[inline]
     fn retrieve_mut(&mut self) -> &mut MouseContext {
         &mut self.mouse
     }
 }
 
-impl HasMut<GamepadContext> for GameContext {
+impl HasMut<GamepadContext> for CustomContext {
     #[inline]
     fn retrieve_mut(&mut self) -> &mut GamepadContext {
         &mut self.gamepad
@@ -287,7 +227,7 @@ impl HasMut<GamepadContext> for GameContext {
 // 扩展：访问游戏特定资源
 // ============================================================================
 
-impl GameContext {
+impl CustomContext {
     /// 获取 ClientSettings
     pub fn settings(&self) -> Option<hecs::Ref<'_, ClientSettings>> {
         if let Some(entity) = crate::ecs::SETTING_ENTITY {
@@ -621,11 +561,11 @@ impl GameContext {
 ///
 /// 封装常用的输入操作，避免直接调用 ggez API
 pub struct InputContext<'a> {
-    ctx: &'a GameContext,
+    ctx: &'a CustomContext,
 }
 
 impl<'a> InputContext<'a> {
-    pub fn new(ctx: &'a GameContext) -> Self {
+    pub fn new(ctx: &'a CustomContext) -> Self {
         Self { ctx }
     }
 

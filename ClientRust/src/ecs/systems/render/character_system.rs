@@ -24,9 +24,10 @@
 // ============================================================================
 
 use hecs::World;
-use ggez::{Context, GameResult};
+use ggez::GameResult;
 use ggez::graphics::{Canvas, DrawParam, Color};
 
+use crate::ecs::GameContext;
 use crate::ecs::components::{
     Camera, Position, Player, PlayerAppearance, TimeTracker,
 };
@@ -117,7 +118,7 @@ impl CharacterRenderSystem {
 
     /// 渲染单个角色
     fn render_character(
-        ctx: &mut Context,
+        ctx: &mut GameContext,
         canvas: &mut Canvas,
         player: &Player,
         pos: &Position,
@@ -160,7 +161,7 @@ impl CharacterRenderSystem {
             
             let body_frame = (frame_index + armour_offset) as usize;
             
-            if let Ok(info) = body_lib.get_or_create_texture(ctx, body_frame) {
+            if let Ok(info) = body_lib.get_or_create_texture(ctx.as_ggez_context(), body_frame) {
                 let draw_x = screen_x - (info.x as f32) * zoom;
                 let draw_y = screen_y - (info.y as f32) * zoom;
                 
@@ -191,7 +192,7 @@ impl CharacterRenderSystem {
                 
                 let hair_frame = (frame_index + hair_offset) as usize;
                 
-                if let Ok(info) = hair_lib.get_or_create_texture(ctx, hair_frame) {
+                if let Ok(info) = hair_lib.get_or_create_texture(ctx.as_ggez_context(), hair_frame) {
                     let draw_x = screen_x - (info.x as f32) * zoom;
                     let draw_y = screen_y - (info.y as f32) * zoom;
                     
@@ -229,7 +230,8 @@ impl CharacterRenderSystem {
 
 // 实现 DrawSystem trait
 impl crate::ecs::systems::DrawSystem for CharacterRenderSystem {
-    fn draw(&mut self, ctx: &mut Context, canvas: &mut Canvas, world: &World) -> GameResult {
+    fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
+        let world = &ctx.world;
         // 获取相机变换
         let Some((cam_x, cam_y, zoom)) = Self::get_camera_transform(world) else {
             return Ok(());

@@ -276,29 +276,16 @@ impl CategorizedEvents {
 /// 网络构建器
 pub struct NetworkBuilder {
     settings: NetworkSettings,
-    use_mock: bool,
 }
 
 impl NetworkBuilder {
     pub fn new(settings: NetworkSettings) -> Self {
         Self {
             settings,
-            use_mock: false,
         }
     }
 
-    /// 启用模拟网络模式（用于开发工具和离线测试）
-    ///
-    /// # 示例
-    /// ```ignore
-    /// let net_ctx = NetworkBuilder::new(settings)
-    ///     .mock(true)
-    ///     .build()?;
-    /// ```
-    pub fn mock(mut self, enable: bool) -> Self {
-        self.use_mock = enable;
-        self
-    }
+   
 
     /// 构建网络模块
     ///
@@ -308,7 +295,7 @@ impl NetworkBuilder {
     ///
     /// 两种模式返回相同的 NetContext 接口
     pub fn build(self) -> Result<NetContext> {
-        if self.use_mock {
+        if self.settings.use_mock {
             // 模拟网络模式
             tracing::info!("🎭 使用模拟网络模式");
             let (tx, rx) = super::mock::MockNetwork::new();

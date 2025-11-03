@@ -207,7 +207,7 @@ impl DebugSystem {
 
     /// 绘制网格线
     fn draw_grid(
-        ctx: &mut ggez::Context,
+        ctx: &mut GameContext,
         canvas: &mut ggez::graphics::Canvas,
         camera: &Camera,
         camera_pos: &Position,
@@ -266,9 +266,9 @@ impl DebugSystem {
 
     /// 绘制瓦片边框
     fn draw_tile_borders(
-        ctx: &mut ggez::Context,
+        ctx: &mut GameContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
+       
         camera: &Camera,
         camera_pos: &Position,
         config: &RenderConfig,
@@ -277,7 +277,7 @@ impl DebugSystem {
         use crate::ecs::{CELL_HEIGHT, CELL_WIDTH};
         use crate::graphics::get_map_library;
         use ggez::graphics::{Color, DrawMode, DrawParam, Mesh};
-
+        let world = &ctx.world;
         let half_width = (camera.screen_width / 2.0) / camera.zoom;
         let half_height = (camera.screen_height / 2.0) / camera.zoom;
         let view_left = camera_pos.x - half_width;
@@ -346,16 +346,16 @@ impl DebugSystem {
 
     /// 绘制障碍物格子
     fn draw_obstacles(
-        ctx: &mut ggez::Context,
+        ctx: &mut GameContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
+      
         camera: &Camera,
         camera_pos: &Position,
     ) -> GameResult {
         use crate::ecs::components::MapData;
         use crate::ecs::{CELL_HEIGHT, CELL_WIDTH};
         use ggez::graphics::{Color, DrawMode, DrawParam, Mesh};
-
+        let world = &ctx.world;
         let obstacle_color = Color::from_rgba(180, 0, 0, 120);
 
         let half_width = (camera.screen_width / 2.0) / camera.zoom;
@@ -415,16 +415,16 @@ impl DebugSystem {
 
     /// 绘制路径
     fn draw_paths(
-        ctx: &mut ggez::Context,
+        ctx: &mut GameContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
+      
         camera: &Camera,
         camera_pos: &Position,
     ) -> GameResult {
         use crate::ecs::components::{LocalPlayer, Path, Position as EntityPosition};
         use crate::ecs::{CELL_HEIGHT, CELL_WIDTH};
         use ggez::graphics::{Color, DrawMode, DrawParam, Mesh};
-
+        let world = &ctx.world;
         for (_, (_, path, pos)) in world
             .query::<(&LocalPlayer, &Path, &EntityPosition)>()
             .iter()
@@ -530,7 +530,7 @@ impl HybridSystem for DebugSystem {
 
         for &key in &keys_to_check {
             if ctx.input().key_pressed(key) {
-                Self::handle_keycode(ctx.world, key);
+                Self::handle_keycode(&mut ctx.world, key);
             }
         }
 
@@ -543,25 +543,24 @@ impl HybridSystem for DebugSystem {
 
     fn draw(
         &mut self,
-        ctx: &mut ggez::Context,
+        ctx: &mut GameContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
     ) -> GameResult {
         use crate::ecs::components::TimeTracker;
         use ggez::graphics::{Color, DrawParam, Text, TextFragment};
-
+      
         // 读取调试信息
         let mut fps = 0.0;
         let mut camera_pos = (0.0, 0.0);
         let mut camera_zoom = 1.0;
-        let entity_count = world.len();
+        let entity_count = ctx.world.len();
 
-        for (_, time) in world.query::<&TimeTracker>().iter() {
+        for (_, time) in ctx.world.query::<&TimeTracker>().iter() {
             fps = time.fps;
             break;
         }
 
-        for (_, (camera, pos)) in world.query::<(&Camera, &Position)>().iter() {
+        for (_, (camera, pos)) in ctx.world.query::<(&Camera, &Position)>().iter() {
             camera_pos = (pos.x, pos.y);
             camera_zoom = camera.zoom;
             break;
@@ -576,7 +575,7 @@ impl HybridSystem for DebugSystem {
         let mut show_grid = false;
         let mut show_borders = false;
 
-        for (_, config) in world.query::<&RenderConfig>().iter() {
+        for (_, config) in ctx.world.query::<&RenderConfig>().iter() {
             show_back = config.show_back;
             show_middle = config.show_middle;
             show_front = config.show_front;
@@ -648,13 +647,13 @@ impl HybridSystem for DebugSystem {
         canvas.draw(&text, DrawParam::default().dest([10.0, 10.0]));
 
         // 获取 RenderConfig 和 Camera
-        let config = world
+        let config = ctx.world
             .query::<&RenderConfig>()
             .iter()
             .next()
             .map(|(_, cfg)| cfg.clone());
         if let Some(config) = config {
-            if let Some((camera, pos)) = world
+            if let Some((camera, pos)) = ctx.world
                 .query::<(&Camera, &Position)>()
                 .iter()
                 .next()
@@ -665,15 +664,15 @@ impl HybridSystem for DebugSystem {
                 }
 
                 if config.show_borders {
-                    Self::draw_tile_borders(ctx, canvas, world, &camera, &pos, &config)?;
+                    Self::draw_tile_borders(ctx, canvas, &camera, &pos, &config)?;
                 }
 
                 if config.show_obstacles {
-                    Self::draw_obstacles(ctx, canvas, world, &camera, &pos)?;
+                    Self::draw_obstacles(ctx, canvas,  &camera, &pos)?;
                 }
 
                 if config.show_path {
-                    Self::draw_paths(ctx, canvas, world, &camera, &pos)?;
+                    Self::draw_paths(ctx, canvas,  &camera, &pos)?;
                 }
             }
         }

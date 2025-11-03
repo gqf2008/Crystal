@@ -348,6 +348,8 @@ pub struct NetworkSettings {
     pub port: u16,
     #[serde(rename = "TimeOut")]
     pub timeout_ms: u64,
+    #[serde(rename = "UseMock")]
+    pub use_mock: bool,
 }
 
 impl Default for NetworkSettings {
@@ -357,6 +359,7 @@ impl Default for NetworkSettings {
             ip_address: "127.0.0.1".into(),
             port: 7000,
             timeout_ms: 5000,
+            use_mock: false,
         }
     }
 }
