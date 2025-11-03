@@ -164,13 +164,17 @@ impl MapViewerScene {
             return;
         }
 
+        // 🎯 玩家的世界坐标（盟重土城传送点）
+        let player_world_x = (332 * 48) as f32;
+        let player_world_y = (327 * 32) as f32;
+
         // 在实际的 World 中重新创建所有实体
         // 相机实体（由 CameraSystem 使用）
-        // 初始位置设置为屏幕中心的一半，使地图 (0,0) 对齐到屏幕左上角
+        // ✅ 相机初始位置应该对准玩家，这样缩放时才不会偏移
         world.spawn((
             Position {
-                x: screen_width / 2.0,
-                y: screen_height / 2.0,
+                x: player_world_x,  // 相机位置 = 玩家位置
+                y: player_world_y,
             },
             Camera {
                 zoom: 1.0,
@@ -313,7 +317,7 @@ impl Scene for MapViewerScene {
     }
 
     fn update(&mut self, ctx: &mut GameContext) -> GameResult<Option<SceneType>> {
-        tracing::info!("🔄 MapViewerScene::update() called");
+        // tracing::info!("🔄 MapViewerScene::update() called");
         
         // 首次更新时初始化 World
         if !self.initialized {
@@ -322,7 +326,7 @@ impl Scene for MapViewerScene {
             self.initialize_world(&mut ctx.world, screen_width, screen_height);
         }
 
-        tracing::info!("📊 Updating FPS stats...");
+        // tracing::info!("📊 Updating FPS stats...");
         // 更新 FPS 统计（不控制帧率）
         if let Ok(mut time) = ctx.world.get::<&mut TimeTracker>(self.time_entity) {
             time.animation_count += 1;
@@ -335,19 +339,19 @@ impl Scene for MapViewerScene {
             }
         }
 
-        tracing::info!("🎮 Running system scheduler update...");
+      //  tracing::info!("🎮 Running system scheduler update...");
         let dt = ctx.time.delta().as_secs_f32();
         self.system_scheduler.update(ctx, dt)?;
 
-        tracing::info!("✅ MapViewerScene::update() completed");
+        // tracing::info!("✅ MapViewerScene::update() completed");
         Ok(None)
     }
 
     fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
-        tracing::info!("🎨 MapViewerScene::draw() called");
+      //  tracing::info!("🎨 MapViewerScene::draw() called");
          let (ctx, world) = ctx.split_gfx_world();
         self.system_scheduler.draw(ctx, canvas, world)?;
-        tracing::info!("✅ MapViewerScene::draw() completed");
+    //    tracing::info!("✅ MapViewerScene::draw() completed");
         Ok(())
     }
 }

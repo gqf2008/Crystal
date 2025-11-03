@@ -59,6 +59,7 @@ impl CameraSystem {
     fn handle_zoom(
         camera: &mut Camera,
         pos: &mut Position,
+        mode: &mut CameraMode,
         scroll_y: Option<f32>,
         mouse_x: f32,
         mouse_y: f32,
@@ -66,6 +67,9 @@ impl CameraSystem {
         let Some(scroll_y) = scroll_y else {
             return;
         };
+
+        // 🔧 切换到手动模式,防止 camera_follow_system 覆盖相机位置
+        *mode = CameraMode::Manual;
 
         let old_zoom = camera.zoom;
         let zoom_speed = 0.1;
@@ -86,11 +90,6 @@ impl CameraSystem {
         // 变换：camera = world - (screen - screen_center) / zoom
         pos.x = world_x_before - (mouse_x - camera.screen_width / 2.0) / camera.zoom;
         pos.y = world_y_before - (mouse_y - camera.screen_height / 2.0) / camera.zoom;
-        
-        tracing::debug!(
-            "🔍 缩放: {:.2} -> {:.2}, 鼠标世界坐标={:.1},{:.1}, 相机位置={:.1},{:.1}",
-            old_zoom, camera.zoom, world_x_before, world_y_before, pos.x, pos.y
-        );
     }
 
     /// 计算震动偏移
@@ -141,6 +140,12 @@ impl System for CameraSystem {
             .next()
             .map(|(_, y)| y);
 
+        // 🔍 调试:检查是否收到滚轮事件 (已禁用,可按需开启)
+        // if scroll_y.is_some() {
+        //     tracing::info!("🖱️ 收到滚轮事件: scroll_y={:?}, 鼠标位置=({:.0},{:.0})", 
+        //         scroll_y, mouse_pos.x, mouse_pos.y);
+        // }
+
         // 读取配置：是否启用相机拖拽
         let camera_drag_enabled = ctx.world.query::<&RenderConfig>()
             .iter()
@@ -148,6 +153,9 @@ impl System for CameraSystem {
             .map(|(_, cfg)| cfg.enable_camera_drag)
             .unwrap_or(false);
 
+        // 🔧 先获取当前窗口尺寸(避免借用冲突)
+        let (current_width, current_height) = ctx.drawable_size();
+        
         // 查询 Camera + Draggable + Position + CameraMode 组件
         let mut camera_query: Vec<_> = ctx.world
             .query_mut::<(&mut Camera, &mut Draggable, &mut Position, &mut CameraMode)>()
@@ -155,14 +163,22 @@ impl System for CameraSystem {
             .collect();
 
         if let Some((_, (ref mut camera, ref mut draggable, ref mut pos, ref mut mode))) = camera_query.first_mut() {
-            // 处理窗口大小调整
+            // 🔧 每帧检查并同步相机尺寸(修复初始化时尺寸错误的问题)
+            if (camera.screen_width - current_width).abs() > 1.0 || (camera.screen_height - current_height).abs() > 1.0 {
+                tracing::debug!("📐 相机尺寸不匹配,自动同步: ({:.0}x{:.0}) -> ({:.0}x{:.0})", 
+                    camera.screen_width, camera.screen_height, current_width, current_height);
+                camera.screen_width = current_width;
+                camera.screen_height = current_height;
+            }
+            
+            // 处理窗口大小调整事件(优先级更高)
             if let Some((width, height)) = resize_event {
                 camera.screen_width = width;
                 camera.screen_height = height;
-                tracing::debug!("📐 相机尺寸更新: {}x{}", width, height);
+                tracing::debug!("📐 相机尺寸更新(resize事件): {}x{}", width, height);
             }
 
-            // 🖱️ 处理鼠标拖拽
+            // 处理鼠标拖拽
             if camera_drag_enabled {
                 let should_drag = (mouse_left && ctrl_pressed) || mouse_middle;
                 
@@ -174,10 +190,10 @@ impl System for CameraSystem {
                     draggable.drag_start_y = mouse_pos.y;
                     draggable.drag_start_pos_x = pos.x;
                     draggable.drag_start_pos_y = pos.y;
-                    tracing::debug!("📹 切换到手动模式并开始拖拽相机: ({:.0}, {:.0})", mouse_pos.x, mouse_pos.y);
+                    tracing::debug!("开始拖拽相机: ({:.0}, {:.0})", mouse_pos.x, mouse_pos.y);
                 } else if draggable.is_dragging {
                     if should_drag {
-                        // 持续拖拽
+                        // 持续拖拽 - 相机跟随鼠标移动
                         let dx = (mouse_pos.x - draggable.drag_start_x) / camera.zoom;
                         let dy = (mouse_pos.y - draggable.drag_start_y) / camera.zoom;
                         pos.x = draggable.drag_start_pos_x - dx;
@@ -185,14 +201,14 @@ impl System for CameraSystem {
                     } else {
                         // 结束拖拽
                         draggable.is_dragging = false;
-                        tracing::debug!("📹 结束拖拽相机");
+                        tracing::debug!("结束拖拽相机");
                     }
                 }
             }
 
             // 🔍 处理滚轮缩放
             if let Some(scroll) = scroll_y {
-                Self::handle_zoom(camera, pos, Some(scroll), mouse_pos.x, mouse_pos.y);
+                Self::handle_zoom(camera, pos, mode, Some(scroll), mouse_pos.x, mouse_pos.y);
             }
         }
 

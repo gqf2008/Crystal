@@ -36,17 +36,17 @@ impl DrawSystem for MapRenderSystem {
         canvas: &mut ggez::graphics::Canvas,
         world: &hecs::World,
     ) -> GameResult {
-        tracing::info!("🗺️  MapRenderSystem::draw() 开始");
+        // tracing::info!("🗺️  MapRenderSystem::draw() 开始");
         // ====================================================================
         // 步骤0: 检查是否有地图瓦片数据（防止崩溃）
         // ====================================================================
         // 如果地图还没加载，直接返回避免崩溃
         let has_tiles = world.query::<&MapTile>().iter().next().is_some();
         if !has_tiles {
-            tracing::info!("⏭️  MapRenderSystem: 没有地图瓦片，跳过渲染");
+            // tracing::info!("⏭️  MapRenderSystem: 没有地图瓦片，跳过渲染");
             return Ok(());
         }
-        tracing::info!("✅ MapRenderSystem: 有地图瓦片，继续渲染");
+        // tracing::info!("✅ MapRenderSystem: 有地图瓦片，继续渲染");
 
         // ====================================================================
         // 步骤1: 获取相机和渲染配置

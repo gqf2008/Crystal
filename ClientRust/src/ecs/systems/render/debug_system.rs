@@ -547,7 +547,7 @@ impl HybridSystem for DebugSystem {
         canvas: &mut ggez::graphics::Canvas,
         world: &hecs::World,
     ) -> GameResult {
-        tracing::info!("🐛 DebugSystem::draw() 开始");
+        // tracing::info!("🐛 DebugSystem::draw() 开始");
         use crate::ecs::components::TimeTracker;
         use ggez::graphics::{Color, DrawParam, Text, TextFragment};
       
