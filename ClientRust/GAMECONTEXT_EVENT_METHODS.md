@@ -1,6 +1,8 @@
 # GameContext 事件便捷方法文档
 
-本文档详细说明 GameContext 中新增的游戏事件访问便捷方法。
+> **📝 历史文档**: 此文档记录了事件方法的实现细节。当前快速参考请查看 [GAMECONTEXT_QUICKREF.md](GAMECONTEXT_QUICKREF.md)
+
+本文档详细说明 GameContext 中的游戏事件访问便捷方法。
 
 ## 📋 目录
 

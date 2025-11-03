@@ -409,25 +409,29 @@ impl<'a> GameContext<'a> {
 
 ### 1. 滚轮事件
 
-鼠标滚轮**不支持状态查询**,只能通过 `GlobalEvents` 的 `InputEvent::MouseWheel` 事件获取:
+鼠标滚轮通过 `InputContext` 访问:
 
 ```rust
-// ❌ 不支持
-let wheel_y = ctx.mouse_wheel_y();  // 方法不存在
-
-// ✅ 正确方式
-use crate::ecs::WorldExt;
-let events = ctx.world.global_events();
-for event in &events.input_events {
-    if let InputEvent::MouseWheel { y, .. } = event {
-        // 处理滚轮事件
-    }
+// ✅ 使用 InputContext
+for (x, y) in ctx.input().mouse_wheel() {
+    tracing::info!("滚轮: x={}, y={}", x, y);
 }
 ```
 
 ### 2. 键盘输入
 
-键盘输入目前也需要通过 `GlobalEvents` 获取 `InputEvent::KeyDown` 事件。未来可能添加键盘状态查询。
+键盘输入通过 `InputContext` 的便捷方法访问:
+
+```rust
+// 键盘状态查询
+if ctx.input().key_pressed(KeyCode::W) { /* ... */ }
+if ctx.input().ctrl_pressed() { /* ... */ }
+
+// 按键事件迭代
+for (key, text) in ctx.input().pressed_keys() {
+    // 处理按键
+}
+```
 
 ### 3. 性能考虑
 
