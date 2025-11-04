@@ -266,6 +266,138 @@ impl DebugSystem {
         Ok(())
     }
 
+    /// 绘制玩家脚下的瓦片高亮 (用于调试动画抖动)
+    fn draw_player_footprint(
+        ctx: &mut GraphicsContext,
+        canvas: &mut ggez::graphics::Canvas,
+        camera: &Camera,
+        camera_pos: &Position,
+        world: &hecs::World,
+    ) -> GameResult {
+        use crate::ecs::components::{LocalPlayer, Player, MovementVelocity};
+        use crate::ecs::{CELL_HEIGHT, CELL_WIDTH};
+        use ggez::graphics::{Color, DrawMode, DrawParam, Mesh, Rect, Text, TextFragment};
+
+        // 查找本地玩家
+        for (_, (position, player, _local, velocity)) in world
+            .query::<(&Position, &Player, &LocalPlayer, &MovementVelocity)>()
+            .iter()
+        {
+            // 🎯 玩家position是脚底的世界坐标
+            let player_foot_x = position.x;
+            let player_foot_y = position.y;
+            
+            // 计算玩家脚底所在的格子坐标(用于显示信息)
+            let grid_x = (player_foot_x / CELL_WIDTH as f32).floor() as i32;
+            let grid_y = (player_foot_y / CELL_HEIGHT as f32).floor() as i32;
+            
+            // ✅ 方案1: 绘制以玩家脚底为中心的格子(不会跳跃)
+            // 格子中心对齐玩家脚底
+            let tile_width = CELL_WIDTH as f32 * camera.zoom;
+            let tile_height = CELL_HEIGHT as f32 * camera.zoom;
+            
+            // 玩家脚底在屏幕上的位置
+            let foot_screen_x = (player_foot_x - camera_pos.x) * camera.zoom + camera.screen_width / 2.0;
+            let foot_screen_y = (player_foot_y - camera_pos.y) * camera.zoom + camera.screen_height / 2.0;
+            
+            // 格子左上角 = 玩家脚底 - 格子尺寸的一半(让格子中心对齐脚底)
+            let tile_screen_x = foot_screen_x - tile_width / 2.0;
+            let tile_screen_y = foot_screen_y - tile_height / 2.0;
+            
+            // 绘制半透明黄色填充
+            let fill_rect = Rect::new(tile_screen_x, tile_screen_y, tile_width, tile_height);
+            let fill_mesh = Mesh::new_rectangle(
+                ctx,
+                DrawMode::fill(),
+                fill_rect,
+                Color::from_rgba(255, 255, 0, 60), // 黄色半透明
+            )?;
+            canvas.draw(&fill_mesh, DrawParam::default());
+            
+            // 绘制边框
+            let border_mesh = Mesh::new_rectangle(
+                ctx,
+                DrawMode::stroke(2.0),
+                fill_rect,
+                Color::from_rgba(255, 255, 0, 200), // 黄色边框
+            )?;
+            canvas.draw(&border_mesh, DrawParam::default());
+            
+            // 🔴 绘制玩家脚底位置的十字标记(屏幕中心)
+            let cross_size = 8.0;
+            
+            // 水平线
+            let h_line = Mesh::new_line(
+                ctx,
+                &[
+                    [foot_screen_x - cross_size, foot_screen_y],
+                    [foot_screen_x + cross_size, foot_screen_y],
+                ],
+                3.0,
+                Color::RED,
+            )?;
+            canvas.draw(&h_line, DrawParam::default());
+            
+            // 垂直线
+            let v_line = Mesh::new_line(
+                ctx,
+                &[
+                    [foot_screen_x, foot_screen_y - cross_size],
+                    [foot_screen_x, foot_screen_y + cross_size],
+                ],
+                3.0,
+                Color::RED,
+            )?;
+            canvas.draw(&v_line, DrawParam::default());
+            
+            // 🔵 绘制格子中心点(用于对比)
+            let center_x = tile_screen_x + tile_width / 2.0;
+            let center_y = tile_screen_y + tile_height / 2.0;
+            let center_circle = Mesh::new_circle(
+                ctx,
+                DrawMode::fill(),
+                [center_x, center_y],
+                4.0,
+                0.1,
+                Color::CYAN,
+            )?;
+            canvas.draw(&center_circle, DrawParam::default());
+            
+            // 📊 显示调试信息
+            let debug_text = format!(
+                "Grid: ({}, {})\nPos: ({:.1}, {:.1})\nVel: ({:.1}, {:.1})\nAction: {:?}",
+                grid_x, grid_y,
+                player_foot_x, player_foot_y,
+                velocity.x, velocity.y,
+                player.action
+            );
+            
+            let text = Text::new(TextFragment {
+                text: debug_text,
+                color: Some(Color::WHITE),
+                font: None,
+                scale: Some(ggez::graphics::PxScale::from(16.0)),
+            });
+            
+            // 文本背景
+            let bg_rect = Rect::new(foot_screen_x + 15.0, foot_screen_y - 60.0, 200.0, 80.0);
+            let bg_mesh = Mesh::new_rectangle(
+                ctx,
+                DrawMode::fill(),
+                bg_rect,
+                Color::from_rgba(0, 0, 0, 200),
+            )?;
+            canvas.draw(&bg_mesh, DrawParam::default());
+            
+            // 绘制文本
+            canvas.draw(&text, DrawParam::default().dest([foot_screen_x + 20.0, foot_screen_y - 55.0]));
+            
+            break; // 只绘制一个玩家
+        }
+        
+        Ok(())
+    }
+
     /// 绘制瓦片边框
     fn draw_tile_borders(
         ctx: &mut GraphicsContext,
@@ -667,6 +799,9 @@ impl HybridSystem for DebugSystem {
                 if config.show_grid {
                     Self::draw_grid(ctx, canvas, &camera, &pos)?;
                 }
+                
+                // 🎯 始终绘制玩家脚下瓦片 (用于调试动画抖动)
+                Self::draw_player_footprint(ctx, canvas, &camera, &pos, world)?;
 
                 if config.show_borders {
                     Self::draw_tile_borders(ctx, canvas, &camera, &pos, &config, world)?;

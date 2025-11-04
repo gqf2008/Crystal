@@ -84,36 +84,45 @@ impl System for MovementSystem {
             &mut Player,
             &crate::ecs::components::PlayerInput,
         )>() {
-            // 🚀 DirectFollow模式: 直接用velocity更新位置,完全绕过Path系统
             use crate::ecs::components::MovementMode;
+            
+            // 🎯 统一处理所有移动模式的动画状态
+            // 检查是否有velocity (移动中)
+            let has_velocity = velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01;
+            
             if player_input.movement_mode == MovementMode::DirectFollow {
-                // 直接应用velocity (velocity已经在PathfindingSystem中设置好了)
-                if velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01 {
-                    // 计算8方向
+                // DirectFollow模式: 直接用velocity更新位置
+                if has_velocity {
+                    // 移动中: 更新位置和动画
                     player.direction = Self::calculate_direction(velocity.x, velocity.y);
-                    
-                    // 🎬 直接设置动画状态 (使用player_input.is_running标志)
                     player.action = if player_input.is_running {
                         crate::ecs::components::PlayerAction::Run
                     } else {
                         crate::ecs::components::PlayerAction::Walk
                     };
                     player.is_moving = true;
-                    
-                    // 平滑移动: 直接更新位置
                     position.x += velocity.x * delay_time;
                     position.y += velocity.y * delay_time;
                 } else {
-                    // 静止状态
+                    // 静止: 设置站立动画
                     player.action = crate::ecs::components::PlayerAction::Stand;
                     player.is_moving = false;
                 }
-                continue; // 跳过Path处理
+                continue;
+            }
+            
+            // 其他模式: 如果没有velocity也要设置站立
+            if !has_velocity {
+                player.action = crate::ecs::components::PlayerAction::Stand;
+                player.is_moving = false;
+                velocity.stop();
+                continue;
             }
             
             if !path.is_valid {
+                player.action = crate::ecs::components::PlayerAction::Stand;
+                player.is_moving = false;
                 velocity.stop();
-                // 不再设置 player.action 和 is_moving,交给 PlayerStateSystem 管理
                 continue;
             }
 
