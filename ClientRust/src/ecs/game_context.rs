@@ -266,6 +266,7 @@ impl GameContext {
                 ggez::GameError::CustomError(format!("Failed to create network: {}", err))
             })?;
         world.spawn_network(net_ctx);
+        world.spawn_settings(settings.clone());
 
         // NetContext 的实体 ID 已经在 spawn 时固定为 NETWORK_ENTITY
 
