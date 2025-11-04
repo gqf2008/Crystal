@@ -298,7 +298,7 @@ impl MapViewerScene {
             PlayerAppearance {
                 class: MirClass::Warrior,
                 gender: MirGender::Male,
-                hair: 0,
+                hair: 1,  // 使用索引1的头发 (0可能无效)
                 weapon: -1, // 无武器
                 armour: 0,
                 weapon_effect: 0,

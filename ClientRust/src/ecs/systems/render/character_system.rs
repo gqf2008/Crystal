@@ -168,8 +168,12 @@ impl CharacterRenderSystem {
             match body_lib.get_or_create_texture(ctx, body_frame) {
                 Ok(info) => {
                     // tracing::info!("✅ 成功获取纹理信息");
-                    let draw_x = screen_x - (info.x as f32) * zoom;
-                    let draw_y = screen_y - (info.y as f32) * zoom;
+                    // 🎯 传奇2渲染逻辑:
+                    // screen_x/y 是人物脚底的屏幕坐标(锚点)
+                    // info.x/y 是图像相对于锚点的偏移
+                    // 图像左上角 = 锚点 + 偏移
+                    let draw_x = screen_x + (info.x as f32) * zoom;
+                    let draw_y = screen_y + (info.y as f32) * zoom;
                     
                     if let Some(ref image) = info.image {
                         canvas.draw(
@@ -204,8 +208,9 @@ impl CharacterRenderSystem {
                 let hair_frame = (frame_index + hair_offset) as usize;
 
                 if let Ok(info) = hair_lib.get_or_create_texture(ctx, hair_frame) {
-                    let draw_x = screen_x - (info.x as f32) * zoom;
-                    let draw_y = screen_y - (info.y as f32) * zoom;
+                    // 头发使用相同的渲染逻辑
+                    let draw_x = screen_x + (info.x as f32) * zoom;
+                    let draw_y = screen_y + (info.y as f32) * zoom;
                     
                     if let Some(ref image) = info.image {
                         canvas.draw(
