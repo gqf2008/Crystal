@@ -29,7 +29,7 @@ use mir2_client::ecs::systems::logic::{
     CameraFollowSystem, CollisionSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem,
     PlayerStateSystem,
 };
-use mir2_client::ecs::systems::{CharacterAnimationSystem, MovementSystem, SystemScheduler};
+use mir2_client::ecs::systems::{MovementSystem, SystemScheduler};
 use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem};
 use mir2_client::graphics::libraries::initialize_all_libraries;
 use mir2_shared::enums::{MirClass, MirGender};
@@ -164,10 +164,8 @@ impl MapViewerScene {
             //    - 只管位移，不管动画状态
             .add_system(MovementSystem)
             
-            // 5. CharacterAnimationSystem: 动画播放
-            //    - 根据 AnimationControl 播放动画帧
-            //    - 动画速度固定，不受velocity影响
-            .add_system(CharacterAnimationSystem::new())
+            // 注意: CharacterAnimationSystem 已移除 (未使用)
+            // 渲染系统直接使用 PlayerAction.frame_interval()
             
             .add_system(TileAnimationSystem::new()) // 瓦片动画系统
             .add_system(MapUpdateSystem::new()) // 地图更新系统 (M键切换地图)
@@ -324,8 +322,7 @@ impl MapViewerScene {
             PlayerInput::default(),
             // 🆕 玩家状态机组件（管理角色状态转换）
             PlayerStateMachine::new(),
-            // 🆕 动画控制组件（管理动画播放速度）
-            mir2_client::ecs::components::animation_state::AnimationControl::new(),
+            // 注意: AnimationControl 已移除（未使用）
             // 本地玩家标记
             LocalPlayer,
         ));

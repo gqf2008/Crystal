@@ -27,7 +27,6 @@ use crate::ecs::{
     components::{
         PlayerStateMachine, PlayerState, PlayerInputEvent,
         PlayerInput, PlayerAction, Path, LocalPlayer, Player,
-        animation_state::{AnimationControl, AnimationState},
     },
     systems::System,
 };
@@ -107,25 +106,8 @@ impl System for PlayerStateSystem {
             player.is_moving = state_machine.current_state.is_moving();
         }
         
-        // 🎯 同步 Player.action 到 AnimationControl.current_state
-        // 这样 CharacterAnimationSystem 才能根据正确的状态播放动画
-        for (_, (player, control)) in ctx.world.query_mut::<(&Player, &mut AnimationControl)>() {
-            let target_state = match player.action {
-                PlayerAction::Stand => AnimationState::Idle,
-                PlayerAction::Walk => AnimationState::Walk,
-                PlayerAction::Run => AnimationState::Run,
-                // PlayerAction 只有这三个变体，其他的由 AnimationState 支持但不映射
-            };
-            
-            // 只在状态改变时更新
-            if control.current_state != target_state {
-                tracing::info!(
-                    "🎞️ 动画状态切换: {:?} -> {:?} (Player.action={:?})",
-                    control.current_state, target_state, player.action
-                );
-                control.set_state(target_state);
-            }
-        }
+        // 注意: AnimationControl 同步代码已移除（未使用）
+        // 渲染系统直接使用 Player.action 和 PlayerAction.frame_interval()
 
         Ok(())
     }
