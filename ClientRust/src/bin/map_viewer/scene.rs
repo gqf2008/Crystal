@@ -315,6 +315,8 @@ impl MapViewerScene {
             PlayerInput::default(),
             // 🆕 玩家状态机组件（管理角色状态转换）
             PlayerStateMachine::new(),
+            // 🆕 动画控制组件（管理动画播放速度）
+            mir2_client::ecs::components::animation_state::AnimationControl::new(),
             // 本地玩家标记
             LocalPlayer,
         ));

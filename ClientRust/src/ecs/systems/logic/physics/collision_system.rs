@@ -102,16 +102,8 @@ impl System for CollisionSystem {
             // 边界检查
             if grid_x < 0 || grid_y < 0 || grid_x >= width || grid_y >= height {
                 vel.stop();
-                if let Some(input) = player_input {
-                    input.move_to = None; // 清除移动目标
-                    input.movement_mode = crate::ecs::components::MovementMode::None;
-                }
-                if let Some(p) = player {
-                    use crate::ecs::components::PlayerAction;
-                    p.action = PlayerAction::Stand;
-                    p.is_moving = false;
-                }
-                tracing::warn!("🛑 边界碰撞！Grid({}, {}), Pos({:.1}, {:.1})", 
+                // 🎯 不清除 move_to，保持动画继续播放
+                tracing::warn!("🛑 边界碰撞！停止velocity但保持动画 - Grid({}, {}), Pos({:.1}, {:.1})", 
                                grid_x, grid_y, pos.x, pos.y);
                 continue;
             }
@@ -126,29 +118,17 @@ impl System for CollisionSystem {
             let has_obstacle = (cell.back_image & 0x20000000) != 0;
             
             if has_obstacle {
-                // 🎯 关键修复：下一个位置有障碍物！立即停止所有移动
+                // 🎯 关键修复：下一个位置有障碍物！立即停止velocity
+                // 但保持 move_to 不变，让动画继续播放
                 vel.stop();
                 
-                if let Some(input) = player_input {
-                    let had_move_to = input.move_to.is_some();
-                    input.move_to = None; // 清除移动目标
-                    // 🎯 关键：清除movement_mode，让PlayerControlSystem知道已停止
-                    input.movement_mode = crate::ecs::components::MovementMode::None;
-                    
-                    if had_move_to {
-                        tracing::warn!("🛑 碰撞！清除move_to - NextGrid({}, {}), CurPos({:.1}, {:.1}), vel=({:.1}, {:.1})", 
-                                       grid_x, grid_y, pos.x, pos.y, vel.x, vel.y);
-                    }
-                } else {
-                    tracing::warn!("🛑 碰撞！但没有PlayerInput - NextGrid({}, {}), CurPos({:.1}, {:.1})", 
-                                   grid_x, grid_y, pos.x, pos.y);
-                }
+                // 🎯 不清除 move_to，不修改 movement_mode
+                // 这样 PlayerStateSystem 仍认为在移动状态，动画会继续
+                // 但由于 velocity=0，position 不会更新，形成"原地踏步"
                 
-                // 🎯 设置站立动画
-                if let Some(p) = player {
-                    use crate::ecs::components::PlayerAction;
-                    p.action = PlayerAction::Stand;
-                    p.is_moving = false;
+                if player_input.is_some() {
+                    tracing::warn!("🛑 碰撞！停止velocity但保持动画 - NextGrid({}, {}), CurPos({:.1}, {:.1})", 
+                                   grid_x, grid_y, pos.x, pos.y);
                 }
             }
         }

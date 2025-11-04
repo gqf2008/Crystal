@@ -26,7 +26,7 @@ use crate::ecs::{
     GameContext,
     components::{
         PlayerStateMachine, PlayerState, PlayerInputEvent,
-        PlayerInput, Player, PlayerAction, Path, LocalPlayer,
+        PlayerInput, PlayerAction, Path, LocalPlayer,
     },
     systems::System,
 };
@@ -57,17 +57,10 @@ impl System for PlayerStateSystem {
             )>()
             .into_iter()
         {
-            // 🎯 判断是否在移动: 
-            // - DirectFollow模式: 检查velocity (因为不用Path)
-            // - 其他模式: 检查path.is_valid
+            // 🎯 关键修复：判断是否在移动应该看 move_to 而不是 velocity
+            // 因为碰撞时 velocity=0 但我们希望动画继续播放
             use crate::ecs::components::MovementMode;
-            let is_moving = if player_input.movement_mode == MovementMode::DirectFollow {
-                // DirectFollow模式: 检查velocity
-                velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01
-            } else {
-                // 其他模式: 检查Path
-                path.is_valid && player_input.move_to.is_some()
-            };
+            let is_moving = player_input.move_to.is_some();
             
             // 根据输入和移动状态决定目标状态
             let target_event = if is_moving {
@@ -100,6 +93,26 @@ impl System for PlayerStateSystem {
 
             // 同步 is_moving 标志
             player.is_moving = state_machine.current_state.is_moving();
+        }
+        
+        // 🎯 新增：同步 Player.action 到 AnimationControl.current_state
+        // 这样 CharacterAnimationSystem 才能根据正确的状态调整速度
+        use crate::ecs::components::animation_state::AnimationControl;
+        use crate::ecs::components::animation_state::AnimationState;
+        use crate::ecs::components::Player;
+        
+        for (_, (player, control)) in ctx.world.query_mut::<(&Player, &mut AnimationControl)>() {
+            let target_state = match player.action {
+                PlayerAction::Stand => AnimationState::Idle,
+                PlayerAction::Walk => AnimationState::Walk,
+                PlayerAction::Run => AnimationState::Run,
+                // PlayerAction 只有这三个变体，其他的由 AnimationState 支持但不映射
+            };
+            
+            // 只在状态改变时更新
+            if control.current_state != target_state {
+                control.set_state(target_state);
+            }
         }
 
         Ok(())

@@ -187,6 +187,10 @@ pub struct AnimationControl {
     
     /// 当前帧索引（由播放系统更新）
     pub current_frame: u8,
+    
+    /// 🎯 新增：动画速度缩放因子 (1.0 = 正常速度)
+    /// 根据实际移动速度调整，避免"拖着走"的感觉
+    pub speed_scale: f32,
 }
 
 impl AnimationControl {
@@ -200,6 +204,7 @@ impl AnimationControl {
             direction: 0,
             loop_animation: true,
             current_frame: 0,
+            speed_scale: 1.0, // 🎯 默认正常速度
         }
     }
     

@@ -397,18 +397,10 @@ impl System for PlayerControlSystem {
                 if is_pressing_left || is_pressing_right {
                     use crate::ecs::components::MovementMode;
                     
-                    // 🎯 检测是否在碰撞冷却期
-                    if self.collision_cooldown_frames > 0 {
-                        self.collision_cooldown_frames -= 1;
-                        // 🎯 关键修复：冷却期内不设置新的移动目标
-                        // 这防止了碰撞后立即重新启动移动导致的抖动
-                    } else if self.had_move_to_last_frame 
-                        && player_input.move_to.is_none() 
-                        && player_input.movement_mode == MovementMode::None {
-                        // 🎯 关键：上一帧有move_to，这一帧被清除了 → 碰撞发生
-                        self.collision_cooldown_frames = 5; // 🎯 增加到5帧（约83ms@60fps），确保停稳
-                        tracing::warn!("⏸️ 检测到碰撞停止，启动冷却(5帧)");
-                    } else {
+                    // 🎯 碰撞冷却机制已移除
+                    // 因为现在碰撞时不再清除move_to，而是依靠velocity=0来阻止移动
+                    // 所以不需要额外的冷却期
+                    {
                         // 正常情况：设置移动目标
                         let (screen_x, screen_y) = self.mouse_state.current_position;
                         let (world_x, world_y) = Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera);
