@@ -27,7 +27,7 @@ use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::logic::map_load_system::MapManager;
 use mir2_client::ecs::systems::logic::{
     CameraFollowSystem, CollisionSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem,
-    PlayerStateSystem,
+    PathfindingSystem,
 };
 use mir2_client::ecs::systems::{MovementSystem, SystemScheduler};
 use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem};
@@ -149,17 +149,17 @@ impl MapViewerScene {
             //    - 设置 mouse_pressed 标志
             .add_system(PlayerControlSystem::new())
             
-            // 2. PlayerStateSystem: 状态管理 (🎯 新增)
-            //    - 根据 mouse_pressed 决定动画状态 (Walk/Run/Idle)
-            //    - 同步 Player.action 到 AnimationControl
-            .add_system(PlayerStateSystem::new())
+            // 2. PathfindingSystem: 寻路系统
+            //    - 处理双击寻路，计算路径
+            //    - 根据 MovementMode 决定是否使用寻路
+            .add_system(PathfindingSystem::new())
             
             // 3. CollisionSystem: 碰撞检测
             //    - 检查地图障碍物
             //    - velocity=0 停止位移，但不影响动画
             .add_system(CollisionSystem::new())
             
-            // 4. MovementSystem: 位置更新
+            // 5. MovementSystem: 位置更新
             //    - 根据velocity更新position
             //    - 只管位移，不管动画状态
             .add_system(MovementSystem)

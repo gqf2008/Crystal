@@ -58,7 +58,7 @@ impl System for PathfindingSystem {
             .map(|(_, data)| data.clone());
 
         // 处理本地玩家的移动输入
-        for (_entity, (player_input, position, path, _player, _local, velocity)) in ctx.world
+        for (_entity, (player_input, position, path, player, _local, velocity)) in ctx.world
             .query_mut::<(
                 &mut PlayerInput,
                 &Position,
@@ -74,8 +74,8 @@ impl System for PathfindingSystem {
                 let current_grid = Self::world_to_grid(position.x, position.y);
                 let target_grid = Self::world_to_grid(target_x, target_y);
                 
-                tracing::trace!("🗺️ PathfindingSystem: current=({},{}), target=({},{}), pathfinding={}", 
-                    current_grid.0, current_grid.1, target_grid.0, target_grid.1, player_input.use_pathfinding);
+                tracing::trace!("🗺️ PathfindingSystem: current=({},{}), target=({},{}), mode={:?}", 
+                    current_grid.0, current_grid.1, target_grid.0, target_grid.1, player_input.movement_mode);
 
                 // 检查目标是否与当前位置不同
                 if current_grid != target_grid {
@@ -102,8 +102,9 @@ impl System for PathfindingSystem {
                             let dir_x = dx / distance;
                             let dir_y = dy / distance;
                             
-                            // 根据is_running设置速度
-                            let speed = if player_input.is_running {
+                            // 🎬 根据 Player.action 设置速度
+                            use crate::ecs::components::PlayerAction;
+                            let speed = if player.action == PlayerAction::Run {
                                 velocity.run_speed
                             } else {
                                 velocity.walk_speed
@@ -132,15 +133,26 @@ impl System for PathfindingSystem {
                                     target_grid.0, target_grid.1
                                 );
                                 path.set_path(vec![target_grid]);
-                            }
-                            MovementMode::FollowWithAvoidance => {
-                                // 跟随+避障模式 (长按): 检测障碍并绕过
-                                tracing::info!(
-                                    "🧭 跟随+避障: ({}, {}) -> ({}, {})",
-                                    current_grid.0, current_grid.1,
-                                    target_grid.0, target_grid.1
-                                );
-                                path.set_path(vec![target_grid]);
+                                
+                                // 🎬 根据 Player.action 计算初始速度（MovementSystem会从Player.action读取）
+                                use crate::ecs::components::PlayerAction;
+                                let speed = if player.action == PlayerAction::Run {
+                                    tracing::debug!("🏃 使用跑步速度: {}", velocity.run_speed);
+                                    velocity.run_speed
+                                } else {
+                                    tracing::debug!("🚶 使用行走速度: {}", velocity.walk_speed);
+                                    velocity.walk_speed
+                                };
+                                
+                                // 🚀 立即计算朝向目标的初始velocity（让MovementSystem第一帧就能检测到has_velocity）
+                                let dx = target_x - position.x;
+                                let dy = target_y - position.y;
+                                let distance = (dx * dx + dy * dy).sqrt();
+                                if distance > 5.0 {
+                                    velocity.x = (dx / distance) * speed;
+                                    velocity.y = (dy / distance) * speed;
+                                    tracing::debug!("� 初始velocity=({:.1}, {:.1})", velocity.x, velocity.y);
+                                }
                             }
                             MovementMode::DirectFollow => {
                                 // 已在上面处理
@@ -148,15 +160,6 @@ impl System for PathfindingSystem {
                             MovementMode::None => {
                                 // 无移动模式,不设置路径
                             }
-                        }
-
-                        // 设置移动速度
-                        if player_input.is_running {
-                            velocity.max_speed = velocity.run_speed;
-                            tracing::debug!("🏃 设置跑步速度: {}", velocity.run_speed);
-                        } else {
-                            velocity.max_speed = velocity.walk_speed;
-                            tracing::debug!("🚶 设置行走速度: {}", velocity.walk_speed);
                         }
                     } else {
                         // 目标没变,不更新路径
@@ -167,9 +170,10 @@ impl System for PathfindingSystem {
                     // 这只是格子坐标相同,角色可能还在移动到格子中心
                     // 对于长按模式:保持 move_to,等鼠标松开或移到其他格子
                     // 对于寻路模式:清除 move_to,结束移动
-                    tracing::trace!("📍 到达目标格子 ({}, {}), pathfinding={}", 
-                        target_grid.0, target_grid.1, player_input.use_pathfinding);
-                    if player_input.use_pathfinding {
+                    use crate::ecs::components::MovementMode;
+                    tracing::trace!("📍 到达目标格子 ({}, {}), mode={:?}", 
+                        target_grid.0, target_grid.1, player_input.movement_mode);
+                    if player_input.movement_mode == MovementMode::Pathfinding {
                         tracing::debug!("✅ 寻路到达目标格子,清除 move_to");
                         player_input.move_to = None;
                     } else {

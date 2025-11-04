@@ -82,7 +82,7 @@ impl System for MovementSystem {
             &mut MovementVelocity,
             &mut Path,
             &mut Player,
-            &crate::ecs::components::PlayerInput,
+            &mut crate::ecs::components::PlayerInput,
         )>() {
             use crate::ecs::components::MovementMode;
             
@@ -111,15 +111,10 @@ impl System for MovementSystem {
                 continue;
             }
             
-            // 其他模式: 如果没有velocity停止
-            if !has_velocity {
-                // 🔥 不设置 player.action，由 PlayerStateSystem 决定
-                velocity.stop();
-                continue;
-            }
-            
+            // Pathfinding模式: 只检查path，velocity由MovementSystem自己计算
             if !path.is_valid {
-                // 🔥 不设置 player.action，由 PlayerStateSystem 决定
+                tracing::warn!("❌ MovementSystem: path无效, 停止 (mode={:?}, waypoints={}, current={}, valid={})", 
+                    player_input.movement_mode, path.waypoints.len(), path.current_index, path.is_valid);
                 velocity.stop();
                 continue;
             }
@@ -144,21 +139,33 @@ impl System for MovementSystem {
                     if !path.advance() {
                         // 路径结束,停止移动
                         velocity.stop();
-                        // 不再设置 player.action 和 is_moving
+                        path.clear();
+                        
+                        // 🎬 设置站立状态
+                        use crate::ecs::components::PlayerAction;
+                        player.action = PlayerAction::Stand;
+                        player.is_moving = false;
+                        
+                        // 清除移动目标和模式
+                        use crate::ecs::components::MovementMode;
+                        player_input.move_to = None;
+                        player_input.movement_mode = MovementMode::None;
+                        
+                        tracing::info!("✅ 到达目的地，停止移动");
                     }
                 } else {
                     // 🎯 计算8方向
                     player.direction = Self::calculate_direction(dx, dy);
                     
-                    // 🎯 根据速度判断走/跑
-                    let is_running = velocity.max_speed > velocity.walk_speed * 1.5;
-                    let speed = if is_running {
+                    // � 根据 Player.action 判断速度（统一数据源）
+                    use crate::ecs::components::PlayerAction;
+                    let speed = if player.action == PlayerAction::Run {
                         velocity.run_speed
                     } else {
                         velocity.walk_speed
                     };
                     
-                    // 不再设置动作状态,交给 PlayerStateSystem 管理
+                    // PlayerControlSystem 已设置 player.action，这里只负责移动
                     
                     // 设置速度方向 (归一化)
                     velocity.set(
@@ -173,8 +180,8 @@ impl System for MovementSystem {
                     position.y += move_y;
                     
                     // 调试:打印移动信息
-                    tracing::trace!(
-                        "🏃 移动: pos=({:.1},{:.1}) target=({:.1},{:.1}) dist={:.1} dt={:.3} move=({:.2},{:.2})",
+                    tracing::info!(
+                        "✅ MovementSystem移动: pos=({:.1},{:.1}) target=({:.1},{:.1}) dist={:.1} dt={:.3} move=({:.2},{:.2})",
                         position.x, position.y, target_x, target_y, distance, delay_time, move_x, move_y
                     );
                 }

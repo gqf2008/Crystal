@@ -199,7 +199,7 @@ pub use logic::combat_skill::{
 };
 
 // Layer 4 (Physics & Movement) - 向后兼容导出
-pub use logic::physics::{PathfindingSystem, PlayerStateSystem, MovementSystem, CollisionSystem};
+pub use logic::physics::{PathfindingSystem, MovementSystem, CollisionSystem};
 
 // Layer 5 (State Update) - 向后兼容导出
 pub use logic::update::{

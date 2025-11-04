@@ -111,9 +111,7 @@ pub enum MovementMode {
     None,
     /// 自动寻路(双击) - 计算完整路径,松开后继续走
     Pathfinding,
-    /// 跟随+避障(长按) - 跟随鼠标,局部避障,松开立即停止
-    FollowWithAvoidance,
-    /// 直接跟随(测试) - 直线移动,不避障,松开立即停止
+    /// 直接跟随(长按) - 直线移动,不避障,松开立即停止
     DirectFollow,
 }
 
@@ -129,20 +127,8 @@ pub struct PlayerInput {
     /// 移动目标（世界坐标）
     pub move_to: Option<(f32, f32)>,
     
-    /// 移动类型（行走/奔跑）
-    pub is_running: bool,
-    
     /// 移动模式
     pub movement_mode: MovementMode,
-    
-    /// 🎯 新增：鼠标是否按下（用于控制动画）
-    /// true = 鼠标按下，即使碰撞也要保持动画播放
-    /// false = 鼠标松开，立即停止动画和移动
-    pub mouse_pressed: bool,
-    
-    /// (已废弃,保留兼容) 移动模式：true=自动寻路（双击），false=直接跟随（长按）
-    #[deprecated(note = "使用 movement_mode 代替")]
-    pub use_pathfinding: bool,
     
     /// 攻击目标实体
     pub attack_target: Option<hecs::Entity>,
@@ -167,11 +153,7 @@ impl PlayerInput {
     pub fn new() -> Self {
         Self {
             move_to: None,
-            is_running: false,
             movement_mode: MovementMode::None,
-            mouse_pressed: false,  // 🎯 初始状态：鼠标未按下
-            #[allow(deprecated)]
-            use_pathfinding: false,  // 已废弃,保留兼容
             attack_target: None,
             cast_spell: None,
             spell_target_pos: None,
@@ -192,18 +174,16 @@ impl PlayerInput {
         self.turn_to = None;
     }
     
-    /// 设置移动指令
-    pub fn set_move(&mut self, target: (f32, f32), is_running: bool) {
+    /// 设置移动指令（寻路模式）
+    pub fn set_move(&mut self, target: (f32, f32)) {
         self.move_to = Some(target);
-        self.is_running = is_running;
-        self.use_pathfinding = true;  // 设置移动时默认使用寻路
+        self.movement_mode = MovementMode::Pathfinding;
     }
     
     /// 设置直接跟随指令（不使用寻路）
-    pub fn set_follow(&mut self, target: (f32, f32), is_running: bool) {
+    pub fn set_follow(&mut self, target: (f32, f32)) {
         self.move_to = Some(target);
-        self.is_running = is_running;
-        self.use_pathfinding = false;  // 直接跟随模式
+        self.movement_mode = MovementMode::DirectFollow;
     }
     
     /// 设置攻击指令

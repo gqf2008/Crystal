@@ -78,12 +78,6 @@ pub struct PlayerControlSystem {
     mouse_state: MouseState,
     double_click_threshold: Duration,
     long_press_threshold: Duration,
-    /// 上次更新移动目标的时间 (用于限制更新频率,避免抖动)
-    last_target_update: Option<Instant>,
-    /// 碰撞停止后需要跳过的帧数
-    collision_cooldown_frames: u32,
-    /// 上一帧是否有move_to（用于检测碰撞清除）
-    had_move_to_last_frame: bool,
 }
 
 impl PlayerControlSystem {
@@ -92,9 +86,6 @@ impl PlayerControlSystem {
             mouse_state: MouseState::default(),
             double_click_threshold: Duration::from_millis(300),
             long_press_threshold: Duration::from_millis(200),
-            last_target_update: None,
-            collision_cooldown_frames: 0,
-            had_move_to_last_frame: false,
         }
     }
 
@@ -245,14 +236,18 @@ impl System for PlayerControlSystem {
             self.mouse_state.left_pressed = false;
             tracing::warn!("🔼 左键松开 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
 
-            if let Some(last_click) = self.mouse_state.left_last_click_time {
-                if now.duration_since(last_click) < self.double_click_threshold {
-                    tracing::debug!("🖱️ 检测到左键双击 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
-                    self.mouse_state.left_last_click_time = None;
-                } else {
-                    self.mouse_state.left_last_click_time = Some(now);
-                }
+            // 检查是否是双击
+            let is_double_click = if let Some(last_click) = self.mouse_state.left_last_click_time {
+                now.duration_since(last_click) < self.double_click_threshold
             } else {
+                false
+            };
+
+            if is_double_click {
+                tracing::warn!("🖱️🖱️ 检测到左键双击 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
+                self.mouse_state.left_last_click_time = None;
+            } else {
+                // 可能是单击，记录时间等待确认（双击窗口过后才确认）
                 self.mouse_state.left_last_click_time = Some(now);
             }
             self.mouse_state.left_press_start = None;
@@ -268,14 +263,18 @@ impl System for PlayerControlSystem {
             self.mouse_state.right_pressed = false;
             tracing::warn!("🔼 右键松开 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
 
-            if let Some(last_click) = self.mouse_state.right_last_click_time {
-                if now.duration_since(last_click) < self.double_click_threshold {
-                    tracing::debug!("🖱️ 检测到右键双击 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
-                    self.mouse_state.right_last_click_time = None;
-                } else {
-                    self.mouse_state.right_last_click_time = Some(now);
-                }
+            // 检查是否是双击
+            let is_double_click = if let Some(last_click) = self.mouse_state.right_last_click_time {
+                now.duration_since(last_click) < self.double_click_threshold
             } else {
+                false
+            };
+
+            if is_double_click {
+                tracing::warn!("🖱️🖱️ 检测到右键双击 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
+                self.mouse_state.right_last_click_time = None;
+            } else {
+                // 可能是单击，记录时间等待确认（双击窗口过后才确认）
                 self.mouse_state.right_last_click_time = Some(now);
             }
             self.mouse_state.right_press_start = None;
@@ -363,73 +362,123 @@ impl System for PlayerControlSystem {
             .next()
             .map(|(_, (pos, _))| (pos.x, pos.y));
         
-        // 更新本地玩家输入
-        for (_entity, (player_input, _player, _local)) in ctx
+        // 🎯 检查延迟单击：只有在双击窗口已过且确认不是双击时才处理单击
+        let now = Instant::now();
+        let has_single_click = {
+            let left_confirmed = if let Some(last_click) = self.mouse_state.left_last_click_time {
+                // 超过双击窗口，确认是单击
+                now.duration_since(last_click) >= self.double_click_threshold
+            } else {
+                false
+            };
+            
+            let right_confirmed = if let Some(last_click) = self.mouse_state.right_last_click_time {
+                // 超过双击窗口，确认是单击
+                now.duration_since(last_click) >= self.double_click_threshold
+            } else {
+                false
+            };
+            
+            left_confirmed || right_confirmed
+        };
+        
+        // 更新本地玩家输入和动作状态
+        for (_entity, (player_input, player, _local, state_machine)) in ctx
             .world
-            .query_mut::<(&mut PlayerInput, &Player, &LocalPlayer)>()
+            .query_mut::<(&mut PlayerInput, &mut Player, &LocalPlayer, &mut crate::ecs::components::PlayerStateMachine)>()
             .into_iter()
         {
-            // 🔴 暂时禁用双击寻路,专注解决按住跟随问题
-            let has_double_click = false; // double_click_left.is_some() || double_click_right.is_some();
+            // 🎯 优先处理单击停止（任意单击都会停止移动）
+            if has_single_click {
+                tracing::warn!("⏹️ 检测到单击，立即停止移动");
+                player_input.move_to = None;
+                player_input.movement_mode = crate::ecs::components::MovementMode::None;
+                
+                // 🎬 直接设置动作状态
+                use crate::ecs::components::{PlayerInputEvent, PlayerAction};
+                state_machine.handle_event(PlayerInputEvent::StopMoving);
+                player.action = PlayerAction::Stand;
+                player.is_moving = false;
+                
+                // 清除 last_click_time 避免重复触发
+                self.mouse_state.left_last_click_time = None;
+                self.mouse_state.right_last_click_time = None;
+                continue;  // 跳过后续处理
+            }
+
+            // ✅ 启用双击寻路功能
+            let has_double_click = double_click_left.is_some() || double_click_right.is_some();
             
             if has_double_click {
-                // 双击模式: 自动寻路,松开后继续移动 (已禁用)
+                use crate::ecs::components::{PlayerInputEvent, PlayerAction};
+                
+                // 双击模式: 自动寻路,松开后继续移动
                 if let Some((world_x, world_y)) = double_click_left {
                     player_input.move_to = Some((world_x, world_y));
-                    player_input.is_running = false;
                     player_input.movement_mode = crate::ecs::components::MovementMode::Pathfinding;
-                    #[allow(deprecated)]
-                    { player_input.use_pathfinding = true; }
+                    
+                    // 🎬 直接设置走路动作
+                    state_machine.handle_event(PlayerInputEvent::StartWalking);
+                    player.action = PlayerAction::Walk;
+                    player.is_moving = true;
+                    
                     tracing::warn!("🚶🚶 左键双击走路到 ({:.1}, {:.1}) [寻路模式-松开后继续走]", world_x, world_y);
                 } else if let Some((world_x, world_y)) = double_click_right {
                     player_input.move_to = Some((world_x, world_y));
-                    player_input.is_running = true;
                     player_input.movement_mode = crate::ecs::components::MovementMode::Pathfinding;
-                    #[allow(deprecated)]
-                    { player_input.use_pathfinding = true; }
+                    
+                    // 🎬 直接设置奔跑动作
+                    state_machine.handle_event(PlayerInputEvent::StartRunning);
+                    player.action = PlayerAction::Run;
+                    player.is_moving = true;
+                    
                     tracing::warn!("🏃🏃 右键双击跑步到 ({:.1}, {:.1}) [寻路模式-松开后继续走]", world_x, world_y);
                 }
             } else {
-                // 没有双击,检查是否按住鼠标(跟随+避障模式)
+                use crate::ecs::components::{MovementMode, PlayerInputEvent, PlayerAction};
+                
+                // 没有双击,检查是否按住鼠标(直接跟随模式)
                 let is_pressing_left = self.mouse_state.left_pressed;
                 let is_pressing_right = self.mouse_state.right_pressed;
                 
                 if is_pressing_left || is_pressing_right {
-                    use crate::ecs::components::MovementMode;
+                    // 🎯 鼠标按下：设置移动目标和动作状态
+                    let (screen_x, screen_y) = self.mouse_state.current_position;
+                    let (world_x, world_y) = Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera);
                     
-                    // 🎯 鼠标按下：设置移动目标和鼠标按下标志
-                    {
-                        let (screen_x, screen_y) = self.mouse_state.current_position;
-                        let (world_x, world_y) = Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera);
-                        
-                        player_input.movement_mode = MovementMode::DirectFollow;
-                        player_input.is_running = is_pressing_right;
-                        player_input.move_to = Some((world_x, world_y));
-                        player_input.mouse_pressed = true;  // 🎯 标记鼠标按下
-                        
-                        #[allow(deprecated)]
-                        { player_input.use_pathfinding = false; }
+                    player_input.movement_mode = MovementMode::DirectFollow;
+                    player_input.move_to = Some((world_x, world_y));
+                    
+                    // 🎬 直接设置动作（走/跑）
+                    if is_pressing_right {
+                        state_machine.handle_event(PlayerInputEvent::StartRunning);
+                        player.action = PlayerAction::Run;
+                    } else {
+                        state_machine.handle_event(PlayerInputEvent::StartWalking);
+                        player.action = PlayerAction::Walk;
                     }
+                    player.is_moving = true;
                 } else {
                     // 🎯 鼠标松开：立即停止移动和动画
-                    use crate::ecs::components::MovementMode;
                     match player_input.movement_mode {
-                        MovementMode::FollowWithAvoidance | MovementMode::DirectFollow => {
+                        MovementMode::DirectFollow => {
                             // 跟随模式下,松开立即停止
-                            if player_input.move_to.is_some() || player_input.mouse_pressed {
+                            if player_input.move_to.is_some() {
                                 tracing::warn!("⏹️⏹️ 松开鼠标,停止跟随 (mode={:?})", player_input.movement_mode);
                                 player_input.move_to = None;
-                                player_input.mouse_pressed = false;  // 🎯 标记鼠标松开
                                 player_input.movement_mode = MovementMode::None;
+                                
+                                // 🎬 停止动作
+                                state_machine.handle_event(PlayerInputEvent::StopMoving);
+                                player.action = PlayerAction::Stand;
+                                player.is_moving = false;
                             }
                         }
                         MovementMode::Pathfinding => {
-                            // 寻路模式下,松开不停止,继续走完路径
-                            player_input.mouse_pressed = false;  // 🎯 寻路模式也要清除按下标志
+                            // 寻路模式下,松开不停止,继续走完路径（动作状态已设置，不需要修改）
                         }
                         MovementMode::None => {
-                            // 确保标志被清除
-                            player_input.mouse_pressed = false;
+                            // 无动作
                         }
                     }
                 }
@@ -446,15 +495,13 @@ impl System for PlayerControlSystem {
         
         let world = &mut ctx.world;
         
-        for (_, (position, velocity, path, player_input)) in world.query_mut::<(
+        for (_, (position, velocity, path, player_input, player)) in world.query_mut::<(
             &Position,
             &mut MovementVelocity,
             &mut Path,
             &PlayerInput,
+            &Player,
         )>() {
-            // 🎯 关键修复：记录这一帧的move_to状态（在任何修改之前）
-            let had_move_to_this_frame_start = player_input.move_to.is_some();
-            
             // 检查是否有移动目标
             if let Some((target_x, target_y)) = player_input.move_to {
                 // DirectFollow模式: 每帧计算velocity朝向目标
@@ -472,8 +519,9 @@ impl System for PlayerControlSystem {
                         let dir_x = dx / distance;
                         let dir_y = dy / distance;
                         
-                        // 根据is_running设置基础速度 - 保持全速直到到达
-                        let speed = if player_input.is_running {
+                        // 🎬 根据 Player.action 设置速度
+                        use crate::ecs::components::PlayerAction;
+                        let speed = if player.action == PlayerAction::Run {
                             tracing::info!("🏃 使用跑步速度: {}", velocity.run_speed);
                             velocity.run_speed
                         } else {
@@ -494,17 +542,13 @@ impl System for PlayerControlSystem {
                         velocity.stop();
                     }
                 } else {
-                    // 其他模式(Pathfinding等)需要PathfindingSystem处理
-                    // 暂时不支持,直接停止
-                    velocity.stop();
+                    // 其他模式(Pathfinding等)由PathfindingSystem和MovementSystem处理
+                    // PlayerControlSystem不干涉
                 }
             } else {
                 // 无移动目标,停止
                 velocity.stop();
             }
-            
-            // 🎯 关键修复：使用帧开始时的状态，避免被当前帧的修改影响
-            self.had_move_to_last_frame = had_move_to_this_frame_start;
         }
 
         Ok(())
