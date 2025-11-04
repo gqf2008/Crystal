@@ -37,9 +37,7 @@ impl GameWorld {
         self.world.spawn((
             Position::new(position.x as f32, position.y as f32),
             Velocity::zero(),
-            Direction::new(MirDirection::Down),
             Sprite::new(2, 0), // Objects.wil
-            Animation::new(MirAction::Standing, 4, 200),
             Health::new(100),
             CombatStats {
                 level: 1,
@@ -79,9 +77,7 @@ impl GameWorld {
         self.world.spawn((
             Position::new(position.x as f32, position.y as f32),
             Velocity::zero(),
-            Direction::new(MirDirection::Down),
             Sprite::new(2, 0),
-            Animation::new(MirAction::Standing, 4, 200),
             Health::new(100),
             PlayerData {
                 id,
@@ -110,9 +106,7 @@ impl GameWorld {
         self.world.spawn((
             Position::new(position.x as f32, position.y as f32),
             Velocity::zero(),
-            Direction::new(MirDirection::Down),
             Sprite::new(4, monster_index as i32), // Monsters.wil
-            Animation::new(MirAction::Standing, 4, 300),
             Health::new(50),
             CombatStats {
                 level: 1,
@@ -157,7 +151,6 @@ impl GameWorld {
     ) -> hecs::Entity {
         self.world.spawn((
             Position::new(position.x as f32, position.y as f32),
-            Direction::new(MirDirection::Down),
             Sprite::new(3, npc_index as i32), // NPCs.wil
             NPCData {
                 id,
@@ -194,7 +187,6 @@ impl GameWorld {
             Position::new(position.x as f32, position.y as f32),
             Velocity::new(vx, vy),
             Sprite::with_blend(6, spell_id as i32, SpriteBlendMode::Additive), // Magic.wil + ADD混合
-            Animation::new(MirAction::Spell, 10, 100),
             SpellData {
                 spell_id,
                 caster_id,

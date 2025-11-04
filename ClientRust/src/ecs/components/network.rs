@@ -3,7 +3,6 @@
 // ============================================================================
 
 use std::time::Instant;
-use std::collections::VecDeque;
 
 /// 网络同步标记 (需要同步的实体)
 #[derive(Debug, Clone)]
@@ -32,50 +31,6 @@ impl NetworkSync {
             last_update: Instant::now(),
             object_type,
         }
-    }
-}
-
-/// 网络发送队列组件
-#[derive(Debug, Clone)]
-pub struct NetworkQueue {
-    /// 待发送的消息队列
-    pub pending_messages: VecDeque<Vec<u8>>,
-    /// 最大队列长度
-    pub max_queue_size: usize,
-}
-
-impl NetworkQueue {
-    pub fn new() -> Self {
-        Self {
-            pending_messages: VecDeque::new(),
-            max_queue_size: 100,
-        }
-    }
-
-    /// 入队消息
-    pub fn enqueue_message(&mut self, message: Vec<u8>) {
-        if self.pending_messages.len() < self.max_queue_size {
-            self.pending_messages.push_back(message);
-        }
-    }
-
-    /// 处理发送队列
-    pub fn process_send_queue(&mut self) {
-        // 实际发送逻辑应该由网络管理器处理
-        // 这里只是清空队列作为示例
-        // 在实际使用中,应该将消息传递给网络层
-        self.pending_messages.clear();
-    }
-
-    /// 获取队列大小
-    pub fn queue_size(&self) -> usize {
-        self.pending_messages.len()
-    }
-}
-
-impl Default for NetworkQueue {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

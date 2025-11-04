@@ -197,7 +197,7 @@ impl MapLoader {
     /// 在地图上随机生成一些测试怪物,确保生成在可行走位置
     pub fn spawn_test_monsters(world: &mut World, map_data: &MapData, count: usize) {
         use crate::ecs::components::{
-            Position, MonsterData, AIState, Health, Animation, Sprite, Velocity,  // 🆕 添加Velocity
+            Position, MonsterData, AIState, Health, Sprite, Velocity,  // 🆕 添加Velocity
         };
         use crate::ecs::{Coord, MapUtils};
         use mir2_shared::MirAction;
@@ -256,15 +256,6 @@ impl MapLoader {
                 Health { 
                     current: 100, 
                     max: 100 
-                },
-                Animation {
-                    action: MirAction::Standing,
-                    direction: 0,
-                    frame_count: 4,
-                    frame_index: 0,
-                    frame_interval: 200,
-                    frame_timer: 0,
-                    loop_animation: true,
                 },
                 Sprite {
                     library: 0,     // 怪物库索引

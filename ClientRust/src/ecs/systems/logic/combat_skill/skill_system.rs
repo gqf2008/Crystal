@@ -23,7 +23,7 @@
 
 use super::super::super::{priority, System};
 use crate::ecs::components::{
-    Animation, LocalPlayer, MagicList, Mana, Monster, NetworkSync, Player, Position, SpellType,
+    LocalPlayer, MagicList, Mana, Monster, NetworkSync, Player, Position, SpellType,
     TargetSelection, TargetType, NPC,
 };
 use crate::ecs::GameContext;
@@ -435,9 +435,9 @@ impl SkillSystem {
 
     /// 获取玩家当前朝向
     fn get_player_direction(world: &World) -> MirDirection {
-        for (_, (_, anim)) in world.query::<(&LocalPlayer, &Animation)>().iter() {
-            // Animation.direction 是 u8 (0-7), 需要转换为 MirDirection
-            return match anim.direction {
+        for (_, (_, player)) in world.query::<(&LocalPlayer, &Player)>().iter() {
+            // Player.direction 是 u8 (0-7), 需要转换为 MirDirection
+            return match player.direction {
                 0 => MirDirection::Up,
                 1 => MirDirection::UpRight,
                 2 => MirDirection::Right,

@@ -12,7 +12,7 @@ use rfd::FileDialog;
 
 use crate::ecs::components::{
     Position, Camera, Draggable, Player, PlayerAction, PlayerAppearance, MoveMode,
-    MovementAnimation, MapData, RenderConfig, TimeTracker, VisibleArea,
+    MapData, RenderConfig, TimeTracker, VisibleArea,
     LocalPlayer, NetworkSync, NetworkObjectType, PlayerInput, MovementVelocity,
     Path, Movement, Prediction,
 };
@@ -242,10 +242,6 @@ impl MapUpdateSystem {
                 weapon_effect: 0,
                 wing_effect: 0,
             },
-            MovementAnimation::new(
-                (spawn_x / 48.0) as i32,
-                (spawn_y / 32.0) as i32,
-            ),
             LocalPlayer,
             NetworkSync {
                 object_id: 1,
