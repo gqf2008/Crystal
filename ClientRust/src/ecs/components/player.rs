@@ -76,6 +76,9 @@ pub enum PlayerAction {
     Stand = 0,
     Walk = 1,
     Run = 2,
+    Attack1 = 3,  // 普通攻击1
+    Attack2 = 4,  // 普通攻击2
+    Attack3 = 5,  // 普通攻击3
 }
 
 impl PlayerAction {
@@ -84,6 +87,9 @@ impl PlayerAction {
             PlayerAction::Stand => 4,
             PlayerAction::Walk => 6,
             PlayerAction::Run => 6,
+            PlayerAction::Attack1 => 6,
+            PlayerAction::Attack2 => 6,
+            PlayerAction::Attack3 => 6,
         }
     }
     
@@ -95,6 +101,10 @@ impl PlayerAction {
             PlayerAction::Walk => 3,
             // Run: 2帧间隔 = 6帧×2tick = 12tick/循环 = 0.2s  
             PlayerAction::Run => 2,
+            // Attack: 10帧间隔 = 6帧×10tick = 60tick = 1s (攻击速度)
+            PlayerAction::Attack1 => 10,
+            PlayerAction::Attack2 => 10,
+            PlayerAction::Attack3 => 10,
         }
     }
     
@@ -103,6 +113,10 @@ impl PlayerAction {
             PlayerAction::Stand => 0,
             PlayerAction::Walk => 32,
             PlayerAction::Run => 80,
+            // C# Attack1: Start=128, Count=6, Interval=100
+            PlayerAction::Attack1 => 128,
+            PlayerAction::Attack2 => 176,
+            PlayerAction::Attack3 => 224,
         }
     }
 }

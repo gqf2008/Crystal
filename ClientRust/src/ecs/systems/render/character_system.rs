@@ -149,9 +149,7 @@ impl CharacterRenderSystem {
         
         // 1️⃣ 绘制身体 (CArmours库 - 盔甲/服装)
         let armour_index = appearance.armour.max(0) as usize; // 0 = 默认裸体
-        tracing::warn!("🎯 尝试获取身体库: armour_index={}", armour_index);
         if let Some(body_lib) = get_library_from_array(LibraryArray::CArmours, armour_index) {
-            tracing::warn!("✅ 获取到身体库锁");
             let mut body_lib = body_lib.lock().unwrap();
             
             // 应用性别偏移 (C# ArmourOffSet)
@@ -162,12 +160,9 @@ impl CharacterRenderSystem {
             };
             
             let body_frame = (frame_index + armour_offset) as usize;
-            tracing::warn!("🎨 计算帧索引: frame_index={}, offset={}, body_frame={}", frame_index, armour_offset, body_frame);
             
-            tracing::warn!("📦 尝试获取或创建纹理: body_frame={}", body_frame);
             match body_lib.get_or_create_texture(ctx, body_frame) {
                 Ok(info) => {
-                    tracing::warn!("✅ 成功获取纹理信息: has_image={}", info.image.is_some());
                     // 🎯 传奇2渲染逻辑:
                     // screen_x/y 是人物脚底的屏幕坐标(锚点)
                     // info.x/y 是图像相对于锚点的偏移
@@ -176,7 +171,6 @@ impl CharacterRenderSystem {
                     let draw_y = screen_y + (info.y as f32) * zoom;
                     
                     if let Some(ref image) = info.image {
-                        tracing::warn!("🎨 绘制身体: draw_x={:.1}, draw_y={:.1}, info.x={}, info.y={}", draw_x, draw_y, info.x, info.y);
                         canvas.draw(
                             image,
                             DrawParam::new()
@@ -184,8 +178,6 @@ impl CharacterRenderSystem {
                                 .scale([zoom, zoom])
                                 .color(color),
                         );
-                    } else {
-                        tracing::error!("❌ 身体图像为空!");
                     }
                 }
                 Err(e) => {
@@ -193,13 +185,10 @@ impl CharacterRenderSystem {
                     return Ok(()); // 跳过渲染，避免崩溃
                 }
             }
-        } else {
-            tracing::error!("❌ 无法获取身体库: armour_index={}", armour_index);
         }
         
         // 2️⃣ 绘制头发 (CHair库)
         let hair_index = appearance.hair.max(0) as usize;
-        tracing::warn!("🎯 尝试绘制头发: hair_index={}", hair_index);
         if hair_index > 0 {
             if let Some(hair_lib) = get_library_from_array(LibraryArray::CHair, hair_index) {
                 let mut hair_lib = hair_lib.lock().unwrap();
