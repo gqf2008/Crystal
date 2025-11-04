@@ -16,12 +16,11 @@ use ggez::graphics::Canvas;
 use ggez::GameResult;
 use hecs::{Entity, World};
 use mir2_client::ecs::components::movement::{MovementVelocity, Path};
-use mir2_client::ecs::components::MoveMode;
 use mir2_client::ecs::components::{
     Camera, CameraMode, Draggable, PlayerInput, Position, RenderConfig, TimeTracker,
     VisibleArea,
 };
-use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance, PlayerStateMachine};
+use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance};
 use mir2_client::ecs::render::{CharacterRenderSystem, DebugSystem, MapRenderSystem};
 use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::logic::map_load_system::MapManager;
@@ -286,27 +285,13 @@ impl MapViewerScene {
             MovementVelocity::with_speeds(120.0, 60.0, 120.0),
             // 🆕 路径组件（MovementSystem 需要）
             Path::new(),
-            // 玩家状态
+            // 玩家核心状态
             Player {
-                direction: 0, // 朝向下
+                direction: 0,
                 action: PlayerAction::Stand,
+                is_moving: false,
                 frame_index: 0,
                 frame_time: 0,
-                speed: 5.0,
-                target_x: 0.0,
-                target_y: 0.0,
-                is_moving: false,
-                path: Vec::new(),
-                path_index: 0,
-                move_mode: MoveMode::Idle,
-                last_move_time: Instant::now(),
-                move_delay: std::time::Duration::from_millis(600),
-                waiting_server_confirm: false,
-                collision_detected: false,
-                collision_target_grid: None,
-                can_run: false,
-                last_run_time: Instant::now(),
-                run_cooldown: std::time::Duration::from_millis(900),
             },
             // 玩家外观
             PlayerAppearance {
@@ -320,9 +305,6 @@ impl MapViewerScene {
             },
             // 🆕 玩家输入组件（由 PlayerControlSystem 写入）
             PlayerInput::default(),
-            // 🆕 玩家状态机组件（管理角色状态转换）
-            PlayerStateMachine::new(),
-            // 注意: AnimationControl 已移除（未使用）
             // 本地玩家标记
             LocalPlayer,
         ));

@@ -51,30 +51,25 @@ impl OtherPlayer {
     }
 }
 
-/// 角色组件 - 查看器中的可控角色
+/// 角色组件 - 核心状态（单一职责）
+/// 
+/// **设计原则**：
+/// - 只包含角色的核心渲染状态
+/// - 不重复其他组件的数据
+/// 
+/// **TODO**: frame_index/frame_time应该移到Animation组件
 #[derive(Debug, Clone)]
 pub struct Player {
-    pub direction: u8,  // 0-7 八方向
+    /// 面向方向 (0-7 八方向)
+    pub direction: u8,
+    /// 当前动作状态（行走/跑步/站立）
     pub action: PlayerAction,
-    pub frame_index: i32,
-    pub frame_time: i32,
-    pub speed: f32,
-    pub target_x: f32,
-    pub target_y: f32,
+    /// 是否正在移动
     pub is_moving: bool,
-    pub path: Vec<(i32, i32)>,
-    pub path_index: usize,
-    pub move_mode: MoveMode,
-    pub last_move_time: Instant,  // 上次发送移动命令的时间
-    pub move_delay: Duration,     // 移动命令间隔(服务器MoveDelay=600ms)
-    pub waiting_server_confirm: bool,        // 🎯 等待服务器确认移动
-    // 🎯 碰撞调试信息
-    pub collision_detected: bool,  // 是否检测到碰撞
-    pub collision_target_grid: Option<(i32, i32)>,  // 碰撞的目标格子
-    // 🎯 走/跑机制
-    pub can_run: bool,            // 是否允许跑步（需要先走路才能设置为true）
-    pub last_run_time: Instant,   // 上次跑步/走路的时间
-    pub run_cooldown: Duration,   // 跑步冷却时间（900ms）
+    /// 动画帧索引 (TODO: 移到Animation组件)
+    pub frame_index: i32,
+    /// 动画帧计时器 (TODO: 移到Animation组件)
+    pub frame_time: i32,
 }
 
 /// 角色动作

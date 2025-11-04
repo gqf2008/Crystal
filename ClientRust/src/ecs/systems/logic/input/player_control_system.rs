@@ -383,9 +383,9 @@ impl System for PlayerControlSystem {
         };
         
         // 更新本地玩家输入和动作状态
-        for (_entity, (player_input, player, _local, state_machine)) in ctx
+        for (_entity, (player_input, player, _local)) in ctx
             .world
-            .query_mut::<(&mut PlayerInput, &mut Player, &LocalPlayer, &mut crate::ecs::components::PlayerStateMachine)>()
+            .query_mut::<(&mut PlayerInput, &mut Player, &LocalPlayer)>()
             .into_iter()
         {
             // 🎯 优先处理单击停止（任意单击都会停止移动）
@@ -395,8 +395,7 @@ impl System for PlayerControlSystem {
                 player_input.movement_mode = crate::ecs::components::MovementMode::None;
                 
                 // 🎬 直接设置动作状态
-                use crate::ecs::components::{PlayerInputEvent, PlayerAction};
-                state_machine.handle_event(PlayerInputEvent::StopMoving);
+                use crate::ecs::components::PlayerAction;
                 player.action = PlayerAction::Stand;
                 player.is_moving = false;
                 
@@ -410,7 +409,7 @@ impl System for PlayerControlSystem {
             let has_double_click = double_click_left.is_some() || double_click_right.is_some();
             
             if has_double_click {
-                use crate::ecs::components::{PlayerInputEvent, PlayerAction};
+                use crate::ecs::components::PlayerAction;
                 
                 // 双击模式: 自动寻路,松开后继续移动
                 if let Some((world_x, world_y)) = double_click_left {
@@ -418,7 +417,6 @@ impl System for PlayerControlSystem {
                     player_input.movement_mode = crate::ecs::components::MovementMode::Pathfinding;
                     
                     // 🎬 直接设置走路动作
-                    state_machine.handle_event(PlayerInputEvent::StartWalking);
                     player.action = PlayerAction::Walk;
                     player.is_moving = true;
                     
@@ -428,14 +426,13 @@ impl System for PlayerControlSystem {
                     player_input.movement_mode = crate::ecs::components::MovementMode::Pathfinding;
                     
                     // 🎬 直接设置奔跑动作
-                    state_machine.handle_event(PlayerInputEvent::StartRunning);
                     player.action = PlayerAction::Run;
                     player.is_moving = true;
                     
                     tracing::warn!("🏃🏃 右键双击跑步到 ({:.1}, {:.1}) [寻路模式-松开后继续走]", world_x, world_y);
                 }
             } else {
-                use crate::ecs::components::{MovementMode, PlayerInputEvent, PlayerAction};
+                use crate::ecs::components::{MovementMode, PlayerAction};
                 
                 // 没有双击,检查是否按住鼠标(直接跟随模式)
                 let is_pressing_left = self.mouse_state.left_pressed;
@@ -451,10 +448,8 @@ impl System for PlayerControlSystem {
                     
                     // 🎬 直接设置动作（走/跑）
                     if is_pressing_right {
-                        state_machine.handle_event(PlayerInputEvent::StartRunning);
                         player.action = PlayerAction::Run;
                     } else {
-                        state_machine.handle_event(PlayerInputEvent::StartWalking);
                         player.action = PlayerAction::Walk;
                     }
                     player.is_moving = true;
@@ -469,7 +464,6 @@ impl System for PlayerControlSystem {
                                 player_input.movement_mode = MovementMode::None;
                                 
                                 // 🎬 停止动作
-                                state_machine.handle_event(PlayerInputEvent::StopMoving);
                                 player.action = PlayerAction::Stand;
                                 player.is_moving = false;
                             }
@@ -482,72 +476,6 @@ impl System for PlayerControlSystem {
                         }
                     }
                 }
-            }
-        }
-
-        // 🚀 合并PathfindingSystem功能: 根据PlayerInput计算velocity
-        use crate::ecs::components::movement::{MovementVelocity, Path};
-        
-        // 先获取地图数据(避免借用冲突)
-        let collision_map_data = ctx.world.query::<&MapData>().iter().next().map(|(_, map)| {
-            (map.width, map.height, map.cells.clone())
-        });
-        
-        let world = &mut ctx.world;
-        
-        for (_, (position, velocity, path, player_input, player)) in world.query_mut::<(
-            &Position,
-            &mut MovementVelocity,
-            &mut Path,
-            &PlayerInput,
-            &Player,
-        )>() {
-            // 检查是否有移动目标
-            if let Some((target_x, target_y)) = player_input.move_to {
-                // DirectFollow模式: 每帧计算velocity朝向目标
-                use crate::ecs::components::MovementMode;
-                if player_input.movement_mode == MovementMode::DirectFollow {
-                    let dx = target_x - position.x;
-                    let dy = target_y - position.y;
-                    let distance = (dx * dx + dy * dy).sqrt();
-                    
-                    // 停止阈值: 距离小于5像素认为已到达
-                    const STOP_DISTANCE: f32 = 5.0;
-                    
-                    if distance > STOP_DISTANCE {
-                        // 归一化方向向量
-                        let dir_x = dx / distance;
-                        let dir_y = dy / distance;
-                        
-                        // 🎬 根据 Player.action 设置速度
-                        use crate::ecs::components::PlayerAction;
-                        let speed = if player.action == PlayerAction::Run {
-                            tracing::info!("🏃 使用跑步速度: {}", velocity.run_speed);
-                            velocity.run_speed
-                        } else {
-                            tracing::info!("🚶 使用走路速度: {}", velocity.walk_speed);
-                            velocity.walk_speed
-                        };
-                        
-                        // 🎯 直接设置velocity
-                        // CollisionSystem(390)会在MovementSystem(400)之前检测碰撞并清零velocity
-                        velocity.x = dir_x * speed;
-                        velocity.y = dir_y * speed;
-                        velocity.max_speed = speed;
-                        
-                        // 清除Path,让MovementSystem直接用velocity
-                        path.clear()
-                    } else {
-                        // 已到达目标,停止
-                        velocity.stop();
-                    }
-                } else {
-                    // 其他模式(Pathfinding等)由PathfindingSystem和MovementSystem处理
-                    // PlayerControlSystem不干涉
-                }
-            } else {
-                // 无移动目标,停止
-                velocity.stop();
             }
         }
 
