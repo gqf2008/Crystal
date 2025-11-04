@@ -282,8 +282,10 @@ impl MapViewerScene {
                 y: (327 * 32) as f32, // 传送点 Y
             },
             // 🆕 移动速度组件（MovementSystem 需要）
-            // 使用默认速度：走路96px/s，跑步144px/s
-            MovementVelocity::with_speeds(144.0, 96.0, 144.0),
+            // 🎯 降低速度以匹配动画播放速度
+            // Walk: 3帧间隔(0.3s/循环) → 设置为60px/s
+            // Run: 1帧间隔(0.1s/循环) → 设置为90px/s
+            MovementVelocity::with_speeds(90.0, 60.0, 90.0),
             // 🆕 路径组件（MovementSystem 需要）
             Path::new(),
             // 玩家状态

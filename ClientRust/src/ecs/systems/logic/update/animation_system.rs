@@ -41,13 +41,20 @@ impl CharacterAnimationSystem {
     /// 🎯 **设计原则**：
     /// - 动画播放速度**固定不变**,由AnimationState.frame_interval()决定
     /// - 不受velocity影响,不需要speed_scale计算
-    /// - Walk: 5帧间隔 → 5/60s = 0.083s/帧
-    /// - Run: 3帧间隔 → 3/60s = 0.05s/帧
-    fn update_animation_frame(control: &mut AnimationControl, delta_time: f32) {
+    /// - Walk: 3帧间隔 → 3/60s = 0.05s/帧 (匹配96px/s)
+    /// - Run: 1帧间隔 → 1/60s = 0.017s/帧 (匹配144px/s)
+    fn update_animation_frame(control: &mut AnimationControl, delta_time: f32, is_first_frame: bool) {
         let frame_count = control.current_state.frame_count();
         
         // 🎯 固定帧间隔：直接使用AnimationState定义的值,不做任何调整
-        let frame_interval = control.current_state.frame_interval() as f32 / 60.0; // 转换为秒
+        let frame_interval_ticks = control.current_state.frame_interval();
+        let frame_interval = frame_interval_ticks as f32 / 60.0; // 转换为秒
+        
+        // 🎯 添加日志查看实际读取的值
+        if is_first_frame && matches!(control.current_state, AnimationState::Walk | AnimationState::Run) {
+            tracing::info!("🎬 动画系统读取: {:?} - frame_interval_ticks={}, frame_interval={:.3}s", 
+                control.current_state, frame_interval_ticks, frame_interval);
+        }
 
         // 🎯 累积帧时间
         control.frame_timer += delta_time;
@@ -84,15 +91,17 @@ impl System for CharacterAnimationSystem {
         self.accumulated_time += delay_time;
 
         // 🎯 **动画播放速度完全固定,不受velocity影响**
-        // - Walk: 5帧间隔, 6帧/循环, 共0.5s
-        // - Run: 3帧间隔, 6帧/循环, 共0.3s
+        // - Walk: 3帧间隔, 6帧/循环, 共0.3s (匹配96px/s速度)
+        // - Run: 1帧间隔, 6帧/循环, 共0.1s (匹配144px/s速度)
         // - 动画由PlayerState控制类型(走/跑/站立)
         // - 速度由CollisionSystem控制velocity(碰撞时归零)
         // - 两者完全解耦,互不影响
         
         // 更新所有动画帧
+        let mut is_first = true;
         for (_, control) in ctx.world.query_mut::<&mut AnimationControl>() {
-            Self::update_animation_frame(control, delay_time);
+            Self::update_animation_frame(control, delay_time, is_first);
+            is_first = false;
         }
 
         Ok(())

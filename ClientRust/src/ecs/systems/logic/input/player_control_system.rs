@@ -474,8 +474,10 @@ impl System for PlayerControlSystem {
                         
                         // 根据is_running设置基础速度 - 保持全速直到到达
                         let speed = if player_input.is_running {
+                            tracing::info!("🏃 使用跑步速度: {}", velocity.run_speed);
                             velocity.run_speed
                         } else {
+                            tracing::info!("🚶 使用走路速度: {}", velocity.walk_speed);
                             velocity.walk_speed
                         };
                         

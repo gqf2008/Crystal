@@ -139,19 +139,21 @@ impl AnimationState {
     }
     
     /// 获取动画帧间隔（帧数）
-    /// 目标：移动1格(48px)对应1个动画循环
-    /// Walk: 96px/s → 48px需0.5s → 6帧×(5/60)=0.5s ✓
-    /// Run: 144px/s → 48px需0.333s → 6帧×(3.3/60)≈0.333s ✓
+    /// 动画播放速度固定,不受velocity影响
+    /// 
+    /// 🎯 大幅加快动画播放速度以匹配快速位移(96/144 px/s):
+    /// - Walk: 3帧间隔 = 6帧×0.05s = 0.3s/循环
+    /// - Run: 1帧间隔 = 6帧×0.017s = 0.1s/循环
     pub fn frame_interval(&self) -> u32 {
         match self {
-            AnimationState::Idle => 12,      // 站立：慢速播放
-            AnimationState::Walk => 5,       // 🎯 从6改为5，加快动画
-            AnimationState::Run => 3,        // 🎯 从4改为3，加快动画
-            AnimationState::Attack => 5,
-            AnimationState::Hit => 10,
-            AnimationState::Die => 12,
-            AnimationState::Spell => 6,
-            AnimationState::Harvest => 8,
+            AnimationState::Idle => 10,      // 站立：慢速播放
+            AnimationState::Walk => 3,       // 🎯 更快走路动画 (4→3)
+            AnimationState::Run => 1,        // 🎯 极快跑步动画 (2→1)
+            AnimationState::Attack => 4,
+            AnimationState::Hit => 8,
+            AnimationState::Die => 10,
+            AnimationState::Spell => 5,
+            AnimationState::Harvest => 6,
         }
     }
     

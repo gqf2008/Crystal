@@ -97,12 +97,11 @@ impl PlayerAction {
     pub fn frame_interval(&self) -> i32 {
         match self {
             PlayerAction::Stand => 30,
-            // Walk: 7帧间隔 → 7*6=42tick/循环 → 700ms/循环
-            // 让动画更慢更自然
-            PlayerAction::Walk => 7,
-            // Run: 6帧间隔 → 6*6=36tick/循环 → 600ms/循环
-            // 让跑步动画也慢一些
-            PlayerAction::Run => 6,
+            // 🎯 加快动画以匹配移动速度 (60/90 px/s)
+            // Walk: 3帧间隔 = 6帧×3tick = 18tick/循环 = 0.3s
+            PlayerAction::Walk => 3,
+            // Run: 2帧间隔 = 6帧×2tick = 12tick/循环 = 0.2s  
+            PlayerAction::Run => 2,
         }
     }
     

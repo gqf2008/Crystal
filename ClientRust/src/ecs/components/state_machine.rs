@@ -38,32 +38,6 @@ pub enum PlayerState {
 }
 
 impl PlayerState {
-    /// 获取状态对应的动画帧数
-    pub fn frame_count(&self) -> i32 {
-        match self {
-            PlayerState::Idle => 4,
-            PlayerState::Walking => 6,
-            PlayerState::Running => 6,
-            PlayerState::Attacking => 6,
-            PlayerState::Casting => 6,
-            PlayerState::Hit => 2,
-            PlayerState::Dead => 10,
-        }
-    }
-
-    /// 获取状态对应的帧间隔(毫秒)
-    pub fn frame_interval(&self) -> i32 {
-        match self {
-            PlayerState::Idle => 300,      // 站立动画慢一点
-            PlayerState::Walking => 100,   // 行走速度
-            PlayerState::Running => 83,    // 跑步更快
-            PlayerState::Attacking => 100,
-            PlayerState::Casting => 120,
-            PlayerState::Hit => 150,
-            PlayerState::Dead => 200,
-        }
-    }
-
     /// 检查是否可以转换到目标状态
     pub fn can_transition_to(&self, target: PlayerState) -> bool {
         match (self, target) {
