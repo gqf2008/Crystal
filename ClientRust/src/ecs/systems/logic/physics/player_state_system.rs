@@ -46,18 +46,31 @@ impl System for PlayerStateSystem {
 
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         // 处理本地玩家的状态转换
-        for (_entity, (state_machine, player_input, path, player, _local)) in ctx.world
+        for (_entity, (state_machine, player_input, path, player, _local, velocity)) in ctx.world
             .query_mut::<(
                 &mut PlayerStateMachine,
                 &PlayerInput,
                 &Path,
                 &mut Player,
                 &LocalPlayer,
+                &crate::ecs::components::MovementVelocity,
             )>()
             .into_iter()
         {
-            // 根据输入和路径状态决定目标状态
-            let target_event = if path.is_valid && player_input.move_to.is_some() {
+            // 🎯 判断是否在移动: 
+            // - DirectFollow模式: 检查velocity (因为不用Path)
+            // - 其他模式: 检查path.is_valid
+            use crate::ecs::components::MovementMode;
+            let is_moving = if player_input.movement_mode == MovementMode::DirectFollow {
+                // DirectFollow模式: 检查velocity
+                velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01
+            } else {
+                // 其他模式: 检查Path
+                path.is_valid && player_input.move_to.is_some()
+            };
+            
+            // 根据输入和移动状态决定目标状态
+            let target_event = if is_moving {
                 // 有移动指令
                 if player_input.is_running {
                     Some(PlayerInputEvent::StartRunning)

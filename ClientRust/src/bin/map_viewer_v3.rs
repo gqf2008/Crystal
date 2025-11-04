@@ -124,11 +124,15 @@ impl EventHandler<GameContext> for MapViewerApp {
         dx: f32,
         dy: f32,
     ) -> Result<(), ggez::GameError> {
-        tracing::debug!("🖱️ 鼠标移动: ({:.1}, {:.1}), Δ({:.1}, {:.1})", x, y, dx, dy);
+        // 取消详细日志,避免刷屏
+        // tracing::debug!("🖱️ 鼠标移动: ({:.1}, {:.1}), Δ({:.1}, {:.1})", x, y, dx, dy);
         ctx.push_input_event(InputEvent::MouseMove { x, y, dx, dy });
 
         Ok(())
     }
+
+    // 注意: 鼠标按钮事件不需要推送到InputEvent,系统会直接从ctx.mouse读取状态
+    // PlayerControlSystem 使用 ctx.mouse.button_pressed() 来检测按钮状态
 
     fn text_input_event(
         &mut self,

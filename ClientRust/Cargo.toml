@@ -135,9 +135,9 @@ path = "src/bin/mir2x.rs"
 # path = "src/bin/simple_map_viewer.rs"
 
 # 🆕 地图查看器 V2 - 使用 MapViewerScheduler (串行调度器)
-[[bin]]
-name = "map_viewer_v2"
-path = "src/bin/map_viewer_v2.rs"
+# [[bin]]
+# name = "map_viewer_v2"
+# path = "src/bin/map_viewer_v2.rs"
 
 # # 中文输入法测试程序
 # [[bin]]

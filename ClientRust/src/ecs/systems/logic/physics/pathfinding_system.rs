@@ -73,6 +73,9 @@ impl System for PathfindingSystem {
             if let Some((target_x, target_y)) = player_input.move_to {
                 let current_grid = Self::world_to_grid(position.x, position.y);
                 let target_grid = Self::world_to_grid(target_x, target_y);
+                
+                tracing::trace!("🗺️ PathfindingSystem: current=({},{}), target=({},{}), pathfinding={}", 
+                    current_grid.0, current_grid.1, target_grid.0, target_grid.1, player_input.use_pathfinding);
 
                 // 检查目标是否与当前位置不同
                 if current_grid != target_grid {
@@ -85,43 +88,99 @@ impl System for PathfindingSystem {
                         true
                     };
 
-                    if needs_update {
-                        if player_input.use_pathfinding {
-                            // 寻路模式 (双击): 使用A*算法
-                            // TODO: 使用 A* 寻路算法
-                            // 现在先使用简单的直线路径
-                            tracing::debug!(
-                                "🔍 寻路: ({}, {}) -> ({}, {})",
-                                current_grid.0, current_grid.1,
-                                target_grid.0, target_grid.1
-                            );
-                            path.set_path(vec![target_grid]);
+                    // 🎯 DirectFollow模式: 不使用Path,每帧直接计算velocity方向
+                    use crate::ecs::components::MovementMode;
+                    
+                    if player_input.movement_mode == MovementMode::DirectFollow {
+                        // 🚀 平滑跟随: 直接设置velocity朝向目标,完全不用Path
+                        let dx = target_x - position.x;
+                        let dy = target_y - position.y;
+                        let distance = (dx * dx + dy * dy).sqrt();
+                        
+                        if distance > 5.0 { // 距离目标超过5像素才移动
+                            // 归一化方向向量
+                            let dir_x = dx / distance;
+                            let dir_y = dy / distance;
+                            
+                            // 根据is_running设置速度
+                            let speed = if player_input.is_running {
+                                velocity.run_speed
+                            } else {
+                                velocity.walk_speed
+                            };
+                            
+                            // 直接设置velocity,MovementSystem会直接用它更新position
+                            velocity.x = dir_x * speed;
+                            velocity.y = dir_y * speed;
+                            velocity.max_speed = speed;
+                            
+                            // ❌ 不设置Path! 让MovementSystem直接用velocity更新
+                            path.clear(); // 确保Path不干扰
                         } else {
-                            // 直接移动模式 (长按跟随): 只在目标格子改变时更新
-                            // 这样避免了每帧重设路径导致的卡顿
-                            path.set_path(vec![target_grid]);
+                            velocity.stop();
+                        }
+                        continue; // 跳过后续的Path逻辑
+                    }
+                    
+                    if needs_update {
+                        match player_input.movement_mode {
+                            MovementMode::Pathfinding => {
+                                // 寻路模式 (双击): 使用A*算法
+                                tracing::info!(
+                                    "🔍 寻路: ({}, {}) -> ({}, {})",
+                                    current_grid.0, current_grid.1,
+                                    target_grid.0, target_grid.1
+                                );
+                                path.set_path(vec![target_grid]);
+                            }
+                            MovementMode::FollowWithAvoidance => {
+                                // 跟随+避障模式 (长按): 检测障碍并绕过
+                                tracing::info!(
+                                    "🧭 跟随+避障: ({}, {}) -> ({}, {})",
+                                    current_grid.0, current_grid.1,
+                                    target_grid.0, target_grid.1
+                                );
+                                path.set_path(vec![target_grid]);
+                            }
+                            MovementMode::DirectFollow => {
+                                // 已在上面处理
+                            }
+                            MovementMode::None => {
+                                // 无移动模式,不设置路径
+                            }
                         }
 
                         // 设置移动速度
                         if player_input.is_running {
                             velocity.max_speed = velocity.run_speed;
+                            tracing::debug!("🏃 设置跑步速度: {}", velocity.run_speed);
                         } else {
                             velocity.max_speed = velocity.walk_speed;
+                            tracing::debug!("🚶 设置行走速度: {}", velocity.walk_speed);
                         }
+                    } else {
+                        // 目标没变,不更新路径
+                        // tracing::trace!("路径目标未改变,跳过更新");
                     }
                 } else {
-                    // 已到达目标格子中心
-                    // 对于长按模式:不清除 move_to,让 PlayerControlSystem 在松开鼠标时清除
-                    // 对于寻路模式:清除 move_to
+                    // 当前格子 == 目标格子
+                    // 这只是格子坐标相同,角色可能还在移动到格子中心
+                    // 对于长按模式:保持 move_to,等鼠标松开或移到其他格子
+                    // 对于寻路模式:清除 move_to,结束移动
+                    tracing::trace!("📍 到达目标格子 ({}, {}), pathfinding={}", 
+                        target_grid.0, target_grid.1, player_input.use_pathfinding);
                     if player_input.use_pathfinding {
+                        tracing::debug!("✅ 寻路到达目标格子,清除 move_to");
                         player_input.move_to = None;
+                    } else {
+                        tracing::trace!("💡 长按模式,保持 move_to");
                     }
-                    path.clear();
-                    velocity.stop();
+                    // 不清除路径! 让 MovementSystem 完成移动到格子中心
                 }
             } else {
                 // 没有移动指令,确保路径被清除
                 if path.is_valid {
+                    tracing::debug!("🧹 无移动指令,清除路径");
                     path.clear();
                     velocity.stop();
                 }

@@ -28,7 +28,7 @@ use mir2_client::ecs::systems::logic::map_load_system::MapManager;
 use mir2_client::ecs::systems::logic::{
     CameraFollowSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem,
 };
-use mir2_client::ecs::systems::{AnimationSystem, PathfindingSystem, PlayerStateSystem, MovementSystem, SystemScheduler};
+use mir2_client::ecs::systems::{CharacterAnimationSystem, PlayerStateSystem, MovementSystem, SystemScheduler};
 use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem};
 use mir2_client::graphics::libraries::initialize_all_libraries;
 use mir2_shared::enums::{MirClass, MirGender};
@@ -141,12 +141,11 @@ impl MapViewerScene {
 
         // 添加逻辑系统 (V1)
         scheduler
-            // PlayerControlSystem 迁移到 V2
+            // PlayerControlSystem: 处理玩家输入 + 计算velocity (合并了PathfindingSystem功能)
             .add_system(PlayerControlSystem::new())
-            .add_system(PathfindingSystem::new()) // 寻路系统 (将 PlayerInput 转换为 Path)
             .add_system(PlayerStateSystem::new()) // 状态机系统 (管理角色状态转换)
-            .add_system(MovementSystem) // 移动系统
-            .add_system(AnimationSystem::new()) // 角色动画系统
+            .add_system(MovementSystem) // 移动系统 (根据velocity更新position)
+            .add_system(CharacterAnimationSystem::new()) // 角色动画系统 (更新动画帧)
             .add_system(TileAnimationSystem::new()) // 瓦片动画系统
             .add_system(MapUpdateSystem::new()) // 地图更新系统 (M键切换地图)
             .add_system(MapLoadSystem) // 地图加载系统 → 从 GameContext 读取 MapChanged 事件

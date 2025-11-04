@@ -77,12 +77,40 @@ impl System for MovementSystem {
 
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         // 🎯 处理有Player组件的实体（玩家、NPC等）
-        for (_, (position, velocity, path, player)) in ctx.world.query_mut::<(
+        for (_, (position, velocity, path, player, player_input)) in ctx.world.query_mut::<(
             &mut Position,
             &mut MovementVelocity,
             &mut Path,
             &mut Player,
+            &crate::ecs::components::PlayerInput,
         )>() {
+            // 🚀 DirectFollow模式: 直接用velocity更新位置,完全绕过Path系统
+            use crate::ecs::components::MovementMode;
+            if player_input.movement_mode == MovementMode::DirectFollow {
+                // 直接应用velocity (velocity已经在PathfindingSystem中设置好了)
+                if velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01 {
+                    // 计算8方向
+                    player.direction = Self::calculate_direction(velocity.x, velocity.y);
+                    
+                    // 🎬 直接设置动画状态 (使用player_input.is_running标志)
+                    player.action = if player_input.is_running {
+                        crate::ecs::components::PlayerAction::Run
+                    } else {
+                        crate::ecs::components::PlayerAction::Walk
+                    };
+                    player.is_moving = true;
+                    
+                    // 平滑移动: 直接更新位置
+                    position.x += velocity.x * delay_time;
+                    position.y += velocity.y * delay_time;
+                } else {
+                    // 静止状态
+                    player.action = crate::ecs::components::PlayerAction::Stand;
+                    player.is_moving = false;
+                }
+                continue; // 跳过Path处理
+            }
+            
             if !path.is_valid {
                 velocity.stop();
                 // 不再设置 player.action 和 is_moving,交给 PlayerStateSystem 管理
@@ -132,8 +160,16 @@ impl System for MovementSystem {
                     );
 
                     // 应用速度到位置
-                    position.x += velocity.x * delay_time;
-                    position.y += velocity.y * delay_time;
+                    let move_x = velocity.x * delay_time;
+                    let move_y = velocity.y * delay_time;
+                    position.x += move_x;
+                    position.y += move_y;
+                    
+                    // 调试:打印移动信息
+                    tracing::trace!(
+                        "🏃 移动: pos=({:.1},{:.1}) target=({:.1},{:.1}) dist={:.1} dt={:.3} move=({:.2},{:.2})",
+                        position.x, position.y, target_x, target_y, distance, delay_time, move_x, move_y
+                    );
                 }
             }
         }

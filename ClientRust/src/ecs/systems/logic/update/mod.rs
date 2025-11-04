@@ -81,7 +81,7 @@ pub mod map_update_system;
 pub mod map_load_system;
 pub mod tile_animation_system;
 
-pub use animation_system::AnimationSystem;
+pub use animation_system::CharacterAnimationSystem;
 pub use health_regen_system::HealthRegenSystem;
 pub use particle_system::ParticleSystem;
 pub use sound_system::SoundSystem;

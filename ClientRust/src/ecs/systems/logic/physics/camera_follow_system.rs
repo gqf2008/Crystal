@@ -28,7 +28,7 @@ impl System for CameraFollowSystem {
         priority::CAMERA_FOLLOW
     }
 
-    fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
+    fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         // 获取玩家位置
         let player_pos = {
             let mut pos = None;
@@ -44,9 +44,18 @@ impl System for CameraFollowSystem {
             for (_, (camera_pos, _camera, mode)) in ctx.world.query_mut::<(&mut Position, &Camera, &CameraMode)>() {
                 // 仅在跟随模式下更新相机位置
                 if *mode == CameraMode::FollowPlayer {
-                    // 直接跟随(可以后续改为平滑跟随)
-                    camera_pos.x = player_x;
-                    camera_pos.y = player_y;
+                    // 🎯 平滑跟随 (线性插值 lerp)
+                    // lerp_factor越大跟随越快,但太大会丢失平滑效果
+                    // 建议值: 5.0-15.0 之间
+                    let lerp_factor = 10.0;
+                    let smooth_speed = lerp_factor * delay_time;
+                    
+                    // 限制smooth_speed最大为1.0,避免相机超过目标
+                    let t = smooth_speed.min(1.0);
+                    
+                    // 线性插值: camera = camera + (player - camera) * t
+                    camera_pos.x += (player_x - camera_pos.x) * t;
+                    camera_pos.y += (player_y - camera_pos.y) * t;
                 }
             }
         }

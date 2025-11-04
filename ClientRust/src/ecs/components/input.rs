@@ -135,6 +135,25 @@ impl Default for TargetSelection {
 use mir2_shared::enums::MirDirection;
 use crate::ecs::components::SpellType;
 
+/// 移动模式
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MovementMode {
+    /// 无移动
+    None,
+    /// 自动寻路(双击) - 计算完整路径,松开后继续走
+    Pathfinding,
+    /// 跟随+避障(长按) - 跟随鼠标,局部避障,松开立即停止
+    FollowWithAvoidance,
+    /// 直接跟随(测试) - 直线移动,不避障,松开立即停止
+    DirectFollow,
+}
+
+impl Default for MovementMode {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 /// 玩家输入组件 - 存储玩家的输入意图
 #[derive(Debug, Clone)]
 pub struct PlayerInput {
@@ -144,7 +163,11 @@ pub struct PlayerInput {
     /// 移动类型（行走/奔跑）
     pub is_running: bool,
     
-    /// 移动模式：true=自动寻路（双击），false=直接跟随（长按）
+    /// 移动模式
+    pub movement_mode: MovementMode,
+    
+    /// (已废弃,保留兼容) 移动模式：true=自动寻路（双击），false=直接跟随（长按）
+    #[deprecated(note = "使用 movement_mode 代替")]
     pub use_pathfinding: bool,
     
     /// 攻击目标实体
@@ -171,7 +194,9 @@ impl PlayerInput {
         Self {
             move_to: None,
             is_running: false,
-            use_pathfinding: true,  // 默认使用寻路
+            movement_mode: MovementMode::None,
+            #[allow(deprecated)]
+            use_pathfinding: false,  // 已废弃,保留兼容
             attack_target: None,
             cast_spell: None,
             spell_target_pos: None,

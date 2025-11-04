@@ -1,10 +1,10 @@
 // ============================================================================
-// Layer 5: State Update - AnimationSystem
+// Layer 5: State Update - CharacterAnimationSystem
 // Priority: 500
 // ============================================================================
 //
 // **职责**：
-// - 动画状态机更新
+// - 角色动画状态机更新
 // - 帧切换
 // - 动画混合
 //
@@ -23,13 +23,13 @@ use crate::ecs::GameContext;
 use crate::ecs::components::animation_state::{AnimationControl, AnimationState};
 use crate::ecs::systems::{System, priority};
 
-/// 动画系统
-pub struct AnimationSystem {
+/// 角色动画系统 (处理所有角色的动画更新)
+pub struct CharacterAnimationSystem {
     /// 累积时间(秒)
     accumulated_time: f32,
 }
 
-impl AnimationSystem {
+impl CharacterAnimationSystem {
     pub fn new() -> Self {
         Self {
             accumulated_time: 0.0,
@@ -59,13 +59,13 @@ impl AnimationSystem {
     }
 }
 
-impl Default for AnimationSystem {
+impl Default for CharacterAnimationSystem {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl System for AnimationSystem {
+impl System for CharacterAnimationSystem {
     fn priority(&self) -> u32 {
         priority::ANIMATION
     }
