@@ -173,7 +173,7 @@ impl MapUpdateSystem {
         camera_pos: Position,
         camera_zoom: f32,
     ) {
-        use crate::ecs::components::{CameraMode, MouseInput};
+        use crate::ecs::components::{CameraMode};
         
         // 创建相机实体 - 使用保存的相机位置和缩放
         world.spawn((
@@ -216,6 +216,7 @@ impl MapUpdateSystem {
             show_npc_borders: false,
             show_monster_borders: false,
             show_effect_borders: false,
+            show_player_debug: false,
             show_path: false,
             max_fps: 160,
             enable_lod: true,
@@ -281,19 +282,19 @@ impl MapUpdateSystem {
         
         // 输入事件现在通过 GameContext 传递，无需单独组件
         
-        // 创建鼠标输入状态实体（地图查看器需要）
-        world.spawn((MouseInput {
-            left_pressed: false,
-            right_pressed: false,
-            left_double_clicked: false,
-            right_double_clicked: false,
-            left_press_time: 0,
-            right_press_time: 0,
-            left_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
-            right_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
-            x: 0.0,
-            y: 0.0,
-        },));
+        // // 创建鼠标输入状态实体（地图查看器需要）
+        // world.spawn((MouseInput {
+        //     left_pressed: false,
+        //     right_pressed: false,
+        //     left_double_clicked: false,
+        //     right_double_clicked: false,
+        //     left_press_time: 0,
+        //     right_press_time: 0,
+        //     left_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
+        //     right_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
+        //     x: 0.0,
+        //     y: 0.0,
+        // },));
     }
 }
 

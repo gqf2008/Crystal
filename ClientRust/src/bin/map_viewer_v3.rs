@@ -133,6 +133,7 @@ impl EventHandler<GameContext> for MapViewerApp {
 
     // 注意: 鼠标按钮事件不需要推送到InputEvent,系统会直接从ctx.mouse读取状态
     // PlayerControlSystem 使用 ctx.mouse.button_pressed() 来检测按钮状态
+    // 键盘事件也不需要推送,DebugSystem 使用 ctx.input().key_pressed() 直接检测
 
     fn text_input_event(
         &mut self,

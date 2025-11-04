@@ -154,7 +154,7 @@ pub mod priority {
 
     // 阶段 4: 移动与物理 (400-499)
     pub const MOVEMENT: u32 = 400;
-    pub const COLLISION: u32 = 410;
+    pub const COLLISION: u32 = 410;    // 碰撞检测在移动之后，检查并修正位置
     pub const CAMERA_FOLLOW: u32 = 420;
 
     // 阶段 5: 状态更新 (500-599)

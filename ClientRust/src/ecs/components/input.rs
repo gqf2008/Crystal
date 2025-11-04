@@ -26,37 +26,6 @@ impl Default for Draggable {
     }
 }
 
-/// 鼠标输入状态组件
-#[derive(Debug, Clone)]
-pub struct MouseInput {
-    pub left_pressed: bool,
-    pub right_pressed: bool,
-    pub left_double_clicked: bool,
-    pub right_double_clicked: bool,
-    pub left_press_time: i32,
-    pub right_press_time: i32,
-    pub left_last_click_time: Instant,
-    pub right_last_click_time: Instant,
-    pub x: f32,
-    pub y: f32,
-}
-
-impl Default for MouseInput {
-    fn default() -> Self {
-        Self {
-            left_pressed: false,
-            right_pressed: false,
-            left_double_clicked: false,
-            right_double_clicked: false,
-            left_press_time: 0,
-            right_press_time: 0,
-            left_last_click_time: Instant::now(),
-            right_last_click_time: Instant::now(),
-            x: 0.0,
-            y: 0.0,
-        }
-    }
-}
 
 /// 目标类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

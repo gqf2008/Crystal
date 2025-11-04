@@ -57,7 +57,7 @@ use crate::ecs::GameContext;
 use crate::ecs::{
     components::{
         Camera, CameraMode, Draggable, Equipment, Inventory, LearnableMagicList, LocalPlayer,
-        MagicList, MirClass, MirGender, MouseInput, MoveMode, Player, PlayerAction,
+        MagicList, MirClass, MirGender, MoveMode, Player, PlayerAction,
         PlayerAppearance, PlayerData, Position, RenderConfig, TargetSelection, TimeTracker,
         VisibleArea,
     },
@@ -171,6 +171,7 @@ impl GameScene {
             show_monster_borders: false,
             show_effect_borders: false,
             show_path: false,
+            show_player_debug: false, // F2键切换
             max_fps: 160,
             enable_lod: true,
             enable_camera_drag: false, // 正常游戏禁用拖拽
@@ -182,19 +183,19 @@ impl GameScene {
         // 创建调试计数器实体
         let debug_counters_entity = world.spawn((crate::ecs::components::DebugCounters::new(),));
 
-        // 创建鼠标输入状态实体
-        world.spawn((MouseInput {
-            left_pressed: false,
-            right_pressed: false,
-            left_double_clicked: false,
-            right_double_clicked: false,
-            left_press_time: 0,
-            right_press_time: 0,
-            left_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
-            right_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
-            x: 0.0,
-            y: 0.0,
-        },));
+        // // 创建鼠标输入状态实体
+        // world.spawn((MouseInput {
+        //     left_pressed: false,
+        //     right_pressed: false,
+        //     left_double_clicked: false,
+        //     right_double_clicked: false,
+        //     left_press_time: 0,
+        //     right_press_time: 0,
+        //     left_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
+        //     right_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
+        //     x: 0.0,
+        //     y: 0.0,
+        // },));
 
         let ui_font_name = "AlibabaPuHuiTi".to_string();
 

@@ -101,10 +101,13 @@ impl System for MovementSystem {
                         crate::ecs::components::PlayerAction::Walk
                     };
                     player.is_moving = true;
+                    
+                    // 🎯 关键修复：只在有velocity时才更新position
                     position.x += velocity.x * delay_time;
                     position.y += velocity.y * delay_time;
                 } else {
-                    // 静止: 设置站立动画
+                    // 🎯 关键修复：静止时必须停止velocity，确保下次不会误移动
+                    velocity.stop();
                     player.action = crate::ecs::components::PlayerAction::Stand;
                     player.is_moving = false;
                 }

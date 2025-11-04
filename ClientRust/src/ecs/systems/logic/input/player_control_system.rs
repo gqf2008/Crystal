@@ -80,6 +80,10 @@ pub struct PlayerControlSystem {
     long_press_threshold: Duration,
     /// 上次更新移动目标的时间 (用于限制更新频率,避免抖动)
     last_target_update: Option<Instant>,
+    /// 碰撞停止后需要跳过的帧数
+    collision_cooldown_frames: u32,
+    /// 上一帧是否有move_to（用于检测碰撞清除）
+    had_move_to_last_frame: bool,
 }
 
 impl PlayerControlSystem {
@@ -89,6 +93,8 @@ impl PlayerControlSystem {
             double_click_threshold: Duration::from_millis(300),
             long_press_threshold: Duration::from_millis(200),
             last_target_update: None,
+            collision_cooldown_frames: 0,
+            had_move_to_last_frame: false,
         }
     }
 
@@ -344,6 +350,19 @@ impl System for PlayerControlSystem {
                 None
             };
 
+        // 🗺️ 预先获取地图数据(避免借用冲突)
+        use crate::ecs::components::map::{MapData, MapBounds};
+        let map_data = ctx.world.query::<(&MapBounds, &MapData)>()
+            .iter()
+            .map(|(_, (bounds, data))| (bounds.clone(), data.cells.clone()))
+            .next();
+
+        // 🎯 预先获取玩家当前位置（用于检查是否卡在障碍物上）
+        let player_position = ctx.world.query::<(&Position, &LocalPlayer)>()
+            .iter()
+            .next()
+            .map(|(_, (pos, _))| (pos.x, pos.y));
+        
         // 更新本地玩家输入
         for (_entity, (player_input, _player, _local)) in ctx
             .world
@@ -376,17 +395,31 @@ impl System for PlayerControlSystem {
                 let is_pressing_right = self.mouse_state.right_pressed;
                 
                 if is_pressing_left || is_pressing_right {
-                    // 🎯 新策略: 直接控制velocity向鼠标方向移动,实现平滑跟随
-                    player_input.movement_mode = crate::ecs::components::MovementMode::DirectFollow;
-                    player_input.is_running = is_pressing_right;
+                    use crate::ecs::components::MovementMode;
                     
-                    // 将鼠标位置设置为移动目标(用于velocity计算)
-                    let (screen_x, screen_y) = self.mouse_state.current_position;
-                    let (world_x, world_y) = Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera);
-                    player_input.move_to = Some((world_x, world_y));
-                    
-                    #[allow(deprecated)]
-                    { player_input.use_pathfinding = false; }
+                    // 🎯 检测是否在碰撞冷却期
+                    if self.collision_cooldown_frames > 0 {
+                        self.collision_cooldown_frames -= 1;
+                        // 🎯 关键修复：冷却期内不设置新的移动目标
+                        // 这防止了碰撞后立即重新启动移动导致的抖动
+                    } else if self.had_move_to_last_frame 
+                        && player_input.move_to.is_none() 
+                        && player_input.movement_mode == MovementMode::None {
+                        // 🎯 关键：上一帧有move_to，这一帧被清除了 → 碰撞发生
+                        self.collision_cooldown_frames = 5; // 🎯 增加到5帧（约83ms@60fps），确保停稳
+                        tracing::warn!("⏸️ 检测到碰撞停止，启动冷却(5帧)");
+                    } else {
+                        // 正常情况：设置移动目标
+                        let (screen_x, screen_y) = self.mouse_state.current_position;
+                        let (world_x, world_y) = Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera);
+                        
+                        player_input.movement_mode = MovementMode::DirectFollow;
+                        player_input.is_running = is_pressing_right;
+                        player_input.move_to = Some((world_x, world_y));
+                        
+                        #[allow(deprecated)]
+                        { player_input.use_pathfinding = false; }
+                    }
                 } else {
                     // 鼠标都松开了 - 检查是否需要停止
                     use crate::ecs::components::MovementMode;
@@ -413,6 +446,12 @@ impl System for PlayerControlSystem {
 
         // 🚀 合并PathfindingSystem功能: 根据PlayerInput计算velocity
         use crate::ecs::components::movement::{MovementVelocity, Path};
+        
+        // 先获取地图数据(避免借用冲突)
+        let collision_map_data = ctx.world.query::<&MapData>().iter().next().map(|(_, map)| {
+            (map.width, map.height, map.cells.clone())
+        });
+        
         let world = &mut ctx.world;
         
         for (_, (position, velocity, path, player_input)) in world.query_mut::<(
@@ -421,6 +460,9 @@ impl System for PlayerControlSystem {
             &mut Path,
             &PlayerInput,
         )>() {
+            // 🎯 关键修复：记录这一帧的move_to状态（在任何修改之前）
+            let had_move_to_this_frame_start = player_input.move_to.is_some();
+            
             // 检查是否有移动目标
             if let Some((target_x, target_y)) = player_input.move_to {
                 // DirectFollow模式: 每帧计算velocity朝向目标
@@ -430,42 +472,29 @@ impl System for PlayerControlSystem {
                     let dy = target_y - position.y;
                     let distance = (dx * dx + dy * dy).sqrt();
                     
-                    // 停止阈值: 距离小于2像素认为已到达
-                    const STOP_DISTANCE: f32 = 2.0;
-                    // 减速开始距离: 距离小于这个值时开始减速
-                    const SLOWDOWN_DISTANCE: f32 = 24.0;
+                    // 停止阈值: 距离小于5像素认为已到达
+                    const STOP_DISTANCE: f32 = 5.0;
                     
                     if distance > STOP_DISTANCE {
                         // 归一化方向向量
                         let dir_x = dx / distance;
                         let dir_y = dy / distance;
                         
-                        // 根据is_running设置基础速度
-                        let base_speed = if player_input.is_running {
+                        // 根据is_running设置基础速度 - 保持全速直到到达
+                        let speed = if player_input.is_running {
                             velocity.run_speed
                         } else {
                             velocity.walk_speed
                         };
                         
-                        // 🎯 渐进减速: 距离越近,速度越慢
-                        let speed = if distance < SLOWDOWN_DISTANCE {
-                            // 在减速区间内,速度按距离比例降低
-                            // speed = base_speed * (distance / SLOWDOWN_DISTANCE)
-                            // 但不低于基础速度的20%
-                            let factor = (distance / SLOWDOWN_DISTANCE).max(0.2);
-                            base_speed * factor
-                        } else {
-                            // 远离目标时,使用全速
-                            base_speed
-                        };
-                        
-                        // 设置velocity
+                        // 🎯 直接设置velocity
+                        // CollisionSystem(390)会在MovementSystem(400)之前检测碰撞并清零velocity
                         velocity.x = dir_x * speed;
                         velocity.y = dir_y * speed;
                         velocity.max_speed = speed;
                         
                         // 清除Path,让MovementSystem直接用velocity
-                        path.clear();
+                        path.clear()
                     } else {
                         // 已到达目标,停止
                         velocity.stop();
@@ -479,6 +508,9 @@ impl System for PlayerControlSystem {
                 // 无移动目标,停止
                 velocity.stop();
             }
+            
+            // 🎯 关键修复：使用帧开始时的状态，避免被当前帧的修改影响
+            self.had_move_to_last_frame = had_move_to_this_frame_start;
         }
 
         Ok(())

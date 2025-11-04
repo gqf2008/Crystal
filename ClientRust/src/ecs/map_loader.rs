@@ -13,7 +13,7 @@ use crate::objects::{MapReader, CellInfo};
 use std::time::Instant;
 
 use crate::ecs::components::{
-    MapData, MapTile, TileLayer, AnimatedTile, Door, DoorState, TileOcclusion,  // 🆕 添加 TileOcclusion
+    MapData, MapBounds, MapTile, TileLayer, AnimatedTile, Door, DoorState, TileOcclusion,  // 添加 MapBounds
     CELL_WIDTH, CELL_HEIGHT,
 };
 
@@ -26,12 +26,18 @@ impl MapLoader {
         let height = reader.height;
         let cells = reader.map_cells.clone();
 
-        // 创建地图数据单例
-        world.spawn((MapData {
-            cells: cells.clone(),
-            width,
-            height,
-        },));
+        // 创建地图数据单例 (包含MapBounds和MapData)
+        world.spawn((
+            MapData {
+                cells: cells.clone(),
+                width,
+                height,
+            },
+            MapBounds {
+                width,
+                height,
+            },
+        ));
 
         println!("📦 正在加载地图瓦片到 ECS...");
         let mut tile_count = 0;

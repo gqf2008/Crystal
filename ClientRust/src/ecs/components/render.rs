@@ -78,6 +78,7 @@ pub struct RenderConfig {
     pub show_monster_borders: bool,  // Monster边框调试
     pub show_effect_borders: bool,   // 特效边框调试
     pub show_path: bool,
+    pub show_player_debug: bool,     // 玩家调试信息（位置、速度等）
     pub max_fps: u32,
     pub enable_lod: bool,
     pub enable_camera_drag: bool,    // 是否允许鼠标拖拽相机（地图查看器专用）
@@ -99,6 +100,7 @@ impl Default for RenderConfig {
             show_monster_borders: false,
             show_effect_borders: false,
             show_path: false,
+            show_player_debug: false,     // 默认不显示玩家调试信息
             max_fps: 120,
             enable_lod: false,
             enable_camera_drag: false,  // 默认禁用（正常游戏不需要）

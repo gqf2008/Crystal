@@ -105,3 +105,46 @@ impl Default for TileOcclusion {
         Self::new()
     }
 }
+
+/// 碰撞信息组件 - 记录最近的碰撞位置
+#[derive(Debug, Clone)]
+pub struct CollisionInfo {
+    /// 碰撞的格子坐标
+    pub collision_grids: Vec<(i32, i32)>,
+    /// 上次更新时间
+    pub last_update: std::time::Instant,
+}
+
+impl CollisionInfo {
+    pub fn new() -> Self {
+        Self {
+            collision_grids: Vec::new(),
+            last_update: std::time::Instant::now(),
+        }
+    }
+    
+    pub fn clear(&mut self) {
+        self.collision_grids.clear();
+    }
+    
+    pub fn add_collision(&mut self, grid_x: i32, grid_y: i32) {
+        // 避免重复添加
+        if !self.collision_grids.contains(&(grid_x, grid_y)) {
+            self.collision_grids.push((grid_x, grid_y));
+        }
+        self.last_update = std::time::Instant::now();
+    }
+    
+    /// 清除超过指定时间的碰撞记录
+    pub fn clear_old_collisions(&mut self, max_age_secs: f32) {
+        if self.last_update.elapsed().as_secs_f32() > max_age_secs {
+            self.clear();
+        }
+    }
+}
+
+impl Default for CollisionInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}

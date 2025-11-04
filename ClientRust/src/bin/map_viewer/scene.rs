@@ -18,7 +18,7 @@ use hecs::{Entity, World};
 use mir2_client::ecs::components::movement::{MovementVelocity, Path};
 use mir2_client::ecs::components::MoveMode;
 use mir2_client::ecs::components::{
-    Camera, CameraMode, Draggable, MouseInput, PlayerInput, Position, RenderConfig, TimeTracker,
+    Camera, CameraMode, Draggable, PlayerInput, Position, RenderConfig, TimeTracker,
     VisibleArea,
 };
 use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance, PlayerStateMachine};
@@ -26,7 +26,7 @@ use mir2_client::ecs::render::{CharacterRenderSystem, DebugSystem, MapRenderSyst
 use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::logic::map_load_system::MapManager;
 use mir2_client::ecs::systems::logic::{
-    CameraFollowSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem,
+    CameraFollowSystem, CollisionSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem,
 };
 use mir2_client::ecs::systems::{CharacterAnimationSystem, MovementSystem, SystemScheduler};
 use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem};
@@ -119,6 +119,7 @@ impl MapViewerScene {
             show_npc_borders: false,
             show_monster_borders: false,
             show_effect_borders: false,
+            show_player_debug: false, // F2键切换
             show_path: false,
             max_fps: 60,
             enable_lod: true,
@@ -140,7 +141,7 @@ impl MapViewerScene {
         tracing::info!("🎯 初始化地图查看器系统 (V1)...");
 
         // 添加逻辑系统 (V1)
-        // 清晰的单向数据流: Input → Velocity → Position → Animation
+        // 清晰的单向数据流: Input → Velocity → Position → Collision → Animation
         scheduler
             // 1. PlayerControlSystem: 输入 → velocity
             //    - 检测鼠标输入,设置 PlayerInput
@@ -152,7 +153,12 @@ impl MapViewerScene {
             //    - 根据velocity设置direction和action(Walk/Run/Stand)
             .add_system(MovementSystem)
             
-            // 3. CharacterAnimationSystem: action → frame_index
+            // 3. CollisionSystem: 碰撞检测和修正
+            //    - 检查地图障碍物
+            //    - 停止向不可行走区域移动
+            .add_system(CollisionSystem::new())
+            
+            // 4. CharacterAnimationSystem: action → frame_index
             //    - 根据action更新动画帧
             .add_system(CharacterAnimationSystem::new())
             
@@ -211,7 +217,7 @@ impl MapViewerScene {
             last_frame_time: Instant::now(),
         },));
 
-        // 渲染配置实体（由键盘输入系统修改）
+        // 渲染配置实体(由键盘输入系统修改)
         self.config_entity = world.spawn((RenderConfig {
             show_back: true,
             show_middle: true,
@@ -225,6 +231,7 @@ impl MapViewerScene {
             show_npc_borders: false,
             show_monster_borders: false,
             show_effect_borders: false,
+            show_player_debug: false, // F2键切换
             show_path: false,
             max_fps: 60,
             enable_lod: true,
@@ -236,19 +243,19 @@ impl MapViewerScene {
 
         // 事件通过 GameContext 传递
 
-        // 鼠标输入状态实体（由鼠标输入系统修改）
-        world.spawn((MouseInput {
-            left_pressed: false,
-            right_pressed: false,
-            left_double_clicked: false,
-            right_double_clicked: false,
-            left_press_time: 0,
-            right_press_time: 0,
-            left_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
-            right_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
-            x: 0.0,
-            y: 0.0,
-        },));
+        // // 鼠标输入状态实体（由鼠标输入系统修改）
+        // world.spawn((MouseInput {
+        //     left_pressed: false,
+        //     right_pressed: false,
+        //     left_double_clicked: false,
+        //     right_double_clicked: false,
+        //     left_press_time: 0,
+        //     right_press_time: 0,
+        //     left_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
+        //     right_last_click_time: Instant::now() - std::time::Duration::from_secs(10),
+        //     x: 0.0,
+        //     y: 0.0,
+        // },));
 
         // 地图管理器组件（用于地图状态跟踪）
 

@@ -153,7 +153,18 @@ impl DebugSystem {
                 );
             }
 
-            // F键 - 边框显示
+            // F键 - 调试显示
+            KeyCode::F2 => {
+                config.show_player_debug = !config.show_player_debug;
+                tracing::info!(
+                    "👤 玩家调试信息: {}",
+                    if config.show_player_debug {
+                        "显示"
+                    } else {
+                        "隐藏"
+                    }
+                );
+            }
             KeyCode::F9 => {
                 config.show_monster_borders = !config.show_monster_borders;
                 tracing::info!(
@@ -362,7 +373,7 @@ impl DebugSystem {
             )?;
             canvas.draw(&center_circle, DrawParam::default());
             
-            // 📊 显示调试信息
+            // 📊 显示调试信息 - 放在人物头顶上
             let debug_text = format!(
                 "Grid: ({}, {})\nPos: ({:.1}, {:.1})\nVel: ({:.1}, {:.1})\nAction: {:?}",
                 grid_x, grid_y,
@@ -378,8 +389,18 @@ impl DebugSystem {
                 scale: Some(ggez::graphics::PxScale::from(16.0)),
             });
             
+            // 计算文本框尺寸
+            let text_width = 200.0;
+            let text_height = 85.0;
+            
+            // 🎯 人物头顶位置 = 脚底 - 人物高度 - 文本高度
+            // 假设人物高度约80像素(视觉高度)
+            let character_height = 80.0;
+            let text_x = foot_screen_x - text_width / 2.0; // 居中对齐
+            let text_y = foot_screen_y - character_height - text_height - 5.0; // 头顶上方5像素
+            
             // 文本背景
-            let bg_rect = Rect::new(foot_screen_x + 15.0, foot_screen_y - 60.0, 200.0, 80.0);
+            let bg_rect = Rect::new(text_x, text_y, text_width, text_height);
             let bg_mesh = Mesh::new_rectangle(
                 ctx,
                 DrawMode::fill(),
@@ -389,7 +410,31 @@ impl DebugSystem {
             canvas.draw(&bg_mesh, DrawParam::default());
             
             // 绘制文本
-            canvas.draw(&text, DrawParam::default().dest([foot_screen_x + 20.0, foot_screen_y - 55.0]));
+            canvas.draw(&text, DrawParam::default().dest([text_x + 5.0, text_y + 5.0]));
+            
+            // 🔴 检查当前格子是否有障碍物,如果有就用红色覆盖
+            use crate::ecs::components::MapData;
+            for (_, map) in world.query::<&MapData>().iter() {
+                if grid_x >= 0 && grid_y >= 0 && grid_x < map.width && grid_y < map.height {
+                    if (grid_x as usize) < map.cells.len() && (grid_y as usize) < map.cells[grid_x as usize].len() {
+                        let cell = &map.cells[grid_x as usize][grid_y as usize];
+                        let has_obstacle = (cell.back_image & 0x20000000) != 0;
+                        
+                        if has_obstacle {
+                            // 当前格子有障碍物,用鲜红色半透明填充覆盖黄色
+                            let collision_color = Color::from_rgba(255, 0, 0, 180);
+                            let collision_mesh = Mesh::new_rectangle(
+                                ctx,
+                                DrawMode::fill(),
+                                fill_rect,
+                                collision_color,
+                            )?;
+                            canvas.draw(&collision_mesh, DrawParam::default());
+                        }
+                    }
+                }
+                break;
+            }
             
             break; // 只绘制一个玩家
         }
@@ -541,7 +586,7 @@ impl DebugSystem {
                 }
             }
         }
-
+        
         Ok(())
     }
 
@@ -649,6 +694,8 @@ impl HybridSystem for DebugSystem {
             KeyCode::KeyD,
             KeyCode::KeyL,
             KeyCode::KeyM,
+            KeyCode::F1,
+            KeyCode::F2,
             KeyCode::F9,
             KeyCode::F10,
             KeyCode::F11,
@@ -799,8 +846,10 @@ impl HybridSystem for DebugSystem {
                     Self::draw_grid(ctx, canvas, &camera, &pos)?;
                 }
                 
-                // 🎯 始终绘制玩家脚下瓦片 (用于调试动画抖动)
-                Self::draw_player_footprint(ctx, canvas, &camera, &pos, world)?;
+                // 🎯 F2 - 玩家调试信息（位置、速度、格子等）
+                if config.show_player_debug {
+                    Self::draw_player_footprint(ctx, canvas, &camera, &pos, world)?;
+                }
 
                 if config.show_borders {
                     Self::draw_tile_borders(ctx, canvas, &camera, &pos, &config, world)?;
