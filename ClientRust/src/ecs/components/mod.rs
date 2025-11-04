@@ -19,12 +19,12 @@ pub mod character_select;  // 🆕 角色选择组件
 
 // 🆕 新架构组件
 pub mod movement;        // 移动相关组件
-pub mod prediction;      // 预测和插值组件
-pub mod animation_state; // 动画状态组件
+pub mod prediction;      // 预测和插值组件 (被 MapUpdateSystem 使用)
+// pub mod animation_state; // ❌ 已删除 - 渲染系统直接使用 PlayerAction
 pub mod sound;           // 音效组件
 pub mod particle;        // 粒子组件
 pub mod events;          // 🆕 全局事件组件
-pub mod state_machine;   // 🆕 状态机组件
+// pub mod state_machine;   // ❌ 已移动到 player.rs
 
 // ============================================================================
 // 统一导出所有组件
@@ -68,24 +68,19 @@ pub use character_select::*;  // 🆕 角色选择组件导出
 
 // 🆕 新架构组件导出
 pub use movement::*;
-pub use prediction::*;
-pub use animation_state::*;
+pub use prediction::*;  // ✅ 被 MapUpdateSystem 使用
+// pub use animation_state::*;  // ❌ 已删除
 pub use sound::*;
 pub use particle::*;
 pub use events::*;  // 🆕 全局事件组件导出
-pub use state_machine::*;  // 🆕 状态机组件导出
+// pub use state_machine::*;  // ❌ 已移动到 player.rs (由 player 模块导出)
 
 // ============================================================================
 // 其他系统组件的重新导出
 // ============================================================================
 
-// QuestLog 组件在 quest_system.rs 中定义，在这里重新导出
-// TODO: layer5_ui已删除，需要从新位置导入或重新实现
-// pub use crate::ecs::systems::layer5_ui::quest_system::QuestLog;
-
-// TradeWindow 组件在 trade_system.rs 中定义，在这里重新导出
-// TODO: layer5_ui已删除，需要从新位置导入或重新实现
-// pub use crate::ecs::systems::layer5_ui::trade_system::TradeWindow;
+// 注意: QuestLog 和 TradeWindow 等 UI 组件已从 layer5_ui 移除
+// 将来如果需要，应该在新的 UI 系统中重新实现
 
 // ============================================================================
 // 公共导出 - 确保外部可以使用

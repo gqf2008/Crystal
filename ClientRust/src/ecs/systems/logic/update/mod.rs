@@ -72,7 +72,7 @@
 //
 // ============================================================================
 
-pub mod animation_system;
+// pub mod animation_system;  // ❌ 已删除 - 未使用
 pub mod health_regen_system;
 pub mod particle_system;
 pub mod sound_system;
@@ -81,7 +81,7 @@ pub mod map_update_system;
 pub mod map_load_system;
 pub mod tile_animation_system;
 
-pub use animation_system::CharacterAnimationSystem;
+// pub use animation_system::CharacterAnimationSystem;  // ❌ 已删除
 pub use health_regen_system::HealthRegenSystem;
 pub use particle_system::ParticleSystem;
 pub use sound_system::SoundSystem;

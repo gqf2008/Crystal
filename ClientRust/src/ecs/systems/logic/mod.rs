@@ -29,7 +29,7 @@ crate::logic_system!(
     physics::CollisionSystem,
     physics::CameraFollowSystem,
     // Layer 5: State Update (500-599)
-    update::CharacterAnimationSystem,
+    // update::CharacterAnimationSystem,  // ❌ 已删除 - 未使用
     update::TileAnimationSystem,
     update::ParticleSystem,
     update::SoundSystem,

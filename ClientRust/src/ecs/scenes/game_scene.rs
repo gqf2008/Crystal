@@ -34,7 +34,7 @@ use super::{Scene, SceneType};
 use crate::ecs::render::{DebugSystem, UIRenderSystem};
 use crate::ecs::systems::{
     // Layer 5
-    CharacterAnimationSystem,
+    // CharacterAnimationSystem,  // ❌ 已删除 - 未使用
     CameraSystem, // ✅ V2 版本
 
     CollisionSystem,
@@ -269,7 +269,7 @@ impl GameScene {
             .add_system(CombatSystem)
             .add_system(MovementSystem)
             .add_system(CollisionSystem::new())
-            .add_system(CharacterAnimationSystem::new())
+            // 注意: CharacterAnimationSystem 已移除（未使用）
             .add_system(ParticleSystem)
             .add_system(HealthRegenSystem)
             .add_system(SoundSystem::new())

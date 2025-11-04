@@ -203,7 +203,8 @@ pub use logic::physics::{PathfindingSystem, PlayerStateSystem, MovementSystem, C
 
 // Layer 5 (State Update) - 向后兼容导出
 pub use logic::update::{
-    CharacterAnimationSystem, CameraSystem, HealthRegenSystem, ParticleSystem, SoundSystem,
+    // CharacterAnimationSystem,  // ❌ 已删除 - 未使用
+    CameraSystem, HealthRegenSystem, ParticleSystem, SoundSystem,
 };
 
 use crate::ecs::GameContext;
