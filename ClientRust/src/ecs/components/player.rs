@@ -110,12 +110,12 @@ impl PlayerAction {
     pub fn frame_interval(&self) -> i32 {
         match self {
             PlayerAction::Stand => 30,
-            // 🎯 加快动画以匹配移动速度 (60/90 px/s)
-            // Walk: 3帧间隔 = 6帧×3tick = 18tick/循环 = 0.3s
-            PlayerAction::Walk => 3,
-            // Run: 2帧间隔 = 6帧×2tick = 12tick/循环 = 0.2s  
+            // 🎯 调整动画速度以匹配移动速度和视觉效果
+            // Walk: 4帧间隔 = 6帧×4tick = 24tick/循环 = 2.4s
+            PlayerAction::Walk => 4,
+            // Run: 2帧间隔 = 6帧×2tick = 12tick/循环 = 1.2s  
             PlayerAction::Run => 2,
-            // Attack: 1帧间隔 = 6帧×1tick = 6tick = 0.6s (C# Interval=100, 每100ms一帧)
+            // Attack: 1帧间隔 = 6帧×1tick = 6tick = 0.6s (保持攻击动画流畅)
             PlayerAction::Attack1 => 1,
             PlayerAction::Attack2 => 1,
             PlayerAction::Attack3 => 1,
