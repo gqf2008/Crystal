@@ -430,16 +430,33 @@ impl System for PlayerControlSystem {
                     let dy = target_y - position.y;
                     let distance = (dx * dx + dy * dy).sqrt();
                     
-                    if distance > 5.0 { // 距离目标超过5像素才移动
+                    // 停止阈值: 距离小于2像素认为已到达
+                    const STOP_DISTANCE: f32 = 2.0;
+                    // 减速开始距离: 距离小于这个值时开始减速
+                    const SLOWDOWN_DISTANCE: f32 = 24.0;
+                    
+                    if distance > STOP_DISTANCE {
                         // 归一化方向向量
                         let dir_x = dx / distance;
                         let dir_y = dy / distance;
                         
-                        // 根据is_running设置速度
-                        let speed = if player_input.is_running {
+                        // 根据is_running设置基础速度
+                        let base_speed = if player_input.is_running {
                             velocity.run_speed
                         } else {
                             velocity.walk_speed
+                        };
+                        
+                        // 🎯 渐进减速: 距离越近,速度越慢
+                        let speed = if distance < SLOWDOWN_DISTANCE {
+                            // 在减速区间内,速度按距离比例降低
+                            // speed = base_speed * (distance / SLOWDOWN_DISTANCE)
+                            // 但不低于基础速度的20%
+                            let factor = (distance / SLOWDOWN_DISTANCE).max(0.2);
+                            base_speed * factor
+                        } else {
+                            // 远离目标时,使用全速
+                            base_speed
                         };
                         
                         // 设置velocity
