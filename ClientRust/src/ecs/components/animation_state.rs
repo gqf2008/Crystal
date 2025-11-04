@@ -139,11 +139,14 @@ impl AnimationState {
     }
     
     /// 获取动画帧间隔（帧数）
+    /// 目标：移动1格(48px)对应1个动画循环
+    /// Walk: 96px/s → 48px需0.5s → 6帧×(5/60)=0.5s ✓
+    /// Run: 144px/s → 48px需0.333s → 6帧×(3.3/60)≈0.333s ✓
     pub fn frame_interval(&self) -> u32 {
         match self {
-            AnimationState::Idle => 12,
-            AnimationState::Walk => 6,
-            AnimationState::Run => 4,
+            AnimationState::Idle => 12,      // 站立：慢速播放
+            AnimationState::Walk => 5,       // 🎯 从6改为5，加快动画
+            AnimationState::Run => 3,        // 🎯 从4改为3，加快动画
             AnimationState::Attack => 5,
             AnimationState::Hit => 10,
             AnimationState::Die => 12,
@@ -188,9 +191,9 @@ pub struct AnimationControl {
     /// 当前帧索引（由播放系统更新）
     pub current_frame: u8,
     
-    /// 🎯 新增：动画速度缩放因子 (1.0 = 正常速度)
-    /// 根据实际移动速度调整，避免"拖着走"的感觉
-    pub speed_scale: f32,
+    /// 🎯 帧计时器：累积的时间，用于判断何时切换到下一帧
+    /// **动画播放速度固定**,不受velocity或speed_scale影响
+    pub frame_timer: f32,
 }
 
 impl AnimationControl {
@@ -204,7 +207,7 @@ impl AnimationControl {
             direction: 0,
             loop_animation: true,
             current_frame: 0,
-            speed_scale: 1.0, // 🎯 默认正常速度
+            frame_timer: 0.0, // 🎯 帧计时器初始化为0,动画速度固定
         }
     }
     
@@ -221,6 +224,7 @@ impl AnimationControl {
             self.state_change_time = Instant::now();
             self.force_change = force;
             self.current_frame = 0; // 重置帧索引
+            self.frame_timer = 0.0; // 🎯 重置帧计时器
             self.loop_animation = state.is_looping(); // 根据状态设置是否循环
         }
     }

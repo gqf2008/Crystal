@@ -397,39 +397,39 @@ impl System for PlayerControlSystem {
                 if is_pressing_left || is_pressing_right {
                     use crate::ecs::components::MovementMode;
                     
-                    // 🎯 碰撞冷却机制已移除
-                    // 因为现在碰撞时不再清除move_to，而是依靠velocity=0来阻止移动
-                    // 所以不需要额外的冷却期
+                    // 🎯 鼠标按下：设置移动目标和鼠标按下标志
                     {
-                        // 正常情况：设置移动目标
                         let (screen_x, screen_y) = self.mouse_state.current_position;
                         let (world_x, world_y) = Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera);
                         
                         player_input.movement_mode = MovementMode::DirectFollow;
                         player_input.is_running = is_pressing_right;
                         player_input.move_to = Some((world_x, world_y));
+                        player_input.mouse_pressed = true;  // 🎯 标记鼠标按下
                         
                         #[allow(deprecated)]
                         { player_input.use_pathfinding = false; }
                     }
                 } else {
-                    // 鼠标都松开了 - 检查是否需要停止
+                    // 🎯 鼠标松开：立即停止移动和动画
                     use crate::ecs::components::MovementMode;
                     match player_input.movement_mode {
                         MovementMode::FollowWithAvoidance | MovementMode::DirectFollow => {
                             // 跟随模式下,松开立即停止
-                            if player_input.move_to.is_some() {
+                            if player_input.move_to.is_some() || player_input.mouse_pressed {
                                 tracing::warn!("⏹️⏹️ 松开鼠标,停止跟随 (mode={:?})", player_input.movement_mode);
                                 player_input.move_to = None;
+                                player_input.mouse_pressed = false;  // 🎯 标记鼠标松开
                                 player_input.movement_mode = MovementMode::None;
                             }
                         }
                         MovementMode::Pathfinding => {
                             // 寻路模式下,松开不停止,继续走完路径
-                            // (不打印日志,太吵)
+                            player_input.mouse_pressed = false;  // 🎯 寻路模式也要清除按下标志
                         }
                         MovementMode::None => {
-                            // 无移动,不需要处理
+                            // 确保标志被清除
+                            player_input.mouse_pressed = false;
                         }
                     }
                 }

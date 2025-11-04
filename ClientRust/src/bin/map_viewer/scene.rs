@@ -27,6 +27,7 @@ use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::logic::map_load_system::MapManager;
 use mir2_client::ecs::systems::logic::{
     CameraFollowSystem, CollisionSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem,
+    PlayerStateSystem,
 };
 use mir2_client::ecs::systems::{CharacterAnimationSystem, MovementSystem, SystemScheduler};
 use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem};
@@ -141,25 +142,31 @@ impl MapViewerScene {
         tracing::info!("🎯 初始化地图查看器系统 (V1)...");
 
         // 添加逻辑系统 (V1)
-        // 清晰的单向数据流: Input → Velocity → Position → Collision → Animation
+        // 清晰的单向数据流: Input → State → Collision → Movement → Animation
         scheduler
-            // 1. PlayerControlSystem: 输入 → velocity
+            // 1. PlayerControlSystem: 输入处理
             //    - 检测鼠标输入,设置 PlayerInput
-            //    - 计算velocity朝向目标
+            //    - 设置 mouse_pressed 标志
             .add_system(PlayerControlSystem::new())
             
-            // 2. MovementSystem: velocity → position + action
-            //    - 根据velocity更新position
-            //    - 根据velocity设置direction和action(Walk/Run/Stand)
-            .add_system(MovementSystem)
+            // 2. PlayerStateSystem: 状态管理 (🎯 新增)
+            //    - 根据 mouse_pressed 决定动画状态 (Walk/Run/Idle)
+            //    - 同步 Player.action 到 AnimationControl
+            .add_system(PlayerStateSystem::new())
             
-            // 3. CollisionSystem: 碰撞检测和修正
+            // 3. CollisionSystem: 碰撞检测
             //    - 检查地图障碍物
-            //    - 停止向不可行走区域移动
+            //    - velocity=0 停止位移，但不影响动画
             .add_system(CollisionSystem::new())
             
-            // 4. CharacterAnimationSystem: action → frame_index
-            //    - 根据action更新动画帧
+            // 4. MovementSystem: 位置更新
+            //    - 根据velocity更新position
+            //    - 只管位移，不管动画状态
+            .add_system(MovementSystem)
+            
+            // 5. CharacterAnimationSystem: 动画播放
+            //    - 根据 AnimationControl 播放动画帧
+            //    - 动画速度固定，不受velocity影响
             .add_system(CharacterAnimationSystem::new())
             
             .add_system(TileAnimationSystem::new()) // 瓦片动画系统

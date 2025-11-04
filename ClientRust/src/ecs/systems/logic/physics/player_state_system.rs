@@ -26,7 +26,8 @@ use crate::ecs::{
     GameContext,
     components::{
         PlayerStateMachine, PlayerState, PlayerInputEvent,
-        PlayerInput, PlayerAction, Path, LocalPlayer,
+        PlayerInput, PlayerAction, Path, LocalPlayer, Player,
+        animation_state::{AnimationControl, AnimationState},
     },
     systems::System,
 };
@@ -57,21 +58,23 @@ impl System for PlayerStateSystem {
             )>()
             .into_iter()
         {
-            // 🎯 关键修复：判断是否在移动应该看 move_to 而不是 velocity
-            // 因为碰撞时 velocity=0 但我们希望动画继续播放
-            use crate::ecs::components::MovementMode;
-            let is_moving = player_input.move_to.is_some();
+            // 🎯 关键修复：动画播放应该由 mouse_pressed 决定，而不是 move_to 或 velocity
+            // 需求：
+            // 1. 鼠标按下 → 动画播放（即使碰到障碍物velocity=0也继续）
+            // 2. 鼠标松开 → 立即停止动画
+            // 3. 碰撞时 → velocity=0停止位移，但mouse_pressed=true保持动画
+            let should_play_animation = player_input.mouse_pressed;
             
-            // 根据输入和移动状态决定目标状态
-            let target_event = if is_moving {
-                // 有移动指令
+            // 根据鼠标按下状态决定目标状态
+            let target_event = if should_play_animation {
+                // 鼠标按下：播放走/跑动画
                 if player_input.is_running {
                     Some(PlayerInputEvent::StartRunning)
                 } else {
                     Some(PlayerInputEvent::StartWalking)
                 }
-            } else if player_input.move_to.is_none() && state_machine.current_state.is_moving() {
-                // 没有移动指令但还在移动状态 -> 停止
+            } else if !player_input.mouse_pressed && state_machine.current_state.is_moving() {
+                // 鼠标松开但还在移动状态 → 立即停止
                 Some(PlayerInputEvent::StopMoving)
             } else {
                 None
@@ -83,24 +86,29 @@ impl System for PlayerStateSystem {
             }
 
             // 同步状态到 Player 组件的 action 字段 (用于动画系统)
-            player.action = match state_machine.current_state {
+            let new_action = match state_machine.current_state {
                 PlayerState::Idle => PlayerAction::Stand,
                 PlayerState::Walking => PlayerAction::Walk,
                 PlayerState::Running => PlayerAction::Run,
                 // TODO: 添加更多动作类型
                 _ => PlayerAction::Stand,
             };
+            
+            // 调试日志：状态变化
+            if player.action != new_action {
+                tracing::info!(
+                    "🎬 Player动作切换: {:?} -> {:?} (mouse_pressed={}, is_running={})",
+                    player.action, new_action, player_input.mouse_pressed, player_input.is_running
+                );
+            }
+            player.action = new_action;
 
             // 同步 is_moving 标志
             player.is_moving = state_machine.current_state.is_moving();
         }
         
-        // 🎯 新增：同步 Player.action 到 AnimationControl.current_state
-        // 这样 CharacterAnimationSystem 才能根据正确的状态调整速度
-        use crate::ecs::components::animation_state::AnimationControl;
-        use crate::ecs::components::animation_state::AnimationState;
-        use crate::ecs::components::Player;
-        
+        // 🎯 同步 Player.action 到 AnimationControl.current_state
+        // 这样 CharacterAnimationSystem 才能根据正确的状态播放动画
         for (_, (player, control)) in ctx.world.query_mut::<(&Player, &mut AnimationControl)>() {
             let target_state = match player.action {
                 PlayerAction::Stand => AnimationState::Idle,
@@ -111,6 +119,10 @@ impl System for PlayerStateSystem {
             
             // 只在状态改变时更新
             if control.current_state != target_state {
+                tracing::info!(
+                    "🎞️ 动画状态切换: {:?} -> {:?} (Player.action={:?})",
+                    control.current_state, target_state, player.action
+                );
                 control.set_state(target_state);
             }
         }

@@ -135,6 +135,11 @@ pub struct PlayerInput {
     /// 移动模式
     pub movement_mode: MovementMode,
     
+    /// 🎯 新增：鼠标是否按下（用于控制动画）
+    /// true = 鼠标按下，即使碰撞也要保持动画播放
+    /// false = 鼠标松开，立即停止动画和移动
+    pub mouse_pressed: bool,
+    
     /// (已废弃,保留兼容) 移动模式：true=自动寻路（双击），false=直接跟随（长按）
     #[deprecated(note = "使用 movement_mode 代替")]
     pub use_pathfinding: bool,
@@ -164,6 +169,7 @@ impl PlayerInput {
             move_to: None,
             is_running: false,
             movement_mode: MovementMode::None,
+            mouse_pressed: false,  // 🎯 初始状态：鼠标未按下
             #[allow(deprecated)]
             use_pathfinding: false,  // 已废弃,保留兼容
             attack_target: None,

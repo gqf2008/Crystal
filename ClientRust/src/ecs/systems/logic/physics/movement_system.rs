@@ -93,38 +93,33 @@ impl System for MovementSystem {
             if player_input.movement_mode == MovementMode::DirectFollow {
                 // DirectFollow模式: 直接用velocity更新位置
                 if has_velocity {
-                    // 移动中: 更新位置和动画
+                    // 移动中: 更新位置和方向
                     player.direction = Self::calculate_direction(velocity.x, velocity.y);
-                    player.action = if player_input.is_running {
-                        crate::ecs::components::PlayerAction::Run
-                    } else {
-                        crate::ecs::components::PlayerAction::Walk
-                    };
-                    player.is_moving = true;
                     
                     // 🎯 关键修复：只在有velocity时才更新position
                     position.x += velocity.x * delay_time;
                     position.y += velocity.y * delay_time;
+                    
+                    // 🔥 不再设置 player.action，由 PlayerStateSystem 根据 move_to 决定
+                    // 这样碰撞时即使 velocity=0，动画仍会继续
                 } else {
-                    // 🎯 关键修复：静止时必须停止velocity，确保下次不会误移动
+                    // 🎯 静止时停止velocity
                     velocity.stop();
-                    player.action = crate::ecs::components::PlayerAction::Stand;
-                    player.is_moving = false;
+                    
+                    // 🔥 不再设置 player.action，由 PlayerStateSystem 决定
                 }
                 continue;
             }
             
-            // 其他模式: 如果没有velocity也要设置站立
+            // 其他模式: 如果没有velocity停止
             if !has_velocity {
-                player.action = crate::ecs::components::PlayerAction::Stand;
-                player.is_moving = false;
+                // 🔥 不设置 player.action，由 PlayerStateSystem 决定
                 velocity.stop();
                 continue;
             }
             
             if !path.is_valid {
-                player.action = crate::ecs::components::PlayerAction::Stand;
-                player.is_moving = false;
+                // 🔥 不设置 player.action，由 PlayerStateSystem 决定
                 velocity.stop();
                 continue;
             }

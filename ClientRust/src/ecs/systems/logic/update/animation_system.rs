@@ -37,28 +37,30 @@ impl CharacterAnimationSystem {
     }
 
     /// 更新动画帧
+    /// 
+    /// 🎯 **设计原则**：
+    /// - 动画播放速度**固定不变**,由AnimationState.frame_interval()决定
+    /// - 不受velocity影响,不需要speed_scale计算
+    /// - Walk: 5帧间隔 → 5/60s = 0.083s/帧
+    /// - Run: 3帧间隔 → 3/60s = 0.05s/帧
     fn update_animation_frame(control: &mut AnimationControl, delta_time: f32) {
         let frame_count = control.current_state.frame_count();
-        let base_frame_interval = control.current_state.frame_interval() as f32 / 60.0; // 转换为秒
         
-        // 🎯 关键修复：根据速度缩放调整帧间隔
-        // speed_scale越大，帧间隔越短，动画播放越快
-        let frame_interval = if control.speed_scale > 0.01 {
-            base_frame_interval / control.speed_scale
-        } else {
-            base_frame_interval
-        };
+        // 🎯 固定帧间隔：直接使用AnimationState定义的值,不做任何调整
+        let frame_interval = control.current_state.frame_interval() as f32 / 60.0; // 转换为秒
 
-        // 累积时间
-        control.state_change_time = control.state_change_time.checked_sub(
-            std::time::Duration::from_secs_f32(delta_time)
-        ).unwrap_or(std::time::Instant::now());
+        // 🎯 累积帧时间
+        control.frame_timer += delta_time;
 
-        // 检查是否该切换帧
-        if control.state_duration() >= frame_interval {
+        // 🎯 检查是否该切换帧
+        if control.frame_timer >= frame_interval {
+            // 重置计时器（保留余数以保持精确）
+            control.frame_timer -= frame_interval;
+            
+            // 切换到下一帧
             control.current_frame = (control.current_frame + 1) % frame_count;
 
-            // 如果动画播放完毕
+            // 如果动画播放完毕（回到第0帧）
             if control.current_frame == 0 && !control.loop_animation {
                 // 非循环动画结束,切换到Idle
                 control.set_state(AnimationState::Idle);
@@ -81,41 +83,13 @@ impl System for CharacterAnimationSystem {
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         self.accumulated_time += delay_time;
 
-        // 🎯 关键修复：根据移动状态调整动画速度
-        // 注意：不能用actual_speed，因为碰撞时velocity=0但我们希望动画继续播放
-        use crate::ecs::components::movement::MovementVelocity;
-        use crate::ecs::components::Player;
+        // 🎯 **动画播放速度完全固定,不受velocity影响**
+        // - Walk: 5帧间隔, 6帧/循环, 共0.5s
+        // - Run: 3帧间隔, 6帧/循环, 共0.3s
+        // - 动画由PlayerState控制类型(走/跑/站立)
+        // - 速度由CollisionSystem控制velocity(碰撞时归零)
+        // - 两者完全解耦,互不影响
         
-        for (_, (control, velocity, player)) in ctx.world.query_mut::<(
-            &mut AnimationControl,
-            &MovementVelocity,
-            Option<&Player>,
-        )>() {
-            // 🎯 根据动画状态设置速度缩放
-            let speed_scale = match control.current_state {
-                AnimationState::Walk => {
-                    // 走路动画：基础速度
-                    1.0
-                }
-                AnimationState::Run => {
-                    // 跑步动画：根据跑步/走路速度比例加速
-                    // 一般跑步速度是走路的1.5-2倍，所以动画也应该快1.5-2倍
-                    if velocity.walk_speed > 0.01 {
-                        (velocity.run_speed / velocity.walk_speed).clamp(1.0, 2.5)
-                    } else {
-                        1.5 // 默认1.5倍速度
-                    }
-                }
-                _ => {
-                    // 其他动画保持正常速度
-                    1.0
-                }
-            };
-            
-            // 🎯 更新速度缩放因子
-            control.speed_scale = speed_scale;
-        }
-
         // 更新所有动画帧
         for (_, control) in ctx.world.query_mut::<&mut AnimationControl>() {
             Self::update_animation_frame(control, delay_time);
