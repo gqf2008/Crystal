@@ -54,22 +54,21 @@ impl OtherPlayer {
 /// 角色组件 - 核心状态（单一职责）
 /// 
 /// **设计原则**：
-/// - 只包含角色的核心渲染状态
-/// - 不重复其他组件的数据
+/// - 只包含角色的核心游戏逻辑状态
+/// - 不重复其他组件的数据（渲染用Animation组件，移动用Path/Velocity组件）
 /// 
-/// **TODO**: frame_index/frame_time应该移到Animation组件
+/// **数据所有权**：
+/// - `direction`: 由 MovementSystem 根据移动方向更新
+/// - `action`: 由 PlayerControlSystem 根据用户输入独占写入 (单一来源原则)
 #[derive(Debug, Clone)]
 pub struct Player {
     /// 面向方向 (0-7 八方向)
     pub direction: u8,
     /// 当前动作状态（行走/跑步/站立）
+    /// 
+    /// **重要**: 此字段只能由 PlayerControlSystem 写入！
+    /// 其他系统(MovementSystem等)只能读取，不能修改
     pub action: PlayerAction,
-    /// 是否正在移动
-    pub is_moving: bool,
-    /// 动画帧索引 (TODO: 移到Animation组件)
-    pub frame_index: i32,
-    /// 动画帧计时器 (TODO: 移到Animation组件)
-    pub frame_time: i32,
 }
 
 /// 角色动作

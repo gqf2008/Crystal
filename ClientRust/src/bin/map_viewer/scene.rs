@@ -289,9 +289,6 @@ impl MapViewerScene {
             Player {
                 direction: 0,
                 action: PlayerAction::Stand,
-                is_moving: false,
-                frame_index: 0,
-                frame_time: 0,
             },
             // 玩家外观
             PlayerAppearance {

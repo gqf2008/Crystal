@@ -137,21 +137,17 @@ impl System for MovementSystem {
                     
                     // 移动到下一个路径点
                     if !path.advance() {
-                        // 路径结束,停止移动
+                        // 🎯 路径结束: 只清理物理状态，不修改 player.action
+                        // player.action 由 PlayerControlSystem 独占管理
                         velocity.stop();
                         path.clear();
                         
-                        // 🎬 设置站立状态
-                        use crate::ecs::components::PlayerAction;
-                        player.action = PlayerAction::Stand;
-                        player.is_moving = false;
-                        
-                        // 清除移动目标和模式
+                        // 清除移动目标，触发 PlayerControlSystem 下一帧设置 Stand
                         use crate::ecs::components::MovementMode;
                         player_input.move_to = None;
                         player_input.movement_mode = MovementMode::None;
                         
-                        tracing::info!("✅ 到达目的地，停止移动");
+                        tracing::info!("✅ 到达目的地，清除移动目标");
                     }
                 } else {
                     // 🎯 计算8方向

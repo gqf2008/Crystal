@@ -394,10 +394,9 @@ impl System for PlayerControlSystem {
                 player_input.move_to = None;
                 player_input.movement_mode = crate::ecs::components::MovementMode::None;
                 
-                // 🎬 直接设置动作状态
+                // 🎬 设置站立动作（PlayerControlSystem 独占写入 player.action）
                 use crate::ecs::components::PlayerAction;
                 player.action = PlayerAction::Stand;
-                player.is_moving = false;
                 
                 // 清除 last_click_time 避免重复触发
                 self.mouse_state.left_last_click_time = None;
@@ -416,18 +415,16 @@ impl System for PlayerControlSystem {
                     player_input.move_to = Some((world_x, world_y));
                     player_input.movement_mode = crate::ecs::components::MovementMode::Pathfinding;
                     
-                    // 🎬 直接设置走路动作
+                    // 🎬 设置走路动作（PlayerControlSystem 独占写入）
                     player.action = PlayerAction::Walk;
-                    player.is_moving = true;
                     
                     tracing::warn!("🚶🚶 左键双击走路到 ({:.1}, {:.1}) [寻路模式-松开后继续走]", world_x, world_y);
                 } else if let Some((world_x, world_y)) = double_click_right {
                     player_input.move_to = Some((world_x, world_y));
                     player_input.movement_mode = crate::ecs::components::MovementMode::Pathfinding;
                     
-                    // 🎬 直接设置奔跑动作
+                    // 🎬 设置奔跑动作（PlayerControlSystem 独占写入）
                     player.action = PlayerAction::Run;
-                    player.is_moving = true;
                     
                     tracing::warn!("🏃🏃 右键双击跑步到 ({:.1}, {:.1}) [寻路模式-松开后继续走]", world_x, world_y);
                 }
@@ -446,15 +443,14 @@ impl System for PlayerControlSystem {
                     player_input.movement_mode = MovementMode::DirectFollow;
                     player_input.move_to = Some((world_x, world_y));
                     
-                    // 🎬 直接设置动作（走/跑）
+                    // 🎬 设置动作（PlayerControlSystem 独占写入）
                     if is_pressing_right {
                         player.action = PlayerAction::Run;
                     } else {
                         player.action = PlayerAction::Walk;
                     }
-                    player.is_moving = true;
                 } else {
-                    // 🎯 鼠标松开：立即停止移动和动画
+                    // 🎯 鼠标松开：根据模式决定是否停止
                     match player_input.movement_mode {
                         MovementMode::DirectFollow => {
                             // 跟随模式下,松开立即停止
@@ -463,16 +459,24 @@ impl System for PlayerControlSystem {
                                 player_input.move_to = None;
                                 player_input.movement_mode = MovementMode::None;
                                 
-                                // 🎬 停止动作
+                                // 🎬 设置站立动作（PlayerControlSystem 独占写入）
                                 player.action = PlayerAction::Stand;
-                                player.is_moving = false;
                             }
                         }
                         MovementMode::Pathfinding => {
-                            // 寻路模式下,松开不停止,继续走完路径（动作状态已设置，不需要修改）
+                            // 寻路模式下,松开不停止,继续走完路径
+                            // 但如果 MovementSystem 已清除 move_to (到达目的地)，则设置站立
+                            if player_input.move_to.is_none() && player.action != PlayerAction::Stand {
+                                player.action = PlayerAction::Stand;
+                                player_input.movement_mode = MovementMode::None;
+                                tracing::info!("🎬 到达目的地,设置站立动作");
+                            }
                         }
                         MovementMode::None => {
-                            // 无动作
+                            // 确保没有移动目标时是站立状态
+                            if player_input.move_to.is_none() && player.action != PlayerAction::Stand {
+                                player.action = PlayerAction::Stand;
+                            }
                         }
                     }
                 }
