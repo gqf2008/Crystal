@@ -283,7 +283,7 @@ impl DebugSystem {
             .query::<(&Position, &Player, &LocalPlayer, &MovementVelocity)>()
             .iter()
         {
-            // 🎯 玩家position是脚底的世界坐标
+            // 🎯 玩家position是脚底的世界坐标(锚点)
             let player_foot_x = position.x;
             let player_foot_y = position.y;
             
@@ -291,16 +291,15 @@ impl DebugSystem {
             let grid_x = (player_foot_x / CELL_WIDTH as f32).floor() as i32;
             let grid_y = (player_foot_y / CELL_HEIGHT as f32).floor() as i32;
             
-            // ✅ 方案1: 绘制以玩家脚底为中心的格子(不会跳跃)
-            // 格子中心对齐玩家脚底
-            let tile_width = CELL_WIDTH as f32 * camera.zoom;
-            let tile_height = CELL_HEIGHT as f32 * camera.zoom;
-            
-            // 玩家脚底在屏幕上的位置
+            // 玩家脚底在屏幕上的位置(这是锚点,不是视觉中心)
             let foot_screen_x = (player_foot_x - camera_pos.x) * camera.zoom + camera.screen_width / 2.0;
             let foot_screen_y = (player_foot_y - camera_pos.y) * camera.zoom + camera.screen_height / 2.0;
             
-            // 格子左上角 = 玩家脚底 - 格子尺寸的一半(让格子中心对齐脚底)
+            // ✅ 格子中心对齐玩家脚底,平滑跟随(不会跳跃)
+            let tile_width = CELL_WIDTH as f32 * camera.zoom;
+            let tile_height = CELL_HEIGHT as f32 * camera.zoom;
+            
+            // 格子左上角 = 玩家脚底 - 格子尺寸的一半
             let tile_screen_x = foot_screen_x - tile_width / 2.0;
             let tile_screen_y = foot_screen_y - tile_height / 2.0;
             
