@@ -151,6 +151,7 @@ pub mod priority {
     pub const COMBAT: u32 = 310;
     pub const PATHFINDING: u32 = 350;  // 寻路系统 (在移动之前)
     pub const PLAYER_STATE: u32 = 380; // 玩家状态机 (在寻路和移动之间)
+    pub const ATTACK: u32 = 390; // 攻击动画管理 (在移动之前检测动画完成)
 
     // 阶段 4: 移动与物理 (400-499)
     pub const MOVEMENT: u32 = 400;

@@ -63,11 +63,25 @@ impl OtherPlayer {
 pub struct Player {
     /// 面向方向 (0-7 八方向)
     pub direction: u8,
-    /// 当前动作状态（行走/跑步/站立）
+    /// 当前动作状态（行走/跑步/站立/攻击）
     /// 
     /// **重要**: 此字段只能由 PlayerControlSystem 写入！
     /// 其他系统(MovementSystem等)只能读取，不能修改
     pub action: PlayerAction,
+    /// 是否正在移动
+    pub is_moving: bool,
+}
+
+/// 攻击状态组件 (ECS 原则: 状态存储在Component中)
+/// 
+/// 当玩家/怪物/NPC进行攻击时自动添加此组件
+/// 攻击完成后自动移除
+#[derive(Debug, Clone, Copy)]
+pub struct AttackState {
+    /// 攻击开始时间 (用于计算动画完成)
+    pub start_time: std::time::Instant,
+    /// 攻击类型 (Attack1/2/3)
+    pub attack_type: PlayerAction,
 }
 
 /// 角色动作
@@ -101,11 +115,22 @@ impl PlayerAction {
             PlayerAction::Walk => 3,
             // Run: 2帧间隔 = 6帧×2tick = 12tick/循环 = 0.2s  
             PlayerAction::Run => 2,
-            // Attack: 10帧间隔 = 6帧×10tick = 60tick = 1s (攻击速度)
-            PlayerAction::Attack1 => 10,
-            PlayerAction::Attack2 => 10,
-            PlayerAction::Attack3 => 10,
+            // Attack: 1帧间隔 = 6帧×1tick = 6tick = 0.6s (C# Interval=100, 每100ms一帧)
+            PlayerAction::Attack1 => 1,
+            PlayerAction::Attack2 => 1,
+            PlayerAction::Attack3 => 1,
         }
+    }
+    
+    /// 计算动画总时长 (毫秒)
+    /// animation_count 每 100ms 增加 1
+    pub fn duration_ms(&self) -> u64 {
+        (self.frame_count() * self.frame_interval() * 100) as u64
+    }
+    
+    /// 是否是攻击动作
+    pub fn is_attack(&self) -> bool {
+        matches!(self, PlayerAction::Attack1 | PlayerAction::Attack2 | PlayerAction::Attack3)
     }
     
     pub fn frame_start(&self) -> i32 {

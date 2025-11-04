@@ -231,6 +231,7 @@ impl MapUpdateSystem {
             Player {
                 direction: 4,
                 action: PlayerAction::Stand,
+                is_moving: false,
             },
             Position { x: spawn_x, y: spawn_y },
             PlayerAppearance {

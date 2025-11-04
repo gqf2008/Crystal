@@ -1,3 +1,4 @@
+pub mod combat;
 pub mod combat_skill;
 pub mod decision;
 pub mod input;
@@ -5,6 +6,7 @@ pub mod physics;
 pub mod update;
 
 // 重新导出所有系统
+pub use combat::*;
 pub use combat_skill::*;
 pub use decision::*;
 pub use input::*;
@@ -24,6 +26,7 @@ crate::logic_system!(
     // Layer 3: Combat & Skill (300-399)
     combat_skill::SkillSystem,
     combat_skill::CombatSystem,
+    combat::AttackSystem,  // ✅ 新增: 攻击动画管理
     // Layer 4: Physics & Movement (400-499)
     physics::MovementSystem,
     physics::CollisionSystem,

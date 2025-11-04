@@ -15,6 +15,7 @@
 // **职责**:
 // - 双击检测 → 生成移动命令（自动寻路）
 // - 长按检测 → 生成跟随命令（直接移动）
+// - 右键单击 → 触发攻击 (添加 AttackState 组件)
 // - 屏幕坐标 → 世界坐标转换
 // - 将处理后的命令写入 PlayerInput 和 Path
 //
@@ -77,7 +78,6 @@ impl Default for MouseState {
 pub struct PlayerControlSystem {
     mouse_state: MouseState,
     double_click_threshold: Duration,
-    long_press_threshold: Duration,
 }
 
 impl PlayerControlSystem {
@@ -85,39 +85,10 @@ impl PlayerControlSystem {
         Self {
             mouse_state: MouseState::default(),
             double_click_threshold: Duration::from_millis(300),
-            long_press_threshold: Duration::from_millis(200),
         }
     }
 
-    /// 检测单击事件
-    fn detect_single_click(&self, button: MouseButton) -> Option<(f32, f32)> {
-        let now = Instant::now();
-        match button {
-            MouseButton::Left => {
-                if let Some(last_click) = self.mouse_state.left_last_click_time {
-                    if now.duration_since(last_click) < Duration::from_millis(100) {
-                        self.mouse_state.left_press_position
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }
-            MouseButton::Right => {
-                if let Some(last_click) = self.mouse_state.right_last_click_time {
-                    if now.duration_since(last_click) < Duration::from_millis(100) {
-                        self.mouse_state.right_press_position
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
+    
 
     /// 检测双击事件
     fn detect_double_click(&self, button: MouseButton) -> Option<(f32, f32)> {
@@ -149,41 +120,7 @@ impl PlayerControlSystem {
         }
     }
 
-    /// 检测长按事件 - 返回当前鼠标位置(用于跟随移动)
-    fn detect_long_press(&self, button: MouseButton) -> Option<(f32, f32)> {
-        let now = Instant::now();
-        match button {
-            MouseButton::Left => {
-                if let Some(start) = self.mouse_state.left_press_start {
-                    if self.mouse_state.left_pressed
-                        && now.duration_since(start) > self.long_press_threshold
-                    {
-                        // 返回当前鼠标位置,而不是按下时的位置
-                        Some(self.mouse_state.current_position)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }
-            MouseButton::Right => {
-                if let Some(start) = self.mouse_state.right_press_start {
-                    if self.mouse_state.right_pressed
-                        && now.duration_since(start) > self.long_press_threshold
-                    {
-                        // 返回当前鼠标位置,而不是按下时的位置
-                        Some(self.mouse_state.current_position)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
+   
 
     /// 屏幕坐标 → 世界坐标
     fn screen_to_world(
@@ -322,81 +259,72 @@ impl System for PlayerControlSystem {
             None
         };
 
-        // 处理长按（连续移动）
-        // 左键长按 = 走路
-        let long_press_left =
-            if let Some((screen_x, screen_y)) = self.detect_long_press(MouseButton::Left) {
-                Some(Self::screen_to_world(
-                    screen_x,
-                    screen_y,
-                    &camera_pos,
-                    &camera,
-                ))
-            } else {
-                None
-            };
-
-        // 右键长按 = 跑步
-        let long_press_right =
-            if let Some((screen_x, screen_y)) = self.detect_long_press(MouseButton::Right) {
-                Some(Self::screen_to_world(
-                    screen_x,
-                    screen_y,
-                    &camera_pos,
-                    &camera,
-                ))
-            } else {
-                None
-            };
-
-        // 🗺️ 预先获取地图数据(避免借用冲突)
-        use crate::ecs::components::map::{MapData, MapBounds};
-        let map_data = ctx.world.query::<(&MapBounds, &MapData)>()
-            .iter()
-            .map(|(_, (bounds, data))| (bounds.clone(), data.cells.clone()))
-            .next();
-
-        // 🎯 预先获取玩家当前位置（用于检查是否卡在障碍物上）
-        let player_position = ctx.world.query::<(&Position, &LocalPlayer)>()
-            .iter()
-            .next()
-            .map(|(_, (pos, _))| (pos.x, pos.y));
         
         // 🎯 检查延迟单击：只有在双击窗口已过且确认不是双击时才处理单击
         let now = Instant::now();
-        let has_single_click = {
-            let left_confirmed = if let Some(last_click) = self.mouse_state.left_last_click_time {
-                // 超过双击窗口，确认是单击
-                now.duration_since(last_click) >= self.double_click_threshold
-            } else {
-                false
-            };
-            
-            let right_confirmed = if let Some(last_click) = self.mouse_state.right_last_click_time {
-                // 超过双击窗口，确认是单击
-                now.duration_since(last_click) >= self.double_click_threshold
-            } else {
-                false
-            };
-            
-            left_confirmed || right_confirmed
+        let left_single_click = if let Some(last_click) = self.mouse_state.left_last_click_time {
+            // 超过双击窗口，确认是左键单击
+            now.duration_since(last_click) >= self.double_click_threshold
+        } else {
+            false
         };
         
+        let right_single_click = if let Some(last_click) = self.mouse_state.right_last_click_time {
+            // 超过双击窗口，确认是右键单击
+            now.duration_since(last_click) >= self.double_click_threshold
+        } else {
+            false
+        };
+        
+        let has_single_click = left_single_click || right_single_click;
+        
         // 更新本地玩家输入和动作状态
-        for (_entity, (player_input, player, _local)) in ctx
+        use crate::ecs::components::AttackState;
+        use crate::ecs::components::PlayerAction;
+        
+        // 先收集所有有AttackState的实体
+        let attacking_entities: std::collections::HashSet<_> = ctx.world
+            .query::<&AttackState>()
+            .iter()
+            .map(|(entity, _)| entity)
+            .collect();
+        
+        // 收集需要添加攻击状态的实体
+        let mut entities_to_attack = Vec::new();
+        
+        for (entity, (player_input, player, _local)) in ctx
             .world
             .query_mut::<(&mut PlayerInput, &mut Player, &LocalPlayer)>()
             .into_iter()
         {
-            // 🎯 优先处理单击停止（任意单击都会停止移动）
+            // ⚔️ 如果正在攻击,跳过输入处理 (由 AttackSystem 管理)
+            if attacking_entities.contains(&entity) {
+                continue;
+            }
+            // 🎯 优先处理单击
+            // 🎯 优先处理单击
             if has_single_click {
-                tracing::warn!("⏹️ 检测到单击，立即停止移动");
+                // 停止移动
                 player_input.move_to = None;
                 player_input.movement_mode = crate::ecs::components::MovementMode::None;
                 
-                // 🎬 设置站立动作（PlayerControlSystem 独占写入 player.action）
                 use crate::ecs::components::PlayerAction;
-                player.action = PlayerAction::Stand;
+                
+                if right_single_click {
+                    // 右键单击 = 攻击动作
+                    tracing::warn!("⚔️ 检测到右键单击，触发攻击");
+                    player.action = PlayerAction::Attack1;
+                    
+                    // ✅ ECS 原则: 收集要添加 AttackState 的实体
+                    entities_to_attack.push(entity);
+                    
+                    // TODO: 计算攻击方向(朝向鼠标点击位置)
+                    // 当前暂时保持原方向
+                } else {
+                    // 左键单击 = 站立
+                    tracing::warn!("⏹️ 检测到左键单击，立即停止移动");
+                    player.action = PlayerAction::Stand;
+                }
                 
                 // 清除 last_click_time 避免重复触发
                 self.mouse_state.left_last_click_time = None;
@@ -481,6 +409,14 @@ impl System for PlayerControlSystem {
                     }
                 }
             }
+        }
+        
+        // ⚔️ 循环结束后,添加所有攻击状态
+        for entity in entities_to_attack {
+            let _ = ctx.world.insert_one(entity, AttackState {
+                start_time: now,
+                attack_type: PlayerAction::Attack1,
+            });
         }
 
         Ok(())

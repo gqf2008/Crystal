@@ -85,22 +85,25 @@ impl System for PlayerStateSystem {
             }
 
             // 同步状态到 Player 组件的 action 字段 (用于动画系统)
-            let new_action = match state_machine.current_state {
-                PlayerState::Idle => PlayerAction::Stand,
-                PlayerState::Walking => PlayerAction::Walk,
-                PlayerState::Running => PlayerAction::Run,
-                // TODO: 添加更多动作类型
-                _ => PlayerAction::Stand,
-            };
-            
-            // 调试日志：状态变化
-            if player.action != new_action {
-                tracing::info!(
-                    "🎬 Player动作切换: {:?} -> {:?} (mouse_pressed={}, is_running={})",
-                    player.action, new_action, player_input.mouse_pressed, player_input.is_running
-                );
+            // ⚔️ 不覆盖攻击动作 (由 AttackSystem 管理)
+            if !player.action.is_attack() {
+                let new_action = match state_machine.current_state {
+                    PlayerState::Idle => PlayerAction::Stand,
+                    PlayerState::Walking => PlayerAction::Walk,
+                    PlayerState::Running => PlayerAction::Run,
+                    // TODO: 添加更多动作类型
+                    _ => PlayerAction::Stand,
+                };
+                
+                // 调试日志：状态变化
+                if player.action != new_action {
+                    tracing::info!(
+                        "🎬 Player动作切换: {:?} -> {:?} (mouse_pressed={}, is_running={})",
+                        player.action, new_action, player_input.mouse_pressed, player_input.is_running
+                    );
+                }
+                player.action = new_action;
             }
-            player.action = new_action;
 
             // 同步 is_moving 标志
             player.is_moving = state_machine.current_state.is_moving();

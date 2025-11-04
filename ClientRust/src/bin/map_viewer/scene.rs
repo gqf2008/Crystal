@@ -25,8 +25,8 @@ use mir2_client::ecs::render::{CharacterRenderSystem, DebugSystem, MapRenderSyst
 use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::logic::map_load_system::MapManager;
 use mir2_client::ecs::systems::logic::{
-    CameraFollowSystem, CollisionSystem, MapLoadSystem, MapUpdateSystem, TileAnimationSystem,
-    PathfindingSystem,
+    AttackSystem, CameraFollowSystem, CollisionSystem, MapLoadSystem, MapUpdateSystem, 
+    TileAnimationSystem, PathfindingSystem,
 };
 use mir2_client::ecs::systems::{MovementSystem, SystemScheduler};
 use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem};
@@ -145,7 +145,7 @@ impl MapViewerScene {
         scheduler
             // 1. PlayerControlSystem: 输入处理
             //    - 检测鼠标输入,设置 PlayerInput
-            //    - 设置 mouse_pressed 标志
+            //    - 添加 AttackState 组件 (右键攻击)
             .add_system(PlayerControlSystem::new())
             
             // 2. PathfindingSystem: 寻路系统
@@ -153,7 +153,12 @@ impl MapViewerScene {
             //    - 根据 MovementMode 决定是否使用寻路
             .add_system(PathfindingSystem::new())
             
-            // 3. CollisionSystem: 碰撞检测
+            // 3. AttackSystem: 攻击动画管理
+            //    - 检测攻击动画完成
+            //    - 移除 AttackState 组件,恢复 Stand
+            .add_system(AttackSystem::new())
+            
+            // 4. CollisionSystem: 碰撞检测
             //    - 检查地图障碍物
             //    - velocity=0 停止位移，但不影响动画
             .add_system(CollisionSystem::new())
@@ -289,6 +294,7 @@ impl MapViewerScene {
             Player {
                 direction: 0,
                 action: PlayerAction::Stand,
+                is_moving: false,
             },
             // 玩家外观
             PlayerAppearance {
