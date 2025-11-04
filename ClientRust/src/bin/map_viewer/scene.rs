@@ -295,9 +295,9 @@ impl MapViewerScene {
                 class: MirClass::Warrior,
                 gender: MirGender::Male,
                 hair: 1,  // 使用索引1的头发 (0可能无效)
-                weapon: -1, // 无武器
-                armour: 0,
-                weapon_effect: 0,
+                weapon: 1, // 武器索引1 (测试武器渲染)
+                armour: 1, // 测试armour=1 (0可能是裸体/透明)
+                weapon_effect: 0, // 0 = 无特效
                 wing_effect: 0,
             },
             // 🆕 玩家输入组件（由 PlayerControlSystem 写入）

@@ -149,9 +149,9 @@ impl CharacterRenderSystem {
         
         // 1️⃣ 绘制身体 (CArmours库 - 盔甲/服装)
         let armour_index = appearance.armour.max(0) as usize; // 0 = 默认裸体
-        // tracing::info!("🎯 尝试获取身体库: armour_index={}", armour_index);
+        tracing::warn!("🎯 尝试获取身体库: armour_index={}", armour_index);
         if let Some(body_lib) = get_library_from_array(LibraryArray::CArmours, armour_index) {
-            // tracing::info!("✅ 获取到身体库锁");
+            tracing::warn!("✅ 获取到身体库锁");
             let mut body_lib = body_lib.lock().unwrap();
             
             // 应用性别偏移 (C# ArmourOffSet)
@@ -162,12 +162,12 @@ impl CharacterRenderSystem {
             };
             
             let body_frame = (frame_index + armour_offset) as usize;
-            // tracing::info!("🎨 计算帧索引: frame_index={}, offset={}, body_frame={}", frame_index, armour_offset, body_frame);
+            tracing::warn!("🎨 计算帧索引: frame_index={}, offset={}, body_frame={}", frame_index, armour_offset, body_frame);
             
-            // tracing::info!("📦 尝试获取或创建纹理: body_frame={}", body_frame);
+            tracing::warn!("📦 尝试获取或创建纹理: body_frame={}", body_frame);
             match body_lib.get_or_create_texture(ctx, body_frame) {
                 Ok(info) => {
-                    // tracing::info!("✅ 成功获取纹理信息");
+                    tracing::warn!("✅ 成功获取纹理信息: has_image={}", info.image.is_some());
                     // 🎯 传奇2渲染逻辑:
                     // screen_x/y 是人物脚底的屏幕坐标(锚点)
                     // info.x/y 是图像相对于锚点的偏移
@@ -176,6 +176,7 @@ impl CharacterRenderSystem {
                     let draw_y = screen_y + (info.y as f32) * zoom;
                     
                     if let Some(ref image) = info.image {
+                        tracing::warn!("🎨 绘制身体: draw_x={:.1}, draw_y={:.1}, info.x={}, info.y={}", draw_x, draw_y, info.x, info.y);
                         canvas.draw(
                             image,
                             DrawParam::new()
@@ -183,6 +184,8 @@ impl CharacterRenderSystem {
                                 .scale([zoom, zoom])
                                 .color(color),
                         );
+                    } else {
+                        tracing::error!("❌ 身体图像为空!");
                     }
                 }
                 Err(e) => {
@@ -190,10 +193,13 @@ impl CharacterRenderSystem {
                     return Ok(()); // 跳过渲染，避免崩溃
                 }
             }
+        } else {
+            tracing::error!("❌ 无法获取身体库: armour_index={}", armour_index);
         }
         
         // 2️⃣ 绘制头发 (CHair库)
         let hair_index = appearance.hair.max(0) as usize;
+        tracing::warn!("🎯 尝试绘制头发: hair_index={}", hair_index);
         if hair_index > 0 {
             if let Some(hair_lib) = get_library_from_array(LibraryArray::CHair, hair_index) {
                 let mut hair_lib = hair_lib.lock().unwrap();
@@ -220,6 +226,71 @@ impl CharacterRenderSystem {
                                 .scale([zoom, zoom])
                                 .color(color),
                         );
+                    }
+                }
+            }
+        }
+        
+        // 3️⃣ 绘制武器 (CWeapons库)
+        // C# 逻辑: PlayerObject.DrawWeapon()
+        // WeaponLibrary1.Draw(DrawFrame + WeaponOffSet, DrawLocation, DrawColour, true)
+        if appearance.weapon >= 0 {
+            let weapon_index = appearance.weapon as usize;
+            
+            if let Some(weapon_lib) = get_library_from_array(LibraryArray::CWeapons, weapon_index) {
+                let mut weapon_lib = weapon_lib.lock().unwrap();
+                
+                // 武器偏移量 (C# WeaponOffSet)
+                // 男性: 0, 女性: 416 (Warrior), 352/512 (Wizard), 416 (其他)
+                let weapon_offset = if appearance.gender == MirGender::Male {
+                    0
+                } else {
+                    // 简化：统一使用 416 偏移
+                    // TODO: 根据职业和动作类型精确计算偏移
+                    416
+                };
+                
+                let weapon_frame = (frame_index + weapon_offset) as usize;
+                
+                if let Ok(info) = weapon_lib.get_or_create_texture(ctx, weapon_frame) {
+                    let draw_x = screen_x + (info.x as f32) * zoom;
+                    let draw_y = screen_y + (info.y as f32) * zoom;
+                    
+                    if let Some(ref image) = info.image {
+                        canvas.draw(
+                            image,
+                            DrawParam::new()
+                                .dest([draw_x, draw_y])
+                                .scale([zoom, zoom])
+                                .color(color),
+                        );
+                    }
+                }
+                
+                // 4️⃣ 绘制武器特效 (CWeaponEffect库)
+                // C# WeaponEffectLibrary1.DrawBlend(DrawFrame + WeaponOffSet, DrawLocation, DrawColour, true, 0.4F)
+                if appearance.weapon_effect > 0 {
+                    let effect_index = appearance.weapon_effect as usize;
+                    
+                    if let Some(effect_lib) = get_library_from_array(LibraryArray::CWeaponEffect, effect_index) {
+                        let mut effect_lib = effect_lib.lock().unwrap();
+                        
+                        if let Ok(effect_info) = effect_lib.get_or_create_texture(ctx, weapon_frame) {
+                            let draw_x = screen_x + (effect_info.x as f32) * zoom;
+                            let draw_y = screen_y + (effect_info.y as f32) * zoom;
+                            
+                            if let Some(ref image) = effect_info.image {
+                                // 特效使用半透明混合 (C# 0.4F alpha)
+                                let effect_color = Color::from_rgba(255, 255, 255, (255.0 * 0.4) as u8);
+                                canvas.draw(
+                                    image,
+                                    DrawParam::new()
+                                        .dest([draw_x, draw_y])
+                                        .scale([zoom, zoom])
+                                        .color(effect_color),
+                                );
+                            }
+                        }
                     }
                 }
             }
