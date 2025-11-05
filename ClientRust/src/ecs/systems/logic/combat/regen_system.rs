@@ -27,6 +27,7 @@ use crate::ecs::components::{Health, Mana, RegenTimer, BuffList, BuffType};
 /// - MP恢复: 每10秒恢复 MaxMP * 3% + 1
 /// - Buff过期清理
 /// - DoT伤害计算 (毒、流血等)
+#[derive(ecs_macros::LogicSystem)]
 pub struct HealthRegenSystem;
 
 impl LogicSystem for HealthRegenSystem {

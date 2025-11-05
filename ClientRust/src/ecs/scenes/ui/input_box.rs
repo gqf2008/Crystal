@@ -2,7 +2,7 @@
 /// Mirrors Client/MirControls/MirInputBox.cs
 
 use ggez::{Context, GameResult};
-use ggez::graphics::{Canvas, Color, DrawParam, Text};
+use ggez::graphics::{Canvas, Color, DrawParam, GraphicsContext, Text};
 use crate::graphics::libraries::{get_library, LibraryName};
 use super::TextInput;
 
@@ -104,7 +104,7 @@ impl InputBox {
     }
     
     /// 显示输入框
-    pub fn show(&mut self, ctx: &mut Context) {
+    pub fn show(&mut self, ctx: &mut GraphicsContext) {
         self.visible = true;
         self.confirmed = false;
         self.cancelled = false;
@@ -112,17 +112,17 @@ impl InputBox {
         self.input.focused = true;
         
         // ✅ 启用 IME 输入
-        ctx.gfx.window().set_ime_allowed(true);
+        ctx.window().set_ime_allowed(true);
         tracing::debug!("✅ InputBox: IME 已启用");
     }
     
     /// 隐藏输入框
-    pub fn hide(&mut self, ctx: &mut Context) {
+    pub fn hide(&mut self, ctx: &mut GraphicsContext) {
         self.visible = false;
         self.input.focused = false;
         
         // ✅ 禁用 IME 输入
-        ctx.gfx.window().set_ime_allowed(false);
+        ctx.window().set_ime_allowed(false);
         tracing::debug!("❌ InputBox: IME 已禁用");
     }
     
@@ -201,7 +201,7 @@ impl InputBox {
     }
     
     /// 鼠标点击事件
-    pub fn on_mouse_down(&mut self, x: f32, y: f32, ctx: &mut Context) -> bool {
+    pub fn on_mouse_down(&mut self, x: f32, y: f32, ctx: &mut GraphicsContext) -> bool {
         if !self.visible {
             return false;
         }
@@ -237,7 +237,7 @@ impl InputBox {
     }
     
     /// 按键事件
-    pub fn on_key_down(&mut self, key: &ggez::winit::keyboard::KeyCode, ctx: &mut Context) {
+    pub fn on_key_down(&mut self, key: &ggez::winit::keyboard::KeyCode, ctx: &mut GraphicsContext) {
         if !self.visible {
             return;
         }

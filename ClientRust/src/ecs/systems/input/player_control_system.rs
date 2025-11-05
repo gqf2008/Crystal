@@ -75,6 +75,7 @@ impl Default for MouseState {
     }
 }
 
+#[derive(ecs_macros::LogicSystem)]
 pub struct PlayerControlSystem {
     mouse_state: MouseState,
     double_click_threshold: Duration,
@@ -149,11 +150,9 @@ impl LogicSystem for PlayerControlSystem {
 
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         // ✅ 零拷贝：直接访问 GameContext
-        let mouse_left_pressed = ctx.mouse.button_pressed(MouseButton::Left);
-        let mouse_right_pressed = ctx.mouse.button_pressed(MouseButton::Right);
-        let mouse_pos = ctx.mouse.position();
-
-        // 调试日志已关闭,减少干扰
+        let mouse_left_pressed = ctx.input().mouse.button_pressed(MouseButton::Left);
+        let mouse_right_pressed = ctx.input().mouse.button_pressed(MouseButton::Right);
+        let mouse_pos = ctx.input().mouse.position();
 
         // 更新鼠标位置 (Point2 使用 .x, .y 访问)
         let mouse_pos_tuple = (mouse_pos.x, mouse_pos.y);

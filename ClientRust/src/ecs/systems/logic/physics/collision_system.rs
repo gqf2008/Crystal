@@ -22,6 +22,7 @@ use crate::ecs::components::{Position, movement::MovementVelocity, map::MapBound
 use crate::ecs::systems::LogicSystem;
 
 /// 碰撞检测系统
+#[derive(ecs_macros::LogicSystem)]
 pub struct CollisionSystem {
     /// 停止移动阈值(像素)
     stop_threshold: f32,

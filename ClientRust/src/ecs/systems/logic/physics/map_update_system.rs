@@ -34,6 +34,7 @@ pub struct MapSwitchRequest {
 /// 地图更新系统
 /// 
 /// 在每帧检查是否需要切换地图，如果需要则执行地图加载和实体重建
+#[derive(ecs_macros::LogicSystem)]
 pub struct MapUpdateSystem;
 
 impl MapUpdateSystem {

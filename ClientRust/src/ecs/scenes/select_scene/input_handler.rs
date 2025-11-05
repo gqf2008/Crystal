@@ -82,8 +82,8 @@ impl SelectScene {
         // 🆕 0. 优先处理输入框（最上层）
         if let Some(ref mut input_box) = self.input_box {
             if input_box.visible {
-                let ggez_ctx = game_ctx.as_ggez_context();
-                input_box.on_mouse_down(design_x, design_y, ggez_ctx);
+                let (ctx, _world) = game_ctx.split_gfx_world();
+                input_box.on_mouse_down(design_x, design_y, ctx);
                 return Ok(()); // 输入框消费了事件
             }
         }
@@ -276,9 +276,9 @@ impl SelectScene {
         // 处理输入框按键
         if let Some(ref mut input_box) = self.input_box {
             if input_box.visible {
-                let ggez_ctx = game_ctx.as_ggez_context();
-                input_box.on_key_down(key, ggez_ctx);
-                                                 // 检查是否已确认或取消
+                 let (ctx, _world) = game_ctx.split_gfx_world();
+                input_box.on_key_down(key, ctx);
+                // 检查是否已确认或取消
                 if input_box.confirmed || input_box.cancelled {
                     // 在update中处理结果
                 }

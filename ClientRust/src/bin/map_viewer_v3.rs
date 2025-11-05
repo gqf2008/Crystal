@@ -78,11 +78,8 @@ impl EventHandler<GameContext> for MapViewerApp {
     }
 
     fn draw(&mut self, ctx: &mut GameContext) -> GameResult {
-        let mut canvas = Canvas::from_frame(ctx, Color::from_rgb(0, 0, 0));
-        // 绘制场景
-        self.scene.draw(ctx, &mut canvas)?;
-        // 提交画布
-        canvas.finish(ctx)?;
+        let (ctx, world) = ctx.split_gfx_world();
+        self.scene.draw(ctx, world)?;
         Ok(())
     }
 

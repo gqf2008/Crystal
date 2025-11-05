@@ -42,6 +42,7 @@ use tokio::sync::mpsc;
 /// 4. 获取目标信息
 /// 5. 发送网络命令
 /// 6. 消耗资源（MP、冷却）
+#[derive(ecs_macros::LogicSystem)]
 pub struct SkillSystem;
 
 impl Default for SkillSystem {

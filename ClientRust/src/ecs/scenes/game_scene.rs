@@ -22,7 +22,7 @@
 //
 // ============================================================================
 
-use ggez::graphics::Canvas;
+use ggez::graphics::{Canvas, Color, GraphicsContext};
 use ggez::input::keyboard::KeyInput;
 use ggez::GameResult;
 use hecs::{Entity, World};
@@ -31,36 +31,33 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::{Scene, SceneType};
-use crate::ecs::render::{DebugSystem, UIRenderSystem};
+use crate::ecs::debug::DebugSystem;
+use crate::ecs::presentation::{ParticleSystem, SoundSystem};
+use crate::ecs::rendering::UIRenderSystem;
 use crate::ecs::systems::{
     priority,
-    // Layer 5
-    // CharacterAnimationSystem,  // ❌ 已删除 - 未使用
-    CameraSystem, // ✅ V2 版本
+    CameraSystem,
 
     CollisionSystem,
-    CombatSystemV2 as CombatSystem,
+    CombatSystem,
     HealthRegenSystem,
     // Layer 2
     MonsterAISystem,
     // Layer 4
     MovementSystem,
     NpcDialogueSystem,
-    ParticleSystem,
     // Layer 1
     PlayerControlSystem,
     // Layer 3
     SkillSystem,
-    SoundSystem,
-    SystemScheduler,   // ✅ V1 调度器
+    SystemScheduler, // ✅ V1 调度器
 };
 use crate::ecs::GameContext;
 use crate::ecs::{
     components::{
         Camera, CameraMode, Draggable, Equipment, Inventory, LearnableMagicList, LocalPlayer,
-        MagicList, MirClass, MirGender, MoveMode, Player, PlayerAction,
-        PlayerAppearance, PlayerData, Position, RenderConfig, TargetSelection, TimeTracker,
-        VisibleArea,
+        MagicList, MirClass, MirGender, MoveMode, Player, PlayerAction, PlayerAppearance,
+        PlayerData, Position, RenderConfig, TargetSelection, TimeTracker, VisibleArea,
     },
     map_loader::MapLoader,
 
@@ -245,7 +242,6 @@ impl GameScene {
         }
     }
 
-
     /// 创建并初始化所有 ECS 系统 (V1)
     ///
     /// 按照六层架构顺序添加系统：
@@ -262,18 +258,18 @@ impl GameScene {
         tracing::info!("🎯 初始化 ECS 系统...");
 
         // ===== Layer 1: 输入与网络 (50-199) =====
-       
+
         scheduler
-            .add_system(MonsterAISystem,priority::MONSTER_AI)
-            .add_system(NpcDialogueSystem::new(),priority::DIALOGUE)
-            .add_system(SkillSystem,priority::SKILL)
-            .add_system(CombatSystem,priority::COMBAT)
-            .add_system(MovementSystem,priority::MOVEMENT)
+            .add_system(MonsterAISystem, priority::MONSTER_AI)
+            .add_system(NpcDialogueSystem::new(), priority::NPC_INTERACTION)
+            .add_system(SkillSystem, priority::SKILL)
+            .add_system(CombatSystem, priority::COMBAT)
+            .add_system(MovementSystem, priority::MOVEMENT)
             .add_system(CollisionSystem::new(), priority::COLLISION)
-            .add_system(ParticleSystem,priority::PARTICLE)
+            .add_system(ParticleSystem, priority::PARTICLE)
             .add_system(HealthRegenSystem, priority::ANIMATION)
             .add_system(SoundSystem::new(), priority::SOUND)
-            .add_system(DebugSystem::new(), priority::DEBUG_RENDER);
+            .add_system(DebugSystem::new(), priority::DEBUG);
 
         tracing::info!("✅ ECS 系统初始化完成！");
         scheduler
@@ -353,9 +349,10 @@ impl Scene for GameScene {
         Ok(None)
     }
 
-    fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
-        let (ctx, world) = ctx.split_gfx_world();
-        self.system_scheduler.draw(ctx, canvas, world)?;
+    fn draw(&mut self, ctx: &mut GraphicsContext, world: &hecs::World) -> GameResult {
+        let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
+        self.system_scheduler.draw(ctx, &mut canvas, world)?;
+        canvas.finish(ctx)?;
         Ok(())
     }
 

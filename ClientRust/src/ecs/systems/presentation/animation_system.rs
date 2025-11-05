@@ -17,9 +17,8 @@
 // ```
 // PlayerControlSystem (右键点击)
 //     ↓ 添加 AttackState 组件
-// AttackSystem (检测动画完成)
+// AnimationSystem (检测动画完成)
 //     ↓ 移除 AttackState 组件 + 设置 Stand
-// PlayerStateSystem (同步状态)
 // ```
 //
 // ============================================================================
@@ -32,18 +31,18 @@ use crate::ecs::{
     systems::LogicSystem,
 };
 
-pub struct AttackSystem;
+#[derive(ecs_macros::LogicSystem)]
+pub struct AnimationSystem;
 
-impl AttackSystem {
+impl AnimationSystem {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl LogicSystem for AttackSystem {
-    
-    fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
-        let now = Instant::now();
+impl AnimationSystem {
+    pub fn update_attack_animation(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
+let now = Instant::now();
         
         // 收集需要移除 AttackState 的实体
         let mut finished_attacks = Vec::new();
@@ -82,8 +81,10 @@ impl LogicSystem for AttackSystem {
     }
 }
 
-impl Default for AttackSystem {
-    fn default() -> Self {
-        Self::new()
+impl LogicSystem for AnimationSystem {
+    
+    fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
+        self.update_attack_animation(ctx, _dt)
     }
 }
+

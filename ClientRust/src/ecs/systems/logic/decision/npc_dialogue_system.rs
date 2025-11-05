@@ -43,6 +43,7 @@ pub struct DialogState {
     pub is_open: bool,
 }
 
+#[derive(ecs_macros::LogicSystem)]
 pub struct NpcDialogueSystem {
     /// 当前激活的对话
     active_dialogs: HashMap<hecs::Entity, DialogState>,

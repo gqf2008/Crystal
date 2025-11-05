@@ -21,6 +21,7 @@ use crate::ecs::components::{LocalPlayer, Position, Camera, CameraMode};
 use crate::ecs::systems::{LogicSystem, priority};
 
 /// 摄像机跟随系统
+#[derive(ecs_macros::LogicSystem)]
 pub struct CameraFollowSystem;
 
 impl LogicSystem for CameraFollowSystem {

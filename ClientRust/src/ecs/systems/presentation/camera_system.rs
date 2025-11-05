@@ -32,6 +32,7 @@ use ggez::input::mouse::MouseButton;
 use ggez::GameResult;
 
 /// 相机系统 V2 (零拷贝版本)
+#[derive(ecs_macros::LogicSystem)]
 pub struct CameraSystem {
     /// 震动相关
     shake_time: f32,
@@ -121,14 +122,14 @@ impl LogicSystem for CameraSystem {
         // ✅ 零拷贝方式：直接从 GameContext 访问输入
         
         // 🖱️ 鼠标状态 - 直接从 GameContext 读取，零拷贝！
-        let mouse_left = ctx.mouse.button_pressed(MouseButton::Left);
-        let mouse_middle = ctx.mouse.button_pressed(MouseButton::Middle);
-        let mouse_pos = ctx.mouse.position();
-        
+        let mouse_left = ctx.input().mouse.button_pressed(MouseButton::Left);
+        let mouse_middle = ctx.input().mouse.button_pressed(MouseButton::Middle);
+        let mouse_pos = ctx.input().mouse.position();
+
         // ⌨️ 使用 InputContext API 访问键盘和其他事件
         let ctrl_pressed = ctx.input().ctrl_pressed();
-        
-        let resize_event = ctx.frame_input_events.iter()
+
+        let resize_event = ctx.input().events.iter()
             .find_map(|e| if let InputEvent::Resize { width, height } = e {
                 Some((*width, *height))
             } else { None });

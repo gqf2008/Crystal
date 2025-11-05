@@ -1,43 +1,76 @@
+// ### 第2層：遊戲邏輯系統 (300-599)
+
+// #### AI 和行為系統
+// | 系統名稱 | 優先級 | 啟用場景 | 職責說明 |
+// |---------|--------|----------|----------|
+// | `MonsterAISystem` | 300 | 遊戲 | 怪物AI、行為決策、狀態切換 |
+// | `NPCInteractionSystem` | 310 | 遊戲 | NPC對話、任務觸發、商店交互 |
+// | `PetAISystem` | 320 | 遊戲 | 寵物跟隨、自動戰鬥、忠誠度 |
+
+// #### 社交系統
+// | 系統名稱 | 優先級 | 啟用場景 | 職責說明 |
+// |---------|--------|----------|----------|
+// | `GuildSystem` | 330 | 遊戲 | 行會管理、行會戰爭、技能 |
+// | `PartySystem` | 340 | 遊戲 | 組隊管理、經驗分配、隊伍BUFF |
+// | `FriendSystem` | 350 | 遊戲 | 好友列表、狀態同步、私聊 |
+
+// #### 傳奇特色系統
+// | 系統名稱 | 優先級 | 啟用場景 | 職責說明 |
+// |---------|--------|----------|----------|
+// | `PKSystem` | 355 | 遊戲 | PK模式、罪惡值、紅名懲罰 |
+// | `DungeonSystem` | 360 | 遊戲 | 副本進入、進度保存、獎勵 |
+// | `BossSystem` | 365 | 遊戲 | BOSS刷新、歸屬判斷、掉落 |
+// | `SiegeWarSystem` | 368 | 遊戲 | 沙巴克攻城、佔領獎勵 |
+
+// #### 任務系統
+// | 系統名稱 | 優先級 | 啟用場景 | 職責說明 |
+// |---------|--------|----------|----------|
+// | `QuestSystem` | 370 | 遊戲 | 任務接取、進度跟踪、獎勵 |
+// | `DailySystem` | 375 | 遊戲 | 每日任務、簽到、活躍度 |
+// | `AchievementSystem` | 380 | 遊戲 | 成就追踪、獎勵發放 |
+
+// #### 戰鬥系統
+// | 系統名稱 | 優先級 | 啟用場景 | 職責說明 |
+// |---------|--------|----------|----------|
+// | `CombatSystem` | 400 | 遊戲 | 戰鬥邏輯、傷害計算、死亡處理 |
+// | `SkillSystem` | 410 | 遊戲 | 技能釋放、冷卻、效果應用 |
+// | `BuffDebuffSystem` | 420 | 遊戲 | BUFF/DEBUFF管理、定時效果 |
+// | `RegenSystem` | 430 | 遊戲 | **生命/魔法恢復、DoT傷害、Buff過期** |
+
+// #### 職業系統
+// | 系統名稱 | 優先級 | 啟用場景 | 職責說明 |
+// |---------|--------|----------|----------|
+// | `ClassSystem` | 440 | 遊戲 | 職業特性、轉職任務、職業平衡 |
+// | `TalentSystem` | 450 | 遊戲 | 天賦樹、技能點分配 |
+// | `SummonSystem` | 460 | 遊戲 | 召喚物管理、寵物控制 |
+
+// #### 經濟系統
+// | 系統名稱 | 優先級 | 啟用場景 | 職責說明 |
+// |---------|--------|----------|----------|
+// | `InventorySystem` | 500 | 遊戲 | 背包管理、物品整理 |
+// | `EquipmentSystem` | 510 | 遊戲 | 裝備穿戴、屬性計算 |
+// | `AuctionSystem` | 520 | 遊戲 | 拍賣行、物品競價 |
+// | `MarketSystem` | 530 | 遊戲 | 交易行、價格波動 |
+// | `ShopSystem` | 540 | 遊戲 | NPC商店、庫存刷新 |
+
+// #### 移動和物理系統
+// | 系統名稱 | 優先級 | 啟用場景 | 職責說明 |
+// |---------|--------|----------|----------|
+// | `MovementSystem` | 550 | 遊戲 | 位置移動、路徑計算 |
+// | `CollisionSystem` | 560 | 遊戲 | 碰撞檢測、障礙物處理 |
+// | `TeleportSystem` | 570 | 遊戲 | 傳送點、地圖切換 |
+
+// #### 自動化系統
+// | 系統名稱 | 優先級 | 啟用場景 | 職責說明 |
+// |---------|--------|----------|----------|
+// | `AutoBattleSystem` | 580 | 遊戲 | 自動戰鬥、掛機設定 |
+// | `AutoPathfindingSystem` | 590 | 遊戲 | 自動尋路、任務導航 |
+
 pub mod combat;
-pub mod combat_skill;
 pub mod decision;
-pub mod input;
 pub mod physics;
-pub mod update;
 
 // 重新导出所有系统
-pub use combat::*;
-pub use combat_skill::*;
 pub use decision::*;
-pub use input::*;
+pub use combat::*;
 pub use physics::*;
-pub use update::*;
-
-// ============================================================================
-// 为所有纯逻辑系统批量实现 IntoSystemKind
-// ============================================================================
-
-crate::logic_system!(
-    input::PlayerControlSystem,
-    // Layer 2: Decision (200-299)
-    decision::MonsterAISystem,
-    decision::NpcAISystem,
-    decision::NpcDialogueSystem,
-    // Layer 3: Combat & Skill (300-399)
-    combat_skill::SkillSystem,
-    combat_skill::CombatSystem,
-    combat::AttackSystem,  // ✅ 新增: 攻击动画管理
-    // Layer 4: Physics & Movement (400-499)
-    physics::MovementSystem,
-    physics::CollisionSystem,
-    physics::CameraFollowSystem,
-    // Layer 5: State Update (500-599)
-    // update::CharacterAnimationSystem,  // ❌ 已删除 - 未使用
-    // update::TileAnimationSystem,  // ❌ 已移至 MapRenderSystem - 瓦片动画属于地图渲染职责
-    update::ParticleSystem,
-    update::SoundSystem,
-    update::HealthRegenSystem,
-    update::MapLoadSystem,
-    update::MapUpdateSystem,
-    update::CameraSystem,
-);

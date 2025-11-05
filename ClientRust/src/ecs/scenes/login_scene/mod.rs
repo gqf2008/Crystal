@@ -18,7 +18,7 @@ pub use new_account::{
 };
 pub use virtual_keyboard::{FocusedInput, VirtualKeyboard, VirtualKeyboardAction};
 
-use ggez::graphics::Canvas;
+use ggez::graphics::{Canvas, GraphicsContext};
 use ggez::{Context, GameResult};
 use hecs::World;
 
@@ -190,7 +190,8 @@ impl Scene for LoginScene {
         Ok(None)
     }
 
-    fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
+    fn draw(&mut self, ctx: &mut GraphicsContext, world: &hecs::World) -> GameResult {
+        let mut canvas = Canvas::from_frame(ctx, ggez::graphics::Color::from_rgb(0, 0, 0));
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
             0.0,
@@ -200,7 +201,7 @@ impl Scene for LoginScene {
 
         // 绘制背景动画(ChrSel库, 1024x768原始尺寸，直接铺满设计坐标系)
         let bg_index = self.background_frame as i32;
-        let _ = draw_sprite_at(&mut ctx.gfx, canvas, &LibraryName::ChrSel, bg_index, 0.0, 0.0);
+        let _ = draw_sprite_at(ctx, &mut canvas, &LibraryName::ChrSel, bg_index, 0.0, 0.0);
 
         // 🆕 登录成功后播放动画时,不再绘制UI界面(只保留背景动画)
         if !self.animation_paused {
@@ -231,25 +232,25 @@ impl Scene for LoginScene {
         }
 
         // 绘制所有UI元素(在设计坐标系中)
-        let _ = self.login_dialog.draw(&mut ctx.gfx, canvas);
+        let _ = self.login_dialog.draw(ctx, &mut canvas);
 
         if let Some(dialog) = &self.new_account_dialog {
-            let _ = dialog.draw(&mut ctx.gfx, canvas);
+            let _ = dialog.draw(ctx, &mut canvas);
         }
 
         if let Some(dialog) = &self.change_password_dialog {
-            let _ = dialog.draw(&mut ctx.gfx, canvas);
+            let _ = dialog.draw(ctx, &mut canvas);
         }
 
         if let Some(msg_box) = &self.message_box {
-            let _ = msg_box.draw(&mut ctx.gfx, canvas);
+            let _ = msg_box.draw(ctx, &mut canvas);
         }
 
         // 虚拟键盘在最上层
         if let Some(keyboard) = &self.virtual_keyboard {
-            let _ = keyboard.draw(&mut ctx.gfx, canvas);
+            let _ = keyboard.draw(ctx, &mut canvas);
         }
-
+        canvas.finish(ctx)?;
         Ok(())
     }
 }

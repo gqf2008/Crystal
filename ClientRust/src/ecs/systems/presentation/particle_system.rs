@@ -1,16 +1,4 @@
-// ============================================================================
-// Layer 5: State Update - ParticleSystem
-// Priority: 510
-// ============================================================================
-//
-// **职责**：
-// - 粒子效果更新
-// - 生命期管理
-// - 位置和速度计算
-//
-// C# 参考: ParticleEngine.cs Process() 方法
-// ============================================================================
-
+// 处理特效
 use hecs::World;
 use ggez::GameResult;
 use crate::ecs::GameContext;
@@ -18,10 +6,10 @@ use crate::ecs::systems::{LogicSystem, priority};
 use crate::ecs::components::{Particle, ParticleEmitter, Position};
 
 /// 粒子系统 - 管理粒子效果生命周期
+#[derive(ecs_macros::LogicSystem)]
 pub struct ParticleSystem;
 
 impl LogicSystem for ParticleSystem {
-    
 
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         let current_time = std::time::SystemTime::now()

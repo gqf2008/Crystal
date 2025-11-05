@@ -57,6 +57,7 @@ pub struct CombatResult {
 /// 3. 暴击判定和暴击伤害
 /// 4. 死亡判断和处理
 /// 5. 攻击范围检测
+#[derive(ecs_macros::LogicSystem)]
 pub struct CombatSystem;
 
 impl Default for CombatSystem {

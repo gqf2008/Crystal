@@ -19,6 +19,7 @@ use ggez::GameResult;
 use crate::ecs::{GameContext, systems::{LogicSystem, priority}};
 
 /// 音效系统
+#[derive(ecs_macros::LogicSystem)]
 pub struct SoundSystem {
     /// 听者位置(通常是摄像机/玩家位置)
     listener_pos: (f32, f32),

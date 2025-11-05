@@ -1,6 +1,8 @@
-// ============================================================================
-// ECS Architecture for Crystal Mir2 Client
-// 使用 hecs 轻量级 ECS 库重构游戏逻辑
+//! ECS 模块（ClientRust/src/ecs）
+//!
+//! 更多文档请参见 `ClientRust/src/ecs/README.md`。
+//!
+//! 本模块使用 `hecs` 管理实体与组件，渲染与输入由 `ggez` 负责。
 // ============================================================================
 
 pub mod components;
@@ -28,7 +30,7 @@ pub mod scenes;
 pub mod ime_handler;
 
 pub use resources::*; // 🆕 导出全局资源
-pub use systems::logic::update::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
+pub use systems::logic::physics::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
 pub use systems::*;
 pub use world::GameWorld;
 pub use game_context::{GameContext, InputContext}; // 🆕 导出 GameContext

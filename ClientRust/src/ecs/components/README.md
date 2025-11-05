@@ -1,3 +1,23 @@
+# components/ 目录说明
+
+此目录包含项目中所有 ECS 组件定义。每个子模块按功能划分（player、actor、item、map、render、input 等），并由 `components/mod.rs` 统一 re-export。
+
+目录内重要子模块（示例）：
+
+- `core`：基础组件（Position、Velocity、Sprite、Health 等）。
+- `player`：玩家相关组件（PlayerData、LocalPlayer、RemotePlayer、Inventory 等）。
+- `actor`：怪物与 NPC 的通用组件（MonsterData、NPCData、AIState 等）。
+- `map`：地图与瓦片组件（MapData、MapTile、AnimatedTile、Door 等）。
+- `render`：渲染相关组件（RenderOrder、SpriteBlend、AnimationFrame 等）。
+- `input`：输入事件组件类型（InputEvent 等），与 `GameContext` 的 `frame_input_events` 协同使用。
+- `movement` / `prediction`：移动与插值/预测相关的组件，配合 `MapUpdateSystem` 使用。
+
+使用要点：
+
+- 查看 `components/mod.rs` 了解哪些符号被统一导出（项目中直接用 `crate::ecs::components::*` 的地方会受益）。
+- 在编写系统时，记得在文档里注明依赖的组件集合（例如 MovementSystem 需要 `Position` + `Velocity` + `Movement`）。
+
+建议：为每个子模块添加 `modname/README.md`（可选），列出关键组件的字段与语义，方便美术/服务端/客户端开发者对接。
 # ecs/components - ECS组件定义
 
 **文件数**: 17  
@@ -68,34 +88,42 @@ components/
 | **Name** | 显示名称 | 显示实体必需 |
 | **LocalPlayer** | 本地玩家标记 | 仅本地玩家 |
 
-### 0. 全局事件组件 (events.rs) ⭐ 重要
+### 0. 事件管理 ⭐ 重要
 
-**GlobalEvents** - 全局事件总线（单例组件）：
+**事件管理由 GameContext 统一处理**:
+
+不再使用 GlobalEvents 单例组件，所有事件管理移至 `GameContext`:
 
 | 字段 | 类型 | 用途 |
 |------|------|------|
-| **input_events** | `Vec<InputEvent>` | 键盘、鼠标、IME事件 |
-| **net_events** | `CategorizedEvents` | 分类网络事件（11个类别） |
-| **frame_event_count** | `usize` | 当前帧事件计数 |
-| **total_event_count** | `u64` | 总事件计数 |
-| **enable_logging** | `bool` | 是否启用事件日志 |
+| **input_events** | `Vec<InputEvent>` | 键盘、鼠标输入事件 |
+| **game_events** | `Vec<GameEvent>` | 游戏逻辑事件 |
+| **network_packets** | `VecDeque<Packet>` | 网络数据包队列 |
 
 **使用方式**:
 ```rust
-// 读取事件（场景/系统）
-let events = world.global_events();
-for event in &events.input_events {
-    // 处理事件
+// 在系统中读取事件
+impl LogicSystem for MySystem {
+    fn update(&mut self, ctx: &mut GameContext, dt: f32) -> GameResult {
+        // 读取输入事件
+        for event in &ctx.input_events {
+            // 处理输入
+        }
+        
+        // 读取游戏事件
+        for event in &ctx.game_events {
+            // 处理游戏逻辑事件
+        }
+        
+        Ok(())
+    }
 }
-
-// 清理事件（GameState）
-world.global_events_mut().clear_frame_events();
 ```
 
-**生命周期**: 由 `GameState` 管理
-- 收集阶段：`collect_network_events()`, ggez 事件回调
-- 处理阶段：`Scene::update()`, 各个 ECS 系统
-- 清理阶段：`clear_global_events()` 每帧结束时调用
+**生命周期**: 由 `GameContext` 自动管理
+- 收集阶段：ggez 事件回调添加到 `input_events`
+- 处理阶段：系统从 GameContext 读取事件
+- 清理阶段：`clear_frame_events()` 在每帧结束时自动调用
 
 ### 2. 移动组件 (movement.rs)
 

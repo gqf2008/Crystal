@@ -94,11 +94,8 @@ impl EventHandler<GameContext> for GameState {
     }
 
     fn draw(&mut self, ctx: &mut GameContext) -> GameResult {
-        let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
-        // 绘制当前场景
-        self.current_scene.draw(ctx, &mut canvas)?;
-        canvas.finish(ctx)?;
-
+        let (ctx, world) = ctx.split_gfx_world();
+        self.current_scene.draw(ctx, &world)?;
         Ok(())
     }
 

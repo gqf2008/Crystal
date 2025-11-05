@@ -22,6 +22,7 @@ use crate::ecs::{GameContext, components::{Player, Position, movement::{Movement
 use crate::ecs::systems::{LogicSystem, priority};
 
 /// 移动系统 - 实现格子对齐的移动逻辑
+#[derive(ecs_macros::LogicSystem)]
 pub struct MovementSystem;
 
 /// 格子尺寸常量 (与C#保持一致)

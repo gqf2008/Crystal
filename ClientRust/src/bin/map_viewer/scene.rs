@@ -12,24 +12,24 @@
 //
 // ============================================================================
 
-use ggez::graphics::Canvas;
+use ggez::graphics::{Canvas, GraphicsContext};
 use ggez::GameResult;
 use hecs::{Entity, World};
 use mir2_client::ecs::components::movement::{MovementVelocity, Path};
 use mir2_client::ecs::components::{
-    Camera, CameraMode, Draggable, PlayerInput, Position, RenderConfig, TimeTracker,
-    VisibleArea,
+    Camera, CameraMode, Draggable, PlayerInput, Position, RenderConfig, TimeTracker, VisibleArea,
 };
 use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance};
-use mir2_client::ecs::render::{CharacterRenderSystem, DebugSystem, MapRenderSystem};
+use mir2_client::ecs::debug::DebugSystem;
+use mir2_client::ecs::rendering::{SpriteRenderSystem, MapRenderSystem};
 use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::logic::map_load_system::MapManager;
 use mir2_client::ecs::systems::logic::{
-    AttackSystem, CameraFollowSystem, CollisionSystem, MapLoadSystem, MapUpdateSystem, 
-    PathfindingSystem,
+    CollisionSystem, MapLoadSystem, MapUpdateSystem, PathfindingSystem,
 };
-use mir2_client::ecs::systems::{priority,MovementSystem, SystemScheduler};
-use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem};
+use mir2_client::ecs::systems::presentation::{AnimationSystem, CameraFollowSystem};
+use mir2_client::ecs::systems::{priority, MovementSystem, SystemScheduler};
+use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem, world};
 use mir2_client::graphics::libraries::initialize_all_libraries;
 use mir2_shared::enums::{MirClass, MirGender};
 use std::time::Instant;
@@ -140,46 +140,19 @@ impl MapViewerScene {
 
         tracing::info!("🎯 初始化地图查看器系统 (V1)...");
 
-        // 添加逻辑系统 (V1)
-        // 清晰的单向数据流: Input → State → Collision → Movement → Animation
         scheduler
-            // 1. PlayerControlSystem: 输入处理
-            //    - 检测鼠标输入,设置 PlayerInput
-            //    - 添加 AttackState 组件 (右键攻击)
-            .add_system(PlayerControlSystem::new(),priority::PLAYER_CONTROL)
-            
-            // 2. PathfindingSystem: 寻路系统
-            //    - 处理双击寻路，计算路径
-            //    - 根据 MovementMode 决定是否使用寻路
-            .add_system(PathfindingSystem::new(),priority::PATHFINDING)
-            
-            // 3. AttackSystem: 攻击动画管理
-            //    - 检测攻击动画完成
-            //    - 移除 AttackState 组件,恢复 Stand
-            .add_system(AttackSystem::new(),priority::ATTACK)
-            
-            // 4. CollisionSystem: 碰撞检测
-            //    - 检查地图障碍物
-            //    - velocity=0 停止位移，但不影响动画
-            .add_system(CollisionSystem::new(),priority::COLLISION)
-            
-            // 5. MovementSystem: 位置更新
-            //    - 根据velocity更新position
-            //    - 只管位移，不管动画状态
-            .add_system(MovementSystem,priority::MOVEMENT)
-            
-            // 注意: CharacterAnimationSystem 已移除 (未使用)
-            // 渲染系统直接使用 PlayerAction.frame_interval()
-            
-            // 注意: TileAnimationSystem 已移至 MapRenderSystem.update()
-            // 地图瓦片动画属于地图渲染职责,不是独立的动画系统
-            .add_system(MapUpdateSystem::new(),500) // 地图更新系统 (M键切换地图)
-            .add_system(MapLoadSystem,510) // 地图加载系统 → 从 GameContext 读取 MapChanged 事件
-            .add_system(CameraSystem::new(),priority::CAMERA)
-            .add_system(CameraFollowSystem,priority::CAMERA_FOLLOW) // 相机跟随
-            .add_system(MapRenderSystem::new(),priority::ANIMATION+5) // 混合系统: update()更新瓦片动画, draw()渲染地图
-            .add_system(CharacterRenderSystem,priority::ENTITY_RENDER) // 角色渲染系统
-            .add_system(DebugSystem,priority::DEBUG_RENDER); // 调试系统
+            .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
+            .add_system(PathfindingSystem::new(), priority::PATHFINDING)
+            .add_system(AnimationSystem::new(), priority::ATTACK)
+            .add_system(CollisionSystem::new(), priority::COLLISION)
+            .add_system(MovementSystem, priority::MOVEMENT)
+            .add_system(MapUpdateSystem::new(), 500) // 地图更新系统 (M键切换地图)
+            .add_system(MapLoadSystem, 510) // 地图加载系统 → 从 GameContext 读取 MapChanged 事件
+            .add_system(CameraSystem::new(), priority::CAMERA)
+            .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW) // 相机跟随
+            .add_system(MapRenderSystem::new(), priority::MAP_RENDER) // 混合系统: update()更新瓦片动画, draw()渲染地图
+            .add_system(SpriteRenderSystem, priority::SPRITE_RENDER) // 角色渲染系统
+            .add_system(DebugSystem, priority::DEBUG); // 调试系统
 
         tracing::info!("✅ 地图查看器 V1 系统初始化完成！");
         scheduler
@@ -200,7 +173,7 @@ impl MapViewerScene {
         // ✅ 相机初始位置应该对准玩家，这样缩放时才不会偏移
         world.spawn((
             Position {
-                x: player_world_x,  // 相机位置 = 玩家位置
+                x: player_world_x, // 相机位置 = 玩家位置
                 y: player_world_y,
             },
             Camera {
@@ -301,9 +274,9 @@ impl MapViewerScene {
             PlayerAppearance {
                 class: MirClass::Warrior,
                 gender: MirGender::Male,
-                hair: 1,  // 使用索引1的头发 (0可能无效)
-                weapon: 1, // 武器索引1 (测试武器渲染)
-                armour: 1, // 测试armour=1 (0可能是裸体/透明)
+                hair: 1,          // 使用索引1的头发 (0可能无效)
+                weapon: 1,        // 武器索引1 (测试武器渲染)
+                armour: 1,        // 测试armour=1 (0可能是裸体/透明)
                 weapon_effect: 0, // 0 = 无特效
                 wing_effect: 0,
             },
@@ -332,7 +305,7 @@ impl Scene for MapViewerScene {
 
     fn update(&mut self, ctx: &mut GameContext) -> GameResult<Option<SceneType>> {
         // tracing::info!("🔄 MapViewerScene::update() called");
-        
+
         // 首次更新时初始化 World
         if !self.initialized {
             tracing::info!("🔧 Initializing World...");
@@ -353,7 +326,7 @@ impl Scene for MapViewerScene {
             }
         }
 
-      //  tracing::info!("🎮 Running system scheduler update...");
+        //  tracing::info!("🎮 Running system scheduler update...");
         let dt = ctx.time.delta().as_secs_f32();
         self.system_scheduler.update(ctx, dt)?;
 
@@ -361,11 +334,10 @@ impl Scene for MapViewerScene {
         Ok(None)
     }
 
-    fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult {
-      //  tracing::info!("🎨 MapViewerScene::draw() called");
-         let (ctx, world) = ctx.split_gfx_world();
-        self.system_scheduler.draw(ctx, canvas, world)?;
-    //    tracing::info!("✅ MapViewerScene::draw() completed");
+    fn draw(&mut self, ctx: &mut GraphicsContext, world: &hecs::World) -> GameResult {
+       let mut canvas = Canvas::from_frame(ctx, ggez::graphics::Color::from_rgb(0, 0, 0));
+        self.system_scheduler.draw(ctx, &mut canvas, world)?;
+       canvas.finish(ctx)?;
         Ok(())
     }
 }

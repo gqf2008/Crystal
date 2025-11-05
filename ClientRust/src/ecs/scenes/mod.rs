@@ -14,7 +14,7 @@ pub mod ui;  // 共享UI组件（Button, TextInput等）
 use std::sync::Arc;
 use crate::ecs::GameContext;
 use crate::network::NetContext;
-use ggez::graphics::Canvas;
+use ggez::graphics::{Canvas, GraphicsContext};
 use ggez::input::keyboard::KeyInput;
 use ggez::{Context, GameResult};
 use hecs::World;
@@ -61,7 +61,6 @@ pub trait Scene {
     /// 
     /// # 参数
     /// - `ctx`: ggez 上下文（用于绘制）
-    /// - `canvas`: 绘制画布
     /// - `world`: ECS World（只读访问）
-    fn draw(&mut self, ctx: &mut GameContext, canvas: &mut Canvas) -> GameResult;
+    fn draw(&mut self, ctx: &mut GraphicsContext, world: &hecs::World) -> GameResult;
 }

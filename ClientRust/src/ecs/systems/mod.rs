@@ -1,183 +1,129 @@
-// ============================================================================
-// ECS Systems - 三类系统架构 (System / DrawSystem / HybridSystem)
-// ============================================================================
-//
-// ## 系统分类
-//
-// ### 1. System - 纯逻辑系统（只有 update）
-//    实现 `System` trait，只需提供 `update()` 方法。
-//    用于 AI、物理、网络、战斗等纯逻辑处理。
-//
-//    示例：MovementSystem, AISystem, CombatSystem
-//
-// ### 2. DrawSystem - 纯渲染系统（只有 draw）
-//    实现 `DrawSystem` trait，只需提供 `draw()` 方法。
-//    用于地图渲染、UI渲染等不需要逻辑更新的渲染任务。
-//
-//    示例：MapRenderSystem, UIRenderSystem
-//
-// ### 3. HybridSystem - 混合系统（update + draw）
-//    实现 `HybridSystem` trait，同时提供 `update()` 和 `draw()` 方法。
-//    用于粒子系统、调试系统等需要逻辑更新和渲染的系统。
-//
-//    示例：ParticleSystem, DebugSystem
-//
-// ## 执行流程
-//
-// 每帧执行顺序：
-// 1. **Update 阶段**：按优先级执行所有 System 和 HybridSystem 的 update()
-// 2. **Draw 阶段**：按优先级执行所有 DrawSystem 和 HybridSystem 的 draw()
-//
-// ## 系统优先级设计（六阶段架构）
-//
-// ### Update 阶段 (50-699)
-//
-// **阶段 1: 输入与网络 (50-199)**
-//   接收网络数据、处理输入、玩家控制、事件分发
-//   - NetworkRecvSystem(50) → InputSystem(100) → PlayerControlSystem(110) → GameEventSystem(120)
-//
-// **阶段 2: AI 与决策 (200-299)**
-//   AI 行为逻辑、对话处理
-//   - MonsterAISystem(200) → NpcAISystem(210) → DialogueSystem(220)
-//
-// **阶段 3: 战斗与技能 (300-399)**
-//   技能释放、战斗计算
-//   - SkillSystem(300) → CombatSystem(310)
-//
-// **阶段 4: 移动与物理 (400-499)**
-//   实体移动、碰撞检测、相机跟随（逻辑层）
-//   - MovementSystem(400) → CollisionSystem(410) → CameraFollowSystem(420)
-//
-// **阶段 5: 状态更新 (500-599)**
-//   动画状态、粒子更新、音效触发、相机矩阵计算（准备渲染）
-//   - AnimationSystem(500) → ParticleSystem(510, Hybrid) → SoundSystem(520) → CameraSystem(530)
-//
-// **阶段 6: 事件清理 (900)**
-//   每帧结束清理 GameContext 中的临时事件，防止事件污染
-//   - 由 GameState 在帧结束时自动处理
-//
-// ### Draw 阶段 (1000-1999)
-//
-// **阶段 7: 渲染 (1000-1999)**
-//   按层级顺序渲染
-//   - MapRenderSystem(1000) → SpriteRenderSystem(1010) → EffectRenderSystem(1020)
-//     → UIRenderSystem(1030) → DebugSystem(1100, Hybrid)
-//
-// ## 数据流
-// 网络/输入 → AI决策 → 战斗技能 → 移动物理 → 状态更新 → 事件清理 → 渲染输出
-//
-// ## 关键设计
-// 1. **GameContext** 提供零拷贝的输入/网络事件访问
-// 2. **PlayerControlSystem** 从 GameContext 读取输入和网络数据，更新玩家状态（包含位置修正逻辑）
-// 3. **GameEventSystem** 统一管理系统间事件通信
-// 4. **事件清理** 在每帧最后由 GameState 清理临时事件，防止下一帧重复处理
-// 5. **CameraFollowSystem(420)** 在移动阶段更新跟随逻辑
-// 6. **CameraSystem(530)** 在状态更新阶段计算最终矩阵
-// 7. **ParticleSystem(510)** 和 **DebugSystem(1100)** 使用 HybridSystem 同时处理逻辑和渲染
-//
-// ============================================================================
+//! # 系统模块 (ecs/systems)
+//!
+//! 本模块包含游戏的所有系统（Systems），按分层架构组织。
+//!
+//! ## 快速导航
+//!
+//! - **完整架构说明**：请查看本模块底部的详细注释和 `README.md`
+//! - **输入系统**：[`input`] 模块
+//! - **逻辑系统**：[`logic`] 模块（包含 physics, combat, decision）
+//! - **表现系统**：[`presentation`] 模块
+//! - **渲染系统**：[`rendering`] 模块
+//! - **优先级常量**：[`priority`] 模块
+//!
+//! ## 三种系统类型
+//!
+//! 1. **System** - 纯逻辑系统（实现 `update()`）
+//! 2. **DrawSystem** - 纯渲染系统（实现 `draw()`）
+//! 3. **HybridSystem** - 混合系统（同时实现 `update()` 和 `draw()`）
+//!
+//! ## 使用示例
+//!
+//! ```rust
+//! use crate::ecs::systems::{System, priority};
+//!
+//! struct MySystem;
+//!
+//! impl System for MySystem {
+//!     fn priority(&self) -> u32 { priority::MOVEMENT }
+//!     
+//!     fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
+//!         // 处理逻辑
+//!         Ok(())
+//!     }
+//! }
+//! ```
 
-// ============================================================================
-//
-// # 热血传奇 ECS 系统职责说明表
-//
-// | 阶段 | 系统名称 | 类型 | 优先级 | 职责说明 |
-// |------|----------|------|--------|----------|
-// | **第一阶段：输入和网络** | GameContext | - | - | [Input] 通过 GameContext 提供零拷贝的输入/网络事件访问 |
-// | | PlayerControlSystem | System | 110 | [Update] 从 GameContext 读取输入和网络数据，更新玩家状态，包含位置修正算法 |
-// | | GameEventSystem | System | 120 | [Update] 管理游戏事件分发（任务、系统、UI事件），协调系统间通信 |
-// | **第二阶段：AI和决策** | MonsterAISystem | System | 200 | 怪物AI逻辑（巡逻、追击、攻击决策、状态切换） |
-// | | NpcAISystem | System | 210 | NPC行为逻辑（对话触发、任务发放、商店交互） |
-// | | DialogueSystem | System | 220 | 处理对话树、选项分支、对话进度管理 |
-// | **第三阶段：战斗和技能** | SkillSystem | System | 300 | 技能释放逻辑、冷却计算、技能效果应用 |
-// | | CombatSystem | System | 310 | 战斗伤害计算、命中判定、暴击处理、死亡判断 |
-// | **第四阶段：移动和物理** | MovementSystem | System | 400 | 实体移动更新、路径追踪、速度方向计算 |
-// | | CollisionSystem | System | 410 | 碰撞检测与响应、障碍物判断、实体间碰撞 |
-// | | CameraFollowSystem | System | 420 | 相机跟随逻辑、目标追踪、平滑移动、边界限制 |
-// | **第五阶段：状态更新** | AnimationSystem | System | 500 | 动画状态机更新、帧切换、动画混合 |
-// | | ParticleSystem | **Hybrid** | 510 | **[Update]** 粒子生命期管理、位置速度计算<br>**[Draw]** 粒子效果渲染 |
-// | | SoundSystem | System | 520 | 音效触发管理、3D音效位置计算、音量控制 |
-// | | CameraSystem | System | 530 | 相机控制（模式切换、拖拽、缩放、震动）- **注意**: 坐标变换由渲染系统执行 |
-// | **第六阶段：事件清理** | ~~EventCleanupSystem~~ | ~~System~~ | ~~900~~ | ⚠️ **已废弃** - 由 `GameState` 在帧结束时自动清理事件 |
-// | **第七阶段：渲染** | MapRenderSystem | DrawSystem | 1000 | 地图图层渲染、地形绘制、遮罩处理 |
-// | | EntityRenderSystem | DrawSystem | 1020 | 实体渲染（玩家/怪物）- 查询 `(Position, Sprite)` + 深度排序 + 视锥裁剪 |
-// | | EffectRenderSystem | DrawSystem | 1020 | 特效渲染（技能特效、光影、后处理） |
-// | | UIRenderSystem | DrawSystem | 1030 | UI界面渲染、HUD、文字显示 |
-// | | DebugSystem | **Hybrid** | 1100 | **[Update]** 性能统计收集、数据采样<br>**[Draw]** 调试信息显示、开发工具 |
-//
-// ============================================================================
-//
-// ## 系统类型说明
-//
-// - **System**: 纯逻辑系统，只实现 `update()` 方法，用于游戏逻辑处理
-// - **DrawSystem**: 纯渲染系统，只实现 `draw()` 方法，用于图形绘制
-// - **Hybrid**: 混合系统，同时实现 `update()` 和 `draw()` 方法，用于需要状态更新和渲染的系统
-//
-// ## 系统依赖关系说明
-//
-// 1. **数据流动**：
-//    GameContext(网络/输入) → 控制响应 → 事件触发 → AI决策 → 战斗计算
-//    → 移动物理 → 状态更新 → 渲染显示 → GameState(事件清理)
-//
-// 2. **关键依赖**：
-//    - PlayerControlSystem 依赖 GameContext 的输入/网络事件数据
-//    - CameraFollowSystem 依赖 MovementSystem 的位置更新
-//    - CameraSystem 依赖 CameraFollowSystem 的跟随逻辑
-//    - 所有战斗相关系统依赖 GameEventSystem 的事件通知
-//    - HybridSystem 的 update 在逻辑阶段执行，draw 在渲染阶段执行
-//    - 事件清理由 GameState 在帧结束时自动执行
-//    - **坐标变换**：由各渲染系统独立执行（读取 Camera 组件），非统一矩阵
-//
-// 3. **渲染顺序**：地图 → 实体 → 特效 → UI → 调试信息（从底层到顶层）
-//
-// ============================================================================
 // 系统优先级常量定义
 // ============================================================================
 /// 系统优先级常量，用于控制系统执行顺序（数字越小越优先）
+///
+/// ## 分层说明
+///
+/// - **0-99**: 基础设施（资源、场景、保存）
+/// - **100-199**: 输入与网络
+/// - **200-599**: 游戏逻辑（AI、战斗、物理）
+/// - **600-899**: 表现层（动画、音效、相机）
+/// - **900-1999**: 渲染层（地图、实体、特效、UI）
+/// - **9000+**: 调试工具
 pub mod priority {
-    // 阶段 1: 输入与网络 (50-199)
-    // pub const NETWORK_RECV: u32 = 50;  // ⚠️ 已废弃 - 由 GameContext 实现
+    // 第0層：基礎設施 (0-99)
+    pub const RESOURCE_PRELOAD: u32 = 10; // 资源预加载系统
+    pub const SCENE: u32 = 20; // 场景管理系统
+    pub const SAVE: u32 = 30; // 保存系统
+
+    // 第1層：輸入網絡 (100-199)
     pub const INPUT: u32 = 100;
-    pub const PLAYER_CONTROL: u32 = 110;
-    pub const GAME_EVENT: u32 = 120;
-
-    // 阶段 2: AI 与决策 (200-299)
+    pub const NETWORK: u32 = 110; // 网络系统
+    pub const PLAYER_CONTROL: u32 = 120;
+    pub const GAME_EVENT: u32 = 130;
+    // 第2层：游戏逻辑(200-599)
+    // ├── AI 系统: MonsterAISystem → NPCInteractionSystem → PetAISystem
+    // ├── 社交系统: GuildSystem → PartySystem → FriendSystem
+    // ├── 传奇特色: PKSystem → DungeonSystem → BossSystem → SiegeWarSystem
+    // ├── 任务系统: QuestSystem → DailySystem → AchievementSystem
+    // ├── 职业系统: ClassSystem → TalentSystem → SummonSystem
+    // ├── 经济系统: InventorySystem → EquipmentSystem → AuctionSystem → MarketSystem
+    // ├── 战斗系统: CombatSystem → SkillSystem → BuffDebuffSystem → RegenSystem
+    // ├── 移动&自动化系统: MovementSystem → CollisionSystem → TeleportSystem → AutoBattleSystem → AutoPathfindingSystem
     pub const MONSTER_AI: u32 = 200;
-    pub const NPC_AI: u32 = 210;
-    pub const DIALOGUE: u32 = 220;
+    pub const NPC_INTERACTION: u32 = 210;
+    pub const PET_AI: u32 = 230;
+    pub const COMBAT: u32 = 300;
+    pub const SKILL: u32 = 310;
+    pub const BUFF_DEBUFF: u32 = 320;
+    pub const REGEN: u32 = 330;
+    pub const ATTACK: u32 = 340;
+    pub const MOVEMENT: u32 = 500;
+    pub const COLLISION: u32 = 510; // 碰撞检测在移动之后，检查并修正位置
+    pub const PATHFINDING: u32 = 520; // 寻路系统 (在移动之前)
 
-    // 阶段 3: 战斗与技能 (300-399)
-    pub const SKILL: u32 = 300;
-    pub const COMBAT: u32 = 310;
-    pub const PATHFINDING: u32 = 350; // 寻路系统 (在移动之前)
-    pub const PLAYER_STATE: u32 = 380; // 玩家状态机 (在寻路和移动之间)
-    pub const ATTACK: u32 = 390; // 攻击动画管理 (在移动之前检测动画完成)
+    // 第3层：表现层(600-899)
+    // ├── 动画特效: AnimationSystem → ParticleSystem → WeatherSystem
+    // ├── 音效系统: SoundSystem → VoiceChatSystem
+    // ├── 摄像机系统: CameraFollowSystem → CameraSystem
+    // └── UI 系统: UISystem → HUDSystem → MinimapSystem → DialogSystem
+    pub const ANIMATION: u32 = 600;
+    pub const PARTICLE: u32 = 610;
+    pub const WEATHER: u32 = 620;
+    pub const SOUND: u32 = 630;
+    pub const VOICE_CHAT: u32 = 640;
+    pub const CAMERA_FOLLOW: u32 = 700;
+    pub const CAMERA: u32 = 710;
+    pub const UI: u32 = 800;
+    pub const HUD: u32 = 810;
+    pub const MINIMAP: u32 = 820;
+    pub const DIALOG: u32 = 830;
 
-    // 阶段 4: 移动与物理 (400-499)
-    pub const MOVEMENT: u32 = 400;
-    pub const COLLISION: u32 = 410; // 碰撞检测在移动之后，检查并修正位置
-    pub const CAMERA_FOLLOW: u32 = 420;
-
-    // 阶段 5: 状态更新 (500-599)
-    pub const ANIMATION: u32 = 500;
-    pub const PARTICLE: u32 = 510;
-    pub const SOUND: u32 = 520;
-    pub const CAMERA: u32 = 530;
-
-    // 阶段 6: 网络同步与事件清理 (600-699)
-    // pub const EVENT_CLEANUP: u32 = 900;  // ⚠️ 已废弃 - 由 GameState::clear_global_events() 实现
-
-    // 阶段 7: 渲染 (1000-1999)
-    pub const MAP_RENDER: u32 = 1000;
-    pub const ENTITY_RENDER: u32 = 1020; // EntityRenderSystem: 实体渲染（玩家/怪物）
-    pub const EFFECT_RENDER: u32 = 1020;
-    pub const UI_RENDER: u32 = 1030;
-    pub const DEBUG_RENDER: u32 = 1100;
+    // ↓
+    // 第4层：渲染层(900-1999)
+    // ├── 基础渲染: MapRenderSystem → SpriteRenderSystem → EffectRenderSystem → UIRenderSystem
+    // └── 高级渲染: LightingRenderSystem → PostProcessSystem → TextRenderSystem
+    pub const MAP_RENDER: u32 = 900;
+    pub const SPRITE_RENDER: u32 = 910;
+    pub const ENTITY_RENDER: u32 = 920; // EntityRenderSystem: 实体渲染（玩家/怪物）
+    pub const EFFECT_RENDER: u32 = 920;
+    pub const UI_RENDER: u32 = 930;
+    pub const LIGHTING_RENDER: u32 = 940;
+    pub const POST_PROCESS: u32 = 1000;
+    pub const TEXT_RENDER: u32 = 1100;
+    // ↓
+    // 第5层：调试工具(9000+)
+    // ├── 作弊系统 → 个人资料系统 → 调试系统 → 记录系统
+    pub const CHEAT: u32 = 9000;
+    pub const PROFILE: u32 = 9100;
+    pub const DEBUG: u32 = 9200;
+    pub const LOGGING: u32 = 9300;
+    // ↓
+    // 帧结束
 }
 
-// ✅ update/render 架构（推荐）
+pub mod debug;
+pub mod infra;
+pub mod input;
 pub mod logic;
-pub mod render;
+pub mod presentation;
+pub mod rendering;
 
 use ggez::graphics::{Canvas, GraphicsContext};
 use ggez::GameResult;
@@ -188,30 +134,14 @@ pub use ecs_macros::{LogicSystem, RenderSystem};
 // 重新导出各层系统（保持向后兼容）
 // 注意：新代码应使用 update:: 和 render:: 模块
 
-// Layer 1 (Input) - 向后兼容导出
-pub use logic::input::PlayerControlSystem;
-
-// Layer 2 (Decision) - 向后兼容导出
-pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
-
-// Layer 3 (Combat & Skills) - 向后兼容导出
-pub use logic::combat_skill::{
-    CombatResult, CombatSystem as CombatSystemV2, DamageType, SkillSystem,
-};
-
-// Layer 4 (Physics & Movement) - 向后兼容导出
-pub use logic::physics::{CollisionSystem, MovementSystem, PathfindingSystem};
-
-// Layer 5 (State Update) - 向后兼容导出
-pub use logic::update::{
-    // CharacterAnimationSystem,  // ❌ 已删除 - 未使用
-    CameraSystem,
-    HealthRegenSystem,
-    ParticleSystem,
-    SoundSystem,
-};
-
 use crate::ecs::GameContext;
+pub use input::PlayerControlSystem;
+pub use logic::combat::{
+    CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem,
+};
+pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
+pub use logic::physics::{CollisionSystem, MovementSystem, PathfindingSystem};
+pub use presentation::{CameraFollowSystem, CameraSystem};
 
 // ============================================================================
 // 系统 Trait 设计
@@ -436,7 +366,6 @@ macro_rules! logic_system {
         )+
     };
 }
-
 
 /// 为混合系统批量实现 IntoSystemKind
 ///

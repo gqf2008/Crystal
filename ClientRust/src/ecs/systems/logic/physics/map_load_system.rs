@@ -67,6 +67,7 @@ impl MapManager {
 /// 地图加载系统
 /// 
 /// **优先级**: 510 (STATE_UPDATE 层)
+#[derive(ecs_macros::LogicSystem)]
 pub struct MapLoadSystem;
 
 impl MapLoadSystem {

@@ -16,7 +16,7 @@
 //! └─ 输入事件缓冲 (frame_input_events)
 //! ```
 
-use crate::ecs::components::InputEvent;
+use crate::ecs::components::{input, InputEvent};
 use crate::ecs::WorldExt;
 use crate::{
     network::{builder::CategorizedEvents, NetContext, NetworkBuilder},
@@ -24,7 +24,6 @@ use crate::{
 };
 use ggez::conf;
 use ggez::graphics::FontData;
-use ggez::input::gamepad::gilrs::ev;
 use ggez::{
     conf::Conf,
     context::{ContextFields, Has, HasMut},
@@ -49,7 +48,7 @@ pub struct GameContextBuilder {
     pub(crate) memory_zip_files: Vec<Cow<'static, [u8]>>,
     pub(crate) load_conf_file: bool,
     pub(crate) font_paths: Vec<(path::PathBuf, String)>,
-    pub(crate)  settings: ClientSettings,
+    pub(crate) settings: ClientSettings,
 }
 
 impl GameContextBuilder {
@@ -174,9 +173,7 @@ impl GameContextBuilder {
     }
 
     /// Build a `Context`
-    pub fn build(
-        self,
-    ) -> ggez::GameResult<(GameContext, ggez::winit::event_loop::EventLoop<()>)> {
+    pub fn build(self) -> ggez::GameResult<(GameContext, ggez::winit::event_loop::EventLoop<()>)> {
         let fs = Filesystem::new(
             self.game_id.as_ref(),
             self.author.as_ref(),
@@ -227,9 +224,7 @@ pub struct GameContext {
     // ===== ggez 核心组件 =====
     pub fs: Filesystem,
     pub gfx: GraphicsContext,
-    pub keyboard: KeyboardContext,
-    pub mouse: MouseContext,
-    pub gamepad: GamepadContext,
+    pub input: InputContext,
     pub time: TimeContext,
     pub fields: ContextFields,
 
@@ -239,8 +234,6 @@ pub struct GameContext {
     pub world: World,
     /// 网络事件（本帧收集的）
     pub net_events: CategorizedEvents,
-    /// 帧临时输入事件缓冲（从 EventHandler 收集）
-    pub frame_input_events: Vec<InputEvent>,
 }
 
 impl GameContext {
@@ -269,54 +262,28 @@ impl GameContext {
         world.spawn_settings(settings.clone());
 
         // NetContext 的实体 ID 已经在 spawn 时固定为 NETWORK_ENTITY
-
+        let input = InputContext::new(
+            KeyboardContext::new(),
+            MouseContext::new(),
+            GamepadContext::new()?,
+        );
         let ctx = Self {
             fs,
             gfx: graphics_context,
             time: timer_context,
-            keyboard: KeyboardContext::new(),
-            mouse: MouseContext::new(),
-            gamepad: GamepadContext::new()?,
+            input,
             fields: ContextFields {
                 conf,
                 continuing: true,
                 quit_requested: false,
             },
             world,
-            frame_input_events: Vec::new(),
+
             net_events: CategorizedEvents::default(),
             settings,
         };
 
         Ok((ctx, event_loop))
-    }
-
-    /// ⚠️ **危险方法** - 使用 transmute 转换为 ggez::Context
-    ///
-    /// **问题**：
-    /// - GameContext 和 ggez::Context 的内存布局不同
-    /// - transmute 假设两个类型完全相同，这是错误的
-    /// - 某些 ggez API 可能会导致内存访问违规 (STATUS_ACCESS_VIOLATION)
-    ///
-    /// **✅ 推荐做法**：
-    /// - 对于纹理创建：使用 `&mut ctx.gfx` (GraphicsContext)
-    /// - 对于窗口控制：使用 `ctx.gfx.window()` 
-    /// - 对于文件系统：使用 `&ctx.fs`
-    ///
-    /// **❌ 不要用于**：
-    /// - 图库的 `get_or_create_texture()` - 会崩溃！改用 `&mut ctx.gfx`
-    /// - 任何可能访问 Context 内部字段的操作
-    ///
-    /// **仅用于**：
-    /// - IME 输入框控制（window.set_ime_allowed）
-    /// - 少数需要完整 Context 的 UI 组件
-    ///
-    /// 用于需要原始 ggez Context 的场景（如 IME 控制）
-    pub fn as_ggez_context(&mut self) -> &mut ggez::Context {
-        // ⚠️ 这是一个 HACK：假设 GameContext 的前几个字段与 ggez::Context 兼容
-        // 这只对简单的窗口操作（如 set_ime_allowed）有效
-        // 对于复杂操作（如创建纹理）会导致崩溃！
-        unsafe { std::mem::transmute(self) }
     }
 
     /// 安全地分离借用 ggez 组件和 World
@@ -415,12 +382,12 @@ impl GameContext {
 
     /// 清空本帧的输入事件
     pub fn clear_frame_events(&mut self) {
-        self.frame_input_events.clear();
+        self.input.events.clear();
     }
 
     /// 添加输入事件到帧缓冲
     pub fn push_input_event(&mut self, event: InputEvent) {
-        self.frame_input_events.push(event);
+        self.input.events.push(event);
     }
 }
 
@@ -446,21 +413,21 @@ impl Has<GraphicsContext> for GameContext {
 impl Has<KeyboardContext> for GameContext {
     #[inline]
     fn retrieve(&self) -> &KeyboardContext {
-        &self.keyboard
+        &self.input.keyboard
     }
 }
 
 impl Has<MouseContext> for GameContext {
     #[inline]
     fn retrieve(&self) -> &MouseContext {
-        &self.mouse
+        &self.input.mouse
     }
 }
 
 impl Has<GamepadContext> for GameContext {
     #[inline]
     fn retrieve(&self) -> &GamepadContext {
-        &self.gamepad
+        &self.input.gamepad
     }
 }
 
@@ -504,21 +471,21 @@ impl HasMut<TimeContext> for GameContext {
 impl HasMut<KeyboardContext> for GameContext {
     #[inline]
     fn retrieve_mut(&mut self) -> &mut KeyboardContext {
-        &mut self.keyboard
+        &mut self.input.keyboard
     }
 }
 
 impl HasMut<MouseContext> for GameContext {
     #[inline]
     fn retrieve_mut(&mut self) -> &mut MouseContext {
-        &mut self.mouse
+        &mut self.input.mouse
     }
 }
 
 impl HasMut<GamepadContext> for GameContext {
     #[inline]
     fn retrieve_mut(&mut self) -> &mut GamepadContext {
-        &mut self.gamepad
+        &mut self.input.gamepad
     }
 }
 
@@ -590,8 +557,8 @@ impl GameContext {
     }
 
     /// 获取输入上下文辅助器
-    pub fn input(&self) -> InputContext<'_> {
-        InputContext::new(self)
+    pub fn input(&self) -> &InputContext {
+        &self.input
     }
 
     // ===== 网络事件访问 =====
@@ -826,7 +793,7 @@ impl GameContext {
 
     /// 获取本帧的输入事件列表
     pub fn input_events(&self) -> &[InputEvent] {
-        &self.frame_input_events
+        &self.input.events
     }
 
     // ===== 工具方法 =====
@@ -859,35 +826,40 @@ impl GameContext {
 /// 输入上下文辅助器 - 提供便捷的输入查询方法
 ///
 /// 封装常用的输入操作，避免直接调用 ggez API
-pub struct InputContext<'a> {
-    ctx: &'a GameContext,
+pub struct InputContext {
+    pub keyboard: KeyboardContext,
+    pub mouse: MouseContext,
+    pub gamepad: GamepadContext,
+    pub events: Vec<InputEvent>,
 }
 
-impl<'a> InputContext<'a> {
-    pub fn new(ctx: &'a GameContext) -> Self {
-        Self { ctx }
+impl InputContext {
+    fn new(keyboard: KeyboardContext, mouse: MouseContext, gamepad: GamepadContext) -> Self {
+        Self {
+            keyboard,
+            mouse,
+            gamepad,
+            events: Vec::new(),
+        }
     }
 
     // ===== 鼠标方法 =====
 
     /// 鼠标左键是否按下
     pub fn mouse_left_pressed(&self) -> bool {
-        self.ctx
-            .mouse
+        self.mouse
             .button_pressed(ggez::input::mouse::MouseButton::Left)
     }
 
     /// 鼠标右键是否按下
     pub fn mouse_right_pressed(&self) -> bool {
-        self.ctx
-            .mouse
+        self.mouse
             .button_pressed(ggez::input::mouse::MouseButton::Right)
     }
 
     /// 鼠标中键是否按下
     pub fn mouse_middle_pressed(&self) -> bool {
-        self.ctx
-            .mouse
+        self.mouse
             .button_pressed(ggez::input::mouse::MouseButton::Middle)
     }
 
@@ -896,8 +868,8 @@ impl<'a> InputContext<'a> {
         &self,
         button: ggez::input::mouse::MouseButton,
     ) -> Option<(ggez::input::mouse::MouseButton, f32, f32)> {
-        if self.ctx.mouse.button_pressed(button) {
-            let pos = self.ctx.mouse.position();
+        if self.mouse.button_pressed(button) {
+            let pos = self.mouse.position();
             Some((button, pos.x, pos.y))
         } else {
             None
@@ -906,100 +878,58 @@ impl<'a> InputContext<'a> {
 
     /// 获取鼠标位置
     pub fn mouse_position(&self) -> (f32, f32) {
-        let pos = self.ctx.mouse.position();
+        let pos = self.mouse.position();
         (pos.x, pos.y)
     }
 
     /// 获取鼠标 X 坐标
     pub fn mouse_x(&self) -> f32 {
-        self.ctx.mouse.position().x
+        self.mouse.position().x
     }
 
     /// 获取鼠标 Y 坐标
     pub fn mouse_y(&self) -> f32 {
-        self.ctx.mouse.position().y
-    }
-
-    /// 鼠标是否在屏幕内
-    pub fn mouse_in_bounds(&self) -> bool {
-        let (x, y) = self.mouse_position();
-        let (w, h) = self.ctx.gfx.drawable_size();
-        x >= 0.0 && x < w && y >= 0.0 && y < h
+        self.mouse.position().y
     }
 
     /// 鼠标移动事件
     pub fn mouse_motion(&self) -> impl Iterator<Item = (f32, f32, f32, f32)> + '_ {
-        self.ctx
-            .frame_input_events
-            .iter()
-            .filter_map(|event| match event {
-                InputEvent::MouseMove { x, y, dx, dy } => Some((*x, *y, *dx, *dy)),
-                _ => None,
-            })
+        self.events.iter().filter_map(|event| match event {
+            InputEvent::MouseMove { x, y, dx, dy } => Some((*x, *y, *dx, *dy)),
+            _ => None,
+        })
     }
 
     /// 鼠标滚轮事件
     pub fn mouse_wheel(&self) -> impl Iterator<Item = (f32, f32)> + '_ {
-        self.ctx
-            .frame_input_events
-            .iter()
-            .filter_map(|event| match event {
-                InputEvent::MouseWheel { x, y } => Some((*x, *y)),
-                _ => None,
-            })
+        self.events.iter().filter_map(|event| match event {
+            InputEvent::MouseWheel { x, y } => Some((*x, *y)),
+            _ => None,
+        })
     }
 
     /// 鼠标进入或离开窗口
     pub fn mouse_entered_or_leaved(&self) -> Option<bool> {
-        self.ctx
-            .frame_input_events
-            .iter()
-            .find_map(|event| match event {
-                InputEvent::MouseEnterOrLeave { entered } => Some(*entered),
-                _ => None,
-            })
+        self.events.iter().find_map(|event| match event {
+            InputEvent::MouseEnterOrLeave { entered } => Some(*entered),
+            _ => None,
+        })
     }
 
     /// 鼠标进入窗口
     pub fn mouse_entered(&self) -> Option<bool> {
-        self.ctx
-            .frame_input_events
-            .iter()
-            .find_map(|event| match event {
-                InputEvent::MouseEnterOrLeave { entered } => Some(*entered),
-                _ => None,
-            })
+        self.events.iter().find_map(|event| match event {
+            InputEvent::MouseEnterOrLeave { entered } => Some(*entered),
+            _ => None,
+        })
     }
 
     /// 鼠标离开窗口
     pub fn mouse_leaved(&self) -> Option<bool> {
-        self.ctx
-            .frame_input_events
-            .iter()
-            .find_map(|event| match event {
-                InputEvent::MouseEnterOrLeave { entered } => Some(!*entered),
-                _ => None,
-            })
-    }
-
-    /// 获取鼠标到屏幕中心的距离
-    pub fn mouse_distance_to_center(&self) -> f32 {
-        let (mx, my) = self.mouse_position();
-        let (w, h) = self.ctx.gfx.drawable_size();
-        let cx = w / 2.0;
-        let cy = h / 2.0;
-        let dx = mx - cx;
-        let dy = my - cy;
-        (dx * dx + dy * dy).sqrt()
-    }
-
-    /// 获取鼠标相对于屏幕中心的角度（弧度）
-    pub fn mouse_angle_from_center(&self) -> f32 {
-        let (mx, my) = self.mouse_position();
-        let (w, h) = self.ctx.gfx.drawable_size();
-        let cx = w / 2.0;
-        let cy = h / 2.0;
-        (my - cy).atan2(mx - cx)
+        self.events.iter().find_map(|event| match event {
+            InputEvent::MouseEnterOrLeave { entered } => Some(!*entered),
+            _ => None,
+        })
     }
 
     /// 检查鼠标是否在指定矩形区域内
@@ -1020,7 +950,7 @@ impl<'a> InputContext<'a> {
 
     /// 迭代本帧的文本输入事件
     pub fn text_input(&self) -> impl Iterator<Item = char> + '_ {
-        self.ctx.frame_input_events.iter().filter_map(|event| {
+        self.events.iter().filter_map(|event| {
             if let InputEvent::Ime { character, .. } = event {
                 Some(*character)
             } else {
@@ -1038,23 +968,18 @@ impl<'a> InputContext<'a> {
             Option<ggez::winit::keyboard::SmolStr>,
         ),
     > + '_ {
-        self.ctx
-            .keyboard
-            .pressed_physical_keys
-            .iter()
-            .filter_map(|&k| {
-                if let ggez::winit::keyboard::PhysicalKey::Code(key) = k {
-                    Some((key, None))
-                } else {
-                    None
-                }
-            })
+        self.keyboard.pressed_physical_keys.iter().filter_map(|&k| {
+            if let ggez::winit::keyboard::PhysicalKey::Code(key) = k {
+                Some((key, None))
+            } else {
+                None
+            }
+        })
     }
 
     /// 检查指定键是否按下
     pub fn key_pressed(&self, key: ggez::input::keyboard::KeyCode) -> bool {
-        self.ctx
-            .keyboard
+        self.keyboard
             .is_physical_key_pressed(&ggez::winit::keyboard::PhysicalKey::Code(key))
     }
 
@@ -1269,12 +1194,12 @@ impl<'a> InputContext<'a> {
 
     /// 获取按下的键数量
     pub fn pressed_key_count(&self) -> usize {
-        self.ctx.keyboard.pressed_physical_keys.len()
+        self.keyboard.pressed_physical_keys.len()
     }
 
     /// 检查是否有任何键按下
     pub fn any_key_pressed(&self) -> bool {
-        !self.ctx.keyboard.pressed_physical_keys.is_empty()
+        !self.keyboard.pressed_physical_keys.is_empty()
     }
 
     // ===== 组合键方法 =====

@@ -27,6 +27,7 @@ use crate::ecs::systems::LogicSystem;
 use ggez::GameResult;
 
 /// 怪物AI系统
+#[derive(ecs_macros::LogicSystem)]
 pub struct MonsterAISystem;
 
 impl MonsterAISystem {

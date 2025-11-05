@@ -1,72 +1,76 @@
-// ============================================================================
-// Layer 4: 物理与移动层 (Physics & Movement Layer)
-// 优先级范围: 400-499
-// ============================================================================
-//
-// ## 模块职责
-//
-// 负责游戏中所有实体的物理运动和碰撞检测：
-// 1. 应用速度到位置（纯物理运动）
-// 2. 碰撞检测与响应
-// 3. 相机跟随玩家
-//
-// ## 设计原则
-//
-// - **纯物理**: 只处理物理运动，不包含游戏逻辑（寻路、AI在Layer 2）
-// - **读写分离**: 读取 Velocity，写入 Position
-// - **碰撞响应**: 检测碰撞后修正位置
-//
-// ## 系统列表
-//
-// | 系统 | 优先级 | 职责 |
-// |------|--------|------|
-// | MovementSystem | 400 | 纯物理移动：Position += Velocity * dt |
-// | CollisionSystem | 410 | 碰撞检测与位置修正 |
-// | CameraFollowSystem | 420 | 相机跟随玩家移动 |
-//
-// ## 输入组件
-//
-// - **Velocity**: 速度向量（由 Layer 2 计算）
-// - **Position**: 当前位置
-// - **Collider**: 碰撞体组件
-// - **Player**: 玩家标记（相机跟随目标）
-//
-// ## 输出组件
-//
-// - **Position**: 更新后的位置
-// - **Camera.position**: 相机位置（跟随玩家）
-//
-// ## 数据流
-//
-// ```
-// Layer 2 计算 Velocity
-//         ↓
-// MovementSystem: Position += Velocity * dt
-//         ↓
-// CollisionSystem: 检测碰撞 → 修正 Position
-//         ↓
-// CameraFollowSystem: Camera.position = Player.position
-//         ↓
-// Layer 5 使用更新后的 Position
-// ```
-//
-// ## 注意事项
-//
-// ✅ **CameraFollowSystem vs CameraSystem 职责划分**: 
-//    - CameraFollowSystem (Layer 4): 更新相机位置（跟随玩家移动）
-//    - CameraSystem (Layer 5): 相机特效（震动、矩阵计算）
-//    - 职责明确，无需合并
-//
+//! # 物理与移动系统模块 (logic/physics)
+//!
+//! **优先级范围**: 500-599
+//!
+//! ## 模块职责
+//!
+//! 负责游戏中所有实体的物理运动和碰撞检测：
+//! 1. 应用速度到位置（纯物理运动）
+//! 2. 碰撞检测与响应
+//! 3. 地图更新（瓦片动画、地图切换）
+//! 4. 寻路计算
+//!
+//! ## 设计原则
+//!
+//! - **纯物理**: 只处理物理运动，不包含游戏逻辑（寻路、AI 在 decision 层）
+//! - **读写分离**: 读取 Velocity，写入 Position
+//! - **碰撞响应**: 检测碰撞后修正位置
+//!
+//! ## 系统列表
+//!
+//! | 系统 | 优先级 | 依赖组件（读） | 依赖组件（写） | 职责 |
+//! |------|--------|----------------|----------------|------|
+//! | PathfindingSystem | 520 | Position, PathTarget | Path | 寻路计算 |
+//! | MovementSystem | 500 | Velocity, Position | Position | 纯物理移动：Position += Velocity * dt |
+//! | CollisionSystem | 510 | Position, Collider, MapData | Position | 碰撞检测与位置修正 |
+//! | MapUpdateSystem | 500 | MapData, AnimatedTile | AnimatedTile | 地图瓦片动画更新 |
+//!
+//! ## 数据流
+//!
+//! ```text
+//! Layer 2 (decision) 计算 Velocity
+//!         ↓
+//! PathfindingSystem: 计算 Path
+//!         ↓
+//! MovementSystem: Position += Velocity * dt
+//!         ↓
+//! CollisionSystem: 检测碰撞 → 修正 Position
+//!         ↓
+//! MapUpdateSystem: 更新地图瓦片动画
+//!         ↓
+//! Layer 3 (presentation) 使用更新后的 Position
+//! ```
+//!
+//! ## 使用示例
+//!
+//! ```rust
+//! use crate::ecs::systems::logic::physics::{MovementSystem, CollisionSystem};
+//! use crate::ecs::components::{Position, Velocity};
+//!
+//! // 创建移动实体
+//! world.spawn((
+//!     Position::new(100.0, 100.0),
+//!     Velocity::new(50.0, 0.0),  // 向右移动
+//! ));
+//!
+//! // MovementSystem 会自动更新位置
+//! // CollisionSystem 会检测并修正碰撞
+//! ```
+//!
+//! ## 注意事项
+//!
+//! - MovementSystem 必须在 CollisionSystem 之前执行（通过优先级保证）
+//! - MapUpdateSystem 是独立的，可以与其他系统并行
+//! - PathfindingSystem 的计算结果会被 AI 系统使用
 // ============================================================================
 
 pub mod pathfinding_system;
-// pub mod player_state_system;  // ❌ 已删除 - 合并到 PlayerControlSystem
 pub mod movement_system;
 pub mod collision_system;
-pub mod camera_follow_system;
-
+pub mod map_update_system;
+pub mod map_load_system;
 pub use pathfinding_system::PathfindingSystem;
-// pub use player_state_system::PlayerStateSystem;  // ❌ 已删除
 pub use movement_system::MovementSystem;
 pub use collision_system::CollisionSystem;
-pub use camera_follow_system::CameraFollowSystem;
+pub use map_update_system::{MapUpdateSystem, MapSwitchRequest};
+pub use map_load_system::{MapLoadSystem, MapManager};
