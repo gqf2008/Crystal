@@ -11,7 +11,7 @@ pub mod runtime;
 // pub mod system_scheduler;  // ✅ 使用经过测试的 SystemScheduler
 pub mod systems;
 // pub mod update_render_parallel_scheduler; // 🔒 暂时注释
-pub mod world; // 🆕 全局游戏资源 (Resources)
+pub mod game_world; // 🆕 全局游戏资源 (Resources)
                // Map Loader 模块
 pub mod map_loader;
 pub mod game_context; // 🆕 GameContext - 零拷贝输入访问
@@ -33,7 +33,7 @@ pub use resources::*; // 🆕 导出全局资源
 pub use systems::logic::physics::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
 pub use systems::input::InputStateSystem; // 🆕 导出输入状态系统
 pub use systems::*;
-pub use world::GameWorld;
+pub use game_world::GameWorld;
 pub use game_context::{GameContext, InputContext}; // 🆕 导出 GameContext
 // Map Loader 导出
 pub use map_loader::MapLoader;

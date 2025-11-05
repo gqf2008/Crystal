@@ -29,7 +29,7 @@ use mir2_client::ecs::systems::logic::{
 };
 use mir2_client::ecs::systems::presentation::{AnimationSystem, CameraFollowSystem};
 use mir2_client::ecs::systems::{priority, MovementSystem, SystemScheduler};
-use mir2_client::ecs::{CameraSystem, GameContext, InputStateSystem, PlayerControlSystem, world};
+use mir2_client::ecs::{CameraSystem, GameContext, InputStateSystem, PlayerControlSystem, game_world};
 use mir2_client::graphics::libraries::initialize_all_libraries;
 use mir2_shared::enums::{MirClass, MirGender};
 use std::time::Instant;
@@ -76,8 +76,9 @@ impl MapViewerScene {
         println!("  • F11      - 切换特效边框");
         println!("  • +/-      - 增加/减少最大 FPS");
         println!("\n🖱️  鼠标操作：");
-        println!("  • 中键拖拽  - 移动摄像机");
-        println!("  • 滚轮     - 缩放");
+        println!("  • 中键拖拽  - 移动摄像机（切换到手动模式）");
+        println!("  • 滚轮     - 缩放（切换到手动模式）");
+        println!("  • 空格键   - 恢复跟随玩家模式");
         println!("  • 左键     - 选中/移动（未实现）");
         println!("  • 右键     - 操作（未实现）");
         println!("\n========================================\n");

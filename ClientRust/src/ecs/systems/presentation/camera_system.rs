@@ -22,13 +22,10 @@
 // ============================================================================
 
 use crate::ecs::{
-    components::{
-        Camera, CameraMode, Draggable, InputEvent, Position, RenderConfig,
-    },
-    systems::priority,
+    components::{Camera, CameraMode, Draggable, InputEvent, Position, RenderConfig},
     GameContext, LogicSystem,
 };
-use ggez::input::mouse::MouseButton;
+use ggez::input::{keyboard::KeyCode, mouse::MouseButton};
 use ggez::GameResult;
 
 /// 相机系统 V2 (零拷贝版本)
@@ -117,10 +114,9 @@ impl Default for CameraSystem {
 }
 
 impl LogicSystem for CameraSystem {
- 
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         // ✅ 零拷贝方式：直接从 GameContext 访问输入
-        
+
         // 🖱️ 鼠标状态 - 直接从 GameContext 读取，零拷贝！
         let mouse_left = ctx.input().mouse.button_pressed(MouseButton::Left);
         let mouse_middle = ctx.input().mouse.button_pressed(MouseButton::Middle);
@@ -128,24 +124,28 @@ impl LogicSystem for CameraSystem {
 
         // ⌨️ 使用 InputContext API 访问键盘和其他事件
         let ctrl_pressed = ctx.input().ctrl_pressed();
+        let space_pressed = ctx.input().key_pressed(KeyCode::Space);
 
-        let resize_event = ctx.input().events.iter()
-            .find_map(|e| if let InputEvent::Resize { width, height } = e {
+        let resize_event = ctx.input().events.iter().find_map(|e| {
+            if let InputEvent::Resize { width, height } = e {
                 Some((*width, *height))
-            } else { None });
-        
-        let scroll_y = ctx.input().mouse_wheel()
-            .next()
-            .map(|(_, y)| y);
+            } else {
+                None
+            }
+        });
+
+        let scroll_y = ctx.input().mouse_wheel().next().map(|(_, y)| y);
 
         // 🔍 调试:检查是否收到滚轮事件 (已禁用,可按需开启)
         // if scroll_y.is_some() {
-        //     tracing::info!("🖱️ 收到滚轮事件: scroll_y={:?}, 鼠标位置=({:.0},{:.0})", 
+        //     tracing::info!("🖱️ 收到滚轮事件: scroll_y={:?}, 鼠标位置=({:.0},{:.0})",
         //         scroll_y, mouse_pos.x, mouse_pos.y);
         // }
 
         // 读取配置：是否启用相机拖拽
-        let camera_drag_enabled = ctx.world.query::<&RenderConfig>()
+        let camera_drag_enabled = ctx
+            .world
+            .query::<&RenderConfig>()
             .iter()
             .next()
             .map(|(_, cfg)| cfg.enable_camera_drag)
@@ -153,22 +153,32 @@ impl LogicSystem for CameraSystem {
 
         // 🔧 先获取当前窗口尺寸(避免借用冲突)
         let (current_width, current_height) = ctx.drawable_size();
-        
+
         // 查询 Camera + Draggable + Position + CameraMode 组件
-        let mut camera_query: Vec<_> = ctx.world
+        let mut camera_query: Vec<_> = ctx
+            .world
             .query_mut::<(&mut Camera, &mut Draggable, &mut Position, &mut CameraMode)>()
             .into_iter()
             .collect();
 
-        if let Some((_, (ref mut camera, ref mut draggable, ref mut pos, ref mut mode))) = camera_query.first_mut() {
+        if let Some((_, (ref mut camera, ref mut draggable, ref mut pos, ref mut mode))) =
+            camera_query.first_mut()
+        {
             // 🔧 每帧检查并同步相机尺寸(修复初始化时尺寸错误的问题)
-            if (camera.screen_width - current_width).abs() > 1.0 || (camera.screen_height - current_height).abs() > 1.0 {
-                tracing::debug!("📐 相机尺寸不匹配,自动同步: ({:.0}x{:.0}) -> ({:.0}x{:.0})", 
-                    camera.screen_width, camera.screen_height, current_width, current_height);
+            if (camera.screen_width - current_width).abs() > 1.0
+                || (camera.screen_height - current_height).abs() > 1.0
+            {
+                tracing::debug!(
+                    "📐 相机尺寸不匹配,自动同步: ({:.0}x{:.0}) -> ({:.0}x{:.0})",
+                    camera.screen_width,
+                    camera.screen_height,
+                    current_width,
+                    current_height
+                );
                 camera.screen_width = current_width;
                 camera.screen_height = current_height;
             }
-            
+
             // 处理窗口大小调整事件(优先级更高)
             if let Some((width, height)) = resize_event {
                 camera.screen_width = width;
@@ -179,7 +189,7 @@ impl LogicSystem for CameraSystem {
             // 处理鼠标拖拽 - 只有中键或Ctrl+左键才触发地图拖拽
             if camera_drag_enabled {
                 let should_drag = (mouse_left && ctrl_pressed) || mouse_middle;
-                
+
                 if should_drag && !draggable.is_dragging {
                     // 开始拖拽
                     **mode = CameraMode::Manual;
@@ -203,13 +213,19 @@ impl LogicSystem for CameraSystem {
                     }
                 }
             }
-            
+
             // TODO: 处理角色移动 - 左键/右键单独点击时让角色移动
             // 这部分逻辑应该在角色移动系统中实现,这里只负责相机控制
 
             // 🔍 处理滚轮缩放
             if let Some(scroll) = scroll_y {
                 Self::handle_zoom(camera, pos, mode, Some(scroll), mouse_pos.x, mouse_pos.y);
+            }
+
+            // 🔄 按空格键切换回跟随模式
+            if space_pressed && **mode == CameraMode::Manual {
+                **mode = CameraMode::FollowPlayer;
+                tracing::info!("📷 相机切换到跟随模式");
             }
         }
 
