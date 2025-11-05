@@ -93,3 +93,38 @@ impl Default for TimeTracker {
         }
     }
 }
+
+/// 动画帧组件 - 存储由 AnimationSystem 计算的当前动画帧索引
+/// 
+/// **设计原则**: 分离动画逻辑和渲染逻辑
+/// - AnimationSystem (逻辑层): 计算当前帧索引，更新此组件
+/// - SpriteRenderSystem (渲染层): 读取此组件，渲染对应精灵
+/// 
+/// **数据流**:
+/// ```
+/// AnimationSystem 更新 → AnimationFrame.current_frame
+///                           ↓
+/// SpriteRenderSystem 读取 → 渲染精灵
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct AnimationFrame {
+    /// 当前角色动画帧索引（身体、头发）
+    pub character_frame: i32,
+    /// 当前武器动画帧索引
+    pub weapon_frame: i32,
+}
+
+impl AnimationFrame {
+    pub fn new() -> Self {
+        Self {
+            character_frame: 0,
+            weapon_frame: 0,
+        }
+    }
+}
+
+impl Default for AnimationFrame {
+    fn default() -> Self {
+        Self::new()
+    }
+}

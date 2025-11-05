@@ -1,4 +1,6 @@
 mod character;
+mod weapon;
+
 use crate::ecs::components::{Camera,Position};
 use crate::ecs::systems::RenderSystem;
 use ggez::{graphics::GraphicsContext, GameResult};
