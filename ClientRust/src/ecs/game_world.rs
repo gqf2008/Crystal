@@ -174,6 +174,50 @@ impl GameWorld {
             LocalPlayer,
             NetworkSync::new(0, NetworkObjectType::Player),
             RenderOrder::new(RenderLayer::Object, position.y),
+            AnimationFrame::new(), // 🆕 动画帧组件 (AnimationSystem 更新, RenderSystem 读取)
+        ))
+    }
+
+    /// 创建完整的本地玩家（包含移动、动画、输入等所有组件）
+    /// 
+    /// 此方法适用于需要完整功能的场景（如地图查看器、游戏场景）
+    pub fn spawn_local_player_full(
+        &mut self,
+        class: MirClass,
+        gender: MirGender,
+        position: Point,
+        hair: u8,
+        weapon: i16,
+        armour: i16,
+    ) -> hecs::Entity {
+        self.world.spawn((
+            // 位置组件（世界坐标，单位：像素）
+            Position::new((position.x * 48) as f32, (position.y * 32) as f32),
+            // 移动速度组件
+            movement::MovementVelocity::with_speeds(120.0, 60.0, 120.0),
+            // 路径组件（寻路系统需要）
+            movement::Path::new(),
+            // 玩家核心状态
+            Player {
+                direction: mir2_shared::MirDirection::Down,
+                action: PlayerAction::Stand,
+            },
+            // 玩家外观
+            PlayerAppearance {
+                class,
+                gender,
+                hair,
+                weapon,
+                armour,
+                weapon_effect: 0,
+                wing_effect: 0,
+            },
+            // 玩家输入组件
+            PlayerInput::default(),
+            // 本地玩家标记
+            LocalPlayer,
+            // 动画帧组件（AnimationSystem 更新, RenderSystem 读取）
+            AnimationFrame::new(),
         ))
     }
 

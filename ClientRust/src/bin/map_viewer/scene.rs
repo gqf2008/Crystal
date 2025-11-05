@@ -258,6 +258,9 @@ impl MapViewerScene {
         },));
 
         // 🆕 创建测试玩家
+        // 📝 注意：这里应该使用 GameWorld::spawn_local_player_full()，
+        //          但由于 GameContext 直接暴露 hecs::World，暂时手动创建
+        // TODO: 重构为使用 GameWorld 的工厂方法
 
         let player_entity = world.spawn((
             // 位置：盟重土城传送点（已知的安全位置）
@@ -292,6 +295,7 @@ impl MapViewerScene {
             // 本地玩家标记
             LocalPlayer,
             // 🆕 动画帧组件（由 AnimationSystem 更新，SpriteRenderSystem 读取）
+            // ⚠️ 重要：必须添加此组件，否则 RenderSystem 查询会跳过该实体！
             AnimationFrame::new(),
         ));
 

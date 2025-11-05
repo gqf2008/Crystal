@@ -60,18 +60,28 @@ use crate::ClientSettings;
 
 /// WorldExt trait - ECS World 扩展方法（向后兼容）
 ///
-/// **注意**: 此 trait 主要用于向后兼容现有代码。
+/// **⚠️ 已废弃**: 此 trait 仅用于向后兼容现有代码。
 /// 
 /// **推荐**: 新代码应使用 `GameWorld` 而非直接操作 `hecs::World`。
 /// 
-/// `GameWorld` 提供了相同的方法，以及额外的实体工厂方法：
+/// `GameWorld` 提供了更完整的实体工厂方法：
 /// ```rust
 /// let mut game_world = GameWorld::new();
 /// game_world.spawn_settings(settings);
-/// game_world.spawn_local_player("Player", class, gender, position);
+/// game_world.spawn_network(net_ctx);
+/// 
+/// // 简单创建（网络同步用）
+/// game_world.spawn_local_player("Hero", class, gender, position);
+/// 
+/// // 完整创建（包含移动、动画、输入等所有组件）
+/// game_world.spawn_local_player_full(class, gender, position, hair, weapon, armour);
 /// ```
 /// 
 /// 此 trait 保留是因为 `GameContext` 仍然直接暴露 `hecs::World`
+#[deprecated(
+    since = "0.1.0",
+    note = "请使用 GameWorld 的实体工厂方法，确保所有必要组件（如 AnimationFrame）都被正确添加"
+)]
 pub trait WorldExt {
     fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self;
     fn spawn_network(&mut self, net_ctx: NetContext) -> &mut Self;
