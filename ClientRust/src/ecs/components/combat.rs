@@ -264,3 +264,100 @@ pub struct CombatStats {
     pub accuracy: u8,
     pub agility: u8,
 }
+
+impl Default for CombatStats {
+    fn default() -> Self {
+        Self {
+            level: 1,
+            attack_min: 0,
+            attack_max: 0,
+            defense: 0,
+            magic_defense: 0,
+            accuracy: 0,
+            agility: 0,
+        }
+    }
+}
+
+impl CombatStats {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// 经验值组件 (升级系统 - Level System)
+#[derive(Debug, Clone, Copy)]
+pub struct Experience {
+    pub current: i64,
+    pub required: i64,  // 下一级所需
+}
+
+impl Experience {
+    pub fn new(level: u16) -> Self {
+        Self {
+            current: 0,
+            required: Self::calculate_required(level),
+        }
+    }
+    
+    pub fn add(&mut self, amount: i64) -> bool {
+        self.current += amount;
+        self.current >= self.required
+    }
+    
+    pub fn level_up(&mut self, new_level: u16) {
+        self.current -= self.required;
+        self.required = Self::calculate_required(new_level);
+    }
+    
+    pub fn percent(&self) -> f32 {
+        (self.current as f32 / self.required as f32).clamp(0.0, 1.0)
+    }
+    
+    /// 传奇升级经验公式
+    fn calculate_required(level: u16) -> i64 {
+        ((level as i64 + 1) * (level as i64 + 1) * 100) as i64
+    }
+}
+
+impl Default for Experience {
+    fn default() -> Self {
+        Self::new(1)
+    }
+}
+
+/// 货币组件 (经济系统 - Economy System)
+#[derive(Debug, Clone, Copy)]
+pub struct Currency {
+    pub gold: u32,      // 金币
+    pub credit: u32,    // 元宝/点券
+}
+
+impl Currency {
+    pub fn new() -> Self {
+        Self { gold: 0, credit: 0 }
+    }
+    
+    pub fn can_afford_gold(&self, cost: u32) -> bool {
+        self.gold >= cost
+    }
+    
+    pub fn spend_gold(&mut self, cost: u32) -> bool {
+        if self.can_afford_gold(cost) {
+            self.gold -= cost;
+            true
+        } else {
+            false
+        }
+    }
+    
+    pub fn add_gold(&mut self, amount: u32) {
+        self.gold = self.gold.saturating_add(amount);
+    }
+}
+
+impl Default for Currency {
+    fn default() -> Self {
+        Self::new()
+    }
+}

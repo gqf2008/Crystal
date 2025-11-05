@@ -16,10 +16,10 @@
 //
 // ============================================================================
 
-use hecs::World;
 use ggez::GameResult;
-use crate::ecs::{GameContext, components::{Player, Position, movement::{MovementVelocity, Path}, player::PlayerAction}};
-use crate::ecs::systems::{LogicSystem, priority};
+use crate::ecs::{GameContext, components::{Player, Position, movement::{MovementVelocity, Path}}};
+use crate::ecs::systems::LogicSystem;
+use mir2_shared::enums::MirDirection;
 
 /// 移动系统 - 实现格子对齐的移动逻辑
 #[derive(ecs_macros::LogicSystem)]
@@ -41,9 +41,11 @@ impl MovementSystem {
     ///      / | \
     ///     5  4  3
     /// ```
-    fn calculate_direction(dx: f32, dy: f32) -> u8 {
+    fn calculate_direction(dx: f32, dy: f32) -> MirDirection {
+        use MirDirection::*;
+        
         if dx.abs() < 0.01 && dy.abs() < 0.01 {
-            return 0; // 静止，保持当前方向
+            return Up; // 静止，保持当前方向
         }
         
         let angle = dy.atan2(dx).to_degrees();
@@ -58,15 +60,15 @@ impl MovementSystem {
         // 8方向划分 (每个方向45度)
         // 0度 = 东 (右), 90度 = 南 (下), 180度 = 西 (左), 270度 = 北 (上)
         match normalized_angle as i32 {
-            337..=360 | 0..=22 => 2,   // 东 (右)
-            23..=67 => 3,               // 东南
-            68..=112 => 4,              // 南 (下)
-            113..=157 => 5,             // 西南
-            158..=202 => 6,             // 西 (左)
-            203..=247 => 7,             // 西北
-            248..=292 => 0,             // 北 (上)
-            293..=336 => 1,             // 东北
-            _ => 0,
+            337..=360 | 0..=22 => Right,      // 东 (右) = 2
+            23..=67 => DownRight,             // 东南 = 3
+            68..=112 => Down,                 // 南 (下) = 4
+            113..=157 => DownLeft,            // 西南 = 5
+            158..=202 => Left,                // 西 (左) = 6
+            203..=247 => UpLeft,              // 西北 = 7
+            248..=292 => Up,                  // 北 (上) = 0
+            293..=336 => UpRight,             // 东北 = 1
+            _ => Up,
         }
     }
 }

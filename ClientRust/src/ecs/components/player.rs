@@ -2,20 +2,28 @@
 // 玩家专用组件
 // ============================================================================
 
-pub use mir2_shared::{MirClass, MirGender};
+pub use mir2_shared::{MirClass, MirDirection, MirGender};
 
-/// 玩家数据组件 (标记这是玩家实体)
+/// 玩家数据组件 (标记这是玩家实体 - 身份卡)
+/// 
+/// **设计原则**: 只包含玩家的身份识别信息 (不可变或较少变化的属性)
+/// - ID、名字、职业、性别 - 角色的核心身份
+/// - Level 保留用于UI显示和等级相关的逻辑判断
+/// 
+/// **已迁移到独立组件**:
+/// - `exp`, `max_experience` → `Experience` 组件
+/// - `gold`, `credit` → `Currency` 组件
+/// - 生命值、魔法值 → `Health`, `Mana` 组件
+/// - 战斗属性 → `CombatStats` 组件
+/// 
+/// **参考**: `ECS_COMPONENTS_ARCHITECTURE.md` - Player Component
 #[derive(Debug, Clone)]
 pub struct PlayerData {
     pub id: u32,
     pub name: String,
     pub class: MirClass,
     pub gender: MirGender,
-    pub level: u16,           // ➕ 玩家等级
-    pub exp: i64,
-    pub max_experience: i64,  // ➕ 升级所需经验
-    pub gold: u32,
-    pub credit: u32,          // ➕ 元宝/点数
+    pub level: u16,  // 保留等级 (显示和逻辑判断用)
 }
 
 /// 本地玩家标记 (只有一个)
@@ -54,22 +62,22 @@ impl OtherPlayer {
 /// 
 /// **设计原则**：
 /// - 只包含角色的核心游戏逻辑状态
-/// - 不重复其他组件的数据（渲染用Animation组件，移动用Path/Velocity组件）
+/// - 不重复其他组件的数据（渲染用Animation组件，移动用Movement组件）
 /// 
 /// **数据所有权**：
 /// - `direction`: 由 MovementSystem 根据移动方向更新
 /// - `action`: 由 PlayerControlSystem 根据用户输入独占写入 (单一来源原则)
+/// 
+/// **注意**: `is_moving` 状态已移到 Movement 组件,使用 `movement.is_moving()` 方法查询
 #[derive(Debug, Clone)]
 pub struct Player {
-    /// 面向方向 (0-7 八方向)
-    pub direction: u8,
+    /// 面向方向 (8方向枚举)
+    pub direction: MirDirection,
     /// 当前动作状态（行走/跑步/站立/攻击）
     /// 
     /// **重要**: 此字段只能由 PlayerControlSystem 写入！
     /// 其他系统(MovementSystem等)只能读取，不能修改
     pub action: PlayerAction,
-    /// 是否正在移动
-    pub is_moving: bool,
 }
 
 /// 攻击状态组件 (ECS 原则: 状态存储在Component中)
@@ -228,6 +236,15 @@ impl GuildMembership {
         self.rank <= 1
     }
 }
+
+// ============================================================================
+// 战斗属性组件 (Combat & Stats Components)
+// ============================================================================
+// 
+// 注意: Health, Mana, CombatStats 等战斗组件已移到 combat.rs
+// 使用时通过 use crate::ecs::components::combat::* 导入
+//
+// ============================================================================
 
 // ============================================================================
 // Player State Machine - 玩家状态机

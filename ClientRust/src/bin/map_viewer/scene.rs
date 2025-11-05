@@ -266,9 +266,8 @@ impl MapViewerScene {
             Path::new(),
             // 玩家核心状态
             Player {
-                direction: 0,
+                direction: mir2_shared::MirDirection::Down,
                 action: PlayerAction::Stand,
-                is_moving: false,
             },
             // 玩家外观
             PlayerAppearance {

@@ -435,18 +435,8 @@ impl SkillSystem {
     /// 获取玩家当前朝向
     fn get_player_direction(world: &World) -> MirDirection {
         for (_, (_, player)) in world.query::<(&LocalPlayer, &Player)>().iter() {
-            // Player.direction 是 u8 (0-7), 需要转换为 MirDirection
-            return match player.direction {
-                0 => MirDirection::Up,
-                1 => MirDirection::UpRight,
-                2 => MirDirection::Right,
-                3 => MirDirection::DownRight,
-                4 => MirDirection::Down,
-                5 => MirDirection::DownLeft,
-                6 => MirDirection::Left,
-                7 => MirDirection::UpLeft,
-                _ => MirDirection::Down,
-            };
+            // Player.direction 现在已经是 MirDirection 类型，直接返回
+            return player.direction;
         }
         MirDirection::Down
     }

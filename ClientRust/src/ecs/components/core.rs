@@ -2,7 +2,7 @@
 // 核心组件 - 所有实体的基础组件
 // ============================================================================
 
-pub use mir2_shared::{MirDirection, MirAction, MirClass, MirGender};
+pub use mir2_shared::{MirDirection as Direction, MirAction, MirClass, MirGender};
 use crate::objects::SpriteBlendMode;
 
 /// 位置组件 - 世界坐标（像素级，支持浮点）
@@ -43,6 +43,7 @@ impl Velocity {
         Self { dx: 0.0, dy: 0.0 }
     }
 }
+
 
 /// 动画帧插值组件 - 实现原版C#的OffSetMove机制
 /// 参考: Client/MirObjects/PlayerObject.cs Line 864-1000

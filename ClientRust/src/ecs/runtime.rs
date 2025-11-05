@@ -1,9 +1,7 @@
 use anyhow::{Context, Result};
 
 use crate::graphics;
-use crate::network as net;
 use crate::settings::ClientSettings;
-use crate::version; // Use network module as 'net'
 
 pub struct ClientRuntime {
     pub settings: ClientSettings,

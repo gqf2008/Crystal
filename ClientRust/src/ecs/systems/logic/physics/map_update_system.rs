@@ -18,7 +18,7 @@ use crate::ecs::components::{
 };
 use crate::ecs::{Coord, GameContext, MapLoader, MapUtils};
 use crate::objects::MapReader;
-use mir2_shared::enums::{MirClass, MirGender};
+use mir2_shared::enums::{MirClass, MirGender, MirDirection};
 
 // 使用 map_load_system 中定义的 MapManager
 use super::map_load_system::MapManager;
@@ -230,9 +230,8 @@ impl MapUpdateSystem {
         // 创建玩家角色实体
         world.spawn((
             Player {
-                direction: 4,
+                direction: MirDirection::Down,
                 action: PlayerAction::Stand,
-                is_moving: false,
             },
             Position { x: spawn_x, y: spawn_y },
             PlayerAppearance {

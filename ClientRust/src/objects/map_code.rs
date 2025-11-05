@@ -1271,7 +1271,6 @@ impl MapReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     #[test]
     fn test_cell_info_creation() {

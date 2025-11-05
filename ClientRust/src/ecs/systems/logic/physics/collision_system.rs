@@ -15,7 +15,6 @@
 //
 // ============================================================================
 
-use hecs::World;
 use ggez::GameResult;
 use crate::ecs::GameContext;
 use crate::ecs::components::{Position, movement::MovementVelocity, map::MapBounds};
@@ -81,7 +80,7 @@ impl LogicSystem for CollisionSystem {
 
         // 检查移动方向的下一个格子是否有障碍物
         use crate::ecs::components::{PlayerInput, Player};
-        for (_entity, (mut pos, vel, player_input, mut player)) in ctx.world.query_mut::<(&mut Position, &mut MovementVelocity, Option<&mut PlayerInput>, Option<&mut Player>)>() {
+        for (_entity, (pos, vel, player_input, _player)) in ctx.world.query_mut::<(&mut Position, &mut MovementVelocity, Option<&mut PlayerInput>, Option<&Player>)>() {
             // 🎯 检查velocity是否为零或接近零
             // 注意: 如果velocity为零,说明没有移动,不需要检查碰撞
             if vel.x.abs() < 0.01 && vel.y.abs() < 0.01 {

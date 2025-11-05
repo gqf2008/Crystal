@@ -115,7 +115,7 @@ impl CharacterRenderSystem {
         let current_frame = animation_tick % frame_count;
         
         // 计算最终索引：基础索引 + 方向偏移 + 帧偏移
-        action_start + (player.direction as i32 * frame_count) + current_frame
+        action_start + (player.direction as u8 as i32 * frame_count) + current_frame
     }
 
     /// 渲染单个角色

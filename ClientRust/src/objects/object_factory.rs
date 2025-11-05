@@ -260,7 +260,7 @@ fn get_current_time() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mir2_shared::enums::{MirDirection, PoisonType, BuffType};
+    use mir2_shared::enums::{MirDirection, PoisonType};
 
     #[test]
     fn test_create_monster() {
