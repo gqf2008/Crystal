@@ -2,7 +2,7 @@
 // 玩家专用组件
 // ============================================================================
 
-pub use mir2_shared::{MirClass, MirDirection, MirGender};
+pub use mir2_shared::{MirAction, MirClass, MirDirection, MirGender};
 
 /// 玩家数据组件 (标记这是玩家实体 - 身份卡)
 /// 
@@ -104,6 +104,29 @@ pub enum PlayerAction {
 }
 
 impl PlayerAction {
+    /// 转换为 MirAction (用于查询 Frame 配置)
+    /// 
+    /// 这个映射连接了 ECS 的 PlayerAction 和原版的 MirAction
+    pub fn to_mir_action(&self) -> MirAction {
+        match self {
+            PlayerAction::Stand => MirAction::Standing,
+            PlayerAction::Walk => MirAction::Walking,
+            PlayerAction::Run => MirAction::Running,
+            PlayerAction::Attack1 => MirAction::Attack1,
+            PlayerAction::Attack2 => MirAction::Attack2,
+            PlayerAction::Attack3 => MirAction::Attack3,
+        }
+    }
+    
+    /// 是否是攻击动作
+    pub fn is_attack(&self) -> bool {
+        matches!(self, PlayerAction::Attack1 | PlayerAction::Attack2 | PlayerAction::Attack3)
+    }
+    
+    // ⚠️ 以下方法已废弃，改为从 objects/frames.rs 的 PLAYER_FRAMES 读取
+    // 保留仅用于兼容性，后续将移除
+    
+    #[deprecated(note = "使用 objects::frames::get_player_frame() 替代")]
     pub fn frame_count(&self) -> i32 {
         match self {
             PlayerAction::Stand => 4,
@@ -115,38 +138,29 @@ impl PlayerAction {
         }
     }
     
+    #[deprecated(note = "使用 objects::frames::get_player_frame() 替代")]
     pub fn frame_interval(&self) -> i32 {
         match self {
             PlayerAction::Stand => 30,
-            // 🎯 调整动画速度以匹配移动速度和视觉效果
-            // Walk: 4帧间隔 = 6帧×4tick = 24tick/循环 = 2.4s
             PlayerAction::Walk => 4,
-            // Run: 2帧间隔 = 6帧×2tick = 12tick/循环 = 1.2s  
             PlayerAction::Run => 2,
-            // Attack: 1帧间隔 = 6帧×1tick = 6tick = 0.6s (保持攻击动画流畅)
             PlayerAction::Attack1 => 1,
             PlayerAction::Attack2 => 1,
             PlayerAction::Attack3 => 1,
         }
     }
     
-    /// 计算动画总时长 (毫秒)
-    /// animation_count 每 100ms 增加 1
+    #[deprecated(note = "使用 objects::frames::get_player_frame() 替代")]
     pub fn duration_ms(&self) -> u64 {
         (self.frame_count() * self.frame_interval() * 100) as u64
     }
     
-    /// 是否是攻击动作
-    pub fn is_attack(&self) -> bool {
-        matches!(self, PlayerAction::Attack1 | PlayerAction::Attack2 | PlayerAction::Attack3)
-    }
-    
+    #[deprecated(note = "使用 objects::frames::get_player_frame() 替代")]
     pub fn frame_start(&self) -> i32 {
         match self {
             PlayerAction::Stand => 0,
             PlayerAction::Walk => 32,
             PlayerAction::Run => 80,
-            // C# Attack1: Start=128, Count=6, Interval=100
             PlayerAction::Attack1 => 128,
             PlayerAction::Attack2 => 176,
             PlayerAction::Attack3 => 224,

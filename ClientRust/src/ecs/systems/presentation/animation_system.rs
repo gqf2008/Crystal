@@ -33,6 +33,7 @@ use crate::ecs::{
     },
     systems::LogicSystem,
 };
+use crate::objects::frames::get_player_frame;
 
 #[derive(ecs_macros::LogicSystem)]
 pub struct AnimationSystem;
@@ -86,21 +87,30 @@ impl AnimationSystem {
 
     /// 计算角色动画帧索引
     ///
+    /// **重构说明**: 现在从 `objects/frames.rs` 的 `PLAYER_FRAMES` 读取配置
+    /// 
     /// C# 逻辑参考: PlayerObject.cs DrawBody()
     /// ```csharp
     /// int index = BaseIndex + (Direction * FrameCount) + CurrentFrame
     /// ```
     fn calculate_character_frame(player: &Player, time_tracker: &TimeTracker) -> i32 {
-        let action_start = player.action.frame_start();
-        let frame_count = player.action.frame_count();
-        let frame_interval = player.action.frame_interval();
+        // 从 PLAYER_FRAMES 获取动画配置
+        let mir_action = player.action.to_mir_action();
+        let frame = match get_player_frame(mir_action) {
+            Some(f) => f,
+            None => {
+                tracing::warn!("⚠️ 未找到动画配置: {:?}, 使用默认值", mir_action);
+                // 返回站立动画的第一帧作为后备
+                return player.direction as u8 as i32 * 4;
+            }
+        };
 
-        // 基于全局动画计数器计算当前帧
-        let animation_tick = (time_tracker.animation_count as i32) / frame_interval;
-        let current_frame = animation_tick % frame_count;
+        // 基于全局动画计数器和配置的 interval 计算当前帧
+        let animation_tick = (time_tracker.animation_count as i32) * 100 / frame.interval;
+        let current_frame = animation_tick % frame.count;
 
         // 计算最终索引：基础索引 + 方向偏移 + 帧偏移
-        action_start + (player.direction as u8 as i32 * frame_count) + current_frame
+        frame.start + (player.direction as u8 as i32 * frame.count) + current_frame
     }
 
     /// 计算武器动画帧索引
@@ -147,8 +157,15 @@ let now = Instant::now();
             .query_mut::<&AttackState>()
             .into_iter()
         {
-            // 计算攻击动画是否完成
-            let duration_ms = attack_state.attack_type.duration_ms();
+            // 从 PLAYER_FRAMES 获取攻击动画时长
+            let duration_ms = if let Some(frame) = get_player_frame(attack_state.attack_type.to_mir_action()) {
+                (frame.count * frame.interval) as u64
+            } else {
+                // 后备：默认600ms (6帧 * 100ms)
+                tracing::warn!("⚠️ 未找到攻击动画配置: {:?}, 使用默认时长", attack_state.attack_type);
+                600
+            };
+            
             let elapsed = now.duration_since(attack_state.start_time).as_millis() as u64;
             
             if elapsed >= duration_ms {

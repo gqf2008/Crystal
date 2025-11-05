@@ -27,7 +27,7 @@
 
 use super::SpriteRenderSystem;
 use crate::ecs::components::{
-    Equipment, Player, PlayerAppearance, Position, WeaponAnimation, WeaponState,
+    AnimationFrame, Equipment, Player, PlayerAppearance, Position, WeaponAnimation, WeaponState,
 };
 use crate::graphics::libraries::{get_library_from_array, LibraryArray};
 use ggez::graphics::{Canvas, Color, DrawParam, GraphicsContext};
@@ -50,8 +50,8 @@ impl SpriteRenderSystem {
         let screen_width = ctx.drawable_size().0;
         let screen_height = ctx.drawable_size().1;
 
-        // 查询所有持有武器组件的实体
-        for (_entity, (pos, player, appearance, equipment, weapon_state, weapon_anim)) in world
+        // 查询所有持有武器组件的实体（现在包含 AnimationFrame）
+        for (_entity, (pos, _player, appearance, equipment, _weapon_state, weapon_anim, anim_frame)) in world
             .query::<(
                 &Position,
                 &Player,
@@ -59,6 +59,7 @@ impl SpriteRenderSystem {
                 &Equipment,
                 &WeaponState,
                 &WeaponAnimation,
+                &AnimationFrame,
             )>()
             .iter()
         {
@@ -67,8 +68,8 @@ impl SpriteRenderSystem {
                 continue;
             }
 
-            // 计算武器精灵索引
-            let frame_index = Self::calculate_weapon_frame(player, weapon_state, weapon_anim);
+            // 从 AnimationFrame 组件读取武器帧索引（由 AnimationSystem 计算）
+            let frame_index = anim_frame.weapon_frame;
 
             // 根据职业选择武器库
             let library_array = Self::get_weapon_library(appearance.class);
@@ -114,40 +115,21 @@ impl SpriteRenderSystem {
         Ok(())
     }
 
-    /// 计算武器动画帧索引
-    ///
-    /// 武器帧计算逻辑：
-    /// - 站立/行走：显示武器默认帧 (方向 * 1)
-    /// - 攻击：显示攻击动画帧 (BaseIndex + 方向 * 帧数 + 当前帧)
-    fn calculate_weapon_frame(
-        player: &Player,
-        weapon_state: &WeaponState,
-        weapon_anim: &WeaponAnimation,
-    ) -> i32 {
-
-        // 如果正在攻击，显示攻击动画
-        if weapon_state.is_attacking {
-            // 获取当前攻击类型的帧数
-            let frame_count = weapon_anim.get_attack_frames(weapon_state.current_attack);
-
-            // 攻击动画基础索引：Attack1=0, Attack2=200, Attack3=400
-            let attack_base = match weapon_state.current_attack {
-                1 => 0,
-                2 => 200,
-                3 => 400,
-                _ => 0,
-            };
-
-            // 计算索引：基础 + 方向 * 帧数 + 当前帧
-            attack_base
-                + (player.direction as u8 as i32 * frame_count as i32)
-                + weapon_state.current_frame as i32
-        } else {
-            // 站立/行走：显示默认姿势（每个方向1帧）
-            // 基础索引1000 + 方向
-            1000 + player.direction as u8 as i32
-        }
-    }
+    // ⚠️ 已废弃：武器帧索引计算已移至 AnimationSystem
+    // 渲染系统现在从 AnimationFrame 组件读取预计算的帧索引
+    // 
+    // /// 计算武器动画帧索引
+    // ///
+    // /// 武器帧计算逻辑：
+    // /// - 站立/行走：显示武器默认帧 (方向 * 1)
+    // /// - 攻击：显示攻击动画帧 (BaseIndex + 方向 * 帧数 + 当前帧)
+    // fn calculate_weapon_frame(
+    //     player: &Player,
+    //     weapon_state: &WeaponState,
+    //     weapon_anim: &WeaponAnimation,
+    // ) -> i32 {
+    //     ...
+    // }
 
     /// 获取武器库类型
     ///

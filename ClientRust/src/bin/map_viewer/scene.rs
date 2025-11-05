@@ -19,7 +19,7 @@ use mir2_client::ecs::components::movement::{MovementVelocity, Path};
 use mir2_client::ecs::components::{
     Camera, CameraMode, Draggable, InputState, PlayerInput, Position, RenderConfig, TimeTracker, VisibleArea,
 };
-use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance};
+use mir2_client::ecs::components::{AnimationFrame, LocalPlayer, Player, PlayerAction, PlayerAppearance};
 use mir2_client::ecs::dbug::DebugSystem;
 use mir2_client::ecs::rendering::{SpriteRenderSystem, MapRenderSystem};
 use mir2_client::ecs::scenes::{Scene, SceneType};
@@ -290,6 +290,8 @@ impl MapViewerScene {
             PlayerInput::default(),
             // 本地玩家标记
             LocalPlayer,
+            // 🆕 动画帧组件（由 AnimationSystem 更新，SpriteRenderSystem 读取）
+            AnimationFrame::new(),
         ));
 
         tracing::info!(

@@ -24,70 +24,26 @@
 // ============================================================================
 
 use super::SpriteRenderSystem;
-use crate::ecs::components::{Camera, Player, PlayerAppearance, Position, TimeTracker};
+use crate::ecs::components::{AnimationFrame, Player, PlayerAppearance, Position, TimeTracker};
 use crate::graphics::libraries::{get_library_from_array, LibraryArray};
 use ggez::graphics::{Canvas, Color, DrawParam, GraphicsContext};
 use ggez::GameResult;
-use hecs::World;
-use mir2_shared::enums::{MirClass, MirGender};
+use mir2_shared::enums::MirGender;
 
 /// 精灵渲染系统
 
 impl SpriteRenderSystem {
-    /// 获取角色库索引
-    ///
-    /// C# 逻辑: CHumEffect[class][gender]
-    /// - Male Warrior = 0, Female Warrior = 1
-    /// - Male Wizard = 2, Female Wizard = 3
-    /// - Male Taoist = 4, Female Taoist = 5
-    /// - Male Assassin = 6, Female Assassin = 7
-    /// - Male Archer = 8, Female Archer = 9
-    fn get_character_library_index(class: MirClass, gender: MirGender) -> usize {
-        let class_base = match class {
-            MirClass::Warrior => 0,
-            MirClass::Wizard => 2,
-            MirClass::Taoist => 4,
-            MirClass::Assassin => 6,
-            MirClass::Archer => 8,
-        };
-
-        let gender_offset = match gender {
-            MirGender::Male => 0,
-            MirGender::Female => 1,
-        };
-
-        class_base + gender_offset
-    }
-
-    /// 计算角色动画帧索引
-    ///
-    /// C# 逻辑参考: PlayerObject.cs DrawBody()
-    /// ```csharp
-    /// int index = BaseIndex + (Direction * FrameCount) + CurrentFrame
-    /// ```
-    fn calculate_frame_index(player: &Player, time_tracker: &TimeTracker) -> i32 {
-        use crate::ecs::components::PlayerAction;
-
-        let action_start = player.action.frame_start();
-        let frame_count = player.action.frame_count();
-        let frame_interval = player.action.frame_interval();
-
-        // 基于全局动画计数器计算当前帧
-        let animation_tick = (time_tracker.animation_count as i32) / frame_interval;
-        let current_frame = animation_tick % frame_count;
-
-        // 计算最终索引：基础索引 + 方向偏移 + 帧偏移
-        action_start + (player.direction as u8 as i32 * frame_count) + current_frame
-    }
-
     /// 渲染单个角色
+    ///
+    /// **重构说明**: 不再自己计算帧索引，改为从 AnimationFrame 组件读取
+    /// AnimationSystem 负责计算并更新帧索引，渲染系统只负责读取和绘制
     fn render_character(
         ctx: &mut GraphicsContext,
         canvas: &mut Canvas,
-        player: &Player,
+        _player: &Player,
         pos: &Position,
         appearance: &PlayerAppearance,
-        time_tracker: &TimeTracker,
+        anim_frame: &AnimationFrame,
         cam_x: f32,
         cam_y: f32,
         zoom: f32,
@@ -106,8 +62,8 @@ impl SpriteRenderSystem {
             screen_height,
         );
 
-        // 计算动画帧索引
-        let frame_index = Self::calculate_frame_index(player, time_tracker);
+        // 从 AnimationFrame 组件读取当前帧索引（由 AnimationSystem 计算）
+        let frame_index = anim_frame.character_frame;
 
         // 🎨 C# PlayerObject.DrawBody() 逻辑:
         // 1. 先绘制身体 (BodyLibrary = CArmours[Armour])
@@ -274,26 +230,20 @@ impl SpriteRenderSystem {
             // tracing::info!("⏭️  CharacterRenderSystem: 没有相机，跳过渲染");
             return Ok(());
         };
-        // tracing::info!("✅ CharacterRenderSystem: 有相机，继续渲染");
 
-        // 获取时间追踪器
-        let time_tracker = {
-            let mut query = world.query::<&TimeTracker>();
-            if let Some((_, tracker)) = query.iter().next() {
-                tracker.clone()
-            } else {
-                return Ok(());
-            }
-        };
-
-        // 收集并排序角色
+        // 收集并排序角色（现在包含 AnimationFrame）
         let mut characters_to_render = Vec::new();
 
-        for (_entity, (player, pos, appearance)) in world
-            .query::<(&Player, &Position, &PlayerAppearance)>()
+        for (_entity, (player, pos, appearance, anim_frame)) in world
+            .query::<(&Player, &Position, &PlayerAppearance, &AnimationFrame)>()
             .iter()
         {
-            characters_to_render.push((player.clone(), pos.clone(), appearance.clone()));
+            characters_to_render.push((
+                player.clone(),
+                pos.clone(),
+                appearance.clone(),
+                anim_frame.clone(),
+            ));
         }
 
         // 按 Y 坐标排序（实现深度排序）
@@ -304,14 +254,14 @@ impl SpriteRenderSystem {
         });
 
         // 渲染所有角色
-        for (player, pos, appearance) in characters_to_render {
+        for (player, pos, appearance, anim_frame) in characters_to_render {
             Self::render_character(
                 ctx,
                 canvas,
                 &player,
                 &pos,
                 &appearance,
-                &time_tracker,
+                &anim_frame,
                 cam_x,
                 cam_y,
                 zoom,
