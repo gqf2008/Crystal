@@ -13,6 +13,7 @@
 //!
 //! | 系统名称 | 优先级 | 依赖组件（读） | 依赖组件（写） | 职责说明 |
 //! |---------|--------|----------------|----------------|----------|
+//! | `InputStateSystem` | 10 | - | InputState | 追踪上一帧输入状态，提供边缘检测基础 |
 //! | `PlayerControlSystem` | 120 | InputEvent, LocalPlayer, Position | Velocity, PlayerAction | 玩家控制逻辑、指令转换 |
 //!
 //! ## 数据流
@@ -71,5 +72,8 @@
 //! - 输入事件在每帧结束后清空（`GameContext.clear_frame_events()`）
 //! - 网络事件通过 `GameContext.net_events` 访问（由 NetworkSystem 填充）
 
-pub mod player_control_system;   
+pub mod input_state_system;
+pub mod player_control_system;
+
+pub use input_state_system::InputStateSystem;   
 pub use player_control_system::PlayerControlSystem;

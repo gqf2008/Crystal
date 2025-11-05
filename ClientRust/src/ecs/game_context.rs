@@ -17,7 +17,7 @@
 //! ```
 
 use crate::ecs::components::{input, InputEvent};
-use crate::ecs::WorldExt;
+use crate::ecs::{GameWorld, WorldExt};
 use crate::{
     network::{builder::CategorizedEvents, NetContext, NetworkBuilder},
     ClientSettings,
@@ -32,7 +32,6 @@ use ggez::{
     input::{gamepad::GamepadContext, keyboard::KeyboardContext, mouse::MouseContext},
     timer::TimeContext,
 };
-use hecs::World;
 use std::borrow::Cow;
 use std::path;
 use std::path::Path;
@@ -229,8 +228,8 @@ pub struct GameContext {
     pub fields: ContextFields,
 
     // ===== 游戏特定组件 =====
-    /// ECS World - 存储所有实体和组件
-    pub world: World,
+    /// ECS World - 存储所有实体和组件（使用 GameWorld 封装）
+    pub world: GameWorld,
     /// 网络事件（本帧收集的）
     pub frame_net_events: CategorizedEvents,
 }
@@ -251,7 +250,7 @@ impl GameContext {
         let timer_context = TimeContext::new();
         let graphics_context = GraphicsContext::new(&game_id, &event_loop, &conf, &fs)?;
 
-        let mut world = World::new();
+        let mut world = GameWorld::new();
         let net_ctx = NetworkBuilder::new(settings.network.clone())
             .build()
             .map_err(|err| {
@@ -287,8 +286,8 @@ impl GameContext {
     /// 安全地分离借用 ggez 组件和 World
     /// # 返回
     /// - GraphicsContext 的可变引用
-    /// - World 的可变引用
-    pub fn split_gfx_world(&mut self) -> (&mut GraphicsContext, &mut World) {
+    /// - GameWorld 的可变引用
+    pub fn split_gfx_world(&mut self) -> (&mut GraphicsContext, &mut GameWorld) {
         (&mut self.gfx, &mut self.world)
     }
 
@@ -298,9 +297,9 @@ impl GameContext {
         self.gfx.drawable_size()
     }
 
-    /// 获取 World 的可变引用
+    /// 获取 GameWorld 的可变引用
     #[inline]
-    pub fn world_mut(&mut self) -> &mut World {
+    pub fn world_mut(&mut self) -> &mut GameWorld {
         &mut self.world
     }
 
@@ -361,9 +360,7 @@ impl GameContext {
         // 删除所有收集的实体
         let count = to_despawn.len();
         for entity in to_despawn {
-            if let Err(e) = self.world.despawn(entity) {
-                println!("⚠️ 删除实体失败: {:?}", e);
-            }
+            self.world.despawn(entity);
         }
 
         println!("✅ 已清理 {} 个游戏对象和地图实体", count);
@@ -374,7 +371,7 @@ impl GameContext {
         self.frame_net_events = events;
     }
 
-    /// 清空本帧的输入事件
+    /// 清空本帧的输入事件（在帧末调用）
     pub fn clear_frame_events(&mut self) {
         self.input.events.clear();
     }
@@ -967,7 +964,7 @@ impl InputContext {
         })
     }
 
-    /// 检查指定键是否按下
+    /// 检查指定键是否按下（持续状态）
     pub fn key_pressed(&self, key: ggez::input::keyboard::KeyCode) -> bool {
         self.keyboard
             .is_physical_key_pressed(&ggez::winit::keyboard::PhysicalKey::Code(key))
@@ -1061,6 +1058,38 @@ impl InputContext {
             0
         };
         (x, y)
+    }
+
+    // ===== 边缘检测方法（需配合 InputState Component 使用）=====
+    
+    /// 检查键是否刚按下（边缘检测）
+    /// 
+    /// **使用方法**：
+    /// ```rust
+    /// let input_state = ctx.world.query::<&InputState>().iter().next().map(|(_, s)| s);
+    /// if let Some(state) = input_state {
+    ///     if ctx.input().key_just_pressed(KeyCode::KeyO, state) {
+    ///         // 键刚按下
+    ///     }
+    /// }
+    /// ```
+    pub fn key_just_pressed(&self, key: ggez::input::keyboard::KeyCode, state: &crate::ecs::components::InputState) -> bool {
+        self.key_pressed(key) && !state.prev_pressed_keys.contains(&key)
+    }
+    
+    /// 检查鼠标左键是否刚按下
+    pub fn mouse_left_just_pressed(&self, state: &crate::ecs::components::InputState) -> bool {
+        self.mouse_left_pressed() && !state.prev_mouse_left
+    }
+    
+    /// 检查鼠标右键是否刚按下
+    pub fn mouse_right_just_pressed(&self, state: &crate::ecs::components::InputState) -> bool {
+        self.mouse_right_pressed() && !state.prev_mouse_right
+    }
+    
+    /// 检查鼠标中键是否刚按下
+    pub fn mouse_middle_just_pressed(&self, state: &crate::ecs::components::InputState) -> bool {
+        self.mouse_middle_pressed() && !state.prev_mouse_middle
     }
 
     // ===== WASD 方法 =====

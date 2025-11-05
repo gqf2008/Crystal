@@ -17,7 +17,7 @@ use ggez::GameResult;
 use hecs::{Entity, World};
 use mir2_client::ecs::components::movement::{MovementVelocity, Path};
 use mir2_client::ecs::components::{
-    Camera, CameraMode, Draggable, PlayerInput, Position, RenderConfig, TimeTracker, VisibleArea,
+    Camera, CameraMode, Draggable, InputState, PlayerInput, Position, RenderConfig, TimeTracker, VisibleArea,
 };
 use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance};
 use mir2_client::ecs::debug::DebugSystem;
@@ -29,7 +29,7 @@ use mir2_client::ecs::systems::logic::{
 };
 use mir2_client::ecs::systems::presentation::{AnimationSystem, CameraFollowSystem};
 use mir2_client::ecs::systems::{priority, MovementSystem, SystemScheduler};
-use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem, world};
+use mir2_client::ecs::{CameraSystem, GameContext, InputStateSystem, PlayerControlSystem, world};
 use mir2_client::graphics::libraries::initialize_all_libraries;
 use mir2_shared::enums::{MirClass, MirGender};
 use std::time::Instant;
@@ -141,6 +141,7 @@ impl MapViewerScene {
         tracing::info!("🎯 初始化地图查看器系统 (V1)...");
 
         scheduler
+            .add_system(InputStateSystem::new(), 10) // 输入状态追踪系统 - 最高优先级
             .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
             .add_system(PathfindingSystem::new(), priority::PATHFINDING)
             .add_system(AnimationSystem::new(), priority::ATTACK)
@@ -223,6 +224,9 @@ impl MapViewerScene {
 
         // 可见区域缓存实体
         world.spawn((VisibleArea::default(),));
+
+        // 🆕 输入状态实体（用于边缘检测）
+        world.spawn((InputState::default(),));
 
         // 事件通过 GameContext 传递
 

@@ -30,6 +30,8 @@ use crate::ecs::{
     systems::LogicSystem,
     Coord,
 };
+use crate::objects::pathfinder::PathFinder;
+use mir2_shared::Point;
 
 pub struct PathfindingSystem;
 
@@ -42,10 +44,45 @@ impl PathfindingSystem {
     fn world_to_grid(world_x: f32, world_y: f32) -> (i32, i32) {
         Coord::world_to_grid(world_x, world_y)
     }
+
+    /// 使用 A* 算法计算路径
+    fn calculate_path(
+        map_data: &MapData,
+        start_grid: (i32, i32),
+        target_grid: (i32, i32),
+    ) -> Option<Vec<(i32, i32)>> {
+        let start = Point::new(start_grid.0, start_grid.1);
+        let goal = Point::new(target_grid.0, target_grid.1);
+
+        // 创建地图障碍检测闭包
+        let cells = map_data.cells.clone();
+        let width = map_data.width;
+        let height = map_data.height;
+        
+        let is_blocking = Box::new(move |pos: Point| -> bool {
+            if pos.x < 0 || pos.x >= width || pos.y < 0 || pos.y >= height {
+                return true; // 地图外视为阻挡
+            }
+            let y = pos.y as usize;
+            let x = pos.x as usize;
+            if y >= cells.len() || x >= cells[y].len() {
+                return true;
+            }
+            !cells[y][x].is_walkable() // true = 阻挡
+        });
+
+        // 创建寻路器并计算路径
+        let pathfinder = PathFinder::new(width, height, is_blocking);
+        
+        pathfinder.find_path(start, goal).map(|path| {
+            path.into_iter()
+                .map(|p| (p.x, p.y))
+                .collect()
+        })
+    }
 }
 
 impl LogicSystem for PathfindingSystem {
-   
 
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         // 获取地图数据(用于寻路)
@@ -78,19 +115,20 @@ impl LogicSystem for PathfindingSystem {
                 // 检查目标是否与当前位置不同
                 if current_grid != target_grid {
                     // 检查是否需要更新路径 - 避免每帧重复设置导致卡顿
-                    let needs_update = if let Some(current_target) = path.current_waypoint() {
-                        // 目标改变了才更新
-                        current_target != target_grid
+                    let needs_update = if !path.waypoints.is_empty() {
+                        // 检查路径的最终目标是否改变了（不是当前waypoint）
+                        let final_target = path.waypoints[path.waypoints.len() - 1];
+                        final_target != target_grid
                     } else {
                         // 没有路径,需要设置
                         true
                     };
 
-                    // 🎯 DirectFollow模式: 不使用Path,每帧直接计算velocity方向
+                    // 🎯 DirectFollow模式: 不使用Path，每帧直接计算velocity方向
                     use crate::ecs::components::MovementMode;
                     
                     if player_input.movement_mode == MovementMode::DirectFollow {
-                        // 🚀 平滑跟随: 直接设置velocity朝向目标,完全不用Path
+                        // 🚀 平滑跟随: 直接设置velocity朝向目标，完全不用Path
                         let dx = target_x - position.x;
                         let dy = target_y - position.y;
                         let distance = (dx * dx + dy * dy).sqrt();
@@ -108,12 +146,12 @@ impl LogicSystem for PathfindingSystem {
                                 velocity.walk_speed
                             };
                             
-                            // 直接设置velocity,MovementSystem会直接用它更新position
+                            // 直接设置velocity，MovementSystem会直接用它更新position
                             velocity.x = dir_x * speed;
                             velocity.y = dir_y * speed;
                             velocity.max_speed = speed;
                             
-                            // ❌ 不设置Path! 让MovementSystem直接用velocity更新
+                            // ❌ 不设置Path！让MovementSystem直接用velocity更新
                             path.clear(); // 确保Path不干扰
                         } else {
                             velocity.stop();
@@ -130,7 +168,29 @@ impl LogicSystem for PathfindingSystem {
                                     current_grid.0, current_grid.1,
                                     target_grid.0, target_grid.1
                                 );
-                                path.set_path(vec![target_grid]);
+                                
+                                // 🎯 使用 A* 算法计算完整路径
+                                if let Some(ref map_data) = map_data {
+                                    match Self::calculate_path(map_data, current_grid, target_grid) {
+                                        Some(full_path) => {
+                                            tracing::info!("✅ A* 找到路径，共 {} 个格子", full_path.len());
+                                            if full_path.len() <= 10 {
+                                                tracing::debug!("完整路径: {:?}", full_path);
+                                            } else {
+                                                tracing::debug!("路径开始: {:?} ...", &full_path[..5]);
+                                                tracing::debug!("路径结束: ... {:?}", &full_path[full_path.len()-5..]);
+                                            }
+                                            path.set_path(full_path);
+                                        }
+                                        None => {
+                                            tracing::warn!("❌ A* 找不到路径，使用直线");
+                                            path.set_path(vec![target_grid]);
+                                        }
+                                    }
+                                } else {
+                                    tracing::warn!("⚠️ 地图数据不存在，使用直线路径");
+                                    path.set_path(vec![target_grid]);
+                                }
                                 
                                 // 🎬 根据 Player.action 计算初始速度（MovementSystem会从Player.action读取）
                                 use crate::ecs::components::PlayerAction;
@@ -153,7 +213,7 @@ impl LogicSystem for PathfindingSystem {
                                 }
                             }
                             MovementMode::DirectFollow => {
-                                // 已在上面处理
+                                // DirectFollow已在上面单独处理
                             }
                             MovementMode::None => {
                                 // 无移动模式,不设置路径

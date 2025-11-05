@@ -268,3 +268,39 @@ impl Default for PlayerInput {
         Self::new()
     }
 }
+
+// ============================================================================
+// 输入状态组件 - 统一管理输入的边缘检测
+// ============================================================================
+
+/// 输入状态组件 - 追踪上一帧的键盘和鼠标状态
+/// 
+/// **设计目标**：
+/// - ✅ 单一职责：专门负责输入状态追踪
+/// - ✅ 逻辑内聚：所有边缘检测逻辑集中在 InputStateSystem
+/// - ✅ 可复用：所有需要边缘检测的 System 都可以查询此 Component
+/// - ✅ 符合 ECS：状态存储在 Component 中，而非 System 或 Context
+/// 
+/// **使用者**：
+/// - `DebugSystem` - 调试热键边缘检测
+/// - `PlayerControlSystem` - 鼠标点击边缘检测（双击、单击）
+/// - `CameraSystem` - 拖拽开始检测
+/// - UI 系统 - 按钮点击检测
+/// 
+/// **更新时机**：
+/// - 由 `InputStateSystem` 在每帧开始时更新（优先级 10）
+/// - 在所有其他输入处理系统之前执行
+#[derive(Debug, Clone, Default)]
+pub struct InputState {
+    /// 上一帧按下的按键集合
+    pub prev_pressed_keys: std::collections::HashSet<ggez::input::keyboard::KeyCode>,
+    
+    /// 上一帧鼠标左键是否按下
+    pub prev_mouse_left: bool,
+    
+    /// 上一帧鼠标右键是否按下
+    pub prev_mouse_right: bool,
+    
+    /// 上一帧鼠标中键是否按下
+    pub prev_mouse_middle: bool,
+}

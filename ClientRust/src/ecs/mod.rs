@@ -31,6 +31,7 @@ pub mod ime_handler;
 
 pub use resources::*; // 🆕 导出全局资源
 pub use systems::logic::physics::{MapManager, MapUpdateSystem}; // 🆕 导出地图更新系统
+pub use systems::input::InputStateSystem; // 🆕 导出输入状态系统
 pub use systems::*;
 pub use world::GameWorld;
 pub use game_context::{GameContext, InputContext}; // 🆕 导出 GameContext
