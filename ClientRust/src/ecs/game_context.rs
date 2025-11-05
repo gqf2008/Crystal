@@ -232,7 +232,7 @@ pub struct GameContext {
     /// ECS World - 存储所有实体和组件
     pub world: World,
     /// 网络事件（本帧收集的）
-    pub net_events: CategorizedEvents,
+    pub frame_net_events: CategorizedEvents,
 }
 
 impl GameContext {
@@ -278,17 +278,13 @@ impl GameContext {
             },
             world,
 
-            net_events: CategorizedEvents::default(),
+            frame_net_events: CategorizedEvents::default(),
         };
 
         Ok((ctx, event_loop))
     }
 
     /// 安全地分离借用 ggez 组件和 World
-    ///
-    /// 这个方法允许同时可变借用 GraphicsContext 和 World，
-    /// 避免了 as_ggez_context() 导致的整体借用问题
-    ///
     /// # 返回
     /// - GraphicsContext 的可变引用
     /// - World 的可变引用
@@ -375,7 +371,7 @@ impl GameContext {
 
     pub fn collect_network_events(&mut self) {
         let events = self.world.network().recv_categorized();
-        self.net_events = events;
+        self.frame_net_events = events;
     }
 
     /// 清空本帧的输入事件
@@ -563,34 +559,34 @@ impl GameContext {
 
     /// 获取所有网络事件的引用
     pub fn net_events(&self) -> &CategorizedEvents {
-        &self.net_events
+        &self.frame_net_events
     }
 
     /// 获取网络事件总数
     pub fn net_event_count(&self) -> usize {
-        self.net_events.total_count()
+        self.frame_net_events.total_count()
     }
 
     /// 检查是否有网络事件
     pub fn has_net_events(&self) -> bool {
-        !self.net_events.is_empty()
+        !self.frame_net_events.is_empty()
     }
 
     // ===== 连接事件 =====
 
     /// 获取连接事件
     pub fn connection_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.connection
+        &self.frame_net_events.connection
     }
 
     /// 检查是否有连接事件
     pub fn has_connection_events(&self) -> bool {
-        !self.net_events.connection.is_empty()
+        !self.frame_net_events.connection.is_empty()
     }
 
     /// 检查是否已断开连接
     pub fn is_disconnected(&self) -> bool {
-        self.net_events
+        self.frame_net_events
             .connection
             .iter()
             .any(|e| matches!(e, crate::network::handlers::GameEvent::Disconnected { .. }))
@@ -600,17 +596,17 @@ impl GameContext {
 
     /// 获取认证事件
     pub fn auth_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.auth
+        &self.frame_net_events.auth
     }
 
     /// 检查是否有认证事件
     pub fn has_auth_events(&self) -> bool {
-        !self.net_events.auth.is_empty()
+        !self.frame_net_events.auth.is_empty()
     }
 
     /// 检查是否登录成功
     pub fn is_login_success(&self) -> bool {
-        self.net_events
+        self.frame_net_events
             .auth
             .iter()
             .any(|e| matches!(e, crate::network::handlers::GameEvent::LoginSuccess { .. }))
@@ -618,7 +614,7 @@ impl GameContext {
 
     /// 检查是否登录失败
     pub fn is_login_failed(&self) -> bool {
-        self.net_events
+        self.frame_net_events
             .auth
             .iter()
             .any(|e| matches!(e, crate::network::handlers::GameEvent::LoginFailed { .. }))
@@ -628,17 +624,17 @@ impl GameContext {
 
     /// 获取角色管理事件
     pub fn character_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.character
+        &self.frame_net_events.character
     }
 
     /// 检查是否有角色管理事件
     pub fn has_character_events(&self) -> bool {
-        !self.net_events.character.is_empty()
+        !self.frame_net_events.character.is_empty()
     }
 
     /// 检查是否收到用户信息（角色信息）
     pub fn has_user_information(&self) -> bool {
-        self.net_events.character.iter().any(|e| {
+        self.frame_net_events.character.iter().any(|e| {
             matches!(
                 e,
                 crate::network::handlers::GameEvent::UserInformation { .. }
@@ -650,65 +646,65 @@ impl GameContext {
 
     /// 获取玩家状态事件
     pub fn player_state_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.player_state
+        &self.frame_net_events.player_state
     }
 
     /// 检查是否有玩家状态事件
     pub fn has_player_state_events(&self) -> bool {
-        !self.net_events.player_state.is_empty()
+        !self.frame_net_events.player_state.is_empty()
     }
 
     // ===== 战斗事件 =====
 
     /// 获取战斗事件
     pub fn combat_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.combat
+        &self.frame_net_events.combat
     }
 
     /// 检查是否有战斗事件
     pub fn has_combat_events(&self) -> bool {
-        !self.net_events.combat.is_empty()
+        !self.frame_net_events.combat.is_empty()
     }
 
     // ===== 聊天事件 =====
 
     /// 获取聊天事件
     pub fn chat_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.chat
+        &self.frame_net_events.chat
     }
 
     /// 检查是否有聊天消息
     pub fn has_chat_events(&self) -> bool {
-        !self.net_events.chat.is_empty()
+        !self.frame_net_events.chat.is_empty()
     }
 
     // ===== 世界对象事件 =====
 
     /// 获取世界对象事件
     pub fn world_object_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.world_objects
+        &self.frame_net_events.world_objects
     }
 
     /// 检查是否有世界对象事件
     pub fn has_world_object_events(&self) -> bool {
-        !self.net_events.world_objects.is_empty()
+        !self.frame_net_events.world_objects.is_empty()
     }
 
     // ===== 地图事件 =====
 
     /// 获取地图事件
     pub fn map_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.map
+        &self.frame_net_events.map
     }
 
     /// 检查是否有地图事件
     pub fn has_map_events(&self) -> bool {
-        !self.net_events.map.is_empty()
+        !self.frame_net_events.map.is_empty()
     }
 
     /// 检查是否有地图切换事件
     pub fn has_map_changed(&self) -> bool {
-        self.net_events
+        self.frame_net_events
             .map
             .iter()
             .any(|e| matches!(e, crate::network::handlers::GameEvent::MapChanged { .. }))
@@ -718,36 +714,36 @@ impl GameContext {
 
     /// 获取物品事件
     pub fn item_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.items
+        &self.frame_net_events.items
     }
 
     /// 检查是否有物品事件
     pub fn has_item_events(&self) -> bool {
-        !self.net_events.items.is_empty()
+        !self.frame_net_events.items.is_empty()
     }
 
     // ===== NPC 事件 =====
 
     /// 获取 NPC 事件
     pub fn npc_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.npc
+        &self.frame_net_events.npc
     }
 
     /// 检查是否有 NPC 事件
     pub fn has_npc_events(&self) -> bool {
-        !self.net_events.npc.is_empty()
+        !self.frame_net_events.npc.is_empty()
     }
 
     // ===== 其他事件 =====
 
     /// 获取其他事件
     pub fn other_events(&self) -> &[crate::network::handlers::GameEvent] {
-        &self.net_events.other
+        &self.frame_net_events.other
     }
 
     /// 检查是否有其他事件
     pub fn has_other_events(&self) -> bool {
-        !self.net_events.other.is_empty()
+        !self.frame_net_events.other.is_empty()
     }
 
     // ===== 事件过滤和查询 =====
@@ -756,19 +752,19 @@ impl GameContext {
     pub fn iter_all_net_events(
         &self,
     ) -> impl Iterator<Item = &crate::network::handlers::GameEvent> {
-        self.net_events
+        self.frame_net_events
             .connection
             .iter()
-            .chain(self.net_events.auth.iter())
-            .chain(self.net_events.character.iter())
-            .chain(self.net_events.player_state.iter())
-            .chain(self.net_events.combat.iter())
-            .chain(self.net_events.chat.iter())
-            .chain(self.net_events.world_objects.iter())
-            .chain(self.net_events.map.iter())
-            .chain(self.net_events.items.iter())
-            .chain(self.net_events.npc.iter())
-            .chain(self.net_events.other.iter())
+            .chain(self.frame_net_events.auth.iter())
+            .chain(self.frame_net_events.character.iter())
+            .chain(self.frame_net_events.player_state.iter())
+            .chain(self.frame_net_events.combat.iter())
+            .chain(self.frame_net_events.chat.iter())
+            .chain(self.frame_net_events.world_objects.iter())
+            .chain(self.frame_net_events.map.iter())
+            .chain(self.frame_net_events.items.iter())
+            .chain(self.frame_net_events.npc.iter())
+            .chain(self.frame_net_events.other.iter())
     }
 
     /// 查找特定类型的事件

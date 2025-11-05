@@ -11,9 +11,9 @@ impl LoginScene {
     pub(crate) fn handle_network_event(&mut self, game_ctx: &mut GameContext) {
         
         // 处理所有类别的网络事件
-        let all_events: Vec<GameEvent> = game_ctx.net_events.connection.iter()
-            .chain(game_ctx.net_events.auth.iter())
-            .chain(game_ctx.net_events.character.iter())
+        let all_events: Vec<GameEvent> = game_ctx.frame_net_events.connection.iter()
+            .chain(game_ctx.frame_net_events.auth.iter())
+            .chain(game_ctx.frame_net_events.character.iter())
             .cloned()
             .collect();
             
