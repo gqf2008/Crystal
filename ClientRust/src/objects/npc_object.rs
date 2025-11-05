@@ -3,7 +3,10 @@
 
 use ggez::{Context, GameResult};
 use ggez::graphics::Canvas;
-use mir2_shared::{Point,packets::*};
+use mir2_shared::{
+    packets::server::ObjectNpc, // 导入服务器数据包类型
+    Point,
+};
 
 use super::map_object::MapObject;
 use super::drawable::DrawableMapObject;

@@ -489,12 +489,8 @@ impl HasMut<GamepadContext> for GameContext {
 
 impl GameContext {
     /// 获取 ClientSettings
-    pub fn settings(&self) -> Option<hecs::Ref<'_, ClientSettings>> {
-        if let Some(entity) = crate::ecs::SETTING_ENTITY {
-            self.world.get::<&ClientSettings>(entity).ok()
-        } else {
-            None
-        }
+    pub fn settings(&self) -> hecs::Ref<'_, ClientSettings> {
+        self.world.settings()
     }
 
     // /// 获取 NetContext

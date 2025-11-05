@@ -3,12 +3,80 @@
 // ============================================================================
 
 use hecs::World;
+use std::ops::{Deref, DerefMut};
 use std::time::Instant;
 
 use super::components::*;
-use mir2_shared::{enums::*, Point};
+use crate::network::NetContext;
+use crate::ClientSettings;
+use ggez::mint::Point2;
+use mir2_shared::Point;
+
+// 使用有效的Entity ID (高32位为generation=1, 低32位为index)
+const SETTING_ENTITY: hecs::Entity = hecs::Entity::from_bits(0x100000001).unwrap();
+const NETWORK_ENTITY: hecs::Entity = hecs::Entity::from_bits(0x100000002).unwrap();
 
 /// 游戏世界 - 管理所有实体
+/// 
+/// ## 功能
+/// 
+/// 1. **单例组件管理** - Settings 和 Network
+/// 2. **实体工厂方法** - 统一创建玩家、怪物、NPC 等
+/// 3. **查询工具** - 快速查找特定实体
+/// 4. **生命周期管理** - 自动清理死亡实体
+/// 
+/// ## 坐标系统
+/// 
+/// `GameWorld` 支持两种坐标类型：
+/// - **`Point2<f32>`** (ggez/mint) - 屏幕/渲染坐标，高精度
+/// - **`Point` (i32)** (mir2_shared) - 地图网格坐标，用于网络同步
+/// 
+/// 每个实体工厂方法都有两个版本：
+/// - `spawn_xxx()` - 接受 `Point` (i32) 地图坐标
+/// - `spawn_xxx_at()` - 接受 `Point2<f32>` 屏幕坐标
+/// 
+/// ## 示例
+/// 
+/// ```rust
+/// use mir2_client::ecs::GameWorld;
+/// use ggez::mint::Point2;
+/// use mir2_shared::Point;
+/// 
+/// let mut game_world = GameWorld::new();
+/// 
+/// // 1. 初始化单例组件
+/// game_world.spawn_settings(settings);
+/// game_world.spawn_network(net_ctx);
+/// 
+/// // 2. 使用 ggez 标准坐标（屏幕/渲染）
+/// let player = game_world.spawn_local_player_at(
+///     "Hero".to_string(),
+///     MirClass::Warrior,
+///     MirGender::Male,
+///     Point2 { x: 100.5, y: 200.3 },  // f32 精度
+/// );
+/// 
+/// // 3. 使用网络协议坐标（地图网格）
+/// let monster = game_world.spawn_monster(
+///     1001,
+///     "Deer".to_string(),
+///     0,
+///     Point { x: 110, y: 210 },  // i32 网格坐标
+/// );
+/// 
+/// // 4. 透明访问内部 World（通过 Deref）
+/// for (id, pos) in game_world.query::<&Position>().iter() {
+///     println!("Entity {:?} at {:?}", id, pos);
+/// }
+/// 
+/// // 5. 使用查询工具
+/// if let Some(pos) = game_world.get_local_player_position() {
+///     println!("Player at grid ({}, {})", pos.x, pos.y);
+/// }
+/// 
+/// // 6. 清理死亡实体
+/// game_world.cleanup_dead_entities();
+/// ```
 pub struct GameWorld {
     pub world: World,
     pub start_time: Instant,
@@ -16,6 +84,7 @@ pub struct GameWorld {
 
 impl GameWorld {
     pub fn new() -> Self {
+
         Self {
             world: World::new(),
             start_time: Instant::now(),
@@ -23,10 +92,54 @@ impl GameWorld {
     }
 
     // ========================================================================
-    // 实体创建工厂方法
+    // 单例组件管理 (Settings, Network)
     // ========================================================================
 
-    /// 创建本地玩家
+    /// 初始化客户端设置
+    pub fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self {
+        self.world.spawn_at(SETTING_ENTITY, (settings,));
+        self
+    }
+
+    /// 初始化网络上下文
+    pub fn spawn_network(&mut self, net_ctx: NetContext) -> &mut Self {
+        self.world.spawn_at(NETWORK_ENTITY, (net_ctx,));
+        self
+    }
+
+    /// 获取客户端设置
+    pub fn settings(&self) -> hecs::Ref<'_, ClientSettings> {
+        self.world
+            .get::<&ClientSettings>(SETTING_ENTITY)
+            .expect("GameWorld ClientSettings not found")
+    }
+
+    /// 获取网络上下文
+    pub fn network(&self) -> hecs::Ref<'_, NetContext> {
+        self.world
+            .get::<&NetContext>(NETWORK_ENTITY)
+            .expect("GameWorld NetContext not found")
+    }
+
+    // ========================================================================
+    // 实体创建工厂方法
+    // ========================================================================
+    
+    /// 创建本地玩家（使用屏幕坐标）
+    /// 
+    /// 便捷方法：接受 `mint::Point2<f32>` 屏幕坐标
+    pub fn spawn_local_player_at(
+        &mut self,
+        name: String,
+        class: MirClass,
+        gender: MirGender,
+        position: Point2<f32>,
+    ) -> hecs::Entity {
+        let grid_pos = Point::new(position.x as i32, position.y as i32);
+        self.spawn_local_player(name, class, gender, grid_pos)
+    }
+
+    /// 创建本地玩家（使用地图网格坐标）
     pub fn spawn_local_player(
         &mut self,
         name: String,
@@ -64,7 +177,20 @@ impl GameWorld {
         ))
     }
 
-    /// 创建远程玩家
+    /// 创建远程玩家（使用屏幕坐标）
+    pub fn spawn_remote_player_at(
+        &mut self,
+        id: u32,
+        name: String,
+        class: MirClass,
+        gender: MirGender,
+        position: Point2<f32>,
+    ) -> hecs::Entity {
+        let grid_pos = Point::new(position.x as i32, position.y as i32);
+        self.spawn_remote_player(id, name, class, gender, grid_pos)
+    }
+
+    /// 创建远程玩家（使用地图网格坐标）
     pub fn spawn_remote_player(
         &mut self,
         id: u32,
@@ -93,7 +219,19 @@ impl GameWorld {
         ))
     }
 
-    /// 创建怪物
+    /// 创建怪物（使用屏幕坐标）
+    pub fn spawn_monster_at(
+        &mut self,
+        id: u32,
+        name: String,
+        monster_index: u16,
+        position: Point2<f32>,
+    ) -> hecs::Entity {
+        let grid_pos = Point::new(position.x as i32, position.y as i32);
+        self.spawn_monster(id, name, monster_index, grid_pos)
+    }
+
+    /// 创建怪物（使用地图网格坐标）
     pub fn spawn_monster(
         &mut self,
         id: u32,
@@ -139,7 +277,19 @@ impl GameWorld {
         ))
     }
 
-    /// 创建 NPC
+    /// 创建 NPC（使用屏幕坐标）
+    pub fn spawn_npc_at(
+        &mut self,
+        id: u32,
+        name: String,
+        npc_index: u16,
+        position: Point2<f32>,
+    ) -> hecs::Entity {
+        let grid_pos = Point::new(position.x as i32, position.y as i32);
+        self.spawn_npc(id, name, npc_index, grid_pos)
+    }
+
+    /// 创建 NPC（使用地图网格坐标）
     pub fn spawn_npc(
         &mut self,
         id: u32,
@@ -164,7 +314,21 @@ impl GameWorld {
         ))
     }
 
-    /// 创建技能特效 (ADD 混合)
+    /// 创建技能特效（使用屏幕坐标）
+    pub fn spawn_spell_effect_at(
+        &mut self,
+        spell_id: u16,
+        caster_id: u32,
+        position: Point2<f32>,
+        target_pos: Point2<f32>,
+        duration_ms: u32,
+    ) -> hecs::Entity {
+        let start = Point::new(position.x as i32, position.y as i32);
+        let end = Point::new(target_pos.x as i32, target_pos.y as i32);
+        self.spawn_spell_effect(spell_id, caster_id, start, end, duration_ms)
+    }
+
+    /// 创建技能特效 (ADD 混合，使用地图网格坐标)
     pub fn spawn_spell_effect(
         &mut self,
         spell_id: u16,
@@ -196,7 +360,20 @@ impl GameWorld {
         ))
     }
 
-    /// 创建地面物品
+    /// 创建地面物品（使用屏幕坐标）
+    pub fn spawn_item_drop_at(
+        &mut self,
+        item_id: u32,
+        item_index: u16,
+        count: u32,
+        position: Point2<f32>,
+        owner_id: Option<u32>,
+    ) -> hecs::Entity {
+        let grid_pos = Point::new(position.x as i32, position.y as i32);
+        self.spawn_item_drop(item_id, item_index, count, grid_pos, owner_id)
+    }
+
+    /// 创建地面物品（使用地图网格坐标）
     pub fn spawn_item_drop(
         &mut self,
         item_id: u32,
@@ -299,11 +476,95 @@ impl GameWorld {
             self.despawn(entity);
         }
     }
+
+    // ========================================================================
+    // 统计和批量操作
+    // ========================================================================
+
+    /// 获取所有远程玩家数量
+    pub fn count_remote_players(&self) -> usize {
+        self.world.query::<&RemotePlayer>().iter().count()
+    }
+
+    /// 获取所有怪物数量
+    pub fn count_monsters(&self) -> usize {
+        self.world.query::<&MonsterData>().iter().count()
+    }
+
+    /// 获取所有 NPC 数量
+    pub fn count_npcs(&self) -> usize {
+        self.world.query::<&NPCData>().iter().count()
+    }
+
+    /// 获取世界中所有实体数量
+    pub fn entity_count(&self) -> u32 {
+        self.world.len()
+    }
+
+    /// 清除所有远程玩家
+    pub fn clear_remote_players(&mut self) {
+        let entities: Vec<_> = self
+            .world
+            .query::<&RemotePlayer>()
+            .iter()
+            .map(|(e, _)| e)
+            .collect();
+        
+        for entity in entities {
+            self.despawn(entity);
+        }
+    }
+
+    /// 清除所有怪物
+    pub fn clear_monsters(&mut self) {
+        let entities: Vec<_> = self
+            .world
+            .query::<&MonsterData>()
+            .iter()
+            .map(|(e, _)| e)
+            .collect();
+        
+        for entity in entities {
+            self.despawn(entity);
+        }
+    }
+
+    /// 清除所有特效
+    pub fn clear_effects(&mut self) {
+        let entities: Vec<_> = self
+            .world
+            .query::<&SpellData>()
+            .iter()
+            .map(|(e, _)| e)
+            .collect();
+        
+        for entity in entities {
+            self.despawn(entity);
+        }
+    }
 }
 
 impl Default for GameWorld {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ============================================================================
+// Deref 实现 - 透明访问内部 World
+// ============================================================================
+
+impl Deref for GameWorld {
+    type Target = World;
+
+    fn deref(&self) -> &Self::Target {
+        &self.world
+    }
+}
+
+impl DerefMut for GameWorld {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.world
     }
 }
 

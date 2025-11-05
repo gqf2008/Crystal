@@ -15,7 +15,7 @@ use mir2_shared::{
         EquipmentSlot, IntelligentCreatureType, ItemSet, ItemType, MirAction, MirClass,
         MirDirection, MirGender, SpecialItemMode, Spell, Stat,
     },
-    packets::*,
+    packets::server::UserInformation, // 导入服务器数据包类型
     Point, UserItem,
 };
 

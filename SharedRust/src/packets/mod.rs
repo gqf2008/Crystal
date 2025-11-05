@@ -24,6 +24,5 @@ pub type CharacterSummary = SelectInfo;
 pub use base::*;
 // pub use ids::*;
 
-// Re-export all packet types for convenience
-pub use client::*;
-pub use server::*;
+// Note: We don't glob re-export client::* and server::* to avoid ambiguous names
+// Use packets::client::PacketName or packets::server::PacketName instead

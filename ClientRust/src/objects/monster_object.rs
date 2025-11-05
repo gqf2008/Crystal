@@ -5,7 +5,8 @@ use ggez::{Context, GameResult};
 use ggez::graphics::Canvas;
 use mir2_shared::{
     enums::{MirDirection, SpellEffect},
-    Point,packets::*
+    packets::server::ObjectMonster, // 导入服务器数据包类型
+    Point,
 };
 
 use super::map_object::MapObject;

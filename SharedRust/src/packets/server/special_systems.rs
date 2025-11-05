@@ -233,40 +233,7 @@ impl Packet for GuildBuffList {
     }
 }
 
-/// NPCRequestInput - NPC请求输入 (247)
-#[derive(Debug, Clone)]
-pub struct NPCRequestInput {
-    pub message: String,            // 提示消息
-    pub max_length: i32,            // 最大长度
-}
-
-impl Packet for NPCRequestInput {
-    const OPCODE: i16 = ServerPacketIds::NPCRequestInput as i16;
-
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        use crate::binary::write_dotnet_string;
-        
-        // Note: C# has NPCID(u32) + PageName(string)
-        // Rust has message(string) + max_length(i32)
-        write_dotnet_string(writer, &self.message)?;
-        writer.write_i32::<LittleEndian>(self.max_length)?;
-        
-        Ok(())
-    }
-
-    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let message = String::from_utf8_lossy(&bytes).to_string();
-        let max_length = reader.read_i32::<LittleEndian>()?;
-        Ok(Self {
-            message,
-            max_length,
-        })
-    }
-}
+// Note: NPCRequestInput has been moved to npc.rs to avoid duplication
 
 /// GameShopInfo - 游戏商店信息 (248)
 #[derive(Debug, Clone)]

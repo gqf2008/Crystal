@@ -49,8 +49,65 @@ pub use ui::{CharacterStatus, ChatWindow, ExpBar, HealthBar, ManaBar, SkillBar};
 // 游戏应用导出
 pub use game_app::GameState;
 pub use scenes::{GameScene, LoginScene, Scene, SceneType, SelectScene};
+
 use crate::network::NetContext;
 use crate::ClientSettings;
+
+// ============================================================================
+// WorldExt trait - 向后兼容的 World 扩展
+// ============================================================================
+
+/// WorldExt trait - ECS World 扩展方法（向后兼容）
+///
+/// **注意**: 此 trait 主要用于向后兼容现有代码。
+/// 
+/// **推荐**: 新代码应使用 `GameWorld` 而非直接操作 `hecs::World`。
+/// 
+/// `GameWorld` 提供了相同的方法，以及额外的实体工厂方法：
+/// ```rust
+/// let mut game_world = GameWorld::new();
+/// game_world.spawn_settings(settings);
+/// game_world.spawn_local_player("Player", class, gender, position);
+/// ```
+/// 
+/// 此 trait 保留是因为 `GameContext` 仍然直接暴露 `hecs::World`
+pub trait WorldExt {
+    fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self;
+    fn spawn_network(&mut self, net_ctx: NetContext) -> &mut Self;
+    fn settings(&self) -> hecs::Ref<'_, ClientSettings>;
+    fn network(&self) -> hecs::Ref<'_, NetContext>;
+}
+
+// 使用有效的Entity ID (高32位为generation=1, 低32位为index)
+const SETTING_ENTITY_ID: hecs::Entity = hecs::Entity::from_bits(0x100000001).unwrap();
+const NETWORK_ENTITY_ID: hecs::Entity = hecs::Entity::from_bits(0x100000002).unwrap();
+
+/// 全局配置实体的常量（用于向后兼容 map_update_system.rs）
+pub const SETTING_ENTITY: Option<hecs::Entity> = Some(SETTING_ENTITY_ID);
+/// 网络上下文实体的常量（用于向后兼容 map_update_system.rs）
+pub const NETWORK_ENTITY: Option<hecs::Entity> = Some(NETWORK_ENTITY_ID);
+
+impl WorldExt for hecs::World {
+    fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self {
+        self.spawn_at(SETTING_ENTITY_ID, (settings,));
+        self
+    }
+    
+    fn spawn_network(&mut self, net_ctx: NetContext) -> &mut Self {
+        self.spawn_at(NETWORK_ENTITY_ID, (net_ctx,));
+        self
+    }
+
+    fn settings(&self) -> hecs::Ref<'_, ClientSettings> {
+        self.get::<&ClientSettings>(SETTING_ENTITY_ID)
+            .expect("ClientSettings not found in World")
+    }
+
+    fn network(&self) -> hecs::Ref<'_, NetContext> {
+        self.get::<&NetContext>(NETWORK_ENTITY_ID)
+            .expect("NetContext not found in World")
+    }
+}
 
 // ============================================================================
 // 架构说明
@@ -82,71 +139,3 @@ use crate::ClientSettings;
 // - NetworkSystem: 同步远程玩家
 //
 // ============================================================================
-
-/// WorldExt trait - ECS World 扩展方法
-/// 
-/// 提供便捷方法用于访问单例组件（settings, network）
-/// 
-/// ## 使用方法
-/// 
-/// ```rust
-/// use crate::ecs::WorldExt;
-/// 
-/// // 初始化阶段
-/// world.spawn_settings(settings);
-/// world.spawn_network(net_ctx);
-/// 
-/// // 访问单例组件
-/// let settings = world.settings();
-/// let network = world.network();
-/// ```
-/// 
-/// ## 注意
-/// 
-/// 输入/网络事件现在通过 `GameContext` 访问，不再使用单独的组件
-/// 
-/// 请使用 **GameContext API** 访问事件：
-/// ```rust
-/// fn run(&mut self, ctx: GameContext) {
-///     let input_events = ctx.input_events();
-///     let net_events = ctx.net_events();
-///     
-///     for key in ctx.filter_key_pressed() {
-///         // 处理按键...
-///     }
-/// }
-/// ```
-pub trait WorldExt {
-    fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self;
-    fn spawn_network(&mut self, net_ctx: NetContext) -> &mut Self;
-    fn settings(&self) -> hecs::Ref<'_, ClientSettings>;
-    fn network(&self) -> hecs::Ref<'_, crate::network::NetContext>;
-}
-
-// 使用有效的Entity ID (高32位为generation=1, 低32位为index)
-pub const SETTING_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x100000001);
-pub const NETWORK_ENTITY: Option<hecs::Entity> = hecs::Entity::from_bits(0x100000002);
-
-impl WorldExt for hecs::World {
-    fn spawn_settings(&mut self, settings: ClientSettings) -> &mut Self {
-        self.spawn_at(
-            SETTING_ENTITY.unwrap_or(hecs::Entity::DANGLING),
-            (settings,),
-        );
-        self
-    }
-    fn spawn_network(&mut self, net_ctx: NetContext) -> &mut Self {
-        self.spawn_at(NETWORK_ENTITY.unwrap_or(hecs::Entity::DANGLING), (net_ctx,));
-        self
-    }
-
-    fn settings(&self) -> hecs::Ref<'_, ClientSettings> {
-        self.get::<&ClientSettings>(SETTING_ENTITY.unwrap_or(hecs::Entity::DANGLING))
-            .expect("GameWorld ClientSettings not found")
-    }
-
-    fn network(&self) -> hecs::Ref<'_, crate::network::NetContext> {
-        self.get::<&NetContext>(NETWORK_ENTITY.unwrap_or(hecs::Entity::DANGLING))
-            .expect("GameWorld NetContext not found")
-    }
-}
