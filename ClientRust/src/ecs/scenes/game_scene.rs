@@ -31,7 +31,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::{Scene, SceneType};
-use crate::ecs::debug::DebugSystem;
+use crate::ecs::dbug::DebugSystem;
 use crate::ecs::presentation::{ParticleSystem, SoundSystem};
 use crate::ecs::rendering::UIRenderSystem;
 use crate::ecs::systems::{

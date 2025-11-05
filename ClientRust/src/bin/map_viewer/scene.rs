@@ -20,7 +20,7 @@ use mir2_client::ecs::components::{
     Camera, CameraMode, Draggable, InputState, PlayerInput, Position, RenderConfig, TimeTracker, VisibleArea,
 };
 use mir2_client::ecs::components::{LocalPlayer, Player, PlayerAction, PlayerAppearance};
-use mir2_client::ecs::debug::DebugSystem;
+use mir2_client::ecs::dbug::DebugSystem;
 use mir2_client::ecs::rendering::{SpriteRenderSystem, MapRenderSystem};
 use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::logic::map_load_system::MapManager;

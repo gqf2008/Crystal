@@ -118,7 +118,7 @@ pub mod priority {
     // 帧结束
 }
 
-pub mod debug;
+pub mod dbug;
 pub mod infra;
 pub mod input;
 pub mod logic;
