@@ -95,11 +95,30 @@ impl InputStateSystem {
 
 impl LogicSystem for InputStateSystem {
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
+        // ⚠️ 关键设计：先使用旧状态，帧末尾才更新
+        // 
+        // 执行顺序：
+        // 1. InputStateSystem (优先级10) - 不做任何事（或者记录旧状态）
+        // 2. PlayerControlSystem (优先级100) - 使用 InputState 做边缘检测
+        // 3. DebugSystem (优先级9200) - 使用 InputState 做边缘检测
+        // 4. 帧末尾 - InputStateSystem 再次执行，更新 InputState
+        //
+        // 但是ECS系统只会在每帧调用一次update...所以我们需要换个思路：
+        // **在当前帧末尾更新 prev_xxx，供下一帧使用**
+        //
+        // 更好的方案：
+        // InputStateSystem 在帧开始时不做任何事
+        // 在帧末尾（所有系统执行完后）才更新状态
+        // 但这需要修改调度器...
+        //
+        // 🔧 临时方案：InputStateSystem 优先级设为最低（在所有系统之后）
+        // 这样它会在帧末尾执行，记录本帧状态供下一帧使用
+        
         // 查询唯一的 InputState 组件
         let mut query = ctx.world.query::<&mut InputState>();
         
         if let Some((_, state)) = query.iter().next() {
-            // ===== 更新键盘状态 =====
+            // ===== 更新键盘状态（为下一帧准备）=====
             state.prev_pressed_keys.clear();
             
             for &key in KEYS_TO_TRACK {
@@ -108,7 +127,7 @@ impl LogicSystem for InputStateSystem {
                 }
             }
             
-            // ===== 更新鼠标状态 =====
+            // ===== 更新鼠标状态（为下一帧准备）=====
             state.prev_mouse_left = ctx.input().mouse_left_pressed();
             state.prev_mouse_right = ctx.input().mouse_right_pressed();
             state.prev_mouse_middle = ctx.input().mouse_middle_pressed();

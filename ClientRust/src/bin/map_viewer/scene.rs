@@ -141,7 +141,9 @@ impl MapViewerScene {
         tracing::info!("🎯 初始化地图查看器系统 (V1)...");
 
         scheduler
-            .add_system(InputStateSystem::new(), 10) // 输入状态追踪系统 - 最高优先级
+            // ❌ 注意：InputStateSystem 必须在帧末尾执行！
+            // 它记录本帧的输入状态，供下一帧的边缘检测使用
+            // 所以优先级要设置为最低（在所有其他系统之后）
             .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
             .add_system(PathfindingSystem::new(), priority::PATHFINDING)
             .add_system(AnimationSystem::new(), priority::ATTACK)
@@ -153,7 +155,8 @@ impl MapViewerScene {
             .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW) // 相机跟随
             .add_system(MapRenderSystem::new(), priority::MAP_RENDER) // 混合系统: update()更新瓦片动画, draw()渲染地图
             .add_system(SpriteRenderSystem, priority::SPRITE_RENDER) // 角色渲染系统
-            .add_system(DebugSystem, priority::DEBUG); // 调试系统
+            .add_system(DebugSystem, priority::DEBUG) // 调试系统
+            .add_system(InputStateSystem::new(), priority::LOGGING + 100); // 输入状态追踪系统 - 最低优先级（帧末尾）
 
         tracing::info!("✅ 地图查看器 V1 系统初始化完成！");
         scheduler
