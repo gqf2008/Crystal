@@ -63,12 +63,14 @@ impl PathfindingSystem {
             if pos.x < 0 || pos.x >= width || pos.y < 0 || pos.y >= height {
                 return true; // 地图外视为阻挡
             }
-            let y = pos.y as usize;
             let x = pos.x as usize;
-            if y >= cells.len() || x >= cells[y].len() {
+            let y = pos.y as usize;
+            // ✅ 关键修正：地图数据结构是 cells[x][y]，不是 cells[y][x]！
+            // outer vec 有 Width 个元素，inner vec 有 Height 个元素
+            if x >= cells.len() || y >= cells[x].len() {
                 return true;
             }
-            !cells[y][x].is_walkable() // true = 阻挡
+            !cells[x][y].is_walkable() // true = 阻挡
         });
 
         // 创建寻路器并计算路径
@@ -134,22 +136,52 @@ impl LogicSystem for PathfindingSystem {
                         let distance = (dx * dx + dy * dy).sqrt();
                         
                         if distance > 5.0 { // 距离目标超过5像素才移动
+                            // 🛡️ DirectFollow 模式需要预检查移动方向是否有障碍物
                             // 归一化方向向量
                             let dir_x = dx / distance;
                             let dir_y = dy / distance;
                             
-                            // 🎬 根据 Player.action 设置速度
-                            use crate::ecs::components::PlayerAction;
-                            let speed = if player.action == PlayerAction::Run {
-                                velocity.run_speed
+                            // 预测移动一小段距离后的位置（比如10像素）
+                            let check_distance = 10.0;
+                            let next_x = position.x + dir_x * check_distance;
+                            let next_y = position.y + dir_y * check_distance;
+                            let next_grid_x = (next_x / 48.0) as i32;
+                            let next_grid_y = (next_y / 32.0) as i32;
+                            
+                            // 检查是否有障碍物（需要地图数据）
+                            let has_obstacle = if let Some(ref map) = map_data {
+                                // 检查目标格子是否在地图范围内
+                                let in_bounds = next_grid_x >= 0 && next_grid_y >= 0 
+                                    && next_grid_x < map.width && next_grid_y < map.height;
+                                
+                                if in_bounds {
+                                    let cell = &map.cells[next_grid_x as usize][next_grid_y as usize];
+                                    (cell.back_image & 0x20000000) != 0
+                                } else {
+                                    true // 边界外视为障碍物
+                                }
                             } else {
-                                velocity.walk_speed
+                                false // 没有地图数据，不阻挡
                             };
                             
-                            // 直接设置velocity，MovementSystem会直接用它更新position
-                            velocity.x = dir_x * speed;
-                            velocity.y = dir_y * speed;
-                            velocity.max_speed = speed;
+                            if !has_obstacle {
+                                // 前方没有障碍物，可以移动
+                                // 🎬 根据 Player.action 设置速度
+                                use crate::ecs::components::PlayerAction;
+                                let speed = if player.action == PlayerAction::Run {
+                                    velocity.run_speed
+                                } else {
+                                    velocity.walk_speed
+                                };
+                                
+                                // 直接设置velocity，MovementSystem会直接用它更新position
+                                velocity.x = dir_x * speed;
+                                velocity.y = dir_y * speed;
+                                velocity.max_speed = speed;
+                            } else {
+                                // 前方有障碍物，停止移动
+                                velocity.stop();
+                            }
                             
                             // ❌ 不设置Path！让MovementSystem直接用velocity更新
                             path.clear(); // 确保Path不干扰

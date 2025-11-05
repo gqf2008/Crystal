@@ -80,12 +80,16 @@ impl LogicSystem for CollisionSystem {
 
         // 检查移动方向的下一个格子是否有障碍物
         use crate::ecs::components::{PlayerInput, Player};
+        
         for (_entity, (pos, vel, player_input, _player)) in ctx.world.query_mut::<(&mut Position, &mut MovementVelocity, Option<&mut PlayerInput>, Option<&Player>)>() {
             // 🎯 检查velocity是否为零或接近零
             // 注意: 如果velocity为零,说明没有移动,不需要检查碰撞
             if vel.x.abs() < 0.01 && vel.y.abs() < 0.01 {
                 continue;
             }
+            
+            // 记录是否为玩家（用于日志输出）
+            let is_player = player_input.is_some();
             
             // 🎯 关键修复：预测下一帧的位置，而不是检查当前位置
             // 这样可以在实际移动前就阻止碰撞
@@ -122,7 +126,7 @@ impl LogicSystem for CollisionSystem {
                 // 这样 PlayerStateSystem 仍认为在移动状态，动画会继续
                 // 但由于 velocity=0，position 不会更新，形成"原地踏步"
                 
-                if player_input.is_some() {
+                if is_player {
                     tracing::warn!("🛑 碰撞！停止velocity但保持动画 - NextGrid({}, {}), CurPos({:.1}, {:.1})", 
                                    grid_x, grid_y, pos.x, pos.y);
                 }

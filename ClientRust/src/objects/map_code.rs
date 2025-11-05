@@ -167,19 +167,18 @@ impl CellInfo {
 
     // 辅助方法：检查是否可行走
     // C# Reference: MapControl.ValidPoint() - (M2CellInfo[x, y].BackImage & 0x20000000) == 0
+    // 
+    // ✅ 关键修正：只检查 back_image 的障碍物标志位！
+    // - front_image/middle_image 只是图片装饰，不阻挡移动
+    // - door_index 在传奇2中通常为0（门系统未实现）
+    // - 必须与 CollisionSystem 和 DebugSystem 的障碍物判断保持一致
     pub fn is_walkable(&self) -> bool {
-        // ❌ 检查 back_image 的障碍物标志位 (0x20000000)
+        // ✅ 只检查 back_image 的障碍物标志位 (0x20000000)
         // 如果设置了这个位，说明该格子有障碍物，不可通行
-        let has_back_obstacle = (self.back_image & 0x20000000) != 0;
+        let has_obstacle = (self.back_image & 0x20000000) != 0;
         
-        // ❌ 检查是否有门（门通常是阻挡的）
-        let has_door = self.door_index != 0;
-        
-        // ❌ 检查前景层是否有阻挡物（某些前景物体会阻挡移动）
-        let has_front_obstacle = self.front_image != 0;
-        
-        // ✅ 只有当所有障碍物检查都通过时，才认为可行走
-        !has_back_obstacle && !has_door && !has_front_obstacle
+        // ✅ 返回: 没有障碍物 = 可行走
+        !has_obstacle
     }
 
     pub fn back_tile(&self) -> Option<(i16, i32)> {
