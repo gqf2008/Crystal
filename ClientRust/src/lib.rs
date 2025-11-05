@@ -14,8 +14,6 @@ pub mod objects;           // ✅ 不依赖 winit/wgpu
 // ECS 模块 (GGEZ + hecs 架构)
 pub mod ecs;               // 🆕 轻量级 ECS 架构 (推荐)
 
-// 🆕 算法模块 - 游戏通用算法（寻路、碰撞检测等）
-pub mod algorithms;
 // 重新导出常用类型
 pub use error::{ClientError, ClientResult};
 pub use settings::ClientSettings;
