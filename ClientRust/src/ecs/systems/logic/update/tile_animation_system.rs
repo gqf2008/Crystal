@@ -18,7 +18,7 @@ use hecs::World;
 use ggez::GameResult;
 use crate::ecs::GameContext;
 use crate::ecs::components::{AnimatedTile, MapTile, RenderConfig};
-use crate::ecs::systems::{System, priority};
+use crate::ecs::systems::{LogicSystem, priority};
 
 /// 瓦片动画系统
 /// 
@@ -65,10 +65,8 @@ impl Default for TileAnimationSystem {
     }
 }
 
-impl System for TileAnimationSystem {
-    fn priority(&self) -> u32 {
-        priority::ANIMATION + 5 // 505, 稍微晚于角色动画
-    }
+impl LogicSystem for TileAnimationSystem {
+   
 
     fn update(&mut self, ctx: &mut GameContext, delta_time: f32) -> GameResult {
         // 检查是否启用动画

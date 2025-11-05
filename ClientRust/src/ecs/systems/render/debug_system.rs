@@ -1,5 +1,5 @@
 use crate::ecs::components::{Camera, InputEvent, Position, RenderConfig};
-use crate::ecs::{GameContext, HybridSystem, System};
+use crate::ecs::{GameContext, RenderSystem, LogicSystem};
 use ggez::graphics::GraphicsContext;
 use ggez::input::keyboard::KeyCode;
 use ggez::GameResult;
@@ -14,6 +14,7 @@ use ggez::GameResult;
 /// - 检测调试快捷键（图层切换、网格、边框等）
 /// - 修改 RenderConfig 组件
 /// - 渲染调试信息（FPS、实体数量等）
+#[derive(ecs_macros::RenderSystem)]
 pub struct DebugSystem;
 
 impl DebugSystem {
@@ -674,7 +675,7 @@ impl DebugSystem {
     }
 }
 
-impl HybridSystem for DebugSystem {
+impl RenderSystem for DebugSystem {
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         // ✅ 使用 InputContext API 检查按键状态
         // 注意：由于键盘状态检查是即时的，这里只处理当前帧按下的键
@@ -713,10 +714,6 @@ impl HybridSystem for DebugSystem {
         }
 
         Ok(())
-    }
-
-    fn priority(&self) -> u32 {
-        u32::MAX - 1
     }
 
     fn draw(

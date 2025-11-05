@@ -1,10 +1,10 @@
-use crate::ecs::{Coord, systems::DrawSystem};
+use crate::ecs::{Coord, systems::RenderSystem};
 use ggez::{GameResult, graphics::GraphicsContext};
 
-
+#[derive(ecs_macros::RenderSystem)]
 pub struct UIRenderSystem;
 
-impl DrawSystem for UIRenderSystem {
+impl RenderSystem for UIRenderSystem {
     fn draw(
         &mut self,
         _ctx: &mut GraphicsContext,

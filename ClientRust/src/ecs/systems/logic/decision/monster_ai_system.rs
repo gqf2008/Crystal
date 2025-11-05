@@ -23,7 +23,7 @@ use crate::ecs::components::{
     Position, MonsterData, Health, AIState,
     Player,
 };
-use crate::ecs::systems::System;
+use crate::ecs::systems::LogicSystem;
 use ggez::GameResult;
 
 /// 怪物AI系统
@@ -184,11 +184,9 @@ impl MonsterAISystem {
     }
 }
 
-impl System for MonsterAISystem {
+impl LogicSystem for MonsterAISystem {
 
-    fn priority(&self) -> u32 {
-        crate::ecs::systems::priority::MONSTER_AI
-    }
+    
 
     fn update(&mut self,  ctx:&mut GameContext, _delay_time: f32) -> GameResult {
         Self::update_ai(&mut ctx.world);

@@ -14,7 +14,7 @@
 //
 // ============================================================================
 
-use crate::ecs::{GameContext, systems::System};
+use crate::ecs::{GameContext, systems::LogicSystem};
 use ggez::GameResult;
 use hecs::World;
 use std::collections::HashMap;
@@ -117,11 +117,8 @@ impl NpcDialogueSystem {
     }
 }
 
-impl System for NpcDialogueSystem {
-    fn priority(&self) -> u32 {
-        crate::ecs::systems::priority::DIALOGUE
-    }
-
+impl LogicSystem for NpcDialogueSystem {
+    
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         self.process_dialogs(&mut ctx.world);
         Ok(())

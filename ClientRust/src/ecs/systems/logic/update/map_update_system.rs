@@ -282,12 +282,10 @@ impl MapUpdateSystem {
 // System Trait 实现
 // ============================================================================
 
-use crate::ecs::systems::System;
+use crate::ecs::systems::LogicSystem;
 
-impl System for MapUpdateSystem {
-    fn priority(&self) -> u32 {
-        500  // STATE_UPDATE 层，在地图加载之前执行
-    }
+impl LogicSystem for MapUpdateSystem {
+    
 
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         Self::do_update(&mut ctx.world)

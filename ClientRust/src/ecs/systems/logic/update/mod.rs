@@ -79,7 +79,7 @@ pub mod sound_system;
 pub mod camera_system; 
 pub mod map_update_system;
 pub mod map_load_system;
-pub mod tile_animation_system;
+// pub mod tile_animation_system;  // ❌ 已移至 render::MapRenderSystem
 
 // pub use animation_system::CharacterAnimationSystem;  // ❌ 已删除
 pub use health_regen_system::HealthRegenSystem;
@@ -88,5 +88,5 @@ pub use sound_system::SoundSystem;
 pub use camera_system::CameraSystem;  // ✅ V2 版本
 pub use map_update_system::{MapUpdateSystem, MapSwitchRequest};
 pub use map_load_system::{MapLoadSystem, MapManager};
-pub use tile_animation_system::TileAnimationSystem;
+// pub use tile_animation_system::TileAnimationSystem;  // ❌ 已移至 render::MapRenderSystem
 

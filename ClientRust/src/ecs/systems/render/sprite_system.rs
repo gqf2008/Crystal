@@ -1,8 +1,11 @@
-use crate::ecs::systems::DrawSystem;
+use crate::ecs::systems::RenderSystem;
 use ggez::{graphics::GraphicsContext, GameResult};
+
+#[derive(ecs_macros::RenderSystem)]
 pub struct SpriteRenderSystem;
 
-impl DrawSystem for SpriteRenderSystem {
+
+impl RenderSystem for SpriteRenderSystem {
     fn draw(
         &mut self,
         _ctx: &mut GraphicsContext,

@@ -27,7 +27,7 @@ use crate::ecs::{
     components::{
         PlayerInput, Player, Position, Path, LocalPlayer, MapData, MovementVelocity,
     },
-    systems::System,
+    systems::LogicSystem,
     Coord,
 };
 
@@ -44,10 +44,8 @@ impl PathfindingSystem {
     }
 }
 
-impl System for PathfindingSystem {
-    fn priority(&self) -> u32 {
-        crate::ecs::systems::priority::PATHFINDING
-    }
+impl LogicSystem for PathfindingSystem {
+   
 
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         // 获取地图数据(用于寻路)

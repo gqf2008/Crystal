@@ -19,7 +19,7 @@ use hecs::World;
 use ggez::GameResult;
 use crate::ecs::GameContext;
 use crate::ecs::components::{Position, movement::MovementVelocity, map::MapBounds};
-use crate::ecs::systems::System;
+use crate::ecs::systems::LogicSystem;
 
 /// 碰撞检测系统
 pub struct CollisionSystem {
@@ -52,12 +52,8 @@ impl Default for CollisionSystem {
     }
 }
 
-impl System for CollisionSystem {
-    fn priority(&self) -> u32 {
-        // 🎯 关键修复：优先级390，在MovementSystem(400)之前执行
-        // 预测性地检测碰撞，在实际移动发生前就阻止
-        390
-    }
+impl LogicSystem for CollisionSystem {
+    
 
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         use crate::ecs::components::map::MapData;

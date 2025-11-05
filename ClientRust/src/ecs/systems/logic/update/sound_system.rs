@@ -16,7 +16,7 @@
 
 use hecs::World;
 use ggez::GameResult;
-use crate::ecs::{GameContext, systems::{System, priority}};
+use crate::ecs::{GameContext, systems::{LogicSystem, priority}};
 
 /// 音效系统
 pub struct SoundSystem {
@@ -55,10 +55,8 @@ impl Default for SoundSystem {
     }
 }
 
-impl System for SoundSystem {
-    fn priority(&self) -> u32 {
-        priority::SOUND
-    }
+impl LogicSystem for SoundSystem {
+   
 
     fn update(&mut self, _ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         // TODO: 实现音效触发和3D音量计算

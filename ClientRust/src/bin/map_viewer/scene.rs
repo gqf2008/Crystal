@@ -26,9 +26,9 @@ use mir2_client::ecs::scenes::{Scene, SceneType};
 use mir2_client::ecs::systems::logic::map_load_system::MapManager;
 use mir2_client::ecs::systems::logic::{
     AttackSystem, CameraFollowSystem, CollisionSystem, MapLoadSystem, MapUpdateSystem, 
-    TileAnimationSystem, PathfindingSystem,
+    PathfindingSystem,
 };
-use mir2_client::ecs::systems::{MovementSystem, SystemScheduler};
+use mir2_client::ecs::systems::{priority,MovementSystem, SystemScheduler};
 use mir2_client::ecs::{CameraSystem, GameContext, PlayerControlSystem};
 use mir2_client::graphics::libraries::initialize_all_libraries;
 use mir2_shared::enums::{MirClass, MirGender};
@@ -146,39 +146,40 @@ impl MapViewerScene {
             // 1. PlayerControlSystem: 输入处理
             //    - 检测鼠标输入,设置 PlayerInput
             //    - 添加 AttackState 组件 (右键攻击)
-            .add_system(PlayerControlSystem::new())
+            .add_system(PlayerControlSystem::new(),priority::PLAYER_CONTROL)
             
             // 2. PathfindingSystem: 寻路系统
             //    - 处理双击寻路，计算路径
             //    - 根据 MovementMode 决定是否使用寻路
-            .add_system(PathfindingSystem::new())
+            .add_system(PathfindingSystem::new(),priority::PATHFINDING)
             
             // 3. AttackSystem: 攻击动画管理
             //    - 检测攻击动画完成
             //    - 移除 AttackState 组件,恢复 Stand
-            .add_system(AttackSystem::new())
+            .add_system(AttackSystem::new(),priority::ATTACK)
             
             // 4. CollisionSystem: 碰撞检测
             //    - 检查地图障碍物
             //    - velocity=0 停止位移，但不影响动画
-            .add_system(CollisionSystem::new())
+            .add_system(CollisionSystem::new(),priority::COLLISION)
             
             // 5. MovementSystem: 位置更新
             //    - 根据velocity更新position
             //    - 只管位移，不管动画状态
-            .add_system(MovementSystem)
+            .add_system(MovementSystem,priority::MOVEMENT)
             
             // 注意: CharacterAnimationSystem 已移除 (未使用)
             // 渲染系统直接使用 PlayerAction.frame_interval()
             
-            .add_system(TileAnimationSystem::new()) // 瓦片动画系统
-            .add_system(MapUpdateSystem::new()) // 地图更新系统 (M键切换地图)
-            .add_system(MapLoadSystem) // 地图加载系统 → 从 GameContext 读取 MapChanged 事件
-            .add_system(CameraSystem::new())
-            .add_system(CameraFollowSystem) // 相机跟随
-            .add_system(MapRenderSystem) // 地图渲染系统
-            .add_system(CharacterRenderSystem)
-            .add_system(DebugSystem); // 角色渲染系统
+            // 注意: TileAnimationSystem 已移至 MapRenderSystem.update()
+            // 地图瓦片动画属于地图渲染职责,不是独立的动画系统
+            .add_system(MapUpdateSystem::new(),500) // 地图更新系统 (M键切换地图)
+            .add_system(MapLoadSystem,510) // 地图加载系统 → 从 GameContext 读取 MapChanged 事件
+            .add_system(CameraSystem::new(),priority::CAMERA)
+            .add_system(CameraFollowSystem,priority::CAMERA_FOLLOW) // 相机跟随
+            .add_system(MapRenderSystem::new(),priority::ANIMATION+5) // 混合系统: update()更新瓦片动画, draw()渲染地图
+            .add_system(CharacterRenderSystem,priority::ENTITY_RENDER) // 角色渲染系统
+            .add_system(DebugSystem,priority::DEBUG_RENDER); // 调试系统
 
         tracing::info!("✅ 地图查看器 V1 系统初始化完成！");
         scheduler

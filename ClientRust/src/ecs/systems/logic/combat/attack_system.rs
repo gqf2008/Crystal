@@ -29,7 +29,7 @@ use std::time::Instant;
 use crate::ecs::{
     GameContext,
     components::{AttackState, Player, PlayerAction},
-    systems::System,
+    systems::LogicSystem,
 };
 
 pub struct AttackSystem;
@@ -40,11 +40,8 @@ impl AttackSystem {
     }
 }
 
-impl System for AttackSystem {
-    fn priority(&self) -> u32 {
-        crate::ecs::systems::priority::ATTACK
-    }
-
+impl LogicSystem for AttackSystem {
+    
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         let now = Instant::now();
         

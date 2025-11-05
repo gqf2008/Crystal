@@ -167,13 +167,10 @@ impl MapLoadSystem {
 // System Trait 实现
 // ============================================================================
 
-use crate::ecs::systems::System;
+use crate::ecs::systems::LogicSystem;
 
-impl System for MapLoadSystem {
-    fn priority(&self) -> u32 {
-        510  // STATE_UPDATE 层，地图加载优先级（与注释中的优先级保持一致）
-    }
-
+impl LogicSystem for MapLoadSystem {
+   
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         Self::do_update(ctx)
     }

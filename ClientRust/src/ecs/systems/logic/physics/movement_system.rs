@@ -19,7 +19,7 @@
 use hecs::World;
 use ggez::GameResult;
 use crate::ecs::{GameContext, components::{Player, Position, movement::{MovementVelocity, Path}, player::PlayerAction}};
-use crate::ecs::systems::{System, priority};
+use crate::ecs::systems::{LogicSystem, priority};
 
 /// 移动系统 - 实现格子对齐的移动逻辑
 pub struct MovementSystem;
@@ -70,10 +70,8 @@ impl MovementSystem {
     }
 }
 
-impl System for MovementSystem {
-    fn priority(&self) -> u32 {
-        priority::MOVEMENT
-    }
+impl LogicSystem for MovementSystem {
+    
 
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         // 🎯 处理有Player组件的实体（玩家、NPC等）

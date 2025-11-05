@@ -52,12 +52,13 @@ use ggez::graphics::{Canvas, Color, DrawParam, GraphicsContext, Rect};
 use tracing::{info, debug};
 
 use crate::ecs::components::{Position, Sprite, Camera, Player, Monster};
-use crate::ecs::systems::DrawSystem;
+use crate::ecs::systems::RenderSystem;
 use crate::graphics::Libraries;
 
 /// 实体渲染系统
 /// 
 /// **优先级**: 1020 (在地图之后，UI之前)
+#[derive(ecs_macros::RenderSystem)]
 pub struct EntityRenderSystem;
 
 impl EntityRenderSystem {
@@ -131,7 +132,7 @@ impl EntityRenderSystem {
     }
 }
 
-impl DrawSystem for EntityRenderSystem {
+impl RenderSystem for EntityRenderSystem {
     fn draw(
         &mut self,
         ctx: &mut GraphicsContext,

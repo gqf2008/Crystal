@@ -26,7 +26,7 @@ use crate::ecs::{
         Camera, CameraMode, Draggable, InputEvent, Position, RenderConfig,
     },
     systems::priority,
-    GameContext, System,
+    GameContext, LogicSystem,
 };
 use ggez::input::mouse::MouseButton;
 use ggez::GameResult;
@@ -115,11 +115,8 @@ impl Default for CameraSystem {
     }
 }
 
-impl System for CameraSystem {
-    fn priority(&self) -> u32 {
-        priority::CAMERA
-    }
-
+impl LogicSystem for CameraSystem {
+ 
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         // ✅ 零拷贝方式：直接从 GameContext 访问输入
         

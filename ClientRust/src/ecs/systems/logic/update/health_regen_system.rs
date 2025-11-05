@@ -17,7 +17,7 @@
 use hecs::World;
 use ggez::GameResult;
 use crate::ecs::GameContext;
-use crate::ecs::systems::{System, priority};
+use crate::ecs::systems::{LogicSystem, priority};
 use crate::ecs::components::{Health, Mana, RegenTimer, BuffList, BuffType};
 
 /// 生命恢复系统
@@ -29,10 +29,8 @@ use crate::ecs::components::{Health, Mana, RegenTimer, BuffList, BuffType};
 /// - DoT伤害计算 (毒、流血等)
 pub struct HealthRegenSystem;
 
-impl System for HealthRegenSystem {
-    fn priority(&self) -> u32 {
-        priority::ANIMATION // 使用510优先级
-    }
+impl LogicSystem for HealthRegenSystem {
+    
 
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         let delta_ms = (delay_time * 1000.0) as u64;

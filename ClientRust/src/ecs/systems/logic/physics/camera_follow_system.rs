@@ -18,15 +18,13 @@ use hecs::World;
 use ggez::GameResult;
 use crate::ecs::GameContext;
 use crate::ecs::components::{LocalPlayer, Position, Camera, CameraMode};
-use crate::ecs::systems::{System, priority};
+use crate::ecs::systems::{LogicSystem, priority};
 
 /// 摄像机跟随系统
 pub struct CameraFollowSystem;
 
-impl System for CameraFollowSystem {
-    fn priority(&self) -> u32 {
-        priority::CAMERA_FOLLOW
-    }
+impl LogicSystem for CameraFollowSystem {
+   
 
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         // 获取玩家位置

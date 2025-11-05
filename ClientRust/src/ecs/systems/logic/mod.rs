@@ -33,7 +33,7 @@ crate::logic_system!(
     physics::CameraFollowSystem,
     // Layer 5: State Update (500-599)
     // update::CharacterAnimationSystem,  // ❌ 已删除 - 未使用
-    update::TileAnimationSystem,
+    // update::TileAnimationSystem,  // ❌ 已移至 MapRenderSystem - 瓦片动画属于地图渲染职责
     update::ParticleSystem,
     update::SoundSystem,
     update::HealthRegenSystem,

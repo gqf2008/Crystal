@@ -149,13 +149,13 @@ pub mod priority {
     // 阶段 3: 战斗与技能 (300-399)
     pub const SKILL: u32 = 300;
     pub const COMBAT: u32 = 310;
-    pub const PATHFINDING: u32 = 350;  // 寻路系统 (在移动之前)
+    pub const PATHFINDING: u32 = 350; // 寻路系统 (在移动之前)
     pub const PLAYER_STATE: u32 = 380; // 玩家状态机 (在寻路和移动之间)
     pub const ATTACK: u32 = 390; // 攻击动画管理 (在移动之前检测动画完成)
 
     // 阶段 4: 移动与物理 (400-499)
     pub const MOVEMENT: u32 = 400;
-    pub const COLLISION: u32 = 410;    // 碰撞检测在移动之后，检查并修正位置
+    pub const COLLISION: u32 = 410; // 碰撞检测在移动之后，检查并修正位置
     pub const CAMERA_FOLLOW: u32 = 420;
 
     // 阶段 5: 状态更新 (500-599)
@@ -183,7 +183,7 @@ use ggez::graphics::{Canvas, GraphicsContext};
 use ggez::GameResult;
 
 // 重新导出派生宏
-pub use ecs_macros::{HybridSystem, LogicSystem, RenderSystem};
+pub use ecs_macros::{LogicSystem, RenderSystem};
 
 // 重新导出各层系统（保持向后兼容）
 // 注意：新代码应使用 update:: 和 render:: 模块
@@ -200,12 +200,15 @@ pub use logic::combat_skill::{
 };
 
 // Layer 4 (Physics & Movement) - 向后兼容导出
-pub use logic::physics::{PathfindingSystem, MovementSystem, CollisionSystem};
+pub use logic::physics::{CollisionSystem, MovementSystem, PathfindingSystem};
 
 // Layer 5 (State Update) - 向后兼容导出
 pub use logic::update::{
     // CharacterAnimationSystem,  // ❌ 已删除 - 未使用
-    CameraSystem, HealthRegenSystem, ParticleSystem, SoundSystem,
+    CameraSystem,
+    HealthRegenSystem,
+    ParticleSystem,
+    SoundSystem,
 };
 
 use crate::ecs::GameContext;
@@ -352,7 +355,7 @@ use crate::ecs::GameContext;
 /// ECS 更新系统抽象（V1 - 稳定版本）
 ///
 /// 所有需要在逻辑更新阶段执行的系统都应实现此 trait。
-pub trait System {
+pub trait LogicSystem {
     /// 系统名称，默认使用类型全名
     fn name(&self) -> &'static str {
         std::any::type_name::<Self>()
@@ -362,21 +365,11 @@ pub trait System {
     fn is_enabled(&self) -> bool {
         true
     }
-
-    /// 优先级（数字越小越优先），默认为 100
-    fn priority(&self) -> u32 {
-        100
-    }
-
     /// 更新方法，每帧在逻辑阶段调用
     fn update(&mut self, ctx: &mut crate::ecs::GameContext, delay_time: f32) -> GameResult;
 }
 
-/// ECS 绘制系统抽象（纯渲染，无逻辑更新）
-///
-/// 所有**纯渲染**系统应实现此 trait（如 MapRenderSystem、UIRenderSystem）。
-/// 如需同时执行更新和渲染，请使用 `HybridSystem` trait。
-pub trait DrawSystem {
+pub trait RenderSystem {
     /// 系统名称，默认使用类型全名
     fn name(&self) -> &'static str {
         std::any::type_name::<Self>()
@@ -385,53 +378,25 @@ pub trait DrawSystem {
     /// 是否启用，默认为 true
     fn is_enabled(&self) -> bool {
         true
-    }
-
-    /// 优先级（数字越小越优先），默认为 100
-    fn priority(&self) -> u32 {
-        100
-    }
-    /// 绘制方法，每帧在渲染阶段调用
-    fn draw(
-        &mut self,
-         ctx: &mut GraphicsContext,
-        canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
-    ) -> GameResult;
-}
-
-pub trait HybridSystem {
-    /// 系统名称，默认使用类型全名
-    fn name(&self) -> &'static str {
-        std::any::type_name::<Self>()
-    }
-
-    /// 是否启用，默认为 true
-    fn is_enabled(&self) -> bool {
-        true
-    }
-
-    /// 优先级（数字越小越优先），默认为 100
-    fn priority(&self) -> u32 {
-        100
     }
 
     /// 更新方法，每帧在逻辑阶段调用（必须实现）
-    fn update(&mut self, _ctx: &mut GameContext, delay_time: f32) -> GameResult;
+    fn update(&mut self, _ctx: &mut GameContext, delay_time: f32) -> GameResult {
+        Ok(())
+    }
 
     /// 绘制方法，每帧在渲染阶段调用（必须实现）
     fn draw(
         &mut self,
         ctx: &mut GraphicsContext,
-        canvas: &mut ggez::graphics::Canvas,
+        canvas: &mut Canvas,
         world: &hecs::World,
     ) -> GameResult;
 }
 
 pub enum SystemKind {
-    Update(Box<dyn System>),
-    Draw(Box<dyn DrawSystem>),
-    Hybrid(Box<dyn HybridSystem>),
+    Update(Box<dyn LogicSystem>),
+    Render(Box<dyn RenderSystem>),
 }
 
 /// 系统类型标记 trait - 用于在编译期判断系统应归入哪个队列
@@ -472,42 +437,22 @@ macro_rules! logic_system {
     };
 }
 
-/// 为纯渲染系统批量实现 IntoSystemKind
+
+/// 为混合系统批量实现 IntoSystemKind
 ///
 /// 等价于为每个类型添加 `#[derive(RenderSystem)]`
 ///
 /// # 用法
 /// ```rust
-/// draw_system!(MapRenderer, UIRenderer);
+/// render_system!(ParticleSystem, DebugSystem);
 /// ```
 #[macro_export]
-macro_rules! draw_system {
+macro_rules! render_system {
     ($($ty:ty),+ $(,)?) => {
         $(
             impl $crate::ecs::systems::IntoSystemKind for $ty {
                 fn into_kind(self: Box<Self>) -> $crate::ecs::systems::SystemKind {
-                    $crate::ecs::systems::SystemKind::Draw(self)
-                }
-            }
-        )+
-    };
-}
-
-/// 为混合系统批量实现 IntoSystemKind
-///
-/// 等价于为每个类型添加 `#[derive(HybridSystem)]`
-///
-/// # 用法
-/// ```rust
-/// hybrid_system!(ParticleSystem, DebugSystem);
-/// ```
-#[macro_export]
-macro_rules! hybrid_system {
-    ($($ty:ty),+ $(,)?) => {
-        $(
-            impl $crate::ecs::systems::IntoSystemKind for $ty {
-                fn into_kind(self: Box<Self>) -> $crate::ecs::systems::SystemKind {
-                    $crate::ecs::systems::SystemKind::Hybrid(self)
+                    $crate::ecs::systems::SystemKind::Render(self)
                 }
             }
         )+
@@ -517,15 +462,15 @@ macro_rules! hybrid_system {
 /// 系统调度器的内部存储结构
 enum SystemEntry {
     Update {
-        system: Box<dyn System>,
+        system: Box<dyn LogicSystem>,
         priority: u32,
     },
-    Draw {
-        system: Box<dyn DrawSystem>,
-        priority: u32,
-    },
+    // Draw {
+    //     system: Box<dyn DrawSystem>,
+    //     priority: u32,
+    // },
     Hybrid {
-        system: Box<dyn HybridSystem>,
+        system: Box<dyn RenderSystem>,
         priority: u32,
     },
 }
@@ -534,7 +479,7 @@ impl SystemEntry {
     fn priority(&self) -> u32 {
         match self {
             SystemEntry::Update { priority, .. } => *priority,
-            SystemEntry::Draw { priority, .. } => *priority,
+            // SystemEntry::Draw { priority, .. } => *priority,
             SystemEntry::Hybrid { priority, .. } => *priority,
         }
     }
@@ -542,7 +487,7 @@ impl SystemEntry {
     fn is_enabled(&self) -> bool {
         match self {
             SystemEntry::Update { system, .. } => system.is_enabled(),
-            SystemEntry::Draw { system, .. } => system.is_enabled(),
+            // SystemEntry::Draw { system, .. } => system.is_enabled(),
             SystemEntry::Hybrid { system, .. } => system.is_enabled(),
         }
     }
@@ -560,27 +505,27 @@ impl SystemScheduler {
     }
 
     /// 添加系统（自动判断类型）
-    pub fn add_system<S>(&mut self, system: S) -> &mut Self
+    pub fn add_system<S>(&mut self, system: S, priority: u32) -> &mut Self
     where
         S: IntoSystemKind + 'static,
     {
         match IntoSystemKind::into_kind(Box::new(system)) {
             SystemKind::Update(sys) => {
-                let priority = sys.priority();
+                // let priority = sys.priority();
                 self.systems.push(SystemEntry::Update {
                     system: sys,
                     priority,
                 });
             }
-            SystemKind::Draw(sys) => {
-                let priority = sys.priority();
-                self.systems.push(SystemEntry::Draw {
-                    system: sys,
-                    priority,
-                });
-            }
-            SystemKind::Hybrid(sys) => {
-                let priority = sys.priority();
+            // SystemKind::Draw(sys) => {
+            //     let priority = sys.priority();
+            //     self.systems.push(SystemEntry::Draw {
+            //         system: sys,
+            //         priority,
+            //     });
+            // }
+            SystemKind::Render(sys) => {
+                // let priority = sys.priority();
                 self.systems.push(SystemEntry::Hybrid {
                     system: sys,
                     priority,
@@ -608,10 +553,9 @@ impl SystemScheduler {
                 }
                 SystemEntry::Hybrid { system, .. } => {
                     system.update(ctx, delay_time)?;
-                }
-                SystemEntry::Draw { .. } => {
-                    // 纯渲染系统无需更新
-                }
+                } // SystemEntry::Draw { .. } => {
+                  //     // 纯渲染系统无需更新
+                  // }
             }
         }
 
@@ -621,7 +565,7 @@ impl SystemScheduler {
     /// 渲染阶段 - 调度 DrawSystem 和 HybridSystem 的 draw 方法
     pub fn draw(
         &mut self,
-         ctx: &mut GraphicsContext,
+        ctx: &mut GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
         world: &hecs::World,
     ) -> GameResult {
@@ -632,11 +576,11 @@ impl SystemScheduler {
             }
 
             match entry {
-                SystemEntry::Draw { system, .. } => {
-                    tracing::trace!("🎨 Drawing system: {}", system.name());
-                    system.draw(ctx, canvas, world)?;
-                    tracing::trace!("✅ System draw completed: {}", system.name());
-                }
+                // SystemEntry::Draw { system, .. } => {
+                //     tracing::trace!("🎨 Drawing system: {}", system.name());
+                //     system.draw(ctx, canvas, world)?;
+                //     tracing::trace!("✅ System draw completed: {}", system.name());
+                // }
                 SystemEntry::Hybrid { system, .. } => {
                     tracing::trace!("🎨 Drawing hybrid system: {}", system.name());
                     system.draw(ctx, canvas, world)?;

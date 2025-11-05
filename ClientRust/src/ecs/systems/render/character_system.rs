@@ -31,12 +31,14 @@ use crate::ecs::GameContext;
 use crate::ecs::components::{
     Camera, Position, Player, PlayerAppearance, TimeTracker,
 };
-use crate::ecs::systems::System;
+use crate::ecs::systems::LogicSystem;
 use crate::graphics::libraries::{get_library_from_array, LibraryArray};
 use mir2_shared::enums::{MirClass, MirGender};
 
 /// 角色渲染系统
+#[derive(ecs_macros::RenderSystem)]
 pub struct CharacterRenderSystem;
+
 
 impl CharacterRenderSystem {
     /// 获取相机变换参数
@@ -304,8 +306,8 @@ impl CharacterRenderSystem {
 }
 
 
-// 实现 DrawSystem trait
-impl crate::ecs::systems::DrawSystem for CharacterRenderSystem {
+// 实现 RenderSystem trait
+impl crate::ecs::systems::RenderSystem for CharacterRenderSystem {
     fn draw(&mut self, ctx: &mut GraphicsContext, canvas: &mut Canvas, world: &hecs::World) -> GameResult {
         // tracing::info!("👤 CharacterRenderSystem::draw() 开始");
         // 获取相机变换

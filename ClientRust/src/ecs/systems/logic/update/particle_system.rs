@@ -14,16 +14,14 @@
 use hecs::World;
 use ggez::GameResult;
 use crate::ecs::GameContext;
-use crate::ecs::systems::{System, priority};
+use crate::ecs::systems::{LogicSystem, priority};
 use crate::ecs::components::{Particle, ParticleEmitter, Position};
 
 /// 粒子系统 - 管理粒子效果生命周期
 pub struct ParticleSystem;
 
-impl System for ParticleSystem {
-    fn priority(&self) -> u32 {
-        priority::PARTICLE
-    }
+impl LogicSystem for ParticleSystem {
+    
 
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         let current_time = std::time::SystemTime::now()

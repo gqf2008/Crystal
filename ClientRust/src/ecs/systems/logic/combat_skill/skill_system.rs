@@ -21,7 +21,7 @@
 //
 // ============================================================================
 
-use super::super::super::{priority, System};
+use super::super::super::{priority, LogicSystem};
 use crate::ecs::components::{
     LocalPlayer, MagicList, Mana, Monster, NetworkSync, Player, Position, SpellType,
     TargetSelection, TargetType, NPC,
@@ -50,10 +50,8 @@ impl Default for SkillSystem {
     }
 }
 
-impl System for SkillSystem {
-    fn priority(&self) -> u32 {
-        priority::SKILL
-    }
+impl LogicSystem for SkillSystem {
+    
 
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         // 检查玩家是否有施法意图

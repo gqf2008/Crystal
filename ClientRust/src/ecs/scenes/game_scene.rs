@@ -33,6 +33,7 @@ use std::time::Instant;
 use super::{Scene, SceneType};
 use crate::ecs::render::{DebugSystem, UIRenderSystem};
 use crate::ecs::systems::{
+    priority,
     // Layer 5
     // CharacterAnimationSystem,  // ❌ 已删除 - 未使用
     CameraSystem, // ✅ V2 版本
@@ -261,19 +262,18 @@ impl GameScene {
         tracing::info!("🎯 初始化 ECS 系统...");
 
         // ===== Layer 1: 输入与网络 (50-199) =====
-        // PlayerControlSystem 已迁移到 V2 (零拷贝)
+       
         scheduler
-            .add_system(MonsterAISystem)
-            .add_system(NpcDialogueSystem::new())
-            .add_system(SkillSystem)
-            .add_system(CombatSystem)
-            .add_system(MovementSystem)
-            .add_system(CollisionSystem::new())
-            // 注意: CharacterAnimationSystem 已移除（未使用）
-            .add_system(ParticleSystem)
-            .add_system(HealthRegenSystem)
-            .add_system(SoundSystem::new())
-            .add_system(DebugSystem::new());
+            .add_system(MonsterAISystem,priority::MONSTER_AI)
+            .add_system(NpcDialogueSystem::new(),priority::DIALOGUE)
+            .add_system(SkillSystem,priority::SKILL)
+            .add_system(CombatSystem,priority::COMBAT)
+            .add_system(MovementSystem,priority::MOVEMENT)
+            .add_system(CollisionSystem::new(), priority::COLLISION)
+            .add_system(ParticleSystem,priority::PARTICLE)
+            .add_system(HealthRegenSystem, priority::ANIMATION)
+            .add_system(SoundSystem::new(), priority::SOUND)
+            .add_system(DebugSystem::new(), priority::DEBUG_RENDER);
 
         tracing::info!("✅ ECS 系统初始化完成！");
         scheduler

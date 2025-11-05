@@ -117,15 +117,12 @@ pub use debug_system::DebugSystem;  // ✅ V2 版本（V1 已删除）
 // 为所有渲染系统批量实现 IntoSystemKind
 // ============================================================================
 
-// 为纯渲染系统实现 IntoSystemKind
-crate::draw_system!(
-    MapRenderSystem,
-    SpriteRenderSystem,
-    EntityRenderSystem,
-    CharacterRenderSystem,
-    EffectRenderSystem,
-    UIRenderSystem,
-);
-crate::hybrid_system!(
-    DebugSystem,
-);
+// crate::render_system!(
+  
+//     SpriteRenderSystem,
+//     EntityRenderSystem,
+//     CharacterRenderSystem,
+//     EffectRenderSystem,
+//     UIRenderSystem,
+//     DebugSystem,
+// );

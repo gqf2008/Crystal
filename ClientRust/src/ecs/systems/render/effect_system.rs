@@ -1,9 +1,10 @@
-use crate::ecs::systems::DrawSystem;
+use crate::ecs::systems::RenderSystem;
 use ggez::{GameResult, graphics::GraphicsContext};
 
+#[derive(ecs_macros::RenderSystem)]
 pub struct EffectRenderSystem;
 
-impl DrawSystem for EffectRenderSystem {
+impl RenderSystem for EffectRenderSystem {
     fn draw(
         &mut self,
         _ctx: &mut GraphicsContext,

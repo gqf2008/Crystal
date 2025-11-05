@@ -37,7 +37,7 @@ use crate::ecs::{
         Camera, LocalPlayer, Player, PlayerInput, Position,
     },
     GameContext,
-    systems::System,
+    systems::LogicSystem,
 };
 use ggez::input::mouse::MouseButton;
 use ggez::GameResult;
@@ -144,10 +144,8 @@ impl Default for PlayerControlSystem {
     }
 }
 
-impl System for PlayerControlSystem {
-    fn priority(&self) -> u32 {
-        crate::ecs::systems::priority::PLAYER_CONTROL
-    }
+impl LogicSystem for PlayerControlSystem {
+    
 
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         // ✅ 零拷贝：直接访问 GameContext

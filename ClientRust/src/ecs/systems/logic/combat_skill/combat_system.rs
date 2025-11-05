@@ -30,7 +30,7 @@ use crate::network::handlers::GameEvent as NetworkCommand;
 use tokio::sync::mpsc;
 use mir2_shared::enums::MirDirection;
 use ggez::GameResult;
-use super::super::super::{System, priority};
+use super::super::super::{LogicSystem, priority};
 
 /// 伤害类型
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,10 +65,8 @@ impl Default for CombatSystem {
     }
 }
 
-impl System for CombatSystem {
-    fn priority(&self) -> u32 {
-        priority::COMBAT
-    }
+impl LogicSystem for CombatSystem {
+    
 
     fn update(&mut self, ctx:&mut GameContext, _delay_time: f32) -> GameResult {
         // 检查玩家是否有攻击意图

@@ -1,28 +1,110 @@
 // ============================================================================
-// 地图渲染系统 - 负责将地图瓦片绘制到屏幕
+// 地图渲染系统 - 混合系统(Hybrid System)
 // ============================================================================
+// 职责：
+// 1. update(): 更新地图瓦片动画帧(水波、岩浆、火焰等)
+// 2. draw(): 渲染地图三层(Back/Middle/Front)
+//
 // 功能：
-// - 三层渲染架构（Back/Middle/Front）
+// - 瓦片动画管理(AnimatedTile)
+// - 三层渲染架构(Back/Middle/Front)
 // - 视口裁剪优化
-// - 静态与动画瓦片独立控制
-// - 混合模式支持（Normal/ADD）
-// - 精确的瓦片偏移计算
+// - 混合模式支持(Normal/ADD)
 // ============================================================================
 
-use crate::ecs::components::{Camera, MapTile, Position, RenderConfig, TileLayer};
-use crate::ecs::systems::DrawSystem;
-use crate::ecs::{world, CELL_HEIGHT, CELL_WIDTH};
+use crate::ecs::components::{AnimatedTile, Camera, MapTile, Position, RenderConfig, TileLayer};
+use crate::ecs::systems::{LogicSystem, RenderSystem};
+use crate::ecs::{GameContext, CELL_HEIGHT, CELL_WIDTH};
 use crate::graphics::get_map_library;
 use ggez::graphics::{DrawParam, GraphicsContext};
 use ggez::GameResult;
 
-/// 地图渲染系统
+/// 地图渲染系统 - 混合系统
 ///
-/// 负责渲染地图的三个层级（Back/Middle/Front），支持视口裁剪、
-/// 动画播放、混合模式等功能
-pub struct MapRenderSystem;
+/// update(): 更新动画瓦片的帧索引
+/// draw(): 渲染地图到屏幕
+#[derive(ecs_macros::RenderSystem)]
+pub struct MapRenderSystem {
+    /// 全局动画计数器(模拟 C# AnimationCount)
+    animation_counter: u32,
+    /// 累积时间(秒)
+    accumulated_time: f32,
+    /// 每次递增计数器需要的时间(秒)
+    counter_interval: f32,
+}
 
-impl DrawSystem for MapRenderSystem {
+impl MapRenderSystem {
+    pub fn new() -> Self {
+        Self {
+            animation_counter: 0,
+            accumulated_time: 0.0,
+            counter_interval: 1.0 / 60.0, // 60 FPS 基准
+        }
+    }
+
+    /// 计算动画帧偏移
+    ///
+    /// C# 逻辑:
+    /// ```csharp
+    /// index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
+    /// ```
+    fn calculate_frame_offset(&self, frame_count: u8, frame_interval: u8) -> i32 {
+        if frame_count == 0 {
+            return 0;
+        }
+
+        let total_ticks = (frame_count as u32 + frame_count as u32 * frame_interval as u32);
+        let divisor = 1 + frame_interval as u32;
+
+        ((self.animation_counter % total_ticks) / divisor) as i32
+    }
+}
+
+impl Default for MapRenderSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+
+
+// ============================================================================
+// RenderSystem 实现 - 渲染地图
+// ============================================================================
+impl RenderSystem for MapRenderSystem {
+    fn update(&mut self, ctx: &mut GameContext, delta_time: f32) -> GameResult {
+        // 检查是否启用动画
+        let animations_enabled = {
+            let mut config_query = ctx.world.query::<&RenderConfig>();
+            config_query
+                .iter()
+                .next()
+                .map(|(_, cfg)| cfg.show_animations)
+                .unwrap_or(true) // 默认启用
+        };
+
+        // 如果动画被禁用,直接返回
+        if !animations_enabled {
+            return Ok(());
+        }
+
+        // 累积时间
+        self.accumulated_time += delta_time;
+
+        // 每个计数器间隔递增计数器
+        while self.accumulated_time >= self.counter_interval {
+            self.animation_counter = self.animation_counter.wrapping_add(1);
+            self.accumulated_time -= self.counter_interval;
+        }
+
+        // 更新所有动画瓦片的 image_index
+        for (_, (tile, anim)) in ctx.world.query_mut::<(&mut MapTile, &AnimatedTile)>() {
+            let frame_offset = self.calculate_frame_offset(anim.frame_count, anim.frame_interval);
+            tile.image_index = anim.base_image_index + frame_offset;
+        }
+
+        Ok(())
+    }
     /// 主渲染方法
     ///
     /// 参数：
