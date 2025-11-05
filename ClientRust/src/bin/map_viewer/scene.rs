@@ -163,8 +163,10 @@ impl MapViewerScene {
         scheduler
     }
 
-    /// 在实际的 World 中创建所有实体
-    fn initialize_world(&mut self, world: &mut World, screen_width: f32, screen_height: f32) {
+    /// 在实际的 GameWorld 中创建所有实体
+    /// 
+    /// 使用 GameWorld 的工厂方法确保所有必要组件都被正确添加
+    fn initialize_world(&mut self, game_world: &mut mir2_client::ecs::GameWorld, screen_width: f32, screen_height: f32) {
         if self.initialized {
             return;
         }
@@ -176,7 +178,7 @@ impl MapViewerScene {
         // 在实际的 World 中重新创建所有实体
         // 相机实体（由 CameraSystem 使用）
         // ✅ 相机初始位置应该对准玩家，这样缩放时才不会偏移
-        world.spawn((
+        game_world.spawn((
             Position {
                 x: player_world_x, // 相机位置 = 玩家位置
                 y: player_world_y,
@@ -197,7 +199,7 @@ impl MapViewerScene {
         ));
 
         // 时间跟踪实体
-        self.time_entity = world.spawn((TimeTracker {
+        self.time_entity = game_world.spawn((TimeTracker {
             animation_count: 0,
             frame_count: 0,
             fps: 0.0,
@@ -205,8 +207,8 @@ impl MapViewerScene {
             last_frame_time: Instant::now(),
         },));
 
-        // 渲染配置实体(由键盘输入系统修改)
-        self.config_entity = world.spawn((RenderConfig {
+        // 渲染配置实体
+        self.config_entity = game_world.spawn((RenderConfig {
             show_back: true,
             show_middle: true,
             show_front: true,
@@ -227,15 +229,15 @@ impl MapViewerScene {
         },));
 
         // 可见区域缓存实体
-        world.spawn((VisibleArea::default(),));
+        game_world.spawn((VisibleArea::default(),));
 
         // 🆕 输入状态实体（用于边缘检测）
-        world.spawn((InputState::default(),));
+        game_world.spawn((InputState::default(),));
 
         // 事件通过 GameContext 传递
 
         // // 鼠标输入状态实体（由鼠标输入系统修改）
-        // world.spawn((MouseInput {
+        // game_world.spawn((MouseInput {
         //     left_pressed: false,
         //     right_pressed: false,
         //     left_double_clicked: false,
@@ -250,54 +252,24 @@ impl MapViewerScene {
 
         // 地图管理器组件（用于地图状态跟踪）
 
-        world.spawn((MapManager {
+        game_world.spawn((MapManager {
             current_map_index: 0,
             current_map_file: "0".to_string(),
             current_map_title: "比奇城".to_string(),
             is_loading: false,
         },));
 
-        // 🆕 创建测试玩家
-        // 📝 注意：这里应该使用 GameWorld::spawn_local_player_full()，
-        //          但由于 GameContext 直接暴露 hecs::World，暂时手动创建
-        // TODO: 重构为使用 GameWorld 的工厂方法
-
-        let player_entity = world.spawn((
-            // 位置：盟重土城传送点（已知的安全位置）
-            Position {
-                x: (332 * 48) as f32, // 传送点 X - 盟重土城中心传送点位置
-                y: (327 * 32) as f32, // 传送点 Y
-            },
-            // 🆕 移动速度组件（MovementSystem 需要）
-            // 🎯 调整速度以匹配动画播放速度
-            // Walk: 3帧间隔(0.3s/循环) → 设置为60px/s
-            // Run: 2帧间隔(0.2s/循环) → 设置为120px/s (加快)
-            MovementVelocity::with_speeds(120.0, 60.0, 120.0),
-            // 🆕 路径组件（MovementSystem 需要）
-            Path::new(),
-            // 玩家核心状态
-            Player {
-                direction: mir2_shared::MirDirection::Down,
-                action: PlayerAction::Stand,
-            },
-            // 玩家外观
-            PlayerAppearance {
-                class: MirClass::Warrior,
-                gender: MirGender::Male,
-                hair: 1,          // 使用索引1的头发 (0可能无效)
-                weapon: 1,        // 武器索引1 (测试武器渲染)
-                armour: 1,        // 测试armour=1 (0可能是裸体/透明)
-                weapon_effect: 0, // 0 = 无特效
-                wing_effect: 0,
-            },
-            // 🆕 玩家输入组件（由 PlayerControlSystem 写入）
-            PlayerInput::default(),
-            // 本地玩家标记
-            LocalPlayer,
-            // 🆕 动画帧组件（由 AnimationSystem 更新，SpriteRenderSystem 读取）
-            // ⚠️ 重要：必须添加此组件，否则 RenderSystem 查询会跳过该实体！
-            AnimationFrame::new(),
-        ));
+        // 🆕 使用 GameWorld 工厂方法创建测试玩家
+        // ✅ 工厂方法确保所有必要组件（包括 AnimationFrame）都被正确添加
+        let player_grid_pos = mir2_shared::Point::new(332, 327); // 盟重土城传送点
+        let player_entity = game_world.spawn_local_player_full(
+            MirClass::Warrior,
+            MirGender::Male,
+            player_grid_pos,
+            1,  // hair
+            1,  // weapon
+            1,  // armour
+        );
 
         tracing::info!(
             "🎮 已创建测试玩家实体: entity={:?}, grid=(332, 327), pixel=({}, {})",

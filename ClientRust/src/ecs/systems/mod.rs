@@ -394,10 +394,6 @@ enum SystemEntry {
         system: Box<dyn LogicSystem>,
         priority: u32,
     },
-    // Draw {
-    //     system: Box<dyn DrawSystem>,
-    //     priority: u32,
-    // },
     Hybrid {
         system: Box<dyn RenderSystem>,
         priority: u32,
@@ -482,16 +478,13 @@ impl SystemScheduler {
                 }
                 SystemEntry::Hybrid { system, .. } => {
                     system.update(ctx, delay_time)?;
-                } // SystemEntry::Draw { .. } => {
-                  //     // 纯渲染系统无需更新
-                  // }
+                } 
             }
         }
 
         Ok(())
     }
 
-    /// 渲染阶段 - 调度 DrawSystem 和 HybridSystem 的 draw 方法
     pub fn draw(
         &mut self,
         ctx: &mut GraphicsContext,

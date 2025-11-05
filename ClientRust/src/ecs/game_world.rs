@@ -276,6 +276,8 @@ impl GameWorld {
     }
 
     /// 创建怪物（使用地图网格坐标）
+    /// 
+    /// 基础版本：用于网络同步等简单场景
     pub fn spawn_monster(
         &mut self,
         id: u32,
@@ -321,6 +323,59 @@ impl GameWorld {
         ))
     }
 
+    /// 创建完整的怪物实体（包含移动、动画等所有组件）
+    /// 
+    /// 完整版本：用于需要完整功能的场景（AI、动画、移动等）
+    pub fn spawn_monster_full(
+        &mut self,
+        id: u32,
+        name: String,
+        monster_index: u16,
+        position: Point,
+        max_hp: i32,
+        stats: CombatStats,
+    ) -> hecs::Entity {
+        self.world.spawn((
+            // 位置组件（世界坐标，单位：像素）
+            Position::new((position.x * 48) as f32, (position.y * 32) as f32),
+            // 移动速度组件
+            movement::MovementVelocity::with_speeds(100.0, 50.0, 100.0),
+            // 路径组件（寻路系统需要）
+            movement::Path::new(),
+            // 怪物核心数据
+            MonsterData {
+                id,
+                name,
+                monster_index,
+                ai_mode: 0,
+                ai_type: 0,
+                spawn_x: position.x as f32,
+                spawn_y: position.y as f32,
+                direction: 0,
+            },
+            // 生命值
+            Health::new(max_hp),
+            // 战斗属性
+            stats,
+            // AI 状态
+            AIState {
+                current_action: crate::ecs::components::AIAction::Idle,
+                mode: AIMode::Idle,
+                target_entity: None,
+                target_pos: None,
+                patrol_points: Vec::new(),
+                current_patrol_index: 0,
+                last_action_time: 0,
+            },
+            // 网络同步
+            NetworkSync::new(id, NetworkObjectType::Monster),
+            // 渲染层级
+            RenderOrder::new(RenderLayer::Object, position.y),
+            // 动画帧组件（AnimationSystem 更新, RenderSystem 读取）
+            AnimationFrame::new(),
+        ))
+    }
+
     /// 创建 NPC（使用屏幕坐标）
     pub fn spawn_npc_at(
         &mut self,
@@ -334,6 +389,8 @@ impl GameWorld {
     }
 
     /// 创建 NPC（使用地图网格坐标）
+    /// 
+    /// 基础版本：用于网络同步等简单场景
     pub fn spawn_npc(
         &mut self,
         id: u32,
@@ -358,6 +415,38 @@ impl GameWorld {
         ))
     }
 
+    /// 创建完整的 NPC 实体（包含动画等所有组件）
+    /// 
+    /// 完整版本：用于需要完整功能的场景（动画、对话等）
+    pub fn spawn_npc_full(
+        &mut self,
+        id: u32,
+        name: String,
+        npc_index: u16,
+        position: Point,
+        dialogue_id: u32,
+    ) -> hecs::Entity {
+        self.world.spawn((
+            // 位置组件（世界坐标，单位：像素）
+            Position::new((position.x * 48) as f32, (position.y * 32) as f32),
+            // NPC 核心数据
+            NPCData {
+                id,
+                name,
+                npc_index,
+                dialogue_id,
+                colour: 0,
+                action_timer: 0,
+                next_action_delay: rand::random::<u32>() % 5000 + 3000,
+                direction: 0,
+            },
+            // 渲染层级
+            RenderOrder::new(RenderLayer::Object, position.y),
+            // 动画帧组件（AnimationSystem 更新, RenderSystem 读取）
+            AnimationFrame::new(),
+        ))
+    }
+
     /// 创建技能特效（使用屏幕坐标）
     pub fn spawn_spell_effect_at(
         &mut self,
@@ -372,7 +461,9 @@ impl GameWorld {
         self.spawn_spell_effect(spell_id, caster_id, start, end, duration_ms)
     }
 
-    /// 创建技能特效 (ADD 混合，使用地图网格坐标)
+    /// 创建技能特效 (ADD 混合，使用地map网格坐标)
+    /// 
+    /// 基础版本：用于简单的技能特效
     pub fn spawn_spell_effect(
         &mut self,
         spell_id: u16,
@@ -401,6 +492,49 @@ impl GameWorld {
             },
             Lifetime::new(duration_ms),
             RenderOrder::new(RenderLayer::Effect, position.y),
+        ))
+    }
+
+    /// 创建完整的技能特效（包含动画帧等所有组件）
+    /// 
+    /// 完整版本：用于需要完整动画的技能特效
+    pub fn spawn_spell_effect_full(
+        &mut self,
+        spell_id: u16,
+        caster_id: u32,
+        position: Point,
+        target_pos: Point,
+        duration_ms: u32,
+        blend_mode: SpriteBlendMode,
+    ) -> hecs::Entity {
+        // 计算速度 (从起点到终点)
+        let dx = (target_pos.x - position.x) as f32;
+        let dy = (target_pos.y - position.y) as f32;
+        let distance = (dx * dx + dy * dy).sqrt();
+        let speed = 300.0; // 像素/秒
+        let vx = if distance > 0.0 { dx / distance * speed } else { 0.0 };
+        let vy = if distance > 0.0 { dy / distance * speed } else { 0.0 };
+
+        self.world.spawn((
+            // 位置组件
+            Position::new((position.x * 48) as f32, (position.y * 32) as f32),
+            // 速度组件
+            Velocity::new(vx, vy),
+            // 精灵组件（使用指定的混合模式）
+            Sprite::with_blend(6, spell_id as i32, blend_mode),
+            // 技能数据
+            SpellData {
+                spell_id,
+                caster_id,
+                target_pos,
+                power: 10,
+            },
+            // 生命周期
+            Lifetime::new(duration_ms),
+            // 渲染层级
+            RenderOrder::new(RenderLayer::Effect, position.y),
+            // 动画帧组件（AnimationSystem 更新, RenderSystem 读取）
+            AnimationFrame::new(),
         ))
     }
 
