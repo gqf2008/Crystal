@@ -12,7 +12,7 @@ mod select_scene;
 pub mod ui;  // 共享UI组件（Button, TextInput等）
 
 use std::sync::Arc;
-use crate::ecs::GameContext;
+use crate::ecs::{GameContext, GameWorld};
 use crate::network::NetContext;
 use ggez::graphics::{Canvas, GraphicsContext};
 use ggez::input::keyboard::KeyInput;
@@ -62,5 +62,5 @@ pub trait Scene {
     /// # 参数
     /// - `ctx`: ggez 上下文（用于绘制）
     /// - `world`: ECS World（只读访问）
-    fn draw(&mut self, ctx: &mut GraphicsContext, world: &hecs::World) -> GameResult;
+    fn draw(&mut self, ctx: &mut GraphicsContext, world: &GameWorld) -> GameResult;
 }

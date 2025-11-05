@@ -134,7 +134,7 @@ pub use ecs_macros::{LogicSystem, RenderSystem};
 // 重新导出各层系统（保持向后兼容）
 // 注意：新代码应使用 update:: 和 render:: 模块
 
-use crate::ecs::GameContext;
+use crate::ecs::{GameContext, GameWorld};
 pub use input::PlayerControlSystem;
 pub use logic::combat::{
     CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem,
@@ -320,7 +320,7 @@ pub trait RenderSystem {
         &mut self,
         ctx: &mut GraphicsContext,
         canvas: &mut Canvas,
-        world: &hecs::World,
+        world: &GameWorld,
     ) -> GameResult;
 }
 
@@ -489,7 +489,7 @@ impl SystemScheduler {
         &mut self,
         ctx: &mut GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
+        world: &GameWorld,
     ) -> GameResult {
         tracing::trace!("🎨 Starting draw phase");
         for entry in &mut self.systems {

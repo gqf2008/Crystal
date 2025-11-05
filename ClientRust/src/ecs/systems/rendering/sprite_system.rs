@@ -1,6 +1,7 @@
 mod character;
 mod weapon;
 
+use crate::ecs::GameWorld;
 use crate::ecs::components::{Camera,Position};
 use crate::ecs::systems::RenderSystem;
 use ggez::{graphics::GraphicsContext, GameResult};
@@ -49,7 +50,7 @@ impl RenderSystem for SpriteRenderSystem {
         &mut self,
         ctx: &mut GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
+        world: &GameWorld,
     ) -> GameResult {
         self.draw_character(ctx, canvas, world)?;
         Ok(())

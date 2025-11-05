@@ -5,7 +5,7 @@
 
 use super::new_character_dialog::DialogButton;
 use super::{BottomButton, CreditsDialog, NewCharacterDialog, SelectScene};
-use crate::ecs::{Coord, WorldExt};
+use crate::ecs::{Coord, GameWorld};
 use crate::network::NetContext;
 use mir2_shared::enums::{MirClass, MirGender};
 use std::sync::Arc;
@@ -19,12 +19,7 @@ impl SelectScene {
     /// - DeleteCharacter: 打开删除角色对话框
     /// - Credits: 打开制作人员对话框
     /// - ExitGame: 退出游戏
-    pub(super) fn handle_button_click(
-        &mut self,
-        button: BottomButton,
-        world: &mut hecs::World,
-      
-    ) {
+    pub(super) fn handle_button_click(&mut self, button: BottomButton, world: &mut GameWorld) {
         match button {
             BottomButton::StartGame => {
                 self.start_game(world);
@@ -50,7 +45,7 @@ impl SelectScene {
     pub(super) fn handle_dialog_button_click(
         &mut self,
         button: DialogButton,
-        world: &mut hecs::World,
+        world: &mut GameWorld,
     ) {
         if let Some(dialog) = &mut self.new_character_dialog {
             match button {
@@ -123,7 +118,7 @@ impl SelectScene {
     pub(super) fn handle_new_character_button(
         &mut self,
         button: DialogButton,
-        world: &mut hecs::World,
+        world: &mut GameWorld,
     ) {
         self.handle_dialog_button_click(button, world);
     }
@@ -137,14 +132,10 @@ impl SelectScene {
     ///     Network.Enqueue(new C.StartGame { CharacterIndex = Characters[_selected].Index });
     /// }
     /// ```
-    pub(super) fn start_game(
-        &mut self,
-        world: &mut hecs::World,
-       
-    ) {
+    pub(super) fn start_game(&mut self, world: &mut GameWorld) {
         use crate::ecs::components::CharacterList;
 
-        // � Step 1: 从UI获取当前选中的角色索引
+        // 🎯 Step 1: 从UI获取当前选中的角色索引
         let ui_selected_index = self.character_select_ui.get_selected_index();
 
         // 🎯 Step 2: 更新World中CharacterList的selected_index
@@ -182,7 +173,8 @@ impl SelectScene {
 
             // 🎯 Step 4: 发送StartGameRequest到服务器
             // 📡 SelectScene不是ECS架构，直接使用NetContext发送命令
-            world.network()
+            world
+                .network()
                 .send(crate::network::handlers::GameEvent::StartGameRequest {
                     character_index: character.index,
                 })

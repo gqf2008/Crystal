@@ -3,10 +3,10 @@
 //! 负责处理所有与服务器通信相关的事件响应
 
 use super::LoginScene;
-use crate::ecs::{Coord, GameContext};
+use crate::ecs::{Coord, GameContext, GameWorld};
 use ggez::winit::event::MouseButton;
 use ggez::winit::keyboard::KeyCode;
-use ggez::{Context, GameResult};
+use ggez::GameResult;
 use hecs::World;
 use smallvec::SmallVec;
 
@@ -18,12 +18,7 @@ use super::virtual_keyboard::{FocusedInput, VirtualKeyboard, VirtualKeyboardActi
 use super::SceneType;
 
 impl LoginScene {
-    fn on_mouse_move(
-        &mut self,
-        game_ctx: &mut GameContext,
-        x: f32,
-        y: f32,
-    ) -> GameResult {
+    fn on_mouse_move(&mut self, game_ctx: &mut GameContext, x: f32, y: f32) -> GameResult {
         let (design_x, design_y) = self.window_to_design_coords(game_ctx, x, y);
 
         // 虚拟键盘优先级最高,但也更新背后的界面(允许悬停效果)
@@ -120,7 +115,6 @@ impl LoginScene {
                 ChangePasswordAction::Submit => {
                     // 构建并发送网络命令
                     let cmd = dialog.build_network_command();
-                    use crate::ecs::WorldExt;
                     if let Err(e) = world.network().send(cmd) {
                         tracing::error!("❌ 发送修改密码命令失败: {}", e);
                         self.show_message("网络错误，无法发送修改密码请求");
@@ -144,7 +138,6 @@ impl LoginScene {
                 NewAccountAction::Submit => {
                     // 构建并发送网络命令
                     let cmd = dialog.build_network_command();
-                    use crate::ecs::WorldExt;
                     if let Err(e) = world.network().send(cmd) {
                         tracing::error!("❌ 发送注册命令失败: {}", e);
                         self.show_message("网络错误，无法发送注册请求");
@@ -179,7 +172,8 @@ impl LoginScene {
                     .get_credentials()
                     .map(|(id, pwd)| (Some(id), Some(pwd)))
                     .unwrap_or((None, None));
-                let mut dialog = ChangePasswordDialog::new(Coord::DESIGN_WIDTH, Coord::DESIGN_HEIGHT);
+                let mut dialog =
+                    ChangePasswordDialog::new(Coord::DESIGN_WIDTH, Coord::DESIGN_HEIGHT);
                 dialog.show(account_id, password);
                 self.change_password_dialog = Some(dialog);
             }
@@ -203,7 +197,7 @@ impl LoginScene {
 
     fn on_key_down(
         &mut self,
-        world: &mut World,
+        world: &mut GameWorld,
         key: &KeyCode,
         text: Option<&str>,
     ) -> GameResult<Option<SceneType>> {
@@ -343,48 +337,53 @@ impl LoginScene {
     }
 
     /// 基于 InputContext 的输入事件处理
-    /// 
+    ///
     /// 使用 GameContext 提供的事件迭代器
     pub(crate) fn handle_input_event(&mut self, game_ctx: &mut GameContext) -> GameResult {
         // ⚠️ 先收集所有事件，避免借用冲突
         // 迭代器持有 game_ctx 的不可变借用，但处理函数需要可变借用 ctx/world
-        
+
         // ✅ 使用 SmallVec 避免小数组的堆分配（栈上分配，零成本）
         // 大多数帧只有 0-4 个鼠标移动事件
         let mouse_moves: SmallVec<[_; 4]> = game_ctx.input().mouse_motion().collect();
-        let mouse_downs: SmallVec<[_; 1]> = if let Some((btn, x, y)) = game_ctx.input().mouse_button_pressed(MouseButton::Left) {
-            let mut v = SmallVec::new();
-            v.push((btn, x, y));
-            v
-        } else {
-            SmallVec::new()
-        };
+        let mouse_downs: SmallVec<[_; 1]> =
+            if let Some((btn, x, y)) = game_ctx.input().mouse_button_pressed(MouseButton::Left) {
+                let mut v = SmallVec::new();
+                v.push((btn, x, y));
+                v
+            } else {
+                SmallVec::new()
+            };
         // ✅ 直接使用 SmolStr，避免不必要的 String 分配
         // 大多数帧只有 0-8 个按键事件
         let key_downs: SmallVec<[_; 8]> = game_ctx.input().pressed_keys().collect();
         let text_inputs: SmallVec<[_; 4]> = game_ctx.input().text_input().collect();
-        
+
         // 1️⃣ 处理鼠标移动事件
         for (x, y, _dx, _dy) in mouse_moves {
             self.on_mouse_move(game_ctx, x, y)?;
         }
-        
+
         // 2️⃣ 处理鼠标按下事件
         for (button, x, y) in mouse_downs {
             self.on_mouse_down(game_ctx, &button, x, y)?;
         }
-        
+
         // 3️⃣ 处理键盘按下事件
         for (keycode, text) in key_downs {
             // SmolStr 可以直接解引用为 &str
-            self.on_key_down(&mut game_ctx.world, &keycode, text.as_ref().map(|s| s.as_str()))?;
+            self.on_key_down(
+                &mut game_ctx.world,
+                &keycode,
+                text.as_ref().map(|s| s.as_str()),
+            )?;
         }
-        
+
         // 4️⃣ 处理文本输入事件
         for character in text_inputs {
             self.on_text_input(&mut game_ctx.world, character.to_string())?;
         }
-        
+
         Ok(())
     }
 }

@@ -29,7 +29,7 @@ use mir2_client::ecs::systems::logic::{
 };
 use mir2_client::ecs::systems::presentation::{AnimationSystem, CameraFollowSystem};
 use mir2_client::ecs::systems::{priority, MovementSystem, SystemScheduler};
-use mir2_client::ecs::{CameraSystem, GameContext, InputStateSystem, PlayerControlSystem, game_world};
+use mir2_client::ecs::{CameraSystem, GameContext, GameWorld, InputStateSystem, PlayerControlSystem, game_world};
 use mir2_client::graphics::libraries::initialize_all_libraries;
 use mir2_shared::enums::{MirClass, MirGender};
 use std::time::Instant;
@@ -319,7 +319,7 @@ impl Scene for MapViewerScene {
         Ok(None)
     }
 
-    fn draw(&mut self, ctx: &mut GraphicsContext, world: &hecs::World) -> GameResult {
+    fn draw(&mut self, ctx: &mut GraphicsContext, world: &GameWorld) -> GameResult {
        let mut canvas = Canvas::from_frame(ctx, ggez::graphics::Color::from_rgb(0, 0, 0));
         self.system_scheduler.draw(ctx, &mut canvas, world)?;
        canvas.finish(ctx)?;

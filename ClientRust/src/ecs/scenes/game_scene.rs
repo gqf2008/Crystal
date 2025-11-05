@@ -52,7 +52,7 @@ use crate::ecs::systems::{
     SkillSystem,
     SystemScheduler, // ✅ V1 调度器
 };
-use crate::ecs::GameContext;
+use crate::ecs::{GameContext, GameWorld};
 use crate::ecs::{
     components::{
         Camera, CameraMode, Draggable, Equipment, Inventory, LearnableMagicList, LocalPlayer,
@@ -349,7 +349,7 @@ impl Scene for GameScene {
         Ok(None)
     }
 
-    fn draw(&mut self, ctx: &mut GraphicsContext, world: &hecs::World) -> GameResult {
+    fn draw(&mut self, ctx: &mut GraphicsContext, world: &GameWorld) -> GameResult {
         let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
         self.system_scheduler.draw(ctx, &mut canvas, world)?;
         canvas.finish(ctx)?;

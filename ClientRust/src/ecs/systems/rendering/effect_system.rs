@@ -1,4 +1,4 @@
-use crate::ecs::systems::RenderSystem;
+use crate::ecs::{GameWorld, systems::RenderSystem};
 use ggez::{GameResult, graphics::GraphicsContext};
 
 #[derive(ecs_macros::RenderSystem)]
@@ -9,7 +9,7 @@ impl RenderSystem for EffectRenderSystem {
         &mut self,
         _ctx: &mut GraphicsContext,
         _canvas: &mut ggez::graphics::Canvas,
-        _world: &hecs::World,
+        _world: &GameWorld,
     ) -> GameResult {
         // 在这里实现地图渲染逻辑
         Ok(())

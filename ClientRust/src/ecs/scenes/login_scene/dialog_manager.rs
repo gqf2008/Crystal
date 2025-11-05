@@ -1,26 +1,25 @@
 //! 对话框管理器 - 减少重复代码
 
+use crate::{ecs::GameWorld, network::handlers::GameEvent};
 use ggez::winit::keyboard::KeyCode;
-use std::sync::Arc;
-use crate::{ecs::WorldExt, network::{NetContext, handlers::GameEvent}};
 
 /// 通用的对话框action trait
 pub trait DialogWithValidation {
     /// 处理Tab键切换字段
     fn on_tab(&mut self);
-    
+
     /// 处理Backspace删除
     fn on_backspace(&mut self);
-    
+
     /// 处理字符输入
     fn on_char(&mut self, ch: char);
-    
+
     /// 是否可以提交
     fn can_submit(&self) -> bool;
-    
+
     /// 获取验证错误消息
     fn get_validation_error(&self) -> String;
-    
+
     /// 构建网络命令
     fn build_network_command(&self) -> GameEvent;
 }
@@ -42,7 +41,7 @@ pub fn handle_dialog_keycode<D>(
     dialog: &mut D,
     keycode: &KeyCode,
     text: Option<&str>,
-    world: &mut hecs::World,
+    world: &mut GameWorld,
     error_context: &str,
 ) -> DialogKeyResult
 where
@@ -63,7 +62,10 @@ where
                 let cmd = dialog.build_network_command();
                 if let Err(e) = world.network().send(cmd) {
                     tracing::error!("❌ {}: {}", error_context, e);
-                    return DialogKeyResult::SendError(format!("网络错误，无法发送{}请求", error_context));
+                    return DialogKeyResult::SendError(format!(
+                        "网络错误，无法发送{}请求",
+                        error_context
+                    ));
                 }
                 DialogKeyResult::Handled
             } else {

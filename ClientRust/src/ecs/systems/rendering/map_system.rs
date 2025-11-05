@@ -14,7 +14,7 @@
 
 use crate::ecs::components::{AnimatedTile, Camera, MapTile, Position, RenderConfig, TileLayer};
 use crate::ecs::systems::{LogicSystem, RenderSystem};
-use crate::ecs::{GameContext, CELL_HEIGHT, CELL_WIDTH};
+use crate::ecs::{CELL_HEIGHT, CELL_WIDTH, GameContext, GameWorld};
 use crate::graphics::get_map_library;
 use ggez::graphics::{DrawParam, GraphicsContext};
 use ggez::GameResult;
@@ -116,7 +116,7 @@ impl RenderSystem for MapRenderSystem {
         &mut self,
         ctx: &mut GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
+        world: &GameWorld,
     ) -> GameResult {
         // tracing::info!("🗺️  MapRenderSystem::draw() 开始");
         // ====================================================================

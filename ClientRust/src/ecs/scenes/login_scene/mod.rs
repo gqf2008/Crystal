@@ -11,6 +11,8 @@ mod virtual_keyboard;
 pub use change_password::{
     ChangePasswordAction, ChangePasswordDialog, ChangePasswordResult, PasswordInputField,
 };
+use ggez::graphics::{Canvas, GraphicsContext};
+use ggez::GameResult;
 pub use login::{DialogAction, LoginDialog};
 pub use message_box::MessageBox;
 pub use new_account::{
@@ -18,12 +20,8 @@ pub use new_account::{
 };
 pub use virtual_keyboard::{FocusedInput, VirtualKeyboard, VirtualKeyboardAction};
 
-use ggez::graphics::{Canvas, GraphicsContext};
-use ggez::{Context, GameResult};
-use hecs::World;
-
 use super::{Scene, SceneType};
-use crate::ecs::{Coord, GameContext, WorldExt};
+use crate::ecs::{Coord, GameContext, GameWorld};
 use crate::graphics::{draw_sprite_at, LibraryName};
 
 /// 登录场景
@@ -45,7 +43,6 @@ pub struct LoginScene {
     message_box: Option<MessageBox>,
     virtual_keyboard: Option<VirtualKeyboard>,
 }
-
 
 impl LoginScene {
     pub fn new() -> Self {
@@ -76,7 +73,12 @@ impl LoginScene {
     }
 
     /// 将窗口坐标转换为设计坐标系（1280x960）
-    fn window_to_design_coords(&self, game_ctx: &GameContext, window_x: f32, window_y: f32) -> (f32, f32) {
+    fn window_to_design_coords(
+        &self,
+        game_ctx: &GameContext,
+        window_x: f32,
+        window_y: f32,
+    ) -> (f32, f32) {
         let (window_width, window_height) = game_ctx.drawable_size();
         // 计算4:3视口
         let aspect_ratio = 4.0 / 3.0;
@@ -101,7 +103,7 @@ impl LoginScene {
         (design_x, design_y)
     }
 
-    fn submit_login(&mut self, world: &mut World) {
+    fn submit_login(&mut self, world: &mut GameWorld) {
         // 🔒 节流: 防止短时间内重复提交 (1秒冷却)
         if let Some(last_attempt) = self.last_login_attempt {
             if last_attempt.elapsed() < std::time::Duration::from_secs(1) {
@@ -190,7 +192,7 @@ impl Scene for LoginScene {
         Ok(None)
     }
 
-    fn draw(&mut self, ctx: &mut GraphicsContext, world: &hecs::World) -> GameResult {
+    fn draw(&mut self, ctx: &mut GraphicsContext, _world: &GameWorld) -> GameResult {
         let mut canvas = Canvas::from_frame(ctx, ggez::graphics::Color::from_rgb(0, 0, 0));
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,
@@ -254,4 +256,3 @@ impl Scene for LoginScene {
         Ok(())
     }
 }
-

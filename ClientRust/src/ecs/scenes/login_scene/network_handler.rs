@@ -3,7 +3,7 @@
 //! 负责处理所有与服务器通信相关的事件响应
 
 use super::LoginScene;
-use crate::ecs::GameContext;
+use crate::ecs::{GameContext, GameWorld};
 use crate::network::GameEvent;
 
 impl LoginScene {
@@ -60,13 +60,12 @@ impl LoginScene {
     }
 
     /// 处理ClientVersion验证响应
-    fn on_client_version_response(&mut self, result: u8, world: &mut hecs::World) {
+    fn on_client_version_response(&mut self, result: u8, world: &mut GameWorld) {
         if result == 1 {
             tracing::info!("✅ ClientVersion验证成功,允许登录");
             self.version_verified = true;
             // 如果之前有用户尝试过登录但由于版本未验证而被缓存,现在自动发送
             if let Some(cmd) = self.pending_login.take() {
-                use crate::ecs::WorldExt;
                 match world.network().send(cmd) {
                     Ok(()) => {
                         tracing::info!("📤 已发送缓存的登录请求");

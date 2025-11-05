@@ -14,7 +14,7 @@ mod network_handler;
 mod ui_actions; // UI 交互逻辑（按钮点击、对话框打开、游戏启动等） // 网络事件处理（服务器响应处理） // 输入事件处理（键盘、鼠标、IME等）
 
 use crate::ecs::components::CharacterList;
-use crate::ecs::{Coord, GameContext, WorldExt};
+use crate::ecs::{Coord, GameContext, GameWorld};
 use character_select::CharacterSelect; // 🆕 导入CharacterList组件
 
 pub use credits_dialog::CreditsDialog;
@@ -355,7 +355,7 @@ impl Scene for SelectScene {
                     if input_text == character.name {
                         tracing::info!("🗑️ 发送删除角色请求: index={}", character.index);
                         // 发送 DeleteCharacter 包
-                        use crate::ecs::WorldExt;
+                      
                         let _ = game_ctx
                             .world
                             .network()
@@ -395,7 +395,7 @@ impl Scene for SelectScene {
         Ok(None)
     }
 
-    fn draw(&mut self, ctx: &mut GraphicsContext, world: &hecs::World) -> GameResult {
+    fn draw(&mut self, ctx: &mut GraphicsContext, world: &GameWorld) -> GameResult {
         let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(
             0.0,

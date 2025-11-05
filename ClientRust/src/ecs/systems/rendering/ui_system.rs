@@ -1,4 +1,4 @@
-use crate::ecs::{Coord, systems::RenderSystem};
+use crate::ecs::{Coord, GameWorld, systems::RenderSystem};
 use ggez::{GameResult, graphics::GraphicsContext};
 
 #[derive(ecs_macros::RenderSystem)]
@@ -9,7 +9,7 @@ impl RenderSystem for UIRenderSystem {
         &mut self,
         _ctx: &mut GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
-        _world: &hecs::World,
+        _world: &GameWorld,
     ) -> GameResult {
         
         canvas.set_screen_coordinates(ggez::graphics::Rect::new(

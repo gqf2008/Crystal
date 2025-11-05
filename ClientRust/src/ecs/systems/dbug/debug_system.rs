@@ -1,6 +1,6 @@
 use crate::ecs::components::{Camera, InputState, Position, RenderConfig};
 use crate::ecs::systems::logic::physics::MapUpdateSystem;
-use crate::ecs::{GameContext, RenderSystem};
+use crate::ecs::{GameContext, GameWorld, RenderSystem};
 use crate::ecs::{CELL_HEIGHT, CELL_WIDTH};
 use ggez::graphics::GraphicsContext;
 use ggez::graphics::{Color, DrawParam, Mesh};
@@ -737,7 +737,7 @@ impl RenderSystem for DebugSystem {
         &mut self,
         ctx: &mut GraphicsContext,
         canvas: &mut ggez::graphics::Canvas,
-        world: &hecs::World,
+        world: &GameWorld,
     ) -> GameResult {
         // tracing::info!("🐛 DebugSystem::draw() 开始");
         use crate::ecs::components::TimeTracker;

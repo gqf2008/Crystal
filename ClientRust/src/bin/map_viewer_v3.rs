@@ -51,7 +51,6 @@ impl MapViewerApp {
         let scene = MapViewerScene::new(ctx)?;
 
         // 🎮 发送开始游戏请求，触发 MockNetwork 加载地图
-        use mir2_client::ecs::WorldExt;
         use mir2_client::network::handlers::GameEvent;
         let net_ctx = ctx.world.network();
         if let Err(e) = net_ctx.send(GameEvent::StartGameRequest { character_index: 0 }) {

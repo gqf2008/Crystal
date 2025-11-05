@@ -16,10 +16,10 @@
 //! └─ 输入事件缓冲 (frame_input_events)
 //! ```
 
-use crate::ecs::components::{input, InputEvent};
-use crate::ecs::{GameWorld, WorldExt};
+use crate::ecs::components::InputEvent;
+use crate::ecs::GameWorld;
 use crate::{
-    network::{builder::CategorizedEvents, NetContext, NetworkBuilder},
+    network::{builder::CategorizedEvents, NetworkBuilder},
     ClientSettings,
 };
 use ggez::conf;
@@ -1061,9 +1061,9 @@ impl InputContext {
     }
 
     // ===== 边缘检测方法（需配合 InputState Component 使用）=====
-    
+
     /// 检查键是否刚按下（边缘检测）
-    /// 
+    ///
     /// **使用方法**：
     /// ```rust
     /// let input_state = ctx.world.query::<&InputState>().iter().next().map(|(_, s)| s);
@@ -1073,20 +1073,24 @@ impl InputContext {
     ///     }
     /// }
     /// ```
-    pub fn key_just_pressed(&self, key: ggez::input::keyboard::KeyCode, state: &crate::ecs::components::InputState) -> bool {
+    pub fn key_just_pressed(
+        &self,
+        key: ggez::input::keyboard::KeyCode,
+        state: &crate::ecs::components::InputState,
+    ) -> bool {
         self.key_pressed(key) && !state.prev_pressed_keys.contains(&key)
     }
-    
+
     /// 检查鼠标左键是否刚按下
     pub fn mouse_left_just_pressed(&self, state: &crate::ecs::components::InputState) -> bool {
         self.mouse_left_pressed() && !state.prev_mouse_left
     }
-    
+
     /// 检查鼠标右键是否刚按下
     pub fn mouse_right_just_pressed(&self, state: &crate::ecs::components::InputState) -> bool {
         self.mouse_right_pressed() && !state.prev_mouse_right
     }
-    
+
     /// 检查鼠标中键是否刚按下
     pub fn mouse_middle_just_pressed(&self, state: &crate::ecs::components::InputState) -> bool {
         self.mouse_middle_pressed() && !state.prev_mouse_middle
