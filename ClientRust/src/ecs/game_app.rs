@@ -11,13 +11,12 @@
 // ============================================================================
 
 use ggez::event::EventHandler;
-use ggez::graphics::{Canvas, Color};
 use ggez::GameResult;
 
 use crate::ecs::components::InputEvent;
 use crate::ecs::scenes::{GameScene, LoginScene, Scene, SceneType, SelectScene};
 use crate::ecs::GameContext;
-
+use crate::ecs::WorldExt;
 /// 游戏主应用
 pub struct GameState {
     /// 当前场景
@@ -49,7 +48,7 @@ impl GameState {
         self.current_scene = match scene_type {
             SceneType::Login => {
                 // 🧹 返回登录场景时发送断开连接命令
-                if let Err(e) = ctx
+                if let Err(e) = ctx.world
                     .network()
                     .send(crate::network::handlers::GameEvent::DisconnectRequest)
                 {

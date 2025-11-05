@@ -229,7 +229,6 @@ pub struct GameContext {
     pub fields: ContextFields,
 
     // ===== 游戏特定组件 =====
-    pub settings: ClientSettings,
     /// ECS World - 存储所有实体和组件
     pub world: World,
     /// 网络事件（本帧收集的）
@@ -280,7 +279,6 @@ impl GameContext {
             world,
 
             net_events: CategorizedEvents::default(),
-            settings,
         };
 
         Ok((ctx, event_loop))
@@ -376,7 +374,7 @@ impl GameContext {
     }
 
     pub fn collect_network_events(&mut self) {
-        let events = self.network().recv_categorized();
+        let events = self.world.network().recv_categorized();
         self.net_events = events;
     }
 
@@ -503,12 +501,12 @@ impl GameContext {
         }
     }
 
-    /// 获取 NetContext
-    pub fn network(&self) -> hecs::Ref<'_, NetContext> {
-        self.world
-            .get::<&NetContext>(crate::ecs::NETWORK_ENTITY.unwrap_or(hecs::Entity::DANGLING))
-            .expect("NetContext not found in World")
-    }
+    // /// 获取 NetContext
+    // pub fn network(&self) -> hecs::Ref<'_, NetContext> {
+    //     self.world
+    //         .get::<&NetContext>(crate::ecs::NETWORK_ENTITY.unwrap_or(hecs::Entity::DANGLING))
+    //         .expect("NetContext not found in World")
+    // }
 
     // ===== 便捷方法：ECS 查询 =====
 
