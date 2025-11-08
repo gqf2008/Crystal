@@ -55,6 +55,16 @@ struct MapViewerState {
     frame_count: u32,
     fps_timer: f64,
     current_fps: u32,
+    
+    /// 固定的渲染尺寸（与 ggez 保持一致）
+    render_width: f32,
+    render_height: f32,
+    
+    /// RenderTarget 用于离屏渲染
+    render_target: RenderTarget,
+    
+    /// Camera2D 用于处理 RenderTarget 的 Y 轴翻转
+    camera: Camera2D,
 }
 
 impl MapViewerState {
@@ -78,6 +88,29 @@ impl MapViewerState {
             tracing::info!("✅ 加载字体成功");
         }
 
+        // 使用固定的渲染尺寸，与 ggez 保持一致
+        let render_width = 1600.0;
+        let render_height = 1200.0;
+        
+        // 创建 RenderTarget 用于离屏渲染
+        let render_target = render_target(render_width as u32, render_height as u32);
+        render_target.texture.set_filter(FilterMode::Linear);
+        
+        // 创建 Camera2D，使用正常的坐标系（不翻转）
+        let camera = Camera2D {
+            zoom: vec2(1.0 / (render_width / 2.0), 1.0 / (render_height / 2.0)), // 正常缩放
+            target: vec2(render_width / 2.0, render_height / 2.0),
+            offset: vec2(0.0, 0.0),
+            rotation: 0.0,
+            render_target: Some(render_target.clone()),
+            viewport: None,
+        };
+        
+        // 输出实际屏幕尺寸信息
+        let (screen_w, screen_h) = renderer.screen_size();
+        tracing::info!("📐 窗口实际尺寸: {}x{}", screen_w, screen_h);
+        tracing::info!("📐 使用固定渲染尺寸: {}x{}", render_width, render_height);
+        
         Self {
             renderer,
             camera_offset: (0.0, 0.0),
@@ -90,6 +123,10 @@ impl MapViewerState {
             frame_count: 0,
             fps_timer: 0.0,
             current_fps: 0,
+            render_width,
+            render_height,
+            render_target,
+            camera,
         }
     }
 
@@ -158,11 +195,14 @@ impl MapViewerState {
 
     /// 渲染
     fn draw(&mut self) {
-        // 清空屏幕
+        // 第一步：渲染游戏世界到 RenderTarget（1600x1200）
+        set_camera(&self.camera);
+        
+        // 清空 RenderTarget
         self.renderer
             .clear(RenderColor::from_rgba_u8(30, 30, 40, 255));
 
-        // 绘制演示内容
+        // 绘制演示内容到 RenderTarget
         self.draw_demo_tiles();
 
         // 绘制网格
@@ -170,7 +210,27 @@ impl MapViewerState {
             self.draw_grid();
         }
 
-        // 绘制 UI
+        // 第二步：切换回默认相机，将 RenderTarget 绘制到屏幕
+        set_default_camera();
+        
+        // 清空屏幕
+        clear_background(Color::from_rgba(30, 30, 40, 255));
+        
+        // 将 RenderTarget 绘制到屏幕，翻转 Y 轴（因为 RenderTarget 坐标系是上下颠倒的）
+        let (screen_w, screen_h) = (screen_width(), screen_height());
+        draw_texture_ex(
+            &self.render_target.texture,
+            0.0,
+            0.0,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(screen_w, screen_h)),
+                flip_y: true,  // 翻转 Y 轴，将 RenderTarget 的内容正确显示
+                ..Default::default()
+            },
+        );
+
+        // 第三步：在屏幕空间绘制 UI（避免文字被翻转）
         self.draw_ui();
 
         // 提交渲染
@@ -179,7 +239,8 @@ impl MapViewerState {
 
     /// 绘制演示图块
     fn draw_demo_tiles(&mut self) {
-        let (screen_w, screen_h) = self.renderer.screen_size();
+        let screen_w = self.render_width;
+        let screen_h = self.render_height;
         let tile_size = 48.0 * self.zoom; // 传奇2 标准图块大小
 
         let start_x = -self.camera_offset.0 / tile_size;
@@ -243,7 +304,8 @@ impl MapViewerState {
 
     /// 绘制网格
     fn draw_grid(&mut self) {
-        let (screen_w, screen_h) = self.renderer.screen_size();
+        let screen_w = self.render_width;
+        let screen_h = self.render_height;
         let tile_size = 48.0 * self.zoom;
 
         let grid_color = RenderColor::from_rgba_u8(255, 255, 255, 50);
@@ -277,9 +339,10 @@ impl MapViewerState {
     fn draw_ui(&mut self) {
         let text_color = RenderColor::WHITE;
 
-        // 标题
+        // UI 在屏幕空间绘制，使用正常的屏幕坐标（左上角原点）
+        // 标题（距离顶部 30 像素）
         self.renderer.draw_text(
-            "🗺️ 传奇2地图查看器 - Macroquad 版本",
+            "传奇2地图查看器 - Macroquad版本",
             RenderVec2::new(10.0, 30.0),
             TextParams {
                 font_size: 24.0,
@@ -289,7 +352,7 @@ impl MapViewerState {
             },
         );
 
-        // 状态信息
+        // 状态信息（距离顶部 60 像素）
         let info = format!(
             "FPS: {} | 缩放: {:.1}x | 相机: ({:.0}, {:.0}) | 网格: {}",
             self.current_fps,
@@ -310,7 +373,7 @@ impl MapViewerState {
             },
         );
 
-        // 控制提示
+        // 控制提示（距离顶部 90 像素）
         self.renderer.draw_text(
             "控制: 鼠标拖拽移动 | 滚轮缩放 | G 切换网格 | ESC 退出",
             RenderVec2::new(10.0, 90.0),
@@ -328,10 +391,10 @@ impl MapViewerState {
 fn window_conf() -> Conf {
     Conf {
         window_title: "传奇2地图查看器 - Macroquad".to_owned(),
-        window_width: 1024,
-        window_height: 768,
+        window_width: 1024,   // 窗口实际大小
+        window_height: 768,   // 窗口实际大小
         window_resizable: true,
-        high_dpi: true,  // 启用 High DPI 支持，与 ggez 的行为一致
+        high_dpi: true,
         ..Default::default()
     }
 }

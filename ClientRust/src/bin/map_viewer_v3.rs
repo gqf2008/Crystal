@@ -47,6 +47,11 @@ impl MapViewerApp {
             .init();
 
         tracing::info!("🗺️  Map Viewer V3 启动中...");
+        
+        // 输出实际屏幕尺寸
+        let screen_rect = ctx.gfx.drawable_size();
+        tracing::info!("📐 ggez 实际渲染尺寸: {}x{}", screen_rect.0, screen_rect.1);
+        
         // 创建场景
         let scene = MapViewerScene::new(ctx)?;
 
