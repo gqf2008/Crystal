@@ -39,7 +39,7 @@ reqwest = { version = "0.12", features = ["json", "gzip", "stream"] }
 bytes = "1"
 parking_lot = "0.12"
 rand = "0.9.2"
-crossbeam-channel = "0.5"  # High-performance MPSC channels
+crossbeam-channel = "0.5" # High-performance MPSC channels
 mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
 byteorder = "1"
 md5 = "0.8.0"
@@ -63,10 +63,12 @@ ecs_macros = { path = "ecs_macros" } # ECS系统派生宏
 #     "default_font",               # 默认字体 (ASCII)
 # ] }
 
-# ========== Ggez + hecs (ECS架构) ==========
-ggez = "=0.10.0-rc0" # Includes winit re-export (use ggez::winit::*)
-hecs ={version= "0.10.5",features = ["hecs-macros"] }       # 轻量级高性能 ECS 库
-rayon = "1.8"        # 并行执行 ECS 系统
+# ========== 渲染后端 (可选择) ==========
+# 使用 feature flags 在 ggez 和 macroquad 之间切换
+ggez = { version = "=0.10.0-rc0", optional = true }       # Includes winit re-export (use ggez::winit::*)
+macroquad = { version = "0.4", optional = true }          # 跨平台游戏框架 (Web/Mobile/Desktop)
+hecs = { version = "0.10.5", features = ["hecs-macros"] } # 轻量级高性能 ECS 库
+rayon = "1.8"                                             # 并行执行 ECS 系统
 # egui = "0.27"  # 暂时禁用,egui_ggez 不兼容 ggez 0.10-rc0
 # egui_ggez = "0.3"  # 在 crates.io 上不存在或不兼容
 assets_manager = "0.13.4"
@@ -139,6 +141,18 @@ path = "src/bin/mir2x.rs"
 # name = "map_viewer_v2"
 # path = "src/bin/map_viewer_v2.rs"
 
+# 🆕 地图查看器 - Macroquad 版本
+[[bin]]
+name = "map_viewer_macroquad"
+path = "src/bin/map_viewer_macroquad.rs"
+required-features = ["backend-macroquad"]
+
+# 🆕 Macroquad 最小演示
+[[bin]]
+name = "demo_macroquad"
+path = "src/bin/demo_macroquad.rs"
+required-features = ["backend-macroquad"]
+
 # # 中文输入法测试程序
 # [[bin]]
 # name = "test_chinese_ime"
@@ -167,5 +181,8 @@ path = "src/bin/mir2x.rs"
 # path = "src/bin/test_ime_custom_loop.rs"
 
 [features]
-default = ["client"]
+default = ["client", "backend-ggez"]
 client = []
+# 渲染后端选择 (互斥)
+backend-ggez = ["ggez"]
+backend-macroquad = ["macroquad"]

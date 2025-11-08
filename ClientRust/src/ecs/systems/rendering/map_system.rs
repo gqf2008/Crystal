@@ -14,7 +14,7 @@
 
 use crate::ecs::components::{AnimatedTile, Camera, MapTile, Position, RenderConfig, TileLayer};
 use crate::ecs::systems::{LogicSystem, RenderSystem};
-use crate::ecs::{CELL_HEIGHT, CELL_WIDTH, GameContext, GameWorld};
+use crate::ecs::{GameContext, GameWorld, CELL_HEIGHT, CELL_WIDTH};
 use crate::graphics::get_map_library;
 use ggez::graphics::{DrawParam, GraphicsContext};
 use ggez::GameResult;
@@ -65,8 +65,6 @@ impl Default for MapRenderSystem {
         Self::new()
     }
 }
-
-
 
 // ============================================================================
 // RenderSystem 实现 - 渲染地图
@@ -353,235 +351,234 @@ impl RenderSystem for MapRenderSystem {
                 // 根据图库索引获取图库实例（如果图库不存在则跳过）
                 if let Some(lib) = get_map_library(lib_index) {
                     // 获取图库锁（多线程安全）
-                    if let Ok(mut lib_guard) = lib.lock() {
-                        // ------------------------------------------------
-                        // 步骤3.6.2: 获取图像尺寸
-                        // ------------------------------------------------
-                        // 从图库获取图像的宽度和高度
-                        // 如果获取失败，使用默认格子尺寸（48x32）
-                        let (tile_w, tile_h) = lib_guard
-                            .get_size(img_index)
-                            .unwrap_or((CELL_WIDTH as i16, CELL_HEIGHT as i16));
+                    let mut lib_guard = lib.lock();
+                    // ------------------------------------------------
+                    // 步骤3.6.2: 获取图像尺寸
+                    // ------------------------------------------------
+                    // 从图库获取图像的宽度和高度
+                    // 如果获取失败，使用默认格子尺寸（48x32）
+                    let (tile_w, tile_h) = lib_guard
+                        .get_size(img_index)
+                        .unwrap_or((CELL_WIDTH as i16, CELL_HEIGHT as i16));
 
-                        // ------------------------------------------------
-                        // 步骤3.6.3: 获取纹理信息
-                        // ------------------------------------------------
-                        // 从图库获取或创建GPU纹理
-                        // ImageInfo包含：image（纹理对象）、x/y（内部偏移）、width/height
-                        if let Ok(info) = lib_guard.get_or_create_texture(ctx, img_index) {
-                            // 检查纹理对象是否存在
-                            if let Some(image) = &info.image {
-                                // ============================================
-                                // 步骤3.6.4: 计算基础世界坐标
-                                // ============================================
-                                // 格子坐标转换为世界坐标
-                                let world_x = (grid_x * CELL_WIDTH) as f32; // X = grid_x * 48
-                                let world_y = (grid_y * CELL_HEIGHT) as f32; // Y = grid_y * 32
+                    // ------------------------------------------------
+                    // 步骤3.6.3: 获取纹理信息
+                    // ------------------------------------------------
+                    // 从图库获取或创建GPU纹理
+                    // ImageInfo包含：image（纹理对象）、x/y（内部偏移）、width/height
+                    if let Ok(info) = lib_guard.get_or_create_texture(ctx, img_index) {
+                        // 检查纹理对象是否存在
+                        if let Some(image) = &info.image {
+                            // ============================================
+                            // 步骤3.6.4: 计算基础世界坐标
+                            // ============================================
+                            // 格子坐标转换为世界坐标
+                            let world_x = (grid_x * CELL_WIDTH) as f32; // X = grid_x * 48
+                            let world_y = (grid_y * CELL_HEIGHT) as f32; // Y = grid_y * 32
 
-                                // ============================================
-                                // 步骤3.6.5: 计算Y轴偏移（核心逻辑）
-                                // ============================================
-                                // 这是地图渲染最复杂的部分，直接影响瓦片对齐
-                                //
-                                // 参考C# MapEditor渲染逻辑 (Main.cs:785-1030):
-                                //
-                                // **Back层** (line 971-993):
-                                //   永远使用: drawY = Y * CellHeight
-                                //   原因：背景层总是贴地，无需偏移
-                                //
-                                // **Middle层** (line 919-970):
-                                //   - 标准尺寸: drawY = Y * CellHeight
-                                //   - 非标准尺寸: drawY = (Y+1) * CellHeight - Height
-                                //   原因：高于一格的物体需要向上偏移，使底部对齐格子
-                                //
-                                // **Front层** (line 785-876):
-                                //   - 标准尺寸: drawY = Y * CellHeight
-                                //   - 非标准 + Blend + 特殊库(14/27/100-199):
-                                //       drawY = (Y+1)*CellHeight - 3*CellHeight = Y*CellHeight - 2*CellHeight
-                                //       原因：火把/蜡烛等光效需要额外向上偏移2格（64px）
-                                //   - 非标准 + 其他: drawY = (Y+1) * CellHeight - Height
-                                //       原因：建筑/树木底部对齐格子底部
+                            // ============================================
+                            // 步骤3.6.5: 计算Y轴偏移（核心逻辑）
+                            // ============================================
+                            // 这是地图渲染最复杂的部分，直接影响瓦片对齐
+                            //
+                            // 参考C# MapEditor渲染逻辑 (Main.cs:785-1030):
+                            //
+                            // **Back层** (line 971-993):
+                            //   永远使用: drawY = Y * CellHeight
+                            //   原因：背景层总是贴地，无需偏移
+                            //
+                            // **Middle层** (line 919-970):
+                            //   - 标准尺寸: drawY = Y * CellHeight
+                            //   - 非标准尺寸: drawY = (Y+1) * CellHeight - Height
+                            //   原因：高于一格的物体需要向上偏移，使底部对齐格子
+                            //
+                            // **Front层** (line 785-876):
+                            //   - 标准尺寸: drawY = Y * CellHeight
+                            //   - 非标准 + Blend + 特殊库(14/27/100-199):
+                            //       drawY = (Y+1)*CellHeight - 3*CellHeight = Y*CellHeight - 2*CellHeight
+                            //       原因：火把/蜡烛等光效需要额外向上偏移2格（64px）
+                            //   - 非标准 + 其他: drawY = (Y+1) * CellHeight - Height
+                            //       原因：建筑/树木底部对齐格子底部
 
-                                // --------------------------------------------
-                                // 判断是否为标准尺寸
-                                // --------------------------------------------
-                                // 标准尺寸：48x32（1格）或96x64（2格）
-                                let is_standard_size = (tile_w == CELL_WIDTH as i16
-                                    && tile_h == CELL_HEIGHT as i16)
-                                    || (tile_w == CELL_WIDTH as i16 * 2
-                                        && tile_h == CELL_HEIGHT as i16 * 2);
+                            // --------------------------------------------
+                            // 判断是否为标准尺寸
+                            // --------------------------------------------
+                            // 标准尺寸：48x32（1格）或96x64（2格）
+                            let is_standard_size = (tile_w == CELL_WIDTH as i16
+                                && tile_h == CELL_HEIGHT as i16)
+                                || (tile_w == CELL_WIDTH as i16 * 2
+                                    && tile_h == CELL_HEIGHT as i16 * 2);
 
-                                // --------------------------------------------
-                                // 计算调整后的坐标
-                                // --------------------------------------------
-                                let adjusted_x = world_x; // X坐标不需要偏移
+                            // --------------------------------------------
+                            // 计算调整后的坐标
+                            // --------------------------------------------
+                            let adjusted_x = world_x; // X坐标不需要偏移
 
-                                let adjusted_y = if matches!(layer, TileLayer::Back) {
-                                    // ========================================
-                                    // Back层规则：永远不偏移
-                                    // ========================================
-                                    // 背景层（地面）总是直接使用格子Y坐标
-                                    world_y
-                                } else if is_standard_size {
-                                    // ========================================
-                                    // 标准尺寸规则：不偏移
-                                    // ========================================
-                                    // Middle层和Front层的标准尺寸（48x32或96x64）
-                                    // 无需偏移，直接对齐格子顶部
-                                    world_y
-                                } else {
-                                    // ========================================
-                                    // 非标准尺寸规则：根据层级和属性偏移
-                                    // ========================================
-                                    // 参考C# GameScene.cs:11967-11972
-                                    // Blend特殊处理仅用于Front层
+                            let adjusted_y = if matches!(layer, TileLayer::Back) {
+                                // ========================================
+                                // Back层规则：永远不偏移
+                                // ========================================
+                                // 背景层（地面）总是直接使用格子Y坐标
+                                world_y
+                            } else if is_standard_size {
+                                // ========================================
+                                // 标准尺寸规则：不偏移
+                                // ========================================
+                                // Middle层和Front层的标准尺寸（48x32或96x64）
+                                // 无需偏移，直接对齐格子顶部
+                                world_y
+                            } else {
+                                // ========================================
+                                // 非标准尺寸规则：根据层级和属性偏移
+                                // ========================================
+                                // 参考C# GameScene.cs:11967-11972
+                                // Blend特殊处理仅用于Front层
 
-                                    if matches!(layer, TileLayer::Front) && use_blend {
-                                        // ------------------------------------
-                                        // Front层 + 混合模式：检查库索引
-                                        // ------------------------------------
-                                        if lib_index == 14
-                                            || lib_index == 27
-                                            || (lib_index > 99 && lib_index < 199)
-                                        {
-                                            // 特殊库：火把、蜡烛等光效
-                                            // 使用额外的向上偏移（-2格 = -64px）
-                                            //
-                                            // C#公式: drawY - (3*CellHeight)
-                                            //       = (y+1)*32 - 96 = (y-2)*32
-                                            // Rust公式: world_y = y*32
-                                            //         所以 y*32 - 64 = (y-2)*32
-                                            world_y - (2 * CELL_HEIGHT) as f32
-                                        } else {
-                                            // 普通混合：使用标准非标准偏移
-                                            // 底部对齐格子底部
-                                            //
-                                            // C#公式: drawY - Height
-                                            //       = (y+1)*32 - Height
-                                            // Rust公式: y*32 + 32 - Height
-                                            world_y + CELL_HEIGHT as f32 - tile_h as f32
-                                        }
-                                    } else {
-                                        // ------------------------------------
-                                        // 非Blend 或 非Front层：标准偏移
-                                        // ------------------------------------
-                                        // Middle层和Front层非混合的非标准尺寸
-                                        // 向上偏移使底部对齐格子底部
+                                if matches!(layer, TileLayer::Front) && use_blend {
+                                    // ------------------------------------
+                                    // Front层 + 混合模式：检查库索引
+                                    // ------------------------------------
+                                    if lib_index == 14
+                                        || lib_index == 27
+                                        || (lib_index > 99 && lib_index < 199)
+                                    {
+                                        // 特殊库：火把、蜡烛等光效
+                                        // 使用额外的向上偏移（-2格 = -64px）
                                         //
-                                        // C#公式: drawY - Height (MapEditor统一规则)
+                                        // C#公式: drawY - (3*CellHeight)
+                                        //       = (y+1)*32 - 96 = (y-2)*32
+                                        // Rust公式: world_y = y*32
+                                        //         所以 y*32 - 64 = (y-2)*32
+                                        world_y - (2 * CELL_HEIGHT) as f32
+                                    } else {
+                                        // 普通混合：使用标准非标准偏移
+                                        // 底部对齐格子底部
+                                        //
+                                        // C#公式: drawY - Height
+                                        //       = (y+1)*32 - Height
                                         // Rust公式: y*32 + 32 - Height
                                         world_y + CELL_HEIGHT as f32 - tile_h as f32
                                     }
-                                };
-
-                                // ============================================
-                                // 步骤3.6.6: 判断是否应用图像内部偏移
-                                // ============================================
-                                // 图像内部偏移 (info.x, info.y) 来自图库文件
-                                // 用于精确定位图像，但并非所有瓦片都需要应用
-                                //
-                                // 参考C# GameScene.cs:11967-11980
-                                // 只有特定情况才应用偏移：
-
-                                let should_apply_offset = if matches!(layer, TileLayer::Front) {
-                                    // Front层：根据混合模式和库索引判断
-                                    if use_blend {
-                                        // ------------------------------------
-                                        // Blend瓦片：特殊库或特定索引
-                                        // ------------------------------------
-                                        // 库14/27/100-199：火把、蜡烛等光效
-                                        // 索引2723-2732：特殊动画效果
-                                        lib_index == 14
-                                            || lib_index == 27
-                                            || (lib_index > 99 && lib_index < 199)
-                                            || (img_index >= 2723 && img_index <= 2732)
-                                    } else if lib_index == 28 {
-                                        // ------------------------------------
-                                        // 库28：仅当有非空偏移时应用
-                                        // ------------------------------------
-                                        info.x != 0 || info.y != 0
-                                    } else {
-                                        // 其他Front层瓦片：不应用偏移
-                                        false
-                                    }
                                 } else {
-                                    // ========================================
-                                    // Back/Middle层：永远不应用偏移
-                                    // ========================================
-                                    // 重要：这防止了Back层错位问题
-                                    false
-                                };
-
-                                // --------------------------------------------
-                                // 应用或跳过图像内部偏移
-                                // --------------------------------------------
-                                let (adjusted_x_final, adjusted_y_final) = if should_apply_offset {
-                                    // 应用偏移（火把、蜡烛等）
-                                    (adjusted_x + info.x as f32, adjusted_y + info.y as f32)
-                                } else {
-                                    // 不应用偏移（大部分瓦片）
-                                    (adjusted_x, adjusted_y)
-                                };
-
-                                // ============================================
-                                // 步骤3.6.7: 世界坐标转换为屏幕坐标
-                                // ============================================
-                                // 世界坐标：物体在游戏世界中的绝对位置
-                                // 屏幕坐标：物体在屏幕上的像素位置
-                                //
-                                // 转换公式：
-                                //   screen = (world - camera_pos) * zoom + screen_center
-                                //
-                                // 步骤：
-                                // 1. 减去相机位置（相对坐标）
-                                // 2. 乘以缩放系数（缩放效果）
-                                // 3. 加上屏幕中心（屏幕坐标原点在中心）
-
-                                let screen_x = (adjusted_x_final - camera_pos.x) * camera.zoom
-                                    + camera.screen_width / 2.0;
-                                let screen_y = (adjusted_y_final - camera_pos.y) * camera.zoom
-                                    + camera.screen_height / 2.0;
-
-                                // ============================================
-                                // 步骤3.6.8: 设置混合模式
-                                // ============================================
-                                // 混合模式控制像素如何叠加
-                                // - Normal: 标准Alpha混合（默认）
-                                // - ADD: 叠加发光（火焰、灯光等）
-
-                                let old_blend_mode = if use_blend {
-                                    // 保存当前混合模式
-                                    let current = canvas.blend_mode();
-                                    // 切换到ADD混合（发光效果）
-                                    canvas.set_blend_mode(ggez::graphics::BlendMode::ADD);
-                                    Some(current) // 返回旧模式以便恢复
-                                } else {
-                                    None // 使用默认混合模式
-                                };
-
-                                // ============================================
-                                // 步骤3.6.9: 绘制瓦片到画布
-                                // ============================================
-                                // 使用DrawParam配置绘制参数
-                                canvas.draw(
-                                    image, // GPU纹理对象
-                                    DrawParam::default()
-                                        .dest([screen_x, screen_y]) // 目标位置（屏幕坐标）
-                                        .scale([camera.zoom, camera.zoom]) // 缩放（跟随相机）
-                                        .color(ggez::graphics::Color::WHITE), // 白色=不着色，保留原图
-                                );
-
-                                // ============================================
-                                // 步骤3.6.10: 恢复混合模式
-                                // ============================================
-                                // 如果之前切换了混合模式，恢复到原来的模式
-                                // 避免影响后续渲染
-                                if let Some(old_mode) = old_blend_mode {
-                                    canvas.set_blend_mode(old_mode);
+                                    // ------------------------------------
+                                    // 非Blend 或 非Front层：标准偏移
+                                    // ------------------------------------
+                                    // Middle层和Front层非混合的非标准尺寸
+                                    // 向上偏移使底部对齐格子底部
+                                    //
+                                    // C#公式: drawY - Height (MapEditor统一规则)
+                                    // Rust公式: y*32 + 32 - Height
+                                    world_y + CELL_HEIGHT as f32 - tile_h as f32
                                 }
-                            } // image存在检查结束
-                        } // 纹理获取结果检查结束
-                    } // 图库锁获取结束
+                            };
+
+                            // ============================================
+                            // 步骤3.6.6: 判断是否应用图像内部偏移
+                            // ============================================
+                            // 图像内部偏移 (info.x, info.y) 来自图库文件
+                            // 用于精确定位图像，但并非所有瓦片都需要应用
+                            //
+                            // 参考C# GameScene.cs:11967-11980
+                            // 只有特定情况才应用偏移：
+
+                            let should_apply_offset = if matches!(layer, TileLayer::Front) {
+                                // Front层：根据混合模式和库索引判断
+                                if use_blend {
+                                    // ------------------------------------
+                                    // Blend瓦片：特殊库或特定索引
+                                    // ------------------------------------
+                                    // 库14/27/100-199：火把、蜡烛等光效
+                                    // 索引2723-2732：特殊动画效果
+                                    lib_index == 14
+                                        || lib_index == 27
+                                        || (lib_index > 99 && lib_index < 199)
+                                        || (img_index >= 2723 && img_index <= 2732)
+                                } else if lib_index == 28 {
+                                    // ------------------------------------
+                                    // 库28：仅当有非空偏移时应用
+                                    // ------------------------------------
+                                    info.x != 0 || info.y != 0
+                                } else {
+                                    // 其他Front层瓦片：不应用偏移
+                                    false
+                                }
+                            } else {
+                                // ========================================
+                                // Back/Middle层：永远不应用偏移
+                                // ========================================
+                                // 重要：这防止了Back层错位问题
+                                false
+                            };
+
+                            // --------------------------------------------
+                            // 应用或跳过图像内部偏移
+                            // --------------------------------------------
+                            let (adjusted_x_final, adjusted_y_final) = if should_apply_offset {
+                                // 应用偏移（火把、蜡烛等）
+                                (adjusted_x + info.x as f32, adjusted_y + info.y as f32)
+                            } else {
+                                // 不应用偏移（大部分瓦片）
+                                (adjusted_x, adjusted_y)
+                            };
+
+                            // ============================================
+                            // 步骤3.6.7: 世界坐标转换为屏幕坐标
+                            // ============================================
+                            // 世界坐标：物体在游戏世界中的绝对位置
+                            // 屏幕坐标：物体在屏幕上的像素位置
+                            //
+                            // 转换公式：
+                            //   screen = (world - camera_pos) * zoom + screen_center
+                            //
+                            // 步骤：
+                            // 1. 减去相机位置（相对坐标）
+                            // 2. 乘以缩放系数（缩放效果）
+                            // 3. 加上屏幕中心（屏幕坐标原点在中心）
+
+                            let screen_x = (adjusted_x_final - camera_pos.x) * camera.zoom
+                                + camera.screen_width / 2.0;
+                            let screen_y = (adjusted_y_final - camera_pos.y) * camera.zoom
+                                + camera.screen_height / 2.0;
+
+                            // ============================================
+                            // 步骤3.6.8: 设置混合模式
+                            // ============================================
+                            // 混合模式控制像素如何叠加
+                            // - Normal: 标准Alpha混合（默认）
+                            // - ADD: 叠加发光（火焰、灯光等）
+
+                            let old_blend_mode = if use_blend {
+                                // 保存当前混合模式
+                                let current = canvas.blend_mode();
+                                // 切换到ADD混合（发光效果）
+                                canvas.set_blend_mode(ggez::graphics::BlendMode::ADD);
+                                Some(current) // 返回旧模式以便恢复
+                            } else {
+                                None // 使用默认混合模式
+                            };
+
+                            // ============================================
+                            // 步骤3.6.9: 绘制瓦片到画布
+                            // ============================================
+                            // 使用DrawParam配置绘制参数
+                            canvas.draw(
+                                image, // GPU纹理对象
+                                DrawParam::default()
+                                    .dest([screen_x, screen_y]) // 目标位置（屏幕坐标）
+                                    .scale([camera.zoom, camera.zoom]) // 缩放（跟随相机）
+                                    .color(ggez::graphics::Color::WHITE), // 白色=不着色，保留原图
+                            );
+
+                            // ============================================
+                            // 步骤3.6.10: 恢复混合模式
+                            // ============================================
+                            // 如果之前切换了混合模式，恢复到原来的模式
+                            // 避免影响后续渲染
+                            if let Some(old_mode) = old_blend_mode {
+                                canvas.set_blend_mode(old_mode);
+                            }
+                        } // image存在检查结束
+                    } // 纹理获取结果检查结束
                 } // 图库存在检查结束
             } // 瓦片绘制循环结束
         } // 层级循环结束

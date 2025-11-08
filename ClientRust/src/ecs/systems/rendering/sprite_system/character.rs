@@ -76,7 +76,7 @@ impl SpriteRenderSystem {
         // 1️⃣ 绘制身体 (CArmours库 - 盔甲/服装)
         let armour_index = appearance.armour.max(0) as usize; // 0 = 默认裸体
         if let Some(body_lib) = get_library_from_array(LibraryArray::CArmours, armour_index) {
-            let mut body_lib = body_lib.lock().unwrap();
+            let mut body_lib = body_lib.lock();
 
             // 应用性别偏移 (C# ArmourOffSet)
             let armour_offset = if appearance.gender == MirGender::Male {
@@ -117,7 +117,7 @@ impl SpriteRenderSystem {
         let hair_index = appearance.hair.max(0) as usize;
         if hair_index > 0 {
             if let Some(hair_lib) = get_library_from_array(LibraryArray::CHair, hair_index) {
-                let mut hair_lib = hair_lib.lock().unwrap();
+                let mut hair_lib = hair_lib.lock();
 
                 // 头发使用相同的帧索引和偏移
                 let hair_offset = if appearance.gender == MirGender::Male {
@@ -153,7 +153,7 @@ impl SpriteRenderSystem {
             let weapon_index = appearance.weapon as usize;
 
             if let Some(weapon_lib) = get_library_from_array(LibraryArray::CWeapons, weapon_index) {
-                let mut weapon_lib = weapon_lib.lock().unwrap();
+                let mut weapon_lib = weapon_lib.lock();
 
                 // 武器偏移量 (C# WeaponOffSet)
                 // 男性: 0, 女性: 416 (Warrior), 352/512 (Wizard), 416 (其他)
@@ -190,7 +190,7 @@ impl SpriteRenderSystem {
                     if let Some(effect_lib) =
                         get_library_from_array(LibraryArray::CWeaponEffect, effect_index)
                     {
-                        let mut effect_lib = effect_lib.lock().unwrap();
+                        let mut effect_lib = effect_lib.lock();
 
                         if let Ok(effect_info) = effect_lib.get_or_create_texture(ctx, weapon_frame)
                         {

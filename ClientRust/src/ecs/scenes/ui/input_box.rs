@@ -148,7 +148,7 @@ impl InputBox {
         
         // 绘制对话框背景（Prguse Index=360，和 MessageBox 一样）
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, 360, self.x, self.y, Color::WHITE, false);
             }
         }
@@ -173,7 +173,7 @@ impl InputBox {
         let (ok_x, ok_y, _, _) = self.ok_button_rect;
         let ok_index = if self.ok_hover { 201 } else { 200 };
         if let Some(lib_arc) = get_library(LibraryName::Title) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, ok_index, ok_x, ok_y, Color::WHITE, false);
             }
         }
@@ -182,7 +182,7 @@ impl InputBox {
         let (cancel_x, cancel_y, _, _) = self.cancel_button_rect;
         let cancel_index = if self.cancel_hover { 203 } else { 202 };
         if let Some(lib_arc) = get_library(LibraryName::Title) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, cancel_index, cancel_x, cancel_y, Color::WHITE, false);
             }
         }

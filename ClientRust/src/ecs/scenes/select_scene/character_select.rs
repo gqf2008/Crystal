@@ -162,14 +162,14 @@ impl CharacterSelect {
     fn draw_background(&self, ctx: &mut ggez::graphics::GraphicsContext, canvas: &mut Canvas) -> GameResult {
         // 1. 绘制背景 Prguse_65
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, 65, 0.0, 0.0, Color::WHITE, false);
             }
         }
         
         // 2. 绘制标题 Title_40 (C#位置: 468, 20)
         if let Some(lib_arc) = get_library(LibraryName::Title) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, 40, 468.0, 20.0, Color::WHITE, false);
             }
         }
@@ -215,7 +215,7 @@ impl CharacterSelect {
             };
             
             if let Some(lib_arc) = get_library(LibraryName::Title) {
-                if let Ok(mut lib) = lib_arc.try_lock() {
+                if let Some(mut lib) = lib_arc.try_lock() {
                     let _ = lib.draw_with_color(ctx, canvas, slot_index as usize, slot_x, slot_y, Color::WHITE, false);
                 }
             }
@@ -229,7 +229,7 @@ impl CharacterSelect {
             let (slot_x, slot_y) = character_button_positions[i];
             
             if let Some(lib_arc) = get_library(LibraryName::Prguse) {
-                if let Ok(mut lib) = lib_arc.try_lock() {
+                if let Some(mut lib) = lib_arc.try_lock() {
                     let _ = lib.draw_with_color(ctx, canvas, 44, slot_x, slot_y, Color::WHITE, false);
                 }
             }
@@ -297,7 +297,7 @@ impl CharacterSelect {
         
         // 使用库系统绘制角色预览（use_offset=true 保持清晰）
         if let Some(lib_arc) = get_library(LibraryName::ChrSel) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 // 绘制角色主体动画
                 let _ = lib.draw_with_color(ctx, canvas, anim_index as usize, preview_x, preview_y, Color::WHITE, true);
                 
@@ -368,7 +368,7 @@ impl CharacterSelect {
         button_group: &ButtonGroup,
     ) -> GameResult {
         if let Some(lib_arc) = get_library(LibraryName::Title) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 for button in &button_group.buttons {
                     let texture_index = button.get_texture_index();
                     let color = button.get_color();

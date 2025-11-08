@@ -491,34 +491,32 @@ impl DebugSystem {
             }
 
             if let Some(lib) = get_map_library(tile.library_index) {
-                if let Ok(mut lib_guard) = lib.lock() {
-                    let (tile_w, tile_h) = lib_guard
-                        .get_size(tile.image_index as usize)
-                        .unwrap_or((CELL_WIDTH as i16, CELL_HEIGHT as i16));
+                let mut lib_guard = lib.lock();
+                let (tile_w, tile_h) = lib_guard
+                    .get_size(tile.image_index as usize)
+                    .unwrap_or((CELL_WIDTH as i16, CELL_HEIGHT as i16));
 
-                    let adjusted_y = world_y - tile_h as f32;
-                    let screen_x =
-                        (world_x - camera_pos.x) * camera.zoom + camera.screen_width / 2.0;
-                    let screen_y =
-                        (adjusted_y - camera_pos.y) * camera.zoom + camera.screen_height / 2.0;
+                let adjusted_y = world_y - tile_h as f32;
+                let screen_x = (world_x - camera_pos.x) * camera.zoom + camera.screen_width / 2.0;
+                let screen_y =
+                    (adjusted_y - camera_pos.y) * camera.zoom + camera.screen_height / 2.0;
 
-                    let border_color = match tile.layer {
-                        TileLayer::Back => Color::from_rgb(255, 0, 0),
-                        TileLayer::Middle => Color::from_rgb(0, 255, 0),
-                        TileLayer::Front => Color::from_rgb(0, 150, 255),
-                    };
+                let border_color = match tile.layer {
+                    TileLayer::Back => Color::from_rgb(255, 0, 0),
+                    TileLayer::Middle => Color::from_rgb(0, 255, 0),
+                    TileLayer::Front => Color::from_rgb(0, 150, 255),
+                };
 
-                    let border_rect = ggez::graphics::Rect::new(
-                        screen_x,
-                        screen_y,
-                        tile_w as f32 * camera.zoom,
-                        tile_h as f32 * camera.zoom,
-                    );
+                let border_rect = ggez::graphics::Rect::new(
+                    screen_x,
+                    screen_y,
+                    tile_w as f32 * camera.zoom,
+                    tile_h as f32 * camera.zoom,
+                );
 
-                    let border_mesh =
-                        Mesh::new_rectangle(ctx, DrawMode::stroke(1.0), border_rect, border_color)?;
-                    canvas.draw(&border_mesh, DrawParam::default());
-                }
+                let border_mesh =
+                    Mesh::new_rectangle(ctx, DrawMode::stroke(1.0), border_rect, border_color)?;
+                canvas.draw(&border_mesh, DrawParam::default());
             }
         }
 
@@ -724,7 +722,7 @@ impl RenderSystem for DebugSystem {
                 Vec::new()
             }
         };
-        
+
         // 处理按键（此时不再借用 InputState）
         for key in pressed_keys {
             Self::handle_keycode(&mut ctx.world, key);

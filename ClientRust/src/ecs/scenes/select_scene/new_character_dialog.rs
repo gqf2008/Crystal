@@ -440,7 +440,7 @@ impl NewCharacterDialog {
         
         // 使用库系统绘制角色主体（use_offset=true 保持清晰）
         if let Some(lib_arc) = crate::graphics::libraries::get_library(LibraryName::ChrSel) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 // 绘制角色主体动画
                 let _ = lib.draw_with_color(
                     ctx, 

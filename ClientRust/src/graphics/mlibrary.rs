@@ -2,13 +2,21 @@
 // 对应: Client/MirGraphics/MLibrary.cs
 //
 // 负责解析和加载 .lib 文件格式（MIR2 专有的图像库格式）
+//
+// 注意: 此模块依赖 objects::frames 和 ggez，仅在 backend-ggez 特性启用时可用
+// 对于 macroquad 后端，请使用 mlibrary_data.rs 的纯数据版本
 
+#[cfg(feature = "backend-ggez")]
 use crate::objects::frames::{Frame, FrameSet};
 use byteorder::LittleEndian;
 use byteorder::ReadBytesExt;
 use flate2::read::GzDecoder;
+
+#[cfg(feature = "backend-ggez")]
 use ggez::graphics::ImageFormat;
+#[cfg(feature = "backend-ggez")]
 use ggez::graphics::{Color, DrawParam, Rect};
+
 use mir2_shared::MirAction;
 use std::collections::HashMap;
 use std::fs::File;
@@ -47,11 +55,13 @@ pub struct ImageInfo {
     pub mask_x: i16,
     pub mask_y: i16,
     pub mask_length: i32,
-    pub texture_valid: bool,                       // 纹理是否有效
-    pub image: Option<ggez::graphics::Image>,      // 解压后的纹理数据 (RGBA格式)
+    pub texture_valid: bool, // 纹理是否有效
+    #[cfg(feature = "backend-ggez")]
+    pub image: Option<ggez::graphics::Image>, // 解压后的纹理数据 (RGBA格式)
+    #[cfg(feature = "backend-ggez")]
     pub mask_image: Option<ggez::graphics::Image>, // 解压后的遮罩纹理数据 (RGBA格式)
-    pub last_access_time: Option<Instant>,         // 最后访问时间 (用于缓存清理)
-    bgra_data: Option<Vec<u8>>,                    // 原始解压数据 (RGBA格式)
+    pub last_access_time: Option<Instant>, // 最后访问时间 (用于缓存清理)
+    bgra_data: Option<Vec<u8>>, // 原始解压数据 (RGBA格式)
 }
 
 impl ImageInfo {
@@ -163,17 +173,17 @@ impl ImageInfo {
 
         // 解压主图像（已转换为RGBA并处理黑色背景）
         let mut main_image = Self::decompress_image(&compressed_data, self.width, self.height)?;
-        
+
         // 🔧 黑色背景透明化（火焰等动画必需）
         Self::bgra_to_transparent(&mut main_image);
-        
+
         self.bgra_data = Some(main_image.clone()); // 保存原始数据副本
-        
+
         // 🔧 使用RGBA格式创建纹理（已从BGRA转换）
         self.image = Some(ggez::graphics::Image::from_pixels(
             ctx,
             &main_image,
-            ImageFormat::Bgra8UnormSrgb,  // ← 使用标准RGBA格式
+            ImageFormat::Bgra8UnormSrgb, // ← 使用标准RGBA格式
             self.width as u32,
             self.height as u32,
         ));
@@ -192,15 +202,15 @@ impl ImageInfo {
 
             // 解压遮罩层（使用主图像的宽高，因为C#代码中遮罩使用Width/Height）
             let mask_data = Self::decompress_image(&mask_compressed, self.width, self.height)?;
-            
+
             // 🔧 黑色背景透明化
-           // Self::bgra_to_transparent(&mut mask_data);
-            
+            // Self::bgra_to_transparent(&mut mask_data);
+
             // 🔧 使用RGBA格式创建遮罩纹理（已从BGRA转换）
             self.mask_image = Some(ggez::graphics::Image::from_pixels(
                 ctx,
                 &mask_data,
-                ImageFormat::Bgra8UnormSrgb,  // ← 使用标准RGBA格式
+                ImageFormat::Bgra8UnormSrgb, // ← 使用标准RGBA格式
                 self.width as u32,
                 self.height as u32,
             ));
@@ -217,9 +227,9 @@ impl ImageInfo {
         self.bgra_data.take();
         self.texture_valid = false;
     }
-    
+
     /// 获取 BGRA 原始数据的引用 (如果已加载)
-    /// 
+    ///
     /// 用于 Bevy 等其他渲染引擎获取图像数据
     pub fn get_bgra_data(&self) -> Option<&Vec<u8>> {
         self.bgra_data.as_ref()
@@ -276,11 +286,10 @@ impl ImageInfo {
                 );
                 decompressed.resize(expected_size, 0);
             }
-        }       
+        }
         Ok(decompressed)
     }
 
-    
     /// BGRA黑色背景透明化
     /// DirectX的alpha值已经正确：alpha=0透明，alpha>0可见
     /// 但某些库文件的黑色背景alpha可能是255，需要转为0
@@ -290,19 +299,19 @@ impl ImageInfo {
             let g = chunk[1];
             let r = chunk[2];
             let a = chunk[3];
-            
+
             // 🔧 纯黑色背景透明化（匹配C#原版逻辑）
             // C# 原版: if (pixels[i] == 0 && pixels[i + 1] == 0 && pixels[i + 2] == 0) pixels[i + 3] = 0;
-            // 
+            //
             // 但由于DXT压缩/解压可能导致精度损失，纯黑(0,0,0)可能变成接近黑(1,1,1)或(2,2,2)
             // 所以放宽到 RGB < 3 来容错
             //
             // 注意：金黄色等有色像素不会被误判（它们的RGB值远大于3）
             let is_near_black = r < 3 && g < 3 && b < 3; // 接近纯黑（容忍DXT压缩误差）
-            let is_opaque = a > 250;                     // 完全不透明
-            
+            let is_opaque = a > 250; // 完全不透明
+
             if is_near_black && is_opaque {
-                chunk[3] = 0;  // 纯黑背景 → 完全透明
+                chunk[3] = 0; // 纯黑背景 → 完全透明
             }
             // 其他所有情况保持原始alpha值
         }
@@ -553,11 +562,11 @@ impl MLibrary {
                 frames.insert(action, frame);
             }
         }
-        
+
         // 使用 HashMap 缓存图像信息，稀疏访问模式更高效
         // 预分配容量避免动态扩容
         let cached_info = HashMap::with_capacity(count as usize);
-        
+
         Ok(Self {
             path: path_buf,
             header,
@@ -589,24 +598,24 @@ impl MLibrary {
                 ),
             ));
         }
-        
+
         // 检查缓存 (如果已缓存则直接返回)
         if let Some(cached) = self.cached_info.get(&index) {
             return Ok(cached.clone());
         }
-        
+
         // 读取图像信息
         let offset = self.indices[index].offset as u64;
         self.reader.seek(SeekFrom::Start(offset))?;
         let info = ImageInfo::from_reader(&mut self.reader)?;
-        
+
         // 缓存结果
         self.cached_info.insert(index, info.clone());
         Ok(info)
     }
-    
+
     /// 获取图像并解压 BGRA 数据 (用于非 ggez 渲染引擎,如 Bevy)
-    /// 
+    ///
     /// 返回 (ImageInfo, BGRA数据)
     pub fn get_image_with_data(&mut self, index: usize) -> io::Result<(ImageInfo, Vec<u8>)> {
         if index >= self.indices.len() {
@@ -615,19 +624,19 @@ impl MLibrary {
                 format!("Image index {} out of range", index),
             ));
         }
-        
+
         // 定位到图像数据
         let offset = self.indices[index].offset as u64;
         self.reader.seek(SeekFrom::Start(offset))?;
-        
+
         // 读取图像信息
         let info = ImageInfo::from_reader(&mut self.reader)?;
-        
+
         // 读取并解压主图像数据
         let mut compressed_data = vec![0u8; info.length as usize];
         self.reader.read_exact(&mut compressed_data)?;
         let bgra_data = ImageInfo::decompress_image(&compressed_data, info.width, info.height)?;
-        
+
         Ok((info, bgra_data))
     }
 
@@ -669,7 +678,7 @@ impl MLibrary {
         // 使用 entry API 统一处理
         use std::collections::hash_map::Entry;
         let offset = self.indices[index].offset as u64;
-        
+
         // 先处理 Entry，确保数据在 HashMap 中
         match self.cached_info.entry(index) {
             Entry::Occupied(mut e) => {
@@ -707,7 +716,7 @@ impl MLibrary {
                 e.insert(info);
             }
         }
-        
+
         // 现在返回引用（Entry 已经释放）
         Ok(self.cached_info.get_mut(&index).unwrap())
     }
@@ -983,7 +992,7 @@ impl MLibrary {
         static mut DEBUG_COUNT: u32 = 0;
         unsafe {
             if index == 1 && DEBUG_COUNT < 3 {
-                // println!("🔍 [mlibrary] index={}, pos=({}, {}), screen={}x{}", 
+                // println!("🔍 [mlibrary] index={}, pos=({}, {}), screen={}x{}",
                 //          index, draw_x, draw_y, screen_width, screen_height);
                 // println!("🔍 [mlibrary] texture size: {}x{}", info.width, info.height);
                 DEBUG_COUNT += 1;
@@ -1639,8 +1648,6 @@ impl MLibrary {
     }
 }
 
-
-
 // ============================================================================
 // 单元测试
 // ============================================================================
@@ -1648,7 +1655,7 @@ impl MLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     // ============================================================================
     // 测试 ImageInfo 结构
     // ============================================================================
@@ -1675,7 +1682,7 @@ mod tests {
             last_access_time: None,
             bgra_data: None,
         };
-        
+
         assert_eq!(info.width, 48);
         assert_eq!(info.height, 32);
         assert_eq!(info.x, -24);
@@ -1683,7 +1690,7 @@ mod tests {
         assert!(!info.has_mask);
         assert!(!info.texture_valid);
     }
-    
+
     // ============================================================================
     // 测试偏移量应用逻辑
     // ============================================================================
@@ -1692,21 +1699,21 @@ mod tests {
         // 模拟 C# 的偏移逻辑
         let info_x = -24i16;
         let info_y = -16i16;
-        
+
         let base_x = 100f32;
         let base_y = 200f32;
-        
+
         // 不使用 offset (C#: 直接使用 point)
         let (x1, y1) = (base_x, base_y);
         assert_eq!(x1, 100.0);
         assert_eq!(y1, 200.0);
-        
+
         // 使用 offset (C#: if (offSet) point.Offset(mi.X, mi.Y))
         let (x2, y2) = (base_x + info_x as f32, base_y + info_y as f32);
-        assert_eq!(x2, 76.0);  // 100 + (-24)
+        assert_eq!(x2, 76.0); // 100 + (-24)
         assert_eq!(y2, 184.0); // 200 + (-16)
     }
-    
+
     // ============================================================================
     // 测试屏幕裁剪逻辑
     // ============================================================================
@@ -1714,11 +1721,11 @@ mod tests {
     fn test_screen_clipping() {
         let screen_width = 800.0;
         let screen_height = 600.0;
-        
-        // C# 逻辑: 
-        // if (x >= ScreenWidth || y >= ScreenHeight || 
+
+        // C# 逻辑:
+        // if (x >= ScreenWidth || y >= ScreenHeight ||
         //     x + width < 0 || y + height < 0) return;
-        
+
         let test_cases = [
             // (x, y, width, height, should_cull, description)
             (850.0, 300.0, 48, 32, true, "x >= screen_width"),
@@ -1730,16 +1737,20 @@ mod tests {
             (-10.0, 100.0, 48, 32, false, "左边缘部分可见"),
             (100.0, -10.0, 48, 32, false, "上边缘部分可见"),
         ];
-        
+
         for (x, y, width, height, should_cull, desc) in test_cases {
-            let culled = x >= screen_width || y >= screen_height || 
-                        x + (width as f32) < 0.0 || y + (height as f32) < 0.0;
-            assert_eq!(culled, should_cull, 
-                      "Failed for case '{}': ({}, {}) with size {}x{}", 
-                      desc, x, y, width, height);
+            let culled = x >= screen_width
+                || y >= screen_height
+                || x + (width as f32) < 0.0
+                || y + (height as f32) < 0.0;
+            assert_eq!(
+                culled, should_cull,
+                "Failed for case '{}': ({}, {}) with size {}x{}",
+                desc, x, y, width, height
+            );
         }
     }
-    
+
     // ============================================================================
     // 测试图像索引边界检查
     // ============================================================================
@@ -1747,7 +1758,7 @@ mod tests {
     fn test_index_bounds_check() {
         // 模拟 C# 的边界检查逻辑
         let image_count = 100;
-        
+
         // C#: if (index < 0 || index >= _images.Length) return false;
         let test_cases = [
             (-1, true, "负数索引应该被拒绝"),
@@ -1757,13 +1768,17 @@ mod tests {
             (100, true, "等于长度的索引应该被拒绝"),
             (200, true, "超大索引应该被拒绝"),
         ];
-        
+
         for (index, should_fail, desc) in test_cases {
             let failed = index < 0 || index >= image_count;
-            assert_eq!(failed, should_fail, "Failed for case '{}': index {}", desc, index);
+            assert_eq!(
+                failed, should_fail,
+                "Failed for case '{}': index {}",
+                desc, index
+            );
         }
     }
-    
+
     // ============================================================================
     // 测试 BackImage 标记处理（与 MapCode 配合）
     // ============================================================================
@@ -1771,7 +1786,7 @@ mod tests {
     fn test_back_image_masking() {
         // C# 中 BackImage 的高3位用于标记
         // 绘制时需要屏蔽: index = (BackImage & 0x1FFFFFFF) - 1
-        
+
         let test_cases = [
             (0x00000001, 0),           // 普通图像索引 1 -> 0
             (0x00000064, 99),          // 普通图像索引 100 -> 99
@@ -1779,14 +1794,17 @@ mod tests {
             (0x20000064, 99),          // 带标记的索引 100 -> 99
             (0xE0000001u32 as i32, 0), // 多个标记位 -> 0
         ];
-        
+
         for (back_image, expected_index) in test_cases {
             let index = ((back_image & 0x1FFFFFFF) - 1) as usize;
-            assert_eq!(index, expected_index, 
-                      "BackImage 0x{:08X} should yield index {}", back_image, expected_index);
+            assert_eq!(
+                index, expected_index,
+                "BackImage 0x{:08X} should yield index {}",
+                back_image, expected_index
+            );
         }
     }
-    
+
     // ============================================================================
     // 测试 FrontImage 标记处理
     // ============================================================================
@@ -1794,21 +1812,24 @@ mod tests {
     fn test_front_image_masking() {
         // C# 中 FrontImage 的高位用于标记
         // 绘制时需要屏蔽: index = (FrontImage & 0x7FFF) - 1
-        
+
         let test_cases = [
-            (0x0001, 0),      // 普通索引 1 -> 0
-            (0x0064, 99),     // 普通索引 100 -> 99
-            (0x8001, 0),      // 带标记的索引 1 -> 0
-            (0x8064, 99),     // 带标记的索引 100 -> 99
+            (0x0001, 0),  // 普通索引 1 -> 0
+            (0x0064, 99), // 普通索引 100 -> 99
+            (0x8001, 0),  // 带标记的索引 1 -> 0
+            (0x8064, 99), // 带标记的索引 100 -> 99
         ];
-        
+
         for (front_image, expected_index) in test_cases {
             let index = ((front_image & 0x7FFF) - 1) as usize;
-            assert_eq!(index, expected_index,
-                      "FrontImage 0x{:04X} should yield index {}", front_image, expected_index);
+            assert_eq!(
+                index, expected_index,
+                "FrontImage 0x{:04X} should yield index {}",
+                front_image, expected_index
+            );
         }
     }
-    
+
     // ============================================================================
     // 测试瓦片动画计算
     // ============================================================================
@@ -1817,18 +1838,18 @@ mod tests {
         // C# 逻辑:
         // int animationoffset = M2CellInfo[x, y].TileAnimationOffset ^ 0x2000;
         // index += animationoffset * (AnimationCount % animation);
-        
+
         let base_index = 100;
         let animation_offset = 0x2000i16 ^ 0x2000; // 结果为 0
         let animation_frames = 8u8;
         let animation_count = 15u32;
-        
+
         // 计算当前帧
         let current_frame = animation_count % animation_frames as u32;
         let final_index = base_index + (animation_offset as i32) * (current_frame as i32);
-        
+
         assert_eq!(final_index, 100); // offset=0 时索引不变
-        
+
         // 测试非零偏移
         let animation_offset2 = 0x2100i16 ^ 0x2000; // 0x0100 = 256
         let final_index2 = base_index + (animation_offset2 as i32) * (current_frame as i32);
@@ -1836,7 +1857,7 @@ mod tests {
         // final_index = 100 + 256 * 7 = 1892
         assert_eq!(final_index2, 1892);
     }
-    
+
     // ============================================================================
     // 测试混合模式标记
     // ============================================================================
@@ -1845,7 +1866,7 @@ mod tests {
         // C# 中动画帧数可能包含混合标记
         // if ((animation & 0x80) > 0) blend = true;
         // animation &= 0x7F;
-        
+
         let test_cases = [
             (0x00, false, 0x00, "无混合，帧数 0"),
             (0x08, false, 0x08, "无混合，帧数 8"),
@@ -1853,16 +1874,24 @@ mod tests {
             (0x88, true, 0x08, "有混合，帧数 8"),
             (0xFF, true, 0x7F, "有混合，帧数 127"),
         ];
-        
+
         for (raw_value, expected_blend, expected_frames, desc) in test_cases {
             let blend = (raw_value & 0x80) > 0;
             let frames = raw_value & 0x7F;
-            
-            assert_eq!(blend, expected_blend, "Blend flag mismatch for case '{}'", desc);
-            assert_eq!(frames, expected_frames, "Frame count mismatch for case '{}'", desc);
+
+            assert_eq!(
+                blend, expected_blend,
+                "Blend flag mismatch for case '{}'",
+                desc
+            );
+            assert_eq!(
+                frames, expected_frames,
+                "Frame count mismatch for case '{}'",
+                desc
+            );
         }
     }
-    
+
     // ============================================================================
     // 测试门动画索引计算
     // ============================================================================
@@ -1872,19 +1901,17 @@ mod tests {
         // if (DoorInfo.DoorState != 0) {
         //     index += (DoorInfo.ImageIndex + 1) * M2CellInfo[x, y].DoorOffset;
         // }
-        
+
         let base_index = 1000;
-        let door_image_index = 3;   // 门动画第3帧
-        let door_offset = 10;       // 每帧偏移10
-        
+        let door_image_index = 3; // 门动画第3帧
+        let door_offset = 10; // 每帧偏移10
+
         // 门关闭状态（DoorState = 0）
         let closed_index = base_index;
         assert_eq!(closed_index, 1000);
-        
+
         // 门打开状态（DoorState != 0）
         let open_index = base_index + (door_image_index + 1) * door_offset;
         assert_eq!(open_index, 1040); // 1000 + 4 * 10
     }
 }
-
-

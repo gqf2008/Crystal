@@ -79,7 +79,7 @@ impl SpriteRenderSystem {
                 get_library_from_array(library_array, weapon_anim.weapon_library_index as usize)
             {
                 // 锁定库并获取纹理
-                let mut lib = library.lock().unwrap();
+                let mut lib = library.lock();
 
                 // 计算屏幕位置（应用相机变换）
                 let (screen_x, screen_y) = Self::world_to_screen(

@@ -16,10 +16,11 @@
 // ============================================================================
 
 use super::handlers::GameEvent;
+#[cfg(feature = "backend-ggez")]
 use crate::objects::map_code::MapReader;
 use crossbeam_channel::{Receiver, Sender};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -81,7 +82,7 @@ impl MockNetwork {
             game_rx: client_rx.clone(),
             _handle: Some(handle),
         };
-        
+
         // 使用 Box::leak 防止 Drop
         let _ = Box::leak(Box::new(mock));
 
@@ -108,9 +109,7 @@ impl MockNetwork {
                 // 延迟一点模拟网络延迟
                 thread::sleep(Duration::from_millis(100));
                 // 返回空角色列表
-                let _ = response_tx.send(GameEvent::LoginSuccess {
-                    characters: vec![],
-                });
+                let _ = response_tx.send(GameEvent::LoginSuccess { characters: vec![] });
             }
 
             // 新建账号请求
@@ -124,9 +123,7 @@ impl MockNetwork {
             GameEvent::NewCharacterRequest { name, .. } => {
                 tracing::info!("🧙 模拟创建角色: {}", name);
                 thread::sleep(Duration::from_millis(100));
-                let _ = response_tx.send(GameEvent::CharacterCreated {
-                    name: name.clone(),
-                });
+                let _ = response_tx.send(GameEvent::CharacterCreated { name: name.clone() });
             }
 
             // 删除角色请求
@@ -147,6 +144,7 @@ impl MockNetwork {
                 let _ = response_tx.send(GameEvent::StartGame { delay: 500 });
 
                 // 加载地图并发送 MapChanged 事件
+                #[cfg(feature = "backend-ggez")]
                 Self::load_and_send_map(&response_tx, "Map/n0.map", 0, "盟重土城");
 
                 // 模拟玩家信息
@@ -186,9 +184,15 @@ impl MockNetwork {
     }
 
     /// 加载地图并发送 MapChanged 事件
-    fn load_and_send_map(response_tx: &Sender<GameEvent>, map_path: &str, map_index: i32, title: &str) {
+    #[cfg(feature = "backend-ggez")]
+    fn load_and_send_map(
+        response_tx: &Sender<GameEvent>,
+        map_path: &str,
+        map_index: i32,
+        title: &str,
+    ) {
         tracing::info!("📂 尝试加载地图: {}", map_path);
-        
+
         match MapReader::new(map_path) {
             Ok(map_reader) => {
                 tracing::info!(
@@ -197,21 +201,21 @@ impl MockNetwork {
                     map_reader.width,
                     map_reader.height
                 );
-                
+
                 // 提取纯文件名（不含路径和扩展名）
                 // 例如: "Map/0.map" -> "0"
                 let file_name = map_path
                     .trim_start_matches("Map/")
                     .trim_end_matches(".map")
                     .to_string();
-                
+
                 // 发送 MapChanged 事件 (与 C# Server 格式一致)
                 let _ = response_tx.send(GameEvent::MapChanged {
                     map_index,
-                    file_name,  // 只发送纯文件名 "0"
+                    file_name, // 只发送纯文件名 "0"
                     title: title.to_string(),
                 });
-                
+
                 // TODO: 这里需要将 MapReader 数据发送给客户端
                 // 目前暂时只发送事件，MapReader 需要在游戏循环中处理
             }

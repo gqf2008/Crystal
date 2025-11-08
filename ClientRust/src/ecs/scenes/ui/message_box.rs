@@ -132,7 +132,7 @@ impl MessageBox {
         
         // 绘制对话框背景 (使用 Prguse 394)
         if let Some(lib_arc) = get_library(LibraryName::Prguse) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, 394, self.x, self.y, Color::WHITE, false);
             }
         }
@@ -175,7 +175,7 @@ impl MessageBox {
         let index = if self.ok_hover { 361 } else { 360 };
         
         if let Some(lib_arc) = get_library(LibraryName::Title) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, index, button_x, button_y, Color::WHITE, false);
             }
         }
@@ -195,7 +195,7 @@ impl MessageBox {
         // Yes 按钮
         let yes_index = if self.yes_hover { 361 } else { 360 };
         if let Some(lib_arc) = get_library(LibraryName::Title) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, yes_index, yes_x, button_y, Color::WHITE, false);
             }
         }
@@ -203,7 +203,7 @@ impl MessageBox {
         // No 按钮
         let no_index = if self.no_hover { 363 } else { 362 };
         if let Some(lib_arc) = get_library(LibraryName::Title) {
-            if let Ok(mut lib) = lib_arc.try_lock() {
+            if let Some(mut lib) = lib_arc.try_lock() {
                 let _ = lib.draw_with_color(ctx, canvas, no_index, no_x, button_y, Color::WHITE, false);
             }
         }
