@@ -4,9 +4,9 @@
 //
 // 说明：
 // - 使用 macroquad 原生 API（不依赖 mir2_client::renderer 抽象层）
-// - 实现 RenderTarget 虚拟分辨率（1600x1200 → 1024x768）
+// - 过扫描渲染策略：底部扩展200px渲染区域避免高建筑物被裁切
 // - Camera2D 相机控制（拖拽、缩放）
-// - 等待 MapReader 和 MLibrary 移植完成后实现真实地图渲染
+// - 直接纹理渲染,高性能稳定运行
 //
 // 运行方式：
 // cargo run --bin map_viewer_macroquad_v2 --no-default-features --features backend-macroquad
@@ -14,7 +14,6 @@
 
 use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
-use macroquad::texture::RenderTarget as MQRenderTarget;
 use macroquad::text::draw_text_ex;
 
 use macroquad_profiler::ProfilerParams;
@@ -29,10 +28,9 @@ use mir2_client::objects::MapReader; // 使用完整的 MapReader
 const WINDOW_WIDTH: i32 = 1024;
 const WINDOW_HEIGHT: i32 = 768;
 
-/// 虚拟渲染尺寸（相机视野范围,大于窗口尺寸会缩小显示）
-/// 1600x1200 的内容会被缩放到 1024x768 窗口显示
-const RENDER_WIDTH: f32 = 1600.0;
-const RENDER_HEIGHT: f32 = 1200.0;
+/// 渲染尺寸(与窗口一致)
+const RENDER_WIDTH: f32 = 1024.0;
+const RENDER_HEIGHT: f32 = 768.0;
 
 /// 传奇2 瓦片尺寸
 const TILE_WIDTH: f32 = 48.0;
@@ -40,6 +38,128 @@ const TILE_HEIGHT: f32 = 32.0;
 
 /// 调试：首次渲染标志
 static mut FIRST_RENDER: bool = true;
+
+// ============================================================================
+// 渲染配置
+// ============================================================================
+
+/// 渲染质量配置
+#[derive(Debug, Clone)]
+struct RenderConfig {
+    /// Gamma校正值 (1.0 = 无校正, 2.2 = 标准sRGB)
+    gamma: f32,
+    
+    /// 亮度增益 (1.0 = 原始亮度, >1.0 变亮, <1.0 变暗)
+    brightness: f32,
+    
+    /// 对比度增益 (1.0 = 原始对比度, >1.0 增强, <1.0 降低)
+    contrast: f32,
+    
+    /// 饱和度增益 (1.0 = 原始饱和度, 0.0 = 灰度, >1.0 过饱和)
+    saturation: f32,
+    
+    /// 混合模式 Alpha (0.0-1.0, 控制纹理透明度)
+    blend_alpha: f32,
+    
+    /// 是否启用色调映射 (HDR -> LDR)
+    tone_mapping: bool,
+}
+
+impl Default for RenderConfig {
+    fn default() -> Self {
+        Self {
+            gamma: 1.0,           // 默认无gamma校正
+            brightness: 1.0,       // 默认亮度
+            contrast: 1.0,         // 默认对比度
+            saturation: 1.0,       // 默认饱和度
+            blend_alpha: 1.0,      // 默认完全不透明
+            tone_mapping: false,   // 默认禁用色调映射
+        }
+    }
+}
+
+impl RenderConfig {
+    /// 应用颜色调整到像素
+    fn apply_color_adjustment(&self, color: Color) -> Color {
+        let mut r = color.r;
+        let mut g = color.g;
+        let mut b = color.b;
+        let a = color.a * self.blend_alpha;
+        
+        // 1. Gamma校正 (线性空间 -> sRGB空间)
+        if self.gamma != 1.0 {
+            r = r.powf(1.0 / self.gamma);
+            g = g.powf(1.0 / self.gamma);
+            b = b.powf(1.0 / self.gamma);
+        }
+        
+        // 2. 亮度调整
+        if self.brightness != 1.0 {
+            r *= self.brightness;
+            g *= self.brightness;
+            b *= self.brightness;
+        }
+        
+        // 3. 对比度调整 (以0.5为中心点拉伸)
+        if self.contrast != 1.0 {
+            r = (r - 0.5) * self.contrast + 0.5;
+            g = (g - 0.5) * self.contrast + 0.5;
+            b = (b - 0.5) * self.contrast + 0.5;
+        }
+        
+        // 4. 饱和度调整 (转换到HSV空间)
+        if self.saturation != 1.0 {
+            let luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+            r = luminance + (r - luminance) * self.saturation;
+            g = luminance + (g - luminance) * self.saturation;
+            b = luminance + (b - luminance) * self.saturation;
+        }
+        
+        // 5. 色调映射 (简单Reinhard)
+        if self.tone_mapping {
+            r = r / (1.0 + r);
+            g = g / (1.0 + g);
+            b = b / (1.0 + b);
+        }
+        
+        // 6. 裁剪到合法范围
+        Color::new(
+            r.clamp(0.0, 1.0),
+            g.clamp(0.0, 1.0),
+            b.clamp(0.0, 1.0),
+            a.clamp(0.0, 1.0),
+        )
+    }
+    
+    /// 高质量预设
+    fn preset_high_quality() -> Self {
+        Self {
+            gamma: 2.2,        // sRGB标准gamma
+            brightness: 1.05,   // 稍微增亮
+            contrast: 1.1,      // 轻微增强对比度
+            saturation: 1.15,   // 稍微增强饱和度
+            blend_alpha: 1.0,
+            tone_mapping: false,
+        }
+    }
+    
+    /// 低质量预设 (高性能)
+    fn preset_low_quality() -> Self {
+        Self::default() // 不做任何处理
+    }
+    
+    /// 复古风格预设
+    fn preset_retro() -> Self {
+        Self {
+            gamma: 1.8,
+            brightness: 0.95,
+            contrast: 1.2,
+            saturation: 0.85,
+            blend_alpha: 1.0,
+            tone_mapping: false,
+        }
+    }
+}
 
 // ============================================================================
 // 主程序
@@ -99,6 +219,12 @@ struct MapViewerState {
     /// 鼠标对应的地图格子坐标
     mouse_tile_x: i32,
     mouse_tile_y: i32,
+    
+    /// 渲染配置
+    render_config: RenderConfig,
+    
+    /// 当前配置预设索引 (0=低质量, 1=默认, 2=高质量, 3=复古)
+    config_preset_index: usize,
 }
 
 impl MapViewerState {
@@ -165,7 +291,7 @@ impl MapViewerState {
           
             camera,
             camera_position,
-            zoom: 1.0,  // 初始缩放：1.0 = 正常大小
+            zoom: 0.5,  // 初始缩放：0.5 = 缩小看更大范围
             dragging: false,
             last_mouse_pos: vec2(0.0, 0.0),
             show_grid: false,
@@ -184,6 +310,8 @@ impl MapViewerState {
             mouse_world_pos: vec2(0.0, 0.0),
             mouse_tile_x: 0,
             mouse_tile_y: 0,
+            render_config: RenderConfig::default(),
+            config_preset_index: 1, // 默认配置
         })
     }
     
@@ -251,6 +379,74 @@ impl MapViewerState {
         if is_key_pressed(KeyCode::Key3) {
             self.show_front_layer = !self.show_front_layer;
             println!("🗺️ Front层(前景): {}", if self.show_front_layer { "显示" } else { "隐藏" });
+        }
+        
+        // Q/E键：切换渲染配置预设
+        if is_key_pressed(KeyCode::Q) {
+            // 上一个预设
+            if self.config_preset_index > 0 {
+                self.config_preset_index -= 1;
+            } else {
+                self.config_preset_index = 3; // 循环到最后
+            }
+            self.apply_config_preset();
+        }
+        
+        if is_key_pressed(KeyCode::E) {
+            // 下一个预设
+            self.config_preset_index = (self.config_preset_index + 1) % 4;
+            self.apply_config_preset();
+        }
+        
+        // 微调控制 (Shift + 数字键)
+        let shift_held = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+        
+        if shift_held {
+            // Shift+Up/Down: Gamma调整
+            if is_key_pressed(KeyCode::Up) {
+                self.render_config.gamma = (self.render_config.gamma + 0.1).min(3.0);
+                println!("🎨 Gamma: {:.2}", self.render_config.gamma);
+            }
+            if is_key_pressed(KeyCode::Down) {
+                self.render_config.gamma = (self.render_config.gamma - 0.1).max(0.5);
+                println!("🎨 Gamma: {:.2}", self.render_config.gamma);
+            }
+            
+            // Shift+Left/Right: 亮度调整
+            if is_key_pressed(KeyCode::Right) {
+                self.render_config.brightness = (self.render_config.brightness + 0.05).min(2.0);
+                println!("💡 亮度: {:.2}", self.render_config.brightness);
+            }
+            if is_key_pressed(KeyCode::Left) {
+                self.render_config.brightness = (self.render_config.brightness - 0.05).max(0.1);
+                println!("💡 亮度: {:.2}", self.render_config.brightness);
+            }
+            
+            // Shift+PageUp/PageDown: 对比度调整
+            if is_key_pressed(KeyCode::PageUp) {
+                self.render_config.contrast = (self.render_config.contrast + 0.05).min(2.0);
+                println!("🔆 对比度: {:.2}", self.render_config.contrast);
+            }
+            if is_key_pressed(KeyCode::PageDown) {
+                self.render_config.contrast = (self.render_config.contrast - 0.05).max(0.1);
+                println!("🔆 对比度: {:.2}", self.render_config.contrast);
+            }
+            
+            // Shift+Home/End: 饱和度调整
+            if is_key_pressed(KeyCode::Home) {
+                self.render_config.saturation = (self.render_config.saturation + 0.05).min(2.0);
+                println!("🌈 饱和度: {:.2}", self.render_config.saturation);
+            }
+            if is_key_pressed(KeyCode::End) {
+                self.render_config.saturation = (self.render_config.saturation - 0.05).max(0.0);
+                println!("🌈 饱和度: {:.2}", self.render_config.saturation);
+            }
+            
+            // Shift+T: 切换色调映射
+            if is_key_pressed(KeyCode::T) {
+                self.render_config.tone_mapping = !self.render_config.tone_mapping;
+                println!("🎬 色调映射: {}", if self.render_config.tone_mapping { "开启" } else { "关闭" });
+            }
         }
         
         // D键：输出鼠标所在格子的详细数据
@@ -332,6 +528,25 @@ impl MapViewerState {
         }
     }
     
+    /// 应用预设配置
+    fn apply_config_preset(&mut self) {
+        let (config, name) = match self.config_preset_index {
+            0 => (RenderConfig::preset_low_quality(), "低质量(高性能)"),
+            1 => (RenderConfig::default(), "默认"),
+            2 => (RenderConfig::preset_high_quality(), "高质量"),
+            3 => (RenderConfig::preset_retro(), "复古风格"),
+            _ => (RenderConfig::default(), "默认"),
+        };
+        
+        self.render_config = config.clone();
+        println!("\n🎨 渲染预设: {}", name);
+        println!("   Gamma: {:.2}", config.gamma);
+        println!("   亮度: {:.2}", config.brightness);
+        println!("   对比度: {:.2}", config.contrast);
+        println!("   饱和度: {:.2}", config.saturation);
+        println!("   色调映射: {}", if config.tone_mapping { "开启" } else { "关闭" });
+    }
+    
     /// 更新相机参数
     fn update_camera(&mut self) {
         self.camera.target = self.camera_position;
@@ -405,6 +620,15 @@ impl MapViewerState {
             None => return,
         };
         
+        // 同步层级显示设置到渲染器
+        self.map_renderer.show_back_layer = self.show_back_layer;
+        self.map_renderer.show_middle_layer = self.show_middle_layer;
+        self.map_renderer.show_front_layer = self.show_front_layer;
+        self.map_renderer.show_texture_border = self.show_texture_border;
+        
+        // 应用颜色调整
+        let tint_color = self.render_config.apply_color_adjustment(WHITE);
+        
         // 使用 MapRenderer 渲染地图
         self.tiles_rendered = self.map_renderer.render(
             map,
@@ -414,10 +638,7 @@ impl MapViewerState {
             RENDER_WIDTH,
             RENDER_HEIGHT,
             self.zoom,
-            self.show_back_layer,
-            self.show_middle_layer,
-            self.show_front_layer,
-            self.show_texture_border,
+            tint_color,
         );
         
         // 首次渲染标记
@@ -578,15 +799,57 @@ impl MapViewerState {
             },
         );
         
-        // 控制提示
+        // 渲染配置状态
+        let preset_name = match self.config_preset_index {
+            0 => "低质量",
+            1 => "默认",
+            2 => "高质量",
+            3 => "复古",
+            _ => "未知",
+        };
+        let render_status = format!(
+            "渲染[{}] γ:{:.1} 亮:{:.2} 对:{:.2} 饱:{:.2} HDR:{}",
+            preset_name,
+            self.render_config.gamma,
+            self.render_config.brightness,
+            self.render_config.contrast,
+            self.render_config.saturation,
+            if self.render_config.tone_mapping { "ON" } else { "  " },
+        );
+        
         draw_text_ex(
-            "控制: 拖拽移动 | 滚轮缩放 | 1/2/3 层级 | G 网格 | B 边框 | ESC 退出",
+            &render_status,
             10.0,
-            135.0,
+            130.0,
             TextParams {
                 font: self.font.as_ref(),
                 font_size: 16,
+                color: Color::from_rgba(255, 200, 100, 255),
+                ..Default::default()
+            },
+        );
+        
+        // 控制提示
+        draw_text_ex(
+            "控制: 拖拽移动 | 滚轮缩放 | 1/2/3 层级 | Q/E 渲染预设 | G 网格 | B 边框 | ESC 退出",
+            10.0,
+            155.0,
+            TextParams {
+                font: self.font.as_ref(),
+                font_size: 14,
                 color: WHITE,
+                ..Default::default()
+            },
+        );
+        
+        draw_text_ex(
+            "微调: Shift+↑↓ Gamma | Shift+←→ 亮度 | Shift+PgUp/Dn 对比度 | Shift+Home/End 饱和度 | Shift+T 色调映射",
+            10.0,
+            175.0,
+            TextParams {
+                font: self.font.as_ref(),
+                font_size: 12,
+                color: Color::from_rgba(200, 200, 200, 255),
                 ..Default::default()
             },
         );
@@ -597,7 +860,7 @@ impl MapViewerState {
     
     /// 绘制鼠标位置和瓦片信息
     fn draw_mouse_info(&self) {
-        let y_offset = 140.0;
+        let y_offset = 180.0;
         
         // 鼠标世界坐标
         let world_info = format!(

@@ -395,12 +395,14 @@ impl MLibraryData {
             let b = chunk[2];
             let a = chunk[3];
             
-            // 纯黑色(或接近黑色)且不透明 -> 设为透明
+            // 检查是否为接近黑色且不透明的像素
+            // 这些像素通常是背景色,需要转为透明
             let is_near_black = r < 3 && g < 3 && b < 3;
             let is_opaque = a > 250;
             
+            // 将接近黑色且不透明的背景色转为透明
             if is_near_black && is_opaque {
-                chunk[3] = 0; // 黑色背景 → 完全透明
+                chunk[3] = 0; // 设置为透明
             }
         }
         

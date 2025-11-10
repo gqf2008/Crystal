@@ -180,7 +180,7 @@ impl LibraryManager {
         // 创建 Texture2D（macroquad API）
         let texture = Texture2D::from_rgba8(width, height, rgba_data);
         
-        // 设置过滤模式为最近邻（像素艺术）
+        // 设置过滤模式为最近邻（像素艺术风格,避免黑边）
         texture.set_filter(FilterMode::Nearest);
         
         texture
