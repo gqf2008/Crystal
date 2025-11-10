@@ -22,6 +22,21 @@
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "Run Map Viewer Macroquad V2",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--bin",
+				"map_viewer_macroquad_v2",
+				"--no-default-features",
+				"--features",
+				"backend-macroquad"
+			],
+			"isBackground": false,
+			"group": "build"
 		}
 	]
 }

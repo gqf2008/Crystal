@@ -37,9 +37,16 @@ pub mod graphics;
 // 网络通信
 pub mod network;
 
-// objects 模块依赖 ggez，只在使用 ggez 后端时可用
+// objects 模块（只在 ggez 后端时完整可用）
 #[cfg(feature = "backend-ggez")]
 pub mod objects;
+
+// map_code 模块（MapReader 和 CellInfo）- 无渲染依赖，两个后端都可用
+#[cfg(all(feature = "backend-macroquad", not(feature = "backend-ggez")))]
+pub mod objects {
+    pub mod map_code;
+    pub use map_code::{CellInfo, MapReader};
+}
 
 // ECS 模块（只在使用 ggez 后端时编译）
 #[cfg(feature = "backend-ggez")]

@@ -11,7 +11,7 @@
 // ============================================================================
 
 use byteorder::{LittleEndian, ReadBytesExt};
-use flate2::read::ZlibDecoder;
+use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
@@ -122,13 +122,8 @@ impl ImageMetadata {
         let shadow = reader.read_u8()?;
         let data_length = reader.read_i32::<LittleEndian>()?;
         
-        // 读取遮罩信息
-        let has_mask = data_length < 0;
-        let actual_length = if has_mask {
-            -data_length
-        } else {
-            data_length
-        };
+        // 遮罩标志在 shadow 字节的最高位
+        let has_mask = (shadow >> 7) == 1;
         
         let (mask_width, mask_height, mask_offset_x, mask_offset_y, mask_length) = if has_mask {
             (
@@ -150,7 +145,7 @@ impl ImageMetadata {
             shadow_x,
             shadow_y,
             shadow,
-            data_length: actual_length,
+            data_length,
             has_mask,
             mask_width,
             mask_height,
@@ -269,7 +264,11 @@ impl MLibraryData {
     /// 从文件加载图像数据
     fn load_image_from_file(&self, index: usize) -> io::Result<ImageData> {
         let offset = self.indices[index].offset;
-        let file = File::open(&self.path)?;
+        let file = File::open(&self.path)
+            .map_err(|e| io::Error::new(
+                e.kind(),
+                format!("无法打开库文件: {:?} - {}", self.path.display(), e)
+            ))?;
         let mut reader = BufReader::new(file);
         
         // 定位到图像数据位置
@@ -277,6 +276,30 @@ impl MLibraryData {
         
         // 读取元数据
         let metadata = ImageMetadata::read_from(&mut reader)?;
+        
+        // 检查图像是否有效（宽度和高度不为0）
+        // 零尺寸图像是库文件的占位符,静默跳过,不输出错误
+        if metadata.width == 0 || metadata.height == 0 || metadata.data_length == 0 {
+            #[cfg(debug_assertions)]
+            log::debug!(
+                "跳过占位符图像 - File: {:?}, Index: {}, Width: {}, Height: {}, DataLength: {}",
+                self.path.display(),
+                index,
+                metadata.width,
+                metadata.height,
+                metadata.data_length
+            );
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "占位符图像" // 简化错误消息,不包含详细信息
+            ));
+        }
+        
+        // 重新定位到图像数据开始位置(跳过元数据)
+        // 基础元数据: 17字节 (width, height, offset_x, offset_y, shadow_x, shadow_y, shadow, data_length)
+        // 如果有mask,再加12字节 (mask_width, mask_height, mask_offset_x, mask_offset_y, mask_length)
+        let metadata_size = if metadata.has_mask { 17 + 12 } else { 17 };
+        reader.seek(SeekFrom::Start((offset + metadata_size) as u64))?;
         
         // 解压主图像数据
         let rgba_data = Self::decompress_image_data(
@@ -329,34 +352,55 @@ impl MLibraryData {
     ) -> io::Result<Vec<u8>> {
         // 读取压缩数据
         let mut compressed_data = vec![0u8; compressed_length];
-        reader.read_exact(&mut compressed_data)?;
+        let bytes_read = reader.read(&mut compressed_data)?;
+        
+        if bytes_read != compressed_length {
+            eprintln!("⚠️ 压缩数据读取不完整: 期望={} 实际={}", compressed_length, bytes_read);
+            compressed_data.truncate(bytes_read);
+        }
         
         // 解压
-        let mut decoder = ZlibDecoder::new(&compressed_data[..]);
+        let mut decoder = GzDecoder::new(&compressed_data[..]);
         let mut decompressed = Vec::new();
-        decoder.read_to_end(&mut decompressed)?;
+        match decoder.read_to_end(&mut decompressed) {
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("⚠️ 解压失败: width={} height={} compressed_len={} error={:?}", 
+                    width, height, compressed_length, e);
+                return Err(e);
+            }
+        }
         
-        // 转换 555 BGR 到 RGBA
-        let pixel_count = (width as usize) * (height as usize);
-        let mut rgba_data = vec![0u8; pixel_count * 4];
+        // 解压后的数据是BGRA8888格式,需要转换为RGBA8888
+        // 验证数据大小
+        let expected_size = (width as usize) * (height as usize) * 4;
+        if decompressed.len() != expected_size {
+            eprintln!("⚠️ 解压后数据大小不匹配: 期望={} 实际={}", expected_size, decompressed.len());
+            if decompressed.len() < expected_size {
+                decompressed.resize(expected_size, 0);
+            } else {
+                decompressed.truncate(expected_size);
+            }
+        }
         
-        for i in 0..pixel_count {
-            if i * 2 + 1 < decompressed.len() {
-                let bgr555 = u16::from_le_bytes([
-                    decompressed[i * 2],
-                    decompressed[i * 2 + 1],
-                ]);
-                
-                // 提取 RGB 分量（555 格式）
-                let b = ((bgr555 & 0x1F) << 3) as u8;
-                let g = (((bgr555 >> 5) & 0x1F) << 3) as u8;
-                let r = (((bgr555 >> 10) & 0x1F) << 3) as u8;
-                
-                // 设置 RGBA
-                rgba_data[i * 4] = r;
-                rgba_data[i * 4 + 1] = g;
-                rgba_data[i * 4 + 2] = b;
-                rgba_data[i * 4 + 3] = if bgr555 == 0 { 0 } else { 255 }; // 黑色透明
+        // 转换 BGRA 到 RGBA (交换 R 和 B 通道)
+        let mut rgba_data = decompressed;
+        for chunk in rgba_data.chunks_exact_mut(4) {
+            // BGRA: [B, G, R, A] -> RGBA: [R, G, B, A]
+            chunk.swap(0, 2); // 交换 B 和 R
+            
+            // 黑色背景透明化 (匹配 ggez 版本逻辑)
+            let r = chunk[0];
+            let g = chunk[1];
+            let b = chunk[2];
+            let a = chunk[3];
+            
+            // 纯黑色(或接近黑色)且不透明 -> 设为透明
+            let is_near_black = r < 3 && g < 3 && b < 3;
+            let is_opaque = a > 250;
+            
+            if is_near_black && is_opaque {
+                chunk[3] = 0; // 黑色背景 → 完全透明
             }
         }
         

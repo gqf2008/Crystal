@@ -66,7 +66,9 @@ ecs_macros = { path = "ecs_macros" } # ECS系统派生宏
 # ========== 渲染后端 (可选择) ==========
 # 使用 feature flags 在 ggez 和 macroquad 之间切换
 ggez = { version = "=0.10.0-rc0", optional = true }       # Includes winit re-export (use ggez::winit::*)
-macroquad = { version = "0.4", optional = true }          # 跨平台游戏框架 (Web/Mobile/Desktop)
+macroquad = { version = "0.4.13", optional = true }  
+macroquad-tiled = { version = "0.2.1"}  
+macroquad-profiler = { version = "0.2.0"}      
 hecs = { version = "0.10.5", features = ["hecs-macros"] } # 轻量级高性能 ECS 库
 rayon = "1.8"                                             # 并行执行 ECS 系统
 # egui = "0.27"  # 暂时禁用,egui_ggez 不兼容 ggez 0.10-rc0
@@ -82,6 +84,7 @@ log = { version = "0.4.28", features = [
     "release_max_level_warn",
 ] }
 smallvec = { version = "1.13", features = ["union"] } # 栈上小数组优化，避免小集合的堆分配
+lru = "0.16.2" # LRU缓存，用于减少锁竞争
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [
@@ -147,10 +150,22 @@ name = "map_viewer_macroquad"
 path = "src/bin/map_viewer_macroquad.rs"
 required-features = ["backend-macroquad"]
 
+# 🆕 地图查看器 V2 - Macroquad 版本（改进的坐标系统）
+[[bin]]
+name = "map_viewer_macroquad_v2"
+path = "src/bin/map_viewer_macroquad_v2.rs"
+required-features = ["backend-macroquad"]
+
 # 🆕 Macroquad 最小演示
 [[bin]]
 name = "demo_macroquad"
 path = "src/bin/demo_macroquad.rs"
+required-features = ["backend-macroquad"]
+
+# 🆕 LibraryManager 测试 - Macroquad 后端
+[[bin]]
+name = "test_library_manager"
+path = "src/bin/test_library_manager.rs"
 required-features = ["backend-macroquad"]
 
 # # 中文输入法测试程序
@@ -181,8 +196,8 @@ required-features = ["backend-macroquad"]
 # path = "src/bin/test_ime_custom_loop.rs"
 
 [features]
-default = ["client", "backend-ggez"]
+default = ["client", "backend-ggez", "backend-macroquad"]
 client = []
-# 渲染后端选择 (互斥)
+# 渲染后端选择 (可以同时启用多个)
 backend-ggez = ["ggez"]
 backend-macroquad = ["macroquad"]

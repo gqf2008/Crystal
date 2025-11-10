@@ -100,22 +100,36 @@ impl SpriteManager {
 
         // 从库加载图像数据
         let library = self.libraries.get_mut(library_name)?;
-        let image_data_ref = library.get_image(index).ok()??;
+        
+        match library.get_image(index) {
+            Ok(Some(image_data_ref)) => {
+                // 克隆图像数据以释放可变借用
+                let image_data = image_data_ref.clone();
 
-        // 克隆图像数据以释放可变借用
-        let image_data = image_data_ref.clone();
+                // 创建纹理
+                let sprite = self.create_sprite_from_data(&image_data)?;
 
-        // 创建纹理
-        let sprite = self.create_sprite_from_data(&image_data)?;
+                // 加入缓存
+                self.sprite_cache.insert(key.clone(), sprite.clone());
+                self.lru_order.push(key);
 
-        // 加入缓存
-        self.sprite_cache.insert(key.clone(), sprite.clone());
-        self.lru_order.push(key);
+                // LRU 淘汰
+                self.evict_lru();
 
-        // LRU 淘汰
-        self.evict_lru();
-
-        Some(sprite)
+                Some(sprite)
+            }
+            Ok(None) => {
+                // 图像不存在,这是正常情况,不打印日志
+                None
+            }
+            Err(e) => {
+                // 只打印非"空图像"的错误
+                if e.kind() != std::io::ErrorKind::InvalidData {
+                    eprintln!("❌ 加载图像错误: library={} index={} error={:?}", library_name, index, e);
+                }
+                None
+            }
+        }
     }
 
     /// 从 ImageData 创建精灵

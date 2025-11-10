@@ -212,6 +212,24 @@ impl CellInfo {
         }
         Some((self.front_index, index))
     }
+
+    pub fn debug_cell_data(&self, x: i32, y: i32) {
+        println!("🔍 格子 ({},{}) 数据:", x, y);
+        println!("   Back:   index={:2}, image=0x{:08X}", self.back_index, self.back_image);
+        if let Some((lib, img)) = self.back_tile() {
+            println!("           → 库{} 图{}", lib, img);
+        }
+        println!("   Middle: index={:2}, image={}", self.middle_index, self.middle_image);
+        if let Some((lib, img)) = self.middle_tile() {
+            println!("           → 库{} 图{}", lib, img);
+        }
+        println!("   Front:  index={:2}, image=0x{:04X}", self.front_index, self.front_image);
+        if let Some((lib, img)) = self.front_tile() {
+            println!("           → 库{} 图{}", lib, img);
+        }
+        println!("   Flags:  door_index={}, door_offset={}", self.door_index, self.door_offset);
+        println!("           light={}, fishing={}", self.light, self.fishing_cell);
+    }
 }
 
 pub enum TileLayer {

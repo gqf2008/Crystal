@@ -1954,6 +1954,11 @@ name = "hashbrown"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "hashlink"
@@ -2575,6 +2580,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
+name = "lru"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96051b46fc183dc9cd4a223960ef37b9af631b55191852a8274bfef064cda20f"
+dependencies = [
+ "hashbrown 0.16.0",
+]
+
+[[package]]
 name = "lyon"
 version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2647,6 +2661,25 @@ dependencies = [
  "macroquad_macro",
  "miniquad",
  "quad-rand",
+]
+
+[[package]]
+name = "macroquad-profiler"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a0f3792c62d2a730a25ca837bbbdfadc7df4a54033533b9a12489f809f325e5"
+dependencies = [
+ "macroquad",
+]
+
+[[package]]
+name = "macroquad-tiled"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3b8791e385de2f6d399e9e4624a405e23c06855df35c134903fefc3bfb7241c"
+dependencies = [
+ "macroquad",
+ "nanoserde",
 ]
 
 [[package]]
@@ -2787,7 +2820,10 @@ dependencies = [
  "hecs",
  "image 0.25.8",
  "log",
+ "lru",
  "macroquad",
+ "macroquad-profiler",
+ "macroquad-tiled",
  "md5",
  "mir2_shared",
  "once_cell",
@@ -2865,6 +2901,21 @@ dependencies = [
  "thiserror 2.0.17",
  "unicode-ident",
 ]
+
+[[package]]
+name = "nanoserde"
+version = "0.1.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5de9cf844ab1e25a0353525bd74cb889843a6215fa4a0d156fd446f4857a1b99"
+dependencies = [
+ "nanoserde-derive",
+]
+
+[[package]]
+name = "nanoserde-derive"
+version = "0.1.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e943b2c21337b7e3ec6678500687cdc741b7639ad457f234693352075c082204"
 
 [[package]]
 name = "native-tls"
