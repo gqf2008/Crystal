@@ -119,17 +119,11 @@ impl MapRenderer {
                     };
 
                     if let Some((file_index, image_index)) = cell.back_tile() {
-                        // 注意：back_tile() 返回的 image_index 已经是正确的值（已经做了 -1）
-                        
-                        // 获取纹理（需要持有锁直到纹理使用完毕）
-                        let texture_opt = get_map_library(file_index)
-                            .and_then(|lib| {
-                                let mut lib_guard = lib.lock();
-                                lib_guard.get_or_create_texture(image_index as usize).ok()
-                                    .and_then(|info| info.image.as_ref().cloned())
-                            });
-                        
-                        if let Some(texture) = texture_opt {
+                        let adjusted_index = if image_index > 0 { image_index - 1 } else { 0 };
+                        if let Some(texture) = get_map_library(file_index)
+                            .and_then(|lib| lib.lock().get_or_create_texture(adjusted_index as usize).ok())
+                            .and_then(|info| info.image.as_ref())
+                        {
                             let world_x = x as f32 * self.tile_width;
                             let world_y = y as f32 * self.tile_height;
                             
@@ -182,16 +176,11 @@ impl MapRenderer {
                     };
 
                     if let Some((file_index, image_index)) = cell.middle_tile() {
-                        // 注意：middle_tile() 返回的 image_index 已经是正确的值（已经做了 -1）
-                        
-                        let texture_opt = get_map_library(file_index)
-                            .and_then(|lib| {
-                                let mut lib_guard = lib.lock();
-                                lib_guard.get_or_create_texture(image_index as usize).ok()
-                                    .and_then(|info| info.image.as_ref().cloned())
-                            });
-                        
-                        if let Some(texture) = texture_opt {
+                        let image_index = image_index - 1;
+                        if let Some(texture) = get_map_library(file_index)
+                            .and_then(|lib| lib.lock().get_or_create_texture(image_index as usize).ok())
+                            .and_then(|info| info.image.as_ref())
+                        {
                             let world_x = x as f32 * self.tile_width;
                             let world_y = y as f32 * self.tile_height;
                             let offset_y = world_y + self.tile_height - texture.height();
@@ -245,16 +234,11 @@ impl MapRenderer {
                     };
 
                     if let Some((file_index, image_index)) = cell.front_tile() {
-                        // 注意：front_tile() 返回的 image_index 已经是正确的值（已经做了 -1）
-                        
-                        let texture_opt = get_map_library(file_index)
-                            .and_then(|lib| {
-                                let mut lib_guard = lib.lock();
-                                lib_guard.get_or_create_texture(image_index as usize).ok()
-                                    .and_then(|info| info.image.as_ref().cloned())
-                            });
-                        
-                        if let Some(texture) = texture_opt {
+                        let image_index = image_index - 1;
+                        if let Some(texture) = get_map_library(file_index)
+                            .and_then(|lib| lib.lock().get_or_create_texture(image_index as usize).ok())
+                            .and_then(|info| info.image.as_ref())
+                        {
                             let world_x = x as f32 * self.tile_width;
                             let world_y = y as f32 * self.tile_height;
                             let offset_y = world_y + self.tile_height - texture.height();

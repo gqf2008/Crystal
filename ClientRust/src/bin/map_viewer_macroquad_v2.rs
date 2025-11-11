@@ -17,7 +17,7 @@ use macroquad::prelude::*;
 use macroquad::text::draw_text_ex;
 
 use macroquad_profiler::ProfilerParams;
-use mir2_client::backends::macroquad::{LibraryManager, MeshMapRenderer};
+use mir2_client::backends::macroquad::{MeshMapRenderer, LIBRARIES};
 use mir2_client::objects::MapReader; // 使用完整的 MapReader
 
 // ============================================================================
@@ -207,9 +207,6 @@ struct MapViewerState {
     /// 地图数据
     map_reader: Option<MapReader>,
     
-    /// 精灵管理器（加载真实图块纹理）
-    library_manager: LibraryManager,
-    
     /// 地图渲染器（使用Mesh Batching优化）
     map_renderer: MeshMapRenderer,
     
@@ -257,15 +254,11 @@ impl MapViewerState {
             }
         };
         
-        // 创建库管理器并加载图块库
-        println!("📦 正在加载图块库...");
-        let library_manager = LibraryManager::new("Data");
-        
         // 加载所有地图库 (MapLib_0 到 MapLib_399)
-        if let Err(e) = library_manager.load_map_libraries() {
+        println!("📦 正在加载图块库...");
+        if let Err(e) = LIBRARIES.lock().init_map_libraries() {
             println!("⚠️ 地图库加载失败: {}", e);
         }
-        
         println!("✅ 图块库加载完成");
         
         // 如果地图加载成功，设置相机初始位置到地图中心
@@ -305,7 +298,6 @@ impl MapViewerState {
             tiles_rendered: 0,
             font: Some(font),
             map_reader,
-            library_manager,
             map_renderer,
             mouse_world_pos: vec2(0.0, 0.0),
             mouse_tile_x: 0,
@@ -632,7 +624,6 @@ impl MapViewerState {
         // 使用 MapRenderer 渲染地图
         self.tiles_rendered = self.map_renderer.render(
             map,
-            &self.library_manager,
             self.camera_position.x,
             self.camera_position.y,
             RENDER_WIDTH,
