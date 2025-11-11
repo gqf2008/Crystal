@@ -196,6 +196,25 @@ impl LibraryManager {
     pub fn is_library_loaded(&self, lib_name: &str) -> bool {
         self.libraries.read().contains_key(lib_name)
     }
+    
+    /// 获取图像的偏移信息（用于动画帧定位）
+    ///
+    /// # 参数
+    /// - `lib_name`: 库名称
+    /// - `image_index`: 图像索引
+    ///
+    /// # 返回
+    /// - Some((offset_x, offset_y)) 图像的偏移坐标
+    /// - None 如果库不存在或图像不存在
+    pub fn get_image_offset(&self, lib_name: &str, image_index: usize) -> Option<(i16, i16)> {
+        let mut libraries = self.libraries.write();
+        let lib_data = libraries.get_mut(lib_name)?;
+        
+        match lib_data.get_image(image_index) {
+            Ok(Some(image_data)) => Some((image_data.offset_x, image_data.offset_y)),
+            _ => None,
+        }
+    }
 
     /// 清空纹理缓存（释放显存）
     pub fn clear_texture_cache(&self) {

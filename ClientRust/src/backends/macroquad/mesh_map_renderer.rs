@@ -19,6 +19,7 @@
 use super::LibraryManager;
 use crate::objects::MapReader;
 use macroquad::prelude::*;
+use macroquad::miniquad::{BlendState, BlendFactor, BlendValue, Equation};
 
 /// Mesh批次数据 (预留,当前未使用)
 struct MeshBatch {
@@ -121,10 +122,38 @@ pub struct MeshMapRenderer {
 
     /// 是否显示纹理边框 (调试用)
     pub show_texture_border: bool,
+    
+    /// 动画计时器
+    animation_time: f32,
+    /// 动画帧计数
+    animation_frame: u32,
+    /// ADD混合材质
+    add_blend_material: Material,
 }
 
 impl MeshMapRenderer {
     pub fn new(tile_width: f32, tile_height: f32) -> Self {
+        // 创建ADD混合材质 (dst + src)
+        // 使用默认的vertex/fragment shader，只改变混合模式
+        let add_blend_material = load_material(
+            ShaderSource::Glsl {
+                vertex: include_str!("../../../shaders/default.vert"),
+                fragment: include_str!("../../../shaders/default.frag"),
+            },
+            MaterialParams {
+                pipeline_params: PipelineParams {
+                    color_blend: Some(BlendState::new(
+                        Equation::Add,
+                        BlendFactor::Value(BlendValue::SourceAlpha),
+                        BlendFactor::One,
+                    )),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        
         Self {
             tile_width,
             tile_height,
@@ -138,11 +167,19 @@ impl MeshMapRenderer {
             show_middle_layer: true,
             show_front_layer: true,
             show_texture_border: false,
+            animation_time: 0.0,
+            animation_frame: 0,
+            add_blend_material,
         }
     }
 
-    pub fn update(&mut self, _dt: f32) {
-        // 动画更新 (暂时不需要)
+    pub fn update(&mut self, dt: f32) {
+        // 动画更新 - 每100ms一帧
+        self.animation_time += dt;
+        if self.animation_time >= 0.1 {
+            self.animation_frame = self.animation_frame.wrapping_add(1);
+            self.animation_time -= 0.1;
+        }
     }
 
     /// 渲染地图 (直接纹理渲染,依赖框架自动批处理)
@@ -191,14 +228,13 @@ impl MeshMapRenderer {
 
         // Middle层
         if self.show_middle_layer {
-            let tiles = self.render_layer(
+            let tiles = self.render_middle_animated(
                 map_reader,
                 library_manager,
                 start_x,
                 start_y,
                 end_x,
                 end_y,
-                |cell| cell.middle_tile(),
                 tint_color,
             );
             total_tiles += tiles;
@@ -206,14 +242,13 @@ impl MeshMapRenderer {
 
         // Front层
         if self.show_front_layer {
-            let tiles = self.render_layer(
+            let tiles = self.render_front_animated(
                 map_reader,
                 library_manager,
                 start_x,
                 start_y,
                 end_x,
                 end_y,
-                |cell| cell.front_tile(),
                 tint_color,
             );
             total_tiles += tiles;
@@ -420,4 +455,265 @@ impl MeshMapRenderer {
 
         tiles_count
     }
+    
+    /// 渲染Middle层（支持动画和混合）
+    fn render_middle_animated(
+        &self,
+        map_reader: &MapReader,
+        library_manager: &LibraryManager,
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
+        tint_color: Color,
+    ) -> u32 {
+        let mut normal_tiles: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)> = Vec::new();
+        let mut blend_tiles: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)> = Vec::new();
+        let mut tiles_count = 0;
+
+        for y in start_y..end_y {
+            if y < 0 || y >= map_reader.height {
+                continue;
+            }
+            for x in start_x..end_x {
+                if x < 0 || x >= map_reader.width {
+                    continue;
+                }
+
+                let Some(cell) = map_reader.get_cell(x, y) else {
+                    continue;
+                };
+
+                if let Some((file_index, base_image_index)) = cell.middle_tile() {
+                    let mut image_index = base_image_index;
+                    
+                    // 检查动画
+                    if cell.middle_has_animation() {
+                        let frame_count = cell.middle_animation_frame as u32;
+                        if frame_count > 0 && frame_count < 255 {
+                            let current_frame = self.animation_frame % frame_count;
+                            image_index = base_image_index + current_frame as i32;
+                        }
+                    }
+                    
+                    // 检查是否需要混合
+                    let use_blend = cell.middle_use_blend();
+                    
+                    let lib_name = format!("MapLib_{}", file_index);
+                    let image_index = (image_index - 1).max(0);
+
+                    if let Some(texture) =
+                        library_manager.get_or_create_texture(&lib_name, image_index as usize)
+                    {
+                        // 获取图像偏移信息（动画帧可能有不同的偏移）
+                        let (offset_x, offset_y) = library_manager
+                            .get_image_offset(&lib_name, image_index as usize)
+                            .unwrap_or((0, 0));
+                        
+                        // 应用偏移：底部对齐 + offset
+                        let world_x = x as f32 * self.tile_width + offset_x as f32;
+                        let world_y = y as f32 * self.tile_height;
+                        let base_offset_y = world_y + self.tile_height - texture.height();
+                        let final_y = base_offset_y + offset_y as f32;
+                        let width = texture.width();
+                        let height = texture.height();
+
+                        let pixel_x = world_x.floor();
+                        let pixel_y = final_y.floor();
+
+                        let priority = if (cell.back_image & 0x20000000) != 0 {
+                            1
+                        } else {
+                            0
+                        };
+
+                        let tile = (
+                            texture.clone(),
+                            pixel_x,
+                            pixel_y,
+                            width,
+                            height,
+                            priority,
+                            y,
+                            x,
+                        );
+                        
+                        if use_blend {
+                            blend_tiles.push(tile);
+                        } else {
+                            normal_tiles.push(tile);
+                        }
+                        tiles_count += 1;
+                    }
+                }
+            }
+        }
+
+        // 先渲染普通瓦片
+        normal_tiles.sort_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        for (texture, x, y, width, height, _, _, _) in normal_tiles {
+            texture.set_filter(FilterMode::Linear);
+            draw_texture_ex(
+                &texture,
+                x,
+                y,
+                tint_color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(width, height)),
+                    ..Default::default()
+                },
+            );
+        }
+        
+        // 使用ADD混合材质渲染混合瓦片
+        blend_tiles.sort_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        gl_use_material(&self.add_blend_material);
+        for (texture, x, y, width, height, _, _, _) in blend_tiles {
+            texture.set_filter(FilterMode::Linear);
+            draw_texture_ex(
+                &texture,
+                x,
+                y,
+                tint_color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(width, height)),
+                    ..Default::default()
+                },
+            );
+        }
+        gl_use_default_material();
+
+        tiles_count
+    }
+    
+    /// 渲染Front层（支持动画和混合）
+    fn render_front_animated(
+        &self,
+        map_reader: &MapReader,
+        library_manager: &LibraryManager,
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
+        tint_color: Color,
+    ) -> u32 {
+        let mut normal_tiles: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)> = Vec::new();
+        let mut blend_tiles: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)> = Vec::new();
+        let mut tiles_count = 0;
+
+        for y in start_y..end_y {
+            if y < 0 || y >= map_reader.height {
+                continue;
+            }
+            for x in start_x..end_x {
+                if x < 0 || x >= map_reader.width {
+                    continue;
+                }
+
+                let Some(cell) = map_reader.get_cell(x, y) else {
+                    continue;
+                };
+
+                if let Some((file_index, base_image_index)) = cell.front_tile() {
+                    let mut image_index = base_image_index;
+                    
+                    // 检查动画（Front层从front_animation_frame判断）
+                    let front_anim = cell.front_animation_frame;
+                    let use_blend = front_anim > 0x0F; // 高4位表示需要混合
+                    
+                    if front_anim > 0 {
+                        let frame_count = (front_anim & 0x0F) as u32; // 低4位是帧数
+                        if frame_count > 0 {
+                            let current_frame = self.animation_frame % frame_count;
+                            image_index = base_image_index + current_frame as i32;
+                        }
+                    }
+                    
+                    let lib_name = format!("MapLib_{}", file_index);
+                    let image_index = (image_index - 1).max(0);
+
+                    if let Some(texture) =
+                        library_manager.get_or_create_texture(&lib_name, image_index as usize)
+                    {
+                        // 获取图像偏移信息（动画帧可能有不同的偏移）
+                        let (offset_x, offset_y) = library_manager
+                            .get_image_offset(&lib_name, image_index as usize)
+                            .unwrap_or((0, 0));
+                        
+                        // 应用偏移：底部对齐 + offset
+                        let world_x = x as f32 * self.tile_width + offset_x as f32;
+                        let world_y = y as f32 * self.tile_height;
+                        let base_offset_y = world_y + self.tile_height - texture.height();
+                        let final_y = base_offset_y + offset_y as f32;
+                        let width = texture.width();
+                        let height = texture.height();
+
+                        let pixel_x = world_x.floor();
+                        let pixel_y = final_y.floor();
+
+                        let priority = if (cell.back_image & 0x20000000) != 0 {
+                            1
+                        } else {
+                            0
+                        };
+
+                        let tile = (
+                            texture.clone(),
+                            pixel_x,
+                            pixel_y,
+                            width,
+                            height,
+                            priority,
+                            y,
+                            x,
+                        );
+                        
+                        if use_blend {
+                            blend_tiles.push(tile);
+                        } else {
+                            normal_tiles.push(tile);
+                        }
+                        tiles_count += 1;
+                    }
+                }
+            }
+        }
+
+        // 先渲染普通瓦片
+        normal_tiles.sort_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        for (texture, x, y, width, height, _, _, _) in normal_tiles {
+            texture.set_filter(FilterMode::Linear);
+            draw_texture_ex(
+                &texture,
+                x,
+                y,
+                tint_color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(width, height)),
+                    ..Default::default()
+                },
+            );
+        }
+        
+        // 使用ADD混合材质渲染混合瓦片
+        blend_tiles.sort_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        gl_use_material(&self.add_blend_material);
+        for (texture, x, y, width, height, _, _, _) in blend_tiles {
+            texture.set_filter(FilterMode::Linear);
+            draw_texture_ex(
+                &texture,
+                x,
+                y,
+                tint_color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(width, height)),
+                    ..Default::default()
+                },
+            );
+        }
+        gl_use_default_material();
+
+        tiles_count
+    }
 }
+

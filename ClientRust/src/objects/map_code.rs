@@ -6,10 +6,14 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
+#[cfg(feature = "backend-ggez")]
 use ggez::graphics::Canvas;
+#[cfg(feature = "backend-ggez")]
 use ggez::{Context, GameResult};
+
 use mir2_shared::Point;
 
+#[cfg(feature = "backend-ggez")]
 use super::drawable::DrawableMapObject;
 
 // ============================================================================
@@ -121,6 +125,7 @@ impl CellInfo {
         // 暂时保留简单版本，后续在 GameScene 中实现完整排序
     }
 
+    #[cfg(feature = "backend-ggez")]
     /// Draw all live objects in this cell
     /// C# Reference: Client/MirObjects/MapCode.cs lines 55-82
     pub fn draw_objects(
@@ -142,6 +147,7 @@ impl CellInfo {
         Ok(())
     }
 
+    #[cfg(feature = "backend-ggez")]
     /// Draw all dead objects in this cell (corpses, etc.)
     /// C# Reference: Client/MirObjects/MapCode.cs lines 85-113
     pub fn draw_dead_objects(
