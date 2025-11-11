@@ -1005,7 +1005,7 @@ fn window_conf() -> Conf {
         window_height: WINDOW_HEIGHT,
         window_resizable: false,
         platform: Platform {
-            swap_interval: Some(1),  // 0 = 关闭VSync, 1 = 60Hz, 2 = 30Hz
+            swap_interval: Some(0),  // 0 = 关闭VSync, 1 = 60Hz, 2 = 30Hz
             ..Default::default()
         },
         ..Default::default()

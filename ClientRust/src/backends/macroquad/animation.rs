@@ -11,8 +11,6 @@
 //
 // ============================================================================
 
-use std::time::Duration;
-
 /// 动画播放模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnimationMode {
