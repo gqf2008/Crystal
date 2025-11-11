@@ -298,8 +298,8 @@ impl MeshMapRenderer {
 
                 if let Some((file_index, image_index)) = cell.back_tile() {
                     let lib_name = format!("MapLib_{}", file_index);
-                    let image_index = (image_index - 1).max(0);
-
+                    // Note: back_tile() already returns index-1, so use it directly
+                    
                     if let Some(texture) =
                         library_manager.get_or_create_texture(&lib_name, image_index as usize)
                     {
@@ -390,8 +390,8 @@ impl MeshMapRenderer {
 
                 if let Some((file_index, image_index)) = get_tile(cell) {
                     let lib_name = format!("MapLib_{}", file_index);
-                    let image_index = (image_index - 1).max(0);
-
+                    // Note: middle_tile()/front_tile() already return index-1, so use it directly
+                    
                     if let Some(texture) =
                         library_manager.get_or_create_texture(&lib_name, image_index as usize)
                     {
@@ -500,8 +500,8 @@ impl MeshMapRenderer {
                     let use_blend = cell.middle_use_blend();
                     
                     let lib_name = format!("MapLib_{}", file_index);
-                    let image_index = (image_index - 1).max(0);
-
+                    // Note: middle_tile() already returns index-1, and animation is added on top, use directly
+                    
                     if let Some(texture) =
                         library_manager.get_or_create_texture(&lib_name, image_index as usize)
                     {
@@ -630,8 +630,8 @@ impl MeshMapRenderer {
                     }
                     
                     let lib_name = format!("MapLib_{}", file_index);
-                    let image_index = (image_index - 1).max(0);
-
+                    // Note: front_tile() already returns index-1, and animation is added on top, use directly
+                    
                     if let Some(texture) =
                         library_manager.get_or_create_texture(&lib_name, image_index as usize)
                     {
