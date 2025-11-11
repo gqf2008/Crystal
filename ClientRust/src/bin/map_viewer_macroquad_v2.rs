@@ -197,6 +197,12 @@ struct MapViewerState {
     frame_count: u32,
     fps_timer: f32,
     current_fps: u32,
+    frame_time_ms: f32,  // 帧时间（毫秒）
+    
+    /// 性能测试
+    benchmark_mode: bool,
+    benchmark_frames: u32,
+    benchmark_total_time: f32,
     
     /// 渲染统计
     tiles_rendered: u32,
@@ -295,6 +301,10 @@ impl MapViewerState {
             frame_count: 0,
             fps_timer: 0.0,
             current_fps: 0,
+            frame_time_ms: 0.0,
+            benchmark_mode: false,
+            benchmark_frames: 0,
+            benchmark_total_time: 0.0,
             tiles_rendered: 0,
             font: Some(font),
             map_reader,
@@ -331,9 +341,10 @@ impl MapViewerState {
         self.mouse_tile_x = (self.mouse_world_pos.x / TILE_WIDTH).floor() as i32;
         self.mouse_tile_y = (self.mouse_world_pos.y / TILE_HEIGHT).floor() as i32;
         
-                // FPS 计算
+        // FPS 计算
         self.frame_count += 1;
         self.fps_timer += dt;
+        self.frame_time_ms = dt * 1000.0;  // 转换为毫秒
         if self.fps_timer >= 1.0 {
             self.current_fps = self.frame_count;
             self.frame_count = 0;
@@ -345,6 +356,18 @@ impl MapViewerState {
         // 键盘输入
         if is_key_pressed(KeyCode::Escape) {
             std::process::exit(0);
+        }
+        
+        // P 键：性能测试模式
+        if is_key_pressed(KeyCode::P) {
+            self.benchmark_mode = !self.benchmark_mode;
+            if self.benchmark_mode {
+                self.benchmark_frames = 0;
+                self.benchmark_total_time = 0.0;
+                println!("🔥 性能测试模式：开启（测试300帧）");
+            } else {
+                println!("⏹️ 性能测试模式：关闭");
+            }
         }
         
         if is_key_pressed(KeyCode::G) {
@@ -747,13 +770,14 @@ impl MapViewerState {
         };
         
         let info = format!(
-            "{}FPS: {} | 缩放: {:.1}x | 相机: ({:.0}, {:.0}) | 瓦片: {}",
+            "{}FPS: {} ({:.2}ms) | 瓦片/帧: {} | 缩放: {:.1}x | 相机: ({:.0}, {:.0})",
             map_info,
             self.current_fps,
+            self.frame_time_ms,
+            self.tiles_rendered,
             self.zoom,
             self.camera_position.x,
             self.camera_position.y,
-            self.tiles_rendered,
         );
         
         draw_text_ex(
