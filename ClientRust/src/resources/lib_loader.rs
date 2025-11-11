@@ -228,6 +228,11 @@ impl MLibraryData {
         self.header.count as usize
     }
     
+    /// 获取库文件路径
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+    
     /// 检查索引是否有效
     pub fn is_valid_index(&self, index: usize) -> bool {
         index < self.indices.len() && self.indices[index].offset > 0

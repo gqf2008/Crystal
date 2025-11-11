@@ -197,7 +197,8 @@ impl CellInfo {
 
     pub fn middle_tile(&self) -> Option<(i16, i32)> {
         let index = self.middle_image - 1;
-        if index < 0 || self.middle_index == -1 {
+        // C#: if (index > 0) - 只处理index > 0的情况
+        if index <= 0 || self.middle_index == -1 {
             return None;
         }
         Some((self.middle_index, index))

@@ -582,6 +582,11 @@ impl MLibrary {
         self.indices.len()
     }
 
+    /// 获取库文件路径
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn frames(&self) -> &FrameSet {
         &self.frames
     }
