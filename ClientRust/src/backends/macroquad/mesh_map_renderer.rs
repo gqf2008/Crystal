@@ -11,93 +11,12 @@
 // 2. 像素对齐 (.floor()) 和最近邻过滤 (FilterMode::Nearest) 消除闪烁
 // 3. Back 层特殊处理: 2x2 格子共享纹理,只在偶数坐标绘制
 // 4. 依赖 macroquad 内部的自动 quad batching 优化 draw call
-//
-// 注: 虽然定义了 MeshBatch 结构,但当前未使用手动 mesh batching,
-//     因为 macroquad 的自动批处理已经足够高效 (120 FPS)
 // ============================================================================
 
-use super::graphics::{get_map_library, LibraryArray};
+use super::graphics::get_map_library;
 use crate::objects::MapReader;
 use macroquad::prelude::*;
 use macroquad::miniquad::{BlendState, BlendFactor, BlendValue, Equation};
-
-/// Mesh批次数据 (预留,当前未使用)
-struct MeshBatch {
-    /// 顶点数据 (position + uv + color)
-    vertices: Vec<Vertex>,
-    /// 索引数据
-    indices: Vec<u16>,
-    /// 纹理
-    texture: Texture2D,
-}
-
-impl MeshBatch {
-    fn new(texture: Texture2D) -> Self {
-        Self {
-            vertices: Vec::new(),
-            indices: Vec::new(),
-            texture,
-        }
-    }
-
-    /// 添加一个四边形瓦片
-    fn add_quad(&mut self, x: f32, y: f32, width: f32, height: f32) {
-        let base_index = self.vertices.len() as u16;
-
-        // 法线向量 (Vec4, 面向屏幕外)
-        let normal = Vec4::new(0.0, 0.0, 1.0, 0.0);
-
-        // 添加4个顶点 (左上, 右上, 右下, 左下)
-        // UV坐标: (0,0)是左上角, (1,1)是右下角
-        // Color: [255, 255, 255, 255] = 白色不透明
-        self.vertices.push(Vertex {
-            position: Vec3::new(x, y, 0.0),
-            uv: Vec2::new(0.0, 0.0),
-            color: [255, 255, 255, 255],
-            normal,
-        });
-        self.vertices.push(Vertex {
-            position: Vec3::new(x + width, y, 0.0),
-            uv: Vec2::new(1.0, 0.0),
-            color: [255, 255, 255, 255],
-            normal,
-        });
-        self.vertices.push(Vertex {
-            position: Vec3::new(x + width, y + height, 0.0),
-            uv: Vec2::new(1.0, 1.0),
-            color: [255, 255, 255, 255],
-            normal,
-        });
-        self.vertices.push(Vertex {
-            position: Vec3::new(x, y + height, 0.0),
-            uv: Vec2::new(0.0, 1.0),
-            color: [255, 255, 255, 255],
-            normal,
-        });
-
-        // 添加2个三角形的索引 (逆时针)
-        self.indices.push(base_index);
-        self.indices.push(base_index + 1);
-        self.indices.push(base_index + 2);
-
-        self.indices.push(base_index);
-        self.indices.push(base_index + 2);
-        self.indices.push(base_index + 3);
-    }
-
-    /// 构建并返回Mesh
-    fn build_mesh(&self) -> Mesh {
-        Mesh {
-            vertices: self.vertices.clone(),
-            indices: self.indices.clone(),
-            texture: Some(self.texture.clone()),
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.vertices.is_empty()
-    }
-}
 
 /// 直接纹理渲染的地图渲染器
 ///
@@ -129,6 +48,11 @@ pub struct MeshMapRenderer {
     animation_frame: u32,
     /// ADD混合材质
     add_blend_material: Material,
+    
+    // 性能优化：复用 Vec 缓冲区，避免每帧重新分配
+    tile_buffer: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)>,
+    normal_tile_buffer: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)>,
+    blend_tile_buffer: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)>,
 }
 
 impl MeshMapRenderer {
@@ -170,6 +94,10 @@ impl MeshMapRenderer {
             animation_time: 0.0,
             animation_frame: 0,
             add_blend_material,
+            // 预分配缓冲区（估计容量：避免初始扩容）
+            tile_buffer: Vec::with_capacity(2000),
+            normal_tile_buffer: Vec::with_capacity(1500),
+            blend_tile_buffer: Vec::with_capacity(500),
         }
     }
 
@@ -264,7 +192,8 @@ impl MeshMapRenderer {
         end_y: i32,
         tint_color: Color,
     ) -> u32 {
-        let mut tiles: Vec<(Texture2D, f32, f32, f32, f32, u8, i32, i32)> = Vec::new();
+        // 复用缓冲区，避免内存分配
+        self.tile_buffer.clear();
         let mut tiles_count = 0;
 
         // 🔧 关键: Back层是2x2格子共享的,只遍历偶数坐标
@@ -321,7 +250,7 @@ impl MeshMapRenderer {
                             0
                         };
 
-                        tiles.push((
+                        self.tile_buffer.push((
                             texture.clone(),
                             pixel_x,
                             pixel_y,
@@ -337,20 +266,20 @@ impl MeshMapRenderer {
             }
         }
 
-        // 按优先级、Y、X排序
-        tiles.sort_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        // 使用不稳定排序（更快）
+        self.tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
 
         // 渲染
-        for (texture, x, y, width, height, _, _, _) in tiles {
+        for (texture, x, y, width, height, _, _, _) in &self.tile_buffer {
             // 启用线性过滤以获得更细腻的缩放效果
             texture.set_filter(FilterMode::Linear);
             draw_texture_ex(
-                &texture,
-                x,
-                y,
+                texture,
+                *x,
+                *y,
                 tint_color, // 应用颜色调整
                 DrawTextureParams {
-                    dest_size: Some(vec2(width, height)),
+                    dest_size: Some(vec2(*width, *height)),
                     ..Default::default()
                 },
             );
@@ -375,10 +304,9 @@ impl MeshMapRenderer {
         get_tile: fn(&crate::objects::CellInfo) -> Option<(i16, i32)>,
         tint_color: Color,
     ) -> u32 {
-        // 分别存储普通瓦片和混合瓦片
-        // 数据结构: (texture, x, y, width, height, priority, tile_y, tile_x)
-        let mut normal_tiles: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)> = Vec::new();
-        let mut blend_tiles: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)> = Vec::new();
+        // 复用缓冲区，避免内存分配
+        self.normal_tile_buffer.clear();
+        self.blend_tile_buffer.clear();
         let mut tiles_count = 0;
 
         for y in start_y..end_y {
@@ -403,7 +331,7 @@ impl MeshMapRenderer {
                         let frame_interval = cell.middle_animation_tick;
                         
                         // C# 逻辑: index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
-                        let total_ticks = (frame_count as u32 + frame_count as u32 * frame_interval as u32);
+                        let total_ticks = frame_count as u32 + frame_count as u32 * frame_interval as u32;
                         let divisor = 1 + frame_interval as u32;
                         let frame_offset = ((self.animation_frame % total_ticks) / divisor) as i32;
                         
@@ -418,14 +346,16 @@ impl MeshMapRenderer {
                                 .map(|info| (info.image.as_ref().cloned(), info.x, info.y))
                         });
                     
-                    if let Some((Some(texture), offset_x, offset_y)) = texture_and_offset_opt {
+                    if let Some((Some(texture), _offset_x, _offset_y)) = texture_and_offset_opt {
                         let world_x = x as f32 * self.tile_width;
                         let world_y = y as f32 * self.tile_height;
                         let base_y = world_y + self.tile_height - texture.height();
                         let width = texture.width();
                         let height = texture.height();
 
-                        // Middle层：不应用图像内部偏移（根据MapRenderSystem的规则）
+                        // Middle层：根据MapRenderSystem规则，不应用图像内部偏移
+                        // 所有Middle层瓦片使用标准Y坐标计算: world_y + tile_height - texture.height()
+                        // offset_x 和 offset_y 被获取但标记为未使用（使用 _ 前缀）
                         // 对齐到像素边界,避免闪烁
                         let pixel_x = world_x.floor();
                         let pixel_y = base_y.floor();
@@ -451,9 +381,9 @@ impl MeshMapRenderer {
                         );
                         
                         if cell.middle_use_blend() {
-                            blend_tiles.push(tile_data);
+                            self.blend_tile_buffer.push(tile_data);
                         } else {
-                            normal_tiles.push(tile_data);
+                            self.normal_tile_buffer.push(tile_data);
                         }
                         
                         tiles_count += 1;
@@ -462,24 +392,21 @@ impl MeshMapRenderer {
             }
         }
 
-        // 三级排序确保正确的渲染顺序
-        // 1. 优先级 (0先1后)
-        // 2. Y坐标 (从上到下)
-        // 3. X坐标 (从左到右)
-        normal_tiles.sort_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
-        blend_tiles.sort_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        // 使用不稳定排序（更快）
+        self.normal_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        self.blend_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
 
         // 先渲染普通瓦片（正常混合）
-        for (texture, x, y, width, height, _, _, _) in normal_tiles {
+        for (texture, x, y, width, height, _, _, _) in &self.normal_tile_buffer {
             texture.set_filter(FilterMode::Linear);
 
             draw_texture_ex(
-                &texture,
-                x,
-                y,
+                texture,
+                *x,
+                *y,
                 tint_color,
                 DrawTextureParams {
-                    dest_size: Some(vec2(width, height)),
+                    dest_size: Some(vec2(*width, *height)),
                     ..Default::default()
                 },
             );
@@ -487,16 +414,16 @@ impl MeshMapRenderer {
 
         // 再渲染混合瓦片（ADD混合）
         gl_use_material(&self.add_blend_material);
-        for (texture, x, y, width, height, _, _, _) in blend_tiles {
+        for (texture, x, y, width, height, _, _, _) in &self.blend_tile_buffer {
             texture.set_filter(FilterMode::Linear);
 
             draw_texture_ex(
-                &texture,
-                x,
-                y,
+                texture,
+                *x,
+                *y,
                 tint_color,
                 DrawTextureParams {
-                    dest_size: Some(vec2(width, height)),
+                    dest_size: Some(vec2(*width, *height)),
                     ..Default::default()
                 },
             );
@@ -516,8 +443,9 @@ impl MeshMapRenderer {
         end_y: i32,
         tint_color: Color,
     ) -> u32 {
-        let mut normal_tiles: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)> = Vec::new();
-        let mut blend_tiles: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)> = Vec::new();
+        // 复用缓冲区，避免内存分配
+        self.normal_tile_buffer.clear();
+        self.blend_tile_buffer.clear();
         let mut tiles_count = 0;
 
         for y in start_y..end_y {
@@ -662,9 +590,9 @@ impl MeshMapRenderer {
                         );
                         
                         if use_blend {
-                            blend_tiles.push(tile);
+                            self.blend_tile_buffer.push(tile);
                         } else {
-                            normal_tiles.push(tile);
+                            self.normal_tile_buffer.push(tile);
                         }
                         tiles_count += 1;
                     }
@@ -672,34 +600,34 @@ impl MeshMapRenderer {
             }
         }
 
-        // 先渲染普通瓦片
-        normal_tiles.sort_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
-        for (texture, x, y, width, height, _, _, _) in normal_tiles {
+        // 使用不稳定排序（更快）
+        self.normal_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        for (texture, x, y, width, height, _, _, _) in &self.normal_tile_buffer {
             texture.set_filter(FilterMode::Linear);
             draw_texture_ex(
-                &texture,
-                x,
-                y,
+                texture,
+                *x,
+                *y,
                 tint_color,
                 DrawTextureParams {
-                    dest_size: Some(vec2(width, height)),
+                    dest_size: Some(vec2(*width, *height)),
                     ..Default::default()
                 },
             );
         }
         
         // 使用ADD混合材质渲染混合瓦片
-        blend_tiles.sort_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        self.blend_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
         gl_use_material(&self.add_blend_material);
-        for (texture, x, y, width, height, _, _, _) in blend_tiles {
+        for (texture, x, y, width, height, _, _, _) in &self.blend_tile_buffer {
             texture.set_filter(FilterMode::Linear);
             draw_texture_ex(
-                &texture,
-                x,
-                y,
+                texture,
+                *x,
+                *y,
                 tint_color,
                 DrawTextureParams {
-                    dest_size: Some(vec2(width, height)),
+                    dest_size: Some(vec2(*width, *height)),
                     ..Default::default()
                 },
             );
