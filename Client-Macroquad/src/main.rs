@@ -1,25 +1,30 @@
 // ============================================================================
-// 传奇2地图查看器 - Macroquad 版本 V2
+// 传奇2地图查看器 - Macroquad 独立版本
 // ============================================================================
 //
 // 说明：
-// - 使用 macroquad 原生 API（不依赖 mir2_client::renderer 抽象层）
+// - 完全独立的 macroquad 项目，不依赖 ClientRust
+// - 所有核心模块已复制到本项目
 // - 过扫描渲染策略：底部扩展200px渲染区域避免高建筑物被裁切
 // - Camera2D 相机控制（拖拽、缩放）
-// - 直接纹理渲染,高性能稳定运行
 //
 // 运行方式：
-// cargo run --bin map_viewer_macroquad_v2 --no-default-features --features backend-macroquad
+// cargo run --release
 // ============================================================================
 
 use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
 use macroquad::text::draw_text_ex;
-
 use macroquad_profiler::ProfilerParams;
-use mir2_client::backends::macroquad::MeshMapRenderer;
-use mir2_client::backends::macroquad::graphics::libraries::init_map_libraries;
-use mir2_client::objects::MapReader; // 使用完整的 MapReader
+
+// 本地模块
+mod map;
+mod graphics;
+mod renderer;
+
+use map::MapReader;
+use graphics::init_map_libraries;
+use renderer::MeshMapRenderer;
 
 // ============================================================================
 // 常量配置
@@ -247,7 +252,7 @@ impl MapViewerState {
         };
         
         // 加载字体
-        let font_data = include_bytes!("../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
+        let font_data = include_bytes!("../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf");
         let font = load_ttf_font_from_bytes(font_data)
             .map_err(|e| format!("加载字体失败: {}", e))?;
         

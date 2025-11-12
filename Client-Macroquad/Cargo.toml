@@ -1,0 +1,42 @@
+[package]
+name = "client_macroquad"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Macroquad 核心
+macroquad = "0.4"
+macroquad-profiler = "0.2"
+
+# 共享库 (游戏协议和数据结构)
+mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
+
+# 图像处理
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+
+# 压缩 (MLibrary 需要)
+flate2 = "1.1"
+
+# 字节序处理
+byteorder = "1"
+
+# 日志
+tracing = "0.1"
+
+# 工具库
+once_cell = "1.21"
+anyhow = "1"
+bitflags = "2.10"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
