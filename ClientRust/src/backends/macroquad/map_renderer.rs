@@ -140,8 +140,12 @@ impl MapRenderer {
                                 world_x,
                                 world_y,
                                 WHITE,
-                                DrawTextureParams::default(),
+                                DrawTextureParams {
+                                    // 启用线性过滤,让阴影和纹理更细腻
+                                    ..Default::default()
+                                },
                             );
+                            texture.set_filter(FilterMode::Linear);
                             self.draw_texture_total_us += start.elapsed().as_micros();
                             self.draw_texture_calls += 1;
                             
@@ -258,16 +262,20 @@ impl MapRenderer {
                             let world_x = x as f32 * self.tile_width;
                             let world_y = y as f32 * self.tile_height;
                             let offset_y = world_y + self.tile_height - texture.height();
-                          
+                            
                             // 测量 draw_texture 耗时
                             let start = Instant::now();
                             draw_texture_ex(
                                 &texture,
                                 world_x,
-                                offset_y,
+                                world_y,
                                 WHITE,
-                                DrawTextureParams::default(),
+                                DrawTextureParams {
+                                    // 启用线性过滤,让阴影和纹理更细腻
+                                    ..Default::default()
+                                },
                             );
+                            texture.set_filter(FilterMode::Linear);
                             self.draw_texture_total_us += start.elapsed().as_micros();
                             self.draw_texture_calls += 1;
                             

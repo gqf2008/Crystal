@@ -171,11 +171,14 @@ impl ImageInfo {
         self.bgra_data = Some(main_image.clone()); // 保存原始数据副本
 
         // 🔧 使用 macroquad Texture2D 创建纹理（RGBA 格式数据）
-        self.image = Some(Texture2D::from_rgba8(
+        let texture = Texture2D::from_rgba8(
             self.width as u16,
             self.height as u16,
             &main_image,
-        ));
+        );
+        // 在创建时设置线性过滤,避免每次渲染都设置
+        texture.set_filter(FilterMode::Linear);
+        self.image = Some(texture);
 
         // 处理遮罩层
         if self.has_mask {
@@ -196,11 +199,14 @@ impl ImageInfo {
             Self::bgra_to_rgba(&mut mask_data);
 
             // 🔧 使用 macroquad Texture2D 创建遮罩纹理（RGBA 格式数据）
-            self.mask_image = Some(Texture2D::from_rgba8(
+            let mask_texture = Texture2D::from_rgba8(
                 self.width as u16,
                 self.height as u16,
                 &mask_data,
-            ));
+            );
+            // 在创建时设置线性过滤
+            mask_texture.set_filter(FilterMode::Linear);
+            self.mask_image = Some(mask_texture);
         }
         self.last_access_time = Some(Instant::now());
         self.texture_valid = true;

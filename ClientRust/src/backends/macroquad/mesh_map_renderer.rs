@@ -262,8 +262,6 @@ impl MeshMapRenderer {
 
         // 渲染
         for (texture, x, y, width, height, _, _, _) in &self.tile_buffer {
-            // 启用线性过滤以获得更细腻的缩放效果
-            texture.set_filter(FilterMode::Linear);
             draw_texture_ex(
                 texture,
                 *x,
@@ -374,8 +372,6 @@ impl MeshMapRenderer {
 
         // 先渲染普通瓦片（正常混合）
         for (texture, x, y, width, height, _, _, _) in &self.normal_tile_buffer {
-            texture.set_filter(FilterMode::Linear);
-
             draw_texture_ex(
                 texture,
                 *x,
@@ -391,8 +387,6 @@ impl MeshMapRenderer {
         // 再渲染混合瓦片（ADD混合）
         gl_use_material(&self.add_blend_material);
         for (texture, x, y, width, height, _, _, _) in &self.blend_tile_buffer {
-            texture.set_filter(FilterMode::Linear);
-
             draw_texture_ex(
                 texture,
                 *x,
@@ -541,7 +535,6 @@ impl MeshMapRenderer {
         }        // 使用不稳定排序（更快）
         self.normal_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
         for (texture, x, y, width, height, _, _, _) in &self.normal_tile_buffer {
-            texture.set_filter(FilterMode::Linear);
             draw_texture_ex(
                 texture,
                 *x,
@@ -558,7 +551,6 @@ impl MeshMapRenderer {
         self.blend_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
         gl_use_material(&self.add_blend_material);
         for (texture, x, y, width, height, _, _, _) in &self.blend_tile_buffer {
-            texture.set_filter(FilterMode::Linear);
             draw_texture_ex(
                 texture,
                 *x,

@@ -29,9 +29,9 @@ use mir2_client::objects::MapReader; // 使用完整的 MapReader
 const WINDOW_WIDTH: i32 = 1024;
 const WINDOW_HEIGHT: i32 = 768;
 
-/// 渲染尺寸(与窗口一致)
-const RENDER_WIDTH: f32 = 1024.0;
-const RENDER_HEIGHT: f32 = 768.0;
+/// 渲染尺寸 - 内部渲染分辨率，可以不同于窗口尺寸
+const RENDER_WIDTH: f32 = 1920.0;
+const RENDER_HEIGHT: f32 = 1440.0;
 
 /// 传奇2 瓦片尺寸
 const TILE_WIDTH: f32 = 48.0;
@@ -291,7 +291,7 @@ impl MapViewerState {
           
             camera,
             camera_position,
-            zoom: 0.5,  // 初始缩放：0.5 = 缩小看更大范围
+            zoom: 1.0,  // 初始缩放：0.5 = 缩小看更大范围
             dragging: false,
             last_mouse_pos: vec2(0.0, 0.0),
             show_grid: false,
@@ -1055,7 +1055,7 @@ fn window_conf() -> Conf {
         window_height: WINDOW_HEIGHT,
         window_resizable: false,
         platform: Platform {
-            swap_interval: Some(0),  // 0 = 关闭VSync, 1 = 60Hz, 2 = 30Hz
+            swap_interval: Some(1),  // 0 = 关闭VSync, 1 = 60Hz, 2 = 30Hz
             ..Default::default()
         },
         ..Default::default()
