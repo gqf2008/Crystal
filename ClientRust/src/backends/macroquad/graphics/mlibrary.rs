@@ -6,7 +6,6 @@
 // 注意: 此模块依赖 objects::frames 和 macroquad
 // 基于 ggez 版本移植，保持相同的逻辑但使用 macroquad 纹理
 
-// use crate::objects::frames::{Frame, FrameSet};  // TODO: 修复编译器找不到 frames 模块的问题
 use byteorder::LittleEndian;
 use byteorder::ReadBytesExt;
 use flate2::read::GzDecoder;
@@ -481,9 +480,8 @@ impl ImageInfo {
 #[derive(Debug)]
 pub struct MLibrary {
     path: PathBuf,
-    header: LibraryHeader,
+    // header: LibraryHeader,
     indices: Vec<ImageIndex>,
-    // frames: FrameSet,  // TODO: 暂时注释掉frames功能（地图渲染不需要）
     cached_info: HashMap<usize, ImageInfo>,
     reader: BufReader<File>,
 }
@@ -505,50 +503,18 @@ impl MLibrary {
             ));
         }
         let count = reader.read_i32::<LittleEndian>()?;
-        let mut frame_seek = 0;
-        if version >= 3 {
-            frame_seek = reader.read_i32::<LittleEndian>()?;
-        }
-        let header = LibraryHeader {
-            version,
-            count,
-            frame_seek,
-        };
+  
         let mut indices = Vec::with_capacity(count as usize);
         for _ in 0..count {
             let offset = reader.read_i32::<LittleEndian>()?;
             indices.push(ImageIndex { offset });
         }
-        // TODO: 暂时注释掉 frames 加载（地图渲染不需要）
-        /*
-        let mut frames = FrameSet::new();
-        if version >= 3 {
-            reader.seek(SeekFrom::Start(frame_seek as u64))?;
-            let frame_count = reader.read_i32::<LittleEndian>()?;
-
-            for _ in 0..frame_count {
-                let action_byte = reader.read_u8()?;
-                let action = MirAction::try_from(action_byte).map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("Invalid MirAction value: {}", action_byte),
-                    )
-                })?;
-                let frame = Frame::from_reader(&mut reader)?;
-                frames.insert(action, frame);
-            }
-        }
-        */
-
-        // 使用 HashMap 缓存图像信息，稀疏访问模式更高效
-        // 预分配容量避免动态扩容
+        
         let cached_info = HashMap::with_capacity(count as usize);
 
         Ok(Self {
             path: path_buf,
-            header,
             indices,
-            // frames,  // TODO: 暂时注释掉
             cached_info,
             reader,
         })
@@ -563,13 +529,6 @@ impl MLibrary {
     pub fn path(&self) -> &Path {
         &self.path
     }
-
-    // TODO: 暂时注释掉 frames 相关方法
-    /*
-    pub fn frames(&self) -> &FrameSet {
-        &self.frames
-    }
-    */
 
     /// 读取图像信息(不解压纹理数据)
     pub fn get_image_info(&mut self, index: usize) -> io::Result<ImageInfo> {

@@ -222,8 +222,6 @@ impl MeshMapRenderer {
                 };
 
                 if let Some((file_index, image_index)) = cell.back_tile() {
-                    // 注意：back_tile()返回的image_index已经是减1后的值（参见map_code.rs:191）
-
                     let texture_opt = get_map_library(file_index)
                         .and_then(|lib| {
                             let mut lib_guard = lib.lock();
@@ -232,23 +230,16 @@ impl MeshMapRenderer {
                         });
                     
                     if let Some(texture) = texture_opt {
-                        // Back瓦片从偶数坐标开始绘制
                         let world_x = x as f32 * self.tile_width;
                         let world_y = y as f32 * self.tile_height;
                         let offset_y = world_y + self.tile_height - texture.height();
                         let width = texture.width();
                         let height = texture.height();
 
-                        // 对齐到像素边界
                         let pixel_x = world_x.floor();
                         let pixel_y = offset_y.floor();
 
-                        // 提取优先级标志
-                        let priority = if (cell.back_image & 0x20000000) != 0 {
-                            1
-                        } else {
-                            0
-                        };
+                        let priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
 
                         self.tile_buffer.push((
                             texture.clone(),
@@ -323,14 +314,11 @@ impl MeshMapRenderer {
                 };
 
                 if let Some((file_index, mut image_index)) = get_tile(cell) {
-                    // 注意：get_tile() 返回的 image_index 已经是正确的值（*_tile() 函数已经做了 -1）
-
                     // 计算动画帧偏移
                     if cell.middle_has_animation() {
                         let frame_count = cell.middle_animation_frame;
                         let frame_interval = cell.middle_animation_tick;
                         
-                        // C# 逻辑: index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
                         let total_ticks = frame_count as u32 + frame_count as u32 * frame_interval as u32;
                         let divisor = 1 + frame_interval as u32;
                         let frame_offset = ((self.animation_frame % total_ticks) / divisor) as i32;
@@ -338,7 +326,6 @@ impl MeshMapRenderer {
                         image_index += frame_offset;
                     }
 
-                    // 获取纹理和ImageInfo（包含x/y偏移）
                     let texture_and_offset_opt = get_map_library(file_index)
                         .and_then(|lib| {
                             let mut lib_guard = lib.lock();
@@ -353,31 +340,20 @@ impl MeshMapRenderer {
                         let width = texture.width();
                         let height = texture.height();
 
-                        // Middle层：根据MapRenderSystem规则，不应用图像内部偏移
-                        // 所有Middle层瓦片使用标准Y坐标计算: world_y + tile_height - texture.height()
-                        // offset_x 和 offset_y 被获取但标记为未使用（使用 _ 前缀）
-                        // 对齐到像素边界,避免闪烁
                         let pixel_x = world_x.floor();
                         let pixel_y = base_y.floor();
 
-                        // 🔧 关键修复: 提取back_image的优先级标志 (第29位: 0x20000000)
-                        // 优先级: 0 = 先绘制(底层), 1 = 后绘制(覆盖层)
-                        let priority = if (cell.back_image & 0x20000000) != 0 {
-                            1
-                        } else {
-                            0
-                        };
+                        let priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
 
-                        // 根据混合标志分类存储
                         let tile_data = (
                             texture.clone(),
                             pixel_x,
                             pixel_y,
                             width,
                             height,
-                            priority, // 优先级: 0先绘制, 1后绘制
-                            y,        // Y坐标
-                            x,        // X坐标
+                            priority,
+                            y,
+                            x,
                         );
                         
                         if cell.middle_use_blend() {
@@ -462,21 +438,11 @@ impl MeshMapRenderer {
                 };
 
                 if let Some((file_index, base_image_index)) = cell.front_tile() {
-                    // front_tile()返回 (front_index, (front_image & 0x7FFF) - 1)
                     let mut image_index = base_image_index;
-                    
-                    // 检查动画 - 参考C# GameScene.cs:11928-11942
-                    // C#逻辑：
-                    // animation = FrontAnimationFrame;
-                    // if ((animation & 0x80) > 0) {
-                    //     blend = true;
-                    //     animation &= 0x7F;  // ← blend=true时才& 0x7F
-                    // }
-                    // if (animation > 0) { /* 使用修改后的animation */ }
                     
                     let mut animation = cell.front_animation_frame;
                     let use_blend = if (animation & 0x80) > 0 {
-                        animation &= 0x7F;  // 修改animation值
+                        animation &= 0x7F;
                         true
                     } else {
                         false
@@ -488,10 +454,7 @@ impl MeshMapRenderer {
                         let current_frame = (self.animation_frame % adjusted_frame_count) / (1 + tick_count as u32);
                         image_index = base_image_index + current_frame as i32;
                     }
-                    
-                    // 不需要再减1，因为front_tile()已经返回了减1后的值
 
-                    // 获取纹理和ImageInfo（包含x/y偏移）
                     let texture_and_info_opt = get_map_library(file_index)
                         .and_then(|lib| {
                             let mut lib_guard = lib.lock();
@@ -504,35 +467,24 @@ impl MeshMapRenderer {
                         let world_y = y as f32 * self.tile_height;
                         let width = texture.width();
                         let height = texture.height();
-
-                        // Front层绘制：参考C# GameScene.cs:11967-11978 和 MapRenderSystem
-                        // 基础计算：drawY - s.Height (其中 drawY = (y+1)*32)
-                        // Rust: world_y = y*32, 所以 (y+1)*32 - Height = world_y + 32 - Height
+                        let base_y = world_y + self.tile_height;
                         
-                        let base_y = world_y + self.tile_height; // = (y+1) * 32 (对应C#的drawY)
-                        
-                        // 判断是否应用图像内部偏移（参考 MapRenderSystem 的 should_apply_offset 逻辑）
                         let should_apply_offset = if use_blend {
-                            // Blend瓦片：特殊库或特定索引
                             file_index == 14 
                                 || file_index == 27 
                                 || (file_index > 99 && file_index < 199)
                                 || (image_index >= 2723 && image_index <= 2732)
                         } else if file_index == 28 {
-                            // 库28：仅当有非空偏移时应用
                             offset_x != 0 || offset_y != 0
                         } else {
                             false
                         };
                         
-                        // C# GameScene.cs:11967-11978 Front层绘制逻辑
                         let (pixel_x, pixel_y) = if use_blend {
                             if file_index == 14 || file_index == 27 || (file_index > 99 && file_index < 199) {
-                                // Blend特殊库(火把、蜡烛等光效): drawY - 3*CellHeight
                                 let mut base_x = world_x;
                                 let mut base_y_pos = base_y - 3.0 * self.tile_height;
                                 
-                                // 应用图像内部偏移
                                 if should_apply_offset {
                                     base_x += offset_x as f32;
                                     base_y_pos += offset_y as f32;
@@ -540,11 +492,9 @@ impl MeshMapRenderer {
                                 
                                 (base_x.floor(), base_y_pos.floor())
                             } else {
-                                // 普通Blend: DrawBlend(index, new Point(drawX, drawY - s.Height), ...)
                                 let mut base_x = world_x;
                                 let mut base_y_pos = base_y - height;
-                                
-                                // 应用图像内部偏移
+                                    
                                 if should_apply_offset {
                                     base_x += offset_x as f32;
                                     base_y_pos += offset_y as f32;
@@ -553,30 +503,20 @@ impl MeshMapRenderer {
                                 (base_x.floor(), base_y_pos.floor())
                             }
                         } else if file_index == 28 && (offset_x != 0 || offset_y != 0) {
-                            // fileIndex==28 有offset特殊处理
-                            // 最终位置 = (drawX + offset_x, drawY - CellHeight + offset_y)
                             let x = (world_x + offset_x as f32).floor();
                             let y = (base_y - self.tile_height + offset_y as f32).floor();
                             (x, y)
                         } else {
-                            // 其他Front层: Draw(index, drawX, drawY - s.Height)
                             let mut base_x = world_x;
                             let mut base_y_pos = base_y - height;
                             
-                            // 应用图像内部偏移（如果需要）
                             if should_apply_offset {
                                 base_x += offset_x as f32;
                                 base_y_pos += offset_y as f32;
                             }
                             
                             (base_x.floor(), base_y_pos.floor())
-                        };
-
-                        let priority = if (cell.back_image & 0x20000000) != 0 {
-                            1
-                        } else {
-                            0
-                        };
+                        };                        let priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
 
                         let tile = (
                             texture.clone(),
@@ -598,9 +538,7 @@ impl MeshMapRenderer {
                     }
                 }
             }
-        }
-
-        // 使用不稳定排序（更快）
+        }        // 使用不稳定排序（更快）
         self.normal_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
         for (texture, x, y, width, height, _, _, _) in &self.normal_tile_buffer {
             texture.set_filter(FilterMode::Linear);
