@@ -781,6 +781,15 @@ impl MapViewerState {
             self.camera_position.y,
         );
         
+        // 性能提示颜色
+        let info_color = if self.current_fps >= 100 {
+            Color::from_rgba(100, 255, 100, 255) // 绿色 - 优秀
+        } else if self.current_fps >= 60 {
+            WHITE // 白色 - 良好
+        } else {
+            Color::from_rgba(255, 200, 100, 255) // 橙色 - 需要优化
+        };
+        
         draw_text_ex(
             &info,
             10.0,
@@ -788,10 +797,26 @@ impl MapViewerState {
             TextParams {
                 font: self.font.as_ref(),
                 font_size: 20,
-                color: WHITE,
+                color: info_color,
                 ..Default::default()
             },
         );
+        
+        // 性能提示
+        if self.current_fps < 100 && self.tiles_rendered > 1000 {
+            let hint = "💡 提示: 放大地图可提升 FPS（瓦片数量减少）";
+            draw_text_ex(
+                hint,
+                RENDER_WIDTH - 450.0,
+                75.0,
+                TextParams {
+                    font: self.font.as_ref(),
+                    font_size: 14,
+                    color: Color::from_rgba(255, 255, 100, 255),
+                    ..Default::default()
+                },
+            );
+        }
         
         // 层级状态
         let layer_status = format!(
