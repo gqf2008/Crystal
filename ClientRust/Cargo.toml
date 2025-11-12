@@ -63,16 +63,11 @@ ecs_macros = { path = "ecs_macros" } # ECS系统派生宏
 #     "default_font",               # 默认字体 (ASCII)
 # ] }
 
-# ========== 渲染后端 (可选择) ==========
-# 使用 feature flags 在 ggez 和 macroquad 之间切换
+# ========== 渲染后端 ==========
+# 使用 ggez 作为主要渲染后端（macroquad 已迁移到独立的 Client-Macroquad 项目）
 ggez = { version = "=0.10.0-rc0", optional = true }       # Includes winit re-export (use ggez::winit::*)
-macroquad = { version = "0.4.13", optional = true }  
-macroquad-tiled = { version = "0.2.1"}  
-macroquad-profiler = { version = "0.2.0"}      
 hecs = { version = "0.10.5", features = ["hecs-macros"] } # 轻量级高性能 ECS 库
 rayon = "1.8"                                             # 并行执行 ECS 系统
-# egui = "0.27"  # 暂时禁用,egui_ggez 不兼容 ggez 0.10-rc0
-# egui_ggez = "0.3"  # 在 crates.io 上不存在或不兼容
 assets_manager = "0.13.4"
 rfd = "0.15" # File dialog for map selection
 ron = "0.11.0"
@@ -144,29 +139,8 @@ path = "src/bin/mir2x.rs"
 # name = "map_viewer_v2"
 # path = "src/bin/map_viewer_v2.rs"
 
-# 🆕 地图查看器 - Macroquad 版本
-[[bin]]
-name = "map_viewer_macroquad"
-path = "src/bin/map_viewer_macroquad.rs"
-required-features = ["backend-macroquad"]
-
-# 🆕 地图查看器 V2 - Macroquad 版本（改进的坐标系统）
-[[bin]]
-name = "map_viewer_macroquad_v2"
-path = "src/bin/map_viewer_macroquad_v2.rs"
-required-features = ["backend-macroquad"]
-
-# 🆕 Macroquad 最小演示
-[[bin]]
-name = "demo_macroquad"
-path = "src/bin/demo_macroquad.rs"
-required-features = ["backend-macroquad"]
-
-# 🆕 LibraryManager 测试 - Macroquad 后端
-[[bin]]
-name = "test_library_manager"
-path = "src/bin/test_library_manager.rs"
-required-features = ["backend-macroquad"]
+# 🆕 Macroquad 地图查看器已迁移到独立项目 Client-Macroquad
+# 请访问 ../Client-Macroquad 目录使用 macroquad 版本
 
 # # 中文输入法测试程序
 # [[bin]]
@@ -196,8 +170,7 @@ required-features = ["backend-macroquad"]
 # path = "src/bin/test_ime_custom_loop.rs"
 
 [features]
-default = ["client", "backend-ggez", "backend-macroquad"]
+default = ["client", "backend-ggez"]
 client = []
-# 渲染后端选择 (可以同时启用多个)
+# 渲染后端（macroquad 已迁移到 Client-Macroquad 项目）
 backend-ggez = ["ggez"]
-backend-macroquad = ["macroquad"]
