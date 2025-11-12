@@ -521,6 +521,12 @@ impl MapViewerState {
             self.dragging = false;
         }
         
+        // 安全机制：如果鼠标左键没按下但dragging为true，强制重置
+        // 这解决了窗口失去焦点导致释放事件丢失的问题
+        if self.dragging && !is_mouse_button_down(MouseButton::Left) {
+            self.dragging = false;
+        }
+        
         if self.dragging {
             let current_pos: Vec2 = mouse_position().into();
             let delta = current_pos - self.last_mouse_pos;
@@ -539,7 +545,7 @@ impl MapViewerState {
             self.camera_position.x -= world_delta_x;
             self.camera_position.y -= world_delta_y;
             
-            // 更新鼠标位置
+            // 更新鼠标位置，避免累积误差导致抖动
             self.last_mouse_pos = current_pos;
         }
     }
