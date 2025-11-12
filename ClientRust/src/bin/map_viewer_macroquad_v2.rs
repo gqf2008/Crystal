@@ -30,8 +30,8 @@ const WINDOW_WIDTH: i32 = 1024;
 const WINDOW_HEIGHT: i32 = 768;
 
 /// 渲染尺寸 - 内部渲染分辨率，可以不同于窗口尺寸
-const RENDER_WIDTH: f32 = 1920.0;
-const RENDER_HEIGHT: f32 = 1440.0;
+const RENDER_WIDTH: f32 = 1024.0;
+const RENDER_HEIGHT: f32 = 768.0;
 
 /// 传奇2 瓦片尺寸
 const TILE_WIDTH: f32 = 48.0;
@@ -291,7 +291,7 @@ impl MapViewerState {
           
             camera,
             camera_position,
-            zoom: 1.0,  // 初始缩放：0.5 = 缩小看更大范围
+            zoom: 0.5,  // 初始缩放：0.5 = 缩小看更大范围
             dragging: false,
             last_mouse_pos: vec2(0.0, 0.0),
             show_grid: false,
@@ -575,7 +575,6 @@ impl MapViewerState {
     fn draw(&mut self) {
         // 清空屏幕
         clear_background(Color::from_rgba(40, 40, 50, 255));
-        
         // 更新并设置游戏相机
         self.update_camera();
         set_camera(&self.camera);
