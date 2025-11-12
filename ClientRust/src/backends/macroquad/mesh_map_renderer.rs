@@ -224,7 +224,7 @@ impl MeshMapRenderer {
                 if let Some((file_index, image_index)) = cell.back_tile() {
                     let texture_opt = get_map_library(file_index)
                         .and_then(|lib| {
-                            let mut lib_guard = lib.lock();
+                            let mut lib_guard = lib.borrow_mut();
                             lib_guard.get_or_create_texture(image_index as usize).ok()
                                 .and_then(|info| info.image.as_ref().cloned())
                         });
@@ -328,7 +328,7 @@ impl MeshMapRenderer {
 
                     let texture_and_offset_opt = get_map_library(file_index)
                         .and_then(|lib| {
-                            let mut lib_guard = lib.lock();
+                            let mut lib_guard = lib.borrow_mut();
                             lib_guard.get_or_create_texture(image_index as usize).ok()
                                 .map(|info| (info.image.as_ref().cloned(), info.x, info.y))
                         });
@@ -457,7 +457,7 @@ impl MeshMapRenderer {
 
                     let texture_and_info_opt = get_map_library(file_index)
                         .and_then(|lib| {
-                            let mut lib_guard = lib.lock();
+                            let mut lib_guard = lib.borrow_mut();
                             lib_guard.get_or_create_texture(image_index as usize).ok()
                                 .map(|info| (info.image.as_ref().cloned(), info.x, info.y))
                         });

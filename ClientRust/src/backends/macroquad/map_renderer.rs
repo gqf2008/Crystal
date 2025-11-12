@@ -124,7 +124,7 @@ impl MapRenderer {
                         // 获取纹理（需要持有锁直到纹理使用完毕）
                         let texture_opt = get_map_library(file_index)
                             .and_then(|lib| {
-                                let mut lib_guard = lib.lock();
+                                let mut lib_guard = lib.borrow_mut();
                                 lib_guard.get_or_create_texture(image_index as usize).ok()
                                     .and_then(|info| info.image.as_ref().cloned())
                             });
@@ -186,7 +186,7 @@ impl MapRenderer {
                         
                         let texture_opt = get_map_library(file_index)
                             .and_then(|lib| {
-                                let mut lib_guard = lib.lock();
+                                let mut lib_guard = lib.borrow_mut();
                                 lib_guard.get_or_create_texture(image_index as usize).ok()
                                     .and_then(|info| info.image.as_ref().cloned())
                             });
@@ -249,7 +249,7 @@ impl MapRenderer {
                         
                         let texture_opt = get_map_library(file_index)
                             .and_then(|lib| {
-                                let mut lib_guard = lib.lock();
+                                let mut lib_guard = lib.borrow_mut();
                                 lib_guard.get_or_create_texture(image_index as usize).ok()
                                     .and_then(|info| info.image.as_ref().cloned())
                             });

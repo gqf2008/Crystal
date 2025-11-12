@@ -17,7 +17,8 @@ use macroquad::prelude::*;
 use macroquad::text::draw_text_ex;
 
 use macroquad_profiler::ProfilerParams;
-use mir2_client::backends::macroquad::{MeshMapRenderer, LIBRARIES};
+use mir2_client::backends::macroquad::MeshMapRenderer;
+use mir2_client::backends::macroquad::graphics::libraries::init_map_libraries;
 use mir2_client::objects::MapReader; // 使用完整的 MapReader
 
 // ============================================================================
@@ -262,7 +263,7 @@ impl MapViewerState {
         
         // 加载所有地图库 (MapLib_0 到 MapLib_399)
         println!("📦 正在加载图块库...");
-        if let Err(e) = LIBRARIES.lock().init_map_libraries() {
+        if let Err(e) = init_map_libraries() {
             println!("⚠️ 地图库加载失败: {}", e);
         }
         println!("✅ 图块库加载完成");

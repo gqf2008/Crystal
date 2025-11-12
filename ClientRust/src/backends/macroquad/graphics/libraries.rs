@@ -4,11 +4,10 @@
 //
 // 提供所有游戏图像库的集中管理，类似 C# 原版的静态 Libraries 类
 
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::rc::Rc;
 
 use super::mlibrary::MLibrary;
 
@@ -303,11 +302,11 @@ impl std::fmt::Display for LibraryArray {
 /// C# 使用静态类 + 静态字段，Rust 使用 Lazy 单例
 pub struct Libraries {
     /// 单体库 (C# 的静态字段)
-    libraries: HashMap<LibraryName, Arc<Mutex<MLibrary>>>,
+    libraries: HashMap<LibraryName, Rc<RefCell<MLibrary>>>,
 
     /// 数组库 (C# 的静态数组字段)
     /// 每个数组元素可能为 None (文件不存在)
-    array_libraries: HashMap<LibraryArray, Vec<Option<Arc<Mutex<MLibrary>>>>>,
+    array_libraries: HashMap<LibraryArray, Vec<Option<Rc<RefCell<MLibrary>>>>>,
 
     /// 数据根目录
     data_path: String,
@@ -389,7 +388,7 @@ impl Libraries {
                     path_ref.display(),
                     count
                 );
-                array[index] = Some(Arc::new(Mutex::new(lib)));
+                array[index] = Some(Rc::new(RefCell::new(lib)));
                 self.progress += 1;
                 Ok(())
             }
@@ -417,13 +416,13 @@ impl Libraries {
     /// - `index`: 数组索引
     ///
     /// # 返回
-    /// - `Some(Arc<Mutex<MLibrary>>)`: 库引用
+    /// - `Some(Rc<RefCell<MLibrary>>)`: 库引用
     /// - `None`: 索引无效或库未加载
     pub fn get_from_array(
         &self,
         array_type: LibraryArray,
         index: usize,
-    ) -> Option<Arc<Mutex<MLibrary>>> {
+    ) -> Option<Rc<RefCell<MLibrary>>> {
         self.array_libraries.get(&array_type)?.get(index)?.clone()
     }
 
@@ -449,8 +448,8 @@ impl Libraries {
     /// - `array_type`: 数组库类型
     ///
     /// # 返回
-    /// - Vec<Arc<Mutex<MLibrary>>>: 所有已加载的库引用
-    pub fn get_all_from_array(&self, array_type: LibraryArray) -> Vec<Arc<Mutex<MLibrary>>> {
+    /// - Vec<Rc<RefCell<MLibrary>>>: 所有已加载的库引用
+    pub fn get_all_from_array(&self, array_type: LibraryArray) -> Vec<Rc<RefCell<MLibrary>>> {
         self.array_libraries
             .get(&array_type)
             .map(|arr| arr.iter().filter_map(|lib| lib.clone()).collect())
@@ -468,7 +467,7 @@ impl Libraries {
         match MLibrary::open(&path) {
             Ok(lib) => {
                 tracing::info!("✓ 成功加载 {} ({} 张图像)", name, lib.count());
-                self.libraries.insert(name, Arc::new(Mutex::new(lib)));
+                self.libraries.insert(name, Rc::new(RefCell::new(lib)));
                 self.progress += 1;
                 Ok(())
             }
@@ -492,7 +491,7 @@ impl Libraries {
         match MLibrary::open(path) {
             Ok(lib) => {
                 tracing::info!("✓ 成功加载 {} ({} 张图像)", name, lib.count());
-                self.libraries.insert(name, Arc::new(Mutex::new(lib)));
+                self.libraries.insert(name, Rc::new(RefCell::new(lib)));
                 self.progress += 1;
                 Ok(())
             }
@@ -506,7 +505,7 @@ impl Libraries {
     /// 获取库引用 (如果未加载则自动加载)
     ///
     /// C# equivalent: 直接访问 Libraries.Weather
-    pub fn get_or_load(&mut self, name: LibraryName) -> Option<Arc<Mutex<MLibrary>>> {
+    pub fn get_or_load(&mut self, name: LibraryName) -> Option<Rc<RefCell<MLibrary>>> {
         // 如果已加载，直接返回
         if let Some(lib) = self.libraries.get(&name) {
             return Some(lib.clone());
@@ -524,7 +523,7 @@ impl Libraries {
     /// 获取库引用 (不自动加载)
     ///
     /// C# equivalent: 直接访问 Libraries.Weather
-    pub fn get(&self, name: LibraryName) -> Option<Arc<Mutex<MLibrary>>> {
+    pub fn get(&self, name: LibraryName) -> Option<Rc<RefCell<MLibrary>>> {
         self.libraries.get(&name).cloned()
     }
 
@@ -1042,30 +1041,32 @@ impl Libraries {
     // get_array_loaded_count 和 get_array_size 已在上面定义 (第368-380行附近)
 }
 
-/// 全局库管理器单例
-///
-/// C# equivalent: Libraries static class
-pub static LIBRARIES: Lazy<Mutex<Libraries>> = Lazy::new(|| Mutex::new(Libraries::new()));
+// 全局库管理器单例 (单线程)
+//
+// C# equivalent: Libraries static class
+thread_local! {
+    static LIBRARIES: RefCell<Libraries> = RefCell::new(Libraries::new());
+}
 
 // ===== 便捷访问函数 =====
 
 /// 便捷函数: 获取单体库 (如果未加载则自动懒加载)
-pub fn get_library(name: LibraryName) -> Option<Arc<Mutex<MLibrary>>> {
-    LIBRARIES.lock().get_or_load(name)
+pub fn get_library(name: LibraryName) -> Option<Rc<RefCell<MLibrary>>> {
+    LIBRARIES.with(|libs| libs.borrow_mut().get_or_load(name))
 }
 
 /// 便捷函数: 获取数组库中的某个元素
 pub fn get_library_from_array(
     array_type: LibraryArray,
     index: usize,
-) -> Option<Arc<Mutex<MLibrary>>> {
-    LIBRARIES.lock().get_from_array(array_type, index)
+) -> Option<Rc<RefCell<MLibrary>>> {
+    LIBRARIES.with(|libs| libs.borrow().get_from_array(array_type, index))
 }
 
 /// 便捷函数: 获取 MapLibs[index]
 ///
 /// 这是最常用的访问方式，专门为地图渲染优化
-pub fn get_map_library(index: i16) -> Option<Arc<Mutex<MLibrary>>> {
+pub fn get_map_library(index: i16) -> Option<Rc<RefCell<MLibrary>>> {
     if index < 0 || index >= 400 {
         return None;
     }
@@ -1078,8 +1079,9 @@ pub fn get_map_library(index: i16) -> Option<Arc<Mutex<MLibrary>>> {
 ///
 /// 这是推荐的初始化方式，一次性完成所有准备工作
 pub fn initialize_all_libraries(data_path: &str) -> std::io::Result<()> {
-    let mut libs = LIBRARIES.lock();
-    libs.set_data_path(data_path);
+    LIBRARIES.with(|libs| {
+        let mut libs = libs.borrow_mut();
+        libs.set_data_path(data_path);
 
     tracing::info!("=== 开始初始化所有库 ===");
 
@@ -1125,46 +1127,53 @@ pub fn initialize_all_libraries(data_path: &str) -> std::io::Result<()> {
     );
     tracing::info!("  - 单体库: {} 个已加载", libs.loaded_count());
 
-    Ok(())
+        Ok(())
+    })
 }
 
 /// 便捷函数: 初始化数据路径
 pub fn set_data_path(path: impl Into<String>) {
-    LIBRARIES.lock().set_data_path(path);
+    LIBRARIES.with(|libs| libs.borrow_mut().set_data_path(path));
+}
+
+/// 便捷函数: 初始化地图库 (MapLibs[0-399])
+pub fn init_map_libraries() -> std::io::Result<()> {
+    LIBRARIES.with(|libs| libs.borrow_mut().init_map_libraries())
 }
 
 /// 便捷函数: 加载库
 pub fn load_library(name: LibraryName) -> std::io::Result<()> {
-    LIBRARIES.lock().load(name)
+    LIBRARIES.with(|libs| libs.borrow_mut().load(name))
 }
 
 /// 便捷函数: 加载库（自定义路径）
 pub fn load_library_custom(name: LibraryName, path: impl AsRef<Path>) -> std::io::Result<()> {
-    LIBRARIES.lock().load_custom(name, path)
+    LIBRARIES.with(|libs| libs.borrow_mut().load_custom(name, path))
 }
 
 // get_library 已在上面定义 (第620行附近)
 
 /// 便捷函数: 检查库是否已加载
 pub fn is_library_loaded(name: LibraryName) -> bool {
-    LIBRARIES.lock().is_loaded(name)
+    LIBRARIES.with(|libs| libs.borrow().is_loaded(name))
 }
 
 /// 便捷函数: 卸载库
 pub fn unload_library(name: LibraryName) {
-    LIBRARIES.lock().unload(name);
+    LIBRARIES.with(|libs| libs.borrow_mut().unload(name));
 }
 
 /// 便捷函数: 卸载所有库
 pub fn unload_all_libraries() {
-    LIBRARIES.lock().unload_all();
+    LIBRARIES.with(|libs| libs.borrow_mut().unload_all());
 }
 
 /// 批量加载核心游戏库
 ///
 /// C# equivalent: Libraries 静态构造函数中的初始化逻辑
 pub fn load_core_libraries() -> std::io::Result<()> {
-    let mut libs = LIBRARIES.lock();
+    LIBRARIES.with(|libs| {
+        let mut libs = libs.borrow_mut();
 
     // 计算需要加载的库数量
     let core_libs = vec![
@@ -1209,13 +1218,15 @@ pub fn load_core_libraries() -> std::io::Result<()> {
             format!("{} 个库加载失败", errors.len()),
         ))
     }
+    })
 }
 
 /// 批量加载所有游戏库（可选）
 ///
 /// 包括 UI、魔法、物品、装备等所有库
 pub fn load_all_libraries() -> std::io::Result<()> {
-    let mut libs = LIBRARIES.lock();
+    LIBRARIES.with(|libs| {
+        let mut libs = libs.borrow_mut();
 
     let all_libs = vec![
         // UI
@@ -1280,6 +1291,7 @@ pub fn load_all_libraries() -> std::io::Result<()> {
     }
 
     Ok(())
+    })
 }
 
 // ==================== MapLibs 地图资源库 ====================
@@ -1293,8 +1305,8 @@ pub fn load_all_libraries() -> std::io::Result<()> {
 /// 对应 C# 中遍历 MapLibs 数组清理纹理的操作
 ///
 /// # 返回
-/// - Vec<Arc<Mutex<MLibrary>>>: 所有已加载的 MapLibs
-pub fn get_all_map_libraries() -> Vec<Arc<Mutex<MLibrary>>> {
-    LIBRARIES.lock().get_all_from_array(LibraryArray::MapLibs)
+/// - Vec<Rc<RefCell<MLibrary>>>: 所有已加载的 MapLibs
+pub fn get_all_map_libraries() -> Vec<Rc<RefCell<MLibrary>>> {
+    LIBRARIES.with(|libs| libs.borrow().get_all_from_array(LibraryArray::MapLibs))
 }
 
