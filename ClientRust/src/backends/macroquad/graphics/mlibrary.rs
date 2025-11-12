@@ -205,7 +205,7 @@ impl ImageInfo {
                 &mask_data,
             );
             // 在创建时设置线性过滤
-            //mask_texture.set_filter(FilterMode::Linear);
+            mask_texture.set_filter(FilterMode::Linear);
             self.mask_image = Some(mask_texture);
         }
         self.last_access_time = Some(Instant::now());
