@@ -1,0 +1,173 @@
+// ============================================================================
+// 游戏核心类型定义和重导出
+// ============================================================================
+//
+// 此模块提供:
+// - 游戏上下文类型 (GameContext, GameResult)
+// - 常用类型重导出 (避免重复导入)
+// - ECS 常量定义 (特殊实体 ID)
+
+// 重新导出核心类型
+pub use crate::game_world::GameWorld;
+
+// 重新导出坐标系统
+pub use crate::coord::{Coord, ViewportConfig, MapUtils, CameraController, CELL_WIDTH, CELL_HEIGHT};
+
+/// GameResult 类型别名 (替代 ggez::GameResult)
+pub type GameResult<T = ()> = Result<T, GameError>;
+
+/// GameError 类型 (替代 ggez::GameError)
+pub use crate::core::GameError;
+
+/// GameContext - 游戏上下文 (替代 ggez::Context 和 ClientRust 的 GameContext)
+pub struct GameContext {
+    pub world: GameWorld,
+    pub delta_time: f32,
+}
+
+impl GameContext {
+    pub fn new() -> Self {
+        Self {
+            world: GameWorld::new(),
+            delta_time: 0.0,
+        }
+    }
+}
+
+/// 图形上下文 (macroquad 不需要,但为了兼容性保留)
+pub struct GraphicsContext;
+
+/// Canvas (macroquad 不需要,但为了兼容性保留)
+pub struct Canvas;
+
+// ============================================================================
+// ggez 图形类型的 macroquad 映射
+// ============================================================================
+
+pub use macroquad::prelude::Color;
+pub use macroquad::prelude::Vec2 as Point2;
+
+/// DrawParam 兼容结构 (简化版)
+#[derive(Debug, Clone, Copy)]
+pub struct DrawParam {
+    pub dest: Vec2,
+    pub rotation: f32,
+    pub scale: Vec2,
+    pub color: Color,
+}
+
+impl Default for DrawParam {
+    fn default() -> Self {
+        Self {
+            dest: Vec2::ZERO,
+            rotation: 0.0,
+            scale: Vec2::ONE,
+            color: macroquad::prelude::WHITE,
+        }
+    }
+}
+
+use macroquad::prelude::Vec2;
+
+impl DrawParam {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn dest(mut self, dest: Vec2) -> Self {
+        self.dest = dest;
+        self
+    }
+
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = color;
+        self
+    }
+
+    pub fn scale(mut self, scale: Vec2) -> Self {
+        self.scale = scale;
+        self
+    }
+}
+
+/// Rect 类型别名
+pub use macroquad::prelude::Rect;
+
+/// Mesh 占位符 (macroquad 使用不同的渲染方式)
+pub struct Mesh;
+
+/// DrawMode 占位符
+#[derive(Debug, Clone, Copy)]
+pub enum DrawMode {
+    Fill,
+    Stroke(f32),
+}
+
+/// Text 占位符 (macroquad 使用不同的文字渲染)
+pub struct Text {
+    pub content: String,
+}
+
+impl Text {
+    pub fn new(content: impl Into<String>) -> Self {
+        Self {
+            content: content.into(),
+        }
+    }
+}
+
+/// TextFragment 占位符
+pub struct TextFragment {
+    pub text: String,
+    pub color: Option<Color>,
+}
+
+impl From<&str> for TextFragment {
+    fn from(s: &str) -> Self {
+        Self {
+            text: s.to_string(),
+            color: None,
+        }
+    }
+}
+
+impl From<String> for TextFragment {
+    fn from(s: String) -> Self {
+        Self {
+            text: s,
+            color: None,
+        }
+    }
+}
+
+// ============================================================================
+// 输入相关兼容
+// ============================================================================
+
+/// KeyCode 映射
+pub use macroquad::prelude::KeyCode;
+
+/// MouseButton 映射
+pub use macroquad::prelude::MouseButton;
+
+// ============================================================================
+// 特殊实体 ID (ECS常量)
+// ============================================================================
+
+/// 网络实体 ID
+pub const NETWORK_ENTITY: hecs::Entity = unsafe { hecs::Entity::from_bits(u64::MAX) };
+
+/// 设置实体 ID  
+pub const SETTING_ENTITY: hecs::Entity = unsafe { hecs::Entity::from_bits(u64::MAX - 1) };
+
+// ============================================================================
+// MapLoader 占位符
+// ============================================================================
+
+/// MapLoader 占位符结构
+pub struct MapLoader;
+
+// ============================================================================
+// 系统 Trait 已移到 systems/mod.rs
+// ============================================================================
+

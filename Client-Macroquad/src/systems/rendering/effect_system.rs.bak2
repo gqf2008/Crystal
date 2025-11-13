@@ -1,0 +1,12 @@
+use crate::{game_world::GameWorld, systems::RenderSystem};
+use crate::compat::{GameResult, GraphicsContext, Canvas};
+
+#[derive(ecs_macros::RenderSystem)]
+pub struct EffectRenderSystem;
+
+impl RenderSystem for EffectRenderSystem {
+    fn draw(&mut self, _world: &GameWorld) -> GameResult {
+        // TODO: 实现特效渲染
+        Ok(())
+    }
+}

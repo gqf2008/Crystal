@@ -1,0 +1,58 @@
+// ============================================================================
+// GameWorld - hecs ECS 世界管理 (Macroquad 版本)
+// ============================================================================
+
+use hecs::World;
+use std::ops::{Deref, DerefMut};
+use std::time::Instant;
+
+use crate::components::core::Dead;
+
+/// 游戏世界 - 管理所有实体
+pub struct GameWorld {
+    pub world: World,
+    pub start_time: Instant,
+}
+
+impl GameWorld {
+    pub fn new() -> Self {
+        Self {
+            world: World::new(),
+            start_time: Instant::now(),
+        }
+    }
+    
+    /// 清理死亡实体
+    pub fn cleanup_dead_entities(&mut self) {
+        let mut to_remove = Vec::new();
+        
+        for (id, _dead) in self.world.query::<&Dead>().iter() {
+            to_remove.push(id);
+        }
+        
+        for id in to_remove {
+            let _ = self.world.despawn(id);
+        }
+    }
+}
+
+// 实现 Deref，让 GameWorld 可以直接调用 World 的方法
+impl Deref for GameWorld {
+    type Target = World;
+    
+    fn deref(&self) -> &Self::Target {
+        &self.world
+    }
+}
+
+impl DerefMut for GameWorld {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.world
+    }
+}
+
+impl Default for GameWorld {
+    fn default() -> Self {
+        Self::new()
+    }
+}

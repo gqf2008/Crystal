@@ -1,0 +1,113 @@
+// ============================================================================
+// Character Render System - 角色渲染系统
+// ============================================================================
+//
+// **优先级**: 610 (在地图渲染后，调试系统前)
+//
+// **职责**:
+// - 渲染所有玩家角色（本地玩家和其他玩家）
+// - 处理角色动画帧（站立、行走、跑步）
+// - 处理多层渲染（身体、武器、翅膀等）
+//
+// **C# 参考**:
+// - PlayerObject.DrawBody() - 绘制角色身体
+// - PlayerObject.DrawWeapon() - 绘制武器
+// - CHumEffect[class][gender] - 角色库索引
+//
+// **渲染流程**:
+// 1. 查询所有 (Player, Position, PlayerAppearance)
+// 2. 按 Y 坐标排序（深度排序）
+// 3. 计算动画帧索引
+// 4. 从 CHumEffect 库加载精灵图
+// 5. 应用相机变换绘制到屏幕
+//
+// ============================================================================
+
+use super::SpriteRenderSystem;
+use crate::components::{AnimationFrame, Player, PlayerAppearance, Position, TimeTracker};
+use crate::resources::libraries::{get_library_from_array, LibraryArray};
+use crate::compat::{Canvas, Color, DrawParam, GraphicsContext};
+use crate::compat::GameResult;
+use mir2_shared::enums::MirGender;
+
+/// 精灵渲染系统
+
+impl SpriteRenderSystem {
+    /// 渲染单个角色
+    ///
+    /// **重构说明**: 不再自己计算帧索引，改为从 AnimationFrame 组件读取
+    /// AnimationSystem 负责计算并更新帧索引，渲染系统只负责读取和绘制
+    #[allow(dead_code)]
+    fn render_character(
+        _ctx: &mut GraphicsContext,
+        _canvas: &mut Canvas,
+        _player: &Player,
+        _pos: &Position,
+        _appearance: &PlayerAppearance,
+        _anim_frame: &AnimationFrame,
+        _cam_x: f32,
+        _cam_y: f32,
+        _zoom: f32,
+    ) -> GameResult {
+        // TODO: 重写为 macroquad API
+        Ok(())
+    }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn draw_character(
+        &mut self,
+        ctx: &mut GraphicsContext,
+        canvas: &mut Canvas,
+        world: &hecs::World,
+    ) -> GameResult {
+        // tracing::info!("👤 CharacterRenderSystem::draw() 开始");
+        // 获取相机变换
+        let Some((cam_x, cam_y, zoom)) = Self::get_camera_transform(world) else {
+            // tracing::info!("⏭️  CharacterRenderSystem: 没有相机，跳过渲染");
+            return Ok(());
+        };
+
+        // 收集并排序角色（现在包含 AnimationFrame）
+        let mut characters_to_render = Vec::new();
+
+        for (_entity, (player, pos, appearance, anim_frame)) in world
+            .query::<(&Player, &Position, &PlayerAppearance, &AnimationFrame)>()
+            .iter()
+        {
+            characters_to_render.push((
+                player.clone(),
+                pos.clone(),
+                appearance.clone(),
+                anim_frame.clone(),
+            ));
+        }
+
+        // 按 Y 坐标排序（实现深度排序）
+        characters_to_render.sort_by(|a, b| {
+            a.1.y
+                .partial_cmp(&b.1.y)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // 渲染所有角色
+        for (player, pos, appearance, anim_frame) in characters_to_render {
+            Self::render_character(
+                ctx,
+                canvas,
+                &player,
+                &pos,
+                &appearance,
+                &anim_frame,
+                cam_x,
+                cam_y,
+                zoom,
+            )?;
+        }
+
+        Ok(())
+    }
+}

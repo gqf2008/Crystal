@@ -18,12 +18,28 @@ use macroquad::text::draw_text_ex;
 use macroquad_profiler::ProfilerParams;
 
 // 本地模块
-mod map;
-mod graphics;
+mod camera;
+mod compat;     // ✨ ggez → macroquad 兼容层
+pub mod components;
+mod coord;      // ✨ 坐标系统
+mod core;
+mod event_bus;  // ✨ 事件总线
+mod game_state; // ✨ 游戏状态管理
+mod network;    // ✨ 网络模块
 mod renderer;
+mod resources;  // ✨ 资源管理（图像库、地图加载）
+mod scenes;     // ✨ 场景系统（登录、角色选择、游戏）
+pub mod systems;
 
-use map::MapReader;
-use graphics::init_map_libraries;
+// ✨ ecs_macros 兼容性别名
+// ecs_macros 生成的代码引用 crate::ecs::*，这里创建别名
+pub mod ecs {
+    pub use crate::compat::GameContext;
+    pub use crate::systems;
+    pub use crate::components;
+}
+
+use resources::{init_map_libraries, MapReader};
 use renderer::MeshMapRenderer;
 
 // ============================================================================
@@ -1110,6 +1126,10 @@ async fn main() {
     println!("📐 窗口尺寸: {}x{}", WINDOW_WIDTH, WINDOW_HEIGHT);
     println!("🖼️ 渲染尺寸: {}x{}", RENDER_WIDTH as i32, RENDER_HEIGHT as i32);
     println!("🎮 控制: 拖拽移动 | 滚轮缩放 | 1/2/3 层级 | G 网格 | B 边框 | ESC 退出");
+    
+    // macOS 焦点修复：等待第一帧渲染完成
+    // 这样可以确保窗口完全创建后再尝试获取焦点
+    next_frame().await;
     
     // 主循环
     loop {
