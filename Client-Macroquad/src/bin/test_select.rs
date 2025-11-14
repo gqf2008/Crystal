@@ -21,7 +21,7 @@ async fn main() -> GameResult {
     println!("📐 窗口尺寸: {}x{}", screen_width(), screen_height());
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    // 创建测试角色数据
+    // 创建测试角色数据 - 展示5个职业
     let characters = vec![
         CharacterInfo {
             index: 0,
@@ -38,6 +38,22 @@ async fn main() -> GameResult {
             class: 1,  // 法师
             gender: 1, // 女
             last_access: "2024-01-16 18:45".to_string(),
+        },
+        CharacterInfo {
+            index: 2,
+            name: "道尊".to_string(),
+            level: 38,
+            class: 2,  // 道士
+            gender: 0, // 男
+            last_access: "2024-01-17 19:20".to_string(),
+        },
+        CharacterInfo {
+            index: 3,
+            name: "影刺".to_string(),
+            level: 42,
+            class: 3,  // 刺客
+            gender: 1, // 女
+            last_access: "2024-01-18 21:15".to_string(),
         },
     ];
     

@@ -229,6 +229,8 @@ impl SelectScene {
                 // 战士: 男20, 女300
                 // 法师: 男40, 女320  
                 // 道士: 男60, 女340
+                // 刺客: 男80, 女360
+                // 弓手: 男100, 女380
                 let base_index = 20 + (character.class as usize * 20) + (character.gender as usize * 280);
                 let frame_index = base_index + self.animation_frame;  // 动画帧0-15
                 
@@ -271,6 +273,8 @@ impl SelectScene {
                     0 => 660, // 战士
                     1 => 661, // 法师
                     2 => 662, // 道士
+                    3 => 663, // 刺客
+                    4 => 664, // 弓手
                     _ => 660,
                 };
                 let texture_index = if is_selected {
@@ -340,6 +344,8 @@ impl SelectScene {
                             0 => "战士",
                             1 => "法师",
                             2 => "道士",
+                            3 => "刺客",
+                            4 => "弓手",
                             _ => "未知",
                         };
                         text_painter.text(
@@ -619,8 +625,10 @@ impl Scene for SelectScene {
             let dpi_scale = screen_dpi_scale();
             ctx.set_pixels_per_point(dpi_scale);
             
-            // 设置全局字体大小
+            // 🎨 移除所有 egui 视觉风格 - 完全透明的UI
             let mut style = (*ctx.style()).clone();
+            
+            // 设置全局字体大小
             style.text_styles = [
                 (egui::TextStyle::Heading, egui::FontId::new(24.0, egui::FontFamily::Proportional)),
                 (egui::TextStyle::Body, egui::FontId::new(16.0, egui::FontFamily::Proportional)),
@@ -628,6 +636,28 @@ impl Scene for SelectScene {
                 (egui::TextStyle::Button, egui::FontId::new(16.0, egui::FontFamily::Proportional)),
                 (egui::TextStyle::Small, egui::FontId::new(12.0, egui::FontFamily::Proportional)),
             ].into();
+            
+            // 移除所有窗口/面板/按钮的背景和边框
+            style.visuals.window_fill = egui::Color32::TRANSPARENT;
+            style.visuals.window_stroke = egui::Stroke::NONE;
+            style.visuals.panel_fill = egui::Color32::TRANSPARENT;
+            style.visuals.window_shadow = egui::epaint::Shadow::NONE;
+            
+            // 移除所有组件的背景
+            style.visuals.widgets.noninteractive.bg_fill = egui::Color32::TRANSPARENT;
+            style.visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+            style.visuals.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
+            style.visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
+            
+            // 移除所有边框
+            style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
+            style.visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+            style.visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
+            style.visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
+            
+            // 移除弹出菜单背景
+            style.visuals.popup_shadow = egui::epaint::Shadow::NONE;
+            style.visuals.extreme_bg_color = egui::Color32::TRANSPARENT;
             ctx.set_style(style);
         });
         
