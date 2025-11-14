@@ -76,6 +76,10 @@ pub struct SelectScene {
     animation_frame: usize,
     animation_timer: f32,
     animation_delay: f32,
+    
+    // 创建角色对话框动画
+    dialog_animation_frame: usize,
+    dialog_animation_timer: f32,
 }
 
 impl SelectScene {
@@ -105,6 +109,9 @@ impl SelectScene {
             animation_frame: 0,
             animation_timer: 0.0,
             animation_delay: 0.25,
+            
+            dialog_animation_frame: 0,
+            dialog_animation_timer: 0.0,
         })
     }
     
@@ -420,6 +427,7 @@ impl SelectScene {
         if self.draw_image_button(ui, ctx, "title", 343, 344, 345,
             egui::pos2(100.0 + x_point * 2.0 - x_point / 2.0 - 50.0, y)) {
             if self.characters.len() < 4 {
+                println!("📝 打开创建角色对话框");
                 self.show_new_character = true;
             } else {
                 self.show_message("提示", "最多只能创建4个角色！");
@@ -560,6 +568,300 @@ impl SelectScene {
                 }
             });
     }
+    
+    /// 【egui 职责】绘制创建角色对话框
+    fn draw_new_character_dialog(&mut self, ctx: &egui::Context) {
+        println!("🎨 绘制创建角色对话框");
+        let screen_w = screen_width() / screen_dpi_scale();
+        let screen_h = screen_height() / screen_dpi_scale();
+        
+        // 对话框尺寸 (Prguse[73])
+        let dialog_w = 656.0;
+        let dialog_h = 537.0;
+        let dialog_x = (screen_w - dialog_w) / 2.0;
+        let dialog_y = (screen_h - dialog_h) / 2.0;
+        
+        // 绘制对话框背景
+        if let Some(ref mut lib) = self.prguse_lib {
+            if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "prguse", 73) {
+                let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("new_char_bg")));
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(dialog_x, dialog_y),
+                    egui::vec2(dialog_w, dialog_h)
+                );
+                painter.image(
+                    texture.id(),
+                    rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        
+        // 绘制标题 Title[20]
+        if let Some(ref mut lib) = self.title_lib {
+            if let Ok(img_info) = lib.get_or_create_texture(20) {
+                if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "title", 20) {
+                    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("new_char_title")));
+                    // 应用ImageInfo偏移
+                    let rect = egui::Rect::from_min_size(
+                        egui::pos2(dialog_x + (dialog_w - img_info.width as f32) / 2.0 + img_info.x as f32, dialog_y + 12.0 + img_info.y as f32),
+                        egui::vec2(img_info.width as f32, img_info.height as f32)
+                    );
+                painter.image(
+                    texture.id(),
+                    rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+            }
+        }
+        
+        // 绘制角色预览动画
+        self.draw_dialog_character_preview(ctx, dialog_x, dialog_y);
+        
+        // 5个职业按钮: 战士/法师/道士/刺客/弓手
+        let class_buttons = [
+            (0, 323.0, 296.0, 2426, 2427), // 战士
+            (1, 373.0, 296.0, 2429, 2430), // 法师
+            (2, 423.0, 296.0, 2432, 2433), // 道士
+            (3, 473.0, 296.0, 2435, 2436), // 刺客
+            (4, 523.0, 296.0, 2438, 2439), // 弓手
+        ];
+        
+        for (class_id, btn_x, btn_y, normal_idx, selected_idx) in class_buttons {
+            let idx = if self.new_char_class == class_id { selected_idx } else { normal_idx };
+            if let Some(ref mut lib) = self.prguse_lib {
+                if let Ok(img_info) = lib.get_or_create_texture(idx) {
+                    if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "prguse", idx) {
+                        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new(format!("class_btn_{}", class_id))));
+                        // 应用ImageInfo的偏移
+                        let rect = egui::Rect::from_min_size(
+                            egui::pos2(dialog_x + btn_x + img_info.x as f32, dialog_y + btn_y + img_info.y as f32),
+                            egui::vec2(img_info.width as f32, img_info.height as f32)
+                        );
+                    painter.image(
+                        texture.id(),
+                        rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                    
+                    // 检测点击
+                    let clicked = ctx.input(|i| {
+                        if i.pointer.any_click() {
+                            if let Some(pos) = i.pointer.interact_pos() {
+                                if rect.contains(pos) {
+                                    return true;
+                                }
+                            }
+                        }
+                        false
+                    });
+                    
+                    if clicked {
+                        self.new_char_class = class_id;
+                    }
+                }
+                }
+            }
+        }
+        
+        // 2个性别按钮: 男/女
+        let gender_buttons = [
+            (0, 323.0, 343.0, 2420, 2421), // 男
+            (1, 373.0, 343.0, 2423, 2424), // 女
+        ];
+        
+        for (gender_id, btn_x, btn_y, normal_idx, selected_idx) in gender_buttons {
+            let idx = if self.new_char_gender == gender_id { selected_idx } else { normal_idx };
+            if let Some(ref mut lib) = self.prguse_lib {
+                if let Ok(img_info) = lib.get_or_create_texture(idx) {
+                    if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "prguse", idx) {
+                        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new(format!("gender_btn_{}", gender_id))));
+                        // 应用ImageInfo的偏移
+                        let rect = egui::Rect::from_min_size(
+                            egui::pos2(dialog_x + btn_x + img_info.x as f32, dialog_y + btn_y + img_info.y as f32),
+                            egui::vec2(img_info.width as f32, img_info.height as f32)
+                        );
+                    painter.image(
+                        texture.id(),
+                        rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                    
+                    // 检测点击
+                    let clicked = ctx.input(|i| {
+                        if i.pointer.any_click() {
+                            if let Some(pos) = i.pointer.interact_pos() {
+                                if rect.contains(pos) {
+                                    return true;
+                                }
+                            }
+                        }
+                        false
+                    });
+                    
+                    if clicked {
+                        self.new_char_gender = gender_id;
+                    }
+                }
+                }
+            }
+        }
+        
+        // 输入框区域
+        egui::Area::new(egui::Id::new("char_name_input"))
+            .fixed_pos(egui::pos2(dialog_x + 325.0, dialog_y + 265.0))
+            .show(ctx, |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.new_char_name)
+                        .desired_width(240.0)
+                        .font(egui::TextStyle::Body)
+                );
+            });
+        
+        // OK 按钮 Title[360]
+        egui::Area::new(egui::Id::new("ok_button"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(ctx, |ui| {
+                if self.draw_image_button(ui, ctx, "title", 360, 361, 362, egui::pos2(dialog_x + 160.0, dialog_y + 425.0)) {
+                    self.handle_create_character();
+                }
+            });
+        
+        // Cancel 按钮 Title[280]
+        egui::Area::new(egui::Id::new("cancel_button"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(ctx, |ui| {
+                if self.draw_image_button(ui, ctx, "title", 280, 281, 282, egui::pos2(dialog_x + 425.0, dialog_y + 425.0)) {
+                    self.new_char_name.clear();
+                    self.new_char_class = 0;
+                    self.new_char_gender = 0;
+                    self.show_new_character = false;
+                }
+            });
+    }
+    
+    /// 绘制对话框中的角色预览
+    fn draw_dialog_character_preview(&mut self, ctx: &egui::Context, dialog_x: f32, dialog_y: f32) {
+        // 计算角色动画索引
+        let base_index = 20 + (self.new_char_class as usize * 20) + (self.new_char_gender as usize * 280);
+        let frame_index = base_index + self.dialog_animation_frame;
+        
+        if let Some(ref mut lib) = self.chrsel_lib {
+            if let Ok(info) = lib.get_or_create_texture(frame_index) {
+                // 转换为 egui 纹理
+                let cache_key = format!("chrsel_{}", frame_index);
+                if !self.texture_cache.contains_key(&cache_key) {
+                    if let Some(rgba_data) = info.get_bgra_data() {
+                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                            [info.width as usize, info.height as usize],
+                            rgba_data
+                        );
+                        let handle = ctx.load_texture(&cache_key, color_image, egui::TextureOptions::default());
+                        self.texture_cache.insert(cache_key.clone(), handle);
+                    }
+                }
+                
+                if let Some(egui_texture) = self.texture_cache.get(&cache_key) {
+                    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("char_preview")));
+                    let rect = egui::Rect::from_min_size(
+                        egui::pos2(dialog_x + 176.0 - info.x as f32, dialog_y + 270.0 - info.y as f32),
+                        egui::vec2(info.width as f32, info.height as f32)
+                    );
+                    painter.image(
+                        egui_texture.id(),
+                        rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                    
+                    // 法师光效
+                    if self.new_char_class == 1 {
+                        let effect_index = frame_index + 560;
+                        if let Ok(effect_info) = lib.get_or_create_texture(effect_index) {
+                            let effect_key = format!("chrsel_{}", effect_index);
+                            if !self.texture_cache.contains_key(&effect_key) {
+                                if let Some(rgba_data) = effect_info.get_bgra_data() {
+                                    let effect_color = egui::ColorImage::from_rgba_unmultiplied(
+                                        [effect_info.width as usize, effect_info.height as usize],
+                                        rgba_data
+                                    );
+                                    let effect_handle = ctx.load_texture(&effect_key, effect_color, egui::TextureOptions::default());
+                                    self.texture_cache.insert(effect_key.clone(), effect_handle);
+                                }
+                            }
+                            
+                            if let Some(effect_tex) = self.texture_cache.get(&effect_key) {
+                                let effect_rect = egui::Rect::from_min_size(
+                                    egui::pos2(dialog_x + 176.0 - effect_info.x as f32, dialog_y + 270.0 - effect_info.y as f32),
+                                    egui::vec2(effect_info.width as f32, effect_info.height as f32)
+                                );
+                                painter.image(
+                                    effect_tex.id(),
+                                    effect_rect,
+                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /// 处理创建角色
+    fn handle_create_character(&mut self) {
+        if self.new_char_name.trim().is_empty() {
+            self.show_message("错误", "请输入角色名称！");
+            return;
+        }
+        
+        if self.new_char_name.chars().count() < 2 {
+            self.show_message("错误", "角色名称至少需2个字符！");
+            return;
+        }
+        
+        if self.new_char_name.chars().count() > 16 {
+            self.show_message("错误", "角色名称最多16个字符！");
+            return;
+        }
+        
+        // 创建新角色
+        let new_char = CharacterInfo {
+            index: self.characters.len() as i32,
+            name: self.new_char_name.clone(),
+            level: 1,
+            class: self.new_char_class,
+            gender: self.new_char_gender,
+            last_access: "刚刚".to_string(),
+        };
+        
+        self.characters.push(new_char);
+        
+        let class_name = match self.new_char_class {
+            0 => "战士",
+            1 => "法师",
+            2 => "道士",
+            3 => "刺客",
+            4 => "弓手",
+            _ => "未知",
+        };
+        let gender_name = if self.new_char_gender == 0 { "男" } else { "女" };
+        
+        println!("🎭 创建角色成功: {} ({}{}) Lv.1", self.new_char_name, gender_name, class_name);
+        
+        // 清空表单
+        self.new_char_name.clear();
+        self.new_char_class = 0;
+        self.new_char_gender = 0;
+        self.show_new_character = false;
+        self.dialog_animation_frame = 0;
+    }
 }
 
 impl Scene for SelectScene {
@@ -682,6 +984,15 @@ impl Scene for SelectScene {
             self.animation_frame = (self.animation_frame + 1) % 16;
         }
         
+        // 更新对话框角色动画
+        if self.show_new_character {
+            self.dialog_animation_timer += dt;
+            if self.dialog_animation_timer >= 0.1 {
+                self.dialog_animation_timer = 0.0;
+                self.dialog_animation_frame = (self.dialog_animation_frame + 1) % 16;
+            }
+        }
+        
         Ok(SceneTransition::None)
     }
     
@@ -707,6 +1018,11 @@ impl Scene for SelectScene {
             // 消息框
             if self.show_message_box {
                 self.draw_message_box(ctx);
+            }
+            
+            // 创建角色对话框
+            if self.show_new_character {
+                self.draw_new_character_dialog(ctx);
             }
         });
         
