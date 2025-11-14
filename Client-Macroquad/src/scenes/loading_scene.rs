@@ -1,7 +1,7 @@
 // LoadingScene - 加载场景
 
 use crate::game::GameResult;
-use crate::scenes::{SceneHandler, SceneTransition};
+use crate::scenes::{Scene, SceneTransition};
 use macroquad::prelude::*;
 
 pub struct LoadingScene;
@@ -10,7 +10,7 @@ impl LoadingScene {
     pub fn new() -> Self { Self }
 }
 
-impl SceneHandler for LoadingScene {
+impl Scene for LoadingScene {
     fn name(&self) -> &str { "加载中" }
     fn on_enter(&mut self) -> GameResult { Ok(()) }
     fn on_exit(&mut self) -> GameResult { Ok(()) }

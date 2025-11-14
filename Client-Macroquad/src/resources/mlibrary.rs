@@ -640,7 +640,6 @@ impl MLibrary {
     /// - ✅ 自动缓存纹理，重复调用零开销
     pub fn get_or_create_texture(
         &mut self,
-        
         index: usize,
     ) -> io::Result<&ImageInfo> {
         // 检查索引范围

@@ -9,6 +9,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use crate::resources::mlibrary::ImageInfo;
+use egui_macroquad::egui;
+
 use super::mlibrary::MLibrary;
 
 // 字符串填充辅助 trait
@@ -29,7 +32,7 @@ impl StringPadding for String {
 /// 库名称枚举
 ///
 /// 对应 C# Libraries 类中的所有静态字段
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum LibraryName {
     // UI 相关
     ChrSel,      // 角色选择界面
@@ -308,6 +311,9 @@ pub struct Libraries {
     /// 每个数组元素可能为 None (文件不存在)
     array_libraries: HashMap<LibraryArray, Vec<Option<Rc<RefCell<MLibrary>>>>>,
 
+    /// egui 纹理缓存（全局）
+    texture_cache: HashMap<String, egui::TextureHandle>,
+
     /// 数据根目录
     data_path: String,
 
@@ -323,6 +329,7 @@ impl Libraries {
         Self {
             libraries: HashMap::new(),
             array_libraries: HashMap::new(),
+            texture_cache: HashMap::new(),
             data_path: "Data".to_string(),
             loaded: false,
             count: 0,
@@ -454,6 +461,62 @@ impl Libraries {
             .get(&array_type)
             .map(|arr| arr.iter().filter_map(|lib| lib.clone()).collect())
             .unwrap_or_default()
+    }
+
+    // ===== 全局 egui 纹理缓存管理 =====
+
+    /// 获取或创建 egui 纹理
+    pub fn get_or_create_egui_texture(
+        &mut self,
+        ctx: &egui::Context,
+        lib: &mut MLibrary,
+        lib_name: &str,
+        index: usize,
+    ) -> Option<egui::TextureHandle> {
+        let key = format!("{}_{}", lib_name, index);
+
+        // 检查缓存
+        if let Some(handle) = self.texture_cache.get(&key) {
+            return Some(handle.clone());
+        }
+
+        // 从库中加载纹理
+        if let Ok(info) = lib.get_or_create_texture(index) {
+            if let Some(ref texture) = info.image {
+                // 直接从 macroquad 纹理创建 egui 纹理
+                let image_data = texture.get_texture_data();
+                let width = texture.width() as usize;
+                let height = texture.height() as usize;
+
+                let mut pixels = Vec::with_capacity(width * height);
+                for y in 0..height {
+                    for x in 0..width {
+                        let idx = (y * width + x) * 4;
+                        let r = image_data.bytes[idx];
+                        let g = image_data.bytes[idx + 1];
+                        let b = image_data.bytes[idx + 2];
+                        let a = image_data.bytes[idx + 3];
+                        pixels.push(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
+                    }
+                }
+
+                let color_image = egui::ColorImage {
+                    size: [width, height],
+                    pixels,
+                };
+
+                let handle = ctx.load_texture(&key, color_image, Default::default());
+                self.texture_cache.insert(key, handle.clone());
+                return Some(handle);
+            }
+        }
+
+        None
+    }
+
+    /// 清理 egui 纹理缓存
+    pub fn clear_texture_cache(&mut self) {
+        self.texture_cache.clear();
     }
 
     /// 加载单个库
@@ -1063,6 +1126,51 @@ pub fn get_library_from_array(
     LIBRARIES.with(|libs| libs.borrow().get_from_array(array_type, index))
 }
 
+pub fn get_or_create_texture(lib_name: LibraryName, index: usize) -> Option<ImageInfo> {
+    LIBRARIES.with(|libs| {
+        let mut libs = libs.borrow_mut();
+        // 获取库
+        let lib_rc = libs.get_or_load(lib_name.clone())?;
+        let mut lib = lib_rc.borrow_mut();
+        lib.get_or_create_texture(index).ok().cloned()
+    })
+}
+
+pub fn get_size(lib_name: LibraryName, index: usize) -> Option<(i16, i16)> {
+    LIBRARIES.with(|libs| {
+        let libs = libs.borrow();
+        // 获取库
+        let lib_rc = libs.get(lib_name)?;
+        let mut lib = lib_rc.borrow_mut();
+        lib.get_size(index).ok()
+    })
+}
+
+/// 便捷函数: 获取或创建 egui 纹理（使用全局缓存）
+///
+/// 这是推荐的方式，避免每个组件都维护自己的纹理缓存
+pub fn get_or_create_egui_texture(
+    ctx: &egui::Context,
+    lib_name: LibraryName,
+    index: usize,
+) -> Option<egui::TextureHandle> {
+    LIBRARIES.with(|libs| {
+        let mut libs = libs.borrow_mut();
+
+        // 获取库
+        let lib_rc = libs.get_or_load(lib_name.clone())?;
+        let mut lib = lib_rc.borrow_mut();
+
+        // 使用库名称作为缓存键
+        libs.get_or_create_egui_texture(ctx, &mut *lib, &lib_name.to_string().to_lowercase(), index)
+    })
+}
+
+/// 便捷函数: 清理全局纹理缓存
+pub fn clear_egui_texture_cache() {
+    LIBRARIES.with(|libs| libs.borrow_mut().clear_texture_cache())
+}
+
 /// 便捷函数: 获取 MapLibs[index]
 ///
 /// 这是最常用的访问方式，专门为地图渲染优化
@@ -1083,49 +1191,48 @@ pub fn initialize_all_libraries(data_path: &str) -> std::io::Result<()> {
         let mut libs = libs.borrow_mut();
         libs.set_data_path(data_path);
 
-    tracing::info!("=== 开始初始化所有库 ===");
+        tracing::info!("=== 开始初始化所有库 ===");
+        load_core_libraries()?;
+        // 1. 初始化 MapLibs[0-399]
+        libs.init_map_libraries()?;
+        // // 2. 加载核心 UI 库 (同步)
+        // let core_libs = [
+        //     LibraryName::ChrSel,
+        //     LibraryName::Prguse,
+        //     LibraryName::Prguse2,
+        //     LibraryName::Prguse3,
+        //     LibraryName::Title,
+        // ];
 
-    // 1. 初始化 MapLibs[0-399]
-    libs.init_map_libraries()?;
+        // for lib_name in core_libs {
+        //     if let Err(e) = libs.load(lib_name.clone()) {
+        //         tracing::warn!("核心库 {} 加载失败: {}", lib_name, e);
+        //     }
+        // }
 
-    // 2. 加载核心 UI 库 (同步)
-    let core_libs = [
-        LibraryName::ChrSel,
-        LibraryName::Prguse,
-        LibraryName::Prguse2,
-        LibraryName::Prguse3,
-        LibraryName::Title,
-    ];
-
-    for lib_name in core_libs {
-        if let Err(e) = libs.load(lib_name.clone()) {
-            tracing::warn!("核心库 {} 加载失败: {}", lib_name, e);
+        // 3. 初始化游戏内容数组库 (异步/延迟加载)
+        // 这些库在后台加载，不会阻塞主线程
+        if let Err(e) = libs.init_game_libraries() {
+            tracing::warn!("游戏内容库初始化部分失败: {}", e);
         }
-    }
 
-    // 3. 初始化游戏内容数组库 (异步/延迟加载)
-    // 这些库在后台加载，不会阻塞主线程
-    if let Err(e) = libs.init_game_libraries() {
-        tracing::warn!("游戏内容库初始化部分失败: {}", e);
-    }
-
-    tracing::info!("=== 库初始化完成 ===");
-    tracing::info!(
-        "  - MapLibs: {}/{} 个已加载",
-        libs.get_array_loaded_count(LibraryArray::MapLibs),
-        libs.get_array_size(LibraryArray::MapLibs)
-    );
-    tracing::info!(
-        "  - Monsters: {}/{} 个已加载",
-        libs.get_array_loaded_count(LibraryArray::Monsters),
-        libs.get_array_size(LibraryArray::Monsters)
-    );
-    tracing::info!(
-        "  - NPCs: {}/{} 个已加载",
-        libs.get_array_loaded_count(LibraryArray::NPCs),
-        libs.get_array_size(LibraryArray::NPCs)
-    );
-    tracing::info!("  - 单体库: {} 个已加载", libs.loaded_count());
+        tracing::info!("=== 库初始化完成 ===");
+        tracing::info!(
+            "  - MapLibs: {}/{} 个已加载",
+            libs.get_array_loaded_count(LibraryArray::MapLibs),
+            libs.get_array_size(LibraryArray::MapLibs)
+        );
+        tracing::info!(
+            "  - Monsters: {}/{} 个已加载",
+            libs.get_array_loaded_count(LibraryArray::Monsters),
+            libs.get_array_size(LibraryArray::Monsters)
+        );
+        tracing::info!(
+            "  - NPCs: {}/{} 个已加载",
+            libs.get_array_loaded_count(LibraryArray::NPCs),
+            libs.get_array_size(LibraryArray::NPCs)
+        );
+        tracing::info!("  - 单体库: {} 个已加载", libs.loaded_count());
 
         Ok(())
     })
@@ -1175,49 +1282,49 @@ pub fn load_core_libraries() -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
         let mut libs = libs.borrow_mut();
 
-    // 计算需要加载的库数量
-    let core_libs = vec![
-        LibraryName::ChrSel, // 角色选择/登录背景
-        LibraryName::Title,  // 标题和按钮
-        LibraryName::Prguse,
-        LibraryName::Prguse2,
-        LibraryName::Magic,
-        LibraryName::Magic2,
-        LibraryName::Weather,
-        LibraryName::Effect,
-        LibraryName::Items,
-        LibraryName::MagIcon,
-        LibraryName::BuffIcon,
-    ];
+        // 计算需要加载的库数量
+        let core_libs = vec![
+            LibraryName::ChrSel, // 角色选择/登录背景
+            LibraryName::Title,  // 标题和按钮
+            LibraryName::Prguse,
+            LibraryName::Prguse2,
+            LibraryName::Magic,
+            LibraryName::Magic2,
+            LibraryName::Weather,
+            LibraryName::Effect,
+            LibraryName::Items,
+            LibraryName::MagIcon,
+            LibraryName::BuffIcon,
+        ];
 
-    libs.count = core_libs.len();
-    libs.progress = 0;
+        libs.count = core_libs.len();
+        libs.progress = 0;
 
-    tracing::info!("开始加载核心库 ({} 个)...", libs.count);
+        tracing::info!("开始加载核心库 ({} 个)...", libs.count);
 
-    let mut errors = Vec::new();
+        let mut errors = Vec::new();
 
-    for lib_name in core_libs {
-        if let Err(e) = libs.load(lib_name.clone()) {
-            errors.push((lib_name, e));
+        for lib_name in core_libs {
+            if let Err(e) = libs.load(lib_name.clone()) {
+                errors.push((lib_name, e));
+            }
         }
-    }
 
-    libs.loaded = errors.is_empty();
+        libs.loaded = errors.is_empty();
 
-    if libs.loaded {
-        tracing::info!("✓ 所有核心库加载完成 ({}/{})", libs.progress, libs.count);
-        Ok(())
-    } else {
-        tracing::error!("✗ 部分库加载失败:");
-        for (name, err) in &errors {
-            tracing::error!("  - {}: {}", name, err);
+        if libs.loaded {
+            tracing::info!("✓ 所有核心库加载完成 ({}/{})", libs.progress, libs.count);
+            Ok(())
+        } else {
+            tracing::error!("✗ 部分库加载失败:");
+            for (name, err) in &errors {
+                tracing::error!("  - {}: {}", name, err);
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{} 个库加载失败", errors.len()),
+            ))
         }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("{} 个库加载失败", errors.len()),
-        ))
-    }
     })
 }
 
@@ -1228,69 +1335,69 @@ pub fn load_all_libraries() -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
         let mut libs = libs.borrow_mut();
 
-    let all_libs = vec![
-        // UI
-        LibraryName::ChrSel,
-        LibraryName::Prguse,
-        LibraryName::Prguse2,
-        LibraryName::Prguse3,
-        LibraryName::BuffIcon,
-        LibraryName::Help,
-        LibraryName::MiniMap,
-        LibraryName::MapLinkIcon,
-        LibraryName::Title,
-        LibraryName::Background,
-        LibraryName::Dragon,
-        // 魔法
-        LibraryName::MagIcon,
-        LibraryName::MagIcon2,
-        LibraryName::Magic,
-        LibraryName::Magic2,
-        LibraryName::Magic3,
-        LibraryName::Effect,
-        LibraryName::MagicC,
-        LibraryName::GuildSkill,
-        // 天气/粒子
-        LibraryName::Weather,
-        // 物品
-        LibraryName::Items,
-        LibraryName::StateItems,
-        LibraryName::FloorItems,
-        // 装饰
-        LibraryName::Deco,
-    ];
+        let all_libs = vec![
+            // UI
+            LibraryName::ChrSel,
+            LibraryName::Prguse,
+            LibraryName::Prguse2,
+            LibraryName::Prguse3,
+            LibraryName::BuffIcon,
+            LibraryName::Help,
+            LibraryName::MiniMap,
+            LibraryName::MapLinkIcon,
+            LibraryName::Title,
+            LibraryName::Background,
+            LibraryName::Dragon,
+            // 魔法
+            LibraryName::MagIcon,
+            LibraryName::MagIcon2,
+            LibraryName::Magic,
+            LibraryName::Magic2,
+            LibraryName::Magic3,
+            LibraryName::Effect,
+            LibraryName::MagicC,
+            LibraryName::GuildSkill,
+            // 天气/粒子
+            LibraryName::Weather,
+            // 物品
+            LibraryName::Items,
+            LibraryName::StateItems,
+            LibraryName::FloorItems,
+            // 装饰
+            LibraryName::Deco,
+        ];
 
-    libs.count = all_libs.len();
-    libs.progress = 0;
+        libs.count = all_libs.len();
+        libs.progress = 0;
 
-    tracing::info!("开始加载所有库 ({} 个)...", libs.count);
+        tracing::info!("开始加载所有库 ({} 个)...", libs.count);
 
-    let mut errors = Vec::new();
+        let mut errors = Vec::new();
 
-    for lib_name in all_libs {
-        if let Err(e) = libs.load(lib_name.clone()) {
-            errors.push((lib_name, e));
-            // 继续加载其他库，不中断
+        for lib_name in all_libs {
+            if let Err(e) = libs.load(lib_name.clone()) {
+                errors.push((lib_name, e));
+                // 继续加载其他库，不中断
+            }
         }
-    }
 
-    libs.loaded = !libs.libraries.is_empty();
+        libs.loaded = !libs.libraries.is_empty();
 
-    tracing::info!(
-        "库加载完成: 成功 {}/{}, 失败 {}",
-        libs.progress - errors.len(),
-        libs.count,
-        errors.len()
-    );
+        tracing::info!(
+            "库加载完成: 成功 {}/{}, 失败 {}",
+            libs.progress - errors.len(),
+            libs.count,
+            errors.len()
+        );
 
-    if !errors.is_empty() {
-        tracing::warn!("以下库加载失败（可能不影响功能）:");
-        for (name, err) in &errors {
-            tracing::warn!("  - {}: {}", name, err);
+        if !errors.is_empty() {
+            tracing::warn!("以下库加载失败（可能不影响功能）:");
+            for (name, err) in &errors {
+                tracing::warn!("  - {}: {}", name, err);
+            }
         }
-    }
 
-    Ok(())
+        Ok(())
     })
 }
 
@@ -1309,4 +1416,3 @@ pub fn load_all_libraries() -> std::io::Result<()> {
 pub fn get_all_map_libraries() -> Vec<Rc<RefCell<MLibrary>>> {
     LIBRARIES.with(|libs| libs.borrow().get_all_from_array(LibraryArray::MapLibs))
 }
-

@@ -113,7 +113,7 @@ pub struct GameContext {
     pub world: hecs::World,                     // ECS 世界
     pub network: crate::components::network::NetworkContext,  // 网络服务
     pub settings: crate::components::settings::Settings,      // 设置
-    pub resources: crate::resources::ResourceManager,         // 资源管理
+   
     pub events: crate::event_bus::EventBus,                   // 事件总线
     pub delta_time: f32,                        // 帧时间
     pub start_time: std::time::Instant,         // 启动时间
@@ -125,7 +125,7 @@ impl GameContext {
             world: hecs::World::new(),
             network: crate::components::network::NetworkContext::new(),
             settings: crate::components::settings::Settings::default(),
-            resources: crate::resources::ResourceManager::new(),
+           
             events: crate::event_bus::EventBus::new(),
             delta_time: 0.0,
             start_time: std::time::Instant::now(),
@@ -165,15 +165,6 @@ impl GameContext {
         &mut self.network
     }
     
-    /// 获取资源管理器（引用）
-    pub fn resources(&self) -> &crate::resources::ResourceManager {
-        &self.resources
-    }
-    
-    /// 获取可变资源管理器
-    pub fn resources_mut(&mut self) -> &mut crate::resources::ResourceManager {
-        &mut self.resources
-    }
     
     /// 获取设置（引用）
     pub fn settings(&self) -> &crate::components::settings::Settings {
@@ -203,7 +194,7 @@ impl GameContext {
 /// 游戏主状态
 pub struct GameState {
     /// 当前场景
-    current_scene: Scene,
+    current_scene: SceneKind,
 }
 
 impl GameState {
@@ -215,7 +206,7 @@ impl GameState {
             .map_err(|e| GameError::ResourceLoadError(format!("字体加载失败: {}", e)))?;
         
         // 创建初始场景（登录）
-        let mut initial_scene = Scene::Login(LoginScene::new());
+        let mut initial_scene = SceneKind::Login(LoginScene::new());
         initial_scene.on_enter()?;
         
         Ok(Self {
@@ -267,10 +258,10 @@ impl GameState {
         
         // 创建新场景
         let mut new_scene = match transition {
-            SceneTransition::Login => Scene::Login(LoginScene::new()),
-            SceneTransition::CharacterSelect => Scene::CharacterSelect(CharacterSelectScene::new()),
-            SceneTransition::Game => Scene::Game(GameScene::new()),
-            SceneTransition::Loading => Scene::Loading(LoadingScene::new()),
+            SceneTransition::Login => SceneKind::Login(LoginScene::new()),
+            SceneTransition::CharacterSelect => SceneKind::CharacterSelect(SelectScene::new(vec![])?),
+            SceneTransition::Game => SceneKind::Game(GameScene::new()),
+            SceneTransition::Loading => SceneKind::Loading(LoadingScene::new()),
             SceneTransition::None | SceneTransition::Exit => {
                 return Ok(());
             }

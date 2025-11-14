@@ -1,7 +1,7 @@
 // GameScene - 游戏主场景
 
 use crate::game::GameResult;
-use crate::scenes::{SceneHandler, SceneTransition};
+use crate::scenes::{Scene, SceneTransition};
 use macroquad::prelude::*;
 
 pub struct GameScene;
@@ -10,7 +10,7 @@ impl GameScene {
     pub fn new() -> Self { Self }
 }
 
-impl SceneHandler for GameScene {
+impl Scene for GameScene {
     fn name(&self) -> &str { "游戏场景" }
     
     fn on_enter(&mut self) -> GameResult {

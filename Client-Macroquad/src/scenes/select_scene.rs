@@ -28,26 +28,11 @@
 
 use crate::game::GameResult;
 use crate::resources::mlibrary::MLibrary;
+use crate::scenes::{Scene, SceneTransition};
 use macroquad::prelude::*;
 use egui_macroquad::egui;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-/// 场景切换
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SceneTransition {
-    None,
-    Login,
-    Game,
-}
-
-/// 场景 trait
-pub trait Scene {
-    fn on_enter(&mut self) -> GameResult;
-    fn on_exit(&mut self) -> GameResult;
-    fn update(&mut self, dt: f32) -> GameResult<SceneTransition>;
-    fn render(&mut self) -> GameResult;
-}
 
 /// 角色信息
 #[derive(Debug, Clone)]
@@ -572,6 +557,10 @@ impl SelectScene {
 }
 
 impl Scene for SelectScene {
+    fn name(&self) -> &str {
+        "CharacterSelect"
+    }
+
     fn on_enter(&mut self) -> GameResult {
         // 使用 egui_macroquad::cfg() 配置字体和样式(一次性设置)
         egui_macroquad::cfg(|ctx| {
@@ -693,6 +682,11 @@ impl Scene for SelectScene {
         
         egui_macroquad::draw();
         
+        Ok(())
+    }
+
+    fn handle_input(&mut self) -> GameResult {
+        // egui 已经在 render() 中处理了所有输入
         Ok(())
     }
 }

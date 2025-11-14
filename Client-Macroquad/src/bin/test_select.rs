@@ -1,7 +1,8 @@
 // 角色选择场景测试程序
 
 use client_macroquad::game::GameResult;
-use client_macroquad::scenes::select_scene::{SelectScene, CharacterInfo, Scene, SceneTransition};
+use client_macroquad::scenes::select_scene::{SelectScene, CharacterInfo};
+use client_macroquad::scenes::{Scene, SceneTransition};
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {

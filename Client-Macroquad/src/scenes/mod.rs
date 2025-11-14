@@ -2,14 +2,13 @@
 // Scene System - 游戏场景管理系统（enum_dispatch 静态分发）
 // ============================================================================
 
+pub mod dialogs;  // 公共对话框组件
 pub mod login_scene;
-pub mod character_select_scene;
 pub mod select_scene;  // 新的角色选择场景
 pub mod game_scene;
 pub mod loading_scene;
 
 pub use login_scene::LoginScene;
-pub use character_select_scene::CharacterSelectScene;
 pub use select_scene::SelectScene;  // 新的角色选择场景
 pub use game_scene::GameScene;
 pub use loading_scene::LoadingScene;
@@ -30,7 +29,7 @@ pub enum SceneTransition {
 
 /// 场景 trait（由 enum_dispatch 自动分发）
 #[enum_dispatch]
-pub trait SceneHandler {
+pub trait Scene {
     fn name(&self) -> &str;
     fn on_enter(&mut self) -> GameResult;
     fn on_exit(&mut self) -> GameResult;
@@ -40,10 +39,10 @@ pub trait SceneHandler {
 }
 
 /// 场景枚举（enum_dispatch 自动生成分发代码）
-#[enum_dispatch(SceneHandler)]
-pub enum Scene {
+#[enum_dispatch(Scene)]
+pub enum SceneKind {
     Login(LoginScene),
-    CharacterSelect(CharacterSelectScene),
+    CharacterSelect(SelectScene),
     Game(GameScene),
     Loading(LoadingScene),
 }
