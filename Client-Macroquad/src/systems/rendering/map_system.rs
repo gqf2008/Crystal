@@ -14,7 +14,7 @@
 
 use crate::components::{AnimatedTile, MapTile, RenderConfig};
 use crate::systems::RenderSystem;
-use crate::compat::{GameContext, GameResult};
+use crate::game::{GameContext, GameResult};
 
 /// 地图渲染系统 - 混合系统
 ///
@@ -110,7 +110,7 @@ impl RenderSystem for MapRenderSystem {
     fn draw(
         &mut self,
         _world: &hecs::World,
-    ) -> crate::compat::GameResult {
+    ) -> crate::game::GameResult {
         // TODO: 重写为 macroquad API
         // 原实现有 470+ 行，需要重写:
         // 1. 获取相机和渲染配置

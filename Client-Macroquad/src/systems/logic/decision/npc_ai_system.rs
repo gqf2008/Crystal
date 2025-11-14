@@ -14,10 +14,10 @@
 //
 // ============================================================================
 
-use crate::compat::GameContext;
+use crate::game::GameContext;
 use crate::systems::LogicSystem;
 use crate::components::{Position, NPC, AIState, LocalPlayer};
-use crate::compat::GameResult;
+use crate::game::GameResult;
 use hecs::World;
 
 pub struct NpcAISystem;

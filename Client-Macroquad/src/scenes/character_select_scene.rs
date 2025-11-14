@@ -1,6 +1,6 @@
 // CharacterSelectScene - 角色选择
 
-use crate::compat::GameResult;
+use crate::game::GameResult;
 use crate::scenes::{SceneHandler, SceneTransition};
 use macroquad::prelude::*;
 

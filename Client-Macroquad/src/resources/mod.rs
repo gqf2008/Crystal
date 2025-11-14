@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 /// 获取地图库 (兼容函数)
-pub fn get_map_library(index: usize) -> Option<Rc<RefCell<MLibrary>>> {
+pub fn get_map_library(_index: usize) -> Option<Rc<RefCell<MLibrary>>> {
     // TODO: 实现地图库获取逻辑
     // 暂时返回 None,等待实际实现
     None

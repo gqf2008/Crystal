@@ -17,8 +17,9 @@ use macroquad::prelude::*;
 use macroquad::text::draw_text_ex;
 use macroquad_profiler::ProfilerParams;
 
+// 引用库模块
 use client_macroquad::resources::{init_map_libraries, MapReader};
-use client_macroquad::renderer::MeshMapRenderer;
+use client_macroquad::map_renderer::MeshMapRenderer;
 
 // ============================================================================
 // 常量配置
@@ -1118,3 +1119,4 @@ async fn main() {
         next_frame().await;
     }
 }
+

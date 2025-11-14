@@ -16,8 +16,8 @@
 
 use crate::components::{Camera, CameraMode, LocalPlayer, Position};
 use crate::systems::LogicSystem;
-use crate::compat::GameContext;
-use crate::compat::GameResult;
+use crate::game::GameContext;
+use crate::game::GameResult;
 
 /// 摄像机跟随系统
 #[derive(ecs_macros::LogicSystem)]

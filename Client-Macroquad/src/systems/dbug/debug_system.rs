@@ -222,7 +222,7 @@ impl RenderSystem for DebugSystem {
     fn draw(
         &mut self,
         _world: &hecs::World,
-    ) -> crate::compat::GameResult {
+    ) -> crate::game::GameResult {
         // TODO: 重写为 macroquad API
         // 原实现包括:
         // 1. FPS 显示

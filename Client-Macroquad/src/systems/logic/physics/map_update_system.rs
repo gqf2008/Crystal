@@ -5,9 +5,8 @@
 //! - 执行地图加载和世界重置
 //! - 重新创建所有必要的实体（相机、玩家、配置等）
 
-use crate::compat::{GameResult, Coord, MapUtils, MapLoader};
+use crate::game::{GameResult, Coord, MapUtils, MapLoader};
 use crate::resources::MapReader;
-use hecs::World;
 use rfd::FileDialog;
 use std::time::Instant;
 
@@ -16,7 +15,7 @@ use crate::components::{
     NetworkSync, Path, Player, PlayerAction, PlayerAppearance, PlayerInput, Position, Prediction,
     RenderConfig, TimeTracker, VisibleArea,
 };
-use crate::compat::GameContext;
+use crate::game::GameContext;
 // use crate::objects::MapReader;  // TODO: 实现 MapReader
 use mir2_shared::enums::{MirClass, MirDirection, MirGender};
 
@@ -45,7 +44,7 @@ impl MapUpdateSystem {
     /// 内部更新逻辑
     ///
     /// 检查 MapSwitchRequest 组件，如果存在则执行地图切换
-    fn do_update(ctx: &mut GameContext) -> crate::compat::GameResult {
+    fn do_update(ctx: &mut GameContext) -> crate::game::GameResult {
         // 查询 MapSwitchRequest 组件
         let map_path = {
             let mut query = ctx.world.query::<&MapSwitchRequest>();

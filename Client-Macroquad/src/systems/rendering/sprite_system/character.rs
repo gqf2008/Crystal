@@ -25,7 +25,7 @@
 
 use super::SpriteRenderSystem;
 use crate::components::{AnimationFrame, Player, PlayerAppearance, Position};
-use crate::compat::GameResult;
+use crate::game::GameResult;
 
 /// 精灵渲染系统
 

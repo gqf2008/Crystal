@@ -22,14 +22,14 @@
 // ============================================================================
 
 use hecs::World;
-use crate::compat::GameContext;
+use crate::game::GameContext;
 use crate::components::{
     LocalPlayer, Position, Health, Monster, NetworkSync, CombatStats, NetworkObjectType
 };
 use crate::network::handlers::NetworkEvent as NetworkCommand;
 use crossbeam_channel::Sender;
 use mir2_shared::enums::MirDirection;
-use crate::compat::GameResult;
+use crate::game::GameResult;
 use super::super::super::LogicSystem;
 
 /// 伤害类型
@@ -207,7 +207,7 @@ impl CombatSystem {
         target_level: u16,
     ) -> CombatResult {
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         
         // 1. 基础伤害 = 随机(最小魔攻, 最大魔攻) + 技能威力
         let base_damage = rng.random_range(attacker_magic.0..=attacker_magic.1) + spell_power;

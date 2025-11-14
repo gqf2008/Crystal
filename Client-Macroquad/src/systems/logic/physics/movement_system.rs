@@ -16,8 +16,8 @@
 //
 // ============================================================================
 
-use crate::compat::GameResult;
-use crate::compat::GameContext;
+use crate::game::GameResult;
+use crate::game::GameContext;
 use crate::components::{Player, Position, movement::{MovementVelocity, Path}};
 use crate::systems::LogicSystem;
 use mir2_shared::enums::MirDirection;

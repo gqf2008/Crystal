@@ -21,7 +21,7 @@
 //
 // ============================================================================
 
-use crate::compat::{GameResult, GameContext, Coord, PathFinder};
+use crate::game::{GameResult, GameContext, Coord, PathFinder};
 use crate::{
     components::{
         PlayerInput, Player, Position, Path, LocalPlayer, MapData, MovementVelocity,

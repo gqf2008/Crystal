@@ -23,7 +23,7 @@
 //
 // ============================================================================
 
-use crate::compat::{GameResult, GameContext};
+use crate::game::{GameResult, GameContext};
 use std::time::Instant;
 use crate::{
     components::{

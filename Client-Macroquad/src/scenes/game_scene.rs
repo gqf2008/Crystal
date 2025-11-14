@@ -1,6 +1,6 @@
 // GameScene - 游戏主场景
 
-use crate::compat::GameResult;
+use crate::game::GameResult;
 use crate::scenes::{SceneHandler, SceneTransition};
 use macroquad::prelude::*;
 

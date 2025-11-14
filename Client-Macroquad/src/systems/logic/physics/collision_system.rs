@@ -15,8 +15,8 @@
 //
 // ============================================================================
 
-use crate::compat::GameResult;
-use crate::compat::GameContext;
+use crate::game::GameResult;
+use crate::game::GameContext;
 use crate::components::{Position, movement::MovementVelocity, map::MapBounds};
 use crate::systems::LogicSystem;
 

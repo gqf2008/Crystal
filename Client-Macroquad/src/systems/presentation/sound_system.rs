@@ -14,8 +14,8 @@
 //
 // ============================================================================
 
-use crate::compat::GameResult;
-use crate::compat::GameContext;
+use crate::game::GameResult;
+use crate::game::GameContext;
 use crate::systems::LogicSystem;
 
 /// 音效系统

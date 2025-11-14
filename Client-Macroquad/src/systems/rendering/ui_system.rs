@@ -1,5 +1,5 @@
 use crate::systems::RenderSystem;
-use crate::compat::GameResult;
+use crate::game::GameResult;
 
 #[derive(ecs_macros::RenderSystem)]
 pub struct UIRenderSystem;

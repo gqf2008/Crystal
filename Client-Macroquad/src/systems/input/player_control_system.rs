@@ -36,7 +36,7 @@ use crate::{
     components::{
         Camera, LocalPlayer, Player, PlayerInput, Position,
     },
-    compat::{GameContext, GameResult},
+    game::{GameContext, GameResult},
     systems::LogicSystem,
 };
 use macroquad::prelude::MouseButton;

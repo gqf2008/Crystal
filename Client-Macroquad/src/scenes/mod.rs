@@ -4,15 +4,17 @@
 
 pub mod login_scene;
 pub mod character_select_scene;
+pub mod select_scene;  // 新的角色选择场景
 pub mod game_scene;
 pub mod loading_scene;
 
 pub use login_scene::LoginScene;
 pub use character_select_scene::CharacterSelectScene;
+pub use select_scene::SelectScene;  // 新的角色选择场景
 pub use game_scene::GameScene;
 pub use loading_scene::LoadingScene;
 
-use crate::compat::GameResult;
+use crate::game::GameResult;
 use enum_dispatch::enum_dispatch;
 
 /// 场景切换请求

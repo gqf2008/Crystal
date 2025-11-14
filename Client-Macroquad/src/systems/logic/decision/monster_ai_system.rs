@@ -18,13 +18,13 @@
 // ============================================================================
 
 use hecs::World;
-use crate::compat::GameContext;
+use crate::game::GameContext;
 use crate::components::{
     Position, MonsterData, Health, AIState,
     Player,
 };
 use crate::systems::LogicSystem;
-use crate::compat::GameResult;
+use crate::game::GameResult;
 
 /// 怪物AI系统
 #[derive(ecs_macros::LogicSystem)]

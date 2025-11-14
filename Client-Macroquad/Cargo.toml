@@ -7,6 +7,7 @@ edition = "2021"
 # Macroquad 核心
 macroquad = "0.4"
 macroquad-profiler = "0.2"
+egui-macroquad = "0.17"  # egui GUI 库
 
 # 共享库 (游戏协议和数据结构)
 mir2_shared = { path = "../SharedRust", features = ["client-parse"] }

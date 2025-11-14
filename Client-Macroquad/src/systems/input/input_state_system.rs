@@ -40,10 +40,10 @@
 
 use crate::{
     components::InputState,
-    compat::GameContext,
+    game::GameContext,
     systems::LogicSystem,
 };
-use crate::compat::{GameResult, KeyCode};
+use crate::game::{GameResult, KeyCode};
 
 /// 需要追踪的按键列表（用于边缘检测）
 /// 

@@ -8,10 +8,8 @@ impl SpriteRenderSystem {
     #[allow(dead_code)]
     pub fn render_weapons(
         &mut self,
-        _ctx: &mut crate::compat::GraphicsContext,
-        _canvas: &mut crate::compat::Canvas,
         _world: &hecs::World,
-    ) -> crate::compat::GameResult {
+    ) -> crate::game::GameResult {
         // TODO: 重写为 macroquad API
         Ok(())
     }

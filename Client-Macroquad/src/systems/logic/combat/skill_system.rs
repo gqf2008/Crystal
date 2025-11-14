@@ -26,9 +26,9 @@ use crate::components::{
     LocalPlayer, MagicList, Mana, Monster, NetworkSync, Player, Position, SpellType,
     TargetSelection, TargetType, NPC,
 };
-use crate::compat::GameContext;
+use crate::game::GameContext;
 use crate::network::handlers::NetworkEvent as NetworkCommand;
-use crate::compat::GameResult;
+use crate::game::GameResult;
 use hecs::World;
 use mir2_shared::enums::MirDirection;
 use crossbeam_channel::Sender;

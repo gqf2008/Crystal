@@ -48,7 +48,7 @@ impl RenderSystem for SpriteRenderSystem {
     fn draw(
         &mut self,
         _world: &hecs::World,
-    ) -> crate::compat::GameResult {
+    ) -> crate::game::GameResult {
         // TODO: 重写为 macroquad API
         // self.draw_character(world)?;
         Ok(())

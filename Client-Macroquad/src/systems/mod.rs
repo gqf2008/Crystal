@@ -125,9 +125,6 @@ pub mod logic;
 pub mod presentation;
 pub mod rendering;
 
-// 使用兼容层替代 ggez
-use crate::compat::{Canvas, GameResult, GraphicsContext};
-
 // 重新导出派生宏
 pub use ecs_macros::{LogicSystem, RenderSystem};
 
@@ -295,7 +292,7 @@ pub trait LogicSystem {
         true
     }
     /// 更新方法，每帧在逻辑阶段调用
-    fn update(&mut self, ctx: &mut crate::compat::GameContext, delay_time: f32) -> crate::compat::GameResult;
+    fn update(&mut self, ctx: &mut crate::game::GameContext, delay_time: f32) -> crate::game::GameResult;
 }
 
 pub trait RenderSystem {
@@ -310,7 +307,7 @@ pub trait RenderSystem {
     }
 
     /// 更新方法，每帧在逻辑阶段调用（可选实现）
-    fn update(&mut self, _ctx: &mut crate::compat::GameContext, _delay_time: f32) -> crate::compat::GameResult {
+    fn update(&mut self, _ctx: &mut crate::game::GameContext, _delay_time: f32) -> crate::game::GameResult {
         Ok(())
     }
 
@@ -322,7 +319,7 @@ pub trait RenderSystem {
     /// - draw_text()
     /// - draw_rectangle()
     /// 等等
-    fn draw(&mut self, _world: &hecs::World) -> crate::compat::GameResult;
+    fn draw(&mut self, _world: &hecs::World) -> crate::game::GameResult;
 }
 
 pub enum SystemKind {
@@ -465,7 +462,7 @@ impl SystemScheduler {
     }
 
     /// 逻辑更新阶段 - 按优先级统一调度所有系统的 update
-    pub fn update(&mut self, ctx: &mut crate::compat::GameContext, delay_time: f32) -> crate::compat::GameResult {
+    pub fn update(&mut self, ctx: &mut crate::game::GameContext, delay_time: f32) -> crate::game::GameResult {
         for entry in &mut self.systems {
             if !entry.is_enabled() {
                 continue;
@@ -488,10 +485,8 @@ impl SystemScheduler {
 
     pub fn draw(
         &mut self,
-        ctx: &mut crate::compat::GraphicsContext,
-        canvas: &mut crate::compat::Canvas,
         world: &hecs::World,
-    ) -> crate::compat::GameResult {
+    ) -> crate::game::GameResult {
         tracing::trace!("🎨 Starting draw phase");
         for entry in &mut self.systems {
             if !entry.is_enabled() {

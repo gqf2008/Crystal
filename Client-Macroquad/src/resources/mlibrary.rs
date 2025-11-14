@@ -283,16 +283,37 @@ impl ImageInfo {
         Ok(decompressed)
     }
 
-    /// BGRA 转 RGBA
+    /// BGRA 转 RGBA + 黑色背景透明化
     /// 
     /// lib 文件存储的是 BGRA 格式（DirectX 格式），需要转换为 RGBA：
-    /// - 交换 R 和 B 通道（BGRA -> RGBA）
+    /// 1. 交换 R 和 B 通道（BGRA -> RGBA）
+    /// 2. 纯黑色背景透明化（匹配C#原版逻辑）
     /// 
-    /// 注意：不需要黑色背景透明化，渲染层会使用 ADD 混合模式处理
+    /// 对应 ggez 版本的 bgra_to_transparent 函数
     fn bgra_to_rgba(data: &mut [u8]) {
         for chunk in data.chunks_exact_mut(4) {
-            // BGRA: [B, G, R, A] -> RGBA: [R, G, B, A]
-            chunk.swap(0, 2); // 交换 B 和 R 通道
+            let b = chunk[0];
+            let g = chunk[1];
+            let r = chunk[2];
+            let a = chunk[3];
+            
+            // 🔧 纯黑色背景透明化（匹配C#原版逻辑）
+            // C# 原版: if (pixels[i] == 0 && pixels[i + 1] == 0 && pixels[i + 2] == 0) pixels[i + 3] = 0;
+            //
+            // 但由于DXT压缩/解压可能导致精度损失，纯黑(0,0,0)可能变成接近黑(1,1,1)或(2,2,2)
+            // 所以放宽到 RGB < 3 来容错
+            let is_near_black = r < 3 && g < 3 && b < 3; // 接近纯黑（容忍DXT压缩误差）
+            let is_opaque = a > 250; // 完全不透明
+            
+            // BGRA -> RGBA: 交换 B 和 R 通道
+            chunk[0] = r;
+            chunk[2] = b;
+            
+            // 纯黑背景 → 完全透明
+            if is_near_black && is_opaque {
+                chunk[3] = 0;
+            }
+            // 其他所有情况保持原始alpha值
         }
     }
 
@@ -509,6 +530,11 @@ impl MLibrary {
             ));
         }
         let count = reader.read_i32::<LittleEndian>()?;
+        
+        // Version 3的.Lib文件有frame_seek字段
+        if version >= 3 {
+            let _frame_seek = reader.read_i32::<LittleEndian>()?;
+        }
   
         let mut indices = Vec::with_capacity(count as usize);
         for _ in 0..count {

@@ -550,8 +550,8 @@ impl CameraController {
             } else {
                 // 随机震动方向
                 use rand::Rng;
-                let mut rng = rand::thread_rng();
-                let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+                let mut rng = rand::rng();
+                let angle = rng.random_range(0.0..std::f32::consts::TAU);
                 let intensity = self.shake_intensity * (self.shake_duration / 0.3).min(1.0);
                 
                 self.shake_offset.0 = angle.cos() * intensity;

@@ -23,7 +23,7 @@
 
 use crate::{
     components::{Camera, CameraMode, Draggable, Position, RenderConfig},
-    compat::{GameContext, GameResult, KeyCode, MouseButton},
+    game::{GameContext, GameResult, KeyCode, MouseButton},
     systems::LogicSystem,
 };
 
@@ -125,7 +125,7 @@ impl LogicSystem for CameraSystem {
         let ctrl_pressed = ctx.input().ctrl_pressed();
         let space_pressed = ctx.input().key_pressed(KeyCode::Space);
 
-        let resize_event = ctx.input().events.iter().find_map(|e| {
+        let resize_event = ctx.input().events.iter().find_map(|_e| {
             // TODO: 当 NetworkEvent 实现后，解析 Resize 事件
             // if let NetworkEvent::Resize { width, height } = e {
             //     Some((width, height))

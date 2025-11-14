@@ -32,12 +32,13 @@
 //! // MapLoadSystem 自动加载地图
 //! ```
 
-use crate::compat::{GameResult, GameError};
+use crate::core::GameError;
+use crate::game::{GameResult, MapLoader};
 use crate::resources::MapReader;
 use tracing::{info, error};
 
 use crate::components::MapData;
-use crate::compat::{GameContext, MapLoader};
+use crate::game::{GameContext};
 
 /// 地图管理组件
 /// 

@@ -14,10 +14,9 @@
 //
 // ============================================================================
 
-use hecs::World;
-use crate::compat::GameResult;
-use crate::compat::GameContext;
-use crate::systems::{LogicSystem, priority};
+use crate::game::GameResult;
+use crate::game::GameContext;
+use crate::systems::LogicSystem;
 use crate::components::{Health, Mana, RegenTimer, BuffList, BuffType};
 
 /// 生命恢复系统

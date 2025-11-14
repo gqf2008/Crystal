@@ -780,7 +780,7 @@ impl Libraries {
         }
 
         // 扫描目录中的所有 .lib 文件 (不区分大小写)
-        let pattern = format!("*{}.lib", suffix);
+        let _pattern = format!("*{}.lib", suffix);
         let mut lib_files: Vec<_> = std::fs::read_dir(&full_path)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| {

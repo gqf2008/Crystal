@@ -14,8 +14,8 @@
 //
 // ============================================================================
 
-use crate::compat::GameContext;
-use crate::compat::GameResult;
+use crate::game::GameContext;
+use crate::game::GameResult;
 use crate::systems::LogicSystem;
 use hecs::World;
 use std::collections::HashMap;

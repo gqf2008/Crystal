@@ -1,6 +1,6 @@
 // Scene Demo - 场景系统演示
 
-use client_macroquad::game_state::GameState;
+use client_macroquad::game::GameState;
 
 #[macroquad::main("场景系统演示")]
 async fn main() {
