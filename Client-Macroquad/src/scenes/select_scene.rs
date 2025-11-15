@@ -876,7 +876,7 @@ impl SelectScene {
                     }
                 }
                 
-                // 输入框（向下偏移30像素）
+                // 输入框（向下偏移28像素）
                 let text_edit = egui::TextEdit::singleline(&mut self.new_char_name)
                     .hint_text("请输入角色名称")
                     .char_limit(15)
@@ -886,7 +886,7 @@ impl SelectScene {
                 
                 ui.put(
                     egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x + 325.0, rect.min.y + 268.0),
+                        egui::pos2(rect.min.x + 325.0, rect.min.y + 266.0),
                         egui::vec2(240.0, 24.0)
                     ),
                     text_edit
