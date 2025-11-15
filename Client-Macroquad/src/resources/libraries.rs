@@ -3,6 +3,39 @@
 // 对应: Client/MirGraphics/Libraries.cs
 //
 // 提供所有游戏图像库的集中管理，类似 C# 原版的静态 Libraries 类
+//
+// # 使用示例
+//
+// ## 便捷访问单个图像
+// ```rust
+// use crate::resources::libraries::LibraryName;
+//
+// // 方式1: 使用 LibraryName 的便捷方法（推荐）
+// if let Some(image_info) = LibraryName::Prguse.get_image(360) {
+//     println!("图像: {}x{}, 偏移: ({}, {})", 
+//         image_info.width, image_info.height,
+//         image_info.x, image_info.y);
+// }
+//
+// // 方式2: 只获取尺寸
+// if let Some((w, h)) = LibraryName::Title.get_size(200) {
+//     println!("OK按钮尺寸: {}x{}", w, h);
+// }
+// ```
+//
+// ## 全局库管理
+// ```rust
+// use crate::resources::libraries::{initialize_all_libraries, get_library};
+//
+// // 初始化所有库
+// initialize_all_libraries("Data")?;
+//
+// // 访问单体库
+// if let Some(lib_rc) = get_library(LibraryName::Magic) {
+//     let mut lib = lib_rc.borrow_mut();
+//     // 使用库...
+// }
+// ```
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -32,6 +65,22 @@ impl StringPadding for String {
 /// 库名称枚举
 ///
 /// 对应 C# Libraries 类中的所有静态字段
+/// 
+/// # 新特性：便捷访问方法
+/// 
+/// 每个库名称现在都支持直接访问图像：
+/// ```ignore
+/// // 旧方式（复杂）
+/// let lib = get_library(LibraryName::Prguse)?;
+/// let mut lib_borrow = lib.borrow_mut();
+/// let info = lib_borrow.get_or_create_texture(360)?;
+/// 
+/// // 新方式（简洁） ✨
+/// let info = LibraryName::Prguse.get_image(360)?;
+/// 
+/// // 只需要尺寸？更简单
+/// let (w, h) = LibraryName::Title.get_size(200)?;
+/// ```
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum LibraryName {
     // UI 相关
@@ -110,6 +159,60 @@ pub enum LibraryName {
 }
 
 impl LibraryName {
+    /// 便捷访问：从库中获取指定索引的图像信息
+    /// 
+    /// 如果库未加载会自动加载，如果索引不存在返回 None
+    /// 
+    /// # 参数
+    /// - `index`: 图像索引
+    /// 
+    /// # 返回
+    /// - `Some(ImageInfo)`: 图像信息的克隆
+    /// - `None`: 库加载失败或索引不存在
+    /// 
+    /// # 示例
+    /// ```ignore
+    /// // 获取 Prguse 库的第 360 张图像
+    /// if let Some(info) = LibraryName::Prguse.get_image(360) {
+    ///     println!("图像尺寸: {}x{}", info.width, info.height);
+    /// }
+    /// ```
+    pub fn get_image(&self, index: usize) -> Option<ImageInfo> {
+        LIBRARIES.with(|libs| {
+            let mut libs = libs.borrow_mut();
+            let lib_rc = libs.get_or_load(*self)?;
+            let mut lib = lib_rc.borrow_mut();
+            lib.get_or_create_texture(index).ok().cloned()
+        })
+    }
+
+
+    /// 便捷访问：获取指定索引图像的尺寸（宽度和高度）
+    /// 
+    /// 比 `get_image()` 更轻量，只返回尺寸信息
+    /// 
+    /// # 参数
+    /// - `index`: 图像索引
+    /// 
+    /// # 返回
+    /// - `Some((width, height))`: 图像的宽度和高度
+    /// - `None`: 库加载失败或索引不存在
+    /// 
+    /// # 示例
+    /// ```ignore
+    /// if let Some((w, h)) = LibraryName::Title.get_size(200) {
+    ///     println!("按钮尺寸: {}x{}", w, h);
+    /// }
+    /// ```
+    pub fn get_size(&self, index: usize) -> Option<(i16, i16)> {
+        LIBRARIES.with(|libs| {
+            let libs = libs.borrow();
+            let lib_rc = libs.get(*self)?;
+            let mut lib = lib_rc.borrow_mut();
+            lib.get_size(index).ok()
+        })
+    }
+
     /// 获取库的默认路径（相对于 Data 目录）
     pub fn default_path(&self) -> String {
         match self {
@@ -463,56 +566,56 @@ impl Libraries {
             .unwrap_or_default()
     }
 
-    // ===== 全局 egui 纹理缓存管理 =====
+    // // ===== 全局 egui 纹理缓存管理 =====
 
-    /// 获取或创建 egui 纹理
-    pub fn get_or_create_egui_texture(
-        &mut self,
-        ctx: &egui::Context,
-        lib: &mut MLibrary,
-        lib_name: &str,
-        index: usize,
-    ) -> Option<egui::TextureHandle> {
-        let key = format!("{}_{}", lib_name, index);
+    // /// 获取或创建 egui 纹理
+    // pub fn get_or_create_egui_texture(
+    //     &mut self,
+    //     ctx: &egui::Context,
+    //     lib: &mut MLibrary,
+    //     lib_name: &str,
+    //     index: usize,
+    // ) -> Option<egui::TextureHandle> {
+    //     let key = format!("{}_{}", lib_name, index);
 
-        // 检查缓存
-        if let Some(handle) = self.texture_cache.get(&key) {
-            return Some(handle.clone());
-        }
+    //     // 检查缓存
+    //     if let Some(handle) = self.texture_cache.get(&key) {
+    //         return Some(handle.clone());
+    //     }
 
-        // 从库中加载纹理
-        if let Ok(info) = lib.get_or_create_texture(index) {
-            if let Some(ref texture) = info.image {
-                // 直接从 macroquad 纹理创建 egui 纹理
-                let image_data = texture.get_texture_data();
-                let width = texture.width() as usize;
-                let height = texture.height() as usize;
+    //     // 从库中加载纹理
+    //     if let Ok(info) = lib.get_or_create_texture(index) {
+    //         if let Some(ref texture) = info.image {
+    //             // 直接从 macroquad 纹理创建 egui 纹理
+    //             let image_data = texture.get_texture_data();
+    //             let width = texture.width() as usize;
+    //             let height = texture.height() as usize;
 
-                let mut pixels = Vec::with_capacity(width * height);
-                for y in 0..height {
-                    for x in 0..width {
-                        let idx = (y * width + x) * 4;
-                        let r = image_data.bytes[idx];
-                        let g = image_data.bytes[idx + 1];
-                        let b = image_data.bytes[idx + 2];
-                        let a = image_data.bytes[idx + 3];
-                        pixels.push(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
-                    }
-                }
+    //             let mut pixels = Vec::with_capacity(width * height);
+    //             for y in 0..height {
+    //                 for x in 0..width {
+    //                     let idx = (y * width + x) * 4;
+    //                     let r = image_data.bytes[idx];
+    //                     let g = image_data.bytes[idx + 1];
+    //                     let b = image_data.bytes[idx + 2];
+    //                     let a = image_data.bytes[idx + 3];
+    //                     pixels.push(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
+    //                 }
+    //             }
 
-                let color_image = egui::ColorImage {
-                    size: [width, height],
-                    pixels,
-                };
+    //             let color_image = egui::ColorImage {
+    //                 size: [width, height],
+    //                 pixels,
+    //             };
 
-                let handle = ctx.load_texture(&key, color_image, Default::default());
-                self.texture_cache.insert(key, handle.clone());
-                return Some(handle);
-            }
-        }
+    //             let handle = ctx.load_texture(&key, color_image, Default::default());
+    //             self.texture_cache.insert(key, handle.clone());
+    //             return Some(handle);
+    //         }
+    //     }
 
-        None
-    }
+    //     None
+    // }
 
     /// 清理 egui 纹理缓存
     pub fn clear_texture_cache(&mut self) {
@@ -1146,25 +1249,25 @@ pub fn get_size(lib_name: LibraryName, index: usize) -> Option<(i16, i16)> {
     })
 }
 
-/// 便捷函数: 获取或创建 egui 纹理（使用全局缓存）
-///
-/// 这是推荐的方式，避免每个组件都维护自己的纹理缓存
-pub fn get_or_create_egui_texture(
-    ctx: &egui::Context,
-    lib_name: LibraryName,
-    index: usize,
-) -> Option<egui::TextureHandle> {
-    LIBRARIES.with(|libs| {
-        let mut libs = libs.borrow_mut();
+// /// 便捷函数: 获取或创建 egui 纹理（使用全局缓存）
+// ///
+// /// 这是推荐的方式，避免每个组件都维护自己的纹理缓存
+// pub fn get_or_create_egui_texture(
+//     ctx: &egui::Context,
+//     lib_name: LibraryName,
+//     index: usize,
+// ) -> Option<egui::TextureHandle> {
+//     LIBRARIES.with(|libs| {
+//         let mut libs = libs.borrow_mut();
 
-        // 获取库
-        let lib_rc = libs.get_or_load(lib_name.clone())?;
-        let mut lib = lib_rc.borrow_mut();
+//         // 获取库
+//         let lib_rc = libs.get_or_load(lib_name.clone())?;
+//         let mut lib = lib_rc.borrow_mut();
 
-        // 使用库名称作为缓存键
-        libs.get_or_create_egui_texture(ctx, &mut *lib, &lib_name.to_string().to_lowercase(), index)
-    })
-}
+//         // 使用库名称作为缓存键
+//         libs.get_or_create_egui_texture(ctx, &mut *lib, &lib_name.to_string().to_lowercase(), index)
+//     })
+// }
 
 /// 便捷函数: 清理全局纹理缓存
 pub fn clear_egui_texture_cache() {
