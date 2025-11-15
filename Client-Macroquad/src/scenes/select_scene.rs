@@ -34,13 +34,74 @@ use egui_macroquad::egui;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+// ============================================================================
+// 常量定义
+// ============================================================================
+
+// 职业类型
+const CLASS_WARRIOR: u8 = 0;
+const CLASS_WIZARD: u8 = 1;
+const CLASS_TAOIST: u8 = 2;
+const CLASS_ASSASSIN: u8 = 3;
+const CLASS_ARCHER: u8 = 4;
+
+// 性别类型
+const GENDER_MALE: u8 = 0;
+const GENDER_FEMALE: u8 = 1;
+
+// 动画配置
+#[allow(dead_code)]  // 保留用于未来可能的验证或文档
+const ANIMATION_FRAME_COUNT: usize = 16;
+const ANIMATION_DELAY: f32 = 0.25;
+
+// 角色名称限制
+const MIN_CHARACTER_NAME_LENGTH: usize = 2;
+const MAX_CHARACTER_NAME_LENGTH: usize = 16;
+
+// 最大角色数量
+#[allow(dead_code)]  // 保留用于未来可能的验证或文档
+const MAX_CHARACTER_COUNT: usize = 4;
+
+// 弓箭手特殊索引（不遵循通用公式）
+const ARCHER_MALE_BASE_INDEX: usize = 100;
+const ARCHER_FEMALE_BASE_INDEX: usize = 140;
+
+// 纹理索引常量
+// 职业按钮纹理索引（ChrSel库）
+const CLASS_BTN_WARRIOR_BASE: usize = 2426;  // 战士按钮起始索引
+const CLASS_BTN_WIZARD_BASE: usize = 2429;   // 法师按钮起始索引
+const CLASS_BTN_TAOIST_BASE: usize = 2432;   // 道士按钮起始索引
+const CLASS_BTN_ASSASSIN_BASE: usize = 2435; // 刺客按钮起始索引
+const CLASS_BTN_ARCHER_BASE: usize = 2438;   // 弓手按钮起始索引
+
+// 性别按钮纹理索引（ChrSel库）
+const GENDER_BTN_MALE_BASE: usize = 2420;    // 男性按钮起始索引
+const GENDER_BTN_FEMALE_BASE: usize = 2423;  // 女性按钮起始索引
+
+// 对话框按钮纹理索引（Title库）
+const BTN_OK_NORMAL: usize = 360;
+const BTN_OK_HOVER: usize = 361;
+const BTN_OK_PRESSED: usize = 362;
+
+const BTN_CANCEL_NORMAL: usize = 280;
+const BTN_CANCEL_HOVER: usize = 281;
+const BTN_CANCEL_PRESSED: usize = 282;
+
+const BTN_EXIT_NORMAL: usize = 200;
+const BTN_EXIT_HOVER: usize = 201;
+const BTN_EXIT_PRESSED: usize = 202;
+
+// ============================================================================
+// 数据结构
+// ============================================================================
+
 /// 角色信息
 #[derive(Debug, Clone)]
 pub struct CharacterInfo {
     pub index: i32,
     pub name: String,
     pub level: u16,
-    pub class: u8,  // 0=Warrior, 1=Wizard, 2=Taoist
+    pub class: u8,  // 0=Warrior, 1=Wizard, 2=Taoist, 3=Assassin, 4=Archer
     pub gender: u8, // 0=Male, 1=Female
     pub last_access: String,
 }
@@ -108,7 +169,7 @@ impl SelectScene {
             
             animation_frame: 0,
             animation_timer: 0.0,
-            animation_delay: 0.25,
+            animation_delay: ANIMATION_DELAY,
             
             dialog_animation_frame: 0,
             dialog_animation_timer: 0.0,
@@ -248,10 +309,14 @@ impl SelectScene {
                 // 计算角色预览帧索引
                 // ChrSel 资源布局: 根据C#源码SelectScene.cs
                 // 大部分职业: base = 20 + class*20 + gender*280
-                // 但弓箭手(class=4)使用特殊索引：男100 / 女140
-                let base_index = if character.class == 4 {
+                // 但弓箭手(class=4)使用特殊索引：男100 / 女3140
+                let base_index = if character.class == CLASS_ARCHER {
                     // 弓箭手特殊处理
-                    if character.gender == 0 { 100 } else { 140 }
+                    if character.gender == GENDER_MALE { 
+                        ARCHER_MALE_BASE_INDEX 
+                    } else { 
+                        ARCHER_FEMALE_BASE_INDEX 
+                    }
                 } else {
                     // 其他职业使用通用公式
                     20 + (character.class as usize * 20) + (character.gender as usize * 280)
@@ -274,7 +339,7 @@ impl SelectScene {
                             });
                             
                             // 光晕效果 (对于法师)
-                            if character.class == 1 {
+                            if character.class == CLASS_WIZARD {
                                 let glow_index = frame_index + 560;
                                 if let Ok(glow_info) = lib.get_or_create_texture(glow_index) {
                                     if let Some(ref glow_texture) = glow_info.image {
@@ -637,7 +702,7 @@ impl SelectScene {
                     )
                 );
                 
-                if self.draw_image_button(ui, ctx, "title", 200, 201, 202, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
+                if self.draw_image_button(ui, ctx, "title", BTN_EXIT_NORMAL, BTN_EXIT_HOVER, BTN_EXIT_PRESSED, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
                     self.show_message_box = false;
                 }
             });
@@ -714,9 +779,13 @@ impl SelectScene {
         // 索引计算：根据C#源码SelectScene.cs
         // 大部分职业: base = 20 + class*20 + gender*280
         // 但弓箭手(class=4)使用特殊索引：男100 / 女140
-        let base_index = if self.new_char_class == 4 {
+        let base_index = if self.new_char_class == CLASS_ARCHER {
             // 弓箭手特殊处理
-            if self.new_char_gender == 0 { 100 } else { 140 }
+            if self.new_char_gender == GENDER_MALE { 
+                ARCHER_MALE_BASE_INDEX 
+            } else { 
+                ARCHER_FEMALE_BASE_INDEX 
+            }
         } else {
             // 其他职业使用通用公式
             20 + (self.new_char_class as usize * 20) + (self.new_char_gender as usize * 280)
@@ -789,7 +858,7 @@ impl SelectScene {
                     );
                     
                     // 法师光效
-                    if self.new_char_class == 1 {
+                    if self.new_char_class == CLASS_WIZARD {
                         let effect_index = frame_index + 560;
                         if let Some(effect_texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "chrsel", effect_index) {
                             if let Ok(effect_info) = lib.get_or_create_texture(effect_index) {
@@ -872,11 +941,11 @@ impl SelectScene {
                 
                 // 职业按钮 (normal, hover, pressed)
                 let class_buttons = [
-                    (0, 323.0, 296.0, 2426, 2427, 2428),
-                    (1, 373.0, 296.0, 2429, 2430, 2431),
-                    (2, 423.0, 296.0, 2432, 2433, 2434),
-                    (3, 473.0, 296.0, 2435, 2436, 2437),
-                    (4, 523.0, 296.0, 2438, 2439, 2440),
+                    (CLASS_WARRIOR, 323.0, 296.0, CLASS_BTN_WARRIOR_BASE, CLASS_BTN_WARRIOR_BASE + 1, CLASS_BTN_WARRIOR_BASE + 2),
+                    (CLASS_WIZARD, 373.0, 296.0, CLASS_BTN_WIZARD_BASE, CLASS_BTN_WIZARD_BASE + 1, CLASS_BTN_WIZARD_BASE + 2),
+                    (CLASS_TAOIST, 423.0, 296.0, CLASS_BTN_TAOIST_BASE, CLASS_BTN_TAOIST_BASE + 1, CLASS_BTN_TAOIST_BASE + 2),
+                    (CLASS_ASSASSIN, 473.0, 296.0, CLASS_BTN_ASSASSIN_BASE, CLASS_BTN_ASSASSIN_BASE + 1, CLASS_BTN_ASSASSIN_BASE + 2),
+                    (CLASS_ARCHER, 523.0, 296.0, CLASS_BTN_ARCHER_BASE, CLASS_BTN_ARCHER_BASE + 1, CLASS_BTN_ARCHER_BASE + 2),
                 ];
                 
                 for (class_id, btn_x, btn_y, normal_idx, hover_idx, pressed_idx) in class_buttons {
@@ -931,8 +1000,8 @@ impl SelectScene {
                 
                 // 性别按钮 (normal, hover, pressed)
                 let gender_buttons = [
-                    (0, 323.0, 343.0, 2420, 2421, 2422),
-                    (1, 373.0, 343.0, 2423, 2424, 2425),
+                    (GENDER_MALE, 323.0, 343.0, GENDER_BTN_MALE_BASE, GENDER_BTN_MALE_BASE + 1, GENDER_BTN_MALE_BASE + 2),
+                    (GENDER_FEMALE, 373.0, 343.0, GENDER_BTN_FEMALE_BASE, GENDER_BTN_FEMALE_BASE + 1, GENDER_BTN_FEMALE_BASE + 2),
                 ];
                 
                 for (gender_id, btn_x, btn_y, normal_idx, hover_idx, pressed_idx) in gender_buttons {
@@ -1001,12 +1070,12 @@ impl SelectScene {
                     text_edit
                 );
                 
-                // OK按钮 (Title库 360/361/362)
+                // OK按钮 (Title库)
                 let ok_x = 160.0;
                 let ok_y = 425.0;
-                let ok_normal_idx = 360;
-                let ok_hover_idx = 361;
-                let ok_pressed_idx = 362;
+                let ok_normal_idx = BTN_OK_NORMAL;
+                let ok_hover_idx = BTN_OK_HOVER;
+                let ok_pressed_idx = BTN_OK_PRESSED;
                 
                 if let Some(ref mut lib) = self.title_lib {
                     // 先用normal纹理获取尺寸
@@ -1047,12 +1116,12 @@ impl SelectScene {
                     }
                 }
                 
-                // Cancel按钮 (Title库 280/281/282)
+                // Cancel按钮 (Title库)
                 let cancel_x = 425.0;
                 let cancel_y = 425.0;
-                let cancel_normal_idx = 280;
-                let cancel_hover_idx = 281;
-                let cancel_pressed_idx = 282;
+                let cancel_normal_idx = BTN_CANCEL_NORMAL;
+                let cancel_hover_idx = BTN_CANCEL_HOVER;
+                let cancel_pressed_idx = BTN_CANCEL_PRESSED;
                 
                 if let Some(ref mut lib) = self.title_lib {
                     // 先用normal纹理获取尺寸
@@ -1107,12 +1176,12 @@ impl SelectScene {
             return;
         }
         
-        if self.new_char_name.chars().count() < 2 {
+        if self.new_char_name.chars().count() < MIN_CHARACTER_NAME_LENGTH {
             self.show_message("错误", "角色名称至少需2个字符！");
             return;
         }
         
-        if self.new_char_name.chars().count() > 16 {
+        if self.new_char_name.chars().count() > MAX_CHARACTER_NAME_LENGTH {
             self.show_message("错误", "角色名称最多16个字符！");
             return;
         }
@@ -1129,15 +1198,16 @@ impl SelectScene {
         
         self.characters.push(new_char);
         
+        // 转换为中文名称
         let class_name = match self.new_char_class {
-            0 => "战士",
-            1 => "法师",
-            2 => "道士",
-            3 => "刺客",
-            4 => "弓手",
+            CLASS_WARRIOR => "战士",
+            CLASS_WIZARD => "法师",
+            CLASS_TAOIST => "道士",
+            CLASS_ASSASSIN => "刺客",
+            CLASS_ARCHER => "弓手",
             _ => "未知",
         };
-        let gender_name = if self.new_char_gender == 0 { "男" } else { "女" };
+        let gender_name = if self.new_char_gender == GENDER_MALE { "男" } else { "女" };
         
         println!("🎭 创建角色成功: {} ({}{}) Lv.1", self.new_char_name, gender_name, class_name);
         
@@ -1197,13 +1267,13 @@ impl Scene for SelectScene {
                 );
                 
                 // 设置字体优先级
-                fonts.families.get_mut(&egui::FontFamily::Proportional)
-                    .unwrap()
-                    .insert(0, "chinese".to_owned());
+                if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                    family.insert(0, "chinese".to_owned());
+                }
                 
-                fonts.families.get_mut(&egui::FontFamily::Monospace)
-                    .unwrap()
-                    .insert(0, "chinese".to_owned());
+                if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                    family.insert(0, "chinese".to_owned());
+                }
             }
             
             ctx.set_fonts(fonts);
