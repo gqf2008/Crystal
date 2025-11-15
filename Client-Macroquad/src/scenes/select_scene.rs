@@ -232,27 +232,46 @@ impl SelectScene {
                 let character = &self.characters[selected_idx];
                 
                 // 计算角色预览帧索引
-                // ChrSel 资源布局: 每个职业相差20, 男女相差280
-                // 战士: 男20, 女300
-                // 法师: 男40, 女320  
-                // 道士: 男60, 女340
-                // 刺客: 男80, 女360
-                // 弓手: 男100, 女380
-                let base_index = 20 + (character.class as usize * 20) + (character.gender as usize * 280);
+                // ChrSel 资源布局: 根据C#源码SelectScene.cs
+                // 大部分职业: base = 20 + class*20 + gender*280
+                // 但弓箭手(class=4)使用特殊索引：男100 / 女140
+                let base_index = if character.class == 4 {
+                    // 弓箭手特殊处理
+                    if character.gender == 0 { 100 } else { 140 }
+                } else {
+                    // 其他职业使用通用公式
+                    20 + (character.class as usize * 20) + (character.gender as usize * 280)
+                };
                 let frame_index = base_index + self.animation_frame;  // 动画帧0-15
                 
                 if let Some(ref mut lib) = self.chrsel_lib {
                     if let Ok(info) = lib.get_or_create_texture(frame_index) {
                         if let Some(ref texture) = info.image {
                             // C# 原版位置: (260, 420) + 偏移值
-                            draw_texture(texture, 260.0 + info.x as f32, 420.0 + info.y as f32, WHITE);
+                            // 放大1.2倍显示，使用线性过滤
+                            let scale = 1.2;
+                            let x = 260.0 + info.x as f32 * scale;
+                            let y = 420.0 + info.y as f32 * scale;
+                            let w = texture.width() * scale;
+                            let h = texture.height() * scale;
+                            draw_texture_ex(texture, x, y, WHITE, DrawTextureParams {
+                                dest_size: Some(Vec2::new(w, h)),
+                                ..Default::default()
+                            });
                             
                             // 光晕效果 (对于法师)
                             if character.class == 1 {
                                 let glow_index = frame_index + 560;
                                 if let Ok(glow_info) = lib.get_or_create_texture(glow_index) {
                                     if let Some(ref glow_texture) = glow_info.image {
-                                        draw_texture(glow_texture, 260.0 + glow_info.x as f32, 420.0 + glow_info.y as f32, Color::new(1.0, 1.0, 1.0, 0.5));
+                                        let glow_x = 260.0 + glow_info.x as f32 * scale;
+                                        let glow_y = 420.0 + glow_info.y as f32 * scale;
+                                        let glow_w = glow_texture.width() * scale;
+                                        let glow_h = glow_texture.height() * scale;
+                                        draw_texture_ex(glow_texture, glow_x, glow_y, Color::new(1.0, 1.0, 1.0, 0.5), DrawTextureParams {
+                                            dest_size: Some(Vec2::new(glow_w, glow_h)),
+                                            ..Default::default()
+                                        });
                                     }
                                 }
                             }
