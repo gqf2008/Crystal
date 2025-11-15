@@ -1086,7 +1086,7 @@ fn window_conf() -> Conf {
         window_width: WINDOW_WIDTH,
         window_height: WINDOW_HEIGHT,
         window_resizable: true,
-        high_dpi: true,  // macOS Retina 支持
+        // high_dpi: true,  // macOS Retina 支持
         fullscreen: false,
         platform: Platform {
             swap_interval: Some(1),  // VSync
