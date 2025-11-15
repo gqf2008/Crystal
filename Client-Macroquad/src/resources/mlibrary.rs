@@ -113,35 +113,6 @@ impl ImageInfo {
         })
     }
 
-    /// 创建纹理数据 - 从reader中读取并解压图像数据
-    ///
-    /// 对应 C# MImage.CreateTexture
-    /// ```csharp
-    /// public unsafe void CreateTexture(BinaryReader reader)
-    /// {
-    ///     int w = Width;
-    ///     int h = Height;
-    ///     Image = new Texture(DXManager.Device, w, h, 1, Usage.None, Format.A8R8G8B8, Pool.Managed);
-    ///     DataRectangle stream = Image.LockRectangle(0, LockFlags.Discard);
-    ///     Data = (byte*)stream.Data.DataPointer;
-    ///     DecompressImage(reader.ReadBytes(Length), stream.Data);
-    ///     stream.Data.Dispose();
-    ///     Image.UnlockRectangle(0);
-    ///     if (HasMask) {
-    ///         reader.ReadBytes(12);
-    ///         w = Width;
-    ///         h = Height;
-    ///         MaskImage = new Texture(DXManager.Device, w, h, 1, Usage.None, Format.A8R8G8B8, Pool.Managed);
-    ///         stream = MaskImage.LockRectangle(0, LockFlags.Discard);
-    ///         DecompressImage(reader.ReadBytes(Length), stream.Data);
-    ///         stream.Data.Dispose();
-    ///         MaskImage.UnlockRectangle(0);
-    ///     }
-    ///     DXManager.TextureList.Add(this);
-    ///     TextureValid = true;
-    ///     CleanTime = CMain.Time + Settings.CleanDelay;
-    /// }
-    /// ```
     ///
     /// # 参数
     /// - `reader`: 二进制读取器，当前位置应该在压缩数据的开始处
