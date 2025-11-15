@@ -810,6 +810,41 @@ impl SelectScene {
             }
         }
         
+        // 绘制职业描述文字 at (279, 70), size (278, 170)
+        let description = match self.new_char_class {
+            0 => "Warriors are a class of great strength and vitality. They are not easily killed in battle and have the advantage of being able to use a variety of heavy weapons and Armour. Therefore, Warriors favor attacks that are based on melee physical damage. They are weak in ranged attacks, however the variety of equipment that are developed specifically for Warriors complement their weakness in ranged combat.",
+            1 => "Wizards are a class of low strength and stamina, but have the ability to use powerful spells. Their offensive spells are very effective, but because it takes time to cast these spells, they're likely to leave themselves open for enemy's attacks. Therefore, the physically weak wizards must aim to attack their enemies from a safe distance.",
+            2 => "Taoists are well disciplined in the study of Astronomy, Medicine, and others aside from Mu-Gong. Rather then directly engaging the enemies, their specialty lies in assisting their allies with support. Taoists can summon powerful creatures and have a high resistance to magic, and is a class with well balanced offensive and defensive abilities.",
+            3 => "Assassins are members of a secret organization and their history is relatively unknown. They're capable of hiding themselves and performing attacks while being unseen by others, which naturally makes them excellent at making fast kills. It is necessary for them to avoid being in battles with multiple enemies due to their weak vitality and strength.",
+            4 => "Archers are a class of great accuracy and strength, using their powerful skills with bows to deal extraordinary damage from range. Much like wizards, they rely on their keen instincts to dodge oncoming attacks as they tend to leave themselves open to frontal attacks. However, their physical prowess and deadly aim allows them to instil fear into anyone they hit.",
+            _ => "",
+        };
+        
+        // 使用galley进行自动换行
+        let desc_rect = egui::Rect::from_min_size(
+            egui::pos2(dialog_x + 279.0, dialog_y + 70.0),
+            egui::vec2(278.0, 170.0)
+        );
+        
+        let font_id = egui::FontId::proportional(11.0);
+        let text_color = egui::Color32::WHITE;
+        let wrap_width = 268.0; // 留出左右边距
+        
+        let galley = ctx.fonts(|fonts| {
+            fonts.layout(
+                description.to_string(),
+                font_id,
+                text_color,
+                wrap_width,
+            )
+        });
+        
+        painter.galley(
+            desc_rect.min + egui::vec2(5.0, 5.0),
+            galley,
+            text_color,
+        );
+        
         // OK和Cancel按钮在交互层绘制（支持hover/pressed状态），这里不再绘制
         
         // 返回对话框坐标供交互层使用
