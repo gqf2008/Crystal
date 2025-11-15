@@ -223,6 +223,20 @@ impl SelectScene {
                 }
             }
         }
+        
+        // 服务器名称文字 "Legend of Mir 2" at (432, 60)
+        let text = "Legend of Mir 2";
+        let font_size = 17.0;
+        let text_params = TextParams {
+            font_size: font_size as u16,
+            color: WHITE,
+            ..Default::default()
+        };
+        let text_dims = measure_text(text, None, font_size as u16, 1.0);
+        // 居中显示在155宽度的区域内
+        let x = 432.0 + (155.0 - text_dims.width) / 2.0;
+        let y = 60.0 + font_size;
+        draw_text_ex(text, x, y, text_params);
     }
     
     /// 【macroquad 职责】绘制角色预览动画
@@ -278,6 +292,47 @@ impl SelectScene {
                         }
                     }
                 }
+            }
+        }
+    }
+    
+    /// 【macroquad 职责】绘制角色信息（Last Online等）
+    fn draw_character_info(&mut self) {
+        if let Some(selected_idx) = self.selected_index {
+            if selected_idx < self.characters.len() {
+                let character = &self.characters[selected_idx];
+                
+                // "Last Online:" 标签 at (200, 609)
+                let label_text = "Last Online:";
+                let label_x = 200.0;
+                let label_y = 609.0;
+                let font_size = 14.0;
+                
+                draw_text_ex(
+                    label_text,
+                    label_x,
+                    label_y + font_size,
+                    TextParams {
+                        font_size: font_size as u16,
+                        color: WHITE,
+                        ..Default::default()
+                    }
+                );
+                
+                // 最后登录时间 at (265, 609)
+                let time_x = 265.0;
+                let time_y = 609.0;
+                
+                draw_text_ex(
+                    &character.last_access,
+                    time_x,
+                    time_y + font_size,
+                    TextParams {
+                        font_size: font_size as u16,
+                        color: WHITE,
+                        ..Default::default()
+                    }
+                );
             }
         }
     }
@@ -911,12 +966,12 @@ impl SelectScene {
                     text_edit
                 );
                 
-                // OK按钮 (Title库 343/344/345 - Create按钮)
+                // OK按钮 (Title库 360/361/362)
                 let ok_x = 160.0;
                 let ok_y = 425.0;
-                let ok_normal_idx = 343;
-                let ok_hover_idx = 344;
-                let ok_pressed_idx = 345;
+                let ok_normal_idx = 360;
+                let ok_hover_idx = 361;
+                let ok_pressed_idx = 362;
                 
                 if let Some(ref mut lib) = self.title_lib {
                     // 先用normal纹理获取尺寸
@@ -1199,6 +1254,7 @@ impl Scene for SelectScene {
         // 1. 背景和角色预览
         self.draw_background();
         self.draw_character_preview();
+        self.draw_character_info();
         
         // === egui 交互层 ===
         egui_macroquad::ui(|ctx| {
