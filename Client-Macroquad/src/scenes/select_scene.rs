@@ -399,8 +399,8 @@ impl SelectScene {
                             println!("✅ 选择角色 {}: {}", i, character.name);
                         }
                         
-                        // 绘制文字（Y坐标向上移动2.5px）
-                        let text_painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("char_text")));
+                        // 绘制文字（使用Middle层级，避免遮挡对话框）
+                        let text_painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new(format!("char_text_{}", i))));
                         
                         // 名称
                         text_painter.text(
