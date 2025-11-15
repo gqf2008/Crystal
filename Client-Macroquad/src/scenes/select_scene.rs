@@ -591,9 +591,9 @@ impl SelectScene {
         let dialog_x = (screen_width - dialog_w) / 2.0;
         let dialog_y = (screen_height - dialog_h) / 2.0;
         
-        // 创建 Dialog Order 的 painter，确保在最顶层
+        // 创建 Middle Order 的 painter，纹理层在交互层之下
         let painter = ctx.layer_painter(egui::LayerId::new(
-            egui::Order::Foreground,  // 最高层级
+            egui::Order::Middle,  // 中间层级，让交互层按钮在上面
             egui::Id::new("new_char_dialog")
         ));
         
@@ -634,70 +634,17 @@ impl SelectScene {
             }
         }
         
-        // 绘制职业按钮
-        let class_buttons = [
-            (0, 323.0, 296.0, 2426, 2427),
-            (1, 373.0, 296.0, 2429, 2430),
-            (2, 423.0, 296.0, 2432, 2433),
-            (3, 473.0, 296.0, 2435, 2436),
-            (4, 523.0, 296.0, 2438, 2439),
-        ];
-        
-        if let Some(ref mut lib) = self.prguse_lib {
-            for (class_id, btn_x, btn_y, normal_idx, selected_idx) in class_buttons {
-                let idx = if self.new_char_class == class_id { selected_idx } else { normal_idx };
-                if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "prguse", idx) {
-                    if let Ok(info) = lib.get_or_create_texture(idx) {
-                        let btn_w = info.width as f32;
-                        let btn_h = info.height as f32;
-                        let rect = egui::Rect::from_min_size(
-                            egui::pos2(dialog_x + btn_x + info.x as f32, dialog_y + btn_y + info.y as f32),
-                            egui::vec2(btn_w, btn_h)
-                        );
-                        painter.image(
-                            texture.id(),
-                            rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    }
-                }
-            }
-        }
-        
-        // 绘制性别按钮
-        let gender_buttons = [
-            (0, 323.0, 343.0, 2420, 2421),
-            (1, 373.0, 343.0, 2423, 2424),
-        ];
-        
-        if let Some(ref mut lib) = self.prguse_lib {
-            for (gender_id, btn_x, btn_y, normal_idx, selected_idx) in gender_buttons {
-                let idx = if self.new_char_gender == gender_id { selected_idx } else { normal_idx };
-                if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "prguse", idx) {
-                    if let Ok(info) = lib.get_or_create_texture(idx) {
-                        let btn_w = info.width as f32;
-                        let btn_h = info.height as f32;
-                        let rect = egui::Rect::from_min_size(
-                            egui::pos2(dialog_x + btn_x + info.x as f32, dialog_y + btn_y + info.y as f32),
-                            egui::vec2(btn_w, btn_h)
-                        );
-                        painter.image(
-                            texture.id(),
-                            rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    }
-                }
-            }
-        }
+        // 职业和性别按钮在交互层绘制（支持hover/pressed状态），这里不再绘制
         
         // 绘制角色预览动画
         let base_index = 20 + (self.new_char_class as usize * 20) + (self.new_char_gender as usize * 280);
         let frame_index = base_index + self.dialog_animation_frame;
         
-        if let Some(ref mut lib) = self.chrsel_lib {
+        // 检查索引是否合法（ChrSel库总共1146张图）
+        if frame_index >= 1146 {
+            println!("⚠️ 角色索引越界: class={}, gender={}, frame={}, index={}",
+                self.new_char_class, self.new_char_gender, self.dialog_animation_frame, frame_index);
+        } else if let Some(ref mut lib) = self.chrsel_lib {
             if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "chrsel", frame_index) {
                 if let Ok(info) = lib.get_or_create_texture(frame_index) {
                     let char_w = info.width as f32;
@@ -735,40 +682,7 @@ impl SelectScene {
             }
         }
         
-        // 绘制OK和Cancel按钮
-        if let Some(ref mut lib) = self.title_lib {
-            // OK按钮
-            if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "title", 360) {
-                if let Ok(info) = lib.get_or_create_texture(360) {
-                    let rect = egui::Rect::from_min_size(
-                        egui::pos2(dialog_x + 160.0 + info.x as f32, dialog_y + 425.0 + info.y as f32),
-                        egui::vec2(info.width as f32, info.height as f32)
-                    );
-                    painter.image(
-                        texture.id(),
-                        rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                }
-            }
-            
-            // Cancel按钮
-            if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "title", 280) {
-                if let Ok(info) = lib.get_or_create_texture(280) {
-                    let rect = egui::Rect::from_min_size(
-                        egui::pos2(dialog_x + 425.0 + info.x as f32, dialog_y + 425.0 + info.y as f32),
-                        egui::vec2(info.width as f32, info.height as f32)
-                    );
-                    painter.image(
-                        texture.id(),
-                        rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                }
-            }
-        }
+        // OK和Cancel按钮在交互层绘制（支持hover/pressed状态），这里不再绘制
         
         // 返回对话框坐标供交互层使用
         (dialog_x, dialog_y)
@@ -776,13 +690,15 @@ impl SelectScene {
     
     /// egui交互层：处理创建角色对话框的所有交互
     /// 参考 LoginScene 的实现：使用 Area + allocate_rect 定位，避免事件冲突
+    /// 同时绘制按钮纹理（根据状态选择不同纹理）
     fn draw_new_character_dialog_ui(&mut self, ctx: &egui::Context, dialog_x: f32, dialog_y: f32) {
         let dialog_w = 656.0;
         let dialog_h = 537.0;
         
-        // 使用 Area 定位整个对话框交互区域
+        // 使用 Area 定位整个对话框交互区域，设置为最高层级
         egui::Area::new(egui::Id::new("new_char_dialog_area"))
             .fixed_pos(egui::pos2(dialog_x, dialog_y))
+            .order(egui::Order::Foreground)  // 最高层级，确保在纹理层之上
             .interactable(true)
             .show(ctx, |ui| {
                 // 分配对话框空间（仅用于定位，不拦截点击）
@@ -791,46 +707,118 @@ impl SelectScene {
                     egui::Sense::hover(),
                 ).rect;
                 
-                // 职业按钮
+                // 职业按钮 (normal, hover, pressed)
                 let class_buttons = [
-                    (0, 323.0, 296.0),
-                    (1, 373.0, 296.0),
-                    (2, 423.0, 296.0),
-                    (3, 473.0, 296.0),
-                    (4, 523.0, 296.0),
+                    (0, 323.0, 296.0, 2426, 2427, 2428),
+                    (1, 373.0, 296.0, 2429, 2430, 2431),
+                    (2, 423.0, 296.0, 2432, 2433, 2434),
+                    (3, 473.0, 296.0, 2435, 2436, 2437),
+                    (4, 523.0, 296.0, 2438, 2439, 2440),
                 ];
                 
-                for (class_id, btn_x, btn_y) in class_buttons {
-                    let btn_rect = egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x + btn_x, rect.min.y + btn_y),
-                        egui::vec2(72.0, 32.0)
-                    );
-                    let response = ui.allocate_rect(btn_rect, egui::Sense::click().union(egui::Sense::hover()));
-                    if response.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                    if response.clicked() {
-                        self.new_char_class = class_id;
+                for (class_id, btn_x, btn_y, normal_idx, hover_idx, pressed_idx) in class_buttons {
+                    // 根据状态选择纹理
+                    let texture_idx = if self.new_char_class == class_id {
+                        hover_idx  // 选中状态用hover纹理
+                    } else {
+                        normal_idx
+                    };
+                    
+                    // 先获取纹理实际尺寸
+                    if let Some(ref mut lib) = self.prguse_lib {
+                        if let Ok(info) = lib.get_or_create_texture(texture_idx) {
+                            let btn_w = info.width as f32;
+                            let btn_h = info.height as f32;
+                            let btn_rect = egui::Rect::from_min_size(
+                                egui::pos2(rect.min.x + btn_x + info.x as f32, rect.min.y + btn_y + info.y as f32),
+                                egui::vec2(btn_w, btn_h)
+                            );
+                            let response = ui.allocate_rect(btn_rect, egui::Sense::click().union(egui::Sense::hover()));
+                            
+                            // 根据hover/pressed重新选择纹理
+                            let final_idx = if response.is_pointer_button_down_on() {
+                                pressed_idx
+                            } else if response.hovered() {
+                                hover_idx
+                            } else if self.new_char_class == class_id {
+                                hover_idx
+                            } else {
+                                normal_idx
+                            };
+                            
+                            // 绘制按钮纹理
+                            if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "prguse", final_idx) {
+                                ui.painter().image(
+                                    texture.id(),
+                                    btn_rect,
+                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Color32::WHITE,
+                                );
+                            }
+                            
+                            if response.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            if response.clicked() {
+                                self.new_char_class = class_id;
+                            }
+                        }
                     }
                 }
                 
-                // 性别按钮
+                // 性别按钮 (normal, hover, pressed)
                 let gender_buttons = [
-                    (0, 323.0, 343.0),
-                    (1, 373.0, 343.0),
+                    (0, 323.0, 343.0, 2420, 2421, 2422),
+                    (1, 373.0, 343.0, 2423, 2424, 2425),
                 ];
                 
-                for (gender_id, btn_x, btn_y) in gender_buttons {
-                    let btn_rect = egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x + btn_x, rect.min.y + btn_y),
-                        egui::vec2(72.0, 32.0)
-                    );
-                    let response = ui.allocate_rect(btn_rect, egui::Sense::click().union(egui::Sense::hover()));
-                    if response.hovered() {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                    if response.clicked() {
-                        self.new_char_gender = gender_id;
+                for (gender_id, btn_x, btn_y, normal_idx, hover_idx, pressed_idx) in gender_buttons {
+                    // 根据状态选择初始纹理
+                    let texture_idx = if self.new_char_gender == gender_id {
+                        hover_idx
+                    } else {
+                        normal_idx
+                    };
+                    
+                    // 先获取纹理实际尺寸
+                    if let Some(ref mut lib) = self.prguse_lib {
+                        if let Ok(info) = lib.get_or_create_texture(texture_idx) {
+                            let btn_w = info.width as f32;
+                            let btn_h = info.height as f32;
+                            let btn_rect = egui::Rect::from_min_size(
+                                egui::pos2(rect.min.x + btn_x + info.x as f32, rect.min.y + btn_y + info.y as f32),
+                                egui::vec2(btn_w, btn_h)
+                            );
+                            let response = ui.allocate_rect(btn_rect, egui::Sense::click().union(egui::Sense::hover()));
+                            
+                            // 根据hover/pressed重新选择纹理
+                            let final_idx = if response.is_pointer_button_down_on() {
+                                pressed_idx
+                            } else if response.hovered() {
+                                hover_idx
+                            } else if self.new_char_gender == gender_id {
+                                hover_idx
+                            } else {
+                                normal_idx
+                            };
+                            
+                            // 绘制按钮纹理
+                            if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "prguse", final_idx) {
+                                ui.painter().image(
+                                    texture.id(),
+                                    btn_rect,
+                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Color32::WHITE,
+                                );
+                            }
+                            
+                            if response.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            if response.clicked() {
+                                self.new_char_gender = gender_id;
+                            }
+                        }
                     }
                 }
                 
@@ -844,37 +832,102 @@ impl SelectScene {
                         .hint_text("请输入角色名称")
                         .char_limit(15)
                         .desired_width(240.0)
-                        .frame(false)
-                        .margin(egui::vec2(0.0, 0.0))
+                        // 保留默认边框，让光标和输入可见
                 );
                 
-                // OK按钮
-                let ok_rect = egui::Rect::from_min_size(
-                    egui::pos2(rect.min.x + 160.0, rect.min.y + 425.0),
-                    egui::vec2(124.0, 35.0)
-                );
-                let ok_response = ui.allocate_rect(ok_rect, egui::Sense::click().union(egui::Sense::hover()));
-                if ok_response.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if ok_response.clicked() {
-                    self.handle_create_character();
+                // OK按钮 (Title库 360/321/322)
+                let ok_x = 160.0;
+                let ok_y = 425.0;
+                let ok_normal_idx = 360;
+                let ok_hover_idx = 321;
+                let ok_pressed_idx = 322;
+                
+                if let Some(ref mut lib) = self.title_lib {
+                    // 先用normal纹理获取尺寸
+                    if let Ok(info) = lib.get_or_create_texture(ok_normal_idx) {
+                        let ok_w = info.width as f32;
+                        let ok_h = info.height as f32;
+                        let ok_rect = egui::Rect::from_min_size(
+                            egui::pos2(rect.min.x + ok_x + info.x as f32, rect.min.y + ok_y + info.y as f32),
+                            egui::vec2(ok_w, ok_h)
+                        );
+                        let ok_response = ui.allocate_rect(ok_rect, egui::Sense::click().union(egui::Sense::hover()));
+                        
+                        // 根据hover/pressed重新选择纹理
+                        let final_ok_idx = if ok_response.is_pointer_button_down_on() {
+                            ok_pressed_idx
+                        } else if ok_response.hovered() {
+                            ok_hover_idx
+                        } else {
+                            ok_normal_idx
+                        };
+                        
+                        // 绘制OK按钮纹理
+                        if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "title", final_ok_idx) {
+                            ui.painter().image(
+                                texture.id(),
+                                ok_rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                        
+                        if ok_response.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        if ok_response.clicked() {
+                            self.handle_create_character();
+                        }
+                    }
                 }
                 
-                // Cancel按钮
-                let cancel_rect = egui::Rect::from_min_size(
-                    egui::pos2(rect.min.x + 425.0, rect.min.y + 425.0),
-                    egui::vec2(124.0, 35.0)
-                );
-                let cancel_response = ui.allocate_rect(cancel_rect, egui::Sense::click().union(egui::Sense::hover()));
-                if cancel_response.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-                if cancel_response.clicked() {
-                    self.new_char_name.clear();
-                    self.new_char_class = 0;
-                    self.new_char_gender = 0;
-                    self.show_new_character = false;
+                // Cancel按钮 (Title库 280/281/282)
+                let cancel_x = 425.0;
+                let cancel_y = 425.0;
+                let cancel_normal_idx = 280;
+                let cancel_hover_idx = 281;
+                let cancel_pressed_idx = 282;
+                
+                if let Some(ref mut lib) = self.title_lib {
+                    // 先用normal纹理获取尺寸
+                    if let Ok(info) = lib.get_or_create_texture(cancel_normal_idx) {
+                        let cancel_w = info.width as f32;
+                        let cancel_h = info.height as f32;
+                        let cancel_rect = egui::Rect::from_min_size(
+                            egui::pos2(rect.min.x + cancel_x + info.x as f32, rect.min.y + cancel_y + info.y as f32),
+                            egui::vec2(cancel_w, cancel_h)
+                        );
+                        let cancel_response = ui.allocate_rect(cancel_rect, egui::Sense::click().union(egui::Sense::hover()));
+                        
+                        // 根据hover/pressed重新选择纹理
+                        let final_cancel_idx = if cancel_response.is_pointer_button_down_on() {
+                            cancel_pressed_idx
+                        } else if cancel_response.hovered() {
+                            cancel_hover_idx
+                        } else {
+                            cancel_normal_idx
+                        };
+                        
+                        // 绘制Cancel按钮纹理
+                        if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "title", final_cancel_idx) {
+                            ui.painter().image(
+                                texture.id(),
+                                cancel_rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                        
+                        if cancel_response.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        if cancel_response.clicked() {
+                            self.new_char_name.clear();
+                            self.new_char_class = 0;
+                            self.new_char_gender = 0;
+                            self.show_new_character = false;
+                        }
+                    }
                 }
             });
     }
