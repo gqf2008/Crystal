@@ -637,13 +637,67 @@ impl SelectScene {
         // 职业和性别按钮在交互层绘制（支持hover/pressed状态），这里不再绘制
         
         // 绘制角色预览动画
-        let base_index = 20 + (self.new_char_class as usize * 20) + (self.new_char_gender as usize * 280);
+        // 索引计算：根据C#源码SelectScene.cs
+        // 大部分职业: base = 20 + class*20 + gender*280
+        // 但弓箭手(class=4)使用特殊索引：男100 / 女140
+        let base_index = if self.new_char_class == 4 {
+            // 弓箭手特殊处理
+            if self.new_char_gender == 0 { 100 } else { 140 }
+        } else {
+            // 其他职业使用通用公式
+            20 + (self.new_char_class as usize * 20) + (self.new_char_gender as usize * 280)
+        };
         let frame_index = base_index + self.dialog_animation_frame;
         
         // 检查索引是否合法（ChrSel库总共1146张图）
         if frame_index >= 1146 {
-            println!("⚠️ 角色索引越界: class={}, gender={}, frame={}, index={}",
-                self.new_char_class, self.new_char_gender, self.dialog_animation_frame, frame_index);
+            println!("⚠️ 角色索引越界: class={}, gender={}, base={}, anim_frame={}, final_index={}, max=1146",
+                self.new_char_class, self.new_char_gender, base_index, self.dialog_animation_frame, frame_index);
+            // 如果帧索引越界，尝试只用base_index（第一帧）
+            let fallback_index = base_index;
+            if fallback_index >= 1146 {
+                println!("⚠️ 基础索引也越界: base={}, 该职业性别组合可能不存在", base_index);
+                // 使用默认的男战士（index 20）
+                let fallback_index = 20;
+                if let Some(ref mut lib) = self.chrsel_lib {
+                    if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "chrsel", fallback_index) {
+                        if let Ok(info) = lib.get_or_create_texture(fallback_index) {
+                            let char_w = info.width as f32;
+                            let char_h = info.height as f32;
+                            let rect = egui::Rect::from_min_size(
+                                egui::pos2(dialog_x + 120.0 + info.x as f32, dialog_y + 250.0 + info.y as f32),
+                                egui::vec2(char_w, char_h)
+                            );
+                            painter.image(
+                                texture.id(),
+                                rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                    }
+                }
+            } else {
+                // 使用base_index绘制第一帧
+                if let Some(ref mut lib) = self.chrsel_lib {
+                    if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "chrsel", fallback_index) {
+                        if let Ok(info) = lib.get_or_create_texture(fallback_index) {
+                            let char_w = info.width as f32;
+                            let char_h = info.height as f32;
+                            let rect = egui::Rect::from_min_size(
+                                egui::pos2(dialog_x + 120.0 + info.x as f32, dialog_y + 250.0 + info.y as f32),
+                                egui::vec2(char_w, char_h)
+                            );
+                            painter.image(
+                                texture.id(),
+                                rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                    }
+                }
+            }
         } else if let Some(ref mut lib) = self.chrsel_lib {
             if let Some(texture) = Self::get_or_create_egui_texture(ctx, &mut self.texture_cache, lib, "chrsel", frame_index) {
                 if let Ok(info) = lib.get_or_create_texture(frame_index) {
@@ -822,25 +876,28 @@ impl SelectScene {
                     }
                 }
                 
-                // 输入框
+                // 输入框（向下偏移30像素）
+                let text_edit = egui::TextEdit::singleline(&mut self.new_char_name)
+                    .hint_text("请输入角色名称")
+                    .char_limit(15)
+                    .desired_width(240.0)
+                    .font(egui::TextStyle::Small) // 使用Small样式（12.0字号）
+                    .frame(false); // 去掉边框和背景
+                
                 ui.put(
                     egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x + 325.0, rect.min.y + 238.0),
+                        egui::pos2(rect.min.x + 325.0, rect.min.y + 268.0),
                         egui::vec2(240.0, 24.0)
                     ),
-                    egui::TextEdit::singleline(&mut self.new_char_name)
-                        .hint_text("请输入角色名称")
-                        .char_limit(15)
-                        .desired_width(240.0)
-                        // 保留默认边框，让光标和输入可见
+                    text_edit
                 );
                 
-                // OK按钮 (Title库 360/321/322)
+                // OK按钮 (Title库 343/344/345 - Create按钮)
                 let ok_x = 160.0;
                 let ok_y = 425.0;
-                let ok_normal_idx = 360;
-                let ok_hover_idx = 321;
-                let ok_pressed_idx = 322;
+                let ok_normal_idx = 343;
+                let ok_hover_idx = 344;
+                let ok_pressed_idx = 345;
                 
                 if let Some(ref mut lib) = self.title_lib {
                     // 先用normal纹理获取尺寸
