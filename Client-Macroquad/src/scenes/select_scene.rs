@@ -218,6 +218,7 @@ impl SelectScene {
         }
         
         if let Ok(info) = lib.get_or_create_texture(index) {
+            info.as_texture(); // 触发纹理创建（注意：这是直接访问 MLibrary，需要手动调用）
             if let Some(ref texture) = info.image {
                 let image_data = texture.get_texture_data();
                 let width = texture.width() as usize;
@@ -269,6 +270,7 @@ impl SelectScene {
         // 背景 Prguse[65] - 背景图片从(0,0)开始,应用ImageInfo的偏移值
         if let Some(ref mut lib) = self.prguse_lib {
             if let Ok(info) = lib.get_or_create_texture(65) {
+                info.as_texture(); // 触发纹理创建（注意：这是直接访问 MLibrary，需要手动调用）
                 if let Some(ref texture) = info.image {
                     draw_texture(texture, 0.0 + info.x as f32, 0.0 + info.y as f32, WHITE);
                 }
@@ -278,6 +280,7 @@ impl SelectScene {
         // 标题 Title[40] at (468, 20)
         if let Some(ref mut lib) = self.title_lib {
             if let Ok(info) = lib.get_or_create_texture(40) {
+                info.as_texture(); // 触发纹理创建（注意：这是直接访问 MLibrary，需要手动调用）
                 if let Some(ref texture) = info.image {
                     // 使用基础位置 + 偏移值
                     draw_texture(texture, 468.0 + info.x as f32, 20.0 + info.y as f32, WHITE);
@@ -325,6 +328,7 @@ impl SelectScene {
                 
                 if let Some(ref mut lib) = self.chrsel_lib {
                     if let Ok(info) = lib.get_or_create_texture(frame_index) {
+                        info.as_texture(); // 触发纹理创建（注意：这是直接访问 MLibrary，需要手动调用）
                         if let Some(ref texture) = info.image {
                             // C# 原版位置: (260, 420) + 偏移值
                             // 放大1.2倍显示，使用线性过滤
@@ -342,6 +346,7 @@ impl SelectScene {
                             if character.class == CLASS_WIZARD {
                                 let glow_index = frame_index + 560;
                                 if let Ok(glow_info) = lib.get_or_create_texture(glow_index) {
+                                    glow_info.as_texture(); // 触发纹理创建（注意：这是直接访问 MLibrary，需要手动调用）
                                     if let Some(ref glow_texture) = glow_info.image {
                                         let glow_x = 260.0 + glow_info.x as f32 * scale;
                                         let glow_y = 420.0 + glow_info.y as f32 * scale;

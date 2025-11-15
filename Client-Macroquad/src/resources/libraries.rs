@@ -1233,9 +1233,52 @@ pub fn get_or_create_texture(lib_name: LibraryName, index: usize) -> Option<Imag
     LIBRARIES.with(|libs| {
         let mut libs = libs.borrow_mut();
         // 获取库
-        let lib_rc = libs.get_or_load(lib_name.clone())?;
+        let lib_rc = match libs.get_or_load(lib_name.clone()) {
+            Some(lib) => lib,
+            None => {
+                eprintln!("❌ 无法加载库: {:?}", lib_name);
+                return None;
+            }
+        };
         let mut lib = lib_rc.borrow_mut();
-        lib.get_or_create_texture(index).ok().cloned()
+        match lib.get_or_create_texture(index) {
+            Ok(info) => {
+                // ⚠️ 注意：不在这里调用 as_texture()，因为：
+                // 1. macroquad 纹理创建需要窗口上下文
+                // 2. 返回的是克隆，Texture2D 无法克隆
+                // 
+                // 调用方应该：
+                // 1. 直接使用 MLibrary 引用（推荐）
+                // 2. 或使用 get_or_create_egui_texture() 获取 egui 纹理
+                Some(info.clone())
+            }
+            Err(e) => {
+                eprintln!("❌ 加载纹理失败 {:?}[{}]: {}", lib_name, index, e);
+                None
+            }
+        }
+    })
+}
+
+/// 便捷函数：获取或创建 egui 纹理（直接返回 TextureHandle）
+///
+/// 这是推荐的方式，用于 egui UI 组件中使用纹理
+pub fn get_or_create_egui_texture(
+    ctx: &egui::Context,
+    lib_name: LibraryName,
+    index: usize,
+) -> Option<egui::TextureHandle> {
+    LIBRARIES.with(|libs| {
+        let mut libs = libs.borrow_mut();
+        // 获取库
+        let lib_rc = libs.get_or_load(lib_name)?;
+        let mut lib = lib_rc.borrow_mut();
+        // get_or_create_texture 返回 &mut ImageInfo
+        if let Ok(info) = lib.get_or_create_texture(index) {
+            info.as_egui_texture(ctx).cloned()
+        } else {
+            None
+        }
     })
 }
 
@@ -1295,8 +1338,36 @@ pub fn initialize_all_libraries(data_path: &str) -> std::io::Result<()> {
         libs.set_data_path(data_path);
 
         tracing::info!("=== 开始初始化所有库 ===");
-        load_core_libraries()?;
-        // 1. 初始化 MapLibs[0-399]
+        
+        // 1. 加载核心库（内联，避免重复借用）
+        let core_libs = vec![
+            LibraryName::ChrSel,
+            LibraryName::Title,
+            LibraryName::Prguse,
+            LibraryName::Prguse2,
+            LibraryName::Magic,
+            LibraryName::Magic2,
+            LibraryName::Weather,
+            LibraryName::Effect,
+            LibraryName::Items,
+            LibraryName::MagIcon,
+            LibraryName::BuffIcon,
+        ];
+
+        libs.count = core_libs.len();
+        libs.progress = 0;
+
+        tracing::info!("开始加载核心库 ({} 个)...", libs.count);
+
+        for lib_name in core_libs {
+            if let Err(e) = libs.load(lib_name) {
+                tracing::warn!("核心库 {} 加载失败: {}", lib_name, e);
+            }
+        }
+
+        libs.loaded = true;
+        
+        // 2. 初始化 MapLibs[0-399]
         libs.init_map_libraries()?;
         // // 2. 加载核心 UI 库 (同步)
         // let core_libs = [

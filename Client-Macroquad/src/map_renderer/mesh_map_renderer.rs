@@ -226,7 +226,10 @@ impl MeshMapRenderer {
                         .and_then(|lib| {
                             let mut lib_guard = lib.borrow_mut();
                             lib_guard.get_or_create_texture(image_index as usize).ok()
-                                .and_then(|info| info.image.as_ref().cloned())
+                                .and_then(|info| {
+                                    info.as_texture(); // 触发纹理创建
+                                    info.image.as_ref().cloned()
+                                })
                         });
                     
                     if let Some(texture) = texture_opt {
@@ -328,7 +331,10 @@ impl MeshMapRenderer {
                         .and_then(|lib| {
                             let mut lib_guard = lib.borrow_mut();
                             lib_guard.get_or_create_texture(image_index as usize).ok()
-                                .map(|info| (info.image.as_ref().cloned(), info.x, info.y))
+                                .map(|info| {
+                                    info.as_texture(); // 触发纹理创建
+                                    (info.image.as_ref().cloned(), info.x, info.y)
+                                })
                         });
                     
                     if let Some((Some(texture), _offset_x, _offset_y)) = texture_and_offset_opt {
@@ -453,7 +459,10 @@ impl MeshMapRenderer {
                         .and_then(|lib| {
                             let mut lib_guard = lib.borrow_mut();
                             lib_guard.get_or_create_texture(image_index as usize).ok()
-                                .map(|info| (info.image.as_ref().cloned(), info.x, info.y))
+                                .map(|info| {
+                                    info.as_texture(); // 触发纹理创建
+                                    (info.image.as_ref().cloned(), info.x, info.y)
+                                })
                         });
                     
                     if let Some((Some(texture), offset_x, offset_y)) = texture_and_info_opt {

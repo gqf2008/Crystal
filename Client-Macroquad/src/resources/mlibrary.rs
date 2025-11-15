@@ -18,6 +18,8 @@ use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use super::texture_converter::TextureConverter;
+
 /// MIR2图像库文件头
 #[derive(Debug, Clone)]
 pub struct LibraryHeader {
@@ -33,7 +35,7 @@ pub struct ImageIndex {
 }
 
 /// 图像元数据(不包含纹理数据)
-#[derive(Clone)]
+// 移除自动 derive，手动实现 Clone 以处理 Texture2D
 pub struct ImageInfo {
     pub width: i16,
     pub height: i16,
@@ -49,13 +51,21 @@ pub struct ImageInfo {
     pub mask_x: i16,
     pub mask_y: i16,
     pub mask_length: i32,
-    pub texture_valid: bool,                       // 纹理是否有效
-    pub image: Option<Texture2D>,                  // 解压后的纹理数据 (RGBA格式)
-    pub egui_texture: Option<egui::TextureHandle>, // egui 纹理句柄
-    pub mask_image: Option<Texture2D>,             // 解压后的遮罩纹理数据 (RGBA格式)
-    pub last_access_time: Option<Instant>,         // 最后访问时间 (用于缓存清理)
-    bgra_data: Option<Vec<u8>>,                    // 原始解压数据 (RGBA格式)
-    mask_bgra_data: Option<Vec<u8>>,               // 遮罩层的原始解压数据 (RGBA格式)
+    
+    // 纹理状态标记
+    pub texture_valid: bool,
+    
+    // 延迟加载的纹理数据（公开访问，但推荐使用访问器方法）
+    pub image: Option<Texture2D>,
+    pub egui_texture: Option<egui::TextureHandle>,
+    pub mask_image: Option<Texture2D>,
+    
+    // 原始 RGBA 数据（私有，用于内部管理）
+    rgba_data: Option<Vec<u8>>,
+    mask_rgba_data: Option<Vec<u8>>,
+    
+    // 访问统计
+    last_access_time: Option<Instant>,
 }
 
 impl ImageInfo {
@@ -112,8 +122,8 @@ impl ImageInfo {
             egui_texture: None,
             mask_image: None,
             last_access_time: None,
-            bgra_data: None,
-            mask_bgra_data: None,
+            rgba_data: None,
+            mask_rgba_data: None,
         })
     }
 
@@ -140,42 +150,30 @@ impl ImageInfo {
         // 解压主图像
         let mut main_image = Self::decompress_image(&compressed_data, self.width, self.height)?;
 
-        // 🔧 BGRA -> RGBA 转换
-        Self::bgra_to_rgba(&mut main_image);
+        // 🔧 使用 TextureConverter 进行 BGRA -> RGBA 转换和透明化处理
+        TextureConverter::bgra_to_rgba_with_transparency(&mut main_image);
 
-        self.bgra_data = Some(main_image.clone()); // 保存原始数据副本
-
-        // // 🔧 使用 macroquad Texture2D 创建纹理（RGBA 格式数据）
-        // let texture = Texture2D::from_rgba8(self.width as u16, self.height as u16, &main_image);
-        // // 在创建时设置线性过滤,避免每次渲染都设置
-        // texture.set_filter(FilterMode::Linear);
-        // self.image = Some(texture);
+        // 保存 RGBA 数据（延迟创建纹理）
+        self.rgba_data = Some(main_image);
 
         // 处理遮罩层
         if self.has_mask {
-            // 跳过12字节的遮罩头信息（C#: reader.ReadBytes(12)）
-            // 这12字节包含: MaskWidth(2) + MaskHeight(2) + MaskX(2) + MaskY(2) + MaskLength(4)
-            // 但这些信息在ImageInfo构造时已经读取，所以这里只是跳过
-            // let mut skip_buffer = [0u8; 12];
-            // reader.read_exact(&mut skip_buffer)?;
             reader.seek(SeekFrom::Current(12))?;
+            
             // 读取遮罩层的压缩数据
             let mut mask_compressed = vec![0u8; self.mask_length as usize];
             reader.read_exact(&mut mask_compressed)?;
 
-            // 解压遮罩层（使用主图像的宽高，因为C#代码中遮罩使用Width/Height）
+            // 解压遮罩层
             let mut mask_data = Self::decompress_image(&mask_compressed, self.width, self.height)?;
 
-            // 🔧 BGRA -> RGBA 转换
-            Self::bgra_to_rgba(&mut mask_data);
-            self.mask_bgra_data = Some(mask_data.clone()); // 保存遮罩原始数据副本
-                                                           // 🔧 使用 macroquad Texture2D 创建遮罩纹理（RGBA 格式数据）
-            // let mask_texture =
-            //     Texture2D::from_rgba8(self.width as u16, self.height as u16, &mask_data);
-            // // 在创建时设置线性过滤
-            // mask_texture.set_filter(FilterMode::Linear);
-            // self.mask_image = Some(mask_texture);
+            // 🔧 使用 TextureConverter 进行转换
+            TextureConverter::bgra_to_rgba_with_transparency(&mut mask_data);
+            
+            // 保存遮罩 RGBA 数据
+            self.mask_rgba_data = Some(mask_data);
         }
+        
         self.last_access_time = Some(Instant::now());
         self.texture_valid = true;
         Ok(())
@@ -185,12 +183,10 @@ impl ImageInfo {
         if let Some(ref img) = self.image {
             return Some(img);
         }
-        if let Some(ref data) = self.bgra_data {
-            let texture = Texture2D::from_rgba8(self.width as u16, self.height as u16, data);
-            // 在创建时设置线性过滤
-            texture.set_filter(FilterMode::Linear);
+        if let Some(ref data) = self.rgba_data {
+            let texture = TextureConverter::create_mq_texture(self.width as u16, self.height as u16, data);
             self.image = Some(texture);
-            self.bgra_data.take();
+            // 不立即释放 rgba_data，保留用于后续可能的用途
         }
         self.image.as_ref()
     }
@@ -199,107 +195,126 @@ impl ImageInfo {
         if let Some(ref img) = self.mask_image {
             return Some(img);
         }
-        if let Some(ref data) = self.mask_bgra_data {
-            let texture = Texture2D::from_rgba8(self.width as u16, self.height as u16, data);
-            // 在创建时设置线性过滤
-            texture.set_filter(FilterMode::Linear);
+        if let Some(ref data) = self.mask_rgba_data {
+            let texture = TextureConverter::create_mq_texture(self.width as u16, self.height as u16, data);
             self.mask_image = Some(texture);
-            self.mask_bgra_data.take();
+            // 不立即释放 mask_rgba_data，保留用于后续可能的用途
         }
         self.mask_image.as_ref()
     }
 
     pub fn as_egui_texture(&mut self, ctx: &egui::Context) -> Option<&egui::TextureHandle> {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        if let Some(ref img) = self.image {
-            let image_data = img.get_texture_data();
-            let width = img.width() as usize;
-            let height = img.height() as usize;
+        if let Some(ref texture) = self.egui_texture {
+            return Some(texture);
+        }
 
-            let mut pixels = Vec::with_capacity(width * height);
-            for y in 0..height {
-                for x in 0..width {
-                    let idx = (y * width + x) * 4;
-                    let r = image_data.bytes[idx];
-                    let g = image_data.bytes[idx + 1];
-                    let b = image_data.bytes[idx + 2];
-                    let a = image_data.bytes[idx + 3];
-                    pixels.push(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
-                }
-            }
-            let mut hasher = DefaultHasher::new();
-            pixels.hash(&mut hasher);
-            let hash_value = hasher.finish();
-            let color_image = egui::ColorImage {
-                size: [width, height],
-                pixels,
-            };
-            let key = format!("{}_{}_{}", hash_value, self.width, self.height);
-            let handle = ctx.load_texture(&key, color_image, Default::default());
+        // 从已有的 macroquad 纹理创建
+        if let Some(ref texture) = self.image {
+            let handle = TextureConverter::mq_to_egui(
+                ctx,
+                texture,
+                format!("{}x{}", self.width, self.height),
+            );
             self.egui_texture = Some(handle);
             return self.egui_texture.as_ref();
         }
 
-        if let Some(ref img) = self.bgra_data {
+        // 从 RGBA 数据创建
+        if let Some(ref data) = self.rgba_data {
             let width = self.width as usize;
             let height = self.height as usize;
-
-            let mut pixels = Vec::with_capacity(width * height);
-            for y in 0..height {
-                for x in 0..width {
-                    let idx = (y * width + x) * 4;
-                    let r = img[idx];
-                    let g = img[idx + 1];
-                    let b = img[idx + 2];
-                    let a = img[idx + 3];
-                    pixels.push(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
-                }
-            }
-            let mut hasher = DefaultHasher::new();
-            pixels.hash(&mut hasher);
-            let hash_value = hasher.finish();
-            let color_image = egui::ColorImage {
-                size: [width, height],
-                pixels,
-            };
-            let key = format!("{}_{}_{}", hash_value, self.width, self.height);
-            let handle = ctx.load_texture(&key, color_image, Default::default());
+            let hash_value = TextureConverter::hash_rgba_data(data);
+            let key = format!("{}_{}_{}", hash_value, width, height);
+            let handle = TextureConverter::rgba_to_egui(ctx, width, height, data, key);
             self.egui_texture = Some(handle);
-            // self.bgra_data.take();
         }
         self.egui_texture.as_ref()
+    }
+
+    /// 获取 macroquad 纹理引用（只读）
+    pub fn texture(&self) -> Option<&Texture2D> {
+        self.image.as_ref()
+    }
+
+    /// 获取遮罩纹理引用（只读）
+    pub fn mask_texture(&self) -> Option<&Texture2D> {
+        self.mask_image.as_ref()
     }
 
     pub fn dispose_texture(&mut self) {
         self.image.take();
         self.mask_image.take();
         self.last_access_time.take();
-        self.bgra_data.take();
-        self.mask_bgra_data.take();
+        self.rgba_data.take();
+        self.mask_rgba_data.take();
         self.egui_texture.take();
         self.texture_valid = false;
     }
 
-    /// 获取 BGRA 原始数据的引用 (如果已加载)
+    /// 仅清理原始 RGBA 数据，保留已创建的纹理
+    /// 
+    /// 用于释放内存但保留纹理可用
+    pub fn release_raw_data(&mut self) {
+        if self.image.is_some() {
+            self.rgba_data.take();
+        }
+        if self.mask_image.is_some() {
+            self.mask_rgba_data.take();
+        }
+    }
+}
+
+// 手动实现 Clone，智能处理纹理克隆
+impl Clone for ImageInfo {
+    fn clone(&self) -> Self {
+        // 克隆基础字段
+        let mut cloned = ImageInfo {
+            width: self.width,
+            height: self.height,
+            x: self.x,
+            y: self.y,
+            shadow_x: self.shadow_x,
+            shadow_y: self.shadow_y,
+            shadow: self.shadow,
+            length: self.length,
+            has_mask: self.has_mask,
+            mask_width: self.mask_width,
+            mask_height: self.mask_height,
+            mask_x: self.mask_x,
+            mask_y: self.mask_y,
+            mask_length: self.mask_length,
+            texture_valid: self.texture_valid,
+            image: None,              // 延迟克隆
+            egui_texture: None,       // egui 纹理无法克隆
+            mask_image: None,         // 延迟克隆
+            rgba_data: self.rgba_data.clone(),
+            mask_rgba_data: self.mask_rgba_data.clone(),
+            last_access_time: self.last_access_time,
+        };
+
+        // 🔧 关键：如果有 RGBA 数据，从数据重新创建纹理
+        // 这样克隆后的对象也能使用纹理（需要窗口上下文）
+        if cloned.rgba_data.is_some() {
+            cloned.as_texture(); // 触发纹理创建
+        }
+        if cloned.mask_rgba_data.is_some() {
+            cloned.as_mask_texture(); // 触发遮罩纹理创建
+        }
+
+        cloned
+    }
+}
+
+impl ImageInfo {
     ///
-    /// 用于 Bevy 等其他渲染引擎获取图像数据
-    pub fn get_bgra_data(&self) -> Option<&Vec<u8>> {
-        self.bgra_data.as_ref()
+    /// 用于其他渲染引擎获取图像数据
+    pub fn get_rgba_data(&self) -> Option<&Vec<u8>> {
+        self.rgba_data.as_ref()
     }
 
-    /// 解压图像数据并转换为RGBA格式
+    /// 解压图像数据并返回 RGBA 格式
     ///
     /// 对应 C# MImage.DecompressImage
-    /// ```csharp
-    /// private static void DecompressImage(byte[] data, Stream destination)
-    /// {
-    ///     using (var stream = new GZipStream(new MemoryStream(data), CompressionMode.Decompress))
-    ///     {
-    ///         stream.CopyTo(destination);
-    ///     }
-    /// }
-    /// ```
     ///
     /// # 参数
     /// - `compressed`: 压缩的图像数据（GZip格式）
@@ -307,7 +322,7 @@ impl ImageInfo {
     /// - `height`: 图像高度
     ///
     /// # 返回
-    /// - `Ok(Vec<u8>)`:BGRA格式的图像数据
+    /// - `Ok(Vec<u8>)`: BGRA格式的图像数据（需要后续转换为RGBA）
     /// - `Err`: 解压失败
     fn decompress_image(
         compressed: &[u8],
@@ -341,40 +356,6 @@ impl ImageInfo {
             }
         }
         Ok(decompressed)
-    }
-
-    /// BGRA 转 RGBA + 黑色背景透明化
-    ///
-    /// lib 文件存储的是 BGRA 格式（DirectX 格式），需要转换为 RGBA：
-    /// 1. 交换 R 和 B 通道（BGRA -> RGBA）
-    /// 2. 纯黑色背景透明化（匹配C#原版逻辑）
-    ///
-    /// 对应 ggez 版本的 bgra_to_transparent 函数
-    fn bgra_to_rgba(data: &mut [u8]) {
-        for chunk in data.chunks_exact_mut(4) {
-            let b = chunk[0];
-            let g = chunk[1];
-            let r = chunk[2];
-            let a = chunk[3];
-
-            // 🔧 纯黑色背景透明化（匹配C#原版逻辑）
-            // C# 原版: if (pixels[i] == 0 && pixels[i + 1] == 0 && pixels[i + 2] == 0) pixels[i + 3] = 0;
-            //
-            // 但由于DXT压缩/解压可能导致精度损失，纯黑(0,0,0)可能变成接近黑(1,1,1)或(2,2,2)
-            // 所以放宽到 RGB < 3 来容错
-            let is_near_black = r < 3 && g < 3 && b < 3; // 接近纯黑（容忍DXT压缩误差）
-            let is_opaque = a > 250; // 完全不透明
-
-            // BGRA -> RGBA: 交换 B 和 R 通道
-            chunk[0] = r;
-            chunk[2] = b;
-
-            // 纯黑背景 → 完全透明
-            if is_near_black && is_opaque {
-                chunk[3] = 0;
-            }
-            // 其他所有情况保持原始alpha值
-        }
     }
 
     // fn apply_auto_alpha(rgba: &mut [u8]) {
@@ -435,13 +416,12 @@ impl ImageInfo {
     /// - 坐标越界返回 false
     /// - 检查 alpha 通道（第4字节）是否为0
     pub fn visible_pixel(&self, x: i32, y: i32) -> bool {
-        if let Some(ref rgba_data) = self.bgra_data {
+        if let Some(ref rgba_data) = self.rgba_data {
             // 边界检查
             if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
                 return false;
             }
             let w = self.width as usize;
-            // 使用我们保存的数据副本
             // 计算索引: (y * width * 4) + (x * 4) + 3
             let index = ((y as usize) * (w << 2)) + ((x as usize) << 2) + 3;
             if index < rgba_data.len() {
@@ -566,20 +546,30 @@ impl ImageInfo {
 /// MIR2图像库
 pub struct MLibrary {
     path: PathBuf,
-    // header: LibraryHeader,
     indices: Vec<ImageIndex>,
     cached_info: HashMap<usize, ImageInfo>,
     reader: BufReader<File>,
+    /// 库名称（用于缓存键）
+    name: String,
 }
 
 impl MLibrary {
     /// 打开.lib文件
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let mut path_buf = path.as_ref().to_path_buf();
+        
+        // 提取库名称
+        let name = path_buf
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        
         // 尝试.Lib扩展名
         if !path_buf.exists() {
             path_buf.set_extension("Lib");
         }
+        
         let mut reader = BufReader::new(File::open(&path_buf)?);
         let version = reader.read_i32::<LittleEndian>()?;
         if version < 2 {
@@ -608,6 +598,7 @@ impl MLibrary {
             indices,
             cached_info,
             reader,
+            name,
         })
     }
 
@@ -619,6 +610,11 @@ impl MLibrary {
     /// 获取库文件路径
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// 获取库名称
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// 读取图像信息(不解压纹理数据)
@@ -697,7 +693,7 @@ impl MLibrary {
     /// # 性能优化
     /// - ✅ 返回引用而非克隆，避免大块内存拷贝
     /// - ✅ 自动缓存纹理，重复调用零开销
-    pub fn get_or_create_texture(&mut self, index: usize) -> io::Result<&ImageInfo> {
+    pub fn get_or_create_texture(&mut self, index: usize) -> io::Result<&mut ImageInfo> {
         // 检查索引范围
         if index >= self.indices.len() {
             return Err(io::Error::new(
@@ -749,7 +745,12 @@ impl MLibrary {
         }
 
         // 现在返回引用（Entry 已经释放）
-        Ok(self.cached_info.get_mut(&index).unwrap())
+        let cached = self.cached_info.get_mut(&index).unwrap();
+        
+        // 注意：不在这里创建 macroquad 纹理，因为需要窗口上下文
+        // 纹理会在调用 as_texture() 时延迟创建
+        
+        Ok(cached)
     }
 
     /// 清理长时间未使用的纹理缓存

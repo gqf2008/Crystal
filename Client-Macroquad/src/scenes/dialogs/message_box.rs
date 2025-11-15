@@ -1,6 +1,7 @@
 // 公共消息框组件
 use super::Dialog;
 use crate::resources::libraries::LibraryName;
+use crate::resources::get_or_create_egui_texture;
 use egui_macroquad::egui;
 use macroquad::prelude::*;
 
@@ -28,16 +29,23 @@ pub struct MessageBox {
     pub text: String,
     pub buttons: MessageBoxButtons,
     pub result: MessageBoxResult,
+    /// 唯一ID，用于区分不同的MessageBox实例
+    id: u64,
 }
+
+// 静态计数器用于生成唯一ID
+static MESSAGE_BOX_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl MessageBox {
     /// 创建新消息框
     pub fn new(title: &str, text: &str, buttons: MessageBoxButtons) -> Self {
+        let id = MESSAGE_BOX_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self {
             title: title.to_string(),
             text: text.to_string(),
             buttons,
             result: MessageBoxResult::None,
+            id,
         }
     }
 
@@ -122,7 +130,7 @@ impl Dialog for MessageBox {
             return;
         }
 
-        egui::Area::new(egui::Id::new("message_box"))
+        egui::Area::new(egui::Id::new(format!("message_box_{}", self.id)))
             .default_pos(egui::pos2(
                 (screen_width() / screen_dpi_scale() - dialog_w) / 2.0,
                 (screen_height() / screen_dpi_scale() - dialog_h) / 2.0,
