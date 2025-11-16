@@ -28,18 +28,36 @@ pub struct MessageBox {
     pub buttons: MessageBoxButtons,
     pub result: MessageBoxResult,
     pub visible: bool,
+    id: String,  // 唯一标识符，用于 egui Area ID
 }
 
 impl MessageBox {
-    /// 创建新消息框
-    pub fn new(title: &str, text: &str, buttons: MessageBoxButtons) -> Self {
+    /// 创建新消息框(带自定义 ID)
+    /// 
+    /// ID 在创建时固定,后续修改 title/text 不会影响 egui widget ID
+    pub fn new_with_id(title: &str, text: &str, buttons: MessageBoxButtons, id: &str) -> Self {
         Self {
             title: title.to_string(),
             text: text.to_string(),
             buttons,
             result: MessageBoxResult::None,
             visible: false,
+            id: format!("message_box_{}", id),
         }
+    }
+    
+    /// 创建新消息框(使用时间戳生成唯一 ID)
+    /// 
+    /// ⚠️ 每次调用都会生成新的 ID!
+    /// 如果需要复用同一个消息框实例并修改内容,请使用 new_with_id()
+    pub fn new(title: &str, text: &str, buttons: MessageBoxButtons) -> Self {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros();
+        let id = format!("{:x}", timestamp);
+        Self::new_with_id(title, text, buttons, &id)
     }
 
     /// 显示消息框
@@ -80,7 +98,7 @@ impl MessageBox {
             return;
         }
 
-        egui::Area::new(egui::Id::new("message_box"))
+        egui::Area::new(egui::Id::new(&self.id))
             .default_pos(egui::pos2(
                 (screen_width() / screen_dpi_scale() - dialog_w) / 2.0,
                 (screen_height() / screen_dpi_scale() - dialog_h) / 2.0
@@ -133,31 +151,31 @@ impl MessageBox {
                 match self.buttons {
                     MessageBoxButtons::Ok => {
                         // OK 按钮 (Title 200/201/202)
-                        if Self::draw_image_button(ui, ctx, 200, 201, 202, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
+                        if self.draw_image_button_internal(ui, ctx, 200, 201, 202, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
                             self.result = MessageBoxResult::Ok;
                             self.visible = false;
                         }
                     }
                     MessageBoxButtons::OkCancel => {
                         // OK 按钮
-                        if Self::draw_image_button(ui, ctx, 200, 201, 202, egui::pos2(rect.min.x + 260.0, rect.min.y + 157.0)) {
+                        if self.draw_image_button_internal(ui, ctx, 200, 201, 202, egui::pos2(rect.min.x + 260.0, rect.min.y + 157.0)) {
                             self.result = MessageBoxResult::Ok;
                             self.visible = false;
                         }
                         // Cancel 按钮 (Title 203/204/205)
-                        if Self::draw_image_button(ui, ctx, 203, 204, 205, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
+                        if self.draw_image_button_internal(ui, ctx, 203, 204, 205, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
                             self.result = MessageBoxResult::Cancel;
                             self.visible = false;
                         }
                     }
                     MessageBoxButtons::YesNo => {
                         // Yes 按钮 (Title 206/207/208)
-                        if Self::draw_image_button(ui, ctx, 206, 207, 208, egui::pos2(rect.min.x + 260.0, rect.min.y + 157.0)) {
+                        if self.draw_image_button_internal(ui, ctx, 206, 207, 208, egui::pos2(rect.min.x + 260.0, rect.min.y + 157.0)) {
                             self.result = MessageBoxResult::Yes;
                             self.visible = false;
                         }
                         // No 按钮 (Title 210/211/212)
-                        if Self::draw_image_button(ui, ctx, 210, 211, 212, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
+                        if self.draw_image_button_internal(ui, ctx, 210, 211, 212, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
                             self.result = MessageBoxResult::No;
                             self.visible = false;
                         }
@@ -165,9 +183,10 @@ impl MessageBox {
                 }
             });
     }
-
-    /// 绘制图像按钮（Title 库）- 使用全局纹理缓存
-    fn draw_image_button(
+    
+    /// 绘制图像按钮(实例方法,使用 MessageBox 的 ID 避免冲突)
+    fn draw_image_button_internal(
+        &self,
         ui: &mut egui::Ui,
         ctx: &egui::Context,
         normal_idx: usize,
@@ -181,19 +200,20 @@ impl MessageBox {
             if let Some(ref handle) = info.egui_texture {
                 // 获取纹理尺寸
                 let texture_size = handle.size_vec2();
-            let button_rect = egui::Rect::from_min_size(abs_pos, texture_size);
+                let button_rect = egui::Rect::from_min_size(abs_pos, texture_size);
 
-            // 检测鼠标交互
-            let response = ui.interact(button_rect, egui::Id::new(format!("btn_{}", normal_idx)), egui::Sense::click());
+                // 检测鼠标交互 - 使用 MessageBox ID + 按钮索引确保唯一性
+                let button_id = format!("{}_{}", self.id, normal_idx);
+                let response = ui.interact(button_rect, egui::Id::new(button_id), egui::Sense::click());
 
-            // 根据状态选择纹理索引
-            let texture_idx = if response.is_pointer_button_down_on() {
-                pressed_idx  // 按下状态
-            } else if response.hovered() {
-                hover_idx  // 悬停状态
-            } else {
-                normal_idx  // 正常状态
-            };
+                // 根据状态选择纹理索引
+                let texture_idx = if response.is_pointer_button_down_on() {
+                    pressed_idx  // 按下状态
+                } else if response.hovered() {
+                    hover_idx  // 悬停状态
+                } else {
+                    normal_idx  // 正常状态
+                };
 
                 // 绘制按钮纹理（使用全局纹理缓存）
                 // ✅ 新 API

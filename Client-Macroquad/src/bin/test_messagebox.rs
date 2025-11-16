@@ -28,20 +28,23 @@ struct TestApp {
 impl TestApp {
     fn new() -> GameResult<Self> {
         Ok(Self {
-            ok_box: MessageBox::new(
+            ok_box: MessageBox::new_with_id(
                 "信息",
                 "这是一个只有 OK 按钮的消息框。\n用于显示简单的提示信息。",
-                MessageBoxButtons::Ok
+                MessageBoxButtons::Ok,
+                "ok_box"
             ),
-            ok_cancel_box: MessageBox::new(
+            ok_cancel_box: MessageBox::new_with_id(
                 "确认操作",
                 "这是一个 OK/Cancel 消息框。\n是否继续执行操作？",
-                MessageBoxButtons::OkCancel
+                MessageBoxButtons::OkCancel,
+                "ok_cancel_box"
             ),
-            yes_no_box: MessageBox::new(
+            yes_no_box: MessageBox::new_with_id(
                 "删除确认",
                 "这是一个 Yes/No 消息框。\n确定要删除这个项目吗？",
-                MessageBoxButtons::YesNo
+                MessageBoxButtons::YesNo,
+                "yes_no_box"
             ),
             
             last_result: "等待操作...".to_string(),
@@ -117,11 +120,8 @@ impl TestApp {
                     ui.horizontal(|ui| {
                         if ui.button("测试 OK 消息框").clicked() {
                             println!("🔵 显示 OK 消息框");
-                            self.ok_box = MessageBox::new(
-                                "提示信息",
-                                "这是一个信息提示框。\n\n只有一个 OK 按钮。\n常用于显示操作结果或提示信息。",
-                                MessageBoxButtons::Ok
-                            );
+                            self.ok_box.title = "提示信息".to_string();
+                            self.ok_box.text = "这是一个信息提示框。\n\n只有一个 OK 按钮。\n常用于显示操作结果或提示信息。".to_string();
                             self.ok_box.show();
                         }
                         ui.label("- 只有 OK 按钮");
@@ -133,11 +133,8 @@ impl TestApp {
                     ui.horizontal(|ui| {
                         if ui.button("测试 OkCancel 消息框").clicked() {
                             println!("🟢 显示 OkCancel 消息框");
-                            self.ok_cancel_box = MessageBox::new(
-                                "操作确认",
-                                "即将执行一个重要操作。\n\n这个操作可能会修改数据。\n确定要继续吗？",
-                                MessageBoxButtons::OkCancel
-                            );
+                            self.ok_cancel_box.title = "操作确认".to_string();
+                            self.ok_cancel_box.text = "即将执行一个重要操作。\n\n这个操作可能会修改数据。\n确定要继续吗？".to_string();
                             self.ok_cancel_box.show();
                         }
                         ui.label("- OK 和 Cancel 按钮");
@@ -149,15 +146,33 @@ impl TestApp {
                     ui.horizontal(|ui| {
                         if ui.button("测试 YesNo 消息框").clicked() {
                             println!("🟡 显示 YesNo 消息框");
-                            self.yes_no_box = MessageBox::new(
-                                "删除确认",
-                                "确定要删除这个项目吗？\n\n删除后将无法恢复！\n是否继续？",
-                                MessageBoxButtons::YesNo
-                            );
+                            self.yes_no_box.title = "删除确认".to_string();
+                            self.yes_no_box.text = "确定要删除这个项目吗？\n\n删除后将无法恢复！\n是否继续？".to_string();
                             self.yes_no_box.show();
                         }
                         ui.label("- Yes 和 No 按钮");
                     });
+                    
+                    ui.add_space(15.0);
+                    ui.separator();
+                    ui.add_space(10.0);
+                    
+                    // ✨ 同时显示多个消息框测试
+                    if ui.button("🎯 同时显示所有消息框（测试独立拖动）").clicked() {
+                        println!("✨ 同时显示所有消息框 - 测试独立拖动功能");
+                        
+                        self.ok_box.title = "消息框 1".to_string();
+                        self.ok_box.text = "第一个消息框\n可以独立拖动！".to_string();
+                        self.ok_box.show();
+                        
+                        self.ok_cancel_box.title = "消息框 2".to_string();
+                        self.ok_cancel_box.text = "第二个消息框\n也可以独立拖动！".to_string();
+                        self.ok_cancel_box.show();
+                        
+                        self.yes_no_box.title = "消息框 3".to_string();
+                        self.yes_no_box.text = "第三个消息框\n每个都有独立的 ID！".to_string();
+                        self.yes_no_box.show();
+                    }
                     
                     ui.add_space(15.0);
                     ui.separator();
@@ -176,12 +191,13 @@ impl TestApp {
                     ui.add_space(10.0);
                     
                     // 测试说明
-                    ui.label("测试要点：");
+                    ui.label("✅ 测试要点：");
                     ui.label("• 按钮位置应该正确（X=260/360, Y=157）");
                     ui.label("• 按钮图片索引应该正确");
                     ui.label("• 鼠标悬停和点击效果正常");
                     ui.label("• ESC 键可以关闭消息框");
-                    ui.label("• 消息框可以拖动");
+                    ui.label("• 💡 每个消息框可以独立拖动");
+                    ui.label("• 💡 多个消息框互不干扰");
                     ui.label("• result 字段正确返回点击结果");
                 });
             
