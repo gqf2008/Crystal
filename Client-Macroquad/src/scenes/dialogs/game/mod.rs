@@ -1,9 +1,11 @@
 // Game dialogs module
 
+pub mod belt_dialog;
+pub mod chat_control_bar;
+pub mod chat_dialog;
 pub mod main_dialog;
-mod belt_dialog;
-mod chat_dialog;
 
-pub use main_dialog::MainDialog;
 pub use belt_dialog::BeltDialog;
+pub use chat_control_bar::ChatControlBar;
 pub use chat_dialog::ChatDialog;
+pub use main_dialog::MainDialog;
