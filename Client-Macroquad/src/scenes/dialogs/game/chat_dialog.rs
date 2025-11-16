@@ -382,10 +382,6 @@ impl ChatDialog {
     
     /// 绘制输入框（下方区域，独立于消息显示框）
     fn draw_input(&mut self, ui: &mut egui::Ui, base_rect: &egui::Rect, ctx: &egui::Context) {
-        if !self.input_visible {
-            return;
-        }
-        
         // 输入框位置和尺寸（原工程：Location = (1, 54), Size = (627 or 403, 13)）
         // 这是下方的输入区域，与上方的消息显示区域分离
         let input_x = 1.0;
@@ -398,32 +394,36 @@ impl ChatDialog {
             egui::vec2(input_width, input_height),
         );
         
-        // 绘制深灰色背景（DarkGray = RGB(169, 169, 169)）
+        // 绘制白色背景，让输入框更明显
         ui.painter().rect_filled(
             input_rect,
             1.0,
-            egui::Color32::from_rgb(169, 169, 169),
+            egui::Color32::WHITE,
         );
         
         // 使用 allocate_ui_at_rect 在指定位置放置交互式输入框
         let mut text_rect = input_rect;
         text_rect.min.x += 2.0;
-        text_rect.min.y += 1.0;
+        text_rect.min.y += 1.0 - 2.0; // 光标向上移动3像素
         text_rect.max.x -= 2.0;
         text_rect.max.y -= 1.0;
+        
+        // 临时修改 UI 样式，设置光标颜色为黑色
+        let mut style = (*ctx.style()).clone();
+        style.visuals.text_cursor.stroke = egui::Stroke::new(2.0, egui::Color32::BLACK); // 黑色粗光标
+        ctx.set_style(style);
         
         let text_edit = egui::TextEdit::singleline(&mut self.input_text)
             .desired_width(text_rect.width())
             .frame(false)
-            .font(egui::FontId::monospace(10.0))
-            .text_color(egui::Color32::BLACK);
+            .font(egui::FontId::monospace(9.0)) // 字体从10改为9
+            .text_color(egui::Color32::BLACK)
+            .cursor_at_end(true); // 光标放在末尾
         
         let response = ui.put(text_rect, text_edit);
         
-        // 自动获取焦点
-        if self.input_visible {
-            response.request_focus();
-        }
+        // 点击输入框时获取焦点，不再需要手动维护焦点
+        // egui 会自动处理点击后的焦点获取
         
         // 处理回车发送
         if response.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -440,13 +440,13 @@ impl ChatDialog {
                 );
                 
                 self.input_text.clear();
+                // 发送后重新获取焦点，继续输入
+                response.request_focus();
             }
-            self.input_visible = false;
         }
         
-        // ESC 取消
+        // ESC 清空输入框但不隐藏
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.input_visible = false;
             self.input_text.clear();
         }
     }

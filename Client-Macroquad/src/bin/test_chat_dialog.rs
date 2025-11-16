@@ -74,14 +74,17 @@ async fn main() {
     loop {
         clear_background(Color::from_rgba(60, 80, 100, 255));
 
-        // Enter 键显示聊天输入框
-        if is_key_pressed(KeyCode::Enter) {
-            chat_dialog.show_input();
-            println!("💬 显示聊天输入框");
-        }
+        // 绘制 UI
+        egui_macroquad::ui(|egui_ctx| {
+            let mut open = true;
+            chat_control_bar.show(egui_ctx, &mut open);
+            chat_dialog.show(egui_ctx, &mut open);
+        });
+        
+        egui_macroquad::draw();
 
         // 绘制背景提示
-        let text = "ChatDialog + ChatControlBar 测试 - Enter 打开聊天输入框";
+        let text = "ChatDialog + ChatControlBar 测试 - 点击输入框输入聊天";
         let font_size = 32.0;
         let text_size = measure_text(&text, None, font_size as u16, 1.0);
         draw_text(
