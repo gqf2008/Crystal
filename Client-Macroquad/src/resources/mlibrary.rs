@@ -37,8 +37,8 @@ pub struct ImageIndex {
 pub struct ImageInfo {
     pub width: i16,
     pub height: i16,
-    pub x: i16, // 偏移量X
-    pub y: i16, // 偏移量Y
+    pub offset_x: i16, // 偏移量X
+    pub offset_y: i16, // 偏移量Y
     pub shadow_x: i16,
     pub shadow_y: i16,
     pub shadow: u8,
@@ -94,8 +94,8 @@ impl ImageInfo {
         Ok(Self {
             width,
             height,
-            x,
-            y,
+            offset_x: x,
+            offset_y: y,
             shadow_x,
             shadow_y,
             shadow,
@@ -745,7 +745,7 @@ impl MLibrary {
         // 获取或读取图像信息
         let info = self.get_image_info(index)?;
 
-        Ok((info.x, info.y))
+        Ok((info.offset_x, info.offset_y))
     }
 
     /// 获取图像尺寸

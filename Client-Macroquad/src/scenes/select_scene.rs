@@ -99,7 +99,7 @@ impl SelectScene {
         // 背景 Prguse[65] - 背景图片从(0,0)开始,应用ImageInfo的偏移值
         if let Some(info) = LibraryName::Prguse.get_texture(65) {
             if let Some(ref texture) = info.image {
-                draw_texture(texture, 0.0 + info.x as f32, 0.0 + info.y as f32, WHITE);
+                draw_texture(texture, 0.0 + info.offset_x as f32, 0.0 + info.offset_y as f32, WHITE);
             }
         }
         
@@ -107,7 +107,7 @@ impl SelectScene {
         if let Some(info) = LibraryName::Title.get_texture(40) {
             if let Some(ref texture) = info.image {
                 // 使用基础位置 + 偏移值
-                draw_texture(texture, 468.0 + info.x as f32, 20.0 + info.y as f32, WHITE);
+                draw_texture(texture, 468.0 + info.offset_x as f32, 20.0 + info.offset_y as f32, WHITE);
             }
         }
         
@@ -150,8 +150,8 @@ impl SelectScene {
                         // C# 原版位置: (260, 420) + 偏移值
                         // 放大1.2倍显示，使用线性过滤
                         let scale = 1.2;
-                        let x = 260.0 + info.x as f32 * scale;
-                        let y = 420.0 + info.y as f32 * scale;
+                        let x = 260.0 + info.offset_x as f32 * scale;
+                        let y = 420.0 + info.offset_y as f32 * scale;
                         let w = texture.width() * scale;
                         let h = texture.height() * scale;
                         draw_texture_ex(texture, x, y, WHITE, DrawTextureParams {
@@ -164,8 +164,8 @@ impl SelectScene {
                             let glow_index = frame_index + 560;
                             if let Some(glow_info) = LibraryName::ChrSel.get_texture(glow_index) {
                                 if let Some(ref glow_texture) = glow_info.image {
-                                    let glow_x = 260.0 + glow_info.x as f32 * scale;
-                                    let glow_y = 420.0 + glow_info.y as f32 * scale;
+                                    let glow_x = 260.0 + glow_info.offset_x as f32 * scale;
+                                    let glow_y = 420.0 + glow_info.offset_y as f32 * scale;
                                     let glow_w = glow_texture.width() * scale;
                                     let glow_h = glow_texture.height() * scale;
                                     draw_texture_ex(glow_texture, glow_x, glow_y, Color::new(1.0, 1.0, 1.0, 0.5), DrawTextureParams {

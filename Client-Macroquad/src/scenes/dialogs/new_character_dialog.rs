@@ -121,7 +121,7 @@ impl NewCharacterDialog {
                 let texture_size = handle.size_vec2();
                 // 添加偏移量
                 let button_rect = egui::Rect::from_min_size(
-                    egui::pos2(abs_pos.x + info.x as f32, abs_pos.y + info.y as f32),
+                    egui::pos2(abs_pos.x + info.offset_x as f32, abs_pos.y + info.offset_y as f32),
                     texture_size
                 );
                 
@@ -206,8 +206,8 @@ impl Dialog for NewCharacterDialog {
                         let size = handle.size_vec2();
                         let title_rect = egui::Rect::from_min_size(
                             egui::pos2(
-                                rect.min.x + 206.0 + info.x as f32,
-                                rect.min.y + 11.0 + info.y as f32
+                                rect.min.x + 206.0 + info.offset_x as f32,
+                                rect.min.y + 11.0 + info.offset_y as f32
                             ),
                             size,
                         );
@@ -239,8 +239,8 @@ impl Dialog for NewCharacterDialog {
                         // 角色预览位置: (120, 250) + ImageInfo 偏移量
                         let preview_rect = egui::Rect::from_min_size(
                             egui::pos2(
-                                rect.min.x + 120.0 + info.x as f32,
-                                rect.min.y + 250.0 + info.y as f32
+                                rect.min.x + 120.0 + info.offset_x as f32,
+                                rect.min.y + 250.0 + info.offset_y as f32
                             ),
                             size,
                         );
@@ -259,8 +259,8 @@ impl Dialog for NewCharacterDialog {
                                     let glow_size = glow_handle.size_vec2();
                                     let glow_rect = egui::Rect::from_min_size(
                                         egui::pos2(
-                                            rect.min.x + 120.0 + glow_info.x as f32,
-                                            rect.min.y + 250.0 + glow_info.y as f32
+                                            rect.min.x + 120.0 + glow_info.offset_x as f32,
+                                            rect.min.y + 250.0 + glow_info.offset_y as f32
                                         ),
                                         glow_size,
                                     );

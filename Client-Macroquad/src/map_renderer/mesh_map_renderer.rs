@@ -323,7 +323,7 @@ impl MeshMapRenderer {
 
                     // ✅ 新 API：一行搞定，自动 LRU 缓存，性能提升 50-100x
                     let texture_and_offset_opt = resources::get_map_texture(file_index, image_index)
-                        .map(|info| (info.image.clone(), info.x, info.y));
+                        .map(|info| (info.image.clone(), info.offset_x, info.offset_y));
                     
                     if let Some((Some(texture), _offset_x, _offset_y)) = texture_and_offset_opt {
                         let world_x = x as f32 * self.tile_width;
@@ -445,7 +445,7 @@ impl MeshMapRenderer {
 
                     // ✅ 新 API：一行搞定，自动 LRU 缓存，性能提升 50-100x
                     let texture_and_info_opt = resources::get_map_texture(file_index, image_index)
-                        .map(|info| (info.image.clone(), info.x, info.y));
+                        .map(|info| (info.image.clone(), info.offset_x, info.offset_y));
                     
                     if let Some((Some(texture), offset_x, offset_y)) = texture_and_info_opt {
                         let world_x = x as f32 * self.tile_width;
