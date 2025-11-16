@@ -164,49 +164,87 @@ impl ChatControlBar {
         ];
         
         for (x_offset, filter, base_index) in button_configs.iter() {
-            // 如果是当前选中的频道，使用 pressed 状态 (base_index + 2)
-            let texture_index = if *filter == self.active_filter {
-                base_index + 2
-            } else {
-                *base_index
-            };
-            
-            self.draw_button(ui, ctx, bg_rect, *x_offset, 1.0, texture_index);
+            // 检查按钮点击
+            if self.draw_clickable_button(ui, ctx, bg_rect, *x_offset, 1.0, *base_index, *filter == self.active_filter) {
+                self.active_filter = *filter;
+                println!("📻 切换聊天频道: {:?} (前缀: '{}')", filter, filter.prefix());
+            }
         }
         
         // TradeButton - 位置固定 (166, 1)
-        self.draw_button(ui, ctx, bg_rect, 166.0, 1.0, 2004);
+        if self.draw_clickable_button(ui, ctx, bg_rect, 166.0, 1.0, 2004, false) {
+            println!("💱 打开交易窗口");
+        }
     }
     
     /// 绘制功能按钮
-    fn draw_function_buttons(&self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: egui::Rect) {
+    fn draw_function_buttons(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: egui::Rect) {
         // SizeButton - 位置根据分辨率变化
         let size_btn_x = if self.resolution_index != 0 { 574.0 } else { 350.0 };
-        self.draw_button(ui, ctx, bg_rect, size_btn_x, 1.0, 2057);
+        if self.draw_clickable_button(ui, ctx, bg_rect, size_btn_x, 1.0, 2057, false) {
+            println!("📐 切换聊天窗口大小");
+        }
         
         // SettingsButton - 位置根据分辨率变化
         let settings_btn_x = if self.resolution_index != 0 { 596.0 } else { 372.0 };
-        self.draw_button(ui, ctx, bg_rect, settings_btn_x, 1.0, 2060);
+        if self.draw_clickable_button(ui, ctx, bg_rect, settings_btn_x, 1.0, 2060, false) {
+            println!("⚙️ 打开聊天设置");
+        }
         
         // ReportButton - 默认隐藏，暂不绘制
         // let report_btn_x = if self.resolution_index != 0 { 552.0 } else { 328.0 };
     }
     
-    /// 绘制单个按钮
-    fn draw_button(&self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: egui::Rect, x_offset: f32, y_offset: f32, texture_index: usize) {
-        if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, texture_index) {
+    /// 绘制可点击按钮（返回是否被点击）
+    fn draw_clickable_button(
+        &self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        bg_rect: egui::Rect,
+        x_offset: f32,
+        y_offset: f32,
+        base_index: usize,
+        is_selected: bool,
+    ) -> bool {
+        if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, base_index) {
             if let Some(btn_texture) = info.egui_texture {
                 let btn_size = btn_texture.size_vec2();
                 let btn_pos = bg_rect.min + egui::vec2(x_offset, y_offset);
                 let btn_rect = egui::Rect::from_min_size(btn_pos, btn_size);
                 
-                ui.painter().image(
-                    btn_texture.id(),
+                // 交互检测
+                let response = ui.interact(
                     btn_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
+                    egui::Id::new(format!("ctrl_btn_{}_{}", base_index, x_offset)),
+                    egui::Sense::click(),
                 );
+                
+                // 根据状态选择纹理：pressed(+2), hover(+1), normal(+0)
+                let texture_idx = if is_selected {
+                    base_index + 2  // 已选中状态
+                } else if response.is_pointer_button_down_on() {
+                    base_index + 2  // 按下状态
+                } else if response.hovered() {
+                    base_index + 1  // 悬停状态
+                } else {
+                    base_index      // 正常状态
+                };
+                
+                // 绘制按钮
+                if let Some(final_info) = LibraryName::Prguse.get_egui_texture(ctx, texture_idx) {
+                    if let Some(final_texture) = final_info.egui_texture {
+                        ui.painter().image(
+                            final_texture.id(),
+                            btn_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
+                
+                return response.clicked();
             }
         }
+        false
     }
 }
