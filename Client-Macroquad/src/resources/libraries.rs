@@ -656,7 +656,14 @@ impl Libraries {
                     pixels,
                 };
 
-                let handle = ctx.load_texture(&key, color_image, Default::default());
+                // 使用最近邻过滤保持像素艺术的清晰度
+                let texture_options = egui::TextureOptions {
+                    magnification: egui::TextureFilter::Nearest,
+                    minification: egui::TextureFilter::Nearest,
+                    ..Default::default()
+                };
+
+                let handle = ctx.load_texture(&key, color_image, texture_options);
                 self.texture_cache.insert(key, handle.clone());
                 return Some(handle);
             }
