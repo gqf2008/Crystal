@@ -51,14 +51,14 @@ impl TestApp {
     fn load_resources(&mut self) -> GameResult {
         println!("📦 加载资源文件...");
         
-        // 使用全局库管理器，不需要本地存储
-        use client_macroquad::resources::libraries::{get_library, LibraryName};
+        // ✅ 使用新 API
+        use client_macroquad::resources::LibraryName;
         
-        if let Some(lib) = get_library(LibraryName::Prguse) {
+        if let Some(lib) = LibraryName::Prguse.get_library() {
             println!("✓ Loaded Prguse: {} images", lib.borrow().count());
         }
         
-        if let Some(lib) = get_library(LibraryName::Title) {
+        if let Some(lib) = LibraryName::Title.get_library() {
             println!("✓ Loaded Title: {} images", lib.borrow().count());
         }
         

@@ -1,7 +1,7 @@
 // 公共消息框组件
 use macroquad::prelude::*;
 use egui_macroquad::egui;
-use crate::resources::libraries::{get_or_create_egui_texture, LibraryName};
+use crate::resources::LibraryName;
 
 /// 消息框按钮类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,8 +61,13 @@ impl MessageBox {
 
         // 获取 Prguse[360] 实际尺寸（使用全局库）
         let (dialog_w, dialog_h) = {
-            if let Some(handle) = get_or_create_egui_texture(ctx, LibraryName::Prguse, 360) {
-                (handle.size_vec2().x, handle.size_vec2().y)
+            // ✅ 新 API
+            if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 360) {
+                if let Some(ref handle) = info.egui_texture {
+                    (handle.size_vec2().x, handle.size_vec2().y)
+                } else {
+                    (460.0, 200.0)
+                }
             } else {
                 (460.0, 200.0)
             }
@@ -91,15 +96,18 @@ impl MessageBox {
                 ).rect;
 
                 // 绘制背景纹理 Prguse[360]（使用全局纹理缓存）
-                if let Some(handle) = get_or_create_egui_texture(ctx, LibraryName::Prguse, 360) {
-                    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                    let tint = egui::Color32::WHITE;
-                    ui.painter().image(
-                        handle.id(),
-                        rect,
-                        uv,
-                        tint,
-                    );
+                // ✅ 新 API
+                if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 360) {
+                    if let Some(ref handle) = info.egui_texture {
+                        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                        let tint = egui::Color32::WHITE;
+                        ui.painter().image(
+                            handle.id(),
+                            rect,
+                            uv,
+                            tint,
+                        );
+                    }
                 }
 
                 // 绘制标题和文本
@@ -168,9 +176,11 @@ impl MessageBox {
         abs_pos: egui::Pos2,
     ) -> bool {
         // 获取按钮正常状态纹理（使用全局纹理缓存）
-        if let Some(handle) = get_or_create_egui_texture(ctx, LibraryName::Title, normal_idx) {
-            // 获取纹理尺寸
-            let texture_size = handle.size_vec2();
+        // ✅ 新 API
+        if let Some(info) = LibraryName::Title.get_egui_texture(ctx, normal_idx) {
+            if let Some(ref handle) = info.egui_texture {
+                // 获取纹理尺寸
+                let texture_size = handle.size_vec2();
             let button_rect = egui::Rect::from_min_size(abs_pos, texture_size);
 
             // 检测鼠标交互
@@ -185,19 +195,23 @@ impl MessageBox {
                 normal_idx  // 正常状态
             };
 
-            // 绘制按钮纹理（使用全局纹理缓存）
-            if let Some(btn_handle) = get_or_create_egui_texture(ctx, LibraryName::Title, texture_idx) {
-                let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                let tint = egui::Color32::WHITE;
-                ui.painter().image(
-                    btn_handle.id(),
-                    button_rect,
-                    uv,
-                    tint,
-                );
-            }
+                // 绘制按钮纹理（使用全局纹理缓存）
+                // ✅ 新 API
+                if let Some(btn_info) = LibraryName::Title.get_egui_texture(ctx, texture_idx) {
+                    if let Some(ref btn_handle) = btn_info.egui_texture {
+                        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                        let tint = egui::Color32::WHITE;
+                        ui.painter().image(
+                            btn_handle.id(),
+                            button_rect,
+                            uv,
+                            tint,
+                        );
+                    }
+                }
 
-            return response.clicked();
+                return response.clicked();
+            }
         }
         false
     }

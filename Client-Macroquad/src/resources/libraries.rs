@@ -1284,6 +1284,24 @@ pub fn get_library(name: LibraryName) -> Option<Rc<RefCell<MLibrary>>> {
     LIBRARIES.with(|libs| libs.borrow_mut().get_or_load(name))
 }
 
+/// 便捷函数: 从数组库获取指定索引的库
+/// 
+/// # Example
+/// ```rust
+/// use client_macroquad::resources::{get_from_array, LibraryArray};
+/// 
+/// // 获取地图库
+/// if let Some(lib) = get_from_array(LibraryArray::MapLibs, 0) {
+///     println!("MapLib[0] 已加载");
+/// }
+/// ```
+pub fn get_from_array(
+    array_type: LibraryArray,
+    index: usize,
+) -> Option<Rc<RefCell<MLibrary>>> {
+    LIBRARIES.with(|libs| libs.borrow().get_from_array(array_type, index))
+}
+
 /// 便捷函数: 获取数组库中的某个元素
 /// 
 /// # ⚠️ 已废弃 (Deprecated)

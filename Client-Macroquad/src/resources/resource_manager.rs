@@ -553,8 +553,12 @@ pub fn get_map_texture(file_index: i16, image_index: i32) -> Option<ImageInfo> {
             return Some(cached.clone());
         }
         
-        // 加载纹理
-        let lib = rm.get_from_array(LibraryArray::MapLibs, file_index as usize)?;
+        // ✅ 从 LIBRARIES 获取地图库（而不是 RESOURCE_MANAGER 的独立副本）
+        let lib = crate::resources::libraries::get_from_array(
+            LibraryArray::MapLibs,
+            file_index as usize
+        )?;
+        
         let mut lib_ref = lib.borrow_mut();
         let info = lib_ref.get_or_create_texture(image_index as usize).ok()?.clone();
         
