@@ -636,17 +636,6 @@ impl Scene for LoginScene {
 
         // ========== 【egui 交互层】 ==========
         egui_macroquad::ui(|ctx| {
-            // 调试: 检查 egui pixels_per_point (DPI 缩放)
-            static FIRST_EGUI: std::sync::atomic::AtomicBool =
-                std::sync::atomic::AtomicBool::new(true);
-            if FIRST_EGUI.swap(false, std::sync::atomic::Ordering::Relaxed) {
-                println!("🎨 egui pixels_per_point: {}", ctx.pixels_per_point());
-                println!(
-                    "🎨 egui native_pixels_per_point: {:?}",
-                    ctx.native_pixels_per_point()
-                );
-            }
-
             // 登录对话框 (返回按钮事件)
             let login_event = self.login_dialog.show(ctx, &mut self.show_login_dialog);
             match login_event {
@@ -677,40 +666,6 @@ impl Scene for LoginScene {
                 && !self.show_message_box {
                 self.show_login_dialog = true;
             }
-
-            // 调试信息
-            egui::Window::new("🔍 坐标系统调试")
-                .default_pos([10.0, 10.0])
-                .default_width(350.0)
-                .show(ctx, |ui| {
-                    ui.heading("坐标系统对比");
-                    ui.separator();
-
-                    // macroquad 坐标 (物理像素)
-                    ui.label("📐 Macroquad (物理像素):");
-                    ui.label(format!("  屏幕: {}x{}", screen_width(), screen_height()));
-
-                    // egui 坐标 (逻辑点)
-                    ui.label("🎨 Egui (逻辑点):");
-                    let pixels_per_point = ctx.pixels_per_point();
-                    ui.label(format!("  pixels_per_point: {}", pixels_per_point));
-                    ui.label(format!(
-                        "  屏幕逻辑尺寸: {}x{}",
-                        screen_width() / pixels_per_point,
-                        screen_height() / pixels_per_point
-                    ));
-
-                    ui.separator();
-                    ui.label("💡 换算关系:");
-                    ui.label(format!("  1 逻辑点 = {} 物理像素", pixels_per_point));
-                    ui.label(format!(
-                        "  macroquad(100) = egui({})",
-                        100.0 / pixels_per_point
-                    ));
-
-                    ui.separator();
-                    ui.label(format!("显示登录框: {}", self.show_login_dialog));
-                });
         });
 
         // 绘制 egui
