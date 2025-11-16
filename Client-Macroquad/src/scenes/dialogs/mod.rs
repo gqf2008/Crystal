@@ -14,7 +14,7 @@ pub use login_dialog::{LoginDialog, LoginDialogEvent};
 pub use new_character_dialog::{NewCharacterDialog, NewCharacterEvent};
 pub use delete_character_dialog::{DeleteCharacterDialog, DeleteCharacterEvent};
 pub use credits_dialog::CreditsDialog;
-pub use game::{MainDialog, BeltDialog};
+pub use game::{MainDialog, BeltDialog, ChatDialog};
 use egui_macroquad::egui;
 
 /// 对话框组件通用接口

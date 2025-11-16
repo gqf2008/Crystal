@@ -40,7 +40,8 @@ struct CellItem {
 impl BeltDialog {
     /// 创建快捷栏对话框
     pub fn new(main_dialog_x: f32, screen_height: f32) -> Self {
-        // 默认水平布局，位于主界面上方居中
+        // 默认水平布局，位于主界面上方，与 ChatDialog 同一水平线
+        // 原工程：MainDialog.X + 230, ScreenHeight - 150
         let position = egui::pos2(main_dialog_x + 230.0, screen_height - 150.0);
         
         Self {
