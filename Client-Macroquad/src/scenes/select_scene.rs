@@ -230,6 +230,16 @@ impl SelectScene {
     
     /// 【egui 职责】绘制角色按钮
     fn draw_character_buttons(&mut self, ctx: &egui::Context) {
+        self.draw_character_buttons_internal(ctx, true);
+    }
+    
+    /// 【egui 职责】绘制角色按钮（仅显示，不交互）
+    fn draw_character_buttons_no_interaction(&mut self, ctx: &egui::Context) {
+        self.draw_character_buttons_internal(ctx, false);
+    }
+    
+    /// 【egui 职责】绘制角色按钮（内部实现）
+    fn draw_character_buttons_internal(&mut self, ctx: &egui::Context, allow_interaction: bool) {
         // C# 原版坐标: (637, 194), (637, 298), (637, 402), (637, 506)
         let positions = [(637.0, 194.0), (637.0, 298.0), (637.0, 402.0), (637.0, 506.0)];
         
@@ -273,21 +283,23 @@ impl SelectScene {
                             egui::Color32::WHITE,
                         );
                         
-                        // 检测点击
-                        let clicked = ctx.input(|i| {
-                            if i.pointer.any_click() {
-                                if let Some(pos) = i.pointer.interact_pos() {
-                                    if rect.contains(pos) {
-                                        return true;
+                        // 检测点击（仅在允许交互时）
+                        if allow_interaction {
+                            let clicked = ctx.input(|i| {
+                                if i.pointer.any_click() {
+                                    if let Some(pos) = i.pointer.interact_pos() {
+                                        if rect.contains(pos) {
+                                            return true;
+                                        }
                                     }
                                 }
+                                false
+                            });
+                            
+                            if clicked {
+                                self.selected_index = Some(i);
+                                println!("✅ 选择角色 {}: {}", i, character.name);
                             }
-                            false
-                        });
-                        
-                        if clicked {
-                            self.selected_index = Some(i);
-                            println!("✅ 选择角色 {}: {}", i, character.name);
                         }
                         
                         // 绘制文字（使用Middle层级，避免遮挡对话框）
@@ -348,22 +360,24 @@ impl SelectScene {
                             egui::Color32::WHITE,
                         );
                         
-                        // 检测点击
-                        let clicked = ctx.input(|i| {
-                            if i.pointer.any_click() {
-                                if let Some(pos) = i.pointer.interact_pos() {
-                                    if rect.contains(pos) {
-                                        return true;
+                        // 检测点击（仅在允许交互时）
+                        if allow_interaction {
+                            let clicked = ctx.input(|i| {
+                                if i.pointer.any_click() {
+                                    if let Some(pos) = i.pointer.interact_pos() {
+                                        if rect.contains(pos) {
+                                            return true;
+                                        }
                                     }
                                 }
-                            }
-                            false
-                        });
-                        
-                        if clicked {
-                            println!("✅ 点击空槽位 {}", i);
-                            if self.characters.len() < 4 {
-                                self.show_new_character = true;
+                                false
+                            });
+                            
+                            if clicked {
+                                println!("✅ 点击空槽位 {}", i);
+                                if self.characters.len() < 4 {
+                                    self.show_new_character = true;
+                                }
                             }
                         }
                     }
@@ -679,17 +693,26 @@ impl Scene for SelectScene {
         
         // === egui 交互层 ===
         egui_macroquad::ui(|ctx| {
-            // 角色按钮
-            self.draw_character_buttons(ctx);
+            // 检查是否有对话框显示
+            let has_dialog = self.show_new_character || self.show_delete_character || self.show_message_box;
+            
+            // 始终渲染角色按钮（但在有对话框时禁用交互）
+            if has_dialog {
+                self.draw_character_buttons_no_interaction(ctx);
+            } else {
+                self.draw_character_buttons(ctx);
+            }
             
             // 底部功能按钮
             egui::Area::new(egui::Id::new("bottom_buttons"))
                 .fixed_pos(egui::pos2(0.0, 0.0))
                 .show(ctx, |ui| {
-                    self.draw_bottom_buttons(ctx, ui);
+                    if !has_dialog {
+                        self.draw_bottom_buttons(ctx, ui);
+                    }
                 });
             
-            // 对话框组件
+            // 对话框组件（始终在最上层）
             self.new_character_dialog.show(ctx, &mut self.show_new_character);
             self.delete_character_dialog.show(ctx, &mut self.show_delete_character);
             self.message_box.show(ctx, &mut self.show_message_box);
