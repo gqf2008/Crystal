@@ -2,6 +2,7 @@
 use macroquad::prelude::*;
 use egui_macroquad::egui;
 use crate::resources::LibraryName;
+use super::Dialog;
 
 /// 消息框按钮类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +28,6 @@ pub struct MessageBox {
     pub text: String,
     pub buttons: MessageBoxButtons,
     pub result: MessageBoxResult,
-    pub visible: bool,
     id: String,  // 唯一标识符，用于 egui Area ID
 }
 
@@ -41,7 +41,6 @@ impl MessageBox {
             text: text.to_string(),
             buttons,
             result: MessageBoxResult::None,
-            visible: false,
             id: format!("message_box_{}", id),
         }
     }
@@ -59,21 +58,68 @@ impl MessageBox {
         let id = format!("{:x}", timestamp);
         Self::new_with_id(title, text, buttons, &id)
     }
+    
+    /// 绘制图像按钮(实例方法,使用 MessageBox 的 ID 避免冲突)
+    fn draw_image_button_internal(
+        &self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        normal_idx: usize,
+        hover_idx: usize,
+        pressed_idx: usize,
+        abs_pos: egui::Pos2,
+    ) -> bool {
+        // 获取按钮正常状态纹理（使用全局纹理缓存）
+        // ✅ 新 API
+        if let Some(info) = LibraryName::Title.get_egui_texture(ctx, normal_idx) {
+            if let Some(ref handle) = info.egui_texture {
+                // 获取纹理尺寸
+                let texture_size = handle.size_vec2();
+                let button_rect = egui::Rect::from_min_size(abs_pos, texture_size);
 
-    /// 显示消息框
-    pub fn show(&mut self) {
-        self.visible = true;
-        self.result = MessageBoxResult::None;
+                // 检测鼠标交互 - 使用 MessageBox ID + 按钮索引确保唯一性
+                let button_id = format!("{}_{}", self.id, normal_idx);
+                let response = ui.interact(button_rect, egui::Id::new(button_id), egui::Sense::click());
+
+                // 根据状态选择纹理索引
+                let texture_idx = if response.is_pointer_button_down_on() {
+                    pressed_idx  // 按下状态
+                } else if response.hovered() {
+                    hover_idx  // 悬停状态
+                } else {
+                    normal_idx  // 正常状态
+                };
+
+                // 绘制按钮纹理（使用全局纹理缓存）
+                // ✅ 新 API
+                if let Some(btn_info) = LibraryName::Title.get_egui_texture(ctx, texture_idx) {
+                    if let Some(ref btn_handle) = btn_info.egui_texture {
+                        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                        let tint = egui::Color32::WHITE;
+                        ui.painter().image(
+                            btn_handle.id(),
+                            button_rect,
+                            uv,
+                            tint,
+                        );
+                    }
+                }
+
+                return response.clicked();
+            }
+        }
+        false
     }
+}
 
-    /// 隐藏消息框
-    pub fn hide(&mut self) {
-        self.visible = false;
-    }
-
-    /// 绘制消息框（完全不需要外部参数，内部使用全局资源）
-    pub fn draw(&mut self, ctx: &egui::Context) {
-        if !self.visible {
+impl Dialog for MessageBox {
+    /// 显示并处理消息框
+    /// 
+    /// # 参数
+    /// - `ctx`: egui 上下文
+    /// - `open`: 对话框是否打开,当用户点击按钮或按ESC时会被设置为 false
+    fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
+        if !*open {
             return;
         }
 
@@ -93,7 +139,7 @@ impl MessageBox {
 
         // ESC键关闭消息框
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.visible = false;
+            *open = false;
             self.result = MessageBoxResult::Cancel;
             return;
         }
@@ -153,86 +199,34 @@ impl MessageBox {
                         // OK 按钮 (Title 200/201/202)
                         if self.draw_image_button_internal(ui, ctx, 200, 201, 202, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
                             self.result = MessageBoxResult::Ok;
-                            self.visible = false;
+                            *open = false;
                         }
                     }
                     MessageBoxButtons::OkCancel => {
                         // OK 按钮
                         if self.draw_image_button_internal(ui, ctx, 200, 201, 202, egui::pos2(rect.min.x + 260.0, rect.min.y + 157.0)) {
                             self.result = MessageBoxResult::Ok;
-                            self.visible = false;
+                            *open = false;
                         }
                         // Cancel 按钮 (Title 203/204/205)
                         if self.draw_image_button_internal(ui, ctx, 203, 204, 205, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
                             self.result = MessageBoxResult::Cancel;
-                            self.visible = false;
+                            *open = false;
                         }
                     }
                     MessageBoxButtons::YesNo => {
                         // Yes 按钮 (Title 206/207/208)
                         if self.draw_image_button_internal(ui, ctx, 206, 207, 208, egui::pos2(rect.min.x + 260.0, rect.min.y + 157.0)) {
                             self.result = MessageBoxResult::Yes;
-                            self.visible = false;
+                            *open = false;
                         }
                         // No 按钮 (Title 210/211/212)
                         if self.draw_image_button_internal(ui, ctx, 210, 211, 212, egui::pos2(rect.min.x + 360.0, rect.min.y + 157.0)) {
                             self.result = MessageBoxResult::No;
-                            self.visible = false;
+                            *open = false;
                         }
                     }
                 }
             });
-    }
-    
-    /// 绘制图像按钮(实例方法,使用 MessageBox 的 ID 避免冲突)
-    fn draw_image_button_internal(
-        &self,
-        ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        normal_idx: usize,
-        hover_idx: usize,
-        pressed_idx: usize,
-        abs_pos: egui::Pos2,
-    ) -> bool {
-        // 获取按钮正常状态纹理（使用全局纹理缓存）
-        // ✅ 新 API
-        if let Some(info) = LibraryName::Title.get_egui_texture(ctx, normal_idx) {
-            if let Some(ref handle) = info.egui_texture {
-                // 获取纹理尺寸
-                let texture_size = handle.size_vec2();
-                let button_rect = egui::Rect::from_min_size(abs_pos, texture_size);
-
-                // 检测鼠标交互 - 使用 MessageBox ID + 按钮索引确保唯一性
-                let button_id = format!("{}_{}", self.id, normal_idx);
-                let response = ui.interact(button_rect, egui::Id::new(button_id), egui::Sense::click());
-
-                // 根据状态选择纹理索引
-                let texture_idx = if response.is_pointer_button_down_on() {
-                    pressed_idx  // 按下状态
-                } else if response.hovered() {
-                    hover_idx  // 悬停状态
-                } else {
-                    normal_idx  // 正常状态
-                };
-
-                // 绘制按钮纹理（使用全局纹理缓存）
-                // ✅ 新 API
-                if let Some(btn_info) = LibraryName::Title.get_egui_texture(ctx, texture_idx) {
-                    if let Some(ref btn_handle) = btn_info.egui_texture {
-                        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                        let tint = egui::Color32::WHITE;
-                        ui.painter().image(
-                            btn_handle.id(),
-                            button_rect,
-                            uv,
-                            tint,
-                        );
-                    }
-                }
-
-                return response.clicked();
-            }
-        }
-        false
     }
 }

@@ -1,7 +1,7 @@
 // MessageBox 组件测试程序
 
 use client_macroquad::game::GameResult;
-use client_macroquad::scenes::dialogs::{MessageBox, MessageBoxButtons, MessageBoxResult};
+use client_macroquad::scenes::dialogs::{Dialog, MessageBox, MessageBoxButtons, MessageBoxResult};
 use macroquad::prelude::*;
 use egui_macroquad::egui;
 
@@ -20,6 +20,11 @@ struct TestApp {
     ok_box: MessageBox,
     ok_cancel_box: MessageBox,
     yes_no_box: MessageBox,
+    
+    // MessageBox 可见性状态
+    ok_box_open: bool,
+    ok_cancel_box_open: bool,
+    yes_no_box_open: bool,
     
     // 测试结果记录
     last_result: String,
@@ -47,6 +52,10 @@ impl TestApp {
                 "yes_no_box"
             ),
             
+            ok_box_open: false,
+            ok_cancel_box_open: false,
+            yes_no_box_open: false,
+            
             last_result: "等待操作...".to_string(),
         })
     }
@@ -70,7 +79,7 @@ impl TestApp {
     
     fn update(&mut self) -> GameResult {
         // 检查 MessageBox 结果
-        if !self.ok_box.visible {
+        if !self.ok_box_open {
             let result = self.ok_box.result;
             if result != MessageBoxResult::None {
                 self.last_result = format!("OK Box 结果: {:?}", result);
@@ -79,7 +88,7 @@ impl TestApp {
             }
         }
         
-        if !self.ok_cancel_box.visible {
+        if !self.ok_cancel_box_open {
             let result = self.ok_cancel_box.result;
             if result != MessageBoxResult::None {
                 self.last_result = format!("OkCancel Box 结果: {:?}", result);
@@ -88,7 +97,7 @@ impl TestApp {
             }
         }
         
-        if !self.yes_no_box.visible {
+        if !self.yes_no_box_open {
             let result = self.yes_no_box.result;
             if result != MessageBoxResult::None {
                 self.last_result = format!("YesNo Box 结果: {:?}", result);
@@ -122,7 +131,7 @@ impl TestApp {
                             println!("🔵 显示 OK 消息框");
                             self.ok_box.title = "提示信息".to_string();
                             self.ok_box.text = "这是一个信息提示框。\n\n只有一个 OK 按钮。\n常用于显示操作结果或提示信息。".to_string();
-                            self.ok_box.show();
+                            self.ok_box_open = true;
                         }
                         ui.label("- 只有 OK 按钮");
                     });
@@ -135,7 +144,7 @@ impl TestApp {
                             println!("🟢 显示 OkCancel 消息框");
                             self.ok_cancel_box.title = "操作确认".to_string();
                             self.ok_cancel_box.text = "即将执行一个重要操作。\n\n这个操作可能会修改数据。\n确定要继续吗？".to_string();
-                            self.ok_cancel_box.show();
+                            self.ok_cancel_box_open = true;
                         }
                         ui.label("- OK 和 Cancel 按钮");
                     });
@@ -148,7 +157,7 @@ impl TestApp {
                             println!("🟡 显示 YesNo 消息框");
                             self.yes_no_box.title = "删除确认".to_string();
                             self.yes_no_box.text = "确定要删除这个项目吗？\n\n删除后将无法恢复！\n是否继续？".to_string();
-                            self.yes_no_box.show();
+                            self.yes_no_box_open = true;
                         }
                         ui.label("- Yes 和 No 按钮");
                     });
@@ -163,15 +172,15 @@ impl TestApp {
                         
                         self.ok_box.title = "消息框 1".to_string();
                         self.ok_box.text = "第一个消息框\n可以独立拖动！".to_string();
-                        self.ok_box.show();
+                        self.ok_box_open = true;
                         
                         self.ok_cancel_box.title = "消息框 2".to_string();
                         self.ok_cancel_box.text = "第二个消息框\n也可以独立拖动！".to_string();
-                        self.ok_cancel_box.show();
+                        self.ok_cancel_box_open = true;
                         
                         self.yes_no_box.title = "消息框 3".to_string();
                         self.yes_no_box.text = "第三个消息框\n每个都有独立的 ID！".to_string();
-                        self.yes_no_box.show();
+                        self.yes_no_box_open = true;
                     }
                     
                     ui.add_space(15.0);
@@ -201,18 +210,10 @@ impl TestApp {
                     ui.label("• result 字段正确返回点击结果");
                 });
             
-            // 绘制 MessageBox（如果可见）
-            if self.ok_box.visible {
-                self.ok_box.draw(ctx);
-            }
-            
-            if self.ok_cancel_box.visible {
-                self.ok_cancel_box.draw(ctx);
-            }
-            
-            if self.yes_no_box.visible {
-                self.yes_no_box.draw(ctx);
-            }
+            // 绘制 MessageBox（使用 Dialog trait）
+            self.ok_box.show(ctx, &mut self.ok_box_open);
+            self.ok_cancel_box.show(ctx, &mut self.ok_cancel_box_open);
+            self.yes_no_box.show(ctx, &mut self.yes_no_box_open);
         });
         
         egui_macroquad::draw();
