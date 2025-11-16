@@ -1,0 +1,465 @@
+// ============================================================================
+// MainDialog - 游戏主界面底部工具栏
+// ============================================================================
+// 
+// 【功能说明】
+// 1. 底部工具栏背景（根据分辨率适配）
+// 2. 生命值/魔法值球显示
+// 3. 经验条和负重条
+// 4. 功能按钮组（背包、角色、技能、任务、选项、菜单、商城）
+// 5. 角色信息显示（等级、金币、负重等）
+// 
+// ============================================================================
+
+use egui_macroquad::egui;
+use crate::resources::LibraryName;
+
+/// 主界面底部工具栏
+pub struct MainDialog {
+    /// 是否可见
+    visible: bool,
+    /// 当前分辨率索引 (0=800, 1=1024, 2=1280+)
+    resolution_index: usize,
+    /// 模拟数据 - 当前生命值
+    hp: i32,
+    /// 模拟数据 - 最大生命值
+    max_hp: i32,
+    /// 模拟数据 - 当前魔法值
+    mp: i32,
+    /// 模拟数据 - 最大魔法值
+    max_mp: i32,
+    /// 模拟数据 - 经验值百分比
+    exp_percent: f32,
+    /// 模拟数据 - 等级
+    level: u32,
+    /// 模拟数据 - 角色名
+    character_name: String,
+    /// 模拟数据 - 金币
+    gold: u32,
+    /// 模拟数据 - 当前负重
+    weight: u32,
+    /// 模拟数据 - 最大负重
+    max_weight: u32,
+    /// 模拟数据 - 背包空格数
+    bag_space: u32,
+}
+
+impl MainDialog {
+    pub fn new() -> Self {
+        // 根据屏幕宽度决定分辨率索引
+        let screen_width = macroquad::prelude::screen_width();
+        let resolution_index = if screen_width <= 800.0 {
+            0
+        } else if screen_width <= 1024.0 {
+            1
+        } else {
+            2
+        };
+
+        Self {
+            visible: true,
+            resolution_index,
+            // 模拟数据
+            hp: 850,
+            max_hp: 1000,
+            mp: 450,
+            max_mp: 600,
+            exp_percent: 0.65,
+            level: 45,
+            character_name: "测试角色".to_string(),
+            gold: 123456,
+            weight: 75,
+            max_weight: 100,
+            bag_space: 28,
+        }
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+
+    pub fn show(&mut self, ctx: &egui::Context) {
+        if !self.visible {
+            return;
+        }
+
+        let screen_width = macroquad::prelude::screen_width() / macroquad::prelude::screen_dpi_scale();
+        let screen_height = macroquad::prelude::screen_height() / macroquad::prelude::screen_dpi_scale();
+
+        // 获取主背景纹理
+        let bg_info = LibraryName::Prguse.get_size(self.resolution_index).unwrap_or((1024, 150));
+        let bg_width = bg_info.0 as f32;
+        let bg_height = bg_info.1 as f32;
+
+        // 底部居中显示
+        let dialog_x = (screen_width - bg_width) / 2.0;
+        let dialog_y = screen_height - bg_height;
+
+        egui::Area::new(egui::Id::new("main_dialog"))
+            .fixed_pos(egui::pos2(dialog_x, dialog_y))
+            .movable(false)
+            .interactable(true)
+            .order(egui::Order::Middle)
+            .show(ctx, |ui| {
+                // 分配对话框空间
+                let rect = ui.allocate_rect(
+                    egui::Rect::from_min_size(ui.cursor().min, egui::vec2(bg_width, bg_height)),
+                    egui::Sense::hover()
+                ).rect;
+
+                // 绘制主背景
+                if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, self.resolution_index) {
+                    if let Some(bg_texture) = info.egui_texture {
+                        ui.painter().image(
+                            bg_texture.id(),
+                            rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
+
+                // 绘制生命值球（左侧）
+                self.draw_health_orb(ui, ctx, &rect);
+
+                // 绘制魔法值球（右侧）
+                self.draw_mana_orb(ui, ctx, &rect);
+
+                // 绘制经验条
+                self.draw_exp_bar(ui, ctx, &rect);
+
+                // 绘制负重条
+                self.draw_weight_bar(ui, ctx, &rect);
+
+                // 绘制角色信息
+                self.draw_character_info(ui, &rect);
+
+                // 绘制功能按钮组
+                self.draw_buttons(ui, ctx, &rect);
+            });
+    }
+
+    /// 绘制生命值球
+    fn draw_health_orb(&self, ui: &mut egui::Ui, ctx: &egui::Context, rect: &egui::Rect) {
+        // 生命值球位置（左侧）
+        let orb_x = rect.min.x + 9.0;
+        let orb_y = rect.min.y + 30.0;
+        
+        // 计算生命值高度（从底部向上填充）
+        let hp_percent = self.hp as f32 / self.max_hp as f32;
+        let orb_height = 80.0;
+        let hp_height = orb_height * hp_percent;
+        
+        // 绘制生命值球纹理 Prguse[4] - 左半部分（红色）
+        if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 4) {
+            if let Some(orb_texture) = info.egui_texture {
+                let tex_size = orb_texture.size_vec2();
+                
+                // 源矩形：从底部裁剪（纹理坐标系）
+                let src_y = orb_height - hp_height;
+                let src_rect = egui::Rect::from_min_max(
+                    egui::pos2(0.0 / tex_size.x, src_y / tex_size.y),
+                    egui::pos2(50.0 / tex_size.x, orb_height / tex_size.y)
+                );
+                
+                // 目标矩形：从底部向上绘制
+                let dst_rect = egui::Rect::from_min_size(
+                    egui::pos2(orb_x, orb_y + src_y),
+                    egui::vec2(50.0, hp_height)
+                );
+                
+                ui.painter().image(
+                    orb_texture.id(),
+                    dst_rect,
+                    src_rect,
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        
+        // 计算魔法值高度
+        let mp_percent = self.mp as f32 / self.max_mp as f32;
+        let mp_height = orb_height * mp_percent;
+        
+        // 绘制魔法值球纹理 Prguse[4] - 右半部分（蓝色）
+        if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 4) {
+            if let Some(orb_texture) = info.egui_texture {
+                let tex_size = orb_texture.size_vec2();
+                
+                // 源矩形：从底部裁剪（右半部分）
+                let src_y = orb_height - mp_height;
+                let src_rect = egui::Rect::from_min_max(
+                    egui::pos2(51.0 / tex_size.x, src_y / tex_size.y),
+                    egui::pos2(101.0 / tex_size.x, orb_height / tex_size.y)
+                );
+                
+                // 目标矩形
+                let dst_rect = egui::Rect::from_min_size(
+                    egui::pos2(orb_x + 51.0, orb_y + src_y),
+                    egui::vec2(50.0, mp_height)
+                );
+                
+                ui.painter().image(
+                    orb_texture.id(),
+                    dst_rect,
+                    src_rect,
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        
+        // 绘制数值文字
+        let hp_text = format!("{}/{}", self.hp, self.max_hp);
+        ui.painter().text(
+            egui::pos2(orb_x + 50.0, orb_y + 27.0),
+            egui::Align2::CENTER_CENTER,
+            &hp_text,
+            egui::FontId::proportional(11.0),
+            egui::Color32::WHITE,
+        );
+        
+        let mp_text = format!("{}/{}", self.mp, self.max_mp);
+        ui.painter().text(
+            egui::pos2(orb_x + 50.0, orb_y + 42.0),
+            egui::Align2::CENTER_CENTER,
+            &mp_text,
+            egui::FontId::proportional(11.0),
+            egui::Color32::WHITE,
+        );
+    }
+
+    /// 绘制魔法值球
+    fn draw_mana_orb(&self, _ui: &mut egui::Ui, _ctx: &egui::Context, _rect: &egui::Rect) {
+        // 魔法值球已经在 draw_health_orb 中一起绘制了
+    }
+
+    /// 绘制经验条
+    fn draw_exp_bar(&self, ui: &mut egui::Ui, ctx: &egui::Context, rect: &egui::Rect) {
+        // 经验条位置
+        let bar_x = rect.min.x + 9.0;
+        let bar_y = rect.min.y + 143.0;
+        
+        // 根据分辨率选择纹理索引 (800用7，其他用8)
+        let exp_texture_idx = if self.resolution_index == 0 { 7 } else { 8 };
+        
+        if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, exp_texture_idx) {
+            if let Some(exp_texture) = info.egui_texture {
+                let tex_size = exp_texture.size_vec2();
+                
+                // 计算经验百分比对应的宽度
+                let bar_width = tex_size.x - 3.0;  // 减去3像素边距
+                let fill_width = bar_width * self.exp_percent;
+                
+                // 源矩形：裁剪宽度
+                let src_rect = egui::Rect::from_min_max(
+                    egui::pos2(0.0, 0.0),
+                    egui::pos2(fill_width / tex_size.x, 1.0)
+                );
+                
+                // 目标矩形
+                let dst_rect = egui::Rect::from_min_size(
+                    egui::pos2(bar_x, bar_y),
+                    egui::vec2(fill_width, tex_size.y)
+                );
+                
+                ui.painter().image(
+                    exp_texture.id(),
+                    dst_rect,
+                    src_rect,
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        
+        // 经验百分比文字
+        let exp_text = format!("{:.1}%", self.exp_percent * 100.0);
+        ui.painter().text(
+            egui::pos2(bar_x + 40.0, bar_y + 5.0),
+            egui::Align2::CENTER_CENTER,
+            &exp_text,
+            egui::FontId::proportional(9.0),
+            egui::Color32::WHITE,
+        );
+    }
+
+    /// 绘制负重条
+    fn draw_weight_bar(&self, ui: &mut egui::Ui, ctx: &egui::Context, rect: &egui::Rect) {
+        // 负重条位置（右侧，从右向左计算）
+        let bar_x = rect.max.x - 105.0;
+        let bar_y = rect.min.y + 103.0;
+        
+        if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 76) {
+            if let Some(weight_texture) = info.egui_texture {
+                let tex_size = weight_texture.size_vec2();
+                
+                // 计算负重百分比
+                let weight_percent = self.weight as f32 / self.max_weight as f32;
+                let weight_percent = weight_percent.min(1.0);
+                
+                // 计算填充宽度
+                let bar_width = tex_size.x - 2.0;  // 减去2像素边距
+                let fill_width = bar_width * weight_percent;
+                
+                // 源矩形：裁剪宽度
+                let src_rect = egui::Rect::from_min_max(
+                    egui::pos2(0.0, 0.0),
+                    egui::pos2(fill_width / tex_size.x, 1.0)
+                );
+                
+                // 目标矩形
+                let dst_rect = egui::Rect::from_min_size(
+                    egui::pos2(bar_x, bar_y),
+                    egui::vec2(fill_width, tex_size.y)
+                );
+                
+                // 根据负重比例选择颜色
+                let color = if weight_percent < 0.8 {
+                    egui::Color32::WHITE  // 正常，使用原色
+                } else if weight_percent < 1.0 {
+                    egui::Color32::from_rgb(255, 255, 0)  // 接近超重，黄色
+                } else {
+                    egui::Color32::from_rgb(255, 100, 100)  // 超重，红色
+                };
+                
+                ui.painter().image(
+                    weight_texture.id(),
+                    dst_rect,
+                    src_rect,
+                    color,
+                );
+            }
+        }
+        
+        // 负重文字
+        let weight_text = format!("{}/{}", self.weight, self.max_weight);
+        ui.painter().text(
+            egui::pos2(bar_x + 40.0, bar_y + 5.0),
+            egui::Align2::CENTER_CENTER,
+            &weight_text,
+            egui::FontId::proportional(9.0),
+            egui::Color32::WHITE,
+        );
+    }
+
+    /// 绘制角色信息
+    fn draw_character_info(&self, ui: &mut egui::Ui, rect: &egui::Rect) {
+        let info_x = rect.min.x + 120.0;
+        let info_y = rect.min.y + 15.0;
+
+        // 角色名和等级
+        let name_level = format!("{} Lv.{}", self.character_name, self.level);
+        ui.painter().text(
+            egui::pos2(info_x, info_y),
+            egui::Align2::LEFT_TOP,
+            &name_level,
+            egui::FontId::proportional(16.0),
+            egui::Color32::from_rgb(255, 215, 0),
+        );
+
+        // 金币
+        let gold_text = format!("金币: {}", self.gold);
+        ui.painter().text(
+            egui::pos2(info_x, info_y + 20.0),
+            egui::Align2::LEFT_TOP,
+            &gold_text,
+            egui::FontId::proportional(12.0),
+            egui::Color32::from_rgb(255, 215, 0),
+        );
+
+        // 背包空格
+        let space_text = format!("空格: {}", self.bag_space);
+        ui.painter().text(
+            egui::pos2(info_x, info_y + 35.0),
+            egui::Align2::LEFT_TOP,
+            &space_text,
+            egui::FontId::proportional(12.0),
+            egui::Color32::WHITE,
+        );
+    }
+
+    /// 绘制功能按钮组
+    fn draw_buttons(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, rect: &egui::Rect) {
+        let button_y = rect.min.y + 76.0;
+        let button_start_x = rect.max.x - 120.0;
+        let button_spacing = 23.0;
+
+        // 按钮列表：背包、角色、技能、任务、选项
+        let buttons = [
+            (1903, 1904, 1905, "背包"),
+            (1900, 1901, 1902, "角色"),
+            (1906, 1907, 1908, "技能"),
+            (1909, 1910, 1911, "任务"),
+            (1912, 1913, 1914, "选项"),
+        ];
+
+        for (i, (normal_idx, hover_idx, pressed_idx, hint)) in buttons.iter().enumerate() {
+            let btn_x = button_start_x + (i as f32 * button_spacing);
+            self.draw_button(ui, ctx, btn_x, button_y, *normal_idx, *hover_idx, *pressed_idx, hint);
+        }
+
+        // 菜单按钮（位置稍上）
+        let menu_x = rect.max.x - 55.0;
+        let menu_y = rect.min.y + 35.0;
+        self.draw_button(ui, ctx, menu_x, menu_y, 1960, 1961, 1962, "菜单");
+
+        // 商城按钮
+        let shop_x = rect.max.x - 105.0;
+        let shop_y = rect.min.y + 35.0;
+        self.draw_button(ui, ctx, shop_x, shop_y, 826, 827, 828, "商城");
+    }
+
+    /// 绘制单个按钮
+    fn draw_button(
+        &self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        x: f32,
+        y: f32,
+        normal_idx: usize,
+        hover_idx: usize,
+        pressed_idx: usize,
+        hint: &str,
+    ) {
+        // 获取按钮纹理
+        if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, normal_idx) {
+            if let Some(texture) = info.egui_texture {
+                let size = texture.size_vec2();
+                let rect = egui::Rect::from_min_size(egui::pos2(x, y), size);
+                
+                let response = ui.interact(rect, egui::Id::new(format!("btn_{}", normal_idx)), egui::Sense::click());
+                
+                // 根据状态选择纹理
+                let texture_idx = if response.is_pointer_button_down_on() {
+                    pressed_idx
+                } else if response.hovered() {
+                    hover_idx
+                } else {
+                    normal_idx
+                };
+                
+                if let Some(btn_info) = LibraryName::Prguse.get_egui_texture(ctx, texture_idx) {
+                    if let Some(btn_texture) = btn_info.egui_texture {
+                        ui.painter().image(
+                            btn_texture.id(),
+                            rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
+                
+                // 点击事件和鼠标悬停提示
+                let clicked = response.clicked();
+                response.on_hover_text(hint);
+                
+                if clicked {
+                    println!("🖱️ 点击了 {} 按钮", hint);
+                }
+            }
+        }
+    }
+}
