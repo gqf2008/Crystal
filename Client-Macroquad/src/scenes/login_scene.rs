@@ -658,6 +658,15 @@ impl Scene for LoginScene {
             self.new_account_dialog.show(ctx, &mut self.show_new_account);
             self.change_password_dialog.show(ctx, &mut self.show_change_password);
             self.message_box.show(ctx, &mut self.show_message_box);
+            
+            // 检查对话框关闭后恢复登录对话框显示
+            // 仅当没有动画播放且所有对话框都关闭时，才显示登录对话框
+            if !self.animation_playing 
+                && !self.show_new_account 
+                && !self.show_change_password 
+                && !self.show_message_box {
+                self.show_login_dialog = true;
+            }
 
             // 调试信息
             egui::Window::new("🔍 坐标系统调试")

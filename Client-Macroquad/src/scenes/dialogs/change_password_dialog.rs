@@ -86,8 +86,8 @@ impl Dialog for ChangePasswordDialog {
             return;
         }
         
-        let dialog_w = 588.0; // Prguse[66] 实际尺寸
-        let dialog_h = 308.0;
+        let dialog_w = 348.0; // Prguse[50] 实际尺寸
+        let dialog_h = 268.0;
         
         // ESC键关闭对话框
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -105,8 +105,8 @@ impl Dialog for ChangePasswordDialog {
                     egui::Sense::hover(),
                 ).rect;
                 
-                // 绘制背景 Prguse[66]
-                if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 66) {
+                // 绘制背景 Prguse[50]
+                if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 50) {
                     if let Some(ref handle) = info.egui_texture {
                         ui.painter().image(
                             handle.id(),
@@ -117,12 +117,13 @@ impl Dialog for ChangePasswordDialog {
                     }
                 }
                 
-                // 输入框 (使用原版坐标)
-                // Account: (226, 103)
+                // 输入框 (使用 C# 原版坐标)
+                // AccountID: (178, 75), CurrentPassword: (178, 113)
+                // NewPassword1: (178, 151), NewPassword2: (178, 188)
                 ui.put(
                     egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x + 226.0, rect.min.y + 103.0),
-                        egui::vec2(136.0, 15.0),
+                        egui::pos2(rect.min.x + 178.0, rect.min.y + 75.0),
+                        egui::vec2(136.0, 18.0),
                     ),
                     egui::TextEdit::singleline(&mut self.account)
                         .hint_text("账号")
@@ -131,11 +132,10 @@ impl Dialog for ChangePasswordDialog {
                         .margin(egui::vec2(0.0, 0.0)),
                 );
                 
-                // Current Password: (226, 129)
                 ui.put(
                     egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x + 226.0, rect.min.y + 129.0),
-                        egui::vec2(136.0, 15.0),
+                        egui::pos2(rect.min.x + 178.0, rect.min.y + 113.0),
+                        egui::vec2(136.0, 18.0),
                     ),
                     egui::TextEdit::singleline(&mut self.current_password)
                         .password(true)
@@ -145,11 +145,10 @@ impl Dialog for ChangePasswordDialog {
                         .margin(egui::vec2(0.0, 0.0)),
                 );
                 
-                // New Password: (226, 163)
                 ui.put(
                     egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x + 226.0, rect.min.y + 163.0),
-                        egui::vec2(136.0, 15.0),
+                        egui::pos2(rect.min.x + 178.0, rect.min.y + 151.0),
+                        egui::vec2(136.0, 18.0),
                     ),
                     egui::TextEdit::singleline(&mut self.new_password)
                         .password(true)
@@ -159,11 +158,10 @@ impl Dialog for ChangePasswordDialog {
                         .margin(egui::vec2(0.0, 0.0)),
                 );
                 
-                // Confirm New Password: (226, 189)
                 ui.put(
                     egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x + 226.0, rect.min.y + 189.0),
-                        egui::vec2(136.0, 15.0),
+                        egui::pos2(rect.min.x + 178.0, rect.min.y + 188.0),
+                        egui::vec2(136.0, 18.0),
                     ),
                     egui::TextEdit::singleline(&mut self.new_password2)
                         .password(true)
@@ -173,17 +171,17 @@ impl Dialog for ChangePasswordDialog {
                         .margin(egui::vec2(0.0, 0.0)),
                 );
                 
-                // 按钮
-                // Change: Title[209] at (160, 258)
-                if self.draw_image_button(ui, ctx, 209, 209, 209,
-                    egui::pos2(rect.min.x + 160.0, rect.min.y + 258.0)) {
+                // 按钮 (C# 原版: OK=80,236  Cancel=222,236)
+                // OK按钮: Title[107/108/109]
+                if self.draw_image_button(ui, ctx, 107, 108, 109,
+                    egui::pos2(rect.min.x + 80.0, rect.min.y + 236.0)) {
                     // TODO: 验证输入并修改密码
                     *open = false;
                 }
                 
-                // Cancel: Title[194/195/196] at (240, 258)
-                if self.draw_image_button(ui, ctx, 194, 195, 196,
-                    egui::pos2(rect.min.x + 240.0, rect.min.y + 258.0)) {
+                // Cancel按钮: Title[110/111/112]
+                if self.draw_image_button(ui, ctx, 110, 111, 112,
+                    egui::pos2(rect.min.x + 222.0, rect.min.y + 236.0)) {
                     *open = false;
                 }
             });
