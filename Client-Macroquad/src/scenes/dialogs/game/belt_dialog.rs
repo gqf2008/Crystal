@@ -23,6 +23,9 @@ pub struct BeltDialog {
     layout: BeltLayout,
     position: egui::Pos2,
     
+    // 保存初始水平布局位置，用于从垂直布局切换回来时恢复
+    horizontal_position: egui::Pos2,
+    
     // 格子数据（实际物品数据应该从 ECS/GameState 获取）
     // 这里只是占位，真实实现需要关联到物品系统
     #[allow(dead_code)]
@@ -40,7 +43,7 @@ struct CellItem {
 impl BeltDialog {
     /// 创建快捷栏对话框
     pub fn new(main_dialog_x: f32, screen_height: f32) -> Self {
-        // 默认水平布局，位于主界面上方，与 ChatDialog 同一水平线
+        // 默认水平布局,位于主界面上方,与 ChatDialog 同一水平线
         // 原工程：MainDialog.X + 230, ScreenHeight - 150
         let position = egui::pos2(main_dialog_x + 230.0, screen_height - 150.0);
         
@@ -48,6 +51,7 @@ impl BeltDialog {
             visible: true,
             layout: BeltLayout::Horizontal,
             position,
+            horizontal_position: position,  // 保存初始位置
             cells: Default::default(),
         }
     }
@@ -56,15 +60,15 @@ impl BeltDialog {
     pub fn flip_layout(&mut self) {
         self.layout = match self.layout {
             BeltLayout::Horizontal => {
+                // 切换到垂直布局前,先保存当前水平位置
+                self.horizontal_position = self.position;
                 // 切换到垂直布局
                 self.position = egui::pos2(0.0, 200.0);
                 BeltLayout::Vertical
             }
             BeltLayout::Vertical => {
-                // 切换回水平布局
-                // 注意：这里的x坐标需要根据主界面位置动态计算
-                // 暂时使用固定值，后续需要传入 main_dialog_x
-                self.position = egui::pos2(400.0, 500.0);
+                // 切换回水平布局,恢复之前保存的位置
+                self.position = self.horizontal_position;
                 BeltLayout::Horizontal
             }
         };
@@ -73,6 +77,10 @@ impl BeltDialog {
     /// 设置位置（当 ChatDialog 改变大小时需要同步更新）
     pub fn set_position(&mut self, pos: egui::Pos2) {
         self.position = pos;
+        // 如果当前是水平布局,同时更新保存的水平位置
+        if self.layout == BeltLayout::Horizontal {
+            self.horizontal_position = pos;
+        }
     }
 
     
