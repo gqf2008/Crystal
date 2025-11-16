@@ -168,14 +168,15 @@ impl ChatDialog {
                     egui::Color32::WHITE, // 白色背景
                 );
                 
-                ui.allocate_rect(bg_rect, egui::Sense::hover());
+                // 不要占用整个背景区域的交互，避免阻止底层按钮响应
+                // ui.allocate_rect(bg_rect, egui::Sense::hover());
                 bg_rect
             } else {
                 // 纹理加载失败，绘制默认背景
                 let default_width = if self.resolution_index == 0 { 403.0 } else { 627.0 };
                 let r = egui::Rect::from_min_size(self.position, egui::vec2(default_width, 70.0));
                 ui.painter().rect_filled(r, 2.0, egui::Color32::from_rgb(50, 50, 50));
-                ui.allocate_rect(r, egui::Sense::hover());
+                // ui.allocate_rect(r, egui::Sense::hover());
                 r
             }
         } else {
@@ -183,7 +184,7 @@ impl ChatDialog {
             let default_width = if self.resolution_index == 0 { 403.0 } else { 627.0 };
             let r = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(default_width, 70.0));
             ui.painter().rect_filled(r, 2.0, egui::Color32::from_rgb(50, 50, 50));
-            ui.allocate_rect(r, egui::Sense::hover());
+            // ui.allocate_rect(r, egui::Sense::hover());
             r
         };
         
@@ -558,7 +559,7 @@ impl Dialog for ChatDialog {
         egui::Area::new(egui::Id::new("chat_dialog"))
             .fixed_pos(self.position)
             .movable(false)
-            .interactable(true)
+            .interactable(false)  // 不要捕获整个区域的交互，避免阻止底层按钮
             .order(egui::Order::Middle)
             .show(ctx, |ui| {
                 // 绘制背景纹理
