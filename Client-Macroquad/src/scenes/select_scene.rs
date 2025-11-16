@@ -29,7 +29,11 @@
 use crate::game::GameResult;
 use crate::resources::LibraryName;
 use crate::scenes::{Scene, SceneTransition};
-use crate::scenes::dialogs::{Dialog, MessageBox, MessageBoxButtons, NewCharacterDialog, NewCharacterEvent};
+use crate::scenes::dialogs::{
+    Dialog, MessageBox, MessageBoxButtons,
+    NewCharacterDialog, NewCharacterEvent,
+    DeleteCharacterDialog, DeleteCharacterEvent,
+};
 use macroquad::prelude::*;
 use egui_macroquad::egui;
 use std::sync::Arc;
@@ -53,11 +57,12 @@ pub struct SelectScene {
     
     // 对话框组件
     new_character_dialog: NewCharacterDialog,
+    delete_character_dialog: DeleteCharacterDialog,
     message_box: MessageBox,
     
     // 对话框状态
     show_new_character: bool,
-    show_delete_confirm: bool,
+    show_delete_character: bool,
     show_message_box: bool,
     
     // 角色预览动画
@@ -75,10 +80,11 @@ impl SelectScene {
             selected_index,
             
             new_character_dialog: NewCharacterDialog::new(),
+            delete_character_dialog: DeleteCharacterDialog::new(),
             message_box: MessageBox::new_with_id("", "", MessageBoxButtons::Ok, "select_msgbox"),
             
             show_new_character: false,
-            show_delete_confirm: false,
+            show_delete_character: false,
             show_message_box: false,
             
             animation_frame: 0,
@@ -396,8 +402,16 @@ impl SelectScene {
         // 删除角色 Title[346-348]
         if self.draw_image_button(ui, ctx, LibraryName::Title, 346, 347, 348,
             egui::pos2(100.0 + x_point * 3.0 - x_point / 2.0 - 50.0, y)) {
-            if self.selected_index.is_some() {
-                self.show_delete_confirm = true;
+            if let Some(idx) = self.selected_index {
+                if idx < self.characters.len() {
+                    let character = &self.characters[idx];
+                    println!("🗑️ 开始删除角色: {}", character.name);
+                    self.delete_character_dialog.start_delete(
+                        character.name.clone(),
+                        character.index
+                    );
+                    self.show_delete_character = true;
+                }
             }
         }
         
@@ -502,6 +516,31 @@ impl SelectScene {
         // 重置对话框并关闭
         self.new_character_dialog.reset();
         self.show_new_character = false;
+    }
+    
+    /// 处理删除角色
+    fn on_delete_character(&mut self, character_index: i32) {
+        // 查找并删除角色
+        if let Some(pos) = self.characters.iter().position(|c| c.index == character_index) {
+            let character_name = self.characters[pos].name.clone();
+            self.characters.remove(pos);
+            
+            println!("✅ 角色已删除: {}", character_name);
+            self.show_message("成功", &format!("角色 {} 已成功删除", character_name));
+            
+            // 更新选中索引
+            if self.characters.is_empty() {
+                self.selected_index = None;
+            } else if let Some(idx) = self.selected_index {
+                if idx >= self.characters.len() {
+                    self.selected_index = Some(self.characters.len() - 1);
+                }
+            }
+        }
+        
+        // 重置对话框并关闭
+        self.delete_character_dialog.reset();
+        self.show_delete_character = false;
     }
 }
 
@@ -652,6 +691,7 @@ impl Scene for SelectScene {
             
             // 对话框组件
             self.new_character_dialog.show(ctx, &mut self.show_new_character);
+            self.delete_character_dialog.show(ctx, &mut self.show_delete_character);
             self.message_box.show(ctx, &mut self.show_message_box);
             
             // 检查新建角色对话框事件
@@ -661,9 +701,24 @@ impl Scene for SelectScene {
                     self.on_create_character();
                 },
                 NewCharacterEvent::Cancel => {
-                    // 已在对话框内部处理关闭
+                    // 对话框取消，确保关闭状态
+                    self.show_new_character = false;
                 },
                 NewCharacterEvent::None => {},
+            }
+            
+            // 检查删除角色对话框事件
+            let delete_event = self.delete_character_dialog.take_event();
+            match delete_event {
+                DeleteCharacterEvent::Delete(char_index) => {
+                    self.on_delete_character(char_index);
+                },
+                DeleteCharacterEvent::Cancel => {
+                    // 对话框取消，确保关闭状态
+                    self.show_delete_character = false;
+                    self.delete_character_dialog.reset();
+                },
+                DeleteCharacterEvent::None => {},
             }
         });
         
