@@ -29,22 +29,23 @@
 use crate::game::GameResult;
 use crate::resources::LibraryName;
 use crate::scenes::{Scene, SceneTransition};
-use crate::scenes::dialogs::{Dialog, MessageBox, NewAccountDialog, ChangePasswordDialog, MessageBoxButtons};
+use crate::scenes::dialogs::{
+    Dialog, MessageBox, NewAccountDialog, ChangePasswordDialog, MessageBoxButtons,
+    LoginDialog, LoginDialogEvent,
+};
 use egui_macroquad::egui;
 use macroquad::prelude::*;
 
 /// 登录场景 - 混合渲染版本
 pub struct LoginScene {
-    // UI 状态
-    account_input: String,
-    password_input: String,
-
     // 对话框组件
+    login_dialog: LoginDialog,
     new_account_dialog: NewAccountDialog,
     change_password_dialog: ChangePasswordDialog,
     message_box: MessageBox,
     
     // 对话框状态
+    show_login_dialog: bool,
     show_new_account: bool,
     show_change_password: bool,
     show_message_box: bool,
@@ -56,20 +57,18 @@ pub struct LoginScene {
     frame_delay: f32,
 
     // 状态
-    show_login_dialog: bool,
     version_text: String,
 }
 
 impl LoginScene {
     pub fn new() -> Self {
         Self {
-            account_input: String::new(),
-            password_input: String::new(),
-            
+            login_dialog: LoginDialog::new(),
             new_account_dialog: NewAccountDialog::new(),
             change_password_dialog: ChangePasswordDialog::new(),
             message_box: MessageBox::new_with_id("", "", MessageBoxButtons::Ok, "login_msgbox"),
             
+            show_login_dialog: true,
             show_new_account: false,
             show_change_password: false,
             show_message_box: false,
@@ -78,8 +77,6 @@ impl LoginScene {
             animation_playing: false,
             frame_timer: 0.0,
             frame_delay: 0.1,
-
-            show_login_dialog: true,
 
             version_text: format!("Build: Crystal-Rust v{}", env!("CARGO_PKG_VERSION")),
         }
@@ -176,7 +173,7 @@ impl LoginScene {
                         egui::pos2(rect.min.x + 85.0, rect.min.y + 85.0),
                         egui::vec2(136.0, 15.0),
                     ),
-                    egui::TextEdit::singleline(&mut self.account_input)
+                    egui::TextEdit::singleline(&mut self.login_dialog.account)
                         .desired_width(136.0)
                         .frame(false) // 去除边框
                         .margin(egui::vec2(0.0, 0.0)), // 去除内边距
@@ -187,7 +184,7 @@ impl LoginScene {
                         egui::pos2(rect.min.x + 85.0, rect.min.y + 108.0),
                         egui::vec2(136.0, 15.0),
                     ),
-                    egui::TextEdit::singleline(&mut self.password_input)
+                    egui::TextEdit::singleline(&mut self.login_dialog.password)
                         .password(true)
                         .desired_width(136.0)
                         .frame(false) // 去除边框
@@ -404,7 +401,7 @@ impl LoginScene {
 
     /// 登录按钮点击
     fn on_login_clicked(&mut self) {
-        if self.account_input.is_empty() || self.password_input.is_empty() {
+        if self.login_dialog.account.is_empty() || self.login_dialog.password.is_empty() {
             self.message_box.title = "登录失败".to_string();
             self.message_box.text = "账号或密码不能为空!".to_string();
             self.message_box.buttons = MessageBoxButtons::Ok;
@@ -412,7 +409,7 @@ impl LoginScene {
             return;
         }
 
-        println!("🔐 Login: account={}", self.account_input);
+        println!("🔐 Login: account={}", self.login_dialog.account);
 
         // 保存配置
         self.save_config();
@@ -477,7 +474,7 @@ impl LoginScene {
 
         let config = format!(
             "[Login]\nAccount={}\nSavePassword=false\nLastLogin={}\nVersion={}\n",
-            self.account_input,
+            self.login_dialog.account,
             timestamp,
             env!("CARGO_PKG_VERSION")
         );
@@ -495,7 +492,7 @@ impl LoginScene {
         if let Ok(content) = fs::read_to_string("config.ini") {
             for line in content.lines() {
                 if let Some(account) = line.strip_prefix("Account=") {
-                    self.account_input = account.to_string();
+                    self.login_dialog.account = account.to_string();
                     println!("✅ 已加载账号: {}", account);
                 }
             }
@@ -509,8 +506,8 @@ impl Scene for LoginScene {
     }
 
     fn on_enter(&mut self) -> GameResult {
-        self.account_input.clear();
-        self.password_input.clear();
+        self.login_dialog.account.clear();
+        self.login_dialog.password.clear();
 
         // 加载保存的配置
         self.load_config();
@@ -650,11 +647,24 @@ impl Scene for LoginScene {
                 );
             }
 
-            if self.show_login_dialog {
-                self.draw_login_ui(ctx);
+            // 登录对话框 (返回按钮事件)
+            let login_event = self.login_dialog.show(ctx, &mut self.show_login_dialog);
+            match login_event {
+                LoginDialogEvent::Login => {
+                    self.on_login_clicked();
+                },
+                LoginDialogEvent::NewAccount => {
+                    self.show_new_account = true;
+                    self.show_login_dialog = false;
+                },
+                LoginDialogEvent::ChangePassword => {
+                    self.show_change_password = true;
+                    self.show_login_dialog = false;
+                },
+                LoginDialogEvent::None => {},
             }
 
-            // 对话框 (使用 Dialog trait)
+            // 其他对话框 (使用 Dialog trait)
             self.new_account_dialog.show(ctx, &mut self.show_new_account);
             self.change_password_dialog.show(ctx, &mut self.show_change_password);
             self.message_box.show(ctx, &mut self.show_message_box);
