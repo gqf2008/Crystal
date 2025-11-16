@@ -140,7 +140,7 @@ impl ChatDialog {
         let base_rect = if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, bg_index) {
             if let Some(bg_texture) = info.egui_texture {
                 let bg_size = bg_texture.size_vec2();
-                let bg_rect = egui::Rect::from_min_size(ui.cursor().min, bg_size);
+                let bg_rect = egui::Rect::from_min_size(self.position, bg_size);
                 
                 // 先绘制主背景纹理
                 ui.painter().image(
@@ -173,7 +173,7 @@ impl ChatDialog {
             } else {
                 // 纹理加载失败，绘制默认背景
                 let default_width = if self.resolution_index == 0 { 403.0 } else { 627.0 };
-                let r = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(default_width, 70.0));
+                let r = egui::Rect::from_min_size(self.position, egui::vec2(default_width, 70.0));
                 ui.painter().rect_filled(r, 2.0, egui::Color32::from_rgb(50, 50, 50));
                 ui.allocate_rect(r, egui::Sense::hover());
                 r

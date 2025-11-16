@@ -127,7 +127,7 @@ impl ChatControlBar {
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, bg_index) {
             if let Some(bg_texture) = info.egui_texture {
                 let bg_size = bg_texture.size_vec2();
-                let bg_rect = egui::Rect::from_min_size(ui.cursor().min, bg_size);
+                let bg_rect = egui::Rect::from_min_size(self.position, bg_size);
                 
                 // 调试信息：打印背景尺寸（只打印一次）
                 static mut DEBUG_PRINTED: bool = false;
@@ -160,7 +160,7 @@ impl ChatControlBar {
             
             // 如果纹理加载失败，绘制临时背景
             let default_width = if self.resolution_index == 0 { 372.0 } else { 596.0 };
-            let default_rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(default_width, 15.0));
+            let default_rect = egui::Rect::from_min_size(self.position, egui::vec2(default_width, 15.0));
             ui.painter().rect_filled(default_rect, 0.0, egui::Color32::from_rgba_premultiplied(50, 50, 50, 200));
             ui.allocate_rect(default_rect, egui::Sense::hover());
         }

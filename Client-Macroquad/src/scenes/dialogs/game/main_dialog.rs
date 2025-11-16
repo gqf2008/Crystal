@@ -126,17 +126,22 @@ impl MainDialog {
         let dialog_y = screen_height - bg_height;
 
         // 绘制主界面
+        let base_pos = egui::pos2(dialog_x, dialog_y);
+        
         egui::Area::new(egui::Id::new("main_dialog"))
-            .fixed_pos(egui::pos2(dialog_x, dialog_y))
+            .fixed_pos(base_pos)
             .movable(false)
             .interactable(true)
             .order(egui::Order::Middle)
             .show(ctx, |ui| {
-                // 分配对话框空间
-                let rect = ui.allocate_rect(
-                    egui::Rect::from_min_size(ui.cursor().min, egui::vec2(bg_width, bg_height)),
+                // 创建基于固定位置的 rect
+                let rect = egui::Rect::from_min_size(base_pos, egui::vec2(bg_width, bg_height));
+                
+                // 分配空间（但不使用返回的 rect，因为它可能有偏移）
+                ui.allocate_rect(
+                    egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(bg_width, bg_height)),
                     egui::Sense::hover()
-                ).rect;
+                );
 
                 // 绘制主背景
                 if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, self.resolution_index) {
@@ -173,8 +178,10 @@ impl MainDialog {
     /// 绘制生命值球
     fn draw_health_orb(&self, ui: &mut egui::Ui, ctx: &egui::Context, rect: &egui::Rect) {
         // 生命值球位置（左侧）
-        let orb_x = rect.min.x + 9.0;
-        let orb_y = rect.min.y + 30.0;
+        // 原工程：X = MainDialog.X, Y = HealthOrb.DisplayLocation.Y + 80 - height
+        // HealthOrb.Location = (0, 30)，所以 HealthOrb.DisplayLocation.Y = MainDialog.Y + 30
+        let orb_x = rect.min.x;  // 直接使用 MainDialog.X，不加偏移
+        let orb_y = rect.min.y + 30.0;  // HealthOrb 相对于 MainDialog 的 Y 偏移
         
         // 绘制生命值球纹理 Prguse[4]
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 4) {
