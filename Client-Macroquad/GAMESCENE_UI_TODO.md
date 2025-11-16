@@ -8,25 +8,25 @@
 ## 🎯 阶段一：核心UI框架（优先级：⭐⭐⭐⭐⭐）
 
 ### 1. MainDialog - 主界面底部工具栏
-**文件**: `src/scenes/game/dialogs/main_dialog.rs`
+**文件**: `src/scenes/dialogs/game/main_dialog.rs`
 
 **功能清单**:
-- [ ] 底部工具栏背景（根据分辨率适配：800/1024/1280+）
-- [ ] 生命值球（HealthOrb）+ 数值显示
-- [ ] 魔法值球（ManaOrb）+ 数值显示
-- [ ] 经验条（ExperienceBar）+ 百分比显示
-- [ ] 负重条（WeightBar）+ 数值显示
-- [ ] 角色名称、等级显示
-- [ ] 金币显示
-- [ ] 背包空格显示
-- [ ] 功能按钮组：
-  - [ ] 背包按钮（InventoryButton）
-  - [ ] 角色按钮（CharacterButton）
-  - [ ] 技能按钮（SkillButton）
-  - [ ] 任务按钮（QuestButton）
-  - [ ] 选项按钮（OptionButton）
-  - [ ] 菜单按钮（MenuButton）
-  - [ ] 商城按钮（GameShopButton）
+- [x] 底部工具栏背景（根据分辨率适配：800/1024/1280+）
+- [x] 生命值球（HealthOrb）+ 数值显示（Prguse[4] 动态裁剪）
+- [x] 魔法值球（ManaOrb）+ 数值显示（Prguse[4] 右半部分）
+- [x] 经验条（ExperienceBar）+ 百分比显示（Prguse[7/8] 动态裁剪）
+- [x] 负重条（WeightBar）+ 数值显示（Prguse[76] 动态裁剪）
+- [x] 角色名称、等级显示
+- [x] 金币显示
+- [x] 背包空格显示
+- [x] 功能按钮组：
+  - [x] 背包按钮（InventoryButton）- Prguse[1903-1905]
+  - [x] 角色按钮（CharacterButton）- Prguse[1900-1902]
+  - [x] 技能按钮（SkillButton）- Prguse[1906-1908]
+  - [x] 任务按钮（QuestButton）- Prguse[1909-1911]
+  - [x] 选项按钮（OptionButton）- Prguse[1912-1914]
+  - [x] 菜单按钮（MenuButton）- Prguse[1960-1962]
+  - [x] 商城按钮（GameShopButton）- Prguse[826-828]
 - [ ] 攻击模式显示（AMode/PMode/SMode）
 - [ ] 英雄信息面板（HeroInfoPanel）
 - [ ] 英雄行为面板（HeroBehaviourPanel）
@@ -35,11 +35,44 @@
 **纹理资源**:
 - 主背景: Prguse[0/1/2] (根据分辨率)
 - 左右扩展: Prguse[12/13]
-- 按钮: Prguse[1900-1913]
+- 按钮: Prguse[1900-1914, 1960-1962, 826-828]
+- 生命/魔法球: Prguse[4]
+- 经验条: Prguse[7/8]
+- 负重条: Prguse[76]
+
+**状态**: ✅ 基础功能已完成，待实现攻击模式和英雄面板
 
 ---
 
-### 2. ChatDialog - 聊天窗口
+### 2. BeltDialog - 快捷栏（血瓶框）
+**文件**: `src/scenes/dialogs/game/belt_dialog.rs`
+
+**功能清单**:
+- [ ] 快捷栏背景（水平/垂直两种布局）
+- [ ] 6个物品格子
+- [ ] 物品图标显示
+- [ ] 物品数量显示
+- [ ] 物品拖拽（与背包交互）
+- [ ] 数字键提示（1-6）
+- [ ] 旋转按钮（切换水平/垂直布局）
+- [ ] 关闭按钮
+- [ ] 半透明背景层
+
+**纹理资源**:
+- 水平布局: Prguse[1932-1933]
+- 垂直布局: Prguse[1944-1945]
+- 旋转按钮: Prguse[1926-1928, 1938-1940]
+- 关闭按钮: Prguse[1923-1925, 1935-1937]
+
+**布局位置**:
+- 水平: MainDialog上方居中 (230, -150 相对偏移)
+- 垂直: 左侧 (0, 200)
+
+**状态**: ⏳ 待实现
+
+---
+
+### 3. ChatDialog - 聊天窗口
 **文件**: `src/scenes/game/dialogs/chat_dialog.rs`
 
 **功能清单**:
