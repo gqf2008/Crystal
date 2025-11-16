@@ -92,12 +92,13 @@ All Rights Reserved
     }
     
     /// 绘制关闭按钮
+    /// 返回值: (是否点击, 是否悬停)
     fn draw_close_button(
         &self,
         ui: &mut egui::Ui,
         ctx: &egui::Context,
         pos: egui::Pos2,
-    ) -> bool {
+    ) -> (bool, bool) {
         // 使用 Title[280-282] (Cancel 按钮)
         if let Some(info) = LibraryName::Title.get_egui_texture(ctx, 280) {
             if let Some(texture) = info.egui_texture {
@@ -124,10 +125,10 @@ All Rights Reserved
                     }
                 }
                 
-                return response.clicked();
+                return (response.clicked(), response.hovered());
             }
         }
-        false
+        (false, false)
     }
 }
 
@@ -144,10 +145,10 @@ impl Dialog for CreditsDialog {
             return;
         }
         
-        // 获取背景纹理 Prguse[360] 或使用固定尺寸
+        // 获取背景纹理 Prguse[360] 的宽度，高度设置为 500
         let (dialog_w, _) = LibraryName::Prguse.get_size(360).unwrap_or((460, 200));
         let dialog_w = dialog_w as f32;
-        let dialog_h = 500.0_f32;  // 使用更高的对话框
+        let dialog_h = 500.0_f32;  // 使用较高的对话框以便显示更多内容
         
         egui::Area::new(egui::Id::new("credits_dialog"))
             .default_pos(egui::pos2(
@@ -200,10 +201,10 @@ impl Dialog for CreditsDialog {
                     egui::Color32::WHITE,
                 );
                 
-                // 滚动文本区域
+                // 滚动文本区域 - 减小 25 像素避免超出边界
                 let text_area = egui::Rect::from_min_size(
                     egui::pos2(rect.min.x + 20.0, rect.min.y + 60.0),
-                    egui::vec2(dialog_w - 40.0, dialog_h - 140.0)
+                    egui::vec2(dialog_w - 40.0, dialog_h - 165.0)
                 );
                 
                 // 设置裁剪区域
@@ -246,19 +247,10 @@ impl Dialog for CreditsDialog {
                     rect.max.y - 60.0
                 );
                 
-                if self.draw_close_button(ui, ctx, close_btn_pos) {
+                if self.draw_close_button(ui, ctx, close_btn_pos).0 {
                     *open = false;
                     self.reset();
                 }
-                
-                // 提示文字
-                ui.painter().text(
-                    egui::pos2(rect.center().x, rect.max.y - 25.0),
-                    egui::Align2::CENTER_CENTER,
-                    "ESC 关闭",
-                    egui::FontId::proportional(12.0),
-                    egui::Color32::from_rgb(150, 150, 150),
-                );
             });
     }
 }
