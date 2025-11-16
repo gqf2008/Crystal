@@ -20,6 +20,10 @@ pub struct MainDialog {
     visible: bool,
     /// 当前分辨率索引 (0=800, 1=1024, 2=1280+)
     resolution_index: usize,
+    /// 聊天输入框内容
+    chat_text: String,
+    /// 聊天输入框是否可见
+    chat_input_visible: bool,
     /// 模拟数据 - 当前生命值
     hp: i32,
     /// 模拟数据 - 最大生命值
@@ -59,6 +63,8 @@ impl MainDialog {
         Self {
             visible: true,
             resolution_index,
+            chat_text: String::new(),
+            chat_input_visible: false,
             // 模拟数据
             hp: 850,
             max_hp: 1000,
@@ -99,6 +105,12 @@ impl MainDialog {
         let dialog_x = (screen_width - bg_width) / 2.0;
         let dialog_y = screen_height - bg_height;
 
+        // 先绘制聊天输入框（在主界面上方，独立 Area）
+        if self.chat_input_visible {
+            self.draw_chat_input_area(ctx, dialog_x, dialog_y);
+        }
+
+        // 绘制主界面
         egui::Area::new(egui::Id::new("main_dialog"))
             .fixed_pos(egui::pos2(dialog_x, dialog_y))
             .movable(false)
@@ -379,6 +391,145 @@ impl MainDialog {
             egui::FontId::proportional(12.0),
             egui::Color32::WHITE,
         );
+    }
+
+    /// 绘制聊天输入框（独立 Area）
+    fn draw_chat_input_area(&mut self, ctx: &egui::Context, main_x: f32, main_y: f32) {
+        // 根据分辨率计算输入框宽度
+        let input_width = match self.resolution_index {
+            0 => 403.0,  // 800分辨率
+            _ => 627.0,  // 1024+分辨率
+        };
+        
+        // 输入框位置（主界面上方）
+        let input_x = main_x + 230.0;
+        let input_y = main_y - 43.0;
+        
+        egui::Area::new(egui::Id::new("chat_input"))
+            .fixed_pos(egui::pos2(input_x, input_y))
+            .movable(false)
+            .interactable(true)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                // 绘制输入框背景（深灰色）
+                let input_rect = egui::Rect::from_min_size(
+                    ui.cursor().min,
+                    egui::vec2(input_width, 20.0)
+                );
+                
+                ui.painter().rect_filled(
+                    input_rect,
+                    2.0,
+                    egui::Color32::from_rgb(169, 169, 169), // DarkGray
+                );
+                
+                // 绘制文本输入框
+                let text_edit = egui::TextEdit::singleline(&mut self.chat_text)
+                    .desired_width(input_width - 4.0)
+                    .font(egui::FontId::monospace(14.0))
+                    .text_color(egui::Color32::BLACK)
+                    .cursor_at_end(true);
+                
+                let response = ui.add(text_edit);
+                
+                // 自动获取焦点
+                if self.chat_input_visible {
+                    response.request_focus();
+                }
+                
+                // 处理回车发送
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if !self.chat_text.is_empty() {
+                        // TODO: 发送聊天消息到游戏服务器
+                        println!("发送聊天: {}", self.chat_text);
+                        self.chat_text.clear();
+                    }
+                    self.chat_input_visible = false;
+                }
+                
+                // ESC 取消
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    self.chat_input_visible = false;
+                    self.chat_text.clear();
+                }
+            });
+    }
+
+    /// 绘制聊天输入框（旧方法，已废弃）
+    #[allow(dead_code)]
+    fn draw_chat_input(&mut self, ui: &mut egui::Ui, rect: &egui::Rect) {
+        // 根据分辨率计算输入框宽度
+        let input_width = match self.resolution_index {
+            0 => 403.0,  // 800分辨率
+            _ => 627.0,  // 1024+分辨率
+        };
+        
+        // 输入框位置（底部工具栏上方）
+        let input_x = rect.min.x + 230.0;
+        let input_y = rect.min.y - 43.0;  // 在主界面上方
+        
+        // 只有按下 Enter 或点击时才显示输入框
+        if !self.chat_input_visible {
+            return;
+        }
+        
+        // 绘制输入框背景（深灰色）
+        let input_rect = egui::Rect::from_min_size(
+            egui::pos2(input_x, input_y),
+            egui::vec2(input_width, 20.0)
+        );
+        
+        ui.painter().rect_filled(
+            input_rect,
+            2.0,
+            egui::Color32::from_rgb(169, 169, 169), // DarkGray
+        );
+        
+        // 绘制文本输入框
+        let text_edit = egui::TextEdit::singleline(&mut self.chat_text)
+            .desired_width(input_width - 4.0)
+            .font(egui::FontId::monospace(14.0))
+            .text_color(egui::Color32::BLACK)
+            .cursor_at_end(true);
+        
+        let response = ui.put(
+            egui::Rect::from_min_size(
+                egui::pos2(input_x + 2.0, input_y + 2.0),
+                egui::vec2(input_width - 4.0, 16.0)
+            ),
+            text_edit
+        );
+        
+        // 自动获取焦点
+        if self.chat_input_visible {
+            response.request_focus();
+        }
+        
+        // 处理回车发送
+        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if !self.chat_text.is_empty() {
+                // TODO: 发送聊天消息到游戏服务器
+                println!("发送聊天: {}", self.chat_text);
+                self.chat_text.clear();
+            }
+            self.chat_input_visible = false;
+        }
+        
+        // ESC 取消
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.chat_input_visible = false;
+            self.chat_text.clear();
+        }
+    }
+    
+    /// 显示聊天输入框
+    pub fn show_chat_input(&mut self) {
+        self.chat_input_visible = true;
+    }
+    
+    /// 隐藏聊天输入框
+    pub fn hide_chat_input(&mut self) {
+        self.chat_input_visible = false;
     }
 
     /// 绘制功能按钮组

@@ -24,14 +24,23 @@ async fn main() {
     let mut main_dialog = MainDialog::new();
     
     println!("✅ MainDialog 已创建");
-    println!("💡 提示: 测试底部工具栏的显示和按钮交互");
+    println!("💡 提示: ");
+    println!("   - 按 Enter 键显示聊天输入框");
+    println!("   - 在输入框中输入文字后按 Enter 发送");
+    println!("   - 按 ESC 取消输入或退出");
 
     loop {
         clear_background(Color::from_rgba(60, 80, 100, 255));
 
+        // 检测 Enter 键显示聊天输入框
+        if is_key_pressed(KeyCode::Enter) {
+            main_dialog.show_chat_input();
+            println!("💬 显示聊天输入框");
+        }
+
         // 绘制背景提示
-        let text = "游戏主场景";
-        let font_size = 48.0;
+        let text = "游戏主场景 - 按 Enter 打开聊天";
+        let font_size = 36.0;
         let text_size = measure_text(&text, None, font_size as u16, 1.0);
         draw_text(
             text,

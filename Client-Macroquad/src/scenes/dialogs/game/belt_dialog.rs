@@ -109,14 +109,83 @@ impl BeltDialog {
             let cell_pos = self.get_cell_position(i);
             let cell_size = egui::vec2(32.0, 32.0);
             
-            // 绘制格子背景（深色边框）
+            // 绘制格子纹理背景（使用 Items 库的空格子纹理）
+            // 原工程中空格子会显示一个物品槽的背景
+            // 这里我们绘制一个带边框的半透明背景来模拟
             let rect = egui::Rect::from_min_size(cell_pos, cell_size);
+            
+            // 绘制格子背景（深色填充）
+            ui.painter().rect_filled(
+                rect,
+                2.0,
+                egui::Color32::from_rgba_premultiplied(40, 40, 40, 200),
+            );
+            
+            // 绘制格子边框（亮色边框）
             ui.painter().rect_stroke(
                 rect,
                 2.0,
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 60)),
+                egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 100, 100)),
                 egui::epaint::StrokeKind::Middle,
             );
+            
+            // 绘制内部高光（模拟3D效果）
+            ui.painter().line_segment(
+                [
+                    egui::pos2(cell_pos.x + 1.0, cell_pos.y + cell_size.y - 1.0),
+                    egui::pos2(cell_pos.x + 1.0, cell_pos.y + 1.0),
+                ],
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 150, 150)),
+            );
+            ui.painter().line_segment(
+                [
+                    egui::pos2(cell_pos.x + 1.0, cell_pos.y + 1.0),
+                    egui::pos2(cell_pos.x + cell_size.x - 1.0, cell_pos.y + 1.0),
+                ],
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 150, 150)),
+            );
+            
+            // 绘制阴影（右下角）
+            ui.painter().line_segment(
+                [
+                    egui::pos2(cell_pos.x + cell_size.x - 1.0, cell_pos.y + 1.0),
+                    egui::pos2(cell_pos.x + cell_size.x - 1.0, cell_pos.y + cell_size.y - 1.0),
+                ],
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(30, 30, 30)),
+            );
+            ui.painter().line_segment(
+                [
+                    egui::pos2(cell_pos.x + 1.0, cell_pos.y + cell_size.y - 1.0),
+                    egui::pos2(cell_pos.x + cell_size.x - 1.0, cell_pos.y + cell_size.y - 1.0),
+                ],
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(30, 30, 30)),
+            );
+            
+            // TODO: 如果有物品，绘制物品图标
+            // if let Some(item) = &self.cells[i] {
+            //     if let Some(info) = LibraryName::Items.get_egui_texture(ctx, item.texture_index as usize) {
+            //         if let Some(item_texture) = info.egui_texture {
+            //             ui.painter().image(
+            //                 item_texture.id(),
+            //                 rect,
+            //                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            //                 egui::Color32::WHITE,
+            //             );
+            //         }
+            //     }
+            //     
+            //     // 绘制物品数量
+            //     if item.count > 1 {
+            //         let count_text = format!("{}", item.count);
+            //         ui.painter().text(
+            //             egui::pos2(cell_pos.x + cell_size.x - 4.0, cell_pos.y + cell_size.y - 4.0),
+            //             egui::Align2::RIGHT_BOTTOM,
+            //             &count_text,
+            //             egui::FontId::proportional(10.0),
+            //             egui::Color32::WHITE,
+            //         );
+            //     }
+            // }
             
             // 绘制数字键提示
             let key_text = format!("{}", i + 1);
