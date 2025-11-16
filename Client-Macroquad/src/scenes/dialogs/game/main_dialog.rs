@@ -510,23 +510,10 @@ impl MainDialog {
             let control_bar_y = chat_pos.y - 15.0;
             self.chat_control_bar.set_position(egui_macroquad::egui::pos2(chat_pos.x, control_bar_y));
             
-            // 同步更新 BeltDialog 位置
-            // 计算 ChatDialog 的实际顶部位置（底部位置 - 窗口高度）
-            // 窗口高度：小=70, 中=118, 大=166（约）
-            let window_size = self.chat_dialog.get_window_size();
-            let chat_window_height = match window_size {
-                0 => 70.0,   // 小窗口高度
-                1 => 118.0,  // 中窗口高度（70 + 48）
-                2 => 166.0,  // 大窗口高度（70 + 96）
-                _ => 70.0,
-            };
-            
-            // BeltDialog 位于 ChatDialog 顶部再往上 10px（避免紧贴）
-            let belt_y = chat_pos.y - chat_window_height - 10.0;
-            
-            println!("📐 窗口大小: {}, ChatDialog底部Y: {:.1}, 窗口高度: {:.1}, BeltDialog Y: {:.1}", 
-                window_size, chat_pos.y, chat_window_height, belt_y);
-            
+            // 同步更新 BeltDialog 位置（紧贴在 ChatControlBar 上方）
+            // ChatControlBar 高度为 16px，BeltDialog 高度为 24px
+            // BeltDialog 顶部 Y = ChatControlBar 顶部 Y - ChatControlBar 高度 - BeltDialog 高度
+            let belt_y = control_bar_y - 16.0 - 24.0;  // control_bar 高度 16 + belt 高度 24
             self.belt_dialog.set_position(egui_macroquad::egui::pos2(chat_pos.x, belt_y));
         }
     }
