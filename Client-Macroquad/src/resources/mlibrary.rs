@@ -149,7 +149,7 @@ impl ImageInfo {
             self.height as u16,
             &main_image,
         );
-        // 在创建时设置线性过滤,避免每次渲染都设置
+        // 使用线性过滤获得更平滑的视觉效果
         texture.set_filter(FilterMode::Linear);
         self.image = Some(texture);
 
@@ -177,7 +177,7 @@ impl ImageInfo {
                 self.height as u16,
                 &mask_data,
             );
-            // 在创建时设置线性过滤
+            // 使用线性过滤获得更平滑的视觉效果
             mask_texture.set_filter(FilterMode::Linear);
             self.mask_image = Some(mask_texture);
         }

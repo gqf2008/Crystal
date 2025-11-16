@@ -656,10 +656,10 @@ impl Libraries {
                     pixels,
                 };
 
-                // 使用最近邻过滤保持像素艺术的清晰度
+                // 使用线性过滤获得更平滑的视觉效果
                 let texture_options = egui::TextureOptions {
-                    magnification: egui::TextureFilter::Nearest,
-                    minification: egui::TextureFilter::Nearest,
+                    magnification: egui::TextureFilter::Linear,
+                    minification: egui::TextureFilter::Linear,
                     ..Default::default()
                 };
 
