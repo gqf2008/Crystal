@@ -180,7 +180,7 @@ impl ChatDialog {
                 egui::pos2(base_rect.min.x + message_area_x + 3.0, base_rect.min.y + y),
                 egui::Align2::LEFT_TOP,
                 &msg.text,
-                egui::FontId::monospace(9.0),
+                egui::FontId::proportional(9.0),
                 msg.color,
             );
         }
@@ -459,7 +459,7 @@ impl ChatDialog {
         let text_edit = egui::TextEdit::singleline(&mut self.input_text)
             .desired_width(text_rect.width())
             .frame(false)
-            .font(egui::FontId::monospace(9.0)) // 字体从10改为9
+            .font(egui::FontId::proportional(9.0)) // 字体从10改为9，使用 Proportional 支持中文
             .text_color(egui::Color32::BLACK)
             .cursor_at_end(true); // 光标放在末尾
         

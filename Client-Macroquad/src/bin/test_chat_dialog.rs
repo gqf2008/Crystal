@@ -21,8 +21,50 @@ async fn main() {
     println!("📐 窗口尺寸: {}x{}", screen_width(), screen_height());
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
+    // 配置 egui（只设置一次）
+    egui_macroquad::cfg(|ctx| {
+        let mut fonts = egui_macroquad::egui::FontDefinitions::default();
+        
+        // 加载中文字体
+        let font_data = std::fs::read("assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf")
+            .or_else(|_| std::fs::read("assets/fonts/Chinese.ttc"))
+            .or_else(|_| std::fs::read("C:\\Windows\\Fonts\\msyh.ttc"))
+            .unwrap_or_else(|_| {
+                println!("⚠️  无法加载中文字体，使用默认字体");
+                vec![]
+            });
+
+        if !font_data.is_empty() {
+            fonts.font_data.insert(
+                "chinese".to_owned(),
+                std::sync::Arc::new(egui_macroquad::egui::FontData::from_owned(font_data)),
+            );
+
+            // 设置字体优先级
+            fonts
+                .families
+                .get_mut(&egui_macroquad::egui::FontFamily::Proportional)
+                .unwrap()
+                .insert(0, "chinese".to_owned());
+
+            fonts
+                .families
+                .get_mut(&egui_macroquad::egui::FontFamily::Monospace)
+                .unwrap()
+                .insert(0, "chinese".to_owned());
+                
+            println!("✅ 已加载中文字体");
+        }
+
+        ctx.set_fonts(fonts);
+
+        // 设置 DPI 缩放
+        let dpi_scale = screen_dpi_scale();
+        ctx.set_pixels_per_point(dpi_scale);
+    });
+
     let screen_h = screen_height() / screen_dpi_scale();
-    let screen_w = screen_width() / screen_dpi_scale();
+    let _screen_w = screen_width() / screen_dpi_scale();
     
     // 模拟 MainDialog 的 X 坐标
     let main_dialog_x = 0.0;
