@@ -1,4 +1,5 @@
 use crate::resources::libraries::LibraryName;
+use crate::scenes::dialogs::Dialog;
 use egui_macroquad::egui;
 use macroquad::prelude::*;
 
@@ -17,6 +18,7 @@ pub struct LoginDialog {
     pub account: String,
     pub password: String,
     pub remember_password: bool,
+    last_event: LoginDialogEvent,
 }
 
 impl LoginDialog {
@@ -26,7 +28,15 @@ impl LoginDialog {
             account: String::new(),
             password: String::new(),
             remember_password: false,
+            last_event: LoginDialogEvent::None,
         }
+    }
+    
+    /// 获取并清除最后的事件
+    pub fn take_event(&mut self) -> LoginDialogEvent {
+        let event = self.last_event;
+        self.last_event = LoginDialogEvent::None;
+        event
     }
     
     /// 重置对话框
@@ -76,21 +86,22 @@ impl LoginDialog {
         }
         false
     }
-    
-    /// 显示登录对话框并返回事件
-    pub fn show(&mut self, ctx: &egui::Context, open: &mut bool) -> LoginDialogEvent {
+}
+
+impl Dialog for LoginDialog {
+    /// 显示登录对话框
+    fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
         if !*open {
-            return LoginDialogEvent::None;
+            return;
         }
         
-        let mut event = LoginDialogEvent::None;
         let dialog_w = 328.0; // Prguse[1084] 实际尺寸
         let dialog_h = 220.0;
         
         // ESC键关闭（退出程序）
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             // 登录对话框的ESC由外部处理
-            return LoginDialogEvent::None;
+            return;
         }
         
         egui::Area::new(egui::Id::new(&self.id))
@@ -180,7 +191,7 @@ impl LoginDialog {
                 );
                 
                 // 密码输入框 (C# 原版: 85, 108)
-                ui.put(
+                let password_response = ui.put(
                     egui::Rect::from_min_size(
                         egui::pos2(rect.min.x + 85.0, rect.min.y + 108.0),
                         egui::vec2(136.0, 15.0),
@@ -193,23 +204,28 @@ impl LoginDialog {
                         .margin(egui::vec2(0.0, 0.0)),
                 );
                 
+                // Enter键登录
+                if password_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    self.last_event = LoginDialogEvent::Login;
+                }
+                
                 // 按钮 (C# 原版位置)
                 // OK按钮: Title[320/321/322] at (227, 81)
                 if self.draw_image_button(ui, ctx, 320, 321, 322,
                     egui::pos2(rect.min.x + 227.0, rect.min.y + 81.0)) {
-                    event = LoginDialogEvent::Login;
+                    self.last_event = LoginDialogEvent::Login;
                 }
                 
                 // New Account按钮: Title[323/324/325] at (60, 163)  
                 if self.draw_image_button(ui, ctx, 323, 324, 325,
                     egui::pos2(rect.min.x + 60.0, rect.min.y + 163.0)) {
-                    event = LoginDialogEvent::NewAccount;
+                    self.last_event = LoginDialogEvent::NewAccount;
                 }
                 
                 // Change Password按钮: Title[326/327/328] at (166, 163)
                 if self.draw_image_button(ui, ctx, 326, 327, 328,
                     egui::pos2(rect.min.x + 166.0, rect.min.y + 163.0)) {
-                    event = LoginDialogEvent::ChangePassword;
+                    self.last_event = LoginDialogEvent::ChangePassword;
                 }
                 
                 // Exit按钮: Title[329/330/331] at (166, 189)
@@ -223,7 +239,5 @@ impl LoginDialog {
                 self.draw_image_button(ui, ctx, 332, 333, 334,
                     egui::pos2(rect.min.x + 60.0, rect.min.y + 189.0));
             });
-        
-        event
     }
 }

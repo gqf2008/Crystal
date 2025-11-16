@@ -335,8 +335,11 @@ impl Scene for LoginScene {
 
         // ========== 【egui 交互层】 ==========
         egui_macroquad::ui(|ctx| {
-            // 登录对话框 (返回按钮事件)
-            let login_event = self.login_dialog.show(ctx, &mut self.show_login_dialog);
+            // 登录对话框 (使用 Dialog trait)
+            self.login_dialog.show(ctx, &mut self.show_login_dialog);
+            
+            // 检查登录对话框事件
+            let login_event = self.login_dialog.take_event();
             match login_event {
                 LoginDialogEvent::Login => {
                     self.on_login_clicked();
