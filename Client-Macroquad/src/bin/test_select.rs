@@ -10,6 +10,7 @@ fn window_conf() -> Conf {
         window_title: "Legend of Mir 2 - Select Scene Test".to_owned(),
         window_width: 1024,
         window_height: 768,
+        high_dpi: false,
         window_resizable: false,
         ..Default::default()
     }

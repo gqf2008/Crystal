@@ -185,6 +185,157 @@ impl LibraryName {
             _ => None,
         }
     }
+
+    // ==================== 便捷方法 ====================
+
+    /// 获取纹理（使用新资源管理器，带 LRU 缓存）
+    /// 
+    /// # Example
+    /// ```
+    /// use client_macroquad::resources::LibraryName;
+    /// 
+    /// if let Some(info) = LibraryName::Prguse.get_texture(100) {
+    ///     // 使用纹理
+    /// }
+    /// ```
+    #[inline]
+    pub fn get_texture(self, index: usize) -> Option<ImageInfo> {
+        crate::resources::resource_manager::get_texture(self, index)
+    }
+
+    /// 获取 egui 纹理（返回包含 egui_texture 字段的 ImageInfo）
+    /// 
+    /// # Example
+    /// ```
+    /// use client_macroquad::resources::LibraryName;
+    /// 
+    /// egui::Window::new("UI").show(ctx, |ui| {
+    ///     if let Some(info) = LibraryName::ChrSel.get_egui_texture(ctx, 0) {
+    ///         if let Some(handle) = &info.egui_texture {
+    ///             ui.image(handle);
+    ///         }
+    ///     }
+    /// });
+    /// ```
+    #[inline]
+    pub fn get_egui_texture(
+        self,
+        ctx: &egui::Context,
+        index: usize,
+    ) -> Option<crate::resources::mlibrary::ImageInfo> {
+        crate::resources::resource_manager::get_egui_texture(ctx, self, index)
+    }
+
+    /// 获取图像尺寸（无需创建纹理，高效）
+    /// 
+    /// # Example
+    /// ```
+    /// use client_macroquad::resources::LibraryName;
+    /// 
+    /// if let Some((w, h)) = LibraryName::Items.get_size(200) {
+    ///     println!("物品尺寸: {}x{}", w, h);
+    /// }
+    /// ```
+    #[inline]
+    pub fn get_size(self, index: usize) -> Option<(i16, i16)> {
+        crate::resources::resource_manager::get_size(self, index)
+    }
+
+    /// 获取库引用（如果未加载则自动懒加载）
+    /// 
+    /// # Example
+    /// ```
+    /// use client_macroquad::resources::LibraryName;
+    /// 
+    /// if let Some(lib) = LibraryName::Magic.get_library() {
+    ///     let mut lib = lib.borrow_mut();
+    ///     // 使用库...
+    /// }
+    /// ```
+    #[inline]
+    pub fn get_library(self) -> Option<Rc<RefCell<MLibrary>>> {
+        crate::resources::resource_manager::get_library(self)
+    }
+
+    /// 检查库是否为 UI 相关库
+    pub fn is_ui_library(&self) -> bool {
+        matches!(
+            self,
+            LibraryName::ChrSel
+                | LibraryName::Prguse
+                | LibraryName::Prguse2
+                | LibraryName::Prguse3
+                | LibraryName::BuffIcon
+                | LibraryName::Help
+                | LibraryName::MiniMap
+                | LibraryName::MapLinkIcon
+                | LibraryName::Title
+                | LibraryName::Background
+        )
+    }
+
+    /// 检查库是否为魔法/特效相关库
+    pub fn is_effect_library(&self) -> bool {
+        matches!(
+            self,
+            LibraryName::Magic
+                | LibraryName::Magic2
+                | LibraryName::Magic3
+                | LibraryName::Effect
+                | LibraryName::MagicC
+                | LibraryName::GuildSkill
+                | LibraryName::Weather
+        )
+    }
+
+    /// 检查库是否为物品相关库
+    pub fn is_item_library(&self) -> bool {
+        matches!(
+            self,
+            LibraryName::Items | LibraryName::StateItems | LibraryName::FloorItems
+        )
+    }
+
+    /// 检查库是否为角色装备库（数组库）
+    pub fn is_character_library(&self) -> bool {
+        matches!(
+            self,
+            LibraryName::CArmours(_)
+                | LibraryName::AArmours(_)
+                | LibraryName::ARArmours(_)
+                | LibraryName::CHair(_)
+                | LibraryName::AHair(_)
+                | LibraryName::ARHair(_)
+                | LibraryName::CWeapons(_)
+                | LibraryName::ARWeapons(_)
+                | LibraryName::CHumEffect(_)
+        )
+    }
+
+    /// 获取库的分类
+    pub fn category(&self) -> LibraryCategory {
+        if self.is_ui_library() {
+            LibraryCategory::UI
+        } else if self.is_effect_library() {
+            LibraryCategory::Effect
+        } else if self.is_item_library() {
+            LibraryCategory::Item
+        } else if self.is_character_library() {
+            LibraryCategory::Character
+        } else {
+            LibraryCategory::Other
+        }
+    }
+}
+
+/// 库分类
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LibraryCategory {
+    UI,        // UI 界面
+    Effect,    // 魔法/特效
+    Item,      // 物品
+    Character, // 角色/装备
+    Other,     // 其他
 }
 
 impl std::fmt::Display for LibraryName {

@@ -26,12 +26,12 @@ use client_macroquad::map_renderer::MeshMapRenderer;
 // ============================================================================
 
 /// 窗口尺寸（实际显示窗口大小）
-const WINDOW_WIDTH: i32 = 1024;
-const WINDOW_HEIGHT: i32 = 768;
+const WINDOW_WIDTH: i32 = 1600;
+const WINDOW_HEIGHT: i32 = 1200;
 
 /// 渲染尺寸 - 内部渲染分辨率，可以不同于窗口尺寸
-const RENDER_WIDTH: f32 = 1024.0;
-const RENDER_HEIGHT: f32 = 768.0;
+const RENDER_WIDTH: f32 = 1600.0;
+const RENDER_HEIGHT: f32 = 1200.0;
 
 /// 传奇2 瓦片尺寸
 const TILE_WIDTH: f32 = 48.0;
@@ -623,7 +623,7 @@ impl MapViewerState {
         if self.show_grid {
             self.draw_grid();
         }
-        
+        set_default_camera();
         // 不切换相机,继续在同一相机空间绘制UI (这会让UI也跟随相机移动)
         self.draw_ui();
     }
@@ -789,7 +789,7 @@ impl MapViewerState {
             35.0,
             TextParams {
                 font: self.font.as_ref(),
-                font_size: 32,
+                font_size: 28,
                 color: WHITE,
                 ..Default::default()
             },
@@ -828,7 +828,7 @@ impl MapViewerState {
             75.0,
             TextParams {
                 font: self.font.as_ref(),
-                font_size: 20,
+                font_size: 24,
                 color: info_color,
                 ..Default::default()
             },
@@ -843,7 +843,7 @@ impl MapViewerState {
                 75.0,
                 TextParams {
                     font: self.font.as_ref(),
-                    font_size: 14,
+                    font_size: 24,
                     color: Color::from_rgba(255, 255, 100, 255),
                     ..Default::default()
                 },
@@ -866,7 +866,7 @@ impl MapViewerState {
             105.0,
             TextParams {
                 font: self.font.as_ref(),
-                font_size: 18,
+                font_size: 24,
                 color: WHITE,
                 ..Default::default()
             },
@@ -896,7 +896,7 @@ impl MapViewerState {
             130.0,
             TextParams {
                 font: self.font.as_ref(),
-                font_size: 16,
+                font_size: 24,
                 color: Color::from_rgba(255, 200, 100, 255),
                 ..Default::default()
             },
@@ -909,7 +909,7 @@ impl MapViewerState {
             155.0,
             TextParams {
                 font: self.font.as_ref(),
-                font_size: 14,
+                font_size: 24,
                 color: WHITE,
                 ..Default::default()
             },
@@ -921,7 +921,7 @@ impl MapViewerState {
             175.0,
             TextParams {
                 font: self.font.as_ref(),
-                font_size: 12,
+                font_size: 24,
                 color: Color::from_rgba(200, 200, 200, 255),
                 ..Default::default()
             },
@@ -950,7 +950,7 @@ impl MapViewerState {
             y_offset,
             TextParams {
                 font: self.font.as_ref(),
-                font_size: 14,
+                font_size: 24,
                 color: Color::from_rgba(255, 255, 100, 255),
                 ..Default::default()
             },
@@ -989,7 +989,7 @@ impl MapViewerState {
                             y_offset + line_offset,
                             TextParams {
                                 font: self.font.as_ref(),
-                                font_size: 13,
+                                font_size: 24,
                                 color: WHITE,
                                 ..Default::default()
                             },
@@ -1006,7 +1006,7 @@ impl MapViewerState {
                             y_offset + line_offset,
                             TextParams {
                                 font: self.font.as_ref(),
-                                font_size: 13,
+                                font_size: 24,
                                 color: WHITE,
                                 ..Default::default()
                             },
@@ -1037,7 +1037,7 @@ impl MapViewerState {
                     y_offset + line_offset,
                     TextParams {
                         font: self.font.as_ref(),
-                        font_size: 13,
+                        font_size: 24,
                         color: WHITE,
                         ..Default::default()
                     },
@@ -1066,7 +1066,7 @@ impl MapViewerState {
                     y_offset + line_offset,
                     TextParams {
                         font: self.font.as_ref(),
-                        font_size: 13,
+                        font_size: 24,
                         color: WHITE,
                         ..Default::default()
                     },
@@ -1086,7 +1086,7 @@ fn window_conf() -> Conf {
         window_width: WINDOW_WIDTH,
         window_height: WINDOW_HEIGHT,
         window_resizable: true,
-        // high_dpi: true,  // macOS Retina 支持
+        high_dpi: true,  // macOS Retina 支持
         fullscreen: false,
         platform: Platform {
             swap_interval: Some(1),  // VSync

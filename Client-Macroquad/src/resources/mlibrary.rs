@@ -33,7 +33,7 @@ pub struct ImageIndex {
 }
 
 /// 图像元数据(不包含纹理数据)
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ImageInfo {
     pub width: i16,
     pub height: i16,
@@ -52,6 +52,7 @@ pub struct ImageInfo {
     pub texture_valid: bool, // 纹理是否有效
     pub image: Option<Texture2D>, // 解压后的纹理数据 (RGBA格式)
     pub mask_image: Option<Texture2D>, // 解压后的遮罩纹理数据 (RGBA格式)
+    pub egui_texture: Option<egui_macroquad::egui::TextureHandle>, // egui 纹理句柄
     pub last_access_time: Option<Instant>, // 最后访问时间 (用于缓存清理)
     bgra_data: Option<Vec<u8>>, // 原始解压数据 (RGBA格式)
 }
@@ -108,6 +109,7 @@ impl ImageInfo {
             texture_valid: false,
             image: None,
             mask_image: None,
+            egui_texture: None,
             last_access_time: None,
             bgra_data: None,
         })
@@ -475,7 +477,6 @@ impl ImageInfo {
 }
 
 /// MIR2图像库
-#[derive(Debug)]
 pub struct MLibrary {
     path: PathBuf,
     // header: LibraryHeader,
