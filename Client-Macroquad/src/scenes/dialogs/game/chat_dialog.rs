@@ -519,8 +519,16 @@ impl ChatDialog {
         
         let response = ui.put(text_rect, text_edit);
         
-        // 点击输入框时获取焦点，不再需要手动维护焦点
-        // egui 会自动处理点击后的焦点获取
+        // 调试：输出焦点状态
+        if response.gained_focus() {
+            println!("💬 ChatDialog 输入框获得焦点");
+        }
+        if response.lost_focus() {
+            println!("💬 ChatDialog 输入框失去焦点");
+        }
+        
+        // 只在明确点击输入框时才获取焦点，避免自动获取焦点干扰其他按钮
+        // egui 的 TextEdit 默认行为：点击时自动获取焦点
         
         // 处理回车发送
         if response.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -559,8 +567,8 @@ impl Dialog for ChatDialog {
         egui::Area::new(egui::Id::new("chat_dialog"))
             .fixed_pos(self.position)
             .movable(false)
-            .interactable(false)  // 不要捕获整个区域的交互，避免阻止底层按钮
-            .order(egui::Order::Middle)
+            .interactable(true)
+            .order(egui::Order::Background)  // 使用 Background 层级，让上层的 MainDialog 按钮优先响应
             .show(ctx, |ui| {
                 // 绘制背景纹理
                 let base_rect = self.draw_chat(ui, ctx);
