@@ -13,6 +13,8 @@
 
 use egui_macroquad::egui;
 use crate::resources::LibraryName;
+use super::{BeltDialog, ChatDialog, ChatControlBar};
+use crate::scenes::dialogs::Dialog;
 
 /// 主界面底部工具栏
 pub struct MainDialog {
@@ -42,12 +44,26 @@ pub struct MainDialog {
     max_weight: u32,
     /// 模拟数据 - 背包空格数
     bag_space: u32,
+    
+    // 子对话框
+    /// 血瓶快捷栏
+    belt_dialog: BeltDialog,
+    /// 聊天窗口
+    chat_dialog: ChatDialog,
+    /// 聊天控制栏
+    chat_control_bar: ChatControlBar,
 }
 
 impl MainDialog {
     pub fn new() -> Self {
         // 根据屏幕宽度决定分辨率索引
         let screen_width = macroquad::prelude::screen_width();
+        let screen_height = macroquad::prelude::screen_height();
+        let dpi_scale = macroquad::prelude::screen_dpi_scale();
+        
+        let screen_w = screen_width / dpi_scale;
+        let screen_h = screen_height / dpi_scale;
+        
         let resolution_index = if screen_width <= 800.0 {
             0
         } else if screen_width <= 1024.0 {
@@ -55,6 +71,11 @@ impl MainDialog {
         } else {
             2
         };
+        
+        // MainDialog 的 X 坐标（底部居中）
+        let bg_info = LibraryName::Prguse.get_size(resolution_index).unwrap_or((1024, 150));
+        let bg_width = bg_info.0 as f32;
+        let main_dialog_x = (screen_w - bg_width) / 2.0;
 
         Self {
             visible: true,
@@ -71,6 +92,11 @@ impl MainDialog {
             weight: 75,
             max_weight: 100,
             bag_space: 28,
+            
+            // 子对话框
+            belt_dialog: BeltDialog::new(main_dialog_x, screen_h),
+            chat_dialog: ChatDialog::new(main_dialog_x, screen_h, resolution_index),
+            chat_control_bar: ChatControlBar::new(main_dialog_x, screen_h, resolution_index),
         }
     }
 
@@ -454,5 +480,49 @@ impl MainDialog {
                 }
             }
         }
+    }
+    
+    /// 显示所有子对话框
+    pub fn show_dialogs(&mut self, ctx: &egui::Context) {
+        // 获取屏幕尺寸
+        let screen_h = macroquad::prelude::screen_height() / macroquad::prelude::screen_dpi_scale();
+        
+        // 每个对话框使用独立的 open 变量，避免互相影响
+        let mut chat_open = true;
+        let mut control_bar_open = true;
+        let mut belt_open = true;
+        
+        // 先显示 ChatDialog（在最底层）
+        self.chat_dialog.show(ctx, &mut chat_open);
+        
+        // 再显示 ChatControlBar（在中间层）
+        let (size_clicked, _settings_clicked) = self.chat_control_bar.show(ctx, &mut control_bar_open);
+        
+        // 最后显示 BeltDialog（在最上层，不被其他组件遮挡）
+        self.belt_dialog.show(ctx, &mut belt_open);
+        
+        // 如果 Size 按钮被点击，改变 ChatDialog 大小
+        if size_clicked {
+            self.chat_dialog.change_size(screen_h);
+            
+            // 同步更新 ChatControlBar 位置（保持在 ChatDialog 上方）
+            let chat_pos = self.chat_dialog.get_position();
+            let control_bar_y = chat_pos.y - 15.0;
+            self.chat_control_bar.set_position(egui_macroquad::egui::pos2(chat_pos.x, control_bar_y));
+            
+            // 同步更新 BeltDialog 位置（保持在 ChatControlBar 上方）
+            let belt_y = control_bar_y - 24.0; // BeltDialog 高度约 24 像素
+            self.belt_dialog.set_position(egui_macroquad::egui::pos2(chat_pos.x, belt_y));
+        }
+    }
+}
+
+// ============================================================================
+// 实现 Dialog trait
+// ============================================================================
+
+impl Dialog for MainDialog {
+    fn show(&mut self, ctx: &egui::Context, _open: &mut bool) {
+        self.show(ctx);
     }
 }

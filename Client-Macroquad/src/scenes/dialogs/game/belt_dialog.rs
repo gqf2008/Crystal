@@ -70,6 +70,12 @@ impl BeltDialog {
         };
     }
     
+    /// 设置位置（当 ChatDialog 改变大小时需要同步更新）
+    pub fn set_position(&mut self, pos: egui::Pos2) {
+        self.position = pos;
+    }
+
+    
     /// 绘制快捷栏
     fn draw_belt(&self, ui: &mut egui::Ui, ctx: &egui::Context) {
         // 获取背景纹理索引
