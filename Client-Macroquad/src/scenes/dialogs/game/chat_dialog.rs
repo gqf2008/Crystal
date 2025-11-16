@@ -241,6 +241,34 @@ impl ChatDialog {
             30.0
         };
         
+        // 先绘制4个按钮
+        // Home 按钮 (2018, 2019, 2020) - 滚动到顶部
+        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, 1.0, 2018, 2019, 2020) {
+            self.scroll_offset = 0;
+        }
+        
+        // Up 按钮 (2021, 2022, 2023) - 向上滚动
+        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, 9.0, 2021, 2022, 2023) {
+            if self.scroll_offset > 0 {
+                self.scroll_offset -= 1;
+            }
+        }
+        
+        // Down 按钮 (2024, 2025, 2026) - 向下滚动
+        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, 39.0, 2024, 2025, 2026) {
+            let max_scroll = self.messages.len().saturating_sub(4);
+            if self.scroll_offset < max_scroll {
+                self.scroll_offset += 1;
+            }
+        }
+        
+        // End 按钮 (2027, 2028, 2029) - 滚动到底部
+        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, 45.0, 2027, 2028, 2029) {
+            let max_scroll = self.messages.len().saturating_sub(4);
+            self.scroll_offset = max_scroll;
+        }
+        
+        // 最后绘制可拖动滑块（在最上层，确保能接收拖动事件）
         // PositionBar - 可拖动滚动条滑块 (Prguse[2015, 2016, 2017])
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 2015) {
             if let Some(texture) = info.egui_texture {
@@ -260,22 +288,37 @@ impl ChatDialog {
                     size,
                 );
                 
-                // 拖动交互 - 使用 click_and_drag 以支持点击后拖动
+                // 拖动交互 - 使用 click_and_drag 提高优先级
+                let id = egui::Id::new("chat_scroll_slider");
                 let response = ui.interact(
                     rect,
-                    egui::Id::new("chat_scroll_slider"),
+                    id,
                     egui::Sense::click_and_drag(),
                 );
                 
-                // 处理拖动
-                if response.dragged() && max_scroll > 0 {
-                    let delta = response.drag_delta().y;
-                    if delta.abs() > 0.01 {
-                        // 计算新的滚动位置
-                        let delta_ratio = delta / scroll_range;
-                        let scroll_delta = (delta_ratio * max_scroll as f32).round();
-                        let new_offset = (self.scroll_offset as f32 + scroll_delta).clamp(0.0, max_scroll as f32);
-                        self.scroll_offset = new_offset as usize;
+                // 处理拖动 - 使用绝对位置计算
+                if (response.dragged() || response.drag_started()) && max_scroll > 0 {
+                    // 获取鼠标位置
+                    if let Some(pointer_pos) = ctx.pointer_latest_pos() {
+                        // 计算鼠标在滚动轨道中的相对位置
+                        let track_start_y = base_rect.min.y + 16.0;
+                        let relative_y = (pointer_pos.y - track_start_y).clamp(0.0, scroll_range);
+                        
+                        // 根据相对位置计算滚动偏移
+                        let scroll_ratio = relative_y / scroll_range;
+                        self.scroll_offset = (scroll_ratio * max_scroll as f32).round() as usize;
+                        self.scroll_offset = self.scroll_offset.min(max_scroll);
+                    }
+                }
+                
+                // 也支持点击滚动条轨道直接跳转
+                if response.clicked() && max_scroll > 0 {
+                    if let Some(pointer_pos) = ctx.pointer_interact_pos() {
+                        let track_start_y = base_rect.min.y + 16.0;
+                        let relative_y = (pointer_pos.y - track_start_y).clamp(0.0, scroll_range);
+                        let scroll_ratio = relative_y / scroll_range;
+                        self.scroll_offset = (scroll_ratio * max_scroll as f32).round() as usize;
+                        self.scroll_offset = self.scroll_offset.min(max_scroll);
                     }
                 }
                 

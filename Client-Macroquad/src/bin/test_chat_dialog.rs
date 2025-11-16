@@ -38,7 +38,7 @@ async fn main() {
     let mut chat_dialog = ChatDialog::new(main_dialog_x, screen_h, 1); // 1024分辨率
     let mut chat_open = true;
     
-    // 添加测试消息
+    // 添加测试消息（需要超过4条才能测试滚动条）
     chat_dialog.add_message(
         "Welcome to the Legend of Mir 2 Server.",
         egui_macroquad::egui::Color32::from_rgb(255, 255, 0), // 黄色
@@ -55,6 +55,17 @@ async fn main() {
         "System: ChatDialog 测试中...",
         egui_macroquad::egui::Color32::WHITE,
     );
+    
+    // 添加更多消息以测试滚动功能
+    for i in 1..=15 {
+        let msg = format!("测试消息 #{}: 这是一条用于测试滚动条功能的消息", i);
+        let color = match i % 3 {
+            0 => egui_macroquad::egui::Color32::from_rgb(255, 200, 100), // 橙色
+            1 => egui_macroquad::egui::Color32::from_rgb(150, 150, 255), // 紫色
+            _ => egui_macroquad::egui::Color32::WHITE,
+        };
+        chat_dialog.add_message(&msg, color);
+    }
     
     println!("✅ ChatDialog 已创建");
     println!("📍 ChatControlBar 位置: x={}, y={}", main_dialog_x + 230.0, screen_h - 112.0);
