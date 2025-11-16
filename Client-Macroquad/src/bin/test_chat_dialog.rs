@@ -115,6 +115,7 @@ async fn main() {
     println!("💡 提示:");
     println!("   - 按 Enter 键显示聊天输入框");
     println!("   - 在输入框中输入文字后按 Enter 发送");
+    println!("   - 按 Tab 键切换聊天窗口大小（小→中→大）");
     println!("   - 按 ESC 退出");
     println!();
     println!("🔍 请检查:");
@@ -127,10 +128,43 @@ async fn main() {
     loop {
         clear_background(Color::from_rgba(60, 80, 100, 255));
 
+        // 处理键盘输入 - Tab 切换窗口大小
+        if is_key_pressed(KeyCode::Tab) {
+            chat_dialog.change_size(screen_h);
+            let size_info = match chat_dialog.get_window_size() {
+                0 => "小 (4行)",
+                1 => "中 (7行)",
+                2 => "大 (11行)",
+                _ => "未知",
+            };
+            println!("🔄 切换聊天窗口大小: {}", size_info);
+        }
+
         // 绘制 UI
         egui_macroquad::ui(|egui_ctx| {
             let mut open = true;
-            chat_control_bar.show(egui_ctx, &mut open);
+            
+            // 显示 ChatControlBar 并获取按钮点击状态
+            let (size_clicked, _settings_clicked) = chat_control_bar.show(egui_ctx, &mut open);
+            
+            // 如果 Size 按钮被点击，改变 ChatDialog 大小
+            if size_clicked {
+                chat_dialog.change_size(screen_h);
+                
+                // 同步更新 ChatControlBar 位置（保持在 ChatDialog 上方）
+                let chat_pos = chat_dialog.get_position();
+                let control_bar_y = chat_pos.y - 15.0; // ChatControlBar 高度约15像素
+                chat_control_bar.set_position(egui_macroquad::egui::pos2(chat_pos.x, control_bar_y));
+                
+                let size_info = match chat_dialog.get_window_size() {
+                    0 => "小 (4行)",
+                    1 => "中 (7行)",
+                    2 => "大 (11行)",
+                    _ => "未知",
+                };
+                println!("🔄 切换聊天窗口大小: {}", size_info);
+            }
+            
             chat_dialog.show(egui_ctx, &mut open);
         });
         

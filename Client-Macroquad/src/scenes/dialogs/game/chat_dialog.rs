@@ -39,6 +39,10 @@ pub struct ChatDialog {
     // 输入框
     input_text: String,
     input_visible: bool,
+    
+    // 窗口大小：0=小(4行), 1=中(7行), 2=大(11行)
+    window_size: usize,
+    line_count: usize,
 }
 
 impl ChatDialog {
@@ -55,6 +59,8 @@ impl ChatDialog {
             scroll_offset: 0,
             input_text: String::new(),
             input_visible: false,
+            window_size: 0,
+            line_count: 4,
         }
     }
     
@@ -84,10 +90,52 @@ impl ChatDialog {
         self.input_text.clear();
     }
     
+    /// 切换窗口大小（0=小, 1=中, 2=大）
+    pub fn change_size(&mut self, screen_height: f32) {
+        // 循环切换：0 -> 1 -> 2 -> 0
+        self.window_size = (self.window_size + 1) % 3;
+        
+        // 更新行数
+        self.line_count = match self.window_size {
+            0 => 4,   // 小窗口：4行
+            1 => 7,   // 中窗口：7行
+            2 => 11,  // 大窗口：11行
+            _ => 4,
+        };
+        
+        // 更新窗口位置（保持底部对齐）
+        let y_offset = match self.window_size {
+            0 => 97.0,   // 小窗口偏移
+            1 => 97.0 + 48.0,  // 中窗口偏移（+48像素）
+            2 => 97.0 + 96.0,  // 大窗口偏移（+96像素）
+            _ => 97.0,
+        };
+        
+        self.position.y = screen_height - y_offset;
+    }
+    
+    /// 获取当前窗口大小
+    pub fn get_window_size(&self) -> usize {
+        self.window_size
+    }
+    
+    /// 获取当前位置
+    pub fn get_position(&self) -> egui::Pos2 {
+        self.position
+    }
+    
     /// 绘制聊天窗口
     fn draw_chat(&self, ui: &mut egui::Ui, ctx: &egui::Context) -> egui::Rect {
-        // 获取背景纹理索引
-        let bg_index = if self.resolution_index == 0 { 2201 } else { 2221 };
+        // 根据窗口大小和分辨率获取背景纹理索引
+        let bg_index = match (self.window_size, self.resolution_index) {
+            (0, 0) => 2201,  // 小窗口 800分辨率
+            (0, _) => 2221,  // 小窗口 1024+分辨率
+            (1, 0) => 2204,  // 中窗口 800分辨率
+            (1, _) => 2224,  // 中窗口 1024+分辨率
+            (2, 0) => 2207,  // 大窗口 800分辨率
+            (2, _) => 2227,  // 大窗口 1024+分辨率
+            _ => if self.resolution_index == 0 { 2201 } else { 2221 },
+        };
         
         let base_rect = if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, bg_index) {
             if let Some(bg_texture) = info.egui_texture {
@@ -102,11 +150,12 @@ impl ChatDialog {
                     egui::Color32::WHITE,
                 );
                 
-                // 立即在主背景上绘制深色消息背景（关键：使用同一个 painter）
+                // 立即在主背景上绘制白色消息背景（关键：使用同一个 painter）
                 let message_area_x = 5.0;
                 let message_area_y = 5.0;
                 let message_area_width = if self.resolution_index == 0 { 380.0 } else { 600.0 };
-                let message_area_height = 40.0;
+                // 消息区域高度根据 line_count 动态计算（每行10像素 + 边距）
+                let message_area_height = (self.line_count as f32 * 10.0) + 4.0;
                 let msg_bg_rect = egui::Rect::from_min_size(
                     egui::pos2(bg_rect.min.x + message_area_x, bg_rect.min.y + message_area_y),
                     egui::vec2(message_area_width, message_area_height),
@@ -164,14 +213,14 @@ impl ChatDialog {
     
     /// 绘制聊天消息显示框（上方区域）
     fn draw_messages(&self, ui: &mut egui::Ui, base_rect: &egui::Rect) {
-        // 消息显示区域：位置(5, 5)，高度约40像素（显示4行，每行10像素）
+        // 消息显示区域：位置(5, 5)
         let message_area_x = 5.0;
         let message_area_y = 5.0;
         let line_height = 10.0;
         
-        // 显示最近的消息（最多4行）
+        // 根据 line_count 显示对应数量的消息
         let start_idx = self.scroll_offset;
-        let end_idx = (start_idx + 4).min(self.messages.len());
+        let end_idx = (start_idx + self.line_count).min(self.messages.len());
         
         for (i, msg) in self.messages[start_idx..end_idx].iter().enumerate() {
             let y = message_area_y + 2.0 + (i as f32 * line_height);
@@ -190,9 +239,10 @@ impl ChatDialog {
     fn draw_scroll_buttons(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, base_rect: &egui::Rect) {
         // 先检测消息区域的鼠标滚轮事件
         let msg_width = if self.resolution_index == 0 { 380.0 } else { 600.0 };
+        let msg_height = (self.line_count as f32 * 10.0) + 4.0;
         let msg_rect = egui::Rect::from_min_size(
             egui::pos2(base_rect.min.x + 5.0, base_rect.min.y + 5.0),
-            egui::vec2(msg_width, 40.0)
+            egui::vec2(msg_width, msg_height)
         );
         
         let msg_response = ui.interact(
@@ -205,7 +255,7 @@ impl ChatDialog {
             ctx.input(|i| {
                 let scroll_delta = i.smooth_scroll_delta.y;
                 if scroll_delta.abs() > 0.1 {
-                    let max_scroll = self.messages.len().saturating_sub(4);
+                    let max_scroll = self.messages.len().saturating_sub(self.line_count);
                     let delta_lines = (-scroll_delta / 10.0).round() as i32;
                     let new_offset = (self.scroll_offset as i32 + delta_lines)
                         .clamp(0, max_scroll as i32) as usize;
@@ -219,8 +269,15 @@ impl ChatDialog {
         let posbar_x = if self.resolution_index == 0 { 395.0 } else { 619.0 };
         let scroll_x = if self.resolution_index == 0 { 394.0 } else { 618.0 };
         
-        // CountBar - 滚动条背景轨道 (Prguse[2012])
-        let countbar_height = if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 2012) {
+        // CountBar - 滚动条背景轨道（根据窗口大小选择纹理）
+        let countbar_index = match self.window_size {
+            0 => 2012,  // 小窗口
+            1 => 2013,  // 中窗口
+            2 => 2014,  // 大窗口
+            _ => 2012,
+        };
+        
+        let countbar_height = if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, countbar_index) {
             if let Some(texture) = info.egui_texture {
                 let size = texture.size_vec2();
                 let rect = egui::Rect::from_min_size(
@@ -254,17 +311,29 @@ impl ChatDialog {
             }
         }
         
-        // Down 按钮 (2024, 2025, 2026) - 向下滚动
-        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, 39.0, 2024, 2025, 2026) {
-            let max_scroll = self.messages.len().saturating_sub(4);
+        // Down 按钮 (2024, 2025, 2026) - 向下滚动（位置根据窗口大小调整）
+        let down_y = match self.window_size {
+            0 => 39.0,         // 小窗口
+            1 => 39.0 + 48.0,  // 中窗口
+            2 => 39.0 + 96.0,  // 大窗口
+            _ => 39.0,
+        };
+        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, down_y, 2024, 2025, 2026) {
+            let max_scroll = self.messages.len().saturating_sub(self.line_count);
             if self.scroll_offset < max_scroll {
                 self.scroll_offset += 1;
             }
         }
         
-        // End 按钮 (2027, 2028, 2029) - 滚动到底部
-        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, 45.0, 2027, 2028, 2029) {
-            let max_scroll = self.messages.len().saturating_sub(4);
+        // End 按钮 (2027, 2028, 2029) - 滚动到底部（位置根据窗口大小调整）
+        let end_y = match self.window_size {
+            0 => 45.0,         // 小窗口
+            1 => 45.0 + 48.0,  // 中窗口
+            2 => 45.0 + 96.0,  // 大窗口
+            _ => 45.0,
+        };
+        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, end_y, 2027, 2028, 2029) {
+            let max_scroll = self.messages.len().saturating_sub(self.line_count);
             self.scroll_offset = max_scroll;
         }
         
@@ -275,7 +344,7 @@ impl ChatDialog {
                 let size = texture.size_vec2();
                 
                 // 计算滑块位置（基于滚动偏移）
-                let max_scroll = self.messages.len().saturating_sub(4);
+                let max_scroll = self.messages.len().saturating_sub(self.line_count);
                 let scroll_range = countbar_height - size.y;
                 let slider_y = if max_scroll > 0 {
                     16.0 + (self.scroll_offset as f32 / max_scroll as f32) * scroll_range
@@ -342,32 +411,6 @@ impl ChatDialog {
                     }
                 }
             }
-        }
-        
-        // Home 按钮 (2018, 2019, 2020) - 滚动到顶部
-        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, 1.0, 2018, 2019, 2020) {
-            self.scroll_offset = 0;
-        }
-        
-        // Up 按钮 (2021, 2022, 2023) - 向上滚动
-        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, 9.0, 2021, 2022, 2023) {
-            if self.scroll_offset > 0 {
-                self.scroll_offset -= 1;
-            }
-        }
-        
-        // Down 按钮 (2024, 2025, 2026) - 向下滚动
-        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, 39.0, 2024, 2025, 2026) {
-            let max_scroll = self.messages.len().saturating_sub(4);
-            if self.scroll_offset < max_scroll {
-                self.scroll_offset += 1;
-            }
-        }
-        
-        // End 按钮 (2027, 2028, 2029) - 滚动到底部
-        if self.draw_scroll_button(ui, ctx, base_rect, scroll_x, 45.0, 2027, 2028, 2029) {
-            let max_scroll = self.messages.len().saturating_sub(4);
-            self.scroll_offset = max_scroll;
         }
     }
     

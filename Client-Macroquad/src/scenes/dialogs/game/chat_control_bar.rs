@@ -79,16 +79,25 @@ impl ChatControlBar {
         self.active_filter = filter;
     }
     
+    /// 设置位置（当 ChatDialog 改变大小时需要同步更新）
+    pub fn set_position(&mut self, pos: egui::Pos2) {
+        self.position = pos;
+    }
+    
     /// 获取当前聊天前缀
     pub fn get_chat_prefix(&self) -> &'static str {
         self.active_filter.prefix()
     }
     
     /// 显示控制栏（使用 egui）
-    pub fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
+    /// 返回：(size_button_clicked, settings_button_clicked)
+    pub fn show(&mut self, ctx: &egui::Context, open: &mut bool) -> (bool, bool) {
         if !self.visible || !*open {
-            return;
+            return (false, false);
         }
+        
+        let mut size_clicked = false;
+        let mut settings_clicked = false;
         
         let window = egui::Window::new("ChatControlBar")
             .title_bar(false)
@@ -100,12 +109,17 @@ impl ChatControlBar {
             // 移除所有 UI 间距
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             
-            self.draw_control_bar(ui, ctx);
+            let (sz, st) = self.draw_control_bar(ui, ctx);
+            size_clicked = sz;
+            settings_clicked = st;
         });
+        
+        (size_clicked, settings_clicked)
     }
     
     /// 绘制控制栏
-    fn draw_control_bar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    /// 返回：(size_button_clicked, settings_button_clicked)
+    fn draw_control_bar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> (bool, bool) {
         // 获取背景纹理索引 (800分辨率用2035，其他用2034)
         let bg_index = if self.resolution_index == 0 { 2035 } else { 2034 };
         
@@ -135,9 +149,11 @@ impl ChatControlBar {
                 
                 // 然后在背景之上绘制按钮（确保按钮在背景内部）
                 self.draw_filter_buttons(ui, ctx, bg_rect);
-                self.draw_function_buttons(ui, ctx, bg_rect);
+                let (size_clicked, settings_clicked) = self.draw_function_buttons(ui, ctx, bg_rect);
                 
                 ui.allocate_rect(bg_rect, egui::Sense::hover());
+                
+                return (size_clicked, settings_clicked);
             }
         } else {
             println!("⚠️ ChatControlBar: 无法加载背景纹理 Prguse[{}]", bg_index);
@@ -148,6 +164,8 @@ impl ChatControlBar {
             ui.painter().rect_filled(default_rect, 0.0, egui::Color32::from_rgba_premultiplied(50, 50, 50, 200));
             ui.allocate_rect(default_rect, egui::Sense::hover());
         }
+        
+        (false, false)
     }
     
     /// 绘制频道选择按钮
@@ -178,21 +196,20 @@ impl ChatControlBar {
     }
     
     /// 绘制功能按钮
-    fn draw_function_buttons(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: egui::Rect) {
+    /// 返回：(size_button_clicked, settings_button_clicked)
+    fn draw_function_buttons(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: egui::Rect) -> (bool, bool) {
         // SizeButton - 位置根据分辨率变化
         let size_btn_x = if self.resolution_index != 0 { 574.0 } else { 350.0 };
-        if self.draw_clickable_button(ui, ctx, bg_rect, size_btn_x, 1.0, 2057, false) {
-            println!("📐 切换聊天窗口大小");
-        }
+        let size_clicked = self.draw_clickable_button(ui, ctx, bg_rect, size_btn_x, 1.0, 2057, false);
         
         // SettingsButton - 位置根据分辨率变化
         let settings_btn_x = if self.resolution_index != 0 { 596.0 } else { 372.0 };
-        if self.draw_clickable_button(ui, ctx, bg_rect, settings_btn_x, 1.0, 2060, false) {
-            println!("⚙️ 打开聊天设置");
-        }
+        let settings_clicked = self.draw_clickable_button(ui, ctx, bg_rect, settings_btn_x, 1.0, 2060, false);
         
         // ReportButton - 默认隐藏，暂不绘制
         // let report_btn_x = if self.resolution_index != 0 { 552.0 } else { 328.0 };
+        
+        (size_clicked, settings_clicked)
     }
     
     /// 绘制可点击按钮（返回是否被点击）
