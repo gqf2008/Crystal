@@ -4,6 +4,7 @@ pub mod change_password_dialog;
 pub mod login_dialog;
 pub mod new_character_dialog;
 pub mod delete_character_dialog;
+pub mod credits_dialog;
 
 pub use message_box::{MessageBox, MessageBoxButtons, MessageBoxResult};
 pub use new_account_dialog::NewAccountDialog;
@@ -11,6 +12,7 @@ pub use change_password_dialog::ChangePasswordDialog;
 pub use login_dialog::{LoginDialog, LoginDialogEvent};
 pub use new_character_dialog::{NewCharacterDialog, NewCharacterEvent};
 pub use delete_character_dialog::{DeleteCharacterDialog, DeleteCharacterEvent};
+pub use credits_dialog::CreditsDialog;
 use egui_macroquad::egui;
 
 /// 对话框组件通用接口

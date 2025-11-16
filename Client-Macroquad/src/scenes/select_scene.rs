@@ -33,6 +33,7 @@ use crate::scenes::dialogs::{
     Dialog, MessageBox, MessageBoxButtons,
     NewCharacterDialog, NewCharacterEvent,
     DeleteCharacterDialog, DeleteCharacterEvent,
+    CreditsDialog,
 };
 use macroquad::prelude::*;
 use egui_macroquad::egui;
@@ -58,11 +59,13 @@ pub struct SelectScene {
     // 对话框组件
     new_character_dialog: NewCharacterDialog,
     delete_character_dialog: DeleteCharacterDialog,
+    credits_dialog: CreditsDialog,
     message_box: MessageBox,
     
     // 对话框状态
     show_new_character: bool,
     show_delete_character: bool,
+    show_credits: bool,
     show_message_box: bool,
     
     // 角色预览动画
@@ -81,10 +84,12 @@ impl SelectScene {
             
             new_character_dialog: NewCharacterDialog::new(),
             delete_character_dialog: DeleteCharacterDialog::new(),
+            credits_dialog: CreditsDialog::new(),
             message_box: MessageBox::new_with_id("", "", MessageBoxButtons::Ok, "select_msgbox"),
             
             show_new_character: false,
             show_delete_character: false,
+            show_credits: false,
             show_message_box: false,
             
             animation_frame: 0,
@@ -432,7 +437,8 @@ impl SelectScene {
         // 制作名单 Title[349-351]
         if self.draw_image_button(ui, ctx, LibraryName::Title, 349, 350, 351,
             egui::pos2(100.0 + x_point * 4.0 - x_point / 2.0 - 50.0, y)) {
-            println!("📜 制作名单");
+            println!("📜 打开制作名单");
+            self.show_credits = true;
         }
         
         // 退出 Title[352-354]
@@ -679,6 +685,11 @@ impl Scene for SelectScene {
             self.new_character_dialog.update(dt);
         }
         
+        // 更新制作名单滚动
+        if self.show_credits {
+            self.credits_dialog.update(dt);
+        }
+        
         Ok(SceneTransition::None)
     }
     
@@ -694,7 +705,7 @@ impl Scene for SelectScene {
         // === egui 交互层 ===
         egui_macroquad::ui(|ctx| {
             // 检查是否有对话框显示
-            let has_dialog = self.show_new_character || self.show_delete_character || self.show_message_box;
+            let has_dialog = self.show_new_character || self.show_delete_character || self.show_credits || self.show_message_box;
             
             // 始终渲染角色按钮（但在有对话框时禁用交互）
             if has_dialog {
@@ -715,6 +726,7 @@ impl Scene for SelectScene {
             // 对话框组件（始终在最上层）
             self.new_character_dialog.show(ctx, &mut self.show_new_character);
             self.delete_character_dialog.show(ctx, &mut self.show_delete_character);
+            self.credits_dialog.show(ctx, &mut self.show_credits);
             self.message_box.show(ctx, &mut self.show_message_box);
             
             // 检查新建角色对话框事件
