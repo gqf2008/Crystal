@@ -337,8 +337,9 @@ impl ChatDialog {
             self.scroll_offset = max_scroll;
         }
         
-        // 最后绘制可拖动滑块（在最上层，确保能接收拖动事件）
+        // 最后绘制可拖动滑块（在最上层，确保能接收拖动事件且不被遮挡）
         // PositionBar - 可拖动滚动条滑块 (Prguse[2015, 2016, 2017])
+        // 使用 Order::Tooltip 确保滑块在最上层
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 2015) {
             if let Some(texture) = info.egui_texture {
                 let size = texture.size_vec2();
@@ -402,7 +403,11 @@ impl ChatDialog {
                 
                 if let Some(bar_info) = LibraryName::Prguse.get_egui_texture(ctx, texture_idx) {
                     if let Some(bar_texture) = bar_info.egui_texture {
-                        ui.painter().image(
+                        // 使用 layer_painter 在最上层绘制滑块，避免被其他元素遮挡
+                        ctx.layer_painter(egui::LayerId::new(
+                            egui::Order::Foreground,
+                            egui::Id::new("chat_scroll_slider_layer")
+                        )).image(
                             bar_texture.id(),
                             rect,
                             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
@@ -468,10 +473,15 @@ impl ChatDialog {
     
     /// 绘制输入框（下方区域，独立于消息显示框）
     fn draw_input(&mut self, ui: &mut egui::Ui, base_rect: &egui::Rect, ctx: &egui::Context) {
-        // 输入框位置和尺寸（原工程：Location = (1, 54), Size = (627 or 403, 13)）
-        // 这是下方的输入区域，与上方的消息显示区域分离
+        // 输入框位置和尺寸（原工程：Location = (1, 54 + offset), Size = (627 or 403, 13)）
+        // 位置根据窗口大小调整
         let input_x = 1.0;
-        let input_y = 54.0;
+        let input_y = match self.window_size {
+            0 => 54.0,         // 小窗口
+            1 => 54.0 + 48.0,  // 中窗口 (+48像素)
+            2 => 54.0 + 96.0,  // 大窗口 (+96像素)
+            _ => 54.0,
+        };
         let input_width = if self.resolution_index == 0 { 403.0 } else { 627.0 };
         let input_height = 13.0;
         
