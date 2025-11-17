@@ -69,8 +69,10 @@ pub struct InventoryDialog {
     /// 拖动时的鼠标偏移
     drag_offset: egui::Vec2,
     
-    /// 滚动偏移量（用于鼠标滚轮）
-    scroll_offset: f32,
+    /// 滚动偏移量（每个标签页独立）
+    scroll_offset_items: f32,   // Items I 滚动偏移
+    scroll_offset_items2: f32,  // Items II 滚动偏移
+    scroll_offset_quest: f32,   // Quest 滚动偏移
     
     /// 当前标签页
     active_tab: InventoryTab,
@@ -101,27 +103,41 @@ impl InventoryDialog {
         // 创建物品格子（80格）
         let mut item_slots = Vec::with_capacity(80);
         for i in 0..80 {
-            // 模拟数据：前几个格子有物品
+            // 模拟数据：前几个格子有物品(Items I), Items II 页也放一些数据
             if i < 5 {
+                // Items I 页前5个格子
                 item_slots.push(ItemSlot::new(100 + i, (i + 1) as u32));
+            } else if i >= 46 && i < 52 {
+                // Items II 页前6个格子（索引46-51）
+                item_slots.push(ItemSlot::new(200 + (i - 46), ((i - 46) + 1) as u32));
             } else {
                 item_slots.push(ItemSlot::empty());
             }
         }
         
-        // 创建任务物品格子（40格）
-        let quest_slots = vec![ItemSlot::empty(); 40];
+        // 创建任务物品格子（40格）- 添加一些测试数据
+        let mut quest_slots = Vec::with_capacity(40);
+        for i in 0..40 {
+            if i < 4 {
+                // Quest 页前4个格子放任务物品
+                quest_slots.push(ItemSlot::new(300 + i, (i + 1) as u32));
+            } else {
+                quest_slots.push(ItemSlot::empty());
+            }
+        }
         
         Self {
             visible: false,
             position: egui::pos2(300.0, 100.0),  // 默认位置
             dragging: false,
             drag_offset: egui::vec2(0.0, 0.0),
-            scroll_offset: 0.0,
+            scroll_offset_items: 0.0,
+            scroll_offset_items2: 0.0,
+            scroll_offset_quest: 0.0,
             active_tab: InventoryTab::Items,
             item_slots,
             quest_slots,
-            max_capacity: 46,  // 初始46格
+            max_capacity: 80,  // 扩展到80格,方便测试 Items II
             gold: 123456,
             weight: (75, 100),
             picking_gold: false,
@@ -163,6 +179,24 @@ impl InventoryDialog {
         
         self.max_capacity += 4;
         println!("✅ 背包扩展至 {} 格", self.max_capacity);
+    }
+    
+    /// 获取当前标签页的滚动偏移量（可变引用）
+    fn get_scroll_offset_mut(&mut self) -> &mut f32 {
+        match self.active_tab {
+            InventoryTab::Items => &mut self.scroll_offset_items,
+            InventoryTab::Items2 => &mut self.scroll_offset_items2,
+            InventoryTab::Quest => &mut self.scroll_offset_quest,
+        }
+    }
+    
+    /// 获取当前标签页的滚动偏移量（只读）
+    fn get_scroll_offset(&self) -> f32 {
+        match self.active_tab {
+            InventoryTab::Items => self.scroll_offset_items,
+            InventoryTab::Items2 => self.scroll_offset_items2,
+            InventoryTab::Quest => self.scroll_offset_quest,
+        }
     }
     
     /// 处理窗口拖动
@@ -341,29 +375,36 @@ impl InventoryDialog {
         // X: x * 37 + 9 (格子32px + 间距1px = 每格占37px，起始位置9px)
         // Y: (y % 5) * 33 + 37 (格子32px + 间距1px = 每格占33px，起始位置37px)
         let grid_start_x = 9.0;
-        let grid_start_y = 37.0;
-        let x_spacing = 37.0;    // X方向每格占用（36 + 1间距）
-        let y_spacing = 33.0;    // Y方向每格占用（32 + 1间距）
+        let grid_start_y = 37.0-4.;
+        let x_spacing = 37.0;    // X方向每格占用(36 + 1间距)
+        let y_spacing = 33.0;    // Y方向每格占用(32 + 1间距)
+        
+        // 定义可见区域(裁剪区):从格子起始位置向下5px开始,高度减少5px
+        // 这是窗口坐标系下的固定区域,不随滚动变化
+        let visible_area = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + grid_start_x, bg_rect.min.y + grid_start_y + 5.0),
+            egui::vec2(8.0 * x_spacing, 5.0 * y_spacing - 5.0), // 可见区域高度减少5px
+        );
+        
+        // 设置裁剪区域,防止格子绘制到可见区域外
+        ui.set_clip_rect(visible_area);
         
         match self.active_tab {
             InventoryTab::Items => {
                 // 显示前46格（8列 x 6行，最后一行只有6格）
                 // 应用滚动偏移，可以看到所有6行
+                let scroll_offset = self.get_scroll_offset();
                 for idx in 0..46 {
                     let x = idx % 8;
                     let y = idx / 8;
                     
                     let cell_x = grid_start_x + x as f32 * x_spacing;
-                    let cell_y = grid_start_y + y as f32 * y_spacing + self.scroll_offset;
+                    let cell_y = grid_start_y + y as f32 * y_spacing + scroll_offset;
                     
                     // 只绘制在可见区域内的格子（裁剪优化）
                     let cell_rect = egui::Rect::from_min_size(
                         egui::pos2(bg_rect.min.x + cell_x, bg_rect.min.y + cell_y),
                         egui::vec2(32.0, 32.0),
-                    );
-                    let visible_area = egui::Rect::from_min_size(
-                        egui::pos2(bg_rect.min.x + grid_start_x, bg_rect.min.y + grid_start_y),
-                        egui::vec2(8.0 * x_spacing, 5.0 * y_spacing), // 可见区域：5行高度
                     );
                     
                     if visible_area.intersects(cell_rect) {
@@ -373,18 +414,27 @@ impl InventoryDialog {
             }
             InventoryTab::Items2 => {
                 // 显示扩展格子（46-85，8列 x 5行）
+                let scroll_offset = self.get_scroll_offset();
                 for i in 0..40 {
                     let idx = 46 + i;
-                    if idx >= self.max_capacity {
-                        // 绘制锁定图标
-                        self.draw_locked_cell(ui, ctx, bg_rect, i, grid_start_x, grid_start_y + self.scroll_offset, x_spacing, y_spacing);
-                    } else {
-                        let x = i % 8;
-                        let y = i / 8;
-                        let cell_x = grid_start_x + x as f32 * x_spacing;
-                        let cell_y = grid_start_y + y as f32 * y_spacing + self.scroll_offset;
-                        
-                        self.draw_item_cell(ui, ctx, bg_rect, idx, cell_x, cell_y);
+                    let x = i % 8;
+                    let y = i / 8;
+                    let cell_x = grid_start_x + x as f32 * x_spacing;
+                    let cell_y = grid_start_y + y as f32 * y_spacing + scroll_offset;
+                    
+                    // 裁剪检查
+                    let cell_rect = egui::Rect::from_min_size(
+                        egui::pos2(bg_rect.min.x + cell_x, bg_rect.min.y + cell_y),
+                        egui::vec2(32.0, 32.0),
+                    );
+                    
+                    if visible_area.intersects(cell_rect) {
+                        if idx >= self.max_capacity {
+                            // 绘制锁定图标
+                            self.draw_locked_cell(ui, ctx, bg_rect, i, grid_start_x, grid_start_y + scroll_offset, x_spacing, y_spacing);
+                        } else {
+                            self.draw_item_cell(ui, ctx, bg_rect, idx, cell_x, cell_y);
+                        }
                     }
                 }
                 
@@ -395,14 +445,23 @@ impl InventoryDialog {
             }
             InventoryTab::Quest => {
                 // 显示任务物品（8列 x 5行 = 40格）
+                let scroll_offset = self.get_scroll_offset();
                 for idx in 0..40 {
                     let x = idx % 8;
                     let y = idx / 8;
                     
                     let cell_x = grid_start_x + x as f32 * x_spacing;
-                    let cell_y = grid_start_y + y as f32 * y_spacing + self.scroll_offset;
+                    let cell_y = grid_start_y + y as f32 * y_spacing + scroll_offset;
                     
-                    self.draw_quest_cell(ui, ctx, bg_rect, idx, cell_x, cell_y);
+                    // 裁剪检查
+                    let cell_rect = egui::Rect::from_min_size(
+                        egui::pos2(bg_rect.min.x + cell_x, bg_rect.min.y + cell_y),
+                        egui::vec2(32.0, 32.0),
+                    );
+                    
+                    if visible_area.intersects(cell_rect) {
+                        self.draw_quest_cell(ui, ctx, bg_rect, idx, cell_x, cell_y);
+                    }
                 }
             }
         }
@@ -464,7 +523,7 @@ impl InventoryDialog {
     
     /// 绘制任务物品格子
     fn draw_quest_cell(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, bg_rect: &egui::Rect, 
-                       _idx: usize, x: f32, y: f32) {
+                       idx: usize, x: f32, y: f32) {
         // 与普通格子类似，但使用 quest_slots 数据
         let cell_size = 32.0;
         let cell_rect = egui::Rect::from_min_size(
@@ -479,12 +538,41 @@ impl InventoryDialog {
             egui::epaint::StrokeKind::Outside,
         );
         
-        // 任务物品格子标记（淡黄色背景）
-        ui.painter().rect_filled(
-            cell_rect.shrink(1.0),
-            2,
-            egui::Color32::from_rgba_premultiplied(100, 100, 50, 50),
+        // 绘制任务物品（如果有）
+        if let Some(slot) = self.quest_slots.get(idx) {
+            if let Some(_icon_idx) = slot.icon_index {
+                // TODO: 从 Libraries.Items 加载物品图标
+                // 临时显示：绘制颜色块表示有物品（使用不同颜色区分任务物品）
+                ui.painter().rect_filled(
+                    cell_rect.shrink(4.0),
+                    2.0,
+                    egui::Color32::from_rgb(200, 150, 100),  // 橙色调区分任务物品
+                );
+                
+                // 绘制数量
+                if slot.count > 1 {
+                    ui.painter().text(
+                        egui::pos2(cell_rect.max.x - 5.0, cell_rect.max.y - 5.0),
+                        egui::Align2::RIGHT_BOTTOM,
+                        format!("{}", slot.count),
+                        egui::FontId::proportional(10.0),
+                        egui::Color32::WHITE,
+                    );
+                }
+            }
+        }
+        
+        // 交互检测
+        let response = ui.interact(
+            cell_rect,
+            egui::Id::new(format!("quest_cell_{}", idx)),
+            egui::Sense::click(),
         );
+        
+        if response.clicked() {
+            println!("📜 点击任务物品格子 {}", idx);
+            // TODO: 物品拖拽、使用等逻辑
+        }
     }
     
     /// 绘制锁定的格子
@@ -625,37 +713,34 @@ impl Dialog for InventoryDialog {
         // 处理鼠标滚轮（在物品格子区域）
         let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
         if scroll_delta != 0.0 {
+            println!("🖱️ 检测到滚轮: {:.1}", scroll_delta);
             if let Some(pointer_pos) = ctx.pointer_latest_pos() {
                 // 检查鼠标是否在背包窗口内
                 let window_rect = egui::Rect::from_min_size(self.position, egui::vec2(318.0, 245.0));
+                println!("   窗口区域: {:?}, 鼠标位置: {:?}", window_rect, pointer_pos);
                 if window_rect.contains(pointer_pos) {
+                    println!("   ✅ 鼠标在窗口内");
                     // 滚动物品列表
-                    self.scroll_offset += scroll_delta * 0.5;
-                    
-                    // 计算滚动范围限制
-                    let max_scroll = match self.active_tab {
+                    // 先计算滚动范围限制（避免借用冲突）
+                    let (min_scroll, max_scroll) = match self.active_tab {
                         InventoryTab::Items => {
                             // Items页：6行，可见5行，可以向上滚动1行的距离
-                            0.0  // 向上滚动（负值）
+                            (-33.0, 0.0)
                         },
                         InventoryTab::Items2 | InventoryTab::Quest => {
                             // Items2/Quest页：5行，刚好填满，不需要滚动
-                            0.0
+                            (0.0, 0.0)
                         },
                     };
                     
-                    let min_scroll = match self.active_tab {
-                        InventoryTab::Items => {
-                            // 可以向上滚动1行（33像素）
-                            -33.0
-                        },
-                        InventoryTab::Items2 | InventoryTab::Quest => {
-                            0.0
-                        },
-                    };
-                    
-                    self.scroll_offset = self.scroll_offset.clamp(min_scroll, max_scroll);
-                    println!("🖱️ 背包滚动: {:.1} (范围: {:.1} ~ {:.1})", self.scroll_offset, min_scroll, max_scroll);
+                    // 再获取可变引用更新滚动偏移
+                    let scroll_offset = self.get_scroll_offset_mut();
+                    let old_offset = *scroll_offset;
+                    *scroll_offset += scroll_delta * 0.5;
+                    *scroll_offset = scroll_offset.clamp(min_scroll, max_scroll);
+                    println!("🖱️ 背包滚动: {:.1} -> {:.1} (范围: {:.1} ~ {:.1})", old_offset, *scroll_offset, min_scroll, max_scroll);
+                } else {
+                    println!("   ❌ 鼠标不在窗口内");
                 }
             }
         }
