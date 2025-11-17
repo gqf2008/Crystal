@@ -126,7 +126,7 @@ pub struct InventoryDialog {
     /// 当前选中的物品格子
     selected_item: Option<SelectedItem>,
     
-    /// 简化的右键菜单状态
+    /// 简化的右键菜单状态（无tooltip干扰）
     context_menu: Option<ContextMenu>,
     
     /// 滚动偏移量（每个标签页独立）
@@ -195,7 +195,7 @@ impl InventoryDialog {
             dragging: false,
             drag_offset: egui::vec2(0.0, 0.0),
             selected_item: None,  // 初始化选中状态
-            // 初始化右键菜单
+            // 简化右键菜单（无tooltip）
             context_menu: None,
             scroll_offset_items: 0.0,
             scroll_offset_items2: 0.0,
@@ -230,7 +230,7 @@ impl InventoryDialog {
         if response.clicked() {
             self.handle_item_click(container, index);
         }
-        // 处理右键点击 - 显示简化菜单
+        // 处理右键点击 - 显示简化菜单（无tooltip干扰）
         else if response.secondary_clicked() {
             let slot = match container {
                 ItemContainer::Inventory => self.item_slots.get(index).cloned(),
@@ -250,7 +250,6 @@ impl InventoryDialog {
                             },
                             visible: true,
                         });
-                        
                         println!("📋 显示简化右键菜单: 格子{}, 图标{}", index, icon_index);
                     }
                 }
@@ -861,14 +860,7 @@ impl InventoryDialog {
             }
         }
         
-        // 显示tooltip（只有在没有右键菜单时才显示）
-        if response.hovered() && self.context_menu.is_none() {
-            if let Some(slot) = self.item_slots.get(idx) {
-                if let Some(icon_idx) = slot.icon_index {
-                    self.show_item_tooltip(ui, ctx, icon_idx, slot.count, ItemContainer::Inventory, idx);
-                }
-            }
-        }
+        // 原版传奇2没有tooltip系统，保持简洁
         
         // 处理物品交互（原版传奇2风格）
         self.handle_item_interaction(response, ItemContainer::Inventory, idx, ctx);
@@ -950,14 +942,7 @@ impl InventoryDialog {
             }
         }
         
-        // 显示tooltip（只有在没有右键菜单时才显示）
-        if response.hovered() && self.context_menu.is_none() {
-            if let Some(slot) = self.quest_slots.get(idx) {
-                if let Some(icon_idx) = slot.icon_index {
-                    self.show_item_tooltip(ui, ctx, icon_idx, slot.count, ItemContainer::Quest, idx);
-                }
-            }
-        }
+        // 原版传奇2没有tooltip系统，保持简洁
         
         // 处理任务物品交互
         self.handle_item_interaction(response, ItemContainer::Quest, idx, ctx);
@@ -1362,7 +1347,7 @@ impl InventoryDialog {
         );
     }
 
-    /// 绘制简化版右键菜单
+    /// 绘制简化版右键菜单（无tooltip干扰）
     fn draw_simple_context_menu(&mut self, ctx: &egui::Context) {
         let mut action_to_execute: Option<ItemAction> = None;
         let mut menu_should_close = false;
@@ -1373,26 +1358,25 @@ impl InventoryDialog {
                 
                 egui::Area::new(egui::Id::new("simple_context_menu"))
                     .fixed_pos(menu.position)
-                    .order(egui::Order::Foreground) // 使用更高层级，确保菜单在tooltip之上
+                    .order(egui::Order::Foreground)
                     .show(ctx, |ui| {
-                        // 创建具有传奇2风格的菜单背景
+                        // 传奇2风格的简洁菜单
                         let frame = egui::Frame::new()
-                            .fill(egui::Color32::from_rgb(32, 24, 16)) // 深棕色背景
-                            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(128, 96, 64))) // 金棕色边框
+                            .fill(egui::Color32::from_rgb(32, 24, 16))
+                            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(128, 96, 64)))
                             .inner_margin(egui::Margin::same(8))
                             .outer_margin(egui::Margin::ZERO);
                         
                         frame.show(ui, |ui| {
                             ui.set_min_width(90.0);
-                            ui.set_min_height(90.0);
                             
                             ui.vertical(|ui| {
                                 ui.add_space(2.0);
                                 
-                                // 传奇2风格按钮样式 - 使用按钮
+                                // 使用按钮
                                 let use_button = egui::Button::new(
                                     egui::RichText::new("使用")
-                                        .color(egui::Color32::from_rgb(255, 215, 0)) // 金色文字
+                                        .color(egui::Color32::from_rgb(255, 215, 0))
                                         .size(12.0)
                                 ).fill(egui::Color32::from_rgb(64, 48, 32))
                                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(128, 96, 64)));
@@ -1403,30 +1387,16 @@ impl InventoryDialog {
                                 
                                 ui.add_space(2.0);
                                 
-                                // 丢弃按钮
-                                let drop_button = egui::Button::new(
-                                    egui::RichText::new("丢弃")
-                                        .color(egui::Color32::from_rgb(255, 100, 100)) // 红色文字
+                                // 取消按钮（不做任何操作）
+                                let cancel_button = egui::Button::new(
+                                    egui::RichText::new("取消")
+                                        .color(egui::Color32::from_rgb(192, 192, 192))
                                         .size(12.0)
                                 ).fill(egui::Color32::from_rgb(64, 48, 32))
                                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(128, 96, 64)));
                                 
-                                if ui.add_sized([80.0, 22.0], drop_button).clicked() {
-                                    action_to_execute = Some(ItemAction::Drop);
-                                }
-                                
-                                ui.add_space(2.0);
-                                
-                                // 查看属性按钮
-                                let prop_button = egui::Button::new(
-                                    egui::RichText::new("属性")
-                                        .color(egui::Color32::from_rgb(135, 206, 235)) // 浅蓝色文字
-                                        .size(12.0)
-                                ).fill(egui::Color32::from_rgb(64, 48, 32))
-                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(128, 96, 64)));
-                                
-                                if ui.add_sized([80.0, 22.0], prop_button).clicked() {
-                                    action_to_execute = Some(ItemAction::Properties);
+                                if ui.add_sized([80.0, 22.0], cancel_button).clicked() {
+                                    menu_should_close = true;
                                 }
                                 
                                 ui.add_space(2.0);
@@ -1434,17 +1404,17 @@ impl InventoryDialog {
                         });
                     });
                 
-                // 检查是否点击了菜单外的区域
+                // 点击菜单外关闭
                 if ctx.input(|i| i.pointer.primary_pressed()) {
                     if let Some(pos) = ctx.pointer_latest_pos() {
-                        let menu_area = egui::Rect::from_min_size(menu.position, egui::vec2(80.0, 80.0));
+                        let menu_area = egui::Rect::from_min_size(menu.position, egui::vec2(90.0, 60.0));
                         if !menu_area.contains(pos) {
                             menu_should_close = true;
                         }
                     }
                 }
                 
-                // 执行动作并关闭菜单
+                // 执行动作
                 if let Some(action) = action_to_execute {
                     self.handle_item_action(action, &target_item);
                     menu_should_close = true;
@@ -1457,6 +1427,32 @@ impl InventoryDialog {
         }
     }
 
+    /// 原版传奇2风格：直接使用物品（无菜单）
+    fn use_item_directly(&mut self, container: ItemContainer, index: usize, icon_index: usize, count: u32) {
+        // 根据物品类型直接使用
+        let item_name = match icon_index {
+            0..=49 => format!("传奇武器 #{}", icon_index),
+            50..=99 => format!("神秘防具 #{}", icon_index),
+            100..=199 => format!("神奇药水 #{}", icon_index),
+            200..=299 => format!("魔法卷轴 #{}", icon_index),
+            _ => format!("物品 #{}", icon_index),
+        };
+        
+        if icon_index >= 100 && icon_index < 200 {
+            // 消耗品：使用一个
+            self.remove_item_from_slot(container, index, 1);
+            println!("🍶 使用消耗品: {} (x1)", item_name);
+        } else if icon_index < 100 {
+            // 装备：装备所有
+            self.remove_item_from_slot(container, index, count);
+            println!("⚔️ 装备物品: {} (x{})", item_name, count);
+        } else {
+            // 其他物品：使用一个
+            self.remove_item_from_slot(container, index, 1);
+            println!("🔧 使用物品: {} (x1)", item_name);
+        }
+    }
+    
     /// 根据图标索引获取物品信息（模拟数据）
     fn get_item_info(&self, icon_index: usize) -> ItemInfo {
         // 这里简化处理，根据图标索引生成模拟的物品信息
@@ -1587,7 +1583,7 @@ impl Dialog for InventoryDialog {
                 self.draw_expand_button(ui, ctx, &bg_rect);
             });
         
-        // 绘制简化版右键菜单
+        // 绘制简化版右键菜单（无tooltip干扰）
         self.draw_simple_context_menu(ctx);
         
         *open = self.visible;

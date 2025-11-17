@@ -59,8 +59,7 @@ async fn main() {
     println!("💡 测试功能:");
     println!("   - 鼠标左键：选择物品");
     println!("   - 再次左键：移动物品到新位置"); 
-    println!("   - 鼠标右键：显示上下文菜单");
-    println!("   - 悬停物品：显示详细tooltip");
+    println!("   - 鼠标右键：显示简洁菜单");
     println!("   - 按 I 键切换背包显示");
     println!("   - 按 ESC 退出");
     
@@ -94,9 +93,9 @@ async fn main() {
             "🎒 背包操作说明:",
             "• 左键点击选择物品",
             "• 再次左键移动到新位置",
-            "• 右键显示上下文菜单",
-            "• 悬停显示详细信息",
-            "• 支持纹理背景的tooltip和菜单",
+            "• 右键显示简洁菜单",
+            "• 传奇2原版操作体验",
+            "• 无tooltip干扰，简洁高效",
         ];
         
         for (i, tip) in tips.iter().enumerate() {
