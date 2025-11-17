@@ -69,7 +69,13 @@ async fn main() {
     println!("   - 点击 Size 按钮或按 Tab 键切换聊天窗口大小");
     println!("   - 按 ESC 退出");
 
+    // FPS 统计
+    let mut frame_times: Vec<f32> = Vec::with_capacity(60);
+    let mut last_time = get_time();
+
     loop {
+        let frame_start = get_time();
+        
         clear_background(Color::from_rgba(60, 80, 100, 255));
 
         // 绘制背景提示
@@ -85,14 +91,37 @@ async fn main() {
         );
 
         // egui UI
+        let egui_start = get_time();
         egui_macroquad::ui(|ctx| {
             // 绘制主对话框和所有子对话框
             main_dialog.show(ctx);
             main_dialog.show_dialogs(ctx);
         });
+        let egui_time = (get_time() - egui_start) * 1000.0; // 转换为毫秒
 
         // 绘制 egui
         egui_macroquad::draw();
+
+        // 计算FPS
+        let current_time = get_time();
+        let delta_time = (current_time - last_time) as f32;
+        last_time = current_time;
+        
+        frame_times.push(delta_time);
+        if frame_times.len() > 60 {
+            frame_times.remove(0);
+        }
+        
+        let avg_frame_time: f32 = frame_times.iter().sum::<f32>() / frame_times.len() as f32;
+        let fps = if avg_frame_time > 0.0 { 1.0 / avg_frame_time } else { 0.0 };
+        let frame_time_ms = avg_frame_time * 1000.0;
+
+        // 绘制性能信息（左上角）
+        let perf_text = format!(
+            "FPS: {:.1}  帧时间: {:.2}ms  UI渲染: {:.2}ms",
+            fps, frame_time_ms, egui_time
+        );
+        draw_text(&perf_text, 10.0, 25.0, 20.0, Color::from_rgba(0, 255, 0, 255));
 
         // ESC 退出
         if is_key_pressed(KeyCode::Escape) {

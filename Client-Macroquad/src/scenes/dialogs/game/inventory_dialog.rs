@@ -103,27 +103,24 @@ impl InventoryDialog {
         // 创建物品格子（80格）
         let mut item_slots = Vec::with_capacity(80);
         for i in 0..80 {
-            // 模拟数据：前几个格子有物品(Items I), Items II 页也放一些数据
-            if i < 5 {
-                // Items I 页前5个格子
-                item_slots.push(ItemSlot::new(100 + i, (i + 1) as u32));
-            } else if i >= 46 && i < 52 {
-                // Items II 页前6个格子（索引46-51）
-                item_slots.push(ItemSlot::new(200 + (i - 46), ((i - 46) + 1) as u32));
+            // Items I 页: 索引0-45 使用图标0-45
+            // Items II 页: 索引46-85 使用图标46-85
+            if i < 46 {
+                // Items I 页填满46格
+                item_slots.push(ItemSlot::new(i, (i % 10 + 1) as u32));
+            } else if i < 86 {
+                // Items II 页填满40格 (索引46-85)
+                item_slots.push(ItemSlot::new(i, ((i - 46) % 10 + 1) as u32));
             } else {
                 item_slots.push(ItemSlot::empty());
             }
         }
         
-        // 创建任务物品格子（40格）- 添加一些测试数据
+        // 创建任务物品格子（40格）- 填满所有格子
         let mut quest_slots = Vec::with_capacity(40);
         for i in 0..40 {
-            if i < 4 {
-                // Quest 页前4个格子放任务物品
-                quest_slots.push(ItemSlot::new(300 + i, (i + 1) as u32));
-            } else {
-                quest_slots.push(ItemSlot::empty());
-            }
+            // Quest 页填满40格,使用图标300-339
+            quest_slots.push(ItemSlot::new(300 + i, (i % 10 + 1) as u32));
         }
         
         Self {
@@ -468,12 +465,19 @@ impl InventoryDialog {
     }
     
     /// 绘制单个物品格子
-    fn draw_item_cell(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, bg_rect: &egui::Rect, 
+    fn draw_item_cell(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect, 
                       idx: usize, x: f32, y: f32) {
         let cell_size = 32.0;
         let cell_rect = egui::Rect::from_min_size(
             egui::pos2(bg_rect.min.x + x, bg_rect.min.y + y),
             egui::vec2(cell_size, cell_size),
+        );
+        
+        // 交互检测(先检测,用于悬停效果)
+        let response = ui.interact(
+            cell_rect,
+            egui::Id::new(format!("inv_cell_{}", idx)),
+            egui::Sense::click(),
         );
         
         // 绘制格子背景（深色边框）
@@ -484,16 +488,32 @@ impl InventoryDialog {
             egui::epaint::StrokeKind::Outside,
         );
         
+        // 鼠标悬停高亮: 使用绿色边框(原工程使用 Color.Lime = RGB(0, 255, 0))
+        if response.hovered() {
+            ui.painter().rect_stroke(
+                cell_rect,
+                2.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 0)),
+                egui::epaint::StrokeKind::Outside,
+            );
+        }
+        
         // 绘制物品图标（如果有）
         if let Some(slot) = self.item_slots.get(idx) {
-            if let Some(_icon_idx) = slot.icon_index {
-                // TODO: 从 Libraries.Items 加载物品图标
-                // 临时显示：绘制颜色块表示有物品
-                ui.painter().rect_filled(
-                    cell_rect.shrink(4.0),
-                    2.0,
-                    egui::Color32::from_rgb(100, 150, 200),
-                );
+            if let Some(icon_idx) = slot.icon_index {
+                // 从 Libraries.Items 加载物品图标纹理
+                if let Some(info) = LibraryName::Items.get_egui_texture(ctx, icon_idx) {
+                    if let Some(texture) = info.egui_texture {
+                        // 缩小纹理尺寸: 28x28 居中显示 (留出2px边距)
+                        let icon_rect = cell_rect.shrink(2.0);
+                        ui.painter().image(
+                            texture.id(),
+                            icon_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
                 
                 // 绘制数量
                 if slot.count > 1 {
@@ -508,13 +528,6 @@ impl InventoryDialog {
             }
         }
         
-        // 交互检测
-        let response = ui.interact(
-            cell_rect,
-            egui::Id::new(format!("inv_cell_{}", idx)),
-            egui::Sense::click(),
-        );
-        
         if response.clicked() {
             println!("🎒 点击背包格子 {}", idx);
             // TODO: 物品拖拽、使用等逻辑
@@ -522,13 +535,20 @@ impl InventoryDialog {
     }
     
     /// 绘制任务物品格子
-    fn draw_quest_cell(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, bg_rect: &egui::Rect, 
+    fn draw_quest_cell(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect, 
                        idx: usize, x: f32, y: f32) {
         // 与普通格子类似，但使用 quest_slots 数据
         let cell_size = 32.0;
         let cell_rect = egui::Rect::from_min_size(
             egui::pos2(bg_rect.min.x + x, bg_rect.min.y + y),
             egui::vec2(cell_size, cell_size),
+        );
+        
+        // 交互检测(先检测,用于悬停效果)
+        let response = ui.interact(
+            cell_rect,
+            egui::Id::new(format!("quest_cell_{}", idx)),
+            egui::Sense::click(),
         );
         
         ui.painter().rect_stroke(
@@ -538,16 +558,32 @@ impl InventoryDialog {
             egui::epaint::StrokeKind::Outside,
         );
         
+        // 鼠标悬停高亮: 使用绿色边框(原工程使用 Color.Lime = RGB(0, 255, 0))
+        if response.hovered() {
+            ui.painter().rect_stroke(
+                cell_rect,
+                2.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 0)),
+                egui::epaint::StrokeKind::Outside,
+            );
+        }
+        
         // 绘制任务物品（如果有）
         if let Some(slot) = self.quest_slots.get(idx) {
-            if let Some(_icon_idx) = slot.icon_index {
-                // TODO: 从 Libraries.Items 加载物品图标
-                // 临时显示：绘制颜色块表示有物品（使用不同颜色区分任务物品）
-                ui.painter().rect_filled(
-                    cell_rect.shrink(4.0),
-                    2.0,
-                    egui::Color32::from_rgb(200, 150, 100),  // 橙色调区分任务物品
-                );
+            if let Some(icon_idx) = slot.icon_index {
+                // 从 Libraries.Items 加载任务物品图标纹理
+                if let Some(info) = LibraryName::Items.get_egui_texture(ctx, icon_idx) {
+                    if let Some(texture) = info.egui_texture {
+                        // 缩小纹理尺寸: 28x28 居中显示 (留出2px边距)
+                        let icon_rect = cell_rect.shrink(2.0);
+                        ui.painter().image(
+                            texture.id(),
+                            icon_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
                 
                 // 绘制数量
                 if slot.count > 1 {
@@ -561,13 +597,6 @@ impl InventoryDialog {
                 }
             }
         }
-        
-        // 交互检测
-        let response = ui.interact(
-            cell_rect,
-            egui::Id::new(format!("quest_cell_{}", idx)),
-            egui::Sense::click(),
-        );
         
         if response.clicked() {
             println!("📜 点击任务物品格子 {}", idx);
