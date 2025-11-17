@@ -50,6 +50,40 @@ enum ItemContainer {
     Quest,      // 任务物品栏
 }
 
+/// 物品操作选项（简化版右键菜单）
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ItemAction {
+    Use,        // 使用
+    Drop,       // 丢弃
+    Properties, // 查看属性
+}
+
+/// 简化的右键菜单状态
+#[derive(Clone, Debug)]
+struct ContextMenu {
+    /// 显示菜单的位置
+    position: egui::Pos2,
+    /// 目标物品信息
+    target_item: SelectedItem,
+    /// 显示状态
+    visible: bool,
+}
+
+/// 物品信息（用于tooltip显示）
+#[derive(Clone, Debug)]
+struct ItemInfo {
+    /// 物品名称
+    name: String,
+    /// 物品类型
+    item_type: String,
+    /// 物品属性描述
+    description: String,
+    /// 物品等级或品质
+    level: u32,
+    /// 攻击力/防御力等数值
+    power: Option<u32>,
+}
+
 /// 物品槽位数据（模拟）
 #[derive(Debug, Clone)]
 struct ItemSlot {
@@ -91,6 +125,9 @@ pub struct InventoryDialog {
     
     /// 当前选中的物品格子
     selected_item: Option<SelectedItem>,
+    
+    /// 简化的右键菜单状态
+    context_menu: Option<ContextMenu>,
     
     /// 滚动偏移量（每个标签页独立）
     scroll_offset_items: f32,   // Items I 滚动偏移
@@ -158,6 +195,8 @@ impl InventoryDialog {
             dragging: false,
             drag_offset: egui::vec2(0.0, 0.0),
             selected_item: None,  // 初始化选中状态
+            // 初始化右键菜单
+            context_menu: None,
             scroll_offset_items: 0.0,
             scroll_offset_items2: 0.0,
             scroll_offset_quest: 0.0,
@@ -187,11 +226,11 @@ impl InventoryDialog {
     /// 处理物品交互（点击交换）
     fn handle_item_interaction(&mut self, response: egui::Response, container: ItemContainer, 
                                index: usize, _ctx: &egui::Context) {
-        // 只处理左键点击
+        // 处理左键点击
         if response.clicked() {
             self.handle_item_click(container, index);
         }
-        // 右键点击处理
+        // 处理右键点击 - 显示简化菜单
         else if response.secondary_clicked() {
             let slot = match container {
                 ItemContainer::Inventory => self.item_slots.get(index).cloned(),
@@ -200,8 +239,20 @@ impl InventoryDialog {
             
             if let Some(slot) = slot {
                 if let Some(icon_index) = slot.icon_index {
-                    println!("🖱️ 右键点击物品 {} (图标: {})", index, icon_index);
-                    // TODO: 显示右键菜单（使用、装备、丢弃等）
+                    if let Some(pointer_pos) = _ctx.pointer_latest_pos() {
+                        self.context_menu = Some(ContextMenu {
+                            position: pointer_pos + egui::vec2(10.0, -10.0),
+                            target_item: SelectedItem {
+                                container,
+                                index,
+                                icon_index,
+                                count: slot.count,
+                            },
+                            visible: true,
+                        });
+                        
+                        println!("📋 显示简化右键菜单: 格子{}, 图标{}", index, icon_index);
+                    }
                 }
             }
         }
@@ -335,6 +386,75 @@ impl InventoryDialog {
         }
         
         println!("🔄 物品交换成功: 格子{} ↔ 格子{}", selected.index, target_index);
+    }
+    
+    // 注意：移除了show_context_menu函数，采用原版传奇2风格
+    
+    /// 处理物品操作（简化版右键菜单）
+    fn handle_item_action(&mut self, action: ItemAction, target_item: &SelectedItem) {
+        match action {
+            ItemAction::Use => {
+                // 根据物品类型决定使用行为
+                let item_info = self.get_item_info(target_item.icon_index);
+                
+                match item_info.item_type.as_str() {
+                    "消耗品" => {
+                        // 消耗品：使用1个，如血瓶、蓝瓶等
+                        println!("🍎 使用消耗品: 格子{}, 图标{}, 剩余{}", 
+                                target_item.index, target_item.icon_index, target_item.count - 1);
+                        self.remove_item_from_slot(target_item.container, target_item.index, 1);
+                    },
+                    "武器" | "防具" => {
+                        // 装备类：装备到身上（在实际游戏中会移动到装备栏）
+                        println!("⚔️ 装备物品: 格子{}, 图标{}", target_item.index, target_item.icon_index);
+                        // TODO: 实际应该移动到装备栏，这里暂时移除表示"已装备"
+                        self.remove_item_from_slot(target_item.container, target_item.index, target_item.count);
+                    },
+                    _ => {
+                        // 其他物品：默认使用1个
+                        println!("🎯 使用物品: 格子{}, 图标{}", target_item.index, target_item.icon_index);
+                        self.remove_item_from_slot(target_item.container, target_item.index, 1);
+                    }
+                }
+            },
+            ItemAction::Drop => {
+                println!("🗑️ 丢弃物品: 格子{}, 图标{}", target_item.index, target_item.icon_index);
+                self.remove_item_from_slot(target_item.container, target_item.index, target_item.count);
+            },
+            ItemAction::Properties => {
+                println!("📄 查看属性: 格子{}, 图标{}", target_item.index, target_item.icon_index);
+                // TODO: 显示物品属性对话框
+            },
+        }
+        
+        // 关闭菜单
+        self.context_menu = None;
+    }
+    
+    /// 从指定格子移除物品
+    fn remove_item_from_slot(&mut self, container: ItemContainer, index: usize, amount: u32) {
+        match container {
+            ItemContainer::Inventory => {
+                if let Some(slot) = self.item_slots.get_mut(index) {
+                    if slot.count > amount {
+                        slot.count -= amount;
+                    } else {
+                        slot.icon_index = None;
+                        slot.count = 0;
+                    }
+                }
+            },
+            ItemContainer::Quest => {
+                if let Some(slot) = self.quest_slots.get_mut(index) {
+                    if slot.count > amount {
+                        slot.count -= amount;
+                    } else {
+                        slot.icon_index = None;
+                        slot.count = 0;
+                    }
+                }
+            },
+        }
     }
     
 
@@ -741,7 +861,16 @@ impl InventoryDialog {
             }
         }
         
-        // 处理物品拖拽
+        // 显示tooltip（只有在没有右键菜单时才显示）
+        if response.hovered() && self.context_menu.is_none() {
+            if let Some(slot) = self.item_slots.get(idx) {
+                if let Some(icon_idx) = slot.icon_index {
+                    self.show_item_tooltip(ui, ctx, icon_idx, slot.count, ItemContainer::Inventory, idx);
+                }
+            }
+        }
+        
+        // 处理物品交互（原版传奇2风格）
         self.handle_item_interaction(response, ItemContainer::Inventory, idx, ctx);
     }
     
@@ -821,7 +950,16 @@ impl InventoryDialog {
             }
         }
         
-        // 处理任务物品拖拽
+        // 显示tooltip（只有在没有右键菜单时才显示）
+        if response.hovered() && self.context_menu.is_none() {
+            if let Some(slot) = self.quest_slots.get(idx) {
+                if let Some(icon_idx) = slot.icon_index {
+                    self.show_item_tooltip(ui, ctx, icon_idx, slot.count, ItemContainer::Quest, idx);
+                }
+            }
+        }
+        
+        // 处理任务物品交互
         self.handle_item_interaction(response, ItemContainer::Quest, idx, ctx);
     }
     
@@ -1092,6 +1230,275 @@ impl InventoryDialog {
         }
     }
     
+    // 注意：移除了draw_context_menu函数，采用原版传奇2的简单右键使用方式
+    
+    /// 显示物品tooltip（带纹理背景）
+    fn show_item_tooltip(&self, _ui: &mut egui::Ui, ctx: &egui::Context, icon_index: usize, 
+                        count: u32, container: ItemContainer, slot_index: usize) {
+        let item_info = self.get_item_info(icon_index);
+        
+        // 使用自定义tooltip，而不是默认的show_tooltip_at_pointer
+        if let Some(pointer_pos) = ctx.pointer_latest_pos() {
+            let tooltip_pos = pointer_pos + egui::vec2(15.0, -10.0);
+            
+            egui::Area::new(egui::Id::new(format!("tooltip_{}_{}", 
+                match container { ItemContainer::Inventory => "inv", ItemContainer::Quest => "quest" }, 
+                slot_index)))
+                .fixed_pos(tooltip_pos)
+                .order(egui::Order::Tooltip)
+                .show(ctx, |ui| {
+                    // 使用透明frame，让我们自己绘制背景
+                    let frame = egui::Frame::new()
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE);
+                    
+                    frame.show(ui, |ui| {
+                        ui.set_max_width(250.0);
+                        
+                        // 获取内容区域大小
+                        let available_rect = ui.available_rect_before_wrap();
+                        
+                        // 绘制tooltip背景纹理
+                        self.draw_tooltip_background(ui, available_rect);
+                        
+                        // 在背景上绘制内容，添加边距
+                        ui.vertical(|ui| {
+                            ui.add_space(8.0);
+                            
+                            ui.horizontal(|ui| {
+                                ui.add_space(8.0);
+                                ui.vertical(|ui| {
+                                    // 物品名称（加粗显示）
+                                    ui.label(egui::RichText::new(&item_info.name)
+                                        .strong()
+                                        .size(14.0)
+                                        .color(egui::Color32::from_rgb(255, 255, 128))); // 淡黄色
+                                    
+                                    ui.add_space(2.0);
+                                    
+                                    // 物品类型
+                                    ui.label(egui::RichText::new(&item_info.item_type)
+                                        .size(12.0)
+                                        .color(egui::Color32::from_rgb(192, 192, 192))); // 浅灰色
+                                    
+                                    ui.add_space(4.0);
+                                    
+                                    // 数量信息
+                                    if count > 1 {
+                                        ui.label(egui::RichText::new(format!("数量: {}", count))
+                                            .size(11.0)
+                                            .color(egui::Color32::WHITE));
+                                    }
+                                    
+                                    // 等级信息
+                                    if item_info.level > 0 {
+                                        ui.label(egui::RichText::new(format!("等级: {}", item_info.level))
+                                            .size(11.0)
+                                            .color(egui::Color32::from_rgb(176, 196, 222))); // 浅蓝色
+                                    }
+                                    
+                                    // 攻击力/防御力等属性
+                                    if let Some(power) = item_info.power {
+                                        let power_text = match item_info.item_type.as_str() {
+                                            "武器" => format!("攻击力: {}", power),
+                                            "防具" => format!("防御力: {}", power),
+                                            _ => format!("属性值: {}", power),
+                                        };
+                                        ui.label(egui::RichText::new(power_text)
+                                            .size(11.0)
+                                            .color(egui::Color32::from_rgb(144, 238, 144))); // 浅绿色
+                                    }
+                                    
+                                    ui.add_space(4.0);
+                                    
+                                    // 物品描述
+                                    if !item_info.description.is_empty() {
+                                        ui.label(egui::RichText::new(&item_info.description)
+                                            .size(10.0)
+                                            .color(egui::Color32::from_rgb(218, 165, 32))); // 金色
+                                    }
+                                    
+                                    // 调试信息（开发时使用）
+                                    #[cfg(debug_assertions)]
+                                    {
+                                        ui.add_space(2.0);
+                                        ui.label(egui::RichText::new(format!("图标ID: {}", icon_index))
+                                            .small()
+                                            .color(egui::Color32::DARK_GRAY));
+                                    }
+                                });
+                                ui.add_space(8.0);
+                            });
+                            
+                            ui.add_space(8.0);
+                        });
+                    });
+                });
+        }
+    }
+    
+    /// 绘制tooltip背景纹理
+    fn draw_tooltip_background(&self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let painter = ui.painter();
+        
+        // 使用原版GameScene.cs中的tooltip背景样式
+        // BackColour = Color.FromArgb(255, 50, 50, 50)
+        // BorderColour = Color.Gray
+        // Opacity = 0.4F
+        
+        // 绘制原版深色背景
+        painter.rect_filled(
+            rect,
+            2.0,
+            egui::Color32::from_rgba_unmultiplied(50, 50, 50, 255),
+        );
+        
+        // 绘制灰色边框
+        painter.rect_stroke(
+            rect,
+            2.0,
+            egui::Stroke::new(1.0, egui::Color32::GRAY),
+            egui::epaint::StrokeKind::Outside,
+        );
+    }
+
+    /// 绘制简化版右键菜单
+    fn draw_simple_context_menu(&mut self, ctx: &egui::Context) {
+        let mut action_to_execute: Option<ItemAction> = None;
+        let mut menu_should_close = false;
+        
+        if let Some(menu) = &self.context_menu {
+            if menu.visible {
+                let target_item = menu.target_item.clone();
+                
+                egui::Area::new(egui::Id::new("simple_context_menu"))
+                    .fixed_pos(menu.position)
+                    .order(egui::Order::Foreground) // 使用更高层级，确保菜单在tooltip之上
+                    .show(ctx, |ui| {
+                        // 创建具有传奇2风格的菜单背景
+                        let frame = egui::Frame::new()
+                            .fill(egui::Color32::from_rgb(32, 24, 16)) // 深棕色背景
+                            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(128, 96, 64))) // 金棕色边框
+                            .inner_margin(egui::Margin::same(8))
+                            .outer_margin(egui::Margin::ZERO);
+                        
+                        frame.show(ui, |ui| {
+                            ui.set_min_width(90.0);
+                            ui.set_min_height(90.0);
+                            
+                            ui.vertical(|ui| {
+                                ui.add_space(2.0);
+                                
+                                // 传奇2风格按钮样式 - 使用按钮
+                                let use_button = egui::Button::new(
+                                    egui::RichText::new("使用")
+                                        .color(egui::Color32::from_rgb(255, 215, 0)) // 金色文字
+                                        .size(12.0)
+                                ).fill(egui::Color32::from_rgb(64, 48, 32))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(128, 96, 64)));
+                                
+                                if ui.add_sized([80.0, 22.0], use_button).clicked() {
+                                    action_to_execute = Some(ItemAction::Use);
+                                }
+                                
+                                ui.add_space(2.0);
+                                
+                                // 丢弃按钮
+                                let drop_button = egui::Button::new(
+                                    egui::RichText::new("丢弃")
+                                        .color(egui::Color32::from_rgb(255, 100, 100)) // 红色文字
+                                        .size(12.0)
+                                ).fill(egui::Color32::from_rgb(64, 48, 32))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(128, 96, 64)));
+                                
+                                if ui.add_sized([80.0, 22.0], drop_button).clicked() {
+                                    action_to_execute = Some(ItemAction::Drop);
+                                }
+                                
+                                ui.add_space(2.0);
+                                
+                                // 查看属性按钮
+                                let prop_button = egui::Button::new(
+                                    egui::RichText::new("属性")
+                                        .color(egui::Color32::from_rgb(135, 206, 235)) // 浅蓝色文字
+                                        .size(12.0)
+                                ).fill(egui::Color32::from_rgb(64, 48, 32))
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(128, 96, 64)));
+                                
+                                if ui.add_sized([80.0, 22.0], prop_button).clicked() {
+                                    action_to_execute = Some(ItemAction::Properties);
+                                }
+                                
+                                ui.add_space(2.0);
+                            });
+                        });
+                    });
+                
+                // 检查是否点击了菜单外的区域
+                if ctx.input(|i| i.pointer.primary_pressed()) {
+                    if let Some(pos) = ctx.pointer_latest_pos() {
+                        let menu_area = egui::Rect::from_min_size(menu.position, egui::vec2(80.0, 80.0));
+                        if !menu_area.contains(pos) {
+                            menu_should_close = true;
+                        }
+                    }
+                }
+                
+                // 执行动作并关闭菜单
+                if let Some(action) = action_to_execute {
+                    self.handle_item_action(action, &target_item);
+                    menu_should_close = true;
+                }
+                
+                if menu_should_close {
+                    self.context_menu = None;
+                }
+            }
+        }
+    }
+
+    /// 根据图标索引获取物品信息（模拟数据）
+    fn get_item_info(&self, icon_index: usize) -> ItemInfo {
+        // 这里简化处理，根据图标索引生成模拟的物品信息
+        // 在实际游戏中，这些信息应该从物品数据库中获取
+        match icon_index {
+            0..=49 => ItemInfo {
+                name: format!("传奇武器 #{}", icon_index),
+                item_type: "武器".to_string(),
+                description: "一把锋利的传奇武器，蕴含着神秘的力量。使用它可以对敌人造成巨大伤害。".to_string(),
+                level: (icon_index as u32 % 10) + 1,
+                power: Some((icon_index as u32 % 20) * 5 + 10),
+            },
+            50..=99 => ItemInfo {
+                name: format!("神秘防具 #{}", icon_index),
+                item_type: "防具".to_string(),
+                description: "坚固的防护装备，能够有效抵挡敌人的攻击。穿戴后大幅提升生存能力。".to_string(),
+                level: (icon_index as u32 % 15) + 1,
+                power: Some((icon_index as u32 % 30) * 3 + 15),
+            },
+            100..=199 => ItemInfo {
+                name: format!("恢复药水 #{}", icon_index),
+                item_type: "消耗品".to_string(),
+                description: "神奇的恢复药水，能够快速恢复生命值或法力值。战斗中的救命法宝。".to_string(),
+                level: (icon_index as u32 % 5) + 1,
+                power: Some((icon_index as u32 % 10) * 10 + 50),
+            },
+            300..=349 => ItemInfo {
+                name: format!("任务道具 #{}", icon_index),
+                item_type: "任务物品".to_string(),
+                description: "重要的任务相关物品，完成特定任务需要用到。不可交易，不可丢弃。".to_string(),
+                level: 0,
+                power: None,
+            },
+            _ => ItemInfo {
+                name: format!("未知物品 #{}", icon_index),
+                item_type: "其他".to_string(),
+                description: "一个神秘的物品，它的用途还未被发现。也许蕴含着未知的秘密...".to_string(),
+                level: 1,
+                power: Some(icon_index as u32 % 100),
+            },
+        }
+    }
 
 }
 
@@ -1178,8 +1585,10 @@ impl Dialog for InventoryDialog {
                 
                 // 绘制扩展按钮（仅在需要时显示）
                 self.draw_expand_button(ui, ctx, &bg_rect);
-                
             });
+        
+        // 绘制简化版右键菜单
+        self.draw_simple_context_menu(ctx);
         
         *open = self.visible;
     }
