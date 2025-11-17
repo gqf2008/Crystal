@@ -103,7 +103,8 @@ impl ChatControlBar {
             .title_bar(false)
             .resizable(false)
             .fixed_pos(self.position)
-            .frame(egui::Frame::NONE);
+            .frame(egui::Frame::NONE)
+            .order(egui::Order::Foreground);  // 确保按钮在最上层可点击
         
         window.show(ctx, |ui| {
             // 移除所有 UI 间距

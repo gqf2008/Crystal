@@ -568,7 +568,7 @@ impl Dialog for ChatDialog {
             .fixed_pos(self.position)
             .movable(false)
             .interactable(true)
-            .order(egui::Order::Background)  // 使用 Background 层级，让上层的 MainDialog 按钮优先响应
+            .order(egui::Order::Foreground)  // 提升到 Foreground，确保输入框和滚动条可交互
             .show(ctx, |ui| {
                 // 绘制背景纹理
                 let base_rect = self.draw_chat(ui, ctx);

@@ -132,7 +132,7 @@ impl MainDialog {
             .fixed_pos(base_pos)
             .movable(false)
             .interactable(true)
-            .order(egui::Order::Middle)
+            .order(egui::Order::Middle)  // 保持在 Middle 层，让聊天组件（Foreground）优先响应
             .show(ctx, |ui| {
                 // 创建基于固定位置的 rect
                 let rect = egui::Rect::from_min_size(base_pos, egui::vec2(bg_width, bg_height));
