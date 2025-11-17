@@ -30,6 +30,28 @@ enum InventoryTab {
     Quest,      // 任务物品
 }
 
+/// 拖拽中的物品
+#[derive(Clone, Debug)]
+struct DraggedItem {
+    /// 来源容器类型
+    source_container: ItemContainer,
+    /// 来源格子索引
+    source_index: usize,
+    /// 物品图标索引
+    icon_index: usize,
+    /// 物品数量
+    count: u32,
+    /// 拖拽偏移量（相对于鼠标位置）
+    drag_offset: egui::Vec2,
+}
+
+/// 物品容器类型
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ItemContainer {
+    Inventory,  // 普通背包
+    Quest,      // 任务物品栏
+}
+
 /// 物品槽位数据（模拟）
 #[derive(Debug, Clone)]
 struct ItemSlot {
@@ -64,10 +86,13 @@ pub struct InventoryDialog {
     visible: bool,
     position: egui::Pos2,
     
-    /// 是否正在拖动
+    /// 是否正在拖动窗口
     dragging: bool,
     /// 拖动时的鼠标偏移
     drag_offset: egui::Vec2,
+    
+    /// 物品拖拽状态
+    dragging_item: Option<DraggedItem>,
     
     /// 滚动偏移量（每个标签页独立）
     scroll_offset_items: f32,   // Items I 滚动偏移
@@ -134,6 +159,7 @@ impl InventoryDialog {
             position: egui::pos2(300.0, 100.0),  // 默认位置
             dragging: false,
             drag_offset: egui::vec2(0.0, 0.0),
+            dragging_item: None,  // 初始化物品拖拽状态
             scroll_offset_items: 0.0,
             scroll_offset_items2: 0.0,
             scroll_offset_quest: 0.0,
@@ -158,6 +184,117 @@ impl InventoryDialog {
     /// 获取可见状态
     pub fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    /// 处理物品交互（拖拽、点击等）
+    fn handle_item_interaction(&mut self, response: egui::Response, container: ItemContainer, 
+                               index: usize, ctx: &egui::Context) {
+        // 获取对应容器的物品槽
+        let slot = match container {
+            ItemContainer::Inventory => self.item_slots.get(index).cloned(),
+            ItemContainer::Quest => self.quest_slots.get(index).cloned(),
+        };
+        
+        if let Some(slot) = slot {
+            if let Some(icon_index) = slot.icon_index {
+                // 开始拖拽
+                if response.drag_started() {
+                    if let Some(pointer_pos) = ctx.pointer_latest_pos() {
+                        self.dragging_item = Some(DraggedItem {
+                            source_container: container,
+                            source_index: index,
+                            icon_index,
+                            count: slot.count,
+                            drag_offset: pointer_pos - response.rect.center(),
+                        });
+                        
+                        // 清空源格子
+                        match container {
+                            ItemContainer::Inventory => {
+                                if let Some(source_slot) = self.item_slots.get_mut(index) {
+                                    source_slot.icon_index = None;
+                                    source_slot.count = 0;
+                                }
+                            },
+                            ItemContainer::Quest => {
+                                if let Some(source_slot) = self.quest_slots.get_mut(index) {
+                                    source_slot.icon_index = None;
+                                    source_slot.count = 0;
+                                }
+                            },
+                        }
+                    }
+                }
+                // 右键点击处理
+                else if response.secondary_clicked() {
+                    println!("🖱️ 右键点击物品 {} (图标: {})", index, icon_index);
+                    // TODO: 显示右键菜单（使用、装备、丢弃等）
+                }
+                // 左键点击处理（非拖拽）
+                else if response.clicked() {
+                    println!("🖱️ 左键点击物品 {} (图标: {})", index, icon_index);
+                    // TODO: 物品使用逻辑
+                }
+            }
+        }
+        
+        // 处理拖拽结束
+        if response.drag_stopped() && self.dragging_item.is_some() {
+            self.handle_drop_item(response.rect.center(), container, index);
+        }
+    }
+    
+    /// 处理物品放下
+    fn handle_drop_item(&mut self, drop_pos: egui::Pos2, target_container: ItemContainer, target_index: usize) {
+        if let Some(dragged) = self.dragging_item.take() {
+            // 检查目标格子是否为空
+            let target_empty = match target_container {
+                ItemContainer::Inventory => {
+                    self.item_slots.get(target_index)
+                        .map_or(false, |slot| slot.icon_index.is_none())
+                },
+                ItemContainer::Quest => {
+                    self.quest_slots.get(target_index)
+                        .map_or(false, |slot| slot.icon_index.is_none())
+                },
+            };
+            
+            if target_empty {
+                // 放置到目标格子
+                match target_container {
+                    ItemContainer::Inventory => {
+                        if let Some(target_slot) = self.item_slots.get_mut(target_index) {
+                            target_slot.icon_index = Some(dragged.icon_index);
+                            target_slot.count = dragged.count;
+                        }
+                    },
+                    ItemContainer::Quest => {
+                        if let Some(target_slot) = self.quest_slots.get_mut(target_index) {
+                            target_slot.icon_index = Some(dragged.icon_index);
+                            target_slot.count = dragged.count;
+                        }
+                    },
+                }
+                println!("✅ 物品移动成功: {} -> {}", dragged.source_index, target_index);
+            } else {
+                // 目标格子被占用，恢复到原位置
+                match dragged.source_container {
+                    ItemContainer::Inventory => {
+                        if let Some(source_slot) = self.item_slots.get_mut(dragged.source_index) {
+                            source_slot.icon_index = Some(dragged.icon_index);
+                            source_slot.count = dragged.count;
+                        }
+                    },
+                    ItemContainer::Quest => {
+                        if let Some(source_slot) = self.quest_slots.get_mut(dragged.source_index) {
+                            source_slot.icon_index = Some(dragged.icon_index);
+                            source_slot.count = dragged.count;
+                        }
+                    },
+                }
+                println!("⚠️ 目标格子被占用，物品恢复到原位置");
+            }
+        }
     }
     
     /// 切换到物品页1
@@ -495,11 +632,11 @@ impl InventoryDialog {
             egui::vec2(cell_size, cell_size),
         );
         
-        // 交互检测(先检测,用于悬停效果)
+        // 交互检测(支持点击和拖拽)
         let response = ui.interact(
             cell_rect,
             egui::Id::new(format!("inv_cell_{}", idx)),
-            egui::Sense::click(),
+            egui::Sense::click_and_drag(),
         );
         
         // 绘制格子背景（深色边框）
@@ -550,10 +687,8 @@ impl InventoryDialog {
             }
         }
         
-        if response.clicked() {
-            println!("🎒 点击背包格子 {}", idx);
-            // TODO: 物品拖拽、使用等逻辑
-        }
+        // 处理物品拖拽
+        self.handle_item_interaction(response, ItemContainer::Inventory, idx, ctx);
     }
     
     /// 绘制任务物品格子
@@ -566,11 +701,11 @@ impl InventoryDialog {
             egui::vec2(cell_size, cell_size),
         );
         
-        // 交互检测(先检测,用于悬停效果)
+        // 交互检测(支持点击和拖拽)
         let response = ui.interact(
             cell_rect,
             egui::Id::new(format!("quest_cell_{}", idx)),
-            egui::Sense::click(),
+            egui::Sense::click_and_drag(),
         );
         
         ui.painter().rect_stroke(
@@ -620,10 +755,8 @@ impl InventoryDialog {
             }
         }
         
-        if response.clicked() {
-            println!("📜 点击任务物品格子 {}", idx);
-            // TODO: 物品拖拽、使用等逻辑
-        }
+        // 处理任务物品拖拽
+        self.handle_item_interaction(response, ItemContainer::Quest, idx, ctx);
     }
     
     /// 绘制底部UI元素（金币、重量条）
@@ -892,6 +1025,60 @@ impl InventoryDialog {
             println!("⚠️ 背包已达到最大容量 (80 格)");
         }
     }
+    
+    /// 绘制正在拖拽的物品
+    fn draw_dragging_item(&self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if let Some(dragged) = &self.dragging_item {
+            if let Some(pointer_pos) = ctx.pointer_latest_pos() {
+                // 计算物品绘制位置（考虑拖拽偏移）
+                let item_pos = pointer_pos - dragged.drag_offset;
+                let item_size = egui::Vec2::new(32.0, 32.0);
+                let item_rect = egui::Rect::from_min_size(item_pos, item_size);
+                
+                // 绘制阴影效果
+                let shadow_rect = item_rect.translate(egui::vec2(2.0, 2.0));
+                ui.painter().rect_filled(
+                    shadow_rect, 
+                    0.0, 
+                    egui::Color32::from_black_alpha(64)
+                );
+                
+                // 简单的矩形表示拖拽物品（暂时不用纹理）
+                ui.painter().rect_filled(
+                    item_rect,
+                    0.0,
+                    egui::Color32::from_rgba_unmultiplied(100, 150, 255, 180), // 半透明蓝色
+                );
+                
+                // 简化边框绘制
+                // ui.painter().rect(...) // 暂时省略边框
+                
+                // 显示图标编号（用于调试）
+                let icon_text = format!("{}", dragged.icon_index);
+                ui.painter().text(
+                    item_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    icon_text,
+                    egui::FontId::proportional(10.0),
+                    egui::Color32::WHITE,
+                );
+                
+                // 如果有数量，显示数量文字
+                if dragged.count > 1 {
+                    let count_text = dragged.count.to_string();
+                    let text_pos = item_rect.right_bottom() + egui::vec2(-8.0, -4.0);
+                    
+                    ui.painter().text(
+                        text_pos,
+                        egui::Align2::RIGHT_BOTTOM,
+                        count_text,
+                        egui::FontId::proportional(10.0),
+                        egui::Color32::YELLOW,
+                    );
+                }
+            }
+        }
+    }
 }
 
 impl Dialog for InventoryDialog {
@@ -975,6 +1162,9 @@ impl Dialog for InventoryDialog {
                 
                 // 绘制扩展按钮（仅在需要时显示）
                 self.draw_expand_button(ui, ctx, &bg_rect);
+                
+                // 绘制拖拽中的物品（在最上层）
+                self.draw_dragging_item(ui, ctx);
             });
         
         *open = self.visible;
