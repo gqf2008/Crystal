@@ -32,6 +32,10 @@ pub struct ChatDialog {
     resolution_index: usize,
     position: egui::Pos2,
     
+    // 拖动相关
+    dragging: bool,
+    drag_offset: egui::Vec2,
+    
     // 聊天消息列表
     messages: Vec<ChatMessage>,
     scroll_offset: usize,
@@ -55,6 +59,8 @@ impl ChatDialog {
             visible: true,
             resolution_index,
             position,
+            dragging: false,
+            drag_offset: egui::vec2(0.0, 0.0),
             messages: Vec::new(),
             scroll_offset: 0,
             input_text: String::new(),
@@ -555,6 +561,38 @@ impl ChatDialog {
             self.input_text.clear();
         }
     }
+    
+    /// 处理窗口拖动
+    fn handle_dragging(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, base_rect: &egui::Rect) {
+        // 定义可拖动区域（顶部区域，避开滚动条和输入框）
+        let title_area = egui::Rect::from_min_size(
+            base_rect.min,
+            egui::vec2(base_rect.width() - 20.0, 15.0),  // 顶部15像素，避开滚动条
+        );
+        
+        let title_response = ui.interact(
+            title_area,
+            egui::Id::new("chat_drag_area"),
+            egui::Sense::drag(),
+        );
+        
+        if title_response.drag_started() {
+            self.dragging = true;
+            if let Some(pointer_pos) = ctx.pointer_interact_pos() {
+                self.drag_offset = self.position.to_vec2() - pointer_pos.to_vec2();
+            }
+        }
+        
+        if self.dragging {
+            if let Some(pointer_pos) = ctx.pointer_latest_pos() {
+                self.position = (pointer_pos.to_vec2() + self.drag_offset).to_pos2();
+            }
+            
+            if title_response.drag_stopped() || !title_response.dragged() {
+                self.dragging = false;
+            }
+        }
+    }
 }
 
 impl Dialog for ChatDialog {
@@ -572,6 +610,9 @@ impl Dialog for ChatDialog {
             .show(ctx, |ui| {
                 // 绘制背景纹理
                 let base_rect = self.draw_chat(ui, ctx);
+                
+                // 处理窗口拖动
+                self.handle_dragging(ui, ctx, &base_rect);
                 
                 // 绘制消息
                 self.draw_messages(ui, &base_rect);

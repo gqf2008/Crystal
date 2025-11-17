@@ -13,7 +13,7 @@
 
 use egui_macroquad::egui;
 use crate::resources::LibraryName;
-use super::{BeltDialog, ChatDialog, ChatControlBar};
+use super::{BeltDialog, ChatDialog, ChatControlBar, InventoryDialog};
 use crate::scenes::dialogs::Dialog;
 
 /// 主界面底部工具栏
@@ -47,11 +47,14 @@ pub struct MainDialog {
     
     // 子对话框
     /// 血瓶快捷栏
+    /// 快捷栏
     belt_dialog: BeltDialog,
     /// 聊天窗口
     chat_dialog: ChatDialog,
     /// 聊天控制栏
     chat_control_bar: ChatControlBar,
+    /// 背包
+    inventory_dialog: InventoryDialog,
 }
 
 impl MainDialog {
@@ -97,6 +100,7 @@ impl MainDialog {
             belt_dialog: BeltDialog::new(main_dialog_x, screen_h),
             chat_dialog: ChatDialog::new(main_dialog_x, screen_h, resolution_index),
             chat_control_bar: ChatControlBar::new(main_dialog_x, screen_h, resolution_index),
+            inventory_dialog: InventoryDialog::new(),
         }
     }
 
@@ -440,7 +444,7 @@ impl MainDialog {
 
     /// 绘制单个按钮
     fn draw_button(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         ctx: &egui::Context,
         x: f32,
@@ -484,6 +488,11 @@ impl MainDialog {
                 
                 if clicked {
                     println!("🖱️ 点击了 {} 按钮", hint);
+                    // 处理按钮点击
+                    match hint {
+                        "背包" => self.inventory_dialog.toggle(),
+                        _ => {}
+                    }
                 }
             }
         }
@@ -498,6 +507,7 @@ impl MainDialog {
         let mut chat_open = true;
         let mut control_bar_open = true;
         let mut belt_open = true;
+        let mut inventory_open = true;
         
         // 先显示 ChatDialog（在最底层）
         self.chat_dialog.show(ctx, &mut chat_open);
@@ -505,8 +515,11 @@ impl MainDialog {
         // 再显示 ChatControlBar（在中间层）
         let (size_clicked, _settings_clicked) = self.chat_control_bar.show(ctx, &mut control_bar_open);
         
-        // 最后显示 BeltDialog（在最上层，不被其他组件遮挡）
+        // 显示 BeltDialog（在最上层，不被其他组件遮挡）
         self.belt_dialog.show(ctx, &mut belt_open);
+        
+        // 显示 InventoryDialog（独立窗口）
+        self.inventory_dialog.show(ctx, &mut inventory_open);
         
         // 如果 Size 按钮被点击，改变 ChatDialog 大小
         if size_clicked {

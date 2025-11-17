@@ -26,6 +26,10 @@ pub struct BeltDialog {
     // 保存初始水平布局位置，用于从垂直布局切换回来时恢复
     horizontal_position: egui::Pos2,
     
+    // 拖动相关
+    dragging: bool,
+    drag_offset: egui::Vec2,
+    
     // 格子数据（实际物品数据应该从 ECS/GameState 获取）
     // 这里只是占位，真实实现需要关联到物品系统
     #[allow(dead_code)]
@@ -52,6 +56,8 @@ impl BeltDialog {
             layout: BeltLayout::Horizontal,
             position,
             horizontal_position: position,  // 保存初始位置
+            dragging: false,
+            drag_offset: egui::vec2(0.0, 0.0),
             cells: Default::default(),
         }
     }
@@ -82,10 +88,46 @@ impl BeltDialog {
             self.horizontal_position = pos;
         }
     }
+    
+    /// 处理窗口拖动
+    fn handle_dragging(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        // 定义可拖动区域（整个背景区域，但排除按钮区域）
+        let drag_area = egui::Rect::from_min_size(
+            bg_rect.min,
+            egui::vec2(bg_rect.width(), bg_rect.height() - 30.0),  // 排除底部按钮区
+        );
+        
+        let drag_response = ui.interact(
+            drag_area,
+            egui::Id::new("belt_drag_area"),
+            egui::Sense::drag(),
+        );
+        
+        if drag_response.drag_started() {
+            self.dragging = true;
+            if let Some(pointer_pos) = ctx.pointer_interact_pos() {
+                self.drag_offset = self.position.to_vec2() - pointer_pos.to_vec2();
+            }
+        }
+        
+        if self.dragging {
+            if let Some(pointer_pos) = ctx.pointer_latest_pos() {
+                self.position = (pointer_pos.to_vec2() + self.drag_offset).to_pos2();
+                // 如果是水平布局，同时更新保存的位置
+                if self.layout == BeltLayout::Horizontal {
+                    self.horizontal_position = self.position;
+                }
+            }
+            
+            if drag_response.drag_stopped() || !drag_response.dragged() {
+                self.dragging = false;
+            }
+        }
+    }
 
     
     /// 绘制快捷栏
-    fn draw_belt(&self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn draw_belt(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> egui::Rect {
         // 获取背景纹理索引
         let bg_index = match self.layout {
             BeltLayout::Horizontal => 1932,
@@ -96,9 +138,11 @@ impl BeltDialog {
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, bg_index) {
             if let Some(bg_texture) = info.egui_texture {
                 let size = bg_texture.size_vec2();
+                let bg_rect = egui::Rect::from_min_size(self.position, size);
+                
                 ui.painter().image(
                     bg_texture.id(),
-                    egui::Rect::from_min_size(self.position, size),
+                    bg_rect,
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
@@ -108,14 +152,19 @@ impl BeltDialog {
                     if let Some(overlay) = info2.egui_texture {
                         ui.painter().image(
                             overlay.id(),
-                            egui::Rect::from_min_size(self.position, size),
+                            bg_rect,
                             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                             egui::Color32::from_white_alpha(128), // 50% 透明度
                         );
                     }
                 }
+                
+                return bg_rect;
             }
         }
+        
+        // 降级：返回默认矩形
+        egui::Rect::from_min_size(self.position, egui::vec2(100.0, 100.0))
     }
     
     /// 绘制物品格子
@@ -335,9 +384,13 @@ impl Dialog for BeltDialog {
         // 使用 Area 创建一个自由浮动的窗口
         egui::Area::new(egui::Id::new("belt_dialog"))
             .fixed_pos(self.position)
+            .movable(false)  // 禁用默认拖动，使用自定义拖动
             .show(ctx, |ui| {
                 // 绘制快捷栏背景
-                self.draw_belt(ui, ctx);
+                let bg_rect = self.draw_belt(ui, ctx);
+                
+                // 处理拖动
+                self.handle_dragging(ui, ctx, &bg_rect);
                 
                 // 绘制物品格子
                 self.draw_cells(ui, ctx);

@@ -1,0 +1,689 @@
+// ============================================================================
+// InventoryDialog - 背包系统
+// ============================================================================
+//
+// 【功能说明】
+// 1. 背包窗口（46格基础 + 最多40格扩展 = 86格）
+// 2. 任务物品栏（40格，独立页面）
+// 3. 物品格子显示、拖拽、使用
+// 4. 金币显示和拾取
+// 5. 负重显示
+// 6. 背包扩展功能
+//
+// 【布局】
+// - 窗口: Title[196]
+// - 标签页: ItemButton(197/737), ItemButton2(168/738), QuestButton(198/739)
+// - 物品格子: 8列 x 10行 = 80格（前46格默认可见）
+// - 任务格子: 8列 x 5行 = 40格（独立页面）
+//
+// ============================================================================
+
+use egui_macroquad::egui;
+use crate::resources::LibraryName;
+use crate::scenes::dialogs::Dialog;
+
+/// 背包标签页类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InventoryTab {
+    Items,      // 物品页1（前46格）
+    Items2,     // 物品页2（扩展格子）
+    Quest,      // 任务物品
+}
+
+/// 物品槽位数据（模拟）
+#[derive(Debug, Clone)]
+struct ItemSlot {
+    /// 物品图标索引（Libraries.Items）
+    icon_index: Option<usize>,
+    /// 物品数量
+    count: u32,
+    /// 是否锁定
+    locked: bool,
+}
+
+impl ItemSlot {
+    fn empty() -> Self {
+        Self {
+            icon_index: None,
+            count: 0,
+            locked: false,
+        }
+    }
+    
+    fn new(icon_index: usize, count: u32) -> Self {
+        Self {
+            icon_index: Some(icon_index),
+            count,
+            locked: false,
+        }
+    }
+}
+
+/// 背包对话框
+pub struct InventoryDialog {
+    visible: bool,
+    position: egui::Pos2,
+    
+    /// 是否正在拖动
+    dragging: bool,
+    /// 拖动时的鼠标偏移
+    drag_offset: egui::Vec2,
+    
+    /// 滚动偏移量（用于鼠标滚轮）
+    scroll_offset: f32,
+    
+    /// 当前标签页
+    active_tab: InventoryTab,
+    
+    /// 物品格子（80格，前46格默认，后34格需扩展）
+    /// 索引 0-45: 默认格子
+    /// 索引 46-79: 扩展格子（需要购买解锁）
+    item_slots: Vec<ItemSlot>,
+    
+    /// 任务物品格子（40格）
+    quest_slots: Vec<ItemSlot>,
+    
+    /// 背包最大容量（46-86）
+    max_capacity: usize,
+    
+    /// 金币数量
+    gold: u32,
+    
+    /// 当前负重 / 最大负重
+    weight: (u32, u32),
+    
+    /// 是否正在拾取金币
+    picking_gold: bool,
+}
+
+impl InventoryDialog {
+    pub fn new() -> Self {
+        // 创建物品格子（80格）
+        let mut item_slots = Vec::with_capacity(80);
+        for i in 0..80 {
+            // 模拟数据：前几个格子有物品
+            if i < 5 {
+                item_slots.push(ItemSlot::new(100 + i, (i + 1) as u32));
+            } else {
+                item_slots.push(ItemSlot::empty());
+            }
+        }
+        
+        // 创建任务物品格子（40格）
+        let quest_slots = vec![ItemSlot::empty(); 40];
+        
+        Self {
+            visible: false,
+            position: egui::pos2(300.0, 100.0),  // 默认位置
+            dragging: false,
+            drag_offset: egui::vec2(0.0, 0.0),
+            scroll_offset: 0.0,
+            active_tab: InventoryTab::Items,
+            item_slots,
+            quest_slots,
+            max_capacity: 46,  // 初始46格
+            gold: 123456,
+            weight: (75, 100),
+            picking_gold: false,
+        }
+    }
+    
+    /// 显示/隐藏背包
+    pub fn toggle(&mut self) {
+        self.visible = !self.visible;
+    }
+    
+    /// 切换到物品页1
+    fn show_items_page1(&mut self) {
+        self.active_tab = InventoryTab::Items;
+    }
+    
+    /// 切换到物品页2（扩展页）
+    fn show_items_page2(&mut self) {
+        if self.max_capacity == 46 {
+            // 提示需要扩展背包
+            println!("⚠️ 需要扩展背包才能使用第二页");
+            // TODO: 显示扩展背包对话框
+        } else {
+            self.active_tab = InventoryTab::Items2;
+        }
+    }
+    
+    /// 切换到任务页
+    fn show_quest_page(&mut self) {
+        self.active_tab = InventoryTab::Quest;
+    }
+    
+    /// 扩展背包（每次+4格，最多扩展10次）
+    pub fn expand_inventory(&mut self) {
+        if self.max_capacity >= 86 {
+            println!("⚠️ 背包已扩展至最大容量");
+            return;
+        }
+        
+        self.max_capacity += 4;
+        println!("✅ 背包扩展至 {} 格", self.max_capacity);
+    }
+    
+    /// 处理窗口拖动
+    fn handle_dragging(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        // 定义可拖动区域（顶部标题栏区域，避免与按钮冲突）
+        let title_area = egui::Rect::from_min_size(
+            bg_rect.min,
+            egui::vec2(bg_rect.width(), 30.0),  // 顶部30像素作为拖动区
+        );
+        
+        let title_response = ui.interact(
+            title_area,
+            egui::Id::new("inv_drag_area"),
+            egui::Sense::drag(),
+        );
+        
+        // 开始拖动
+        if title_response.drag_started() {
+            self.dragging = true;
+            if let Some(pointer_pos) = ctx.pointer_interact_pos() {
+                self.drag_offset = self.position.to_vec2() - pointer_pos.to_vec2();
+            }
+        }
+        
+        // 拖动中
+        if self.dragging {
+            if let Some(pointer_pos) = ctx.pointer_latest_pos() {
+                self.position = (pointer_pos.to_vec2() + self.drag_offset).to_pos2();
+            }
+            
+            // 停止拖动
+            if title_response.drag_stopped() || !title_response.dragged() {
+                self.dragging = false;
+            }
+        }
+    }
+    
+    /// 绘制背包窗口
+    fn draw_window(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> egui::Rect {
+        // 获取背景纹理 Title[196]
+        if let Some(info) = LibraryName::Title.get_egui_texture(ctx, 196) {
+            if let Some(bg_texture) = info.egui_texture {
+                let bg_size = bg_texture.size_vec2();
+                let bg_rect = egui::Rect::from_min_size(self.position, bg_size);
+                
+                // 绘制背景
+                ui.painter().image(
+                    bg_texture.id(),
+                    bg_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+                
+                return bg_rect;
+            }
+        }
+        
+        // 降级：绘制默认背景
+        let default_size = egui::vec2(318.0, 245.0);
+        let bg_rect = egui::Rect::from_min_size(self.position, default_size);
+        ui.painter().rect_filled(bg_rect, 4.0, egui::Color32::from_rgb(40, 40, 50));
+        bg_rect
+    }
+    
+    /// 绘制标签页按钮
+    fn draw_tab_buttons(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        // 标签页按钮配置：(x, y, normal_idx, selected_idx, tab_type)
+        let tab_configs = [
+            (6.0, 7.0, 737usize, 197usize, InventoryTab::Items),   // 物品1
+            (76.0, 7.0, 738usize, 168usize, InventoryTab::Items2), // 物品2
+            (146.0, 7.0, 739usize, 198usize, InventoryTab::Quest), // 任务
+        ];
+        
+        for (x, y, normal_idx, selected_idx, tab_type) in tab_configs.iter() {
+            // 根据是否选中决定纹理索引
+            let texture_idx = if self.active_tab == *tab_type {
+                *selected_idx
+            } else {
+                *normal_idx
+            };
+            
+            // 特殊处理：如果背包容量=46，物品2按钮显示锁定状态(169)
+            let texture_idx = if *tab_type == InventoryTab::Items2 && self.max_capacity == 46 {
+                169
+            } else {
+                texture_idx
+            };
+            
+            if let Some(info) = LibraryName::Title.get_egui_texture(ctx, texture_idx) {
+                if let Some(texture) = info.egui_texture {
+                    let size = egui::vec2(72.0, 23.0);
+                    let btn_rect = egui::Rect::from_min_size(
+                        egui::pos2(bg_rect.min.x + x, bg_rect.min.y + y),
+                        size,
+                    );
+                    
+                    let response = ui.interact(
+                        btn_rect,
+                        egui::Id::new(format!("inv_tab_{:?}", tab_type)),
+                        egui::Sense::click(),
+                    );
+                    
+                    // 绘制按钮纹理
+                    ui.painter().image(
+                        texture.id(),
+                        btn_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                    
+                    // 处理点击
+                    if response.clicked() {
+                        match tab_type {
+                            InventoryTab::Items => self.show_items_page1(),
+                            InventoryTab::Items2 => self.show_items_page2(),
+                            InventoryTab::Quest => self.show_quest_page(),
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 关闭按钮 Prguse2[360-362]
+        self.draw_close_button(ui, ctx, bg_rect);
+    }
+    
+    /// 绘制关闭按钮
+    fn draw_close_button(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        let x = 289.0;
+        let y = 3.0;
+        
+        if let Some(info) = LibraryName::Prguse2.get_egui_texture(ctx, 360) {
+            if let Some(texture) = info.egui_texture {
+                let size = texture.size_vec2();
+                let btn_rect = egui::Rect::from_min_size(
+                    egui::pos2(bg_rect.min.x + x, bg_rect.min.y + y),
+                    size,
+                );
+                
+                let response = ui.interact(
+                    btn_rect,
+                    egui::Id::new("inv_close_btn"),
+                    egui::Sense::click(),
+                );
+                
+                // 三态纹理
+                let texture_idx = if response.is_pointer_button_down_on() {
+                    362
+                } else if response.hovered() {
+                    361
+                } else {
+                    360
+                };
+                
+                if let Some(btn_info) = LibraryName::Prguse2.get_egui_texture(ctx, texture_idx) {
+                    if let Some(btn_texture) = btn_info.egui_texture {
+                        ui.painter().image(
+                            btn_texture.id(),
+                            btn_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
+                
+                if response.clicked() {
+                    self.visible = false;
+                }
+            }
+        }
+    }
+    
+    /// 绘制物品格子
+    fn draw_item_grid(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        // 原版布局参数：Location = new Point(x * 36 + 9 + x, y % 5 * 32 + 37 + y % 5)
+        // X: x * 37 + 9 (格子32px + 间距1px = 每格占37px，起始位置9px)
+        // Y: (y % 5) * 33 + 37 (格子32px + 间距1px = 每格占33px，起始位置37px)
+        let grid_start_x = 9.0;
+        let grid_start_y = 37.0;
+        let x_spacing = 37.0;    // X方向每格占用（36 + 1间距）
+        let y_spacing = 33.0;    // Y方向每格占用（32 + 1间距）
+        
+        match self.active_tab {
+            InventoryTab::Items => {
+                // 显示前46格（8列 x 6行，最后一行只有6格）
+                // 应用滚动偏移，可以看到所有6行
+                for idx in 0..46 {
+                    let x = idx % 8;
+                    let y = idx / 8;
+                    
+                    let cell_x = grid_start_x + x as f32 * x_spacing;
+                    let cell_y = grid_start_y + y as f32 * y_spacing + self.scroll_offset;
+                    
+                    // 只绘制在可见区域内的格子（裁剪优化）
+                    let cell_rect = egui::Rect::from_min_size(
+                        egui::pos2(bg_rect.min.x + cell_x, bg_rect.min.y + cell_y),
+                        egui::vec2(32.0, 32.0),
+                    );
+                    let visible_area = egui::Rect::from_min_size(
+                        egui::pos2(bg_rect.min.x + grid_start_x, bg_rect.min.y + grid_start_y),
+                        egui::vec2(8.0 * x_spacing, 5.0 * y_spacing), // 可见区域：5行高度
+                    );
+                    
+                    if visible_area.intersects(cell_rect) {
+                        self.draw_item_cell(ui, ctx, bg_rect, idx, cell_x, cell_y);
+                    }
+                }
+            }
+            InventoryTab::Items2 => {
+                // 显示扩展格子（46-85，8列 x 5行）
+                for i in 0..40 {
+                    let idx = 46 + i;
+                    if idx >= self.max_capacity {
+                        // 绘制锁定图标
+                        self.draw_locked_cell(ui, ctx, bg_rect, i, grid_start_x, grid_start_y + self.scroll_offset, x_spacing, y_spacing);
+                    } else {
+                        let x = i % 8;
+                        let y = i / 8;
+                        let cell_x = grid_start_x + x as f32 * x_spacing;
+                        let cell_y = grid_start_y + y as f32 * y_spacing + self.scroll_offset;
+                        
+                        self.draw_item_cell(ui, ctx, bg_rect, idx, cell_x, cell_y);
+                    }
+                }
+                
+                // 扩展按钮（如果还能扩展）
+                if self.max_capacity < 86 {
+                    self.draw_expand_button(ui, ctx, bg_rect);
+                }
+            }
+            InventoryTab::Quest => {
+                // 显示任务物品（8列 x 5行 = 40格）
+                for idx in 0..40 {
+                    let x = idx % 8;
+                    let y = idx / 8;
+                    
+                    let cell_x = grid_start_x + x as f32 * x_spacing;
+                    let cell_y = grid_start_y + y as f32 * y_spacing + self.scroll_offset;
+                    
+                    self.draw_quest_cell(ui, ctx, bg_rect, idx, cell_x, cell_y);
+                }
+            }
+        }
+    }
+    
+    /// 绘制单个物品格子
+    fn draw_item_cell(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, bg_rect: &egui::Rect, 
+                      idx: usize, x: f32, y: f32) {
+        let cell_size = 32.0;
+        let cell_rect = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + x, bg_rect.min.y + y),
+            egui::vec2(cell_size, cell_size),
+        );
+        
+        // 绘制格子背景（深色边框）
+        ui.painter().rect_stroke(
+            cell_rect,
+            2,
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80)),
+            egui::epaint::StrokeKind::Outside,
+        );
+        
+        // 绘制物品图标（如果有）
+        if let Some(slot) = self.item_slots.get(idx) {
+            if let Some(_icon_idx) = slot.icon_index {
+                // TODO: 从 Libraries.Items 加载物品图标
+                // 临时显示：绘制颜色块表示有物品
+                ui.painter().rect_filled(
+                    cell_rect.shrink(4.0),
+                    2.0,
+                    egui::Color32::from_rgb(100, 150, 200),
+                );
+                
+                // 绘制数量
+                if slot.count > 1 {
+                    ui.painter().text(
+                        egui::pos2(cell_rect.max.x - 5.0, cell_rect.max.y - 5.0),
+                        egui::Align2::RIGHT_BOTTOM,
+                        format!("{}", slot.count),
+                        egui::FontId::proportional(10.0),
+                        egui::Color32::WHITE,
+                    );
+                }
+            }
+        }
+        
+        // 交互检测
+        let response = ui.interact(
+            cell_rect,
+            egui::Id::new(format!("inv_cell_{}", idx)),
+            egui::Sense::click(),
+        );
+        
+        if response.clicked() {
+            println!("🎒 点击背包格子 {}", idx);
+            // TODO: 物品拖拽、使用等逻辑
+        }
+    }
+    
+    /// 绘制任务物品格子
+    fn draw_quest_cell(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, bg_rect: &egui::Rect, 
+                       _idx: usize, x: f32, y: f32) {
+        // 与普通格子类似，但使用 quest_slots 数据
+        let cell_size = 32.0;
+        let cell_rect = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + x, bg_rect.min.y + y),
+            egui::vec2(cell_size, cell_size),
+        );
+        
+        ui.painter().rect_stroke(
+            cell_rect,
+            2,
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80)),
+            egui::epaint::StrokeKind::Outside,
+        );
+        
+        // 任务物品格子标记（淡黄色背景）
+        ui.painter().rect_filled(
+            cell_rect.shrink(1.0),
+            2,
+            egui::Color32::from_rgba_premultiplied(100, 100, 50, 50),
+        );
+    }
+    
+    /// 绘制锁定的格子
+    fn draw_locked_cell(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect,
+                        idx: usize, grid_x: f32, grid_y: f32, x_spacing: f32, y_spacing: f32) {
+        let x = idx % 8;
+        let y = idx / 8;
+        let cell_x = grid_x + x as f32 * x_spacing;
+        let cell_y = grid_y + y as f32 * y_spacing;
+        
+        // 绘制锁定图标 Prguse2[307]
+        if let Some(info) = LibraryName::Prguse2.get_egui_texture(ctx, 307) {
+            if let Some(texture) = info.egui_texture {
+                let lock_rect = egui::Rect::from_min_size(
+                    egui::pos2(bg_rect.min.x + cell_x, bg_rect.min.y + cell_y),
+                    egui::vec2(32.0, 32.0),
+                );
+                
+                ui.painter().image(
+                    texture.id(),
+                    lock_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+    }
+    
+    /// 绘制扩展按钮
+    fn draw_expand_button(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        let x = 235.0;
+        let y = 5.0;
+        
+        if let Some(info) = LibraryName::Title.get_egui_texture(ctx, 483) {
+            if let Some(_texture) = info.egui_texture {
+                let size = egui::vec2(72.0, 23.0);
+                let btn_rect = egui::Rect::from_min_size(
+                    egui::pos2(bg_rect.min.x + x, bg_rect.min.y + y),
+                    size,
+                );
+                
+                let response = ui.interact(
+                    btn_rect,
+                    egui::Id::new("inv_expand_btn"),
+                    egui::Sense::click(),
+                );
+                
+                let texture_idx = if response.is_pointer_button_down_on() {
+                    485
+                } else if response.hovered() {
+                    484
+                } else {
+                    483
+                };
+                
+                if let Some(btn_info) = LibraryName::Title.get_egui_texture(ctx, texture_idx) {
+                    if let Some(btn_texture) = btn_info.egui_texture {
+                        ui.painter().image(
+                            btn_texture.id(),
+                            btn_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
+                
+                if response.clicked() {
+                    let open_level = (self.max_capacity - 46) / 4;
+                    let open_gold = 1000000 + open_level * 1000000;
+                    println!("💰 扩展背包需要 {} 金币", open_gold);
+                    // TODO: 显示确认对话框
+                    self.expand_inventory();
+                }
+            }
+        }
+    }
+    
+    /// 绘制金币和负重信息
+    fn draw_info_bar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        // 金币标签 (40, 212)
+        let gold_text = format!("{}", self.gold);
+        ui.painter().text(
+            egui::pos2(bg_rect.min.x + 40.0, bg_rect.min.y + 218.0),
+            egui::Align2::LEFT_CENTER,
+            &gold_text,
+            egui::FontId::proportional(12.0),
+            egui::Color32::from_rgb(255, 215, 0),  // 金色
+        );
+        
+        // 负重条 Prguse[24] 在 (182, 217)
+        let weight_percent = self.weight.0 as f32 / self.weight.1 as f32;
+        if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 24) {
+            if let Some(texture) = info.egui_texture {
+                let bar_width = 50.0 * weight_percent;
+                let bar_rect = egui::Rect::from_min_size(
+                    egui::pos2(bg_rect.min.x + 182.0, bg_rect.min.y + 217.0),
+                    egui::vec2(bar_width, 14.0),
+                );
+                
+                // 裁剪纹理显示负重条
+                let tex_rect = egui::Rect::from_min_max(
+                    egui::pos2(0.0, 0.0),
+                    egui::pos2(weight_percent, 1.0),
+                );
+                
+                ui.painter().image(
+                    texture.id(),
+                    bar_rect,
+                    tex_rect,
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        
+        // 空格数量 (268, 212)
+        let empty_slots = self.item_slots[0..self.max_capacity]
+            .iter()
+            .filter(|s| s.icon_index.is_none())
+            .count();
+        
+        ui.painter().text(
+            egui::pos2(bg_rect.min.x + 268.0, bg_rect.min.y + 218.0),
+            egui::Align2::LEFT_CENTER,
+            format!("{}", empty_slots),
+            egui::FontId::proportional(12.0),
+            egui::Color32::WHITE,
+        );
+    }
+}
+
+impl Dialog for InventoryDialog {
+    fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
+        if !self.visible {
+            *open = false;
+            return;
+        }
+        
+        // 处理鼠标滚轮（在物品格子区域）
+        let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
+        if scroll_delta != 0.0 {
+            if let Some(pointer_pos) = ctx.pointer_latest_pos() {
+                // 检查鼠标是否在背包窗口内
+                let window_rect = egui::Rect::from_min_size(self.position, egui::vec2(318.0, 245.0));
+                if window_rect.contains(pointer_pos) {
+                    // 滚动物品列表
+                    self.scroll_offset += scroll_delta * 0.5;
+                    
+                    // 计算滚动范围限制
+                    let max_scroll = match self.active_tab {
+                        InventoryTab::Items => {
+                            // Items页：6行，可见5行，可以向上滚动1行的距离
+                            0.0  // 向上滚动（负值）
+                        },
+                        InventoryTab::Items2 | InventoryTab::Quest => {
+                            // Items2/Quest页：5行，刚好填满，不需要滚动
+                            0.0
+                        },
+                    };
+                    
+                    let min_scroll = match self.active_tab {
+                        InventoryTab::Items => {
+                            // 可以向上滚动1行（33像素）
+                            -33.0
+                        },
+                        InventoryTab::Items2 | InventoryTab::Quest => {
+                            0.0
+                        },
+                    };
+                    
+                    self.scroll_offset = self.scroll_offset.clamp(min_scroll, max_scroll);
+                    println!("🖱️ 背包滚动: {:.1} (范围: {:.1} ~ {:.1})", self.scroll_offset, min_scroll, max_scroll);
+                }
+            }
+        }
+        
+        egui::Window::new("Inventory")
+            .title_bar(false)
+            .resizable(false)
+            .fixed_pos(self.position)
+            .movable(false)  // 禁用 egui 默认拖动，使用自定义拖动
+            .frame(egui::Frame::NONE)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                // 绘制窗口背景
+                let bg_rect = self.draw_window(ui, ctx);
+                
+                // 处理窗口拖动（点击背景区域可拖动）
+                self.handle_dragging(ui, ctx, &bg_rect);
+                
+                // 绘制标签页按钮
+                self.draw_tab_buttons(ui, ctx, &bg_rect);
+                
+                // 绘制物品格子
+                self.draw_item_grid(ui, ctx, &bg_rect);
+                
+                // 绘制金币和负重信息
+                self.draw_info_bar(ui, ctx, &bg_rect);
+            });
+        
+        *open = self.visible;
+    }
+}
