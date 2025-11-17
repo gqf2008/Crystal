@@ -31,7 +31,7 @@ enum InventoryTab {
 }
 
 /// 选中的物品格子
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct SelectedItem {
     /// 来源容器类型
     container: ItemContainer,
@@ -69,7 +69,7 @@ struct ContextMenu {
     visible: bool,
 }
 
-/// 物品信息（用于tooltip显示）
+/// 物品信息（与原版传奇2完全一致）
 #[derive(Clone, Debug)]
 struct ItemInfo {
     /// 物品名称
@@ -80,8 +80,47 @@ struct ItemInfo {
     description: String,
     /// 物品等级或品质
     level: u32,
-    /// 攻击力/防御力等数值
-    power: Option<u32>,
+    /// 攻击力范围 (min, max)
+    attack: Option<(u32, u32)>,
+    /// 魔法攻击力范围 (min, max)
+    magic_attack: Option<(u32, u32)>,
+    /// 道术攻击力范围 (min, max)
+    taoist_attack: Option<(u32, u32)>,
+    /// 防御力范围 (min, max)
+    defence: Option<(u32, u32)>,
+    /// 魔法防御力范围 (min, max)
+    magic_defence: Option<(u32, u32)>,
+    /// 准确度
+    accuracy: Option<u32>,
+    /// 敏捷度
+    agility: Option<u32>,
+    /// 幸运值
+    luck: Option<u32>,
+    /// 重量
+    weight: u32,
+    /// 耐久度 (current, max)
+    durability: Option<(u32, u32)>,
+    /// 物品品质等级
+    grade: ItemGrade,
+    /// 是否经过强化
+    refined: bool,
+    /// 职业限制
+    class_requirement: Option<String>,
+    /// 性别限制
+    gender_requirement: Option<String>,
+    /// 最大堆叠数量
+    max_stack: u32,
+}
+
+/// 物品品质等级（与原版一致）
+#[derive(Clone, Debug, PartialEq)]
+enum ItemGrade {
+    None,
+    Common,      // 普通
+    Rare,        // 稀有
+    Legendary,   // 传说
+    Mythical,    // 神话
+    Heroic,      // 英雄
 }
 
 /// 物品槽位数据（模拟）
@@ -113,15 +152,51 @@ impl ItemSlot {
     }
 }
 
+/// UI布局常量
+struct InventoryLayout {
+    /// 窗口尺寸
+    window_size: egui::Vec2,
+    /// 物品格子尺寸
+    cell_size: f32,
+    /// 网格列数
+    grid_cols: usize,
+    /// 格子间距
+    cell_spacing: f32,
+    /// 内容边距
+    content_margin: egui::Vec2,
+}
+
+impl Default for InventoryLayout {
+    fn default() -> Self {
+        Self {
+            window_size: egui::vec2(318.0, 245.0),
+            cell_size: 32.0,
+            grid_cols: 8,
+            cell_spacing: 1.0,
+            content_margin: egui::vec2(8.0, 8.0),
+        }
+    }
+}
+
+/// UI交互状态
+#[derive(Default, Debug)]
+struct InteractionState {
+    /// 鼠标悬停的格子索引
+    hovered_slot: Option<(ItemContainer, usize)>,
+    /// 拖拽状态
+    dragging_item: Option<SelectedItem>,
+    /// 窗口拖拽状态
+    window_dragging: bool,
+    /// 窗口拖拽偏移
+    drag_offset: egui::Vec2,
+}
+
 /// 背包对话框
 pub struct InventoryDialog {
     visible: bool,
     position: egui::Pos2,
-    
-    /// 是否正在拖动窗口
-    dragging: bool,
-    /// 拖动时的鼠标偏移
-    drag_offset: egui::Vec2,
+    layout: InventoryLayout,
+    interaction: InteractionState,
     
     /// 当前选中的物品格子
     selected_item: Option<SelectedItem>,
@@ -162,6 +237,16 @@ pub struct InventoryDialog {
     gold_hovered: bool,
     /// 关闭按钮是否悬停
     close_hovered: bool,
+    
+    /// tooltip显示延时控制
+    tooltip_start_time: Option<std::time::Instant>,
+    tooltip_delay: std::time::Duration,
+    
+    /// 数量选择对话框状态
+    quantity_dialog_visible: bool,
+    quantity_dialog_item: Option<SelectedItem>,
+    quantity_input: String,
+    quantity_max: u32,
 }
 
 impl InventoryDialog {
@@ -192,8 +277,8 @@ impl InventoryDialog {
         Self {
             visible: false,
             position: egui::pos2(300.0, 100.0),  // 默认位置
-            dragging: false,
-            drag_offset: egui::vec2(0.0, 0.0),
+            layout: InventoryLayout::default(),
+            interaction: InteractionState::default(),
             selected_item: None,  // 初始化选中状态
             // 简化右键菜单（无tooltip）
             context_menu: None,
@@ -209,6 +294,14 @@ impl InventoryDialog {
             picking_gold: false,
             gold_hovered: false,
             close_hovered: false,
+            tooltip_start_time: None,
+            tooltip_delay: std::time::Duration::from_millis(800), // 0.8秒延时，符合原版传奇2
+            
+            // 数量选择对话框
+            quantity_dialog_visible: false,
+            quantity_dialog_item: None,
+            quantity_input: String::new(),
+            quantity_max: 0,
         }
     }
     
@@ -225,10 +318,22 @@ impl InventoryDialog {
     
     /// 处理物品交互（点击交换）
     fn handle_item_interaction(&mut self, response: egui::Response, container: ItemContainer, 
-                               index: usize, _ctx: &egui::Context) {
+                               index: usize, ctx: &egui::Context) {
         // 处理左键点击
         if response.clicked() {
-            self.handle_item_click(container, index);
+            // 检查修饰键状态
+            let modifiers = ctx.input(|i| i.modifiers);
+            
+            if modifiers.shift {
+                // Shift+点击：分离一半
+                self.handle_item_split_half(container, index);
+            } else if modifiers.ctrl {
+                // Ctrl+点击：自定义分离数量
+                self.handle_item_split_custom(container, index);
+            } else {
+                // 普通点击：选择/交换
+                self.handle_item_click(container, index);
+            }
         }
         // 处理右键点击 - 显示简化菜单（无tooltip干扰）
         else if response.secondary_clicked() {
@@ -239,7 +344,7 @@ impl InventoryDialog {
             
             if let Some(slot) = slot {
                 if let Some(icon_index) = slot.icon_index {
-                    if let Some(pointer_pos) = _ctx.pointer_latest_pos() {
+                    if let Some(pointer_pos) = ctx.pointer_latest_pos() {
                         self.context_menu = Some(ContextMenu {
                             position: pointer_pos + egui::vec2(10.0, -10.0),
                             target_item: SelectedItem {
@@ -294,7 +399,7 @@ impl InventoryDialog {
         }
     }
     
-    /// 执行物品交换或移动
+    /// 执行物品交换或移动（支持堆叠）
     fn perform_item_exchange(&mut self, selected: SelectedItem, target_container: ItemContainer, target_index: usize) {
         // 获取目标格子的物品
         let target_slot = match target_container {
@@ -306,11 +411,105 @@ impl InventoryDialog {
             if target_slot.icon_index.is_none() {
                 // 目标格子为空，移动物品
                 self.move_item_to_empty_slot(selected, target_container, target_index);
+            } else if target_slot.icon_index == Some(selected.icon_index) {
+                // 相同物品，尝试堆叠
+                self.try_stack_items(selected, target_container, target_index, target_slot);
             } else {
-                // 目标格子有物品，交换物品
+                // 不同物品，交换物品
                 self.swap_items(selected, target_container, target_index, target_slot);
             }
         }
+    }
+    
+    /// 尝试堆叠相同物品
+    fn try_stack_items(&mut self, selected: SelectedItem, target_container: ItemContainer, target_index: usize, target_slot: ItemSlot) {
+        let item_info = self.get_item_info(selected.icon_index);
+        let max_stack = item_info.max_stack;
+        
+        if max_stack <= 1 {
+            // 不可堆叠物品，进行交换
+            self.swap_items(selected, target_container, target_index, target_slot);
+            return;
+        }
+        
+        let total_count = selected.count + target_slot.count;
+        
+        if total_count <= max_stack {
+            // 可以完全合并
+            self.merge_items_completely(selected, target_container, target_index, total_count);
+        } else {
+            // 部分合并，目标格子满了
+            let remaining = total_count - max_stack;
+            self.merge_items_partially(selected, target_container, target_index, max_stack, remaining);
+        }
+    }
+    
+    /// 完全合并物品
+    fn merge_items_completely(&mut self, selected: SelectedItem, target_container: ItemContainer, target_index: usize, total_count: u32) {
+        // 清空源格子
+        match selected.container {
+            ItemContainer::Inventory => {
+                if let Some(source_slot) = self.item_slots.get_mut(selected.index) {
+                    source_slot.icon_index = None;
+                    source_slot.count = 0;
+                }
+            },
+            ItemContainer::Quest => {
+                if let Some(source_slot) = self.quest_slots.get_mut(selected.index) {
+                    source_slot.icon_index = None;
+                    source_slot.count = 0;
+                }
+            },
+        }
+        
+        // 更新目标格子
+        match target_container {
+            ItemContainer::Inventory => {
+                if let Some(target_slot) = self.item_slots.get_mut(target_index) {
+                    target_slot.count = total_count;
+                }
+            },
+            ItemContainer::Quest => {
+                if let Some(target_slot) = self.quest_slots.get_mut(target_index) {
+                    target_slot.count = total_count;
+                }
+            },
+        }
+        
+        println!("🔄 物品完全合并: 格子{} -> 格子{}，数量{}", selected.index, target_index, total_count);
+    }
+    
+    /// 部分合并物品
+    fn merge_items_partially(&mut self, selected: SelectedItem, target_container: ItemContainer, target_index: usize, max_stack: u32, remaining: u32) {
+        // 更新源格子数量
+        match selected.container {
+            ItemContainer::Inventory => {
+                if let Some(source_slot) = self.item_slots.get_mut(selected.index) {
+                    source_slot.count = remaining;
+                }
+            },
+            ItemContainer::Quest => {
+                if let Some(source_slot) = self.quest_slots.get_mut(selected.index) {
+                    source_slot.count = remaining;
+                }
+            },
+        }
+        
+        // 更新目标格子数量（填满）
+        match target_container {
+            ItemContainer::Inventory => {
+                if let Some(target_slot) = self.item_slots.get_mut(target_index) {
+                    target_slot.count = max_stack;
+                }
+            },
+            ItemContainer::Quest => {
+                if let Some(target_slot) = self.quest_slots.get_mut(target_index) {
+                    target_slot.count = max_stack;
+                }
+            },
+        }
+        
+        println!("🔄 物品部分合并: 格子{}剩余{}, 格子{}填满{}", selected.index, remaining, target_index, max_stack);
     }
     
     /// 移动物品到空格子
@@ -499,14 +698,13 @@ impl InventoryDialog {
         }
     }
     
-    /// 处理窗口拖动
-    fn handle_dragging(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+    /// 处理窗口拖动（使用优化的状态管理）
+    fn handle_window_dragging(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
         // 定义可拖动区域（顶部标题栏区域，避免与关闭按钮冲突）
-        // 关闭按钮位置是 (289, 3)，大小 20x20，所以拖动区域应该避开 (289-310, 3-23) 区域
         let drag_area_width = 289.0 - 5.0;  // 在关闭按钮左侧留5像素间隙
         let title_area = egui::Rect::from_min_size(
             bg_rect.min,
-            egui::vec2(drag_area_width, 30.0),  // 只占用关闭按钮左侧的区域
+            egui::vec2(drag_area_width, 30.0),
         );
         
         let title_response = ui.interact(
@@ -515,23 +713,21 @@ impl InventoryDialog {
             egui::Sense::drag(),
         );
         
-        // 开始拖动
+        // 使用优化的状态管理
         if title_response.drag_started() {
-            self.dragging = true;
+            self.interaction.window_dragging = true;
             if let Some(pointer_pos) = ctx.pointer_interact_pos() {
-                self.drag_offset = self.position.to_vec2() - pointer_pos.to_vec2();
+                self.interaction.drag_offset = self.position.to_vec2() - pointer_pos.to_vec2();
             }
         }
         
-        // 拖动中
-        if self.dragging {
+        if self.interaction.window_dragging {
             if let Some(pointer_pos) = ctx.pointer_latest_pos() {
-                self.position = (pointer_pos.to_vec2() + self.drag_offset).to_pos2();
+                self.position = (pointer_pos.to_vec2() + self.interaction.drag_offset).to_pos2();
             }
             
-            // 停止拖动
             if title_response.drag_stopped() || !title_response.dragged() {
-                self.dragging = false;
+                self.interaction.window_dragging = false;
             }
         }
     }
@@ -686,7 +882,122 @@ impl InventoryDialog {
         }
     }
     
-    /// 绘制物品格子
+    /// 使用egui::Grid布局绘制物品格子（优化版本）
+    fn draw_item_grid_optimized(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        let grid_start_x = 9.0;
+        let grid_start_y = 42.0;
+        
+        // 创建网格区域
+        let grid_area = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + grid_start_x, bg_rect.min.y + grid_start_y),
+            egui::vec2(264.0, 158.0),
+        );
+        
+        // 获取当前页面的数据
+        let (slot_count, container, start_index) = match self.active_tab {
+            InventoryTab::Items => (46, ItemContainer::Inventory, 0),
+            InventoryTab::Items2 => (self.max_capacity.min(80) - 46, ItemContainer::Inventory, 46),
+            InventoryTab::Quest => (40, ItemContainer::Quest, 0),
+        };
+        
+        // 使用egui::Grid进行布局
+        let response = ui.allocate_response(grid_area.size(), egui::Sense::hover());
+        ui.allocate_ui_at_rect(grid_area, |ui| {
+            egui::Grid::new("inventory_grid_optimized")
+                .num_columns(self.layout.grid_cols)
+                .spacing([self.layout.cell_spacing, self.layout.cell_spacing])
+                .show(ui, |ui| {
+                    // 直接绘制格子，避免复杂的借用
+                    for i in 0..slot_count {
+                        let global_index = start_index + i;
+                        
+                        // 获取格子数据
+                        let slot = match container {
+                            ItemContainer::Inventory => self.item_slots.get(global_index),
+                            ItemContainer::Quest => self.quest_slots.get(global_index),
+                        };
+                        
+                        if let Some(slot) = slot {
+                            // 直接在这里绘制格子，避免方法调用的借用问题
+                            let cell_size = egui::vec2(self.layout.cell_size, self.layout.cell_size);
+                            let (rect, response) = ui.allocate_exact_size(cell_size, egui::Sense::click_and_drag());
+                            
+                            // 绘制基础边框
+                            ui.painter().rect_stroke(
+                                rect,
+                                2.0,
+                                egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80)),
+                                egui::epaint::StrokeKind::Outside,
+                            );
+                            
+                            // 绘制悬停和选中状态
+                            if response.hovered() {
+                                ui.painter().rect_stroke(
+                                    rect,
+                                    2.0,
+                                    egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 0)),
+                                    egui::epaint::StrokeKind::Outside,
+                                );
+                            }
+                            
+                            if let Some(selected) = &self.selected_item {
+                                if selected.container == container && selected.index == global_index {
+                                    ui.painter().rect_stroke(
+                                        rect,
+                                        2.0,
+                                        egui::Stroke::new(3.0, egui::Color32::from_rgb(255, 255, 0)),
+                                        egui::epaint::StrokeKind::Outside,
+                                    );
+                                }
+                            }
+                            
+                            // 绘制物品内容
+                            if let Some(icon_index) = slot.icon_index {
+                                // 绘制图标
+                                if let Some(info) = LibraryName::Items.get_egui_texture(ctx, icon_index) {
+                                    if let Some(texture) = info.egui_texture {
+                                        let icon_rect = rect.shrink(2.0);
+                                        ui.painter().image(
+                                            texture.id(),
+                                            icon_rect,
+                                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                            egui::Color32::WHITE,
+                                        );
+                                    }
+                                }
+                                
+                                // 绘制数量
+                                if slot.count > 1 {
+                                    ui.painter().text(
+                                        egui::pos2(rect.max.x - 5.0, rect.max.y - 5.0),
+                                        egui::Align2::RIGHT_BOTTOM,
+                                        format!("{}", slot.count),
+                                        egui::FontId::proportional(10.0),
+                                        egui::Color32::WHITE,
+                                    );
+                                }
+                                
+                                // 处理tooltip
+                                if response.hovered() {
+                                    self.check_and_show_delayed_tooltip(ui, ctx, icon_index, slot.count, container, global_index);
+                                }
+                            }
+                            
+                            // 处理交互事件
+                            self.handle_item_interaction(response, container, global_index, ctx);
+                        }
+                        
+                        // 每8个格子换行
+                        if (i + 1) % self.layout.grid_cols == 0 {
+                            ui.end_row();
+                        }
+                    }
+                });
+        });
+    }
+
+    
+    /// 绘制物品格子（保持向后兼容）
     fn draw_item_grid(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
         // 原版布局参数：Location = new Point(x * 36 + 9 + x, y % 5 * 32 + 37 + y % 5)
         // X: x * 37 + 9 (格子32px + 间距1px = 每格占37px，起始位置9px)
@@ -860,7 +1171,15 @@ impl InventoryDialog {
             }
         }
         
-        // 原版传奇2没有tooltip系统，保持简洁
+        // 原版传奇2风格的物品预览系统（带延时）
+        if response.hovered() {
+            if let Some(slot) = self.item_slots.get(idx) {
+                if let Some(icon_idx) = slot.icon_index {
+                    // 检查并显示tooltip（如果延时已过）
+                    self.check_and_show_delayed_tooltip(ui, ctx, icon_idx, slot.count, ItemContainer::Inventory, idx);
+                }
+            }
+        }
         
         // 处理物品交互（原版传奇2风格）
         self.handle_item_interaction(response, ItemContainer::Inventory, idx, ctx);
@@ -942,7 +1261,15 @@ impl InventoryDialog {
             }
         }
         
-        // 原版传奇2没有tooltip系统，保持简洁
+        // 原版传奇2风格的任务物品预览系统（带延时）
+        if response.hovered() {
+            if let Some(slot) = self.quest_slots.get(idx) {
+                if let Some(icon_idx) = slot.icon_index {
+                    // 检查并显示tooltip（如果延时已过）
+                    self.check_and_show_delayed_tooltip(ui, ctx, icon_idx, slot.count, ItemContainer::Quest, idx);
+                }
+            }
+        }
         
         // 处理任务物品交互
         self.handle_item_interaction(response, ItemContainer::Quest, idx, ctx);
@@ -1121,12 +1448,12 @@ impl InventoryDialog {
                 if response.clicked() {
                     let expand_level = (self.max_capacity - 46) / 4;
                     let expand_cost = (1000000 + expand_level * 1000000) as u32;
-                    println!("💰 扩展背包需要 {} 金币 (当前有 {})", expand_cost, self.gold);
                     
                     if self.gold >= expand_cost {
                         self.expand_inventory();
+                        println!("🎒 背包扩展成功！消耗 {} 金币", expand_cost);
                     } else {
-                        println!("⚠️ 金币不足，无法扩展背包");
+                        println!("💰 金币不足！需要 {} 金币，当前只有 {}", expand_cost, self.gold);
                     }
                 }
             }
@@ -1217,9 +1544,40 @@ impl InventoryDialog {
     
     // 注意：移除了draw_context_menu函数，采用原版传奇2的简单右键使用方式
     
+
+    
+    /// 检查并显示带延时的tooltip（可修改self）
+    fn check_and_show_delayed_tooltip(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, icon_index: usize, count: u32, container: ItemContainer, slot_index: usize) {
+        // 初始化或检查计时器
+        if self.tooltip_start_time.is_none() {
+            self.tooltip_start_time = Some(std::time::Instant::now());
+        }
+        
+        // 检查延时是否已过
+        if let Some(start_time) = self.tooltip_start_time {
+            if start_time.elapsed() >= self.tooltip_delay {
+                self.show_item_tooltip(ui, ctx, icon_index, count, container, slot_index);
+            }
+        }
+    }
+    
+    /// 清除tooltip计时器（当鼠标不在任何物品上时）
+    fn clear_tooltip_if_not_hovering(&mut self, ctx: &egui::Context) {
+        // 检查鼠标是否在背包窗口外，或者没有悬停任何UI元素
+        if let Some(pointer_pos) = ctx.pointer_latest_pos() {
+            let window_rect = egui::Rect::from_min_size(self.position, egui::vec2(318.0, 245.0));
+            if !window_rect.contains(pointer_pos) {
+                // 鼠标在窗口外，清除tooltip计时器
+                self.tooltip_start_time = None;
+            }
+        } else {
+            // 没有鼠标位置信息，清除tooltip计时器
+            self.tooltip_start_time = None;
+        }
+    }
+    
     /// 显示物品tooltip（带纹理背景）
-    fn show_item_tooltip(&self, _ui: &mut egui::Ui, ctx: &egui::Context, icon_index: usize, 
-                        count: u32, container: ItemContainer, slot_index: usize) {
+    fn show_item_tooltip(&self, _ui: &mut egui::Ui, ctx: &egui::Context, icon_index: usize, count: u32, container: ItemContainer, slot_index: usize) {
         let item_info = self.get_item_info(icon_index);
         
         // 使用自定义tooltip，而不是默认的show_tooltip_at_pointer
@@ -1282,17 +1640,7 @@ impl InventoryDialog {
                                             .color(egui::Color32::from_rgb(176, 196, 222))); // 浅蓝色
                                     }
                                     
-                                    // 攻击力/防御力等属性
-                                    if let Some(power) = item_info.power {
-                                        let power_text = match item_info.item_type.as_str() {
-                                            "武器" => format!("攻击力: {}", power),
-                                            "防具" => format!("防御力: {}", power),
-                                            _ => format!("属性值: {}", power),
-                                        };
-                                        ui.label(egui::RichText::new(power_text)
-                                            .size(11.0)
-                                            .color(egui::Color32::from_rgb(144, 238, 144))); // 浅绿色
-                                    }
+                                    // 属性信息（删除旧的power字段引用）
                                     
                                     ui.add_space(4.0);
                                     
@@ -1427,6 +1775,128 @@ impl InventoryDialog {
         }
     }
 
+    /// 绘制数量选择对话框
+    fn draw_quantity_dialog(&mut self, ctx: &egui::Context) {
+        if !self.quantity_dialog_visible {
+            return;
+        }
+        
+        egui::Window::new("选择分离数量")
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .fixed_size(egui::vec2(250.0, 120.0))
+            .frame(egui::Frame {
+                fill: egui::Color32::from_rgb(40, 40, 40),
+                stroke: egui::Stroke::new(2.0, egui::Color32::GOLD),
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+                    
+                    // 标题
+                    ui.colored_label(egui::Color32::GOLD, "分离物品数量");
+                    ui.add_space(10.0);
+                    
+                    // 显示最大数量
+                    ui.label(format!("最多可分离: {}", self.quantity_max));
+                    ui.add_space(5.0);
+                    
+                    // 数量输入框
+                    ui.horizontal(|ui| {
+                        ui.label("数量:");
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.quantity_input)
+                                .desired_width(60.0)
+                        );
+                        
+                        // 自动选中文本便于输入
+                        if !response.has_focus() {
+                            response.request_focus();
+                        }
+                    });
+                    
+                    ui.add_space(10.0);
+                    
+                    // 按钮
+                    ui.horizontal(|ui| {
+                        ui.add_space(30.0);
+                        
+                        // 确认按钮
+                        if ui.add(
+                            egui::Button::new("确认")
+                                .fill(egui::Color32::from_rgb(0, 150, 0))
+                                .min_size(egui::vec2(60.0, 25.0))
+                        ).clicked() {
+                            if let Ok(quantity) = self.quantity_input.parse::<u32>() {
+                                if quantity > 0 && quantity <= self.quantity_max {
+                                    self.execute_custom_split(quantity);
+                                } else {
+                                    println!("⚠️ 无效数量: {} (范围: 1-{})", quantity, self.quantity_max);
+                                }
+                            } else {
+                                println!("⚠️ 输入的数量格式不正确");
+                            }
+                            self.quantity_dialog_visible = false;
+                        }
+                        
+                        ui.add_space(10.0);
+                        
+                        // 取消按钮
+                        if ui.add(
+                            egui::Button::new("取消")
+                                .fill(egui::Color32::from_rgb(150, 0, 0))
+                                .min_size(egui::vec2(60.0, 25.0))
+                        ).clicked() {
+                            self.quantity_dialog_visible = false;
+                        }
+                    });
+                });
+            });
+    }
+    
+    /// 执行自定义数量分离
+    fn execute_custom_split(&mut self, split_quantity: u32) {
+        if let Some(item) = &self.quantity_dialog_item {
+            if let Some(empty_index) = self.find_empty_slot(item.container) {
+                let remaining_quantity = item.count - split_quantity;
+                
+                // 更新原格子数量
+                match item.container {
+                    ItemContainer::Inventory => {
+                        if let Some(source_slot) = self.item_slots.get_mut(item.index) {
+                            source_slot.count = remaining_quantity;
+                        }
+                        // 在空格子放入分离的部分
+                        if let Some(empty_slot) = self.item_slots.get_mut(empty_index) {
+                            empty_slot.icon_index = Some(item.icon_index);
+                            empty_slot.count = split_quantity;
+                        }
+                    },
+                    ItemContainer::Quest => {
+                        if let Some(source_slot) = self.quest_slots.get_mut(item.index) {
+                            source_slot.count = remaining_quantity;
+                        }
+                        if let Some(empty_slot) = self.quest_slots.get_mut(empty_index) {
+                            empty_slot.icon_index = Some(item.icon_index);
+                            empty_slot.count = split_quantity;
+                        }
+                    },
+                }
+                println!("🔢 自定义分离: 格子{} 剩余{}, 格子{} 分离{}", item.index, remaining_quantity, empty_index, split_quantity);
+            } else {
+                println!("⚠️ 没有空格子进行分离");
+            }
+        }
+        
+        // 清理对话框状态
+        self.quantity_dialog_item = None;
+        self.quantity_input.clear();
+        self.quantity_max = 0;
+    }
+    
     /// 原版传奇2风格：直接使用物品（无菜单）
     fn use_item_directly(&mut self, container: ItemContainer, index: usize, icon_index: usize, count: u32) {
         // 根据物品类型直接使用
@@ -1453,49 +1923,404 @@ impl InventoryDialog {
         }
     }
     
-    /// 根据图标索引获取物品信息（模拟数据）
+    /// 根据图标索引获取物品信息（原版传奇2风格）
     fn get_item_info(&self, icon_index: usize) -> ItemInfo {
-        // 这里简化处理，根据图标索引生成模拟的物品信息
-        // 在实际游戏中，这些信息应该从物品数据库中获取
+        // 根据图标索引生成与原版传奇2一致的物品信息
         match icon_index {
             0..=49 => ItemInfo {
-                name: format!("传奇武器 #{}", icon_index),
+                name: format!("裁决之杖 +{}", icon_index % 5),
                 item_type: "武器".to_string(),
-                description: "一把锋利的传奇武器，蕴含着神秘的力量。使用它可以对敌人造成巨大伤害。".to_string(),
-                level: (icon_index as u32 % 10) + 1,
-                power: Some((icon_index as u32 % 20) * 5 + 10),
+                description: "一把神秘的武器，拥有强大的魔法力量。".to_string(),
+                level: (icon_index as u32 % 50) + 1,
+                attack: Some((15 + icon_index as u32 % 10, 25 + icon_index as u32 % 15)),
+                magic_attack: None,
+                taoist_attack: None,
+                defence: None,
+                magic_defence: None,
+                accuracy: Some(5 + icon_index as u32 % 3),
+                agility: None,
+                luck: Some(2 + icon_index as u32 % 2),
+                weight: 8 + icon_index as u32 % 5,
+                durability: Some((18000 - (icon_index as u32 % 5) * 1000, 20000)),
+                grade: if icon_index % 10 == 0 { ItemGrade::Legendary } else { ItemGrade::Common },
+                refined: icon_index % 7 == 0,
+                class_requirement: Some("战士".to_string()),
+                gender_requirement: None,
+                max_stack: 1, // 武器不可堆叠
             },
             50..=99 => ItemInfo {
-                name: format!("神秘防具 #{}", icon_index),
+                name: format!("龙纹盔甲 +{}", (icon_index - 50) % 5),
                 item_type: "防具".to_string(),
-                description: "坚固的防护装备，能够有效抵挡敌人的攻击。穿戴后大幅提升生存能力。".to_string(),
-                level: (icon_index as u32 % 15) + 1,
-                power: Some((icon_index as u32 % 30) * 3 + 15),
+                description: "龙纹装饰的盔甲，拥有强大的防护能力。".to_string(),
+                level: ((icon_index - 50) as u32 % 40) + 10,
+                attack: None,
+                magic_attack: None,
+                taoist_attack: None,
+                defence: Some((8 + (icon_index - 50) as u32 % 8, 15 + (icon_index - 50) as u32 % 10)),
+                magic_defence: Some((5 + (icon_index - 50) as u32 % 5, 10 + (icon_index - 50) as u32 % 8)),
+                accuracy: None,
+                agility: None,
+                luck: None,
+                weight: 12 + (icon_index - 50) as u32 % 8,
+                durability: Some((25000 - ((icon_index - 50) as u32 % 8) * 1000, 28000)),
+                grade: if (icon_index - 50) % 15 == 0 { ItemGrade::Rare } else { ItemGrade::Common },
+                refined: (icon_index - 50) % 9 == 0,
+                class_requirement: Some("战士".to_string()),
+                gender_requirement: None,
+                max_stack: 1, // 防具不可堆叠
             },
             100..=199 => ItemInfo {
-                name: format!("恢复药水 #{}", icon_index),
-                item_type: "消耗品".to_string(),
-                description: "神奇的恢复药水，能够快速恢复生命值或法力值。战斗中的救命法宝。".to_string(),
-                level: (icon_index as u32 % 5) + 1,
-                power: Some((icon_index as u32 % 10) * 10 + 50),
+                name: format!("超级魔法药"),
+                item_type: "药水".to_string(),
+                description: "高级的魔法药水，能够快速恢复魔法值。".to_string(),
+                level: 1,
+                attack: None,
+                magic_attack: None,
+                taoist_attack: None,
+                defence: None,
+                magic_defence: None,
+                accuracy: None,
+                agility: None,
+                luck: None,
+                weight: 1,
+                durability: None,
+                grade: ItemGrade::Common,
+                refined: false,
+                class_requirement: None,
+                gender_requirement: None,
+                max_stack: 250, // 药水可堆叠250个
             },
             300..=349 => ItemInfo {
-                name: format!("任务道具 #{}", icon_index),
+                name: format!("任务令牌"),
                 item_type: "任务物品".to_string(),
-                description: "重要的任务相关物品，完成特定任务需要用到。不可交易，不可丢弃。".to_string(),
-                level: 0,
-                power: None,
+                description: "重要的任务物品，完成特定任务需要用到。".to_string(),
+                level: 1,
+                attack: None,
+                magic_attack: None,
+                taoist_attack: None,
+                defence: None,
+                magic_defence: None,
+                accuracy: None,
+                agility: None,
+                luck: None,
+                weight: 1,
+                durability: None,
+                grade: ItemGrade::Common,
+                refined: false,
+                class_requirement: None,
+                gender_requirement: None,
+                max_stack: 100, // 任务物品可堆叠100个
             },
             _ => ItemInfo {
-                name: format!("未知物品 #{}", icon_index),
-                item_type: "其他".to_string(),
-                description: "一个神秘的物品，它的用途还未被发现。也许蕴含着未知的秘密...".to_string(),
+                name: format!("神秘物品"),
+                item_type: "特殊物品".to_string(),
+                description: "一个神秘的物品，它的用途还未被发现。".to_string(),
                 level: 1,
-                power: Some(icon_index as u32 % 100),
+                attack: None,
+                magic_attack: None,
+                taoist_attack: None,
+                defence: None,
+                magic_defence: None,
+                accuracy: None,
+                agility: None,
+                luck: None,
+                weight: 1,
+                durability: None,
+                grade: ItemGrade::Mythical,
+                refined: false,
+                class_requirement: None,
+                gender_requirement: None,
+                max_stack: 50, // 特殊物品可堆叠50个
             },
         }
     }
-
+    
+    /// 处理数字键快速使用物品
+    fn handle_hotkey_use(&mut self, slot_index: usize) {
+        if slot_index >= self.item_slots.len() {
+            return;
+        }
+        
+        if let Some(slot) = self.item_slots.get(slot_index) {
+            if let Some(icon_idx) = slot.icon_index {
+                println!("⌨️ 数字键{}使用物品: 格子{}, 图标{}", slot_index + 1, slot_index, icon_idx);
+                self.use_item_directly(ItemContainer::Inventory, slot_index, icon_idx, slot.count);
+            } else {
+                println!("⌨️ 数字键{}: 格子{}为空", slot_index + 1, slot_index);
+            }
+        }
+    }
+    
+    /// 处理Delete键丢弃物品
+    fn handle_item_drop(&mut self, container: ItemContainer, index: usize) {
+        let success = match container {
+            ItemContainer::Inventory => {
+                if let Some(slot) = self.item_slots.get_mut(index) {
+                    if slot.icon_index.is_some() {
+                        let item_name = format!("物品#{}", slot.icon_index.unwrap_or(0));
+                        *slot = ItemSlot::empty();
+                        println!("🗑️ 丢弃物品: {}", item_name);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            ItemContainer::Quest => {
+                if let Some(slot) = self.quest_slots.get_mut(index) {
+                    if slot.icon_index.is_some() {
+                        let item_name = format!("任务物品#{}", slot.icon_index.unwrap_or(0));
+                        *slot = ItemSlot::empty();
+                        println!("🗑️ 丢弃任务物品: {}", item_name);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+        };
+        
+        if !success {
+            println!("⚠️ 无法丢弃: 格子为空或无效");
+        } else {
+            // 清除选中状态
+            self.selected_item = None;
+        }
+    }
+    
+    /// 处理Enter键使用选中的物品
+    fn handle_selected_item_use(&mut self) {
+        if let Some(selected) = &self.selected_item.clone() {
+            let slot = match selected.container {
+                ItemContainer::Inventory => self.item_slots.get(selected.index),
+                ItemContainer::Quest => self.quest_slots.get(selected.index),
+            };
+            
+            if let Some(slot) = slot {
+                if let Some(icon_idx) = slot.icon_index {
+                    self.use_item_directly(selected.container, selected.index, icon_idx, slot.count);
+                } else {
+                    println!("⚠️ 选中的格子为空");
+                }
+            }
+        } else {
+            println!("⚠️ 没有选中任何物品");
+        }
+    }
+    
+    /// 处理Shift+点击分离一半物品
+    fn handle_item_split_half(&mut self, container: ItemContainer, index: usize) {
+        let slot = match container {
+            ItemContainer::Inventory => self.item_slots.get(index).cloned(),
+            ItemContainer::Quest => self.quest_slots.get(index).cloned(),
+        };
+        
+        if let Some(slot) = slot {
+            if let Some(icon_index) = slot.icon_index {
+                if slot.count > 1 {
+                    // 找到空格子进行分离
+                    let split_count = slot.count / 2;
+                    let remaining_count = slot.count - split_count;
+                    
+                    if let Some(empty_index) = self.find_empty_slot(container) {
+                        // 更新原格子数量
+                        match container {
+                            ItemContainer::Inventory => {
+                                if let Some(source_slot) = self.item_slots.get_mut(index) {
+                                    source_slot.count = remaining_count;
+                                }
+                                // 在空格子放入分离的部分
+                                if let Some(empty_slot) = self.item_slots.get_mut(empty_index) {
+                                    empty_slot.icon_index = Some(icon_index);
+                                    empty_slot.count = split_count;
+                                }
+                            },
+                            ItemContainer::Quest => {
+                                if let Some(source_slot) = self.quest_slots.get_mut(index) {
+                                    source_slot.count = remaining_count;
+                                }
+                                if let Some(empty_slot) = self.quest_slots.get_mut(empty_index) {
+                                    empty_slot.icon_index = Some(icon_index);
+                                    empty_slot.count = split_count;
+                                }
+                            },
+                        }
+                        println!("✂️ Shift+点击分离: 格子{} 剩余{}，格子{} 分离{}", index, remaining_count, empty_index, split_count);
+                    } else {
+                        println!("⚠️ 没有空格子进行分离");
+                    }
+                } else {
+                    println!("⚠️ 物品数量为1，无法分离");
+                }
+            }
+        }
+    }
+    
+    /// 处理Ctrl+点击自定义分离数量
+    fn handle_item_split_custom(&mut self, container: ItemContainer, index: usize) {
+        let slot = match container {
+            ItemContainer::Inventory => self.item_slots.get(index).cloned(),
+            ItemContainer::Quest => self.quest_slots.get(index).cloned(),
+        };
+        
+        if let Some(slot) = slot {
+            if let Some(icon_index) = slot.icon_index {
+                if slot.count > 1 {
+                    // 显示数量选择对话框
+                    self.quantity_dialog_visible = true;
+                    self.quantity_dialog_item = Some(SelectedItem {
+                        container,
+                        index,
+                        icon_index,
+                        count: slot.count,
+                    });
+                    self.quantity_max = slot.count - 1; // 最多可以分离 count-1 个
+                    self.quantity_input = "1".to_string(); // 默认分离1个
+                    println!("🔢 Ctrl+点击显示数量选择对话框: 最多可分离{}", self.quantity_max);
+                } else {
+                    println!("⚠️ 物品数量为1，无法分离");
+                }
+            }
+        }
+    }
+    
+    /// 查找空格子
+    fn find_empty_slot(&self, container: ItemContainer) -> Option<usize> {
+        match container {
+            ItemContainer::Inventory => {
+                for (i, slot) in self.item_slots.iter().enumerate() {
+                    if i < self.max_capacity && slot.icon_index.is_none() {
+                        return Some(i);
+                    }
+                }
+            },
+            ItemContainer::Quest => {
+                for (i, slot) in self.quest_slots.iter().enumerate() {
+                    if slot.icon_index.is_none() {
+                        return Some(i);
+                    }
+                }
+            },
+        }
+        None
+    }
+    
+    /// 处理方向键选择物品
+    fn handle_arrow_key_selection(&mut self, input: &egui::InputState) {
+        let current_selection = self.selected_item.clone();
+        
+        // 计算当前网格的行列数
+        let (cols, rows) = match self.active_tab {
+            InventoryTab::Items => (8, 6),      // Items页：8列6行
+            InventoryTab::Items2 => (8, 5),     // Items2页：8列5行
+            InventoryTab::Quest => (8, 5),      // Quest页：8列5行
+        };
+        
+        let new_selection = if let Some(selected) = current_selection {
+            // 如果当前有选中的物品，根据方向键移动
+            if selected.container == ItemContainer::Inventory && self.active_tab == InventoryTab::Items ||
+               selected.container == ItemContainer::Inventory && self.active_tab == InventoryTab::Items2 ||
+               selected.container == ItemContainer::Quest && self.active_tab == InventoryTab::Quest {
+                
+                let current_row = selected.index / cols;
+                let current_col = selected.index % cols;
+                
+                let (new_row, new_col) = if input.key_pressed(egui::Key::ArrowLeft) {
+                    (current_row, if current_col > 0 { current_col - 1 } else { cols - 1 })
+                } else if input.key_pressed(egui::Key::ArrowRight) {
+                    (current_row, if current_col < cols - 1 { current_col + 1 } else { 0 })
+                } else if input.key_pressed(egui::Key::ArrowUp) {
+                    (if current_row > 0 { current_row - 1 } else { rows - 1 }, current_col)
+                } else if input.key_pressed(egui::Key::ArrowDown) {
+                    (if current_row < rows - 1 { current_row + 1 } else { 0 }, current_col)
+                } else {
+                    (current_row, current_col)
+                };
+                
+                let new_index = new_row * cols + new_col;
+                
+                // 确保新索引在有效范围内
+                let max_index = match self.active_tab {
+                    InventoryTab::Items => self.item_slots.len().min(46),
+                    InventoryTab::Items2 => self.item_slots.len(),
+                    InventoryTab::Quest => self.quest_slots.len(),
+                };
+                
+                if new_index < max_index {
+                    // 获取新位置的物品信息
+                    let (icon_idx, count) = match selected.container {
+                        ItemContainer::Inventory => {
+                            if let Some(slot) = self.item_slots.get(new_index) {
+                                (slot.icon_index.unwrap_or(0), slot.count)
+                            } else {
+                                (0, 0)
+                            }
+                        }
+                        ItemContainer::Quest => {
+                            if let Some(slot) = self.quest_slots.get(new_index) {
+                                (slot.icon_index.unwrap_or(0), slot.count)
+                            } else {
+                                (0, 0)
+                            }
+                        }
+                    };
+                    
+                    Some(SelectedItem {
+                        container: selected.container,
+                        index: new_index,
+                        icon_index: icon_idx,
+                        count,
+                    })
+                } else {
+                    Some(selected)
+                }
+            } else {
+                Some(selected)
+            }
+        } else {
+            // 如果没有选中的物品，选择第一个格子
+            let container = match self.active_tab {
+                InventoryTab::Items | InventoryTab::Items2 => ItemContainer::Inventory,
+                InventoryTab::Quest => ItemContainer::Quest,
+            };
+            
+            // 获取第一个格子的物品信息
+            let (icon_idx, count) = match container {
+                ItemContainer::Inventory => {
+                    if let Some(slot) = self.item_slots.get(0) {
+                        (slot.icon_index.unwrap_or(0), slot.count)
+                    } else {
+                        (0, 0)
+                    }
+                }
+                ItemContainer::Quest => {
+                    if let Some(slot) = self.quest_slots.get(0) {
+                        (slot.icon_index.unwrap_or(0), slot.count)
+                    } else {
+                        (0, 0)
+                    }
+                }
+            };
+            
+            Some(SelectedItem {
+                container,
+                index: 0,
+                icon_index: icon_idx,
+                count,
+            })
+        };
+        
+        if let Some(new_sel) = new_selection {
+            if self.selected_item.as_ref() != Some(&new_sel) {
+                self.selected_item = Some(new_sel.clone());
+                println!("⌨️ 方向键选择: 容器{:?}, 格子{}", new_sel.container, new_sel.index);
+            }
+        }
+    }
 }
 
 impl Dialog for InventoryDialog {
@@ -1507,11 +2332,65 @@ impl Dialog for InventoryDialog {
         
 
         
-        // 键盘快捷键：I键或ESC键关闭背包
+        // 原版传奇2风格的键盘快捷键
         ctx.input(|i| {
+            // I键或ESC键关闭背包
             if i.key_pressed(egui::Key::I) || i.key_pressed(egui::Key::Escape) {
                 self.visible = false;
                 println!("⌨️ 键盘关闭背包对话框");
+            }
+            
+            // Tab键切换标签页
+            if i.key_pressed(egui::Key::Tab) {
+                self.active_tab = match self.active_tab {
+                    InventoryTab::Items => InventoryTab::Items2,
+                    InventoryTab::Items2 => InventoryTab::Quest,
+                    InventoryTab::Quest => InventoryTab::Items,
+                };
+                println!("⌨️ Tab键切换标签页: {:?}", self.active_tab);
+            }
+            
+            // 数字键1-9快速使用物品（前9个格子）
+            for num in 1..=9 {
+                let key = match num {
+                    1 => egui::Key::Num1,
+                    2 => egui::Key::Num2,
+                    3 => egui::Key::Num3,
+                    4 => egui::Key::Num4,
+                    5 => egui::Key::Num5,
+                    6 => egui::Key::Num6,
+                    7 => egui::Key::Num7,
+                    8 => egui::Key::Num8,
+                    9 => egui::Key::Num9,
+                    _ => continue,
+                };
+                
+                if i.key_pressed(key) {
+                    let slot_index = (num - 1) as usize;
+                    self.handle_hotkey_use(slot_index);
+                }
+            }
+            
+            // Delete键丢弃选中的物品
+            if i.key_pressed(egui::Key::Delete) {
+                if let Some(selected) = &self.selected_item {
+                    println!("⌨️ Delete键丢弃物品: 容器{:?}, 格子{}", selected.container, selected.index);
+                    self.handle_item_drop(selected.container, selected.index);
+                }
+            }
+            
+            // Enter键使用选中的物品
+            if i.key_pressed(egui::Key::Enter) {
+                if let Some(selected) = &self.selected_item {
+                    println!("⌨️ Enter键使用物品: 容器{:?}, 格子{}", selected.container, selected.index);
+                    self.handle_selected_item_use();
+                }
+            }
+            
+            // 方向键选择物品
+            if i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::ArrowRight) ||
+               i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::ArrowDown) {
+                self.handle_arrow_key_selection(i);
             }
         });
         
@@ -1561,14 +2440,20 @@ impl Dialog for InventoryDialog {
                 // 绘制窗口背景
                 let bg_rect = self.draw_window(ui, ctx);
                 
-                // 处理窗口拖动（点击背景区域可拖动）
-                self.handle_dragging(ui, ctx, &bg_rect);
+                // 处理窗口拖动（使用优化的状态管理）
+                self.handle_window_dragging(ui, ctx, &bg_rect);
                 
                 // 绘制标签页按钮
                 self.draw_tab_buttons(ui, ctx, &bg_rect);
                 
-                // 绘制物品格子
-                self.draw_item_grid(ui, ctx, &bg_rect);
+                // 使用优化的Grid布局绘制物品格子
+                self.draw_item_grid_optimized(ui, ctx, &bg_rect);
+                
+                // 同时保持原有的绘制方法作为备用
+                // self.draw_item_grid(ui, ctx, &bg_rect);
+                
+                // 检查是否需要清除tooltip计时器（当鼠标不在任何物品上时）
+                self.clear_tooltip_if_not_hovering(ctx);
                 
                 // 绘制金币和负重信息
                 self.draw_info_bar(ui, ctx, &bg_rect);
@@ -1585,6 +2470,9 @@ impl Dialog for InventoryDialog {
         
         // 绘制简化版右键菜单（无tooltip干扰）
         self.draw_simple_context_menu(ctx);
+        
+        // 绘制数量选择对话框
+        self.draw_quantity_dialog(ctx);
         
         *open = self.visible;
     }

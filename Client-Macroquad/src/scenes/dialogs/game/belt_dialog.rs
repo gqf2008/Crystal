@@ -37,7 +37,7 @@ pub struct BeltDialog {
 }
 
 /// 快捷栏格子物品（临时结构，后续应该使用真实的物品系统）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 struct CellItem {
     texture_index: u32,
@@ -51,6 +51,45 @@ impl BeltDialog {
         // 原工程：MainDialog.X + 230, ScreenHeight - 150
         let position = egui::pos2(main_dialog_x + 230.0, screen_height - 150.0);
         
+        // 初始化一些药水物品作为示例
+        let mut cells = [None; 6];
+        
+        // 索引 0: 小血瓶 (Items 索引 0)
+        cells[0] = Some(CellItem {
+            texture_index: 0,  // 小血瓶图标
+            count: 15,         // 15个
+        });
+        
+        // 索引 1: 大血瓶 (Items 索引 1)
+        cells[1] = Some(CellItem {
+            texture_index: 1,  // 大血瓶图标
+            count: 8,          // 8个
+        });
+        
+        // 索引 2: 小蓝瓶 (Items 索引 2)
+        cells[2] = Some(CellItem {
+            texture_index: 2,  // 小蓝瓶图标
+            count: 12,         // 12个
+        });
+        
+        // 索引 3: 大蓝瓶 (Items 索引 3)
+        cells[3] = Some(CellItem {
+            texture_index: 3,  // 大蓝瓶图标
+            count: 6,          // 6个
+        });
+        
+        // 索引 4: 金创药 (Items 索引 5)
+        cells[4] = Some(CellItem {
+            texture_index: 5,  // 金创药图标
+            count: 3,          // 3个
+        });
+        
+        // 索引 5: 万能药 (Items 索引 6)
+        cells[5] = Some(CellItem {
+            texture_index: 6,  // 万能药图标
+            count: 2,          // 2个
+        });
+        
         Self {
             visible: true,
             layout: BeltLayout::Horizontal,
@@ -58,7 +97,7 @@ impl BeltDialog {
             horizontal_position: position,  // 保存初始位置
             dragging: false,
             drag_offset: egui::vec2(0.0, 0.0),
-            cells: Default::default(),
+            cells,
         }
     }
     
@@ -168,7 +207,7 @@ impl BeltDialog {
     }
     
     /// 绘制物品格子
-    fn draw_cells(&self, ui: &mut egui::Ui, _ctx: &egui::Context) {
+    fn draw_cells(&self, ui: &mut egui::Ui, ctx: &egui::Context) {
         for i in 0..6 {
             let cell_pos = self.get_cell_position(i);
             let cell_size = egui::vec2(32.0, 32.0);
@@ -225,52 +264,66 @@ impl BeltDialog {
                 egui::Stroke::new(1.0, egui::Color32::from_rgb(30, 30, 30)),
             );
             
-            // TODO: 如果有物品，绘制物品图标
-            // if let Some(item) = &self.cells[i] {
-            //     if let Some(info) = LibraryName::Items.get_egui_texture(ctx, item.texture_index as usize) {
-            //         if let Some(item_texture) = info.egui_texture {
-            //             ui.painter().image(
-            //                 item_texture.id(),
-            //                 rect,
-            //                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            //                 egui::Color32::WHITE,
-            //             );
-            //         }
-            //     }
-            //     
-            //     // 绘制物品数量
-            //     if item.count > 1 {
-            //         let count_text = format!("{}", item.count);
-            //         ui.painter().text(
-            //             egui::pos2(cell_pos.x + cell_size.x - 4.0, cell_pos.y + cell_size.y - 4.0),
-            //             egui::Align2::RIGHT_BOTTOM,
-            //             &count_text,
-            //             egui::FontId::proportional(10.0),
-            //             egui::Color32::WHITE,
-            //         );
-            //     }
-            // }
+            // 绘制物品图标和数量
+            if let Some(item) = &self.cells[i] {
+                if let Some(info) = LibraryName::Items.get_egui_texture(ctx, item.texture_index as usize) {
+                    if let Some(item_texture) = info.egui_texture {
+                        // 根据原始C#代码逻辑：计算居中偏移
+                        // Point offSet = new Point((Size.Width - imgSize.Width) / 2, (Size.Height - imgSize.Height) / 2);
+                        let cell_inner_size = 30.0; // 32 - 2像素边距
+                        let img_width = info.width as f32;
+                        let img_height = info.height as f32;
+                        
+                        // 计算居中偏移
+                        let center_offset_x = (cell_inner_size - img_width) / 2.0;
+                        let center_offset_y = (cell_inner_size - img_height) / 2.0;
+                        
+                        // 计算最终绘制位置（格子位置 + 边距 + 居中偏移）
+                        let draw_pos = egui::pos2(
+                            cell_pos.x + 1.0 + center_offset_x,
+                            cell_pos.y + 1.0 + center_offset_y
+                        );
+                        
+                        // 使用纹理的实际尺寸
+                        let texture_size = egui::vec2(img_width, img_height);
+                        let item_rect = egui::Rect::from_min_size(draw_pos, texture_size);
+                        
+                        ui.painter().image(
+                            item_texture.id(),
+                            item_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
+                
+                // 绘制物品数量（在右下角）
+                if item.count > 1 {
+                    let count_text = format!("{}", item.count);
+                    ui.painter().text(
+                        egui::pos2(cell_pos.x + cell_size.x - 3.0, cell_pos.y + cell_size.y - 3.0),
+                        egui::Align2::RIGHT_BOTTOM,
+                        &count_text,
+                        egui::FontId::proportional(9.0),
+                        egui::Color32::WHITE,
+                    );
+                }
+            }
             
-            // 绘制数字键提示
+            // 绘制数字键提示（在格子外面）
             let key_text = format!("{}", i + 1);
             let key_pos = match self.layout {
-                BeltLayout::Horizontal => egui::pos2(cell_pos.x + 9.0, cell_pos.y - 12.0),
-                BeltLayout::Vertical => egui::pos2(cell_pos.x - 15.0, cell_pos.y + 13.0),
+                BeltLayout::Horizontal => egui::pos2(cell_pos.x + 16.0, cell_pos.y - 12.0),
+                BeltLayout::Vertical => egui::pos2(cell_pos.x - 15.0, cell_pos.y + 16.0),
             };
             
             ui.painter().text(
                 key_pos,
                 egui::Align2::CENTER_CENTER,
                 &key_text,
-                egui::FontId::proportional(10.0),
-                egui::Color32::WHITE,
+                egui::FontId::proportional(9.0),
+                egui::Color32::from_rgb(255, 255, 0), // 黄色数字键提示
             );
-            
-            // TODO: 绘制物品图标和数量
-            // if let Some(item) = &self.cells[i] {
-            //     // 绘制物品纹理
-            //     // 绘制数量文字
-            // }
         }
     }
     
