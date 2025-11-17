@@ -507,7 +507,7 @@ impl MainDialog {
         let mut chat_open = true;
         let mut control_bar_open = true;
         let mut belt_open = true;
-        let mut inventory_open = true;
+        let mut inventory_open = self.inventory_dialog.is_visible(); // 使用背包对话框的实际可见状态
         
         // 先显示 ChatDialog（在最底层）
         self.chat_dialog.show(ctx, &mut chat_open);

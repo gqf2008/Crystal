@@ -96,6 +96,12 @@ pub struct InventoryDialog {
     
     /// 是否正在拾取金币
     picking_gold: bool,
+    
+    /// UI状态
+    /// 金币区域是否悬停
+    gold_hovered: bool,
+    /// 关闭按钮是否悬停
+    close_hovered: bool,
 }
 
 impl InventoryDialog {
@@ -138,12 +144,20 @@ impl InventoryDialog {
             gold: 123456,
             weight: (75, 100),
             picking_gold: false,
+            gold_hovered: false,
+            close_hovered: false,
         }
     }
     
     /// 显示/隐藏背包
     pub fn toggle(&mut self) {
         self.visible = !self.visible;
+        println!("🎒 背包对话框: {}", if self.visible { "显示" } else { "隐藏" });
+    }
+    
+    /// 获取可见状态
+    pub fn is_visible(&self) -> bool {
+        self.visible
     }
     
     /// 切换到物品页1
@@ -167,16 +181,7 @@ impl InventoryDialog {
         self.active_tab = InventoryTab::Quest;
     }
     
-    /// 扩展背包（每次+4格，最多扩展10次）
-    pub fn expand_inventory(&mut self) {
-        if self.max_capacity >= 86 {
-            println!("⚠️ 背包已扩展至最大容量");
-            return;
-        }
-        
-        self.max_capacity += 4;
-        println!("✅ 背包扩展至 {} 格", self.max_capacity);
-    }
+
     
     /// 获取当前标签页的滚动偏移量（可变引用）
     fn get_scroll_offset_mut(&mut self) -> &mut f32 {
@@ -198,10 +203,12 @@ impl InventoryDialog {
     
     /// 处理窗口拖动
     fn handle_dragging(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
-        // 定义可拖动区域（顶部标题栏区域，避免与按钮冲突）
+        // 定义可拖动区域（顶部标题栏区域，避免与关闭按钮冲突）
+        // 关闭按钮位置是 (289, 3)，大小 20x20，所以拖动区域应该避开 (289-310, 3-23) 区域
+        let drag_area_width = 289.0 - 5.0;  // 在关闭按钮左侧留5像素间隙
         let title_area = egui::Rect::from_min_size(
             bg_rect.min,
-            egui::vec2(bg_rect.width(), 30.0),  // 顶部30像素作为拖动区
+            egui::vec2(drag_area_width, 30.0),  // 只占用关闭按钮左侧的区域
         );
         
         let title_response = ui.interact(
@@ -325,44 +332,59 @@ impl InventoryDialog {
         let x = 289.0;
         let y = 3.0;
         
-        if let Some(info) = LibraryName::Prguse2.get_egui_texture(ctx, 360) {
-            if let Some(texture) = info.egui_texture {
-                let size = texture.size_vec2();
-                let btn_rect = egui::Rect::from_min_size(
-                    egui::pos2(bg_rect.min.x + x, bg_rect.min.y + y),
-                    size,
+        // 计算按钮的绝对位置
+        let abs_pos = egui::pos2(bg_rect.min.x + x, bg_rect.min.y + y);
+        let btn_size = egui::vec2(20.0, 20.0);
+        let btn_rect = egui::Rect::from_min_size(abs_pos, btn_size);
+        
+        // 尝试加载正常状态纹理以获取尺寸
+        if let Some(normal_info) = LibraryName::Prguse2.get_egui_texture(ctx, 360) {
+            if let Some(normal_texture) = normal_info.egui_texture {
+                // 创建ImageButton
+                let image_button = egui::ImageButton::new(
+                    egui::Image::from_texture(egui::load::SizedTexture::new(
+                        normal_texture.id(), 
+                        normal_texture.size_vec2()
+                    )).fit_to_exact_size(btn_size)
                 );
                 
-                let response = ui.interact(
-                    btn_rect,
-                    egui::Id::new("inv_close_btn"),
-                    egui::Sense::click(),
-                );
+                // 将ImageButton放在指定位置
+                let response = ui.put(btn_rect, image_button);
                 
-                // 三态纹理
-                let texture_idx = if response.is_pointer_button_down_on() {
-                    362
-                } else if response.hovered() {
-                    361
-                } else {
-                    360
-                };
+                // 更新悬停状态
+                self.close_hovered = response.hovered();
                 
-                if let Some(btn_info) = LibraryName::Prguse2.get_egui_texture(ctx, texture_idx) {
-                    if let Some(btn_texture) = btn_info.egui_texture {
-                        ui.painter().image(
-                            btn_texture.id(),
-                            btn_rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    }
-                }
-                
+                // 处理点击事件
                 if response.clicked() {
                     self.visible = false;
                 }
+                
+                // 如果悬停，在按钮上方叠加悬停纹理
+                if self.close_hovered {
+                    if let Some(hover_info) = LibraryName::Prguse2.get_egui_texture(ctx, 361) {
+                        if let Some(hover_texture) = hover_info.egui_texture {
+                            ui.painter().image(
+                                hover_texture.id(),
+                                btn_rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                    }
+                }
+                
+                return;
             }
+        }
+        
+        // 如果纹理加载失败，使用备用的文本按钮
+        let fallback_button = egui::Button::new("×")
+            .fill(egui::Color32::from_rgb(150, 80, 80));
+        
+        let response = ui.put(btn_rect, fallback_button);
+        
+        if response.clicked() {
+            self.visible = false;
         }
     }
     
@@ -604,6 +626,107 @@ impl InventoryDialog {
         }
     }
     
+    /// 绘制底部UI元素（金币、重量条）
+    fn draw_bottom_ui(&mut self, ui: &mut egui::Ui, content_rect: &egui::Rect) {
+        // 金币显示区域 (40, 212, 111x14) - 原版精确位置
+        let gold_rect = egui::Rect::from_min_size(
+            egui::pos2(content_rect.min.x + 40.0, content_rect.min.y + 212.0),
+            egui::vec2(111.0, 14.0)
+        );
+        
+        // 金币交互
+        let gold_response = ui.interact(
+            gold_rect,
+            egui::Id::new("gold_area"),
+            egui::Sense::click()
+        );
+        
+        self.gold_hovered = gold_response.hovered();
+        
+        // 绘制金币背景
+        if self.gold_hovered {
+            ui.painter().rect_filled(
+                gold_rect,
+                2.0,
+                egui::Color32::from_rgba_premultiplied(255, 215, 0, 60), // 淡金色高亮
+            );
+        }
+        
+        // 绘制金币数量
+        let gold_text = self.gold.to_string(); // 显示金币数量
+        ui.painter().text(
+            gold_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            gold_text,
+            egui::FontId::proportional(12.0),
+            egui::Color32::from_rgb(255, 215, 0), // 金色
+        );
+        
+        if gold_response.clicked() {
+            self.picking_gold = !self.picking_gold;
+            println!("💰 点击金币: {} (拾取: {})", self.gold, self.picking_gold);
+        }
+        
+        // 重量条 (182, 217) - 原版精确位置，使用纹理自然大小
+        let weight_bar_rect = egui::Rect::from_min_size(
+            egui::pos2(content_rect.min.x + 182.0, content_rect.min.y + 217.0),
+            egui::vec2(50.0, 14.0) // 匹配原版纹理大小
+        );
+        
+        // 绘制重量条背景
+        ui.painter().rect_filled(
+            weight_bar_rect,
+            2.0,
+            egui::Color32::from_rgb(60, 60, 60),
+        );
+        
+        // 计算重量百分比
+        let weight_percent = if self.weight.1 > 0 {
+            (self.weight.0 as f32 / self.weight.1 as f32).min(1.0)
+        } else {
+            0.0
+        };
+        
+        // 绘制重量条填充
+        if weight_percent > 0.0 {
+            let fill_width = weight_bar_rect.width() * weight_percent;
+            let fill_rect = egui::Rect::from_min_size(
+                weight_bar_rect.min,
+                egui::vec2(fill_width, weight_bar_rect.height())
+            );
+            
+            // 根据重量百分比选择颜色
+            let fill_color = if weight_percent > 0.8 {
+                egui::Color32::from_rgb(220, 50, 50)  // 红色（超重）
+            } else if weight_percent > 0.6 {
+                egui::Color32::from_rgb(255, 140, 0)  // 橙色（较重）
+            } else {
+                egui::Color32::from_rgb(100, 200, 100) // 绿色（正常）
+            };
+            
+            ui.painter().rect_filled(
+                fill_rect,
+                2.0,
+                fill_color,
+            );
+        }
+        
+        // 空格数标签 (268, 212, 26x14) - 原版精确位置和大小
+        let empty_slots = self.item_slots.iter().filter(|slot| slot.icon_index.is_none()).count();
+        let weight_text_rect = egui::Rect::from_min_size(
+            egui::pos2(content_rect.min.x + 268.0, content_rect.min.y + 212.0),
+            egui::vec2(26.0, 14.0)
+        );
+        
+        ui.painter().text(
+            weight_text_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            empty_slots.to_string(),
+            egui::FontId::proportional(12.0),
+            egui::Color32::WHITE,
+        );
+    }
+    
     /// 绘制锁定的格子
     fn draw_locked_cell(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect,
                         idx: usize, grid_x: f32, grid_y: f32, x_spacing: f32, y_spacing: f32) {
@@ -630,8 +753,13 @@ impl InventoryDialog {
         }
     }
     
-    /// 绘制扩展按钮
+    /// 绘制扩展按钮（仅在需要时显示）
     fn draw_expand_button(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        // 只有在背包未满且在Items页面时才显示扩展按钮
+        if self.max_capacity >= 80 || self.active_tab != InventoryTab::Items {
+            return;
+        }
+        
         let x = 235.0;
         let y = 5.0;
         
@@ -669,11 +797,15 @@ impl InventoryDialog {
                 }
                 
                 if response.clicked() {
-                    let open_level = (self.max_capacity - 46) / 4;
-                    let open_gold = 1000000 + open_level * 1000000;
-                    println!("💰 扩展背包需要 {} 金币", open_gold);
-                    // TODO: 显示确认对话框
-                    self.expand_inventory();
+                    let expand_level = (self.max_capacity - 46) / 4;
+                    let expand_cost = (1000000 + expand_level * 1000000) as u32;
+                    println!("💰 扩展背包需要 {} 金币 (当前有 {})", expand_cost, self.gold);
+                    
+                    if self.gold >= expand_cost {
+                        self.expand_inventory();
+                    } else {
+                        println!("⚠️ 金币不足，无法扩展背包");
+                    }
                 }
             }
         }
@@ -681,10 +813,10 @@ impl InventoryDialog {
     
     /// 绘制金币和负重信息
     fn draw_info_bar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
-        // 金币标签 (40, 212)
+        // 金币标签 (40, 212) - 原版精确位置，左对齐
         let gold_text = format!("{}", self.gold);
         ui.painter().text(
-            egui::pos2(bg_rect.min.x + 40.0, bg_rect.min.y + 218.0),
+            egui::pos2(bg_rect.min.x + 40.0, bg_rect.min.y + 212.0 + 7.0), // 垂直居中在14px高度中
             egui::Align2::LEFT_CENTER,
             &gold_text,
             egui::FontId::proportional(12.0),
@@ -716,19 +848,49 @@ impl InventoryDialog {
             }
         }
         
-        // 空格数量 (268, 212)
+        // 空格数量 (268, 212) - 原版精确位置，26x14区域内居中
         let empty_slots = self.item_slots[0..self.max_capacity]
             .iter()
             .filter(|s| s.icon_index.is_none())
             .count();
         
         ui.painter().text(
-            egui::pos2(bg_rect.min.x + 268.0, bg_rect.min.y + 218.0),
-            egui::Align2::LEFT_CENTER,
+            egui::pos2(bg_rect.min.x + 268.0 + 13.0, bg_rect.min.y + 212.0 + 7.0), // 在26x14区域内居中
+            egui::Align2::CENTER_CENTER,
             format!("{}", empty_slots),
             egui::FontId::proportional(12.0),
             egui::Color32::WHITE,
         );
+    }
+    
+    /// 扩展背包容量（每次扩展 4 个格子）
+    fn expand_inventory(&mut self) {
+        if self.max_capacity < 80 {
+            let old_capacity = self.max_capacity;
+            self.max_capacity = (self.max_capacity + 4).min(80);
+            let new_slots = self.max_capacity - old_capacity;
+            
+            // 添加新的空格子
+            for _ in 0..new_slots {
+                self.item_slots.push(ItemSlot {
+                    icon_index: None,
+                    count: 0,
+                    locked: false,
+                });
+            }
+            
+            // 模拟扣除金币（简化处理）
+            let expand_level = (old_capacity - 46) / 4;
+            let expand_cost = (1000000 + expand_level * 1000000) as u32;
+            if self.gold >= expand_cost {
+                self.gold -= expand_cost;
+                println!("🎒 背包已扩展到 {} 个格子，消耗 {} 金币", self.max_capacity, expand_cost);
+            } else {
+                println!("💰 金币不足，需要 {} 金币", expand_cost);
+            }
+        } else {
+            println!("⚠️ 背包已达到最大容量 (80 格)");
+        }
     }
 }
 
@@ -738,6 +900,14 @@ impl Dialog for InventoryDialog {
             *open = false;
             return;
         }
+        
+        // 键盘快捷键：I键或ESC键关闭背包
+        ctx.input(|i| {
+            if i.key_pressed(egui::Key::I) || i.key_pressed(egui::Key::Escape) {
+                self.visible = false;
+                println!("⌨️ 键盘关闭背包对话框");
+            }
+        });
         
         // 处理鼠标滚轮（在物品格子区域）
         let scroll_delta = ctx.input(|i| i.smooth_scroll_delta.y);
@@ -796,6 +966,15 @@ impl Dialog for InventoryDialog {
                 
                 // 绘制金币和负重信息
                 self.draw_info_bar(ui, ctx, &bg_rect);
+                
+                // 绘制底部UI（金币可点击区域等）
+                self.draw_bottom_ui(ui, &bg_rect);
+                
+                // 绘制关闭按钮
+                self.draw_close_button(ui, ctx, &bg_rect);
+                
+                // 绘制扩展按钮（仅在需要时显示）
+                self.draw_expand_button(ui, ctx, &bg_rect);
             });
         
         *open = self.visible;
