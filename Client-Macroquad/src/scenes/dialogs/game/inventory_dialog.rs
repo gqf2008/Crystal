@@ -30,19 +30,17 @@ enum InventoryTab {
     Quest,      // 任务物品
 }
 
-/// 拖拽中的物品
+/// 选中的物品格子
 #[derive(Clone, Debug)]
-struct DraggedItem {
+struct SelectedItem {
     /// 来源容器类型
-    source_container: ItemContainer,
-    /// 来源格子索引
-    source_index: usize,
+    container: ItemContainer,
+    /// 格子索引
+    index: usize,
     /// 物品图标索引
     icon_index: usize,
     /// 物品数量
     count: u32,
-    /// 拖拽偏移量（相对于鼠标位置）
-    drag_offset: egui::Vec2,
 }
 
 /// 物品容器类型
@@ -91,8 +89,8 @@ pub struct InventoryDialog {
     /// 拖动时的鼠标偏移
     drag_offset: egui::Vec2,
     
-    /// 物品拖拽状态
-    dragging_item: Option<DraggedItem>,
+    /// 当前选中的物品格子
+    selected_item: Option<SelectedItem>,
     
     /// 滚动偏移量（每个标签页独立）
     scroll_offset_items: f32,   // Items I 滚动偏移
@@ -159,7 +157,7 @@ impl InventoryDialog {
             position: egui::pos2(300.0, 100.0),  // 默认位置
             dragging: false,
             drag_offset: egui::vec2(0.0, 0.0),
-            dragging_item: None,  // 初始化物品拖拽状态
+            selected_item: None,  // 初始化选中状态
             scroll_offset_items: 0.0,
             scroll_offset_items2: 0.0,
             scroll_offset_quest: 0.0,
@@ -186,116 +184,160 @@ impl InventoryDialog {
         self.visible
     }
     
-    /// 处理物品交互（拖拽、点击等）
+    /// 处理物品交互（点击交换）
     fn handle_item_interaction(&mut self, response: egui::Response, container: ItemContainer, 
-                               index: usize, ctx: &egui::Context) {
-        // 获取对应容器的物品槽
-        let slot = match container {
+                               index: usize, _ctx: &egui::Context) {
+        // 只处理左键点击
+        if response.clicked() {
+            self.handle_item_click(container, index);
+        }
+        // 右键点击处理
+        else if response.secondary_clicked() {
+            let slot = match container {
+                ItemContainer::Inventory => self.item_slots.get(index).cloned(),
+                ItemContainer::Quest => self.quest_slots.get(index).cloned(),
+            };
+            
+            if let Some(slot) = slot {
+                if let Some(icon_index) = slot.icon_index {
+                    println!("🖱️ 右键点击物品 {} (图标: {})", index, icon_index);
+                    // TODO: 显示右键菜单（使用、装备、丢弃等）
+                }
+            }
+        }
+    }
+    
+    /// 处理物品点击（选择/交换）
+    fn handle_item_click(&mut self, container: ItemContainer, index: usize) {
+        // 获取当前点击格子的物品
+        let current_slot = match container {
             ItemContainer::Inventory => self.item_slots.get(index).cloned(),
             ItemContainer::Quest => self.quest_slots.get(index).cloned(),
         };
         
-        if let Some(slot) = slot {
-            if let Some(icon_index) = slot.icon_index {
-                // 开始拖拽
-                if response.drag_started() {
-                    if let Some(pointer_pos) = ctx.pointer_latest_pos() {
-                        self.dragging_item = Some(DraggedItem {
-                            source_container: container,
-                            source_index: index,
-                            icon_index,
-                            count: slot.count,
-                            drag_offset: pointer_pos - response.rect.center(),
-                        });
-                        
-                        // 清空源格子
-                        match container {
-                            ItemContainer::Inventory => {
-                                if let Some(source_slot) = self.item_slots.get_mut(index) {
-                                    source_slot.icon_index = None;
-                                    source_slot.count = 0;
-                                }
-                            },
-                            ItemContainer::Quest => {
-                                if let Some(source_slot) = self.quest_slots.get_mut(index) {
-                                    source_slot.icon_index = None;
-                                    source_slot.count = 0;
-                                }
-                            },
-                        }
-                    }
-                }
-                // 右键点击处理
-                else if response.secondary_clicked() {
-                    println!("🖱️ 右键点击物品 {} (图标: {})", index, icon_index);
-                    // TODO: 显示右键菜单（使用、装备、丢弃等）
-                }
-                // 左键点击处理（非拖拽）
-                else if response.clicked() {
-                    println!("🖱️ 左键点击物品 {} (图标: {})", index, icon_index);
-                    // TODO: 物品使用逻辑
+        if let Some(selected) = &self.selected_item {
+            // 已有选中物品，进行交换或移动
+            if selected.container == container && selected.index == index {
+                // 点击同一格子，取消选择
+                self.selected_item = None;
+                println!("❌ 取消选择物品");
+            } else {
+                // 点击不同格子，进行交换或移动
+                self.perform_item_exchange(selected.clone(), container, index);
+                self.selected_item = None;
+            }
+        } else {
+            // 没有选中物品，选择当前格子的物品
+            if let Some(slot) = current_slot {
+                if let Some(icon_index) = slot.icon_index {
+                    self.selected_item = Some(SelectedItem {
+                        container,
+                        index,
+                        icon_index,
+                        count: slot.count,
+                    });
+                    println!("✅ 选择物品: 格子{}, 图标{}, 数量{}", index, icon_index, slot.count);
+                } else {
+                    println!("⚠️ 点击空格子");
                 }
             }
-        }
-        
-        // 处理拖拽结束
-        if response.drag_stopped() && self.dragging_item.is_some() {
-            self.handle_drop_item(response.rect.center(), container, index);
         }
     }
     
-    /// 处理物品放下
-    fn handle_drop_item(&mut self, drop_pos: egui::Pos2, target_container: ItemContainer, target_index: usize) {
-        if let Some(dragged) = self.dragging_item.take() {
-            // 检查目标格子是否为空
-            let target_empty = match target_container {
-                ItemContainer::Inventory => {
-                    self.item_slots.get(target_index)
-                        .map_or(false, |slot| slot.icon_index.is_none())
-                },
-                ItemContainer::Quest => {
-                    self.quest_slots.get(target_index)
-                        .map_or(false, |slot| slot.icon_index.is_none())
-                },
-            };
-            
-            if target_empty {
-                // 放置到目标格子
-                match target_container {
-                    ItemContainer::Inventory => {
-                        if let Some(target_slot) = self.item_slots.get_mut(target_index) {
-                            target_slot.icon_index = Some(dragged.icon_index);
-                            target_slot.count = dragged.count;
-                        }
-                    },
-                    ItemContainer::Quest => {
-                        if let Some(target_slot) = self.quest_slots.get_mut(target_index) {
-                            target_slot.icon_index = Some(dragged.icon_index);
-                            target_slot.count = dragged.count;
-                        }
-                    },
-                }
-                println!("✅ 物品移动成功: {} -> {}", dragged.source_index, target_index);
+    /// 执行物品交换或移动
+    fn perform_item_exchange(&mut self, selected: SelectedItem, target_container: ItemContainer, target_index: usize) {
+        // 获取目标格子的物品
+        let target_slot = match target_container {
+            ItemContainer::Inventory => self.item_slots.get(target_index).cloned(),
+            ItemContainer::Quest => self.quest_slots.get(target_index).cloned(),
+        };
+        
+        if let Some(target_slot) = target_slot {
+            if target_slot.icon_index.is_none() {
+                // 目标格子为空，移动物品
+                self.move_item_to_empty_slot(selected, target_container, target_index);
             } else {
-                // 目标格子被占用，恢复到原位置
-                match dragged.source_container {
-                    ItemContainer::Inventory => {
-                        if let Some(source_slot) = self.item_slots.get_mut(dragged.source_index) {
-                            source_slot.icon_index = Some(dragged.icon_index);
-                            source_slot.count = dragged.count;
-                        }
-                    },
-                    ItemContainer::Quest => {
-                        if let Some(source_slot) = self.quest_slots.get_mut(dragged.source_index) {
-                            source_slot.icon_index = Some(dragged.icon_index);
-                            source_slot.count = dragged.count;
-                        }
-                    },
-                }
-                println!("⚠️ 目标格子被占用，物品恢复到原位置");
+                // 目标格子有物品，交换物品
+                self.swap_items(selected, target_container, target_index, target_slot);
             }
         }
     }
+    
+    /// 移动物品到空格子
+    fn move_item_to_empty_slot(&mut self, selected: SelectedItem, target_container: ItemContainer, target_index: usize) {
+        // 清空源格子
+        match selected.container {
+            ItemContainer::Inventory => {
+                if let Some(source_slot) = self.item_slots.get_mut(selected.index) {
+                    source_slot.icon_index = None;
+                    source_slot.count = 0;
+                }
+            },
+            ItemContainer::Quest => {
+                if let Some(source_slot) = self.quest_slots.get_mut(selected.index) {
+                    source_slot.icon_index = None;
+                    source_slot.count = 0;
+                }
+            },
+        }
+        
+        // 设置目标格子
+        match target_container {
+            ItemContainer::Inventory => {
+                if let Some(target_slot) = self.item_slots.get_mut(target_index) {
+                    target_slot.icon_index = Some(selected.icon_index);
+                    target_slot.count = selected.count;
+                }
+            },
+            ItemContainer::Quest => {
+                if let Some(target_slot) = self.quest_slots.get_mut(target_index) {
+                    target_slot.icon_index = Some(selected.icon_index);
+                    target_slot.count = selected.count;
+                }
+            },
+        }
+        
+        println!("✅ 物品移动成功: 格子{} -> 格子{}", selected.index, target_index);
+    }
+    
+    /// 交换两个格子的物品
+    fn swap_items(&mut self, selected: SelectedItem, target_container: ItemContainer, target_index: usize, target_slot: ItemSlot) {
+        // 将选中物品放入目标格子
+        match target_container {
+            ItemContainer::Inventory => {
+                if let Some(slot) = self.item_slots.get_mut(target_index) {
+                    slot.icon_index = Some(selected.icon_index);
+                    slot.count = selected.count;
+                }
+            },
+            ItemContainer::Quest => {
+                if let Some(slot) = self.quest_slots.get_mut(target_index) {
+                    slot.icon_index = Some(selected.icon_index);
+                    slot.count = selected.count;
+                }
+            },
+        }
+        
+        // 将目标物品放入源格子
+        match selected.container {
+            ItemContainer::Inventory => {
+                if let Some(slot) = self.item_slots.get_mut(selected.index) {
+                    slot.icon_index = target_slot.icon_index;
+                    slot.count = target_slot.count;
+                }
+            },
+            ItemContainer::Quest => {
+                if let Some(slot) = self.quest_slots.get_mut(selected.index) {
+                    slot.icon_index = target_slot.icon_index;
+                    slot.count = target_slot.count;
+                }
+            },
+        }
+        
+        println!("🔄 物品交换成功: 格子{} ↔ 格子{}", selected.index, target_index);
+    }
+    
+
     
     /// 切换到物品页1
     fn show_items_page1(&mut self) {
@@ -657,6 +699,18 @@ impl InventoryDialog {
             );
         }
         
+        // 选中状态高亮: 使用黄色边框
+        if let Some(selected) = &self.selected_item {
+            if selected.container == ItemContainer::Inventory && selected.index == idx {
+                ui.painter().rect_stroke(
+                    cell_rect,
+                    2.0,
+                    egui::Stroke::new(3.0, egui::Color32::from_rgb(255, 255, 0)), // 黄色边框
+                    egui::epaint::StrokeKind::Outside,
+                );
+            }
+        }
+        
         // 绘制物品图标（如果有）
         if let Some(slot) = self.item_slots.get(idx) {
             if let Some(icon_idx) = slot.icon_index {
@@ -723,6 +777,18 @@ impl InventoryDialog {
                 egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 0)),
                 egui::epaint::StrokeKind::Outside,
             );
+        }
+        
+        // 选中状态高亮: 使用黄色边框
+        if let Some(selected) = &self.selected_item {
+            if selected.container == ItemContainer::Quest && selected.index == idx {
+                ui.painter().rect_stroke(
+                    cell_rect,
+                    2.0,
+                    egui::Stroke::new(3.0, egui::Color32::from_rgb(255, 255, 0)), // 黄色边框
+                    egui::epaint::StrokeKind::Outside,
+                );
+            }
         }
         
         // 绘制任务物品（如果有）
@@ -1026,59 +1092,7 @@ impl InventoryDialog {
         }
     }
     
-    /// 绘制正在拖拽的物品
-    fn draw_dragging_item(&self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        if let Some(dragged) = &self.dragging_item {
-            if let Some(pointer_pos) = ctx.pointer_latest_pos() {
-                // 计算物品绘制位置（考虑拖拽偏移）
-                let item_pos = pointer_pos - dragged.drag_offset;
-                let item_size = egui::Vec2::new(32.0, 32.0);
-                let item_rect = egui::Rect::from_min_size(item_pos, item_size);
-                
-                // 绘制阴影效果
-                let shadow_rect = item_rect.translate(egui::vec2(2.0, 2.0));
-                ui.painter().rect_filled(
-                    shadow_rect, 
-                    0.0, 
-                    egui::Color32::from_black_alpha(64)
-                );
-                
-                // 简单的矩形表示拖拽物品（暂时不用纹理）
-                ui.painter().rect_filled(
-                    item_rect,
-                    0.0,
-                    egui::Color32::from_rgba_unmultiplied(100, 150, 255, 180), // 半透明蓝色
-                );
-                
-                // 简化边框绘制
-                // ui.painter().rect(...) // 暂时省略边框
-                
-                // 显示图标编号（用于调试）
-                let icon_text = format!("{}", dragged.icon_index);
-                ui.painter().text(
-                    item_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    icon_text,
-                    egui::FontId::proportional(10.0),
-                    egui::Color32::WHITE,
-                );
-                
-                // 如果有数量，显示数量文字
-                if dragged.count > 1 {
-                    let count_text = dragged.count.to_string();
-                    let text_pos = item_rect.right_bottom() + egui::vec2(-8.0, -4.0);
-                    
-                    ui.painter().text(
-                        text_pos,
-                        egui::Align2::RIGHT_BOTTOM,
-                        count_text,
-                        egui::FontId::proportional(10.0),
-                        egui::Color32::YELLOW,
-                    );
-                }
-            }
-        }
-    }
+
 }
 
 impl Dialog for InventoryDialog {
@@ -1087,6 +1101,8 @@ impl Dialog for InventoryDialog {
             *open = false;
             return;
         }
+        
+
         
         // 键盘快捷键：I键或ESC键关闭背包
         ctx.input(|i| {
@@ -1163,8 +1179,6 @@ impl Dialog for InventoryDialog {
                 // 绘制扩展按钮（仅在需要时显示）
                 self.draw_expand_button(ui, ctx, &bg_rect);
                 
-                // 绘制拖拽中的物品（在最上层）
-                self.draw_dragging_item(ui, ctx);
             });
         
         *open = self.visible;
