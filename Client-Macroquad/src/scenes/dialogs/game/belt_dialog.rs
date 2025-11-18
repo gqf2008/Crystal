@@ -438,6 +438,7 @@ impl Dialog for BeltDialog {
         egui::Area::new(egui::Id::new("belt_dialog"))
             .fixed_pos(self.position)
             .movable(false)  // 禁用默认拖动，使用自定义拖动
+            .order(egui::Order::Foreground)  // 确保快捷栏在最前层，不被遮挡
             .show(ctx, |ui| {
                 // 绘制快捷栏背景
                 let bg_rect = self.draw_belt(ui, ctx);

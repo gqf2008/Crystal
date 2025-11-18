@@ -65,8 +65,12 @@ async fn main() {
     let mut main_dialog = MainDialog::new();
     
     println!("✅ MainDialog 及所有子对话框已创建");
-    println!("💡 提示: ");
-    println!("   - 点击 Size 按钮或按 Tab 键切换聊天窗口大小");
+    println!("💡 提示:");
+    println!("   - 点击底部按钮打开各种对话框（背包、角色、技能、任务、选项、菜单、商城）");
+    println!("   - 按 M 键快速切换小地图显示/隐藏");
+    println!("   - 按 TAB 键切换小地图大小模式（大模式/小模式）");
+    println!("   - 点击小地图右上角按钮也可切换显示/隐藏");
+    println!("   - 所有对话框都支持拖拽（拖拽标题栏）");
     println!("   - 按 ESC 退出");
 
     // FPS 统计
@@ -123,6 +127,15 @@ async fn main() {
         );
         draw_text(&perf_text, 10.0, 25.0, 20.0, Color::from_rgba(0, 255, 0, 255));
 
+        // 键盘快捷键处理
+        if is_key_pressed(KeyCode::M) {
+            main_dialog.toggle_minimap();
+        }
+        
+        if is_key_pressed(KeyCode::Tab) {
+            main_dialog.toggle_minimap_size();
+        }
+        
         // ESC 退出
         if is_key_pressed(KeyCode::Escape) {
             println!("👋 退出测试");

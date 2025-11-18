@@ -238,10 +238,12 @@ impl LoginScene {
                     }
                 }
                 
-                // 5. 绘制输入框
+                // 5. 绘制输入框（支持中文输入）
                 ui.put(
                     egui::Rect::from_min_size(egui::pos2(85.0, 82.0), egui::vec2(136.0, 18.0)),
-                    egui::TextEdit::singleline(&mut self.account_input).desired_width(136.0)
+                    egui::TextEdit::singleline(&mut self.account_input)
+                        .desired_width(136.0)
+                        .hint_text("请输入账号") // 添加提示文本
                 );
                 
                 ui.put(
@@ -249,6 +251,7 @@ impl LoginScene {
                     egui::TextEdit::singleline(&mut self.password_input)
                         .password(true)
                         .desired_width(136.0)
+                        .hint_text("请输入密码") // 添加提示文本
                 );
                 
                 // 6. 绘制按钮

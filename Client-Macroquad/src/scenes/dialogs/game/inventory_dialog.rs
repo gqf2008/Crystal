@@ -170,9 +170,9 @@ impl Default for InventoryLayout {
     fn default() -> Self {
         Self {
             window_size: egui::vec2(318.0, 245.0),
-            cell_size: 32.0,
+            cell_size: 36.0,      // 原工程格子大小：36像素
             grid_cols: 8,
-            cell_spacing: 1.0,
+            cell_spacing: 1.0,     // 原工程间距：1像素
             content_margin: egui::vec2(8.0, 8.0),
         }
     }
@@ -189,6 +189,25 @@ struct InteractionState {
     window_dragging: bool,
     /// 窗口拖拽偏移
     drag_offset: egui::Vec2,
+}
+
+/// 金币飞行动画状态
+#[derive(Debug, Clone)]
+struct GoldFlyAnimation {
+    /// 起始位置（屏幕坐标）
+    start_pos: egui::Pos2,
+    /// 目标位置（背包金币区域）
+    target_pos: egui::Pos2,
+    /// 当前位置
+    current_pos: egui::Pos2,
+    /// 动画开始时间
+    start_time: std::time::Instant,
+    /// 动画持续时间
+    duration: std::time::Duration,
+    /// 金币数量
+    amount: u32,
+    /// 动画完成标志
+    completed: bool,
 }
 
 /// 背包对话框
@@ -241,12 +260,17 @@ pub struct InventoryDialog {
     /// tooltip显示延时控制
     tooltip_start_time: Option<std::time::Instant>,
     tooltip_delay: std::time::Duration,
+    /// 当前悬停的物品（用于检测切换）
+    current_hovered_item: Option<(ItemContainer, usize)>,
     
     /// 数量选择对话框状态
     quantity_dialog_visible: bool,
     quantity_dialog_item: Option<SelectedItem>,
     quantity_input: String,
     quantity_max: u32,
+    
+    /// 金币飞行动画列表
+    gold_animations: Vec<GoldFlyAnimation>,
 }
 
 impl InventoryDialog {
@@ -295,13 +319,17 @@ impl InventoryDialog {
             gold_hovered: false,
             close_hovered: false,
             tooltip_start_time: None,
-            tooltip_delay: std::time::Duration::from_millis(800), // 0.8秒延时，符合原版传奇2
+            tooltip_delay: std::time::Duration::from_millis(800), // 0.8秒延时
+            current_hovered_item: None,
             
             // 数量选择对话框
             quantity_dialog_visible: false,
             quantity_dialog_item: None,
             quantity_input: String::new(),
             quantity_max: 0,
+            
+            // 金币动画
+            gold_animations: Vec::new(),
         }
     }
     
@@ -314,6 +342,150 @@ impl InventoryDialog {
     /// 获取可见状态
     pub fn is_visible(&self) -> bool {
         self.visible
+    }
+    
+    /// 获取当前位置
+    pub fn get_position(&self) -> egui::Pos2 {
+        self.position
+    }
+    
+    /// 获取当前金币数量
+    pub fn get_gold(&self) -> u32 {
+        self.gold
+    }
+    
+    /// 设置金币数量
+    pub fn set_gold(&mut self, amount: u32) {
+        self.gold = amount;
+    }
+    
+    /// 触发金币拾取动画
+    /// 
+    /// # 参数
+    /// * `start_pos` - 金币在屏幕上的起始位置（比如地面上的金币）
+    /// * `amount` - 拾取的金币数量
+    /// * `target_pos` - 背包金币显示区域的位置
+    pub fn trigger_gold_pickup(&mut self, start_pos: egui::Pos2, amount: u32, target_pos: egui::Pos2) {
+        let animation = GoldFlyAnimation {
+            start_pos,
+            target_pos,
+            current_pos: start_pos,
+            start_time: std::time::Instant::now(),
+            duration: std::time::Duration::from_millis(800), // 0.8秒动画
+            amount,
+            completed: false,
+        };
+        
+        self.gold_animations.push(animation);
+        
+        // 同时更新金币数量
+        self.gold += amount;
+        
+        println!("💰 触发金币拾取动画: +{} 金币，从 ({:.0},{:.0}) 飞向 ({:.0},{:.0})", 
+                 amount, start_pos.x, start_pos.y, target_pos.x, target_pos.y);
+    }
+    
+    /// 更新金币动画状态
+    fn update_gold_animations(&mut self) {
+        let now = std::time::Instant::now();
+        
+        for animation in &mut self.gold_animations {
+            if animation.completed {
+                continue;
+            }
+            
+            let elapsed = now.duration_since(animation.start_time);
+            let progress = (elapsed.as_secs_f32() / animation.duration.as_secs_f32()).min(1.0);
+            
+            if progress >= 1.0 {
+                // 动画完成
+                animation.current_pos = animation.target_pos;
+                animation.completed = true;
+            } else {
+                // 使用二次贝塞尔曲线计算飞行轨迹（抛物线效果）
+                let t = progress;
+                let ease_progress = 1.0 - (1.0 - t) * (1.0 - t); // easeOutQuad
+                
+                // 直线插值计算水平位置
+                let x = animation.start_pos.x + (animation.target_pos.x - animation.start_pos.x) * ease_progress;
+                
+                // 加入抛物线效果（向上的弧度）
+                let y_direct = animation.start_pos.y + (animation.target_pos.y - animation.start_pos.y) * ease_progress;
+                let arc_height = 50.0; // 抛物线高度
+                let arc_offset = arc_height * (4.0 * t * (1.0 - t)); // 抛物线公式
+                let y = y_direct - arc_offset;
+                
+                animation.current_pos = egui::pos2(x, y);
+            }
+        }
+        
+        // 移除已完成的动画
+        self.gold_animations.retain(|anim| !anim.completed);
+    }
+    
+    /// 渲染飞行中的金币
+    fn render_flying_gold(&self, painter: &egui::Painter, ctx: &egui::Context) {
+        for animation in &self.gold_animations {
+            if animation.completed {
+                continue;
+            }
+            
+            // 使用金币图标（假定使用Items库的索引116）
+            if let Some(info) = LibraryName::Items.get_egui_texture(ctx, 116) {
+                if let Some(gold_texture) = info.egui_texture {
+                    let size = egui::vec2(16.0, 16.0); // 金币小图标
+                    let rect = egui::Rect::from_center_size(animation.current_pos, size);
+                    
+                    // 计算动画透明度（开始和结束时渐变）
+                    let now = std::time::Instant::now();
+                    let elapsed = now.duration_since(animation.start_time);
+                    let progress = (elapsed.as_secs_f32() / animation.duration.as_secs_f32()).min(1.0);
+                    
+                    let alpha = if progress < 0.1 {
+                        // 开始渐入
+                        progress / 0.1
+                    } else if progress > 0.9 {
+                        // 结束渐出
+                        (1.0 - progress) / 0.1
+                    } else {
+                        1.0
+                    };
+                    
+                    let color = egui::Color32::from_rgba_premultiplied(
+                        255,
+                        255,
+                        255,
+                        (255.0 * alpha) as u8,
+                    );
+                    
+                    painter.image(
+                        gold_texture.id(),
+                        rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        color,
+                    );
+                    
+                    // 显示金币数量（在金币图标旁边）
+                    if animation.amount > 1 {
+                        let amount_text = format!("+{}", animation.amount);
+                        let text_pos = egui::pos2(animation.current_pos.x + 10.0, animation.current_pos.y - 5.0);
+                        
+                        painter.text(
+                            text_pos,
+                            egui::Align2::LEFT_CENTER,
+                            amount_text,
+                            egui::FontId::proportional(10.0),
+                            egui::Color32::from_rgba_premultiplied(
+                                255,
+                                255,
+                                0, // 黄色文字
+                                (255.0 * alpha) as u8,
+                            ),
+                        );
+                    }
+                }
+            }
+        }
     }
     
     /// 处理物品交互（点击交换）
@@ -627,6 +799,9 @@ impl InventoryDialog {
         
         // 关闭菜单
         self.context_menu = None;
+        // 清除tooltip状态，避免tooltip和菜单冲突
+        self.tooltip_start_time = None;
+        self.current_hovered_item = None;
     }
     
     /// 从指定格子移除物品
@@ -885,13 +1060,35 @@ impl InventoryDialog {
     /// 使用egui::Grid布局绘制物品格子（优化版本）
     fn draw_item_grid_optimized(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
         let grid_start_x = 9.0;
-        let grid_start_y = 42.0;
+        let grid_start_y = 37.0;  // 原工程起始Y位置：37像素
         
-        // 创建网格区域
+        // 创建网格区域 - 根据原工程计算：8列完整显示，避免右侧多出半格
+        let grid_width = 8.0 * 36.0 + 7.0;  // 8列×36像素 + 7像素间隔 = 295像素
+        
+        // 根据当前标签页计算需要的行数，支持滚动显示更多物品
+        let required_rows = match self.active_tab {
+            InventoryTab::Items => ((46 + 7) / 8) as f32,    // 46个物品需要6行
+            InventoryTab::Items2 => {
+                let items2_count = self.max_capacity.min(80) - 46;
+                ((items2_count + 7) / 8) as f32  // 根据实际物品数量计算行数
+            }
+            InventoryTab::Quest => ((40 + 7) / 8) as f32,    // 40个物品需要5行
+        };
+        let display_rows = 5.0;  // 显示区域限制为5行
+        let grid_height = display_rows * 33.0; // 显示区域高度
+        let content_height = required_rows * 33.0; // 实际内容高度（可能超过显示区域）
         let grid_area = egui::Rect::from_min_size(
             egui::pos2(bg_rect.min.x + grid_start_x, bg_rect.min.y + grid_start_y),
-            egui::vec2(264.0, 158.0),
+            egui::vec2(grid_width, grid_height),
         );
+        
+        // 设置裁剪区域，防止物品绘制到对话框外面
+        // 精确控制裁剪区域，避免超出对话框边界
+        let clip_rect = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + grid_start_x - 1.0, bg_rect.min.y + grid_start_y - 1.0),
+            egui::vec2(grid_width + 2.0, grid_height + 2.0),
+        );
+        ui.set_clip_rect(clip_rect);
         
         // 获取当前页面的数据
         let (slot_count, container, start_index) = match self.active_tab {
@@ -900,13 +1097,22 @@ impl InventoryDialog {
             InventoryTab::Quest => (40, ItemContainer::Quest, 0),
         };
         
-        // 使用egui::Grid进行布局
-        let response = ui.allocate_response(grid_area.size(), egui::Sense::hover());
+        // 为每个标签页创建独立的滚动区域
+        let scroll_id = match self.active_tab {
+            InventoryTab::Items => "inventory_scroll_items",
+            InventoryTab::Items2 => "inventory_scroll_items2",
+            InventoryTab::Quest => "inventory_scroll_quest",
+        };
+        
         ui.allocate_ui_at_rect(grid_area, |ui| {
-            egui::Grid::new("inventory_grid_optimized")
-                .num_columns(self.layout.grid_cols)
-                .spacing([self.layout.cell_spacing, self.layout.cell_spacing])
+            egui::ScrollArea::vertical()
+                .id_salt(scroll_id)
+                .max_height(grid_height)
                 .show(ui, |ui| {
+                    egui::Grid::new(format!("inventory_grid_{}", scroll_id))
+                        .num_columns(self.layout.grid_cols)
+                        .spacing([self.layout.cell_spacing, self.layout.cell_spacing])
+                        .show(ui, |ui| {
                     // 直接绘制格子，避免复杂的借用
                     for i in 0..slot_count {
                         let global_index = start_index + i;
@@ -992,6 +1198,7 @@ impl InventoryDialog {
                             ui.end_row();
                         }
                     }
+                        });
                 });
         });
     }
@@ -1276,7 +1483,7 @@ impl InventoryDialog {
     }
     
     /// 绘制底部UI元素（金币、重量条）
-    fn draw_bottom_ui(&mut self, ui: &mut egui::Ui, content_rect: &egui::Rect) {
+    fn draw_bottom_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, content_rect: &egui::Rect) {
         // 金币显示区域 (40, 212, 111x14) - 原版精确位置
         let gold_rect = egui::Rect::from_min_size(
             egui::pos2(content_rect.min.x + 40.0, content_rect.min.y + 212.0),
@@ -1314,6 +1521,25 @@ impl InventoryDialog {
         if gold_response.clicked() {
             self.picking_gold = !self.picking_gold;
             println!("💰 点击金币: {} (拾取: {})", self.gold, self.picking_gold);
+            
+            // 演示金币拾取动画 - 从屏幕底部随机位置飞入金币区域
+            let screen_rect = ctx.screen_rect();
+            
+            // 使用当前时间作为简单的随机源
+            let time_nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos();
+            
+            let random_offset = ((time_nanos % 1000) as f32 / 1000.0 - 0.5) * 200.0;
+            let start_pos = egui::pos2(
+                screen_rect.center().x + random_offset,
+                screen_rect.max.y - 50.0, // 屏幕底部
+            );
+            let target_pos = gold_rect.center();
+            let pickup_amount = 100 + (time_nanos % 900); // 100-999金币
+            
+            self.trigger_gold_pickup(start_pos, pickup_amount, target_pos);
         }
         
         // 重量条 (182, 217) - 原版精确位置，使用纹理自然大小
@@ -1548,9 +1774,20 @@ impl InventoryDialog {
     
     /// 检查并显示带延时的tooltip（可修改self）
     fn check_and_show_delayed_tooltip(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, icon_index: usize, count: u32, container: ItemContainer, slot_index: usize) {
-        // 初始化或检查计时器
-        if self.tooltip_start_time.is_none() {
+        // 如果右键菜单正在显示，不显示tooltip
+        if let Some(menu) = &self.context_menu {
+            if menu.visible {
+                return;
+            }
+        }
+        
+        let current_item = (container, slot_index);
+        
+        // 检查是否是新的物品，如果是则重置计时器
+        if self.current_hovered_item != Some(current_item) {
+            self.current_hovered_item = Some(current_item);
             self.tooltip_start_time = Some(std::time::Instant::now());
+            return; // 第一帧不显示tooltip，等待延时
         }
         
         // 检查延时是否已过
@@ -1567,16 +1804,16 @@ impl InventoryDialog {
         if let Some(pointer_pos) = ctx.pointer_latest_pos() {
             let window_rect = egui::Rect::from_min_size(self.position, egui::vec2(318.0, 245.0));
             if !window_rect.contains(pointer_pos) {
-                // 鼠标在窗口外，清除tooltip计时器
+                // 鼠标在窗口外，清除tooltip计时器和悬停物品记录
                 self.tooltip_start_time = None;
+                self.current_hovered_item = None;
             }
         } else {
-            // 没有鼠标位置信息，清除tooltip计时器
+            // 没有鼠标位置信息，清除tooltip计时器和悬停物品记录
             self.tooltip_start_time = None;
+            self.current_hovered_item = None;
         }
-    }
-    
-    /// 显示物品tooltip（带纹理背景）
+    }    /// 显示物品tooltip（带纹理背景）
     fn show_item_tooltip(&self, _ui: &mut egui::Ui, ctx: &egui::Context, icon_index: usize, count: u32, container: ItemContainer, slot_index: usize) {
         let item_info = self.get_item_info(icon_index);
         
@@ -1706,7 +1943,7 @@ impl InventoryDialog {
                 
                 egui::Area::new(egui::Id::new("simple_context_menu"))
                     .fixed_pos(menu.position)
-                    .order(egui::Order::Foreground)
+                    .order(egui::Order::Tooltip)  // 使用最高层级确保不被遮挡
                     .show(ctx, |ui| {
                         // 传奇2风格的简洁菜单
                         let frame = egui::Frame::new()
@@ -1770,6 +2007,9 @@ impl InventoryDialog {
                 
                 if menu_should_close {
                     self.context_menu = None;
+                    // 清除tooltip状态，避免tooltip和菜单冲突
+                    self.tooltip_start_time = None;
+                    self.current_hovered_item = None;
                 }
             }
         }
@@ -2330,7 +2570,8 @@ impl Dialog for InventoryDialog {
             return;
         }
         
-
+        // 更新金币动画状态
+        self.update_gold_animations();
         
         // 原版传奇2风格的键盘快捷键
         ctx.input(|i| {
@@ -2459,7 +2700,7 @@ impl Dialog for InventoryDialog {
                 self.draw_info_bar(ui, ctx, &bg_rect);
                 
                 // 绘制底部UI（金币可点击区域等）
-                self.draw_bottom_ui(ui, &bg_rect);
+                self.draw_bottom_ui(ui, ctx, &bg_rect);
                 
                 // 绘制关闭按钮
                 self.draw_close_button(ui, ctx, &bg_rect);
@@ -2473,6 +2714,13 @@ impl Dialog for InventoryDialog {
         
         // 绘制数量选择对话框
         self.draw_quantity_dialog(ctx);
+        
+        // 渲染飞行中的金币（在最上层，不受窗口裁剪影响）
+        let foreground_painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("flying_gold_layer"),
+        ));
+        self.render_flying_gold(&foreground_painter, ctx);
         
         *open = self.visible;
     }

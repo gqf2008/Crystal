@@ -13,7 +13,7 @@
 
 use egui_macroquad::egui;
 use crate::resources::LibraryName;
-use super::{BeltDialog, ChatDialog, ChatControlBar, InventoryDialog};
+use super::{BeltDialog, ChatDialog, ChatControlBar, InventoryDialog, CharacterDialog, QuestLogDialog, OptionDialog, GameShopDialog, MenuDialog, MiniMapDialog};
 use crate::scenes::dialogs::Dialog;
 
 /// 主界面底部工具栏
@@ -55,6 +55,18 @@ pub struct MainDialog {
     chat_control_bar: ChatControlBar,
     /// 背包
     inventory_dialog: InventoryDialog,
+    /// 角色对话框
+    character_dialog: CharacterDialog,
+    /// 任务日志对话框
+    quest_log_dialog: QuestLogDialog,
+    /// 设置对话框
+    option_dialog: OptionDialog,
+    /// 游戏商城对话框
+    game_shop_dialog: GameShopDialog,
+    /// 菜单对话框
+    menu_dialog: MenuDialog,
+    /// 小地图对话框
+    minimap_dialog: MiniMapDialog,
 }
 
 impl MainDialog {
@@ -101,6 +113,12 @@ impl MainDialog {
             chat_dialog: ChatDialog::new(main_dialog_x, screen_h, resolution_index),
             chat_control_bar: ChatControlBar::new(main_dialog_x, screen_h, resolution_index),
             inventory_dialog: InventoryDialog::new(),
+            character_dialog: CharacterDialog::new(),
+            quest_log_dialog: QuestLogDialog::new(),
+            option_dialog: OptionDialog::new(),
+            game_shop_dialog: GameShopDialog::new(),
+            menu_dialog: MenuDialog::new(),
+            minimap_dialog: MiniMapDialog::new(),
         }
     }
 
@@ -440,6 +458,9 @@ impl MainDialog {
         let shop_x = rect.max.x - 105.0;
         let shop_y = rect.min.y + 35.0;
         self.draw_button(ui, ctx, shop_x, shop_y, 826, 827, 828, "商城");
+        
+        // 注意：根据原工程逻辑，小地图是独立的右上角对话框，不在主界面底部
+        // 小地图通过M键控制显示/隐藏，按钮在小地图对话框自身上
     }
 
     /// 绘制单个按钮
@@ -491,11 +512,32 @@ impl MainDialog {
                     // 处理按钮点击
                     match hint {
                         "背包" => self.inventory_dialog.toggle(),
+                        "角色" => self.character_dialog.toggle(),
+                        "技能" => {
+                            // 技能可以打开角色对话框的技能页面
+                            self.character_dialog.set_visible(true);
+                            self.character_dialog.set_current_tab(1); // 切换到技能页面
+                        },
+                        "任务" => self.quest_log_dialog.toggle(),
+                        "选项" => self.option_dialog.toggle(),
+                        "菜单" => self.menu_dialog.toggle(),
+                        "商城" => self.game_shop_dialog.toggle(),
                         _ => {}
                     }
                 }
             }
         }
+    }
+    
+    /// 显示所有子对话框
+    /// 切换小地图显示（快捷键M）
+    pub fn toggle_minimap(&mut self) {
+        self.minimap_dialog.toggle();
+    }
+
+    /// 切换小地图大小模式（快捷键TAB）
+    pub fn toggle_minimap_size(&mut self) {
+        self.minimap_dialog.toggle_size();
     }
     
     /// 显示所有子对话框
@@ -520,6 +562,25 @@ impl MainDialog {
         
         // 显示 InventoryDialog（独立窗口）
         self.inventory_dialog.show(ctx, &mut inventory_open);
+        
+        // 显示新的对话框
+        let mut character_open = self.character_dialog.is_visible();
+        self.character_dialog.show(ctx, &mut character_open);
+        
+        let mut quest_open = self.quest_log_dialog.is_visible();
+        self.quest_log_dialog.show(ctx, &mut quest_open);
+        
+        let mut option_open = self.option_dialog.is_visible();
+        self.option_dialog.show(ctx, &mut option_open);
+        
+        let mut shop_open = self.game_shop_dialog.is_visible();
+        self.game_shop_dialog.show(ctx, &mut shop_open);
+        
+        let mut menu_open = self.menu_dialog.is_visible();
+        self.menu_dialog.show(ctx, &mut menu_open);
+        
+        let mut minimap_open = self.minimap_dialog.is_visible();
+        self.minimap_dialog.show(ctx, &mut minimap_open);
         
         // 如果 Size 按钮被点击，改变 ChatDialog 大小
         if size_clicked {
