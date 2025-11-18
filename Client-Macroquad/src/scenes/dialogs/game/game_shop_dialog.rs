@@ -1,12 +1,12 @@
 // ============================================================================
-// GameShopDialog - 游戏商城对话框
+// GameShopDialog - 基于新组件系统的商城对话框
 // ============================================================================
 // 
 // 【功能说明】
-// 1. 商城界面，显示可购买的物品
-// 2. 分类浏览：武器、防具、道具、特殊物品等
-// 3. 物品详情显示和购买功能
-// 4. 元宝/金币支付选择
+// 1. 使用MirDialog和MirButton组件实现
+// 2. 集成ShopItemViewer实现商品预览
+// 3. 统一的状态管理和事件处理
+// 4. 完全兼容原版Crystal客户端架构
 // 
 // ============================================================================
 
@@ -700,15 +700,17 @@ impl GameShopDialog {
         );
         
         // 使用更高优先级的ID避免与主对话框拖拽冲突
+        let viewer_drag_id = format!("viewer_title_drag_{}", viewer.item.id);
         let title_response = ui.interact(
             title_area, 
-            egui::Id::new("viewer_title_drag").with(viewer.item.id), 
+            egui::Id::new(&viewer_drag_id), 
             egui::Sense::drag()
         );
         
         // 优化拖拽性能：只在需要时更新位置，避免与主对话框拖拽冲突
-        if title_response.drag_started() {
+        if title_response.drag_started() && !viewer.dragging {
             viewer.dragging = true;
+            println!("🔄 开始拖拽预览器: {}", viewer.item.name);
             if let Some(pointer_pos) = ctx.input(|i| i.pointer.hover_pos()) {
                 viewer.drag_offset = viewer.position.to_vec2() - pointer_pos.to_vec2();
             }
@@ -717,6 +719,7 @@ impl GameShopDialog {
             viewer.position += title_response.drag_delta();
         } else if viewer.dragging && (!ctx.input(|i| i.pointer.primary_down()) || title_response.drag_stopped()) {
             viewer.dragging = false;
+            println!("🔄 停止拖拽预览器: {}", viewer.item.name);
         }
         
         // 确保预览器不会超出主窗口边界
@@ -1121,6 +1124,125 @@ impl GameShopDialog {
             self.dragging = false;
         }
     }
+
+    /// 独立绘制商品预览器，使用模态对话框模式避免阻挡主对话框交互
+    fn draw_item_viewer_separate(ctx: &egui::Context, viewer: &mut ShopItemViewer, _main_dialog_pos: &egui::Pos2) -> bool {
+        let mut should_close = false;
+        
+        // 1. 绘制半透明遮罩层（阻止底层交互，点击外部关闭）
+        egui::Area::new(egui::Id::new(format!("modal_overlay_{}", viewer.item.id)))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .movable(false)
+            .interactable(true)  // 消费所有点击事件
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let screen_size = ctx.screen_rect().size();
+                let overlay_rect = egui::Rect::from_min_size(
+                    egui::pos2(0.0, 0.0),
+                    screen_size,
+                );
+                // 绘制半透明遮罩
+                ui.painter().rect_filled(
+                    overlay_rect,
+                    0.0,
+                    egui::Color32::from_black_alpha(64),  // 轻微半透明
+                );
+                // 点击遮罩区域关闭预览器
+                if ui.allocate_rect(overlay_rect, egui::Sense::click()).clicked() {
+                    should_close = true;
+                    println!("📱 点击外部关闭商品预览");
+                }
+            });
+        
+        // 2. 在遮罩层上方显示预览对话框
+        if let Some(response) = egui::Window::new(&viewer.item.name)
+            .id(egui::Id::new(format!("shop_item_viewer_{}", viewer.item.id)))
+            .fixed_pos(viewer.position)
+            .fixed_size(egui::vec2(260.0, 280.0))
+            .title_bar(true)  // 使用标准标题栏提供拖拽功能
+            .resizable(false)
+            .collapsible(false) 
+            .order(egui::Order::Tooltip)  // 🔧 最高层级，在遮罩层之上
+            .show(ctx, |ui| {
+                // 使用标准 egui 布局，避免手动交互区域
+                
+                // 物品图标
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    
+                    // 图标区域
+                    if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, viewer.item.icon_index) {
+                        if let Some(item_texture) = info.egui_texture {
+                            ui.image(egui::ImageSource::Texture(egui::load::SizedTexture::new(
+                                item_texture.id(),
+                                egui::vec2(64.0, 64.0)
+                            )));
+                        }
+                    } else {
+                        // 备用图标显示
+                        ui.allocate_space(egui::vec2(64.0, 64.0));
+                    }
+                    
+                    // 物品信息
+                    ui.vertical(|ui| {
+                        ui.label(&viewer.item.name);
+                        ui.separator();
+                        ui.label(&viewer.item.description);
+                        ui.separator();
+                        if viewer.item.price_gold > 0 {
+                            ui.label(format!("金币: {}", viewer.item.price_gold));
+                        }
+                        if viewer.item.price_ingot > 0 {
+                            ui.label(format!("元宝: {}", viewer.item.price_ingot));
+                        }
+                    });
+                });
+                
+                ui.separator();
+                
+                // 方向控制
+                ui.horizontal(|ui| {
+                    ui.label("预览方向:");
+                    if ui.button("◀").clicked() {
+                        viewer.direction = if viewer.direction == 1 { 8 } else { viewer.direction - 1 };
+                        println!("🔄 预览方向: {}", viewer.direction);
+                    }
+                    ui.label(format!("{}", viewer.direction));
+                    if ui.button("▶").clicked() {
+                        viewer.direction = if viewer.direction == 8 { 1 } else { viewer.direction + 1 };
+                        println!("🔄 预览方向: {}", viewer.direction);
+                    }
+                });
+                
+                ui.separator();
+                
+                // 关闭按钮
+                if ui.button("关闭").clicked() {
+                    should_close = true;
+                    println!("❌ 关闭商品预览");
+                }
+                
+                // 返回是否需要关闭
+                should_close
+            }) {
+            
+            // 更新位置（Window 会自动处理拖拽，我们只需要同步位置）
+            viewer.position = response.response.rect.min;
+            
+            // 检查是否需要关闭
+            if let Some(inner_result) = response.inner {
+                should_close = inner_result;
+            }
+        }
+        
+        // 按ESC键关闭预览器
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            should_close = true;
+            println!("❌ ESC键关闭商品预览");
+        }
+        
+        should_close
+    }
 }
 
 impl Dialog for GameShopDialog {
@@ -1134,6 +1256,7 @@ impl Dialog for GameShopDialog {
         egui::Area::new(egui::Id::new("game_shop_dialog"))
             .fixed_pos(self.position)
             .movable(false)  // 使用自定义拖拽
+            .order(egui::Order::Middle)  // 设置中等优先级，避免与其他UI冲突
             .show(ctx, |ui| {
                 // 绘制背景
                 let bg_rect = self.draw_background(ui, ctx);
@@ -1156,17 +1279,18 @@ impl Dialog for GameShopDialog {
                     *open = false;
                 }
                 
-                // 在最后绘制商品预览器，避免阻挡其他UI交互
-                let mut close_viewer = false;
-                if let Some(ref mut viewer) = self.item_viewer {
-                    if viewer.visible {
-                        close_viewer = GameShopDialog::draw_item_viewer_impl(ui, ctx, viewer, &bg_rect);
-                    }
-                }
-                if close_viewer {
-                    self.item_viewer = None;
-                }
             });
+        
+        // 商品预览器使用独立的 Area，层级更高，避免阻挡主对话框交互
+        let mut close_viewer = false;
+        if let Some(ref mut viewer) = self.item_viewer {
+            if viewer.visible {
+                close_viewer = GameShopDialog::draw_item_viewer_separate(ctx, viewer, &self.position);
+            }
+        }
+        if close_viewer {
+            self.item_viewer = None;
+        }
         
         *open = self.visible;
     }

@@ -1,0 +1,356 @@
+// ============================================================================
+// MirDialog - 基于原版MirImageControl的对话框基类
+// ============================================================================
+// 
+// 【功能说明】
+// 1. 可拖拽的模态或非模态对话框
+// 2. 自动纹理背景绘制
+// 3. 标准的关闭按钮
+// 4. 层级管理和焦点处理
+// 
+// ============================================================================
+
+use egui_macroquad::egui;
+use crate::resources::LibraryName;
+use super::{Control, ImageControl};
+
+/// 对话框类型
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DialogType {
+    /// 非模态对话框 - 不阻挡底层交互
+    Normal,
+    /// 模态对话框 - 阻挡底层交互，点击外部关闭
+    Modal,
+    /// 固定对话框 - 阻挡底层交互，只能通过按钮关闭
+    Fixed,
+}
+
+/// 对话框基类
+pub struct Dialog {
+    /// 对话框ID
+    pub id: String,
+    /// 对话框标题
+    pub title: String,
+    /// 位置
+    pub position: egui::Pos2,
+    /// 尺寸
+    pub size: egui::Vec2,
+    /// 是否可见
+    pub visible: bool,
+    /// 对话框类型
+    pub dialog_type: DialogType,
+    /// 是否可拖拽
+    pub movable: bool,
+    /// 是否正在拖拽
+    pub dragging: bool,
+    /// 拖拽偏移
+    pub drag_offset: egui::Vec2,
+    /// 背景纹理库
+    pub library: LibraryName,
+    /// 背景纹理索引
+    pub index: usize,
+    /// 关闭按钮
+    pub close_button: Option<MirButton>,
+    /// 标题纹理索引（可选）
+    pub title_index: Option<usize>,
+    /// UI层级
+    pub order: egui::Order,
+}
+
+impl MirDialog {
+    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
+        let dialog_id = id.into();
+        
+        Self {
+            id: dialog_id.clone(),
+            title: title.into(),
+            position: egui::pos2(100.0, 100.0),
+            size: egui::vec2(400.0, 300.0),
+            visible: false,
+            dialog_type: DialogType::Normal,
+            movable: true,
+            dragging: false,
+            drag_offset: egui::Vec2::ZERO,
+            library: LibraryName::Title,
+            index: 0,
+            close_button: Some(
+                MirButton::new(format!("{}_close", dialog_id))
+                    .with_library(LibraryName::Prguse2)
+                    .with_textures(360, Some(361), Some(362))
+                    .with_rect(egui::pos2(0.0, 0.0), egui::vec2(20.0, 20.0))
+                    .with_hint("关闭")
+            ),
+            title_index: None,
+            order: egui::Order::Middle,
+        }
+    }
+    
+    /// 设置对话框类型
+    pub fn with_type(mut self, dialog_type: DialogType) -> Self {
+        self.dialog_type = dialog_type;
+        self.order = match dialog_type {
+            DialogType::Normal => egui::Order::Middle,
+            DialogType::Modal | DialogType::Fixed => egui::Order::Foreground,
+        };
+        self
+    }
+    
+    /// 设置背景纹理
+    pub fn with_background(mut self, library: LibraryName, index: usize) -> Self {
+        self.library = library;
+        self.index = index;
+        self
+    }
+    
+    /// 设置位置和尺寸
+    pub fn with_rect(mut self, pos: egui::Pos2, size: egui::Vec2) -> Self {
+        self.position = pos;
+        self.size = size;
+        // 更新关闭按钮位置（右上角）
+        if let Some(ref mut close_btn) = self.close_button {
+            close_btn.position = egui::pos2(size.x - 25.0, 5.0);
+        }
+        self
+    }
+    
+    /// 设置关闭按钮
+    pub fn with_close_button(mut self, button: Option<MirButton>) -> Self {
+        self.close_button = button;
+        self
+    }
+    
+    /// 设置标题纹理
+    pub fn with_title_texture(mut self, index: usize) -> Self {
+        self.title_index = Some(index);
+        self
+    }
+    
+    /// 显示对话框
+    pub fn show(&mut self) {
+        self.visible = true;
+    }
+    
+    /// 隐藏对话框
+    pub fn hide(&mut self) {
+        self.visible = false;
+        self.dragging = false;
+    }
+    
+    /// 绘制对话框基础结构，返回是否应该关闭
+    pub fn draw_base(&mut self, ctx: &egui::Context) -> bool {
+        if !self.visible {
+            return false;
+        }
+        
+        let mut should_close = false;
+        
+        // 1. 绘制模态遮罩（如果是模态对话框）
+        if self.dialog_type == DialogType::Modal {
+            self.draw_modal_overlay(ctx, &mut should_close);
+        }
+        
+        // 2. 绘制对话框主体
+        let dialog_area = if self.dialog_type == DialogType::Normal {
+            egui::Area::new(egui::Id::new(&self.id))
+                .fixed_pos(self.position)
+                .movable(false)
+                .order(self.order)
+        } else {
+            egui::Area::new(egui::Id::new(&self.id))
+                .fixed_pos(self.position)
+                .movable(false)
+                .order(egui::Order::Tooltip) // 模态对话框使用最高层级
+        };
+        
+        dialog_area.show(ctx, |ui| {
+            let dialog_rect = egui::Rect::from_min_size(self.position, self.size);
+            
+            // 处理拖拽
+            if self.movable {
+                should_close = self.handle_dragging(ui, ctx, dialog_rect) || should_close;
+            }
+            
+            // 绘制背景
+            self.draw_background(ui, ctx, dialog_rect);
+            
+            // 绘制标题
+            if let Some(title_idx) = self.title_index {
+                self.draw_title(ui, ctx, title_idx);
+            }
+            
+            // 绘制关闭按钮
+            if let Some(ref close_btn) = self.close_button {
+                let btn_pos = self.position + egui::vec2(close_btn.position.x, close_btn.position.y);
+                let mut close_btn_copy = close_btn.clone();
+                close_btn_copy.position = btn_pos;
+                let response = close_btn_copy.show(ui, ctx);
+                if response.clicked {
+                    should_close = true;
+                }
+            }
+        });
+        
+        should_close
+    }
+    
+    /// 绘制模态遮罩
+    fn draw_modal_overlay(&self, ctx: &egui::Context, should_close: &mut bool) {
+        egui::Area::new(egui::Id::new(format!("{}_modal_overlay", self.id)))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .movable(false)
+            .interactable(true)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let screen_size = ctx.screen_rect().size();
+                let overlay_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), screen_size);
+                
+                // 半透明遮罩
+                ui.painter().rect_filled(
+                    overlay_rect,
+                    0.0,
+                    egui::Color32::from_black_alpha(64),
+                );
+                
+                // 点击外部关闭（仅限模态对话框）
+                if self.dialog_type == DialogType::Modal {
+                    if ui.allocate_rect(overlay_rect, egui::Sense::click()).clicked() {
+                        *should_close = true;
+                    }
+                }
+            });
+    }
+    
+    /// 处理拖拽
+    fn handle_dragging(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, dialog_rect: egui::Rect) -> bool {
+        // 标题栏拖拽区域（顶部30像素）
+        let title_area = egui::Rect::from_min_size(
+            dialog_rect.min,
+            egui::vec2(self.size.x, 30.0)
+        );
+        
+        let title_response = ui.interact(
+            title_area,
+            egui::Id::new(format!("{}_title_drag", self.id)),
+            egui::Sense::drag()
+        );
+        
+        if title_response.drag_started() && !self.dragging {
+            self.dragging = true;
+            if let Some(pointer_pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                self.drag_offset = self.position.to_vec2() - pointer_pos.to_vec2();
+            }
+        } else if title_response.dragged() && self.dragging {
+            self.position += title_response.drag_delta();
+        } else if self.dragging && (!ctx.input(|i| i.pointer.primary_down()) || title_response.drag_stopped()) {
+            self.dragging = false;
+        }
+        
+        // 边界检查
+        let screen_rect = ctx.screen_rect();
+        if self.position.x < screen_rect.min.x - self.size.x + 50.0 {
+            self.position.x = screen_rect.min.x - self.size.x + 50.0;
+        }
+        if self.position.x > screen_rect.max.x - 50.0 {
+            self.position.x = screen_rect.max.x - 50.0;
+        }
+        if self.position.y < screen_rect.min.y {
+            self.position.y = screen_rect.min.y;
+        }
+        if self.position.y > screen_rect.max.y - 50.0 {
+            self.position.y = screen_rect.max.y - 50.0;
+        }
+        
+        false // 拖拽不会关闭对话框
+    }
+    
+    /// 绘制背景
+    fn draw_background(&self, ui: &mut egui::Ui, ctx: &egui::Context, rect: egui::Rect) {
+        if let Some(info) = self.library.get_egui_texture(ctx, self.index) {
+            if let Some(texture) = info.egui_texture {
+                ui.painter().image(
+                    texture.id(),
+                    rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        } else {
+            // 备用背景
+            ui.painter().rect_filled(
+                rect,
+                5.0,
+                egui::Color32::from_rgba_premultiplied(40, 40, 50, 240),
+            );
+            ui.painter().rect_stroke(
+                rect,
+                5.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(200, 200, 200)),
+                egui::epaint::StrokeKind::Outside,
+            );
+        }
+    }
+    
+    /// 绘制标题纹理
+    fn draw_title(&self, ui: &mut egui::Ui, ctx: &egui::Context, title_index: usize) {
+        let title_pos = self.position + egui::vec2(18.0, 9.0);
+        if let Some(info) = self.library.get_egui_texture(ctx, title_index) {
+            if let Some(texture) = info.egui_texture {
+                let title_rect = egui::Rect::from_min_size(title_pos, egui::vec2(200.0, 30.0));
+                ui.painter().image(
+                    texture.id(),
+                    title_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+    }
+}
+
+impl MirControl for MirDialog {
+    fn id(&self) -> egui::Id {
+        egui::Id::new(&self.id)
+    }
+    
+    fn position(&self) -> egui::Pos2 {
+        self.position
+    }
+    
+    fn set_position(&mut self, pos: egui::Pos2) {
+        self.position = pos;
+    }
+    
+    fn size(&self) -> egui::Vec2 {
+        self.size
+    }
+    
+    fn visible(&self) -> bool {
+        self.visible
+    }
+    
+    fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+    
+    fn draw(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        self.draw_base(ctx);
+    }
+}
+
+impl MirImageControl for MirDialog {
+    fn library(&self) -> LibraryName {
+        self.library
+    }
+    
+    fn set_library(&mut self, library: LibraryName) {
+        self.library = library;
+    }
+    
+    fn index(&self) -> usize {
+        self.index
+    }
+    
+    fn set_index(&mut self, index: usize) {
+        self.index = index;
+    }
+}
