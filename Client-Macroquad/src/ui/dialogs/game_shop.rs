@@ -3,7 +3,7 @@
 // ============================================================================
 // 
 // 【功能说明】
-// 1. 使用MirDialog基类实现基础对话框功能
+// 1. 使用TexturedDialog基类实现基础对话框功能
 // 2. 集成ShopItemViewer实现商品预览
 // 3. 统一的事件处理和状态管理
 // 4. 完全基于原版Crystal客户端架构
@@ -12,7 +12,7 @@
 
 use egui_macroquad::egui;
 use crate::resources::LibraryName;
-// use crate::ui::components::{MirDialog, MirButton, ShopItemViewer, DialogType};
+use crate::ui::components::{TexturedDialog, TexturedButton, ShopItemViewer, DialogType};
 
 /// 商店商品信息
 #[derive(Debug, Clone)]
@@ -29,7 +29,7 @@ pub struct ShopItem {
 /// 商店对话框
 pub struct GameShopDialog {
     /// 基础对话框
-    pub dialog: MirDialog,
+    pub dialog: TexturedDialog,
     /// 商品预览器
     pub item_viewer: ShopItemViewer,
     /// 商品列表
@@ -40,48 +40,48 @@ pub struct GameShopDialog {
     pub current_page: usize,
     pub items_per_page: usize,
     /// 按钮
-    pub prev_page_button: MirButton,
-    pub next_page_button: MirButton,
-    pub buy_button: MirButton,
-    pub close_button: MirButton,
+    pub prev_page_button: TexturedButton,
+    pub next_page_button: TexturedButton,
+    pub buy_button: TexturedButton,
+    pub close_button: TexturedButton,
 }
 
 impl GameShopDialog {
     pub fn new() -> Self {
         // 创建基础对话框（原版GameshopDialog的尺寸和位置）
-        let dialog = MirDialog::new("game_shop_dialog", "商店")
+        let dialog = TexturedDialog::new("game_shop_dialog", "商店")
             .with_type(DialogType::Normal)
             .with_background(LibraryName::Title, 603) // 原版的Title[603]
             .with_rect(egui::pos2(200.0, 100.0), egui::vec2(312.0, 433.0))
             .with_close_button(None); // 使用自定义关闭按钮
         
         // 创建商品预览器
-        let mut item_viewer = ShopItemViewer::new();
+        let item_viewer = ShopItemViewer::new();
         
         // 创建按钮（基于原版位置）
-        let prev_page_button = MirButton::new("shop_prev_page")
+        let prev_page_button = TexturedButton::new()
             .with_library(LibraryName::Prguse2)
-            .with_textures(202, Some(203), Some(204))
-            .with_rect(egui::pos2(237.0, 380.0), egui::vec2(16.0, 14.0))
-            .with_hint("上一页");
+            .with_states(202, Some(203), Some(204), None)
+            .with_size(egui::vec2(16.0, 14.0))
+            .with_tooltip("上一页");
             
-        let next_page_button = MirButton::new("shop_next_page")
+        let next_page_button = TexturedButton::new()
             .with_library(LibraryName::Prguse2)
-            .with_textures(205, Some(206), Some(207))
-            .with_rect(egui::pos2(256.0, 380.0), egui::vec2(16.0, 14.0))
-            .with_hint("下一页");
+            .with_states(205, Some(206), Some(207), None)
+            .with_size(egui::vec2(16.0, 14.0))
+            .with_tooltip("下一页");
             
-        let buy_button = MirButton::new("shop_buy")
+        let buy_button = TexturedButton::new()
             .with_library(LibraryName::Prguse2)
-            .with_textures(313, Some(314), Some(315))
-            .with_rect(egui::pos2(235.0, 400.0), egui::vec2(53.0, 17.0))
-            .with_hint("购买");
+            .with_states(313, Some(314), Some(315), None)
+            .with_size(egui::vec2(53.0, 17.0))
+            .with_tooltip("购买");
             
-        let close_button = MirButton::new("shop_close")
+        let close_button = TexturedButton::new()
             .with_library(LibraryName::Prguse2)
-            .with_textures(360, Some(361), Some(362))
-            .with_rect(egui::pos2(280.0, 15.0), egui::vec2(20.0, 20.0))
-            .with_hint("关闭");
+            .with_states(360, Some(361), Some(362), None)
+            .with_size(egui::vec2(20.0, 20.0))
+            .with_tooltip("关闭");
         
         Self {
             dialog,
@@ -112,7 +112,7 @@ impl GameShopDialog {
     /// 隐藏商店
     pub fn hide(&mut self) {
         self.dialog.hide();
-        self.item_viewer.viewer.hide();
+        self.item_viewer.hide();
     }
     
     /// 是否可见
@@ -124,7 +124,11 @@ impl GameShopDialog {
     fn get_current_page_items(&self) -> &[ShopItem] {
         let start = self.current_page * self.items_per_page;
         let end = (start + self.items_per_page).min(self.items.len());
-        &self.items[start..end]
+        if start >= self.items.len() {
+            &[]
+        } else {
+            &self.items[start..end]
+        }
     }
     
     /// 获取总页数
@@ -138,18 +142,13 @@ impl GameShopDialog {
     
     /// 选择商品
     fn select_item(&mut self, index: usize) {
-        if let Some(item) = self.items.get(index) {
+        if let Some(_item) = self.items.get(index) {
             self.selected_item = Some(index);
             
             // 显示商品预览
-            self.item_viewer.show_shop_item(
-                index as i32,
-                self.items.len() as i32,
-                &item.name,
-                &item.description,
-                item.price,
-                Some(item.icon_index)
-            );
+            self.item_viewer.current_item_index = index as i32;
+            self.item_viewer.total_items = self.items.len() as i32;
+            self.item_viewer.show();
         }
     }
     
@@ -201,13 +200,7 @@ impl GameShopDialog {
         action = area_response.inner;
         
         // 绘制商品预览器（独立层级）
-        if self.item_viewer.viewer.is_visible() {
-            let viewer_closed = self.item_viewer.draw(ctx);
-            if viewer_closed {
-                // 预览器关闭时清除选择
-                self.selected_item = None;
-            }
-        }
+        self.item_viewer.draw(ctx);
         
         action
     }
@@ -215,7 +208,7 @@ impl GameShopDialog {
     /// 绘制商品网格
     fn draw_item_grid(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> Option<GameShopAction> {
         let current_items = self.get_current_page_items();
-        let grid_start = self.dialog.position + egui::vec2(20.0, 50.0);
+        let grid_start = egui::vec2(20.0, 50.0); // 相对位置
         let cell_size = egui::vec2(36.0, 36.0);
         let grid_cols = 4;
         let grid_spacing = egui::vec2(40.0, 40.0);
@@ -227,7 +220,7 @@ impl GameShopDialog {
                 col as f32 * grid_spacing.x,
                 row as f32 * grid_spacing.y
             );
-            let cell_rect = egui::Rect::from_min_size(cell_pos, cell_size);
+            let cell_rect = egui::Rect::from_min_size(self.dialog.position + cell_pos, cell_size);
             
             // 绘制商品图标
             if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, item.icon_index) {
@@ -288,47 +281,67 @@ impl GameShopDialog {
     }
     
     /// 绘制按钮
-    fn draw_buttons(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> Option<GameShopAction> {
+    fn draw_buttons(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) -> Option<GameShopAction> {
         // 上一页按钮
-        let prev_pos = self.dialog.position + egui::vec2(self.prev_page_button.position.x, self.prev_page_button.position.y);
-        let mut prev_btn_copy = self.prev_page_button.clone();
-        prev_btn_copy.position = prev_pos;
-        prev_btn_copy.enabled = self.current_page > 0;
-        let prev_response = prev_btn_copy.show(ui, ctx);
-        if prev_response.clicked && self.current_page > 0 {
-            self.current_page -= 1;
-            return Some(GameShopAction::PageChanged(self.current_page));
+        let prev_pos = egui::pos2(237.0, 380.0); // 相对位置
+        let prev_rect = egui::Rect::from_min_size(self.dialog.position + prev_pos.to_vec2(), egui::vec2(16.0, 14.0));
+        let mut prev_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(prev_rect)
+                .layout(*ui.layout())
+        );
+        
+        self.prev_page_button = self.prev_page_button.clone().with_enabled(self.current_page > 0);
+        if self.prev_page_button.draw(&mut prev_ui) {
+            if self.current_page > 0 {
+                self.current_page -= 1;
+                return Some(GameShopAction::PageChanged(self.current_page));
+            }
         }
         
         // 下一页按钮
-        let next_pos = self.dialog.position + egui::vec2(self.next_page_button.position.x, self.next_page_button.position.y);
-        let mut next_btn_copy = self.next_page_button.clone();
-        next_btn_copy.position = next_pos;
-        next_btn_copy.enabled = self.current_page + 1 < self.get_total_pages();
-        let next_response = next_btn_copy.show(ui, ctx);
-        if next_response.clicked && self.current_page + 1 < self.get_total_pages() {
-            self.current_page += 1;
-            return Some(GameShopAction::PageChanged(self.current_page));
+        let next_pos = egui::pos2(256.0, 380.0); // 相对位置
+        let next_rect = egui::Rect::from_min_size(self.dialog.position + next_pos.to_vec2(), egui::vec2(16.0, 14.0));
+        let mut next_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(next_rect)
+                .layout(*ui.layout())
+        );
+        
+        self.next_page_button = self.next_page_button.clone().with_enabled(self.current_page + 1 < self.get_total_pages());
+        if self.next_page_button.draw(&mut next_ui) {
+            if self.current_page + 1 < self.get_total_pages() {
+                self.current_page += 1;
+                return Some(GameShopAction::PageChanged(self.current_page));
+            }
         }
         
         // 购买按钮
-        let buy_pos = self.dialog.position + egui::vec2(self.buy_button.position.x, self.buy_button.position.y);
-        let mut buy_btn_copy = self.buy_button.clone();
-        buy_btn_copy.position = buy_pos;
-        buy_btn_copy.enabled = self.selected_item.is_some();
-        let buy_response = buy_btn_copy.show(ui, ctx);
-        if buy_response.clicked {
+        let buy_pos = egui::pos2(235.0, 400.0); // 相对位置
+        let buy_rect = egui::Rect::from_min_size(self.dialog.position + buy_pos.to_vec2(), egui::vec2(53.0, 17.0));
+        let mut buy_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(buy_rect)
+                .layout(*ui.layout())
+        );
+        
+        self.buy_button = self.buy_button.clone().with_enabled(self.selected_item.is_some());
+        if self.buy_button.draw(&mut buy_ui) {
             if let Some(item_id) = self.buy_selected_item() {
                 return Some(GameShopAction::BuyItem(item_id));
             }
         }
         
         // 关闭按钮
-        let close_pos = self.dialog.position + egui::vec2(self.close_button.position.x, self.close_button.position.y);
-        let mut close_btn_copy = self.close_button.clone();
-        close_btn_copy.position = close_pos;
-        let close_response = close_btn_copy.show(ui, ctx);
-        if close_response.clicked {
+        let close_pos = egui::pos2(280.0, 15.0); // 相对位置
+        let close_rect = egui::Rect::from_min_size(self.dialog.position + close_pos.to_vec2(), egui::vec2(20.0, 20.0));
+        let mut close_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(close_rect)
+                .layout(*ui.layout())
+        );
+        
+        if self.close_button.draw(&mut close_ui) {
             self.hide();
             return Some(GameShopAction::Close);
         }
@@ -337,7 +350,7 @@ impl GameShopDialog {
     }
     
     /// 绘制页面信息
-    fn draw_page_info(&self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn draw_page_info(&self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         let total_pages = self.get_total_pages();
         if total_pages > 1 {
             let info_pos = self.dialog.position + egui::vec2(20.0, 380.0);

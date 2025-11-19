@@ -11,17 +11,21 @@
 // 
 // ============================================================================
 
-// pub mod dialog;
-// pub mod shop_viewer;
+pub mod dialog;
+pub mod shop_viewer;
 pub mod checkbox;
 pub mod checkbox_test;
 pub mod textured_widgets;
+pub mod label;
+pub mod message_box;
 
-// pub use dialog::*;
-// pub use shop_viewer::*;
+pub use dialog::*;
+pub use shop_viewer::*;
 pub use checkbox::*;
 pub use checkbox_test::*;
 pub use textured_widgets::*;
+pub use label::*;
+pub use message_box::*;
 
 use egui_macroquad::egui;
 use crate::resources::LibraryName;

@@ -24,10 +24,10 @@ pub struct TexturedButton {
     enabled: bool,
     
     /// 提示文本
-    tooltip: String,
+    pub tooltip: String,
     
     /// 按钮尺寸（None表示使用纹理原始尺寸）
-    size: Option<egui::Vec2>,
+    pub size: Option<egui::Vec2>,
 }
 
 impl TexturedButton {
@@ -109,7 +109,7 @@ impl TexturedButton {
                     });
                     
                     // 创建ImageButton - 使用新的API格式
-                    let image_button = egui::ImageButton::new((texture_id, button_size));
+                    let image_button = egui::ImageButton::new((texture_id, button_size)).frame(false);
                     
                     let response = ui.add(image_button);
                     

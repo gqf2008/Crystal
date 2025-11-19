@@ -1,18 +1,10 @@
 // ============================================================================
-// MirDialog - 基于原版MirImageControl的对话框基类
-// ============================================================================
-// 
-// 【功能说明】
-// 1. 可拖拽的模态或非模态对话框
-// 2. 自动纹理背景绘制
-// 3. 标准的关闭按钮
-// 4. 层级管理和焦点处理
-// 
+// TexturedDialog - 基于egui的纹理对话框组件
 // ============================================================================
 
 use egui_macroquad::egui;
 use crate::resources::LibraryName;
-use super::{Control, ImageControl};
+use super::{Control, ImageControl, TexturedButton};
 
 /// 对话框类型
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -25,8 +17,8 @@ pub enum DialogType {
     Fixed,
 }
 
-/// 对话框基类
-pub struct Dialog {
+/// 纹理对话框组件
+pub struct TexturedDialog {
     /// 对话框ID
     pub id: String,
     /// 对话框标题
@@ -50,14 +42,16 @@ pub struct Dialog {
     /// 背景纹理索引
     pub index: usize,
     /// 关闭按钮
-    pub close_button: Option<MirButton>,
+    pub close_button: Option<TexturedButton>,
+    /// 关闭按钮相对位置
+    pub close_button_offset: egui::Vec2,
     /// 标题纹理索引（可选）
     pub title_index: Option<usize>,
     /// UI层级
     pub order: egui::Order,
 }
 
-impl MirDialog {
+impl TexturedDialog {
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
         let dialog_id = id.into();
         
@@ -74,12 +68,13 @@ impl MirDialog {
             library: LibraryName::Title,
             index: 0,
             close_button: Some(
-                MirButton::new(format!("{}_close", dialog_id))
+                TexturedButton::new()
                     .with_library(LibraryName::Prguse2)
-                    .with_textures(360, Some(361), Some(362))
-                    .with_rect(egui::pos2(0.0, 0.0), egui::vec2(20.0, 20.0))
-                    .with_hint("关闭")
+                    .with_states(360, Some(361), Some(362), None)
+                    .with_size(egui::vec2(20.0, 20.0))
+                    .with_tooltip("关闭")
             ),
+            close_button_offset: egui::vec2(375.0, 5.0), // 默认右上角
             title_index: None,
             order: egui::Order::Middle,
         }
@@ -106,15 +101,13 @@ impl MirDialog {
     pub fn with_rect(mut self, pos: egui::Pos2, size: egui::Vec2) -> Self {
         self.position = pos;
         self.size = size;
-        // 更新关闭按钮位置（右上角）
-        if let Some(ref mut close_btn) = self.close_button {
-            close_btn.position = egui::pos2(size.x - 25.0, 5.0);
-        }
+        // 更新关闭按钮默认位置（右上角）
+        self.close_button_offset = egui::vec2(size.x - 25.0, 5.0);
         self
     }
     
     /// 设置关闭按钮
-    pub fn with_close_button(mut self, button: Option<MirButton>) -> Self {
+    pub fn with_close_button(mut self, button: Option<TexturedButton>) -> Self {
         self.close_button = button;
         self
     }
@@ -179,12 +172,18 @@ impl MirDialog {
             }
             
             // 绘制关闭按钮
-            if let Some(ref close_btn) = self.close_button {
-                let btn_pos = self.position + egui::vec2(close_btn.position.x, close_btn.position.y);
-                let mut close_btn_copy = close_btn.clone();
-                close_btn_copy.position = btn_pos;
-                let response = close_btn_copy.show(ui, ctx);
-                if response.clicked {
+            if let Some(ref mut close_btn) = self.close_button {
+                // 在绝对位置绘制按钮
+                let btn_pos = self.position + self.close_button_offset;
+                let btn_rect = egui::Rect::from_min_size(btn_pos, egui::vec2(20.0, 20.0)); // 假设按钮大小
+                
+                // 使用ui.new_child放置按钮
+                let mut child_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(btn_rect)
+                        .layout(*ui.layout())
+                );
+                if close_btn.draw(&mut child_ui) {
                     should_close = true;
                 }
             }
@@ -307,7 +306,7 @@ impl MirDialog {
     }
 }
 
-impl MirControl for MirDialog {
+impl Control for TexturedDialog {
     fn id(&self) -> egui::Id {
         egui::Id::new(&self.id)
     }
@@ -332,12 +331,14 @@ impl MirControl for MirDialog {
         self.visible = visible;
     }
     
-    fn draw(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        self.draw_base(ctx);
+    fn draw(&mut self, _ui: &mut egui::Ui, ctx: &egui::Context) {
+        if self.draw_base(ctx) {
+            self.hide();
+        }
     }
 }
 
-impl MirImageControl for MirDialog {
+impl ImageControl for TexturedDialog {
     fn library(&self) -> LibraryName {
         self.library
     }

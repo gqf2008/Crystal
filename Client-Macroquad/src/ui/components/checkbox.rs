@@ -80,8 +80,8 @@ impl TexturedCheckBox {
     pub fn new() -> Self {
         Self {
             checked: false,
-            checked_index: 0,
-            unchecked_index: 1,
+            checked_index: 2087,
+            unchecked_index: 2086,
             library: LibraryName::Prguse,
             label_text: String::new(),
             enabled: true,
@@ -149,7 +149,7 @@ impl TexturedCheckBox {
                         
                         let image_button = egui::ImageButton::new(
                             (texture_id, checkbox_size)
-                        );
+                        ).frame(false);
                         
                         let response = ui.add(image_button);
                         

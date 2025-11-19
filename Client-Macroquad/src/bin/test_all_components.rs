@@ -3,407 +3,354 @@
 // 测试所有公共组件的功能和交互
 // ============================================================================
 
-// FIXME: 此测试文件使用了已删除的组件，需要更新
-// use client_macroquad::ui::components::{
-//     MirButton, MirLabel, MirTextBox, MirListBox, MirProgressBar,
-//     MirDialog, ShopItemViewer, ListItem, MirControl
-};
 use macroquad::prelude::*;
 use egui_macroquad::egui;
+use client_macroquad::ui::components::{
+    TexturedButton, TexturedCheckBox, TexturedDialog, ShopItemViewer, DialogType,
+    TexturedMessageBox, MessageBoxButtons, MessageBoxResult
+};
+use client_macroquad::ui::dialogs::{GameShopDialog, ShopItem};
+use client_macroquad::resources::{ResourceManager, LibraryName};
+
+#[derive(PartialEq, Clone, Copy)]
+enum TestPage {
+    Buttons,
+    Checkboxes,
+    Dialogs,
+    MessageBox,
+    Shop,
+    ItemViewer,
+}
 
 struct ComponentTestApp {
+    current_page: TestPage,
+    font_loaded: bool,
+
     // 基础组件
-    test_button: MirButton,
-    close_button: MirButton,
-    info_label: MirLabel,
-    title_label: MirLabel,
-    status_label: MirLabel,
+    btn_normal: TexturedButton,
+    btn_disabled: TexturedButton,
+    checkbox_native: TexturedCheckBox,
+    checkbox_textured: TexturedCheckBox,
     
-    // 输入组件
-    name_textbox: MirTextBox,
-    password_textbox: MirTextBox,
-    search_textbox: MirTextBox,
-    
-    // 列表组件
-    items_listbox: MirListBox,
-    skills_listbox: MirListBox,
-    
-    // 进度条组件
-    hp_progress: MirProgressBar,
-    mp_progress: MirProgressBar,
-    exp_progress: MirProgressBar,
-    loading_progress: MirProgressBar,
-    
-    // 对话框组件
-    test_dialog: MirDialog,
-    info_dialog: MirDialog,
-    
-    // 商店查看器
+    // 对话框
+    dialog: TexturedDialog,
+    message_box: TexturedMessageBox,
+    shop_dialog: GameShopDialog,
     shop_viewer: ShopItemViewer,
     
-    // 测试状态
-    button_click_count: u32,
-    progress_values: [f32; 4],
-    time_elapsed: f32,
-    show_dialog: bool,
-    show_info_dialog: bool,
-    show_shop: bool,
+    // 状态
+    counter: i32,
+    last_msg_result: String,
 }
 
 impl ComponentTestApp {
     fn new() -> Self {
-        // 创建按钮组件
-        let test_button = MirButton::new("test_btn")
-            .with_rect(egui::pos2(20.0, 20.0), egui::vec2(120.0, 30.0))
-            .with_text("点击测试 (0)");
+        // 1. 基础按钮 (使用 Prguse2 库中的关闭按钮样式)
+        let btn_normal = TexturedButton::new()
+            .with_library(LibraryName::Prguse2)
+            .with_states(360, Some(361), Some(362), None) 
+            .with_size(egui::vec2(20.0, 20.0))
+            .with_tooltip("点击增加计数");
+
+        let btn_disabled = TexturedButton::new()
+            .with_library(LibraryName::Prguse2)
+            .with_states(360, Some(361), Some(362), None)
+            .with_size(egui::vec2(20.0, 20.0))
+            .with_enabled(false)
+            .with_tooltip("禁用按钮");
+
+        // 2. 复选框
+        let checkbox_native = TexturedCheckBox::new()
+            .with_text("原生样式复选框")
+            .with_checked(true);
+
+        let checkbox_textured = TexturedCheckBox::new()
+            .with_textures(LibraryName::Prguse, 2087, 2086) // 使用 Prguse 默认复选框索引
+            .with_text("纹理复选框")
+            .with_tooltip("带纹理的复选框");
+
+        // 3. 基础对话框 (使用 Title 库中的聊天选项背景，避免看起来像 MessageBox)
+        let dialog = TexturedDialog::new("test_dialog", "测试对话框")
+            .with_type(DialogType::Normal)
+            .with_background(LibraryName::Title, 466) // 使用 Title[466] (ChatOptionDialog)
+            .with_rect(egui::pos2(300.0, 100.0), egui::vec2(224.0, 180.0));
         
-        let close_button = MirButton::new("close_btn")
-            .with_rect(egui::pos2(660.0, 20.0), egui::vec2(80.0, 30.0))
-            .with_text("退出");
-        
-        // 创建标签组件
-        let title_label = MirLabel::new("title", "🎮 Crystal UI组件统一测试平台")
-            .with_position(egui::pos2(200.0, 25.0))
-            .with_font_size(20.0)
-            .with_color(egui::Color32::from_rgb(255, 215, 0));
-        
-        let info_label = MirLabel::new("info", "测试所有公共UI组件的功能和交互效果")
-            .with_position(egui::pos2(20.0, 60.0))
-            .with_font_size(14.0)
-            .with_color(egui::Color32::LIGHT_GRAY);
-        
-        let status_label = MirLabel::new("status", "状态: 就绪")
-            .with_position(egui::pos2(20.0, 85.0))
-            .with_font_size(12.0)
-            .with_color(egui::Color32::GREEN);
-        
-        // 创建文本输入框
-        let name_textbox = MirTextBox::new("name_input")
-            .with_rect(egui::pos2(20.0, 120.0), egui::vec2(200.0, 25.0))
-            .with_placeholder("请输入用户名...");
-        
-        let password_textbox = MirTextBox::new("pass_input")
-            .with_rect(egui::pos2(240.0, 120.0), egui::vec2(200.0, 25.0))
-            .with_placeholder("请输入密码...")
-            .with_password(true);
-        
-        let search_textbox = MirTextBox::new("search_input")
-            .with_rect(egui::pos2(460.0, 120.0), egui::vec2(200.0, 25.0))
-            .with_placeholder("搜索物品...");
-        
-        // 创建列表框
-        let mut items_listbox = MirListBox::new("items_list")
-            .with_rect(egui::pos2(20.0, 160.0), egui::vec2(200.0, 200.0));
-        
-        // 添加物品列表项
-        let items = vec![
-            ListItem::new("屠龙刀", "icon_weapon_1"),
-            ListItem::new("倚天剑", "icon_weapon_2"),
-            ListItem::new("麻痹戒指", "icon_ring_1"),
-            ListItem::new("护身戒指", "icon_ring_2"),
-            ListItem::new("复活戒指", "icon_ring_3"),
-            ListItem::new("超级红药", "icon_potion_1"),
-            ListItem::new("超级蓝药", "icon_potion_2"),
-            ListItem::new("强效太阳水", "icon_potion_3"),
-            ListItem::new("万年雪霜", "icon_potion_4"),
-            ListItem::new("地狱雷光", "icon_scroll_1"),
-        ];
-        for item in items {
-            items_listbox.add_item(item);
-        }
-        
-        let mut skills_listbox = MirListBox::new("skills_list")
-            .with_rect(egui::pos2(240.0, 160.0), egui::vec2(200.0, 200.0));
-        
-        // 添加技能列表项
-        let skills = vec![
-            ListItem::new("基本剑术", "skill_basic_sword"),
-            ListItem::new("攻杀剑术", "skill_attack_sword"),
-            ListItem::new("刺杀剑术", "skill_thrust_sword"),
-            ListItem::new("半月弯刀", "skill_half_moon"),
-            ListItem::new("烈火剑法", "skill_fire_sword"),
-            ListItem::new("逐日剑法", "skill_sun_sword"),
-            ListItem::new("开天斩", "skill_heaven_slash"),
-        ];
-        for skill in skills {
-            skills_listbox.add_item(skill);
-        }
-        
-        // 创建进度条
-        let hp_progress = MirProgressBar::new("hp_bar")
-            .with_rect(egui::pos2(460.0, 160.0), egui::vec2(200.0, 20.0))
-            .with_colors(egui::Color32::RED, egui::Color32::DARK_RED)
-            .with_text(true, "HP: {current}/{max}");
-        
-        let mp_progress = MirProgressBar::new("mp_bar")
-            .with_rect(egui::pos2(460.0, 190.0), egui::vec2(200.0, 20.0))
-            .with_colors(egui::Color32::BLUE, egui::Color32::DARK_BLUE)
-            .with_text(true, "MP: {current}/{max}");
-        
-        let exp_progress = MirProgressBar::new("exp_bar")
-            .with_rect(egui::pos2(460.0, 220.0), egui::vec2(200.0, 20.0))
-            .with_colors(egui::Color32::YELLOW, egui::Color32::from_rgb(128, 128, 0))
-            .with_text(true, "EXP: {percent}%");
-        
-        let loading_progress = MirProgressBar::new("loading_bar")
-            .with_rect(egui::pos2(460.0, 250.0), egui::vec2(200.0, 15.0))
-            .with_colors(egui::Color32::GREEN, egui::Color32::DARK_GREEN)
-            .with_text(true, "Loading... {percent}%");
-        
-        // 创建对话框
-        let mut test_dialog = MirDialog::new("test_dialog", "组件测试对话框");
-        test_dialog.size = egui::vec2(400.0, 300.0);
-        
-        let mut info_dialog = MirDialog::new("info_dialog", "组件信息");
-        info_dialog.size = egui::vec2(350.0, 250.0);
-        
-        // 创建商店查看器
-        let shop_viewer = ShopItemViewer::new();
-        
-        Self {
-            test_button,
-            close_button,
-            info_label,
-            title_label,
-            status_label,
-            name_textbox,
-            password_textbox,
-            search_textbox,
-            items_listbox,
-            skills_listbox,
-            hp_progress,
-            mp_progress,
-            exp_progress,
-            loading_progress,
-            test_dialog,
-            info_dialog,
-            shop_viewer,
-            button_click_count: 0,
-            progress_values: [80.0, 65.0, 45.0, 0.0],
-            time_elapsed: 0.0,
-            show_dialog: false,
-            show_info_dialog: false,
-            show_shop: false,
-        }
-    }
-    
-    fn update(&mut self, dt: f32) {
-        self.time_elapsed += dt;
-        
-        // 更新进度条动画
-        self.progress_values[3] = ((self.time_elapsed * 0.5).sin() * 0.5 + 0.5) * 100.0;
-        
-        // 模拟HP/MP变化
-        if self.time_elapsed.fract() < 0.01 {
-            self.progress_values[0] = (self.progress_values[0] + 0.5) % 100.0;
-            self.progress_values[1] = (self.progress_values[1] + 0.3) % 100.0;
-        }
-        
-        // 更新进度条数值
-        self.hp_progress.set_value(self.progress_values[0]);
-        self.mp_progress.set_value(self.progress_values[1]);
-        self.exp_progress.set_value(self.progress_values[2]);
-        self.loading_progress.set_value(self.progress_values[3]);
-        
-        // 更新状态标签
-        let status_text = format!(
-            "状态: 运行中 | 时间: {:.1}s | 点击: {}次", 
-            self.time_elapsed, 
-            self.button_click_count
+        // 4. 消息框
+        let message_box = TexturedMessageBox::new(
+            "这是一个测试消息框。\n请点击按钮进行选择。",
+            MessageBoxButtons::YesNoCancel
         );
-        self.status_label.set_text(&status_text);
+
+        // 5. 商店对话框
+        let mut shop_dialog = GameShopDialog::new();
+        // 添加一些测试商品
+        let items = vec![
+            ShopItem {
+                id: 1,
+                name: "木剑".to_string(),
+                description: "新手武器".to_string(),
+                price: 100,
+                icon_index: 100,
+                category: "武器".to_string(),
+                in_stock: true,
+            },
+            ShopItem {
+                id: 2,
+                name: "布衣".to_string(),
+                description: "新手防具".to_string(),
+                price: 200,
+                icon_index: 101,
+                category: "防具".to_string(),
+                in_stock: true,
+            },
+            ShopItem {
+                id: 3,
+                name: "金创药(小)".to_string(),
+                description: "恢复生命值".to_string(),
+                price: 50,
+                icon_index: 102,
+                category: "消耗品".to_string(),
+                in_stock: false, // 缺货测试
+            },
+        ];
+        shop_dialog.load_items(items);
+
+        // 6. 独立查看器
+        let shop_viewer = ShopItemViewer::new()
+            .with_total_items(5);
+
+        Self {
+            current_page: TestPage::Buttons,
+            font_loaded: false,
+            btn_normal,
+            btn_disabled,
+            checkbox_native,
+            checkbox_textured,
+            dialog,
+            message_box,
+            shop_dialog,
+            shop_viewer,
+            counter: 0,
+            last_msg_result: "无".to_string(),
+        }
     }
-    
-    fn draw(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // 绘制标题和信息
-            self.title_label.draw(ui, ctx);
-            self.info_label.draw(ui, ctx);
-            self.status_label.draw(ui, ctx);
-            
-            // 绘制按钮
-            let response = self.test_button.show(ui, ctx);
-            if response.clicked {
-                self.button_click_count += 1;
-                self.test_button.text = Some(format!("点击测试 ({})", self.button_click_count));
-                
-                // 每5次点击显示测试对话框
-                if self.button_click_count % 5 == 0 {
-                    self.show_dialog = true;
-                }
-            }
-            
-            let close_response = self.close_button.show(ui, ctx);
-            if close_response.clicked {
-                std::process::exit(0);
-            }
-            
-            // 绘制文本输入框
-            self.name_textbox.draw(ui, ctx);
-            self.password_textbox.draw(ui, ctx);
-            self.search_textbox.draw(ui, ctx);
-            
-            // 绘制列表框
-            self.items_listbox.draw(ui, ctx);
-            ui.label("物品列表 (请点击选择)");
-            
-            self.skills_listbox.draw(ui, ctx);
-            ui.label("技能列表 (请点击选择)");
-            
-            // 绘制进度条
-            self.hp_progress.draw(ui, ctx);
-            self.mp_progress.draw(ui, ctx);
-            self.exp_progress.draw(ui, ctx);
-            self.loading_progress.draw(ui, ctx);
-            
-            // 绘制控制按钮区域
-            ui.horizontal(|ui| {
-                ui.set_min_height(40.0);
-                
-                if ui.button("🔧 显示测试对话框").clicked() {
-                    self.show_dialog = true;
-                }
-                
-                if ui.button("ℹ️ 显示组件信息").clicked() {
-                    self.show_info_dialog = true;
-                }
-                
-                if ui.button("🛒 显示商店查看器").clicked() {
-                    self.show_shop = true;
-                }
-                
-                if ui.button("🔄 重置所有组件").clicked() {
-                    self.reset_components();
-                }
-            });
-            
-            // 显示组件统计信息
-            ui.separator();
-            ui.label("📊 组件统计:");
-            ui.label(format!("• 按钮组件: 2个"));
-            ui.label(format!("• 标签组件: 3个"));
-            ui.label(format!("• 输入框组件: 3个"));
-            ui.label(format!("• 列表框组件: 2个 (物品10项, 技能7项)"));
-            ui.label(format!("• 进度条组件: 4个"));
-            ui.label(format!("• 对话框组件: 2个"));
-            ui.label(format!("• 商店查看器: 1个"));
-        });
-        
-        // 绘制对话框
-        if self.show_dialog {
-            if self.draw_test_dialog(ctx) {
-                self.show_dialog = false;
-            }
+
+    fn load_fonts(&mut self, ctx: &egui::Context) {
+        if self.font_loaded {
+            return;
         }
+
+        let mut fonts = egui::FontDefinitions::default();
+        let font_path = "assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf";
         
-        if self.show_info_dialog {
-            if self.draw_info_dialog(ctx) {
-                self.show_info_dialog = false;
-            }
-        }
+        println!("Attempting to load font from: {}", font_path);
         
-        if self.show_shop {
-            if self.shop_viewer.draw(ctx) {
-                self.show_shop = false;
+        match std::fs::read(font_path) {
+            Ok(font_data) => {
+                fonts.font_data.insert(
+                    "my_font".to_owned(),
+                    std::sync::Arc::new(egui::FontData::from_owned(font_data)),
+                );
+
+                fonts
+                    .families
+                    .entry(egui::FontFamily::Proportional)
+                    .or_default()
+                    .insert(0, "my_font".to_owned());
+
+                fonts
+                    .families
+                    .entry(egui::FontFamily::Monospace)
+                    .or_default()
+                    .insert(0, "my_font".to_owned());
+
+                ctx.set_fonts(fonts);
+                println!("Font loaded successfully!");
+                self.font_loaded = true;
+            },
+            Err(e) => {
+                eprintln!("Failed to load font: {}", e);
+                // Fallback or just mark as loaded to stop trying
+                self.font_loaded = true; 
             }
         }
     }
-    
-    fn draw_test_dialog(&mut self, ctx: &egui::Context) -> bool {
-        let mut should_close = false;
-        
-        egui::Window::new("🔧 组件测试对话框")
-            .resizable(false)
-            .collapsible(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
-                ui.label("🎉 恭喜！您已经点击了测试按钮足够多次！");
-                ui.separator();
-                
-                ui.label("组件功能测试:");
-                ui.label("✅ 按钮点击响应正常");
-                ui.label("✅ 标签文本更新正常");
-                ui.label("✅ 进度条动画正常");
-                ui.label("✅ 对话框显示正常");
-                
-                ui.separator();
-                
-                ui.horizontal(|ui| {
-                    if ui.button("确定").clicked() {
-                        should_close = true;
+
+    fn update(&mut self) {
+        // 这里可以处理一些非UI的逻辑
+    }
+
+    fn draw(&mut self) {
+        egui_macroquad::ui(|ctx| {
+            self.load_fonts(ctx);
+
+            // 侧边栏 - 组件列表
+            egui::SidePanel::left("component_list_panel")
+                .resizable(false)
+                .default_width(150.0)
+                .show(ctx, |ui| {
+                    ui.heading("组件列表");
+                    ui.separator();
+                    
+                    if ui.selectable_label(self.current_page == TestPage::Buttons, "基础按钮 (Buttons)").clicked() {
+                        self.current_page = TestPage::Buttons;
                     }
-                    if ui.button("取消").clicked() {
-                        should_close = true;
+                    if ui.selectable_label(self.current_page == TestPage::Checkboxes, "复选框 (Checkboxes)").clicked() {
+                        self.current_page = TestPage::Checkboxes;
                     }
+                    if ui.selectable_label(self.current_page == TestPage::Dialogs, "对话框 (Dialogs)").clicked() {
+                        self.current_page = TestPage::Dialogs;
+                    }
+                    if ui.selectable_label(self.current_page == TestPage::MessageBox, "消息框 (MsgBox)").clicked() {
+                        self.current_page = TestPage::MessageBox;
+                    }
+                    if ui.selectable_label(self.current_page == TestPage::Shop, "游戏商店 (Shop)").clicked() {
+                        self.current_page = TestPage::Shop;
+                    }
+                    if ui.selectable_label(self.current_page == TestPage::ItemViewer, "物品查看 (Viewer)").clicked() {
+                        self.current_page = TestPage::ItemViewer;
+                    }
+                    
+                    ui.separator();
+                    ui.label("点击上方列表切换测试内容");
                 });
-            });
-        
-        should_close
-    }
-    
-    fn draw_info_dialog(&mut self, ctx: &egui::Context) -> bool {
-        let mut should_close = false;
-        
-        egui::Window::new("ℹ️ 组件信息")
-            .resizable(false)
-            .collapsible(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
-                ui.label("📋 Crystal UI组件系统信息");
-                ui.separator();
-                
-                ui.label("🏗️ 架构特点:");
-                ui.label("• 基于egui框架构建");
-                ui.label("• 统一的MirControl接口");
-                ui.label("• 支持纹理和颜色渲染");
-                ui.label("• 完整的交互事件处理");
-                
-                ui.separator();
-                
-                ui.label("🎨 支持的组件:");
-                ui.label("• MirButton - 多状态按钮");
-                ui.label("• MirLabel - 文本标签");
-                ui.label("• MirTextBox - 文本输入框");
-                ui.label("• MirListBox - 滚动列表");
-                ui.label("• MirProgressBar - 进度条");
-                ui.label("• MirDialog - 对话框");
-                ui.label("• ShopItemViewer - 商店查看器");
-                
-                ui.separator();
-                
-                if ui.button("关闭").clicked() {
-                    should_close = true;
+
+            // 主内容区域
+            egui::CentralPanel::default().show(ctx, |ui| {
+                match self.current_page {
+                    TestPage::Buttons => {
+                        ui.heading("基础按钮测试");
+                        ui.label("测试 TexturedButton 组件的不同状态");
+                        ui.add_space(20.0);
+                        
+                        ui.horizontal(|ui| {
+                            ui.label("正常按钮:");
+                            if self.btn_normal.draw(ui) {
+                                self.counter += 1;
+                            }
+                            ui.label(format!("(点击计数: {})", self.counter));
+                        });
+                        
+                        ui.add_space(10.0);
+                        
+                        ui.horizontal(|ui| {
+                            ui.label("禁用按钮:");
+                            self.btn_disabled.draw(ui);
+                            ui.label("(不可点击)");
+                        });
+                    },
+                    TestPage::Checkboxes => {
+                        ui.heading("复选框测试");
+                        ui.label("测试 TexturedCheckBox 组件");
+                        ui.add_space(20.0);
+                        
+                        ui.label("1. 原生样式:");
+                        self.checkbox_native.draw(ui);
+                        
+                        ui.add_space(10.0);
+                        
+                        ui.label("2. 纹理样式 (模拟):");
+                        self.checkbox_textured.draw(ui);
+                    },
+                    TestPage::Dialogs => {
+                        ui.heading("对话框测试");
+                        ui.label("测试 TexturedDialog 组件");
+                        ui.label("请点击下方按钮显示/隐藏对话框");
+                        ui.add_space(20.0);
+                        
+                        if ui.button(if self.dialog.visible { "隐藏对话框" } else { "显示对话框" }).clicked() {
+                            if self.dialog.visible {
+                                self.dialog.hide();
+                            } else {
+                                self.dialog.show();
+                            }
+                        }
+                    },
+                    TestPage::MessageBox => {
+                        ui.heading("消息框测试");
+                        ui.label("测试 TexturedMessageBox 组件");
+                        ui.add_space(20.0);
+                        
+                        if ui.button("显示消息框").clicked() {
+                            self.message_box.show();
+                        }
+                        
+                        ui.add_space(10.0);
+                        ui.label(format!("上次选择结果: {}", self.last_msg_result));
+                    },
+                    TestPage::Shop => {
+                        ui.heading("游戏商店测试");
+                        ui.label("测试 GameShopDialog 组件");
+                        ui.add_space(20.0);
+                        
+                        if ui.button("打开商店").clicked() {
+                            self.shop_dialog.show();
+                        }
+                    },
+                    TestPage::ItemViewer => {
+                        ui.heading("物品查看器测试");
+                        ui.label("测试 ShopItemViewer 组件");
+                        ui.add_space(20.0);
+                        
+                        self.shop_viewer.show();
+                        self.shop_viewer.draw(ctx); // Viewer通常是直接绘制的
+                    },
                 }
             });
-        
-        should_close
-    }
-    
-    fn reset_components(&mut self) {
-        self.button_click_count = 0;
-        self.test_button.text = Some("点击测试 (0)".to_string());
-        self.name_textbox.text = String::new();
-        self.password_textbox.text = String::new();
-        self.search_textbox.text = String::new();
-        self.progress_values = [80.0, 65.0, 45.0, 0.0];
-        self.time_elapsed = 0.0;
+
+            // 独立绘制的弹窗组件 (Overlay)
+            
+            // 消息框 (最高优先级)
+            let msg_result = self.message_box.draw(ctx);
+            if msg_result != MessageBoxResult::None {
+                self.last_msg_result = format!("{:?}", msg_result);
+            }
+
+            if self.current_page == TestPage::Dialogs {
+                if self.dialog.draw_base(ctx) {
+                    // 对话框关闭时的回调
+                }
+                if self.dialog.visible {
+                    egui::Area::new(egui::Id::new("test_dialog_content"))
+                        .fixed_pos(self.dialog.position + egui::vec2(20.0, 40.0))
+                        .order(self.dialog.order)
+                        .show(ctx, |ui| {
+                            ui.label("这是一个测试对话框内容");
+                            ui.label("你可以拖拽标题栏移动它");
+                        });
+                }
+            }
+
+            if self.current_page == TestPage::Shop {
+                if let Some(action) = self.shop_dialog.draw(ctx) {
+                    match action {
+                        client_macroquad::ui::dialogs::GameShopAction::Close => {
+                            // 商店内部有关闭逻辑，这里可以处理额外的关闭事件
+                        },
+                        client_macroquad::ui::dialogs::GameShopAction::BuyItem(id) => {
+                            println!("购买了商品 ID: {}", id);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        });
     }
 }
 
-#[macroquad::main("Crystal UI组件统一测试")]
+#[macroquad::main("UI Component Test")]
 async fn main() {
-    let mut app = ComponentTestApp::new();
+    // 初始化资源管理器（虽然没有真实加载，但需要结构存在）
+    // 注意：实际运行需要正确的资源路径和文件
+    let _resource_manager = ResourceManager::new();
     
+    let mut app = ComponentTestApp::new();
+
     loop {
-        clear_background(Color::from_rgba(30, 30, 30, 255));
+        clear_background(GRAY);
         
-        let dt = get_frame_time();
-        app.update(dt);
-        
-        // 绘制egui界面
-        egui_macroquad::ui(|ctx| {
-            app.draw(ctx);
-        });
+        app.update();
+        app.draw();
         
         egui_macroquad::draw();
         
