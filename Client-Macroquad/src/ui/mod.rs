@@ -2,6 +2,8 @@
 
 pub mod components;
 pub mod dialogs;
+pub mod text_renderer;
 
 pub use components::*;
 pub use dialogs::*;
+pub use text_renderer::*;

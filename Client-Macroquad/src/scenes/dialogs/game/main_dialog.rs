@@ -1,25 +1,26 @@
 // ============================================================================
 // MainDialog - 游戏主界面底部工具栏
 // ============================================================================
-// 
+//
 // 【功能说明】
 // 1. 底部工具栏背景（根据分辨率适配）
 // 2. 生命值/魔法值球显示
 // 3. 经验条和负重条
 // 4. 功能按钮组（背包、角色、技能、任务、选项、菜单、商城）
 // 5. 角色信息显示（等级、金币、负重等）
-// 
+//
 // ============================================================================
 
-use egui_macroquad::egui;
+use super::{
+    BeltDialog, CharacterDialog, ChatControlBar, ChatDialog, GameShopDialog, InventoryDialog,
+    MenuDialog, MiniMapDialog, OptionDialog, QuestLogDialog,
+};
 use crate::resources::LibraryName;
-use super::{BeltDialog, ChatDialog, ChatControlBar, InventoryDialog, CharacterDialog, QuestLogDialog, OptionDialog, GameShopDialog, MenuDialog, MiniMapDialog};
 use crate::scenes::dialogs::Dialog;
+use egui_macroquad::egui;
 
 /// 主界面底部工具栏
 pub struct MainDialog {
-    /// 是否可见
-    visible: bool,
     /// 当前分辨率索引 (0=800, 1=1024, 2=1280+)
     resolution_index: usize,
     /// 模拟数据 - 当前生命值
@@ -44,7 +45,7 @@ pub struct MainDialog {
     max_weight: u32,
     /// 模拟数据 - 背包空格数
     bag_space: u32,
-    
+
     // 子对话框
     /// 血瓶快捷栏
     /// 快捷栏
@@ -67,6 +68,17 @@ pub struct MainDialog {
     menu_dialog: MenuDialog,
     /// 小地图对话框
     minimap_dialog: MiniMapDialog,
+
+    belt_dialog_open: bool,
+    chat_dialog_open: bool,
+    chat_control_bar_open: bool,
+    inventory_dialog_open: bool,
+    character_dialog_open: bool,
+    quest_log_dialog_open: bool,
+    option_dialog_open: bool,
+    game_shop_dialog_open: bool,
+    menu_dialog_open: bool,
+    minimap_dialog_open: bool,
 }
 
 impl MainDialog {
@@ -75,10 +87,10 @@ impl MainDialog {
         let screen_width = macroquad::prelude::screen_width();
         let screen_height = macroquad::prelude::screen_height();
         let dpi_scale = macroquad::prelude::screen_dpi_scale();
-        
+
         let screen_w = screen_width / dpi_scale;
         let screen_h = screen_height / dpi_scale;
-        
+
         let resolution_index = if screen_width <= 800.0 {
             0
         } else if screen_width <= 1024.0 {
@@ -86,14 +98,15 @@ impl MainDialog {
         } else {
             2
         };
-        
+
         // MainDialog 的 X 坐标（底部居中）
-        let bg_info = LibraryName::Prguse.get_size(resolution_index).unwrap_or((1024, 150));
+        let bg_info = LibraryName::Prguse
+            .get_size(resolution_index)
+            .unwrap_or((1024, 150));
         let bg_width = bg_info.0 as f32;
         let main_dialog_x = (screen_w - bg_width) / 2.0;
 
         Self {
-            visible: true,
             resolution_index,
             // 模拟数据
             hp: 850,
@@ -107,7 +120,7 @@ impl MainDialog {
             weight: 75,
             max_weight: 100,
             bag_space: 28,
-            
+
             // 子对话框
             belt_dialog: BeltDialog::new(main_dialog_x, screen_h),
             chat_dialog: ChatDialog::new(main_dialog_x, screen_h, resolution_index),
@@ -119,27 +132,40 @@ impl MainDialog {
             game_shop_dialog: GameShopDialog::new(),
             menu_dialog: MenuDialog::new(),
             minimap_dialog: MiniMapDialog::new(),
+            belt_dialog_open: true,
+            chat_dialog_open: true,
+            chat_control_bar_open: true,
+            inventory_dialog_open: false,
+
+            character_dialog_open: false,
+            quest_log_dialog_open: false,
+            option_dialog_open: false,
+            game_shop_dialog_open: false,
+            menu_dialog_open: false,
+            minimap_dialog_open: true,
+
         }
     }
 
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
+    // pub fn is_visible(&self) -> bool {
+    //     self.visible
+    // }
 
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
+    // pub fn set_visible(&mut self, visible: bool) {
+    //     self.visible = visible;
+    // }
 
     pub fn show(&mut self, ctx: &egui::Context) {
-        if !self.visible {
-            return;
-        }
-
-        let screen_width = macroquad::prelude::screen_width() / macroquad::prelude::screen_dpi_scale();
-        let screen_height = macroquad::prelude::screen_height() / macroquad::prelude::screen_dpi_scale();
+      
+        let screen_width =
+            macroquad::prelude::screen_width() / macroquad::prelude::screen_dpi_scale();
+        let screen_height =
+            macroquad::prelude::screen_height() / macroquad::prelude::screen_dpi_scale();
 
         // 获取主背景纹理
-        let bg_info = LibraryName::Prguse.get_size(self.resolution_index).unwrap_or((1024, 150));
+        let bg_info = LibraryName::Prguse
+            .get_size(self.resolution_index)
+            .unwrap_or((1024, 150));
         let bg_width = bg_info.0 as f32;
         let bg_height = bg_info.1 as f32;
 
@@ -149,24 +175,28 @@ impl MainDialog {
 
         // 绘制主界面
         let base_pos = egui::pos2(dialog_x, dialog_y);
-        
+
         egui::Area::new(egui::Id::new("main_dialog"))
             .fixed_pos(base_pos)
             .movable(false)
             .interactable(true)
-            .order(egui::Order::Middle)  // 保持在 Middle 层，让聊天组件（Foreground）优先响应
+            .order(egui::Order::Middle) // 保持在 Middle 层，让聊天组件（Foreground）优先响应
             .show(ctx, |ui| {
                 // 创建基于固定位置的 rect
                 let rect = egui::Rect::from_min_size(base_pos, egui::vec2(bg_width, bg_height));
-                
+
                 // 分配空间（但不使用返回的 rect，因为它可能有偏移）
                 ui.allocate_rect(
-                    egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(bg_width, bg_height)),
-                    egui::Sense::hover()
+                    egui::Rect::from_min_size(
+                        egui::pos2(0.0, 0.0),
+                        egui::vec2(bg_width, bg_height),
+                    ),
+                    egui::Sense::hover(),
                 );
 
                 // 绘制主背景
-                if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, self.resolution_index) {
+                if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, self.resolution_index)
+                {
                     if let Some(bg_texture) = info.egui_texture {
                         ui.painter().image(
                             bg_texture.id(),
@@ -202,55 +232,55 @@ impl MainDialog {
         // 生命值球位置（左侧）
         // 原工程：X = MainDialog.X, Y = HealthOrb.DisplayLocation.Y + 80 - height
         // HealthOrb.Location = (0, 30)，所以 HealthOrb.DisplayLocation.Y = MainDialog.Y + 30
-        let orb_x = rect.min.x;  // 直接使用 MainDialog.X，不加偏移
-        let orb_y = rect.min.y + 30.0;  // HealthOrb 相对于 MainDialog 的 Y 偏移
-        
+        let orb_x = rect.min.x; // 直接使用 MainDialog.X，不加偏移
+        let orb_y = rect.min.y + 30.0; // HealthOrb 相对于 MainDialog 的 Y 偏移
+
         // 绘制生命值球纹理 Prguse[4]
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 4) {
             if let Some(orb_texture) = info.egui_texture {
                 let tex_size = orb_texture.size_vec2();
-                
+
                 // 纹理实际高度（通常是80，但使用实际值更准确）
                 let orb_height = tex_size.y.min(80.0);
-                
+
                 // 计算生命值高度（从底部向上填充）
                 let hp_percent = (self.hp as f32 / self.max_hp as f32).clamp(0.0, 1.0);
                 let hp_height = orb_height * hp_percent;
-                
+
                 // 左半部分（红色生命值） - 宽度50像素
                 let hp_src_y = orb_height - hp_height;
                 let hp_src_rect = egui::Rect::from_min_max(
                     egui::pos2(0.0 / tex_size.x, hp_src_y / tex_size.y),
-                    egui::pos2(50.0 / tex_size.x, orb_height / tex_size.y)
+                    egui::pos2(50.0 / tex_size.x, orb_height / tex_size.y),
                 );
-                
+
                 let hp_dst_rect = egui::Rect::from_min_size(
                     egui::pos2(orb_x, orb_y + hp_src_y),
-                    egui::vec2(50.0, hp_height)
+                    egui::vec2(50.0, hp_height),
                 );
-                
+
                 ui.painter().image(
                     orb_texture.id(),
                     hp_dst_rect,
                     hp_src_rect,
                     egui::Color32::WHITE,
                 );
-                
+
                 // 右半部分（蓝色魔法值） - x从51开始，宽度50像素
                 let mp_percent = (self.mp as f32 / self.max_mp as f32).clamp(0.0, 1.0);
                 let mp_height = orb_height * mp_percent;
                 let mp_src_y = orb_height - mp_height;
-                
+
                 let mp_src_rect = egui::Rect::from_min_max(
                     egui::pos2(51.0 / tex_size.x, mp_src_y / tex_size.y),
-                    egui::pos2(101.0 / tex_size.x, orb_height / tex_size.y)
+                    egui::pos2(101.0 / tex_size.x, orb_height / tex_size.y),
                 );
-                
+
                 let mp_dst_rect = egui::Rect::from_min_size(
                     egui::pos2(orb_x + 51.0, orb_y + mp_src_y),
-                    egui::vec2(50.0, mp_height)
+                    egui::vec2(50.0, mp_height),
                 );
-                
+
                 ui.painter().image(
                     orb_texture.id(),
                     mp_dst_rect,
@@ -259,7 +289,7 @@ impl MainDialog {
                 );
             }
         }
-        
+
         // 绘制数值文字
         let hp_text = format!("{}/{}", self.hp, self.max_hp);
         ui.painter().text(
@@ -269,7 +299,7 @@ impl MainDialog {
             egui::FontId::proportional(11.0),
             egui::Color32::WHITE,
         );
-        
+
         let mp_text = format!("{}/{}", self.mp, self.max_mp);
         ui.painter().text(
             egui::pos2(orb_x + 50.0, orb_y + 42.0),
@@ -290,39 +320,35 @@ impl MainDialog {
         // 经验条位置
         let bar_x = rect.min.x + 9.0;
         let bar_y = rect.min.y + 143.0;
-        
+
         // 根据分辨率选择纹理索引 (800用7，其他用8)
         let exp_texture_idx = if self.resolution_index == 0 { 7 } else { 8 };
-        
+
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, exp_texture_idx) {
             if let Some(exp_texture) = info.egui_texture {
                 let tex_size = exp_texture.size_vec2();
-                
+
                 // 计算经验百分比对应的宽度
-                let bar_width = tex_size.x - 3.0;  // 减去3像素边距
+                let bar_width = tex_size.x - 3.0; // 减去3像素边距
                 let fill_width = bar_width * self.exp_percent;
-                
+
                 // 源矩形：裁剪宽度
                 let src_rect = egui::Rect::from_min_max(
                     egui::pos2(0.0, 0.0),
-                    egui::pos2(fill_width / tex_size.x, 1.0)
+                    egui::pos2(fill_width / tex_size.x, 1.0),
                 );
-                
+
                 // 目标矩形
                 let dst_rect = egui::Rect::from_min_size(
                     egui::pos2(bar_x, bar_y),
-                    egui::vec2(fill_width, tex_size.y)
+                    egui::vec2(fill_width, tex_size.y),
                 );
-                
-                ui.painter().image(
-                    exp_texture.id(),
-                    dst_rect,
-                    src_rect,
-                    egui::Color32::WHITE,
-                );
+
+                ui.painter()
+                    .image(exp_texture.id(), dst_rect, src_rect, egui::Color32::WHITE);
             }
         }
-        
+
         // 经验百分比文字
         let exp_text = format!("{:.1}%", self.exp_percent * 100.0);
         ui.painter().text(
@@ -339,49 +365,45 @@ impl MainDialog {
         // 负重条位置（右侧，从右向左计算）
         let bar_x = rect.max.x - 105.0;
         let bar_y = rect.min.y + 103.0;
-        
+
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 76) {
             if let Some(weight_texture) = info.egui_texture {
                 let tex_size = weight_texture.size_vec2();
-                
+
                 // 计算负重百分比
                 let weight_percent = self.weight as f32 / self.max_weight as f32;
                 let weight_percent = weight_percent.min(1.0);
-                
+
                 // 计算填充宽度
-                let bar_width = tex_size.x - 2.0;  // 减去2像素边距
+                let bar_width = tex_size.x - 2.0; // 减去2像素边距
                 let fill_width = bar_width * weight_percent;
-                
+
                 // 源矩形：裁剪宽度
                 let src_rect = egui::Rect::from_min_max(
                     egui::pos2(0.0, 0.0),
-                    egui::pos2(fill_width / tex_size.x, 1.0)
+                    egui::pos2(fill_width / tex_size.x, 1.0),
                 );
-                
+
                 // 目标矩形
                 let dst_rect = egui::Rect::from_min_size(
                     egui::pos2(bar_x, bar_y),
-                    egui::vec2(fill_width, tex_size.y)
+                    egui::vec2(fill_width, tex_size.y),
                 );
-                
+
                 // 根据负重比例选择颜色
                 let color = if weight_percent < 0.8 {
-                    egui::Color32::WHITE  // 正常，使用原色
+                    egui::Color32::WHITE // 正常，使用原色
                 } else if weight_percent < 1.0 {
-                    egui::Color32::from_rgb(255, 255, 0)  // 接近超重，黄色
+                    egui::Color32::from_rgb(255, 255, 0) // 接近超重，黄色
                 } else {
-                    egui::Color32::from_rgb(255, 100, 100)  // 超重，红色
+                    egui::Color32::from_rgb(255, 100, 100) // 超重，红色
                 };
-                
-                ui.painter().image(
-                    weight_texture.id(),
-                    dst_rect,
-                    src_rect,
-                    color,
-                );
+
+                ui.painter()
+                    .image(weight_texture.id(), dst_rect, src_rect, color);
             }
         }
-        
+
         // 负重文字
         let weight_text = format!("{}/{}", self.weight, self.max_weight);
         ui.painter().text(
@@ -446,7 +468,16 @@ impl MainDialog {
 
         for (i, (normal_idx, hover_idx, pressed_idx, hint)) in buttons.iter().enumerate() {
             let btn_x = button_start_x + (i as f32 * button_spacing);
-            self.draw_button(ui, ctx, btn_x, button_y, *normal_idx, *hover_idx, *pressed_idx, hint);
+            self.draw_button(
+                ui,
+                ctx,
+                btn_x,
+                button_y,
+                *normal_idx,
+                *hover_idx,
+                *pressed_idx,
+                hint,
+            );
         }
 
         // 菜单按钮（位置稍上）
@@ -458,7 +489,7 @@ impl MainDialog {
         let shop_x = rect.max.x - 105.0;
         let shop_y = rect.min.y + 35.0;
         self.draw_button(ui, ctx, shop_x, shop_y, 826, 827, 828, "商城");
-        
+
         // 注意：根据原工程逻辑，小地图是独立的右上角对话框，不在主界面底部
         // 小地图通过M键控制显示/隐藏，按钮在小地图对话框自身上
     }
@@ -480,9 +511,13 @@ impl MainDialog {
             if let Some(texture) = info.egui_texture {
                 let size = texture.size_vec2();
                 let rect = egui::Rect::from_min_size(egui::pos2(x, y), size);
-                
-                let response = ui.interact(rect, egui::Id::new(format!("btn_{}", normal_idx)), egui::Sense::click());
-                
+
+                let response = ui.interact(
+                    rect,
+                    egui::Id::new(format!("btn_{}", normal_idx)),
+                    egui::Sense::click(),
+                );
+
                 // 根据状态选择纹理
                 let texture_idx = if response.is_pointer_button_down_on() {
                     pressed_idx
@@ -491,7 +526,7 @@ impl MainDialog {
                 } else {
                     normal_idx
                 };
-                
+
                 if let Some(btn_info) = LibraryName::Prguse.get_egui_texture(ctx, texture_idx) {
                     if let Some(btn_texture) = btn_info.egui_texture {
                         ui.painter().image(
@@ -502,100 +537,74 @@ impl MainDialog {
                         );
                     }
                 }
-                
+
                 // 点击事件和鼠标悬停提示
                 let clicked = response.clicked();
                 response.on_hover_text(hint);
-                
+
                 if clicked {
                     println!("🖱️ 点击了 {} 按钮", hint);
                     // 处理按钮点击
                     match hint {
-                        "背包" => self.inventory_dialog.toggle(),
-                        "角色" => self.character_dialog.toggle(),
+                        "背包" => self.inventory_dialog_open = !self.inventory_dialog_open,
+                        "角色" => self.character_dialog_open = !self.character_dialog_open,
                         "技能" => {
                             // 技能可以打开角色对话框的技能页面
-                            self.character_dialog.set_visible(true);
+                             self.character_dialog_open=true;
                             self.character_dialog.set_current_tab(1); // 切换到技能页面
-                        },
-                        "任务" => self.quest_log_dialog.toggle(),
-                        "选项" => self.option_dialog.toggle(),
-                        "菜单" => self.menu_dialog.toggle(),
-                        "商城" => self.game_shop_dialog.toggle(),
+                        }
+                        "任务" =>self.quest_log_dialog_open = !self.quest_log_dialog_open,
+                        "选项" => self.option_dialog_open = !self.option_dialog_open,
+                        "菜单" => self.menu_dialog_open = !self.menu_dialog_open,
+                        "商城" =>self.game_shop_dialog_open = !self.game_shop_dialog_open,
                         _ => {}
                     }
                 }
             }
         }
     }
-    
+
     /// 显示所有子对话框
     /// 切换小地图显示（快捷键M）
     pub fn toggle_minimap(&mut self) {
-        self.minimap_dialog.toggle();
+        self.minimap_dialog_open =!self.minimap_dialog_open
     }
 
     /// 切换小地图大小模式（快捷键TAB）
     pub fn toggle_minimap_size(&mut self) {
         self.minimap_dialog.toggle_size();
     }
-    
+
     /// 显示所有子对话框
     pub fn show_dialogs(&mut self, ctx: &egui::Context) {
-        // 获取屏幕尺寸
-        let screen_h = macroquad::prelude::screen_height() / macroquad::prelude::screen_dpi_scale();
-        
-        // 每个对话框使用独立的 open 变量，避免互相影响
-        let mut chat_open = true;
-        let mut control_bar_open = true;
-        let mut belt_open = true;
-        let mut inventory_open = self.inventory_dialog.is_visible(); // 使用背包对话框的实际可见状态
-        
-        // 先显示 ChatDialog（在最底层）
-        self.chat_dialog.show(ctx, &mut chat_open);
-        
-        // 再显示 ChatControlBar（在中间层）
-        let (size_clicked, _settings_clicked) = self.chat_control_bar.show(ctx, &mut control_bar_open);
-        
-        // 显示 BeltDialog（在最上层，不被其他组件遮挡）
-        self.belt_dialog.show(ctx, &mut belt_open);
-        
-        // 显示 InventoryDialog（独立窗口）
-        self.inventory_dialog.show(ctx, &mut inventory_open);
-        
-        // 显示新的对话框
-        let mut character_open = self.character_dialog.is_visible();
-        self.character_dialog.show(ctx, &mut character_open);
-        
-        let mut quest_open = self.quest_log_dialog.is_visible();
-        self.quest_log_dialog.show(ctx, &mut quest_open);
-        
-        let mut option_open = self.option_dialog.is_visible();
-        self.option_dialog.show(ctx, &mut option_open);
-        
-        let mut shop_open = self.game_shop_dialog.is_visible();
-        self.game_shop_dialog.show(ctx, &mut shop_open);
-        
-        let mut menu_open = self.menu_dialog.is_visible();
-        self.menu_dialog.show(ctx, &mut menu_open);
-        
-        let mut minimap_open = self.minimap_dialog.is_visible();
-        self.minimap_dialog.show(ctx, &mut minimap_open);
-        
+        self.chat_dialog.show(ctx, &mut self.chat_dialog_open);
+        let (size_clicked, _settings_clicked) =
+            self.chat_control_bar.show(ctx, &mut self.chat_control_bar_open);
+        self.belt_dialog.show(ctx, &mut self.belt_dialog_open);
+        self.inventory_dialog.show(ctx, &mut self.inventory_dialog_open);
+        self.character_dialog.show(ctx, &mut self.character_dialog_open);
+        self.quest_log_dialog.show(ctx, &mut self.quest_log_dialog_open);
+        self.option_dialog.show(ctx, &mut self.option_dialog_open);
+        self.game_shop_dialog.show(ctx, &mut self.game_shop_dialog_open);
+        self.menu_dialog.show(ctx, &mut self.menu_dialog_open);
+        self.minimap_dialog.show(ctx, &mut self.minimap_dialog_open);
+         let screen_h = macroquad::prelude::screen_height() / macroquad::prelude::screen_dpi_scale();
         // 如果 Size 按钮被点击，改变 ChatDialog 大小
         if size_clicked {
             self.chat_dialog.change_size(screen_h);
-            
+
             // 同步更新 ChatControlBar 位置（保持在 ChatDialog 上方 15px）
             let chat_pos = self.chat_dialog.get_position();
             let control_bar_y = chat_pos.y - 15.0;
-            self.chat_control_bar.set_position(egui_macroquad::egui::pos2(chat_pos.x, control_bar_y));
-            
+            self.chat_control_bar
+                .set_position(egui_macroquad::egui::pos2(chat_pos.x, control_bar_y));
+
             // 同步更新 BeltDialog 位置（紧贴在 ChatControlBar 上方）
             // ChatControlBar 高度为 16px，BeltDialog 高度为 24px
             // BeltDialog 顶部 Y = ChatControlBar 顶部 Y - ChatControlBar 高度 - BeltDialog 高度
-            let belt_y = control_bar_y - 16.0 - 24.0;  // control_bar 高度 16 + belt 高度 24
-            self.belt_dialog.set_position(egui_macroquad::egui::pos2(chat_pos.x, belt_y));
+            let belt_y = control_bar_y - 16.0 - 24.0; // control_bar 高度 16 + belt 高度 24
+            self.belt_dialog
+                .set_position(egui_macroquad::egui::pos2(chat_pos.x, belt_y));
         }
     }
 }

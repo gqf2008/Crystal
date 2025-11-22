@@ -16,6 +16,42 @@
             }
         },
         {
+            "label": "run test_inventory_dialog",
+            "type": "cargo",
+            "command": "run",
+            "args": [
+                "--package",
+                "client_macroquad",
+                "--bin",
+                "test_inventory_dialog"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "run test_main_dialog",
+            "type": "cargo",
+            "command": "run",
+            "args": [
+                "--package",
+                "client_macroquad",
+                "--bin",
+                "test_main_dialog"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
             "label": "编译 Release",
             "type": "cargo",
             "command": "build",

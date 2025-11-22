@@ -131,8 +131,6 @@ impl ShopItemViewer {
 
 /// 游戏商城对话框
 pub struct GameShopDialog {
-    /// 是否可见
-    visible: bool,
     /// 窗口位置
     position: egui::Pos2,
     /// 是否正在拖拽
@@ -232,7 +230,6 @@ impl GameShopDialog {
         ];
 
         let mut dialog = Self {
-            visible: false,
             position: egui::pos2(300.0, 150.0),
             dragging: false,
             drag_offset: egui::Vec2::ZERO,
@@ -255,21 +252,6 @@ impl GameShopDialog {
         dialog
     }
 
-    /// 切换可见性
-    pub fn toggle(&mut self) {
-        self.visible = !self.visible;
-        println!("🛒 商城对话框: {}", if self.visible { "打开" } else { "关闭" });
-    }
-
-    /// 获取可见性
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-
-    /// 设置可见性
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
 
     /// 绘制对话框背景
     fn draw_background(&self, ui: &mut egui::Ui, ctx: &egui::Context) -> egui::Rect {
@@ -1247,8 +1229,7 @@ impl GameShopDialog {
 
 impl Dialog for GameShopDialog {
     fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
-        if !self.visible {
-            *open = false;
+         if !*open {
             return;
         }
         
@@ -1275,7 +1256,6 @@ impl Dialog for GameShopDialog {
                 
                 // 绘制关闭按钮
                 if self.draw_close_button(ui, ctx, &bg_rect) {
-                    self.visible = false;
                     *open = false;
                 }
                 
@@ -1291,7 +1271,5 @@ impl Dialog for GameShopDialog {
         if close_viewer {
             self.item_viewer = None;
         }
-        
-        *open = self.visible;
     }
 }

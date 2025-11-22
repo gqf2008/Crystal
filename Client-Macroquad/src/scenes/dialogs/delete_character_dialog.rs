@@ -80,7 +80,6 @@ impl DeleteCharacterDialog {
         self.step = DeleteStep::Confirm;
         self.input_text.clear();
         
-        // 设置确认对话框
         self.confirm_box.title = "确认删除".to_string();
         self.confirm_box.text = format!("确定要删除角色 {} 吗？", character_name);
     }
@@ -99,9 +98,6 @@ impl DeleteCharacterDialog {
         self.step = DeleteStep::Confirm;
         self.input_text.clear();
         self.last_event = DeleteCharacterEvent::None;
-        // 重置所有子对话框的结果
-        self.confirm_box.result = crate::scenes::dialogs::MessageBoxResult::None;
-        self.error_box.result = crate::scenes::dialogs::MessageBoxResult::None;
     }
     
     /// 绘制输入框按钮
@@ -162,23 +158,23 @@ impl Dialog for DeleteCharacterDialog {
                 
                 if !confirm_open {
                     // 对话框关闭，检查结果
-                    match self.confirm_box.result {
-                        crate::scenes::dialogs::MessageBoxResult::Yes => {
-                            // 用户点击 Yes，进入第二步
-                            self.step = DeleteStep::InputName;
-                            self.input_text.clear();
-                            self.input_box.title = "验证删除".to_string();
-                            self.input_box.text = format!("请输入角色名称以确认删除：");
-                            self.confirm_box.result = crate::scenes::dialogs::MessageBoxResult::None; // 重置结果
+                    if let Some(result) = self.confirm_box.result() {
+                        match result {
+                            crate::scenes::dialogs::MessageBoxResult::Yes => {
+                                // 用户点击 Yes，进入第二步
+                                self.step = DeleteStep::InputName;
+                                self.input_text.clear();
+                                self.input_box.title = "验证删除".to_string();
+                                self.input_box.text = format!("请输入角色名称以确认删除：");
+                            }
+                            crate::scenes::dialogs::MessageBoxResult::No |
+                            crate::scenes::dialogs::MessageBoxResult::Cancel => {
+                                // 用户取消
+                                self.last_event = DeleteCharacterEvent::Cancel;
+                                *open = false;
+                            }
+                            _ => {}
                         }
-                        crate::scenes::dialogs::MessageBoxResult::No |
-                        crate::scenes::dialogs::MessageBoxResult::Cancel => {
-                            // 用户取消
-                            self.last_event = DeleteCharacterEvent::Cancel;
-                            self.confirm_box.result = crate::scenes::dialogs::MessageBoxResult::None; // 重置结果
-                            *open = false;
-                        }
-                        _ => {}
                     }
                 }
             }

@@ -1,29 +1,29 @@
 // ============================================================================
 // MiniMapDialog - 小地图对话框
 // ============================================================================
-// 
+//
 // 【功能说明】
 // 1. 显示当前地图的缩略图
 // 2. 显示玩家位置和朝向
 // 3. 显示其他玩家、NPC、怪物位置
 // 4. 支持地图缩放和拖拽查看
 // 5. 快速传送功能（如果有传送权限）
-// 
+//
 // ============================================================================
 
-use egui_macroquad::egui;
 use crate::resources::LibraryName;
 use crate::scenes::dialogs::Dialog;
+use egui_macroquad::egui;
 
 /// 地图上的对象类型
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MapObjectType {
-    Player,     // 玩家
+    Player,      // 玩家
     OtherPlayer, // 其他玩家
-    NPC,        // NPC
-    Monster,    // 怪物
-    Item,       // 掉落物品
-    Portal,     // 传送点
+    NPC,         // NPC
+    Monster,     // 怪物
+    Item,        // 掉落物品
+    Portal,      // 传送点
 }
 
 /// 地图对象
@@ -33,14 +33,12 @@ pub struct MapObject {
     pub name: String,
     pub x: f32,
     pub y: f32,
-    pub level: Option<u32>,  // 等级（玩家和怪物）
-    pub hostile: bool,       // 是否敌对
+    pub level: Option<u32>, // 等级（玩家和怪物）
+    pub hostile: bool,      // 是否敌对
 }
 
 /// 小地图对话框
 pub struct MiniMapDialog {
-    /// 是否可见
-    visible: bool,
     /// 窗口位置
     position: egui::Pos2,
     /// 是否正在拖拽
@@ -152,8 +150,7 @@ impl MiniMapDialog {
         ];
 
         Self {
-            visible: true,   // 默认显示，符合原版逻辑
-            position: egui::pos2(macroquad::prelude::screen_width() - 126.0, 0.0),  // 右上角位置，符合原版
+            position: egui::pos2(macroquad::prelude::screen_width() - 126.0, 0.0), // 右上角位置，符合原版
             dragging: false,
             drag_offset: egui::Vec2::ZERO,
             map_name: "比奇城".to_string(),
@@ -167,40 +164,21 @@ impl MiniMapDialog {
             show_player_names: true,
             show_monsters: true,
             show_npcs: true,
-            big_mode: true,  // 默认大模式
+            big_mode: true, // 默认大模式
         }
-    }
-
-    /// 切换可见性（原工程逻辑：在大模式和隐藏之间切换）
-    pub fn toggle(&mut self) {
-        if !self.visible {
-            // 隐藏状态 -> 显示大模式
-            self.visible = true;
-            self.big_mode = true;
-            println!("🗺️ 小地图: 显示大模式");
-        } else {
-            // 显示状态 -> 隐藏
-            self.visible = false;
-            println!("🗺️ 小地图: 隐藏");
-        }
-    }
-
-    /// 获取可见性
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-
-    /// 设置可见性
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
     }
 
     /// 切换大小模式（TAB键功能）
     pub fn toggle_size(&mut self) {
-        if self.visible {
-            self.big_mode = !self.big_mode;
-            println!("🗺️ 小地图模式: {}", if self.big_mode { "大模式" } else { "小模式" });
-        }
+        self.big_mode = !self.big_mode;
+        println!(
+            "🗺️ 小地图模式: {}",
+            if self.big_mode {
+                "大模式"
+            } else {
+                "小模式"
+            }
+        );
     }
 
     /// 获取当前模式
@@ -212,10 +190,10 @@ impl MiniMapDialog {
     fn world_to_minimap(&self, world_x: f32, world_y: f32, map_rect: &egui::Rect) -> egui::Pos2 {
         let scale_x = map_rect.width() / self.map_size.0 * self.zoom_level;
         let scale_y = map_rect.height() / self.map_size.1 * self.zoom_level;
-        
+
         let mini_x = map_rect.min.x + world_x * scale_x - self.view_offset.x;
         let mini_y = map_rect.min.y + world_y * scale_y - self.view_offset.y;
-        
+
         egui::pos2(mini_x, mini_y)
     }
 
@@ -227,22 +205,22 @@ impl MiniMapDialog {
             if let Some(bg_texture) = info.egui_texture {
                 let bg_size = bg_texture.size_vec2();
                 let bg_rect = egui::Rect::from_min_size(self.position, bg_size);
-                
+
                 ui.painter().image(
                     bg_texture.id(),
                     bg_rect,
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
-                
+
                 return bg_rect;
             }
         }
-        
+
         // 降级：使用自定义背景
         let bg_size = egui::vec2(250.0, 280.0);
         let bg_rect = egui::Rect::from_min_size(self.position, bg_size);
-        
+
         ui.painter().rect_filled(
             bg_rect,
             5.0,
@@ -272,16 +250,13 @@ impl MiniMapDialog {
         // 根据原版小地图布局，地图显示区域应该适配纹理尺寸
         // 纹理2090大概是124x150，实际地图区域更小
         let map_area = egui::Rect::from_min_size(
-            egui::pos2(bg_rect.min.x + 3.0, bg_rect.min.y + 22.0),  // 左边距3px，顶部22px（留给标题栏）
-            egui::vec2(bg_rect.width() - 6.0, 108.0)  // 宽度留6px边距，高度108px（原版地图显示区域）
+            egui::pos2(bg_rect.min.x + 3.0, bg_rect.min.y + 22.0), // 左边距3px，顶部22px（留给标题栏）
+            egui::vec2(bg_rect.width() - 6.0, 108.0), // 宽度留6px边距，高度108px（原版地图显示区域）
         );
 
         // 地图背景
-        ui.painter().rect_filled(
-            map_area,
-            3.0,
-            egui::Color32::from_rgb(30, 40, 30),
-        );
+        ui.painter()
+            .rect_filled(map_area, 3.0, egui::Color32::from_rgb(30, 40, 30));
         ui.painter().rect_stroke(
             map_area,
             3.0,
@@ -297,7 +272,7 @@ impl MiniMapDialog {
 
         // 处理地图交互（拖拽、缩放）
         self.handle_map_interaction(ui, &map_area);
-        
+
         // 绘制Toggle按钮（位置109,3）
         self.draw_toggle_button(ui, ctx, bg_rect);
     }
@@ -339,7 +314,7 @@ impl MiniMapDialog {
             }
 
             let pos = self.world_to_minimap(obj.x, obj.y, map_rect);
-            
+
             // 检查是否在可见区域内
             if !map_rect.contains(pos) {
                 continue;
@@ -353,7 +328,7 @@ impl MiniMapDialog {
                     } else {
                         (egui::Color32::from_rgb(100, 100, 255), 5.0, "●")
                     }
-                },
+                }
                 MapObjectType::NPC => (egui::Color32::from_rgb(255, 255, 0), 4.0, "■"),
                 MapObjectType::Monster => (egui::Color32::from_rgb(255, 0, 0), 4.0, "▲"),
                 MapObjectType::Item => (egui::Color32::from_rgb(255, 215, 0), 3.0, "♦"),
@@ -371,10 +346,11 @@ impl MiniMapDialog {
 
             // 绘制玩家朝向
             if obj.obj_type == MapObjectType::Player {
-                let direction_end = pos + egui::vec2(
-                    self.player_direction.cos() * 8.0,
-                    self.player_direction.sin() * 8.0,
-                );
+                let direction_end = pos
+                    + egui::vec2(
+                        self.player_direction.cos() * 8.0,
+                        self.player_direction.sin() * 8.0,
+                    );
                 ui.painter().line_segment(
                     [pos, direction_end],
                     egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 0)),
@@ -411,23 +387,27 @@ impl MiniMapDialog {
     fn draw_toggle_button(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
         // Toggle按钮位置：右上角(109,3)
         let button_pos = egui::pos2(bg_rect.min.x + 109.0, bg_rect.min.y + 3.0);
-        
+
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 2102) {
             if let Some(texture) = info.egui_texture {
                 let button_size = texture.size_vec2();
                 let button_rect = egui::Rect::from_min_size(button_pos, button_size);
-                
-                let response = ui.interact(button_rect, egui::Id::new("minimap_toggle"), egui::Sense::click());
-                
+
+                let response = ui.interact(
+                    button_rect,
+                    egui::Id::new("minimap_toggle"),
+                    egui::Sense::click(),
+                );
+
                 // 根据状态选择纹理
                 let texture_idx = if response.is_pointer_button_down_on() {
-                    2104  // 按下状态
+                    2104 // 按下状态
                 } else if response.hovered() {
-                    2103  // 悬停状态
+                    2103 // 悬停状态
                 } else {
-                    2102  // 正常状态
+                    2102 // 正常状态
                 };
-                
+
                 if let Some(btn_info) = LibraryName::Prguse.get_egui_texture(ctx, texture_idx) {
                     if let Some(btn_texture) = btn_info.egui_texture {
                         ui.painter().image(
@@ -438,12 +418,12 @@ impl MiniMapDialog {
                         );
                     }
                 }
-                
-                // 处理点击事件
-                if response.clicked() {
-                    self.toggle();
-                }
-                
+
+                // // 处理点击事件
+                // if response.clicked() {
+                //     self.toggle();
+                // }
+
                 response.on_hover_text("小地图 (M)");
             }
         }
@@ -451,8 +431,12 @@ impl MiniMapDialog {
 
     /// 处理地图交互
     fn handle_map_interaction(&mut self, ui: &mut egui::Ui, map_rect: &egui::Rect) {
-        let response = ui.interact(*map_rect, egui::Id::new("minimap_area"), egui::Sense::click_and_drag());
-        
+        let response = ui.interact(
+            *map_rect,
+            egui::Id::new("minimap_area"),
+            egui::Sense::click_and_drag(),
+        );
+
         // 拖拽地图
         if response.dragged() {
             self.view_offset += response.drag_delta();
@@ -479,7 +463,7 @@ impl MiniMapDialog {
     fn draw_controls(&mut self, ui: &mut egui::Ui, bg_rect: &egui::Rect) {
         let controls_area = egui::Rect::from_min_size(
             egui::pos2(bg_rect.min.x + 10.0, bg_rect.min.y + 225.0),
-            egui::vec2(230.0, 45.0)
+            egui::vec2(230.0, 45.0),
         );
 
         // 缩放控制
@@ -505,11 +489,11 @@ impl MiniMapDialog {
         // 显示选项按钮
         let toggle_names_rect = egui::Rect::from_min_size(
             egui::pos2(controls_area.min.x + 120.0, controls_area.min.y),
-            egui::vec2(50.0, 15.0)
+            egui::vec2(50.0, 15.0),
         );
         let toggle_monsters_rect = egui::Rect::from_min_size(
             egui::pos2(controls_area.min.x + 175.0, controls_area.min.y),
-            egui::vec2(50.0, 15.0)
+            egui::vec2(50.0, 15.0),
         );
 
         // 名称显示切换
@@ -518,7 +502,8 @@ impl MiniMapDialog {
         } else {
             egui::Color32::from_rgb(100, 100, 100)
         };
-        ui.painter().rect_filled(toggle_names_rect, 2.0, names_color);
+        ui.painter()
+            .rect_filled(toggle_names_rect, 2.0, names_color);
         ui.painter().text(
             toggle_names_rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -527,7 +512,11 @@ impl MiniMapDialog {
             egui::Color32::WHITE,
         );
 
-        let names_response = ui.interact(toggle_names_rect, egui::Id::new("toggle_names"), egui::Sense::click());
+        let names_response = ui.interact(
+            toggle_names_rect,
+            egui::Id::new("toggle_names"),
+            egui::Sense::click(),
+        );
         if names_response.clicked() {
             self.show_player_names = !self.show_player_names;
         }
@@ -538,7 +527,8 @@ impl MiniMapDialog {
         } else {
             egui::Color32::from_rgb(100, 100, 100)
         };
-        ui.painter().rect_filled(toggle_monsters_rect, 2.0, monsters_color);
+        ui.painter()
+            .rect_filled(toggle_monsters_rect, 2.0, monsters_color);
         ui.painter().text(
             toggle_monsters_rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -547,23 +537,33 @@ impl MiniMapDialog {
             egui::Color32::WHITE,
         );
 
-        let monsters_response = ui.interact(toggle_monsters_rect, egui::Id::new("toggle_monsters"), egui::Sense::click());
+        let monsters_response = ui.interact(
+            toggle_monsters_rect,
+            egui::Id::new("toggle_monsters"),
+            egui::Sense::click(),
+        );
         if monsters_response.clicked() {
             self.show_monsters = !self.show_monsters;
         }
     }
 
     /// 绘制关闭按钮
-    fn draw_close_button(&self, ui: &mut egui::Ui, _ctx: &egui::Context, bg_rect: &egui::Rect) -> bool {
+    fn draw_close_button(
+        &self,
+        ui: &mut egui::Ui,
+        _ctx: &egui::Context,
+        bg_rect: &egui::Rect,
+    ) -> bool {
         // 关闭按钮位置（右上角）
         let close_size = egui::vec2(15.0, 15.0);
         let close_rect = egui::Rect::from_min_size(
             egui::pos2(bg_rect.max.x - 20.0, bg_rect.min.y + 5.0),
-            close_size
+            close_size,
         );
 
         // 绘制关闭按钮背景
-        ui.painter().rect_filled(close_rect, 2.0, egui::Color32::from_rgb(150, 50, 50));
+        ui.painter()
+            .rect_filled(close_rect, 2.0, egui::Color32::from_rgb(150, 50, 50));
         ui.painter().rect_stroke(
             close_rect,
             2.0,
@@ -580,7 +580,11 @@ impl MiniMapDialog {
             egui::Color32::WHITE,
         );
 
-        let response = ui.interact(close_rect, egui::Id::new("minimap_close"), egui::Sense::click());
+        let response = ui.interact(
+            close_rect,
+            egui::Id::new("minimap_close"),
+            egui::Sense::click(),
+        );
         let is_clicked = response.clicked();
         if response.hovered() {
             response.on_hover_text("关闭");
@@ -590,28 +594,34 @@ impl MiniMapDialog {
     }
 
     /// 处理窗口拖拽
-    fn handle_window_dragging(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+    fn handle_window_dragging(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        bg_rect: &egui::Rect,
+    ) {
         // 标题栏区域作为拖拽区域
-        let title_area = egui::Rect::from_min_size(
-            bg_rect.min,
-            egui::vec2(bg_rect.width(), 25.0),
+        let title_area = egui::Rect::from_min_size(bg_rect.min, egui::vec2(bg_rect.width(), 25.0));
+
+        let drag_response = ui.interact(
+            title_area,
+            egui::Id::new("minimap_drag"),
+            egui::Sense::drag(),
         );
-        
-        let drag_response = ui.interact(title_area, egui::Id::new("minimap_drag"), egui::Sense::drag());
-        
+
         if drag_response.drag_started() {
             self.dragging = true;
             if let Some(pointer_pos) = ctx.pointer_interact_pos() {
                 self.drag_offset = self.position.to_vec2() - pointer_pos.to_vec2();
             }
         }
-        
+
         if self.dragging {
             if let Some(pointer_pos) = ctx.pointer_interact_pos() {
                 self.position = (pointer_pos.to_vec2() + self.drag_offset).to_pos2();
             }
         }
-        
+
         if drag_response.drag_stopped() {
             self.dragging = false;
         }
@@ -621,9 +631,13 @@ impl MiniMapDialog {
     pub fn update_player_position(&mut self, x: f32, y: f32, direction: f32) {
         self.player_pos = (x, y);
         self.player_direction = direction;
-        
+
         // 更新玩家对象在列表中的位置
-        if let Some(player_obj) = self.map_objects.iter_mut().find(|obj| obj.obj_type == MapObjectType::Player) {
+        if let Some(player_obj) = self
+            .map_objects
+            .iter_mut()
+            .find(|obj| obj.obj_type == MapObjectType::Player)
+        {
             player_obj.x = x;
             player_obj.y = y;
         }
@@ -632,35 +646,31 @@ impl MiniMapDialog {
 
 impl Dialog for MiniMapDialog {
     fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
-        if !self.visible {
-            *open = false;
+        if !*open {
             return;
         }
-        
+
         // 使用 Area 创建自由浮动窗口
         egui::Area::new(egui::Id::new("minimap_dialog"))
             .fixed_pos(self.position)
-            .movable(false)  // 使用自定义拖拽
+            .movable(false) // 使用自定义拖拽
             .show(ctx, |ui| {
                 // 绘制背景
                 let bg_rect = self.draw_background(ui, ctx);
-                
+
                 // 处理窗口拖拽
                 self.handle_window_dragging(ui, ctx, &bg_rect);
-                
+
                 // 绘制地图
                 self.draw_map(ui, ctx, &bg_rect);
-                
+
                 // 绘制控制面板
                 self.draw_controls(ui, &bg_rect);
-                
+
                 // 绘制关闭按钮
                 if self.draw_close_button(ui, ctx, &bg_rect) {
-                    self.visible = false;
                     *open = false;
                 }
             });
-        
-        *open = self.visible;
     }
 }

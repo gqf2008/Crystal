@@ -19,7 +19,6 @@ pub enum BeltLayout {
 
 /// 快捷栏对话框
 pub struct BeltDialog {
-    visible: bool,
     layout: BeltLayout,
     position: egui::Pos2,
     
@@ -91,7 +90,6 @@ impl BeltDialog {
         });
         
         Self {
-            visible: true,
             layout: BeltLayout::Horizontal,
             position,
             horizontal_position: position,  // 保存初始位置
@@ -429,8 +427,7 @@ impl BeltDialog {
 
 impl Dialog for BeltDialog {
     fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
-        if !self.visible {
-            *open = false;
+        if !*open {
             return;
         }
         
@@ -457,12 +454,9 @@ impl Dialog for BeltDialog {
                 
                 // 绘制关闭按钮
                 if self.draw_close_button(ui, ctx) {
-                    // 点击关闭按钮
-                    self.visible = false;
                     *open = false;
                 }
             });
         
-        *open = self.visible;
     }
 }

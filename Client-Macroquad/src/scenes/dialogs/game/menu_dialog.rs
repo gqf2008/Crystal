@@ -1,34 +1,32 @@
 // ============================================================================
 // MenuDialog - 游戏菜单对话框
 // ============================================================================
-// 
+//
 // 【功能说明】
 // 1. 游戏主菜单：存档、读档、设置、退出等
 // 2. 快速功能入口：回城、下线、退出游戏
 // 3. 游戏信息：在线时间、服务器状态等
-// 
+//
 // ============================================================================
 
-use egui_macroquad::egui;
 use crate::resources::LibraryName;
 use crate::scenes::dialogs::Dialog;
+use egui_macroquad::egui;
 
 /// 菜单项类型
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MenuAction {
-    ReturnToCity,  // 回城
-    SaveGame,      // 存档
-    LoadGame,      // 读档
-    Options,       // 设置
-    Help,          // 帮助
-    Logout,        // 下线
-    ExitGame,      // 退出游戏
+    ReturnToCity, // 回城
+    SaveGame,     // 存档
+    LoadGame,     // 读档
+    Options,      // 设置
+    Help,         // 帮助
+    Logout,       // 下线
+    ExitGame,     // 退出游戏
 }
 
 /// 游戏菜单对话框
 pub struct MenuDialog {
-    /// 是否可见
-    visible: bool,
     /// 窗口位置
     position: egui::Pos2,
     /// 是否正在拖拽
@@ -50,7 +48,6 @@ pub struct MenuDialog {
 impl MenuDialog {
     pub fn new() -> Self {
         Self {
-            visible: false,
             position: egui::pos2(400.0, 200.0),
             dragging: false,
             drag_offset: egui::Vec2::ZERO,
@@ -60,22 +57,6 @@ impl MenuDialog {
             experience: 450000,
             next_level_exp: 500000,
         }
-    }
-
-    /// 切换可见性
-    pub fn toggle(&mut self) {
-        self.visible = !self.visible;
-        println!("📋 菜单对话框: {}", if self.visible { "打开" } else { "关闭" });
-    }
-
-    /// 获取可见性
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-
-    /// 设置可见性
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
     }
 
     /// 格式化在线时间
@@ -90,7 +71,7 @@ impl MenuDialog {
     fn draw_background(&self, ui: &mut egui::Ui, ctx: &egui::Context) -> egui::Rect {
         let bg_size = egui::vec2(350.0, 450.0);
         let bg_rect = egui::Rect::from_min_size(self.position, bg_size);
-        
+
         // 绘制背景
         ui.painter().rect_filled(
             bg_rect,
@@ -120,7 +101,7 @@ impl MenuDialog {
     fn draw_game_info(&self, ui: &mut egui::Ui, bg_rect: &egui::Rect) {
         let info_area = egui::Rect::from_min_size(
             egui::pos2(bg_rect.min.x + 20.0, bg_rect.min.y + 50.0),
-            egui::vec2(310.0, 100.0)
+            egui::vec2(310.0, 100.0),
         );
 
         ui.painter().rect_filled(
@@ -173,7 +154,10 @@ impl MenuDialog {
         ui.painter().text(
             egui::pos2(info_area.min.x + 15.0, y),
             egui::Align2::LEFT_TOP,
-            &format!("经验: {}% ({}/{})", exp_percent, self.experience, self.next_level_exp),
+            &format!(
+                "经验: {}% ({}/{})",
+                exp_percent, self.experience, self.next_level_exp
+            ),
             egui::FontId::proportional(12.0),
             egui::Color32::from_rgb(0, 200, 255),
         );
@@ -183,7 +167,7 @@ impl MenuDialog {
     fn draw_menu_buttons(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
         let buttons_area = egui::Rect::from_min_size(
             egui::pos2(bg_rect.min.x + 20.0, bg_rect.min.y + 170.0),
-            egui::vec2(310.0, 250.0)
+            egui::vec2(310.0, 250.0),
         );
 
         let button_width = 280.0;
@@ -191,24 +175,72 @@ impl MenuDialog {
         let button_spacing = 10.0;
 
         let menu_items = [
-            (MenuAction::ReturnToCity, "🏠 回城", "立即传送回城", egui::Color32::from_rgb(100, 150, 100), None),
-            (MenuAction::SaveGame, "💾 存档", "保存当前游戏进度", egui::Color32::from_rgb(100, 100, 150), None),
-            (MenuAction::LoadGame, "📁 读档", "加载之前的存档", egui::Color32::from_rgb(100, 100, 150), None),
-            (MenuAction::Options, "⚙️ 设置", "打开游戏设置", egui::Color32::from_rgb(120, 120, 120), None),
-            (MenuAction::Help, "❓ 帮助", "查看游戏帮助", egui::Color32::from_rgb(100, 120, 150), None),
-            (MenuAction::Logout, "🚪 下线", "安全下线到角色选择", egui::Color32::from_rgb(150, 150, 100), Some((636, 637, 638))), // Title库的下线按钮
-            (MenuAction::ExitGame, "❌ 退出游戏", "完全退出游戏", egui::Color32::from_rgb(150, 100, 100), Some((633, 634, 635))), // Title库的退出按钮
+            (
+                MenuAction::ReturnToCity,
+                "🏠 回城",
+                "立即传送回城",
+                egui::Color32::from_rgb(100, 150, 100),
+                None,
+            ),
+            (
+                MenuAction::SaveGame,
+                "💾 存档",
+                "保存当前游戏进度",
+                egui::Color32::from_rgb(100, 100, 150),
+                None,
+            ),
+            (
+                MenuAction::LoadGame,
+                "📁 读档",
+                "加载之前的存档",
+                egui::Color32::from_rgb(100, 100, 150),
+                None,
+            ),
+            (
+                MenuAction::Options,
+                "⚙️ 设置",
+                "打开游戏设置",
+                egui::Color32::from_rgb(120, 120, 120),
+                None,
+            ),
+            (
+                MenuAction::Help,
+                "❓ 帮助",
+                "查看游戏帮助",
+                egui::Color32::from_rgb(100, 120, 150),
+                None,
+            ),
+            (
+                MenuAction::Logout,
+                "🚪 下线",
+                "安全下线到角色选择",
+                egui::Color32::from_rgb(150, 150, 100),
+                Some((636, 637, 638)),
+            ), // Title库的下线按钮
+            (
+                MenuAction::ExitGame,
+                "❌ 退出游戏",
+                "完全退出游戏",
+                egui::Color32::from_rgb(150, 100, 100),
+                Some((633, 634, 635)),
+            ), // Title库的退出按钮
         ];
 
-        for (i, (action, label, description, color, texture_indices)) in menu_items.iter().enumerate() {
+        for (i, (action, label, description, color, texture_indices)) in
+            menu_items.iter().enumerate()
+        {
             let button_y = buttons_area.min.y + i as f32 * (button_height + button_spacing);
             let button_rect = egui::Rect::from_min_size(
                 egui::pos2(buttons_area.min.x + 15.0, button_y),
-                egui::vec2(button_width, button_height)
+                egui::vec2(button_width, button_height),
             );
 
-            let response = ui.interact(button_rect, egui::Id::new(format!("menu_{:?}", action)), egui::Sense::click());
-            
+            let response = ui.interact(
+                button_rect,
+                egui::Id::new(format!("menu_{:?}", action)),
+                egui::Sense::click(),
+            );
+
             // 尝试使用纹理按钮
             let mut used_texture = false;
             if let Some((normal, hover, pressed)) = texture_indices {
@@ -219,7 +251,7 @@ impl MenuDialog {
                 } else {
                     *normal
                 };
-                
+
                 if let Some(info) = LibraryName::Title.get_egui_texture(ctx, texture_index) {
                     if let Some(btn_texture) = info.egui_texture {
                         ui.painter().image(
@@ -232,7 +264,7 @@ impl MenuDialog {
                     }
                 }
             }
-            
+
             // 降级：使用自定义按钮
             if !used_texture {
                 let bg_color = if response.hovered() {
@@ -277,46 +309,52 @@ impl MenuDialog {
             MenuAction::ReturnToCity => {
                 println!("🏠 执行回城操作");
                 // TODO: 实现回城功能
-            },
+            }
             MenuAction::SaveGame => {
                 println!("💾 保存游戏");
                 // TODO: 实现存档功能
-            },
+            }
             MenuAction::LoadGame => {
                 println!("📁 加载游戏");
                 // TODO: 实现读档功能
-            },
+            }
             MenuAction::Options => {
                 println!("⚙️ 打开设置");
                 // TODO: 打开设置对话框
-            },
+            }
             MenuAction::Help => {
                 println!("❓ 显示帮助");
                 // TODO: 打开帮助对话框
-            },
+            }
             MenuAction::Logout => {
                 println!("🚪 安全下线");
                 // TODO: 实现下线功能
-            },
+            }
             MenuAction::ExitGame => {
                 println!("❌ 退出游戏");
                 // TODO: 实现退出游戏功能
                 std::process::exit(0);
-            },
+            }
         }
     }
 
     /// 绘制关闭按钮
-    fn draw_close_button(&self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) -> bool {
+    fn draw_close_button(
+        &self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        bg_rect: &egui::Rect,
+    ) -> bool {
         // 关闭按钮位置（右上角）
         let close_size = egui::vec2(20.0, 20.0);
         let close_rect = egui::Rect::from_min_size(
             egui::pos2(bg_rect.max.x - 25.0, bg_rect.min.y + 5.0),
-            close_size
+            close_size,
         );
 
         // 绘制关闭按钮背景
-        ui.painter().rect_filled(close_rect, 2.0, egui::Color32::from_rgb(150, 50, 50));
+        ui.painter()
+            .rect_filled(close_rect, 2.0, egui::Color32::from_rgb(150, 50, 50));
         ui.painter().rect_stroke(
             close_rect,
             2.0,
@@ -333,7 +371,11 @@ impl MenuDialog {
             egui::Color32::WHITE,
         );
 
-        let response = ui.interact(close_rect, egui::Id::new("menu_close"), egui::Sense::click());
+        let response = ui.interact(
+            close_rect,
+            egui::Id::new("menu_close"),
+            egui::Sense::click(),
+        );
         let is_clicked = response.clicked();
         if response.hovered() {
             response.on_hover_text("关闭");
@@ -343,28 +385,31 @@ impl MenuDialog {
     }
 
     /// 处理窗口拖拽
-    fn handle_window_dragging(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+    fn handle_window_dragging(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        bg_rect: &egui::Rect,
+    ) {
         // 标题栏区域作为拖拽区域
-        let title_area = egui::Rect::from_min_size(
-            bg_rect.min,
-            egui::vec2(bg_rect.width(), 30.0),
-        );
-        
-        let drag_response = ui.interact(title_area, egui::Id::new("menu_drag"), egui::Sense::drag());
-        
+        let title_area = egui::Rect::from_min_size(bg_rect.min, egui::vec2(bg_rect.width(), 30.0));
+
+        let drag_response =
+            ui.interact(title_area, egui::Id::new("menu_drag"), egui::Sense::drag());
+
         if drag_response.drag_started() {
             self.dragging = true;
             if let Some(pointer_pos) = ctx.pointer_interact_pos() {
                 self.drag_offset = self.position.to_vec2() - pointer_pos.to_vec2();
             }
         }
-        
+
         if self.dragging {
             if let Some(pointer_pos) = ctx.pointer_interact_pos() {
                 self.position = (pointer_pos.to_vec2() + self.drag_offset).to_pos2();
             }
         }
-        
+
         if drag_response.drag_stopped() {
             self.dragging = false;
         }
@@ -373,33 +418,29 @@ impl MenuDialog {
 
 impl Dialog for MenuDialog {
     fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
-        if !self.visible {
-            *open = false;
+        if !*open {
             return;
         }
-        
+
         // 使用 Area 创建自由浮动窗口
         egui::Area::new(egui::Id::new("menu_dialog"))
             .fixed_pos(self.position)
-            .movable(false)  // 使用自定义拖拽
+            .movable(false) // 使用自定义拖拽
             .show(ctx, |ui| {
                 // 绘制背景
                 let bg_rect = self.draw_background(ui, ctx);
-                
+
                 // 处理窗口拖拽
                 self.handle_window_dragging(ui, ctx, &bg_rect);
-                
+
                 // 绘制游戏信息
                 self.draw_game_info(ui, &bg_rect);
-                
-        // 绘制菜单按钮
-        self.draw_menu_buttons(ui, ctx, &bg_rect);                // 绘制关闭按钮
+
+                // 绘制菜单按钮
+                self.draw_menu_buttons(ui, ctx, &bg_rect); // 绘制关闭按钮
                 if self.draw_close_button(ui, ctx, &bg_rect) {
-                    self.visible = false;
                     *open = false;
                 }
             });
-        
-        *open = self.visible;
     }
 }

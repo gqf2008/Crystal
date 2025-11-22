@@ -80,28 +80,22 @@ impl TestApp {
     fn update(&mut self) -> GameResult {
         // 检查 MessageBox 结果
         if !self.ok_box_open {
-            let result = self.ok_box.result;
-            if result != MessageBoxResult::None {
+            if let Some(result) = self.ok_box.result() {
                 self.last_result = format!("OK Box 结果: {:?}", result);
-                self.ok_box.result = MessageBoxResult::None;
                 println!("{}", self.last_result);
             }
         }
         
         if !self.ok_cancel_box_open {
-            let result = self.ok_cancel_box.result;
-            if result != MessageBoxResult::None {
+            if let Some(result) = self.ok_cancel_box.result() {
                 self.last_result = format!("OkCancel Box 结果: {:?}", result);
-                self.ok_cancel_box.result = MessageBoxResult::None;
                 println!("{}", self.last_result);
             }
         }
         
         if !self.yes_no_box_open {
-            let result = self.yes_no_box.result;
-            if result != MessageBoxResult::None {
+            if let Some(result) = self.yes_no_box.result() {
                 self.last_result = format!("YesNo Box 结果: {:?}", result);
-                self.yes_no_box.result = MessageBoxResult::None;
                 println!("{}", self.last_result);
             }
         }
@@ -129,8 +123,12 @@ impl TestApp {
                     ui.horizontal(|ui| {
                         if ui.button("测试 OK 消息框").clicked() {
                             println!("🔵 显示 OK 消息框");
-                            self.ok_box.title = "提示信息".to_string();
-                            self.ok_box.text = "这是一个信息提示框。\n\n只有一个 OK 按钮。\n常用于显示操作结果或提示信息。".to_string();
+                            self.ok_box = MessageBox::new_with_id(
+                                "提示信息",
+                                "这是一个信息提示框。\n\n只有一个 OK 按钮。\n常用于显示操作结果或提示信息。",
+                                MessageBoxButtons::Ok,
+                                "ok_box"
+                            );
                             self.ok_box_open = true;
                         }
                         ui.label("- 只有 OK 按钮");
@@ -142,8 +140,12 @@ impl TestApp {
                     ui.horizontal(|ui| {
                         if ui.button("测试 OkCancel 消息框").clicked() {
                             println!("🟢 显示 OkCancel 消息框");
-                            self.ok_cancel_box.title = "操作确认".to_string();
-                            self.ok_cancel_box.text = "即将执行一个重要操作。\n\n这个操作可能会修改数据。\n确定要继续吗？".to_string();
+                            self.ok_cancel_box = MessageBox::new_with_id(
+                                "操作确认",
+                                "即将执行一个重要操作。\n\n这个操作可能会修改数据。\n确定要继续吗？",
+                                MessageBoxButtons::OkCancel,
+                                "ok_cancel_box"
+                            );
                             self.ok_cancel_box_open = true;
                         }
                         ui.label("- OK 和 Cancel 按钮");
@@ -155,8 +157,12 @@ impl TestApp {
                     ui.horizontal(|ui| {
                         if ui.button("测试 YesNo 消息框").clicked() {
                             println!("🟡 显示 YesNo 消息框");
-                            self.yes_no_box.title = "删除确认".to_string();
-                            self.yes_no_box.text = "确定要删除这个项目吗？\n\n删除后将无法恢复！\n是否继续？".to_string();
+                            self.yes_no_box = MessageBox::new_with_id(
+                                "删除确认",
+                                "确定要删除这个项目吗？\n\n删除后将无法恢复！\n是否继续？",
+                                MessageBoxButtons::YesNo,
+                                "yes_no_box"
+                            );
                             self.yes_no_box_open = true;
                         }
                         ui.label("- Yes 和 No 按钮");
@@ -170,16 +176,28 @@ impl TestApp {
                     if ui.button("🎯 同时显示所有消息框（测试独立拖动）").clicked() {
                         println!("✨ 同时显示所有消息框 - 测试独立拖动功能");
                         
-                        self.ok_box.title = "消息框 1".to_string();
-                        self.ok_box.text = "第一个消息框\n可以独立拖动！".to_string();
+                        self.ok_box = MessageBox::new_with_id(
+                            "消息框 1",
+                            "第一个消息框\n可以独立拖动！",
+                            MessageBoxButtons::Ok,
+                            "ok_box"
+                        );
                         self.ok_box_open = true;
                         
-                        self.ok_cancel_box.title = "消息框 2".to_string();
-                        self.ok_cancel_box.text = "第二个消息框\n也可以独立拖动！".to_string();
+                        self.ok_cancel_box = MessageBox::new_with_id(
+                            "消息框 2",
+                            "第二个消息框\n也可以独立拖动！",
+                            MessageBoxButtons::OkCancel,
+                            "ok_cancel_box"
+                        );
                         self.ok_cancel_box_open = true;
                         
-                        self.yes_no_box.title = "消息框 3".to_string();
-                        self.yes_no_box.text = "第三个消息框\n每个都有独立的 ID！".to_string();
+                        self.yes_no_box = MessageBox::new_with_id(
+                            "消息框 3",
+                            "第三个消息框\n每个都有独立的 ID！",
+                            MessageBoxButtons::YesNo,
+                            "yes_no_box"
+                        );
                         self.yes_no_box_open = true;
                     }
                     

@@ -60,7 +60,6 @@ pub struct SkillInfo {
 
 /// 角色对话框
 pub struct CharacterDialog {
-    visible: bool,
     position: egui::Pos2,
     
     /// 当前标签页
@@ -166,7 +165,6 @@ impl CharacterDialog {
         };
         
         Self {
-            visible: false,
             position: egui::pos2(100.0, 100.0),
             active_tab: CharacterTab::Character,
             dragging: false,
@@ -177,38 +175,20 @@ impl CharacterDialog {
         }
     }
     
-    /// 显示/隐藏对话框
-    pub fn toggle(&mut self) {
-        self.visible = !self.visible;
-        println!("🧙 角色对话框: {}", if self.visible { "显示" } else { "隐藏" });
-    }
     
     /// 显示角色页
     pub fn show_character_page(&mut self) {
         self.active_tab = CharacterTab::Character;
-        self.visible = true;
     }
     
     /// 显示技能页
     pub fn show_skill_page(&mut self) {
         self.active_tab = CharacterTab::Skills;
-        self.visible = true;
     }
     
     /// 显示状态页  
     pub fn show_status_page(&mut self) {
         self.active_tab = CharacterTab::Status;
-        self.visible = true;
-    }
-    
-    /// 获取可见状态
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-    
-    /// 设置可见状态
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
     }
     
     /// 绘制对话框背景
@@ -626,8 +606,7 @@ impl CharacterDialog {
 
 impl Dialog for CharacterDialog {
     fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
-        if !self.visible {
-            *open = false;
+        if !*open {
             return;
         }
         
@@ -654,11 +633,8 @@ impl Dialog for CharacterDialog {
                 
                 // 绘制关闭按钮
                 if self.draw_close_button(ui, ctx, &bg_rect) {
-                    self.visible = false;
                     *open = false;
                 }
             });
-        
-        *open = self.visible;
     }
 }

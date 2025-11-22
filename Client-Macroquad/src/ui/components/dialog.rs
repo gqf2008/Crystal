@@ -118,7 +118,13 @@ impl TexturedDialog {
         self
     }
     
-    /// 显示对话框
+    /// 设置关闭按钮偏移
+    pub fn with_close_button_offset(mut self, offset: egui::Vec2) -> Self {
+        self.close_button_offset = offset;
+        self
+    }
+    
+    /// 显示对话框 (设置为可见)
     pub fn show(&mut self) {
         self.visible = true;
     }
@@ -192,6 +198,92 @@ impl TexturedDialog {
         should_close
     }
     
+    /// 显示对话框并绘制内容
+    pub fn show_content<R>(
+        &mut self,
+        ctx: &egui::Context,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> Option<R> {
+        if !self.visible {
+            return None;
+        }
+        
+        let mut should_close = false;
+        
+        // 1. 绘制模态遮罩
+        if self.dialog_type == DialogType::Modal {
+            self.draw_modal_overlay(ctx, &mut should_close);
+        }
+        
+        // 2. 绘制对话框主体
+        let dialog_area = if self.dialog_type == DialogType::Normal {
+            egui::Area::new(egui::Id::new(&self.id))
+                .fixed_pos(self.position)
+                .movable(false)
+                .order(self.order)
+        } else {
+            egui::Area::new(egui::Id::new(&self.id))
+                .fixed_pos(self.position)
+                .movable(false)
+                .order(egui::Order::Tooltip)
+        };
+        
+        let inner_response = dialog_area.show(ctx, |ui| {
+            // 使用相对坐标 (0,0) 开始
+            let relative_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), self.size);
+            
+            // 处理拖拽 - 在最前面处理，确保不被内容遮挡
+            if self.movable {
+                // 整个背景区域都可以拖拽
+                let drag_rect = relative_rect;
+                let response = ui.interact(
+                    drag_rect, 
+                    egui::Id::new(format!("{}_drag", self.id)), 
+                    egui::Sense::drag()
+                );
+                
+                if response.dragged() {
+                    self.position += response.drag_delta();
+                }
+            }
+            
+            // 绘制背景
+            self.draw_background(ui, ctx, relative_rect);
+            
+            // 绘制标题
+            if let Some(title_idx) = self.title_index {
+                let title_pos = egui::pos2(18.0, 9.0);
+                self.draw_title_at(ui, ctx, title_idx, title_pos);
+            }
+            
+            // 绘制内容
+            let result = add_contents(ui);
+
+            // 绘制关闭按钮
+            if let Some(ref mut close_btn) = self.close_button {
+                let btn_pos = egui::pos2(self.close_button_offset.x, self.close_button_offset.y); // 相对位置
+                let btn_rect = egui::Rect::from_min_size(btn_pos, egui::vec2(20.0, 20.0));
+                
+                let mut child_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(btn_rect)
+                        .layout(*ui.layout())
+                );
+                if close_btn.draw(&mut child_ui) {
+                    should_close = true;
+                }
+            }
+            
+            result
+        });
+        
+        if should_close {
+            self.hide();
+        }
+        
+        Some(inner_response.inner)
+    }
+
     /// 绘制模态遮罩
     fn draw_modal_overlay(&self, ctx: &egui::Context, should_close: &mut bool) {
         egui::Area::new(egui::Id::new(format!("{}_modal_overlay", self.id)))
@@ -295,6 +387,21 @@ impl TexturedDialog {
         if let Some(info) = self.library.get_egui_texture(ctx, title_index) {
             if let Some(texture) = info.egui_texture {
                 let title_rect = egui::Rect::from_min_size(title_pos, egui::vec2(200.0, 30.0));
+                ui.painter().image(
+                    texture.id(),
+                    title_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+    }
+    
+    /// 在指定相对位置绘制标题
+    fn draw_title_at(&self, ui: &mut egui::Ui, ctx: &egui::Context, title_index: usize, pos: egui::Pos2) {
+        if let Some(info) = self.library.get_egui_texture(ctx, title_index) {
+            if let Some(texture) = info.egui_texture {
+                let title_rect = egui::Rect::from_min_size(pos, egui::vec2(200.0, 30.0));
                 ui.painter().image(
                     texture.id(),
                     title_rect,
