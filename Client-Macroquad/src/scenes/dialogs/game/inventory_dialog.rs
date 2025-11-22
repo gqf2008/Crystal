@@ -26,53 +26,6 @@ use std::path::PathBuf;
 
 use super::inventory_persistence::InventoryData;
 
-// /// 预加载的纹理信息
-// #[derive(Clone)]
-// struct PreloadedTextures {
-//     /// 背景纹理尺寸
-//     bg_size: egui::Vec2,
-// }
-
-// impl PreloadedTextures {
-//     /// 预加载所有纹理并验证
-//     fn preload() -> Self {
-//         // 验证背景纹理
-//         let bg_info = LibraryName::Title
-//             .get_texture(196)
-//             .expect("❌ 背包背景纹理 Title[196] 不存在！");
-//         let bg_size = egui::vec2(bg_info.width as f32, bg_info.height as f32);
-
-//         // 验证标签纹理（所有标签都在 Title 库中）
-//         LibraryName::Title
-//             .get_texture(737)
-//             .expect("❌ 标签纹理 Title[737] 不存在！");
-//         LibraryName::Title
-//             .get_texture(197)
-//             .expect("❌ 标签纹理 Title[197] 不存在！");
-//         LibraryName::Title
-//             .get_texture(738)
-//             .expect("❌ 标签纹理 Title[738] 不存在！");
-//         LibraryName::Title
-//             .get_texture(168)
-//             .expect("❌ 标签纹理 Title[168] 不存在！");
-//         LibraryName::Title
-//             .get_texture(739)
-//             .expect("❌ 标签纹理 Title[739] 不存在！");
-//         LibraryName::Title
-//             .get_texture(198)
-//             .expect("❌ 标签纹理 Title[198] 不存在！");
-//         LibraryName::Title
-//             .get_texture(169)
-//             .expect("❌ 锁定纹理 Title[169] 不存在！");
-
-//         println!("✅ 背包纹理预加载完成:");
-//         println!("  - 背景: Title[196] ({}x{})", bg_size.x, bg_size.y);
-//         println!("  - 标签: Title[737,738,739,197,168,198,169]");
-
-//         Self { bg_size }
-//     }
-// }
-
 /// 背包标签页类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InventoryTab {
@@ -144,14 +97,35 @@ struct InventoryLayout {
     content_margin: egui::Vec2,
 }
 
+impl InventoryLayout {
+    /// 布局常量
+    const CELL_WIDTH: f32 = 36.0;
+    const CELL_HEIGHT: f32 = 32.0;
+    const GRID_COLS: usize = 8;
+    const CELL_SPACING: f32 = 1.0;
+    const GRID_OFFSET_X: f32 = 0.0;
+    const GRID_OFFSET_Y: f32 = 3.0;
+    const DISPLAY_ROWS: usize = 5;
+    
+    /// 获取格子位置
+    fn get_cell_rect(&self, row: usize, col: usize, grid_min: egui::Pos2) -> egui::Rect {
+        let x = grid_min.x + col as f32 * (self.cell_width + self.cell_spacing) + Self::GRID_OFFSET_X;
+        let y = grid_min.y + row as f32 * (self.cell_height + self.cell_spacing) + Self::GRID_OFFSET_Y;
+        egui::Rect::from_min_size(
+            egui::pos2(x, y),
+            egui::vec2(self.cell_width, self.cell_height)
+        )
+    }
+}
+
 impl Default for InventoryLayout {
     fn default() -> Self {
         Self {
-            cell_width: 36.0,  // 格子宽度：36像素(原版x*36+9，每格占36px)
-            cell_height: 32.0, // 格子高度：32像素(原版y*32+37)
-            grid_cols: 8,
-            cell_spacing: 1.0,                     // 测试：格子间有1像素间距
-            content_margin: egui::vec2(9.0, 37.0), // 起始位置
+            cell_width: Self::CELL_WIDTH,
+            cell_height: Self::CELL_HEIGHT,
+            grid_cols: Self::GRID_COLS,
+            cell_spacing: Self::CELL_SPACING,
+            content_margin: egui::vec2(9.0, 37.0),
         }
     }
 }
@@ -241,10 +215,6 @@ impl InventoryDialog {
             // Quest 页填满40格,使用图标300-339
             quest_slots.push(ItemSlot::new(300 + i, (i % 10 + 1) as u32));
         }
-        let (w, h) = LibraryName::Title
-            .get_size(Self::BG_INDEX)
-            .expect("❌ 背包背景纹理 Title[196] 不存在！");
-        let bg_size = egui::vec2(w as f32, h as f32);
         let mut bg = None;
         egui_macroquad::cfg(|ctx| {
             bg = LibraryName::Title.get_egui_texture(ctx, Self::BG_INDEX);
@@ -290,6 +260,39 @@ impl InventoryDialog {
     /// 设置金币数量
     pub fn set_gold(&mut self, amount: u32) {
         self.gold = amount;
+    }
+
+    /// 获取槽位数据（统一访问接口）
+    fn get_slot(&self, container: ItemContainer, index: usize) -> Option<&ItemSlot> {
+        match container {
+            ItemContainer::Inventory => self.item_slots.get(index),
+            ItemContainer::Quest => self.quest_slots.get(index),
+        }
+    }
+
+    /// 获取可变槽位数据
+    fn get_slot_mut(&mut self, container: ItemContainer, index: usize) -> Option<&mut ItemSlot> {
+        match container {
+            ItemContainer::Inventory => self.item_slots.get_mut(index),
+            ItemContainer::Quest => self.quest_slots.get_mut(index),
+        }
+    }
+
+    /// 清空槽位
+    fn clear_slot(&mut self, container: ItemContainer, index: usize) {
+        if let Some(slot) = self.get_slot_mut(container, index) {
+            slot.icon_index = None;
+            slot.count = 0;
+        }
+    }
+
+    /// 设置槽位数据
+    #[allow(dead_code)]
+    fn set_slot(&mut self, container: ItemContainer, index: usize, icon_index: usize, count: u32) {
+        if let Some(slot) = self.get_slot_mut(container, index) {
+            slot.icon_index = Some(icon_index);
+            slot.count = count;
+        }
     }
 
     /// 触发金币拾取动画
@@ -508,10 +511,7 @@ impl InventoryDialog {
         target_index: usize,
     ) {
         // 获取目标格子的物品
-        let target_slot = match target_container {
-            ItemContainer::Inventory => self.item_slots.get(target_index).cloned(),
-            ItemContainer::Quest => self.quest_slots.get(target_index).cloned(),
-        };
+        let target_slot = self.get_slot(target_container, target_index).cloned();
 
         if let Some(target_slot) = target_slot {
             if target_slot.icon_index.is_none() {
@@ -570,33 +570,11 @@ impl InventoryDialog {
         total_count: u32,
     ) {
         // 清空源格子
-        match selected.container {
-            ItemContainer::Inventory => {
-                if let Some(source_slot) = self.item_slots.get_mut(selected.index) {
-                    source_slot.icon_index = None;
-                    source_slot.count = 0;
-                }
-            }
-            ItemContainer::Quest => {
-                if let Some(source_slot) = self.quest_slots.get_mut(selected.index) {
-                    source_slot.icon_index = None;
-                    source_slot.count = 0;
-                }
-            }
-        }
+        self.clear_slot(selected.container, selected.index);
 
-        // 更新目标格子
-        match target_container {
-            ItemContainer::Inventory => {
-                if let Some(target_slot) = self.item_slots.get_mut(target_index) {
-                    target_slot.count = total_count;
-                }
-            }
-            ItemContainer::Quest => {
-                if let Some(target_slot) = self.quest_slots.get_mut(target_index) {
-                    target_slot.count = total_count;
-                }
-            }
+        // 更新目标格子数量
+        if let Some(target_slot) = self.get_slot_mut(target_container, target_index) {
+            target_slot.count = total_count;
         }
 
         println!(
@@ -910,24 +888,14 @@ impl InventoryDialog {
                     egui::Sense::hover()
                 );
 
-                // 手动偏移调整 - 对齐背景纹理网格
-                // 如果网格向左上偏移,则需要向右下调整
-                let offset_x = 0.0; // 向右调整
-                let offset_y = 3.0; // 向下调整
-
                 // 手动绘制每个格子
                 for i in 0..slot_count {
                     let global_index = start_index + i;
                     let row = i / self.layout.grid_cols;
                     let col = i % self.layout.grid_cols;
 
-                    // 计算格子位置（包含间距）+ 偏移调整
-                    let x = grid_rect.min.x + col as f32 * (self.layout.cell_width + self.layout.cell_spacing) + offset_x;
-                    let y = grid_rect.min.y + row as f32 * (self.layout.cell_height + self.layout.cell_spacing) + offset_y;
-                    let rect = egui::Rect::from_min_size(
-                        egui::pos2(x, y),
-                        egui::vec2(self.layout.cell_width, self.layout.cell_height)
-                    );
+                    // 使用布局方法计算格子位置
+                    let rect = self.layout.get_cell_rect(row, col, grid_rect.min);
 
                     // 交互检测
                     let response = ui.interact(
@@ -937,12 +905,7 @@ impl InventoryDialog {
                     );
 
                     // 获取格子数据
-                    let slot = match container {
-                        ItemContainer::Inventory => self.item_slots.get(global_index),
-                        ItemContainer::Quest => self.quest_slots.get(global_index),
-                    };
-
-                    if let Some(slot) = slot {
+                    if let Some(slot) = self.get_slot(container, global_index) {
                         // 绘制物品内容
                         if let Some(icon_index) = slot.icon_index {
                             // 绘制图标 - 获取纹理真实尺寸并居中显示
