@@ -97,6 +97,8 @@ pub struct ShopItem {
     pub in_stock: bool,       // 是否有库存
     pub hot: bool,           // 是否热销
     pub new: bool,           // 是否新品
+    pub stock: u32,          // 库存数量 (0表示无限)
+    pub count: u32,          // 每次购买数量
 }
 
 /// 商品预览状态
@@ -132,35 +134,39 @@ impl ShopItemViewer {
 /// 游戏商城对话框
 pub struct GameShopDialog {
     /// 窗口位置
-    position: egui::Pos2,
+    pub position: egui::Pos2,
     /// 是否正在拖拽
     dragging: bool,
     /// 拖拽偏移
     drag_offset: egui::Vec2,
     /// 当前选中的主要分类
-    selected_section: GameShopSection,
+    pub selected_section: GameShopSection,
     /// 当前选中的职业分类
-    selected_class: GameShopClass,
+    pub selected_class: GameShopClass,
     /// 商城物品列表
-    shop_items: Vec<ShopItem>,
+    pub shop_items: Vec<ShopItem>,
     /// 过滤后的物品列表
-    filtered_items: Vec<ShopItem>,
+    pub filtered_items: Vec<ShopItem>,
     /// 滚动偏移
     scroll_offset: f32,
     /// 选中的物品索引
-    selected_item: Option<usize>,
+    pub selected_item: Option<usize>,
     /// 商品预览器
-    item_viewer: Option<ShopItemViewer>,
+    pub item_viewer: Option<ShopItemViewer>,
     /// 购买数量
     buy_quantity: u32,
     /// 玩家金币
-    player_gold: u32,
+    pub player_gold: u32,
     /// 玩家元宝
-    player_ingot: u32,
+    pub player_ingot: u32,
     /// 当前页面
-    current_page: usize,
+    pub current_page: usize,
     /// 每页显示物品数量 (4x2 = 8个)
-    items_per_page: usize,
+    pub items_per_page: usize,
+    /// 左侧分类列表滚动位置 (0-based索引)
+    category_scroll_index: usize,
+    /// 分类列表
+    categories: Vec<String>,
 }
 
 impl GameShopDialog {
@@ -178,6 +184,8 @@ impl GameShopDialog {
                 in_stock: true,
                 hot: true,
                 new: false,
+                stock: 10,
+                count: 1,
             },
             ShopItem {
                 id: 2,
@@ -190,6 +198,8 @@ impl GameShopDialog {
                 in_stock: true,
                 hot: false,
                 new: true,
+                stock: 5,
+                count: 1,
             },
             ShopItem {
                 id: 3,
@@ -202,6 +212,8 @@ impl GameShopDialog {
                 in_stock: true,
                 hot: false,
                 new: false,
+                stock: 0,  // 无限库存
+                count: 10,
             },
             ShopItem {
                 id: 4,
@@ -214,6 +226,8 @@ impl GameShopDialog {
                 in_stock: false,
                 hot: true,
                 new: true,
+                stock: 0,
+                count: 1,
             },
             ShopItem {
                 id: 5,
@@ -226,6 +240,8 @@ impl GameShopDialog {
                 in_stock: true,
                 hot: false,
                 new: true,
+                stock: 20,
+                count: 1,
             },
         ];
 
@@ -245,6 +261,28 @@ impl GameShopDialog {
             player_ingot: 10000,
             current_page: 0,
             items_per_page: 8, // 4x2网格
+            category_scroll_index: 0,
+            categories: vec![
+                "武器".to_string(),
+                "防具".to_string(),
+                "头盔".to_string(),
+                "项链".to_string(),
+                "手镯".to_string(),
+                "戒指".to_string(),
+                "腰带".to_string(),
+                "靴子".to_string(),
+                "药品".to_string(),
+                "特殊物品".to_string(),
+                "时装".to_string(),
+                "宝石".to_string(),
+                "材料".to_string(),
+                "卷轴".to_string(),
+                "坐骑".to_string(),
+                "技能书".to_string(),
+                "消耗品".to_string(),
+                "任务物品".to_string(),
+                "其他".to_string(),
+            ],
         };
         
         // 初始化过滤的物品列表
@@ -255,7 +293,7 @@ impl GameShopDialog {
 
     /// 绘制对话框背景
     fn draw_background(&self, ui: &mut egui::Ui, ctx: &egui::Context) -> egui::Rect {
-        // 使用原版传奇2商城背景纹理 (Title[749] - 从原版代码获取)
+        // 使用原版传奇2商城背景纹理 (Title[749])
         if let Some(info) = LibraryName::Title.get_egui_texture(ctx, 749) {
             if let Some(bg_texture) = info.egui_texture {
                 let bg_size = bg_texture.size_vec2();
@@ -295,7 +333,7 @@ impl GameShopDialog {
     }
 
     /// 过滤物品列表
-    fn filter_items(&mut self) {
+    pub fn filter_items(&mut self) {
         self.filtered_items = self.shop_items
             .iter()
             .filter(|item| {
@@ -326,22 +364,35 @@ impl GameShopDialog {
         
         for (i, section) in GameShopSection::ALL.iter().enumerate() {
             let is_selected = self.selected_section == *section;
-            let texture_index = match section {
-                GameShopSection::All => if is_selected { 771 } else { 770 },
-                GameShopSection::TopItems => if is_selected { 777 } else { 776 },
-                GameShopSection::Deals => if is_selected { 773 } else { 772 },
-                GameShopSection::New => if is_selected { 775 } else { 774 },
+            
+            // 普通和选中的纹理索引
+            let (normal_idx, selected_idx) = match section {
+                GameShopSection::All => (770, 771),
+                GameShopSection::TopItems => (776, 777),
+                GameShopSection::Deals => (772, 773),
+                GameShopSection::New => (774, 775),
             };
             
             let tab_x = bg_rect.min.x + 138.0 + (i as f32 * 71.0);
             let tab_pos = egui::pos2(tab_x, section_y);
+            let tab_size = egui::vec2(71.0, 23.0);
+            let tab_rect = egui::Rect::from_min_size(tab_pos, tab_size);
+            
+            // 交互检测
+            let response = ui.interact(tab_rect, egui::Id::new(format!("section_tab_{}", i)), egui::Sense::click());
+            
+            // 确定显示的纹理（悬停时显示选中状态）
+            let display_idx = if response.hovered() && !is_selected {
+                selected_idx  // 悬停时显示高亮
+            } else if is_selected {
+                selected_idx  // 选中状态
+            } else {
+                normal_idx    // 正常状态
+            };
             
             // 使用纹理渲染tab按钮
-            if let Some(info) = LibraryName::Title.get_egui_texture(ctx, texture_index) {
+            if let Some(info) = LibraryName::Title.get_egui_texture(ctx, display_idx) {
                 if let Some(tab_texture) = info.egui_texture {
-                    let tab_size = egui::vec2(71.0, 23.0);
-                    let tab_rect = egui::Rect::from_min_size(tab_pos, tab_size);
-                    
                     ui.painter().image(
                         tab_texture.id(),
                         tab_rect,
@@ -349,7 +400,6 @@ impl GameShopDialog {
                         egui::Color32::WHITE,
                     );
                     
-                    let response = ui.interact(tab_rect, egui::Id::new(format!("section_tab_{}", i)), egui::Sense::click());
                     if response.clicked() && !self.dragging {
                         self.selected_section = *section;
                         self.selected_class = GameShopClass::All;
@@ -374,24 +424,61 @@ impl GameShopDialog {
         
         for (i, class) in GameShopClass::ALL.iter().enumerate() {
             let is_selected = self.selected_class == *class;
-            let texture_index = match class {
-                GameShopClass::All => if is_selected { 752 } else { 751 },
-                GameShopClass::Warrior => if is_selected { 755 } else { 754 },
-                GameShopClass::Assassin => if is_selected { 758 } else { 757 },
-                GameShopClass::Taoist => if is_selected { 761 } else { 760 },
-                GameShopClass::Wizard => if is_selected { 764 } else { 763 },
-                GameShopClass::Archer => if is_selected { 767 } else { 766 },
-            };
             
             let tab_x = bg_rect.min.x + 539.0 + (i as f32 * 23.0);
             let tab_pos = egui::pos2(tab_x, class_y);
+            let tab_size = egui::vec2(23.0, 20.0);
+            let tab_rect = egui::Rect::from_min_size(tab_pos, tab_size);
+            
+            // 交互检测（用于判断悬停和点击状态）
+            let response = ui.interact(tab_rect, egui::Id::new(format!("class_tab_{}", i)), egui::Sense::click());
+            
+            // 根据状态选择纹理索引: normal/hover/pressed
+            let texture_index = if is_selected {
+                // 已选中的标签页使用选中状态纹理
+                match class {
+                    GameShopClass::All => 752,
+                    GameShopClass::Warrior => 755,
+                    GameShopClass::Assassin => 758,
+                    GameShopClass::Taoist => 761,
+                    GameShopClass::Wizard => 764,
+                    GameShopClass::Archer => 767,
+                }
+            } else if response.is_pointer_button_down_on() {
+                // 按下状态 (pressed)
+                match class {
+                    GameShopClass::All => 753,
+                    GameShopClass::Warrior => 756,
+                    GameShopClass::Assassin => 759,
+                    GameShopClass::Taoist => 762,
+                    GameShopClass::Wizard => 765,
+                    GameShopClass::Archer => 768,
+                }
+            } else if response.hovered() {
+                // 悬停状态 (hover)
+                match class {
+                    GameShopClass::All => 752,
+                    GameShopClass::Warrior => 755,
+                    GameShopClass::Assassin => 758,
+                    GameShopClass::Taoist => 761,
+                    GameShopClass::Wizard => 764,
+                    GameShopClass::Archer => 767,
+                }
+            } else {
+                // 正常状态 (normal)
+                match class {
+                    GameShopClass::All => 751,
+                    GameShopClass::Warrior => 754,
+                    GameShopClass::Assassin => 757,
+                    GameShopClass::Taoist => 760,
+                    GameShopClass::Wizard => 763,
+                    GameShopClass::Archer => 766,
+                }
+            };
             
             // 使用纹理渲染tab按钮
             if let Some(info) = LibraryName::Title.get_egui_texture(ctx, texture_index) {
                 if let Some(tab_texture) = info.egui_texture {
-                    let tab_size = egui::vec2(23.0, 20.0);
-                    let tab_rect = egui::Rect::from_min_size(tab_pos, tab_size);
-                    
                     ui.painter().image(
                         tab_texture.id(),
                         tab_rect,
@@ -399,7 +486,6 @@ impl GameShopDialog {
                         egui::Color32::WHITE,
                     );
                     
-                    let response = ui.interact(tab_rect, egui::Id::new(format!("class_tab_{}", i)), egui::Sense::click());
                     if response.clicked() && !self.dragging {
                         self.selected_class = *class;
                         self.current_page = 0;
@@ -486,7 +572,6 @@ impl GameShopDialog {
 
         // 计算当前页显示的物品
         let start_index = self.current_page * self.items_per_page;
-        let selected_item = self.selected_item;
         
         // 绘制4x2网格
         for i in 0..self.items_per_page {
@@ -533,45 +618,258 @@ impl GameShopDialog {
                     );
                 }
                 
-                // 物品图标区域 (居中显示)
-                let icon_size = 64.0;
-                let icon_rect = egui::Rect::from_center_size(
-                    egui::pos2(cell_rect.center().x, cell_rect.min.y + 50.0),
-                    egui::vec2(icon_size, icon_size)
-                );
-                
-                // 绘制物品图标背景
-                ui.painter().rect_filled(
-                    icon_rect,
-                    2.0,
-                    egui::Color32::from_rgba_premultiplied(40, 40, 50, 180)
-                );
-                
-                // 物品名称
+                // 物品名称 (位置: 0, 13) - 金色，字体稍大
                 ui.painter().text(
-                    egui::pos2(cell_rect.center().x, cell_rect.min.y + 90.0),
+                    egui::pos2(cell_rect.min.x + cell_width / 2.0, cell_rect.min.y + 13.0),
                     egui::Align2::CENTER_TOP,
                     &item.name,
-                    egui::FontId::proportional(11.0),
-                    if item.in_stock { egui::Color32::WHITE } else { egui::Color32::GRAY },
+                    egui::FontId::proportional(10.0),
+                    if item.in_stock { egui::Color32::from_rgb(255, 215, 0) } else { egui::Color32::GRAY },
                 );
                 
-                // 价格信息
-                let price_text = if item.price_gold > 0 && item.price_ingot > 0 {
-                    format!("{}金 | {}宝", item.price_gold, item.price_ingot)
-                } else if item.price_gold > 0 {
-                    format!("{}金币", item.price_gold)
+                // 物品图标区域 (位置: 12, 40, 尺寸: 32x32)
+                let icon_base_pos = egui::pos2(cell_rect.min.x + 12.0, cell_rect.min.y + 40.0);
+                
+                // 绘制物品图标纹理 (使用Items库)
+                if let Some(info) = LibraryName::Items.get_egui_texture(ctx, item.icon_index as usize) {
+                    if let Some(item_texture) = info.egui_texture {
+                        // 获取纹理实际尺寸
+                        let texture_size = egui::vec2(info.width as f32, info.height as f32);
+                        
+                        // 计算居中偏移 (32x32区域内居中)
+                        let offset_x = (32.0 - texture_size.x) / 2.0;
+                        let offset_y = (32.0 - texture_size.y) / 2.0;
+                        
+                        let icon_rect = egui::Rect::from_min_size(
+                            egui::pos2(icon_base_pos.x + offset_x, icon_base_pos.y + offset_y),
+                            texture_size
+                        );
+                        
+                        // 绘制图标
+                        ui.painter().image(
+                            item_texture.id(),
+                            icon_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
+                
+                // 交互区域 - 悬停时显示详细信息
+                let interact_rect = egui::Rect::from_min_size(icon_base_pos, egui::vec2(32.0, 32.0));
+                let icon_response = ui.interact(interact_rect, egui::Id::new(format!("icon_{}", item.id)), egui::Sense::hover());
+                if icon_response.hovered() {
+                    // 显示详细的物品信息（跟随鼠标位置）
+                    if let Some(pointer_pos) = ctx.pointer_hover_pos() {
+                        egui::Area::new(egui::Id::new(format!("tooltip_{}", item.id)))
+                            .fixed_pos(pointer_pos + egui::vec2(10.0, 10.0))
+                            .order(egui::Order::Tooltip)
+                            .show(ctx, |ui| {
+                                egui::Frame::new()
+                                    .fill(egui::Color32::from_rgba_premultiplied(40, 40, 40, 150))  // 更透明的背景
+                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 220, 220)))  // 更亮的边框
+                                    .inner_margin(8.0)  // 内边距
+                                    .show(ui, |ui| {
+                                        ui.style_mut().visuals.override_text_color = Some(egui::Color32::WHITE);  // 确保文字是纯白色
+                                        ui.set_max_width(250.0);
+                                        
+                                        // 物品名称（金色）
+                                        ui.label(egui::RichText::new(&item.name)
+                                            .color(egui::Color32::from_rgb(255, 215, 0))
+                                            .size(14.0)
+                                            .strong());
+                                        
+                                        ui.separator();
+                                        
+                                        // 物品描述
+                                        ui.label(&item.description);
+                                        
+                                        ui.separator();
+                                        
+                                        // 价格信息
+                                        if item.price_gold > 0 {
+                                            ui.label(egui::RichText::new(format!("金币: {}", item.price_gold))
+                                                .color(egui::Color32::from_rgb(255, 215, 0)));
+                                        }
+                                        if item.price_ingot > 0 {
+                                            ui.label(egui::RichText::new(format!("元宝: {}", item.price_ingot))
+                                                .color(egui::Color32::from_rgb(0, 255, 255)));
+                                        }
+                                        
+                                        // 库存信息
+                                        if item.stock == 0 {
+                                            ui.label("库存: 无限");
+                                        } else {
+                                            ui.label(format!("库存: {}", item.stock));
+                                        }
+                                        
+                                        // 数量信息
+                                        if item.count > 1 {
+                                            ui.label(format!("每次购买: {} 个", item.count));
+                                        }
+                                    });
+                            });
+                    }
+                }
+                
+                // STOCK标签 (位置: 53, 37)
+                ui.painter().text(
+                    egui::pos2(cell_rect.min.x + 53.0, cell_rect.min.y + 37.0),
+                    egui::Align2::LEFT_TOP,
+                    "STOCK:",
+                    egui::FontId::proportional(7.0),
+                    egui::Color32::GRAY,
+                );
+                
+                // 库存数量 (位置: 93, 37)
+                let stock_text = if item.stock >= 99 {
+                    "99+".to_string()
+                } else if item.stock == 0 {
+                    "∞".to_string()
                 } else {
-                    format!("{}元宝", item.price_ingot)
+                    item.stock.to_string()
+                };
+                ui.painter().text(
+                    egui::pos2(cell_rect.min.x + 93.0, cell_rect.min.y + 37.0),
+                    egui::Align2::LEFT_TOP,
+                    &stock_text,
+                    egui::FontId::proportional(7.0),
+                    egui::Color32::WHITE,
+                );
+                
+                // 物品数量 (位置: 16, 60)
+                if item.count > 1 {
+                    ui.painter().text(
+                        egui::pos2(cell_rect.min.x + 16.0, cell_rect.min.y + 60.0),
+                        egui::Align2::LEFT_TOP,
+                        &format!("x{}", item.count),
+                        egui::FontId::proportional(7.0),
+                        egui::Color32::WHITE,
+                    );
+                }
+                
+                // 数量调整按钮 (位置: 55-97, 56)
+                // 减少按钮 (Prguse2[240-242])
+                let qty_down_rect = egui::Rect::from_min_size(
+                    egui::pos2(cell_rect.min.x + 55.0, cell_rect.min.y + 56.0),
+                    egui::vec2(16.0, 14.0)
+                );
+                let _qty_down_response = ui.interact(qty_down_rect, egui::Id::new(format!("qty_down_{}", item.id)), egui::Sense::click());
+                // TODO: 实现数量减少逻辑
+                
+                // 数量显示 (位置: 74, 56)
+                ui.painter().text(
+                    egui::pos2(cell_rect.min.x + 82.0, cell_rect.min.y + 56.0 + 7.0),
+                    egui::Align2::CENTER_CENTER,
+                    "1",  // TODO: 实际数量
+                    egui::FontId::proportional(8.0),
+                    egui::Color32::WHITE,
+                );
+                
+                // 增加按钮 (Prguse2[243-245])
+                let qty_up_rect = egui::Rect::from_min_size(
+                    egui::pos2(cell_rect.min.x + 97.0, cell_rect.min.y + 56.0),
+                    egui::vec2(16.0, 14.0)
+                );
+                let _qty_up_response = ui.interact(qty_up_rect, egui::Id::new(format!("qty_up_{}", item.id)), egui::Sense::click());
+                // TODO: 实现数量增加逻辑
+                
+                // 元宝价格 (位置: 2, 81)
+                if item.price_ingot > 0 {
+                    ui.painter().text(
+                        egui::pos2(cell_rect.min.x + 97.0, cell_rect.min.y + 81.0),
+                        egui::Align2::RIGHT_TOP,
+                        &format!("{}", item.price_ingot),
+                        egui::FontId::proportional(8.0),
+                        egui::Color32::from_rgb(0, 255, 255),
+                    );
+                }
+                
+                // 金币价格 (位置: 2, 102)
+                if item.price_gold > 0 {
+                    ui.painter().text(
+                        egui::pos2(cell_rect.min.x + 97.0, cell_rect.min.y + 102.0),
+                        egui::Align2::RIGHT_TOP,
+                        &format!("{}", item.price_gold),
+                        egui::FontId::proportional(8.0),
+                        egui::Color32::from_rgb(255, 215, 0),
+                    );
+                }
+                
+                // Preview按钮 (Title[781-783], 位置: 8, 122) - 仅武器/装备显示
+                let is_previewable = matches!(item.category, ShopCategory::Weapon | ShopCategory::Armor);
+                if is_previewable {
+                    let preview_rect = egui::Rect::from_min_size(
+                        egui::pos2(cell_rect.min.x + 8.0, cell_rect.min.y + 122.0),
+                        egui::vec2(32.0, 16.0)
+                    );
+                    let preview_response = ui.interact(preview_rect, egui::Id::new(format!("preview_{}", item.id)), egui::Sense::click());
+                    
+                    // 绘制Preview按钮纹理
+                    let preview_texture_index = if preview_response.clicked() {
+                        783 // pressed
+                    } else if preview_response.hovered() {
+                        782 // hover
+                    } else {
+                        781 // normal
+                    };
+                    
+                    if let Some(info) = LibraryName::Title.get_egui_texture(ctx, preview_texture_index) {
+                        if let Some(preview_texture) = info.egui_texture {
+                            ui.painter().image(
+                                preview_texture.id(),
+                                preview_rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                    }
+                    
+                    if preview_response.clicked() && !self.dragging {
+                        // 创建预览器
+                        let viewer_size = egui::vec2(260.0, 300.0);
+                        let viewer_pos = if i % 4 < 2 {
+                            egui::pos2(bg_rect.max.x - viewer_size.x - 30.0, bg_rect.min.y + 120.0)
+                        } else {
+                            egui::pos2(bg_rect.min.x + 50.0, bg_rect.min.y + 120.0)
+                        };
+                        self.item_viewer = Some(ShopItemViewer::new(item.clone(), viewer_pos));
+                        self.selected_item = Some(item_index);
+                    }
+                }
+                
+                // Buy按钮 (Title[778-780], 位置: 42/75, 122)
+                let buy_x = if is_previewable { 75.0 } else { 42.0 };
+                let buy_rect = egui::Rect::from_min_size(
+                    egui::pos2(cell_rect.min.x + buy_x, cell_rect.min.y + 122.0),
+                    egui::vec2(32.0, 16.0)
+                );
+                let buy_response = ui.interact(buy_rect, egui::Id::new(format!("buy_{}", item.id)), egui::Sense::click());
+                
+                // 绘制Buy按钮纹理
+                let buy_texture_index = if buy_response.clicked() {
+                    780 // pressed
+                } else if buy_response.hovered() {
+                    779 // hover
+                } else {
+                    778 // normal
                 };
                 
-                ui.painter().text(
-                    egui::pos2(cell_rect.center().x, cell_rect.min.y + 110.0),
-                    egui::Align2::CENTER_TOP,
-                    &price_text,
-                    egui::FontId::proportional(9.0),
-                    egui::Color32::from_rgb(255, 215, 0),
-                );
+                if let Some(info) = LibraryName::Title.get_egui_texture(ctx, buy_texture_index) {
+                    if let Some(buy_texture) = info.egui_texture {
+                        ui.painter().image(
+                            buy_texture.id(),
+                            buy_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                }
+                
+                if buy_response.clicked() && !self.dragging {
+                    println!("💰 购买商品: {}", item.name);
+                    // TODO: 实现购买逻辑
+                }
                 
                 // 状态标签
                 if item.hot {
@@ -592,73 +890,8 @@ impl GameShopDialog {
                         egui::Color32::GREEN,
                     );
                 }
-                
-                // 库存状态
-                if !item.in_stock {
-                    ui.painter().text(
-                        egui::pos2(cell_rect.center().x, cell_rect.min.y + 125.0),
-                        egui::Align2::CENTER_TOP,
-                        "缺货",
-                        egui::FontId::proportional(10.0),
-                        egui::Color32::RED,
-                    );
-                }
-                
-                // 点击交互 - 使用item的唯一ID避免冲突，添加调试信息
-                let cell_id = format!("shop_cell_{}_{}_grid_{}", item.id, item_index, i);
-                let response = ui.interact(cell_rect, egui::Id::new(&cell_id), egui::Sense::click());
-                if response.clicked() && !self.dragging {
-                    println!("🖱️ 点击商品: {} (index: {}, grid: {}, id: {})", item.name, item_index, i, cell_id);
-                    
-                    // 如果点击的是已选中的商品，关闭预览器
-                    if Some(item_index) == self.selected_item && self.item_viewer.is_some() {
-                        self.item_viewer = None;
-                        self.selected_item = None;
-                        println!("❌ 关闭商品预览: {}", item.name);
-                    } else {
-                        // 否则显示新的预览器
-                        self.selected_item = Some(item_index);
-                        
-                        // 创建商品预览器 - 调整位置避免遮挡重要UI元素
-                        let viewer_size = egui::vec2(260.0, 300.0);
-                        // 使用网格索引而不是坐标判断位置，更准确
-                        let viewer_pos = if i % 4 < 2 {
-                            // 如果是左半部分（第0,1列），预览器显示在右侧
-                            let right_x = bg_rect.max.x - viewer_size.x - 30.0; // 留出关闭按钮空间
-                            egui::pos2(right_x, bg_rect.min.y + 120.0)
-                        } else {
-                            // 如果是右半部分（第2,3列），预览器显示在左侧
-                            egui::pos2(bg_rect.min.x + 50.0, bg_rect.min.y + 120.0)
-                        };
-                        
-                        self.item_viewer = Some(ShopItemViewer::new(item.clone(), viewer_pos));
-                        println!("🛍️ 选择商品: {} - 显示预览 (位置: {:?})", item.name, viewer_pos);
-                    }
-                }
-                
-                // 选中高亮
-                if Some(item_index) == selected_item {
-                    ui.painter().rect_stroke(
-                        cell_rect,
-                        3.0,
-                        egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 215, 0)),
-                        egui::epaint::StrokeKind::Outside,
-                    );
-                }
-            } else {
-                // 绘制空单元格
-                ui.painter().rect_filled(
-                    cell_rect,
-                    3.0,
-                    egui::Color32::from_rgba_premultiplied(30, 30, 40, 100),
-                );
-                ui.painter().rect_stroke(
-                    cell_rect,
-                    3.0,
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 60)),
-                    egui::epaint::StrokeKind::Outside,
-                );
             }
+            // 空单元格不绘制任何内容
         }
         
         // 绘制分页控制
@@ -947,6 +1180,195 @@ impl GameShopDialog {
         should_close
     }
 
+    /// 绘制左侧分类列表区域
+    fn draw_category_list(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        // 绘制FilterBackground背景 Title[769] 位置(11, 102)
+        let filter_bg_pos = egui::pos2(bg_rect.min.x + 11.0, bg_rect.min.y + 102.0);
+        if let Some(info) = LibraryName::Title.get_egui_texture(ctx, 769) {
+            if let Some(bg_texture) = info.egui_texture {
+                let bg_size = egui::vec2(info.width as f32, info.height as f32);
+                let filter_rect = egui::Rect::from_min_size(filter_bg_pos, bg_size);
+                ui.painter().image(
+                    bg_texture.id(),
+                    filter_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        
+        // 绘制分类列表文本 (显示22个)
+        let list_start_y = bg_rect.min.y + 120.0;
+        let line_height = 14.0;
+        let max_visible = 22;
+        
+        for i in 0..max_visible {
+            let category_index = self.category_scroll_index + i;
+            if category_index >= self.categories.len() {
+                break;
+            }
+            
+            let category = &self.categories[category_index].clone();
+            let text_pos = egui::pos2(bg_rect.min.x + 20.0, list_start_y + (i as f32 * line_height));
+            
+            // 创建可点击区域
+            let item_rect = egui::Rect::from_min_size(
+                egui::pos2(bg_rect.min.x + 15.0, list_start_y + (i as f32 * line_height)),
+                egui::vec2(100.0, line_height)
+            );
+            let item_response = ui.interact(item_rect, egui::Id::new(format!("category_{}", category_index)), egui::Sense::click());
+            
+            // 悬停效果
+            let text_color = if item_response.hovered() {
+                egui::Color32::from_rgb(255, 215, 0)  // 金色高亮
+            } else {
+                egui::Color32::WHITE
+            };
+            
+            ui.painter().text(
+                text_pos,
+                egui::Align2::LEFT_TOP,
+                category,
+                egui::FontId::proportional(9.0),
+                text_color,
+            );
+            
+            // 处理点击
+            if item_response.clicked() && !self.dragging {
+                println!("📁 选择分类: {}", category);
+                // TODO: 根据分类筛选商品
+            }
+        }
+        
+        // 处理鼠标滚轮
+        let list_area = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + 15.0, list_start_y),
+            egui::vec2(100.0, line_height * max_visible as f32)
+        );
+        let list_response = ui.interact(list_area, egui::Id::new("category_list_area"), egui::Sense::hover());
+        
+        if list_response.hovered() {
+            let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+            if scroll_delta != 0.0 {
+                let scroll_lines = (-scroll_delta / 20.0) as i32;  // 每20像素滚动一行
+                let new_index = (self.category_scroll_index as i32 + scroll_lines)
+                    .max(0)
+                    .min((self.categories.len().saturating_sub(max_visible)) as i32) as usize;
+                self.category_scroll_index = new_index;
+            }
+        }
+        
+        // 绘制滚动条
+        self.draw_category_scrollbar(ui, ctx, bg_rect);
+    }
+    
+    /// 绘制分类列表滚动条
+    fn draw_category_scrollbar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) {
+        // 上箭头按钮 Prguse2[197/198/199] 位置(120, 103)
+        let up_btn_rect = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + 120.0, bg_rect.min.y + 103.0),
+            egui::vec2(16.0, 14.0)
+        );
+        let up_response = ui.interact(up_btn_rect, egui::Id::new("category_scroll_up"), egui::Sense::click());
+        let up_index = if up_response.clicked() {
+            199
+        } else if up_response.hovered() {
+            198
+        } else {
+            197
+        };
+        
+        if let Some(info) = LibraryName::Prguse2.get_egui_texture(ctx, up_index) {
+            if let Some(texture) = info.egui_texture {
+                ui.painter().image(
+                    texture.id(),
+                    up_btn_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        
+        if up_response.clicked() && self.category_scroll_index > 0 {
+            self.category_scroll_index -= 1;
+        }
+        
+        // 下箭头按钮 Prguse2[207/208/209] 位置(120, 421)
+        let down_btn_rect = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + 120.0, bg_rect.min.y + 421.0),
+            egui::vec2(16.0, 14.0)
+        );
+        let down_response = ui.interact(down_btn_rect, egui::Id::new("category_scroll_down"), egui::Sense::click());
+        let down_index = if down_response.clicked() {
+            209
+        } else if down_response.hovered() {
+            208
+        } else {
+            207
+        };
+        
+        if let Some(info) = LibraryName::Prguse2.get_egui_texture(ctx, down_index) {
+            if let Some(texture) = info.egui_texture {
+                ui.painter().image(
+                    texture.id(),
+                    down_btn_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        
+        if down_response.clicked() && self.category_scroll_index + 22 < self.categories.len() {
+            self.category_scroll_index += 1;
+        }
+        
+        // 滚动块 Prguse2[205/206] 位置(120, 117) - 可拖拽
+        let scrollbar_height = 421.0 - 117.0;  // 304px
+        let scroll_ratio = if self.categories.len() > 22 {
+            self.category_scroll_index as f32 / (self.categories.len() - 22) as f32
+        } else {
+            0.0
+        };
+        
+        let position_y = bg_rect.min.y + 117.0 + (scroll_ratio * (scrollbar_height - 20.0));
+        let position_rect = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + 120.0, position_y),
+            egui::vec2(16.0, 20.0)
+        );
+        
+        let position_response = ui.interact(position_rect, egui::Id::new("category_scroll_bar"), egui::Sense::drag());
+        let position_index = if position_response.hovered() || position_response.dragged() {
+            206
+        } else {
+            205
+        };
+        
+        if let Some(info) = LibraryName::Prguse2.get_egui_texture(ctx, position_index) {
+            if let Some(texture) = info.egui_texture {
+                ui.painter().image(
+                    texture.id(),
+                    position_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        
+        // 处理拖拽 - 直接使用鼠标位置而不是增量
+        if position_response.dragged() {
+            if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
+                let relative_y = pointer_pos.y - bg_rect.min.y - 117.0;
+                let clamped_y = relative_y.clamp(0.0, scrollbar_height - 20.0);
+                let new_ratio = clamped_y / (scrollbar_height - 20.0);
+                
+                if self.categories.len() > 22 {
+                    self.category_scroll_index = ((self.categories.len() - 22) as f32 * new_ratio) as usize;
+                    self.category_scroll_index = self.category_scroll_index.min(self.categories.len().saturating_sub(22));
+                }
+            }
+        }
+    }
+    
     /// 绘制分页控制
     fn draw_pagination(&mut self, ui: &mut egui::Ui, bg_rect: &egui::Rect) {
         let total_pages = if self.filtered_items.is_empty() { 
@@ -1045,33 +1467,54 @@ impl GameShopDialog {
     }
 
     /// 绘制关闭按钮
-    fn draw_close_button(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, bg_rect: &egui::Rect) -> bool {
+    fn draw_close_button(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, bg_rect: &egui::Rect) -> bool {
+        // 使用Prguse2纹理360/361/362绘制关闭按钮
         // 关闭按钮位置（右上角）
         let close_size = egui::vec2(20.0, 20.0);
         let close_rect = egui::Rect::from_min_size(
             egui::pos2(bg_rect.max.x - 25.0, bg_rect.min.y + 5.0),
             close_size
         );
-
-        // 绘制关闭按钮背景
-        ui.painter().rect_filled(close_rect, 2.0, egui::Color32::from_rgb(150, 50, 50));
-        ui.painter().rect_stroke(
-            close_rect,
-            2.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 100, 100)),
-            egui::epaint::StrokeKind::Outside,
-        );
-
-        // 绘制关闭符号 "×"
-        ui.painter().text(
-            close_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "×",
-            egui::FontId::proportional(14.0),
-            egui::Color32::WHITE,
-        );
-
+     
         let response = ui.interact(close_rect, egui::Id::new("shop_close"), egui::Sense::click());
+        
+        // 根据状态选择纹理索引
+        let texture_index = if response.clicked() {
+            362 // pressed
+        } else if response.hovered() {
+            361 // hover
+        } else {
+            360 // normal
+        };
+        
+        // 绘制关闭按钮纹理
+        if let Some(info) = LibraryName::Prguse2.get_egui_texture(ctx, texture_index) {
+            if let Some(close_texture) = info.egui_texture {
+                ui.painter().image(
+                    close_texture.id(),
+                    close_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        } else {
+            // 备用：绘制简单关闭按钮
+            ui.painter().rect_filled(close_rect, 2.0, egui::Color32::from_rgb(150, 50, 50));
+            ui.painter().rect_stroke(
+                close_rect,
+                2.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 100, 100)),
+                egui::epaint::StrokeKind::Outside,
+            );
+            ui.painter().text(
+                close_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "×",
+                egui::FontId::proportional(14.0),
+                egui::Color32::WHITE,
+            );
+        }
+
         let is_clicked = response.clicked();
         if response.hovered() {
             response.on_hover_text("关闭");
@@ -1235,9 +1678,9 @@ impl Dialog for GameShopDialog {
         
         // 使用 Area 创建自由浮动窗口
         egui::Area::new(egui::Id::new("game_shop_dialog"))
-            .fixed_pos(self.position)
+            .default_pos(self.position)
             .movable(false)  // 使用自定义拖拽
-            .order(egui::Order::Middle)  // 设置中等优先级，避免与其他UI冲突
+            .interactable(true)
             .show(ctx, |ui| {
                 // 绘制背景
                 let bg_rect = self.draw_background(ui, ctx);
@@ -1247,6 +1690,9 @@ impl Dialog for GameShopDialog {
                 
                 // 绘制分类标签页
                 self.draw_category_tabs(ui, ctx, &bg_rect);
+                
+                // 绘制左侧分类列表
+                self.draw_category_list(ui, ctx, &bg_rect);
                 
                 // 绘制物品列表
                 self.draw_item_grid(ui, ctx, &bg_rect);

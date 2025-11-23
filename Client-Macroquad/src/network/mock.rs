@@ -16,8 +16,6 @@
 // ============================================================================
 
 use super::handlers::NetworkEvent;
-#[cfg(feature = "backend-ggez")]
-use crate::objects::map_code::MapReader;
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

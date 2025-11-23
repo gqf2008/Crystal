@@ -13,7 +13,8 @@
 
 use super::{
     BeltDialog, CharacterDialog, ChatControlBar, ChatDialog, GameShopDialog, InventoryDialog,
-    MenuDialog, MiniMapDialog, OptionDialog, QuestLogDialog,
+    MenuDialog, MiniMapDialog, OptionDialog, QuestLogDialog, QuestListDialog, QuestDetailDialog,
+    QuestTrackingDialog,
 };
 use crate::resources::LibraryName;
 use crate::scenes::dialogs::Dialog;
@@ -60,6 +61,12 @@ pub struct MainDialog {
     character_dialog: CharacterDialog,
     /// 任务日志对话框
     quest_log_dialog: QuestLogDialog,
+    /// 任务列表对话框(NPC任务)
+    quest_list_dialog: QuestListDialog,
+    /// 任务详情对话框
+    quest_detail_dialog: QuestDetailDialog,
+    /// 任务追踪对话框
+    quest_tracking_dialog: QuestTrackingDialog,
     /// 设置对话框
     option_dialog: OptionDialog,
     /// 游戏商城对话框
@@ -75,6 +82,9 @@ pub struct MainDialog {
     inventory_dialog_open: bool,
     character_dialog_open: bool,
     quest_log_dialog_open: bool,
+    quest_list_dialog_open: bool,
+    quest_detail_dialog_open: bool,
+    quest_tracking_dialog_open: bool,
     option_dialog_open: bool,
     game_shop_dialog_open: bool,
     menu_dialog_open: bool,
@@ -128,6 +138,9 @@ impl MainDialog {
             inventory_dialog: InventoryDialog::new(),
             character_dialog: CharacterDialog::new(),
             quest_log_dialog: QuestLogDialog::new(),
+            quest_list_dialog: QuestListDialog::new(),
+            quest_detail_dialog: QuestDetailDialog::new(),
+            quest_tracking_dialog: QuestTrackingDialog::new(),
             option_dialog: OptionDialog::new(),
             game_shop_dialog: GameShopDialog::new(),
             menu_dialog: MenuDialog::new(),
@@ -139,6 +152,9 @@ impl MainDialog {
 
             character_dialog_open: false,
             quest_log_dialog_open: false,
+            quest_list_dialog_open: false,
+            quest_detail_dialog_open: false,
+            quest_tracking_dialog_open: true,  // 任务追踪默认开启
             option_dialog_open: false,
             game_shop_dialog_open: false,
             menu_dialog_open: false,
@@ -584,6 +600,9 @@ impl MainDialog {
         self.inventory_dialog.show(ctx, &mut self.inventory_dialog_open);
         self.character_dialog.show(ctx, &mut self.character_dialog_open);
         self.quest_log_dialog.show(ctx, &mut self.quest_log_dialog_open);
+        self.quest_list_dialog.show(ctx, &mut self.quest_list_dialog_open);
+        self.quest_detail_dialog.show(ctx, &mut self.quest_detail_dialog_open);
+        self.quest_tracking_dialog.show(ctx, &mut self.quest_tracking_dialog_open);
         self.option_dialog.show(ctx, &mut self.option_dialog_open);
         self.game_shop_dialog.show(ctx, &mut self.game_shop_dialog_open);
         self.menu_dialog.show(ctx, &mut self.menu_dialog_open);

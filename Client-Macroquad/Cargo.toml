@@ -65,6 +65,10 @@ path = "src/bin/test_all_components.rs"
 name = "test_inventory_dialog"
 path = "src/bin/test_inventory_dialog.rs"
 
+[[bin]]
+name = "test_character_dialog"
+path = "src/bin/test_character_dialog.rs"
+
 
 [profile.release]
 opt-level = 3
