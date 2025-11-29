@@ -249,25 +249,18 @@ impl ResourceManager {
     #[inline]
     pub fn get_library(&mut self, name: LibraryName) -> Option<Rc<RefCell<MLibrary>>> {
         if let Some(lib) = self.libraries.get(&name) {
-            println!("✅ 库已缓存: {:?}", name);
             return Some(lib.clone());
         }
 
         // 懒加载
         let path = format!("{}/{}", self.data_path, name.default_path());
-        println!("🔍 尝试加载库: {:?} 从路径: {}", name, path);
-        
         match MLibrary::open(&path) {
             Ok(lib) => {
-                println!("✅ 成功加载库: {:?}, 图像数: {}", name, lib.count());
                 let rc = Rc::new(RefCell::new(lib));
                 self.libraries.insert(name, rc.clone());
                 Some(rc)
             }
-            Err(e) => {
-                println!("❌ 加载库失败: {:?}, 路径: {}, 错误: {:?}", name, path, e);
-                None
-            }
+            Err(_) => None,
         }
     }
 
@@ -358,8 +351,6 @@ impl ResourceManager {
             return Some(cached.clone());
         }
 
-        println!("🎨 创建 egui 纹理: {:?} index={}", lib_name, index);
-
         // 加载纹理
         let mut info = self.get_texture(lib_name, index)?;
         let texture = info.image.as_ref()?;
@@ -368,8 +359,6 @@ impl ResourceManager {
         let image_data = texture.get_texture_data();
         let width = texture.width() as usize;
         let height = texture.height() as usize;
-
-        println!("📐 纹理尺寸: {}x{}", width, height);
 
         let mut pixels = Vec::with_capacity(width * height);
         for y in 0..height {

@@ -52,7 +52,7 @@ impl QuestListDialog {
     pub fn new() -> Self {
         Self {
             visible: false,
-            position: egui::pos2(400.0, 100.0),
+            position: egui::pos2(100.0, 50.0),
             quests: Vec::new(),
             selected_index: None,
             start_index: 0,
@@ -86,14 +86,12 @@ impl QuestListDialog {
     }
     
     /// 绘制对话框背景
-    fn draw_background(&self, ui: &mut egui::Ui, ctx: &egui::Context) -> egui::Rect {
+    fn draw_background(&self, ui: &mut egui::Ui, ctx: &egui::Context, _painter_rect: egui::Rect) -> egui::Rect {
         // 任务列表对话框背景 (Index: 950)
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, 950) {
             if let Some(bg_texture) = info.egui_texture {
                 let bg_size = bg_texture.size_vec2();
                 let bg_rect = egui::Rect::from_min_size(self.position, bg_size);
-                
-                println!("✅ 绘制任务列表背景: 位置={:?}, 大小={:?}", self.position, bg_size);
                 
                 ui.painter().image(
                     bg_texture.id(),
@@ -103,11 +101,7 @@ impl QuestListDialog {
                 );
                 
                 return bg_rect;
-            } else {
-                println!("❌ 纹理加载失败: egui_texture 为 None");
             }
-        } else {
-            println!("❌ 获取纹理信息失败: Prguse index 950 返回 None");
         }
         
         // 降级：绘制默认背景
@@ -185,25 +179,34 @@ impl QuestListDialog {
         }
         
         // 绘制任务图标
-        let icon_index = match quest.status {
-            QuestStatus::Available => 961,  // 可接受任务图标
-            QuestStatus::Accepted => 962,   // 进行中任务图标
-            QuestStatus::Completed => 963,  // 已完成任务图标
-            QuestStatus::Failed => 964,     // 失败任务图标
+        // 原工程: IconImage.Index = 961 + (int)Quest.Icon + iconTypeOffset
+        // 其中 iconTypeOffset = Quest.Icon > 3 ? 15 : 0
+        // QuestIcon枚举: None=0, QuestionWhite=1, ExclamationYellow=2, QuestionYellow=3, ExclamationBlue=5, QuestionBlue=6
+        // 注意：961-964是小图标，不是对话框背景！背景是950(QuestList), 960(QuestDetail), 1047(QuestLog)
+        let (quest_icon, icon_type_offset) = match quest.status {
+            QuestStatus::Available => (2, 0),    // ExclamationYellow = 2 → 黄色感叹号(有任务可接)
+            QuestStatus::Accepted => (1, 0),     // QuestionWhite = 1 → 白色问号(进行中)
+            QuestStatus::Completed => (3, 0),    // QuestionYellow = 3 → 黄色问号(可完成)
+            QuestStatus::Failed => (1, 0),       // 失败用白色问号
         };
+        let icon_index = 961 + quest_icon + icon_type_offset;
         
         if let Some(info) = LibraryName::Prguse.get_egui_texture(ctx, icon_index) {
             if let Some(icon_texture) = info.egui_texture {
-                let icon_rect = egui::Rect::from_min_size(
-                    egui::pos2(pos.x + 3.0, pos.y),
-                    icon_texture.size_vec2()
-                );
-                ui.painter().image(
-                    icon_texture.id(),
-                    icon_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
+                // 只绘制小图标（高度应该小于20像素的才是图标）
+                let icon_size = icon_texture.size_vec2();
+                if icon_size.y < 30.0 {
+                    let icon_rect = egui::Rect::from_min_size(
+                        egui::pos2(pos.x + 3.0, pos.y),
+                        icon_size
+                    );
+                    ui.painter().image(
+                        icon_texture.id(),
+                        icon_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
             }
         }
         
@@ -316,38 +319,27 @@ impl QuestListDialog {
             egui::vec2(280.0, 160.0)
         );
         
-        // 绘制消息背景
-        ui.painter().rect_filled(
-            message_area,
-            3.0,
-            egui::Color32::from_rgba_premultiplied(20, 20, 25, 200),
-        );
-        ui.painter().rect_stroke(
-            message_area,
-            3.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80)),
-            egui::epaint::StrokeKind::Outside,
-        );
-        
         if let Some(index) = self.selected_index {
             if let Some(quest) = self.quests.get(index) {
-                // 绘制任务描述
-                let text_pos = egui::pos2(message_area.min.x + 10.0, message_area.min.y + 10.0 - self.message_scroll);
+                // 使用egui的ScrollArea和Label来实现文字自动换行
+                let text_area = message_area.shrink(8.0);
                 
-                ui.painter().text(
-                    text_pos,
-                    egui::Align2::LEFT_TOP,
-                    &quest.description,
-                    egui::FontId::proportional(11.0),
-                    egui::Color32::WHITE,
-                );
-                
-                // 处理滚动
-                let response = ui.interact(message_area, egui::Id::new("quest_message"), egui::Sense::hover());
-                if response.hovered() {
-                    let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
-                    self.message_scroll = (self.message_scroll - scroll_delta * 10.0).max(0.0);
-                }
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(text_area), |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("quest_message_scroll")
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                        .show(ui, |ui| {
+                            ui.set_width(text_area.width() - 10.0);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&quest.description)
+                                        .size(11.0)
+                                        .color(egui::Color32::WHITE)
+                                )
+                                .wrap()
+                            );
+                        });
+                });
             }
         } else {
             // 无选中任务时显示提示
@@ -744,27 +736,29 @@ impl QuestListDialog {
 
 impl Dialog for QuestListDialog {
     fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
-        if !self.visible {
-            *open = false;
+        if !*open {
+            self.visible = false;
             return;
         }
-        
-        println!("🖼️ QuestListDialog::show 被调用, visible={}", self.visible);
+        self.visible = true;
         
         egui::Area::new(egui::Id::new("quest_list_dialog"))
             .fixed_pos(self.position)
             .movable(false)
+            .order(egui::Order::Middle)
+            .interactable(true)
             .show(ctx, |ui| {
-                println!("🎨 开始绘制 QuestListDialog UI");
+                // 分配固定大小的空间
+                let (_, painter_rect) = ui.allocate_space(egui::vec2(320.0, 470.0));
                 
                 // 绘制背景
-                let bg_rect = self.draw_background(ui, ctx);
+                let bg_rect = self.draw_background(ui, ctx, painter_rect);
                 
                 // 处理窗口拖拽
-                self.handle_window_dragging(ui, ctx, &bg_rect);
+               self.handle_window_dragging(ui, ctx, &bg_rect);
                 
-                // 绘制任务选择区域
-                self.draw_quest_selection(ui, ctx, &bg_rect);
+                // // 绘制任务选择区域
+                 self.draw_quest_selection(ui, ctx, &bg_rect);
                 
                 // 绘制消息区域
                 self.draw_message_area(ui, ctx, &bg_rect);

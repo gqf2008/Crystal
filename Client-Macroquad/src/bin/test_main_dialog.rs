@@ -64,12 +64,16 @@ async fn main() {
     // 创建 MainDialog（内部自动创建所有子对话框）
     let mut main_dialog = MainDialog::new();
     
+    // 加载原生UI纹理
+    main_dialog.load_native_textures().await;
+    
     println!("✅ MainDialog 及所有子对话框已创建");
     println!("💡 提示:");
     println!("   - 点击底部按钮打开各种对话框（背包、角色、技能、任务、选项、菜单、商城）");
     println!("   - 按 M 键快速切换小地图显示/隐藏");
     println!("   - 按 TAB 键切换小地图大小模式（大模式/小模式）");
-    println!("   - 点击小地图右上角按钮也可切换显示/隐藏");
+    println!("   - 按 N 键切换背包UI模式（原生/egui）");
+    println!("   - 按 B 键切换快捷栏UI模式（原生/egui）");
     println!("   - 所有对话框都支持拖拽（拖拽标题栏）");
     println!("   - 按 ESC 退出");
 
@@ -106,6 +110,9 @@ async fn main() {
         // 绘制 egui
         egui_macroquad::draw();
 
+        // 绘制原生UI对话框（在 egui 之后）
+        main_dialog.show_native_dialogs();
+
         // 计算FPS
         let current_time = get_time();
         let delta_time = (current_time - last_time) as f32;
@@ -134,6 +141,16 @@ async fn main() {
         
         if is_key_pressed(KeyCode::Tab) {
             main_dialog.toggle_minimap_size();
+        }
+        
+        // N 键切换背包UI模式
+        if is_key_pressed(KeyCode::N) {
+            main_dialog.toggle_inventory_mode();
+        }
+        
+        // B 键切换快捷栏UI模式
+        if is_key_pressed(KeyCode::B) {
+            main_dialog.toggle_belt_mode();
         }
         
         // ESC 退出

@@ -33,7 +33,7 @@ impl QuestDetailDialog {
     pub fn new() -> Self {
         Self {
             visible: false,
-            position: egui::pos2(600.0, 100.0),
+            position: egui::pos2(450.0, 50.0),
             quest: None,
             dragging: false,
             drag_offset: egui::vec2(0.0, 0.0),
@@ -98,123 +98,80 @@ impl QuestDetailDialog {
             egui::vec2(280.0, 260.0)
         );
         
-        // 绘制消息背景
-        ui.painter().rect_filled(
-            message_area,
-            3.0,
-            egui::Color32::from_rgba_premultiplied(20, 20, 25, 200),
-        );
-        ui.painter().rect_stroke(
-            message_area,
-            3.0,
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80)),
-            egui::epaint::StrokeKind::Outside,
-        );
-        
-        if let Some(quest) = &self.quest {
-            let mut y_offset = message_area.min.y + 10.0 - self.message_scroll;
+        if let Some(quest) = &self.quest.clone() {
+            // 使用egui的ScrollArea和Label来实现文字自动换行
+            let text_area = message_area.shrink(8.0);
             
-            // 任务名称
-            ui.painter().text(
-                egui::pos2(message_area.min.x + 10.0, y_offset),
-                egui::Align2::LEFT_TOP,
-                &quest.name,
-                egui::FontId::proportional(14.0),
-                egui::Color32::YELLOW,
-            );
-            y_offset += 25.0;
-            
-            // 任务描述标题
-            ui.painter().text(
-                egui::pos2(message_area.min.x + 10.0, y_offset),
-                egui::Align2::LEFT_TOP,
-                "任务描述:",
-                egui::FontId::proportional(12.0),
-                egui::Color32::from_rgb(200, 200, 100),
-            );
-            y_offset += 20.0;
-            
-            // 任务描述内容
-            ui.painter().text(
-                egui::pos2(message_area.min.x + 15.0, y_offset),
-                egui::Align2::LEFT_TOP,
-                &quest.description,
-                egui::FontId::proportional(11.0),
-                egui::Color32::WHITE,
-            );
-            y_offset += 60.0;
-            
-            // 任务进度
-            if quest.max_progress > 0 {
-                ui.painter().text(
-                    egui::pos2(message_area.min.x + 10.0, y_offset),
-                    egui::Align2::LEFT_TOP,
-                    "进度:",
-                    egui::FontId::proportional(12.0),
-                    egui::Color32::from_rgb(200, 200, 100),
-                );
-                y_offset += 20.0;
-                
-                ui.painter().text(
-                    egui::pos2(message_area.min.x + 15.0, y_offset),
-                    egui::Align2::LEFT_TOP,
-                    format!("{} / {}", quest.progress, quest.max_progress),
-                    egui::FontId::proportional(11.0),
-                    egui::Color32::WHITE,
-                );
-                y_offset += 25.0;
-                
-                // 进度条
-                let progress_rect = egui::Rect::from_min_size(
-                    egui::pos2(message_area.min.x + 15.0, y_offset),
-                    egui::vec2(250.0, 10.0)
-                );
-                
-                ui.painter().rect_filled(
-                    progress_rect,
-                    2.0,
-                    egui::Color32::from_rgb(40, 40, 40),
-                );
-                
-                let progress_percent = quest.progress as f32 / quest.max_progress as f32;
-                let filled_rect = egui::Rect::from_min_size(
-                    progress_rect.min,
-                    egui::vec2(progress_rect.width() * progress_percent, progress_rect.height())
-                );
-                
-                ui.painter().rect_filled(
-                    filled_rect,
-                    2.0,
-                    egui::Color32::from_rgb(100, 150, 100),
-                );
-                
-                y_offset += 20.0;
-            }
-            
-            // 返回NPC
-            ui.painter().text(
-                egui::pos2(message_area.min.x + 10.0, y_offset),
-                egui::Align2::LEFT_TOP,
-                "返回:",
-                egui::FontId::proportional(12.0),
-                egui::Color32::from_rgb(200, 200, 100),
-            );
-            y_offset += 20.0;
-            
-            ui.painter().text(
-                egui::pos2(message_area.min.x + 15.0, y_offset),
-                egui::Align2::LEFT_TOP,
-                format!("找 {} 完成任务", quest.npc_name),
-                egui::FontId::proportional(11.0),
-                egui::Color32::WHITE,
-            );
-            
-            // 处理滚动
-            let response = ui.interact(message_area, egui::Id::new("quest_detail_message"), egui::Sense::hover());
-            if response.hovered() {
-                let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
-                self.message_scroll = (self.message_scroll - scroll_delta * 10.0).max(0.0);
-            }
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(text_area), |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("quest_detail_message_scroll")
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        ui.set_width(text_area.width() - 10.0);
+                        
+                        // 任务名称
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&quest.name)
+                                    .size(14.0)
+                                    .color(egui::Color32::YELLOW)
+                            )
+                            .wrap()
+                        );
+                        ui.add_space(10.0);
+                        
+                        // 任务描述标题
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new("任务描述:")
+                                    .size(12.0)
+                                    .color(egui::Color32::from_rgb(200, 200, 100))
+                            )
+                        );
+                        ui.add_space(5.0);
+                        
+                        // 任务描述内容
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&quest.description)
+                                    .size(11.0)
+                                    .color(egui::Color32::WHITE)
+                            )
+                            .wrap()
+                        );
+                        ui.add_space(15.0);
+                        
+                        // 任务进度
+                        if quest.max_progress > 0 {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new("进度:")
+                                        .size(12.0)
+                                        .color(egui::Color32::from_rgb(200, 200, 100))
+                                )
+                            );
+                            ui.add_space(5.0);
+                            
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(format!("{} / {}", quest.progress, quest.max_progress))
+                                        .size(11.0)
+                                        .color(egui::Color32::WHITE)
+                                )
+                            );
+                            ui.add_space(10.0);
+                            
+                            // 进度条
+                            let progress_percent = quest.progress as f32 / quest.max_progress as f32;
+                            let (rect, _) = ui.allocate_exact_size(egui::vec2(250.0, 10.0), egui::Sense::hover());
+                            ui.painter().rect_filled(rect, 3.0, egui::Color32::from_rgb(40, 40, 50));
+                            let filled_width = rect.width() * progress_percent;
+                            let filled_rect = egui::Rect::from_min_size(rect.min, egui::vec2(filled_width, rect.height()));
+                            ui.painter().rect_filled(filled_rect, 3.0, egui::Color32::from_rgb(100, 200, 100));
+                            ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80)), egui::epaint::StrokeKind::Outside);
+                        }
+                    });
+            });
         }
     }
     
@@ -520,10 +477,11 @@ impl QuestDetailDialog {
 
 impl Dialog for QuestDetailDialog {
     fn show(&mut self, ctx: &egui::Context, open: &mut bool) {
-        if !self.visible {
-            *open = false;
+        if !*open {
+            self.visible = false;
             return;
         }
+        self.visible = true;
         
         egui::Area::new(egui::Id::new("quest_detail_dialog"))
             .fixed_pos(self.position)

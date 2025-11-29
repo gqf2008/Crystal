@@ -240,8 +240,8 @@ impl GameState {
                     break;
                 }
                 other => {
-                    // 切换场景
-                    self.switch_to(other)?;
+                    // 切换场景（异步）
+                    self.switch_to(other).await?;
                 }
             }
             
@@ -251,8 +251,8 @@ impl GameState {
         Ok(())
     }
     
-    /// 切换场景
-    fn switch_to(&mut self, transition: SceneTransition) -> GameResult {
+    /// 切换场景（异步版本）
+    async fn switch_to(&mut self, transition: SceneTransition) -> GameResult {
         // 离开当前场景
         self.current_scene.on_exit()?;
         
@@ -260,7 +260,12 @@ impl GameState {
         let mut new_scene = match transition {
             SceneTransition::Login => SceneKind::Login(LoginScene::new()),
             SceneTransition::CharacterSelect => SceneKind::CharacterSelect(SelectScene::new(vec![])?),
-            SceneTransition::Game => SceneKind::Game(GameScene::new()),
+            SceneTransition::Game => {
+                // 创建游戏场景并异步加载纹理
+                let mut scene = GameScene::new();
+                scene.load_textures().await;
+                SceneKind::Game(scene)
+            }
             SceneTransition::Loading => SceneKind::Loading(LoadingScene::new()),
             SceneTransition::None | SceneTransition::Exit => {
                 return Ok(());

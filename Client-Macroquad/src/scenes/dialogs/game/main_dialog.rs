@@ -12,9 +12,9 @@
 // ============================================================================
 
 use super::{
-    BeltDialog, CharacterDialog, ChatControlBar, ChatDialog, GameShopDialog, InventoryDialog,
-    MenuDialog, MiniMapDialog, OptionDialog, QuestLogDialog, QuestListDialog, QuestDetailDialog,
-    QuestTrackingDialog,
+    BeltDialog, BeltDialogNative, CharacterDialog, ChatControlBar, ChatDialog, GameShopDialog,
+    InventoryDialog, InventoryDialogNative, MenuDialog, MiniMapDialog, OptionDialog, QuestLogDialog,
+    QuestListDialog, QuestDetailDialog, QuestTrackingDialog,
 };
 use crate::resources::LibraryName;
 use crate::scenes::dialogs::Dialog;
@@ -51,12 +51,20 @@ pub struct MainDialog {
     /// 血瓶快捷栏
     /// 快捷栏
     belt_dialog: BeltDialog,
+    /// 快捷栏（原生UI版本）
+    belt_dialog_native: BeltDialogNative,
+    /// 是否使用原生UI快捷栏
+    use_native_belt: bool,
     /// 聊天窗口
     chat_dialog: ChatDialog,
     /// 聊天控制栏
     chat_control_bar: ChatControlBar,
     /// 背包
     inventory_dialog: InventoryDialog,
+    /// 背包（原生UI版本）
+    inventory_dialog_native: InventoryDialogNative,
+    /// 是否使用原生UI背包
+    use_native_inventory: bool,
     /// 角色对话框
     character_dialog: CharacterDialog,
     /// 任务日志对话框
@@ -133,9 +141,13 @@ impl MainDialog {
 
             // 子对话框
             belt_dialog: BeltDialog::new(main_dialog_x, screen_h),
+            belt_dialog_native: BeltDialogNative::new(),
+            use_native_belt: true, // 默认使用原生UI版本
             chat_dialog: ChatDialog::new(main_dialog_x, screen_h, resolution_index),
             chat_control_bar: ChatControlBar::new(main_dialog_x, screen_h, resolution_index),
             inventory_dialog: InventoryDialog::new(),
+            inventory_dialog_native: InventoryDialogNative::new(),
+            use_native_inventory: true, // 默认使用原生UI版本
             character_dialog: CharacterDialog::new(),
             quest_log_dialog: QuestLogDialog::new(),
             quest_list_dialog: QuestListDialog::new(),
@@ -161,6 +173,32 @@ impl MainDialog {
             minimap_dialog_open: true,
 
         }
+    }
+
+    /// 异步加载原生UI纹理
+    pub async fn load_native_textures(&mut self) {
+        self.inventory_dialog_native.load_textures().await;
+        self.belt_dialog_native.load_textures().await;
+        
+        // 设置快捷栏初始位置（与 egui 版本一致）
+        let screen_h = macroquad::prelude::screen_height() / macroquad::prelude::screen_dpi_scale();
+        let screen_w = macroquad::prelude::screen_width() / macroquad::prelude::screen_dpi_scale();
+        let bg_info = LibraryName::Prguse.get_size(self.resolution_index).unwrap_or((1024, 150));
+        let bg_width = bg_info.0 as f32;
+        let main_dialog_x = (screen_w - bg_width) / 2.0;
+        self.belt_dialog_native.set_position(macroquad::prelude::vec2(main_dialog_x + 230.0, screen_h - 150.0));
+    }
+
+    /// 切换背包UI模式（原生/egui）
+    pub fn toggle_inventory_mode(&mut self) {
+        self.use_native_inventory = !self.use_native_inventory;
+        println!("📦 背包UI模式: {}", if self.use_native_inventory { "原生" } else { "egui" });
+    }
+
+    /// 切换快捷栏UI模式（原生/egui）
+    pub fn toggle_belt_mode(&mut self) {
+        self.use_native_belt = !self.use_native_belt;
+        println!("🎒 快捷栏UI模式: {}", if self.use_native_belt { "原生" } else { "egui" });
     }
 
     // pub fn is_visible(&self) -> bool {
@@ -596,8 +634,18 @@ impl MainDialog {
         self.chat_dialog.show(ctx, &mut self.chat_dialog_open);
         let (size_clicked, _settings_clicked) =
             self.chat_control_bar.show(ctx, &mut self.chat_control_bar_open);
-        self.belt_dialog.show(ctx, &mut self.belt_dialog_open);
-        self.inventory_dialog.show(ctx, &mut self.inventory_dialog_open);
+        
+        // 快捷栏：根据 use_native_belt 选择版本
+        if !self.use_native_belt {
+            self.belt_dialog.show(ctx, &mut self.belt_dialog_open);
+        }
+        
+        // 背包对话框：根据 use_native_inventory 选择版本
+        // 原生版本在 show_native_dialogs 中绘制
+        if !self.use_native_inventory {
+            self.inventory_dialog.show(ctx, &mut self.inventory_dialog_open);
+        }
+        
         self.character_dialog.show(ctx, &mut self.character_dialog_open);
         self.quest_log_dialog.show(ctx, &mut self.quest_log_dialog_open);
         self.quest_list_dialog.show(ctx, &mut self.quest_list_dialog_open);
@@ -625,6 +673,61 @@ impl MainDialog {
             self.belt_dialog
                 .set_position(egui_macroquad::egui::pos2(chat_pos.x, belt_y));
         }
+    }
+
+    /// 显示原生UI对话框（在 egui 之后调用）
+    /// 返回 true 表示原生UI消耗了鼠标事件
+    pub fn show_native_dialogs(&mut self) -> bool {
+        let mut consumed = false;
+        let (mx, my) = macroquad::prelude::mouse_position();
+        let mouse_pos = macroquad::prelude::vec2(mx, my);
+        
+        // 原生快捷栏
+        if self.use_native_belt {
+            // 同步可见状态
+            if self.belt_dialog_open {
+                self.belt_dialog_native.open();
+            } else {
+                self.belt_dialog_native.close();
+            }
+            
+            // 绘制对话框
+            self.belt_dialog_native.update_and_draw();
+            
+            // 同步关闭状态
+            if !self.belt_dialog_native.is_visible() {
+                self.belt_dialog_open = false;
+            }
+            
+            if self.belt_dialog_open && self.belt_dialog_native.contains(mouse_pos) {
+                consumed = true;
+            }
+        }
+        
+        // 原生背包对话框
+        if self.use_native_inventory {
+            // 同步可见状态：MainDialog 控制的 open 状态传递给原生对话框
+            if self.inventory_dialog_open {
+                self.inventory_dialog_native.open();
+            } else {
+                self.inventory_dialog_native.close();
+            }
+            
+            // 绘制对话框
+            self.inventory_dialog_native.update_and_draw();
+            
+            // 如果对话框被内部关闭（如按ESC），同步回 MainDialog
+            if !self.inventory_dialog_native.is_visible() {
+                self.inventory_dialog_open = false;
+            }
+            
+            // 检查鼠标是否在背包区域内
+            if self.inventory_dialog_open && self.inventory_dialog_native.contains(mouse_pos) {
+                consumed = true;
+            }
+        }
+        
+        consumed
     }
 }
 

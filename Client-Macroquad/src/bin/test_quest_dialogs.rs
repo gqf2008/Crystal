@@ -197,6 +197,171 @@ impl QuestDialogTest {
                     ],
                 },
             },
+            QuestInfo {
+                id: 7,
+                name: "护送公主".to_string(),
+                description: "公主需要前往邻国参加婚礼，请沿途保护她的安全。".to_string(),
+                npc_name: "国王".to_string(),
+                status: QuestStatus::Accepted,
+                progress: 2,
+                max_progress: 5,
+                level_required: 25,
+                rewards: QuestRewards {
+                    experience: 8000,
+                    gold: 5000,
+                    items: vec![
+                        QuestItem {
+                            icon_index: 70,
+                            name: "皇家勋章".to_string(),
+                            count: 1,
+                        }
+                    ],
+                },
+            },
+            QuestInfo {
+                id: 8,
+                name: "讨伐山贼".to_string(),
+                description: "山贼在官道上劫掠过往商旅，请前去剿灭。".to_string(),
+                npc_name: "捕快".to_string(),
+                status: QuestStatus::Available,
+                progress: 0,
+                max_progress: 20,
+                level_required: 12,
+                rewards: QuestRewards {
+                    experience: 3000,
+                    gold: 1500,
+                    items: vec![],
+                },
+            },
+            QuestInfo {
+                id: 9,
+                name: "修复古桥".to_string(),
+                description: "村口的古桥年久失修，需要收集材料进行修复。".to_string(),
+                npc_name: "工匠".to_string(),
+                status: QuestStatus::Accepted,
+                progress: 50,
+                max_progress: 100,
+                level_required: 8,
+                rewards: QuestRewards {
+                    experience: 1200,
+                    gold: 300,
+                    items: vec![],
+                },
+            },
+            QuestInfo {
+                id: 10,
+                name: "调查神秘洞穴".to_string(),
+                description: "村民报告在山脚发现了一个发光的洞穴，请前去调查。".to_string(),
+                npc_name: "猎人".to_string(),
+                status: QuestStatus::Completed,
+                progress: 1,
+                max_progress: 1,
+                level_required: 18,
+                rewards: QuestRewards {
+                    experience: 4000,
+                    gold: 2500,
+                    items: vec![
+                        QuestItem {
+                            icon_index: 80,
+                            name: "夜明珠".to_string(),
+                            count: 1,
+                        }
+                    ],
+                },
+            },
+            QuestInfo {
+                id: 11,
+                name: "驯服野马".to_string(),
+                description: "马厩主人希望你能驯服草原上的野马。".to_string(),
+                npc_name: "马倌".to_string(),
+                status: QuestStatus::Available,
+                progress: 0,
+                max_progress: 3,
+                level_required: 15,
+                rewards: QuestRewards {
+                    experience: 2500,
+                    gold: 800,
+                    items: vec![],
+                },
+            },
+            QuestInfo {
+                id: 12,
+                name: "学习新技能".to_string(),
+                description: "武馆师傅愿意教你一招新技能，但需要先通过考验。".to_string(),
+                npc_name: "武馆师傅".to_string(),
+                status: QuestStatus::Accepted,
+                progress: 1,
+                max_progress: 3,
+                level_required: 20,
+                rewards: QuestRewards {
+                    experience: 5000,
+                    gold: 0,
+                    items: vec![
+                        QuestItem {
+                            icon_index: 90,
+                            name: "技能书".to_string(),
+                            count: 1,
+                        }
+                    ],
+                },
+            },
+            QuestInfo {
+                id: 13,
+                name: "拯救矿工".to_string(),
+                description: "矿洞发生塌方，有矿工被困其中，请尽快救援。".to_string(),
+                npc_name: "矿主".to_string(),
+                status: QuestStatus::Accepted,
+                progress: 0,
+                max_progress: 5,
+                level_required: 22,
+                rewards: QuestRewards {
+                    experience: 6000,
+                    gold: 3000,
+                    items: vec![],
+                },
+            },
+            QuestInfo {
+                id: 14,
+                name: "消灭巨型蜘蛛".to_string(),
+                description: "森林深处出现了巨型蜘蛛，威胁到伐木工的安全。".to_string(),
+                npc_name: "伐木工头".to_string(),
+                status: QuestStatus::Available,
+                progress: 0,
+                max_progress: 8,
+                level_required: 16,
+                rewards: QuestRewards {
+                    experience: 3500,
+                    gold: 1200,
+                    items: vec![
+                        QuestItem {
+                            icon_index: 95,
+                            name: "蜘蛛丝".to_string(),
+                            count: 10,
+                        }
+                    ],
+                },
+            },
+            QuestInfo {
+                id: 15,
+                name: "寻找传说之剑".to_string(),
+                description: "传说中有一把神剑被封印在远古遗迹中，等待有缘人将其唤醒。".to_string(),
+                npc_name: "老隐士".to_string(),
+                status: QuestStatus::Available,
+                progress: 0,
+                max_progress: 1,
+                level_required: 50,
+                rewards: QuestRewards {
+                    experience: 50000,
+                    gold: 10000,
+                    items: vec![
+                        QuestItem {
+                            icon_index: 100,
+                            name: "传说之剑".to_string(),
+                            count: 1,
+                        }
+                    ],
+                },
+            },
         ]
     }
     
@@ -315,12 +480,77 @@ impl QuestDialogTest {
                 
                 ui.add_space(10.0);
                 ui.separator();
-                ui.heading("🎨 纹理资源");
-                ui.label("已加载:");
-                ui.label("  • Prguse (对话框背景)");
-                ui.label("  • Prguse2 (滚动条)");
-                ui.label("  • Title (标题和按钮)");
-                ui.label("  • Items (物品图标)");
+                ui.heading("🎨 纹理资源测试");
+                
+                // 测试 Prguse 950 (任务列表背景)
+                let tex_950 = LibraryName::Prguse.get_egui_texture(ctx, 950);
+                ui.horizontal(|ui| {
+                    ui.label("Prguse[950]:");
+                    if let Some(info) = &tex_950 {
+                        if info.egui_texture.is_some() {
+                            ui.colored_label(egui::Color32::GREEN, format!("✓ {}x{}", info.width, info.height));
+                        } else {
+                            ui.colored_label(egui::Color32::YELLOW, "无egui纹理");
+                        }
+                    } else {
+                        ui.colored_label(egui::Color32::RED, "✗ 加载失败");
+                    }
+                });
+                
+                // 测试 Prguse 960 (任务详情背景)
+                let tex_960 = LibraryName::Prguse.get_egui_texture(ctx, 960);
+                ui.horizontal(|ui| {
+                    ui.label("Prguse[960]:");
+                    if let Some(info) = &tex_960 {
+                        if info.egui_texture.is_some() {
+                            ui.colored_label(egui::Color32::GREEN, format!("✓ {}x{}", info.width, info.height));
+                        } else {
+                            ui.colored_label(egui::Color32::YELLOW, "无egui纹理");
+                        }
+                    } else {
+                        ui.colored_label(egui::Color32::RED, "✗ 加载失败");
+                    }
+                });
+                
+                // 测试 Prguse 1047 (任务日志背景)
+                let tex_1047 = LibraryName::Prguse.get_egui_texture(ctx, 1047);
+                ui.horizontal(|ui| {
+                    ui.label("Prguse[1047]:");
+                    if let Some(info) = &tex_1047 {
+                        if info.egui_texture.is_some() {
+                            ui.colored_label(egui::Color32::GREEN, format!("✓ {}x{}", info.width, info.height));
+                        } else {
+                            ui.colored_label(egui::Color32::YELLOW, "无egui纹理");
+                        }
+                    } else {
+                        ui.colored_label(egui::Color32::RED, "✗ 加载失败");
+                    }
+                });
+                
+                // 测试 Prguse 1002 (选项对话框背景 - 对照组)
+                let tex_1002 = LibraryName::Prguse.get_egui_texture(ctx, 1002);
+                ui.horizontal(|ui| {
+                    ui.label("Prguse[1002]:");
+                    if let Some(info) = &tex_1002 {
+                        if info.egui_texture.is_some() {
+                            ui.colored_label(egui::Color32::GREEN, format!("✓ {}x{}", info.width, info.height));
+                        } else {
+                            ui.colored_label(egui::Color32::YELLOW, "无egui纹理");
+                        }
+                    } else {
+                        ui.colored_label(egui::Color32::RED, "✗ 加载失败");
+                    }
+                });
+                
+                // 如果有纹理，绘制测试图像
+                ui.add_space(10.0);
+                if let Some(info) = tex_950 {
+                    if let Some(tex) = info.egui_texture {
+                        ui.label("Prguse[950] 预览:");
+                        let preview_size = tex.size_vec2() * 0.3; // 30% 大小预览
+                        ui.image(egui::ImageSource::Texture(egui::load::SizedTexture::new(tex.id(), preview_size)));
+                    }
+                }
             });
     }
 }
@@ -365,6 +595,53 @@ async fn main() {
     ]);
     
     println!("✅ 纹理资源加载完成");
+    println!();
+    
+    // 配置 egui（设置中文字体）
+    println!("🔤 正在加载中文字体...");
+    egui_macroquad::cfg(|ctx| {
+        let mut fonts = egui::FontDefinitions::default();
+        
+        // 加载中文字体
+        let font_data = std::fs::read("assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf")
+            .or_else(|_| std::fs::read("assets/fonts/Chinese.ttc"))
+            .or_else(|_| std::fs::read("C:\\Windows\\Fonts\\msyh.ttc"))
+            .unwrap_or_else(|_| {
+                println!("⚠️  无法加载中文字体，使用默认字体");
+                vec![]
+            });
+
+        if !font_data.is_empty() {
+            fonts.font_data.insert(
+                "chinese".to_owned(),
+                std::sync::Arc::new(egui::FontData::from_owned(font_data)),
+            );
+
+            // 设置字体优先级
+            fonts
+                .families
+                .get_mut(&egui::FontFamily::Proportional)
+                .unwrap()
+                .insert(0, "chinese".to_owned());
+
+            fonts
+                .families
+                .get_mut(&egui::FontFamily::Monospace)
+                .unwrap()
+                .insert(0, "chinese".to_owned());
+                
+            println!("✅ 中文字体加载成功");
+        }
+
+        ctx.set_fonts(fonts);
+        
+        // 设置透明背景风格（让纹理背景显示）
+        let mut style = (*ctx.style()).clone();
+        style.visuals.window_fill = egui::Color32::TRANSPARENT;
+        style.visuals.panel_fill = egui::Color32::TRANSPARENT;
+        style.visuals.widgets.noninteractive.bg_fill = egui::Color32::TRANSPARENT;
+        ctx.set_style(style);
+    });
     println!();
     
     let mut test = QuestDialogTest::new();
