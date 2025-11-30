@@ -17,6 +17,7 @@
 use macroquad::prelude::*;
 use macroquad::ui::{hash, root_ui, widgets::Group, Drag, Skin};
 use crate::resources::LibraryName;
+use crate::ui::text_renderer::draw_text_cn;
 use super::native_ui_utils::*;
 
 /// 快捷栏布局模式
@@ -473,7 +474,7 @@ impl BeltDialogHybrid {
                         // 绘制数量
                         if item.count > 1 {
                             let count_text = format!("{}", item.count);
-                            draw_text(&count_text, mouse.x + 10.0, mouse.y + 10.0, 14.0, WHITE);
+                            draw_text_cn(&count_text, mouse.x + 10.0, mouse.y + 10.0, 14.0, WHITE);
                         }
                     }
                 }
@@ -565,7 +566,7 @@ impl BeltDialogHybrid {
                 BeltLayoutHybrid::Horizontal => (rect.x + 12.0, rect.y - 2.0),
                 BeltLayoutHybrid::Vertical => (rect.x - 12.0, rect.y + 20.0),
             };
-            draw_text(&key_text, key_x, key_y, 14.0, YELLOW);
+            draw_text_cn(&key_text, key_x, key_y, 14.0, YELLOW);
         }
     }
     

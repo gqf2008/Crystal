@@ -504,6 +504,13 @@ impl GameShopDialogHybrid {
     pub fn is_visible(&self) -> bool { self.visible }
     pub fn set_position(&mut self, pos: Vec2) { self.position = pos; }
     
+    /// 检查点是否在对话框区域内
+    pub fn contains(&self, pos: Vec2) -> bool {
+        if !self.visible { return false; }
+        let rect = Rect::new(self.position.x, self.position.y, Self::DIALOG_WIDTH, Self::DIALOG_HEIGHT);
+        rect.contains(pos)
+    }
+    
     /// 更新和绘制
     pub fn update_and_draw(&mut self) {
         if !self.visible { return; }

@@ -167,6 +167,12 @@ pub struct GameShopDialog {
     category_scroll_index: usize,
     /// 分类列表
     categories: Vec<String>,
+    /// 每个格子的购买数量 [0-7]
+    pub quantities: [u8; 8],
+    /// 搜索文本
+    pub search_text: String,
+    /// 支付方式: true=金币, false=元宝
+    pub pay_with_gold: bool,
 }
 
 impl GameShopDialog {
@@ -283,6 +289,9 @@ impl GameShopDialog {
                 "任务物品".to_string(),
                 "其他".to_string(),
             ],
+            pay_with_gold: true,      // 默认用金币支付
+            quantities: [1; 8],       // 每个单元格默认数量为1
+            search_text: String::new(), // 搜索框初始为空
         };
         
         // 初始化过滤的物品列表
@@ -334,9 +343,19 @@ impl GameShopDialog {
 
     /// 过滤物品列表
     pub fn filter_items(&mut self) {
+        let search_lower = self.search_text.to_lowercase();
+        
         self.filtered_items = self.shop_items
             .iter()
             .filter(|item| {
+                // 搜索过滤
+                let search_match = if search_lower.is_empty() {
+                    true
+                } else {
+                    item.name.to_lowercase().contains(&search_lower) ||
+                    item.description.to_lowercase().contains(&search_lower)
+                };
+                
                 // 根据选中的分类过滤
                 let section_match = match self.selected_section {
                     GameShopSection::All => true,
@@ -351,7 +370,7 @@ impl GameShopDialog {
                     _ => true, // 暂时允许所有职业访问所有物品
                 };
                 
-                section_match && class_match
+                search_match && section_match && class_match
             })
             .cloned()
             .collect();
@@ -573,6 +592,11 @@ impl GameShopDialog {
         // 计算当前页显示的物品
         let start_index = self.current_page * self.items_per_page;
         
+        // 收集数量调整操作 (grid_idx, delta, shift_held)
+        let mut qty_changes: Vec<(usize, i8, bool)> = Vec::new();
+        // 收集需要知道的最大数量信息 (grid_idx, max_qty)
+        let mut max_qtys: Vec<(usize, u8)> = Vec::new();
+        
         // 绘制4x2网格
         for i in 0..self.items_per_page {
             let item_index = start_index + i;
@@ -749,19 +773,56 @@ impl GameShopDialog {
                 }
                 
                 // 数量调整按钮 (位置: 55-97, 56)
+                // 计算当前格子在页面中的索引 (0-7)
+                let grid_idx = i;
+                let current_qty = self.quantities[grid_idx];
+                
                 // 减少按钮 (Prguse2[240-242])
                 let qty_down_rect = egui::Rect::from_min_size(
                     egui::pos2(cell_rect.min.x + 55.0, cell_rect.min.y + 56.0),
                     egui::vec2(16.0, 14.0)
                 );
-                let _qty_down_response = ui.interact(qty_down_rect, egui::Id::new(format!("qty_down_{}", item.id)), egui::Sense::click());
-                // TODO: 实现数量减少逻辑
+                let qty_down_response = ui.interact(qty_down_rect, egui::Id::new(format!("qty_down_{}", item.id)), egui::Sense::click());
+                
+                // 绘制减少按钮纹理
+                let down_tex_idx = if qty_down_response.is_pointer_button_down_on() {
+                    242 // pressed
+                } else if qty_down_response.hovered() {
+                    241 // hover
+                } else {
+                    240 // normal
+                };
+                if let Some(info) = LibraryName::Prguse2.get_egui_texture(ctx, down_tex_idx) {
+                    if let Some(tex) = info.egui_texture {
+                        ui.painter().image(
+                            tex.id(),
+                            qty_down_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                } else {
+                    // 备用绘制
+                    let color = if qty_down_response.hovered() { 
+                        egui::Color32::from_rgb(120, 120, 160) 
+                    } else { 
+                        egui::Color32::from_rgb(80, 80, 120) 
+                    };
+                    ui.painter().rect_filled(qty_down_rect, 2.0, color);
+                    ui.painter().text(
+                        qty_down_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "-",
+                        egui::FontId::proportional(10.0),
+                        egui::Color32::WHITE,
+                    );
+                }
                 
                 // 数量显示 (位置: 74, 56)
                 ui.painter().text(
                     egui::pos2(cell_rect.min.x + 82.0, cell_rect.min.y + 56.0 + 7.0),
                     egui::Align2::CENTER_CENTER,
-                    "1",  // TODO: 实际数量
+                    &current_qty.to_string(),
                     egui::FontId::proportional(8.0),
                     egui::Color32::WHITE,
                 );
@@ -771,8 +832,56 @@ impl GameShopDialog {
                     egui::pos2(cell_rect.min.x + 97.0, cell_rect.min.y + 56.0),
                     egui::vec2(16.0, 14.0)
                 );
-                let _qty_up_response = ui.interact(qty_up_rect, egui::Id::new(format!("qty_up_{}", item.id)), egui::Sense::click());
-                // TODO: 实现数量增加逻辑
+                let qty_up_response = ui.interact(qty_up_rect, egui::Id::new(format!("qty_up_{}", item.id)), egui::Sense::click());
+                
+                // 绘制增加按钮纹理
+                let up_tex_idx = if qty_up_response.is_pointer_button_down_on() {
+                    245 // pressed
+                } else if qty_up_response.hovered() {
+                    244 // hover
+                } else {
+                    243 // normal
+                };
+                if let Some(info) = LibraryName::Prguse2.get_egui_texture(ctx, up_tex_idx) {
+                    if let Some(tex) = info.egui_texture {
+                        ui.painter().image(
+                            tex.id(),
+                            qty_up_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                } else {
+                    // 备用绘制
+                    let color = if qty_up_response.hovered() { 
+                        egui::Color32::from_rgb(120, 120, 160) 
+                    } else { 
+                        egui::Color32::from_rgb(80, 80, 120) 
+                    };
+                    ui.painter().rect_filled(qty_up_rect, 2.0, color);
+                    ui.painter().text(
+                        qty_up_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "+",
+                        egui::FontId::proportional(10.0),
+                        egui::Color32::WHITE,
+                    );
+                }
+                
+                // 处理数量按钮点击
+                let shift_held = ui.input(|i| i.modifiers.shift);
+                if qty_down_response.clicked() && !self.dragging {
+                    qty_changes.push((grid_idx, -1, shift_held));
+                }
+                if qty_up_response.clicked() && !self.dragging {
+                    let max_qty = if item.stock > 0 && item.stock < 99 {
+                        item.stock as u8
+                    } else {
+                        99
+                    };
+                    max_qtys.push((grid_idx, max_qty));
+                    qty_changes.push((grid_idx, 1, shift_held));
+                }
                 
                 // 元宝价格 (位置: 2, 81)
                 if item.price_ingot > 0 {
@@ -867,8 +976,12 @@ impl GameShopDialog {
                 }
                 
                 if buy_response.clicked() && !self.dragging {
-                    println!("💰 购买商品: {}", item.name);
-                    // TODO: 实现购买逻辑
+                    let qty = self.quantities[i];
+                    let payment = if self.pay_with_gold { "金币" } else { "元宝" };
+                    let price = if self.pay_with_gold { item.price_gold } else { item.price_ingot };
+                    let total = price * qty as u32;
+                    println!("💰 购买商品: {} x{} = {} {} (使用{})", item.name, qty, total, payment, payment);
+                    // TODO: 发送购买请求到服务器
                 }
                 
                 // 状态标签
@@ -892,6 +1005,23 @@ impl GameShopDialog {
                 }
             }
             // 空单元格不绘制任何内容
+        }
+        
+        // 应用数量变化
+        for (grid_idx, delta, shift_held) in qty_changes {
+            let max_qty = max_qtys.iter()
+                .find(|(idx, _)| *idx == grid_idx)
+                .map(|(_, max)| *max)
+                .unwrap_or(99);
+            
+            let current = self.quantities[grid_idx];
+            let step = if shift_held { 10 } else { 1 };
+            
+            if delta > 0 {
+                self.quantities[grid_idx] = (current + step).min(max_qty);
+            } else {
+                self.quantities[grid_idx] = current.saturating_sub(step).max(1);
+            }
         }
         
         // 绘制分页控制
@@ -1418,6 +1548,7 @@ impl GameShopDialog {
                 self.current_page -= 1;
                 self.selected_item = None;
                 self.item_viewer = None; // 关闭预览器
+                self.quantities = [1; 8]; // 重置数量
                 println!("📄 切换到第{}页", self.current_page + 1);
             }
         }
@@ -1438,6 +1569,7 @@ impl GameShopDialog {
                 self.current_page += 1;
                 self.selected_item = None;
                 self.item_viewer = None; // 关闭预览器
+                self.quantities = [1; 8]; // 重置数量
                 println!("📄 切换到第{}页", self.current_page + 1);
             }
         }
@@ -1464,6 +1596,155 @@ impl GameShopDialog {
             egui::FontId::proportional(12.0),
             egui::Color32::from_rgb(0, 255, 255),
         );
+    }
+
+    /// 绘制支付方式选择 (原版位置: PaymentTypeGold=250,449 PaymentTypeCredit=340,449)
+    fn draw_payment_options(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, bg_rect: &egui::Rect) {
+        let checkbox_size = 14.0;
+        
+        // Buy with Gold 复选框 (原版位置: 250, 449)
+        let gold_rect = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + 250.0, bg_rect.min.y + 449.0),
+            egui::vec2(checkbox_size, checkbox_size)
+        );
+        let gold_label_rect = egui::Rect::from_min_size(
+            egui::pos2(gold_rect.max.x + 4.0, gold_rect.min.y),
+            egui::vec2(80.0, checkbox_size)
+        );
+        
+        // 绘制金币复选框纹理 (Prguse2中寻找checkbox纹理)
+        if self.pay_with_gold {
+            ui.painter().rect_filled(gold_rect, 2.0, egui::Color32::from_rgb(40, 80, 40));
+            ui.painter().text(
+                gold_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "✓",
+                egui::FontId::proportional(10.0),
+                egui::Color32::GREEN,
+            );
+        } else {
+            ui.painter().rect_filled(gold_rect, 2.0, egui::Color32::from_rgb(60, 60, 80));
+        }
+        ui.painter().rect_stroke(
+            gold_rect, 2.0, 
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 150, 170)),
+            egui::epaint::StrokeKind::Outside,
+        );
+        
+        // 交互区域（包括标签）
+        let gold_interact_rect = egui::Rect::from_min_max(gold_rect.min, gold_label_rect.max);
+        let gold_response = ui.interact(gold_interact_rect, egui::Id::new("pay_gold"), egui::Sense::click());
+        
+        let gold_text_color = if gold_response.hovered() { 
+            egui::Color32::WHITE 
+        } else { 
+            egui::Color32::GRAY 
+        };
+        ui.painter().text(
+            egui::pos2(gold_label_rect.min.x, gold_label_rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "Buy with Gold",
+            egui::FontId::proportional(9.0),
+            gold_text_color,
+        );
+        
+        if gold_response.clicked() && !self.dragging {
+            self.pay_with_gold = true;
+        }
+        
+        // Buy with Credits 复选框 (原版位置: 340, 449)
+        let credit_rect = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + 340.0, bg_rect.min.y + 449.0),
+            egui::vec2(checkbox_size, checkbox_size)
+        );
+        let credit_label_rect = egui::Rect::from_min_size(
+            egui::pos2(credit_rect.max.x + 4.0, credit_rect.min.y),
+            egui::vec2(90.0, checkbox_size)
+        );
+        
+        // 绘制元宝复选框
+        if !self.pay_with_gold {
+            ui.painter().rect_filled(credit_rect, 2.0, egui::Color32::from_rgb(40, 80, 40));
+            ui.painter().text(
+                credit_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "✓",
+                egui::FontId::proportional(10.0),
+                egui::Color32::GREEN,
+            );
+        } else {
+            ui.painter().rect_filled(credit_rect, 2.0, egui::Color32::from_rgb(60, 60, 80));
+        }
+        ui.painter().rect_stroke(
+            credit_rect, 2.0,
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(150, 150, 170)),
+            egui::epaint::StrokeKind::Outside,
+        );
+        
+        let credit_interact_rect = egui::Rect::from_min_max(credit_rect.min, credit_label_rect.max);
+        let credit_response = ui.interact(credit_interact_rect, egui::Id::new("pay_credit"), egui::Sense::click());
+        
+        let credit_text_color = if credit_response.hovered() { 
+            egui::Color32::WHITE 
+        } else { 
+            egui::Color32::GRAY 
+        };
+        ui.painter().text(
+            egui::pos2(credit_label_rect.min.x, credit_label_rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "Buy with Credits",
+            egui::FontId::proportional(9.0),
+            credit_text_color,
+        );
+        
+        if credit_response.clicked() && !self.dragging {
+            self.pay_with_gold = false;
+        }
+    }
+
+    /// 绘制搜索框 (原版位置: 540, 69, 尺寸140x16)
+    fn draw_search_box(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, bg_rect: &egui::Rect) {
+        let search_rect = egui::Rect::from_min_size(
+            egui::pos2(bg_rect.min.x + 540.0, bg_rect.min.y + 69.0),
+            egui::vec2(140.0, 16.0)
+        );
+        
+        // 背景
+        ui.painter().rect_filled(search_rect, 2.0, egui::Color32::from_rgb(4, 4, 4));
+        ui.painter().rect_stroke(
+            search_rect, 2.0,
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 120)),
+            egui::epaint::StrokeKind::Outside,
+        );
+        
+        // 使用egui的TextEdit widget
+        let text_edit_rect = search_rect.shrink(2.0);
+        
+        // 创建一个子区域来放置TextEdit
+        #[allow(deprecated)]
+        let _response = ui.allocate_ui_at_rect(text_edit_rect, |ui| {
+            ui.style_mut().visuals.extreme_bg_color = egui::Color32::TRANSPARENT;
+            ui.style_mut().visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+            ui.style_mut().visuals.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
+            ui.style_mut().visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
+            
+            let text_edit = egui::TextEdit::singleline(&mut self.search_text)
+                .hint_text("搜索...")
+                .desired_width(130.0)
+                .frame(false)
+                .text_color(egui::Color32::WHITE);
+            
+            let response = ui.add(text_edit);
+            
+            // 如果搜索文本变化，触发过滤
+            if response.changed() {
+                self.filter_items();
+                self.current_page = 0;
+                self.quantities = [1; 8];
+            }
+            
+            response
+        });
     }
 
     /// 绘制关闭按钮
@@ -1699,6 +1980,12 @@ impl Dialog for GameShopDialog {
                 
                 // 绘制货币信息
                 self.draw_currency_info(ui, &bg_rect);
+                
+                // 绘制支付方式选择
+                self.draw_payment_options(ui, ctx, &bg_rect);
+                
+                // 绘制搜索框
+                self.draw_search_box(ui, ctx, &bg_rect);
                 
                 // 绘制关闭按钮
                 if self.draw_close_button(ui, ctx, &bg_rect) {

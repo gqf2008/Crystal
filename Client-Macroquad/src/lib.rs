@@ -13,6 +13,7 @@ pub mod event_bus;
 pub mod game;
 pub mod network;
 pub mod map_renderer;
+pub mod platform;
 pub mod resources;
 pub mod scenes;
 pub mod systems;

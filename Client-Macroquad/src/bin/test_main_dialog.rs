@@ -1,11 +1,12 @@
-// 测试 MainDialog
+// 测试 MainDialog - 纯 Hybrid 版本
 
-use client_macroquad::scenes::dialogs::MainDialog;
+use client_macroquad::scenes::dialogs::game::MainDialog;
+use client_macroquad::ui::text_renderer::{init_chinese_font, draw_text_cn, measure_text_cn};
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "传奇2 - MainDialog 测试".to_owned(),
+        window_title: "传奇2 - MainDialog 测试（Hybrid）".to_owned(),
         window_width: 1024,
         window_height: 768,
         high_dpi: false,
@@ -16,50 +17,13 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    println!("🎮 传奇2 - MainDialog 测试");
+    println!("🎮 传奇2 - MainDialog 测试（纯 Hybrid 版本）");
     println!("📐 窗口尺寸: {}x{}", screen_width(), screen_height());
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
- // 配置 egui（只设置一次）
-    egui_macroquad::cfg(|ctx| {
-        let mut fonts = egui_macroquad::egui::FontDefinitions::default();
-        
-        // 加载中文字体
-        let font_data = std::fs::read("assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf")
-            .or_else(|_| std::fs::read("assets/fonts/Chinese.ttc"))
-            .or_else(|_| std::fs::read("C:\\Windows\\Fonts\\msyh.ttc"))
-            .unwrap_or_else(|_| {
-                println!("⚠️  无法加载中文字体，使用默认字体");
-                vec![]
-            });
-
-        if !font_data.is_empty() {
-            fonts.font_data.insert(
-                "chinese".to_owned(),
-                std::sync::Arc::new(egui_macroquad::egui::FontData::from_owned(font_data)),
-            );
-
-            // 设置字体优先级
-            fonts
-                .families
-                .get_mut(&egui_macroquad::egui::FontFamily::Proportional)
-                .unwrap()
-                .insert(0, "chinese".to_owned());
-
-            fonts
-                .families
-                .get_mut(&egui_macroquad::egui::FontFamily::Monospace)
-                .unwrap()
-                .insert(0, "chinese".to_owned());
-                
-            println!("✅ 已加载中文字体");
-        }
-
-        ctx.set_fonts(fonts);
-
-        // 设置 DPI 缩放
-        let dpi_scale = screen_dpi_scale();
-        ctx.set_pixels_per_point(dpi_scale);
-    });
+    
+    // 初始化中文字体（重要！）
+    println!("🔤 正在加载中文字体...");
+    init_chinese_font().await;
     
     // 创建 MainDialog（内部自动创建所有子对话框）
     let mut main_dialog = MainDialog::new();
@@ -67,13 +31,11 @@ async fn main() {
     // 加载原生UI纹理
     main_dialog.load_native_textures().await;
     
-    println!("✅ MainDialog 及所有子对话框已创建");
+    println!("✅ MainDialog 及所有子对话框已创建（纯 Hybrid 模式）");
     println!("💡 提示:");
     println!("   - 点击底部按钮打开各种对话框（背包、角色、技能、任务、选项、菜单、商城）");
     println!("   - 按 M 键快速切换小地图显示/隐藏");
     println!("   - 按 TAB 键切换小地图大小模式（大模式/小模式）");
-    println!("   - 按 N 键切换背包UI模式（原生/egui）");
-    println!("   - 按 B 键切换快捷栏UI模式（原生/egui）");
     println!("   - 所有对话框都支持拖拽（拖拽标题栏）");
     println!("   - 按 ESC 退出");
 
@@ -82,15 +44,15 @@ async fn main() {
     let mut last_time = get_time();
 
     loop {
-        let frame_start = get_time();
+        let _frame_start = get_time();
         
         clear_background(Color::from_rgba(60, 80, 100, 255));
 
         // 绘制背景提示
         let text = "游戏主场景 - 点击 Size 按钮或按 Tab 切换聊天窗口大小";
         let font_size = 32.0;
-        let text_size = measure_text(&text, None, font_size as u16, 1.0);
-        draw_text(
+        let text_size = measure_text_cn(&text, font_size);
+        draw_text_cn(
             text,
             screen_width() / 2.0 - text_size.width / 2.0,
             screen_height() / 2.0 - 100.0,
@@ -98,20 +60,11 @@ async fn main() {
             WHITE,
         );
 
-        // egui UI
-        let egui_start = get_time();
-        egui_macroquad::ui(|ctx| {
-            // 绘制主对话框和所有子对话框
-            main_dialog.show(ctx);
-            main_dialog.show_dialogs(ctx);
-        });
-        let egui_time = (get_time() - egui_start) * 1000.0; // 转换为毫秒
+        // 绘制主对话框 - 纯原生绘制
+        main_dialog.update_and_draw();
 
-        // 绘制 egui
-        egui_macroquad::draw();
-
-        // 绘制原生UI对话框（在 egui 之后）
-        main_dialog.show_native_dialogs();
+        // 绘制所有子对话框 - 纯原生绘制
+        let _ui_consumed = main_dialog.show_dialogs();
 
         // 计算FPS
         let current_time = get_time();
@@ -129,34 +82,26 @@ async fn main() {
 
         // 绘制性能信息（左上角）
         let perf_text = format!(
-            "FPS: {:.1}  帧时间: {:.2}ms  UI渲染: {:.2}ms",
-            fps, frame_time_ms, egui_time
+            "FPS: {:.1}  帧时间: {:.2}ms  (纯 Hybrid 模式)",
+            fps, frame_time_ms
         );
-        draw_text(&perf_text, 10.0, 25.0, 20.0, Color::from_rgba(0, 255, 0, 255));
+        draw_text_cn(&perf_text, 10.0, 25.0, 20.0, Color::from_rgba(0, 255, 0, 255));
 
-        // 键盘快捷键处理
-        if is_key_pressed(KeyCode::M) {
-            main_dialog.toggle_minimap();
-        }
-        
-        if is_key_pressed(KeyCode::Tab) {
-            main_dialog.toggle_minimap_size();
-        }
-        
-        // N 键切换背包UI模式
-        if is_key_pressed(KeyCode::N) {
-            main_dialog.toggle_inventory_mode();
-        }
-        
-        // B 键切换快捷栏UI模式
-        if is_key_pressed(KeyCode::B) {
-            main_dialog.toggle_belt_mode();
-        }
-        
-        // ESC 退出
-        if is_key_pressed(KeyCode::Escape) {
-            println!("👋 退出测试");
-            break;
+        // 键盘快捷键处理（仅在没有输入框激活时）
+        if !main_dialog.is_any_input_active() {
+            if is_key_pressed(KeyCode::M) {
+                main_dialog.toggle_minimap();
+            }
+            
+            if is_key_pressed(KeyCode::Tab) {
+                main_dialog.toggle_minimap_size();
+            }
+            
+            // ESC 退出（仅在没有输入框激活时）
+            if is_key_pressed(KeyCode::Escape) {
+                println!("👋 退出测试");
+                break;
+            }
         }
 
         next_frame().await;

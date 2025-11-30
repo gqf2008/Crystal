@@ -17,6 +17,7 @@
 use macroquad::prelude::*;
 use macroquad::ui::{hash, root_ui, widgets::Group, Drag, Skin};
 use crate::resources::LibraryName;
+use crate::ui::text_renderer::draw_text_cn;
 use super::native_ui_utils::*;
 
 /// 物品槽位
@@ -481,7 +482,7 @@ impl InventoryDialogHybrid {
                         if let Some(tex) = self.item_cache.get_cached(icon_idx) {
                             draw_texture(tex, mouse.x - tex.width() / 2.0, mouse.y - tex.height() / 2.0, WHITE);
                             if slot.count > 1 {
-                                draw_text(&format!("{}", slot.count), mouse.x + 10.0, mouse.y + 10.0, 14.0, WHITE);
+                                draw_text_cn(&format!("{}", slot.count), mouse.x + 10.0, mouse.y + 10.0, 14.0, WHITE);
                             }
                         }
                     }
