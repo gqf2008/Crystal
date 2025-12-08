@@ -341,6 +341,11 @@ impl CharacterDialogHybrid {
     
     pub fn set_position(&mut self, pos: Vec2) { self.position = pos; }
     
+    /// 检查当前是否在技能标签页
+    pub fn is_skills_tab(&self) -> bool {
+        self.current_tab == CharacterTabHybrid::Skills
+    }
+    
     pub fn switch_tab(&mut self, tab: CharacterTabHybrid) {
         if self.current_tab != tab {
             self.current_tab = tab;

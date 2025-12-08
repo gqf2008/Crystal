@@ -5,15 +5,15 @@
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use std::fs;
-use super::inventory_dialog::{InventoryDialog, ItemSlot, InventoryTab};
+use super::inventory_dialog_hybrid::{InventoryDialogHybrid, ItemSlotHybrid, InventoryTabHybrid};
 
 /// 背包持久化数据（用于保存/加载）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InventoryData {
     /// 物品格子数据（80格）
-    pub item_slots: Vec<ItemSlot>,
+    pub item_slots: Vec<ItemSlotHybrid>,
     /// 任务物品格子数据（40格）
-    pub quest_slots: Vec<ItemSlot>,
+    pub quest_slots: Vec<ItemSlotHybrid>,
     /// 背包最大容量
     pub max_capacity: usize,
     /// 金币数量
@@ -21,7 +21,7 @@ pub struct InventoryData {
     /// 当前负重 / 最大负重
     pub weight: (u32, u32),
     /// 当前活跃标签页
-    pub active_tab: InventoryTab,
+    pub active_tab: InventoryTabHybrid,
     /// 数据版本号（用于未来兼容性）
     pub version: u32,
 }

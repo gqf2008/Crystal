@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::resources::mlibrary::ImageInfo;
-use egui_macroquad::egui;
 
 use super::mlibrary::MLibrary;
 
@@ -201,29 +200,6 @@ impl LibraryName {
     #[inline]
     pub fn get_texture(self, index: usize) -> Option<ImageInfo> {
         crate::resources::resource_manager::get_texture(self, index)
-    }
-
-    /// 获取 egui 纹理（返回包含 egui_texture 字段的 ImageInfo）
-    /// 
-    /// # Example
-    /// ```
-    /// use client_macroquad::resources::LibraryName;
-    /// 
-    /// egui::Window::new("UI").show(ctx, |ui| {
-    ///     if let Some(info) = LibraryName::ChrSel.get_egui_texture(ctx, 0) {
-    ///         if let Some(handle) = &info.egui_texture {
-    ///             ui.image(handle);
-    ///         }
-    ///     }
-    /// });
-    /// ```
-    #[inline]
-    pub fn get_egui_texture(
-        self,
-        ctx: &egui::Context,
-        index: usize,
-    ) -> Option<crate::resources::mlibrary::ImageInfo> {
-        crate::resources::resource_manager::get_egui_texture(ctx, self, index)
     }
 
     /// 获取图像尺寸（无需创建纹理，高效）
@@ -462,9 +438,6 @@ pub struct Libraries {
     /// 每个数组元素可能为 None (文件不存在)
     array_libraries: HashMap<LibraryArray, Vec<Option<Rc<RefCell<MLibrary>>>>>,
 
-    /// egui 纹理缓存（全局）
-    texture_cache: HashMap<String, egui::TextureHandle>,
-
     /// 数据根目录
     data_path: String,
 
@@ -480,7 +453,6 @@ impl Libraries {
         Self {
             libraries: HashMap::new(),
             array_libraries: HashMap::new(),
-            texture_cache: HashMap::new(),
             data_path: "Data".to_string(),
             loaded: false,
             count: 0,
@@ -612,69 +584,6 @@ impl Libraries {
             .get(&array_type)
             .map(|arr| arr.iter().filter_map(|lib| lib.clone()).collect())
             .unwrap_or_default()
-    }
-
-    // ===== 全局 egui 纹理缓存管理 =====
-
-    /// 获取或创建 egui 纹理
-    pub fn get_or_create_egui_texture(
-        &mut self,
-        ctx: &egui::Context,
-        lib: &mut MLibrary,
-        lib_name: &str,
-        index: usize,
-    ) -> Option<egui::TextureHandle> {
-        let key = format!("{}_{}", lib_name, index);
-
-        // 检查缓存
-        if let Some(handle) = self.texture_cache.get(&key) {
-            return Some(handle.clone());
-        }
-
-        // 从库中加载纹理
-        if let Ok(info) = lib.get_or_create_texture(index) {
-            if let Some(ref texture) = info.image {
-                // 直接从 macroquad 纹理创建 egui 纹理
-                let image_data = texture.get_texture_data();
-                let width = texture.width() as usize;
-                let height = texture.height() as usize;
-
-                let mut pixels = Vec::with_capacity(width * height);
-                for y in 0..height {
-                    for x in 0..width {
-                        let idx = (y * width + x) * 4;
-                        let r = image_data.bytes[idx];
-                        let g = image_data.bytes[idx + 1];
-                        let b = image_data.bytes[idx + 2];
-                        let a = image_data.bytes[idx + 3];
-                        pixels.push(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
-                    }
-                }
-
-                let color_image = egui::ColorImage {
-                    size: [width, height],
-                    pixels,
-                };
-
-                // 使用线性过滤获得更平滑的视觉效果
-                let texture_options = egui::TextureOptions {
-                    magnification: egui::TextureFilter::Linear,
-                    minification: egui::TextureFilter::Linear,
-                    ..Default::default()
-                };
-
-                let handle = ctx.load_texture(&key, color_image, texture_options);
-                self.texture_cache.insert(key, handle.clone());
-                return Some(handle);
-            }
-        }
-
-        None
-    }
-
-    /// 清理 egui 纹理缓存
-    pub fn clear_texture_cache(&mut self) {
-        self.texture_cache.clear();
     }
 
     /// 加载单个库

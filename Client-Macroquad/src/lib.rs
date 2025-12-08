@@ -18,6 +18,7 @@ pub mod resources;
 pub mod scenes;
 pub mod systems;
 pub mod ui;
+pub mod utils;
 
 // ✨ ecs_macros 兼容性别名
 pub mod ecs {

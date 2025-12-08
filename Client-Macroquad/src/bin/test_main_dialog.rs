@@ -104,6 +104,11 @@ async fn main() {
             }
         }
 
+        // 调试：打印接收到的字符输入
+        while let Some(ch) = get_char_pressed() {
+            println!("📝 收到字符: '{}' (U+{:04X})", ch, ch as u32);
+        }
+
         next_frame().await;
     }
 }

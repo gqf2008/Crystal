@@ -1,59 +1,46 @@
-// Game dialogs module
+// Game dialogs module - 纯 Native 版本 (无 egui)
 
 pub mod native_ui_utils;
-pub mod belt_dialog;
 pub mod belt_dialog_native;
 pub mod belt_dialog_mqui;
 pub mod belt_dialog_hybrid;
-pub mod character_dialog;
 pub mod character_dialog_hybrid;
-pub mod chat_control_bar;
 pub mod chat_control_bar_hybrid;
-pub mod chat_dialog;
 pub mod chat_dialog_hybrid;
-pub mod game_shop_dialog;
-pub mod game_shop_dialog_hybrid;
-pub mod inventory_dialog;
+pub mod game_shop_dialog_hybrid;  // 原版 hybrid 版本
 pub mod inventory_dialog_native;
 pub mod inventory_dialog_hybrid;
-pub mod inventory_persistence;
+// pub mod inventory_persistence; // 暂时禁用，需要为 hybrid 类型添加 serde 支持
 pub mod main_dialog;
-pub mod menu_dialog;
 pub mod menu_dialog_hybrid;
-pub mod minimap_dialog;
 pub mod minimap_dialog_hybrid;
-pub mod option_dialog;
 pub mod option_dialog_hybrid;
-pub mod quest_log_dialog;
 pub mod quest_log_dialog_hybrid;
-pub mod quest_list_dialog;
-pub mod quest_detail_dialog;
-pub mod quest_tracking_dialog;
 
-pub use belt_dialog::BeltDialog;
+// 导出 hybrid 版本作为主要实现
 pub use belt_dialog_native::{BeltDialogNative, BeltLayout, BeltItem};
 pub use belt_dialog_mqui::{BeltDialogMqui, BeltItem as BeltItemMqui, BeltLayout as BeltLayoutMqui};
 pub use belt_dialog_hybrid::{BeltDialogHybrid, BeltItemHybrid, BeltLayoutHybrid};
-pub use character_dialog::CharacterDialog;
 pub use character_dialog_hybrid::{CharacterDialogHybrid, CharacterTabHybrid, EquipmentItemHybrid, EquipSlot};
-pub use chat_control_bar::ChatControlBar;
 pub use chat_control_bar_hybrid::{ChatControlBarHybrid, ChatFilterHybrid};
-pub use chat_dialog::ChatDialog;
 pub use chat_dialog_hybrid::ChatDialogHybrid;
-pub use game_shop_dialog::{GameShopDialog, GameShopSection, GameShopClass};
-pub use game_shop_dialog_hybrid::{GameShopDialogHybrid, ShopSectionHybrid, ShopClassHybrid, ShopItemHybrid};
-pub use inventory_dialog::{InventoryDialog, InventoryTab};
+pub use game_shop_dialog_hybrid::{GameShopDialogHybrid, ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid};
 pub use inventory_dialog_native::InventoryDialogNative;
 pub use inventory_dialog_hybrid::{InventoryDialogHybrid, ItemSlotHybrid, InventoryTabHybrid};
 pub use main_dialog::MainDialog;
-pub use menu_dialog::MenuDialog;
 pub use menu_dialog_hybrid::{MenuDialogHybrid, MenuAction};
-pub use minimap_dialog::MiniMapDialog;
 pub use minimap_dialog_hybrid::MiniMapDialogHybrid;
-pub use option_dialog::OptionDialog;
 pub use option_dialog_hybrid::OptionDialogHybrid;
-pub use quest_log_dialog::QuestLogDialog;
 pub use quest_log_dialog_hybrid::QuestLogDialogHybrid;
-pub use quest_list_dialog::QuestListDialog;
-pub use quest_detail_dialog::QuestDetailDialog;
-pub use quest_tracking_dialog::QuestTrackingDialog;
+
+// 为了兼容性，创建别名
+pub type BeltDialog = BeltDialogHybrid;
+pub type CharacterDialog = CharacterDialogHybrid;
+pub type ChatControlBar = ChatControlBarHybrid;
+pub type ChatDialog = ChatDialogHybrid;
+pub type GameShopDialog = GameShopDialogHybrid;
+pub type InventoryDialog = InventoryDialogHybrid;
+pub type MenuDialog = MenuDialogHybrid;
+pub type MiniMapDialog = MiniMapDialogHybrid;
+pub type OptionDialog = OptionDialogHybrid;
+pub type QuestLogDialog = QuestLogDialogHybrid;

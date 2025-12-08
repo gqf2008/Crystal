@@ -8,7 +8,6 @@
 
 use byteorder::LittleEndian;
 use byteorder::ReadBytesExt;
-use egui_macroquad::egui::Vec2;
 use flate2::read::GzDecoder;
 
 use macroquad::prelude::*;
@@ -53,7 +52,6 @@ pub struct ImageInfo {
     pub texture_valid: bool, // 纹理是否有效
     pub image: Option<Texture2D>, // 解压后的纹理数据 (RGBA格式)
     pub mask_image: Option<Texture2D>, // 解压后的遮罩纹理数据 (RGBA格式)
-    pub egui_texture: Option<egui_macroquad::egui::TextureHandle>, // egui 纹理句柄
     pub last_access_time: Option<Instant>, // 最后访问时间 (用于缓存清理)
     bgra_data: Option<Vec<u8>>, // 原始解压数据 (RGBA格式)
 }
@@ -110,7 +108,6 @@ impl ImageInfo {
             texture_valid: false,
             image: None,
             mask_image: None,
-            egui_texture: None,
             last_access_time: None,
             bgra_data: None,
         })
@@ -369,8 +366,8 @@ impl ImageInfo {
         (self.width, self.height)
     }
 
-    pub fn get_size_vec2(&self) -> Vec2 {
-        Vec2::new(self.width as f32, self.height as f32)
+    pub fn get_size_vec2(&self) -> macroquad::math::Vec2 {
+        macroquad::math::Vec2::new(self.width as f32, self.height as f32)
     }
 
     /// 获取图像的实际显示尺寸（去除透明边缘）

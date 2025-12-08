@@ -47,6 +47,10 @@ pub struct ChatDialogHybrid {
     current_size: Vec2,
     /// 拖拽辅助器
     drag_helper: DragHelper,
+    /// Backspace 按键重复计时器
+    backspace_timer: f64,
+    /// Backspace 是否在重复模式
+    backspace_repeat: bool,
 }
 
 impl ChatDialogHybrid {
@@ -67,6 +71,8 @@ impl ChatDialogHybrid {
             bg_texture: None,
             current_size: vec2(627.0, 70.0),
             drag_helper: DragHelper::new(),
+            backspace_timer: 0.0,
+            backspace_repeat: false,
         }
     }
 
@@ -88,6 +94,24 @@ impl ChatDialogHybrid {
     /// 输入框是否激活（用于判断是否应该消耗键盘输入）
     pub fn is_input_active(&self) -> bool {
         self.input_active
+    }
+
+    /// 激活输入框（用于 Enter 键打开聊天）
+    pub fn activate_input(&mut self) {
+        if self.visible && !self.input_active {
+            self.input_active = true;
+            // 启用 IME 输入法
+            miniquad::window::set_ime_enabled(true);
+        }
+    }
+
+    /// 取消激活输入框
+    pub fn deactivate_input(&mut self) {
+        if self.input_active {
+            self.input_active = false;
+            // 禁用 IME 输入法
+            miniquad::window::set_ime_enabled(false);
+        }
     }
 
     /// 设置位置
@@ -412,18 +436,52 @@ impl ChatDialogHybrid {
         // 检测点击激活
         let mouse_pos = vec2(mouse_position().0, mouse_position().1);
         if input_rect.contains(mouse_pos) && is_mouse_button_pressed(MouseButton::Left) {
-            self.input_active = true;
+            if !self.input_active {
+                self.input_active = true;
+                // 启用 IME 输入法
+                miniquad::window::set_ime_enabled(true);
+                // 设置 IME 候选窗口位置到输入框下方
+                let dpi = miniquad::window::dpi_scale();
+                let ime_x = (input_rect.x * dpi) as i32;
+                let ime_y = ((input_rect.y + input_rect.h + 2.0) * dpi) as i32;
+                miniquad::window::set_ime_position(ime_x, ime_y);
+            }
         } else if !input_rect.contains(mouse_pos) && is_mouse_button_pressed(MouseButton::Left) {
-            self.input_active = false;
+            if self.input_active {
+                self.input_active = false;
+                // 禁用 IME 输入法（用于游戏控制）
+                miniquad::window::set_ime_enabled(false);
+            }
         }
 
         // 处理键盘输入（支持中文）
         if self.input_active {
+            // 每帧更新 IME 位置（输入框可能被拖动，或光标位置变化）
+            let cursor_x = input_rect.x + 3.0 + measure_text_cn(&self.input_text, 14.0).width;
+            let dpi = miniquad::window::dpi_scale();
+            let ime_x = (cursor_x * dpi) as i32;
+            let ime_y = ((input_rect.y + input_rect.h + 2.0) * dpi) as i32;
+            miniquad::window::set_ime_position(ime_x, ime_y);
+            
             // 获取输入的字符（支持中文和其他Unicode字符）
             while let Some(ch) = get_char_pressed() {
                 // 过滤控制字符，但允许所有可打印字符（包括中文）
                 if !ch.is_control() {
                     self.input_text.push(ch);
+                }
+            }
+            
+            // Ctrl+V 粘贴（支持中文输入的备用方案）
+            if (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl))
+                && is_key_pressed(KeyCode::V)
+            {
+                if let Some(clipboard_text) = miniquad::window::clipboard_get() {
+                    // 过滤控制字符，保留中文和其他可打印字符
+                    for ch in clipboard_text.chars() {
+                        if !ch.is_control() {
+                            self.input_text.push(ch);
+                        }
+                    }
                 }
             }
             
@@ -437,10 +495,32 @@ impl ChatDialogHybrid {
             if is_key_pressed(KeyCode::Escape) {
                 self.input_text.clear();
                 self.input_active = false;
+                // 禁用 IME 输入法
+                miniquad::window::set_ime_enabled(false);
             }
-            // Backspace 删除字符
-            if is_key_pressed(KeyCode::Backspace) && !self.input_text.is_empty() {
-                self.input_text.pop();
+            // Backspace 删除字符（支持按住连续删除）
+            if is_key_down(KeyCode::Backspace) {
+                let now = get_time();
+                if is_key_pressed(KeyCode::Backspace) {
+                    // 首次按下，立即删除一个字符
+                    if !self.input_text.is_empty() {
+                        self.input_text.pop();
+                    }
+                    self.backspace_timer = now;
+                    self.backspace_repeat = false;
+                } else {
+                    // 按住状态
+                    let delay = if self.backspace_repeat { 0.03 } else { 0.4 }; // 首次延迟 400ms，之后 30ms
+                    if now - self.backspace_timer > delay {
+                        if !self.input_text.is_empty() {
+                            self.input_text.pop();
+                        }
+                        self.backspace_timer = now;
+                        self.backspace_repeat = true;
+                    }
+                }
+            } else {
+                self.backspace_repeat = false;
             }
         }
     }

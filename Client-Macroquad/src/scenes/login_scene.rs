@@ -1,93 +1,78 @@
 // ============================================================================
-// LoginScene - 登录界面 (混合渲染架构)
+// LoginScene - 登录界面 (纯 Native 版本 - macroquad 原生渲染)
 // ============================================================================
 // 对应原版: C# Client/MirScenes/LoginScene.cs
 //
-// 【渲染架构】混合渲染 - macroquad + egui
-// ┌─────────────────────────────────────────────────────────────────────┐
-// │ Layer 1 (底层): macroquad 纹理渲染                                    │
-// │   - ChrSel 库: 背景动画 (0-18 帧)                                     │
-// │   - Prguse 库: 登录对话框背景 (1084)                                  │
-// │   - Title 库: 标题和标签 (30/31/32)                                   │
-// │   - DPI 处理: 自动根据 screen_dpi_scale() 缩放                        │
-// │   - 坐标系统: 物理像素坐标                                             │
-// ├─────────────────────────────────────────────────────────────────────┤
-// │ Layer 2 (交互层): egui UI 组件                                        │
-// │   - TextEdit: 账号/密码输入框                                         │
-// │   - ImageButton: 登录/新建/修改密码/退出按钮                           │
-// │   - DPI 处理: ctx.set_pixels_per_point(screen_dpi_scale())           │
-// │   - 坐标系统: 逻辑像素,通过 pixels_per_point 与 macroquad 对齐         │
-// └─────────────────────────────────────────────────────────────────────┘
-//
-// 【DPI 适配机制】
-//   - macOS Retina: screen_dpi_scale() = 2.0 → pixels_per_point = 2.0
-//   - Windows 普通屏: screen_dpi_scale() = 1.0 → pixels_per_point = 1.0
-//   - 自动对齐: macroquad 物理坐标 ≡ egui 逻辑坐标 * pixels_per_point
+// 【渲染架构】纯 macroquad 原生渲染
+// - 所有 UI 元素使用 macroquad 原生绘制
+// - 无 egui 依赖
 //
 // ============================================================================
 
 use crate::game::GameResult;
 use crate::resources::LibraryName;
 use crate::scenes::{Scene, SceneTransition};
-use crate::scenes::dialogs::{
-    Dialog, MessageBox, NewAccountDialog, ChangePasswordDialog, MessageBoxButtons,
-    LoginDialog, LoginDialogEvent,
-};
-use egui_macroquad::egui;
+use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
 use macroquad::prelude::*;
 
-/// 登录场景 - 混合渲染版本
+/// 登录场景 - 纯 Native 版本
 pub struct LoginScene {
-    // 对话框组件
-    login_dialog: LoginDialog,
-    new_account_dialog: NewAccountDialog,
-    change_password_dialog: ChangePasswordDialog,
-    message_box: MessageBox,
+    // 登录信息
+    account: String,
+    password: String,
+    password_focus: bool,
     
-    // 对话框状态
-    show_login_dialog: bool,
-    show_new_account: bool,
-    show_change_password: bool,
-    show_message_box: bool,
-
     // 背景动画
     background_frame: usize,
     animation_playing: bool,
     frame_timer: f32,
     frame_delay: f32,
+    
+    // UI 状态
+    cursor_visible: bool,
+    cursor_timer: f32,
+    input_focus: InputFocus,
+    
+    // 消息框
+    show_message: bool,
+    message_text: String,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum InputFocus {
+    Account,
+    Password,
+    None,
 }
 
 impl LoginScene {
     pub fn new() -> Self {
         Self {
-            login_dialog: LoginDialog::new(),
-            new_account_dialog: NewAccountDialog::new(),
-            change_password_dialog: ChangePasswordDialog::new(),
-            message_box: MessageBox::new_with_id("", "", MessageBoxButtons::Ok, "login_msgbox"),
+            account: String::new(),
+            password: String::new(),
+            password_focus: false,
             
-            show_login_dialog: true,
-            show_new_account: false,
-            show_change_password: false,
-            show_message_box: false,
-
             background_frame: 0,
             animation_playing: false,
             frame_timer: 0.0,
             frame_delay: 0.1,
+            
+            cursor_visible: true,
+            cursor_timer: 0.0,
+            input_focus: InputFocus::Account,
+            
+            show_message: false,
+            message_text: String::new(),
         }
     }
 
-    /// 【macroquad 职责】绘制登录对话框背景层
-    /// - 纹理渲染: Prguse[1084] 对话框背景, Title[30/31/32] 标题和标签
-    /// - DPI 处理: macroquad 自动根据 screen_dpi_scale() 缩放
-    /// - 坐标系统: 使用物理像素坐标,原始纹理尺寸
-    fn draw_login_background(&mut self) -> (f32, f32, f32, f32) {
+    /// 绘制登录对话框背景
+    fn draw_login_background(&self) -> (f32, f32, f32, f32) {
         let screen_w = screen_width();
         let screen_h = screen_height();
 
         // 获取背景纹理并计算居中位置
         let (dialog_w, dialog_h, dialog_x, dialog_y) =
-            // ✅ 新 API：性能提升 50-100x，自动 LRU 缓存
             if let Some(info) = LibraryName::Prguse.get_texture(1084) {
                 if let Some(ref bg_tex) = info.image {
                     let w = bg_tex.width();
@@ -95,9 +80,7 @@ impl LoginScene {
                     let x = (screen_w - w) / 2.0;
                     let y = (screen_h - h) / 2.0;
 
-                    // 绘制背景 (原始尺寸,macroquad 会根据 DPI 自动缩放)
                     draw_texture(bg_tex, x, y, WHITE);
-
                     (w, h, x, y)
                 } else {
                     let w = 328.0;
@@ -110,27 +93,24 @@ impl LoginScene {
                 (w, h, (screen_w - w) / 2.0, (screen_h - h) / 2.0)
             };
 
-        // 绘制标题 (Title 30) - 原始尺寸
-        // ✅ 新 API
+        // 绘制标题 (Title 30)
         if let Some(info) = LibraryName::Title.get_texture(30) {
-                if let Some(ref tex) = info.image {
-                    let w = tex.width();
-                    let x = dialog_x + (dialog_w - w) / 2.0;
-                    let y = dialog_y + 12.0;
-                    draw_texture(tex, x, y, WHITE);
-                }
+            if let Some(ref tex) = info.image {
+                let w = tex.width();
+                let x = dialog_x + (dialog_w - w) / 2.0;
+                let y = dialog_y + 12.0;
+                draw_texture(tex, x, y, WHITE);
             }
+        }
 
-        // 绘制账号标签 (Title 31) - 原始尺寸
-        // ✅ 新 API
+        // 绘制账号标签 (Title 31)
         if let Some(info) = LibraryName::Title.get_texture(31) {
-                if let Some(ref tex) = info.image {
-                    draw_texture(tex, dialog_x + 52.0, dialog_y + 83.0, WHITE);
-                }
+            if let Some(ref tex) = info.image {
+                draw_texture(tex, dialog_x + 52.0, dialog_y + 83.0, WHITE);
             }
+        }
 
-        // 绘制密码标签 (Title 32) - 原始尺寸
-        // ✅ 新 API
+        // 绘制密码标签 (Title 32)
         if let Some(info) = LibraryName::Title.get_texture(32) {
             if let Some(ref tex) = info.image {
                 draw_texture(tex, dialog_x + 43.0, dialog_y + 105.0, WHITE);
@@ -140,17 +120,114 @@ impl LoginScene {
         (dialog_w, dialog_h, dialog_x, dialog_y)
     }
 
+    /// 绘制输入框
+    fn draw_input_box(&self, x: f32, y: f32, width: f32, height: f32, text: &str, is_password: bool, is_focused: bool) {
+        // 绘制背景
+        let bg_color = if is_focused {
+            Color::from_rgba(40, 40, 50, 255)
+        } else {
+            Color::from_rgba(30, 30, 40, 255)
+        };
+        draw_rectangle(x, y, width, height, bg_color);
+        
+        // 绘制边框
+        let border_color = if is_focused {
+            Color::from_rgba(100, 150, 200, 255)
+        } else {
+            Color::from_rgba(60, 60, 80, 255)
+        };
+        draw_rectangle_lines(x, y, width, height, 1.0, border_color);
+        
+        // 绘制文本
+        let display_text = if is_password {
+            "*".repeat(text.len())
+        } else {
+            text.to_string()
+        };
+        
+        let text_y = y + height / 2.0 + 5.0;
+        draw_text_cn(&display_text, x + 5.0, text_y, 14.0, WHITE);
+        
+        // 绘制光标
+        if is_focused && self.cursor_visible {
+            let text_width = measure_text_cn(&display_text, 14.0).width;
+            let cursor_x = x + 5.0 + text_width;
+            draw_line(cursor_x, y + 3.0, cursor_x, y + height - 3.0, 1.0, WHITE);
+        }
+    }
+
+    /// 绘制按钮
+    fn draw_button(&self, x: f32, y: f32, normal_idx: usize, hover_idx: usize, pressed_idx: usize) -> bool {
+        let (mx, my) = mouse_position();
+        
+        let btn_size = if let Some(info) = LibraryName::Prguse.get_texture(normal_idx) {
+            (info.width as f32, info.height as f32)
+        } else {
+            (80.0, 25.0)
+        };
+        
+        let is_hovered = mx >= x && mx <= x + btn_size.0 && my >= y && my <= y + btn_size.1;
+        let is_pressed = is_hovered && is_mouse_button_down(MouseButton::Left);
+        
+        let texture_idx = if is_pressed {
+            pressed_idx
+        } else if is_hovered {
+            hover_idx
+        } else {
+            normal_idx
+        };
+        
+        if let Some(info) = LibraryName::Prguse.get_texture(texture_idx) {
+            if let Some(ref tex) = info.image {
+                draw_texture(tex, x, y, WHITE);
+            }
+        } else {
+            // 降级绘制
+            let color = if is_pressed {
+                Color::from_rgba(100, 100, 150, 255)
+            } else if is_hovered {
+                Color::from_rgba(80, 80, 100, 255)
+            } else {
+                Color::from_rgba(60, 60, 80, 255)
+            };
+            draw_rectangle(x, y, btn_size.0, btn_size.1, color);
+            draw_rectangle_lines(x, y, btn_size.0, btn_size.1, 1.0, WHITE);
+        }
+        
+        is_hovered && is_mouse_button_pressed(MouseButton::Left)
+    }
+
+    /// 绘制消息框
+    fn draw_message_box(&self) {
+        let screen_w = screen_width();
+        let screen_h = screen_height();
+        
+        let box_w = 300.0;
+        let box_h = 150.0;
+        let box_x = (screen_w - box_w) / 2.0;
+        let box_y = (screen_h - box_h) / 2.0;
+        
+        // 背景
+        draw_rectangle(box_x, box_y, box_w, box_h, Color::from_rgba(40, 40, 50, 240));
+        draw_rectangle_lines(box_x, box_y, box_w, box_h, 2.0, Color::from_rgba(100, 100, 120, 255));
+        
+        // 标题
+        draw_text_cn("提示", box_x + box_w / 2.0 - 15.0, box_y + 30.0, 18.0, WHITE);
+        
+        // 消息文本
+        let text_width = measure_text_cn(&self.message_text, 14.0).width;
+        draw_text_cn(&self.message_text, box_x + (box_w - text_width) / 2.0, box_y + 70.0, 14.0, WHITE);
+    }
+
     /// 登录按钮点击
     fn on_login_clicked(&mut self) {
-        if self.login_dialog.account.is_empty() || self.login_dialog.password.is_empty() {
-            self.message_box.title = "登录失败".to_string();
-            self.message_box.text = "账号或密码不能为空!".to_string();
-            self.message_box.buttons = MessageBoxButtons::Ok;
-            self.show_message_box = true;
+        if self.account.is_empty() || self.password.is_empty() {
+            self.message_text = "账号或密码不能为空!".to_string();
+            self.show_message = true;
             return;
         }
 
-        println!("🔐 Login: account={}", self.login_dialog.account);
+        println!("🔐 Login: account={}", self.account);
 
         // 保存配置
         self.save_config();
@@ -158,10 +235,9 @@ impl LoginScene {
         // 开始播放登录成功动画
         self.animation_playing = true;
         self.background_frame = 0;
-        self.show_login_dialog = false;
     }
 
-    /// 【功能】保存配置到本地文件
+    /// 保存配置到本地文件
     fn save_config(&self) {
         use std::fs;
         use std::io::Write;
@@ -173,7 +249,7 @@ impl LoginScene {
 
         let config = format!(
             "[Login]\nAccount={}\nSavePassword=false\nLastLogin={}\nVersion={}\n",
-            self.login_dialog.account,
+            self.account,
             timestamp,
             env!("CARGO_PKG_VERSION")
         );
@@ -184,17 +260,66 @@ impl LoginScene {
         }
     }
 
-    /// 【功能】加载配置
+    /// 加载配置
     fn load_config(&mut self) {
         use std::fs;
 
         if let Ok(content) = fs::read_to_string("config.ini") {
             for line in content.lines() {
                 if let Some(account) = line.strip_prefix("Account=") {
-                    self.login_dialog.account = account.to_string();
+                    self.account = account.to_string();
                     println!("✅ 已加载账号: {}", account);
                 }
             }
+        }
+    }
+
+    /// 处理键盘输入
+    fn handle_text_input(&mut self) {
+        // 处理字符输入
+        while let Some(ch) = get_char_pressed() {
+            if ch.is_ascii() && !ch.is_control() {
+                match self.input_focus {
+                    InputFocus::Account => {
+                        if self.account.len() < 20 {
+                            self.account.push(ch);
+                        }
+                    }
+                    InputFocus::Password => {
+                        if self.password.len() < 20 {
+                            self.password.push(ch);
+                        }
+                    }
+                    InputFocus::None => {}
+                }
+            }
+        }
+
+        // 处理退格键
+        if is_key_pressed(KeyCode::Backspace) {
+            match self.input_focus {
+                InputFocus::Account => {
+                    self.account.pop();
+                }
+                InputFocus::Password => {
+                    self.password.pop();
+                }
+                InputFocus::None => {}
+            }
+        }
+
+        // Tab 切换焦点
+        if is_key_pressed(KeyCode::Tab) {
+            self.input_focus = match self.input_focus {
+                InputFocus::Account => InputFocus::Password,
+                InputFocus::Password => InputFocus::Account,
+                InputFocus::None => InputFocus::Account,
+            };
+        }
+
+        // Enter 登录
+        if is_key_pressed(KeyCode::Enter) {
+            self.on_login_clicked();
         }
     }
 }
@@ -205,79 +330,9 @@ impl Scene for LoginScene {
     }
 
     fn on_enter(&mut self) -> GameResult {
-        self.login_dialog.account.clear();
-        self.login_dialog.password.clear();
-
-        // 加载保存的配置
+        self.account.clear();
+        self.password.clear();
         self.load_config();
-
-        // 使用 egui_macroquad::cfg() 配置字体和样式(一次性设置)
-        egui_macroquad::cfg(|ctx| {
-            let mut fonts = egui::FontDefinitions::default();
-
-            // 加载中文字体
-            let font_data = std::fs::read("assets/fonts/AlibabaP uHuiTi-3-55-Regular.ttf")
-                .or_else(|_| std::fs::read("assets/fonts/Chinese.ttc"))
-                .unwrap_or_else(|_| {
-                    println!("⚠ 无法加载中文字体，使用默认字体");
-                    vec![]
-                });
-
-            if !font_data.is_empty() {
-                fonts.font_data.insert(
-                    "chinese".to_owned(),
-                    std::sync::Arc::new(egui::FontData::from_owned(font_data)),
-                );
-
-                // 设置字体优先级
-                fonts
-                    .families
-                    .get_mut(&egui::FontFamily::Proportional)
-                    .unwrap()
-                    .insert(0, "chinese".to_owned());
-
-                fonts
-                    .families
-                    .get_mut(&egui::FontFamily::Monospace)
-                    .unwrap()
-                    .insert(0, "chinese".to_owned());
-            }
-
-            ctx.set_fonts(fonts);
-
-            // 设置 DPI 缩放 - 使 egui 与 macroquad 坐标系统对齐
-            // macroquad 会根据系统 DPI 自动处理,egui 也需要同步
-            let dpi_scale = screen_dpi_scale();
-            ctx.set_pixels_per_point(dpi_scale);
-
-            // 设置全局字体大小
-            let mut style = (*ctx.style()).clone();
-            style.text_styles = [
-                (
-                    egui::TextStyle::Heading,
-                    egui::FontId::new(24.0, egui::FontFamily::Proportional),
-                ),
-                (
-                    egui::TextStyle::Body,
-                    egui::FontId::new(16.0, egui::FontFamily::Proportional),
-                ),
-                (
-                    egui::TextStyle::Monospace,
-                    egui::FontId::new(14.0, egui::FontFamily::Monospace),
-                ),
-                (
-                    egui::TextStyle::Button,
-                    egui::FontId::new(16.0, egui::FontFamily::Proportional),
-                ),
-                (
-                    egui::TextStyle::Small,
-                    egui::FontId::new(12.0, egui::FontFamily::Proportional),
-                ),
-            ]
-            .into();
-            ctx.set_style(style);
-        });
-
         println!("🎬 进入登录界面");
         Ok(())
     }
@@ -288,6 +343,13 @@ impl Scene for LoginScene {
     }
 
     fn update(&mut self, dt: f32) -> GameResult<SceneTransition> {
+        // 更新光标闪烁
+        self.cursor_timer += dt;
+        if self.cursor_timer >= 0.5 {
+            self.cursor_timer = 0.0;
+            self.cursor_visible = !self.cursor_visible;
+        }
+
         // 更新背景动画
         if self.animation_playing {
             self.frame_timer += dt;
@@ -310,76 +372,101 @@ impl Scene for LoginScene {
     fn render(&mut self) -> GameResult {
         clear_background(BLACK);
 
-        // ========== 【macroquad 渲染层】 ==========
-        // 1. 绘制背景动画 (ChrSel 库)
+        // 绘制背景动画 (ChrSel 库)
         let frame_index = if self.animation_playing {
             self.background_frame
         } else {
             0
         };
 
-        // ✅ 新 API
         if let Some(info) = LibraryName::ChrSel.get_texture(frame_index) {
             if let Some(ref texture) = info.image {
                 draw_texture(texture, 0.0, 0.0, WHITE);
             }
         }
 
-        // 2. 绘制登录对话框背景纹理 (Prguse 和 Title 库)
-        if self.show_login_dialog {
-            self.draw_login_background();
+        // 如果没有播放动画，绘制登录对话框
+        if !self.animation_playing {
+            let (dialog_w, _dialog_h, dialog_x, dialog_y) = self.draw_login_background();
+            
+            // 绘制输入框
+            let input_x = dialog_x + 86.0;
+            let input_w = 136.0;
+            let input_h = 18.0;
+            
+            // 账号输入框
+            let account_y = dialog_y + 71.0;
+            self.draw_input_box(input_x, account_y, input_w, input_h, &self.account, false, self.input_focus == InputFocus::Account);
+            
+            // 密码输入框
+            let password_y = dialog_y + 93.0;
+            self.draw_input_box(input_x, password_y, input_w, input_h, &self.password, true, self.input_focus == InputFocus::Password);
+            
+            // 绘制按钮
+            let btn_y = dialog_y + 130.0;
+            let btn_spacing = 80.0;
+            let btn_start_x = dialog_x + (dialog_w - 4.0 * btn_spacing) / 2.0;
+            
+            // 登录按钮 (Prguse 192-194)
+            if self.draw_button(btn_start_x, btn_y, 192, 193, 194) {
+                self.on_login_clicked();
+            }
+            
+            // 新建账号按钮 (Prguse 195-197)
+            if self.draw_button(btn_start_x + btn_spacing, btn_y, 195, 196, 197) {
+                println!("🆕 新建账号");
+            }
+            
+            // 修改密码按钮 (Prguse 198-200)
+            if self.draw_button(btn_start_x + btn_spacing * 2.0, btn_y, 198, 199, 200) {
+                println!("🔑 修改密码");
+            }
+            
+            // 退出按钮 (Prguse 201-203)
+            if self.draw_button(btn_start_x + btn_spacing * 3.0, btn_y, 201, 202, 203) {
+                std::process::exit(0);
+            }
+            
+            // 处理点击输入框切换焦点
+            let (mx, my) = mouse_position();
+            if is_mouse_button_pressed(MouseButton::Left) {
+                if mx >= input_x && mx <= input_x + input_w {
+                    if my >= account_y && my <= account_y + input_h {
+                        self.input_focus = InputFocus::Account;
+                    } else if my >= password_y && my <= password_y + input_h {
+                        self.input_focus = InputFocus::Password;
+                    }
+                }
+            }
         }
 
-        // 3. 对话框背景现在由 Dialog trait 内部处理
-        // (NewAccountDialog 和 ChangePasswordDialog 在 show() 中绘制背景)
-
-        // ========== 【egui 交互层】 ==========
-        egui_macroquad::ui(|ctx| {
-            // 登录对话框 (使用 Dialog trait)
-            self.login_dialog.show(ctx, &mut self.show_login_dialog);
+        // 绘制消息框
+        if self.show_message {
+            self.draw_message_box();
             
-            // 检查登录对话框事件
-            let login_event = self.login_dialog.take_event();
-            match login_event {
-                LoginDialogEvent::Login => {
-                    self.on_login_clicked();
-                },
-                LoginDialogEvent::NewAccount => {
-                    self.show_new_account = true;
-                    self.show_login_dialog = false;
-                },
-                LoginDialogEvent::ChangePassword => {
-                    self.show_change_password = true;
-                    self.show_login_dialog = false;
-                },
-                LoginDialogEvent::None => {},
+            // 点击任意位置关闭消息框
+            if is_mouse_button_pressed(MouseButton::Left) {
+                self.show_message = false;
             }
-
-            // 其他对话框 (使用 Dialog trait)
-            self.new_account_dialog.show(ctx, &mut self.show_new_account);
-            self.change_password_dialog.show(ctx, &mut self.show_change_password);
-            self.message_box.show(ctx, &mut self.show_message_box);
-            
-            // 检查对话框关闭后恢复登录对话框显示
-            // 仅当没有动画播放且所有对话框都关闭时，才显示登录对话框
-            if !self.animation_playing 
-                && !self.show_new_account 
-                && !self.show_change_password 
-                && !self.show_message_box {
-                self.show_login_dialog = true;
-            }
-        });
-
-        // 绘制 egui
-        egui_macroquad::draw();
+        }
 
         Ok(())
     }
 
     fn handle_input(&mut self) -> GameResult {
         if is_key_pressed(KeyCode::Escape) {
-            std::process::exit(0);
+            if self.show_message {
+                self.show_message = false;
+            } else {
+                std::process::exit(0);
+            }
         }
+
+        // 处理文本输入
+        if !self.animation_playing && !self.show_message {
+            self.handle_text_input();
+        }
+
         Ok(())
     }
 }

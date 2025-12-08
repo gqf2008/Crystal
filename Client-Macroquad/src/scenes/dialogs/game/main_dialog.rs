@@ -22,7 +22,7 @@ use super::{
     CharacterTabHybrid,
     ChatControlBarHybrid,
     ChatDialogHybrid,
-    GameShopDialogHybrid,
+    GameShopDialog,
     InventoryDialogHybrid,
     MenuDialogHybrid,
     MiniMapDialogHybrid,
@@ -31,6 +31,21 @@ use super::{
 };
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
+
+/// 对话框类型枚举，用于 z-order 管理
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DialogType {
+    Belt,
+    Chat,
+    ChatControlBar,
+    Inventory,
+    Character,
+    QuestLog,
+    Option,
+    GameShop,
+    Menu,
+    MiniMap,
+}
 
 /// 主界面底部工具栏
 pub struct MainDialog {
@@ -75,7 +90,7 @@ pub struct MainDialog {
     /// 设置对话框
     option_dialog: OptionDialogHybrid,
     /// 游戏商城对话框
-    game_shop_dialog: GameShopDialogHybrid,
+    game_shop_dialog: GameShopDialog,
     /// 菜单对话框
     menu_dialog: MenuDialogHybrid,
     /// 小地图对话框
@@ -92,6 +107,9 @@ pub struct MainDialog {
     game_shop_dialog_open: bool,
     menu_dialog_open: bool,
     minimap_dialog_open: bool,
+
+    /// 对话框 z-order 列表（从后到前，最后一个在最上层）
+    dialog_z_order: Vec<DialogType>,
 
     /// 背景纹理
     bg_texture: Option<Texture2D>,
@@ -150,7 +168,7 @@ impl MainDialog {
             character_dialog: CharacterDialogHybrid::new(),
             quest_log_dialog: QuestLogDialogHybrid::new(),
             option_dialog: OptionDialogHybrid::new(),
-            game_shop_dialog: GameShopDialogHybrid::new(),
+            game_shop_dialog: GameShopDialog::new(),
             menu_dialog: MenuDialogHybrid::new(),
             minimap_dialog: MiniMapDialogHybrid::new(),
 
@@ -165,6 +183,20 @@ impl MainDialog {
             game_shop_dialog_open: false,
             menu_dialog_open: false,
             minimap_dialog_open: true,
+
+            // 对话框 z-order（从后到前）
+            dialog_z_order: vec![
+                DialogType::Chat,
+                DialogType::ChatControlBar,
+                DialogType::Belt,
+                DialogType::MiniMap,
+                DialogType::Inventory,
+                DialogType::Character,
+                DialogType::QuestLog,
+                DialogType::Option,
+                DialogType::GameShop,
+                DialogType::Menu,
+            ],
 
             bg_texture: None,
             bg_size: vec2(bg_width, bg_height),
@@ -251,38 +283,72 @@ impl MainDialog {
         let mut consumed = false;
         let (mx, my) = mouse_position();
         let mouse_pos = vec2(mx, my);
+        let mouse_clicked = is_mouse_button_pressed(MouseButton::Left);
 
-        // 快捷栏
-        self.sync_and_draw_belt(&mut consumed, mouse_pos);
+        // 检测哪个对话框被点击，用于置顶
+        // 从 z-order 最高（最上层）开始检测，找到第一个被点击的对话框
+        let mut clicked_dialog: Option<DialogType> = None;
+        
+        if mouse_clicked {
+            for dialog_type in self.dialog_z_order.iter().rev() {
+                let (is_open, contains) = self.check_dialog_contains(*dialog_type, mouse_pos);
+                if is_open && contains {
+                    clicked_dialog = Some(*dialog_type);
+                    break;
+                }
+            }
+        }
 
-        // 背包
-        self.sync_and_draw_inventory(&mut consumed, mouse_pos);
+        // 如果有对话框被点击，将其移到最前面
+        if let Some(dialog_type) = clicked_dialog {
+            self.bring_to_front(dialog_type);
+        }
 
-        // 角色
-        self.sync_and_draw_character(&mut consumed, mouse_pos);
-
-        // 商城
-        self.sync_and_draw_shop(&mut consumed, mouse_pos);
-
-        // 菜单
-        self.sync_and_draw_menu(&mut consumed, mouse_pos);
-
-        // 小地图
-        self.sync_and_draw_minimap(&mut consumed, mouse_pos);
-
-        // 选项
-        self.sync_and_draw_option(&mut consumed, mouse_pos);
-
-        // 聊天
-        self.sync_and_draw_chat(&mut consumed, mouse_pos);
-
-        // 聊天控制栏
-        self.sync_and_draw_chat_control_bar(&mut consumed, mouse_pos);
-
-        // 任务日志
-        self.sync_and_draw_quest_log(&mut consumed, mouse_pos);
+        // 按 z-order 顺序绘制所有对话框（从后到前）
+        for dialog_type in self.dialog_z_order.clone().iter() {
+            match dialog_type {
+                DialogType::Belt => self.sync_and_draw_belt(&mut consumed, mouse_pos),
+                DialogType::Chat => self.sync_and_draw_chat(&mut consumed, mouse_pos),
+                DialogType::ChatControlBar => self.sync_and_draw_chat_control_bar(&mut consumed, mouse_pos),
+                DialogType::Inventory => self.sync_and_draw_inventory(&mut consumed, mouse_pos),
+                DialogType::Character => self.sync_and_draw_character(&mut consumed, mouse_pos),
+                DialogType::QuestLog => self.sync_and_draw_quest_log(&mut consumed, mouse_pos),
+                DialogType::Option => self.sync_and_draw_option(&mut consumed, mouse_pos),
+                DialogType::GameShop => self.sync_and_draw_shop(&mut consumed, mouse_pos),
+                DialogType::Menu => self.sync_and_draw_menu(&mut consumed, mouse_pos),
+                DialogType::MiniMap => self.sync_and_draw_minimap(&mut consumed, mouse_pos),
+            }
+        }
 
         consumed
+    }
+
+    /// 检查指定对话框是否打开且包含指定位置
+    fn check_dialog_contains(&self, dialog_type: DialogType, mouse_pos: Vec2) -> (bool, bool) {
+        match dialog_type {
+            DialogType::Belt => (self.belt_dialog_open, self.belt_dialog.contains(mouse_pos)),
+            DialogType::Chat => (self.chat_dialog_open, self.chat_dialog.contains(mouse_pos)),
+            DialogType::ChatControlBar => (self.chat_control_bar_open, self.chat_control_bar.contains(mouse_pos)),
+            DialogType::Inventory => (self.inventory_dialog_open, self.inventory_dialog.contains(mouse_pos)),
+            DialogType::Character => (self.character_dialog_open, self.character_dialog.contains(mouse_pos)),
+            DialogType::QuestLog => (self.quest_log_dialog_open, self.quest_log_dialog.contains(mouse_pos)),
+            DialogType::Option => (self.option_dialog_open, self.option_dialog.contains(mouse_pos)),
+            DialogType::GameShop => (self.game_shop_dialog_open, self.game_shop_dialog.contains(mouse_pos)),
+            DialogType::Menu => (self.menu_dialog_open, self.menu_dialog.contains(mouse_pos)),
+            DialogType::MiniMap => (self.minimap_dialog_open, self.minimap_dialog.contains(mouse_pos)),
+        }
+    }
+
+    /// 将指定对话框移到最前面（z-order 最高）
+    fn bring_to_front(&mut self, dialog_type: DialogType) {
+        if let Some(pos) = self.dialog_z_order.iter().position(|&d| d == dialog_type) {
+            // 如果已经在最前面，不需要移动
+            if pos == self.dialog_z_order.len() - 1 {
+                return;
+            }
+            self.dialog_z_order.remove(pos);
+            self.dialog_z_order.push(dialog_type);
+        }
     }
 
     // ========================================================================
@@ -368,33 +434,32 @@ impl MainDialog {
             draw_rectangle(orb_x + 51.0, orb_y + orb_height * (1.0 - mp_percent), 50.0, orb_height * mp_percent, BLUE);
         }
 
-        // 绘制球框纹理 Prguse[5] - 左框，Prguse[6] - 右框
-        if let Some(frame_left) = LibraryName::Prguse.get_texture(5) {
-            if let Some(ref tex) = frame_left.image {
-                draw_texture_ex(tex, orb_x - 5.0, orb_y - 5.0, WHITE, DrawTextureParams::default());
-            }
-        }
-        if let Some(frame_right) = LibraryName::Prguse.get_texture(6) {
-            if let Some(ref tex) = frame_right.image {
-                let frame_left_width = LibraryName::Prguse.get_texture(5).map(|t| t.width as f32).unwrap_or(50.0);
-                draw_texture_ex(tex, orb_x + frame_left_width - 5.0, orb_y - 5.0, WHITE, DrawTextureParams::default());
-            }
-        }
+        // 注意：球框已经是 MainDialog 背景纹理 (Prguse[0/1/2]) 的一部分，不需要单独绘制
 
-        // 绘制数值文字
-        // HP标签位置：C#源码 HealthLabel.Location = (0, 27) 相对于 HealthOrb
-        let hp_text = format!("{}/{}", self.hp, self.max_hp);
-        draw_text_cn(&hp_text, orb_x + 9.0, orb_y + 27.0, 11.0, WHITE);
-
-        // MP标签位置：C#源码 ManaLabel.Location = (0, 42) 相对于 HealthOrb
-        let mp_text = format!("{}/{}", self.mp, self.max_mp);
-        draw_text_cn(&mp_text, orb_x + 9.0, orb_y + 42.0, 11.0, WHITE);
+        // 绘制数值文字 - 使用 TopLabel/BottomLabel 样式（居中显示）
+        // C#: TopLabel.Location = (9, 20) 相对于 HealthOrb, Size = (85, 30)
+        // C#: BottomLabel.Location = (9, 50) 相对于 HealthOrb, Size = (85, 30)
+        let label_width = 85.0;
+        
+        // HP 显示在上方
+        let hp_text = format!("{}", self.hp);
+        let hp_text_width = hp_text.len() as f32 * 6.0; // 估算文本宽度
+        draw_text_cn(&hp_text, orb_x + 9.0 + (label_width - hp_text_width) / 2.0, orb_y + 20.0 + 12.0, 11.0, WHITE);
+        
+        // 分隔线
+        draw_text_cn("--", orb_x + 9.0 + label_width / 2.0 - 6.0, orb_y + 35.0, 11.0, WHITE);
+        
+        // MaxHP 显示在下方
+        let max_hp_text = format!("{}", self.max_hp);
+        let max_hp_text_width = max_hp_text.len() as f32 * 6.0;
+        draw_text_cn(&max_hp_text, orb_x + 9.0 + (label_width - max_hp_text_width) / 2.0, orb_y + 50.0 + 12.0, 11.0, WHITE);
     }
 
     /// 绘制经验条
     fn draw_exp_bar(&self) {
+        // C#: ExperienceBar.Location = new Point(9, 143)
         let bar_x = self.position.x + 9.0;
-        let bar_y = self.position.y + self.bg_size.y - 10.0;
+        let bar_y = self.position.y + 143.0;
 
         // 根据分辨率选择纹理索引 (800用7，其他用8)
         let exp_texture_idx = if self.resolution_index == 0 { 7 } else { 8 };
@@ -423,14 +488,21 @@ impl MainDialog {
         }
 
         // 经验百分比文字
+        // C#: ExperienceLabel.Location = ((ExperienceBar.Size.Width / 2) - 20, -10) 相对于 ExperienceBar
+        let bar_width = if let Some(texture) = LibraryName::Prguse.get_texture(exp_texture_idx) {
+            texture.width as f32
+        } else {
+            100.0
+        };
         let exp_text = format!("{:.1}%", self.exp_percent * 100.0);
-        draw_text_cn(&exp_text, bar_x + 40.0, bar_y + 4.0, 9.0, WHITE);
+        draw_text_cn(&exp_text, bar_x + bar_width / 2.0 - 20.0, bar_y - 10.0 + 10.0, 9.0, WHITE);
     }
 
     /// 绘制负重条
     fn draw_weight_bar(&self) {
+        // C#: WeightBar.Location = new Point(this.Size.Width - 105, 103)
         let bar_x = self.position.x + self.bg_size.x - 105.0;
-        let bar_y = self.position.y + self.bg_size.y - 30.0;
+        let bar_y = self.position.y + 103.0;
 
         let weight_percent = (self.weight as f32 / self.max_weight as f32).clamp(0.0, 1.0);
 
@@ -468,78 +540,131 @@ impl MainDialog {
         }
 
         // 负重文字
+        // C#: WeightLabel.Location = (Size.Width - 105, 101)
+        // C#: SpaceLabel.Location = (Size.Width - 30, 101)
+        let weight_label_y = self.position.y + 101.0;
         let weight_text = format!("{}/{}", self.weight, self.max_weight);
-        draw_text_cn(&weight_text, bar_x + 25.0, bar_y + 4.0, 9.0, WHITE);
+        draw_text_cn(&weight_text, bar_x, weight_label_y + 10.0, 9.0, WHITE);
+        
+        // 背包空格 - 显示在右侧
+        let space_x = self.position.x + self.bg_size.x - 30.0;
+        let space_text = format!("{}", self.bag_space);
+        draw_text_cn(&space_text, space_x, weight_label_y + 10.0, 9.0, WHITE);
     }
 
     /// 绘制角色信息
     fn draw_character_info(&self) {
-        let info_x = self.position.x + 130.0;
-        let info_y = self.position.y + 15.0;
+        // C#: LevelLabel.Location = new Point(5, 108)
+        let level_x = self.position.x + 5.0;
+        let level_y = self.position.y + 108.0;
 
-        // 角色名和等级
-        let name_level = format!("{} Lv.{}", self.character_name, self.level);
-        draw_text_cn(&name_level, info_x, info_y + 12.0, 16.0, Color::from_rgba(255, 215, 0, 255));
+        // C#: CharacterName.Location = new Point(6, 120), Size = (90, 16) 居中
+        let name_x = self.position.x + 6.0;
+        let name_y = self.position.y + 120.0;
+        let name_width = 90.0;
+
+        // C#: GoldLabel.Location = new Point(this.Size.Width - 105, 119), Size = (99, 13)
+        let gold_x = self.position.x + self.bg_size.x - 105.0;
+        let gold_y = self.position.y + 119.0;
+
+        // 等级
+        let level_text = format!("{}", self.level);
+        draw_text_cn(&level_text, level_x, level_y + 10.0, 11.0, WHITE);
+
+        // 角色名（居中显示）
+        let name_text_width = self.character_name.chars().count() as f32 * 8.0;
+        let name_center_x = name_x + (name_width - name_text_width) / 2.0;
+        draw_text_cn(&self.character_name, name_center_x, name_y + 12.0, 11.0, Color::from_rgba(255, 215, 0, 255));
 
         // 金币
-        let gold_text = format!("金币: {}", self.gold);
-        draw_text_cn(&gold_text, info_x, info_y + 28.0, 12.0, Color::from_rgba(255, 215, 0, 255));
-
-        // 背包空格
-        let space_text = format!("空格: {}", self.bag_space);
-        draw_text_cn(&space_text, info_x, info_y + 42.0, 12.0, WHITE);
+        let gold_text = format!("{}", self.gold);
+        draw_text_cn(&gold_text, gold_x, gold_y + 10.0, 9.0, Color::from_rgba(255, 215, 0, 255));
     }
 
     /// 绘制功能按钮组
     fn draw_buttons(&mut self) {
         let button_y = self.position.y + 76.0;
-        let button_start_x = self.position.x + self.bg_size.x - 125.0;
-        let button_spacing = 23.0;
-
         let mouse_pos = vec2(mouse_position().0, mouse_position().1);
 
-        // 按钮列表：背包、角色、技能、任务、选项
-        // 纹理索引：(正常, 悬停, 按下)
-        let buttons: [(usize, usize, usize, &str, usize); 5] = [
-            (1903, 1904, 1905, "背包", 0),
-            (1900, 1901, 1902, "角色", 1),
-            (1906, 1907, 1908, "技能", 2),
-            (1909, 1910, 1911, "任务", 3),
-            (1912, 1913, 1914, "选项", 4),
+        // 按钮列表：按C#源码的精确位置
+        // C#: CharacterButton = Size.Width - 119
+        // C#: InventoryButton = Size.Width - 96
+        // C#: SkillButton = Size.Width - 73
+        // C#: QuestButton = Size.Width - 50
+        // C#: OptionButton = Size.Width - 27
+        // 纹理索引：(正常, 悬停, 按下, 提示, X偏移)
+        let buttons: [(usize, usize, usize, &str, f32); 5] = [
+            (1900, 1901, 1902, "角色", self.bg_size.x - 119.0),
+            (1903, 1904, 1905, "背包", self.bg_size.x - 96.0),
+            (1906, 1907, 1908, "技能", self.bg_size.x - 73.0),
+            (1909, 1910, 1911, "任务", self.bg_size.x - 50.0),
+            (1912, 1913, 1914, "选项", self.bg_size.x - 27.0),
         ];
 
-        for (normal_idx, hover_idx, pressed_idx, hint, i) in buttons {
-            let btn_x = button_start_x + (i as f32 * button_spacing);
+        for (normal_idx, hover_idx, pressed_idx, hint, x_offset) in buttons {
+            let btn_x = self.position.x + x_offset;
             if self.draw_button(mouse_pos, btn_x, button_y, normal_idx, hover_idx, pressed_idx) {
                 println!("🖱️ 点击了 {} 按钮", hint);
                 match hint {
-                    "背包" => self.inventory_dialog_open = !self.inventory_dialog_open,
-                    "角色" => self.character_dialog_open = !self.character_dialog_open,
-                    "技能" => {
-                        self.character_dialog_open = true;
-                        self.character_dialog.switch_tab(CharacterTabHybrid::Skills);
+                    "背包" => {
+                        self.inventory_dialog_open = !self.inventory_dialog_open;
+                        if self.inventory_dialog_open {
+                            self.bring_to_front(DialogType::Inventory);
+                        }
                     }
-                    "任务" => self.quest_log_dialog_open = !self.quest_log_dialog_open,
-                    "选项" => self.option_dialog_open = !self.option_dialog_open,
+                    "角色" => {
+                        self.character_dialog_open = !self.character_dialog_open;
+                        if self.character_dialog_open {
+                            self.bring_to_front(DialogType::Character);
+                        }
+                    }
+                    "技能" => {
+                        // 如果角色对话框已打开且在技能页，则关闭；否则打开并切换到技能页
+                        if self.character_dialog_open && self.character_dialog.is_skills_tab() {
+                            self.character_dialog_open = false;
+                        } else {
+                            self.character_dialog_open = true;
+                            self.character_dialog.switch_tab(CharacterTabHybrid::Skills);
+                            self.bring_to_front(DialogType::Character);
+                        }
+                    }
+                    "任务" => {
+                        self.quest_log_dialog_open = !self.quest_log_dialog_open;
+                        if self.quest_log_dialog_open {
+                            self.bring_to_front(DialogType::QuestLog);
+                        }
+                    }
+                    "选项" => {
+                        self.option_dialog_open = !self.option_dialog_open;
+                        if self.option_dialog_open {
+                            self.bring_to_front(DialogType::Option);
+                        }
+                    }
                     _ => {}
                 }
             }
         }
 
-        // 菜单按钮（位置稍上）
+        // 菜单按钮 C#: Size.Width - 55, 35
         let menu_x = self.position.x + self.bg_size.x - 55.0;
         let menu_y = self.position.y + 35.0;
         if self.draw_button(mouse_pos, menu_x, menu_y, 1960, 1961, 1962) {
             println!("🖱️ 点击了菜单按钮");
             self.menu_dialog_open = !self.menu_dialog_open;
+            if self.menu_dialog_open {
+                self.bring_to_front(DialogType::Menu);
+            }
         }
 
-        // 商城按钮
+        // 商城按钮 C#: Size.Width - 105, 35
         let shop_x = self.position.x + self.bg_size.x - 105.0;
         let shop_y = self.position.y + 35.0;
         if self.draw_button(mouse_pos, shop_x, shop_y, 826, 827, 828) {
             println!("🖱️ 点击了商城按钮");
             self.game_shop_dialog_open = !self.game_shop_dialog_open;
+            if self.game_shop_dialog_open {
+                self.bring_to_front(DialogType::GameShop);
+            }
         }
     }
 

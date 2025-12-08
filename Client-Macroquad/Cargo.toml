@@ -7,7 +7,6 @@ edition = "2021"
 # Macroquad 核心
 macroquad = "0.4"
 macroquad-profiler = "0.2"
-egui-macroquad = "0.17"  # egui GUI 库
 
 # 共享库 (游戏协议和数据结构)
 mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
@@ -53,21 +52,12 @@ chrono = "0.4"
 # 文件对话框 (地图加载)
 rfd = "0.15"
 
+# Patch miniquad to use local version with IME support
+[patch.crates-io]
+miniquad = { path = "miniquad" }
+
 [profile.dev]
 opt-level = 1
-
-
-[[bin]]
-name = "test_all_components"
-path = "src/bin/test_all_components.rs"
-
-[[bin]]
-name = "test_inventory_dialog"
-path = "src/bin/test_inventory_dialog.rs"
-
-[[bin]]
-name = "test_character_dialog"
-path = "src/bin/test_character_dialog.rs"
 
 
 [profile.release]

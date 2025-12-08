@@ -10,7 +10,8 @@ use crate::scenes::dialogs::game::{
     InventoryDialogHybrid,
     CharacterDialogHybrid,
     BeltDialogHybrid,
-    GameShopDialogHybrid,
+    GameShopDialog,
+    ChatDialogHybrid,
 };
 use crate::scenes::{Scene, SceneTransition};
 use crate::ui::text_renderer::draw_text_cn;
@@ -22,7 +23,8 @@ pub struct GameScene {
     inventory_dialog: InventoryDialogHybrid,
     character_dialog: CharacterDialogHybrid,
     belt_dialog: BeltDialogHybrid,
-    shop_dialog: GameShopDialogHybrid,
+    shop_dialog: GameShopDialog,
+    chat_dialog: ChatDialogHybrid,
     
     // 初始化状态
     initialized: bool,
@@ -30,11 +32,13 @@ pub struct GameScene {
 
 impl GameScene {
     pub fn new() -> Self {
+        let sh = screen_height();
         Self {
             inventory_dialog: InventoryDialogHybrid::new(),
             character_dialog: CharacterDialogHybrid::new(),
             belt_dialog: BeltDialogHybrid::new(),
-            shop_dialog: GameShopDialogHybrid::new(),
+            shop_dialog: GameShopDialog::new(),
+            chat_dialog: ChatDialogHybrid::new(0.0, sh, 0), // 初始位置，后续在 load_textures 中调整
             initialized: false,
         }
     }
@@ -47,6 +51,7 @@ impl GameScene {
         self.character_dialog.load_textures().await;
         self.belt_dialog.load_textures().await;
         self.shop_dialog.load_textures().await;
+        self.chat_dialog.load_textures().await;
         
         // 设置初始位置
         let sw = screen_width();
@@ -65,12 +70,31 @@ impl GameScene {
         // 商城居中
         self.shop_dialog.set_position(vec2((sw - 720.0) / 2.0, 100.0));
         
+        // 聊天窗口在左下角
+        self.chat_dialog.set_position(vec2(0.0, sh - 100.0));
+        self.chat_dialog.open(); // 聊天窗口默认打开
+        
+        // 添加欢迎消息
+        self.chat_dialog.add_message("欢迎进入传奇世界！", Color::from_rgba(255, 255, 0, 255));
+        self.chat_dialog.add_message("按 Enter 打开聊天输入框", Color::from_rgba(200, 200, 200, 255));
+        
         self.initialized = true;
         println!("✅ GameScene: 对话框纹理加载完成");
     }
     
     /// 处理快捷键
     fn handle_hotkeys(&mut self) {
+        // 如果聊天输入框激活，不处理其他快捷键
+        if self.chat_dialog.is_input_active() {
+            return;
+        }
+        
+        // Enter = 激活聊天输入框
+        if is_key_pressed(KeyCode::Enter) {
+            self.chat_dialog.activate_input();
+            println!("💬 聊天: 输入框已激活");
+        }
+        
         // I = 背包
         if is_key_pressed(KeyCode::I) {
             self.inventory_dialog.toggle();
@@ -131,7 +155,7 @@ impl GameScene {
     fn draw_help_text(&self) {
         let y = screen_height() - 25.0;
         draw_text_cn(
-            "快捷键: I=背包 C=角色 B=快捷栏 S=商城 | ESC=返回角色选择",
+            "快捷键: I=背包 C=角色 B=快捷栏 S=商城 Enter=聊天 | ESC=返回角色选择",
             10.0, y, 14.0, Color::from_rgba(200, 200, 200, 180)
         );
     }
@@ -160,6 +184,8 @@ impl Scene for GameScene {
         self.character_dialog.close();
         self.belt_dialog.close();
         self.shop_dialog.close();
+        self.chat_dialog.close();
+        self.chat_dialog.deactivate_input(); // 确保 IME 被禁用
         Ok(())
     }
     
@@ -206,6 +232,7 @@ impl Scene for GameScene {
             );
         } else {
             // 绘制所有对话框（商城在最上层）
+            self.chat_dialog.update_and_draw(); // 聊天窗口在最底层
             self.inventory_dialog.update_and_draw();
             self.character_dialog.update_and_draw();
             self.belt_dialog.update_and_draw();

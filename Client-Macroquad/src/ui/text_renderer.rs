@@ -143,49 +143,6 @@ pub fn draw_text_with_outline(
     draw_text_cn(text, x, y, font_size, color);
 }
 
-/// 配置 egui 中文字体
-/// 
-/// 应该在 egui_macroquad::cfg() 中调用
-pub fn setup_egui_chinese_font(ctx: &egui_macroquad::egui::Context) {
-    let mut fonts = egui_macroquad::egui::FontDefinitions::default();
-    
-    // 加载中文字体
-    let font_data = std::fs::read("assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf")
-        .or_else(|_| std::fs::read("assets/fonts/Chinese.ttc"))
-        .or_else(|_| std::fs::read("C:\\Windows\\Fonts\\msyh.ttc"))
-        .unwrap_or_else(|_| {
-            println!("⚠️  egui：无法加载中文字体，使用默认字体");
-            vec![]
-        });
-
-    if !font_data.is_empty() {
-        fonts.font_data.insert(
-            "chinese".to_owned(),
-            std::sync::Arc::new(egui_macroquad::egui::FontData::from_owned(font_data)),
-        );
-
-        fonts
-            .families
-            .get_mut(&egui_macroquad::egui::FontFamily::Proportional)
-            .unwrap()
-            .insert(0, "chinese".to_owned());
-
-        fonts
-            .families
-            .get_mut(&egui_macroquad::egui::FontFamily::Monospace)
-            .unwrap()
-            .insert(0, "chinese".to_owned());
-            
-        println!("✅ egui：已加载中文字体");
-    }
-
-    ctx.set_fonts(fonts);
-
-    // 设置 DPI 缩放
-    let dpi_scale = screen_dpi_scale();
-    ctx.set_pixels_per_point(dpi_scale);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

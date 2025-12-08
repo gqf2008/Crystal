@@ -12,8 +12,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
-use egui_macroquad::egui;
-
 use super::mlibrary::{ImageInfo, MLibrary};
 use crate::resources::libraries::{LibraryArray, LibraryName};
 
@@ -207,12 +205,8 @@ pub struct ResourceManager {
     /// Macroquad 纹理 LRU 缓存
     texture_cache: LruCache<TextureKey, ImageInfo>,
 
-    /// egui 纹理 LRU 缓存 (存储包含egui纹理句柄的ImageInfo)
-    egui_texture_cache: LruCache<TextureKey, ImageInfo>,
-
     /// 缓存容量配置
     texture_cache_size: usize,
-    egui_cache_size: usize,
 }
 
 impl ResourceManager {
@@ -223,9 +217,7 @@ impl ResourceManager {
             libraries: HashMap::new(),
             array_libraries: HashMap::new(),
             texture_cache: LruCache::new(1000), // 默认缓存1000个纹理
-            egui_texture_cache: LruCache::new(500), // 默认缓存500个egui纹理
             texture_cache_size: 1000,
-            egui_cache_size: 500,
         }
     }
 
@@ -236,11 +228,9 @@ impl ResourceManager {
     }
 
     /// 设置纹理缓存大小
-    pub fn set_cache_size(&mut self, texture_size: usize, egui_size: usize) {
+    pub fn set_cache_size(&mut self, texture_size: usize) {
         self.texture_cache_size = texture_size;
-        self.egui_cache_size = egui_size;
         self.texture_cache = LruCache::new(texture_size);
-        self.egui_texture_cache = LruCache::new(egui_size);
     }
 
     // ==================== 库管理 ====================
@@ -332,63 +322,6 @@ impl ResourceManager {
         Some(info)
     }
 
-    /// 获取或创建 egui 纹理（带LRU缓存）
-    /// 
-    /// 返回包含 egui 纹理句柄的 ImageInfo
-    pub fn get_egui_texture(
-        &mut self,
-        ctx: &egui::Context,
-        lib_name: LibraryName,
-        index: usize,
-    ) -> Option<ImageInfo> {
-        let key = TextureKey {
-            library: lib_name.to_string(),
-            index,
-        };
-
-        // 检查缓存
-        if let Some(cached) = self.egui_texture_cache.get(&key) {
-            return Some(cached.clone());
-        }
-
-        // 加载纹理
-        let mut info = self.get_texture(lib_name, index)?;
-        let texture = info.image.as_ref()?;
-
-        // 转换为 egui 纹理
-        let image_data = texture.get_texture_data();
-        let width = texture.width() as usize;
-        let height = texture.height() as usize;
-
-        let mut pixels = Vec::with_capacity(width * height);
-        for y in 0..height {
-            for x in 0..width {
-                let idx = (y * width + x) * 4;
-                let r = image_data.bytes[idx];
-                let g = image_data.bytes[idx + 1];
-                let b = image_data.bytes[idx + 2];
-                let a = image_data.bytes[idx + 3];
-                pixels.push(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
-            }
-        }
-
-        let color_image = egui::ColorImage {
-            size: [width, height],
-            pixels,
-        };
-
-        let cache_key = format!("{}_{}", key.library, key.index);
-        let handle = ctx.load_texture(&cache_key, color_image, Default::default());
-
-        // 在 ImageInfo 中设置 egui 纹理
-        info.egui_texture = Some(handle);
-
-        // 缓存
-        self.egui_texture_cache.put(key, info.clone());
-
-        Some(info)
-    }
-
     /// 获取图像尺寸（无需创建纹理）
     #[inline]
     pub fn get_size(&mut self, lib_name: LibraryName, index: usize) -> Option<(i16, i16)> {
@@ -400,7 +333,6 @@ impl ResourceManager {
     /// 清空纹理缓存
     pub fn clear_texture_cache(&mut self) {
         self.texture_cache.clear();
-        self.egui_texture_cache.clear();
     }
 
     /// 获取缓存统计信息
@@ -408,8 +340,6 @@ impl ResourceManager {
         CacheStats {
             texture_cache_size: self.texture_cache.len(),
             texture_cache_capacity: self.texture_cache_size,
-            egui_cache_size: self.egui_texture_cache.len(),
-            egui_cache_capacity: self.egui_cache_size,
             loaded_libraries: self.libraries.len(),
         }
     }
@@ -426,8 +356,6 @@ impl Default for ResourceManager {
 pub struct CacheStats {
     pub texture_cache_size: usize,
     pub texture_cache_capacity: usize,
-    pub egui_cache_size: usize,
-    pub egui_cache_capacity: usize,
     pub loaded_libraries: usize,
 }
 
@@ -447,24 +375,14 @@ pub fn set_data_path(path: impl Into<String>) {
 
 /// 设置缓存大小
 #[inline]
-pub fn set_cache_size(texture_size: usize, egui_size: usize) {
-    RESOURCE_MANAGER.with(|rm| rm.borrow_mut().set_cache_size(texture_size, egui_size));
+pub fn set_cache_size(texture_size: usize) {
+    RESOURCE_MANAGER.with(|rm| rm.borrow_mut().set_cache_size(texture_size));
 }
 
 /// 获取纹理
 #[inline]
 pub fn get_texture(lib_name: LibraryName, index: usize) -> Option<ImageInfo> {
     RESOURCE_MANAGER.with(|rm| rm.borrow_mut().get_texture(lib_name, index))
-}
-
-/// 获取 egui 纹理（返回包含 egui_texture 字段的 ImageInfo）
-#[inline]
-pub fn get_egui_texture(
-    ctx: &egui::Context,
-    lib_name: LibraryName,
-    index: usize,
-) -> Option<ImageInfo> {
-    RESOURCE_MANAGER.with(|rm| rm.borrow_mut().get_egui_texture(ctx, lib_name, index))
 }
 
 /// 获取图像尺寸
@@ -643,9 +561,8 @@ mod tests {
         rm.set_data_path("Data");
 
         // 测试缓存大小设置
-        rm.set_cache_size(100, 50);
+        rm.set_cache_size(100);
         let stats = rm.cache_stats();
         assert_eq!(stats.texture_cache_capacity, 100);
-        assert_eq!(stats.egui_cache_capacity, 50);
     }
 }

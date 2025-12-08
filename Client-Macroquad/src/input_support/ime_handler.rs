@@ -1,10 +1,10 @@
 // ============================================================================
-// IME 事件处理器
+// IME 事件处理器 - 纯 Native 版本 (无 egui)
 // ============================================================================
 
 use super::ImeInputState;
 use macroquad::prelude::*;
-use egui_macroquad::egui;
+use crate::ui::text_renderer::draw_text_cn;
 
 /// IME 事件处理器
 pub struct ImeHandler {
@@ -163,34 +163,43 @@ impl ImeHandler {
         }
     }
 
-    /// 渲染候选词窗口
-    pub fn render_candidates(&self, ctx: &egui::Context, cursor_pos: egui::Pos2) {
+    /// 渲染候选词窗口 (纯 macroquad 原生绘制)
+    pub fn render_candidates(&self, cursor_x: f32, cursor_y: f32) {
         if !self.state.is_composing || self.state.candidates.is_empty() {
             return;
         }
 
-        egui::Area::new(egui::Id::new("ime_candidates"))
-            .fixed_pos(cursor_pos + egui::vec2(0.0, 20.0))
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                egui::Frame::popup(&ctx.style())
-                    .inner_margin(4.0)
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            ui.label(format!("拼音: {}", self.state.composition_text));
-                            ui.separator();
-                            
-                            for (i, candidate) in self.state.candidates.iter().enumerate() {
-                                let is_selected = self.state.selected_candidate == Some(i);
-                                let response = ui.selectable_label(is_selected, 
-                                    format!("{}. {}", i + 1, candidate));
-                                
-                                if response.clicked() {
-                                    // 处理候选词点击
-                                }
-                            }
-                        });
-                    });
-            });
+        let popup_x = cursor_x;
+        let popup_y = cursor_y + 20.0;
+        let popup_w = 150.0;
+        let line_height = 20.0;
+        let popup_h = (self.state.candidates.len() as f32 + 2.0) * line_height + 10.0;
+
+        // 背景
+        draw_rectangle(popup_x, popup_y, popup_w, popup_h, Color::from_rgba(40, 40, 50, 240));
+        draw_rectangle_lines(popup_x, popup_y, popup_w, popup_h, 1.0, Color::from_rgba(100, 100, 120, 255));
+
+        // 拼音显示
+        draw_text_cn(&format!("拼音: {}", self.state.composition_text), 
+            popup_x + 5.0, popup_y + line_height, 14.0, WHITE);
+        
+        // 分隔线
+        draw_line(popup_x + 5.0, popup_y + line_height + 5.0, 
+                  popup_x + popup_w - 5.0, popup_y + line_height + 5.0, 
+                  1.0, Color::from_rgba(80, 80, 100, 255));
+
+        // 候选词列表
+        for (i, candidate) in self.state.candidates.iter().enumerate() {
+            let y = popup_y + (i as f32 + 2.0) * line_height;
+            let is_selected = self.state.selected_candidate == Some(i);
+            
+            if is_selected {
+                draw_rectangle(popup_x + 2.0, y - 12.0, popup_w - 4.0, line_height, 
+                    Color::from_rgba(60, 80, 120, 255));
+            }
+            
+            draw_text_cn(&format!("{}. {}", i + 1, candidate), 
+                popup_x + 5.0, y, 14.0, WHITE);
+        }
     }
 }
