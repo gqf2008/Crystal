@@ -383,3 +383,4 @@ ClientRust/mir2x.exe
 ClientRust/map_viewer_v3.exe
 *.c
 *.exe
+/Client-Macroquad/miniquad
