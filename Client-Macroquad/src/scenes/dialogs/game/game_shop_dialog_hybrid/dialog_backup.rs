@@ -17,83 +17,8 @@ use macroquad::ui::{self, Skin, hash};
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 
-/// 商城主分类
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ShopSectionHybrid {
-    All,        // 全部
-    TopItems,   // 热销
-    Deals,      // 特价
-    New,        // 新品
-}
-
-impl ShopSectionHybrid {
-    pub const ALL: &'static [Self] = &[Self::All, Self::TopItems, Self::Deals, Self::New];
-    
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::All => "全部",
-            Self::TopItems => "热销",
-            Self::Deals => "特价",
-            Self::New => "新品",
-        }
-    }
-}
-
-/// 商城职业分类
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ShopClassHybrid {
-    All,        // 全部
-    Warrior,    // 战士
-    Assassin,   // 刺客
-    Taoist,     // 道士
-    Wizard,     // 法师
-    Archer,     // 弓箭手
-}
-
-impl ShopClassHybrid {
-    pub const ALL: &'static [Self] = &[
-        Self::All, Self::Warrior, Self::Assassin, 
-        Self::Taoist, Self::Wizard, Self::Archer
-    ];
-    
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::All => "全",
-            Self::Warrior => "战",
-            Self::Assassin => "刺",
-            Self::Taoist => "道",
-            Self::Wizard => "法",
-            Self::Archer => "弓",
-        }
-    }
-}
-
-/// 商品分类
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ShopCategoryHybrid {
-    Weapon,     // 武器
-    Armor,      // 防具
-    Potion,     // 药品
-    Special,    // 特殊
-    Fashion,    // 时装
-}
-
-/// 商城物品
-#[derive(Debug, Clone)]
-pub struct ShopItemHybrid {
-    pub id: u32,
-    pub name: String,
-    pub description: String,
-    pub icon_index: usize,
-    pub price_gold: u32,
-    pub price_ingot: u32,
-    pub category: ShopCategoryHybrid,
-    pub in_stock: bool,
-    pub hot: bool,
-    pub new: bool,
-    pub stock: u32,
-    pub count: u32,
-}
+use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid};
+use super::sample_items::create_sample_items;
 
 /// 商城对话框（混合版本）
 pub struct GameShopDialogHybrid {
@@ -216,7 +141,7 @@ impl GameShopDialogHybrid {
     const SCROLL_BTN_H: f32 = 14.0;
     
     pub fn new() -> Self {
-        let shop_items = Self::create_sample_items();
+        let shop_items = create_sample_items();
         let mut dialog = Self {
             visible: false,
             position: vec2(200.0, 100.0),
@@ -268,72 +193,6 @@ impl GameShopDialogHybrid {
         };
         dialog.filter_items();
         dialog
-    }
-    
-    /// 创建示例商品
-    fn create_sample_items() -> Vec<ShopItemHybrid> {
-        vec![
-            ShopItemHybrid {
-                id: 1, name: "龙纹剑".into(), description: "攻击力+50".into(),
-                icon_index: 1, price_gold: 100000, price_ingot: 500,
-                category: ShopCategoryHybrid::Weapon, in_stock: true,
-                hot: true, new: false, stock: 10, count: 1,
-            },
-            ShopItemHybrid {
-                id: 2, name: "天师道袍".into(), description: "魔防+30".into(),
-                icon_index: 20, price_gold: 80000, price_ingot: 400,
-                category: ShopCategoryHybrid::Armor, in_stock: true,
-                hot: false, new: true, stock: 5, count: 1,
-            },
-            ShopItemHybrid {
-                id: 3, name: "强效金疮药".into(), description: "恢复500HP".into(),
-                icon_index: 40, price_gold: 1000, price_ingot: 5,
-                category: ShopCategoryHybrid::Potion, in_stock: true,
-                hot: false, new: false, stock: 0, count: 10,
-            },
-            ShopItemHybrid {
-                id: 4, name: "传送戒指".into(), description: "随机传送".into(),
-                icon_index: 60, price_gold: 500000, price_ingot: 2000,
-                category: ShopCategoryHybrid::Special, in_stock: false,
-                hot: true, new: true, stock: 0, count: 1,
-            },
-            ShopItemHybrid {
-                id: 5, name: "华丽时装".into(), description: "外观装饰".into(),
-                icon_index: 80, price_gold: 0, price_ingot: 1000,
-                category: ShopCategoryHybrid::Fashion, in_stock: true,
-                hot: false, new: true, stock: 20, count: 1,
-            },
-            ShopItemHybrid {
-                id: 6, name: "裁决之杖".into(), description: "攻击力+80".into(),
-                icon_index: 5, price_gold: 200000, price_ingot: 1000,
-                category: ShopCategoryHybrid::Weapon, in_stock: true,
-                hot: true, new: false, stock: 3, count: 1,
-            },
-            ShopItemHybrid {
-                id: 7, name: "法神披风".into(), description: "魔攻+40".into(),
-                icon_index: 25, price_gold: 150000, price_ingot: 750,
-                category: ShopCategoryHybrid::Armor, in_stock: true,
-                hot: false, new: false, stock: 8, count: 1,
-            },
-            ShopItemHybrid {
-                id: 8, name: "太阳水".into(), description: "恢复300MP".into(),
-                icon_index: 45, price_gold: 800, price_ingot: 4,
-                category: ShopCategoryHybrid::Potion, in_stock: true,
-                hot: false, new: false, stock: 0, count: 10,
-            },
-            ShopItemHybrid {
-                id: 9, name: "复活戒指".into(), description: "死亡复活".into(),
-                icon_index: 65, price_gold: 1000000, price_ingot: 5000,
-                category: ShopCategoryHybrid::Special, in_stock: true,
-                hot: true, new: true, stock: 1, count: 1,
-            },
-            ShopItemHybrid {
-                id: 10, name: "新年套装".into(), description: "限定外观".into(),
-                icon_index: 85, price_gold: 0, price_ingot: 2000,
-                category: ShopCategoryHybrid::Fashion, in_stock: true,
-                hot: true, new: true, stock: 50, count: 1,
-            },
-        ]
     }
     
     /// 加载纹理

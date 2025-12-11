@@ -1,0 +1,817 @@
+﻿// ============================================================================
+// GameShopDialogHybrid - 渲染模块
+// ============================================================================
+// 
+// 所有绘制和交互相关方法
+// ============================================================================
+
+use macroquad::prelude::*;
+use macroquad::ui::{self, hash};
+use crate::resources::LibraryName;
+use crate::ui::text_renderer::draw_text_cn;
+use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid};
+use super::dialog::GameShopDialogHybrid;
+
+impl GameShopDialogHybrid {
+    /// 更新和绘制
+    pub fn update_and_draw(&mut self) {
+        if !self.visible { return; }
+        
+        let pos = self.position;
+        
+        // 1. 绘制背景
+        self.draw_background(pos);
+        
+        // 2. 绘制标题
+        self.draw_title(pos);
+        
+        // 3. 绘制分类标签
+        self.draw_section_tabs(pos);
+        self.draw_class_tabs(pos);
+        
+        // 4. 绘制左侧分类列表
+        self.draw_category_list(pos);
+        
+        // 5. 绘制商品网格
+        self.draw_item_grid(pos);
+        
+        // 6. 绘制分页
+        self.draw_pagination(pos);
+        
+        // 7. 绘制货币信息和支付方式
+        self.draw_currency_info(pos);
+        self.draw_payment_options(pos);
+        
+        // 8. 绘制搜索框
+        self.draw_search_box(pos);
+        
+        // 9. 绘制预览窗口
+        self.draw_preview_window(pos);
+        
+        // 10. 绘制悬停提示框（需要在最后绘制以显示在最上层）
+        self.draw_item_tooltip();
+        
+        // 11. 处理拖拽（使用mqui）
+        self.handle_dragging(pos);
+        
+        // 12. 处理关闭按钮
+        self.handle_close_button(pos);
+    }
+    
+    /// 绘制背景
+    pub(super) fn draw_background(&self, pos: Vec2) {
+        if let Some(ref tex) = self.background_texture {
+            draw_texture_ex(tex, pos.x, pos.y, WHITE, DrawTextureParams {
+                dest_size: Some(vec2(Self::DIALOG_WIDTH, Self::DIALOG_HEIGHT)),
+                ..Default::default()
+            });
+        } else {
+            // 备用背景
+            draw_rectangle(pos.x, pos.y, Self::DIALOG_WIDTH, Self::DIALOG_HEIGHT, 
+                Color::from_rgba(40, 40, 50, 240));
+            draw_rectangle_lines(pos.x, pos.y, Self::DIALOG_WIDTH, Self::DIALOG_HEIGHT, 
+                2.0, Color::from_rgba(100, 100, 120, 255));
+        }
+    }
+    
+    /// 绘制标题
+    pub(super) fn draw_title(&self, pos: Vec2) {
+        // 标题图标 Title[26] (原版位置: 18, 9)
+        if let Some(ref tex) = self.title_label_texture {
+            draw_texture_ex(tex, pos.x + 18.0, pos.y + 9.0, WHITE, DrawTextureParams::default());
+        } else {
+            draw_text_cn("🛒 游戏商城", pos.x + 20.0, pos.y + 25.0, 18.0, 
+                Color::from_rgba(255, 215, 0, 255));
+        }
+    }
+    
+    /// 绘制主分类标签 (使用纹理)
+    pub(super) fn draw_section_tabs(&mut self, pos: Vec2) {
+        for (i, section) in ShopSectionHybrid::ALL.iter().enumerate() {
+            let tab_x = pos.x + Self::SECTION_TAB_X + (i as f32 * Self::SECTION_TAB_W);
+            let tab_y = pos.y + Self::SECTION_TAB_Y;
+            let is_selected = self.current_section == *section;
+            
+            let mouse_pos = mouse_position();
+            let hovered = mouse_pos.0 >= tab_x && mouse_pos.0 <= tab_x + Self::SECTION_TAB_W
+                && mouse_pos.1 >= tab_y && mouse_pos.1 <= tab_y + Self::SECTION_TAB_H;
+            
+            // 使用纹理或备用绘制
+            if i < self.section_tab_textures.len() {
+                let (ref normal_tex, ref selected_tex) = self.section_tab_textures[i];
+                let tex_to_use = if is_selected || hovered { selected_tex } else { normal_tex };
+                
+                if let Some(tex) = tex_to_use {
+                    draw_texture_ex(tex, tab_x, tab_y, WHITE, DrawTextureParams::default());
+                } else {
+                    self.draw_fallback_section_tab(tab_x, tab_y, section, is_selected, hovered);
+                }
+            } else {
+                self.draw_fallback_section_tab(tab_x, tab_y, section, is_selected, hovered);
+            }
+            
+            // 处理点击
+            if hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+                self.current_section = *section;
+                self.filter_items();
+                println!("🏷️ 切换分类: {}", section.name());
+            }
+        }
+    }
+    
+    /// 备用分类标签绘制
+    pub(super) fn draw_fallback_section_tab(&self, x: f32, y: f32, section: &ShopSectionHybrid, selected: bool, hovered: bool) {
+        let bg_color = if selected {
+            Color::from_rgba(200, 180, 140, 255)
+        } else if hovered {
+            Color::from_rgba(100, 100, 140, 255)
+        } else {
+            Color::from_rgba(60, 60, 80, 255)
+        };
+        draw_rectangle(x, y, Self::SECTION_TAB_W, Self::SECTION_TAB_H, bg_color);
+        draw_rectangle_lines(x, y, Self::SECTION_TAB_W, Self::SECTION_TAB_H, 1.0, 
+            Color::from_rgba(150, 150, 170, 255));
+        
+        let text_color = if selected { BLACK } else { WHITE };
+        draw_text_cn(section.name(), x + 15.0, y + 16.0, 12.0, text_color);
+    }
+    
+    /// 绘制职业分类标签 (使用纹理)
+    pub(super) fn draw_class_tabs(&mut self, pos: Vec2) {
+        for (i, class) in ShopClassHybrid::ALL.iter().enumerate() {
+            let tab_x = pos.x + Self::CLASS_TAB_X + (i as f32 * Self::CLASS_TAB_SIZE);
+            let tab_y = pos.y + Self::CLASS_TAB_Y;
+            let is_selected = self.current_class == *class;
+            
+            let mouse_pos = mouse_position();
+            let hovered = mouse_pos.0 >= tab_x && mouse_pos.0 <= tab_x + Self::CLASS_TAB_SIZE
+                && mouse_pos.1 >= tab_y && mouse_pos.1 <= tab_y + Self::CLASS_TAB_SIZE - 3.0;
+            let pressed = hovered && is_mouse_button_down(MouseButton::Left);
+            
+            // 使用纹理或备用绘制
+            if i < self.class_tab_textures.len() {
+                let (ref normal_tex, ref hover_tex, ref pressed_tex) = self.class_tab_textures[i];
+                let tex_to_use = if pressed {
+                    pressed_tex
+                } else if is_selected || hovered {
+                    hover_tex
+                } else {
+                    normal_tex
+                };
+                
+                if let Some(tex) = tex_to_use {
+                    draw_texture_ex(tex, tab_x, tab_y, WHITE, DrawTextureParams::default());
+                } else {
+                    self.draw_fallback_class_tab(tab_x, tab_y, class, is_selected, hovered);
+                }
+            } else {
+                self.draw_fallback_class_tab(tab_x, tab_y, class, is_selected, hovered);
+            }
+            
+            // 处理点击
+            if hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+                self.current_class = *class;
+                self.filter_items();
+                println!("🏷️ 切换职业: {:?}", class);
+            }
+        }
+    }
+    
+    /// 备用职业标签绘制
+    pub(super) fn draw_fallback_class_tab(&self, x: f32, y: f32, class: &ShopClassHybrid, selected: bool, hovered: bool) {
+        let bg_color = if selected {
+            Color::from_rgba(200, 180, 140, 255)
+        } else if hovered {
+            Color::from_rgba(100, 100, 140, 255)
+        } else {
+            Color::from_rgba(60, 60, 80, 255)
+        };
+        draw_rectangle(x, y, Self::CLASS_TAB_SIZE, Self::CLASS_TAB_SIZE - 3.0, bg_color);
+        
+        let text_color = if selected { BLACK } else { WHITE };
+        draw_text_cn(class.name(), x + 4.0, y + 14.0, 12.0, text_color);
+    }
+    
+    /// 绘制左侧分类列表
+    pub(super) fn draw_category_list(&mut self, pos: Vec2) {
+        // 绘制分类列表背景 Title[769]
+        let filter_bg_x = pos.x + Self::FILTER_BG_X;
+        let filter_bg_y = pos.y + Self::FILTER_BG_Y;
+        
+        if let Some(ref tex) = self.filter_bg_texture {
+            draw_texture_ex(tex, filter_bg_x, filter_bg_y, WHITE, DrawTextureParams::default());
+        } else {
+            // 备用背景
+            draw_rectangle(filter_bg_x, filter_bg_y, 110.0, 340.0,
+                Color::from_rgba(30, 30, 40, 200));
+        }
+        
+        // 绘制分类项
+        let list_x = pos.x + Self::CATEGORY_LIST_X;
+        let list_y = pos.y + Self::CATEGORY_LIST_Y;
+        
+        for i in 0..Self::CATEGORY_MAX_VISIBLE {
+            let idx = self.category_scroll + i;
+            if idx >= self.categories.len() { break; }
+            
+            let item_y = list_y + (i as f32 * Self::CATEGORY_LINE_HEIGHT);
+            let mouse_pos = mouse_position();
+            let hovered = mouse_pos.0 >= list_x && mouse_pos.0 <= list_x + 100.0
+                && mouse_pos.1 >= item_y && mouse_pos.1 <= item_y + Self::CATEGORY_LINE_HEIGHT;
+            
+            // 悬停效果
+            if hovered {
+                draw_rectangle(list_x - 5.0, item_y, 100.0, Self::CATEGORY_LINE_HEIGHT,
+                    Color::from_rgba(80, 80, 100, 150));
+            }
+            
+            // 文字
+            let text_color = if hovered {
+                Color::from_rgba(255, 215, 0, 255)
+            } else {
+                WHITE
+            };
+            draw_text_cn(&self.categories[idx], list_x, item_y + 11.0, 9.0, text_color);
+            
+            // 点击
+            if hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+                println!("📁 选择分类: {}", self.categories[idx]);
+            }
+        }
+        
+        // 滚动条
+        self.draw_category_scrollbar(pos);
+    }
+    
+    /// 绘制分类滚动条 (使用纹理)
+    pub(super) fn draw_category_scrollbar(&mut self, pos: Vec2) {
+        let scroll_x = pos.x + Self::SCROLL_X;
+        let mouse_pos = mouse_position();
+        
+        // 上箭头 Prguse2[197-199]
+        let up_y = pos.y + Self::SCROLL_UP_Y;
+        let up_hovered = mouse_pos.0 >= scroll_x && mouse_pos.0 <= scroll_x + Self::SCROLL_BTN_W
+            && mouse_pos.1 >= up_y && mouse_pos.1 <= up_y + Self::SCROLL_BTN_H;
+        let up_pressed = up_hovered && is_mouse_button_down(MouseButton::Left);
+        
+        let up_tex = if up_pressed {
+            &self.scroll_up_textures.2
+        } else if up_hovered {
+            &self.scroll_up_textures.1
+        } else {
+            &self.scroll_up_textures.0
+        };
+        
+        if let Some(tex) = up_tex {
+            draw_texture_ex(tex, scroll_x, up_y, WHITE, DrawTextureParams::default());
+        } else {
+            draw_rectangle(scroll_x, up_y, Self::SCROLL_BTN_W, Self::SCROLL_BTN_H, 
+                Color::from_rgba(80, 80, 100, 255));
+            draw_text_cn("▲", scroll_x + 2.0, up_y + 10.0, 10.0, WHITE);
+        }
+        
+        if up_hovered && is_mouse_button_pressed(MouseButton::Left) {
+            if self.category_scroll > 0 {
+                self.category_scroll -= 1;
+            }
+        }
+        
+        // 下箭头 Prguse2[207-209]
+        let down_y = pos.y + Self::SCROLL_DOWN_Y;
+        let down_hovered = mouse_pos.0 >= scroll_x && mouse_pos.0 <= scroll_x + Self::SCROLL_BTN_W
+            && mouse_pos.1 >= down_y && mouse_pos.1 <= down_y + Self::SCROLL_BTN_H;
+        let down_pressed = down_hovered && is_mouse_button_down(MouseButton::Left);
+        
+        let down_tex = if down_pressed {
+            &self.scroll_down_textures.2
+        } else if down_hovered {
+            &self.scroll_down_textures.1
+        } else {
+            &self.scroll_down_textures.0
+        };
+        
+        if let Some(tex) = down_tex {
+            draw_texture_ex(tex, scroll_x, down_y, WHITE, DrawTextureParams::default());
+        } else {
+            draw_rectangle(scroll_x, down_y, Self::SCROLL_BTN_W, Self::SCROLL_BTN_H, 
+                Color::from_rgba(80, 80, 100, 255));
+            draw_text_cn("▼", scroll_x + 2.0, down_y + 10.0, 10.0, WHITE);
+        }
+        
+        if down_hovered && is_mouse_button_pressed(MouseButton::Left) {
+            let max_scroll = self.categories.len().saturating_sub(Self::CATEGORY_MAX_VISIBLE);
+            if self.category_scroll < max_scroll {
+                self.category_scroll += 1;
+            }
+        }
+        
+        // 滚动块 Prguse2[205-206]
+        let scrollbar_height = Self::SCROLL_DOWN_Y - Self::SCROLL_UP_Y - Self::SCROLL_BTN_H;
+        let scroll_ratio = if self.categories.len() > Self::CATEGORY_MAX_VISIBLE {
+            self.category_scroll as f32 / (self.categories.len() - Self::CATEGORY_MAX_VISIBLE) as f32
+        } else {
+            0.0
+        };
+        
+        let bar_y = pos.y + Self::SCROLL_UP_Y + Self::SCROLL_BTN_H + (scroll_ratio * (scrollbar_height - 20.0));
+        let bar_hovered = mouse_pos.0 >= scroll_x && mouse_pos.0 <= scroll_x + Self::SCROLL_BTN_W
+            && mouse_pos.1 >= bar_y && mouse_pos.1 <= bar_y + 20.0;
+        
+        let bar_tex = if bar_hovered { &self.scroll_bar_textures.1 } else { &self.scroll_bar_textures.0 };
+        
+        if let Some(tex) = bar_tex {
+            draw_texture_ex(tex, scroll_x, bar_y, WHITE, DrawTextureParams::default());
+        } else {
+            draw_rectangle(scroll_x, bar_y, Self::SCROLL_BTN_W, 20.0, 
+                Color::from_rgba(100, 100, 120, 255));
+        }
+    }
+    
+    /// 绘制商品网格
+    pub(super) fn draw_item_grid(&mut self, pos: Vec2) {
+        // 每帧重置悬停状态
+        self.hover_item = None;
+        
+        let start_idx = self.current_page * self.items_per_page;
+        
+        for i in 0..self.items_per_page {
+            let item_idx = start_idx + i;
+            
+            // 计算网格位置
+            let grid_x = if i < 4 {
+                pos.x + Self::GRID_START_X + (i as f32 * Self::CELL_SPACING)
+            } else {
+                pos.x + Self::GRID_START_X + ((i - 4) as f32 * Self::CELL_SPACING)
+            };
+            let grid_y = if i < 4 {
+                pos.y + Self::GRID_ROW1_Y
+            } else {
+                pos.y + Self::GRID_ROW2_Y
+            };
+            
+            // 绘制商品格子
+            if item_idx < self.filtered_items.len() {
+                self.draw_item_cell(grid_x, grid_y, item_idx);
+            } else {
+                // 空格子
+                self.draw_empty_cell(grid_x, grid_y);
+            }
+        }
+    }
+    
+    /// 绘制商品格子 (基于原版位置)
+    pub(super) fn draw_item_cell(&mut self, x: f32, y: f32, item_idx: usize) {
+        let item = &self.filtered_items[item_idx];
+        
+        // 格子背景 Title[750]
+        if let Some(ref tex) = self.cell_texture {
+            draw_texture_ex(tex, x, y, WHITE, DrawTextureParams::default());
+        } else {
+            draw_rectangle(x, y, Self::CELL_WIDTH, Self::CELL_HEIGHT,
+                Color::from_rgba(50, 50, 60, 255));
+            draw_rectangle_lines(x, y, Self::CELL_WIDTH, Self::CELL_HEIGHT,
+                1.0, Color::from_rgba(100, 100, 120, 255));
+        }
+        
+        // 物品名称 (原版位置: 0, 13 居中)
+        let name_color = if item.in_stock {
+            Color::from_rgba(255, 215, 0, 255)
+        } else {
+            GRAY
+        };
+        draw_text_cn(&item.name, x + Self::CELL_WIDTH / 2.0 - 20.0, y + 16.0, 10.0, name_color);
+        
+        // 物品图标 (原版位置: 12, 40, 尺寸32x32)
+        let icon_x = x + 12.0;
+        let icon_y = y + 40.0;
+        let icon_w = 32.0;
+        let icon_h = 32.0;
+        
+        // 检测图标区域悬停（用于显示物品提示框）
+        let mouse_pos = mouse_position();
+        let icon_hovered = mouse_pos.0 >= icon_x && mouse_pos.0 <= icon_x + icon_w
+            && mouse_pos.1 >= icon_y && mouse_pos.1 <= icon_y + icon_h;
+        if icon_hovered {
+            self.hover_item = Some(item_idx);
+        }
+        
+        if let Some(info) = LibraryName::Items.get_texture(item.icon_index) {
+            if let Some(ref tex) = info.image {
+                // 居中绘制
+                let tex_w = info.width as f32;
+                let tex_h = info.height as f32;
+                let offset_x = (32.0 - tex_w.min(32.0)) / 2.0;
+                let offset_y = (32.0 - tex_h.min(32.0)) / 2.0;
+                draw_texture_ex(tex, icon_x + offset_x, icon_y + offset_y, WHITE, DrawTextureParams {
+                    dest_size: Some(vec2(tex_w.min(32.0), tex_h.min(32.0))),
+                    ..Default::default()
+                });
+            }
+        } else {
+            draw_rectangle(icon_x, icon_y, 32.0, 32.0, Color::from_rgba(60, 60, 70, 255));
+        }
+        
+        // STOCK标签 (原版位置: 53, 37)
+        draw_text_cn("STOCK:", x + 53.0, y + 45.0, 7.0, GRAY);
+        
+        // 库存数量 (原版位置: 93, 37)
+        let stock_text = if item.stock >= 99 {
+            "99+".to_string()
+        } else if item.stock == 0 {
+            "∞".to_string()
+        } else {
+            item.stock.to_string()
+        };
+        draw_text_cn(&stock_text, x + 93.0, y + 45.0, 7.0, WHITE);
+        
+        // 购买数量选择按钮 (原版位置: quantityDown=55,56 quantityUp=97,56 quantity=74,56)
+        // 计算当前格子在页面中的索引 (0-7)
+        let start_idx = self.current_page * self.items_per_page;
+        let grid_idx = item_idx - start_idx;
+        
+        if grid_idx < 8 {
+            let qty = self.quantities[grid_idx];
+            
+            // 减少按钮 Prguse2[240-242] (原版位置: 55, 56)
+            let down_x = x + 55.0;
+            let down_y = y + 56.0;
+            let btn_w = 16.0;
+            let btn_h = 14.0;
+            
+            let down_hovered = mouse_pos.0 >= down_x && mouse_pos.0 <= down_x + btn_w
+                && mouse_pos.1 >= down_y && mouse_pos.1 <= down_y + btn_h;
+            let down_pressed = down_hovered && is_mouse_button_down(MouseButton::Left);
+            
+            let down_tex = if down_pressed {
+                &self.left_btn_textures.2
+            } else if down_hovered {
+                &self.left_btn_textures.1
+            } else {
+                &self.left_btn_textures.0
+            };
+            
+            if let Some(tex) = down_tex {
+                draw_texture_ex(tex, down_x, down_y, WHITE, DrawTextureParams::default());
+            } else {
+                let color = if down_hovered {
+                    Color::from_rgba(120, 120, 160, 255)
+                } else {
+                    Color::from_rgba(80, 80, 120, 255)
+                };
+                draw_rectangle(down_x, down_y, btn_w, btn_h, color);
+                draw_text_cn("-", down_x + 5.0, down_y + 10.0, 10.0, WHITE);
+            }
+            
+            if down_hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+                if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
+                    self.quantities[grid_idx] = qty.saturating_sub(10).max(1);
+                } else {
+                    self.quantities[grid_idx] = qty.saturating_sub(1).max(1);
+                }
+            }
+            
+            // 数量显示 (原版位置: 74, 56, 尺寸20x13)
+            let qty_x = x + 74.0;
+            let qty_y = y + 56.0;
+            draw_text_cn(&qty.to_string(), qty_x + 4.0, qty_y + 10.0, 8.0, WHITE);
+            
+            // 增加按钮 Prguse2[243-245] (原版位置: 97, 56)
+            let up_x = x + 97.0;
+            let up_y = y + 56.0;
+            
+            let up_hovered = mouse_pos.0 >= up_x && mouse_pos.0 <= up_x + btn_w
+                && mouse_pos.1 >= up_y && mouse_pos.1 <= up_y + btn_h;
+            let up_pressed = up_hovered && is_mouse_button_down(MouseButton::Left);
+            
+            let up_tex = if up_pressed {
+                &self.right_btn_textures.2
+            } else if up_hovered {
+                &self.right_btn_textures.1
+            } else {
+                &self.right_btn_textures.0
+            };
+            
+            if let Some(tex) = up_tex {
+                draw_texture_ex(tex, up_x, up_y, WHITE, DrawTextureParams::default());
+            } else {
+                let color = if up_hovered {
+                    Color::from_rgba(120, 120, 160, 255)
+                } else {
+                    Color::from_rgba(80, 80, 120, 255)
+                };
+                draw_rectangle(up_x, up_y, btn_w, btn_h, color);
+                draw_text_cn("+", up_x + 4.0, up_y + 10.0, 10.0, WHITE);
+            }
+            
+            if up_hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+                let max_qty = if item.stock > 0 && item.stock < 99 {
+                    item.stock as u8
+                } else {
+                    99
+                };
+                if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
+                    self.quantities[grid_idx] = (qty + 10).min(max_qty);
+                } else {
+                    self.quantities[grid_idx] = (qty + 1).min(max_qty);
+                }
+            }
+        }
+        
+        // 物品数量 (原版位置: 16, 60)
+        if item.count > 1 {
+            draw_text_cn(&format!("x{}", item.count), x + 16.0, y + 68.0, 7.0, WHITE);
+        }
+        
+        // 元宝价格 (原版位置: 2, 81 右对齐)
+        if item.price_ingot > 0 {
+            draw_text_cn(&format!("{}", item.price_ingot), x + 75.0, y + 89.0, 8.0,
+                Color::from_rgba(0, 255, 255, 255));
+        }
+        
+        // 金币价格 (原版位置: 2, 102 右对齐)
+        if item.price_gold > 0 {
+            draw_text_cn(&format!("{}", item.price_gold), x + 75.0, y + 110.0, 8.0,
+                Color::from_rgba(255, 215, 0, 255));
+        }
+        
+        // 热销/新品标记
+        if item.hot {
+            draw_text_cn("🔥", x + Self::CELL_WIDTH - 18.0, y + 12.0, 12.0, RED);
+        }
+        if item.new {
+            draw_text_cn("NEW", x + 5.0, y + 12.0, 7.0, GREEN);
+        }
+        
+        let is_previewable = matches!(item.category, ShopCategoryHybrid::Weapon | ShopCategoryHybrid::Armor);
+        
+        // Preview按钮 Title[781-783] (原版位置: 8, 122)
+        if is_previewable {
+            let preview_x = x + 8.0;
+            let preview_y = y + 122.0;
+            
+            // 使用纹理实际尺寸
+            let (preview_w, preview_h) = if let Some(ref tex) = self.preview_btn_textures.0 {
+                (tex.width(), tex.height())
+            } else {
+                (32.0, 24.0)  // 默认尺寸
+            };
+            
+            let preview_hovered = mouse_pos.0 >= preview_x && mouse_pos.0 <= preview_x + preview_w
+                && mouse_pos.1 >= preview_y && mouse_pos.1 <= preview_y + preview_h;
+            let preview_pressed = preview_hovered && is_mouse_button_down(MouseButton::Left);
+            
+            let preview_tex = if preview_pressed {
+                &self.preview_btn_textures.2
+            } else if preview_hovered {
+                &self.preview_btn_textures.1
+            } else {
+                &self.preview_btn_textures.0
+            };
+            
+            if let Some(tex) = preview_tex {
+                draw_texture_ex(tex, preview_x, preview_y, WHITE, DrawTextureParams::default());
+            } else {
+                let color = if preview_hovered {
+                    Color::from_rgba(120, 120, 180, 255)
+                } else {
+                    Color::from_rgba(80, 80, 140, 255)
+                };
+                draw_rectangle(preview_x, preview_y, preview_w, preview_h, color);
+            }
+            
+            if preview_hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+                self.preview_item = Some(item_idx);
+                println!("👁️ 预览: {}", item.name);
+            }
+        }
+        
+        // Buy按钮 Title[778-780] (原版位置: 42/75, 122)
+        let buy_x = if is_previewable { x + 75.0 } else { x + 42.0 };
+        let buy_y = y + 122.0;
+        
+        // 使用纹理实际尺寸
+        let (buy_w, buy_h) = if let Some(ref tex) = self.buy_btn_textures.0 {
+            (tex.width(), tex.height())
+        } else {
+            (32.0, 24.0)  // 默认尺寸
+        };
+        
+        let buy_hovered = mouse_pos.0 >= buy_x && mouse_pos.0 <= buy_x + buy_w
+            && mouse_pos.1 >= buy_y && mouse_pos.1 <= buy_y + buy_h;
+        let buy_pressed = buy_hovered && is_mouse_button_down(MouseButton::Left);
+        
+        let buy_tex = if buy_pressed {
+            &self.buy_btn_textures.2
+        } else if buy_hovered {
+            &self.buy_btn_textures.1
+        } else {
+            &self.buy_btn_textures.0
+        };
+        
+        if let Some(tex) = buy_tex {
+            draw_texture_ex(tex, buy_x, buy_y, WHITE, DrawTextureParams::default());
+        } else {
+            let color = if buy_hovered {
+                Color::from_rgba(120, 180, 120, 255)
+            } else {
+                Color::from_rgba(80, 140, 80, 255)
+            };
+            draw_rectangle(buy_x, buy_y, buy_w, buy_h, color);
+        }
+        
+        if buy_hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+            println!("💰 购买: {}", item.name);
+        }
+    }
+    
+    /// 绘制空格子 (原版也使用 Title[750] 纹理)
+    pub(super) fn draw_empty_cell(&self, x: f32, y: f32) {
+        // 原版中空格子也会绘制背景纹理 Title[750]
+        if let Some(ref tex) = self.cell_texture {
+            draw_texture_ex(tex, x, y, WHITE, DrawTextureParams::default());
+        } else {
+            // 备用绘制
+            draw_rectangle(x, y, Self::CELL_WIDTH, Self::CELL_HEIGHT,
+                Color::from_rgba(40, 40, 50, 150));
+            draw_rectangle_lines(x, y, Self::CELL_WIDTH, Self::CELL_HEIGHT,
+                1.0, Color::from_rgba(60, 60, 70, 255));
+        }
+    }
+    
+    /// 绘制分页控制 (原版位置: PageLabel=597,446(83x17) PreviousButton=600,448 NextButton=660,448)
+    pub(super) fn draw_pagination(&mut self, pos: Vec2) {
+        let total_pages = if self.filtered_items.is_empty() {
+            1
+        } else {
+            (self.filtered_items.len() + self.items_per_page - 1) / self.items_per_page
+        };
+        
+        let mouse_pos = mouse_position();
+        
+        // 上一页按钮 Prguse2[240-242] (原版: 600, 448)
+        let prev_x = pos.x + 600.0;
+        let prev_y = pos.y + 448.0;
+        let btn_w = 16.0;
+        let btn_h = 14.0;
+        
+        let prev_hovered = mouse_pos.0 >= prev_x && mouse_pos.0 <= prev_x + btn_w
+            && mouse_pos.1 >= prev_y && mouse_pos.1 <= prev_y + btn_h;
+        let prev_pressed = prev_hovered && is_mouse_button_down(MouseButton::Left);
+        
+        // 使用 left_btn_textures (Prguse2[240-242])
+        let prev_tex = if prev_pressed {
+            &self.left_btn_textures.2
+        } else if prev_hovered {
+            &self.left_btn_textures.1
+        } else {
+            &self.left_btn_textures.0
+        };
+        
+        if let Some(tex) = prev_tex {
+            draw_texture_ex(tex, prev_x, prev_y, WHITE, DrawTextureParams::default());
+        } else {
+            let color = if prev_hovered {
+                Color::from_rgba(120, 120, 160, 255)
+            } else {
+                Color::from_rgba(80, 80, 120, 255)
+            };
+            draw_rectangle(prev_x, prev_y, btn_w, btn_h, color);
+            draw_text_cn("◀", prev_x + 3.0, prev_y + 10.0, 10.0, WHITE);
+        }
+        
+        if prev_hovered && is_mouse_button_pressed(MouseButton::Left) && self.current_page > 0 {
+            self.current_page -= 1;
+            self.preview_item = None;
+            self.quantities = [1; 8];  // 重置购买数量
+            println!("📄 上一页: {}", self.current_page + 1);
+        }
+        
+        // 下一页按钮 Prguse2[243-245] (原版: 660, 448)
+        let next_x = pos.x + 660.0;
+        let next_y = pos.y + 448.0;
+        
+        let next_hovered = mouse_pos.0 >= next_x && mouse_pos.0 <= next_x + btn_w
+            && mouse_pos.1 >= next_y && mouse_pos.1 <= next_y + btn_h;
+        let next_pressed = next_hovered && is_mouse_button_down(MouseButton::Left);
+        
+        // 使用 right_btn_textures (Prguse2[243-245])
+        let next_tex = if next_pressed {
+            &self.right_btn_textures.2
+        } else if next_hovered {
+            &self.right_btn_textures.1
+        } else {
+            &self.right_btn_textures.0
+        };
+        
+        if let Some(tex) = next_tex {
+            draw_texture_ex(tex, next_x, next_y, WHITE, DrawTextureParams::default());
+        } else {
+            let color = if next_hovered {
+                Color::from_rgba(120, 120, 160, 255)
+            } else {
+                Color::from_rgba(80, 80, 120, 255)
+            };
+            draw_rectangle(next_x, next_y, btn_w, btn_h, color);
+            draw_text_cn("▶", next_x + 3.0, next_y + 10.0, 10.0, WHITE);
+        }
+        
+        if next_hovered && is_mouse_button_pressed(MouseButton::Left) && self.current_page < total_pages - 1 {
+            self.current_page += 1;
+            self.preview_item = None;
+            self.quantities = [1; 8];  // 重置购买数量
+            println!("📄 下一页: {}", self.current_page + 1);
+        }
+        
+        // 页码显示 (原版: 597, 446, 尺寸83x17, 居中对齐)
+        // 页码在按钮上方显示，居中在83px宽度内
+        let page_label_x = pos.x + 597.0;
+        let page_label_y = pos.y + 446.0;
+        let page_text = format!("{} / {}", self.current_page + 1, total_pages);
+        // 83px宽度内居中 (597 + 83/2 = 638.5)
+        draw_text_cn(&page_text, page_label_x + 30.0, page_label_y + 11.0, 9.0, WHITE);
+    }
+    
+    /// 绘制货币信息 (原版位置: totalCredits=5,449 totalGold=123,449)
+    pub(super) fn draw_currency_info(&self, pos: Vec2) {
+        // 元宝显示 (原版位置: 5, 449, 右对齐100宽)
+        let credits_x = pos.x + 5.0;
+        let credits_y = pos.y + 449.0;
+        draw_text_cn(&format!("{}", self.player_ingot), credits_x + 60.0, credits_y + 12.0,
+            10.0, Color::from_rgba(0, 255, 255, 255));
+        
+        // 金币显示 (原版位置: 123, 449, 右对齐100宽)
+        let gold_x = pos.x + 123.0;
+        let gold_y = pos.y + 449.0;
+        draw_text_cn(&format!("{}", self.player_gold), gold_x + 60.0, gold_y + 12.0, 
+            10.0, Color::from_rgba(255, 215, 0, 255));
+    }
+    
+    /// 绘制支付方式选择 (原版位置: PaymentTypeGold=250,449 PaymentTypeCredit=340,449)
+    pub(super) fn draw_payment_options(&mut self, pos: Vec2) {
+        let mouse_pos = mouse_position();
+        
+        // Buy with Gold 复选框 (原版位置: 250, 449)
+        let gold_x = pos.x + 250.0;
+        let gold_y = pos.y + 449.0;
+        let checkbox_size = 14.0;
+        
+        let gold_hovered = mouse_pos.0 >= gold_x && mouse_pos.0 <= gold_x + 120.0
+            && mouse_pos.1 >= gold_y && mouse_pos.1 <= gold_y + checkbox_size;
+        
+        // 绘制复选框
+        let gold_tex = if self.pay_with_gold {
+            &self.checkbox_textures.1  // 选中
+        } else {
+            &self.checkbox_textures.0  // 未选中
+        };
+        
+        if let Some(tex) = gold_tex {
+            draw_texture_ex(tex, gold_x, gold_y, WHITE, DrawTextureParams::default());
+        } else {
+            draw_rectangle(gold_x, gold_y, checkbox_size, checkbox_size, 
+                Color::from_rgba(60, 60, 80, 255));
+            draw_rectangle_lines(gold_x, gold_y, checkbox_size, checkbox_size,
+                1.0, Color::from_rgba(150, 150, 170, 255));
+            if self.pay_with_gold {
+                draw_text_cn("✓", gold_x + 2.0, gold_y + 11.0, 10.0, GREEN);
+            }
+        }
+        draw_text_cn("Buy with Gold", gold_x + 18.0, gold_y + 11.0, 9.0, 
+            if gold_hovered { WHITE } else { GRAY });
+        
+        if gold_hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+            self.pay_with_gold = true;
+        }
+        
+        // Buy with Credits 复选框 (原版位置: 340, 449)
+        let credit_x = pos.x + 340.0;
+        let credit_y = pos.y + 449.0;
+        
+        let credit_hovered = mouse_pos.0 >= credit_x && mouse_pos.0 <= credit_x + 130.0
+            && mouse_pos.1 >= credit_y && mouse_pos.1 <= credit_y + checkbox_size;
+        
+        let credit_tex = if !self.pay_with_gold {
+            &self.checkbox_textures.1  // 选中
+        } else {
+            &self.checkbox_textures.0  // 未选中
+        };
+        
+        if let Some(tex) = credit_tex {
+            draw_texture_ex(tex, credit_x, credit_y, WHITE, DrawTextureParams::default());
+        } else {
+            draw_rectangle(credit_x, credit_y, checkbox_size, checkbox_size, 
+                Color::from_rgba(60, 60, 80, 255));
+            draw_rectangle_lines(credit_x, credit_y, checkbox_size, checkbox_size,
+                1.0, Color::from_rgba(150, 150, 170, 255));
+            if !self.pay_with_gold {
+                draw_text_cn("✓", credit_x + 2.0, credit_y + 11.0, 10.0, GREEN);
+            }
+        }
+        draw_text_cn("Buy with Credits", credit_x + 18.0, credit_y + 11.0, 9.0,
+            if credit_hovered { WHITE } else { GRAY });
+        
+        if credit_hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+            self.pay_with_gold = false;
+        }
+    }
+}
