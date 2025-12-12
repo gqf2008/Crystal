@@ -13,11 +13,10 @@
 // ============================================================================
 
 use macroquad::prelude::*;
-use macroquad::ui::{self, Skin, hash};
+use macroquad::ui::{self, Skin};
 use crate::resources::LibraryName;
-use crate::ui::text_renderer::draw_text_cn;
 
-use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid};
+use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopItemHybrid};
 use super::sample_items::create_sample_items;
 
 /// 商城对话框（混合版本）
@@ -102,8 +101,9 @@ pub struct GameShopDialogHybrid {
 
 impl GameShopDialogHybrid {
     // 常量 - 基于 egui 版本的原版位置
-    pub(super) const DIALOG_WIDTH: f32 = 720.0;
-    pub(super) const DIALOG_HEIGHT: f32 = 480.0;
+    // 与 C# 原版一致：Title[749] 实际尺寸为 696x476（MirImageControl.AutoSize = true）
+    pub(super) const DIALOG_WIDTH: f32 = 696.0;
+    pub(super) const DIALOG_HEIGHT: f32 = 476.0;
     pub(super) const TITLE_HEIGHT: f32 = 35.0;
     
     // 网格位置 (原版)

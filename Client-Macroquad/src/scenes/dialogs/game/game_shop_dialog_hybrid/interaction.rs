@@ -215,8 +215,16 @@ impl GameShopDialogHybrid {
             // 关闭按钮 (原版位置: 230, 8)
             let close_x = preview_x + 230.0;
             let close_y = preview_y + 8.0;
-            let close_hovered = mouse_pos.0 >= close_x && mouse_pos.0 <= close_x + 20.0
-                && mouse_pos.1 >= close_y && mouse_pos.1 <= close_y + 20.0;
+
+            // 使用关闭按钮纹理实际尺寸（Prguse2[360] 为 24x21）
+            let (close_w, close_h) = if let Some(ref tex) = self.close_btn_textures.0 {
+                (tex.width(), tex.height())
+            } else {
+                (24.0, 21.0)
+            };
+
+            let close_hovered = mouse_pos.0 >= close_x && mouse_pos.0 <= close_x + close_w
+                && mouse_pos.1 >= close_y && mouse_pos.1 <= close_y + close_h;
             let close_pressed = close_hovered && is_mouse_button_down(MouseButton::Left);
             
             let close_tex = if close_pressed {
@@ -235,7 +243,7 @@ impl GameShopDialogHybrid {
                 } else {
                     Color::from_rgba(150, 50, 50, 255)
                 };
-                draw_rectangle(close_x, close_y, 20.0, 20.0, close_color);
+                draw_rectangle(close_x, close_y, close_w, close_h, close_color);
                 draw_text_cn("×", close_x + 5.0, close_y + 15.0, 14.0, WHITE);
             }
             
@@ -287,23 +295,12 @@ impl GameShopDialogHybrid {
     
     /// 处理关闭按钮 (使用纹理 Prguse2[360-362])
     pub(super) fn handle_close_button(&mut self, pos: Vec2) {
-        // 纹理尺寸: 24x21
-        // 原版位置: (671, 4)
-        // 对话框宽度: 720
-        // 720 - 24 - 边距 = 720 - 24 - 25 = 671 ✓
-        let close_x = pos.x + 671.0;
+        // C# 原版:
+        // - Dialog 背景 Title[749] 实际尺寸: 696x476 (AutoSize)
+        // - CloseButton.Location = (671, 4)
+        // - CloseButton 纹理 Prguse2[360] 实际尺寸: 24x21
+        //   => 右边距 = 696 - 671 - 24 = 1px
         let close_y = pos.y + 4.0;
-        
-        // 🔍 调试输出
-        static mut PRINTED: bool = false;
-        unsafe {
-            if !PRINTED {
-                println!("🔍 对话框位置: ({}, {})", pos.x, pos.y);
-                println!("🔍 关闭按钮绝对位置: ({}, {})", close_x, close_y);
-                println!("🔍 对话框宽度: {}, 按钮X偏移: 671", Self::DIALOG_WIDTH);
-                PRINTED = true;
-            }
-        }
         
         // 使用纹理实际尺寸
         let (close_w, close_h) = if let Some(ref tex) = self.close_btn_textures.0 {
@@ -311,6 +308,8 @@ impl GameShopDialogHybrid {
         } else {
             (24.0, 21.0)  // Prguse2[360] 实际尺寸
         };
+
+        let close_x = pos.x + (Self::DIALOG_WIDTH - close_w - 1.0);
         
         let mouse_pos = mouse_position();
         let hovered = mouse_pos.0 >= close_x && mouse_pos.0 <= close_x + close_w
