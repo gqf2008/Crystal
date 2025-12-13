@@ -15,6 +15,18 @@ pub enum RenderLayer {
     UI = 5,          // UI元素
 }
 
+/// 渲染阶段参数（用于多次渲染 pass，例如遮挡后的 ghost pass）
+#[derive(Debug, Clone, Copy)]
+pub struct RenderPass {
+    pub alpha: f32,
+}
+
+impl Default for RenderPass {
+    fn default() -> Self {
+        Self { alpha: 1.0 }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RenderOrder {
     pub layer: RenderLayer,

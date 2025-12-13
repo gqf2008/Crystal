@@ -4,13 +4,37 @@ mod weapon;
 use crate::components::{Camera,Position};
 use crate::systems::RenderSystem;
 // use ggez::{graphics::GraphicsContext, GameResult};
+use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
+use macroquad::prelude::*;
 
 #[derive(ecs_macros::RenderSystem)]
-pub struct SpriteRenderSystem;
+pub struct SpriteRenderSystem {
+    add_blend_material: Material,
+}
 
 impl SpriteRenderSystem {
     pub fn new() -> Self {
-        Self
+        // 创建 ADD 混合材质 (dst + src * alpha)
+        let add_blend_material = load_material(
+            ShaderSource::Glsl {
+                vertex: include_str!("../../../shaders/default.vert"),
+                fragment: include_str!("../../../shaders/default.frag"),
+            },
+            MaterialParams {
+                pipeline_params: PipelineParams {
+                    color_blend: Some(BlendState::new(
+                        Equation::Add,
+                        BlendFactor::Value(BlendValue::SourceAlpha),
+                        BlendFactor::One,
+                    )),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        Self { add_blend_material }
     }
 }
 
@@ -49,10 +73,9 @@ impl SpriteRenderSystem {
 impl RenderSystem for SpriteRenderSystem {
     fn draw(
         &mut self,
-        _world: &hecs::World,
+        world: &hecs::World,
     ) -> crate::game::GameResult {
-        // TODO: 重写为 macroquad API
-        // self.draw_character(world)?;
+        self.draw_character(world, &self.add_blend_material)?;
         Ok(())
     }
 }

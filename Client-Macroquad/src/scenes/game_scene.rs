@@ -15,15 +15,14 @@ use crate::{
     components::{
         AnimationFrame, Camera as EcsCamera, CameraMode, LocalPlayer, MapData, MirDirection,
         MovementVelocity, Path, Player, PlayerAction, PlayerAppearance, PlayerInput, Position,
-        TimeTracker,
+        RenderPass, TimeTracker,
     },
     systems::{priority, AnimationSystem, CameraFollowSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SystemScheduler},
 };
 use crate::components::{WeaponAnimation, WeaponState};
-use crate::{map_renderer::MeshMapRenderer, resources::{init_map_libraries, LibraryName, MapReader}};
-use crate::objects::frames::get_player_frame;
+use crate::{map_renderer::MeshMapRenderer, resources::{init_map_libraries, MapReader}};
+use crate::systems::rendering::SpriteRenderSystem;
 use macroquad::prelude::*;
-use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
 
 // 遮挡“露人形”参数（集中在这里，方便调观感）
 const FRONT_OCCLUSION_SEARCH_RADIUS_X_TILES: i32 = 3;
@@ -35,12 +34,6 @@ const PLAYER_OCCLUSION_PROBE_HEIGHT_PX: f32 = 56.0;
 
 // 被遮挡时额外绘制的人形透明度
 const PLAYER_GHOST_ALPHA: f32 = 0.45;
-
-// 武器特效强度（DrawBlend 的 alpha 近似值）
-const WEAPON_EFFECT_ALPHA: f32 = 0.4;
-
-// 坐骑时，人物在坐骑上的上移（纯视觉，不影响碰撞/寻路）
-const MOUNT_RIDER_OFFSET_Y_PX: f32 = -24.0;
 
 /// 游戏主场景 - 集成所有混合对话框
 pub struct GameScene {
@@ -54,9 +47,6 @@ pub struct GameScene {
     map_first_drag: bool,
     map_last_mouse_pos: Vec2,
 
-    // 角色武器特效用的 ADD 混合材质（避免 alpha 混合导致“阴影圈/发灰边缘”）
-    add_blend_material: Material,
-
     // 完整 UI（底部主界面 + 全部子对话框）
     main_dialog: MainDialog,
 
@@ -67,6 +57,7 @@ pub struct GameScene {
     ecs_local_player_entity: Option<hecs::Entity>,
     ecs_map_entity: Option<hecs::Entity>,
     ecs_time_entity: Option<hecs::Entity>,
+    ecs_render_pass_entity: Option<hecs::Entity>,
 
     ecs_animation_accum: f32,
 
@@ -79,26 +70,6 @@ pub struct GameScene {
 
 impl GameScene {
     pub fn new() -> Self {
-        // 创建 ADD 混合材质 (dst + src * alpha)
-        let add_blend_material = load_material(
-            ShaderSource::Glsl {
-                vertex: include_str!("../../shaders/default.vert"),
-                fragment: include_str!("../../shaders/default.frag"),
-            },
-            MaterialParams {
-                pipeline_params: PipelineParams {
-                    color_blend: Some(BlendState::new(
-                        Equation::Add,
-                        BlendFactor::Value(BlendValue::SourceAlpha),
-                        BlendFactor::One,
-                    )),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
         // Camera2D 初始值（真实参数会在地图加载后更新）
         let map_camera = Camera2D {
             target: vec2(0.0, 0.0),
@@ -115,7 +86,9 @@ impl GameScene {
             .add_system(PathfindingSystem::new(), priority::PATHFINDING)
             .add_system(MovementSystem, priority::MOVEMENT)
             .add_system(AnimationSystem::new(), priority::ANIMATION)
-            .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW);
+            .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW)
+            // ECS 渲染系统：先最小接入 SpriteRenderSystem（角色/坐骑/武器特效）
+            .add_system(SpriteRenderSystem::new(), priority::SPRITE_RENDER);
 
         Self {
             map_reader: None,
@@ -127,8 +100,6 @@ impl GameScene {
             map_first_drag: true,
             map_last_mouse_pos: mouse_position().into(),
 
-            add_blend_material,
-
             main_dialog: MainDialog::new(),
 
             ecs_ctx: GameContext::new(),
@@ -137,6 +108,7 @@ impl GameScene {
             ecs_local_player_entity: None,
             ecs_map_entity: None,
             ecs_time_entity: None,
+            ecs_render_pass_entity: None,
 
             ecs_animation_accum: 0.0,
             ui_consumed_last_frame: false,
@@ -177,6 +149,12 @@ impl GameScene {
         if self.ecs_time_entity.is_none() {
             let entity = self.ecs_ctx.world.spawn((TimeTracker::default(),));
             self.ecs_time_entity = Some(entity);
+        }
+
+        // 2.6) 渲染 pass 参数（用于 ghost pass 等多次绘制）
+        if self.ecs_render_pass_entity.is_none() {
+            let entity = self.ecs_ctx.world.spawn((RenderPass::default(),));
+            self.ecs_render_pass_entity = Some(entity);
         }
 
         // 3) 本地玩家实体（最小移动链路）
@@ -250,325 +228,16 @@ impl GameScene {
         self.clamp_map_camera_position();
     }
 
-    fn draw_local_player_sprite(&mut self, alpha: f32) {
-        let Some(player_entity) = self.ecs_local_player_entity else {
-            return;
+    fn draw_ecs_sprites(&mut self, alpha: f32) -> GameResult {
+        let Some(pass_entity) = self.ecs_render_pass_entity else {
+            return Ok(());
         };
 
-        let Ok(mut q) = self
-            .ecs_ctx
-            .world
-            .query_one::<(&Position, &Player, &PlayerAppearance, &AnimationFrame)>(player_entity)
-        else {
-            return;
-        };
-
-        let Some((pos, player, appearance, anim_frame)) = q.get() else {
-            return;
-        };
-
-        // 取全局动画计数器（与 AnimationSystem 同源）
-        let animation_count = self
-            .ecs_time_entity
-            .and_then(|e| self.ecs_ctx.world.get::<&TimeTracker>(e).ok().map(|t| t.animation_count))
-            .unwrap_or(0);
-
-        // 使用 AnimationSystem 计算的帧索引（更接近最终架构）
-        let base_frame = anim_frame.character_frame;
-        let weapon_frame = anim_frame.weapon_frame;
-
-        let tint = Color::new(1.0, 1.0, 1.0, alpha.clamp(0.0, 1.0));
-
-        // 性别偏移（C# HairOffSet/ArmourOffSet/WeaponOffSet）
-        let body_hair_offset = if appearance.gender == crate::components::MirGender::Male {
-            0
-        } else {
-            808
-        };
-        let weapon_offset = if appearance.gender == crate::components::MirGender::Male {
-            0
-        } else {
-            416
-        };
-
-        let armour_index = appearance.armour.max(0) as usize;
-        let hair_index = appearance.hair as usize;
-        let weapon_index_opt = if appearance.weapon >= 0 {
-            Some(appearance.weapon as usize)
-        } else {
-            None
-        };
-        let weapon_effect_index_opt = if appearance.weapon_effect > 0 {
-            Some(appearance.weapon_effect as usize)
-        } else {
-            None
-        };
-
-        let armour_library = match appearance.class {
-            crate::components::MirClass::Assassin => LibraryName::AArmours(armour_index),
-            crate::components::MirClass::Archer => LibraryName::ARArmours(armour_index),
-            _ => LibraryName::CArmours(armour_index),
-        };
-        let hair_library = match appearance.class {
-            crate::components::MirClass::Assassin => LibraryName::AHair(hair_index),
-            crate::components::MirClass::Archer => LibraryName::ARHair(hair_index),
-            _ => LibraryName::CHair(hair_index),
-        };
-        let weapon_library = |idx: usize| match appearance.class {
-            crate::components::MirClass::Archer => LibraryName::ARWeapons(idx),
-            _ => LibraryName::CWeapons(idx),
-        };
-
-        let mut drew_any = false;
-
-        let draw_layer = |lib: LibraryName, frame: i32, pos: &Position, tint: Color| -> bool {
-            let frame_index = frame.max(0) as usize;
-            let Some(info) = lib.get_texture(frame_index) else {
-                return false;
-            };
-            let Some(tex) = info.image else {
-                return false;
-            };
-            let draw_x = pos.x + info.offset_x as f32;
-            let draw_y = pos.y + info.offset_y as f32;
-            draw_texture_ex(
-                &tex,
-                draw_x,
-                draw_y,
-                tint,
-                DrawTextureParams { ..Default::default() },
-            );
-            true
-        };
-
-        let draw_layer_additive = |material: &Material,
-                                  lib: LibraryName,
-                                  frame: i32,
-                                  pos: &Position,
-                                  tint: Color|
-         -> bool {
-            let frame_index = frame.max(0) as usize;
-            let Some(info) = lib.get_texture(frame_index) else {
-                return false;
-            };
-            let Some(tex) = info.image else {
-                return false;
-            };
-            let draw_x = pos.x + info.offset_x as f32;
-            let draw_y = pos.y + info.offset_y as f32;
-
-            gl_use_material(material);
-            draw_texture_ex(
-                &tex,
-                draw_x,
-                draw_y,
-                tint,
-                DrawTextureParams { ..Default::default() },
-            );
-            gl_use_default_material();
-
-            true
-        };
-
-        // 坐骑（MVP：用于 test_game_scene 视觉展示）
-        // 注意：`objects::frames::PLAYER_FRAMES` 里的 Mount* start 值是“人物帧表”的索引，
-        // 不能直接拿来索引 `Data/Mount/XX.Lib`，否则会越界导致“坐骑没了”。
-        // 这里改为：以 Mount lib 的 0 起始索引推算帧，并带多级回退，保证至少能画出来。
-        const DEFAULT_MOUNT_INDEX: usize = 0;
-        let mounted = true;
-
-        let mut mount_drawn = false;
-        let actor_pos;
-
-        if mounted {
-            let mount_lib = LibraryName::Mounts(DEFAULT_MOUNT_INDEX);
-
-            // 坐骑资源的方向顺序在不同客户端资源里存在差异。
-            // 当前这套 Data/Mount 资源表现为与 MirDirection 同序（Up 开始顺时针）。
-            // 如果这里做 +4 旋转，会导致整体 180° 反向。
-            let dir = player.direction as u8 as i32;
-            let mount_dir_index = dir.rem_euclid(8);
-
-            // 常见坐骑资源布局：按动作分块排列，每块再按 8 方向排列。
-            // Stand: 4 帧/方向  => base 0
-            // Walk : 8 帧/方向  => base 8*4 = 32
-            // Run  : 6 帧/方向  => base 32 + 8*8 = 96
-            let (frames_per_dir, interval_ms, action_base) = match player.action {
-                PlayerAction::Walk => (8, 100, 8 * 4),
-                PlayerAction::Run => (6, 100, 8 * 4 + 8 * 8),
-                _ => (4, 500, 0),
-            };
-
-            // 用 TimeTracker 驱动动画帧（与角色/地图一致的 100ms tick 源）
-            let animation_tick = (animation_count as i32) * 100 / interval_ms;
-            let current_frame = animation_tick % frames_per_dir;
-
-            // 先按“动作分块 + 方向 + 帧”尝试
-            let primary_index = action_base + mount_dir_index * frames_per_dir + current_frame;
-
-            // 失败时回退：
-            // 1) 同方向但用 stand 分块
-            // 2) 同方向但不用分块（有些资源从 0 开始直接按方向排）
-            // 3) 最后兜底到 0/1/2
-            let candidates = [
-                primary_index,
-                0 + mount_dir_index * 4 + (current_frame % 4),
-                mount_dir_index * frames_per_dir + current_frame,
-                current_frame,
-                0,
-                1,
-                2,
-            ];
-
-            for frame_index in candidates {
-                if draw_layer(mount_lib, frame_index, pos, tint) {
-                    mount_drawn = true;
-                    drew_any = true;
-                    break;
-                }
-            }
+        if let Ok(mut pass) = self.ecs_ctx.world.get::<&mut RenderPass>(pass_entity) {
+            pass.alpha = alpha;
         }
 
-        // 骑乘时，人物应使用 Mount* 动作帧（否则会看到“人在坐骑上还在跑路/跑步姿势”）。
-        // 注意：Mount* 人物帧本身已经包含与坐骑对齐的绘制偏移。
-        // 若我们再额外上移一次，会导致“人站在坐骑上/悬空”。
-        let mut rider_base_frame = base_frame;
-        let mut rider_weapon_frame = weapon_frame;
-        let mut rider_uses_mount_frames = false;
-        if mounted && mount_drawn {
-            let mount_action = match player.action {
-                PlayerAction::Walk => mir2_shared::enums::MirAction::MountWalking,
-                PlayerAction::Run => mir2_shared::enums::MirAction::MountRunning,
-                _ => mir2_shared::enums::MirAction::MountStanding,
-            };
-
-            if let Some(frame) = get_player_frame(mount_action) {
-                let dir = player.direction as u8 as i32;
-
-                let interval = frame.interval.max(1);
-                let count = frame.count.max(1);
-                let tick = (animation_count as i32) * 100 / interval;
-                let current = tick % count;
-
-                rider_base_frame = frame.start + (dir * frame.count) + current;
-
-                // ✅ 与非骑乘一致：武器/武器特效跟随身体 DrawFrame，避免左右“乱晃”。
-                rider_weapon_frame = rider_base_frame;
-
-                rider_uses_mount_frames = true;
-            }
-        }
-
-        // 只有真的画出了坐骑，才对人物位置做骑乘修正。
-        // 若使用 Mount* 人物帧，不再额外上移；否则用旧偏移做兜底对齐。
-        actor_pos = if mounted && mount_drawn {
-            if rider_uses_mount_frames {
-                *pos
-            } else {
-                Position::new(pos.x, pos.y + MOUNT_RIDER_OFFSET_Y_PX)
-            }
-        } else {
-            *pos
-        };
-
-        // 翅膀（简单实现：优先用 rider_base_frame；取不到就回退到 0 帧）
-        if appearance.wing_effect > 0 {
-            let wing_lib = LibraryName::Wings(appearance.wing_effect as usize);
-            if !draw_layer(wing_lib, rider_base_frame, &actor_pos, tint) {
-                drew_any |= draw_layer(wing_lib, 0, &actor_pos, tint);
-            } else {
-                drew_any = true;
-            }
-        }
-
-        // 武器层前后关系（参考原版）：右侧/下方方向武器在前，其余方向武器在后
-        let weapon_front = matches!(
-            player.direction,
-            crate::components::MirDirection::UpRight
-                | crate::components::MirDirection::Right
-                | crate::components::MirDirection::DownRight
-                | crate::components::MirDirection::Down
-        );
-
-        // weapon behind
-        if !weapon_front {
-            if let Some(weapon_index) = weapon_index_opt {
-                drew_any |= draw_layer(
-                    weapon_library(weapon_index),
-                    rider_weapon_frame + weapon_offset,
-                    &actor_pos,
-                    tint,
-                );
-
-                if let Some(effect_index) = weapon_effect_index_opt {
-                    // ✅ 原版 DrawBlend(0.4F) 更接近 ADD/发光效果，这里用 ADD 混合避免“阴影圈”。
-                    let effect_tint = Color::new(
-                        tint.r,
-                        tint.g,
-                        tint.b,
-                        (tint.a * WEAPON_EFFECT_ALPHA).clamp(0.0, 1.0),
-                    );
-                    drew_any |= draw_layer_additive(
-                        &self.add_blend_material,
-                        LibraryName::CWeaponEffect(effect_index),
-                        rider_weapon_frame + weapon_offset,
-                        &actor_pos,
-                        effect_tint,
-                    );
-                }
-            }
-        }
-
-        // body
-        drew_any |= draw_layer(
-            armour_library,
-            rider_base_frame + body_hair_offset,
-            &actor_pos,
-            tint,
-        );
-
-        // hair
-        drew_any |= draw_layer(
-            hair_library,
-            rider_base_frame + body_hair_offset,
-            &actor_pos,
-            tint,
-        );
-
-
-
-        // weapon front
-        if weapon_front {
-            if let Some(weapon_index) = weapon_index_opt {
-                drew_any |= draw_layer(
-                    weapon_library(weapon_index),
-                    rider_weapon_frame + weapon_offset,
-                    &actor_pos,
-                    tint,
-                );
-
-                if let Some(effect_index) = weapon_effect_index_opt {
-                    let effect_tint = Color::new(
-                        tint.r,
-                        tint.g,
-                        tint.b,
-                        (tint.a * WEAPON_EFFECT_ALPHA).clamp(0.0, 1.0),
-                    );
-                    drew_any |= draw_layer_additive(
-                        &self.add_blend_material,
-                        LibraryName::CWeaponEffect(effect_index),
-                        rider_weapon_frame + weapon_offset,
-                        &actor_pos,
-                        effect_tint,
-                    );
-                }
-            }
-        }
-
-        // 回退：红点
-        if !drew_any {
-            draw_circle(pos.x, pos.y, 6.0, Color::new(1.0, 0.0, 0.0, tint.a));
-        }
+        self.ecs_scheduler.draw(&self.ecs_ctx.world)
     }
 
     fn draw_ecs_path_overlay(&mut self) {
@@ -949,7 +618,7 @@ impl Scene for GameScene {
             }
 
             // 2) 先画角色（位于 Middle 与 Front 之间）
-            self.draw_local_player_sprite(1.0);
+            self.draw_ecs_sprites(1.0)?;
             self.draw_ecs_path_overlay();
 
             // 3) 再渲染 Front（保持完全不透明）
@@ -974,7 +643,7 @@ impl Scene for GameScene {
 
                 // 4) 只有被前景遮挡时，额外画一遍半透明人形（不改变前景本身）
                 if occluded {
-                    self.draw_local_player_sprite(PLAYER_GHOST_ALPHA);
+                    self.draw_ecs_sprites(PLAYER_GHOST_ALPHA)?;
                 }
             }
             set_default_camera();
