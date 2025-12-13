@@ -24,7 +24,7 @@
 // ============================================================================
 
 use super::SpriteRenderSystem;
-use crate::components::{AnimationFrame, Player, PlayerAppearance, Position, RenderPass, TimeTracker};
+use crate::components::{AnimationFrame, LocalPlayer, Player, PlayerAppearance, Position, RenderPass, TimeTracker};
 use crate::game::GameResult;
 use crate::objects::frames::get_player_frame;
 use crate::resources::LibraryName;
@@ -351,26 +351,40 @@ impl SpriteRenderSystem {
             .map(|(_, tt)| tt.animation_count)
             .unwrap_or(0);
 
-        let alpha = world
+        let (alpha, local_only) = world
             .query::<&RenderPass>()
             .iter()
             .next()
-            .map(|(_, pass)| pass.alpha)
-            .unwrap_or(1.0);
+            .map(|(_, pass)| (pass.alpha, pass.local_only))
+            .unwrap_or((1.0, false));
 
         // 收集并排序角色（现在包含 AnimationFrame）
         let mut characters_to_render = Vec::new();
 
-        for (_entity, (player, pos, appearance, anim_frame)) in world
-            .query::<(&Player, &Position, &PlayerAppearance, &AnimationFrame)>()
-            .iter()
-        {
-            characters_to_render.push((
-                player.clone(),
-                pos.clone(),
-                appearance.clone(),
-                anim_frame.clone(),
-            ));
+        if local_only {
+            for (_entity, (_local, player, pos, appearance, anim_frame)) in world
+                .query::<(&LocalPlayer, &Player, &Position, &PlayerAppearance, &AnimationFrame)>()
+                .iter()
+            {
+                characters_to_render.push((
+                    player.clone(),
+                    pos.clone(),
+                    appearance.clone(),
+                    anim_frame.clone(),
+                ));
+            }
+        } else {
+            for (_entity, (player, pos, appearance, anim_frame)) in world
+                .query::<(&Player, &Position, &PlayerAppearance, &AnimationFrame)>()
+                .iter()
+            {
+                characters_to_render.push((
+                    player.clone(),
+                    pos.clone(),
+                    appearance.clone(),
+                    anim_frame.clone(),
+                ));
+            }
         }
 
         // 按 Y 坐标排序（实现深度排序）

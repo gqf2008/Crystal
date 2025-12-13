@@ -19,11 +19,15 @@ pub enum RenderLayer {
 #[derive(Debug, Clone, Copy)]
 pub struct RenderPass {
     pub alpha: f32,
+    pub local_only: bool,
 }
 
 impl Default for RenderPass {
     fn default() -> Self {
-        Self { alpha: 1.0 }
+        Self {
+            alpha: 1.0,
+            local_only: false,
+        }
     }
 }
 

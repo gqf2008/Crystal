@@ -228,13 +228,14 @@ impl GameScene {
         self.clamp_map_camera_position();
     }
 
-    fn draw_ecs_sprites(&mut self, alpha: f32) -> GameResult {
+    fn draw_ecs_sprites(&mut self, alpha: f32, local_only: bool) -> GameResult {
         let Some(pass_entity) = self.ecs_render_pass_entity else {
             return Ok(());
         };
 
         if let Ok(mut pass) = self.ecs_ctx.world.get::<&mut RenderPass>(pass_entity) {
             pass.alpha = alpha;
+            pass.local_only = local_only;
         }
 
         self.ecs_scheduler.draw(&self.ecs_ctx.world)
@@ -473,6 +474,22 @@ impl GameScene {
             10.0, y, 14.0, Color::from_rgba(200, 200, 200, 180)
         );
     }
+
+    fn draw_debug_fps(&self) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+
+        // macroquad 内置 FPS 计数（debug 下足够用）
+        let fps = get_fps();
+        draw_text(
+            &format!("FPS: {}", fps),
+            12.0,
+            22.0,
+            20.0,
+            Color::from_rgba(0, 255, 0, 220),
+        );
+    }
 }
 
 impl Default for GameScene {
@@ -618,7 +635,7 @@ impl Scene for GameScene {
             }
 
             // 2) 先画角色（位于 Middle 与 Front 之间）
-            self.draw_ecs_sprites(1.0)?;
+            self.draw_ecs_sprites(1.0, false)?;
             self.draw_ecs_path_overlay();
 
             // 3) 再渲染 Front（保持完全不透明）
@@ -643,7 +660,7 @@ impl Scene for GameScene {
 
                 // 4) 只有被前景遮挡时，额外画一遍半透明人形（不改变前景本身）
                 if occluded {
-                    self.draw_ecs_sprites(PLAYER_GHOST_ALPHA)?;
+                    self.draw_ecs_sprites(PLAYER_GHOST_ALPHA, true)?;
                 }
             }
             set_default_camera();
@@ -677,6 +694,9 @@ impl Scene for GameScene {
             // 绘制帮助提示
             self.draw_help_text();
         }
+
+        // Debug overlay（放在最后，覆盖在 UI 之上）
+        self.draw_debug_fps();
         
         Ok(())
     }
