@@ -468,6 +468,84 @@ pub fn mouse_pos() -> Vec2 {
     vec2(x, y)
 }
 
+// ============================================================================
+// Library 绘制辅助（对齐 C# UseOffSet / DisplayLocation）
+// ============================================================================
+
+/// 绘制库图片（应用 offset_x/offset_y），并返回“实际绘制/命中”矩形
+#[inline]
+pub fn draw_library_image_with_offset(
+    library: LibraryName,
+    index: usize,
+    pos: Vec2,
+    color: Color,
+) -> Option<Rect> {
+    let info = library.get_texture(index)?;
+    let tex = info.image?;
+
+    let draw_x = pos.x + info.offset_x as f32;
+    let draw_y = pos.y + info.offset_y as f32;
+    draw_texture(&tex, draw_x, draw_y, color);
+
+    Some(Rect::new(draw_x, draw_y, info.width as f32, info.height as f32))
+}
+
+/// 绘制三态按钮（normal/hover/pressed），应用 offset，并返回是否“按下点击”
+///
+/// - 命中矩形使用 normal 的 offset/size（贴近 C# 的 DisplayRectangle 行为）
+#[inline]
+pub fn draw_library_button_with_offset(
+    library: LibraryName,
+    indices: [usize; 3],
+    pos: Vec2,
+    mouse_pos: Vec2,
+) -> bool {
+    let normal_info = library.get_texture(indices[0]);
+
+    let (w, h, base_off_x, base_off_y) = match normal_info.as_ref() {
+        Some(info) => (
+            info.width as f32,
+            info.height as f32,
+            info.offset_x as f32,
+            info.offset_y as f32,
+        ),
+        None => (12.0, 12.0, 0.0, 0.0),
+    };
+
+    let hit_rect = Rect::new(pos.x + base_off_x, pos.y + base_off_y, w, h);
+    let hovered = hit_rect.contains(mouse_pos);
+
+    let idx = if hovered && is_mouse_button_down(MouseButton::Left) {
+        indices[2]
+    } else if hovered {
+        indices[1]
+    } else {
+        indices[0]
+    };
+
+    if let Some(info) = library.get_texture(idx) {
+        if let Some(tex) = info.image {
+            draw_texture(
+                &tex,
+                pos.x + info.offset_x as f32,
+                pos.y + info.offset_y as f32,
+                WHITE,
+            );
+        }
+    } else if let Some(info) = normal_info {
+        if let Some(tex) = info.image {
+            draw_texture(
+                &tex,
+                pos.x + info.offset_x as f32,
+                pos.y + info.offset_y as f32,
+                WHITE,
+            );
+        }
+    }
+
+    hovered && is_mouse_button_pressed(MouseButton::Left)
+}
+
 /// 检查鼠标是否在矩形内
 #[inline]
 pub fn is_mouse_over(rect: Rect) -> bool {

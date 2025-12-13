@@ -7,6 +7,7 @@ pub mod belt_dialog_hybrid;
 pub mod character_dialog_hybrid;
 pub mod chat_control_bar_hybrid;
 pub mod chat_dialog_hybrid;
+pub mod chat_option_dialog_hybrid;
 pub mod game_shop_dialog_hybrid;  // 原版 hybrid 版本
 pub mod inventory_dialog_native;
 pub mod inventory_dialog_hybrid;
@@ -24,6 +25,8 @@ pub use belt_dialog_hybrid::{BeltDialogHybrid, BeltItemHybrid, BeltLayoutHybrid}
 pub use character_dialog_hybrid::{CharacterDialogHybrid, CharacterTabHybrid, EquipmentItemHybrid, EquipSlot};
 pub use chat_control_bar_hybrid::{ChatControlBarHybrid, ChatFilterHybrid};
 pub use chat_dialog_hybrid::ChatDialogHybrid;
+pub use chat_dialog_hybrid::ChatMessageKind;
+pub use chat_option_dialog_hybrid::{ChatOptionDialogHybrid, ChatOptionSettingsHybrid};
 pub use game_shop_dialog_hybrid::{GameShopDialogHybrid, ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid};
 pub use inventory_dialog_native::InventoryDialogNative;
 pub use inventory_dialog_hybrid::{InventoryDialogHybrid, ItemSlotHybrid, InventoryTabHybrid};
@@ -38,6 +41,7 @@ pub type BeltDialog = BeltDialogHybrid;
 pub type CharacterDialog = CharacterDialogHybrid;
 pub type ChatControlBar = ChatControlBarHybrid;
 pub type ChatDialog = ChatDialogHybrid;
+pub type ChatOptionDialog = ChatOptionDialogHybrid;
 pub type GameShopDialog = GameShopDialogHybrid;
 pub type InventoryDialog = InventoryDialogHybrid;
 pub type MenuDialog = MenuDialogHybrid;

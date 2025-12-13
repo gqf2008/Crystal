@@ -396,8 +396,18 @@ impl CharacterDialogHybrid {
             None
         };
         
-        // 关闭按钮
-        let close_rect = Rect::new(self.position.x + 241.0, self.position.y + 3.0, 20.0, 20.0);
+        // 关闭按钮 (Prguse2[360-362])
+        let close_size = if self.close_btn.size.x > 0.0 && self.close_btn.size.y > 0.0 {
+            self.close_btn.size
+        } else {
+            vec2(20.0, 20.0)
+        };
+        let close_rect = Rect::new(
+            self.position.x + 241.0,
+            self.position.y + 3.0,
+            close_size.x,
+            close_size.y,
+        );
         let close_hovered = close_rect.contains(mouse);
         
         // 标签页点击
@@ -446,8 +456,7 @@ impl CharacterDialogHybrid {
         for i in 0..4 {
             let rect = self.get_tab_rect(i);
             let is_current = self.current_tab as usize == i;
-            let is_hovered = self.hovered_tab == Some(i);
-            let state = if is_current || is_hovered { 1 } else { 0 };
+            let state = if is_current { 1 } else { 0 };
             
             if let Some(ref tex) = self.tab_textures[i][state] {
                 let alpha = if is_current { 1.0 } else { 0.7 };

@@ -226,6 +226,10 @@ impl BeltDialogHybrid {
     pub fn get_position(&self) -> Vec2 {
         self.position
     }
+
+    pub fn is_horizontal_layout(&self) -> bool {
+        self.layout == BeltLayoutHybrid::Horizontal
+    }
     
     pub fn open(&mut self) {
         if !self.visible {
@@ -386,7 +390,7 @@ impl BeltDialogHybrid {
         // ========== 5. 收集数据用于 mqui 拖放 ==========
         let cells_snapshot: [Option<BeltItemHybrid>; 6] = self.cells;
         let item_dragging = self.item_dragging;
-        let layout = self.layout;
+        let _layout = self.layout;
         
         // ========== 6. mqui Group 拖放处理 ==========
         let mut drag_command: Option<DragCommand> = None;

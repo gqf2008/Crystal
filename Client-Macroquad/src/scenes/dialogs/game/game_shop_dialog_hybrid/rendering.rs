@@ -6,7 +6,6 @@
 // ============================================================================
 
 use macroquad::prelude::*;
-use macroquad::ui::{self, hash};
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid};
@@ -373,13 +372,22 @@ impl GameShopDialogHybrid {
                 1.0, Color::from_rgba(100, 100, 120, 255));
         }
         
-        // 物品名称 (原版位置: 0, 13 居中)
+        // 物品名称（对齐 C# GameShopCell.nameLabel: Size(125,15), Location(0,13), Font 8F, HorizontalCenter）
         let name_color = if item.in_stock {
             Color::from_rgba(255, 215, 0, 255)
         } else {
             GRAY
         };
-        draw_text_cn(&item.name, x + Self::CELL_WIDTH / 2.0 - 20.0, y + 16.0, 10.0, name_color);
+        let name_font_size = 8.0;
+        let name_top_y = y + 13.0;
+        let name_baseline_y = name_top_y + name_font_size + 2.0;
+        crate::ui::text_renderer::draw_text_centered(
+            &item.name,
+            x + Self::CELL_WIDTH / 2.0,
+            name_baseline_y,
+            name_font_size,
+            name_color,
+        );
         
         // 物品图标 (原版位置: 12, 40, 尺寸32x32)
         let icon_x = x + 12.0;

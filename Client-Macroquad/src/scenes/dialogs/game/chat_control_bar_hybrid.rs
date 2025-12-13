@@ -66,6 +66,10 @@ pub struct ChatControlBarHybrid {
     visible: bool,
     /// 当前选中的聊天频道
     active_filter: ChatFilterHybrid,
+    /// 是否显示行会聊天（对齐 C# Settings.ShowGuildChat）
+    show_guild_chat: bool,
+    /// 是否显示举报按钮（对齐 C#：默认 false）
+    report_visible: bool,
     /// 背景纹理
     bg_texture: Option<Texture2D>,
     /// 当前尺寸
@@ -86,6 +90,8 @@ impl ChatControlBarHybrid {
             position,
             visible: true,
             active_filter: ChatFilterHybrid::All,
+            show_guild_chat: true,
+            report_visible: false,
             bg_texture: None,
             current_size: vec2(default_width, 15.0),
         }
@@ -114,6 +120,10 @@ impl ChatControlBarHybrid {
     /// 获取位置
     pub fn get_position(&self) -> Vec2 {
         self.position
+    }
+
+    pub fn get_size(&self) -> Vec2 {
+        self.current_size
     }
 
     /// 切换聊天频道
@@ -165,6 +175,7 @@ impl ChatControlBarHybrid {
             2004, 2005, 2006, // Trade
             2057, 2058, 2059, // Size
             2060, 2061, 2062, // Settings
+            2063, 2064, 2065, // Report
         ];
         for idx in button_indices {
             let _ = LibraryName::Prguse.get_texture(idx);
@@ -239,6 +250,9 @@ impl ChatControlBarHybrid {
         for (x_offset, filter, base_index) in button_configs {
             let is_selected = filter == self.active_filter;
             if self.draw_button(mouse_pos, x_offset, 1.0, base_index, is_selected) {
+                if filter == ChatFilterHybrid::Guild {
+                    self.show_guild_chat = !self.show_guild_chat;
+                }
                 self.active_filter = filter;
                 println!("📻 切换聊天频道: {:?} (前缀: '{}')", filter, filter.prefix());
             }
@@ -247,6 +261,14 @@ impl ChatControlBarHybrid {
         // TradeButton - 位置固定 (166, 1)
         if self.draw_button(mouse_pos, 166.0, 1.0, 2004, false) {
             println!("💱 打开交易窗口");
+        }
+
+        // ReportButton - 对齐 C#：默认 Visible=false
+        if self.report_visible {
+            let report_x = if self.resolution_index != 0 { 552.0 } else { 328.0 };
+            if self.draw_button(mouse_pos, report_x, 1.0, 2063, false) {
+                println!("🚩 打开举报窗口");
+            }
         }
     }
 

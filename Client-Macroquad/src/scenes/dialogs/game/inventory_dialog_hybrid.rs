@@ -109,6 +109,7 @@ pub struct InventoryDialogHybrid {
     bg_texture: Option<Texture2D>,
     close_btn: ButtonTextures,
     tab_textures: [[Option<Texture2D>; 2]; 3],
+    tab_items2_disabled_texture: Option<Texture2D>,
     item_cache: ItemTextureCache,
 }
 
@@ -125,6 +126,8 @@ impl InventoryDialogHybrid {
     const TAB_START_X: f32 = 6.0;
     const TAB_START_Y: f32 = 7.0;
     const TAB_SPACING: f32 = 70.0;
+    const TAB_WIDTH: f32 = 72.0;
+    const TAB_HEIGHT: f32 = 23.0;
     
     const DOUBLE_CLICK_TIME: f64 = 0.3;
     
@@ -172,6 +175,7 @@ impl InventoryDialogHybrid {
             bg_texture: None,
             close_btn: ButtonTextures::new(),
             tab_textures: [[None, None], [None, None], [None, None]],
+            tab_items2_disabled_texture: None,
             item_cache: ItemTextureCache::new(),
         }
     }
@@ -198,6 +202,11 @@ impl InventoryDialogHybrid {
                     self.tab_textures[tab_idx][state_idx] = info.image;
                 }
             }
+        }
+
+        // ItemButton2 在 C# Inventory.Length == 46 时的禁用样式: Title[169]
+        if let Some(info) = LibraryName::Title.get_texture(169) {
+            self.tab_items2_disabled_texture = info.image;
         }
         
         // 物品图标
@@ -322,15 +331,18 @@ impl InventoryDialogHybrid {
     }
     
     fn get_tab_rect(&self, index: usize) -> Rect {
-        let (w, h) = self.tab_textures[index][0]
-            .as_ref()
-            .map(|t| (t.width(), t.height()))
-            .unwrap_or((72.0, 23.0));
+        // C# 明确设置 Size = 72x23
         Rect::new(
             self.position.x + Self::TAB_START_X + index as f32 * Self::TAB_SPACING,
             self.position.y + Self::TAB_START_Y,
-            w, h,
+            Self::TAB_WIDTH,
+            Self::TAB_HEIGHT,
         )
+    }
+
+    fn is_base_inventory(&self) -> bool {
+        // 对齐 C#: GameScene.User.Inventory.Length == 46
+        self.tab_items[0].len() == 46
     }
     
     pub fn contains(&self, pos: Vec2) -> bool {
@@ -357,8 +369,18 @@ impl InventoryDialogHybrid {
             .find(|(i, _)| self.get_slot_rect(*i).contains(mouse))
             .map(|(i, _)| i);
         
-        // 关闭按钮
-        let close_rect = Rect::new(self.position.x + 289.0, self.position.y + 3.0, 20.0, 20.0);
+        // 关闭按钮 (Prguse2[360-362])
+        let close_size = if self.close_btn.size.x > 0.0 && self.close_btn.size.y > 0.0 {
+            self.close_btn.size
+        } else {
+            vec2(20.0, 20.0)
+        };
+        let close_rect = Rect::new(
+            self.position.x + 289.0,
+            self.position.y + 3.0,
+            close_size.x,
+            close_size.y,
+        );
         let close_hovered = close_rect.contains(mouse);
         
         // 标签页点击
@@ -545,8 +567,15 @@ impl InventoryDialogHybrid {
         for i in 0..3 {
             let rect = self.get_tab_rect(i);
             let is_current = self.current_tab as usize == i;
-            let is_hovered = self.hovered_tab == Some(i);
-            let state = if is_current || is_hovered { 1 } else { 0 };
+            let state = if is_current { 1 } else { 0 };
+
+            // C# 逻辑: Inventory.Length==46 时 ItemButton2 显示 Title[169] (禁用)
+            if i == 1 && state == 0 && self.is_base_inventory() {
+                if let Some(ref tex) = self.tab_items2_disabled_texture {
+                    draw_texture(tex, rect.x, rect.y, WHITE);
+                    continue;
+                }
+            }
             
             if let Some(ref tex) = self.tab_textures[i][state] {
                 draw_texture(tex, rect.x, rect.y, WHITE);

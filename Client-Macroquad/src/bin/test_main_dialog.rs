@@ -105,8 +105,11 @@ async fn main() {
         }
 
         // 调试：打印接收到的字符输入
-        while let Some(ch) = get_char_pressed() {
-            println!("📝 收到字符: '{}' (U+{:04X})", ch, ch as u32);
+        // 注意：get_char_pressed() 会消耗字符队列；如果这里无条件读取，会抢走 ChatDialog 的输入。
+        if !main_dialog.is_any_input_active() {
+            while let Some(ch) = get_char_pressed() {
+                println!("📝 收到字符: '{}' (U+{:04X})", ch, ch as u32);
+            }
         }
 
         next_frame().await;

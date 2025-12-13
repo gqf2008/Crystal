@@ -11,7 +11,9 @@
 use macroquad::prelude::*;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use super::native_ui_utils::{
+    DragHelper, draw_library_button_with_offset, draw_library_image_with_offset,
+};
 
 /// 地图上的对象类型
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,6 +65,8 @@ pub struct MiniMapDialogHybrid {
     show_npcs: bool,
     /// 是否为大模式（true=大模式2090、false=小模式2091）
     big_mode: bool,
+    /// 是否有新邮件提示（对应 C# NewMail.Visible）
+    has_new_mail: bool,
     /// 背景纹理
     bg_texture: Option<Texture2D>,
     /// 当前对话框尺寸
@@ -133,6 +137,7 @@ impl MiniMapDialogHybrid {
             show_monsters: true,
             show_npcs: true,
             big_mode: true,
+            has_new_mail: false,
             bg_texture: None,
             current_size: vec2(124.0, 150.0),
             drag_helper: DragHelper::new(),
@@ -183,7 +188,22 @@ impl MiniMapDialogHybrid {
     /// 切换大小模式
     pub fn toggle_size(&mut self) {
         self.big_mode = !self.big_mode;
-        self.bg_texture = None; // 重新加载纹理
+
+        // 对齐 C#：切换 Index(2090/2091) 会改变 Size；这里立即刷新纹理与尺寸，
+        // 避免出现“切换后仍显示旧纹理/旧尺寸”的一帧延迟或缓存残留。
+        let old_size = self.current_size;
+        let right = self.position.x + old_size.x;
+
+        let texture_index = if self.big_mode { 2090 } else { 2091 };
+        if let Some(texture) = LibraryName::Prguse.get_texture(texture_index) {
+            self.current_size = vec2(texture.width as f32, texture.height as f32);
+            self.bg_texture = texture.image;
+        } else {
+            self.bg_texture = None;
+        }
+
+        // 维持右侧对齐（更接近 C# 右上角固定的视觉效果）
+        self.position.x = right - self.current_size.x;
         println!(
             "🗺️ 小地图模式: {}",
             if self.big_mode { "大模式" } else { "小模式" }
@@ -238,16 +258,17 @@ impl MiniMapDialogHybrid {
         // 绘制背景
         self.draw_background();
 
+        // 绘制标题/标签（对齐 C# MapNameLabel / LocationLabel）
+        self.draw_labels();
+
         // 绘制地图区域
-        self.draw_map(mouse_pos);
-
-        // 绘制Toggle按钮
-        self.draw_toggle_button(mouse_pos);
-
-        // 绘制关闭按钮
-        if self.draw_close_button(mouse_pos) {
-            self.close();
+        // 对齐 C#：小模式(Index=2091)不绘制 MiniMap 内容（仅显示小框/按钮）。
+        if self.big_mode {
+            self.draw_map(mouse_pos);
         }
+
+        // 绘制底部控件（对齐 C# MailButton / BigMapButton / LightSetting / ToggleButton）
+        self.draw_bottom_controls(mouse_pos);
     }
 
     /// 绘制背景
@@ -286,7 +307,7 @@ impl MiniMapDialogHybrid {
         let map_rect = Rect::new(
             self.position.x + 3.0,
             self.position.y + 22.0,
-            self.current_size.x - 6.0,
+            120.0,
             108.0,
         );
 
@@ -306,10 +327,79 @@ impl MiniMapDialogHybrid {
         self.draw_map_objects(map_rect);
     }
 
+    fn draw_labels(&self) {
+        // MapNameLabel: Location (2,2), Size(120,18), 居中
+        let name_rect = Rect::new(self.position.x + 2.0, self.position.y + 2.0, 120.0, 18.0);
+        let name = self.map_name.as_str();
+        let name_x = name_rect.x + name_rect.w / 2.0 - (name.chars().count() as f32) * 6.0 / 2.0;
+        draw_text_cn(name, name_x, name_rect.y + 14.0, 12.0, WHITE);
+
+        // LocationLabel: Location (46, y), Size(56,18), 居中
+        // 对齐 C#：y = Size.Height - 23
+        let bottom_y = (self.current_size.y - 23.0).max(0.0);
+        let loc_rect = Rect::new(self.position.x + 46.0, self.position.y + bottom_y, 56.0, 18.0);
+        let loc_text = format!("{},{}", self.player_pos.0 as i32, self.player_pos.1 as i32);
+        let loc_x = loc_rect.x + loc_rect.w / 2.0 - (loc_text.chars().count() as f32) * 6.0 / 2.0;
+        draw_text_cn(&loc_text, loc_x, loc_rect.y + 14.0, 12.0, WHITE);
+    }
+
+    fn draw_bottom_controls(&mut self, mouse_pos: Vec2) {
+        // 对齐 C#：y = Size.Height - 23
+        let bottom_y = (self.current_size.y - 23.0).max(0.0);
+
+        // MailButton: (4,y) Prguse[2099/2100/2101]
+        if draw_library_button_with_offset(
+            LibraryName::Prguse,
+            [2099, 2100, 2101],
+            vec2(self.position.x + 4.0, self.position.y + bottom_y),
+            mouse_pos,
+        ) {
+            println!("📮 MiniMap: MailButton clicked (stub)");
+        }
+
+        // NewMail icon: Prguse[544] at (5,y+1) when visible
+        if self.has_new_mail {
+            let _ = draw_library_image_with_offset(
+                LibraryName::Prguse,
+                544,
+                vec2(self.position.x + 5.0, self.position.y + bottom_y + 1.0),
+                WHITE,
+            );
+        }
+
+        // BigMapButton: (25,y) Prguse[2096/2097/2098]
+        if draw_library_button_with_offset(
+            LibraryName::Prguse,
+            [2096, 2097, 2098],
+            vec2(self.position.x + 25.0, self.position.y + bottom_y),
+            mouse_pos,
+        ) {
+            println!("🗺️ MiniMap: BigMapButton clicked (stub)");
+        }
+
+        // LightSetting image: Prguse[2093] at (102,y)
+        let _ = draw_library_image_with_offset(
+            LibraryName::Prguse,
+            2093,
+            vec2(self.position.x + 102.0, self.position.y + bottom_y),
+            WHITE,
+        );
+
+        // ToggleButton: (109,3) Prguse[2102/2103/2104]
+        if draw_library_button_with_offset(
+            LibraryName::Prguse,
+            [2102, 2103, 2104],
+            vec2(self.position.x + 109.0, self.position.y + 3.0),
+            mouse_pos,
+        ) {
+            self.toggle_size();
+        }
+    }
+
     /// 绘制网格
     fn draw_grid(&self, map_rect: Rect) {
-        let grid_size = 20.0 * self.zoom_level;
-        let grid_color = Color::from_rgba(100, 100, 100, 60);
+        let grid_color = Color::from_rgba(50, 80, 50, 120);
+        let grid_size = 12.0;
 
         // 垂直线
         let mut x = map_rect.x;
@@ -376,70 +466,6 @@ impl MiniMapDialogHybrid {
                 draw_text_cn(&obj.name, pos.x - 10.0, pos.y - 8.0, 10.0, WHITE);
             }
         }
-    }
-
-    /// 绘制Toggle按钮
-    fn draw_toggle_button(&mut self, mouse_pos: Vec2) {
-        let button_pos = vec2(self.position.x + 109.0, self.position.y + 3.0);
-        let button_size = vec2(12.0, 12.0);
-        let button_rect = Rect::new(button_pos.x, button_pos.y, button_size.x, button_size.y);
-
-        let is_hovered = button_rect.contains(mouse_pos);
-
-        // 尝试使用纹理
-        let texture_idx = if is_mouse_button_down(MouseButton::Left) && is_hovered {
-            2104
-        } else if is_hovered {
-            2103
-        } else {
-            2102
-        };
-
-        if let Some(texture) = LibraryName::Prguse.get_texture(texture_idx) {
-            if let Some(ref tex) = texture.image {
-                draw_texture_ex(
-                    tex,
-                    button_pos.x,
-                    button_pos.y,
-                    WHITE,
-                    DrawTextureParams::default(),
-                );
-            }
-        } else {
-            // 降级
-            let color = if is_hovered {
-                Color::from_rgba(100, 100, 150, 255)
-            } else {
-                Color::from_rgba(80, 80, 100, 255)
-            };
-            draw_rectangle(button_pos.x, button_pos.y, button_size.x, button_size.y, color);
-        }
-
-        // 点击切换大小
-        if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
-            self.toggle_size();
-        }
-    }
-
-    /// 绘制关闭按钮（返回是否点击）
-    fn draw_close_button(&self, mouse_pos: Vec2) -> bool {
-        let close_size = 15.0;
-        let close_x = self.position.x + self.current_size.x - 20.0;
-        let close_y = self.position.y + 5.0;
-        let close_rect = Rect::new(close_x, close_y, close_size, close_size);
-
-        let is_hovered = close_rect.contains(mouse_pos);
-
-        let bg_color = if is_hovered {
-            Color::from_rgba(200, 70, 70, 255)
-        } else {
-            Color::from_rgba(150, 50, 50, 255)
-        };
-        draw_rectangle(close_x, close_y, close_size, close_size, bg_color);
-
-        draw_text("×", close_x + 3.0, close_y + 12.0, 14.0, WHITE);
-
-        is_hovered && is_mouse_button_pressed(MouseButton::Left)
     }
 
     /// 更新玩家位置

@@ -16,6 +16,8 @@ use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use super::native_ui_utils::DragHelper;
 
+const MAX_CONCURRENT_QUESTS: usize = 10;
+
 /// 任务状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuestStatus {
@@ -71,6 +73,8 @@ pub struct QuestLogDialogHybrid {
     selected_quest: Option<usize>,
     /// 滚动偏移
     scroll_offset: f32,
+    /// 展开的任务分组（为空表示全部展开，行为对齐 C# ExpandedGroups）
+    expanded_groups: Vec<String>,
     /// 背景纹理 - Prguse[961]
     bg_texture: Option<Texture2D>,
     /// 标题纹理 - Title[15]
@@ -128,6 +132,7 @@ impl QuestLogDialogHybrid {
             quests,
             selected_quest: None,
             scroll_offset: 0.0,
+            expanded_groups: Vec::new(),
             bg_texture: None,
             title_texture: None,
             close_button_textures: [None, None, None],
@@ -259,58 +264,159 @@ impl QuestLogDialogHybrid {
                 DrawTextureParams::default(),
             );
         }
+
+        // _takenQuestsLabel: Location (210,7)
+        let label = format!(
+            "List: {}/{}",
+            self.quests.len(),
+            MAX_CONCURRENT_QUESTS
+        );
+        draw_text_cn(&label, self.position.x + 210.0, self.position.y + 20.0, 12.0, WHITE);
     }
 
     /// 绘制任务列表 (C# 原版从 Y=40 开始)
     fn draw_quest_list(&mut self, mouse_pos: Vec2) {
         let list_x = self.position.x + 15.0;
-        let mut y = self.position.y + 40.0;
-        let item_height = 20.0;
-        let mut clicked_idx: Option<usize> = None;
+        let list_w = self.size.x - 30.0;
+        let list_top = self.position.y + 40.0;
+        let list_bottom = self.position.y + 430.0;
+        let list_h = (list_bottom - list_top).max(0.0);
+        let list_rect = Rect::new(list_x, list_top, list_w, list_h);
 
-        for (i, quest) in self.quests.iter().enumerate() {
-            let item_rect = Rect::new(list_x, y, self.size.x - 30.0, item_height);
-            let is_selected = self.selected_quest == Some(i);
-            let is_hovered = item_rect.contains(mouse_pos);
-
-            // 高亮背景
-            if is_selected || is_hovered {
-                let color = if is_selected {
-                    Color::from_rgba(60, 80, 100, 150)
-                } else {
-                    Color::from_rgba(50, 50, 60, 100)
-                };
-                draw_rectangle(item_rect.x, item_rect.y, item_rect.w, item_rect.h, color);
-            }
-
-            // 任务名称
-            let name_color = match quest.status {
-                QuestStatus::Available => Color::from_rgba(255, 255, 100, 255),
-                QuestStatus::Accepted => WHITE,
-                QuestStatus::Completed => Color::from_rgba(100, 255, 100, 255),
-                QuestStatus::Failed => Color::from_rgba(255, 100, 100, 255),
-            };
-            draw_text_cn(&quest.name, list_x + 5.0, y + 14.0, 12.0, name_color);
-
-            // 进度
-            if quest.status == QuestStatus::Accepted && quest.max_progress > 0 {
-                let progress_text = format!("{}/{}", quest.progress, quest.max_progress);
-                draw_text_cn(&progress_text, self.position.x + self.size.x - 60.0, y + 14.0, 11.0, GRAY);
-            }
-
-            if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
-                clicked_idx = Some(i);
-            }
-
-            y += item_height;
-            
-            // 防止超出对话框底部（留空间给关闭按钮）
-            if y > self.position.y + self.size.y - 50.0 {
-                break;
+        // 鼠标滚轮滚动
+        if list_rect.contains(mouse_pos) {
+            let wheel = mouse_wheel().1;
+            if wheel != 0.0 {
+                self.scroll_offset = (self.scroll_offset - wheel * 20.0).max(0.0);
             }
         }
 
-        if let Some(idx) = clicked_idx {
+        // 按出现顺序分组（对齐 C# GroupBy 的直觉表现）
+        let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+        for (idx, quest) in self.quests.iter().enumerate() {
+            if let Some((_, indices)) = groups.iter_mut().find(|(g, _)| g == &quest.group) {
+                indices.push(idx);
+            } else {
+                groups.push((quest.group.clone(), vec![idx]));
+            }
+        }
+
+        let group_header_h = 20.0;
+        let quest_item_h = 18.0;
+
+        // 计算最大滚动
+        let mut content_h = 0.0;
+        for (group_name, indices) in groups.iter() {
+            content_h += group_header_h;
+            let expanded = self.expanded_groups.is_empty() || self.expanded_groups.iter().any(|g| g == group_name);
+            if expanded {
+                content_h += indices.len() as f32 * quest_item_h;
+            }
+        }
+        let max_scroll = (content_h - list_h).max(0.0);
+        if self.scroll_offset > max_scroll {
+            self.scroll_offset = max_scroll;
+        }
+
+        let mut clicked_group: Option<String> = None;
+        let mut clicked_quest: Option<usize> = None;
+
+        let mut y = list_top - self.scroll_offset;
+
+        for (group_name, indices) in groups.iter() {
+            // Group header
+            let header_rect = Rect::new(list_x, y, list_w, group_header_h);
+            let header_visible = header_rect.y + header_rect.h > list_top && header_rect.y < list_bottom;
+
+            let expanded = self.expanded_groups.is_empty() || self.expanded_groups.iter().any(|g| g == group_name);
+            let header_hovered = header_rect.contains(mouse_pos);
+
+            if header_visible {
+                if header_hovered {
+                    draw_rectangle(header_rect.x, header_rect.y, header_rect.w, header_rect.h, Color::from_rgba(60, 60, 80, 140));
+                }
+
+                let prefix = if expanded { "-" } else { "+" };
+                draw_text_cn(
+                    &format!("{} {}", prefix, group_name),
+                    list_x + 5.0,
+                    header_rect.y + 14.0,
+                    12.0,
+                    Color::from_rgba(230, 230, 230, 255),
+                );
+
+                if header_hovered && is_mouse_button_pressed(MouseButton::Left) {
+                    clicked_group = Some(group_name.clone());
+                }
+            }
+
+            y += group_header_h;
+
+            if !expanded {
+                continue;
+            }
+
+            // Quests
+            for quest_idx in indices.iter().copied() {
+                let quest = &self.quests[quest_idx];
+                let item_rect = Rect::new(list_x + 10.0, y, list_w - 10.0, quest_item_h);
+                let item_visible = item_rect.y + item_rect.h > list_top && item_rect.y < list_bottom;
+                let is_selected = self.selected_quest == Some(quest_idx);
+                let is_hovered = item_rect.contains(mouse_pos);
+
+                if item_visible {
+                    if is_selected || is_hovered {
+                        let color = if is_selected {
+                            Color::from_rgba(60, 80, 100, 150)
+                        } else {
+                            Color::from_rgba(50, 50, 60, 100)
+                        };
+                        draw_rectangle(item_rect.x, item_rect.y, item_rect.w, item_rect.h, color);
+                    }
+
+                    let name_color = match quest.status {
+                        QuestStatus::Available => Color::from_rgba(255, 255, 100, 255),
+                        QuestStatus::Accepted => WHITE,
+                        QuestStatus::Completed => Color::from_rgba(100, 255, 100, 255),
+                        QuestStatus::Failed => Color::from_rgba(255, 100, 100, 255),
+                    };
+                    draw_text_cn(&quest.name, item_rect.x + 5.0, item_rect.y + 13.0, 11.0, name_color);
+
+                    if quest.status == QuestStatus::Accepted && quest.max_progress > 0 {
+                        let progress_text = format!("{}/{}", quest.progress, quest.max_progress);
+                        draw_text_cn(
+                            &progress_text,
+                            self.position.x + self.size.x - 60.0,
+                            item_rect.y + 13.0,
+                            11.0,
+                            GRAY,
+                        );
+                    }
+
+                    if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
+                        clicked_quest = Some(quest_idx);
+                    }
+                }
+
+                y += quest_item_h;
+            }
+        }
+
+        if let Some(group) = clicked_group {
+            // ExpandedGroups 为空表示“全部展开”；一旦用户操作，就进入显式列表模式
+            if self.expanded_groups.is_empty() {
+                // 复制当前所有组为展开，再 toggle 点击的那组
+                self.expanded_groups = groups.iter().map(|(g, _)| g.clone()).collect();
+            }
+
+            if let Some(pos) = self.expanded_groups.iter().position(|g| g == &group) {
+                self.expanded_groups.remove(pos);
+            } else {
+                self.expanded_groups.push(group);
+            }
+        }
+
+        if let Some(idx) = clicked_quest {
             self.selected_quest = Some(idx);
         }
     }

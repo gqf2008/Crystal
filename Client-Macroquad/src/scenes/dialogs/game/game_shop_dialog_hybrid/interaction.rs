@@ -10,6 +10,7 @@ use macroquad::ui::{self, hash};
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use super::dialog::GameShopDialogHybrid;
+use super::super::native_ui_utils::{draw_library_button_with_offset, mouse_pos as ui_mouse_pos};
 
 impl GameShopDialogHybrid {
     /// 绘制搜索框
@@ -110,15 +111,7 @@ impl GameShopDialogHybrid {
                 draw_rectangle_lines(preview_x, preview_y, preview_w, preview_h,
                     2.0, Color::from_rgba(150, 150, 170, 255));
             }
-            
-            // 标题
-            draw_text_cn(&item.name, preview_x + preview_w / 2.0 - 30.0, preview_y + 30.0, 16.0,
-                Color::from_rgba(255, 215, 0, 255));
-            
-            // 描述
-            draw_text_cn(&item.description, preview_x + preview_w / 2.0 - 40.0, preview_y + 55.0, 12.0,
-                Color::from_rgba(200, 200, 200, 255));
-            
+
             // 预览区域 (原版位置: 105, 160 居中)
             let preview_area_x = preview_x + 80.0;
             let preview_area_y = preview_y + 100.0;
@@ -149,61 +142,27 @@ impl GameShopDialogHybrid {
                     12.0, Color::from_rgba(0, 255, 255, 255));
             }
             
-            let mouse_pos = mouse_position();
+            let mouse_pos = ui_mouse_pos();
             
             // 方向控制按钮 (原版位置: LeftDirection 81,282  RightDirection 160,282)
-            let left_x = preview_x + 81.0;
-            let right_x = preview_x + 160.0;
             let dir_y = preview_y + 252.0;
-            let dir_w = 24.0;
-            let dir_h = 20.0;
-            
-            // 左转按钮 Prguse2[240-242]
-            let left_hovered = mouse_pos.0 >= left_x && mouse_pos.0 <= left_x + dir_w
-                && mouse_pos.1 >= dir_y && mouse_pos.1 <= dir_y + dir_h;
-            let left_pressed = left_hovered && is_mouse_button_down(MouseButton::Left);
-            
-            let left_tex = if left_pressed {
-                &self.left_btn_textures.2
-            } else if left_hovered {
-                &self.left_btn_textures.1
-            } else {
-                &self.left_btn_textures.0
-            };
-            
-            if let Some(tex) = left_tex {
-                draw_texture_ex(tex, left_x, dir_y, WHITE, DrawTextureParams::default());
-            } else {
-                draw_rectangle(left_x, dir_y, dir_w, dir_h, Color::from_rgba(80, 80, 120, 255));
-                draw_text_cn("◀", left_x + 6.0, dir_y + 14.0, 12.0, WHITE);
-            }
-            
-            if left_hovered && is_mouse_button_pressed(MouseButton::Left) {
+
+            if draw_library_button_with_offset(
+                LibraryName::Prguse2,
+                [240, 241, 242],
+                vec2(preview_x + 81.0, dir_y),
+                mouse_pos,
+            ) {
                 self.preview_direction = if self.preview_direction == 1 { 8 } else { self.preview_direction - 1 };
                 println!("🔄 预览方向: {}", self.preview_direction);
             }
-            
-            // 右转按钮 Prguse2[243-245]
-            let right_hovered = mouse_pos.0 >= right_x && mouse_pos.0 <= right_x + dir_w
-                && mouse_pos.1 >= dir_y && mouse_pos.1 <= dir_y + dir_h;
-            let right_pressed = right_hovered && is_mouse_button_down(MouseButton::Left);
-            
-            let right_tex = if right_pressed {
-                &self.right_btn_textures.2
-            } else if right_hovered {
-                &self.right_btn_textures.1
-            } else {
-                &self.right_btn_textures.0
-            };
-            
-            if let Some(tex) = right_tex {
-                draw_texture_ex(tex, right_x, dir_y, WHITE, DrawTextureParams::default());
-            } else {
-                draw_rectangle(right_x, dir_y, dir_w, dir_h, Color::from_rgba(80, 80, 120, 255));
-                draw_text_cn("▶", right_x + 6.0, dir_y + 14.0, 12.0, WHITE);
-            }
-            
-            if right_hovered && is_mouse_button_pressed(MouseButton::Left) {
+
+            if draw_library_button_with_offset(
+                LibraryName::Prguse2,
+                [243, 244, 245],
+                vec2(preview_x + 160.0, dir_y),
+                mouse_pos,
+            ) {
                 self.preview_direction = if self.preview_direction == 8 { 1 } else { self.preview_direction + 1 };
                 println!("🔄 预览方向: {}", self.preview_direction);
             }
@@ -213,41 +172,13 @@ impl GameShopDialogHybrid {
                 Color::from_rgba(150, 150, 150, 255));
             
             // 关闭按钮 (原版位置: 230, 8)
-            let close_x = preview_x + 230.0;
-            let close_y = preview_y + 8.0;
 
-            // 使用关闭按钮纹理实际尺寸（Prguse2[360] 为 24x21）
-            let (close_w, close_h) = if let Some(ref tex) = self.close_btn_textures.0 {
-                (tex.width(), tex.height())
-            } else {
-                (24.0, 21.0)
-            };
-
-            let close_hovered = mouse_pos.0 >= close_x && mouse_pos.0 <= close_x + close_w
-                && mouse_pos.1 >= close_y && mouse_pos.1 <= close_y + close_h;
-            let close_pressed = close_hovered && is_mouse_button_down(MouseButton::Left);
-            
-            let close_tex = if close_pressed {
-                &self.close_btn_textures.2
-            } else if close_hovered {
-                &self.close_btn_textures.1
-            } else {
-                &self.close_btn_textures.0
-            };
-            
-            if let Some(tex) = close_tex {
-                draw_texture_ex(tex, close_x, close_y, WHITE, DrawTextureParams::default());
-            } else {
-                let close_color = if close_hovered {
-                    Color::from_rgba(200, 80, 80, 255)
-                } else {
-                    Color::from_rgba(150, 50, 50, 255)
-                };
-                draw_rectangle(close_x, close_y, close_w, close_h, close_color);
-                draw_text_cn("×", close_x + 5.0, close_y + 15.0, 14.0, WHITE);
-            }
-            
-            if close_hovered && is_mouse_button_pressed(MouseButton::Left) {
+            if draw_library_button_with_offset(
+                LibraryName::Prguse2,
+                [360, 361, 362],
+                vec2(preview_x + 230.0, preview_y + 8.0),
+                mouse_pos,
+            ) {
                 self.preview_item = None;
             }
             

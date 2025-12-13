@@ -12,6 +12,7 @@ use crate::scenes::dialogs::game::{
     BeltDialogHybrid,
     GameShopDialog,
     ChatDialogHybrid,
+    ChatMessageKind,
 };
 use crate::scenes::{Scene, SceneTransition};
 use crate::ui::text_renderer::draw_text_cn;
@@ -75,8 +76,16 @@ impl GameScene {
         self.chat_dialog.open(); // 聊天窗口默认打开
         
         // 添加欢迎消息
-        self.chat_dialog.add_message("欢迎进入传奇世界！", Color::from_rgba(255, 255, 0, 255));
-        self.chat_dialog.add_message("按 Enter 打开聊天输入框", Color::from_rgba(200, 200, 200, 255));
+        self.chat_dialog.add_message_with_kind(
+            "欢迎进入传奇世界！",
+            Color::from_rgba(255, 255, 0, 255),
+            ChatMessageKind::System,
+        );
+        self.chat_dialog.add_message_with_kind(
+            "按 Enter 打开聊天输入框",
+            Color::from_rgba(200, 200, 200, 255),
+            ChatMessageKind::System,
+        );
         
         self.initialized = true;
         println!("✅ GameScene: 对话框纹理加载完成");

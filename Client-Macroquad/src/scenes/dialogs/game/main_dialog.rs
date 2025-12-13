@@ -22,6 +22,7 @@ use super::{
     CharacterTabHybrid,
     ChatControlBarHybrid,
     ChatDialogHybrid,
+    ChatOptionDialogHybrid,
     GameShopDialog,
     InventoryDialogHybrid,
     MenuDialogHybrid,
@@ -38,6 +39,7 @@ pub enum DialogType {
     Belt,
     Chat,
     ChatControlBar,
+    ChatOption,
     Inventory,
     Character,
     QuestLog,
@@ -81,6 +83,8 @@ pub struct MainDialog {
     chat_dialog: ChatDialogHybrid,
     /// 聊天控制栏
     chat_control_bar: ChatControlBarHybrid,
+    /// 聊天设置/过滤
+    chat_option_dialog: ChatOptionDialogHybrid,
     /// 背包
     inventory_dialog: InventoryDialogHybrid,
     /// 角色对话框
@@ -100,6 +104,7 @@ pub struct MainDialog {
     belt_dialog_open: bool,
     chat_dialog_open: bool,
     chat_control_bar_open: bool,
+    chat_option_dialog_open: bool,
     inventory_dialog_open: bool,
     character_dialog_open: bool,
     quest_log_dialog_open: bool,
@@ -164,6 +169,7 @@ impl MainDialog {
             belt_dialog: BeltDialogHybrid::new(),
             chat_dialog: ChatDialogHybrid::new(main_dialog_x, screen_h, resolution_index),
             chat_control_bar: ChatControlBarHybrid::new(main_dialog_x, screen_h, resolution_index),
+            chat_option_dialog: ChatOptionDialogHybrid::new(),
             inventory_dialog: InventoryDialogHybrid::new(),
             character_dialog: CharacterDialogHybrid::new(),
             quest_log_dialog: QuestLogDialogHybrid::new(),
@@ -176,6 +182,7 @@ impl MainDialog {
             belt_dialog_open: true,
             chat_dialog_open: true,
             chat_control_bar_open: true,
+            chat_option_dialog_open: false,
             inventory_dialog_open: false,
             character_dialog_open: false,
             quest_log_dialog_open: false,
@@ -188,6 +195,7 @@ impl MainDialog {
             dialog_z_order: vec![
                 DialogType::Chat,
                 DialogType::ChatControlBar,
+                DialogType::ChatOption,
                 DialogType::Belt,
                 DialogType::MiniMap,
                 DialogType::Inventory,
@@ -218,6 +226,7 @@ impl MainDialog {
         self.belt_dialog.load_textures().await;
         self.chat_dialog.load_textures().await;
         self.chat_control_bar.load_textures().await;
+        self.chat_option_dialog.load_textures().await;
         self.inventory_dialog.load_textures().await;
         self.character_dialog.load_textures().await;
         self.quest_log_dialog.load_textures().await;
@@ -310,6 +319,7 @@ impl MainDialog {
                 DialogType::Belt => self.sync_and_draw_belt(&mut consumed, mouse_pos),
                 DialogType::Chat => self.sync_and_draw_chat(&mut consumed, mouse_pos),
                 DialogType::ChatControlBar => self.sync_and_draw_chat_control_bar(&mut consumed, mouse_pos),
+                DialogType::ChatOption => self.sync_and_draw_chat_option(&mut consumed, mouse_pos),
                 DialogType::Inventory => self.sync_and_draw_inventory(&mut consumed, mouse_pos),
                 DialogType::Character => self.sync_and_draw_character(&mut consumed, mouse_pos),
                 DialogType::QuestLog => self.sync_and_draw_quest_log(&mut consumed, mouse_pos),
@@ -329,6 +339,10 @@ impl MainDialog {
             DialogType::Belt => (self.belt_dialog_open, self.belt_dialog.contains(mouse_pos)),
             DialogType::Chat => (self.chat_dialog_open, self.chat_dialog.contains(mouse_pos)),
             DialogType::ChatControlBar => (self.chat_control_bar_open, self.chat_control_bar.contains(mouse_pos)),
+            DialogType::ChatOption => (
+                self.chat_option_dialog_open,
+                self.chat_option_dialog.contains(mouse_pos),
+            ),
             DialogType::Inventory => (self.inventory_dialog_open, self.inventory_dialog.contains(mouse_pos)),
             DialogType::Character => (self.character_dialog_open, self.character_dialog.contains(mouse_pos)),
             DialogType::QuestLog => (self.quest_log_dialog_open, self.quest_log_dialog.contains(mouse_pos)),
@@ -717,7 +731,15 @@ impl MainDialog {
         } else {
             self.belt_dialog.close();
         }
+
+        // ChatDialog 缩放/拖动会带动 ChatControlBar 位置变化，先约束一次避免 1 帧重叠
+        self.clamp_belt_above_chat_control_bar();
+
         self.belt_dialog.update_and_draw();
+
+        // BeltDialog 可能被拖动/切换布局导致尺寸变化，再约束一次保证立即生效
+        self.clamp_belt_above_chat_control_bar();
+
         if !self.belt_dialog.is_visible() {
             self.belt_dialog_open = false;
         }
@@ -825,6 +847,9 @@ impl MainDialog {
             self.chat_dialog.close();
         }
         self.chat_dialog.update_and_draw();
+
+        // ChatDialog 可能被拖动/缩放，确保 ChatControlBar 始终在其上方
+        self.sync_chat_control_bar_position();
         if !self.chat_dialog.is_visible() {
             self.chat_dialog_open = false;
         }
@@ -833,13 +858,67 @@ impl MainDialog {
         }
     }
 
+    fn sync_chat_control_bar_position(&mut self) {
+        if !self.chat_control_bar_open {
+            return;
+        }
+
+        // 即使 ChatDialog 被隐藏，这里也不会强制隐藏控制栏；只负责位置锚定
+        let chat_pos = self.chat_dialog.get_position();
+        let bar_h = self.chat_control_bar.get_size().y;
+        self.chat_control_bar
+            .set_position(vec2(chat_pos.x, chat_pos.y - bar_h));
+    }
+
+    fn clamp_belt_above_chat_control_bar(&mut self) {
+        if !self.belt_dialog_open || !self.chat_control_bar_open {
+            return;
+        }
+
+        if !self.belt_dialog.is_visible() || !self.chat_control_bar.is_visible() {
+            return;
+        }
+
+        // 对齐 C#：仅水平 Belt(Index=1932) 才跟随 ChatControlBar；垂直 Belt(Index=1944) 使用自身固定位置
+        if !self.belt_dialog.is_horizontal_layout() {
+            return;
+        }
+
+        let bar_top_y = self.chat_control_bar.get_position().y;
+        let belt_pos = self.belt_dialog.get_position();
+        let belt_size = self.belt_dialog.get_size();
+
+        // 需求：始终贴紧在 ChatControlBar 上方
+        self.belt_dialog
+            .set_position(vec2(belt_pos.x, bar_top_y - belt_size.y));
+    }
+
     fn sync_and_draw_chat_control_bar(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
         if self.chat_control_bar_open {
             self.chat_control_bar.open();
         } else {
             self.chat_control_bar.close();
         }
-        let (size_clicked, _settings_clicked) = self.chat_control_bar.update_and_draw();
+
+        // 每帧锚定位置：保证 ChatDialog 缩放/拖动后控制栏不“掉队”
+        self.sync_chat_control_bar_position();
+
+        let (size_clicked, settings_clicked) = self.chat_control_bar.update_and_draw();
+
+        // 对齐 C#：ChatControlBar 负责驱动 ChatDialog.ChatPrefix
+        self.chat_dialog
+            .set_chat_prefix(self.chat_control_bar.get_chat_prefix());
+
+        // 对齐 C#：SettingsButton 切换 ChatOptionDialog
+        if settings_clicked {
+            self.chat_option_dialog_open = !self.chat_option_dialog_open;
+            if self.chat_option_dialog_open {
+                self.chat_option_dialog.open();
+                self.bring_to_front(DialogType::ChatOption);
+            } else {
+                self.chat_option_dialog.close();
+            }
+        }
 
         // 如果 Size 按钮被点击，改变 ChatDialog 大小
         if size_clicked {
@@ -847,15 +926,40 @@ impl MainDialog {
             self.chat_dialog.change_size(screen_h);
 
             // 同步更新 ChatControlBar 位置
-            let chat_pos = self.chat_dialog.get_position();
-            let control_bar_y = chat_pos.y - 15.0;
-            self.chat_control_bar.set_position(vec2(chat_pos.x, control_bar_y));
+            self.sync_chat_control_bar_position();
         }
+
+        // update_and_draw 过程中尺寸可能刷新，再同步一次避免高度变化造成 1 帧错位
+        self.sync_chat_control_bar_position();
 
         if !self.chat_control_bar.is_visible() {
             self.chat_control_bar_open = false;
         }
         if self.chat_control_bar_open && self.chat_control_bar.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    fn sync_and_draw_chat_option(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.chat_option_dialog_open {
+            self.chat_option_dialog.open();
+        } else {
+            self.chat_option_dialog.close();
+        }
+
+        // 更新与绘制
+        let changed = self.chat_option_dialog.update_and_draw();
+        if !self.chat_option_dialog.is_visible() {
+            self.chat_option_dialog_open = false;
+        }
+
+        // 同步设置到 ChatDialog（目前先同步透明聊天；过滤项留作后续接入消息类型）
+        if changed || self.chat_option_dialog_open {
+            let settings = self.chat_option_dialog.get_settings();
+            self.chat_dialog.apply_chat_option_settings(settings);
+        }
+
+        if self.chat_option_dialog_open && self.chat_option_dialog.contains(mouse_pos) {
             *consumed = true;
         }
     }
