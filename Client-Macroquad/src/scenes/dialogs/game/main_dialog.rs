@@ -366,6 +366,31 @@ impl MainDialog {
         consumed
     }
 
+    /// 当前鼠标位置是否位于 UI 区域之上（用于屏蔽游戏内点击/移动）
+    ///
+    /// 说明：这是“命中检测”接口，不会触发绘制。
+    pub fn is_mouse_over_ui(&self, mouse_pos: Vec2) -> bool {
+        // 主底部界面背景区域
+        let main_rect = Rect::new(self.position.x, self.position.y, self.bg_size.x, self.bg_size.y);
+        if mouse_pos.x >= main_rect.x
+            && mouse_pos.x <= main_rect.x + main_rect.w
+            && mouse_pos.y >= main_rect.y
+            && mouse_pos.y <= main_rect.y + main_rect.h
+        {
+            return true;
+        }
+
+        // 子对话框区域（按 z-order 从上到下检测）
+        for dialog_type in self.dialog_z_order.iter().rev() {
+            let (is_open, contains) = self.check_dialog_contains(*dialog_type, mouse_pos);
+            if is_open && contains {
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// 检查指定对话框是否打开且包含指定位置
     fn check_dialog_contains(&self, dialog_type: DialogType, mouse_pos: Vec2) -> (bool, bool) {
         match dialog_type {

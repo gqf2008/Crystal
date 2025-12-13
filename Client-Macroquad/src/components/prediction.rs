@@ -9,7 +9,7 @@
 // ============================================================================
 
 use std::time::Instant;
-use crate::ecs::components::Position;
+use crate::components::Position;
 
 /// 客户端预测组件
 #[derive(Debug, Clone)]

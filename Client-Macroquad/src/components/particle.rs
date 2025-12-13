@@ -7,9 +7,9 @@
 #[derive(Debug, Clone)]
 pub struct Particle {
     /// 位置
-    pub position: crate::ecs::components::core::Position,
+    pub position: crate::components::core::Position,
     /// 速度 (像素/秒)
-    pub velocity: crate::ecs::components::core::Position,
+    pub velocity: crate::components::core::Position,
     /// 颜色
     pub color: ParticleColor,
     /// 大小
@@ -33,8 +33,8 @@ impl Particle {
             .as_secs_f32();
         
         Self {
-            position: crate::ecs::components::core::Position::new(x, y),
-            velocity: crate::ecs::components::core::Position::new(vx, vy),
+            position: crate::components::core::Position::new(x, y),
+            velocity: crate::components::core::Position::new(vx, vy),
             color: ParticleColor { r: 255, g: 255, b: 255, a: 255 },
             size: 1.0,
             alive_until: current_time + lifetime,
@@ -82,7 +82,7 @@ pub enum BlendMode {
 #[derive(Debug, Clone)]
 pub struct ParticleEmitter {
     /// 发射器位置
-    pub emitter_location: crate::ecs::components::core::Position,
+    pub emitter_location: crate::components::core::Position,
     /// 是否生成粒子
     pub generate_particles: bool,
     /// 下次生成时间
@@ -90,7 +90,7 @@ pub struct ParticleEmitter {
     /// 生成间隔 (秒)
     pub spawn_interval: f32,
     /// 外力速度 (如风力)
-    pub force_velocity: crate::ecs::components::core::Position,
+    pub force_velocity: crate::components::core::Position,
     /// 粒子类型
     pub particle_type: ParticleType,
 }

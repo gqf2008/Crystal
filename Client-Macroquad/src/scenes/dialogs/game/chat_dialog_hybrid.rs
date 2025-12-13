@@ -70,6 +70,7 @@ pub struct ChatDialogHybrid {
     /// 拖动时鼠标到 PositionBar 顶部的偏移
     position_bar_drag_offset_y: f32,
     /// 拖拽辅助器
+    #[allow(dead_code)]
     drag_helper: DragHelper,
     /// Backspace 按键重复计时器
     backspace_timer: f64,

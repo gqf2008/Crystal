@@ -22,6 +22,7 @@ impl DebugSystem {
     }
 
     /// 处理调试相关的键盘按键
+    #[allow(dead_code)]
     fn handle_keycode(world: &mut hecs::World, keycode: KeyCode) {
         // M键需要特殊处理，因为它会借用整个 world
         if keycode == KeyCode::M {

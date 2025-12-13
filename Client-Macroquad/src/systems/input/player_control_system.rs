@@ -302,7 +302,7 @@ impl LogicSystem for PlayerControlSystem {
             if has_single_click {
                 // 停止移动
                 player_input.move_to = None;
-                player_input.movement_mode = crate::ecs::components::MovementMode::None;
+                player_input.movement_mode = crate::components::MovementMode::None;
                 
                 use crate::components::PlayerAction;
                 
@@ -337,7 +337,7 @@ impl LogicSystem for PlayerControlSystem {
                 // 双击模式: 自动寻路,松开后继续移动
                 if let Some((world_x, world_y)) = double_click_left {
                     player_input.move_to = Some((world_x, world_y));
-                    player_input.movement_mode = crate::ecs::components::MovementMode::Pathfinding;
+                    player_input.movement_mode = crate::components::MovementMode::Pathfinding;
                     
                     // 🎬 设置走路动作（PlayerControlSystem 独占写入）
                     player.action = PlayerAction::Walk;
@@ -345,7 +345,7 @@ impl LogicSystem for PlayerControlSystem {
                     tracing::warn!("🚶🚶 左键双击走路到 ({:.1}, {:.1}) [寻路模式-松开后继续走]", world_x, world_y);
                 } else if let Some((world_x, world_y)) = double_click_right {
                     player_input.move_to = Some((world_x, world_y));
-                    player_input.movement_mode = crate::ecs::components::MovementMode::Pathfinding;
+                    player_input.movement_mode = crate::components::MovementMode::Pathfinding;
                     
                     // 🎬 设置奔跑动作（PlayerControlSystem 独占写入）
                     player.action = PlayerAction::Run;

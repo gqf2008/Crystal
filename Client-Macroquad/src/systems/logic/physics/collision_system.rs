@@ -24,6 +24,7 @@ use crate::systems::LogicSystem;
 #[derive(ecs_macros::LogicSystem)]
 pub struct CollisionSystem {
     /// 停止移动阈值(像素)
+    #[allow(dead_code)]
     stop_threshold: f32,
 }
 
@@ -35,11 +36,13 @@ impl CollisionSystem {
     }
 
     /// 检查位置是否在地图边界内
+    #[allow(dead_code)]
     fn is_within_bounds(x: f32, y: f32, bounds: &MapBounds) -> bool {
         x >= 0.0 && y >= 0.0 && x < bounds.width as f32 && y < bounds.height as f32
     }
 
     /// 将位置限制在地图边界内
+    #[allow(dead_code)]
     fn clamp_to_bounds(pos: &mut Position, bounds: &MapBounds) {
         pos.x = pos.x.clamp(0.0, (bounds.width - 1) as f32);
         pos.y = pos.y.clamp(0.0, (bounds.height - 1) as f32);

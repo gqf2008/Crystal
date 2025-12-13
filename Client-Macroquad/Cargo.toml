@@ -56,6 +56,17 @@ rfd = "0.15"
 [patch.crates-io]
 miniquad = { path = "miniquad" }
 
+[features]
+# Keep default feature set minimal.
+default = []
+
+# Optional async runtime support.
+tokio = ["dep:tokio"]
+
+# Compatibility flag for legacy ggez backend code paths.
+# Currently not enabled by default.
+backend-ggez = []
+
 [profile.dev]
 opt-level = 1
 

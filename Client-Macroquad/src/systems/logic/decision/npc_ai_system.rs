@@ -49,7 +49,7 @@ impl NpcAISystem {
                         let _direction = Self::calculate_direction(dx, dy);
                         
                         // 更新AI状态为面向玩家
-                        ai.current_action = crate::ecs::components::AIAction::Idle;
+                        ai.current_action = crate::components::AIAction::Idle;
                         // Note: AIState 没有 facing_direction 字段，方向由其他组件控制
                     }
                 }

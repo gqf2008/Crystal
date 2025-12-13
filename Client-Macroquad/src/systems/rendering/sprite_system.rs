@@ -16,6 +16,7 @@ impl SpriteRenderSystem {
 
 impl SpriteRenderSystem {
     /// 获取相机变换参数
+    #[allow(dead_code)]
     fn get_camera_transform(world: &hecs::World) -> Option<(f32, f32, f32)> {
         let mut query = world.query::<(&Camera, &Position)>();
         if let Some((_, (camera, cam_pos))) = query.iter().next() {
@@ -26,6 +27,7 @@ impl SpriteRenderSystem {
     }
 
     /// 世界坐标 → 屏幕坐标
+    #[allow(dead_code)]
     fn world_to_screen(
         world_x: f32,
         world_y: f32,

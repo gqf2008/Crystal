@@ -27,8 +27,10 @@ pub struct MockNetwork {
     /// 线程是否运行
     running: Arc<AtomicBool>,
     /// 接收游戏层发送的事件
+    #[allow(dead_code)]
     game_tx: Sender<NetworkEvent>,
     /// 游戏层接收事件的通道
+    #[allow(dead_code)]
     game_rx: Receiver<NetworkEvent>,
     /// 模拟网络线程句柄
     _handle: Option<thread::JoinHandle<()>>,

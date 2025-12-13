@@ -152,7 +152,17 @@ impl PlayerAction {
     
     #[deprecated(note = "使用 objects::frames::get_player_frame() 替代")]
     pub fn duration_ms(&self) -> u64 {
-        (self.frame_count() * self.frame_interval() * 100) as u64
+        // 避免在兼容 API 内部调用其他 deprecated 方法，
+        // 否则编译会产生额外的 deprecated 警告。
+        let (frames, interval) = match self {
+            PlayerAction::Stand => (4_i32, 30_i32),
+            PlayerAction::Walk => (6, 4),
+            PlayerAction::Run => (6, 2),
+            PlayerAction::Attack1 => (6, 1),
+            PlayerAction::Attack2 => (6, 1),
+            PlayerAction::Attack3 => (6, 1),
+        };
+        (frames * interval * 100) as u64
     }
     
     #[deprecated(note = "使用 objects::frames::get_player_frame() 替代")]
@@ -256,7 +266,7 @@ impl GuildMembership {
 // ============================================================================
 // 
 // 注意: Health, Mana, CombatStats 等战斗组件已移到 combat.rs
-// 使用时通过 use crate::ecs::components::combat::* 导入
+// 使用时通过 use crate::components::combat::* 导入
 //
 // ============================================================================
 

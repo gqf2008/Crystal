@@ -50,6 +50,7 @@ impl SpriteRenderSystem {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(super) fn draw_character(
         &mut self,
         world: &hecs::World,

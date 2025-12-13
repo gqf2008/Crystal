@@ -32,23 +32,7 @@ use crate::{
     },
     systems::LogicSystem,
 };
-// use crate::objects::frames::get_player_frame;
-
-// 临时占位函数 - TODO: 实现完整的动画帧查找
-fn get_player_frame(_action: u8) -> Option<PlayerFrameInfo> {
-    // 返回默认动画配置
-    Some(PlayerFrameInfo {
-        start: 0,
-        count: 4,
-        interval: 100,
-    })
-}
-
-struct PlayerFrameInfo {
-    start: i32,
-    count: i32,
-    interval: i32,
-}
+use crate::objects::frames::get_player_frame;
 
 #[derive(ecs_macros::LogicSystem)]
 pub struct AnimationSystem;
@@ -110,7 +94,7 @@ impl AnimationSystem {
     /// ```
     fn calculate_character_frame(player: &Player, time_tracker: &TimeTracker) -> i32 {
         // 从 PLAYER_FRAMES 获取动画配置
-        let mir_action = player.action.to_mir_action() as u8;
+        let mir_action = player.action.to_mir_action();
         let frame = match get_player_frame(mir_action) {
             Some(f) => f,
             None => {
@@ -173,7 +157,7 @@ let now = Instant::now();
             .into_iter()
         {
             // 从 PLAYER_FRAMES 获取攻击动画时长
-            let duration_ms = if let Some(frame) = get_player_frame(attack_state.attack_type.to_mir_action() as u8) {
+            let duration_ms = if let Some(frame) = get_player_frame(attack_state.attack_type.to_mir_action()) {
                 (frame.count * frame.interval) as u64
             } else {
                 // 后备：默认600ms (6帧 * 100ms)

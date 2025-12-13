@@ -20,88 +20,103 @@ pub use macroquad::prelude::{KeyCode, MouseButton};
 /// GameResult 类型别名 (替代 ggez::GameResult)
 pub type GameResult<T = ()> = Result<T, GameError>;
 
-/// 输入状态包装器（简化版）
-pub struct InputState {
+/// 每帧输入快照（macroquad 轮询输入的轻量包装）
+///
+/// 说明：这不是 ECS 组件 `components::InputState`。
+/// ECS 的 `InputState` 用于“上一帧状态/边缘检测”。
+pub struct FrameInput {
+    enabled: bool,
     pub mouse: MouseState,
-    pub events: EventIterator,
 }
 
-impl InputState {
-    pub fn new() -> Self {
+impl FrameInput {
+    pub fn new(enabled: bool) -> Self {
         Self {
-            mouse: MouseState,
-            events: EventIterator,
+            enabled,
+            mouse: MouseState { enabled },
         }
     }
     
     pub fn key_pressed(&self, key: KeyCode) -> bool {
+        if !self.enabled {
+            return false;
+        }
         macroquad::prelude::is_key_pressed(key)
     }
     
     pub fn mouse_left_pressed(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
         macroquad::prelude::is_mouse_button_pressed(MouseButton::Left)
     }
     
     pub fn mouse_right_pressed(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
         macroquad::prelude::is_mouse_button_pressed(MouseButton::Right)
     }
     
     pub fn mouse_middle_pressed(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
         macroquad::prelude::is_mouse_button_pressed(MouseButton::Middle)
     }
     
     pub fn mouse_position(&self) -> (f32, f32) {
+        if !self.enabled {
+            return (0.0, 0.0);
+        }
         macroquad::prelude::mouse_position()
     }
     
     pub fn ctrl_pressed(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
         macroquad::prelude::is_key_down(KeyCode::LeftControl) 
             || macroquad::prelude::is_key_down(KeyCode::RightControl)
     }
     
     pub fn mouse_wheel(&self) -> (f32, f32) {
+        if !self.enabled {
+            return (0.0, 0.0);
+        }
         macroquad::prelude::mouse_wheel()
     }
     
     // 兼容字段访问
     pub fn button_pressed(&self, button: MouseButton) -> bool {
+        if !self.enabled {
+            return false;
+        }
         macroquad::prelude::is_mouse_button_pressed(button)
     }
 }
 
 #[derive(Clone, Copy)]
-pub struct MouseState;
+pub struct MouseState {
+    enabled: bool,
+}
 
 impl MouseState {
     pub fn button_pressed(&self, button: MouseButton) -> bool {
+        if !self.enabled {
+            return false;
+        }
         macroquad::prelude::is_mouse_button_pressed(button)
     }
     
     pub fn position(&self) -> Vec2 {
+        if !self.enabled {
+            return Vec2::new(0.0, 0.0);
+        }
         let (x, y) = macroquad::prelude::mouse_position();
         Vec2::new(x, y)
     }
 }
-
-#[derive(Clone, Copy)]
-pub struct EventIterator;
-
-impl Iterator for EventIterator {
-    type Item = GameEvent;
-    
-    fn next(&mut self) -> Option<Self::Item> {
-        None  // 暂时返回空
-    }
-}
-
-impl EventIterator {
-    pub fn iter(&self) -> Self {
-        *self
-    }
-}
-
-pub struct GameEvent;
-
 
 /// GameContext - 游戏运行时上下文
 /// 
@@ -117,6 +132,9 @@ pub struct GameContext {
     pub events: crate::event_bus::EventBus,                   // 事件总线
     pub delta_time: f32,                        // 帧时间
     pub start_time: std::time::Instant,         // 启动时间
+
+    /// 是否屏蔽本帧 ECS 输入读取（用于 UI 交互期间防止误触）
+    pub input_blocked: bool,
 }
 
 impl GameContext {
@@ -129,11 +147,13 @@ impl GameContext {
             events: crate::event_bus::EventBus::new(),
             delta_time: 0.0,
             start_time: std::time::Instant::now(),
+
+            input_blocked: false,
         }
     }
     
-    pub fn input(&self) -> InputState {
-        InputState::new()
+    pub fn input(&self) -> FrameInput {
+        FrameInput::new(!self.input_blocked)
     }
     
     pub fn map_events(&mut self) -> &[NetworkEvent] {

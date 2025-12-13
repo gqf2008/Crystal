@@ -158,7 +158,7 @@ impl Default for TargetSelection {
 // ============================================================================
 
 use mir2_shared::enums::MirDirection;
-use crate::ecs::components::SpellType;
+use crate::components::SpellType;
 
 /// 移动模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

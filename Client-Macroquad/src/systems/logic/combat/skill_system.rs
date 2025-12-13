@@ -61,7 +61,7 @@ impl LogicSystem for SkillSystem {
 
             for (_, (_, input)) in ctx
                 .world
-                .query::<(&LocalPlayer, &crate::ecs::components::PlayerInput)>()
+                .query::<(&LocalPlayer, &crate::components::PlayerInput)>()
                 .iter()
             {
                 if let Some(spell) = input.cast_spell {
@@ -93,7 +93,7 @@ impl LogicSystem for SkillSystem {
                 // 清除施法输入
                 for (_, (_, input)) in ctx
                     .world
-                    .query_mut::<(&LocalPlayer, &mut crate::ecs::components::PlayerInput)>()
+                    .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
                 {
                     input.cast_spell = None;
                     break;
@@ -121,7 +121,7 @@ impl LogicSystem for SkillSystem {
                 // 清除施法输入
                 for (_, (_, input)) in ctx
                     .world
-                    .query_mut::<(&LocalPlayer, &mut crate::ecs::components::PlayerInput)>()
+                    .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
                 {
                     input.cast_spell = None;
                     break;
@@ -150,7 +150,7 @@ impl LogicSystem for SkillSystem {
             // 6. 清除施法输入
             for (_, (_, input)) in ctx
                 .world
-                .query_mut::<(&LocalPlayer, &mut crate::ecs::components::PlayerInput)>()
+                .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
             {
                 input.cast_spell = None;
                 input.spell_target_pos = None;

@@ -125,16 +125,6 @@ impl LogicSystem for CameraSystem {
         let ctrl_pressed = ctx.input().ctrl_pressed();
         let space_pressed = ctx.input().key_pressed(KeyCode::Space);
 
-        let resize_event = ctx.input().events.iter().find_map(|_e| {
-            // TODO: 当 NetworkEvent 实现后，解析 Resize 事件
-            // if let NetworkEvent::Resize { width, height } = e {
-            //     Some((width, height))
-            // } else {
-            //     None
-            // }
-            None
-        });
-
         let scroll_y = {
             let (_, y) = ctx.input().mouse_wheel();
             if y != 0.0 { Some(y) } else { None }
@@ -183,12 +173,7 @@ impl LogicSystem for CameraSystem {
                 camera.screen_height = current_height;
             }
 
-            // 处理窗口大小调整事件(优先级更高)
-            if let Some((width, height)) = resize_event {
-                camera.screen_width = width;
-                camera.screen_height = height;
-                tracing::debug!("📐 相机尺寸更新(resize事件): {}x{}", width, height);
-            }
+            // macroquad 通过 drawable_size() 轮询窗口尺寸；无需额外 resize 事件。
 
             // 处理鼠标拖拽 - 只有中键或Ctrl+左键才触发地图拖拽
             if camera_drag_enabled {

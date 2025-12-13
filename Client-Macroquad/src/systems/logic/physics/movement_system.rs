@@ -84,7 +84,7 @@ impl LogicSystem for MovementSystem {
             &mut MovementVelocity,
             &mut Path,
             &mut Player,
-            &mut crate::ecs::components::PlayerInput,
+            &mut crate::components::PlayerInput,
         )>() {
             use crate::components::MovementMode;
             

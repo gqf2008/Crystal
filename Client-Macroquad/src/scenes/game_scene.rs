@@ -5,13 +5,21 @@
 //   F1-F6 = 快捷栏技能
 //   ESC = 返回角色选择
 
-use crate::game::GameResult;
+use crate::game::{GameContext, GameResult};
 use crate::scenes::dialogs::game::{
     MainDialog,
 };
 use crate::scenes::{Scene, SceneTransition};
 use crate::ui::text_renderer::draw_text_cn;
-use crate::{map_renderer::MeshMapRenderer, resources::{init_map_libraries, MapReader}};
+use crate::{
+    components::{
+        AnimationFrame, Camera as EcsCamera, CameraMode, LocalPlayer, MapData, MirDirection,
+        MovementVelocity, Path, Player, PlayerAction, PlayerAppearance, PlayerInput, Position,
+        TimeTracker,
+    },
+    systems::{priority, AnimationSystem, CameraFollowSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SystemScheduler},
+};
+use crate::{map_renderer::MeshMapRenderer, resources::{init_map_libraries, LibraryName, MapReader}};
 use macroquad::prelude::*;
 
 /// 游戏主场景 - 集成所有混合对话框
@@ -28,6 +36,19 @@ pub struct GameScene {
 
     // 完整 UI（底部主界面 + 全部子对话框）
     main_dialog: MainDialog,
+
+    // ECS（ggez 版本同构）：先最小接入 update，不影响现有渲染链路
+    ecs_ctx: GameContext,
+    ecs_scheduler: SystemScheduler,
+    ecs_camera_entity: Option<hecs::Entity>,
+    ecs_local_player_entity: Option<hecs::Entity>,
+    ecs_map_entity: Option<hecs::Entity>,
+    ecs_time_entity: Option<hecs::Entity>,
+
+    ecs_animation_accum: f32,
+
+    ui_consumed_last_frame: bool,
+    ui_mouse_captured: bool,
     
     // 初始化状态
     initialized: bool,
@@ -45,6 +66,14 @@ impl GameScene {
             viewport: None,
         };
 
+        let mut ecs_scheduler = SystemScheduler::new();
+        ecs_scheduler
+            .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
+            .add_system(PathfindingSystem::new(), priority::PATHFINDING)
+            .add_system(MovementSystem, priority::MOVEMENT)
+            .add_system(AnimationSystem::new(), priority::ANIMATION)
+            .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW);
+
         Self {
             map_reader: None,
             map_renderer: MeshMapRenderer::new(48.0, 32.0),
@@ -56,8 +85,219 @@ impl GameScene {
             map_last_mouse_pos: mouse_position().into(),
 
             main_dialog: MainDialog::new(),
+
+            ecs_ctx: GameContext::new(),
+            ecs_scheduler,
+            ecs_camera_entity: None,
+            ecs_local_player_entity: None,
+            ecs_map_entity: None,
+            ecs_time_entity: None,
+
+            ecs_animation_accum: 0.0,
+            ui_consumed_last_frame: false,
+            ui_mouse_captured: false,
             initialized: false,
         }
+    }
+
+    fn ensure_ecs_bootstrap(&mut self) {
+        if !self.initialized {
+            return;
+        }
+
+        // 1) 地图数据（用于寻路/碰撞等系统）
+        if self.ecs_map_entity.is_none() {
+            if let Some(map) = self.map_reader.as_ref() {
+                let entity = self.ecs_ctx.world.spawn((MapData {
+                    cells: map.map_cells.clone(),
+                    width: map.width,
+                    height: map.height,
+                },));
+                self.ecs_map_entity = Some(entity);
+            }
+        }
+
+        // 2) 相机实体（PlayerControlSystem 需要 Camera + Position 来做屏幕->世界坐标转换）
+        if self.ecs_camera_entity.is_none() {
+            let (sw, sh) = self.ecs_ctx.drawable_size();
+            let entity = self.ecs_ctx.world.spawn((
+                EcsCamera::new(sw, sh),
+                Position::new(self.map_camera_position.x, self.map_camera_position.y),
+                CameraMode::FollowPlayer,
+            ));
+            self.ecs_camera_entity = Some(entity);
+        }
+
+        // 2.5) 时间跟踪实体（AnimationSystem 需要 animation_count 驱动帧变化）
+        if self.ecs_time_entity.is_none() {
+            let entity = self.ecs_ctx.world.spawn((TimeTracker::default(),));
+            self.ecs_time_entity = Some(entity);
+        }
+
+        // 3) 本地玩家实体（最小移动链路）
+        if self.ecs_local_player_entity.is_none() {
+            let player = Player {
+                direction: MirDirection::Up,
+                action: PlayerAction::Stand,
+            };
+
+            let entity = self.ecs_ctx.world.spawn((
+                LocalPlayer,
+                player,
+                Position::new(self.map_camera_position.x, self.map_camera_position.y),
+                PlayerAppearance::default(),
+                AnimationFrame::default(),
+                PlayerInput::default(),
+                Path::new(),
+                MovementVelocity::new(crate::components::movement::DEFAULT_MAX_SPEED),
+            ));
+            self.ecs_local_player_entity = Some(entity);
+        }
+    }
+
+    fn sync_ecs_camera_from_map(&mut self) {
+        let Some(cam_entity) = self.ecs_camera_entity else {
+            return;
+        };
+
+        // 同步相机尺寸/缩放/位置到 ECS
+        let (sw, sh) = self.ecs_ctx.drawable_size();
+        if let Ok(mut cam) = self.ecs_ctx.world.get::<&mut EcsCamera>(cam_entity) {
+            cam.screen_width = sw;
+            cam.screen_height = sh;
+            cam.zoom = self.map_zoom;
+        }
+        if let Ok(mut pos) = self.ecs_ctx.world.get::<&mut Position>(cam_entity) {
+            pos.x = self.map_camera_position.x;
+            pos.y = self.map_camera_position.y;
+        }
+    }
+
+    fn apply_ecs_camera_to_map(&mut self) {
+        let Some(cam_entity) = self.ecs_camera_entity else {
+            return;
+        };
+        let Ok(pos) = self.ecs_ctx.world.get::<&Position>(cam_entity) else {
+            return;
+        };
+
+        // 先拷贝数据，避免 hecs::Ref 持有借用导致后续无法可变借用 self
+        let (x, y) = (pos.x, pos.y);
+        drop(pos);
+
+        self.map_camera_position.x = x;
+        self.map_camera_position.y = y;
+        self.clamp_map_camera_position();
+    }
+
+    fn draw_local_player_sprite(&mut self, alpha: f32) {
+        let Some(player_entity) = self.ecs_local_player_entity else {
+            return;
+        };
+
+        let Ok(mut q) = self
+            .ecs_ctx
+            .world
+            .query_one::<(&Position, &PlayerAppearance, &AnimationFrame)>(player_entity)
+        else {
+            return;
+        };
+
+        let Some((pos, appearance, anim_frame)) = q.get() else {
+            return;
+        };
+
+        // 使用 AnimationSystem 计算的帧索引（更接近最终架构）
+        let base_frame = anim_frame.character_frame;
+
+        // 性别偏移（C# ArmourOffSet）：女角色身体动画从 +808 开始
+        let armour_offset = if appearance.gender == crate::components::MirGender::Male {
+            0
+        } else {
+            808
+        };
+
+        let armour_index = appearance.armour.max(0) as usize;
+        let body_frame = (base_frame + armour_offset).max(0) as usize;
+
+        if let Some(info) = LibraryName::CArmours(armour_index).get_texture(body_frame) {
+            if let Some(tex) = info.image {
+                let draw_x = pos.x + info.offset_x as f32;
+                let draw_y = pos.y + info.offset_y as f32;
+                let tint = Color::new(1.0, 1.0, 1.0, alpha.clamp(0.0, 1.0));
+                draw_texture_ex(
+                    &tex,
+                    draw_x,
+                    draw_y,
+                    tint,
+                    DrawTextureParams {
+                        ..Default::default()
+                    },
+                );
+                return;
+            }
+        }
+
+        // 回退：红点
+        if let Ok(pos) = self.ecs_ctx.world.get::<&Position>(player_entity) {
+            draw_circle(pos.x, pos.y, 6.0, Color::new(1.0, 0.0, 0.0, alpha.clamp(0.0, 1.0)));
+        }
+    }
+
+    fn draw_ecs_path_overlay(&mut self) {
+        let Some(player_entity) = self.ecs_local_player_entity else {
+            return;
+        };
+
+        // 路径（格子→世界）
+        if let (Ok(pos), Ok(path)) = (
+            self.ecs_ctx.world.get::<&Position>(player_entity),
+            self.ecs_ctx.world.get::<&Path>(player_entity),
+        ) {
+            if path.is_valid && !path.waypoints.is_empty() {
+                let mut last = (pos.x, pos.y);
+                for (gx, gy) in path.waypoints.iter().copied() {
+                    let wx = gx as f32 * 48.0;
+                    let wy = gy as f32 * 32.0;
+                    draw_line(last.0, last.1, wx, wy, 2.0, Color::from_rgba(255, 255, 0, 180));
+                    last = (wx, wy);
+                }
+            }
+        }
+    }
+
+    fn is_local_player_occluded_by_front(&self) -> bool {
+        let Some(map) = self.map_reader.as_ref() else {
+            return false;
+        };
+        let Some(player_entity) = self.ecs_local_player_entity else {
+            return false;
+        };
+        let Ok(pos) = self.ecs_ctx.world.get::<&Position>(player_entity) else {
+            return false;
+        };
+
+        // 轻量遮挡判断：检查玩家附近（偏上方）的 front tile 是否存在。
+        // 目标是“只在确实有前景遮挡时才画 ghost”，避免一直显示。
+        let fx = (pos.x / 48.0).floor() as i32;
+        let fy = (pos.y / 32.0).floor() as i32;
+
+        for dy in -8..=1 {
+            for dx in -2..=2 {
+                let tx = fx + dx;
+                let ty = fy + dy;
+                if tx < 0 || ty < 0 || tx >= map.width || ty >= map.height {
+                    continue;
+                }
+                if let Some(cell) = map.get_cell(tx, ty) {
+                    if cell.front_tile().is_some() {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     fn update_map_camera(&mut self) {
@@ -189,6 +429,10 @@ impl GameScene {
         }
         
         self.initialized = true;
+
+        // 地图加载完成后，立即完成 ECS 最小引导（MapData/Camera/LocalPlayer）
+        self.ensure_ecs_bootstrap();
+        self.sync_ecs_camera_from_map();
         println!("✅ GameScene: 对话框纹理加载完成");
     }
     
@@ -262,6 +506,79 @@ impl Scene for GameScene {
         // 地图输入（空格模式）
         self.handle_map_input();
 
+        // ECS 整合：
+        // - update 阶段驱动 ECS 世界
+        // - Space 按下时：地图相机为手动（由现有 map_input 控制）
+        // - Space 松开时：地图相机会跟随 ECS Camera（CameraFollowSystem）
+        // - 点击 UI 时：屏蔽 ECS 输入，避免 UI 操作导致角色乱走
+        if self.initialized {
+            self.ensure_ecs_bootstrap();
+
+            // 驱动全局动画计数器（AnimationSystem 使用 animation_count 计算当前帧）
+            if let Some(time_entity) = self.ecs_time_entity {
+                if let Ok(mut tt) = self.ecs_ctx.world.get::<&mut TimeTracker>(time_entity) {
+                    tt.frame_count = tt.frame_count.wrapping_add(1);
+                    tt.last_frame_time = std::time::Instant::now();
+
+                    // 与地图动画一致：每 100ms 递增一次（使用累加器避免 dt<0.1 时永远不动）
+                    self.ecs_animation_accum += _dt;
+                    while self.ecs_animation_accum >= 0.1 {
+                        tt.animation_count = tt.animation_count.wrapping_add(1);
+                        self.ecs_animation_accum -= 0.1;
+                    }
+                }
+            }
+
+            let space_down = is_key_down(KeyCode::Space);
+            let (mx, my) = mouse_position();
+            let mouse_pos = vec2(mx, my);
+            let left_pressed = is_mouse_button_pressed(MouseButton::Left);
+            let right_pressed = is_mouse_button_pressed(MouseButton::Right);
+            let left_down = is_mouse_button_down(MouseButton::Left);
+            let right_down = is_mouse_button_down(MouseButton::Right);
+            let mouse_button_down = left_down || right_down;
+            let wheel_y = mouse_wheel().1;
+            let ui_over = self.main_dialog.is_mouse_over_ui(mouse_pos);
+
+            // UI 鼠标捕获：在 UI 上按下鼠标后，直到松开都阻止 ECS 读取输入。
+            // 解决“拖拽 UI 时后续帧仍触发角色移动/寻路”的问题。
+            if (left_pressed || right_pressed) && ui_over {
+                self.ui_mouse_captured = true;
+            }
+            if self.ui_mouse_captured && !mouse_button_down {
+                self.ui_mouse_captured = false;
+            }
+
+            // 这个帧内是否阻止 ECS 读取输入
+            self.ecs_ctx.input_blocked = self.main_dialog.is_any_input_active()
+                || self.ui_mouse_captured
+                || (wheel_y != 0.0 && ui_over)
+                || self.ui_consumed_last_frame;
+
+            // 相机模式/权威切换
+            if let Some(cam_entity) = self.ecs_camera_entity {
+                if let Ok(mut mode) = self.ecs_ctx.world.get::<&mut CameraMode>(cam_entity) {
+                    *mode = if space_down { CameraMode::Manual } else { CameraMode::FollowPlayer };
+                }
+            }
+
+            if space_down || self.map_dragging {
+                // 手动相机：GameScene map_camera_position 主导 ECS camera
+                self.sync_ecs_camera_from_map();
+            }
+
+            self.ecs_ctx.delta_time = _dt;
+            self.ecs_scheduler.update(&mut self.ecs_ctx, _dt)?;
+
+            if !space_down && !self.map_dragging {
+                // 跟随相机：ECS camera 主导 GameScene map_camera_position
+                self.apply_ecs_camera_to_map();
+            }
+
+            self.ecs_ctx.cleanup_dead_entities();
+            self.ecs_ctx.events_mut().clear_frame();
+        }
+
         // 处理快捷键
         self.handle_hotkeys();
         
@@ -274,24 +591,62 @@ impl Scene for GameScene {
         
         Ok(SceneTransition::None)
     }
-    
+
     fn render(&mut self) -> GameResult {
         // 绘制地图背景（若地图未加载则使用占位网格）
         clear_background(Color::from_rgba(30, 45, 30, 255));
 
         self.update_map_camera();
-        if let Some(map) = self.map_reader.as_ref() {
+        if self.map_reader.is_some() {
             set_camera(&self.map_camera);
-            // 颜色先保持原样，后续若需要再引入 RenderConfig
-            let _tiles = self.map_renderer.render(
-                map,
-                self.map_camera_position.x,
-                self.map_camera_position.y,
-                screen_width(),
-                screen_height(),
-                self.map_zoom,
-                WHITE,
-            );
+            // 1) 先渲染 Back+Middle（不画 Front）
+            let original_show_front = self.map_renderer.show_front_layer;
+            {
+                let map = self.map_reader.as_ref().expect("map_reader exists");
+
+                self.map_renderer.show_front_layer = false;
+                // 颜色先保持原样，后续若需要再引入 RenderConfig
+                let _tiles = self.map_renderer.render(
+                    map,
+                    self.map_camera_position.x,
+                    self.map_camera_position.y,
+                    screen_width(),
+                    screen_height(),
+                    self.map_zoom,
+                    WHITE,
+                );
+                self.map_renderer.show_front_layer = original_show_front;
+            }
+
+            // 2) 先画角色（位于 Middle 与 Front 之间）
+            self.draw_local_player_sprite(1.0);
+            self.draw_ecs_path_overlay();
+
+            // 3) 再渲染 Front（保持完全不透明）
+            if original_show_front {
+                let occluded = self.is_local_player_occluded_by_front();
+                {
+                    let map = self.map_reader.as_ref().expect("map_reader exists");
+                    let _front_tiles = self.map_renderer.render_front_layer_with_focus(
+                        map,
+                        self.map_camera_position.x,
+                        self.map_camera_position.y,
+                        screen_width(),
+                        screen_height(),
+                        self.map_zoom,
+                        WHITE,
+                        None,
+                        0,
+                        0,
+                        1.0,
+                    );
+                }
+
+                // 4) 只有被前景遮挡时，额外画一遍半透明人形（不改变前景本身）
+                if occluded {
+                    self.draw_local_player_sprite(0.45);
+                }
+            }
             set_default_camera();
         } else {
             // 占位网格背景（模拟地图）
@@ -317,7 +672,8 @@ impl Scene for GameScene {
         } else {
             // 绘制完整 UI
             self.main_dialog.update_and_draw();
-            let _ui_consumed = self.main_dialog.show_dialogs();
+            let ui_consumed = self.main_dialog.show_dialogs();
+            self.ui_consumed_last_frame = ui_consumed;
             
             // 绘制帮助提示
             self.draw_help_text();

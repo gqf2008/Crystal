@@ -20,6 +20,7 @@ pub struct LoginScene {
     // 登录信息
     account: String,
     password: String,
+    #[allow(dead_code)]
     password_focus: bool,
     
     // 背景动画
@@ -42,6 +43,7 @@ pub struct LoginScene {
 enum InputFocus {
     Account,
     Password,
+    #[allow(dead_code)]
     None,
 }
 

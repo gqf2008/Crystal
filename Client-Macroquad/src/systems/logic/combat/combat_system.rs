@@ -74,7 +74,7 @@ impl LogicSystem for CombatSystem {
         let attack_request = {
             let mut request = None;
 
-            for (_, (_, input)) in ctx.world.query::<(&LocalPlayer, &crate::ecs::components::PlayerInput)>().iter() {
+            for (_, (_, input)) in ctx.world.query::<(&LocalPlayer, &crate::components::PlayerInput)>().iter() {
                 if let Some(target_entity) = input.attack_target {
                     request = Some(target_entity);
                     break;
@@ -113,7 +113,7 @@ impl LogicSystem for CombatSystem {
                     tracing::warn!("⚠️ 攻击目标不存在");
                     
                     // 清除攻击输入
-                    for (_, (_, input)) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::ecs::components::PlayerInput)>() {
+                    for (_, (_, input)) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>() {
                         input.attack_target = None;
                         break;
                     }
@@ -138,7 +138,7 @@ impl LogicSystem for CombatSystem {
             }
             
             // 6. 清除攻击输入
-            for (_, (_, input)) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::ecs::components::PlayerInput)>() {
+            for (_, (_, input)) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>() {
                 input.attack_target = None;
             }
         }

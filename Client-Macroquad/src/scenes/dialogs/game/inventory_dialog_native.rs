@@ -135,6 +135,7 @@ impl InventoryDialogNative {
     const CELL_WIDTH: f32 = 36.0;
     const CELL_HEIGHT: f32 = 32.0;
     const GRID_COLS: usize = 8;
+    #[allow(dead_code)]
     const GRID_ROWS: usize = 6;  // 总行数
     const VISIBLE_ROWS: usize = 5;  // 可见行数
     const GRID_START_X: f32 = 9.0;

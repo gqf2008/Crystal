@@ -35,6 +35,7 @@ impl BeltItem {
 
 /// 拖放命令
 #[derive(Debug)]
+#[allow(dead_code)]
 enum DragCommand {
     /// 使用物品
     Use { slot: usize },

@@ -2,7 +2,7 @@
 // 支持 Group::draggable() 物品拖放
 
 use macroquad::prelude::*;
-use client_macroquad::scenes::dialogs::game::belt_dialog_mqui::{BeltDialogMqui, BeltItem};
+use client_macroquad::scenes::dialogs::game::belt_dialog_mqui::BeltDialogMqui;
 use client_macroquad::resources::{set_data_path, preload_libraries, LibraryName};
 
 #[macroquad::main("Belt Dialog MQUI Test")]

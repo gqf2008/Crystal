@@ -261,9 +261,9 @@ impl MapUpdateSystem {
             },
             PlayerInput::new(),
             MovementVelocity::with_speeds(
-                crate::ecs::components::DEFAULT_MAX_SPEED,
-                crate::ecs::components::DEFAULT_WALK_SPEED,
-                crate::ecs::components::DEFAULT_RUN_SPEED,
+                crate::components::DEFAULT_MAX_SPEED,
+                crate::components::DEFAULT_WALK_SPEED,
+                crate::components::DEFAULT_RUN_SPEED,
             ),
             Path::new(),
             Movement::new(),

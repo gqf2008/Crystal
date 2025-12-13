@@ -74,9 +74,11 @@ pub mod priority {
     pub const BUFF_DEBUFF: u32 = 320;
     pub const REGEN: u32 = 330;
     pub const ATTACK: u32 = 340;
+    // 注意：调度器按 priority 从小到大执行。
+    // 寻路必须在移动之前运行，否则会出现“晚一帧才开始走/跟随”的延迟。
+    pub const PATHFINDING: u32 = 490;
     pub const MOVEMENT: u32 = 500;
     pub const COLLISION: u32 = 510; // 碰撞检测在移动之后，检查并修正位置
-    pub const PATHFINDING: u32 = 520; // 寻路系统 (在移动之前)
 
     // 第3层：表现层(600-899)
     // ├── 动画特效: AnimationSystem → ParticleSystem → WeatherSystem
@@ -137,7 +139,7 @@ pub use logic::combat::{
 };
 pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
 pub use logic::physics::{CollisionSystem, MovementSystem, PathfindingSystem};
-pub use presentation::{CameraFollowSystem, CameraSystem};
+pub use presentation::{AnimationSystem, CameraFollowSystem, CameraSystem};
 
 // ============================================================================
 // 系统 Trait 设计
@@ -391,10 +393,12 @@ enum SystemEntry {
     Update {
         system: Box<dyn LogicSystem>,
         priority: u32,
+        order: u64,
     },
     Hybrid {
         system: Box<dyn RenderSystem>,
         priority: u32,
+        order: u64,
     },
 }
 
@@ -404,6 +408,13 @@ impl SystemEntry {
             SystemEntry::Update { priority, .. } => *priority,
             // SystemEntry::Draw { priority, .. } => *priority,
             SystemEntry::Hybrid { priority, .. } => *priority,
+        }
+    }
+
+    fn order(&self) -> u64 {
+        match self {
+            SystemEntry::Update { order, .. } => *order,
+            SystemEntry::Hybrid { order, .. } => *order,
         }
     }
 
@@ -418,12 +429,14 @@ impl SystemEntry {
 
 pub struct SystemScheduler {
     systems: Vec<SystemEntry>,
+    next_order: u64,
 }
 
 impl SystemScheduler {
     pub fn new() -> Self {
         Self {
             systems: Vec::new(),
+            next_order: 0,
         }
     }
 
@@ -432,12 +445,16 @@ impl SystemScheduler {
     where
         S: IntoSystemKind + 'static,
     {
+        let order = self.next_order;
+        self.next_order = self.next_order.wrapping_add(1);
+
         match IntoSystemKind::into_kind(Box::new(system)) {
             SystemKind::Update(sys) => {
                 // let priority = sys.priority();
                 self.systems.push(SystemEntry::Update {
                     system: sys,
                     priority,
+                    order,
                 });
             }
             // SystemKind::Draw(sys) => {
@@ -452,12 +469,14 @@ impl SystemScheduler {
                 self.systems.push(SystemEntry::Hybrid {
                     system: sys,
                     priority,
+                    order,
                 });
             }
         }
 
-        // 按优先级排序（数字越小越优先）
-        self.systems.sort_by_key(|entry| entry.priority());
+        // 按优先级排序（数字越小越优先）；相同优先级保持插入顺序稳定
+        self.systems
+            .sort_by_key(|entry| (entry.priority(), entry.order()));
         self
     }
 

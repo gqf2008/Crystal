@@ -13,15 +13,13 @@
 //!
 //! | 系统名称 | 优先级 | 依赖组件（读） | 依赖组件（写） | 职责说明 |
 //! |---------|--------|----------------|----------------|----------|
-//! | `InputStateSystem` | 10 | - | InputState | 追踪上一帧输入状态，提供边缘检测基础 |
+//! | `InputStateSystem` | (建议帧末尾) | - | InputState | 追踪上一帧输入状态，提供边缘检测基础 |
 //! | `PlayerControlSystem` | 120 | InputEvent, LocalPlayer, Position | Velocity, PlayerAction | 玩家控制逻辑、指令转换 |
 //!
 //! ## 数据流
 //!
 //! ```text
-//! ggez EventHandler 收集输入
-//!         ↓
-//! GameContext.frame_input_events (零拷贝访问)
+//! macroquad 轮询输入（`GameContext.input()`）
 //!         ↓
 //! PlayerControlSystem: 转换为游戏指令
 //!         ↓
@@ -63,14 +61,13 @@
 //!    let (dx, dy) = input.wasd_direction();  // 获取 WASD 方向向量
 //!    ```
 //!
-//! 3. **避免直接访问 ggez 输入**：
-//!    使用 `GameContext.frame_input_events` 获取零拷贝的输入事件列表
+//! 3. **避免散落地直接访问 macroquad 全局输入**：
+//!    统一通过 `GameContext.input()`（便于后续替换/录制回放）
 //!
 //! ## 注意事项
 //!
 //! - PlayerControlSystem 必须在物理系统之前执行（优先级 120 < 500）
-//! - 输入事件在每帧结束后清空（`GameContext.clear_frame_events()`）
-//! - 网络事件通过 `GameContext.net_events` 访问（由 NetworkSystem 填充）
+//! - `InputStateSystem` 需要在“读取输入的系统之后”执行，才可以把“本帧状态”保存为“下一帧的 prev 状态”
 
 pub mod input_state_system;
 pub mod player_control_system;

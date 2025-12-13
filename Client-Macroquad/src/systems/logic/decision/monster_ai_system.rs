@@ -50,7 +50,7 @@ impl MonsterAISystem {
             match monster.ai_type {
                 0 => {
                     // AI = 0: 无AI，静止不动
-                    ai_state.current_action = crate::ecs::components::AIAction::Idle;
+                    ai_state.current_action = crate::components::AIAction::Idle;
                 }
                 1 => {
                     // AI = 1: 近战攻击型（最常见）
@@ -82,20 +82,20 @@ impl MonsterAISystem {
             
             if distance < 1.5 {
                 // 在攻击范围内 - 攻击
-                ai_state.current_action = crate::ecs::components::AIAction::Attack;
+                ai_state.current_action = crate::components::AIAction::Attack;
                 ai_state.target_pos = Some((px, py));
             } else if distance < 10.0 {
                 // 在视野范围内 - 追击
-                ai_state.current_action = crate::ecs::components::AIAction::Chase;
+                ai_state.current_action = crate::components::AIAction::Chase;
                 ai_state.target_pos = Some((px, py));
             } else {
                 // 超出视野 - 闲置
-                ai_state.current_action = crate::ecs::components::AIAction::Idle;
+                ai_state.current_action = crate::components::AIAction::Idle;
                 ai_state.target_pos = None;
             }
         } else {
             // 找不到玩家 - 闲置
-            ai_state.current_action = crate::ecs::components::AIAction::Idle;
+            ai_state.current_action = crate::components::AIAction::Idle;
             ai_state.target_pos = None;
         }
     }
@@ -111,23 +111,23 @@ impl MonsterAISystem {
             
             if distance >= 3.0 && distance < 8.0 {
                 // 在最佳攻击范围内 - 攻击
-                ai_state.current_action = crate::ecs::components::AIAction::Attack;
+                ai_state.current_action = crate::components::AIAction::Attack;
                 ai_state.target_pos = Some((px, py));
             } else if distance < 3.0 {
                 // 太近了 - 后退
-                ai_state.current_action = crate::ecs::components::AIAction::Retreat;
+                ai_state.current_action = crate::components::AIAction::Retreat;
                 ai_state.target_pos = Some((px, py));
             } else if distance < 12.0 {
                 // 太远了 - 追击
-                ai_state.current_action = crate::ecs::components::AIAction::Chase;
+                ai_state.current_action = crate::components::AIAction::Chase;
                 ai_state.target_pos = Some((px, py));
             } else {
                 // 超出视野 - 闲置
-                ai_state.current_action = crate::ecs::components::AIAction::Idle;
+                ai_state.current_action = crate::components::AIAction::Idle;
                 ai_state.target_pos = None;
             }
         } else {
-            ai_state.current_action = crate::ecs::components::AIAction::Idle;
+            ai_state.current_action = crate::components::AIAction::Idle;
             ai_state.target_pos = None;
         }
     }
@@ -160,10 +160,10 @@ impl MonsterAISystem {
             if distance < 0.5 {
                 // 到达巡逻点，切换到下一个
                 ai_state.current_patrol_index = (ai_state.current_patrol_index + 1) % ai_state.patrol_points.len();
-                ai_state.current_action = crate::ecs::components::AIAction::Idle;
+                ai_state.current_action = crate::components::AIAction::Idle;
             } else {
                 // 继续前往巡逻点
-                ai_state.current_action = crate::ecs::components::AIAction::Patrol;
+                ai_state.current_action = crate::components::AIAction::Patrol;
                 ai_state.target_pos = Some(target);
             }
         }

@@ -16,7 +16,7 @@
 use crate::resources;
 use crate::resources::MapReader;
 use macroquad::prelude::*;
-use macroquad::miniquad::{BlendState, BlendFactor, BlendValue, Equation};
+use macroquad::miniquad::{BlendState, BlendFactor, BlendValue, Equation, UniformDesc, UniformType};
 
 /// 直接纹理渲染的地图渲染器
 ///
@@ -48,6 +48,11 @@ pub struct MeshMapRenderer {
     animation_frame: u32,
     /// ADD混合材质
     add_blend_material: Material,
+
+    /// Front 遮挡半透明遮罩材质（按屏幕矩形区域按像素降低 alpha）
+    focus_mask_material: Material,
+    /// Front 遮挡半透明遮罩材质（ADD 混合版本）
+    focus_mask_add_material: Material,
     
     // 性能优化：复用 Vec 缓冲区，避免每帧重新分配
     tile_buffer: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)>,
@@ -77,6 +82,55 @@ impl MeshMapRenderer {
             },
         )
         .unwrap();
+
+        // Front 遮挡半透明：使用自定义 frag，在 FocusRect 内按像素降低 alpha。
+        let focus_mask_material = load_material(
+            ShaderSource::Glsl {
+                vertex: include_str!("../../shaders/default.vert"),
+                fragment: include_str!("../../shaders/focus_mask.frag"),
+            },
+            MaterialParams {
+                // 关键：front 贴图大量使用透明像素。
+                // 如果不启用 alpha blending，透明区域会以黑色显示（看起来像“黑色块”）。
+                pipeline_params: PipelineParams {
+                    color_blend: Some(BlendState::new(
+                        Equation::Add,
+                        BlendFactor::Value(BlendValue::SourceAlpha),
+                        BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                    )),
+                    ..Default::default()
+                },
+                uniforms: vec![
+                    UniformDesc::new("FocusRect", UniformType::Float4),
+                    UniformDesc::new("FocusAlpha", UniformType::Float1),
+                ],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let focus_mask_add_material = load_material(
+            ShaderSource::Glsl {
+                vertex: include_str!("../../shaders/default.vert"),
+                fragment: include_str!("../../shaders/focus_mask.frag"),
+            },
+            MaterialParams {
+                pipeline_params: PipelineParams {
+                    color_blend: Some(BlendState::new(
+                        Equation::Add,
+                        BlendFactor::Value(BlendValue::SourceAlpha),
+                        BlendFactor::One,
+                    )),
+                    ..Default::default()
+                },
+                uniforms: vec![
+                    UniformDesc::new("FocusRect", UniformType::Float4),
+                    UniformDesc::new("FocusAlpha", UniformType::Float1),
+                ],
+                ..Default::default()
+            },
+        )
+        .unwrap();
         
         Self {
             tile_width,
@@ -94,6 +148,8 @@ impl MeshMapRenderer {
             animation_time: 0.0,
             animation_frame: 0,
             add_blend_material,
+            focus_mask_material,
+            focus_mask_add_material,
             // 预分配缓冲区（估计容量：避免初始扩容）
             tile_buffer: Vec::with_capacity(2000),
             normal_tile_buffer: Vec::with_capacity(1500),
@@ -180,6 +236,91 @@ impl MeshMapRenderer {
         }
 
         total_tiles
+    }
+
+    /// 只渲染 Front 层（用于“人物先画，前景后画”的遮挡逻辑）。
+    ///
+    /// 当 `focus_world` 存在时，会把靠近该点上方的前景瓦片按 `focus_alpha` 降低透明度，
+    /// 用于实现“人物被树/屋檐遮挡时，前景半透明”。
+    pub fn render_front_layer_with_focus(
+        &mut self,
+        map_reader: &MapReader,
+        camera_x: f32,
+        camera_y: f32,
+        viewport_width: f32,
+        viewport_height: f32,
+        zoom: f32,
+        tint_color: Color,
+        focus_world: Option<Vec2>,
+        focus_radius_tiles_x: i32,
+        focus_radius_tiles_y: i32,
+        focus_alpha: f32,
+    ) -> u32 {
+        let half_width = (viewport_width / 2.0) / zoom;
+        let half_height = (viewport_height / 2.0) / zoom;
+
+        let view_left = camera_x - half_width - self.left_margin;
+        let view_right = camera_x + half_width + self.right_margin;
+        let view_top = camera_y - half_height - self.top_margin;
+        let view_bottom = camera_y + half_height + self.bottom_margin;
+
+        let start_x = ((view_left / self.tile_width).floor() as i32 - 1).max(0);
+        let start_y = ((view_top / self.tile_height).floor() as i32 - 1).max(0);
+        let end_x = ((view_right / self.tile_width).ceil() as i32 + 1).min(map_reader.width);
+        let end_y = ((view_bottom / self.tile_height).ceil() as i32 + 1).min(map_reader.height);
+
+        // focus 遮罩参数（按屏幕矩形区域按像素降低 alpha）
+        if let Some(focus) = focus_world {
+            // focus 区域（世界坐标）：以玩家脚下为基准，向上覆盖一段，向下给 1 个 tile 缓冲
+            let half_w_world = focus_radius_tiles_x.max(1) as f32 * self.tile_width;
+            let up_h_world = focus_radius_tiles_y.max(1) as f32 * self.tile_height;
+
+            let left_w = focus.x - half_w_world;
+            let right_w = focus.x + half_w_world;
+            let top_w = focus.y - up_h_world;
+            let bottom_w = focus.y + self.tile_height;
+
+            // world -> screen（以屏幕中心为原点，应用相机位置与 zoom）
+            let world_to_screen = |wx: f32, wy: f32| -> (f32, f32) {
+                (
+                    viewport_width / 2.0 + (wx - camera_x) * zoom,
+                    viewport_height / 2.0 + (wy - camera_y) * zoom,
+                )
+            };
+
+            let (left_s, top_s) = world_to_screen(left_w, top_w);
+            let (right_s, bottom_s) = world_to_screen(right_w, bottom_w);
+
+            let x1 = left_s.min(right_s).clamp(0.0, viewport_width);
+            let x2 = left_s.max(right_s).clamp(0.0, viewport_width);
+
+            // gl_FragCoord：左下为原点；screen：左上为原点
+            let gl_top = viewport_height - top_s;
+            let gl_bottom = viewport_height - bottom_s;
+            let y1 = gl_bottom.min(gl_top).clamp(0.0, viewport_height);
+            let y2 = gl_bottom.max(gl_top).clamp(0.0, viewport_height);
+
+            let rect = [x1, y1, x2, y2];
+            self.focus_mask_material.set_uniform("FocusRect", rect);
+            self.focus_mask_add_material.set_uniform("FocusRect", rect);
+            self.focus_mask_material
+                .set_uniform("FocusAlpha", focus_alpha.clamp(0.0, 1.0));
+            self.focus_mask_add_material
+                .set_uniform("FocusAlpha", focus_alpha.clamp(0.0, 1.0));
+        }
+
+        self.render_front_animated_with_focus(
+            map_reader,
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            tint_color,
+            focus_world,
+            focus_radius_tiles_x,
+            focus_radius_tiles_y,
+            focus_alpha,
+        )
     }
 
     /// 渲染Back层 (2x2格子共享,只在偶数坐标绘制)
@@ -541,6 +682,180 @@ impl MeshMapRenderer {
         // 使用ADD混合材质渲染混合瓦片
         self.blend_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
         gl_use_material(&self.add_blend_material);
+        for (texture, x, y, width, height, _, _, _) in &self.blend_tile_buffer {
+            draw_texture_ex(
+                texture,
+                *x,
+                *y,
+                tint_color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(*width, *height)),
+                    ..Default::default()
+                },
+            );
+        }
+        gl_use_default_material();
+
+        tiles_count
+    }
+
+    fn render_front_animated_with_focus(
+        &mut self,
+        map_reader: &MapReader,
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
+        tint_color: Color,
+        focus_world: Option<Vec2>,
+        _focus_radius_tiles_x: i32,
+        _focus_radius_tiles_y: i32,
+        _focus_alpha: f32,
+    ) -> u32 {
+        self.normal_tile_buffer.clear();
+        self.blend_tile_buffer.clear();
+        let mut tiles_count = 0;
+
+        for y in start_y..end_y {
+            if y < 0 || y >= map_reader.height {
+                continue;
+            }
+            for x in start_x..end_x {
+                if x < 0 || x >= map_reader.width {
+                    continue;
+                }
+
+                let Some(cell) = map_reader.get_cell(x, y) else {
+                    continue;
+                };
+
+                if let Some((file_index, base_image_index)) = cell.front_tile() {
+                    let mut image_index = base_image_index;
+
+                    let mut animation = cell.front_animation_frame;
+                    let use_blend = if (animation & 0x80) > 0 {
+                        animation &= 0x7F;
+                        true
+                    } else {
+                        false
+                    };
+
+                    if animation > 0 {
+                        let tick_count = cell.front_animation_tick;
+                        let adjusted_frame_count =
+                            animation as u32 + (animation as u32 * tick_count as u32);
+                        let current_frame =
+                            (self.animation_frame % adjusted_frame_count) / (1 + tick_count as u32);
+                        image_index = base_image_index + current_frame as i32;
+                    }
+
+                    let texture_and_info_opt = resources::get_map_texture(file_index, image_index)
+                        .map(|info| (info.image.clone(), info.offset_x, info.offset_y));
+
+                    if let Some((Some(texture), offset_x, offset_y)) = texture_and_info_opt {
+                        let world_x = x as f32 * self.tile_width;
+                        let world_y = y as f32 * self.tile_height;
+                        let width = texture.width();
+                        let height = texture.height();
+                        let base_y = world_y + self.tile_height;
+
+                        let should_apply_offset = if use_blend {
+                            file_index == 14
+                                || file_index == 27
+                                || (file_index > 99 && file_index < 199)
+                                || (image_index >= 2723 && image_index <= 2732)
+                        } else if file_index == 28 {
+                            offset_x != 0 || offset_y != 0
+                        } else {
+                            false
+                        };
+
+                        let (pixel_x, pixel_y) = if use_blend {
+                            if file_index == 14
+                                || file_index == 27
+                                || (file_index > 99 && file_index < 199)
+                            {
+                                let mut base_x = world_x;
+                                let mut base_y_pos = base_y - 3.0 * self.tile_height;
+
+                                if should_apply_offset {
+                                    base_x += offset_x as f32;
+                                    base_y_pos += offset_y as f32;
+                                }
+
+                                (base_x.floor(), base_y_pos.floor())
+                            } else {
+                                let mut base_x = world_x;
+                                let mut base_y_pos = base_y - height;
+
+                                if should_apply_offset {
+                                    base_x += offset_x as f32;
+                                    base_y_pos += offset_y as f32;
+                                }
+
+                                (base_x.floor(), base_y_pos.floor())
+                            }
+                        } else if file_index == 28 && (offset_x != 0 || offset_y != 0) {
+                            let x = (world_x + offset_x as f32).floor();
+                            let y = (base_y - self.tile_height + offset_y as f32).floor();
+                            (x, y)
+                        } else {
+                            let mut base_x = world_x;
+                            let mut base_y_pos = base_y - height;
+
+                            if should_apply_offset {
+                                base_x += offset_x as f32;
+                                base_y_pos += offset_y as f32;
+                            }
+
+                            (base_x.floor(), base_y_pos.floor())
+                        };
+
+                        let priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                        let tile = (texture.clone(), pixel_x, pixel_y, width, height, priority, y, x);
+
+                        if use_blend {
+                            self.blend_tile_buffer.push(tile);
+                        } else {
+                            self.normal_tile_buffer.push(tile);
+                        }
+
+                        tiles_count += 1;
+                    }
+                }
+            }
+        }
+
+        self.normal_tile_buffer
+            .sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+
+        // 使用 focus shader：只在 FocusRect 内按像素降低 alpha（不会再整张 tile 变半透明）
+        if focus_world.is_some() {
+            gl_use_material(&self.focus_mask_material);
+        }
+        for (texture, x, y, width, height, _, _, _) in &self.normal_tile_buffer {
+            draw_texture_ex(
+                texture,
+                *x,
+                *y,
+                tint_color,
+                DrawTextureParams {
+                    dest_size: Some(vec2(*width, *height)),
+                    ..Default::default()
+                },
+            );
+        }
+        if focus_world.is_some() {
+            gl_use_default_material();
+        }
+
+        self.blend_tile_buffer
+            .sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        if focus_world.is_some() {
+            gl_use_material(&self.focus_mask_add_material);
+        } else {
+            gl_use_material(&self.add_blend_material);
+        }
         for (texture, x, y, width, height, _, _, _) in &self.blend_tile_buffer {
             draw_texture_ex(
                 texture,
