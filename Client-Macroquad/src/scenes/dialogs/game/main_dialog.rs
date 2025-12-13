@@ -249,6 +249,39 @@ impl MainDialog {
         self.chat_dialog.is_input_active()
     }
 
+    /// 激活聊天输入框（对应原版 Enter 打开输入）
+    pub fn activate_chat_input(&mut self) {
+        self.chat_dialog.activate_input();
+    }
+
+    /// 禁用聊天输入框（离开场景时确保 IME 关闭）
+    pub fn deactivate_chat_input(&mut self) {
+        self.chat_dialog.deactivate_input();
+    }
+
+    /// 是否有任何“弹窗类”对话框打开（用于 ESC 逻辑）
+    /// 说明：不包含 Belt/Chat/ChatControlBar/MiniMap 这些常驻 UI。
+    pub fn any_popup_open(&self) -> bool {
+        self.inventory_dialog_open
+            || self.character_dialog_open
+            || self.quest_log_dialog_open
+            || self.option_dialog_open
+            || self.game_shop_dialog_open
+            || self.menu_dialog_open
+            || self.chat_option_dialog_open
+    }
+
+    /// 关闭所有“弹窗类”对话框（用于 ESC 一键收起）
+    pub fn close_all_popups(&mut self) {
+        self.inventory_dialog_open = false;
+        self.character_dialog_open = false;
+        self.quest_log_dialog_open = false;
+        self.option_dialog_open = false;
+        self.game_shop_dialog_open = false;
+        self.menu_dialog_open = false;
+        self.chat_option_dialog_open = false;
+    }
+
     /// 切换小地图显示（快捷键M）
     pub fn toggle_minimap(&mut self) {
         self.minimap_dialog_open = !self.minimap_dialog_open;
