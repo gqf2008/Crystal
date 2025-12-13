@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
+use macroquad::prelude::FilterMode;
+
 use super::mlibrary::{ImageInfo, MLibrary};
 use crate::resources::libraries::{LibraryArray, LibraryName};
 
@@ -315,6 +317,14 @@ impl ResourceManager {
         let lib = self.get_library(lib_name)?;
         let mut lib_ref = lib.borrow_mut();
         let info = lib_ref.get_or_create_texture(index).ok()?.clone();
+
+        // 角色相关贴图：使用 Linear，避免 Nearest 过度锐化。
+        // 只影响角色装备/翅膀/坐骑等库，不改变 UI 的观感。
+        if lib_name.is_character_library() {
+            if let Some(tex) = info.image.as_ref() {
+                tex.set_filter(FilterMode::Linear);
+            }
+        }
 
         // 缓存
         self.texture_cache.put(key, info.clone());

@@ -96,6 +96,10 @@ pub enum LibraryName {
     /// CWeapon/0000.Lib - CWeapon/0999.Lib
     CWeapons(usize),
 
+    /// 人物武器特效库
+    /// CWeaponEffect/0000.Lib - CWeaponEffect/0999.Lib
+    CWeaponEffect(usize),
+
     /// 弓箭手武器库
     /// ARWeapon/0000.Lib - ARWeapon/0999.Lib
     ARWeapons(usize),
@@ -103,6 +107,18 @@ pub enum LibraryName {
     /// 人物特效库 (翅膀等)
     /// CHumEffect/0000.Lib - CHumEffect/0999.Lib
     CHumEffect(usize),
+
+    /// 翅膀库
+    /// Wing/0000.Lib - Wing/0999.Lib
+    Wings(usize),
+
+    /// 宠物库
+    /// Pet/0000.Lib - Pet/0999.Lib
+    Pets(usize),
+
+    /// 坐骑库
+    /// Mount/0000.Lib - Mount/0999.Lib
+    Mounts(usize),
 
     // 其他（可扩展）
     Custom(u32), // 自定义库（用于动态加载）
@@ -148,7 +164,11 @@ impl LibraryName {
             LibraryName::ARHair(idx) => format!("ARHair/{:02}", idx),
             LibraryName::CWeapons(idx) => format!("CWeapon/{:02}", idx),
             LibraryName::ARWeapons(idx) => format!("ARWeapon/{:02}", idx),
+            LibraryName::CWeaponEffect(idx) => format!("CWeaponEffect/{:02}", idx),
             LibraryName::CHumEffect(idx) => format!("CHumEffect/{:02}", idx),
+            LibraryName::Wings(idx) => format!("Wing/{:02}", idx),
+            LibraryName::Pets(idx) => format!("Pet/{:02}", idx),
+            LibraryName::Mounts(idx) => format!("Mount/{:02}", idx),
 
             LibraryName::Custom(id) => format!("Custom{}", id),
         }
@@ -284,7 +304,11 @@ impl LibraryName {
                 | LibraryName::ARHair(_)
                 | LibraryName::CWeapons(_)
                 | LibraryName::ARWeapons(_)
+                | LibraryName::CWeaponEffect(_)
                 | LibraryName::CHumEffect(_)
+                | LibraryName::Wings(_)
+                | LibraryName::Pets(_)
+                | LibraryName::Mounts(_)
         )
     }
 

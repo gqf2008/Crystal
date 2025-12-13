@@ -28,7 +28,6 @@ use std::time::Instant;
 use crate::{
     components::{
         AnimationFrame, AttackState, Player, PlayerAction, TimeTracker,
-        WeaponAnimation, WeaponState,
     },
     systems::LogicSystem,
 };
@@ -65,20 +64,12 @@ impl AnimationSystem {
             .query_mut::<(&Player, &mut AnimationFrame)>()
             .into_iter()
         {
-            // 计算角色动画帧索引
-            anim_frame.character_frame =
-                Self::calculate_character_frame(player, &time_tracker);
-        }
-
-        // 更新所有武器的动画帧
-        for (_entity, (player, weapon_state, weapon_anim, anim_frame)) in ctx
-            .world
-            .query_mut::<(&Player, &WeaponState, &WeaponAnimation, &mut AnimationFrame)>()
-            .into_iter()
-        {
-            // 计算武器动画帧索引
-            anim_frame.weapon_frame =
-                Self::calculate_weapon_frame(player, weapon_state, weapon_anim);
+            // Mir2 原版渲染的核心是 DrawFrame：武器/武器特效通常与身体共用同一套帧序号，
+            // 只在取纹理时叠加 WeaponOffSet/性别偏移。
+            // 之前用 effect_* 作为武器帧会与身体脱节，表现为左右“乱晃”。
+            let frame = Self::calculate_character_frame(player, &time_tracker);
+            anim_frame.character_frame = frame;
+            anim_frame.weapon_frame = frame;
         }
 
         Ok(())
@@ -105,46 +96,16 @@ impl AnimationSystem {
         };
 
         // 基于全局动画计数器和配置的 interval 计算当前帧
-        let animation_tick = (time_tracker.animation_count as i32) * 100 / frame.interval;
+        let interval = frame.interval.max(1);
+        let animation_tick = (time_tracker.animation_count as i32) * 100 / interval;
         let current_frame = animation_tick % frame.count;
 
         // 计算最终索引：基础索引 + 方向偏移 + 帧偏移
         frame.start + (player.direction as u8 as i32 * frame.count) + current_frame
     }
 
-    /// 计算武器动画帧索引
-    ///
-    /// 武器帧计算逻辑：
-    /// - 站立/行走：显示武器默认帧 (方向 * 1)
-    /// - 攻击：显示攻击动画帧 (BaseIndex + 方向 * 帧数 + 当前帧)
-    fn calculate_weapon_frame(
-        player: &Player,
-        weapon_state: &WeaponState,
-        weapon_anim: &WeaponAnimation,
-    ) -> i32 {
-        // 如果正在攻击，显示攻击动画
-        if weapon_state.is_attacking {
-            // 获取当前攻击类型的帧数
-            let frame_count = weapon_anim.get_attack_frames(weapon_state.current_attack);
-
-            // 攻击动画基础索引：Attack1=0, Attack2=200, Attack3=400
-            let attack_base = match weapon_state.current_attack {
-                1 => 0,
-                2 => 200,
-                3 => 400,
-                _ => 0,
-            };
-
-            // 计算索引：基础 + 方向 * 帧数 + 当前帧
-            attack_base
-                + (player.direction as u8 as i32 * frame_count as i32)
-                + weapon_state.current_frame as i32
-        } else {
-            // 站立/行走：显示默认姿势（每个方向1帧）
-            // 基础索引1000 + 方向
-            1000 + player.direction as u8 as i32
-        }
-    }
+    // 注意：武器帧独立逻辑暂时保留在 WeaponState/WeaponAnimation（用于未来的“挥砍特效触发帧”等）。
+    // 但渲染使用的 weapon_frame 目前直接跟随 character_frame，避免与资源布局不一致导致“取不到纹理”。
 
     pub fn update_attack_animation(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
 let now = Instant::now();
