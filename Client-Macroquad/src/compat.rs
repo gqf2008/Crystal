@@ -118,15 +118,173 @@ impl MapLoader {
 }
 
 /// PathFinder 占位符结构
-pub struct PathFinder;
+pub struct PathFinder {
+    width: usize,
+    height: usize,
+    is_blocking: Box<dyn Fn(usize, usize) -> bool>,
+}
 
 impl PathFinder {
-    pub fn new(_width: usize, _height: usize, _is_blocking: impl Fn(usize, usize) -> bool) -> Self {
-        Self
+    pub fn new(
+        width: usize,
+        height: usize,
+        is_blocking: impl Fn(usize, usize) -> bool + 'static,
+    ) -> Self {
+        Self {
+            width,
+            height,
+            is_blocking: Box::new(is_blocking),
+        }
     }
     
-    pub fn find_path(&self, _start: (usize, usize), _end: (usize, usize)) -> Option<Vec<(usize, usize)>> {
-        // TODO: 实现 A* 寻路
+    pub fn find_path(
+        &self,
+        start: (usize, usize),
+        end: (usize, usize),
+    ) -> Option<Vec<(usize, usize)>> {
+        if start == end {
+            return Some(Vec::new());
+        }
+        if start.0 >= self.width || start.1 >= self.height {
+            return None;
+        }
+        if end.0 >= self.width || end.1 >= self.height {
+            return None;
+        }
+        if (self.is_blocking)(start.0, start.1) {
+            return None;
+        }
+        if (self.is_blocking)(end.0, end.1) {
+            return None;
+        }
+
+        use std::cmp::Ordering;
+        use std::collections::BinaryHeap;
+
+        #[derive(Copy, Clone, Eq, PartialEq)]
+        struct State {
+            f: u32,
+            g: u32,
+            x: usize,
+            y: usize,
+        }
+
+        impl Ord for State {
+            fn cmp(&self, other: &Self) -> Ordering {
+                // BinaryHeap 是最大堆，这里反转实现最小堆
+                other
+                    .f
+                    .cmp(&self.f)
+                    .then_with(|| other.g.cmp(&self.g))
+                    .then_with(|| other.x.cmp(&self.x))
+                    .then_with(|| other.y.cmp(&self.y))
+            }
+        }
+
+        impl PartialOrd for State {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
+        let idx = |x: usize, y: usize| -> usize { y * self.width + x };
+
+        let heuristic = |x: usize, y: usize, tx: usize, ty: usize| -> u32 {
+            // Octile distance (8方向)
+            let dx = if x > tx { x - tx } else { tx - x };
+            let dy = if y > ty { y - ty } else { ty - y };
+            let min = dx.min(dy) as u32;
+            let max = dx.max(dy) as u32;
+            14 * min + 10 * (max - min)
+        };
+
+        let mut open = BinaryHeap::new();
+        let mut g_score = vec![u32::MAX; self.width * self.height];
+        let mut came_from: Vec<Option<(usize, usize)>> = vec![None; self.width * self.height];
+
+        let start_i = idx(start.0, start.1);
+        g_score[start_i] = 0;
+        open.push(State {
+            f: heuristic(start.0, start.1, end.0, end.1),
+            g: 0,
+            x: start.0,
+            y: start.1,
+        });
+
+        const DIRS: [(i32, i32, u32); 8] = [
+            (0, -1, 10),
+            (1, -1, 14),
+            (1, 0, 10),
+            (1, 1, 14),
+            (0, 1, 10),
+            (-1, 1, 14),
+            (-1, 0, 10),
+            (-1, -1, 14),
+        ];
+
+        while let Some(State { f: _f, g, x, y }) = open.pop() {
+            if (x, y) == end {
+                // reconstruct (exclude start)
+                let mut path_rev = Vec::new();
+                let mut cur = end;
+                while cur != start {
+                    path_rev.push(cur);
+                    let prev = came_from[idx(cur.0, cur.1)]?;
+                    cur = prev;
+                }
+                path_rev.reverse();
+                return Some(path_rev);
+            }
+
+            // 过期条目
+            if g != g_score[idx(x, y)] {
+                continue;
+            }
+
+            for (dx, dy, cost) in DIRS {
+                let nx_i = x as i32 + dx;
+                let ny_i = y as i32 + dy;
+                if nx_i < 0 || ny_i < 0 {
+                    continue;
+                }
+                let nx = nx_i as usize;
+                let ny = ny_i as usize;
+                if nx >= self.width || ny >= self.height {
+                    continue;
+                }
+
+                // 阻挡
+                if (self.is_blocking)(nx, ny) {
+                    continue;
+                }
+
+                // 防止“擦角”穿墙：对角移动时要求两个正交相邻格也可走
+                if dx != 0 && dy != 0 {
+                    let ox = (x as i32 + dx) as usize;
+                    let oy = y;
+                    let px = x;
+                    let py = (y as i32 + dy) as usize;
+                    if (self.is_blocking)(ox, oy) || (self.is_blocking)(px, py) {
+                        continue;
+                    }
+                }
+
+                let tentative_g = g.saturating_add(cost);
+                let n_idx = idx(nx, ny);
+                if tentative_g < g_score[n_idx] {
+                    came_from[n_idx] = Some((x, y));
+                    g_score[n_idx] = tentative_g;
+                    let h = heuristic(nx, ny, end.0, end.1);
+                    open.push(State {
+                        f: tentative_g.saturating_add(h),
+                        g: tentative_g,
+                        x: nx,
+                        y: ny,
+                    });
+                }
+            }
+        }
+
         None
     }
 }

@@ -85,6 +85,8 @@ pub mod priority {
     // ├── 音效系统: SoundSystem → VoiceChatSystem
     // ├── 摄像机系统: CameraFollowSystem → CameraSystem
     // └── UI 系统: UISystem → HUDSystem → MinimapSystem → DialogSystem
+    // 装备/外观派生状态（渲染/动作切换）
+    pub const MOUNT_STATE_SYNC: u32 = 590;
     pub const ANIMATION: u32 = 600;
     pub const PARTICLE: u32 = 610;
     pub const WEATHER: u32 = 620;
@@ -139,7 +141,7 @@ pub use logic::combat::{
 };
 pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
 pub use logic::physics::{CollisionSystem, MovementSystem, PathfindingSystem};
-pub use presentation::{AnimationSystem, CameraFollowSystem, CameraSystem};
+pub use presentation::{AnimationSystem, CameraFollowSystem, CameraSystem, MountStateSyncSystem};
 
 // ============================================================================
 // 系统 Trait 设计

@@ -24,7 +24,7 @@
 // ============================================================================
 
 use super::SpriteRenderSystem;
-use crate::components::{AnimationFrame, LocalPlayer, Player, PlayerAppearance, Position, RenderPass, TimeTracker};
+use crate::components::{AnimationFrame, Camera, LocalPlayer, Monster, MountState, NPC, Player, PlayerAppearance, Position, RenderPass, TimeTracker};
 use crate::game::GameResult;
 use crate::objects::frames::get_player_frame;
 use crate::resources::LibraryName;
@@ -53,6 +53,7 @@ impl SpriteRenderSystem {
         animation_count: i32,
         alpha: f32,
         add_blend_material: &Material,
+        mount_index: Option<usize>,
     ) -> GameResult {
         let base_frame = anim_frame.character_frame;
         let weapon_frame = anim_frame.weapon_frame;
@@ -150,14 +151,13 @@ impl SpriteRenderSystem {
             true
         };
 
-        // 坐骑（当前沿用 GameScene 的 MVP 逻辑：用于视觉展示）
-        const DEFAULT_MOUNT_INDEX: usize = 0;
-        let mounted = true;
+        // 坐骑（由组件驱动）
+        let mounted = mount_index.is_some();
         let mut mount_drawn = false;
         let actor_pos;
 
         if mounted {
-            let mount_lib = LibraryName::Mounts(DEFAULT_MOUNT_INDEX);
+            let mount_lib = LibraryName::Mounts(mount_index.unwrap_or(0));
 
             // 当前 Data/Mount 资源表现为与 MirDirection 同序（Up 开始顺时针）
             let dir = player.direction as u8 as i32;
@@ -337,12 +337,22 @@ impl SpriteRenderSystem {
         world: &hecs::World,
         add_blend_material: &Material,
     ) -> GameResult {
-        // tracing::info!("👤 CharacterRenderSystem::draw() 开始");
-        // 获取相机变换
-        let Some((_cam_x, _cam_y, _zoom)) = Self::get_camera_transform(world) else {
-            // tracing::info!("⏭️  CharacterRenderSystem: 没有相机，跳过渲染");
-            return Ok(());
-        };
+        // 相机（用于裁剪；真正的坐标变换由 GameScene 的 macroquad Camera2D 完成）
+        let (cam_x, cam_y, cam_zoom, sw, sh) = world
+            .query::<(&Camera, &Position)>()
+            .iter()
+            .next()
+            .map(|(_, (c, p))| (p.x, p.y, c.zoom, c.screen_width, c.screen_height))
+            .unwrap_or((0.0, 0.0, 1.0, screen_width(), screen_height()));
+
+        let zoom = cam_zoom.max(0.0001);
+        let half_w = sw.max(1.0) * 0.5 / zoom;
+        let half_h = sh.max(1.0) * 0.5 / zoom;
+        let view_min_x = cam_x - half_w;
+        let view_max_x = cam_x + half_w;
+        let view_min_y = cam_y - half_h;
+        let view_max_y = cam_y + half_h;
+        const CULL_MARGIN: f32 = 200.0;
 
         let animation_count = world
             .query::<&TimeTracker>()
@@ -358,53 +368,121 @@ impl SpriteRenderSystem {
             .map(|(_, pass)| (pass.alpha, pass.local_only))
             .unwrap_or((1.0, false));
 
-        // 收集并排序角色（现在包含 AnimationFrame）
-        let mut characters_to_render = Vec::new();
+        // 收集并排序可渲染对象（玩家/怪物/NPC）
+        #[derive(Clone)]
+        enum Renderable {
+            Player {
+                entity: hecs::Entity,
+                player: Player,
+                pos: Position,
+                appearance: PlayerAppearance,
+                anim_frame: AnimationFrame,
+            },
+            NPC {
+                name: String,
+                pos: Position,
+            },
+            Monster {
+                name: String,
+                pos: Position,
+            },
+        }
 
+        fn in_view(pos: &Position, min_x: f32, min_y: f32, max_x: f32, max_y: f32, margin: f32) -> bool {
+            pos.x >= min_x - margin && pos.x <= max_x + margin && pos.y >= min_y - margin && pos.y <= max_y + margin
+        }
+
+        let mut renderables: Vec<(f32, i32, Renderable)> = Vec::new();
+
+        // Players
         if local_only {
-            for (_entity, (_local, player, pos, appearance, anim_frame)) in world
+            for (entity, (_local, player, pos, appearance, anim_frame)) in world
                 .query::<(&LocalPlayer, &Player, &Position, &PlayerAppearance, &AnimationFrame)>()
                 .iter()
             {
-                characters_to_render.push((
-                    player.clone(),
-                    pos.clone(),
-                    appearance.clone(),
-                    anim_frame.clone(),
-                ));
+                if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                    continue;
+                }
+                // kind order: NPC(0) < Monster(1) < Player(2)
+                renderables.push((pos.y, 2, Renderable::Player {
+                    entity,
+                    player: player.clone(),
+                    pos: *pos,
+                    appearance: appearance.clone(),
+                    anim_frame: *anim_frame,
+                }));
             }
         } else {
-            for (_entity, (player, pos, appearance, anim_frame)) in world
+            for (entity, (player, pos, appearance, anim_frame)) in world
                 .query::<(&Player, &Position, &PlayerAppearance, &AnimationFrame)>()
                 .iter()
             {
-                characters_to_render.push((
-                    player.clone(),
-                    pos.clone(),
-                    appearance.clone(),
-                    anim_frame.clone(),
-                ));
+                if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                    continue;
+                }
+                renderables.push((pos.y, 2, Renderable::Player {
+                    entity,
+                    player: player.clone(),
+                    pos: *pos,
+                    appearance: appearance.clone(),
+                    anim_frame: *anim_frame,
+                }));
             }
         }
 
-        // 按 Y 坐标排序（实现深度排序）
-        characters_to_render.sort_by(|a, b| {
-            a.1.y
-                .partial_cmp(&b.1.y)
+        // NPC/Monster：当前先用占位绘制（后续接入真实库映射/动画组件）
+        if !local_only {
+            for (_entity, (npc, pos)) in world.query::<(&NPC, &Position)>().iter() {
+                if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                    continue;
+                }
+                renderables.push((pos.y, 0, Renderable::NPC { name: npc.name.clone(), pos: *pos }));
+            }
+            for (_entity, (monster, pos)) in world.query::<(&Monster, &Position)>().iter() {
+                if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                    continue;
+                }
+                renderables.push((pos.y, 1, Renderable::Monster { name: monster.name.clone(), pos: *pos }));
+            }
+        }
+
+        // 深度排序：先按 y（越靠下越后绘制），再按类型优先级
+        renderables.sort_by(|a, b| {
+            a.0.partial_cmp(&b.0)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.1.cmp(&b.1))
         });
 
-        // 渲染所有角色
-        for (player, pos, appearance, anim_frame) in characters_to_render {
-            Self::render_character(
-                &player,
-                &pos,
-                &appearance,
-                &anim_frame,
-                animation_count,
-                alpha,
-                add_blend_material,
-            )?;
+        // 渲染
+        for (_y, _kind, item) in renderables {
+            match item {
+                Renderable::Player { entity, player, pos, appearance, anim_frame } => {
+                    let mount_index = world
+                        .get::<&MountState>(entity)
+                        .ok()
+                        .and_then(|m| m.mount_index);
+                    Self::render_character(
+                        &player,
+                        &pos,
+                        &appearance,
+                        &anim_frame,
+                        animation_count,
+                        alpha,
+                        add_blend_material,
+                        mount_index,
+                    )?;
+                }
+                Renderable::NPC { name, pos } => {
+                    let tint = Color::new(0.3, 0.8, 1.0, alpha.clamp(0.0, 1.0));
+                    draw_circle(pos.x, pos.y - 16.0, 10.0, tint);
+                    draw_text(&name, pos.x - 20.0, pos.y - 30.0, 16.0, tint);
+                }
+                Renderable::Monster { name, pos } => {
+                    let tint = Color::new(1.0, 0.3, 0.3, alpha.clamp(0.0, 1.0));
+                    draw_circle(pos.x, pos.y - 16.0, 12.0, tint);
+                    draw_text(&name, pos.x - 20.0, pos.y - 30.0, 16.0, tint);
+                }
+            }
         }
 
         Ok(())

@@ -31,8 +31,10 @@
  mod particle_system;
  mod sound_system;
  mod animation_system;
+mod mount_state_sync_system;
  pub use camera_system::CameraSystem;
  pub use camera_follow_system::CameraFollowSystem;
  pub use particle_system::ParticleSystem;
  pub use sound_system::SoundSystem;
  pub use animation_system::AnimationSystem;
+pub use mount_state_sync_system::MountStateSyncSystem;

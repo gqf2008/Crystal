@@ -3,6 +3,7 @@
 // ============================================================================
 
 pub use mir2_shared::{MirDirection as Direction, MirAction, MirClass, MirGender};
+use crate::resources::LibraryName;
 
 /// 混合模式（简化版）
 #[derive(Debug, Clone, Copy)]
@@ -65,6 +66,42 @@ pub struct Sprite {
     pub index: i32,        // 贴图索引
     pub frame: i32,        // 当前帧
     pub blend_mode: SpriteBlendMode, // 混合模式
+}
+
+/// 基于 LibraryName 的精灵引用（macroquad 资源系统友好）
+///
+/// 用于 NPC/怪物/特效等非玩家多层渲染对象：直接指向 Data 下的某个库与帧索引。
+#[derive(Debug, Clone, Copy)]
+pub struct LibrarySprite {
+    pub library: LibraryName,
+    pub index: i32,
+    pub frame: i32,
+    pub blend_mode: SpriteBlendMode,
+}
+
+impl LibrarySprite {
+    pub fn new(library: LibraryName, index: i32) -> Self {
+        Self {
+            library,
+            index,
+            frame: 0,
+            blend_mode: SpriteBlendMode::Alpha,
+        }
+    }
+
+    pub fn with_blend(library: LibraryName, index: i32, blend_mode: SpriteBlendMode) -> Self {
+        Self {
+            library,
+            index,
+            frame: 0,
+            blend_mode,
+        }
+    }
+
+    #[inline]
+    pub fn texture_index(&self) -> usize {
+        (self.index + self.frame).max(0) as usize
+    }
 }
 
 impl Sprite {

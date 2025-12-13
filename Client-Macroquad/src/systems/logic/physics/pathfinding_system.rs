@@ -77,6 +77,49 @@ impl PathfindingSystem {
                 .collect()
         })
     }
+
+    fn is_grid_walkable(map_data: &MapData, gx: i32, gy: i32) -> bool {
+        if gx < 0 || gy < 0 || gx >= map_data.width || gy >= map_data.height {
+            return false;
+        }
+        let x = gx as usize;
+        let y = gy as usize;
+        if x >= map_data.cells.len() || y >= map_data.cells[x].len() {
+            return false;
+        }
+        map_data.cells[x][y].is_walkable()
+    }
+
+    fn nearest_walkable_goal(map_data: &MapData, target: (i32, i32), max_radius: i32) -> Option<(i32, i32)> {
+        if Self::is_grid_walkable(map_data, target.0, target.1) {
+            return Some(target);
+        }
+
+        for r in 1..=max_radius {
+            for dx in -r..=r {
+                // 上下边
+                for dy in [-r, r] {
+                    let gx = target.0 + dx;
+                    let gy = target.1 + dy;
+                    if Self::is_grid_walkable(map_data, gx, gy) {
+                        return Some((gx, gy));
+                    }
+                }
+            }
+            for dy in (-r + 1)..=(r - 1) {
+                // 左右边
+                for dx in [-r, r] {
+                    let gx = target.0 + dx;
+                    let gy = target.1 + dy;
+                    if Self::is_grid_walkable(map_data, gx, gy) {
+                        return Some((gx, gy));
+                    }
+                }
+            }
+        }
+
+        None
+    }
 }
 
 impl LogicSystem for PathfindingSystem {
@@ -151,7 +194,7 @@ impl LogicSystem for PathfindingSystem {
                                 
                                 if in_bounds {
                                     let cell = &map.cells[next_grid_x as usize][next_grid_y as usize];
-                                    (cell.back_image & 0x20000000) != 0
+                                    !cell.is_walkable()
                                 } else {
                                     true // 边界外视为障碍物
                                 }
@@ -196,9 +239,12 @@ impl LogicSystem for PathfindingSystem {
                                     target_grid.0, target_grid.1
                                 );
                                 
-                                // 🎯 使用 A* 算法计算完整路径
+                                // 🎯 使用 A* 算法计算完整路径（考虑障碍物）
                                 if let Some(ref map_data) = map_data {
-                                    match Self::calculate_path(map_data, current_grid, target_grid) {
+                                    // 目标不可走时，先找一个最近可走的落点
+                                    let goal = Self::nearest_walkable_goal(map_data, target_grid, 8).unwrap_or(target_grid);
+
+                                    match Self::calculate_path(map_data, current_grid, goal) {
                                         Some(full_path) => {
                                             tracing::info!("✅ A* 找到路径，共 {} 个格子", full_path.len());
                                             if full_path.len() <= 10 {
@@ -210,13 +256,21 @@ impl LogicSystem for PathfindingSystem {
                                             path.set_path(full_path);
                                         }
                                         None => {
-                                            tracing::warn!("❌ A* 找不到路径，使用直线");
-                                            path.set_path(vec![target_grid]);
+                                            tracing::warn!("❌ A* 找不到路径（含避障），停止移动");
+                                            path.clear();
+                                            velocity.stop();
+                                            player_input.move_to = None;
+                                            player_input.movement_mode = MovementMode::None;
+                                            continue;
                                         }
                                     }
                                 } else {
-                                    tracing::warn!("⚠️ 地图数据不存在，使用直线路径");
-                                    path.set_path(vec![target_grid]);
+                                    tracing::warn!("⚠️ 地图数据不存在，停止寻路");
+                                    path.clear();
+                                    velocity.stop();
+                                    player_input.move_to = None;
+                                    player_input.movement_mode = MovementMode::None;
+                                    continue;
                                 }
                                 
                                 // 🎬 根据 Player.action 计算初始速度（MovementSystem会从Player.action读取）

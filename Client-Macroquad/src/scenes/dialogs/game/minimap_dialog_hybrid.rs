@@ -11,6 +11,7 @@
 use macroquad::prelude::*;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
+use crate::coord::Coord;
 use super::native_ui_utils::{
     DragHelper, draw_library_button_with_offset, draw_library_image_with_offset,
 };
@@ -225,13 +226,59 @@ impl MiniMapDialogHybrid {
 
     /// 世界坐标转换为小地图坐标
     fn world_to_minimap(&self, world_x: f32, world_y: f32, map_rect: Rect) -> Vec2 {
-        let scale_x = map_rect.w / self.map_size.0 * self.zoom_level;
-        let scale_y = map_rect.h / self.map_size.1 * self.zoom_level;
+        // map_size 以“格子尺寸(宽高=地图格数)”为单位；这里先把世界像素换算成格子坐标再映射。
+        let scale_x = map_rect.w / self.map_size.0.max(1.0) * self.zoom_level;
+        let scale_y = map_rect.h / self.map_size.1.max(1.0) * self.zoom_level;
 
-        let mini_x = map_rect.x + world_x * scale_x - self.view_offset.x;
-        let mini_y = map_rect.y + world_y * scale_y - self.view_offset.y;
+        let grid_x = world_x / crate::coord::CELL_WIDTH as f32;
+        let grid_y = world_y / crate::coord::CELL_HEIGHT as f32;
+
+        let mini_x = map_rect.x + grid_x * scale_x - self.view_offset.x;
+        let mini_y = map_rect.y + grid_y * scale_y - self.view_offset.y;
 
         vec2(mini_x, mini_y)
+    }
+
+    /// 设置地图尺寸（单位：格子数 width/height），用于小地图坐标映射/点击反算
+    pub fn set_world_size(&mut self, grid_w: f32, grid_h: f32) {
+        // 防御：避免除零
+        self.map_size = (grid_w.max(1.0), grid_h.max(1.0));
+    }
+
+    /// 若鼠标点击在小地图“地图区域”内，返回目标世界坐标（像素）
+    pub fn pick_world_target_from_mouse(&self, mouse_pos: Vec2) -> Option<(f32, f32)> {
+        if !self.visible || !self.big_mode {
+            return None;
+        }
+
+        // 与 draw_map 使用的区域保持一致
+        let map_rect = Rect::new(
+            self.position.x + 3.0,
+            self.position.y + 22.0,
+            120.0,
+            108.0,
+        );
+
+        if mouse_pos.x < map_rect.x
+            || mouse_pos.x > map_rect.x + map_rect.w
+            || mouse_pos.y < map_rect.y
+            || mouse_pos.y > map_rect.y + map_rect.h
+        {
+            return None;
+        }
+
+        let zoom = self.zoom_level.max(0.0001);
+        let scale_x = map_rect.w / self.map_size.0 * zoom;
+        let scale_y = map_rect.h / self.map_size.1 * zoom;
+
+        // 反算得到“格子坐标”（浮点），再转回世界像素坐标
+        let grid_x = (mouse_pos.x - map_rect.x + self.view_offset.x) / scale_x;
+        let grid_y = (mouse_pos.y - map_rect.y + self.view_offset.y) / scale_y;
+
+        let gx = grid_x.floor().clamp(0.0, self.map_size.0 - 1.0) as i32;
+        let gy = grid_y.floor().clamp(0.0, self.map_size.1 - 1.0) as i32;
+        let (wx, wy) = Coord::grid_to_world_center(gx, gy);
+        Some((wx, wy))
     }
 
     /// 更新和绘制

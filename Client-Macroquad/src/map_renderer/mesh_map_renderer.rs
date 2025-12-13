@@ -53,11 +53,6 @@ pub struct MeshMapRenderer {
     focus_mask_material: Material,
     /// Front 遮挡半透明遮罩材质（ADD 混合版本）
     focus_mask_add_material: Material,
-    
-    // 性能优化：复用 Vec 缓冲区，避免每帧重新分配
-    tile_buffer: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)>,
-    normal_tile_buffer: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)>,
-    blend_tile_buffer: Vec<(Texture2D, f32, f32, f32, f32, i32, i32, i32)>,
 }
 
 impl MeshMapRenderer {
@@ -150,10 +145,6 @@ impl MeshMapRenderer {
             add_blend_material,
             focus_mask_material,
             focus_mask_add_material,
-            // 预分配缓冲区（估计容量：避免初始扩容）
-            tile_buffer: Vec::with_capacity(2000),
-            normal_tile_buffer: Vec::with_capacity(1500),
-            blend_tile_buffer: Vec::with_capacity(500),
         }
     }
 
@@ -454,8 +445,6 @@ impl MeshMapRenderer {
         end_y: i32,
         tint_color: Color,
     ) -> u32 {
-        // 复用缓冲区，避免内存分配
-        self.tile_buffer.clear();
         let mut tiles_count = 0;
 
         // 🔧 关键: Back层是2x2格子共享的,只遍历偶数坐标
@@ -470,67 +459,60 @@ impl MeshMapRenderer {
             start_y - 1
         };
 
-        for y in (start_y_even..end_y).step_by(2) {
-            if y < 0 || y >= map_reader.height {
-                continue;
-            }
-            for x in (start_x_even..end_x).step_by(2) {
-                if x < 0 || x >= map_reader.width {
+        // 性能优化：避免每帧 push+sort 大量 Vec。
+        // 直接按 (priority, y, x) 双层遍历，保证与 sort_unstable_by_key 一致的绘制顺序。
+        for priority in 0..=1 {
+            for y in (start_y_even..end_y).step_by(2) {
+                if y < 0 || y >= map_reader.height {
                     continue;
                 }
-
-                let Some(cell) = map_reader.get_cell(x, y) else {
-                    continue;
-                };
-
-                if let Some((file_index, image_index)) = cell.back_tile() {
-                    // ✅ 新 API：一行搞定，自动 LRU 缓存，性能提升 50-100x
-                    let texture_opt = resources::get_map_texture(file_index, image_index)
-                        .and_then(|info| info.image.clone());
-                    
-                    if let Some(texture) = texture_opt {
-                        let world_x = x as f32 * self.tile_width;
-                        let world_y = y as f32 * self.tile_height;
-                        let offset_y = world_y + self.tile_height - texture.height();
-                        let width = texture.width();
-                        let height = texture.height();
-
-                        let pixel_x = world_x.floor();
-                        let pixel_y = offset_y.floor();
-
-                        let priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
-
-                        self.tile_buffer.push((
-                            texture.clone(),
-                            pixel_x,
-                            pixel_y,
-                            width,
-                            height,
-                            priority,
-                            y,
-                            x,
-                        ));
-                        tiles_count += 1;
+                for x in (start_x_even..end_x).step_by(2) {
+                    if x < 0 || x >= map_reader.width {
+                        continue;
                     }
+
+                    let Some(cell) = map_reader.get_cell(x, y) else {
+                        continue;
+                    };
+
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    if cell_priority != priority {
+                        continue;
+                    }
+
+                    let Some((file_index, image_index)) = cell.back_tile() else {
+                        continue;
+                    };
+
+                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                        continue;
+                    };
+                    let Some(texture) = info.image.clone() else {
+                        continue;
+                    };
+
+                    let world_x = x as f32 * self.tile_width;
+                    let world_y = y as f32 * self.tile_height;
+                    let offset_y = world_y + self.tile_height - texture.height();
+                    let width = texture.width();
+                    let height = texture.height();
+
+                    let pixel_x = world_x.floor();
+                    let pixel_y = offset_y.floor();
+
+                    draw_texture_ex(
+                        &texture,
+                        pixel_x,
+                        pixel_y,
+                        tint_color,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(width, height)),
+                            ..Default::default()
+                        },
+                    );
+                    tiles_count += 1;
                 }
             }
-        }
-
-        // 使用不稳定排序（更快）
-        self.tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
-
-        // 渲染
-        for (texture, x, y, width, height, _, _, _) in &self.tile_buffer {
-            draw_texture_ex(
-                texture,
-                *x,
-                *y,
-                tint_color, // 应用颜色调整
-                DrawTextureParams {
-                    dest_size: Some(vec2(*width, *height)),
-                    ..Default::default()
-                },
-            );
         }
 
         tiles_count
@@ -552,107 +534,148 @@ impl MeshMapRenderer {
         get_tile: fn(&crate::resources::map_reader::CellInfo) -> Option<(i16, i32)>,
         tint_color: Color,
     ) -> u32 {
-        // 复用缓冲区，避免内存分配
-        self.normal_tile_buffer.clear();
-        self.blend_tile_buffer.clear();
         let mut tiles_count = 0;
 
-        for y in start_y..end_y {
-            if y < 0 || y >= map_reader.height {
-                continue;
-            }
-            for x in start_x..end_x {
-                if x < 0 || x >= map_reader.width {
+        // 性能优化：避免每帧构建 Vec 并排序。
+        // 保持原有“普通先画、混合后画”的语义，同时保证 (priority, y, x) 顺序一致。
+
+        // 1) 普通瓦片（正常混合）
+        for priority in 0..=1 {
+            for y in start_y..end_y {
+                if y < 0 || y >= map_reader.height {
                     continue;
                 }
+                for x in start_x..end_x {
+                    if x < 0 || x >= map_reader.width {
+                        continue;
+                    }
 
-                let Some(cell) = map_reader.get_cell(x, y) else {
-                    continue;
-                };
+                    let Some(cell) = map_reader.get_cell(x, y) else {
+                        continue;
+                    };
 
-                if let Some((file_index, mut image_index)) = get_tile(cell) {
-                    // 计算动画帧偏移
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    if cell_priority != priority {
+                        continue;
+                    }
+
+                    if cell.middle_use_blend() {
+                        continue;
+                    }
+
+                    let Some((file_index, mut image_index)) = get_tile(cell) else {
+                        continue;
+                    };
+
                     if cell.middle_has_animation() {
                         let frame_count = cell.middle_animation_frame;
                         let frame_interval = cell.middle_animation_tick;
-                        
-                        let total_ticks = frame_count as u32 + frame_count as u32 * frame_interval as u32;
+                        let total_ticks =
+                            frame_count as u32 + frame_count as u32 * frame_interval as u32;
                         let divisor = 1 + frame_interval as u32;
                         let frame_offset = ((self.animation_frame % total_ticks) / divisor) as i32;
-                        
                         image_index += frame_offset;
                     }
 
-                    // ✅ 新 API：一行搞定，自动 LRU 缓存，性能提升 50-100x
-                    let texture_and_offset_opt = resources::get_map_texture(file_index, image_index)
-                        .map(|info| (info.image.clone(), info.offset_x, info.offset_y));
-                    
-                    if let Some((Some(texture), _offset_x, _offset_y)) = texture_and_offset_opt {
-                        let world_x = x as f32 * self.tile_width;
-                        let world_y = y as f32 * self.tile_height;
-                        let base_y = world_y + self.tile_height - texture.height();
-                        let width = texture.width();
-                        let height = texture.height();
+                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                        continue;
+                    };
+                    let Some(texture) = info.image.clone() else {
+                        continue;
+                    };
 
-                        let pixel_x = world_x.floor();
-                        let pixel_y = base_y.floor();
+                    let world_x = x as f32 * self.tile_width;
+                    let world_y = y as f32 * self.tile_height;
+                    let base_y = world_y + self.tile_height - texture.height();
+                    let width = texture.width();
+                    let height = texture.height();
 
-                        let priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    let pixel_x = world_x.floor();
+                    let pixel_y = base_y.floor();
 
-                        let tile_data = (
-                            texture.clone(),
-                            pixel_x,
-                            pixel_y,
-                            width,
-                            height,
-                            priority,
-                            y,
-                            x,
-                        );
-                        
-                        if cell.middle_use_blend() {
-                            self.blend_tile_buffer.push(tile_data);
-                        } else {
-                            self.normal_tile_buffer.push(tile_data);
-                        }
-                        
-                        tiles_count += 1;
-                    }
+                    draw_texture_ex(
+                        &texture,
+                        pixel_x,
+                        pixel_y,
+                        tint_color,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(width, height)),
+                            ..Default::default()
+                        },
+                    );
+                    tiles_count += 1;
                 }
             }
         }
 
-        // 使用不稳定排序（更快）
-        self.normal_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
-        self.blend_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
-
-        // 先渲染普通瓦片（正常混合）
-        for (texture, x, y, width, height, _, _, _) in &self.normal_tile_buffer {
-            draw_texture_ex(
-                texture,
-                *x,
-                *y,
-                tint_color,
-                DrawTextureParams {
-                    dest_size: Some(vec2(*width, *height)),
-                    ..Default::default()
-                },
-            );
-        }
-
-        // 再渲染混合瓦片（ADD混合）
+        // 2) 混合瓦片（ADD 混合）
         gl_use_material(&self.add_blend_material);
-        for (texture, x, y, width, height, _, _, _) in &self.blend_tile_buffer {
-            draw_texture_ex(
-                texture,
-                *x,
-                *y,
-                tint_color,
-                DrawTextureParams {
-                    dest_size: Some(vec2(*width, *height)),
-                    ..Default::default()
-                },
-            );
+        for priority in 0..=1 {
+            for y in start_y..end_y {
+                if y < 0 || y >= map_reader.height {
+                    continue;
+                }
+                for x in start_x..end_x {
+                    if x < 0 || x >= map_reader.width {
+                        continue;
+                    }
+
+                    let Some(cell) = map_reader.get_cell(x, y) else {
+                        continue;
+                    };
+
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    if cell_priority != priority {
+                        continue;
+                    }
+
+                    if !cell.middle_use_blend() {
+                        continue;
+                    }
+
+                    let Some((file_index, mut image_index)) = get_tile(cell) else {
+                        continue;
+                    };
+
+                    if cell.middle_has_animation() {
+                        let frame_count = cell.middle_animation_frame;
+                        let frame_interval = cell.middle_animation_tick;
+                        let total_ticks =
+                            frame_count as u32 + frame_count as u32 * frame_interval as u32;
+                        let divisor = 1 + frame_interval as u32;
+                        let frame_offset = ((self.animation_frame % total_ticks) / divisor) as i32;
+                        image_index += frame_offset;
+                    }
+
+                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                        continue;
+                    };
+                    let Some(texture) = info.image.clone() else {
+                        continue;
+                    };
+
+                    let world_x = x as f32 * self.tile_width;
+                    let world_y = y as f32 * self.tile_height;
+                    let base_y = world_y + self.tile_height - texture.height();
+                    let width = texture.width();
+                    let height = texture.height();
+
+                    let pixel_x = world_x.floor();
+                    let pixel_y = base_y.floor();
+
+                    draw_texture_ex(
+                        &texture,
+                        pixel_x,
+                        pixel_y,
+                        tint_color,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(width, height)),
+                            ..Default::default()
+                        },
+                    );
+                    tiles_count += 1;
+                }
+            }
         }
         gl_use_default_material();
 
@@ -669,27 +692,35 @@ impl MeshMapRenderer {
         end_y: i32,
         tint_color: Color,
     ) -> u32 {
-        // 复用缓冲区，避免内存分配
-        self.normal_tile_buffer.clear();
-        self.blend_tile_buffer.clear();
         let mut tiles_count = 0;
 
-        for y in start_y..end_y {
-            if y < 0 || y >= map_reader.height {
-                continue;
-            }
-            for x in start_x..end_x {
-                if x < 0 || x >= map_reader.width {
+        // 性能优化：去掉 Vec 收集与排序，直接按 (priority, y, x) 顺序绘制。
+
+        // 1) 普通瓦片
+        for priority in 0..=1 {
+            for y in start_y..end_y {
+                if y < 0 || y >= map_reader.height {
                     continue;
                 }
+                for x in start_x..end_x {
+                    if x < 0 || x >= map_reader.width {
+                        continue;
+                    }
 
-                let Some(cell) = map_reader.get_cell(x, y) else {
-                    continue;
-                };
+                    let Some(cell) = map_reader.get_cell(x, y) else {
+                        continue;
+                    };
 
-                if let Some((file_index, base_image_index)) = cell.front_tile() {
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    if cell_priority != priority {
+                        continue;
+                    }
+
+                    let Some((file_index, base_image_index)) = cell.front_tile() else {
+                        continue;
+                    };
+
                     let mut image_index = base_image_index;
-                    
                     let mut animation = cell.front_animation_frame;
                     let use_blend = if (animation & 0x80) > 0 {
                         animation &= 0x7F;
@@ -697,123 +728,170 @@ impl MeshMapRenderer {
                     } else {
                         false
                     };
-                    
+                    if use_blend {
+                        continue;
+                    }
+
                     if animation > 0 {
                         let tick_count = cell.front_animation_tick;
-                        let adjusted_frame_count = animation as u32 + (animation as u32 * tick_count as u32);
-                        let current_frame = (self.animation_frame % adjusted_frame_count) / (1 + tick_count as u32);
+                        let adjusted_frame_count =
+                            animation as u32 + (animation as u32 * tick_count as u32);
+                        let current_frame =
+                            (self.animation_frame % adjusted_frame_count) / (1 + tick_count as u32);
                         image_index = base_image_index + current_frame as i32;
                     }
 
-                    // ✅ 新 API：一行搞定，自动 LRU 缓存，性能提升 50-100x
-                    let texture_and_info_opt = resources::get_map_texture(file_index, image_index)
-                        .map(|info| (info.image.clone(), info.offset_x, info.offset_y));
-                    
-                    if let Some((Some(texture), offset_x, offset_y)) = texture_and_info_opt {
-                        let world_x = x as f32 * self.tile_width;
-                        let world_y = y as f32 * self.tile_height;
-                        let width = texture.width();
-                        let height = texture.height();
-                        let base_y = world_y + self.tile_height;
-                        
-                        let should_apply_offset = if use_blend {
-                            file_index == 14 
-                                || file_index == 27 
-                                || (file_index > 99 && file_index < 199)
-                                || (image_index >= 2723 && image_index <= 2732)
-                        } else if file_index == 28 {
-                            offset_x != 0 || offset_y != 0
-                        } else {
-                            false
-                        };
-                        
-                        let (pixel_x, pixel_y) = if use_blend {
-                            if file_index == 14 || file_index == 27 || (file_index > 99 && file_index < 199) {
-                                let mut base_x = world_x;
-                                let mut base_y_pos = base_y - 3.0 * self.tile_height;
-                                
-                                if should_apply_offset {
-                                    base_x += offset_x as f32;
-                                    base_y_pos += offset_y as f32;
-                                }
-                                
-                                (base_x.floor(), base_y_pos.floor())
-                            } else {
-                                let mut base_x = world_x;
-                                let mut base_y_pos = base_y - height;
-                                    
-                                if should_apply_offset {
-                                    base_x += offset_x as f32;
-                                    base_y_pos += offset_y as f32;
-                                }
-                                
-                                (base_x.floor(), base_y_pos.floor())
-                            }
-                        } else if file_index == 28 && (offset_x != 0 || offset_y != 0) {
-                            let x = (world_x + offset_x as f32).floor();
-                            let y = (base_y - self.tile_height + offset_y as f32).floor();
-                            (x, y)
-                        } else {
-                            let mut base_x = world_x;
-                            let mut base_y_pos = base_y - height;
-                            
-                            if should_apply_offset {
-                                base_x += offset_x as f32;
-                                base_y_pos += offset_y as f32;
-                            }
-                            
-                            (base_x.floor(), base_y_pos.floor())
-                        };                        let priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                        continue;
+                    };
+                    let Some(texture) = info.image.clone() else {
+                        continue;
+                    };
+                    let offset_x = info.offset_x;
+                    let offset_y = info.offset_y;
 
-                        let tile = (
-                            texture.clone(),
-                            pixel_x,
-                            pixel_y,
-                            width,
-                            height,
-                            priority,
-                            y,
-                            x,
-                        );
-                        
-                        if use_blend {
-                            self.blend_tile_buffer.push(tile);
-                        } else {
-                            self.normal_tile_buffer.push(tile);
+                    let world_x = x as f32 * self.tile_width;
+                    let world_y = y as f32 * self.tile_height;
+                    let width = texture.width();
+                    let height = texture.height();
+                    let base_y = world_y + self.tile_height;
+
+                    let should_apply_offset = if file_index == 28 {
+                        offset_x != 0 || offset_y != 0
+                    } else {
+                        false
+                    };
+
+                    let (pixel_x, pixel_y) = if file_index == 28 && (offset_x != 0 || offset_y != 0) {
+                        (
+                            (world_x + offset_x as f32).floor(),
+                            (base_y - self.tile_height + offset_y as f32).floor(),
+                        )
+                    } else {
+                        let mut base_x = world_x;
+                        let mut base_y_pos = base_y - height;
+                        if should_apply_offset {
+                            base_x += offset_x as f32;
+                            base_y_pos += offset_y as f32;
                         }
-                        tiles_count += 1;
-                    }
+                        (base_x.floor(), base_y_pos.floor())
+                    };
+
+                    draw_texture_ex(
+                        &texture,
+                        pixel_x,
+                        pixel_y,
+                        tint_color,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(width, height)),
+                            ..Default::default()
+                        },
+                    );
+                    tiles_count += 1;
                 }
             }
-        }        // 使用不稳定排序（更快）
-        self.normal_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
-        for (texture, x, y, width, height, _, _, _) in &self.normal_tile_buffer {
-            draw_texture_ex(
-                texture,
-                *x,
-                *y,
-                tint_color,
-                DrawTextureParams {
-                    dest_size: Some(vec2(*width, *height)),
-                    ..Default::default()
-                },
-            );
         }
-        
-        // 使用ADD混合材质渲染混合瓦片
-        self.blend_tile_buffer.sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+
+        // 2) 混合瓦片（ADD）
         gl_use_material(&self.add_blend_material);
-        for (texture, x, y, width, height, _, _, _) in &self.blend_tile_buffer {
-            draw_texture_ex(
-                texture,
-                *x,
-                *y,
-                tint_color,
-                DrawTextureParams {
-                    dest_size: Some(vec2(*width, *height)),
-                    ..Default::default()
-                },
-            );
+        for priority in 0..=1 {
+            for y in start_y..end_y {
+                if y < 0 || y >= map_reader.height {
+                    continue;
+                }
+                for x in start_x..end_x {
+                    if x < 0 || x >= map_reader.width {
+                        continue;
+                    }
+
+                    let Some(cell) = map_reader.get_cell(x, y) else {
+                        continue;
+                    };
+
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    if cell_priority != priority {
+                        continue;
+                    }
+
+                    let Some((file_index, base_image_index)) = cell.front_tile() else {
+                        continue;
+                    };
+
+                    let mut image_index = base_image_index;
+                    let mut animation = cell.front_animation_frame;
+                    let use_blend = if (animation & 0x80) > 0 {
+                        animation &= 0x7F;
+                        true
+                    } else {
+                        false
+                    };
+                    if !use_blend {
+                        continue;
+                    }
+
+                    if animation > 0 {
+                        let tick_count = cell.front_animation_tick;
+                        let adjusted_frame_count =
+                            animation as u32 + (animation as u32 * tick_count as u32);
+                        let current_frame =
+                            (self.animation_frame % adjusted_frame_count) / (1 + tick_count as u32);
+                        image_index = base_image_index + current_frame as i32;
+                    }
+
+                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                        continue;
+                    };
+                    let Some(texture) = info.image.clone() else {
+                        continue;
+                    };
+                    let offset_x = info.offset_x;
+                    let offset_y = info.offset_y;
+
+                    let world_x = x as f32 * self.tile_width;
+                    let world_y = y as f32 * self.tile_height;
+                    let width = texture.width();
+                    let height = texture.height();
+                    let base_y = world_y + self.tile_height;
+
+                    let should_apply_offset = file_index == 14
+                        || file_index == 27
+                        || (file_index > 99 && file_index < 199)
+                        || (image_index >= 2723 && image_index <= 2732);
+
+                    let (pixel_x, pixel_y) = if file_index == 14
+                        || file_index == 27
+                        || (file_index > 99 && file_index < 199)
+                    {
+                        let mut base_x = world_x;
+                        let mut base_y_pos = base_y - 3.0 * self.tile_height;
+                        if should_apply_offset {
+                            base_x += offset_x as f32;
+                            base_y_pos += offset_y as f32;
+                        }
+                        (base_x.floor(), base_y_pos.floor())
+                    } else {
+                        let mut base_x = world_x;
+                        let mut base_y_pos = base_y - height;
+                        if should_apply_offset {
+                            base_x += offset_x as f32;
+                            base_y_pos += offset_y as f32;
+                        }
+                        (base_x.floor(), base_y_pos.floor())
+                    };
+
+                    draw_texture_ex(
+                        &texture,
+                        pixel_x,
+                        pixel_y,
+                        tint_color,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(width, height)),
+                            ..Default::default()
+                        },
+                    );
+                    tiles_count += 1;
+                }
+            }
         }
         gl_use_default_material();
 
@@ -833,26 +911,38 @@ impl MeshMapRenderer {
         _focus_radius_tiles_y: i32,
         _focus_alpha: f32,
     ) -> u32 {
-        self.normal_tile_buffer.clear();
-        self.blend_tile_buffer.clear();
         let mut tiles_count = 0;
 
-        for y in start_y..end_y {
-            if y < 0 || y >= map_reader.height {
-                continue;
-            }
-            for x in start_x..end_x {
-                if x < 0 || x >= map_reader.width {
+        // 性能优化：保持 focus shader 语义不变，去掉 Vec+排序。
+
+        // 1) 普通瓦片（可能需要 focus shader）
+        if focus_world.is_some() {
+            gl_use_material(&self.focus_mask_material);
+        }
+        for priority in 0..=1 {
+            for y in start_y..end_y {
+                if y < 0 || y >= map_reader.height {
                     continue;
                 }
+                for x in start_x..end_x {
+                    if x < 0 || x >= map_reader.width {
+                        continue;
+                    }
 
-                let Some(cell) = map_reader.get_cell(x, y) else {
-                    continue;
-                };
+                    let Some(cell) = map_reader.get_cell(x, y) else {
+                        continue;
+                    };
 
-                if let Some((file_index, base_image_index)) = cell.front_tile() {
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    if cell_priority != priority {
+                        continue;
+                    }
+
+                    let Some((file_index, base_image_index)) = cell.front_tile() else {
+                        continue;
+                    };
+
                     let mut image_index = base_image_index;
-
                     let mut animation = cell.front_animation_frame;
                     let use_blend = if (animation & 0x80) > 0 {
                         animation &= 0x7F;
@@ -860,6 +950,9 @@ impl MeshMapRenderer {
                     } else {
                         false
                     };
+                    if use_blend {
+                        continue;
+                    }
 
                     if animation > 0 {
                         let tick_count = cell.front_animation_tick;
@@ -870,124 +963,164 @@ impl MeshMapRenderer {
                         image_index = base_image_index + current_frame as i32;
                     }
 
-                    let texture_and_info_opt = resources::get_map_texture(file_index, image_index)
-                        .map(|info| (info.image.clone(), info.offset_x, info.offset_y));
+                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                        continue;
+                    };
+                    let Some(texture) = info.image.clone() else {
+                        continue;
+                    };
+                    let offset_x = info.offset_x;
+                    let offset_y = info.offset_y;
 
-                    if let Some((Some(texture), offset_x, offset_y)) = texture_and_info_opt {
-                        let world_x = x as f32 * self.tile_width;
-                        let world_y = y as f32 * self.tile_height;
-                        let width = texture.width();
-                        let height = texture.height();
-                        let base_y = world_y + self.tile_height;
+                    let world_x = x as f32 * self.tile_width;
+                    let world_y = y as f32 * self.tile_height;
+                    let width = texture.width();
+                    let height = texture.height();
+                    let base_y = world_y + self.tile_height;
 
-                        let should_apply_offset = if use_blend {
-                            file_index == 14
-                                || file_index == 27
-                                || (file_index > 99 && file_index < 199)
-                                || (image_index >= 2723 && image_index <= 2732)
-                        } else if file_index == 28 {
-                            offset_x != 0 || offset_y != 0
-                        } else {
-                            false
-                        };
+                    let should_apply_offset = if file_index == 28 {
+                        offset_x != 0 || offset_y != 0
+                    } else {
+                        false
+                    };
 
-                        let (pixel_x, pixel_y) = if use_blend {
-                            if file_index == 14
-                                || file_index == 27
-                                || (file_index > 99 && file_index < 199)
-                            {
-                                let mut base_x = world_x;
-                                let mut base_y_pos = base_y - 3.0 * self.tile_height;
-
-                                if should_apply_offset {
-                                    base_x += offset_x as f32;
-                                    base_y_pos += offset_y as f32;
-                                }
-
-                                (base_x.floor(), base_y_pos.floor())
-                            } else {
-                                let mut base_x = world_x;
-                                let mut base_y_pos = base_y - height;
-
-                                if should_apply_offset {
-                                    base_x += offset_x as f32;
-                                    base_y_pos += offset_y as f32;
-                                }
-
-                                (base_x.floor(), base_y_pos.floor())
-                            }
-                        } else if file_index == 28 && (offset_x != 0 || offset_y != 0) {
-                            let x = (world_x + offset_x as f32).floor();
-                            let y = (base_y - self.tile_height + offset_y as f32).floor();
-                            (x, y)
-                        } else {
-                            let mut base_x = world_x;
-                            let mut base_y_pos = base_y - height;
-
-                            if should_apply_offset {
-                                base_x += offset_x as f32;
-                                base_y_pos += offset_y as f32;
-                            }
-
-                            (base_x.floor(), base_y_pos.floor())
-                        };
-
-                        let priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
-                        let tile = (texture.clone(), pixel_x, pixel_y, width, height, priority, y, x);
-
-                        if use_blend {
-                            self.blend_tile_buffer.push(tile);
-                        } else {
-                            self.normal_tile_buffer.push(tile);
+                    let (pixel_x, pixel_y) = if file_index == 28 && (offset_x != 0 || offset_y != 0) {
+                        (
+                            (world_x + offset_x as f32).floor(),
+                            (base_y - self.tile_height + offset_y as f32).floor(),
+                        )
+                    } else {
+                        let mut base_x = world_x;
+                        let mut base_y_pos = base_y - height;
+                        if should_apply_offset {
+                            base_x += offset_x as f32;
+                            base_y_pos += offset_y as f32;
                         }
+                        (base_x.floor(), base_y_pos.floor())
+                    };
 
-                        tiles_count += 1;
-                    }
+                    draw_texture_ex(
+                        &texture,
+                        pixel_x,
+                        pixel_y,
+                        tint_color,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(width, height)),
+                            ..Default::default()
+                        },
+                    );
+                    tiles_count += 1;
                 }
             }
-        }
-
-        self.normal_tile_buffer
-            .sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
-
-        // 使用 focus shader：只在 FocusRect 内按像素降低 alpha（不会再整张 tile 变半透明）
-        if focus_world.is_some() {
-            gl_use_material(&self.focus_mask_material);
-        }
-        for (texture, x, y, width, height, _, _, _) in &self.normal_tile_buffer {
-            draw_texture_ex(
-                texture,
-                *x,
-                *y,
-                tint_color,
-                DrawTextureParams {
-                    dest_size: Some(vec2(*width, *height)),
-                    ..Default::default()
-                },
-            );
         }
         if focus_world.is_some() {
             gl_use_default_material();
         }
 
-        self.blend_tile_buffer
-            .sort_unstable_by_key(|(_, _, _, _, _, priority, y, x)| (*priority, *y, *x));
+        // 2) 混合瓦片（focus 时用 focus_mask_add，否则用 add_blend）
         if focus_world.is_some() {
             gl_use_material(&self.focus_mask_add_material);
         } else {
             gl_use_material(&self.add_blend_material);
         }
-        for (texture, x, y, width, height, _, _, _) in &self.blend_tile_buffer {
-            draw_texture_ex(
-                texture,
-                *x,
-                *y,
-                tint_color,
-                DrawTextureParams {
-                    dest_size: Some(vec2(*width, *height)),
-                    ..Default::default()
-                },
-            );
+        for priority in 0..=1 {
+            for y in start_y..end_y {
+                if y < 0 || y >= map_reader.height {
+                    continue;
+                }
+                for x in start_x..end_x {
+                    if x < 0 || x >= map_reader.width {
+                        continue;
+                    }
+
+                    let Some(cell) = map_reader.get_cell(x, y) else {
+                        continue;
+                    };
+
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    if cell_priority != priority {
+                        continue;
+                    }
+
+                    let Some((file_index, base_image_index)) = cell.front_tile() else {
+                        continue;
+                    };
+
+                    let mut image_index = base_image_index;
+                    let mut animation = cell.front_animation_frame;
+                    let use_blend = if (animation & 0x80) > 0 {
+                        animation &= 0x7F;
+                        true
+                    } else {
+                        false
+                    };
+                    if !use_blend {
+                        continue;
+                    }
+
+                    if animation > 0 {
+                        let tick_count = cell.front_animation_tick;
+                        let adjusted_frame_count =
+                            animation as u32 + (animation as u32 * tick_count as u32);
+                        let current_frame =
+                            (self.animation_frame % adjusted_frame_count) / (1 + tick_count as u32);
+                        image_index = base_image_index + current_frame as i32;
+                    }
+
+                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                        continue;
+                    };
+                    let Some(texture) = info.image.clone() else {
+                        continue;
+                    };
+                    let offset_x = info.offset_x;
+                    let offset_y = info.offset_y;
+
+                    let world_x = x as f32 * self.tile_width;
+                    let world_y = y as f32 * self.tile_height;
+                    let width = texture.width();
+                    let height = texture.height();
+                    let base_y = world_y + self.tile_height;
+
+                    let should_apply_offset = file_index == 14
+                        || file_index == 27
+                        || (file_index > 99 && file_index < 199)
+                        || (image_index >= 2723 && image_index <= 2732);
+
+                    let (pixel_x, pixel_y) = if file_index == 14
+                        || file_index == 27
+                        || (file_index > 99 && file_index < 199)
+                    {
+                        let mut base_x = world_x;
+                        let mut base_y_pos = base_y - 3.0 * self.tile_height;
+                        if should_apply_offset {
+                            base_x += offset_x as f32;
+                            base_y_pos += offset_y as f32;
+                        }
+                        (base_x.floor(), base_y_pos.floor())
+                    } else {
+                        let mut base_x = world_x;
+                        let mut base_y_pos = base_y - height;
+                        if should_apply_offset {
+                            base_x += offset_x as f32;
+                            base_y_pos += offset_y as f32;
+                        }
+                        (base_x.floor(), base_y_pos.floor())
+                    };
+
+                    draw_texture_ex(
+                        &texture,
+                        pixel_x,
+                        pixel_y,
+                        tint_color,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(width, height)),
+                            ..Default::default()
+                        },
+                    );
+                    tiles_count += 1;
+                }
+            }
         }
         gl_use_default_material();
 

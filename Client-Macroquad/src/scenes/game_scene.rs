@@ -15,13 +15,15 @@ use crate::{
     components::{
         AnimationFrame, Camera as EcsCamera, CameraMode, LocalPlayer, MapData, MirDirection,
         MovementVelocity, Path, Player, PlayerAction, PlayerAppearance, PlayerInput, Position,
-        RenderPass, TimeTracker,
+        Equipment, MountState, RenderPass, TimeTracker,
     },
-    systems::{priority, AnimationSystem, CameraFollowSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SystemScheduler},
+    systems::{priority, AnimationSystem, CameraFollowSystem, MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SystemScheduler},
 };
 use crate::components::{WeaponAnimation, WeaponState};
 use crate::{map_renderer::MeshMapRenderer, resources::{init_map_libraries, MapReader}};
-use crate::systems::rendering::SpriteRenderSystem;
+use crate::systems::rendering::{EffectRenderSystem, SpriteRenderSystem};
+use mir2_shared::data::item::{ItemInfo, UserItem};
+use mir2_shared::enums::ItemType;
 use macroquad::prelude::*;
 
 // 遮挡“露人形”参数（集中在这里，方便调观感）
@@ -85,10 +87,12 @@ impl GameScene {
             .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
             .add_system(PathfindingSystem::new(), priority::PATHFINDING)
             .add_system(MovementSystem, priority::MOVEMENT)
+            .add_system(MountStateSyncSystem::new(), priority::MOUNT_STATE_SYNC)
             .add_system(AnimationSystem::new(), priority::ANIMATION)
             .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW)
             // ECS 渲染系统：先最小接入 SpriteRenderSystem（角色/坐骑/武器特效）
-            .add_system(SpriteRenderSystem::new(), priority::SPRITE_RENDER);
+            .add_system(SpriteRenderSystem::new(), priority::SPRITE_RENDER)
+            .add_system(EffectRenderSystem::new(), priority::EFFECT_RENDER);
 
         Self {
             map_reader: None,
@@ -114,6 +118,30 @@ impl GameScene {
             ui_consumed_last_frame: false,
             ui_mouse_captured: false,
             initialized: false,
+        }
+    }
+
+    /// 根据窗口尺寸自动调整有效缩放。
+    ///
+    /// 目的：统一缩放参数的来源，避免渲染/输入/相机 clamp 各用各的 zoom。
+    ///
+    /// 注意：这里不再做“随窗口尺寸自动放大 zoom”的视野钉死策略。
+    /// 用户期望：窗口变大 = 视野变大；性能优化应在渲染层解决。
+    fn effective_map_zoom(&self) -> f32 {
+        self.map_zoom
+    }
+
+    fn mir_direction_to_radians(dir: MirDirection) -> f32 {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        match dir {
+            MirDirection::Right => 0.0,
+            MirDirection::DownRight => FRAC_PI_2 / 2.0,
+            MirDirection::Down => FRAC_PI_2,
+            MirDirection::DownLeft => FRAC_PI_2 + FRAC_PI_2 / 2.0,
+            MirDirection::Left => PI,
+            MirDirection::UpLeft => -PI + FRAC_PI_2 / 2.0,
+            MirDirection::Up => -FRAC_PI_2,
+            MirDirection::UpRight => -FRAC_PI_2 / 2.0,
         }
     }
 
@@ -159,6 +187,74 @@ impl GameScene {
 
         // 3) 本地玩家实体（最小移动链路）
         if self.ecs_local_player_entity.is_none() {
+            // 出生点：尽量选择一个“无障碍物”的格子，避免一出生就卡墙/寻路失败
+            let mut spawn_world = self.map_camera_position;
+            if let Some(map_entity) = self.ecs_map_entity {
+                if let Ok(map) = self.ecs_ctx.world.get::<&MapData>(map_entity) {
+                    let desired_grid = crate::coord::Coord::world_to_grid(spawn_world.x, spawn_world.y);
+
+                    let mut found = None;
+                    let max_radius: i32 = 20;
+
+                    let is_walkable = |gx: i32, gy: i32| -> bool {
+                        if gx < 0 || gy < 0 || gx >= map.width || gy >= map.height {
+                            return false;
+                        }
+                        let x = gx as usize;
+                        let y = gy as usize;
+                        if x >= map.cells.len() || y >= map.cells[x].len() {
+                            return false;
+                        }
+                        map.cells[x][y].is_walkable()
+                    };
+
+                    if is_walkable(desired_grid.0, desired_grid.1) {
+                        found = Some(desired_grid);
+                    } else {
+                        for r in 1..=max_radius {
+                            for dx in -r..=r {
+                                for dy in [-r, r] {
+                                    let gx = desired_grid.0 + dx;
+                                    let gy = desired_grid.1 + dy;
+                                    if is_walkable(gx, gy) {
+                                        found = Some((gx, gy));
+                                        break;
+                                    }
+                                }
+                                if found.is_some() {
+                                    break;
+                                }
+                            }
+                            if found.is_some() {
+                                break;
+                            }
+                            for dy in (-r + 1)..=(r - 1) {
+                                for dx in [-r, r] {
+                                    let gx = desired_grid.0 + dx;
+                                    let gy = desired_grid.1 + dy;
+                                    if is_walkable(gx, gy) {
+                                        found = Some((gx, gy));
+                                        break;
+                                    }
+                                }
+                                if found.is_some() {
+                                    break;
+                                }
+                            }
+                            if found.is_some() {
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some((gx, gy)) = found {
+                        let (wx, wy) = crate::coord::Coord::grid_to_world(gx, gy);
+                        spawn_world = vec2(wx, wy);
+                        self.map_camera_position = spawn_world;
+                    }
+                }
+            }
+
             let player = Player {
                 direction: MirDirection::Up,
                 action: PlayerAction::Stand,
@@ -177,11 +273,23 @@ impl GameScene {
 
             let weapon_anim = WeaponAnimation::new(appearance.weapon.max(0) as u16);
 
+            // test_game_scene 默认给一个坐骑，确保 MountStateSyncSystem 有可见效果
+            let mut mount_info = ItemInfo::default();
+            mount_info.item_type = ItemType::Mount;
+            mount_info.shape = 0;
+            let mount_item = UserItem::with_info(mount_info);
+            let equipment = Equipment {
+                mount: Some(mount_item),
+                ..Equipment::default()
+            };
+
             let entity = self.ecs_ctx.world.spawn((
                 LocalPlayer,
                 player,
-                Position::new(self.map_camera_position.x, self.map_camera_position.y),
+                Position::new(spawn_world.x, spawn_world.y),
                 appearance,
+                equipment,
+                MountState::default(),
                 AnimationFrame::default(),
                 PlayerInput::default(),
                 Path::new(),
@@ -203,11 +311,28 @@ impl GameScene {
         if let Ok(mut cam) = self.ecs_ctx.world.get::<&mut EcsCamera>(cam_entity) {
             cam.screen_width = sw;
             cam.screen_height = sh;
-            cam.zoom = self.map_zoom;
+            cam.zoom = self.effective_map_zoom();
         }
         if let Ok(mut pos) = self.ecs_ctx.world.get::<&mut Position>(cam_entity) {
             pos.x = self.map_camera_position.x;
             pos.y = self.map_camera_position.y;
+        }
+    }
+
+    /// 仅同步“视图参数”（屏幕尺寸/缩放）到 ECS Camera。
+    ///
+    /// 目的：ECS 的输入系统（如 PlayerControlSystem::screen_to_world）依赖 Camera.zoom 与
+    /// screen_width/height；如果这些与实际渲染相机不一致，窗口缩放后会出现“点哪走哪不对”。
+    fn sync_ecs_camera_view_params(&mut self) {
+        let Some(cam_entity) = self.ecs_camera_entity else {
+            return;
+        };
+
+        let (sw, sh) = self.ecs_ctx.drawable_size();
+        if let Ok(mut cam) = self.ecs_ctx.world.get::<&mut EcsCamera>(cam_entity) {
+            cam.screen_width = sw;
+            cam.screen_height = sh;
+            cam.zoom = self.effective_map_zoom();
         }
     }
 
@@ -296,7 +421,7 @@ impl GameScene {
         // 像素对齐（抗闪烁）：
         // Linear 过滤 + 子像素相机移动会导致阴影/暗部出现“深浅闪烁”(shimmering)。
         // 将渲染相机 target 对齐到 1/map_zoom 的网格（世界像素）上，可显著稳定采样。
-        let zoom = self.map_zoom.max(0.0001);
+        let zoom = self.effective_map_zoom().max(0.0001);
         let snapped_target = vec2(
             (self.map_camera_position.x * zoom).round() / zoom,
             (self.map_camera_position.y * zoom).round() / zoom,
@@ -304,7 +429,7 @@ impl GameScene {
         self.map_camera.target = snapped_target;
         let sw = screen_width().max(1.0);
         let sh = screen_height().max(1.0);
-        self.map_camera.zoom = vec2(2.0 / sw * self.map_zoom, 2.0 / sh * self.map_zoom);
+        self.map_camera.zoom = vec2(2.0 / sw * zoom, 2.0 / sh * zoom);
     }
 
     fn clamp_map_camera_position(&mut self) {
@@ -313,8 +438,9 @@ impl GameScene {
         };
 
         // 视口半宽/半高（世界坐标，单位：像素）
-        let half_w = (screen_width().max(1.0) / 2.0) / self.map_zoom;
-        let half_h = (screen_height().max(1.0) / 2.0) / self.map_zoom;
+        let zoom = self.effective_map_zoom().max(0.0001);
+        let half_w = (screen_width().max(1.0) / 2.0) / zoom;
+        let half_h = (screen_height().max(1.0) / 2.0) / zoom;
 
         // 地图总大小（世界坐标，单位：像素）
         let map_w = map.width as f32 * 48.0;
@@ -383,8 +509,9 @@ impl GameScene {
                 self.map_first_drag = false;
 
                 // 公式参考 map_viewer：屏幕像素 delta -> 世界坐标 delta，再除以 zoom
-                let world_delta_x = delta.x / self.map_zoom;
-                let world_delta_y = delta.y / self.map_zoom;
+                let zoom = self.effective_map_zoom().max(0.0001);
+                let world_delta_x = delta.x / zoom;
+                let world_delta_y = delta.y / zoom;
                 self.map_camera_position.x -= world_delta_x;
                 self.map_camera_position.y -= world_delta_y;
 
@@ -416,6 +543,9 @@ impl GameScene {
         match MapReader::new(map_path) {
             Ok(reader) => {
                 println!("✅ GameScene: 地图加载成功 {} ({}x{})", map_path, reader.width, reader.height);
+                // 小地图需要知道地图尺寸（格子数），用于点击反算到世界坐标
+                self.main_dialog
+                    .set_minimap_world_size(reader.width as f32, reader.height as f32);
                 // 初始相机位置：地图中心
                 self.map_camera_position = vec2(reader.width as f32 * 48.0 / 2.0, reader.height as f32 * 32.0 / 2.0);
                 self.map_zoom = 1.0;
@@ -571,6 +701,23 @@ impl Scene for GameScene {
                 || (wheel_y != 0.0 && ui_over)
                 || self.ui_consumed_last_frame;
 
+            // 每帧同步 ECS camera 的 view 参数，保证输入换算与渲染一致（尤其是窗口缩放后）。
+            self.sync_ecs_camera_view_params();
+
+            // UI -> ECS：点击小地图产生的自动寻路目标
+            if let Some((wx, wy, run)) = self.main_dialog.take_pending_auto_path_target() {
+                if let Some(player_entity) = self.ecs_local_player_entity {
+                    if let (Ok(mut input), Ok(mut player)) = (
+                        self.ecs_ctx.world.get::<&mut PlayerInput>(player_entity),
+                        self.ecs_ctx.world.get::<&mut Player>(player_entity),
+                    ) {
+                        input.move_to = Some((wx, wy));
+                        input.movement_mode = crate::components::MovementMode::Pathfinding;
+                        player.action = if run { PlayerAction::Run } else { PlayerAction::Walk };
+                    }
+                }
+            }
+
             // 相机模式/权威切换
             if let Some(cam_entity) = self.ecs_camera_entity {
                 if let Ok(mut mode) = self.ecs_ctx.world.get::<&mut CameraMode>(cam_entity) {
@@ -585,6 +732,18 @@ impl Scene for GameScene {
 
             self.ecs_ctx.delta_time = _dt;
             self.ecs_scheduler.update(&mut self.ecs_ctx, _dt)?;
+
+            // 同步玩家点到小地图（位置用世界像素；朝向换成弧度用于指示线）
+            if let Some(player_entity) = self.ecs_local_player_entity {
+                if let (Ok(pos), Ok(player)) = (
+                    self.ecs_ctx.world.get::<&Position>(player_entity),
+                    self.ecs_ctx.world.get::<&Player>(player_entity),
+                ) {
+                    let dir_rad = Self::mir_direction_to_radians(player.direction);
+                    self.main_dialog
+                        .update_minimap_player_position(pos.x, pos.y, dir_rad);
+                }
+            }
 
             if !space_down && !self.map_dragging {
                 // 跟随相机：ECS camera 主导 GameScene map_camera_position
@@ -615,6 +774,7 @@ impl Scene for GameScene {
         self.update_map_camera();
         if self.map_reader.is_some() {
             set_camera(&self.map_camera);
+            let effective_zoom = self.effective_map_zoom();
             // 1) 先渲染 Back+Middle（不画 Front）
             let original_show_front = self.map_renderer.show_front_layer;
             {
@@ -628,7 +788,7 @@ impl Scene for GameScene {
                     self.map_camera_position.y,
                     screen_width(),
                     screen_height(),
-                    self.map_zoom,
+                    effective_zoom,
                     WHITE,
                 );
                 self.map_renderer.show_front_layer = original_show_front;
@@ -649,7 +809,7 @@ impl Scene for GameScene {
                         self.map_camera_position.y,
                         screen_width(),
                         screen_height(),
-                        self.map_zoom,
+                        effective_zoom,
                         WHITE,
                         None,
                         0,

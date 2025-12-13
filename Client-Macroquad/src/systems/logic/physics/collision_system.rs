@@ -118,7 +118,7 @@ impl LogicSystem for CollisionSystem {
 
             // 检查下一个位置的格子是否有障碍物
             let cell = &cells[grid_x as usize][grid_y as usize];
-            let has_obstacle = (cell.back_image & 0x20000000) != 0;
+            let has_obstacle = !cell.is_walkable();
             
             if has_obstacle {
                 // 🎯 关键修复：下一个位置有障碍物！立即停止velocity

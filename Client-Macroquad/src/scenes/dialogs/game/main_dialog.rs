@@ -32,6 +32,7 @@ use super::{
 };
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
+use std::time::{Duration, Instant};
 
 /// 对话框类型枚举，用于 z-order 管理
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -122,6 +123,21 @@ pub struct MainDialog {
     bg_size: Vec2,
     /// 位置
     position: Vec2,
+
+    // === Resize/Layout ===
+    /// 上一帧屏幕宽度（dpi 修正后的逻辑坐标）
+    last_screen_w: f32,
+    /// 上一帧屏幕高度（dpi 修正后的逻辑坐标）
+    last_screen_h: f32,
+    /// 上一帧 MainDialog 的 X（用于子对话框相对布局）
+    last_main_dialog_x: f32,
+
+    /// UI 产生的“自动寻路目标”（世界坐标像素）；由 GameScene 在 update 阶段消费
+    pending_auto_path_target: Option<(f32, f32, bool)>,
+
+    /// 小地图右键双击检测
+    minimap_right_last_click_time: Option<Instant>,
+    minimap_double_click_threshold: Duration,
 }
 
 impl MainDialog {
@@ -209,6 +225,74 @@ impl MainDialog {
             bg_texture: None,
             bg_size: vec2(bg_width, bg_height),
             position: vec2(main_dialog_x, screen_h - bg_height),
+
+            last_screen_w: screen_w,
+            last_screen_h: screen_h,
+            last_main_dialog_x: main_dialog_x,
+
+            pending_auto_path_target: None,
+            minimap_right_last_click_time: None,
+            minimap_double_click_threshold: Duration::from_millis(260),
+        }
+    }
+
+    /// 设置小地图对应的世界尺寸（单位：世界像素）
+    pub fn set_minimap_world_size(&mut self, world_w: f32, world_h: f32) {
+        self.minimap_dialog.set_world_size(world_w, world_h);
+    }
+
+    /// 同步小地图上的玩家点（世界坐标像素 + 朝向弧度）
+    pub fn update_minimap_player_position(&mut self, world_x: f32, world_y: f32, direction_rad: f32) {
+        self.minimap_dialog
+            .update_player_position(world_x, world_y, direction_rad);
+    }
+
+    /// 取出（并清空）一次 UI 产生的自动寻路目标
+    pub fn take_pending_auto_path_target(&mut self) -> Option<(f32, f32, bool)> {
+        self.pending_auto_path_target.take()
+    }
+
+    fn apply_resize_layout(&mut self, old_screen_w: f32, old_screen_h: f32, old_main_x: f32, new_screen_w: f32, new_screen_h: f32, new_main_x: f32) {
+        // 只处理“窗口尺寸变化”导致的布局漂移；拖拽后的相对偏移应保留。
+        // 这里使用“相对 MainDialog 的 X 偏移 + 相对屏幕底部的 Y 偏移”来迁移位置。
+        let moved = (old_screen_w - new_screen_w).abs() > 0.5 || (old_screen_h - new_screen_h).abs() > 0.5;
+        if !moved {
+            return;
+        }
+
+        // Belt: 以 MainDialog 为锚点 + 底部距离保持
+        {
+            let old_pos = self.belt_dialog.get_position();
+            let dx = old_pos.x - old_main_x;
+            let bottom_gap = old_screen_h - old_pos.y;
+            self.belt_dialog
+                .set_position(vec2(new_main_x + dx, new_screen_h - bottom_gap));
+        }
+
+        // Chat: 以 MainDialog 为锚点 + 底部距离保持
+        {
+            let old_pos = self.chat_dialog.get_position();
+            let dx = old_pos.x - old_main_x;
+            let bottom_gap = old_screen_h - old_pos.y;
+            self.chat_dialog
+                .set_position(vec2(new_main_x + dx, new_screen_h - bottom_gap));
+        }
+
+        // ChatControlBar: 通常每帧会锚定到 ChatDialog 上方；这里先随 ChatDialog 做一次迁移，避免一帧错位。
+        {
+            let old_pos = self.chat_control_bar.get_position();
+            let dx = old_pos.x - old_main_x;
+            let bottom_gap = old_screen_h - old_pos.y;
+            self.chat_control_bar
+                .set_position(vec2(new_main_x + dx, new_screen_h - bottom_gap));
+        }
+
+        // MiniMap: 默认右上角；用“左边缘到右侧的距离”保持（无需访问对话框内部 size）
+        {
+            let old_pos = self.minimap_dialog.get_position();
+            let right_gap_from_left = old_screen_w - old_pos.x;
+            self.minimap_dialog
+                .set_position(vec2(new_screen_w - right_gap_from_left, old_pos.y));
         }
     }
 
@@ -297,8 +381,19 @@ impl MainDialog {
         let screen_w = screen_width() / screen_dpi_scale();
         let screen_h = screen_height() / screen_dpi_scale();
 
-        // 更新位置
+        // 先计算新的 MainDialog 位置，再基于“旧布局”迁移子对话框
+        let old_screen_w = self.last_screen_w;
+        let old_screen_h = self.last_screen_h;
+        let old_main_x = self.last_main_dialog_x;
+
         self.position = vec2((screen_w - self.bg_size.x) / 2.0, screen_h - self.bg_size.y);
+        let new_main_x = self.position.x;
+
+        self.apply_resize_layout(old_screen_w, old_screen_h, old_main_x, screen_w, screen_h, new_main_x);
+
+        self.last_screen_w = screen_w;
+        self.last_screen_h = screen_h;
+        self.last_main_dialog_x = new_main_x;
 
         // 绘制主背景
         self.draw_background();
@@ -325,13 +420,15 @@ impl MainDialog {
         let mut consumed = false;
         let (mx, my) = mouse_position();
         let mouse_pos = vec2(mx, my);
-        let mouse_clicked = is_mouse_button_pressed(MouseButton::Left);
+        let left_clicked = is_mouse_button_pressed(MouseButton::Left);
+        let right_clicked = is_mouse_button_pressed(MouseButton::Right);
+        let any_clicked = left_clicked || right_clicked;
 
         // 检测哪个对话框被点击，用于置顶
         // 从 z-order 最高（最上层）开始检测，找到第一个被点击的对话框
         let mut clicked_dialog: Option<DialogType> = None;
         
-        if mouse_clicked {
+        if any_clicked {
             for dialog_type in self.dialog_z_order.iter().rev() {
                 let (is_open, contains) = self.check_dialog_contains(*dialog_type, mouse_pos);
                 if is_open && contains {
@@ -344,6 +441,35 @@ impl MainDialog {
         // 如果有对话框被点击，将其移到最前面
         if let Some(dialog_type) = clicked_dialog {
             self.bring_to_front(dialog_type);
+
+            // 小地图点击：在地图区域内则触发自动寻路（由 GameScene 消费）
+            if dialog_type == DialogType::MiniMap {
+                if left_clicked {
+                    if let Some((wx, wy)) = self.minimap_dialog.pick_world_target_from_mouse(mouse_pos) {
+                        // 左键：走路寻路
+                        self.pending_auto_path_target = Some((wx, wy, false));
+                        consumed = true;
+                    }
+                }
+
+                if right_clicked {
+                    // 右键：仅双击触发“奔跑寻路”，单击只记录时间
+                    if let Some((wx, wy)) = self.minimap_dialog.pick_world_target_from_mouse(mouse_pos) {
+                        let now = Instant::now();
+                        let is_double = self
+                            .minimap_right_last_click_time
+                            .is_some_and(|t| now.duration_since(t) <= self.minimap_double_click_threshold);
+
+                        if is_double {
+                            self.pending_auto_path_target = Some((wx, wy, true));
+                            self.minimap_right_last_click_time = None;
+                            consumed = true;
+                        } else {
+                            self.minimap_right_last_click_time = Some(now);
+                        }
+                    }
+                }
+            }
         }
 
         // 按 z-order 顺序绘制所有对话框（从后到前）

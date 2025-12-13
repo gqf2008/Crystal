@@ -198,6 +198,19 @@ pub struct PlayerAppearance {
     pub wing_effect: u8,
 }
 
+/// 坐骑状态（渲染/动作切换使用）
+#[derive(Debug, Clone, Copy)]
+pub struct MountState {
+    /// None = 未骑乘；Some(idx) = 使用 Mounts(idx) 库绘制坐骑
+    pub mount_index: Option<usize>,
+}
+
+impl Default for MountState {
+    fn default() -> Self {
+        Self { mount_index: None }
+    }
+}
+
 impl Default for PlayerAppearance {
     fn default() -> Self {
         Self {
