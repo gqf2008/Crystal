@@ -489,6 +489,15 @@ pub fn get_map_texture(file_index: i16, image_index: i32) -> Option<ImageInfo> {
         
         let mut lib_ref = lib.borrow_mut();
         let info = lib_ref.get_or_create_texture(image_index as usize).ok()?.clone();
+
+        // 地图瓦片/物件（含大量阴影/半透明边缘）在 Linear 过滤 + 相机移动/缩放时容易出现“阴影微闪”。
+        // 这里对 MapLibs 单独使用 Nearest，显著稳定阴影区域采样。
+        if let Some(tex) = info.image.as_ref() {
+            tex.set_filter(FilterMode::Nearest);
+        }
+        if let Some(tex) = info.mask_image.as_ref() {
+            tex.set_filter(FilterMode::Nearest);
+        }
         
         // 缓存
         rm.texture_cache.put(key, info.clone());
