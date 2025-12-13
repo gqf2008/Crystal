@@ -277,27 +277,15 @@ impl GameScene {
             return false;
         };
 
-        // 轻量遮挡判断：检查玩家附近（偏上方）的 front tile 是否存在。
-        // 目标是“只在确实有前景遮挡时才画 ghost”，避免一直显示。
-        let fx = (pos.x / 48.0).floor() as i32;
-        let fy = (pos.y / 32.0).floor() as i32;
+        // 更真实遮挡判断：用 Front 贴图的“实际绘制矩形”与玩家身体区域相交来判断。
+        // 这里用一个从脚下向上延伸的矩形作为人体探针（无需 shader、也不改前景本身）。
+        let foot = vec2(pos.x, pos.y);
+        let probe_w = 26.0;
+        let probe_h = 56.0;
+        let probe = Rect::new(foot.x - probe_w * 0.5, foot.y - probe_h, probe_w, probe_h);
 
-        for dy in -8..=1 {
-            for dx in -2..=2 {
-                let tx = fx + dx;
-                let ty = fy + dy;
-                if tx < 0 || ty < 0 || tx >= map.width || ty >= map.height {
-                    continue;
-                }
-                if let Some(cell) = map.get_cell(tx, ty) {
-                    if cell.front_tile().is_some() {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
+        self.map_renderer
+            .front_layer_occludes_probe(map, probe, 3, 10)
     }
 
     fn update_map_camera(&mut self) {

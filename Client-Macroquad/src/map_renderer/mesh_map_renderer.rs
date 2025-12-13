@@ -323,6 +323,127 @@ impl MeshMapRenderer {
         )
     }
 
+    /// 更真实的遮挡检测：使用与 Front 渲染同样的贴图矩形计算逻辑，判断是否有任何 Front 贴图的
+    /// 实际绘制矩形覆盖/相交 `probe_world`。
+    ///
+    /// 备注：这里只做几何矩形检测，不做逐像素 alpha 测试。
+    pub fn front_layer_occludes_probe(
+        &self,
+        map_reader: &MapReader,
+        probe_world: Rect,
+        search_radius_tiles_x: i32,
+        search_radius_tiles_y: i32,
+    ) -> bool {
+        let center_x = (probe_world.x + probe_world.w * 0.5) / self.tile_width;
+        let center_y = (probe_world.y + probe_world.h * 0.5) / self.tile_height;
+        let fx = center_x.floor() as i32;
+        let fy = center_y.floor() as i32;
+
+        let start_x = (fx - search_radius_tiles_x).max(0);
+        let end_x = (fx + search_radius_tiles_x).min(map_reader.width - 1);
+        let start_y = (fy - search_radius_tiles_y).max(0);
+        let end_y = (fy + search_radius_tiles_y).min(map_reader.height - 1);
+
+        for y in start_y..=end_y {
+            for x in start_x..=end_x {
+                let Some(cell) = map_reader.get_cell(x, y) else {
+                    continue;
+                };
+
+                let Some((file_index, base_image_index)) = cell.front_tile() else {
+                    continue;
+                };
+
+                // 计算动画帧（与 render_front_animated_with_focus 一致）
+                let mut image_index = base_image_index;
+                let mut animation = cell.front_animation_frame;
+                let use_blend = if (animation & 0x80) > 0 {
+                    animation &= 0x7F;
+                    true
+                } else {
+                    false
+                };
+
+                if animation > 0 {
+                    let tick_count = cell.front_animation_tick;
+                    let adjusted_frame_count =
+                        animation as u32 + (animation as u32 * tick_count as u32);
+                    let current_frame =
+                        (self.animation_frame % adjusted_frame_count) / (1 + tick_count as u32);
+                    image_index = base_image_index + current_frame as i32;
+                }
+
+                let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                    continue;
+                };
+                let Some(texture) = info.image.clone() else {
+                    continue;
+                };
+
+                let offset_x = info.offset_x;
+                let offset_y = info.offset_y;
+
+                let world_x = x as f32 * self.tile_width;
+                let world_y = y as f32 * self.tile_height;
+                let width = texture.width();
+                let height = texture.height();
+                let base_y = world_y + self.tile_height;
+
+                let should_apply_offset = if use_blend {
+                    file_index == 14
+                        || file_index == 27
+                        || (file_index > 99 && file_index < 199)
+                        || (image_index >= 2723 && image_index <= 2732)
+                } else if file_index == 28 {
+                    offset_x != 0 || offset_y != 0
+                } else {
+                    false
+                };
+
+                let (pixel_x, pixel_y) = if use_blend {
+                    if file_index == 14 || file_index == 27 || (file_index > 99 && file_index < 199)
+                    {
+                        let mut base_x = world_x;
+                        let mut base_y_pos = base_y - 3.0 * self.tile_height;
+                        if should_apply_offset {
+                            base_x += offset_x as f32;
+                            base_y_pos += offset_y as f32;
+                        }
+                        (base_x.floor(), base_y_pos.floor())
+                    } else {
+                        let mut base_x = world_x;
+                        let mut base_y_pos = base_y - height;
+                        if should_apply_offset {
+                            base_x += offset_x as f32;
+                            base_y_pos += offset_y as f32;
+                        }
+                        (base_x.floor(), base_y_pos.floor())
+                    }
+                } else if file_index == 28 && (offset_x != 0 || offset_y != 0) {
+                    (
+                        (world_x + offset_x as f32).floor(),
+                        (base_y - self.tile_height + offset_y as f32).floor(),
+                    )
+                } else {
+                    let mut base_x = world_x;
+                    let mut base_y_pos = base_y - height;
+                    if should_apply_offset {
+                        base_x += offset_x as f32;
+                        base_y_pos += offset_y as f32;
+                    }
+                    (base_x.floor(), base_y_pos.floor())
+                };
+
+                let front_rect = Rect::new(pixel_x, pixel_y, width, height);
+                if front_rect.overlaps(&probe_world) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// 渲染Back层 (2x2格子共享,只在偶数坐标绘制)
     fn render_back_layer(
         &mut self,
