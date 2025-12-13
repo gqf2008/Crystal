@@ -292,7 +292,7 @@ impl MeshMapRenderer {
             focus_mask_material,
             focus_mask_add_material,
 
-            enable_static_chunk_cache: true,
+            enable_static_chunk_cache: false,
             static_chunk_cache: StaticChunkCache::new(),
             render_counter: 0,
         }
@@ -319,6 +319,9 @@ impl MeshMapRenderer {
         tint_color: Color, // 新增: 颜色调整(gamma/亮度/对比度等)
     ) -> u32 {
         self.render_counter = self.render_counter.wrapping_add(1);
+
+        // 目前 chunk 缓存会导致画面错乱/缺块，按需完全禁用。
+        self.enable_static_chunk_cache = false;
 
         // 使用成员变量的过扫描边界
         // 计算视口范围(加上各方向的过扫描边界)
@@ -403,7 +406,7 @@ impl MeshMapRenderer {
                         cy,
                         world_left,
                         world_top,
-                        tint_color,
+                        Color::new(1.0, 1.0, 1.0, 1.0),
                         self.show_back_layer,
                         self.show_middle_layer,
                     );
@@ -450,16 +453,19 @@ impl MeshMapRenderer {
 
         // Back层 - 特殊处理: 2x2格子共享,只在偶数坐标绘制
         if self.show_back_layer {
-            let tiles = self.render_back_layer(
-                map_reader,
-                start_x,
-                start_y,
-                end_x,
-                end_y,
-                tint_color,
-                if self.enable_static_chunk_cache { Some(1) } else { None },
-            );
-            total_tiles += tiles;
+            // 当静态 chunk 缓存启用且 Back 层已被缓存时，这里无需再逐瓦片绘制 Back。
+            if !self.enable_static_chunk_cache {
+                let tiles = self.render_back_layer(
+                    map_reader,
+                    start_x,
+                    start_y,
+                    end_x,
+                    end_y,
+                    tint_color,
+                    None,
+                );
+                total_tiles += tiles;
+            }
         }
 
         // Middle层
@@ -519,109 +525,114 @@ impl MeshMapRenderer {
         let end_y = (ey + my).min(map_reader.height);
 
         if include_back {
-            // Back（2x2 only even coords），仅 priority=0
+            // Back（2x2 only even coords），缓存 priority=0/1
             let start_x_even = if start_x % 2 == 0 { start_x } else { start_x - 1 };
             let start_y_even = if start_y % 2 == 0 { start_y } else { start_y - 1 };
-            for y in (start_y_even..end_y).step_by(2) {
-                if y < 0 || y >= map_reader.height {
-                    continue;
-                }
-                for x in (start_x_even..end_x).step_by(2) {
-                    if x < 0 || x >= map_reader.width {
+            for priority in 0..=1 {
+                for y in (start_y_even..end_y).step_by(2) {
+                    if y < 0 || y >= map_reader.height {
                         continue;
                     }
-                    let Some(cell) = map_reader.get_cell(x, y) else {
-                        continue;
-                    };
+                    for x in (start_x_even..end_x).step_by(2) {
+                        if x < 0 || x >= map_reader.width {
+                            continue;
+                        }
+                        let Some(cell) = map_reader.get_cell(x, y) else {
+                            continue;
+                        };
 
-                    // priority=0 only
-                    if (cell.back_image & 0x20000000) != 0 {
-                        continue;
+                        let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                        if cell_priority != priority {
+                            continue;
+                        }
+
+                        let Some((file_index, image_index)) = cell.back_tile() else {
+                            continue;
+                        };
+                        let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                            continue;
+                        };
+                        let Some(texture) = info.image.clone() else {
+                            continue;
+                        };
+
+                        let world_x = x as f32 * self.tile_width;
+                        let world_y = y as f32 * self.tile_height;
+                        let offset_y = world_y + self.tile_height - texture.height();
+
+                        let pixel_x = (world_x - chunk_world_left).floor();
+                        let pixel_y = (offset_y - chunk_world_top).floor();
+                        let width = texture.width();
+                        let height = texture.height();
+
+                        draw_texture_ex(
+                            &texture,
+                            pixel_x,
+                            pixel_y,
+                            tint_color,
+                            DrawTextureParams {
+                                dest_size: Some(vec2(width, height)),
+                                ..Default::default()
+                            },
+                        );
                     }
-
-                    let Some((file_index, image_index)) = cell.back_tile() else {
-                        continue;
-                    };
-                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
-                        continue;
-                    };
-                    let Some(texture) = info.image.clone() else {
-                        continue;
-                    };
-
-                    let world_x = x as f32 * self.tile_width;
-                    let world_y = y as f32 * self.tile_height;
-                    let offset_y = world_y + self.tile_height - texture.height();
-
-                    let pixel_x = (world_x - chunk_world_left).floor();
-                    let pixel_y = (offset_y - chunk_world_top).floor();
-                    let width = texture.width();
-                    let height = texture.height();
-
-                    draw_texture_ex(
-                        &texture,
-                        pixel_x,
-                        pixel_y,
-                        tint_color,
-                        DrawTextureParams {
-                            dest_size: Some(vec2(width, height)),
-                            ..Default::default()
-                        },
-                    );
                 }
             }
         }
 
         if include_middle {
-            // Middle：仅 priority=0、无动画、非 blend
-            for y in start_y..end_y {
-                if y < 0 || y >= map_reader.height {
-                    continue;
-                }
-                for x in start_x..end_x {
-                    if x < 0 || x >= map_reader.width {
+            // Middle：缓存 priority=0/1 的“静态且非 blend”的瓦片
+            for priority in 0..=1 {
+                for y in start_y..end_y {
+                    if y < 0 || y >= map_reader.height {
                         continue;
                     }
-                    let Some(cell) = map_reader.get_cell(x, y) else {
-                        continue;
-                    };
+                    for x in start_x..end_x {
+                        if x < 0 || x >= map_reader.width {
+                            continue;
+                        }
+                        let Some(cell) = map_reader.get_cell(x, y) else {
+                            continue;
+                        };
 
-                    if (cell.back_image & 0x20000000) != 0 {
-                        continue;
+                        let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                        if cell_priority != priority {
+                            continue;
+                        }
+                        if cell.middle_use_blend() || cell.middle_has_animation() {
+                            continue;
+                        }
+
+                        let Some((file_index, image_index)) = cell.middle_tile() else {
+                            continue;
+                        };
+                        let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                            continue;
+                        };
+                        let Some(texture) = info.image.clone() else {
+                            continue;
+                        };
+
+                        let world_x = x as f32 * self.tile_width;
+                        let world_y = y as f32 * self.tile_height;
+                        let base_y = world_y + self.tile_height - texture.height();
+
+                        let pixel_x = (world_x - chunk_world_left).floor();
+                        let pixel_y = (base_y - chunk_world_top).floor();
+                        let width = texture.width();
+                        let height = texture.height();
+
+                        draw_texture_ex(
+                            &texture,
+                            pixel_x,
+                            pixel_y,
+                            tint_color,
+                            DrawTextureParams {
+                                dest_size: Some(vec2(width, height)),
+                                ..Default::default()
+                            },
+                        );
                     }
-                    if cell.middle_use_blend() || cell.middle_has_animation() {
-                        continue;
-                    }
-
-                    let Some((file_index, image_index)) = cell.middle_tile() else {
-                        continue;
-                    };
-                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
-                        continue;
-                    };
-                    let Some(texture) = info.image.clone() else {
-                        continue;
-                    };
-
-                    let world_x = x as f32 * self.tile_width;
-                    let world_y = y as f32 * self.tile_height;
-                    let base_y = world_y + self.tile_height - texture.height();
-
-                    let pixel_x = (world_x - chunk_world_left).floor();
-                    let pixel_y = (base_y - chunk_world_top).floor();
-                    let width = texture.width();
-                    let height = texture.height();
-
-                    draw_texture_ex(
-                        &texture,
-                        pixel_x,
-                        pixel_y,
-                        tint_color,
-                        DrawTextureParams {
-                            dest_size: Some(vec2(width, height)),
-                            ..Default::default()
-                        },
-                    );
                 }
             }
         }
@@ -962,9 +973,8 @@ impl MeshMapRenderer {
                     }
 
                     if skip_cached_static {
-                        let priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
-                        if priority == 0 && !cell.middle_use_blend() && !cell.middle_has_animation() {
-                            // 这部分已由静态 chunk 缓存绘制
+                        if !cell.middle_use_blend() && !cell.middle_has_animation() {
+                            // 这部分已由静态 chunk 缓存绘制（priority=0/1 都包含）
                             continue;
                         }
                     }
