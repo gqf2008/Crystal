@@ -17,6 +17,7 @@ use crate::resources;
 use crate::resources::MapReader;
 use macroquad::prelude::*;
 use macroquad::miniquad::{BlendState, BlendFactor, BlendValue, Equation, UniformDesc, UniformType};
+use std::collections::HashMap;
 
 /// 直接纹理渲染的地图渲染器
 ///
@@ -53,6 +54,151 @@ pub struct MeshMapRenderer {
     focus_mask_material: Material,
     /// Front 遮挡半透明遮罩材质（ADD 混合版本）
     focus_mask_add_material: Material,
+
+    // ------------------------------------------------------------------------
+    // Chunk 缓存（静态层）
+    // ------------------------------------------------------------------------
+    /// 是否启用静态层 chunk 缓存（Back + 可缓存的 Middle）。
+    pub enable_static_chunk_cache: bool,
+    static_chunk_cache: StaticChunkCache,
+    render_counter: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ChunkKey {
+    cx: i32,
+    cy: i32,
+}
+
+struct ChunkEntry {
+    rt: RenderTarget,
+    world_left: f32,
+    world_top: f32,
+    last_used: u64,
+}
+
+struct StaticChunkCache {
+    chunk_tiles_x: i32,
+    chunk_tiles_y: i32,
+    /// 渲染 chunk 时额外采样的瓦片边界（用于覆盖跨 chunk 的高贴图，避免边缘被裁切）。
+    margin_tiles_x: i32,
+    margin_tiles_y: i32,
+    max_chunks: usize,
+    map_w: i32,
+    map_h: i32,
+    include_back: bool,
+    include_middle: bool,
+    hits_since_report: u64,
+    misses_since_report: u64,
+    evictions_since_report: u64,
+    entries: HashMap<ChunkKey, ChunkEntry>,
+}
+
+impl StaticChunkCache {
+    fn new() -> Self {
+        Self {
+            chunk_tiles_x: 32,
+            chunk_tiles_y: 32,
+            margin_tiles_x: 2,
+            margin_tiles_y: 6,
+            max_chunks: 128,
+            map_w: 0,
+            map_h: 0,
+            include_back: true,
+            include_middle: true,
+            hits_since_report: 0,
+            misses_since_report: 0,
+            evictions_since_report: 0,
+            entries: HashMap::new(),
+        }
+    }
+
+    fn reset_stats(&mut self) {
+        self.hits_since_report = 0;
+        self.misses_since_report = 0;
+        self.evictions_since_report = 0;
+    }
+
+    fn ensure_map(&mut self, map_reader: &MapReader) {
+        if self.map_w != map_reader.width || self.map_h != map_reader.height {
+            self.map_w = map_reader.width;
+            self.map_h = map_reader.height;
+            self.entries.clear();
+            self.reset_stats();
+        }
+    }
+
+    fn ensure_mode(&mut self, include_back: bool, include_middle: bool) {
+        if self.include_back != include_back || self.include_middle != include_middle {
+            self.include_back = include_back;
+            self.include_middle = include_middle;
+            self.entries.clear();
+            self.reset_stats();
+        }
+    }
+
+    fn maybe_report_stats(&mut self, render_counter: u64, visible_chunks: u64) {
+        // 轻量统计：避免刷屏，默认每 120 帧输出一次。
+        const REPORT_INTERVAL_FRAMES: u64 = 120;
+        if render_counter % REPORT_INTERVAL_FRAMES != 0 {
+            return;
+        }
+
+        let total = self.hits_since_report + self.misses_since_report;
+        let hit_rate = if total > 0 {
+            self.hits_since_report as f64 / total as f64
+        } else {
+            0.0
+        };
+
+        tracing::info!(
+            "[chunk-cache] visible={} hits={} misses={} hit_rate={:.1}% evictions={} entries={}/{} mode=back:{} middle:{} chunk={}x{} margin={}x{}",
+            visible_chunks,
+            self.hits_since_report,
+            self.misses_since_report,
+            hit_rate * 100.0,
+            self.evictions_since_report,
+            self.entries.len(),
+            self.max_chunks,
+            self.include_back,
+            self.include_middle,
+            self.chunk_tiles_x,
+            self.chunk_tiles_y,
+            self.margin_tiles_x,
+            self.margin_tiles_y,
+        );
+
+        self.reset_stats();
+    }
+
+    fn chunk_world_rect(&self, tile_w: f32, tile_h: f32, cx: i32, cy: i32) -> (f32, f32, f32, f32) {
+        let start_x = cx * self.chunk_tiles_x;
+        let start_y = cy * self.chunk_tiles_y;
+        let world_left = start_x as f32 * tile_w;
+        let world_top = start_y as f32 * tile_h;
+        let world_w = self.chunk_tiles_x as f32 * tile_w;
+        let world_h = self.chunk_tiles_y as f32 * tile_h;
+        (world_left, world_top, world_w, world_h)
+    }
+
+    fn evict_if_needed(&mut self) {
+        if self.entries.len() <= self.max_chunks {
+            return;
+        }
+
+        // 简单 LRU：线性扫描找 last_used 最小。
+        let mut oldest: Option<(ChunkKey, u64)> = None;
+        for (k, v) in self.entries.iter() {
+            let candidate = (*k, v.last_used);
+            if oldest.is_none() || candidate.1 < oldest.unwrap().1 {
+                oldest = Some(candidate);
+            }
+        }
+        if let Some((k, _)) = oldest {
+            self.entries.remove(&k);
+            self.evictions_since_report = self.evictions_since_report.saturating_add(1);
+        }
+    }
 }
 
 impl MeshMapRenderer {
@@ -145,6 +291,10 @@ impl MeshMapRenderer {
             add_blend_material,
             focus_mask_material,
             focus_mask_add_material,
+
+            enable_static_chunk_cache: true,
+            static_chunk_cache: StaticChunkCache::new(),
+            render_counter: 0,
         }
     }
 
@@ -168,6 +318,8 @@ impl MeshMapRenderer {
         zoom: f32,
         tint_color: Color, // 新增: 颜色调整(gamma/亮度/对比度等)
     ) -> u32 {
+        self.render_counter = self.render_counter.wrapping_add(1);
+
         // 使用成员变量的过扫描边界
         // 计算视口范围(加上各方向的过扫描边界)
         let half_width = (viewport_width / 2.0) / zoom;
@@ -186,6 +338,116 @@ impl MeshMapRenderer {
 
         let mut total_tiles = 0;
 
+        // 优先渲染静态 chunk（Back + Middle 可缓存部分）
+        if self.enable_static_chunk_cache && (self.show_back_layer || self.show_middle_layer) {
+            self.static_chunk_cache.ensure_map(map_reader);
+            self.static_chunk_cache
+                .ensure_mode(self.show_back_layer, self.show_middle_layer);
+
+            // chunk 可见范围（按 tile 坐标）
+            let cx0 = (start_x / self.static_chunk_cache.chunk_tiles_x).max(0);
+            let cy0 = (start_y / self.static_chunk_cache.chunk_tiles_y).max(0);
+            let cx1 = ((end_x - 1) / self.static_chunk_cache.chunk_tiles_x).max(0);
+            let cy1 = ((end_y - 1) / self.static_chunk_cache.chunk_tiles_y).max(0);
+
+            let visible_chunks = (cx1 - cx0 + 1).max(0) as u64 * (cy1 - cy0 + 1).max(0) as u64;
+            let mut frame_hits: u64 = 0;
+            let mut frame_misses: u64 = 0;
+
+            for cy in cy0..=cy1 {
+                for cx in cx0..=cx1 {
+                    let key = ChunkKey { cx, cy };
+                    let used = self.render_counter;
+
+                    // 命中缓存
+                    if let Some(entry) = self.static_chunk_cache.entries.get_mut(&key) {
+                        frame_hits = frame_hits.saturating_add(1);
+                        entry.last_used = used;
+                        draw_texture_ex(
+                            &entry.rt.texture,
+                            entry.world_left,
+                            entry.world_top,
+                            tint_color,
+                            DrawTextureParams {
+                                dest_size: Some(vec2(
+                                    self.static_chunk_cache.chunk_tiles_x as f32 * self.tile_width,
+                                    self.static_chunk_cache.chunk_tiles_y as f32 * self.tile_height,
+                                )),
+                                ..Default::default()
+                            },
+                        );
+                        continue;
+                    }
+
+                    frame_misses = frame_misses.saturating_add(1);
+
+                    // 缓存未命中：构建 chunk
+                    let (world_left, world_top, world_w, world_h) = self
+                        .static_chunk_cache
+                        .chunk_world_rect(self.tile_width, self.tile_height, cx, cy);
+
+                    let rt = render_target(world_w as u32, world_h as u32);
+                    rt.texture.set_filter(FilterMode::Nearest);
+
+                    // 切到 RenderTarget 相机
+                    let mut rt_cam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, world_w, world_h));
+                    // 当前项目的世界相机使用正的 zoom.y（不翻转 Y），这里保持一致，避免 chunk 纹理上下颠倒。
+                    rt_cam.zoom.y = rt_cam.zoom.y.abs();
+                    rt_cam.render_target = Some(rt.clone());
+                    set_camera(&rt_cam);
+                    clear_background(Color::new(0.0, 0.0, 0.0, 0.0));
+
+                    self.render_static_chunk_contents(
+                        map_reader,
+                        cx,
+                        cy,
+                        world_left,
+                        world_top,
+                        tint_color,
+                        self.show_back_layer,
+                        self.show_middle_layer,
+                    );
+
+                    // 恢复世界相机（GameScene 的 map_camera 也使用同一套参数）
+                    let mut world_cam = Camera2D::default();
+                    world_cam.target = vec2(camera_x, camera_y);
+                    world_cam.zoom = vec2(2.0 / viewport_width.max(1.0) * zoom, 2.0 / viewport_height.max(1.0) * zoom);
+                    set_camera(&world_cam);
+
+                    // 写入缓存并绘制
+                    self.static_chunk_cache.entries.insert(
+                        key,
+                        ChunkEntry {
+                            rt,
+                            world_left,
+                            world_top,
+                            last_used: used,
+                        },
+                    );
+                    self.static_chunk_cache.evict_if_needed();
+
+                    let entry = self.static_chunk_cache.entries.get(&key).expect("inserted");
+                    draw_texture_ex(
+                        &entry.rt.texture,
+                        entry.world_left,
+                        entry.world_top,
+                        tint_color,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(world_w, world_h)),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+
+            self.static_chunk_cache.hits_since_report =
+                self.static_chunk_cache.hits_since_report.saturating_add(frame_hits);
+            self.static_chunk_cache.misses_since_report =
+                self.static_chunk_cache.misses_since_report.saturating_add(frame_misses);
+            self.static_chunk_cache
+                .maybe_report_stats(self.render_counter, visible_chunks);
+        }
+
         // Back层 - 特殊处理: 2x2格子共享,只在偶数坐标绘制
         if self.show_back_layer {
             let tiles = self.render_back_layer(
@@ -195,6 +457,7 @@ impl MeshMapRenderer {
                 end_x,
                 end_y,
                 tint_color,
+                if self.enable_static_chunk_cache { Some(1) } else { None },
             );
             total_tiles += tiles;
         }
@@ -209,6 +472,7 @@ impl MeshMapRenderer {
                 end_y,
                 |cell| cell.middle_tile(),
                 tint_color,
+                self.enable_static_chunk_cache,
             );
             total_tiles += tiles;
         }
@@ -227,6 +491,140 @@ impl MeshMapRenderer {
         }
 
         total_tiles
+    }
+
+    /// 构建静态 chunk 内容：Back + Middle（仅 priority=0、无动画、非 blend）
+    fn render_static_chunk_contents(
+        &mut self,
+        map_reader: &MapReader,
+        cx: i32,
+        cy: i32,
+        chunk_world_left: f32,
+        chunk_world_top: f32,
+        tint_color: Color,
+        include_back: bool,
+        include_middle: bool,
+    ) {
+        let sx = cx * self.static_chunk_cache.chunk_tiles_x;
+        let sy = cy * self.static_chunk_cache.chunk_tiles_y;
+        let ex = (sx + self.static_chunk_cache.chunk_tiles_x).min(map_reader.width);
+        let ey = (sy + self.static_chunk_cache.chunk_tiles_y).min(map_reader.height);
+
+        let mx = self.static_chunk_cache.margin_tiles_x;
+        let my = self.static_chunk_cache.margin_tiles_y;
+
+        let start_x = (sx - mx).max(0);
+        let start_y = (sy - my).max(0);
+        let end_x = (ex + mx).min(map_reader.width);
+        let end_y = (ey + my).min(map_reader.height);
+
+        if include_back {
+            // Back（2x2 only even coords），仅 priority=0
+            let start_x_even = if start_x % 2 == 0 { start_x } else { start_x - 1 };
+            let start_y_even = if start_y % 2 == 0 { start_y } else { start_y - 1 };
+            for y in (start_y_even..end_y).step_by(2) {
+                if y < 0 || y >= map_reader.height {
+                    continue;
+                }
+                for x in (start_x_even..end_x).step_by(2) {
+                    if x < 0 || x >= map_reader.width {
+                        continue;
+                    }
+                    let Some(cell) = map_reader.get_cell(x, y) else {
+                        continue;
+                    };
+
+                    // priority=0 only
+                    if (cell.back_image & 0x20000000) != 0 {
+                        continue;
+                    }
+
+                    let Some((file_index, image_index)) = cell.back_tile() else {
+                        continue;
+                    };
+                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                        continue;
+                    };
+                    let Some(texture) = info.image.clone() else {
+                        continue;
+                    };
+
+                    let world_x = x as f32 * self.tile_width;
+                    let world_y = y as f32 * self.tile_height;
+                    let offset_y = world_y + self.tile_height - texture.height();
+
+                    let pixel_x = (world_x - chunk_world_left).floor();
+                    let pixel_y = (offset_y - chunk_world_top).floor();
+                    let width = texture.width();
+                    let height = texture.height();
+
+                    draw_texture_ex(
+                        &texture,
+                        pixel_x,
+                        pixel_y,
+                        tint_color,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(width, height)),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+
+        if include_middle {
+            // Middle：仅 priority=0、无动画、非 blend
+            for y in start_y..end_y {
+                if y < 0 || y >= map_reader.height {
+                    continue;
+                }
+                for x in start_x..end_x {
+                    if x < 0 || x >= map_reader.width {
+                        continue;
+                    }
+                    let Some(cell) = map_reader.get_cell(x, y) else {
+                        continue;
+                    };
+
+                    if (cell.back_image & 0x20000000) != 0 {
+                        continue;
+                    }
+                    if cell.middle_use_blend() || cell.middle_has_animation() {
+                        continue;
+                    }
+
+                    let Some((file_index, image_index)) = cell.middle_tile() else {
+                        continue;
+                    };
+                    let Some(info) = resources::get_map_texture(file_index, image_index) else {
+                        continue;
+                    };
+                    let Some(texture) = info.image.clone() else {
+                        continue;
+                    };
+
+                    let world_x = x as f32 * self.tile_width;
+                    let world_y = y as f32 * self.tile_height;
+                    let base_y = world_y + self.tile_height - texture.height();
+
+                    let pixel_x = (world_x - chunk_world_left).floor();
+                    let pixel_y = (base_y - chunk_world_top).floor();
+                    let width = texture.width();
+                    let height = texture.height();
+
+                    draw_texture_ex(
+                        &texture,
+                        pixel_x,
+                        pixel_y,
+                        tint_color,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(width, height)),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
     }
 
     /// 只渲染 Front 层（用于“人物先画，前景后画”的遮挡逻辑）。
@@ -444,6 +842,7 @@ impl MeshMapRenderer {
         end_x: i32,
         end_y: i32,
         tint_color: Color,
+        only_priority: Option<i32>,
     ) -> u32 {
         let mut tiles_count = 0;
 
@@ -461,7 +860,9 @@ impl MeshMapRenderer {
 
         // 性能优化：避免每帧 push+sort 大量 Vec。
         // 直接按 (priority, y, x) 双层遍历，保证与 sort_unstable_by_key 一致的绘制顺序。
-        for priority in 0..=1 {
+        let pri_start = only_priority.unwrap_or(0);
+        let pri_end = only_priority.unwrap_or(1);
+        for priority in pri_start..=pri_end {
             for y in (start_y_even..end_y).step_by(2) {
                 if y < 0 || y >= map_reader.height {
                     continue;
@@ -533,6 +934,7 @@ impl MeshMapRenderer {
         end_y: i32,
         get_tile: fn(&crate::resources::map_reader::CellInfo) -> Option<(i16, i32)>,
         tint_color: Color,
+        skip_cached_static: bool,
     ) -> u32 {
         let mut tiles_count = 0;
 
@@ -557,6 +959,14 @@ impl MeshMapRenderer {
                     let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
                     if cell_priority != priority {
                         continue;
+                    }
+
+                    if skip_cached_static {
+                        let priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                        if priority == 0 && !cell.middle_use_blend() && !cell.middle_has_animation() {
+                            // 这部分已由静态 chunk 缓存绘制
+                            continue;
+                        }
                     }
 
                     if cell.middle_use_blend() {

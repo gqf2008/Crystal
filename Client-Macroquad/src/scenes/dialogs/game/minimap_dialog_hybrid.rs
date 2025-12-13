@@ -46,7 +46,7 @@ pub struct MiniMapDialogHybrid {
     visible: bool,
     /// 地图名称
     map_name: String,
-    /// 地图尺寸（像素）
+    /// 地图尺寸（格子数）
     map_size: (f32, f32),
     /// 当前缩放级别
     zoom_level: f32,

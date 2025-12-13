@@ -236,9 +236,11 @@ impl MainDialog {
         }
     }
 
-    /// 设置小地图对应的世界尺寸（单位：世界像素）
-    pub fn set_minimap_world_size(&mut self, world_w: f32, world_h: f32) {
-        self.minimap_dialog.set_world_size(world_w, world_h);
+    /// 设置小地图对应的地图尺寸（单位：地图格子数 width/height）
+    ///
+    /// 备注：小地图点击反算会先算出格子坐标，再用 `Coord::grid_to_world_center()` 转为世界像素。
+    pub fn set_minimap_world_size(&mut self, grid_w: f32, grid_h: f32) {
+        self.minimap_dialog.set_world_size(grid_w, grid_h);
     }
 
     /// 同步小地图上的玩家点（世界坐标像素 + 朝向弧度）
