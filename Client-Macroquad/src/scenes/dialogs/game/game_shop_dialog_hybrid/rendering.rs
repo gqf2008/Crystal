@@ -10,6 +10,11 @@ use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid};
 use super::dialog::GameShopDialogHybrid;
+use super::super::native_ui_utils::{
+    draw_library_button_with_offset,
+    draw_library_image_with_offset,
+    mouse_pos as ui_mouse_pos,
+};
 
 impl GameShopDialogHybrid {
     /// 更新和绘制
@@ -86,33 +91,50 @@ impl GameShopDialogHybrid {
     
     /// 绘制主分类标签 (使用纹理)
     pub(super) fn draw_section_tabs(&mut self, pos: Vec2) {
+        let mouse_pos = ui_mouse_pos();
+
+        // Section Tabs 纹理索引 (All, TopItems, Deals, New)
+        let section_indices: [(usize, usize); 4] = [(770, 771), (776, 777), (772, 773), (774, 775)];
+
         for (i, section) in ShopSectionHybrid::ALL.iter().enumerate() {
             let tab_x = pos.x + Self::SECTION_TAB_X + (i as f32 * Self::SECTION_TAB_W);
             let tab_y = pos.y + Self::SECTION_TAB_Y;
             let is_selected = self.current_section == *section;
-            
-            let mouse_pos = mouse_position();
-            let hovered = mouse_pos.0 >= tab_x && mouse_pos.0 <= tab_x + Self::SECTION_TAB_W
-                && mouse_pos.1 >= tab_y && mouse_pos.1 <= tab_y + Self::SECTION_TAB_H;
-            
-            // 使用纹理或备用绘制
-            if i < self.section_tab_textures.len() {
-                let (ref normal_tex, ref selected_tex) = self.section_tab_textures[i];
-                let tex_to_use = if is_selected || hovered { selected_tex } else { normal_tex };
-                
-                if let Some(tex) = tex_to_use {
-                    draw_texture_ex(tex, tab_x, tab_y, WHITE, DrawTextureParams::default());
+
+            let hovered = Rect::new(tab_x, tab_y, Self::SECTION_TAB_W, Self::SECTION_TAB_H).contains(mouse_pos);
+
+            if let Some((normal_idx, selected_idx)) = section_indices.get(i).copied() {
+                let indices = if is_selected {
+                    [selected_idx, selected_idx, selected_idx]
                 } else {
-                    self.draw_fallback_section_tab(tab_x, tab_y, section, is_selected, hovered);
+                    [normal_idx, selected_idx, selected_idx]
+                };
+
+                let has_texture = LibraryName::Title
+                    .get_texture(indices[0])
+                    .and_then(|info| info.image)
+                    .is_some();
+
+                if has_texture {
+                    if draw_library_button_with_offset(
+                        LibraryName::Title,
+                        indices,
+                        vec2(tab_x, tab_y),
+                        mouse_pos,
+                    ) && !self.dragging {
+                        self.current_section = *section;
+                        self.refresh_categories_and_items();
+                        println!("🏷️ 切换分类: {}", section.name());
+                    }
+                    continue;
                 }
-            } else {
-                self.draw_fallback_section_tab(tab_x, tab_y, section, is_selected, hovered);
             }
-            
-            // 处理点击
+
+            self.draw_fallback_section_tab(tab_x, tab_y, section, is_selected, hovered);
+
             if hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
                 self.current_section = *section;
-                self.filter_items();
+                self.refresh_categories_and_items();
                 println!("🏷️ 切换分类: {}", section.name());
             }
         }
@@ -137,40 +159,58 @@ impl GameShopDialogHybrid {
     
     /// 绘制职业分类标签 (使用纹理)
     pub(super) fn draw_class_tabs(&mut self, pos: Vec2) {
+        let mouse_pos = ui_mouse_pos();
+
+        // Class Tabs 纹理索引 (All, Warrior, Assassin, Taoist, Wizard, Archer)
+        let class_indices: [(usize, usize, usize); 6] = [
+            (751, 752, 753),
+            (754, 755, 756),
+            (757, 758, 759),
+            (760, 761, 762),
+            (763, 764, 765),
+            (766, 767, 768),
+        ];
+
         for (i, class) in ShopClassHybrid::ALL.iter().enumerate() {
             let tab_x = pos.x + Self::CLASS_TAB_X + (i as f32 * Self::CLASS_TAB_SIZE);
             let tab_y = pos.y + Self::CLASS_TAB_Y;
             let is_selected = self.current_class == *class;
-            
-            let mouse_pos = mouse_position();
-            let hovered = mouse_pos.0 >= tab_x && mouse_pos.0 <= tab_x + Self::CLASS_TAB_SIZE
-                && mouse_pos.1 >= tab_y && mouse_pos.1 <= tab_y + Self::CLASS_TAB_SIZE - 3.0;
-            let pressed = hovered && is_mouse_button_down(MouseButton::Left);
-            
-            // 使用纹理或备用绘制
-            if i < self.class_tab_textures.len() {
-                let (ref normal_tex, ref hover_tex, ref pressed_tex) = self.class_tab_textures[i];
-                let tex_to_use = if pressed {
-                    pressed_tex
-                } else if is_selected || hovered {
-                    hover_tex
+
+            let hovered = Rect::new(tab_x, tab_y, Self::CLASS_TAB_SIZE, Self::CLASS_TAB_SIZE - 3.0)
+                .contains(mouse_pos);
+
+            if let Some((normal_idx, hover_idx, pressed_idx)) = class_indices.get(i).copied() {
+                let indices = if is_selected {
+                    [pressed_idx, pressed_idx, pressed_idx]
                 } else {
-                    normal_tex
+                    [normal_idx, hover_idx, pressed_idx]
                 };
-                
-                if let Some(tex) = tex_to_use {
-                    draw_texture_ex(tex, tab_x, tab_y, WHITE, DrawTextureParams::default());
-                } else {
-                    self.draw_fallback_class_tab(tab_x, tab_y, class, is_selected, hovered);
+
+                let has_texture = LibraryName::Title
+                    .get_texture(indices[0])
+                    .and_then(|info| info.image)
+                    .is_some();
+
+                if has_texture {
+                    if draw_library_button_with_offset(
+                        LibraryName::Title,
+                        indices,
+                        vec2(tab_x, tab_y),
+                        mouse_pos,
+                    ) && !self.dragging {
+                        self.current_class = *class;
+                        self.refresh_categories_and_items();
+                        println!("🏷️ 切换职业: {:?}", class);
+                    }
+                    continue;
                 }
-            } else {
-                self.draw_fallback_class_tab(tab_x, tab_y, class, is_selected, hovered);
             }
-            
-            // 处理点击
+
+            self.draw_fallback_class_tab(tab_x, tab_y, class, is_selected, hovered);
+
             if hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
                 self.current_class = *class;
-                self.filter_items();
+                self.refresh_categories_and_items();
                 println!("🏷️ 切换职业: {:?}", class);
             }
         }
@@ -193,47 +233,70 @@ impl GameShopDialogHybrid {
     
     /// 绘制左侧分类列表
     pub(super) fn draw_category_list(&mut self, pos: Vec2) {
-        // 绘制分类列表背景 Title[769]
-        let filter_bg_x = pos.x + Self::FILTER_BG_X;
-        let filter_bg_y = pos.y + Self::FILTER_BG_Y;
-        
-        if let Some(ref tex) = self.filter_bg_texture {
-            draw_texture_ex(tex, filter_bg_x, filter_bg_y, WHITE, DrawTextureParams::default());
-        } else {
+        // 绘制分类列表背景 Title[769] + 获取命中区域（用于滚轮滚动）
+        let filter_bg_pos = vec2(pos.x + Self::FILTER_BG_X, pos.y + Self::FILTER_BG_Y);
+
+        let filter_bg_hit_rect = draw_library_image_with_offset(
+            LibraryName::Title,
+            769,
+            filter_bg_pos,
+            WHITE,
+        )
+        .unwrap_or_else(|| {
             // 备用背景
-            draw_rectangle(filter_bg_x, filter_bg_y, 110.0, 340.0,
+            draw_rectangle(filter_bg_pos.x, filter_bg_pos.y, 110.0, 340.0,
                 Color::from_rgba(30, 30, 40, 200));
-        }
+            Rect::new(filter_bg_pos.x, filter_bg_pos.y, 110.0, 340.0)
+        });
         
         // 绘制分类项
         let list_x = pos.x + Self::CATEGORY_LIST_X;
         let list_y = pos.y + Self::CATEGORY_LIST_Y;
+        let mouse_pos = ui_mouse_pos();
+
+        // 与 C# 原版一致：滚轮在分类背景上滚动时上下滚分类
+        if !self.dragging {
+            let (_wheel_x, wheel_y) = mouse_wheel();
+            if wheel_y.abs() > 0.0 && filter_bg_hit_rect.contains(mouse_pos) {
+                let max_scroll = self.categories.len().saturating_sub(Self::CATEGORY_MAX_VISIBLE);
+                if max_scroll > 0 {
+                    if wheel_y > 0.0 {
+                        self.category_scroll = self.category_scroll.saturating_sub(1);
+                    } else {
+                        self.category_scroll = (self.category_scroll + 1).min(max_scroll);
+                    }
+                }
+            }
+        }
         
         for i in 0..Self::CATEGORY_MAX_VISIBLE {
             let idx = self.category_scroll + i;
             if idx >= self.categories.len() { break; }
             
-            let item_y = list_y + (i as f32 * Self::CATEGORY_LINE_HEIGHT);
-            let mouse_pos = mouse_position();
-            let hovered = mouse_pos.0 >= list_x && mouse_pos.0 <= list_x + 100.0
-                && mouse_pos.1 >= item_y && mouse_pos.1 <= item_y + Self::CATEGORY_LINE_HEIGHT;
-            
-            // 悬停效果
-            if hovered {
-                draw_rectangle(list_x - 5.0, item_y, 100.0, Self::CATEGORY_LINE_HEIGHT,
-                    Color::from_rgba(80, 80, 100, 150));
-            }
-            
-            // 文字
-            let text_color = if hovered {
-                Color::from_rgba(255, 215, 0, 255)
+            let item_y = list_y + (i as f32 * Self::CATEGORY_ITEM_STEP);
+
+            // 与 C# 原版 MirLabel Filters 对齐的命中区域
+            let item_rect = Rect::new(list_x, item_y, Self::CATEGORY_ITEM_W, Self::CATEGORY_ITEM_H);
+            let hovered = item_rect.contains(mouse_pos);
+            let selected = self.selected_category == Some(idx);
+
+            // 文字颜色对齐 C#：默认灰、悬停棕、选中金
+            let text_color = if selected {
+                Color::from_rgba(230, 200, 160, 255)
+            } else if hovered {
+                Color::from_rgba(160, 140, 110, 255)
             } else {
-                WHITE
+                Color::from_rgba(128, 128, 128, 255)
             };
-            draw_text_cn(&self.categories[idx], list_x, item_y + 11.0, 9.0, text_color);
-            
-            // 点击
+
+            draw_text_cn(&self.categories[idx], list_x, item_y + 13.0, 7.0, text_color);
+
             if hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+                self.selected_category = Some(idx);
+                self.current_page = 0;
+                self.preview_item = None;
+                self.quantities = [1; 8];
+                self.filter_items();
                 println!("📁 选择分类: {}", self.categories[idx]);
             }
         }
@@ -245,31 +308,17 @@ impl GameShopDialogHybrid {
     /// 绘制分类滚动条 (使用纹理)
     pub(super) fn draw_category_scrollbar(&mut self, pos: Vec2) {
         let scroll_x = pos.x + Self::SCROLL_X;
-        let mouse_pos = mouse_position();
+        let mouse_pos = ui_mouse_pos();
         
         // 上箭头 Prguse2[197-199]
         let up_y = pos.y + Self::SCROLL_UP_Y;
-        let up_hovered = mouse_pos.0 >= scroll_x && mouse_pos.0 <= scroll_x + Self::SCROLL_BTN_W
-            && mouse_pos.1 >= up_y && mouse_pos.1 <= up_y + Self::SCROLL_BTN_H;
-        let up_pressed = up_hovered && is_mouse_button_down(MouseButton::Left);
-        
-        let up_tex = if up_pressed {
-            &self.scroll_up_textures.2
-        } else if up_hovered {
-            &self.scroll_up_textures.1
-        } else {
-            &self.scroll_up_textures.0
-        };
-        
-        if let Some(tex) = up_tex {
-            draw_texture_ex(tex, scroll_x, up_y, WHITE, DrawTextureParams::default());
-        } else {
-            draw_rectangle(scroll_x, up_y, Self::SCROLL_BTN_W, Self::SCROLL_BTN_H, 
-                Color::from_rgba(80, 80, 100, 255));
-            draw_text_cn("▲", scroll_x + 2.0, up_y + 10.0, 10.0, WHITE);
-        }
-        
-        if up_hovered && is_mouse_button_pressed(MouseButton::Left) {
+
+        if draw_library_button_with_offset(
+            LibraryName::Prguse2,
+            [197, 198, 199],
+            vec2(scroll_x, up_y),
+            mouse_pos,
+        ) {
             if self.category_scroll > 0 {
                 self.category_scroll -= 1;
             }
@@ -277,27 +326,13 @@ impl GameShopDialogHybrid {
         
         // 下箭头 Prguse2[207-209]
         let down_y = pos.y + Self::SCROLL_DOWN_Y;
-        let down_hovered = mouse_pos.0 >= scroll_x && mouse_pos.0 <= scroll_x + Self::SCROLL_BTN_W
-            && mouse_pos.1 >= down_y && mouse_pos.1 <= down_y + Self::SCROLL_BTN_H;
-        let down_pressed = down_hovered && is_mouse_button_down(MouseButton::Left);
-        
-        let down_tex = if down_pressed {
-            &self.scroll_down_textures.2
-        } else if down_hovered {
-            &self.scroll_down_textures.1
-        } else {
-            &self.scroll_down_textures.0
-        };
-        
-        if let Some(tex) = down_tex {
-            draw_texture_ex(tex, scroll_x, down_y, WHITE, DrawTextureParams::default());
-        } else {
-            draw_rectangle(scroll_x, down_y, Self::SCROLL_BTN_W, Self::SCROLL_BTN_H, 
-                Color::from_rgba(80, 80, 100, 255));
-            draw_text_cn("▼", scroll_x + 2.0, down_y + 10.0, 10.0, WHITE);
-        }
-        
-        if down_hovered && is_mouse_button_pressed(MouseButton::Left) {
+
+        if draw_library_button_with_offset(
+            LibraryName::Prguse2,
+            [207, 208, 209],
+            vec2(scroll_x, down_y),
+            mouse_pos,
+        ) {
             let max_scroll = self.categories.len().saturating_sub(Self::CATEGORY_MAX_VISIBLE);
             if self.category_scroll < max_scroll {
                 self.category_scroll += 1;
@@ -305,23 +340,37 @@ impl GameShopDialogHybrid {
         }
         
         // 滚动块 Prguse2[205-206]
+        let thumb_h = LibraryName::Prguse2
+            .get_texture(205)
+            .map(|info| info.height as f32)
+            .unwrap_or(20.0);
+
         let scrollbar_height = Self::SCROLL_DOWN_Y - Self::SCROLL_UP_Y - Self::SCROLL_BTN_H;
         let scroll_ratio = if self.categories.len() > Self::CATEGORY_MAX_VISIBLE {
             self.category_scroll as f32 / (self.categories.len() - Self::CATEGORY_MAX_VISIBLE) as f32
         } else {
             0.0
         };
-        
-        let bar_y = pos.y + Self::SCROLL_UP_Y + Self::SCROLL_BTN_H + (scroll_ratio * (scrollbar_height - 20.0));
-        let bar_hovered = mouse_pos.0 >= scroll_x && mouse_pos.0 <= scroll_x + Self::SCROLL_BTN_W
-            && mouse_pos.1 >= bar_y && mouse_pos.1 <= bar_y + 20.0;
-        
-        let bar_tex = if bar_hovered { &self.scroll_bar_textures.1 } else { &self.scroll_bar_textures.0 };
-        
-        if let Some(tex) = bar_tex {
-            draw_texture_ex(tex, scroll_x, bar_y, WHITE, DrawTextureParams::default());
+
+        let usable_h = (scrollbar_height - thumb_h).max(0.0);
+        let bar_y = pos.y + Self::SCROLL_UP_Y + Self::SCROLL_BTN_H + (scroll_ratio * usable_h);
+
+        let bar_hit_rect = if let Some(info) = LibraryName::Prguse2.get_texture(205) {
+            Rect::new(
+                scroll_x + info.offset_x as f32,
+                bar_y + info.offset_y as f32,
+                info.width as f32,
+                info.height as f32,
+            )
         } else {
-            draw_rectangle(scroll_x, bar_y, Self::SCROLL_BTN_W, 20.0, 
+            Rect::new(scroll_x, bar_y, Self::SCROLL_BTN_W, thumb_h)
+        };
+
+        let bar_hovered = bar_hit_rect.contains(mouse_pos);
+        let bar_idx = if bar_hovered { 206 } else { 205 };
+
+        if draw_library_image_with_offset(LibraryName::Prguse2, bar_idx, vec2(scroll_x, bar_y), WHITE).is_none() {
+            draw_rectangle(scroll_x, bar_y, Self::SCROLL_BTN_W, thumb_h,
                 Color::from_rgba(100, 100, 120, 255));
         }
     }
@@ -396,9 +445,9 @@ impl GameShopDialogHybrid {
         let icon_h = 32.0;
         
         // 检测图标区域悬停（用于显示物品提示框）
-        let mouse_pos = mouse_position();
-        let icon_hovered = mouse_pos.0 >= icon_x && mouse_pos.0 <= icon_x + icon_w
-            && mouse_pos.1 >= icon_y && mouse_pos.1 <= icon_y + icon_h;
+        let mouse_pos = ui_mouse_pos();
+        let icon_hovered = mouse_pos.x >= icon_x && mouse_pos.x <= icon_x + icon_w
+            && mouse_pos.y >= icon_y && mouse_pos.y <= icon_y + icon_h;
         if icon_hovered {
             self.hover_item = Some(item_idx);
         }
@@ -443,34 +492,13 @@ impl GameShopDialogHybrid {
             // 减少按钮 Prguse2[240-242] (原版位置: 55, 56)
             let down_x = x + 55.0;
             let down_y = y + 56.0;
-            let btn_w = 16.0;
-            let btn_h = 14.0;
-            
-            let down_hovered = mouse_pos.0 >= down_x && mouse_pos.0 <= down_x + btn_w
-                && mouse_pos.1 >= down_y && mouse_pos.1 <= down_y + btn_h;
-            let down_pressed = down_hovered && is_mouse_button_down(MouseButton::Left);
-            
-            let down_tex = if down_pressed {
-                &self.left_btn_textures.2
-            } else if down_hovered {
-                &self.left_btn_textures.1
-            } else {
-                &self.left_btn_textures.0
-            };
-            
-            if let Some(tex) = down_tex {
-                draw_texture_ex(tex, down_x, down_y, WHITE, DrawTextureParams::default());
-            } else {
-                let color = if down_hovered {
-                    Color::from_rgba(120, 120, 160, 255)
-                } else {
-                    Color::from_rgba(80, 80, 120, 255)
-                };
-                draw_rectangle(down_x, down_y, btn_w, btn_h, color);
-                draw_text_cn("-", down_x + 5.0, down_y + 10.0, 10.0, WHITE);
-            }
-            
-            if down_hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+
+            if draw_library_button_with_offset(
+                LibraryName::Prguse2,
+                [240, 241, 242],
+                vec2(down_x, down_y),
+                mouse_pos,
+            ) && !self.dragging {
                 if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
                     self.quantities[grid_idx] = qty.saturating_sub(10).max(1);
                 } else {
@@ -486,32 +514,13 @@ impl GameShopDialogHybrid {
             // 增加按钮 Prguse2[243-245] (原版位置: 97, 56)
             let up_x = x + 97.0;
             let up_y = y + 56.0;
-            
-            let up_hovered = mouse_pos.0 >= up_x && mouse_pos.0 <= up_x + btn_w
-                && mouse_pos.1 >= up_y && mouse_pos.1 <= up_y + btn_h;
-            let up_pressed = up_hovered && is_mouse_button_down(MouseButton::Left);
-            
-            let up_tex = if up_pressed {
-                &self.right_btn_textures.2
-            } else if up_hovered {
-                &self.right_btn_textures.1
-            } else {
-                &self.right_btn_textures.0
-            };
-            
-            if let Some(tex) = up_tex {
-                draw_texture_ex(tex, up_x, up_y, WHITE, DrawTextureParams::default());
-            } else {
-                let color = if up_hovered {
-                    Color::from_rgba(120, 120, 160, 255)
-                } else {
-                    Color::from_rgba(80, 80, 120, 255)
-                };
-                draw_rectangle(up_x, up_y, btn_w, btn_h, color);
-                draw_text_cn("+", up_x + 4.0, up_y + 10.0, 10.0, WHITE);
-            }
-            
-            if up_hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+
+            if draw_library_button_with_offset(
+                LibraryName::Prguse2,
+                [243, 244, 245],
+                vec2(up_x, up_y),
+                mouse_pos,
+            ) && !self.dragging {
                 let max_qty = if item.stock > 0 && item.stock < 99 {
                     item.stock as u8
                 } else {
@@ -556,38 +565,13 @@ impl GameShopDialogHybrid {
         if is_previewable {
             let preview_x = x + 8.0;
             let preview_y = y + 122.0;
-            
-            // 使用纹理实际尺寸
-            let (preview_w, preview_h) = if let Some(ref tex) = self.preview_btn_textures.0 {
-                (tex.width(), tex.height())
-            } else {
-                (32.0, 24.0)  // 默认尺寸
-            };
-            
-            let preview_hovered = mouse_pos.0 >= preview_x && mouse_pos.0 <= preview_x + preview_w
-                && mouse_pos.1 >= preview_y && mouse_pos.1 <= preview_y + preview_h;
-            let preview_pressed = preview_hovered && is_mouse_button_down(MouseButton::Left);
-            
-            let preview_tex = if preview_pressed {
-                &self.preview_btn_textures.2
-            } else if preview_hovered {
-                &self.preview_btn_textures.1
-            } else {
-                &self.preview_btn_textures.0
-            };
-            
-            if let Some(tex) = preview_tex {
-                draw_texture_ex(tex, preview_x, preview_y, WHITE, DrawTextureParams::default());
-            } else {
-                let color = if preview_hovered {
-                    Color::from_rgba(120, 120, 180, 255)
-                } else {
-                    Color::from_rgba(80, 80, 140, 255)
-                };
-                draw_rectangle(preview_x, preview_y, preview_w, preview_h, color);
-            }
-            
-            if preview_hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+
+            if draw_library_button_with_offset(
+                LibraryName::Title,
+                [781, 782, 783],
+                vec2(preview_x, preview_y),
+                mouse_pos,
+            ) && !self.dragging {
                 self.preview_item = Some(item_idx);
                 println!("👁️ 预览: {}", item.name);
             }
@@ -596,38 +580,13 @@ impl GameShopDialogHybrid {
         // Buy按钮 Title[778-780] (原版位置: 42/75, 122)
         let buy_x = if is_previewable { x + 75.0 } else { x + 42.0 };
         let buy_y = y + 122.0;
-        
-        // 使用纹理实际尺寸
-        let (buy_w, buy_h) = if let Some(ref tex) = self.buy_btn_textures.0 {
-            (tex.width(), tex.height())
-        } else {
-            (32.0, 24.0)  // 默认尺寸
-        };
-        
-        let buy_hovered = mouse_pos.0 >= buy_x && mouse_pos.0 <= buy_x + buy_w
-            && mouse_pos.1 >= buy_y && mouse_pos.1 <= buy_y + buy_h;
-        let buy_pressed = buy_hovered && is_mouse_button_down(MouseButton::Left);
-        
-        let buy_tex = if buy_pressed {
-            &self.buy_btn_textures.2
-        } else if buy_hovered {
-            &self.buy_btn_textures.1
-        } else {
-            &self.buy_btn_textures.0
-        };
-        
-        if let Some(tex) = buy_tex {
-            draw_texture_ex(tex, buy_x, buy_y, WHITE, DrawTextureParams::default());
-        } else {
-            let color = if buy_hovered {
-                Color::from_rgba(120, 180, 120, 255)
-            } else {
-                Color::from_rgba(80, 140, 80, 255)
-            };
-            draw_rectangle(buy_x, buy_y, buy_w, buy_h, color);
-        }
-        
-        if buy_hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
+
+        if draw_library_button_with_offset(
+            LibraryName::Title,
+            [778, 779, 780],
+            vec2(buy_x, buy_y),
+            mouse_pos,
+        ) && !self.dragging {
             println!("💰 购买: {}", item.name);
         }
     }
@@ -654,40 +613,18 @@ impl GameShopDialogHybrid {
             (self.filtered_items.len() + self.items_per_page - 1) / self.items_per_page
         };
         
-        let mouse_pos = mouse_position();
+        let mouse_pos = ui_mouse_pos();
         
         // 上一页按钮 Prguse2[240-242] (原版: 600, 448)
         let prev_x = pos.x + 600.0;
         let prev_y = pos.y + 448.0;
-        let btn_w = 16.0;
-        let btn_h = 14.0;
-        
-        let prev_hovered = mouse_pos.0 >= prev_x && mouse_pos.0 <= prev_x + btn_w
-            && mouse_pos.1 >= prev_y && mouse_pos.1 <= prev_y + btn_h;
-        let prev_pressed = prev_hovered && is_mouse_button_down(MouseButton::Left);
-        
-        // 使用 left_btn_textures (Prguse2[240-242])
-        let prev_tex = if prev_pressed {
-            &self.left_btn_textures.2
-        } else if prev_hovered {
-            &self.left_btn_textures.1
-        } else {
-            &self.left_btn_textures.0
-        };
-        
-        if let Some(tex) = prev_tex {
-            draw_texture_ex(tex, prev_x, prev_y, WHITE, DrawTextureParams::default());
-        } else {
-            let color = if prev_hovered {
-                Color::from_rgba(120, 120, 160, 255)
-            } else {
-                Color::from_rgba(80, 80, 120, 255)
-            };
-            draw_rectangle(prev_x, prev_y, btn_w, btn_h, color);
-            draw_text_cn("◀", prev_x + 3.0, prev_y + 10.0, 10.0, WHITE);
-        }
-        
-        if prev_hovered && is_mouse_button_pressed(MouseButton::Left) && self.current_page > 0 {
+
+        if draw_library_button_with_offset(
+            LibraryName::Prguse2,
+            [240, 241, 242],
+            vec2(prev_x, prev_y),
+            mouse_pos,
+        ) && self.current_page > 0 {
             self.current_page -= 1;
             self.preview_item = None;
             self.quantities = [1; 8];  // 重置购买数量
@@ -697,33 +634,13 @@ impl GameShopDialogHybrid {
         // 下一页按钮 Prguse2[243-245] (原版: 660, 448)
         let next_x = pos.x + 660.0;
         let next_y = pos.y + 448.0;
-        
-        let next_hovered = mouse_pos.0 >= next_x && mouse_pos.0 <= next_x + btn_w
-            && mouse_pos.1 >= next_y && mouse_pos.1 <= next_y + btn_h;
-        let next_pressed = next_hovered && is_mouse_button_down(MouseButton::Left);
-        
-        // 使用 right_btn_textures (Prguse2[243-245])
-        let next_tex = if next_pressed {
-            &self.right_btn_textures.2
-        } else if next_hovered {
-            &self.right_btn_textures.1
-        } else {
-            &self.right_btn_textures.0
-        };
-        
-        if let Some(tex) = next_tex {
-            draw_texture_ex(tex, next_x, next_y, WHITE, DrawTextureParams::default());
-        } else {
-            let color = if next_hovered {
-                Color::from_rgba(120, 120, 160, 255)
-            } else {
-                Color::from_rgba(80, 80, 120, 255)
-            };
-            draw_rectangle(next_x, next_y, btn_w, btn_h, color);
-            draw_text_cn("▶", next_x + 3.0, next_y + 10.0, 10.0, WHITE);
-        }
-        
-        if next_hovered && is_mouse_button_pressed(MouseButton::Left) && self.current_page < total_pages - 1 {
+
+        if draw_library_button_with_offset(
+            LibraryName::Prguse2,
+            [243, 244, 245],
+            vec2(next_x, next_y),
+            mouse_pos,
+        ) && self.current_page < total_pages - 1 {
             self.current_page += 1;
             self.preview_item = None;
             self.quantities = [1; 8];  // 重置购买数量
@@ -756,26 +673,29 @@ impl GameShopDialogHybrid {
     
     /// 绘制支付方式选择 (原版位置: PaymentTypeGold=250,449 PaymentTypeCredit=340,449)
     pub(super) fn draw_payment_options(&mut self, pos: Vec2) {
-        let mouse_pos = mouse_position();
+        let mouse_pos = ui_mouse_pos();
         
         // Buy with Gold 复选框 (原版位置: 250, 449)
         let gold_x = pos.x + 250.0;
         let gold_y = pos.y + 449.0;
         let checkbox_size = 14.0;
-        
-        let gold_hovered = mouse_pos.0 >= gold_x && mouse_pos.0 <= gold_x + 120.0
-            && mouse_pos.1 >= gold_y && mouse_pos.1 <= gold_y + checkbox_size;
+
+        let gold_base_info = LibraryName::Prguse.get_texture(2086);
+        let (gold_off_x, gold_off_y, gold_h) = match gold_base_info.as_ref() {
+            Some(info) => (info.offset_x as f32, info.offset_y as f32, info.height as f32),
+            None => (0.0, 0.0, checkbox_size),
+        };
+
+        let gold_hovered = mouse_pos.x >= gold_x + gold_off_x && mouse_pos.x <= gold_x + gold_off_x + 120.0
+            && mouse_pos.y >= gold_y + gold_off_y && mouse_pos.y <= gold_y + gold_off_y + gold_h.max(checkbox_size);
         
         // 绘制复选框
-        let gold_tex = if self.pay_with_gold {
-            &self.checkbox_textures.1  // 选中
-        } else {
-            &self.checkbox_textures.0  // 未选中
-        };
-        
-        if let Some(tex) = gold_tex {
-            draw_texture_ex(tex, gold_x, gold_y, WHITE, DrawTextureParams::default());
-        } else {
+        if draw_library_image_with_offset(
+            LibraryName::Prguse,
+            if self.pay_with_gold { 2087 } else { 2086 },
+            vec2(gold_x, gold_y),
+            WHITE,
+        ).is_none() {
             draw_rectangle(gold_x, gold_y, checkbox_size, checkbox_size, 
                 Color::from_rgba(60, 60, 80, 255));
             draw_rectangle_lines(gold_x, gold_y, checkbox_size, checkbox_size,
@@ -794,19 +714,22 @@ impl GameShopDialogHybrid {
         // Buy with Credits 复选框 (原版位置: 340, 449)
         let credit_x = pos.x + 340.0;
         let credit_y = pos.y + 449.0;
-        
-        let credit_hovered = mouse_pos.0 >= credit_x && mouse_pos.0 <= credit_x + 130.0
-            && mouse_pos.1 >= credit_y && mouse_pos.1 <= credit_y + checkbox_size;
-        
-        let credit_tex = if !self.pay_with_gold {
-            &self.checkbox_textures.1  // 选中
-        } else {
-            &self.checkbox_textures.0  // 未选中
+
+        let credit_base_info = LibraryName::Prguse.get_texture(2086);
+        let (credit_off_x, credit_off_y, credit_h) = match credit_base_info.as_ref() {
+            Some(info) => (info.offset_x as f32, info.offset_y as f32, info.height as f32),
+            None => (0.0, 0.0, checkbox_size),
         };
-        
-        if let Some(tex) = credit_tex {
-            draw_texture_ex(tex, credit_x, credit_y, WHITE, DrawTextureParams::default());
-        } else {
+
+        let credit_hovered = mouse_pos.x >= credit_x + credit_off_x && mouse_pos.x <= credit_x + credit_off_x + 130.0
+            && mouse_pos.y >= credit_y + credit_off_y && mouse_pos.y <= credit_y + credit_off_y + credit_h.max(checkbox_size);
+
+        if draw_library_image_with_offset(
+            LibraryName::Prguse,
+            if !self.pay_with_gold { 2087 } else { 2086 },
+            vec2(credit_x, credit_y),
+            WHITE,
+        ).is_none() {
             draw_rectangle(credit_x, credit_y, checkbox_size, checkbox_size, 
                 Color::from_rgba(60, 60, 80, 255));
             draw_rectangle_lines(credit_x, credit_y, checkbox_size, checkbox_size,

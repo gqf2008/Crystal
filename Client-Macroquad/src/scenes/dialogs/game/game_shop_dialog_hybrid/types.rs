@@ -61,6 +61,18 @@ pub enum ShopCategoryHybrid {
     Fashion,    // 时装
 }
 
+impl ShopCategoryHybrid {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Weapon => "Weapon",
+            Self::Armor => "Armor",
+            Self::Potion => "Potion",
+            Self::Special => "Special",
+            Self::Fashion => "Fashion",
+        }
+    }
+}
+
 /// 商城物品
 #[derive(Debug, Clone)]
 pub struct ShopItemHybrid {
@@ -70,10 +82,14 @@ pub struct ShopItemHybrid {
     pub icon_index: usize,
     pub price_gold: u32,
     pub price_ingot: u32,
+    pub class: ShopClassHybrid,
     pub category: ShopCategoryHybrid,
     pub in_stock: bool,
     pub hot: bool,
     pub new: bool,
+    pub deal: bool,
+    /// 距今多少天（用于模拟 C# Date > Now.AddDays(-7)）
+    pub days_ago: i32,
     pub stock: u32,
     pub count: u32,
 }

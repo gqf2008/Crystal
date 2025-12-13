@@ -80,6 +80,7 @@ pub struct GameShopDialogHybrid {
     // 分类列表
     pub(super) categories: Vec<String>,
     pub(super) category_scroll: usize,
+    pub(super) selected_category: Option<usize>,
     
     // 预览
     pub(super) preview_item: Option<usize>,
@@ -100,6 +101,78 @@ pub struct GameShopDialogHybrid {
 }
 
 impl GameShopDialogHybrid {
+    const SHOW_ALL_CATEGORY: &'static str = "Show All";
+
+    fn item_matches_section(&self, item: &ShopItemHybrid) -> bool {
+        match self.current_section {
+            ShopSectionHybrid::All => true,
+            ShopSectionHybrid::TopItems => item.hot,
+            // 对齐 C#：DealItems
+            ShopSectionHybrid::Deals => item.deal,
+            // 对齐 C#：NewItems (7 天内)
+            ShopSectionHybrid::New => item.days_ago <= 7,
+        }
+    }
+
+    fn item_matches_class(&self, item: &ShopItemHybrid) -> bool {
+        // 对齐 C#：item.Class == ClassFilter || item.Class == "All" || ClassFilter == "Show All"
+        self.current_class == ShopClassHybrid::All
+            || item.class == ShopClassHybrid::All
+            || item.class == self.current_class
+    }
+
+    fn item_matches_search(&self, item: &ShopItemHybrid) -> bool {
+        if self.search_text.is_empty() {
+            return true;
+        }
+        let needle = self.search_text.to_lowercase();
+        item.name.to_lowercase().contains(&needle)
+    }
+
+    fn selected_category_name(&self) -> &str {
+        self.selected_category
+            .and_then(|idx| self.categories.get(idx))
+            .map(|s| s.as_str())
+            .unwrap_or(Self::SHOW_ALL_CATEGORY)
+    }
+
+    /// 与 C# 原版 GetCategories 对齐：基于当前 Section/Class/Search 生成分类列表，并重置为 Show All
+    pub fn rebuild_categories(&mut self) {
+        let mut list: Vec<String> = vec![Self::SHOW_ALL_CATEGORY.to_string()];
+
+        for item in self.shop_items.iter() {
+            if !self.item_matches_class(item) {
+                continue;
+            }
+            if !self.item_matches_section(item) {
+                continue;
+            }
+            if !self.item_matches_search(item) {
+                continue;
+            }
+            let cat = item.category.name();
+            if cat.is_empty() {
+                continue;
+            }
+            if !list.iter().any(|s| s == cat) {
+                list.push(cat.to_string());
+            }
+        }
+
+        self.categories = list;
+        self.category_scroll = 0;
+        self.selected_category = Some(0);
+    }
+
+    /// 与 C# 原版行为对齐：重置分类/分页并刷新列表（GetCategories -> UpdateShop）
+    pub fn refresh_categories_and_items(&mut self) {
+        self.rebuild_categories();
+        self.current_page = 0;
+        self.preview_item = None;
+        self.quantities = [1; 8];
+        self.filter_items();
+    }
+
     // 常量 - 基于 egui 版本的原版位置
     // 与 C# 原版一致：Title[749] 实际尺寸为 696x476（MirImageControl.AutoSize = true）
     pub(super) const DIALOG_WIDTH: f32 = 696.0;
@@ -128,9 +201,12 @@ impl GameShopDialogHybrid {
     // 分类列表位置 (原版: 11, 102)
     pub(super) const FILTER_BG_X: f32 = 11.0;
     pub(super) const FILTER_BG_Y: f32 = 102.0;
-    pub(super) const CATEGORY_LIST_X: f32 = 20.0;
-    pub(super) const CATEGORY_LIST_Y: f32 = 120.0;
-    pub(super) const CATEGORY_LINE_HEIGHT: f32 = 14.0;
+    // 与 C# 原版 MirLabel Filters 对齐: Location=(15, 103 + 15*i), Size=(90, 20)
+    pub(super) const CATEGORY_LIST_X: f32 = 15.0;
+    pub(super) const CATEGORY_LIST_Y: f32 = 103.0;
+    pub(super) const CATEGORY_ITEM_W: f32 = 90.0;
+    pub(super) const CATEGORY_ITEM_H: f32 = 20.0;
+    pub(super) const CATEGORY_ITEM_STEP: f32 = 15.0;
     pub(super) const CATEGORY_MAX_VISIBLE: usize = 22;
     
     // 滚动条位置 (原版: 120, 103/421)
@@ -175,14 +251,9 @@ impl GameShopDialogHybrid {
             items_per_page: 8,
             player_gold: 999999,
             player_ingot: 10000,
-            categories: vec![
-                "武器".into(), "防具".into(), "头盔".into(), "项链".into(),
-                "手镯".into(), "戒指".into(), "腰带".into(), "靴子".into(),
-                "药品".into(), "特殊物品".into(), "时装".into(), "宝石".into(),
-                "材料".into(), "卷轴".into(), "坐骑".into(), "技能书".into(),
-                "消耗品".into(), "任务物品".into(), "其他".into(),
-            ],
+            categories: Vec::new(),
             category_scroll: 0,
+            selected_category: None,
             preview_item: None,
             preview_direction: 6,
             hover_item: None,
@@ -191,7 +262,7 @@ impl GameShopDialogHybrid {
             pay_with_gold: true,
             quantities: [1; 8],
         };
-        dialog.filter_items();
+        dialog.refresh_categories_and_items();
         dialog
     }
     
@@ -341,17 +412,28 @@ impl GameShopDialogHybrid {
     
     /// 过滤商品
     pub fn filter_items(&mut self) {
-        self.filtered_items = self.shop_items.iter().filter(|item| {
-            let section_match = match self.current_section {
-                ShopSectionHybrid::All => true,
-                ShopSectionHybrid::TopItems => item.hot,
-                ShopSectionHybrid::Deals => item.price_gold > 0 && item.price_ingot > 0,
-                ShopSectionHybrid::New => item.new,
-            };
-            section_match
-        }).cloned().collect();
-        
+        let selected_cat = self.selected_category_name().to_string();
+        let show_all = selected_cat == Self::SHOW_ALL_CATEGORY;
+
+        let mut list: Vec<ShopItemHybrid> = self
+            .shop_items
+            .iter()
+            .filter(|item| {
+                self.item_matches_class(item)
+                    && self.item_matches_section(item)
+                    && self.item_matches_search(item)
+                    && (show_all || item.category.name() == selected_cat)
+            })
+            .cloned()
+            .collect();
+
+        // C# 原版对 filteredShop 做 FriendlyName 排序
+        list.sort_by(|a, b| a.name.cmp(&b.name));
+        self.filtered_items = list;
+
+        // 与 C# UpdateShop 对齐：过滤后回到第一页，并关闭预览
         self.current_page = 0;
+        self.preview_item = None;
     }
     
     // 基本控制方法

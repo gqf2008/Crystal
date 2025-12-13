@@ -20,9 +20,9 @@ impl GameShopDialogHybrid {
         let search_w = 140.0;
         let search_h = 16.0;
         
-        let mouse_pos = mouse_position();
-        let hovered = mouse_pos.0 >= search_x && mouse_pos.0 <= search_x + search_w
-            && mouse_pos.1 >= search_y && mouse_pos.1 <= search_y + search_h;
+        let mouse_pos = ui_mouse_pos();
+        let hovered = mouse_pos.x >= search_x && mouse_pos.x <= search_x + search_w
+            && mouse_pos.y >= search_y && mouse_pos.y <= search_y + search_h;
         
         // 背景
         let bg_color = if self.search_active {
@@ -66,7 +66,7 @@ impl GameShopDialogHybrid {
             // 退格删除
             if is_key_pressed(KeyCode::Backspace) && !self.search_text.is_empty() {
                 self.search_text.pop();
-                self.filter_items();
+                self.refresh_categories_and_items();
             }
             // ESC取消
             if is_key_pressed(KeyCode::Escape) {
@@ -77,7 +77,7 @@ impl GameShopDialogHybrid {
                 if let Some(c) = key_to_char(key) {
                     if self.search_text.len() < 23 {
                         self.search_text.push(c);
-                        self.filter_items();
+                        self.refresh_categories_and_items();
                     }
                 }
             }
@@ -207,12 +207,12 @@ impl GameShopDialogHybrid {
         // Drag 是枚举：Dragging(Vec2, Vec2), Hovered, Clicked, None
         match drag_result {
             ui::Drag::Dragging(_, _) => {
-                let mouse_pos = mouse_position();
+                let mouse_pos = ui_mouse_pos();
                 if !self.dragging {
                     self.dragging = true;
-                    self.drag_offset = vec2(mouse_pos.0, mouse_pos.1) - pos;
+                    self.drag_offset = mouse_pos - pos;
                 }
-                self.position = vec2(mouse_pos.0, mouse_pos.1) - self.drag_offset;
+                self.position = mouse_pos - self.drag_offset;
             }
             _ => {
                 self.dragging = false;
@@ -231,45 +231,16 @@ impl GameShopDialogHybrid {
         // - CloseButton.Location = (671, 4)
         // - CloseButton 纹理 Prguse2[360] 实际尺寸: 24x21
         //   => 右边距 = 696 - 671 - 24 = 1px
-        let close_y = pos.y + 4.0;
-        
-        // 使用纹理实际尺寸
-        let (close_w, close_h) = if let Some(ref tex) = self.close_btn_textures.0 {
-            (tex.width(), tex.height())
-        } else {
-            (24.0, 21.0)  // Prguse2[360] 实际尺寸
-        };
 
-        let close_x = pos.x + (Self::DIALOG_WIDTH - close_w - 1.0);
-        
-        let mouse_pos = mouse_position();
-        let hovered = mouse_pos.0 >= close_x && mouse_pos.0 <= close_x + close_w
-            && mouse_pos.1 >= close_y && mouse_pos.1 <= close_y + close_h;
-        let pressed = hovered && is_mouse_button_down(MouseButton::Left);
-        
-        // 绘制关闭按钮 Prguse2[360-362]
-        let close_tex = if pressed {
-            &self.close_btn_textures.2
-        } else if hovered {
-            &self.close_btn_textures.1
-        } else {
-            &self.close_btn_textures.0
-        };
-        
-        if let Some(tex) = close_tex {
-            draw_texture_ex(tex, close_x, close_y, WHITE, DrawTextureParams::default());
-        } else {
-            let color = if hovered {
-                Color::from_rgba(200, 80, 80, 255)
-            } else {
-                Color::from_rgba(150, 50, 50, 255)
-            };
-            draw_rectangle(close_x, close_y, close_w, close_h, color);
-            draw_text_cn("×", close_x + 5.0, close_y + 15.0, 14.0, WHITE);
-        }
-        
-        // 处理点击
-        if hovered && is_mouse_button_pressed(MouseButton::Left) {
+        let close_pos = vec2(pos.x + 671.0, pos.y + 4.0);
+        let mouse_pos = ui_mouse_pos();
+
+        if draw_library_button_with_offset(
+            LibraryName::Prguse2,
+            [360, 361, 362],
+            close_pos,
+            mouse_pos,
+        ) {
             self.close();
             println!("❌ 关闭商城");
         }
@@ -283,7 +254,7 @@ impl GameShopDialogHybrid {
             }
             
             let item = &self.filtered_items[idx];
-            let mouse = mouse_position();
+            let mouse = ui_mouse_pos();
             
             // 提示框内容
             let lines = vec![
@@ -331,15 +302,15 @@ impl GameShopDialogHybrid {
             let offset_x = 15.0;
             let offset_y = 10.0;
             
-            let mut tooltip_x = mouse.0 + offset_x;
-            let mut tooltip_y = mouse.1 + offset_y;
+            let mut tooltip_x = mouse.x + offset_x;
+            let mut tooltip_y = mouse.y + offset_y;
             
             // 边界检查
             if tooltip_x + tooltip_w > screen_w {
-                tooltip_x = mouse.0 - tooltip_w - 5.0;
+                tooltip_x = mouse.x - tooltip_w - 5.0;
             }
             if tooltip_y + tooltip_h > screen_h {
-                tooltip_y = mouse.1 - tooltip_h - 5.0;
+                tooltip_y = mouse.y - tooltip_h - 5.0;
             }
             
             // 绘制背景
