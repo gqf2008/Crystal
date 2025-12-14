@@ -176,7 +176,20 @@ impl PlayerControlSystem {
         (world_x, world_y)
     }
 
-    fn find_hovered_object_id(
+    fn find_network_entity_by_object_id(
+        ctx: &GameContext,
+        object_type: NetworkObjectType,
+        object_id: u32,
+    ) -> Option<hecs::Entity> {
+        for (e, sync) in ctx.world.query::<&NetworkSync>().iter() {
+            if sync.object_type == object_type && sync.object_id == object_id {
+                return Some(e);
+            }
+        }
+        None
+    }
+
+    fn hit_test_object_id(
         ctx: &GameContext,
         mouse_world: (f32, f32),
         object_type: NetworkObjectType,
@@ -245,6 +258,41 @@ impl PlayerControlSystem {
         best_rect.map(|(oid, _y)| oid)
     }
 
+    fn hit_test_object_id_with_grid_fallback(
+        ctx: &GameContext,
+        mouse_world: (f32, f32),
+        object_type: NetworkObjectType,
+    ) -> Option<u32> {
+        if let Some(oid) = Self::hit_test_object_id(ctx, mouse_world, object_type) {
+            return Some(oid);
+        }
+
+        // 格子/距离兜底：用于纹理未加载或可见像素数据异常时仍能点到。
+        let (click_gx, click_gy) = crate::coord::Coord::world_to_grid(mouse_world.0, mouse_world.1);
+        let mut best: Option<(u32, f32)> = None;
+
+        for (_, (sync, pos)) in ctx.world.query::<(&NetworkSync, &Position)>().iter() {
+            if sync.object_type != object_type {
+                continue;
+            }
+            let (gx, gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+            let dx = (gx - click_gx).abs();
+            let dy = (gy - click_gy).abs();
+            if dx > 1 || dy > 1 {
+                continue;
+            }
+            let dist2 = (pos.x - mouse_world.0) * (pos.x - mouse_world.0)
+                + (pos.y - mouse_world.1) * (pos.y - mouse_world.1);
+            match best {
+                None => best = Some((sync.object_id, dist2)),
+                Some((_oid, bdist2)) if dist2 < bdist2 => best = Some((sync.object_id, dist2)),
+                _ => {}
+            }
+        }
+
+        best.map(|(oid, _)| oid)
+    }
+
     fn update_world_hover(ctx: &mut GameContext, camera_pos: &Position, camera: &Camera) {
         // HoverHighlight 被挂在 render-pass 实体上（约定：世界里只有一个）
         let Some(pass_entity) = ctx
@@ -257,8 +305,10 @@ impl PlayerControlSystem {
             return;
         };
 
-        // UI 屏蔽：UI 捕获或鼠标悬停 UI 时，不更新世界 hover
-        let blocked_by_ui = ctx
+        // UI/输入屏蔽：UI 捕获或鼠标悬停 UI 时，不更新世界 hover。
+        // 另外，如果本帧 `input_blocked`，FrameInput 会返回 (0,0)，必须直接跳过。
+        let blocked_by_ui = ctx.input_blocked
+            || ctx
             .world
             .get::<&UiWorldInputBlock>(pass_entity)
             .ok()
@@ -271,10 +321,10 @@ impl PlayerControlSystem {
             let mouse_pos = ctx.input().mouse.position();
             let (wx, wy) = Self::screen_to_world(mouse_pos.x, mouse_pos.y, camera_pos, camera);
 
-            if let Some(oid) = Self::find_hovered_object_id(ctx, (wx, wy), NetworkObjectType::NPC) {
+            if let Some(oid) = Self::hit_test_object_id(ctx, (wx, wy), NetworkObjectType::NPC) {
                 (Some(oid), None)
             } else {
-                let mid = Self::find_hovered_object_id(ctx, (wx, wy), NetworkObjectType::Monster);
+                let mid = Self::hit_test_object_id(ctx, (wx, wy), NetworkObjectType::Monster);
                 (None, mid)
             }
         };
@@ -287,59 +337,7 @@ impl PlayerControlSystem {
     }
 
     fn find_clicked_npc_object_id(ctx: &GameContext, click_world: (f32, f32)) -> Option<u32> {
-        use crate::components::{LibrarySprite, NetworkObjectType, NetworkSync, Position};
-
-        // 贴近原版：优先像素级命中（VisiblePixel）
-        // 选择规则：命中里取 y 最大（最前景）
-        let mut best_pixel: Option<(u32, f32)> = None;
-        for (_, (sync, spr, pos)) in ctx.world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
-            if sync.object_type != NetworkObjectType::NPC {
-                continue;
-            }
-
-            let Some(info) = spr.library.get_texture(spr.texture_index()) else {
-                continue;
-            };
-            let draw_x = pos.x + info.offset_x as f32;
-            let draw_y = pos.y + info.offset_y as f32;
-            let local_x = (click_world.0 - draw_x).floor() as i32;
-            let local_y = (click_world.1 - draw_y).floor() as i32;
-            if !info.visible_pixel(local_x, local_y) {
-                continue;
-            }
-
-            match best_pixel {
-                None => best_pixel = Some((sync.object_id, pos.y)),
-                Some((_oid, best_y)) if pos.y > best_y => best_pixel = Some((sync.object_id, pos.y)),
-                _ => {}
-            }
-        }
-        if let Some((oid, _y)) = best_pixel {
-            return Some(oid);
-        }
-
-        // fallback：格子/距离近似（避免纹理未加载/异常时完全点不到）
-        let (click_gx, click_gy) = crate::coord::Coord::world_to_grid(click_world.0, click_world.1);
-        let mut best: Option<(u32, f32)> = None;
-        for (_, (sync, pos)) in ctx.world.query::<(&NetworkSync, &Position)>().iter() {
-            if sync.object_type != NetworkObjectType::NPC {
-                continue;
-            }
-            let (gx, gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-            let dx = (gx - click_gx).abs();
-            let dy = (gy - click_gy).abs();
-            if dx > 1 || dy > 1 {
-                continue;
-            }
-            let dist2 = (pos.x - click_world.0) * (pos.x - click_world.0)
-                + (pos.y - click_world.1) * (pos.y - click_world.1);
-            match best {
-                None => best = Some((sync.object_id, dist2)),
-                Some((_oid, bdist2)) if dist2 < bdist2 => best = Some((sync.object_id, dist2)),
-                _ => {}
-            }
-        }
-        best.map(|(oid, _)| oid)
+        Self::hit_test_object_id_with_grid_fallback(ctx, click_world, NetworkObjectType::NPC)
     }
 
     fn try_send_npc_main(ctx: &mut GameContext, npc_object_id: u32) {
@@ -369,31 +367,8 @@ impl PlayerControlSystem {
     }
 
     fn find_clicked_monster_entity(ctx: &GameContext, click_world: (f32, f32)) -> Option<hecs::Entity> {
-        use crate::components::{NetworkObjectType, NetworkSync, Position};
-
-        let (click_gx, click_gy) = crate::coord::Coord::world_to_grid(click_world.0, click_world.1);
-        let mut best: Option<(hecs::Entity, f32)> = None;
-
-        for (e, (sync, pos)) in ctx.world.query::<(&NetworkSync, &Position)>().iter() {
-            if sync.object_type != NetworkObjectType::Monster {
-                continue;
-            }
-            let (gx, gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-            let dx = (gx - click_gx).abs();
-            let dy = (gy - click_gy).abs();
-            if dx > 1 || dy > 1 {
-                continue;
-            }
-            let dist2 = (pos.x - click_world.0) * (pos.x - click_world.0)
-                + (pos.y - click_world.1) * (pos.y - click_world.1);
-            match best {
-                None => best = Some((e, dist2)),
-                Some((_be, bdist2)) if dist2 < bdist2 => best = Some((e, dist2)),
-                _ => {}
-            }
-        }
-
-        best.map(|(e, _)| e)
+        let oid = Self::hit_test_object_id_with_grid_fallback(ctx, click_world, NetworkObjectType::Monster)?;
+        Self::find_network_entity_by_object_id(ctx, NetworkObjectType::Monster, oid)
     }
 
     fn player_in_talk_range(ctx: &GameContext, npc_object_id: u32, max_range: i32) -> bool {
