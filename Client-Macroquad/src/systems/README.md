@@ -1,262 +1,54 @@
-# systems/ 目录说明
+\# systems/ 分层架构（以代码为准）
 
-存放游戏逻辑系统（Systems）。系统负责处理组件数据并驱动游戏行为。
+本目录包含 ECS 的系统（Systems），按“优先级 + 分层目录”组织。**本文件是权威说明**，已与当前代码结构对齐。
 
-## 系统分层架构
+\## 目录与 6 层分层
 
-本项目采用分层系统设计，按优先级（Priority）从低到高执行：
+当前代码采用 6 个一级目录，对应优先级区间（见 systems/mod.rs 的 priority 定义）：
 
-### 第 0 层：基础设施 (0-99)
-- 资源预加载、场景管理、保存系统
+- 第0层 `infra/`（0-99）：资源、场景、存档、网络底层
+- 第1层 `input/`（100-199）：输入采样、输入→意图转换（玩家控制等）
+- 第2层 `logic/`（200-599）：决策 / 战斗 / 物理移动
+- 第3层 `presentation/`（600-899）：动画、相机、粒子、UI 逻辑表现
+- 第4层 `rendering/`（900-1999）：渲染（实体/特效等；地图/UI 渲染迁移中）
+- 第5层 `dbug/`（9000+）：调试工具
 
-### 第 1 层：输入与网络 (100-199)
-- `InputSystem` - 输入处理
-- `NetworkSystem` - 网络事件接收与分发
-- `PlayerControlSystem` - 玩家控制输入转换
+\## 系统类型（以代码为准）
 
-### 第 2 层：游戏逻辑 (200-599)
+当前 `SystemScheduler` 支持两类 trait（见 systems/mod.rs）：
 
-#### 决策系统 (200-299)
-- `MonsterAISystem` - 怪物 AI 行为
-- `NpcAISystem` - NPC AI 行为
-- `NpcDialogueSystem` - NPC 对话逻辑
+- `LogicSystem`：只实现 `update(&mut GameContext, dt)`
+- `RenderSystem`：实现 `update(&mut GameContext, dt)` + `draw(&hecs::World)`
 
-#### 战斗系统 (300-399)
-- `CombatSystem` - 战斗逻辑与伤害计算
-- `SkillSystem` - 技能释放与效果
-- `HealthRegenSystem` - 生命回复
+说明：调度器内部仍然以“Update/Hybrid”条目存储，但对外语义就是“逻辑系统 / 渲染系统”。
 
-#### 物理与移动 (500-599)
-- `PathfindingSystem` - 寻路计算
-- `MovementSystem` - 实体位移（Position += Velocity * dt）
-- `CollisionSystem` - 碰撞检测与位置修正
-- `MapUpdateSystem` - 地图更新（瓦片动画、地图切换）
+\## 调度与执行顺序
 
-### 第 3 层：表现层 (600-899)
-- `AnimationSystem` - 动画状态更新
-- `ParticleSystem` - 粒子效果
-- `CameraFollowSystem` - 相机跟随
-- `CameraSystem` - 相机特效（震动等）
+- `SystemScheduler::update(...)`：按 priority 从小到大调用所有系统的 `update()`
+- `SystemScheduler::draw(...)`：按 priority 从小到大调用所有 `RenderSystem` 的 `draw()`
 
-### 第 4 层：渲染层 (900-1999)
-- `MapRenderSystem` - 地图渲染
-- `EntityRenderSystem` - 实体渲染（玩家/怪物）
-- `EffectRenderSystem` - 特效渲染
-- `UIRenderSystem` - UI 渲染
+\## 渲染层的现状（重要）
 
-### 第 5 层：调试工具 (9000+)
-- `DebugSystem` - 调试信息显示
-- `ProfileSystem` - 性能分析
+`rendering/` 目录处于迁移阶段：
 
-## 系统类型（重要）
+- `SpriteRenderSystem` / `EffectRenderSystem` 已在主场景里通过 `ecs_scheduler.draw()` 跑起来
+- `MapRenderSystem` / `UIRenderSystem` 目前通过 feature `ecs_rendering` 门控（默认不启用），主渲染仍以 scenes/ + map_renderer/ 为主
 
-项目定义了三种系统类型：
+\## 约束与约定（团队协作规则）
 
-1. **System** - 纯逻辑系统
-   - 实现 `update()` 方法
-   - 用于 AI、物理、战斗等逻辑处理
+1. 系统优先级必须使用 `systems::priority::*`，不要硬编码数字。
+2. 系统之间用组件/资源通信，尽量避免 Scene 直接实现“游戏逻辑”。
+3. 允许存在“迁移中系统”（目录里有、但主场景暂未注册），但必须在这里标注现状，避免文档漂移。
 
-2. **DrawSystem** - 纯渲染系统
-   - 实现 `draw()` 方法
-   - 用于地图、UI 渲染
+\## 变更流程（你要求的确认机制）
 
-3. **HybridSystem** - 混合系统
-   - 同时实现 `update()` 和 `draw()`
-   - 用于粒子、调试等需要逻辑+渲染的系统
+如果要“新增/删除/合并”任何子系统（新增文件或改变分层边界），我会先与你确认：
 
-## 关键系统依赖组件速查
+- 变更动机（性能/可维护性/职责边界）
+- 放在哪一层、priority 取值、与现有系统的依赖关系
+- 迁移策略（保功能、可回滚、分步骤验证）
 
-### MovementSystem (优先级 500)
-**依赖组件**：
-- 读取：`Velocity`, `Position`
-- 写入：`Position`
-
-**职责**：纯物理移动，应用速度到位置
-
-### CollisionSystem (优先级 510)
-**依赖组件**：
-- 读取：`Position`, `Collider`, `MapData`
-- 写入：`Position` (碰撞修正)
-
-**职责**：碰撞检测与位置修正
-
-### CombatSystem (优先级 300)
-**依赖组件**：
-- 读取：`Position`, `CombatStats`, `Target`
-- 写入：`Health`, `CombatState`
-
-**职责**：战斗逻辑、伤害计算、状态更新
-
-### MapUpdateSystem (优先级 500)
-**依赖组件**：
-- 读取：`MapData`, `AnimatedTile`
-- 写入：`AnimatedTile` (帧索引)
-
-**职责**：地图瓦片动画更新、地图切换处理
-
-### EntityRenderSystem (优先级 920)
-**依赖组件**：
-- 读取：`Position`, `Sprite`, `Camera`, `Player`, `Monster`
-- 写入：无（纯渲染）
-
-**职责**：渲染玩家和怪物实体
-
-## 约定与最佳实践
-
-1. **组件依赖声明**：每个系统应在文档或模块注释中明确依赖的组件列表。
-2. **优先级常量**：使用 `systems::priority` 模块中的常量，不要硬编码数字。
-3. **线程安全**：并行系统应在文档中标注线程安全注意点。
-4. **单元测试**：复杂系统应编写单元测试（Mock World + 必要组件）。
-
-## 使用示例
-
-```rust
-use crate::ecs::systems::{System, priority};
-
-struct MyLogicSystem;
-
-impl System for MyLogicSystem {
-    fn priority(&self) -> u32 { 
-        priority::MOVEMENT 
-    }
-
-    fn update(&mut self, world: &mut hecs::World, dt: f32) -> GameResult {
-        // 处理逻辑
-        for (id, (pos, vel)) in world.query_mut::<(&mut Position, &Velocity)>() {
-            pos.x += vel.x * dt;
-            pos.y += vel.y * dt;
-        }
-        Ok(())
-    }
-}
-```
-
-## 查看更多
-
-- 完整的系统架构说明：`systems/mod.rs` 顶部注释
-- 各子系统详细文档：查看对应目录（`logic/`, `rendering/`, `input/` 等）
-# ECS Systems 架构文档 v4.0
-
-**版本**: v4.0 (两类系统架构)  
-**最后更新**: 2025-11-05  
-**状态**: ✅ 架构重构完成
-
----
-
-## 📚 快速导航
-
-- [架构概览](#-架构概览)
-- [系统清单](#-系统清单)
-- [数据流](#-数据流)
-- [使用指南](#-使用指南)
-- [架构审查报告](./ARCHITECTURE_REVIEW.md)
-
----
-
-## 🏗️ 架构概览
-
-### 目录结构
-
-```
-systems/
-├── mod.rs                      # 主模块：系统类型定义 (LogicSystem/RenderSystem)
-├── README.md                   # 本文档
-│
-├── logic/                      # 纯逻辑系统 (只有 update，优先级 50-599)
-│   ├── input/                  # Layer 1: 输入层 (50-199)
-│   │   └── player_control_system.rs    - 玩家控制
-│   │
-│   ├── decision/               # Layer 2: 决策层 (200-299)
-│   │   ├── monster_ai_system.rs        - 怪物AI
-│   │   ├── npc_ai_system.rs            - NPC AI
-│   │   └── npc_dialogue_system.rs      - NPC对话
-│   │
-│   ├── combat_skill/           # Layer 3: 战斗技能层 (300-399)
-│   │   ├── skill_system.rs             - 技能系统
-│   │   └── combat_system.rs            - 战斗系统
-│   │
-│   ├── physics/                # Layer 4: 物理移动层 (400-499)
-│   │   ├── movement_system.rs          - 移动系统
-│   │   ├── collision_system.rs         - 碰撞检测
-│   │   ├── pathfinding_system.rs       - 寻路系统
-│   │   └── camera_follow_system.rs     - 相机跟随
-│   │
-│   └── update/                 # Layer 5: 状态更新层 (500-599)
-│       ├── particle_system.rs          - 粒子特效
-│       ├── health_regen_system.rs      - 生命恢复
-│       ├── sound_system.rs             - 音效系统
-│       └── camera_system.rs            - 相机系统
-│
-└── render/                     # 渲染系统 (有 update + draw，优先级 1000-1999)
-    ├── map_system.rs           - 地图渲染 (混合系统: 瓦片动画更新 + 地图绘制)
-    └── entity_render_system.rs - 实体渲染 (玩家/怪物/NPC)
-```
-
-**统计数据**:
-- **逻辑系统** (LogicSystem): 11 个 - 只实现 `update()` 方法
-- **渲染系统** (RenderSystem): 2 个 - 实现 `update()` + `draw()` 方法
-- **总系统数**: 13 个系统
-- **事件清理**: 由 GameContext 在帧结束时自动清理
-
----
-
-## 🎯 设计原则
-
-### 两类系统架构
-
-```
-┌──────────────────────────────────────────────────────┐
-│ LogicSystem (纯逻辑系统) - logic/                     │
-│ - 只实现 update(&mut GameContext, dt) -> GameResult  │
-│ - 用于: AI、物理、战斗等游戏逻辑处理                   │
-│ - 示例: MovementSystem, CombatSystem, AISystem       │
-│ - 优先级: 50-599                                      │
-└──────────────────────────────────────────────────────┘
-              ↓ 数据流 (组件读写)
-┌──────────────────────────────────────────────────────┐
-│ RenderSystem (渲染系统) - render/                     │
-│ - 实现 update() + draw() 两个方法                     │
-│ - update(): 更新渲染相关状态(如动画帧、视锥裁剪)      │
-│ - draw(): 绘制到 Canvas                               │
-│ - 示例: MapRenderSystem (瓦片动画 + 地图渲染)        │
-│ - 优先级: 1000-1999                                   │
-└──────────────────────────────────────────────────────┘
-```
-
-**关键设计变化**:
-- ❌ **移除** HybridSystem trait (过度设计)
-- ✅ **简化** 为两类系统: LogicSystem / RenderSystem
-- ✅ **RenderSystem** 可以同时有 update() 和 draw() 方法
-- ✅ **update() 可选**: 如果不需要逻辑更新,提供空实现即可
-
-### 核心设计原则
-
-1. ✅ **职责分离**: logic/ 处理游戏逻辑，render/ 负责渲染
-2. ✅ **单向数据流**: Layer 1 → Layer 2 → ... → Layer 5 → Render
-3. ✅ **组件驱动**: 系统通过读写组件通信，不直接调用
-4. ✅ **最小化系统状态**: 优先使用组件存储状态，系统状态仅用于缓存
-5. ✅ **优先级排序**: 通过注册顺序和优先级参数控制执行顺序
-
----
-
-## 📊 系统清单
-
-### Logic Systems (优先级 50-900)
-
-#### Layer 1: Input & Network (50-199)
-
-| 系统 | 优先级 | 职责 | 状态 |
-|------|--------|------|------|
-| PlayerControlSystem | 110 | 处理玩家输入、移动控制、攻击逻辑 | ✅ 就绪 |
-
-**输入处理**:
-- 输入事件由 GameContext 统一管理
-- PlayerControlSystem 从 GameContext 读取键盘/鼠标事件
-- 支持移动、攻击、技能释放等玩家操作
-
----
-
-#### Layer 2: AI & Decision (200-299)
+（注：仅做代码归位/把 GameScene 的逻辑搬回现有系统，不算“新增子系统”，但我仍会解释职责变化。）
 
 | 系统 | 优先级 | 职责 | 状态 |
 |------|--------|------|------|
