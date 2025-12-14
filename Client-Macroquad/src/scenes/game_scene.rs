@@ -13,7 +13,7 @@ use crate::scenes::dialogs::game::{
     NpcGoodsDialogHybrid,
 };
 use crate::scenes::{Scene, SceneTransition};
-use crate::ui::text_renderer::draw_text_cn;
+use crate::ui::text_renderer::{draw_text_cn, draw_text_with_outline, measure_text_cn};
 use crate::{
     components::{
         AnimationFrame, Camera as EcsCamera, CameraMode, LocalPlayer, MapData, MirDirection,
@@ -705,6 +705,193 @@ impl GameScene {
         }
 
         self.ecs_scheduler.draw(&self.ecs_ctx.world)
+    }
+
+    fn draw_world_overlays(&mut self, alpha: f32) {
+        let world = &self.ecs_ctx.world;
+        let alpha = alpha.clamp(0.0, 1.0);
+
+        let cam_zoom = world
+            .query::<&crate::components::Camera>()
+            .iter()
+            .next()
+            .map(|(_, c)| c.zoom)
+            .unwrap_or(1.0)
+            .max(0.0001);
+
+        fn argb_i32_to_color(argb: i32, alpha_mul: f32) -> Color {
+            if argb == 0 {
+                return Color::new(1.0, 1.0, 1.0, alpha_mul.clamp(0.0, 1.0));
+            }
+            let u = argb as u32;
+            let a = ((u >> 24) & 0xFF) as f32 / 255.0;
+            let r = ((u >> 16) & 0xFF) as f32 / 255.0;
+            let g = ((u >> 8) & 0xFF) as f32 / 255.0;
+            let b = (u & 0xFF) as f32 / 255.0;
+            Color::new(r, g, b, (a * alpha_mul).clamp(0.0, 1.0))
+        }
+
+        // 0) NPC 悬停线框（放在前景层之后，避免被遮挡）
+        let hovered_npc_object_id = world
+            .query::<&crate::components::HoverHighlight>()
+            .iter()
+            .next()
+            .and_then(|(_, hh)| hh.npc_object_id);
+
+        if let Some(hover_oid) = hovered_npc_object_id {
+            for (_entity, (spr, pos, sync)) in world
+                .query::<(
+                    &crate::components::LibrarySprite,
+                    &Position,
+                    &crate::components::NetworkSync,
+                )>()
+                .iter()
+            {
+                if sync.object_type != crate::components::NetworkObjectType::NPC
+                    || sync.object_id != hover_oid
+                {
+                    continue;
+                }
+                if !matches!(spr.blend_mode, crate::components::SpriteBlendMode::Alpha) {
+                    continue;
+                }
+
+                let Some(info) = spr.library.get_texture(spr.texture_index()) else {
+                    continue;
+                };
+                let Some(tex) = info.image else {
+                    continue;
+                };
+
+                let rect_x = pos.x + info.offset_x as f32;
+                let rect_y = pos.y + info.offset_y as f32;
+                let rect_w = tex.width();
+                let rect_h = tex.height();
+
+                let thickness = (2.0 / cam_zoom).max(0.5 / cam_zoom);
+                let frame_color = Color::new(1.0, 1.0, 1.0, (0.95 * alpha).clamp(0.0, 1.0));
+                draw_rectangle_lines(rect_x, rect_y, rect_w, rect_h, thickness, frame_color);
+            }
+        }
+
+        // 1) NPC 名字常显（放在前景层之后，避免被树/屋檐遮挡）
+        for (entity, (npc, pos)) in world.query::<(&crate::components::NPC, &Position)>().iter() {
+            let name = npc.name.as_str();
+            if name.is_empty() {
+                continue;
+            }
+
+            let name_color_argb = world
+                .get::<&crate::components::NameColor>(entity)
+                .ok()
+                .map(|c| c.0)
+                .unwrap_or(0);
+
+            let lines: Vec<&str> = if name.contains('_') {
+                name.split('_').filter(|s| !s.is_empty()).collect()
+            } else {
+                vec![name]
+            };
+            if lines.is_empty() {
+                continue;
+            }
+
+            let font_size = 16.0;
+            let base_y = pos.y - 40.0;
+            let multi_offset = ((lines.len().saturating_sub(1)) as f32 * 10.0) / 2.0;
+
+            for (i, line) in lines.iter().enumerate() {
+                let dims = measure_text_cn(line, font_size);
+                let x = pos.x - dims.width / 2.0;
+                let y = base_y - multi_offset + (i as f32 * 12.0);
+
+                let color = if i == 0 {
+                    argb_i32_to_color(name_color_argb, alpha)
+                } else {
+                    Color::new(1.0, 1.0, 1.0, alpha)
+                };
+                let outline = Color::new(0.0, 0.0, 0.0, alpha);
+                draw_text_with_outline(line, x, y, font_size, color, outline);
+            }
+        }
+
+        // 2) 怪物名字 + 血条
+        for (_entity, (monster, pos, hp)) in world
+            .query::<(&crate::components::Monster, &Position, &Health)>()
+            .iter()
+        {
+            if monster.name.is_empty() {
+                continue;
+            }
+
+            let font_size = 16.0;
+            let name = monster.name.as_str();
+            let dims = measure_text_cn(name, font_size);
+            let x = pos.x - dims.width / 2.0;
+            let y = pos.y - 54.0;
+            draw_text_with_outline(
+                name,
+                x,
+                y,
+                font_size,
+                Color::new(1.0, 1.0, 1.0, alpha),
+                Color::new(0.0, 0.0, 0.0, alpha),
+            );
+
+            let bar_w = 46.0;
+            let bar_h = 6.0;
+            let bar_x = pos.x - bar_w / 2.0;
+            let bar_y = pos.y - 46.0;
+
+            let max = hp.max.max(1) as f32;
+            let cur = hp.current.max(0) as f32;
+            let pct = (cur / max).clamp(0.0, 1.0);
+
+            draw_rectangle(
+                bar_x,
+                bar_y,
+                bar_w,
+                bar_h,
+                Color::from_rgba(0, 0, 0, (0.55 * alpha * 255.0).clamp(0.0, 255.0) as u8),
+            );
+            draw_rectangle_lines(
+                bar_x,
+                bar_y,
+                bar_w,
+                bar_h,
+                1.0 / cam_zoom,
+                Color::new(0.0, 0.0, 0.0, alpha),
+            );
+            draw_rectangle(
+                bar_x + 1.0 / cam_zoom,
+                bar_y + 1.0 / cam_zoom,
+                (bar_w - 2.0 / cam_zoom) * pct,
+                bar_h - 2.0 / cam_zoom,
+                Color::new(0.9, 0.1, 0.1, alpha),
+            );
+        }
+
+        // 3) 漂浮文本（伤害数字）
+        for (_entity, (ft, pos)) in world
+            .query::<(&crate::components::FloatingText, &Position)>()
+            .iter()
+        {
+            if ft.text.is_empty() {
+                continue;
+            }
+            let font_size = 18.0;
+            let dims = measure_text_cn(&ft.text, font_size);
+            let x = pos.x - dims.width / 2.0;
+            let y = pos.y;
+            draw_text_with_outline(
+                &ft.text,
+                x,
+                y,
+                font_size,
+                Color::new(1.0, 1.0, 1.0, alpha),
+                Color::new(0.0, 0.0, 0.0, alpha),
+            );
+        }
     }
 
     fn draw_ecs_path_overlay(&mut self) {
@@ -1450,6 +1637,9 @@ impl Scene for GameScene {
                     self.draw_ecs_sprites(PLAYER_GHOST_ALPHA, true)?;
                 }
             }
+
+            // 5) 世界叠加层：放到 Front 之后，避免被前景遮挡
+            self.draw_world_overlays(1.0);
             set_default_camera();
         } else {
             // 占位网格背景（模拟地图）

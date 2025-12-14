@@ -288,8 +288,9 @@ impl MockNetwork {
                         name_colour: 0,
                         image: 0,
                         colour: 0,
-                        location_x: 334,
-                        location_y: 328,
+                        // 原位置在该地图点位会被前景树完全遮挡，挪到更空旷的位置便于测试交互。
+                        location_x: 332,
+                        location_y: 330,
                         direction: mir2_shared::enums::MirDirection::Down,
                     },
                 });

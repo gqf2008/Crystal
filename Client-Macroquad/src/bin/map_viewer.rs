@@ -238,8 +238,8 @@ impl MapViewerState {
     async fn new() -> Result<Self, String> {
         // 资源根目录：使用绝对路径，避免从不同工作目录启动时找不到 Data/
         let data_dir = format!("{}/Data", env!("CARGO_MANIFEST_DIR"));
-        crate::resources::resource_manager::set_data_path(&data_dir);
-        crate::resources::libraries::set_data_path(data_dir);
+        client_macroquad::resources::resource_manager::set_data_path(&data_dir);
+        client_macroquad::resources::libraries::set_data_path(data_dir);
 
         // 创建 Camera2D (初始值,会在 update_camera 中更新)
         let camera = Camera2D {
@@ -258,7 +258,7 @@ impl MapViewerState {
         
         // 加载地图（使用 n0.map - 新手村，有漂亮的地图动画）
         println!("🗺️ 正在加载地图...");
-        let map_path = crate::resources::map_reader::resolve_map_path("n0");
+        let map_path = client_macroquad::resources::map_reader::resolve_map_path("n0");
         let map_reader = match MapReader::new(&map_path) {
             Ok(reader) => {
                 println!("✅ 地图加载成功: {}x{}", reader.width, reader.height);
