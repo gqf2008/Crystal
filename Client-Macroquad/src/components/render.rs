@@ -16,10 +16,26 @@ pub enum RenderLayer {
 }
 
 /// 渲染阶段参数（用于多次渲染 pass，例如遮挡后的 ghost pass）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderStage {
+    /// 正常渲染（位于地图 Middle 与 Front 之间的对象/特效）
+    Normal,
+    /// 后置渲染（位于地图 Front 之后的世界叠加层：名字/血条/轮廓/漂浮字等）
+    PostFront,
+}
+
+impl Default for RenderStage {
+    fn default() -> Self {
+        RenderStage::Normal
+    }
+}
+
+/// 渲染阶段参数（用于多次渲染 pass，例如遮挡后的 ghost pass）
 #[derive(Debug, Clone, Copy)]
 pub struct RenderPass {
     pub alpha: f32,
     pub local_only: bool,
+    pub stage: RenderStage,
 }
 
 /// 当前鼠标悬停对象（用于渲染高亮/轮廓等视觉效果）
@@ -58,6 +74,7 @@ impl Default for RenderPass {
         Self {
             alpha: 1.0,
             local_only: false,
+            stage: RenderStage::Normal,
         }
     }
 }

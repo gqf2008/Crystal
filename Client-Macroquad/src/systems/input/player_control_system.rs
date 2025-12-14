@@ -34,7 +34,8 @@
 
 use crate::{
     components::{
-        Camera, LocalPlayer, Player, PlayerInput, Position,
+        Camera, HoverHighlight, LibrarySprite, NetworkObjectType, NetworkSync, Position, UiWorldInputBlock,
+        LocalPlayer, Player, PlayerInput,
     },
     game::{GameContext, GameResult},
     systems::LogicSystem,
@@ -173,6 +174,116 @@ impl PlayerControlSystem {
         let world_x = camera_pos.x + (screen_x - camera.screen_width / 2.0) / camera.zoom;
         let world_y = camera_pos.y + (screen_y - camera.screen_height / 2.0) / camera.zoom;
         (world_x, world_y)
+    }
+
+    fn find_hovered_object_id(
+        ctx: &GameContext,
+        mouse_world: (f32, f32),
+        object_type: NetworkObjectType,
+    ) -> Option<u32> {
+        // 贴近原版：优先像素级命中（VisiblePixel），命中里取 y 最大（最前景）
+        let mut best_pixel: Option<(u32, f32)> = None;
+        for (_, (sync, spr, pos)) in ctx.world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
+            if sync.object_type != object_type {
+                continue;
+            }
+
+            let Some(info) = spr.library.get_texture(spr.texture_index()) else {
+                continue;
+            };
+
+            let draw_x = pos.x + info.offset_x as f32;
+            let draw_y = pos.y + info.offset_y as f32;
+            let local_x = (mouse_world.0 - draw_x).floor() as i32;
+            let local_y = (mouse_world.1 - draw_y).floor() as i32;
+            if !info.visible_pixel(local_x, local_y) {
+                continue;
+            }
+
+            match best_pixel {
+                None => best_pixel = Some((sync.object_id, pos.y)),
+                Some((_oid, best_y)) if pos.y > best_y => best_pixel = Some((sync.object_id, pos.y)),
+                _ => {}
+            }
+        }
+        if let Some((oid, _y)) = best_pixel {
+            return Some(oid);
+        }
+
+        // 命中兜底：鼠标落在当前帧纹理矩形内
+        let mut best_rect: Option<(u32, f32)> = None;
+        for (_, (sync, spr, pos)) in ctx.world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
+            if sync.object_type != object_type {
+                continue;
+            }
+            let Some(info) = spr.library.get_texture(spr.texture_index()) else {
+                continue;
+            };
+            let Some(tex) = info.image else {
+                continue;
+            };
+
+            let draw_x = pos.x + info.offset_x as f32;
+            let draw_y = pos.y + info.offset_y as f32;
+            let w = tex.width();
+            let h = tex.height();
+            if mouse_world.0 < draw_x
+                || mouse_world.1 < draw_y
+                || mouse_world.0 >= draw_x + w
+                || mouse_world.1 >= draw_y + h
+            {
+                continue;
+            }
+
+            match best_rect {
+                None => best_rect = Some((sync.object_id, pos.y)),
+                Some((_oid, best_y)) if pos.y > best_y => best_rect = Some((sync.object_id, pos.y)),
+                _ => {}
+            }
+        }
+
+        best_rect.map(|(oid, _y)| oid)
+    }
+
+    fn update_world_hover(ctx: &mut GameContext, camera_pos: &Position, camera: &Camera) {
+        // HoverHighlight 被挂在 render-pass 实体上（约定：世界里只有一个）
+        let Some(pass_entity) = ctx
+            .world
+            .query::<&HoverHighlight>()
+            .iter()
+            .next()
+            .map(|(e, _)| e)
+        else {
+            return;
+        };
+
+        // UI 屏蔽：UI 捕获或鼠标悬停 UI 时，不更新世界 hover
+        let blocked_by_ui = ctx
+            .world
+            .get::<&UiWorldInputBlock>(pass_entity)
+            .ok()
+            .map(|b| b.mouse_captured || b.mouse_over_ui)
+            .unwrap_or(false);
+
+        let (npc_oid, monster_oid) = if blocked_by_ui {
+            (None, None)
+        } else {
+            let mouse_pos = ctx.input().mouse.position();
+            let (wx, wy) = Self::screen_to_world(mouse_pos.x, mouse_pos.y, camera_pos, camera);
+
+            if let Some(oid) = Self::find_hovered_object_id(ctx, (wx, wy), NetworkObjectType::NPC) {
+                (Some(oid), None)
+            } else {
+                let mid = Self::find_hovered_object_id(ctx, (wx, wy), NetworkObjectType::Monster);
+                (None, mid)
+            }
+        };
+
+        // 最后再写入 HoverHighlight，避免与上面的只读查询产生借用冲突
+        if let Ok(mut hh) = ctx.world.get::<&mut HoverHighlight>(pass_entity) {
+            hh.npc_object_id = npc_oid;
+            hh.monster_object_id = monster_oid;
+        }
     }
 
     fn find_clicked_npc_object_id(ctx: &GameContext, click_world: (f32, f32)) -> Option<u32> {
@@ -439,6 +550,9 @@ impl LogicSystem for PlayerControlSystem {
                     screen_height: 720.0,
                 },
             ));
+
+        // 统一由 ECS 输入系统更新 hover 高亮
+        Self::update_world_hover(ctx, &camera_pos, &camera);
 
         // 处理双击（移动到目标，使用寻路）
         // 说明：双击是“第二次点击松开”时产生的一次性事件；单击不会误触发。

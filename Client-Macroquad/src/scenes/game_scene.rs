@@ -13,13 +13,13 @@ use crate::scenes::dialogs::game::{
     NpcGoodsDialogHybrid,
 };
 use crate::scenes::{Scene, SceneTransition};
-use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
+use crate::ui::text_renderer::draw_text_cn;
 use crate::{
     components::{
         AnimationFrame, Camera as EcsCamera, CameraMode, LocalPlayer, MapData, MirDirection,
         MovementVelocity, Path, Player, PlayerAction, PlayerAppearance, PlayerInput, Position,
         CombatStats, Draggable, Equipment, Health, Mana, MountState, RegenTimer, RenderConfig,
-        RenderPass, TimeTracker,
+        RenderPass, RenderStage, TimeTracker,
     },
     systems::{priority, AnimationSystem, CameraFollowSystem, CameraSystem, CollisionSystem, CombatSystem, HealthRegenSystem, MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SkillSystem, SystemScheduler},
 };
@@ -511,6 +511,7 @@ impl GameScene {
                     crate::components::HoverHighlight::default(),
                     crate::components::ActiveNpc::default(),
                     crate::components::NpcCallCooldown::default(),
+                    crate::components::UiWorldInputBlock::default(),
                 ));
             self.ecs_render_pass_entity = Some(entity);
         }
@@ -700,7 +701,7 @@ impl GameScene {
         self.clamp_map_camera_position();
     }
 
-    fn draw_ecs_sprites(&mut self, alpha: f32, local_only: bool) -> GameResult {
+    fn draw_ecs_sprites(&mut self, alpha: f32, local_only: bool, stage: RenderStage) -> GameResult {
         let Some(pass_entity) = self.ecs_render_pass_entity else {
             return Ok(());
         };
@@ -708,295 +709,10 @@ impl GameScene {
         if let Ok(mut pass) = self.ecs_ctx.world.get::<&mut RenderPass>(pass_entity) {
             pass.alpha = alpha;
             pass.local_only = local_only;
+            pass.stage = stage;
         }
 
         self.ecs_scheduler.draw(&self.ecs_ctx.world)
-    }
-
-    fn draw_world_overlays(&mut self, alpha: f32) {
-        let world = &self.ecs_ctx.world;
-        let alpha = alpha.clamp(0.0, 1.0);
-
-        let cam_zoom = world
-            .query::<&crate::components::Camera>()
-            .iter()
-            .next()
-            .map(|(_, c)| c.zoom)
-            .unwrap_or(1.0)
-            .max(0.0001);
-
-        // 视口裁剪：避免对屏幕外的实体做文本描边/测量，显著降低 draw calls。
-        let (cam_pos_x, cam_pos_y, cam_screen_w, cam_screen_h) = world
-            .query::<(&crate::components::Camera, &Position)>()
-            .iter()
-            .next()
-            .map(|(_, (c, p))| (p.x, p.y, c.screen_width, c.screen_height))
-            .unwrap_or((0.0, 0.0, screen_width(), screen_height()));
-        let half_w = (cam_screen_w / 2.0) / cam_zoom;
-        let half_h = (cam_screen_h / 2.0) / cam_zoom;
-        let cull_margin = 120.0; // 留一点 margin，避免边缘闪烁
-        let view_left = cam_pos_x - half_w - cull_margin;
-        let view_right = cam_pos_x + half_w + cull_margin;
-        let view_top = cam_pos_y - half_h - cull_margin;
-        let view_bottom = cam_pos_y + half_h + cull_margin;
-
-        let in_view = |x: f32, y: f32| -> bool {
-            x >= view_left && x <= view_right && y >= view_top && y <= view_bottom
-        };
-
-        // 世界文本：使用更轻量的 4 向描边（比 8 向少 44% draw calls）
-        let draw_text_outline_world = |text: &str, x: f32, y: f32, font_size: f32, color: Color, outline: Color| {
-            // 让描边在缩放下保持“屏幕 1px”的感觉
-            let d = (1.0 / cam_zoom).max(0.35 / cam_zoom);
-            let offsets = [vec2(-d, 0.0), vec2(d, 0.0), vec2(0.0, -d), vec2(0.0, d)];
-            for off in offsets {
-                draw_text_cn(text, x + off.x, y + off.y, font_size, outline);
-            }
-            draw_text_cn(text, x, y, font_size, color);
-        };
-
-        fn argb_i32_to_color(argb: i32, alpha_mul: f32) -> Color {
-            if argb == 0 {
-                return Color::new(1.0, 1.0, 1.0, alpha_mul.clamp(0.0, 1.0));
-            }
-            let u = argb as u32;
-            let a = ((u >> 24) & 0xFF) as f32 / 255.0;
-            let r = ((u >> 16) & 0xFF) as f32 / 255.0;
-            let g = ((u >> 8) & 0xFF) as f32 / 255.0;
-            let b = (u & 0xFF) as f32 / 255.0;
-            Color::new(r, g, b, (a * alpha_mul).clamp(0.0, 1.0))
-        }
-
-        // 0) 悬停轮廓（放在前景层之后，避免被遮挡）
-        let (hovered_npc_object_id, hovered_monster_object_id) = world
-            .query::<&crate::components::HoverHighlight>()
-            .iter()
-            .next()
-            .map(|(_, hh)| (hh.npc_object_id, hh.monster_object_id))
-            .unwrap_or((None, None));
-
-        if let Some(hover_oid) = hovered_npc_object_id {
-            for (_entity, (spr, pos, sync)) in world
-                .query::<(
-                    &crate::components::LibrarySprite,
-                    &Position,
-                    &crate::components::NetworkSync,
-                )>()
-                .iter()
-            {
-                if sync.object_type != crate::components::NetworkObjectType::NPC
-                    || sync.object_id != hover_oid
-                {
-                    continue;
-                }
-                if !matches!(spr.blend_mode, crate::components::SpriteBlendMode::Alpha) {
-                    continue;
-                }
-
-                let Some(info) = spr.library.get_texture(spr.texture_index()) else {
-                    continue;
-                };
-                let Some(tex) = info.image else {
-                    continue;
-                };
-
-                let base_x = pos.x + info.offset_x as f32;
-                let base_y = pos.y + info.offset_y as f32;
-
-                // 参考原版感觉：白色细描边（上下左右 4 向 1px），避免 8 向导致边缘“太厚”。
-                // 屏幕 1px -> 世界偏移 = 1 / zoom
-                let d = (1.0 / cam_zoom).max(0.35 / cam_zoom);
-                let outline = Color::new(1.0, 1.0, 1.0, (0.55 * alpha).clamp(0.0, 1.0));
-
-                let offsets = [vec2(-d, 0.0), vec2(d, 0.0), vec2(0.0, -d), vec2(0.0, d)];
-
-                for off in offsets {
-                    draw_texture_ex(
-                        &tex,
-                        base_x + off.x,
-                        base_y + off.y,
-                        outline,
-                        DrawTextureParams {
-                            ..Default::default()
-                        },
-                    );
-                }
-            }
-        }
-
-        if let Some(hover_oid) = hovered_monster_object_id {
-            for (_entity, (spr, pos, sync)) in world
-                .query::<(
-                    &crate::components::LibrarySprite,
-                    &Position,
-                    &crate::components::NetworkSync,
-                )>()
-                .iter()
-            {
-                if sync.object_type != crate::components::NetworkObjectType::Monster
-                    || sync.object_id != hover_oid
-                {
-                    continue;
-                }
-                if !matches!(spr.blend_mode, crate::components::SpriteBlendMode::Alpha) {
-                    continue;
-                }
-
-                let Some(info) = spr.library.get_texture(spr.texture_index()) else {
-                    continue;
-                };
-                let Some(tex) = info.image else {
-                    continue;
-                };
-
-                let base_x = pos.x + info.offset_x as f32;
-                let base_y = pos.y + info.offset_y as f32;
-
-                let d = (1.0 / cam_zoom).max(0.35 / cam_zoom);
-                let outline = Color::new(1.0, 1.0, 1.0, (0.55 * alpha).clamp(0.0, 1.0));
-                let offsets = [vec2(-d, 0.0), vec2(d, 0.0), vec2(0.0, -d), vec2(0.0, d)];
-
-                for off in offsets {
-                    draw_texture_ex(
-                        &tex,
-                        base_x + off.x,
-                        base_y + off.y,
-                        outline,
-                        DrawTextureParams {
-                            ..Default::default()
-                        },
-                    );
-                }
-            }
-        }
-
-        // 1) NPC 名字常显（放在前景层之后，避免被树/屋檐遮挡）
-        for (entity, (npc, pos)) in world.query::<(&crate::components::NPC, &Position)>().iter() {
-            if !in_view(pos.x, pos.y) {
-                continue;
-            }
-            let name = npc.name.as_str();
-            if name.is_empty() {
-                continue;
-            }
-
-            let name_color_argb = world
-                .get::<&crate::components::NameColor>(entity)
-                .ok()
-                .map(|c| c.0)
-                .unwrap_or(0);
-
-            let lines: Vec<&str> = if name.contains('_') {
-                name.split('_').filter(|s| !s.is_empty()).collect()
-            } else {
-                vec![name]
-            };
-            if lines.is_empty() {
-                continue;
-            }
-
-            let font_size = 16.0;
-            let base_y = pos.y - 40.0;
-            let multi_offset = ((lines.len().saturating_sub(1)) as f32 * 10.0) / 2.0;
-
-            for (i, line) in lines.iter().enumerate() {
-                let dims = measure_text_cn(line, font_size);
-                let x = pos.x - dims.width / 2.0;
-                let y = base_y - multi_offset + (i as f32 * 12.0);
-
-                let color = if i == 0 {
-                    argb_i32_to_color(name_color_argb, alpha)
-                } else {
-                    Color::new(1.0, 1.0, 1.0, alpha)
-                };
-                let outline = Color::new(0.0, 0.0, 0.0, alpha);
-                draw_text_outline_world(line, x, y, font_size, color, outline);
-            }
-        }
-
-        // 2) 怪物名字 + 血条
-        for (_entity, (monster, pos, hp)) in world
-            .query::<(&crate::components::Monster, &Position, &Health)>()
-            .iter()
-        {
-            if !in_view(pos.x, pos.y) {
-                continue;
-            }
-            if monster.name.is_empty() {
-                continue;
-            }
-
-            let font_size = 16.0;
-            let name = monster.name.as_str();
-            let dims = measure_text_cn(name, font_size);
-            let x = pos.x - dims.width / 2.0;
-            let y = pos.y - 54.0;
-            draw_text_outline_world(
-                name,
-                x,
-                y,
-                font_size,
-                Color::new(1.0, 1.0, 1.0, alpha),
-                Color::new(0.0, 0.0, 0.0, alpha),
-            );
-
-            let bar_w = 46.0;
-            let bar_h = 6.0;
-            let bar_x = pos.x - bar_w / 2.0;
-            let bar_y = pos.y - 46.0;
-
-            let max = hp.max.max(1) as f32;
-            let cur = hp.current.max(0) as f32;
-            let pct = (cur / max).clamp(0.0, 1.0);
-
-            draw_rectangle(
-                bar_x,
-                bar_y,
-                bar_w,
-                bar_h,
-                Color::from_rgba(0, 0, 0, (0.55 * alpha * 255.0).clamp(0.0, 255.0) as u8),
-            );
-            draw_rectangle_lines(
-                bar_x,
-                bar_y,
-                bar_w,
-                bar_h,
-                1.0 / cam_zoom,
-                Color::new(0.0, 0.0, 0.0, alpha),
-            );
-            draw_rectangle(
-                bar_x + 1.0 / cam_zoom,
-                bar_y + 1.0 / cam_zoom,
-                (bar_w - 2.0 / cam_zoom) * pct,
-                bar_h - 2.0 / cam_zoom,
-                Color::new(0.9, 0.1, 0.1, alpha),
-            );
-        }
-
-        // 3) 漂浮文本（伤害数字）
-        for (_entity, (ft, pos)) in world
-            .query::<(&crate::components::FloatingText, &Position)>()
-            .iter()
-        {
-            if !in_view(pos.x, pos.y) {
-                continue;
-            }
-            if ft.text.is_empty() {
-                continue;
-            }
-            let font_size = 18.0;
-            let dims = measure_text_cn(&ft.text, font_size);
-            let x = pos.x - dims.width / 2.0;
-            let y = pos.y;
-            draw_text_outline_world(
-                &ft.text,
-                x,
-                y,
-                font_size,
-                Color::new(1.0, 1.0, 1.0, alpha),
-                Color::new(0.0, 0.0, 0.0, alpha),
-            );
-        }
     }
 
     fn draw_ecs_path_overlay(&mut self) {
@@ -1093,207 +809,6 @@ impl GameScene {
         }
     }
 
-    fn screen_to_world_from_map_camera(&self, screen_pos: Vec2) -> Vec2 {
-        let (sw, sh) = self.ecs_ctx.drawable_size();
-        let zoom = self.effective_map_zoom().max(0.0001);
-
-        vec2(
-            self.map_camera_position.x + (screen_pos.x - sw / 2.0) / zoom,
-            self.map_camera_position.y + (screen_pos.y - sh / 2.0) / zoom,
-        )
-    }
-
-    fn find_hovered_npc_tile(&self, mouse_world: Vec2) -> Option<(u32, i32, i32)> {
-        use crate::components::{LibrarySprite, NetworkObjectType, NetworkSync, Position};
-
-        // 贴近原版：优先像素级命中（BodyLibrary.VisiblePixel）
-        // 选择规则：命中里取 y 最大（最前景）
-        let mut best_pixel: Option<(u32, f32, i32, i32)> = None;
-        for (_, (sync, spr, pos)) in self
-            .ecs_ctx
-            .world
-            .query::<(&NetworkSync, &LibrarySprite, &Position)>()
-            .iter()
-        {
-            if sync.object_type != NetworkObjectType::NPC {
-                continue;
-            }
-
-            let Some(info) = spr.library.get_texture(spr.texture_index()) else {
-                continue;
-            };
-
-            let draw_x = pos.x + info.offset_x as f32;
-            let draw_y = pos.y + info.offset_y as f32;
-            let local_x = (mouse_world.x - draw_x).floor() as i32;
-            let local_y = (mouse_world.y - draw_y).floor() as i32;
-            if !info.visible_pixel(local_x, local_y) {
-                continue;
-            }
-
-            let (gx, gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-            match best_pixel {
-                None => best_pixel = Some((sync.object_id, pos.y, gx, gy)),
-                Some((_oid, best_y, _bgx, _bgy)) if pos.y > best_y => {
-                    best_pixel = Some((sync.object_id, pos.y, gx, gy))
-                }
-                _ => {}
-            }
-        }
-        if let Some((oid, _y, gx, gy)) = best_pixel {
-            return Some((oid, gx, gy));
-        }
-
-        // 命中兜底：只要鼠标落在当前帧纹理矩形内即可（不再使用“大半径”）。
-        let mut best_rect: Option<(u32, f32, i32, i32)> = None;
-        for (_, (sync, spr, pos)) in self
-            .ecs_ctx
-            .world
-            .query::<(&NetworkSync, &LibrarySprite, &Position)>()
-            .iter()
-        {
-            if sync.object_type != NetworkObjectType::NPC {
-                continue;
-            }
-            let Some(info) = spr.library.get_texture(spr.texture_index()) else {
-                continue;
-            };
-            let Some(tex) = info.image else {
-                continue;
-            };
-
-            let draw_x = pos.x + info.offset_x as f32;
-            let draw_y = pos.y + info.offset_y as f32;
-            let w = tex.width();
-            let h = tex.height();
-            if mouse_world.x < draw_x
-                || mouse_world.y < draw_y
-                || mouse_world.x >= draw_x + w
-                || mouse_world.y >= draw_y + h
-            {
-                continue;
-            }
-
-            let (gx, gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-            match best_rect {
-                None => best_rect = Some((sync.object_id, pos.y, gx, gy)),
-                Some((_oid, best_y, _bgx, _bgy)) if pos.y > best_y => {
-                    best_rect = Some((sync.object_id, pos.y, gx, gy))
-                }
-                _ => {}
-            }
-        }
-
-        best_rect.map(|(oid, _y, gx, gy)| (oid, gx, gy))
-    }
-
-    fn find_hovered_monster_tile(&self, mouse_world: Vec2) -> Option<(u32, i32, i32)> {
-        use crate::components::{LibrarySprite, NetworkObjectType, NetworkSync, Position};
-
-        // 像素级命中（优先）
-        let mut best_pixel: Option<(u32, f32, i32, i32)> = None;
-        for (_, (sync, spr, pos)) in self
-            .ecs_ctx
-            .world
-            .query::<(&NetworkSync, &LibrarySprite, &Position)>()
-            .iter()
-        {
-            if sync.object_type != NetworkObjectType::Monster {
-                continue;
-            }
-
-            let Some(info) = spr.library.get_texture(spr.texture_index()) else {
-                continue;
-            };
-            let draw_x = pos.x + info.offset_x as f32;
-            let draw_y = pos.y + info.offset_y as f32;
-            let local_x = (mouse_world.x - draw_x).floor() as i32;
-            let local_y = (mouse_world.y - draw_y).floor() as i32;
-            if !info.visible_pixel(local_x, local_y) {
-                continue;
-            }
-
-            let (gx, gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-            match best_pixel {
-                None => best_pixel = Some((sync.object_id, pos.y, gx, gy)),
-                Some((_oid, best_y, _bgx, _bgy)) if pos.y > best_y => {
-                    best_pixel = Some((sync.object_id, pos.y, gx, gy))
-                }
-                _ => {}
-            }
-        }
-        if let Some((oid, _y, gx, gy)) = best_pixel {
-            return Some((oid, gx, gy));
-        }
-
-        // 命中兜底：鼠标落在当前帧纹理矩形内
-        let mut best_rect: Option<(u32, f32, i32, i32)> = None;
-        for (_, (sync, spr, pos)) in self
-            .ecs_ctx
-            .world
-            .query::<(&NetworkSync, &LibrarySprite, &Position)>()
-            .iter()
-        {
-            if sync.object_type != NetworkObjectType::Monster {
-                continue;
-            }
-            let Some(info) = spr.library.get_texture(spr.texture_index()) else {
-                continue;
-            };
-            let Some(tex) = info.image else {
-                continue;
-            };
-
-            let draw_x = pos.x + info.offset_x as f32;
-            let draw_y = pos.y + info.offset_y as f32;
-            let w = tex.width();
-            let h = tex.height();
-            if mouse_world.x < draw_x
-                || mouse_world.y < draw_y
-                || mouse_world.x >= draw_x + w
-                || mouse_world.y >= draw_y + h
-            {
-                continue;
-            }
-
-            let (gx, gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-            match best_rect {
-                None => best_rect = Some((sync.object_id, pos.y, gx, gy)),
-                Some((_oid, best_y, _bgx, _bgy)) if pos.y > best_y => {
-                    best_rect = Some((sync.object_id, pos.y, gx, gy))
-                }
-                _ => {}
-            }
-        }
-
-        best_rect.map(|(oid, _y, gx, gy)| (oid, gx, gy))
-    }
-
-    fn set_hovered_npc_object_id(&mut self, object_id: Option<u32>) {
-        let Some(pass_entity) = self.ecs_render_pass_entity else {
-            return;
-        };
-        if let Ok(mut hh) = self
-            .ecs_ctx
-            .world
-            .get::<&mut crate::components::HoverHighlight>(pass_entity)
-        {
-            hh.npc_object_id = object_id;
-        }
-    }
-
-    fn set_hovered_monster_object_id(&mut self, object_id: Option<u32>) {
-        let Some(pass_entity) = self.ecs_render_pass_entity else {
-            return;
-        };
-        if let Ok(mut hh) = self
-            .ecs_ctx
-            .world
-            .get::<&mut crate::components::HoverHighlight>(pass_entity)
-        {
-            hh.monster_object_id = object_id;
-        }
-    }
 
     fn active_npc_object_id(&self) -> Option<u32> {
         let Some(pass_entity) = self.ecs_render_pass_entity else {
@@ -1327,37 +842,6 @@ impl GameScene {
         }
 
         false
-    }
-
-    fn draw_npc_hover_highlight(&mut self) {
-        // 贴近原版：只有“鼠标确实在 UI 上”才屏蔽世界 hover。
-        // 但如果 UI 正在捕获鼠标（按住拖拽/滑动中），仍然屏蔽，避免拖拽时画面干扰。
-        // 默认先清空，避免 UI 覆盖/不命中时残留上一次高亮
-        self.set_hovered_npc_object_id(None);
-        self.set_hovered_monster_object_id(None);
-
-        if self.ui_mouse_captured {
-            return;
-        }
-        if self.map_reader.is_none() {
-            return;
-        }
-
-        let mouse_screen: Vec2 = mouse_position().into();
-        if self.is_mouse_over_any_ui(mouse_screen) {
-            return;
-        }
-
-        let mouse_world = self.screen_to_world_from_map_camera(mouse_screen);
-
-        if let Some((oid, _gx, _gy)) = self.find_hovered_npc_tile(mouse_world) {
-            self.set_hovered_npc_object_id(Some(oid));
-            return;
-        }
-
-        if let Some((oid, _gx, _gy)) = self.find_hovered_monster_tile(mouse_world) {
-            self.set_hovered_monster_object_id(Some(oid));
-        }
     }
 
     fn handle_map_input(&mut self) {
@@ -1706,6 +1190,14 @@ impl Scene for GameScene {
                 self.ui_mouse_captured = false;
             }
 
+            // UI -> ECS：同步 UI 命中/捕获状态，用于阻止世界 hover（由 ECS 输入系统统一处理）。
+            if let Some(pass_entity) = self.ecs_render_pass_entity {
+                if let Ok(mut block) = self.ecs_ctx.world.get::<&mut crate::components::UiWorldInputBlock>(pass_entity) {
+                    block.mouse_over_ui = ui_over;
+                    block.mouse_captured = self.ui_mouse_captured;
+                }
+            }
+
             // 这个帧内是否阻止 ECS 读取输入
             self.ecs_ctx.input_blocked = self.main_dialog.is_any_input_active()
                 || self.ui_mouse_captured
@@ -1818,11 +1310,8 @@ impl Scene for GameScene {
                 self.map_renderer.show_front_layer = original_show_front;
             }
 
-            // 鼠标悬停 NPC 高亮（位于地图层与精灵层之间）
-            self.draw_npc_hover_highlight();
-
             // 2) 先画角色（位于 Middle 与 Front 之间）
-            self.draw_ecs_sprites(1.0, false)?;
+            self.draw_ecs_sprites(1.0, false, RenderStage::Normal)?;
             self.draw_ecs_path_overlay();
 
             // 3) 再渲染 Front（保持完全不透明）
@@ -1847,12 +1336,12 @@ impl Scene for GameScene {
 
                 // 4) 只有被前景遮挡时，额外画一遍半透明人形（不改变前景本身）
                 if occluded {
-                    self.draw_ecs_sprites(PLAYER_GHOST_ALPHA, true)?;
+                    self.draw_ecs_sprites(PLAYER_GHOST_ALPHA, true, RenderStage::Normal)?;
                 }
             }
 
             // 5) 世界叠加层：放到 Front 之后，避免被前景遮挡
-            self.draw_world_overlays(1.0);
+            self.draw_ecs_sprites(1.0, false, RenderStage::PostFront)?;
             set_default_camera();
         } else {
             // 占位网格背景（模拟地图）

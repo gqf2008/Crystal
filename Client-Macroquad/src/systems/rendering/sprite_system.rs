@@ -1,7 +1,7 @@
 mod character;
 mod weapon;
 
-use crate::components::{Camera,Position};
+use crate::components::{Camera,Position, RenderPass, RenderStage};
 use crate::systems::RenderSystem;
 // use ggez::{graphics::GraphicsContext, GameResult};
 use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
@@ -75,6 +75,17 @@ impl RenderSystem for SpriteRenderSystem {
         &mut self,
         world: &hecs::World,
     ) -> crate::game::GameResult {
+        // PostFront pass 只画“世界叠加层”，精灵/角色应在 Normal pass 完成。
+        let stage = world
+            .query::<&RenderPass>()
+            .iter()
+            .next()
+            .map(|(_, pass)| pass.stage)
+            .unwrap_or(RenderStage::Normal);
+        if stage != RenderStage::Normal {
+            return Ok(());
+        }
+
         self.draw_character(world, &self.add_blend_material)?;
         Ok(())
     }

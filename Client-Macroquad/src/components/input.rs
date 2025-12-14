@@ -70,6 +70,16 @@ pub struct Draggable {
     pub drag_start_pos_y: f32,
 }
 
+/// UI 对世界输入的屏蔽状态。
+///
+/// 说明：UI（GameScene/MainDialog）负责命中检测与鼠标捕获；ECS 输入系统只读取该状态，
+/// 用于避免“鼠标在 UI 上时仍触发世界 hover/点击语义”。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UiWorldInputBlock {
+    pub mouse_over_ui: bool,
+    pub mouse_captured: bool,
+}
+
 impl Default for Draggable {
     fn default() -> Self {
         Self {
