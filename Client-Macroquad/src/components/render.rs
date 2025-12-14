@@ -26,6 +26,7 @@ pub struct RenderPass {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HoverHighlight {
     pub npc_object_id: Option<u32>,
+    pub monster_object_id: Option<u32>,
 }
 
 /// 当前正在交互的 NPC（对齐 C# 的 GameScene.NPCID）

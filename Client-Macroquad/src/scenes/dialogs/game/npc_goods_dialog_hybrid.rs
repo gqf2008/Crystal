@@ -63,6 +63,11 @@ enum HoverTarget {
 pub struct NpcGoodsDialogHybrid {
     visible: bool,
 
+    // 窗口位置（可拖动）
+    pos: Vec2,
+    window_dragging: bool,
+    window_drag_offset: Vec2,
+
     // 对齐 C# 字段
     ptype: PanelType,
     use_pearls: bool,
@@ -106,8 +111,11 @@ pub struct NpcGoodsDialogHybrid {
 
 impl NpcGoodsDialogHybrid {
     // 布局参数（与 C# 原版一致）
-    const POS_X: f32 = 0.0;
-    const POS_Y: f32 = 224.0;
+    const DEFAULT_POS_X: f32 = 0.0;
+    const DEFAULT_POS_Y: f32 = 224.0;
+
+    // 顶部可拖动区域高度（简化实现：标题栏/顶部背景）
+    const DRAG_BAR_H: f32 = 32.0;
 
     const CELL_X: f32 = 10.0;
     const CELL_Y: f32 = 34.0;
@@ -140,6 +148,10 @@ impl NpcGoodsDialogHybrid {
     pub fn new() -> Self {
         Self {
             visible: false,
+
+            pos: vec2(Self::DEFAULT_POS_X, Self::DEFAULT_POS_Y),
+            window_dragging: false,
+            window_drag_offset: vec2(0.0, 0.0),
 
             ptype: PanelType::Buy,
             use_pearls: false,
@@ -189,6 +201,7 @@ impl NpcGoodsDialogHybrid {
     pub fn hide(&mut self) {
         self.visible = false;
         self.scroll_dragging = false;
+        self.window_dragging = false;
         self.pending_action = None;
     }
 
@@ -197,7 +210,28 @@ impl NpcGoodsDialogHybrid {
     }
 
     pub fn rect(&self) -> Rect {
-        Rect::new(Self::POS_X, Self::POS_Y, self.bg_size.x.max(235.0), self.bg_size.y.max(340.0))
+        Rect::new(self.pos.x, self.pos.y, self.bg_size.x.max(235.0), self.bg_size.y.max(340.0))
+    }
+
+    fn title_drag_rect(&self) -> Rect {
+        let r = self.rect();
+        Rect::new(r.x, r.y, r.w, Self::DRAG_BAR_H.min(r.h))
+    }
+
+    fn clamp_pos_to_screen(&mut self) {
+        let r = self.rect();
+        let sw = screen_width();
+        let sh = screen_height();
+
+        // 保证窗口至少留一点在屏幕内，避免拖丢
+        let min_visible = 20.0;
+        let min_x = -(r.w - min_visible);
+        let max_x = (sw - min_visible).max(min_x);
+        let min_y = 0.0;
+        let max_y = (sh - min_visible).max(min_y);
+
+        self.pos.x = self.pos.x.clamp(min_x, max_x);
+        self.pos.y = self.pos.y.clamp(min_y, max_y);
     }
 
     pub fn is_mouse_over(&self, mouse_pos: Vec2) -> bool {
@@ -276,10 +310,10 @@ impl NpcGoodsDialogHybrid {
         self.display_goods.iter().find(|x| x.unique_id == uid)
     }
 
-    fn cell_rect(row: usize) -> Rect {
+    fn cell_rect(&self, row: usize) -> Rect {
         Rect::new(
-            Self::POS_X + Self::CELL_X,
-            Self::POS_Y + Self::CELL_Y + row as f32 * Self::CELL_STEP_Y,
+            self.pos.x + Self::CELL_X,
+            self.pos.y + Self::CELL_Y + row as f32 * Self::CELL_STEP_Y,
             Self::CELL_W,
             Self::CELL_H,
         )
@@ -287,8 +321,8 @@ impl NpcGoodsDialogHybrid {
 
     fn close_rect(&self) -> Rect {
         Rect::new(
-            Self::POS_X + Self::CLOSE_X,
-            Self::POS_Y + Self::CLOSE_Y,
+            self.pos.x + Self::CLOSE_X,
+            self.pos.y + Self::CLOSE_Y,
             self.close_btn.size.x,
             self.close_btn.size.y,
         )
@@ -296,8 +330,8 @@ impl NpcGoodsDialogHybrid {
 
     fn buy_rect(&self) -> Rect {
         Rect::new(
-            Self::POS_X + Self::BUY_X,
-            Self::POS_Y + Self::BUY_Y,
+            self.pos.x + Self::BUY_X,
+            self.pos.y + Self::BUY_Y,
             self.buy_btn.size.x,
             self.buy_btn.size.y,
         )
@@ -305,8 +339,8 @@ impl NpcGoodsDialogHybrid {
 
     fn scroll_up_rect(&self) -> Rect {
         Rect::new(
-            Self::POS_X + Self::SCROLL_X,
-            Self::POS_Y + Self::SCROLL_UP_Y,
+            self.pos.x + Self::SCROLL_X,
+            self.pos.y + Self::SCROLL_UP_Y,
             self.scroll_up_btn.size.x,
             self.scroll_up_btn.size.y,
         )
@@ -314,8 +348,8 @@ impl NpcGoodsDialogHybrid {
 
     fn scroll_down_rect(&self) -> Rect {
         Rect::new(
-            Self::POS_X + Self::SCROLL_X,
-            Self::POS_Y + Self::SCROLL_DOWN_Y,
+            self.pos.x + Self::SCROLL_X,
+            self.pos.y + Self::SCROLL_DOWN_Y,
             self.scroll_down_btn.size.x,
             self.scroll_down_btn.size.y,
         )
@@ -325,7 +359,7 @@ impl NpcGoodsDialogHybrid {
         let bar_h = self.scroll_bar_btn.size.y.max(1.0);
 
         if self.display_goods.len() <= Self::CELL_ROWS {
-            return Rect::new(Self::POS_X + Self::SCROLL_X, Self::POS_Y + Self::SCROLL_BAR_MIN_Y, self.scroll_bar_btn.size.x, bar_h);
+            return Rect::new(self.pos.x + Self::SCROLL_X, self.pos.y + Self::SCROLL_BAR_MIN_Y, self.scroll_bar_btn.size.x, bar_h);
         }
 
         // 对齐 C#：h = 233 - bar_h; pos = 49 + (h/(count-8))*StartIndex
@@ -335,7 +369,7 @@ impl NpcGoodsDialogHybrid {
         let offset = (track_h / steps) * self.start_index as f32;
         let y = Self::SCROLL_BAR_MIN_Y + offset;
 
-        Rect::new(Self::POS_X + Self::SCROLL_X, Self::POS_Y + y, self.scroll_bar_btn.size.x, bar_h)
+        Rect::new(self.pos.x + Self::SCROLL_X, self.pos.y + y, self.scroll_bar_btn.size.x, bar_h)
     }
 
     fn can_scroll(&self) -> bool {
@@ -430,7 +464,7 @@ impl NpcGoodsDialogHybrid {
     }
 
     fn draw_cell(&self, row: usize, item: &UserItem, selected: bool, hovered: bool, multiple_available: bool) {
-        let rect = Self::cell_rect(row);
+        let rect = self.cell_rect(row);
 
         // 边框（对齐 C#：BorderColour=Color.Lime，并在 x=40 处有分割线）
         let border_color = if selected {
@@ -512,11 +546,39 @@ impl NpcGoodsDialogHybrid {
             vec2(-1.0e9, -1.0e9)
         };
 
+        let mut consumed = false;
+
+        // 先处理窗口拖动（避免与内部控件交互冲突）
+        let mut child_input_enabled = input_enabled;
+        if input_enabled {
+            let close_rect = self.close_rect();
+            let title_rect = self.title_drag_rect();
+            if is_mouse_button_pressed(MouseButton::Left)
+                && title_rect.contains(mouse_pos)
+                && !close_rect.contains(mouse_pos)
+            {
+                self.window_dragging = true;
+                self.window_drag_offset = mouse_pos - self.pos;
+                consumed = true;
+            }
+
+            if is_mouse_button_released(MouseButton::Left) {
+                self.window_dragging = false;
+            }
+
+            if self.window_dragging {
+                self.pos = mouse_pos - self.window_drag_offset;
+                self.clamp_pos_to_screen();
+                child_input_enabled = false;
+                consumed = true;
+            }
+        }
+
         // 背景
         if let Some(bg) = self.bg_texture.as_ref() {
-            draw_texture(bg, Self::POS_X, Self::POS_Y, WHITE);
+            draw_texture(bg, self.pos.x, self.pos.y, WHITE);
         } else {
-            draw_rectangle(Self::POS_X, Self::POS_Y, self.bg_size.x, self.bg_size.y, Color::new(0.0, 0.0, 0.0, 0.6));
+            draw_rectangle(self.pos.x, self.pos.y, self.bg_size.x, self.bg_size.y, Color::new(0.0, 0.0, 0.0, 0.6));
         }
 
         // 标题
@@ -526,12 +588,12 @@ impl NpcGoodsDialogHybrid {
             self.title_label.as_ref()
         };
         if let Some(tex) = label_tex {
-            draw_texture(tex, Self::POS_X + Self::LABEL_X, Self::POS_Y + Self::LABEL_Y, WHITE);
+            draw_texture(tex, self.pos.x + Self::LABEL_X, self.pos.y + Self::LABEL_Y, WHITE);
         }
 
         // 关闭按钮
         let close_rect = self.close_rect();
-        let close_clicked = if input_enabled {
+        let close_clicked = if child_input_enabled {
             let state = ButtonState::from_mouse(close_rect, mouse_pos);
             self.close_btn.draw(vec2(close_rect.x, close_rect.y), state);
             ButtonState::is_clicked(close_rect, mouse_pos)
@@ -546,9 +608,8 @@ impl NpcGoodsDialogHybrid {
         }
 
         // 滚动按钮
-        let mut consumed = false;
         let _ = net;
-        if input_enabled && self.can_scroll() {
+        if child_input_enabled && self.can_scroll() {
             let up_rect = self.scroll_up_rect();
             if self.scroll_up_btn.draw_button(up_rect, mouse_pos) {
                 self.scroll_by(-1);
@@ -576,7 +637,7 @@ impl NpcGoodsDialogHybrid {
             }
             if self.scroll_dragging {
                 let bar_h = bar_rect.h.max(1.0);
-                let mut y = (mouse_pos.y - self.scroll_drag_offset_y) - Self::POS_Y;
+                let mut y = (mouse_pos.y - self.scroll_drag_offset_y) - self.pos.y;
                 let max_y = Self::SCROLL_BAR_MAX_Y - bar_h;
                 if y < Self::SCROLL_BAR_MIN_Y {
                     y = Self::SCROLL_BAR_MIN_Y;
@@ -601,7 +662,7 @@ impl NpcGoodsDialogHybrid {
 
         // 鼠标滚轮（对齐 C#：StartIndex -= count）
         let wheel = mouse_wheel().1;
-        if input_enabled && wheel != 0.0 {
+        if child_input_enabled && wheel != 0.0 {
             // macroquad：向上滚 wheel>0
             if self.rect().contains(mouse_pos) {
                 let delta = if wheel > 0.0 { -1 } else { 1 };
@@ -623,7 +684,7 @@ impl NpcGoodsDialogHybrid {
 
             let item_unique_id = self.display_goods[idx].unique_id;
             let item_index = self.display_goods[idx].item_index;
-            let rect = Self::cell_rect(row);
+            let rect = self.cell_rect(row);
             let hovered = rect.contains(mouse_pos);
             let selected = self.selected_unique_id == Some(item_unique_id);
 
@@ -642,7 +703,7 @@ impl NpcGoodsDialogHybrid {
                 false
             };
 
-            if input_enabled && hovered {
+            if child_input_enabled && hovered {
                 self.hover = Some(HoverTarget::Cell(row));
 
                 // 单击选择 + 双击购买
@@ -687,13 +748,13 @@ impl NpcGoodsDialogHybrid {
                 self.draw_cell(row, item, selected, hovered, multiple_available);
             }
 
-            if input_enabled && trigger_buy {
+            if child_input_enabled && trigger_buy {
                 self.queue_buy_action();
             }
         }
 
         // Buy 按钮（Craft 隐藏）
-        if input_enabled && self.ptype != PanelType::Craft {
+        if child_input_enabled && self.ptype != PanelType::Craft {
             let buy_rect = self.buy_rect();
             if self.buy_btn.draw_button(buy_rect, mouse_pos) {
                 self.queue_buy_action();

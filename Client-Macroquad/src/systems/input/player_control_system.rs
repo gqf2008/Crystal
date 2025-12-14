@@ -94,13 +94,15 @@ pub struct PlayerControlSystem {
 }
 
 impl PlayerControlSystem {
+    const NPC_CALL_COOLDOWN_SECS: f64 = 0.35;
     pub fn new() -> Self {
         Self {
             mouse_state: MouseState::default(),
-            // 双击窗口：越长越容易误触发自动寻路；这里收紧到 200ms。
-            double_click_threshold: Duration::from_millis(200),
-            // “按住移动”需要一个阈值，避免快速单击也触发 DirectFollow 导致轻微位移。
-            long_press_threshold: Duration::from_millis(120),
+            // 双击窗口：200ms 对右键双击偏紧，容易“有时打不出来”。这里适度放宽。
+            double_click_threshold: Duration::from_millis(280),
+            // “按住移动”阈值：120ms 对很多鼠标的“正常点击按住时长”偏紧，
+            // 会把单击/双击误判为长按，从而导致双击偶发不触发。
+            long_press_threshold: Duration::from_millis(200),
 
             pending_npc_call: None,
 
@@ -230,7 +232,7 @@ impl PlayerControlSystem {
     }
 
     fn try_send_npc_main(ctx: &mut GameContext, npc_object_id: u32) {
-        // 对齐 C#：ClientPackets.CallNPC { ObjectID, Key="[@Main]" } 且 5s 内只允许一次
+        // 对齐交互手感：限制短时间内重复发包，但不影响连续点击/打开商店。
         let now = get_time();
         let mut allowed = true;
 
@@ -239,7 +241,7 @@ impl PlayerControlSystem {
             if now < cd.until {
                 allowed = false;
             } else {
-                cd.until = now + 5.0;
+                cd.until = now + Self::NPC_CALL_COOLDOWN_SECS;
             }
         }
 
@@ -349,23 +351,36 @@ impl LogicSystem for PlayerControlSystem {
             self.mouse_state.left_pressed = false;
             tracing::warn!("🔼 左键松开 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
 
-            // 检查是否是双击
-            let is_double_click = if let Some(last_click) = self.mouse_state.left_last_click_time {
-                now.duration_since(last_click) < self.double_click_threshold
-            } else {
-                false
-            };
+            // 长按不计入“点击/双击”，避免跟随模式污染双击识别。
+            let is_click_candidate = self
+                .mouse_state
+                .left_press_start
+                .map(|t| now.duration_since(t) < self.long_press_threshold)
+                .unwrap_or(false);
 
-            if is_double_click {
-                tracing::warn!("🖱️🖱️ 检测到左键双击 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
-                // 双击：记录一次性事件，供本帧后续消费（触发寻路）
-                self.mouse_state.left_pending_double_click = self.mouse_state.left_press_position;
+            if !is_click_candidate {
                 self.mouse_state.left_last_click_time = None;
+                self.mouse_state.left_pending_double_click = None;
+                self.mouse_state.left_press_start = None;
             } else {
-                // 可能是单击，记录时间等待确认（双击窗口过后才确认）
-                self.mouse_state.left_last_click_time = Some(now);
+                // 检查是否是双击
+                let is_double_click = if let Some(last_click) = self.mouse_state.left_last_click_time {
+                    now.duration_since(last_click) < self.double_click_threshold
+                } else {
+                    false
+                };
+
+                if is_double_click {
+                    tracing::warn!("🖱️🖱️ 检测到左键双击 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
+                    // 双击：记录一次性事件，供本帧后续消费（触发寻路）
+                    self.mouse_state.left_pending_double_click = self.mouse_state.left_press_position;
+                    self.mouse_state.left_last_click_time = None;
+                } else {
+                    // 可能是单击，记录时间等待确认（双击窗口过后才确认）
+                    self.mouse_state.left_last_click_time = Some(now);
+                }
+                self.mouse_state.left_press_start = None;
             }
-            self.mouse_state.left_press_start = None;
         }
 
         // 处理右键状态变化
@@ -378,23 +393,36 @@ impl LogicSystem for PlayerControlSystem {
             self.mouse_state.right_pressed = false;
             tracing::warn!("🔼 右键松开 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
 
-            // 检查是否是双击
-            let is_double_click = if let Some(last_click) = self.mouse_state.right_last_click_time {
-                now.duration_since(last_click) < self.double_click_threshold
-            } else {
-                false
-            };
+            // 长按不计入“点击/双击”，避免 DirectFollow/攻击等场景污染双击识别。
+            let is_click_candidate = self
+                .mouse_state
+                .right_press_start
+                .map(|t| now.duration_since(t) < self.long_press_threshold)
+                .unwrap_or(false);
 
-            if is_double_click {
-                tracing::warn!("🖱️🖱️ 检测到右键双击 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
-                // 双击：记录一次性事件，供本帧后续消费（触发寻路）
-                self.mouse_state.right_pending_double_click = self.mouse_state.right_press_position;
+            if !is_click_candidate {
                 self.mouse_state.right_last_click_time = None;
+                self.mouse_state.right_pending_double_click = None;
+                self.mouse_state.right_press_start = None;
             } else {
-                // 可能是单击，记录时间等待确认（双击窗口过后才确认）
-                self.mouse_state.right_last_click_time = Some(now);
+                // 检查是否是双击
+                let is_double_click = if let Some(last_click) = self.mouse_state.right_last_click_time {
+                    now.duration_since(last_click) < self.double_click_threshold
+                } else {
+                    false
+                };
+
+                if is_double_click {
+                    tracing::warn!("🖱️🖱️ 检测到右键双击 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
+                    // 双击：记录一次性事件，供本帧后续消费（触发寻路）
+                    self.mouse_state.right_pending_double_click = self.mouse_state.right_press_position;
+                    self.mouse_state.right_last_click_time = None;
+                } else {
+                    // 可能是单击，记录时间等待确认（双击窗口过后才确认）
+                    self.mouse_state.right_last_click_time = Some(now);
+                }
+                self.mouse_state.right_press_start = None;
             }
-            self.mouse_state.right_press_start = None;
         }
 
         // 获取相机信息
@@ -520,8 +548,28 @@ impl LogicSystem for PlayerControlSystem {
         let npc_approach_right_world: Option<(u32, f32, f32)> = npc_approach_target_right
             .and_then(|oid| Self::find_object_world_pos(ctx, oid).map(|(x, y)| (oid, x, y)));
 
-        // 右键攻击：在进入 query_mut 之前，先把“点击世界坐标/点到的怪物实体”算好，避免可变借用期间再借用 ctx。
-        let right_click_attack_world: Option<(f32, f32)> = if right_single_click && npc_interaction_target_right.is_none() {
+        // 单击攻击：在进入 query_mut 之前，先把“点击世界坐标/点到的怪物实体”算好，避免可变借用期间再借用 ctx。
+        // 注意：如果本次单击命中/接近 NPC，则不应同时触发攻击判定。
+        let left_click_attack_world: Option<(f32, f32)> = if left_single_click
+            && npc_interaction_target_left.is_none()
+            && npc_approach_target_left.is_none()
+        {
+            self.mouse_state
+                .left_press_position
+                .map(|(sx, sy)| Self::screen_to_world(sx, sy, &camera_pos, &camera))
+        } else {
+            None
+        };
+        let left_click_attack_monster: Option<hecs::Entity> = left_click_attack_world
+            .and_then(|click_world| Self::find_clicked_monster_entity(ctx, click_world));
+        let left_click_attack_monster_grid: Option<(i32, i32)> = left_click_attack_monster
+            .and_then(|e| ctx.world.get::<&crate::components::Position>(e).ok())
+            .map(|pos| crate::coord::Coord::world_to_grid(pos.x, pos.y));
+
+        let right_click_attack_world: Option<(f32, f32)> = if right_single_click
+            && npc_interaction_target_right.is_none()
+            && npc_approach_target_right.is_none()
+        {
             self.mouse_state
                 .right_press_position
                 .map(|(sx, sy)| Self::screen_to_world(sx, sy, &camera_pos, &camera))
@@ -590,6 +638,28 @@ impl LogicSystem for PlayerControlSystem {
                         player_input.movement_mode = crate::components::MovementMode::Pathfinding;
                         player.action = PlayerAction::Walk;
                         self.pending_npc_call = Some(npc_object_id);
+                    } else if let (Some(target_entity), Some((mgx, mgy))) = (left_click_attack_monster, left_click_attack_monster_grid) {
+                        // 左键点怪：走过去后攻击（走路）
+                        player_input.set_attack(target_entity);
+                        player.action = PlayerAction::Attack1;
+                        self.pending_npc_call = None;
+
+                        let (pgx, pgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+                        let dx = (mgx - pgx).abs();
+                        let dy = (mgy - pgy).abs();
+                        let in_melee_range = dx.max(dy) <= 1;
+
+                        if !in_melee_range {
+                            let step_x = (mgx - pgx).clamp(-1, 1);
+                            let step_y = (mgy - pgy).clamp(-1, 1);
+                            let agx = mgx - step_x;
+                            let agy = mgy - step_y;
+                            let (awx, awy) = crate::coord::Coord::grid_to_world_center(agx, agy);
+
+                            player_input.move_to = Some((awx, awy));
+                            player_input.movement_mode = crate::components::MovementMode::Pathfinding;
+                            player.action = PlayerAction::Walk;
+                        }
                     } else {
                         // 左键单击 = 站立
                         tracing::warn!("⏹️ 检测到左键单击，立即停止移动");
@@ -609,7 +679,7 @@ impl LogicSystem for PlayerControlSystem {
                     } else if let Some((npc_object_id, wx, wy)) = npc_approach_right_world {
                         player_input.move_to = Some((wx, wy));
                         player_input.movement_mode = crate::components::MovementMode::Pathfinding;
-                        player.action = PlayerAction::Walk;
+                        player.action = PlayerAction::Run;
                         self.pending_npc_call = Some(npc_object_id);
                     } else {
                         // 右键单击 = 攻击动作
