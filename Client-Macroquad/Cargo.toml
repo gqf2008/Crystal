@@ -60,6 +60,10 @@ miniquad = { path = "miniquad" }
 # Keep default feature set minimal.
 default = []
 
+# Experimental ECS-based rendering pipeline (MapRenderSystem/UIRenderSystem etc.).
+# Mainline rendering currently uses `map_renderer/` + native UI, so keep this off by default.
+ecs_rendering = []
+
 # Optional async runtime support.
 tokio = ["dep:tokio"]
 

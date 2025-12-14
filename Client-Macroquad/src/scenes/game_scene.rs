@@ -7,7 +7,10 @@
 
 use crate::game::{GameContext, GameResult};
 use crate::scenes::dialogs::game::{
+    AmountBoxHybrid, AmountBoxResult,
     MainDialog,
+    NpcDialogAction, NpcDialogHybrid,
+    NpcGoodsDialogHybrid,
 };
 use crate::scenes::{Scene, SceneTransition};
 use crate::ui::text_renderer::draw_text_cn;
@@ -15,9 +18,10 @@ use crate::{
     components::{
         AnimationFrame, Camera as EcsCamera, CameraMode, LocalPlayer, MapData, MirDirection,
         MovementVelocity, Path, Player, PlayerAction, PlayerAppearance, PlayerInput, Position,
-        Equipment, MountState, RenderPass, TimeTracker,
+        CombatStats, Draggable, Equipment, Health, Mana, MountState, RegenTimer, RenderConfig,
+        RenderPass, TimeTracker,
     },
-    systems::{priority, AnimationSystem, CameraFollowSystem, MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SystemScheduler},
+    systems::{priority, AnimationSystem, CameraFollowSystem, CameraSystem, CollisionSystem, CombatSystem, HealthRegenSystem, MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SkillSystem, SystemScheduler},
 };
 use crate::components::{WeaponAnimation, WeaponState};
 use crate::{map_renderer::MeshMapRenderer, resources::{init_map_libraries, MapReader}};
@@ -48,9 +52,24 @@ pub struct GameScene {
     map_dragging: bool,
     map_first_drag: bool,
     map_last_mouse_pos: Vec2,
+    loaded_map_file: Option<String>,
 
     // 完整 UI（底部主界面 + 全部子对话框）
     main_dialog: MainDialog,
+
+    // NPC 对话框（对齐 C# NPCDialog）
+    npc_dialog: NpcDialogHybrid,
+    npc_dialog_cooldown_until: f64,
+
+    // NPC 商店（对齐 C# NPCGoodsDialog）
+    npc_goods_dialog: NpcGoodsDialogHybrid,
+
+    // NPC 子商品（对齐 C#：NPCSubGoodsDialog 实际是 NPCGoodsDialog(PanelType::BuySub)）
+    npc_sub_goods_dialog: NpcGoodsDialogHybrid,
+
+    // 数量输入框（对齐 C# MirAmountBox）
+    amount_box: AmountBoxHybrid,
+    amount_box_buy_uid: Option<u64>,
 
     // ECS（ggez 版本同构）：先最小接入 update，不影响现有渲染链路
     ecs_ctx: GameContext,
@@ -84,12 +103,22 @@ impl GameScene {
 
         let mut ecs_scheduler = SystemScheduler::new();
         ecs_scheduler
+            .add_system(crate::systems::NetworkSystem::default(), priority::NETWORK)
+            .add_system(crate::systems::NetworkApplySystem::default(), priority::NETWORK_APPLY)
+            .add_system(crate::systems::MapLoadSystem, priority::MAP_LOAD)
             .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
+            // 战斗/技能/自然回复：先接入闭环（目前 test_game_scene 默认不会触发）
+            .add_system(CombatSystem::default(), priority::COMBAT)
+            .add_system(SkillSystem::default(), priority::SKILL)
+            .add_system(HealthRegenSystem, priority::REGEN)
             .add_system(PathfindingSystem::new(), priority::PATHFINDING)
             .add_system(MovementSystem, priority::MOVEMENT)
+            .add_system(CollisionSystem::new(), priority::COLLISION)
             .add_system(MountStateSyncSystem::new(), priority::MOUNT_STATE_SYNC)
             .add_system(AnimationSystem::new(), priority::ANIMATION)
+            .add_system(crate::systems::ParticleSystem, priority::PARTICLE)
             .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW)
+            .add_system(CameraSystem::new(), priority::CAMERA)
             // ECS 渲染系统：先最小接入 SpriteRenderSystem（角色/坐骑/武器特效）
             .add_system(SpriteRenderSystem::new(), priority::SPRITE_RENDER)
             .add_system(EffectRenderSystem::new(), priority::EFFECT_RENDER);
@@ -103,8 +132,19 @@ impl GameScene {
             map_dragging: false,
             map_first_drag: true,
             map_last_mouse_pos: mouse_position().into(),
+            loaded_map_file: None,
 
             main_dialog: MainDialog::new(),
+
+            npc_dialog: NpcDialogHybrid::new(),
+            npc_dialog_cooldown_until: 0.0,
+
+            npc_goods_dialog: NpcGoodsDialogHybrid::new(),
+
+            npc_sub_goods_dialog: NpcGoodsDialogHybrid::new(),
+
+            amount_box: AmountBoxHybrid::new(),
+            amount_box_buy_uid: None,
 
             ecs_ctx: GameContext::new(),
             ecs_scheduler,
@@ -119,6 +159,243 @@ impl GameScene {
             ui_mouse_captured: false,
             initialized: false,
         }
+    }
+
+    fn handle_npc_goods_action(&mut self, action: crate::scenes::dialogs::game::npc_goods_dialog_hybrid::NpcGoodsDialogAction) {
+        use crate::network::handlers::NetworkEvent;
+        use mir2_shared::enums::PanelType;
+
+        fn inventory_total_free_space(inv: &crate::components::item::Inventory, item_index: i32, stack_size: u16) -> u32 {
+            let stack_size = stack_size.max(1) as u32;
+            let mut free: u32 = 0;
+
+            for slot in inv.items.iter() {
+                match slot {
+                    None => {
+                        free = free.saturating_add(stack_size);
+                    }
+                    Some(it) => {
+                        if it.item_index == item_index {
+                            let current = it.count as u32;
+                            if current < stack_size {
+                                free = free.saturating_add(stack_size - current);
+                            }
+                        }
+                    }
+                }
+            }
+            free
+        }
+
+        fn can_send_buy_request(
+            gold: u32,
+            credit: u32,
+            inv_free_space: Option<u32>,
+            unit_price: u32,
+            count: u32,
+            stack_size: u16,
+            use_pearls: bool,
+        ) -> Result<(), &'static str> {
+            let currency = if use_pearls { credit } else { gold };
+
+            if unit_price > 0 {
+                let cost = (unit_price as u64).saturating_mul(count as u64);
+                if cost > currency as u64 {
+                    return Err(if use_pearls {
+                        "You do not have enough Pearls."
+                    } else {
+                        "Not enough gold."
+                    });
+                }
+            }
+
+            // stackable 的“是否有空间”用总可容纳数量判断；非堆叠等价于必须有空格。
+            if let Some(free) = inv_free_space {
+                let need = count.min(stack_size.max(1) as u32);
+                if free < need {
+                    return Err("You do not have enough space.");
+                }
+            }
+
+            Ok(())
+        }
+
+        match action {
+            crate::scenes::dialogs::game::npc_goods_dialog_hybrid::NpcGoodsDialogAction::OpenSubGoods {
+                items,
+                rate,
+                hide_added_stats,
+            } => {
+                self.npc_sub_goods_dialog
+                    .new_goods(items, rate, PanelType::BuySub, hide_added_stats);
+                self.main_dialog.open_inventory();
+            }
+            crate::scenes::dialogs::game::npc_goods_dialog_hybrid::NpcGoodsDialogAction::OpenAmountBox {
+                title,
+                image_index,
+                default_amount,
+                unique_id,
+                item_index,
+                stack_size,
+                unit_price,
+                use_pearls,
+            } => {
+                // 对齐 C#：maxQuantity 受金币/元宝与背包空间限制；为 0 则直接提示。
+                let mut gold: u32 = 0;
+                let mut credit: u32 = 0;
+                let mut free_space: Option<u32> = None;
+
+                if let Some(player) = self.ecs_local_player_entity {
+                    if let Ok(cur) = self.ecs_ctx.world.get::<&crate::components::combat::Currency>(player) {
+                        gold = cur.gold;
+                        credit = cur.credit;
+                    }
+                    if let Ok(inv) = self.ecs_ctx.world.get::<&crate::components::item::Inventory>(player) {
+                        free_space = Some(inventory_total_free_space(&inv, item_index, stack_size));
+                        // 兼容：部分逻辑可能只更新 inv.gold
+                        if gold == 0 {
+                            gold = inv.gold;
+                        }
+                    }
+                }
+
+                let stack_max = stack_size.max(1) as u32;
+                let currency = if use_pearls { credit } else { gold };
+
+                let mut max_quantity = stack_max;
+                if unit_price > 0 {
+                    let full_cost = (unit_price as u64).saturating_mul(stack_max as u64);
+                    if full_cost > currency as u64 {
+                        max_quantity = currency / unit_price;
+                    }
+                }
+
+                if max_quantity == 0 {
+                    self.main_dialog.push_system_chat_line(if use_pearls {
+                        "You do not have enough Pearls."
+                    } else {
+                        "Not enough gold."
+                    });
+                    return;
+                }
+
+                if let Some(free) = free_space {
+                    max_quantity = max_quantity.min(free).min(stack_max);
+                }
+
+                if max_quantity == 0 {
+                    self.main_dialog
+                        .push_system_chat_line("You do not have enough space.");
+                    return;
+                }
+
+                self.amount_box
+                    .show(title, image_index, max_quantity, 0, default_amount);
+                self.amount_box_buy_uid = Some(unique_id);
+            }
+            crate::scenes::dialogs::game::npc_goods_dialog_hybrid::NpcGoodsDialogAction::RequestBuy {
+                unique_id,
+                count,
+                item_index,
+                stack_size,
+                unit_price,
+                use_pearls,
+            } => {
+                // 对齐 C#：非堆叠购买前做 LowGold/NoBagSpace 前置提示（不改变服务器权威）。
+                let mut gold: u32 = 0;
+                let mut credit: u32 = 0;
+                let mut free_space: Option<u32> = None;
+
+                if let Some(player) = self.ecs_local_player_entity {
+                    if let Ok(cur) = self.ecs_ctx.world.get::<&crate::components::combat::Currency>(player) {
+                        gold = cur.gold;
+                        credit = cur.credit;
+                    }
+                    if let Ok(inv) = self.ecs_ctx.world.get::<&crate::components::item::Inventory>(player) {
+                        free_space = Some(inventory_total_free_space(&inv, item_index, stack_size));
+                        if gold == 0 {
+                            gold = inv.gold;
+                        }
+                    }
+                }
+
+                if let Err(msg) = can_send_buy_request(
+                    gold,
+                    credit,
+                    free_space,
+                    unit_price,
+                    count,
+                    stack_size,
+                    use_pearls,
+                ) {
+                    self.main_dialog.push_system_chat_line(msg);
+                    return;
+                }
+
+                if let Some(net) = self.ecs_ctx.net.as_ref() {
+                    let _ = net.send(NetworkEvent::BuyItemRequest {
+                        item_index: unique_id,
+                        count,
+                        panel_type: PanelType::Buy as u8,
+                    });
+                }
+            }
+        }
+    }
+
+    fn pump_network_messages_to_ui(&mut self) {
+        use crate::network::handlers::NetworkEvent;
+
+        for ev in self.ecs_ctx.events().network_events() {
+            match ev {
+                NetworkEvent::NpcDialog { npc_id, dialog } => {
+                    // 对齐 C#：NPCResponse 打开 NPCDialog（不再只写到聊天）
+                    // npc_id 可能为 0（真实协议不含 object id），实际交互 object id 由 ActiveNpc 记忆。
+                    let _ = npc_id;
+
+                    // 对齐 C#：收到新 NPC 对话内容时，关闭可能残留的 NPC 相关窗口
+                    self.npc_goods_dialog.hide();
+                    self.npc_sub_goods_dialog.hide();
+                    self.amount_box.hide();
+                    self.amount_box_buy_uid = None;
+
+                    self.npc_dialog.new_dialog(dialog);
+                }
+                NetworkEvent::NPCGoods {
+                    items,
+                    rate,
+                    panel_type,
+                    hide_added_stats,
+                } => {
+                    use mir2_shared::enums::PanelType;
+                    if matches!(*panel_type, PanelType::Buy | PanelType::Craft) {
+                        self.npc_goods_dialog
+                            .new_goods(items.clone(), *rate, *panel_type, *hide_added_stats);
+                        self.main_dialog.open_inventory();
+                    } else if matches!(*panel_type, PanelType::BuySub) {
+                        self.npc_sub_goods_dialog
+                            .new_goods(items.clone(), *rate, *panel_type, *hide_added_stats);
+                        self.main_dialog.open_inventory();
+                    }
+                }
+                NetworkEvent::SystemMessage { message } => {
+                    self.main_dialog.push_system_chat_line(message.clone());
+                }
+                NetworkEvent::ChatMessage { sender, message, .. } => {
+                    self.main_dialog
+                        .push_chat_line(format!("{}: {}", sender, message));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn close_npc_related_dialogs(&mut self) {
+        self.npc_dialog.hide();
+        self.npc_goods_dialog.hide();
+        self.npc_sub_goods_dialog.hide();
+        self.amount_box.hide();
+        self.amount_box_buy_uid = None;
     }
 
     /// 根据窗口尺寸自动调整有效缩放。
@@ -167,10 +444,24 @@ impl GameScene {
             let (sw, sh) = self.ecs_ctx.drawable_size();
             let entity = self.ecs_ctx.world.spawn((
                 EcsCamera::new(sw, sh),
+                Draggable::default(),
                 Position::new(self.map_camera_position.x, self.map_camera_position.y),
                 CameraMode::FollowPlayer,
             ));
             self.ecs_camera_entity = Some(entity);
+        }
+
+        // 2.7) 渲染/相机配置（CameraSystem 会读取 RenderConfig.enable_camera_drag）
+        // 默认禁用拖拽，避免影响正常游戏操作。
+        if self
+            .ecs_ctx
+            .world
+            .query::<&RenderConfig>()
+            .iter()
+            .next()
+            .is_none()
+        {
+            self.ecs_ctx.world.spawn((RenderConfig::default(),));
         }
 
         // 2.5) 时间跟踪实体（AnimationSystem 需要 animation_count 驱动帧变化）
@@ -181,7 +472,14 @@ impl GameScene {
 
         // 2.6) 渲染 pass 参数（用于 ghost pass 等多次绘制）
         if self.ecs_render_pass_entity.is_none() {
-            let entity = self.ecs_ctx.world.spawn((RenderPass::default(),));
+            let entity = self
+                .ecs_ctx
+                .world
+                .spawn((
+                    RenderPass::default(),
+                    crate::components::HoverHighlight::default(),
+                    crate::components::ActiveNpc::default(),
+                ));
             self.ecs_render_pass_entity = Some(entity);
         }
 
@@ -287,6 +585,10 @@ impl GameScene {
                 LocalPlayer,
                 player,
                 Position::new(spawn_world.x, spawn_world.y),
+                // 基础战斗属性：为后续 Combat/Skill/Regen 系统铺路
+                Health::new(100),
+                Mana::new(50),
+                RegenTimer::default(),
                 appearance,
                 equipment,
                 MountState::default(),
@@ -297,6 +599,19 @@ impl GameScene {
                 WeaponState::default(),
                 weapon_anim,
             ));
+
+            let _ = self.ecs_ctx.world.insert_one(
+                entity,
+                CombatStats {
+                    level: 1,
+                    attack_min: 5,
+                    attack_max: 8,
+                    defense: 1,
+                    magic_defense: 0,
+                    accuracy: 5,
+                    agility: 3,
+                },
+            );
             self.ecs_local_player_entity = Some(entity);
         }
     }
@@ -460,6 +775,127 @@ impl GameScene {
         }
     }
 
+    fn screen_to_world_from_map_camera(&self, screen_pos: Vec2) -> Vec2 {
+        let (sw, sh) = self.ecs_ctx.drawable_size();
+        let zoom = self.effective_map_zoom().max(0.0001);
+
+        vec2(
+            self.map_camera_position.x + (screen_pos.x - sw / 2.0) / zoom,
+            self.map_camera_position.y + (screen_pos.y - sh / 2.0) / zoom,
+        )
+    }
+
+    fn find_hovered_npc_tile(&self, mouse_world: Vec2) -> Option<(u32, i32, i32)> {
+        use crate::components::{NetworkObjectType, NetworkSync, Position};
+
+        // 贴近原版：用“屏幕像素半径”做 hover 命中，避免缩放后难以悬停。
+        // world_radius = screen_px / zoom
+        let zoom = self.effective_map_zoom().max(0.0001);
+        let hover_radius_world = 110.0 / zoom;
+        let max_dist2 = hover_radius_world * hover_radius_world;
+
+        let mut best: Option<(u32, i32, i32, f32)> = None;
+
+        for (_, (sync, pos)) in self.ecs_ctx.world.query::<(&NetworkSync, &Position)>().iter() {
+            if sync.object_type != NetworkObjectType::NPC {
+                continue;
+            }
+
+            let dist2 = (pos.x - mouse_world.x) * (pos.x - mouse_world.x)
+                + (pos.y - mouse_world.y) * (pos.y - mouse_world.y);
+            if dist2 > max_dist2 {
+                continue;
+            }
+
+            let (gx, gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+
+            match best {
+                None => best = Some((sync.object_id, gx, gy, dist2)),
+                Some((_oid, _bgx, _bgy, bdist2)) if dist2 < bdist2 => {
+                    best = Some((sync.object_id, gx, gy, dist2))
+                }
+                _ => {}
+            }
+        }
+
+        best.map(|(oid, gx, gy, _)| (oid, gx, gy))
+    }
+
+    fn set_hovered_npc_object_id(&mut self, object_id: Option<u32>) {
+        let Some(pass_entity) = self.ecs_render_pass_entity else {
+            return;
+        };
+        if let Ok(mut hh) = self
+            .ecs_ctx
+            .world
+            .get::<&mut crate::components::HoverHighlight>(pass_entity)
+        {
+            hh.npc_object_id = object_id;
+        }
+    }
+
+    fn active_npc_object_id(&self) -> Option<u32> {
+        let Some(pass_entity) = self.ecs_render_pass_entity else {
+            return None;
+        };
+        self.ecs_ctx
+            .world
+            .get::<&crate::components::ActiveNpc>(pass_entity)
+            .ok()
+            .and_then(|x| x.npc_object_id)
+    }
+
+    fn is_mouse_over_any_ui(&self, mouse_pos: Vec2) -> bool {
+        // MainDialog 负责绝大多数 UI 面板的命中检测
+        if self.main_dialog.is_mouse_over_ui(mouse_pos) {
+            return true;
+        }
+
+        // 额外的独立对话框（不在 MainDialog 的 z-order 中）
+        if self.npc_goods_dialog.is_mouse_over(mouse_pos) {
+            return true;
+        }
+        if self.npc_dialog.is_mouse_over(mouse_pos) {
+            return true;
+        }
+        if self.npc_sub_goods_dialog.is_mouse_over(mouse_pos) {
+            return true;
+        }
+        if self.amount_box.is_mouse_over(mouse_pos) {
+            return true;
+        }
+
+        false
+    }
+
+    fn draw_npc_hover_highlight(&mut self) {
+        // 贴近原版：只有“鼠标确实在 UI 上”才屏蔽世界 hover。
+        // 但如果 UI 正在捕获鼠标（按住拖拽/滑动中），仍然屏蔽，避免拖拽时画面干扰。
+        // 默认先清空，避免 UI 覆盖/不命中时残留上一次高亮
+        self.set_hovered_npc_object_id(None);
+
+        if self.ui_mouse_captured {
+            return;
+        }
+        if self.map_reader.is_none() {
+            return;
+        }
+
+        let mouse_screen: Vec2 = mouse_position().into();
+        if self.is_mouse_over_any_ui(mouse_screen) {
+            return;
+        }
+
+        let mouse_world = self.screen_to_world_from_map_camera(mouse_screen);
+
+        let Some((oid, _gx, _gy)) = self.find_hovered_npc_tile(mouse_world) else {
+            return;
+        };
+
+        // 轮廓绘制在渲染系统里做（EffectRenderSystem），这里仅同步 hovered id。
+        self.set_hovered_npc_object_id(Some(oid));
+    }
+
     fn handle_map_input(&mut self) {
         if self.map_reader.is_none() {
             return;
@@ -543,6 +979,7 @@ impl GameScene {
         match MapReader::new(map_path) {
             Ok(reader) => {
                 println!("✅ GameScene: 地图加载成功 {} ({}x{})", map_path, reader.width, reader.height);
+                self.loaded_map_file = Some("n0".to_string());
                 // 小地图需要知道地图尺寸（格子数），用于点击反算到世界坐标
                 self.main_dialog
                     .set_minimap_world_size(reader.width as f32, reader.height as f32);
@@ -568,6 +1005,11 @@ impl GameScene {
     
     /// 处理快捷键
     fn handle_hotkeys(&mut self) {
+        // AmountBox 是 modal：优先吞掉按键（ESC/Enter 等由 AmountBox 自己处理）
+        if self.amount_box.is_visible() {
+            return;
+        }
+
         // 如果聊天输入框激活，不处理其他快捷键
         if self.main_dialog.is_any_input_active() {
             return;
@@ -590,6 +1032,22 @@ impl GameScene {
 
         // ESC = 先关闭弹窗；若没弹窗则返回角色选择（在 update 中处理返回）
         if is_key_pressed(KeyCode::Escape) {
+            if self.amount_box.is_visible() {
+                self.amount_box.hide();
+                self.amount_box_buy_uid = None;
+                return;
+            }
+
+            if self.npc_sub_goods_dialog.is_visible() {
+                self.npc_sub_goods_dialog.hide();
+                return;
+            }
+
+            if self.npc_goods_dialog.is_visible() {
+                self.npc_goods_dialog.hide();
+                return;
+            }
+
             if self.main_dialog.any_popup_open() {
                 self.main_dialog.close_all_popups();
             }
@@ -620,6 +1078,61 @@ impl GameScene {
             Color::from_rgba(0, 255, 0, 220),
         );
     }
+
+    fn sync_visual_map_from_ecs(&mut self) {
+        // 通过 ECS 的 MapManager 作为“当前地图权威”，让渲染层 map_reader 跟随它。
+        let mgr_file = {
+            let mut q = self.ecs_ctx.world.query::<&crate::systems::MapManager>();
+            q.iter().next().map(|(_, mgr)| mgr.current_map_file.clone())
+        };
+        let Some(file) = mgr_file else {
+            return;
+        };
+
+        if self.loaded_map_file.as_deref() == Some(file.as_str()) {
+            return;
+        }
+        let map_path = Self::normalize_map_path(&file);
+        match MapReader::new(&map_path) {
+            Ok(reader) => {
+                println!("🗺️ GameScene: 切换地图到 {} ({}x{})", map_path, reader.width, reader.height);
+                self.main_dialog
+                    .set_minimap_world_size(reader.width as f32, reader.height as f32);
+
+                self.map_reader = Some(reader);
+                self.loaded_map_file = Some(file);
+
+                // 相机尽量跟随本地玩家
+                if let Some(player_entity) = self.ecs_local_player_entity {
+                    if let Ok(pos) = self.ecs_ctx.world.get::<&Position>(player_entity) {
+                        self.map_camera_position = vec2(pos.x, pos.y);
+                    }
+                }
+                self.clamp_map_camera_position();
+                self.update_map_camera();
+            }
+            Err(e) => {
+                println!("⚠️ GameScene: 切换地图失败 {}: {}", map_path, e);
+            }
+        }
+    }
+
+    fn normalize_map_path(file_name: &str) -> String {
+        let mut f = file_name.trim().replace('\\', "/");
+        if f.is_empty() {
+            return "Map/0.map".to_string();
+        }
+
+        // file_name 可能是 "0" / "n0" / "0.map" / "Map/0.map"。
+        if !f.ends_with(".map") {
+            f.push_str(".map");
+        }
+        if f.contains('/') {
+            f
+        } else {
+            format!("Map/{}", f)
+        }
+    }
 }
 
 impl Default for GameScene {
@@ -633,6 +1146,40 @@ impl Scene for GameScene {
     
     fn on_enter(&mut self) -> GameResult {
         println!("🎬 进入游戏场景");
+
+        // 场景间移交网络连接：SelectScene 已把 NetContext 放入全局，这里接管到 ECS。
+        if let Some(net) = crate::network::take_global_net() {
+            self.ecs_ctx.set_net(net);
+            // 目前本地玩家移动仍由客户端 MovementSystem 驱动；开启 server_authoritative_movement
+            // 会导致“本地移动 + 服务器回包纠偏”双重驱动，从而出现抖动/乱跳（坐骑更明显）。
+            self.ecs_ctx.session.server_authoritative_movement = false;
+            self.ecs_ctx.session.server_authoritative_combat = true;
+        }
+
+        // 如果没有连接（例如 test_game_scene 直接进 GameScene），且配置允许 mock，则自动接入 MockNetwork。
+        let mut auto_start_game = false;
+        if self.ecs_ctx.net.is_none() {
+            let cfg = crate::network::load_network_runtime_config();
+            if cfg.use_mock {
+                if let Ok(net) = crate::network::NetworkBuilder::new(cfg.server_addr).with_mock(true).build() {
+                    self.ecs_ctx.set_net(net);
+                    // Mock 场景下默认使用本地移动（避免双驱动抖动）。
+                    self.ecs_ctx.session.server_authoritative_movement = false;
+                    self.ecs_ctx.session.server_authoritative_combat = true;
+                    auto_start_game = true;
+                }
+            }
+        }
+
+        // 自动触发 StartGameRequest，让 MockNetwork 下发地图/玩家信息以及 NPC/怪物。
+        if auto_start_game {
+            if let Some(net) = self.ecs_ctx.net() {
+                let _ = net.send(crate::network::handlers::NetworkEvent::StartGameRequest {
+                    character_index: 0,
+                });
+            }
+        }
+
         // 注意: 纹理需要异步加载，这里无法调用 async 函数
         // 应该在进入场景前或通过 Loading 场景预加载
         Ok(())
@@ -640,6 +1187,12 @@ impl Scene for GameScene {
     
     fn on_exit(&mut self) -> GameResult {
         println!("🎬 离开游戏场景");
+
+        // 退出时把连接放回全局，便于返回角色选择/复用。
+        if let Some(net) = self.ecs_ctx.net.take() {
+            crate::network::set_global_net(net);
+        }
+
         self.main_dialog.close_all_popups();
         self.main_dialog.deactivate_chat_input();
         Ok(())
@@ -684,7 +1237,7 @@ impl Scene for GameScene {
             let right_down = is_mouse_button_down(MouseButton::Right);
             let mouse_button_down = left_down || right_down;
             let wheel_y = mouse_wheel().1;
-            let ui_over = self.main_dialog.is_mouse_over_ui(mouse_pos);
+            let ui_over = self.is_mouse_over_any_ui(mouse_pos);
 
             // UI 鼠标捕获：在 UI 上按下鼠标后，直到松开都阻止 ECS 读取输入。
             // 解决“拖拽 UI 时后续帧仍触发角色移动/寻路”的问题。
@@ -699,7 +1252,8 @@ impl Scene for GameScene {
             self.ecs_ctx.input_blocked = self.main_dialog.is_any_input_active()
                 || self.ui_mouse_captured
                 || (wheel_y != 0.0 && ui_over)
-                || self.ui_consumed_last_frame;
+                || self.ui_consumed_last_frame
+                || self.amount_box.is_visible();
 
             // 每帧同步 ECS camera 的 view 参数，保证输入换算与渲染一致（尤其是窗口缩放后）。
             self.sync_ecs_camera_view_params();
@@ -733,6 +1287,13 @@ impl Scene for GameScene {
             self.ecs_ctx.delta_time = _dt;
             self.ecs_scheduler.update(&mut self.ecs_ctx, _dt)?;
 
+            // 在 clear_frame 之前把网络消息泵到 UI（聊天窗口）
+            self.pump_network_messages_to_ui();
+
+            // 网络地图切换：MapLoadSystem 会把 MapManager/MapData 更新到 ECS。
+            // 这里仅负责把“画面层的 map_reader”同步到当前地图文件。
+            self.sync_visual_map_from_ecs();
+
             // 同步玩家点到小地图（位置用世界像素；朝向换成弧度用于指示线）
             if let Some(player_entity) = self.ecs_local_player_entity {
                 if let (Ok(pos), Ok(player)) = (
@@ -759,7 +1320,12 @@ impl Scene for GameScene {
         
         // ESC 且没有打开的对话框 = 返回角色选择
         if is_key_pressed(KeyCode::Escape) {
-            if !self.main_dialog.any_popup_open() {
+            if !self.main_dialog.any_popup_open()
+                && !self.npc_dialog.is_visible()
+                && !self.npc_goods_dialog.is_visible()
+                && !self.npc_sub_goods_dialog.is_visible()
+                && !self.amount_box.is_visible()
+            {
                 return Ok(SceneTransition::CharacterSelect);
             }
         }
@@ -793,6 +1359,9 @@ impl Scene for GameScene {
                 );
                 self.map_renderer.show_front_layer = original_show_front;
             }
+
+            // 鼠标悬停 NPC 高亮（位于地图层与精灵层之间）
+            self.draw_npc_hover_highlight();
 
             // 2) 先画角色（位于 Middle 与 Front 之间）
             self.draw_ecs_sprites(1.0, false)?;
@@ -849,7 +1418,95 @@ impl Scene for GameScene {
             // 绘制完整 UI
             self.main_dialog.update_and_draw();
             let ui_consumed = self.main_dialog.show_dialogs();
-            self.ui_consumed_last_frame = ui_consumed;
+
+            // NPC 对话框（非 modal，位于主 UI 之上）
+            let mut npc_dialog_consumed = false;
+            if self.npc_dialog.is_visible() {
+                npc_dialog_consumed = true;
+                match self.npc_dialog.update_and_draw() {
+                    NpcDialogAction::None => {}
+                    NpcDialogAction::Close => {
+                        // 对齐 C# NPCDialog.Hide(): 关闭 NPC 对话时连带关闭商店等相关窗口
+                        self.close_npc_related_dialogs();
+                    }
+                    NpcDialogAction::OpenLink { url } => {
+                        // 最小可用：在聊天里提示链接（后续如需可接入系统浏览器打开）
+                        self.main_dialog
+                            .push_system_chat_line(format!("链接：{}", url));
+                    }
+                    NpcDialogAction::ClickAction { action } => {
+                        // 对齐 C#：5s 内只允许一次 CallNPC
+                        let now = get_time();
+                        if now >= self.npc_dialog_cooldown_until {
+                            self.npc_dialog_cooldown_until = now + 5.0;
+
+                            if let Some(npc_object_id) = self.active_npc_object_id() {
+                                if let Some(net) = self.ecs_ctx.net.as_ref() {
+                                    let key = format!("[{}]", action);
+                                    let _ = net.send(crate::network::handlers::NetworkEvent::NPCCallRequest {
+                                        npc_object_id,
+                                        key,
+                                    });
+                                }
+                            } else {
+                                self.main_dialog
+                                    .push_system_chat_line("当前没有选中的 NPC，无法发送对话选项。".to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // NPC 商店窗口：放在最上层
+            let input_enabled = !self.amount_box.is_visible();
+
+            let npc_consumed = self
+                .npc_goods_dialog
+                .update_and_draw_with_input(self.ecs_ctx.net.as_ref(), input_enabled);
+
+            // 子商品窗口（BuySub）：在主商店之上
+            let npc_sub_consumed = self
+                .npc_sub_goods_dialog
+                .update_and_draw_with_input(self.ecs_ctx.net.as_ref(), input_enabled);
+
+            // 处理商店 action（在渲染帧内统一发包/弹窗）
+            if let Some(action) = self.npc_goods_dialog.take_action() {
+                self.handle_npc_goods_action(action);
+            }
+            if let Some(action) = self.npc_sub_goods_dialog.take_action() {
+                self.handle_npc_goods_action(action);
+            }
+
+            // 数量框（modal，最上层）
+            let mut amount_consumed = false;
+            if self.amount_box.is_visible() {
+                amount_consumed = true;
+                match self.amount_box.update_and_draw() {
+                    AmountBoxResult::Ok(amount) => {
+                        if amount > 0 {
+                            if let Some(uid) = self.amount_box_buy_uid.take() {
+                                use crate::network::handlers::NetworkEvent;
+                                use mir2_shared::enums::PanelType;
+                                if let Some(net) = self.ecs_ctx.net.as_ref() {
+                                    let _ = net.send(NetworkEvent::BuyItemRequest {
+                                        item_index: uid,
+                                        count: amount,
+                                        panel_type: PanelType::Buy as u8,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    AmountBoxResult::Cancel => {
+                        self.amount_box_buy_uid = None;
+                    }
+                    AmountBoxResult::None => {}
+                }
+            }
+
+            self.ui_consumed_last_frame = ui_consumed || npc_consumed || npc_sub_consumed || amount_consumed;
+                        self.ui_consumed_last_frame =
+                            self.ui_consumed_last_frame || npc_dialog_consumed;
             
             // 绘制帮助提示
             self.draw_help_text();

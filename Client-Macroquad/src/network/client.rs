@@ -648,9 +648,12 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         // ===== 聊天相关 =====
         NetworkEvent::ChatRequest {
             message,
-            chat_type: _,
+            linked_items,
         } => {
-            let packet = client::Chat { message };
+            let packet = client::Chat {
+                message,
+                linked_items,
+            };
             serialize_packet(stream, &packet)?;
             tracing::trace!("💬 Sent chat: {}", packet.message);
         }
@@ -770,10 +773,10 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== NPC 相关 =====
-        NetworkEvent::NPCCallRequest { npc_object_id } => {
+        NetworkEvent::NPCCallRequest { npc_object_id, key } => {
             let packet = client::CallNPC {
                 object_id: npc_object_id,
-                key: String::new(), // 通常为空字符串
+                key: key.clone(),
             };
             serialize_packet(stream, &packet)?;
         }
@@ -785,7 +788,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         } => {
             use mir2_shared::enums::PanelType;
             let packet = client::npc::BuyItem {
-                item_index: item_index as u64,
+                item_index,
                 count: count as u16,
                 panel_type: PanelType::try_from(panel_type).unwrap_or(PanelType::Buy),
             };

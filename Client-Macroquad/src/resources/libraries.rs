@@ -120,6 +120,15 @@ pub enum LibraryName {
     /// Mount/0000.Lib - Mount/0999.Lib
     Mounts(usize),
 
+    // 生物与 NPC（用于离线/MockNetwork 展示）
+    /// 怪物库
+    /// Monster/000.Lib - Monster/999.Lib（3 位数字）
+    Monsters(usize),
+
+    /// NPC 库
+    /// NPC/00.Lib - NPC/99.Lib（2 位数字）
+    Npcs(usize),
+
     // 其他（可扩展）
     Custom(u32), // 自定义库（用于动态加载）
 }
@@ -169,6 +178,9 @@ impl LibraryName {
             LibraryName::Wings(idx) => format!("Wing/{:02}", idx),
             LibraryName::Pets(idx) => format!("Pet/{:02}", idx),
             LibraryName::Mounts(idx) => format!("Mount/{:02}", idx),
+
+            LibraryName::Monsters(idx) => format!("Monster/{:03}", idx),
+            LibraryName::Npcs(idx) => format!("NPC/{:02}", idx),
 
             LibraryName::Custom(id) => format!("Custom{}", id),
         }

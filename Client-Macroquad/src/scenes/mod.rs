@@ -9,7 +9,7 @@ pub mod game_scene;
 pub mod loading_scene;
 
 pub use login_scene::LoginScene;
-pub use select_scene::SelectScene;  // 新的角色选择场景
+pub use select_scene::{CharacterInfo, SelectScene};  // 新的角色选择场景
 pub use game_scene::GameScene;
 pub use loading_scene::LoadingScene;
 

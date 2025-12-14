@@ -29,3 +29,6 @@ pub use data::{
     // From shared_data
     ClientGTMap, Door, QuestItemReward, RankCharacterInfo, WorldMapIcon, WorldMapSetup,
 };
+
+// Re-export additional item-related data types
+pub use data::item::ChatItem;

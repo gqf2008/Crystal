@@ -15,6 +15,7 @@ pub mod input;
 pub mod network;
 pub mod debug;
 pub mod settings;
+pub mod session;
 
 // 高级组件
 pub mod actor;
@@ -37,6 +38,7 @@ pub use combat::*;
 pub use input::*;
 pub use network::*;
 pub use debug::*;
+pub use session::*;
 pub use actor::*;
 pub use character_select::*;
 pub use events::*;

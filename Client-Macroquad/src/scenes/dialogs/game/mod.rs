@@ -8,8 +8,10 @@ pub mod character_dialog_hybrid;
 pub mod chat_control_bar_hybrid;
 pub mod chat_dialog_hybrid;
 pub mod chat_option_dialog_hybrid;
+pub mod amount_box_hybrid;
 pub mod game_shop_dialog_hybrid;  // 原版 hybrid 版本
-pub mod inventory_dialog_native;
+pub mod npc_dialog_hybrid;
+pub mod npc_goods_dialog_hybrid;
 pub mod inventory_dialog_hybrid;
 // pub mod inventory_persistence; // 暂时禁用，需要为 hybrid 类型添加 serde 支持
 pub mod main_dialog;
@@ -27,8 +29,10 @@ pub use chat_control_bar_hybrid::{ChatControlBarHybrid, ChatFilterHybrid};
 pub use chat_dialog_hybrid::ChatDialogHybrid;
 pub use chat_dialog_hybrid::ChatMessageKind;
 pub use chat_option_dialog_hybrid::{ChatOptionDialogHybrid, ChatOptionSettingsHybrid};
+pub use amount_box_hybrid::{AmountBoxHybrid, AmountBoxResult};
 pub use game_shop_dialog_hybrid::{GameShopDialogHybrid, ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid};
-pub use inventory_dialog_native::InventoryDialogNative;
+pub use npc_dialog_hybrid::{NpcDialogHybrid, NpcDialogAction};
+pub use npc_goods_dialog_hybrid::NpcGoodsDialogHybrid;
 pub use inventory_dialog_hybrid::{InventoryDialogHybrid, ItemSlotHybrid, InventoryTabHybrid};
 pub use main_dialog::MainDialog;
 pub use menu_dialog_hybrid::{MenuDialogHybrid, MenuAction};

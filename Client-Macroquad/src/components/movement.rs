@@ -13,13 +13,13 @@ use std::time::Instant;
 
 /// 默认走路速度（像素/秒）
 /// 参考：Walk动画6帧*6tick=36tick≈600ms/循环, 1格48px → 48/0.6=80px/s
-/// 但为了更接近传奇2,稍微加快到85px/s
-pub const DEFAULT_WALK_SPEED: f32 = 85.0;
+/// 体感微调：提高到 100px/s
+pub const DEFAULT_WALK_SPEED: f32 = 100.0;
 
 /// 默认跑步速度（像素/秒）
 /// 参考：Run动画6帧*5tick=30tick≈500ms/循环, 1格48px → 48/0.5=96px/s
-/// 但跑步应该更快,调整到115px/s (约1.35倍走路速度)
-pub const DEFAULT_RUN_SPEED: f32 = 115.0;
+/// 体感微调：提高到 150px/s（约 1.5 倍走路速度）
+pub const DEFAULT_RUN_SPEED: f32 = 150.0;
 
 /// 默认最大速度（像素/秒）
 pub const DEFAULT_MAX_SPEED: f32 = 300.0;

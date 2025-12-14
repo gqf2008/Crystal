@@ -345,6 +345,18 @@ impl MainDialog {
         self.chat_dialog.deactivate_input();
     }
 
+    /// 往聊天窗口追加一条系统提示（用于网络/脚本调试输出）
+    pub fn push_system_chat_line(&mut self, text: impl Into<String>) {
+        self.chat_dialog
+            .add_message(text, Color::from_rgba(255, 230, 120, 255));
+    }
+
+    /// 往聊天窗口追加一条普通消息
+    pub fn push_chat_line(&mut self, text: impl Into<String>) {
+        self.chat_dialog
+            .add_message(text, Color::from_rgba(220, 220, 220, 255));
+    }
+
     /// 是否有任何“弹窗类”对话框打开（用于 ESC 逻辑）
     /// 说明：不包含 Belt/Chat/ChatControlBar/MiniMap 这些常驻 UI。
     pub fn any_popup_open(&self) -> bool {
@@ -366,6 +378,12 @@ impl MainDialog {
         self.game_shop_dialog_open = false;
         self.menu_dialog_open = false;
         self.chat_option_dialog_open = false;
+    }
+
+    /// 打开背包对话框（用于对齐原版：打开 NPC 商店时自动弹出背包）
+    pub fn open_inventory(&mut self) {
+        self.inventory_dialog_open = true;
+        self.bring_to_front(DialogType::Inventory);
     }
 
     /// 切换小地图显示（快捷键M）

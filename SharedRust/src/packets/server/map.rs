@@ -43,16 +43,18 @@ pub struct NewMapInfo {
 
 #[derive(Debug, Clone)]
 pub struct MapChanged {
+    pub map_index: i32,
     pub file_name: String,
     pub title: String,
     pub minimap: u16,
     pub big_map: u16,
-    pub music: u16,
     pub lights: u8,
-    pub location_x: u32,
-    pub location_y: u32,
+    pub location_x: i32,
+    pub location_y: i32,
     pub direction: u8,
     pub map_dark_light: u8,
+    pub music: u16,
+    pub weather: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -199,30 +201,34 @@ impl Packet for MapChanged {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         Ok(MapChanged {
+            map_index: reader.read_i32::<LittleEndian>()?,
             file_name: read_dotnet_string(reader)?,
             title: read_dotnet_string(reader)?,
             minimap: reader.read_u16::<LittleEndian>()?,
             big_map: reader.read_u16::<LittleEndian>()?,
-            music: reader.read_u16::<LittleEndian>()?,
             lights: reader.read_u8()?,
-            location_x: reader.read_u32::<LittleEndian>()?,
-            location_y: reader.read_u32::<LittleEndian>()?,
+            location_x: reader.read_i32::<LittleEndian>()?,
+            location_y: reader.read_i32::<LittleEndian>()?,
             direction: reader.read_u8()?,
             map_dark_light: reader.read_u8()?,
+            music: reader.read_u16::<LittleEndian>()?,
+            weather: reader.read_u16::<LittleEndian>()?,
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.map_index)?;
         write_dotnet_string(writer, &self.file_name)?;
         write_dotnet_string(writer, &self.title)?;
         writer.write_u16::<LittleEndian>(self.minimap)?;
         writer.write_u16::<LittleEndian>(self.big_map)?;
-        writer.write_u16::<LittleEndian>(self.music)?;
         writer.write_u8(self.lights)?;
-        writer.write_u32::<LittleEndian>(self.location_x)?;
-        writer.write_u32::<LittleEndian>(self.location_y)?;
+        writer.write_i32::<LittleEndian>(self.location_x)?;
+        writer.write_i32::<LittleEndian>(self.location_y)?;
         writer.write_u8(self.direction)?;
         writer.write_u8(self.map_dark_light)?;
+        writer.write_u16::<LittleEndian>(self.music)?;
+        writer.write_u16::<LittleEndian>(self.weather)?;
         Ok(())
     }
 }

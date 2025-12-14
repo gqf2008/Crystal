@@ -5,6 +5,7 @@
 //! - 本目录是 **ECS 渲染系统草案/迁移中的实现**：目前项目的主渲染链路主要由 `scenes/`（如 GameScene）+
 //!   `map_renderer/` 完成。
 //! - `SystemScheduler` 的 draw 阶段尚未接入主循环；因此这些系统即使编译，也可能不会在正常运行时被调用。
+//! - `MapRenderSystem`/`UIRenderSystem` 属于迁移草案，默认通过 feature `ecs_rendering` 关闭。
 //! - 可运行验证入口：`src/bin/test_ecs_min.rs`（验证 systems 的 update 调度闭环）。
 //!
 //! **优先级范围**: 900-1999
@@ -70,14 +71,22 @@
 //! - 深度排序在 EntityRenderSystem 中按 Y 坐标处理
 //! - 特效使用 ADD 混合模式（在 Sprite 组件中指定）
 // ============================================================================
-pub mod map_system;
 pub mod sprite_system;
 pub mod effect_system;
+
+#[cfg(feature = "ecs_rendering")]
+pub mod map_system;
+
+#[cfg(feature = "ecs_rendering")]
 pub mod ui_system;
 
-pub use map_system::MapRenderSystem;
 pub use sprite_system::SpriteRenderSystem;
 pub use effect_system::EffectRenderSystem;
+
+#[cfg(feature = "ecs_rendering")]
+pub use map_system::MapRenderSystem;
+
+#[cfg(feature = "ecs_rendering")]
 pub use ui_system::UIRenderSystem;
 
 

@@ -85,7 +85,10 @@ impl NetContext {
                 // 角色相关
                 NetworkEvent::CharacterCreated { .. }
                 | NetworkEvent::CharacterDeleted { .. }
-                | NetworkEvent::StartGame { .. } => {
+                | NetworkEvent::StartGame { .. }
+                | NetworkEvent::StartGameDelay { .. }
+                | NetworkEvent::StartGameBanned { .. }
+                | NetworkEvent::UserInformation { .. } => {
                     result.character.push(event);
                 }
 
@@ -120,7 +123,7 @@ impl NetContext {
                 }
 
                 // 地图相关
-                NetworkEvent::MapChanged { .. } => {
+                NetworkEvent::MapInformation { .. } | NetworkEvent::MapChanged { .. } => {
                     result.map.push(event);
                 }
 

@@ -117,8 +117,9 @@ impl LogicSystem for CameraSystem {
         // ✅ 零拷贝方式：直接从 GameContext 访问输入
 
         // 🖱️ 鼠标状态 - 直接从 GameContext 读取，零拷贝！
-        let mouse_left = ctx.input().mouse.button_pressed(MouseButton::Left);
-        let mouse_middle = ctx.input().mouse.button_pressed(MouseButton::Middle);
+        // 注意：拖拽需要“持续按下”，不能用边缘触发的 button_pressed。
+        let mouse_left = ctx.input().mouse.button_down(MouseButton::Left);
+        let mouse_middle = ctx.input().mouse.button_down(MouseButton::Middle);
         let mouse_pos = ctx.input().mouse.position();
 
         // ⌨️ 使用 InputContext API 访问键盘和其他事件

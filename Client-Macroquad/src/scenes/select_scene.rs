@@ -8,6 +8,7 @@
 // ============================================================================
 
 use crate::game::GameResult;
+use crate::network::{NetContext, NetworkBuilder, NetworkEvent};
 use crate::resources::LibraryName;
 use crate::scenes::{Scene, SceneTransition};
 use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
@@ -54,6 +55,12 @@ pub struct SelectScene {
     // 光标闪烁
     cursor_visible: bool,
     cursor_timer: f32,
+
+    // 网络 / 进场
+    net: Option<NetContext>,
+    start_game_requested: bool,
+    start_game_in_flight: bool,
+    start_game_character_index: Option<i32>,
 }
 
 impl SelectScene {
@@ -83,7 +90,84 @@ impl SelectScene {
             
             cursor_visible: true,
             cursor_timer: 0.0,
+
+            net: None,
+            start_game_requested: false,
+            start_game_in_flight: false,
+            start_game_character_index: None,
         })
+    }
+
+    fn request_start_game(&mut self) {
+        let Some(selected_idx) = self.selected_index else {
+            self.show_message("请先选择一个角色");
+            return;
+        };
+        if selected_idx >= self.characters.len() {
+            self.show_message("角色索引无效");
+            return;
+        }
+
+        let character = &self.characters[selected_idx];
+        self.start_game_character_index = Some(character.index);
+        self.start_game_requested = true;
+    }
+
+    fn ensure_network(&mut self) {
+        if self.net.is_some() {
+            return;
+        }
+
+        // 读取 config.ini（默认 mock=true，保证离线可跑）
+        let cfg = crate::network::load_network_runtime_config();
+        let builder = NetworkBuilder::new(cfg.server_addr).with_mock(cfg.use_mock);
+        match builder.build() {
+            Ok(net) => {
+                self.net = Some(net);
+            }
+            Err(e) => {
+                self.show_message(&format!("网络初始化失败: {e}"));
+            }
+        }
+    }
+
+    fn pump_network_for_start_game(&mut self) -> Option<SceneTransition> {
+        let Some(net) = self.net.as_ref() else {
+            return None;
+        };
+
+        let events = net.recv_all();
+        if events.is_empty() {
+            return None;
+        }
+
+        for ev in events {
+            match ev {
+                NetworkEvent::StartGame { packet } => {
+                    // C#：Result=4 表示 Success，带 Resolution。
+                    if packet.result == 4 {
+                        // 场景间移交连接：Select -> Game
+                        if let Some(net) = self.net.take() {
+                            crate::network::set_global_net(net);
+                        }
+                        return Some(SceneTransition::Game);
+                    }
+                    self.show_message(&format!("StartGame 失败: result={}", packet.result));
+                    self.start_game_in_flight = false;
+                }
+                NetworkEvent::StartGameDelay { packet } => {
+                    self.show_message(&format!("开始游戏延迟: {}ms", packet.milliseconds));
+                    self.start_game_in_flight = false;
+                }
+                NetworkEvent::StartGameBanned { packet } => {
+                    self.show_message(&format!("开始游戏被禁止: {}", packet.reason));
+                    self.start_game_in_flight = false;
+                }
+                _ => {}
+            }
+        }
+
+        None
     }
     
     /// 显示消息框
@@ -227,7 +311,7 @@ impl SelectScene {
         // 开始游戏 Title[340-342]
         if self.selected_index.is_some() {
             if self.draw_button(100.0 + x_point - x_point / 2.0 - 50.0, y, 340, 341, 342) {
-                println!("🎮 开始游戏");
+                self.request_start_game();
             }
         }
         
@@ -608,6 +692,27 @@ impl Scene for SelectScene {
         if self.cursor_timer >= 0.5 {
             self.cursor_timer = 0.0;
             self.cursor_visible = !self.cursor_visible;
+        }
+
+        // 处理“开始游戏”请求（由 render 中的按钮点击触发，下一帧在 update 中发送）
+        if self.start_game_requested {
+            self.start_game_requested = false;
+            self.ensure_network();
+
+            if let (Some(net), Some(character_index)) = (self.net.as_ref(), self.start_game_character_index) {
+                if !self.start_game_in_flight {
+                    if let Err(e) = net.send(NetworkEvent::StartGameRequest { character_index }) {
+                        self.show_message(&format!("发送 StartGameRequest 失败: {e}"));
+                    } else {
+                        self.start_game_in_flight = true;
+                    }
+                }
+            }
+        }
+
+        // 轮询网络：等待 StartGame* 回包
+        if let Some(t) = self.pump_network_for_start_game() {
+            return Ok(t);
         }
         
         Ok(SceneTransition::None)

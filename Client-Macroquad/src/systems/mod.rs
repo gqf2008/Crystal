@@ -55,6 +55,10 @@ pub mod priority {
     // 第1層：輸入網絡 (100-199)
     pub const INPUT: u32 = 100;
     pub const NETWORK: u32 = 110; // 网络系统
+    /// NetworkSystem 拉取事件后，立刻落地到 ECS 状态（本地玩家/切图定位等）
+    pub const NETWORK_APPLY: u32 = 115;
+    /// 消费 MapInformation/MapChanged 并加载/更新 MapData
+    pub const MAP_LOAD: u32 = 118;
     pub const PLAYER_CONTROL: u32 = 120;
     pub const GAME_EVENT: u32 = 130;
     // 第2层：游戏逻辑(200-599)
@@ -136,12 +140,14 @@ pub use ecs_macros::{LogicSystem, RenderSystem};
 // 注意：新代码应使用 update:: 和 render:: 模块
 
 pub use input::PlayerControlSystem;
+pub use infra::NetworkSystem;
+pub use infra::NetworkApplySystem;
 pub use logic::combat::{
     CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem,
 };
 pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
-pub use logic::physics::{CollisionSystem, MovementSystem, PathfindingSystem};
-pub use presentation::{AnimationSystem, CameraFollowSystem, CameraSystem, MountStateSyncSystem};
+pub use logic::physics::{CollisionSystem, MapLoadSystem, MapManager, MovementSystem, PathfindingSystem};
+pub use presentation::{AnimationSystem, CameraFollowSystem, CameraSystem, MountStateSyncSystem, ParticleSystem};
 
 // ============================================================================
 // 系统 Trait 设计

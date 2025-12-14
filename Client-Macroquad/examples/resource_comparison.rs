@@ -17,9 +17,9 @@ fn main() {
 
     println!("\n新方式:");
     println!("  resources::set_data_path(\"Data\");");
-    println!("  resources::set_cache_size(1000, 500);");
+    println!("  resources::set_cache_size(1000);");
     resources::set_data_path("Data");
-    resources::set_cache_size(1000, 500);
+    resources::set_cache_size(1000);
     println!("  ✓ 完成");
 
     // ==================== 纹理加载对比 ====================
@@ -61,7 +61,7 @@ fn main() {
 
     println!("\n新方式:");
     println!("  // LRU 自动管理，内存可控");
-    println!("  resources::set_cache_size(1000, 500);  // 设置容量");
+    println!("  resources::set_cache_size(1000);  // 设置容量");
     println!("  let stats = resources::cache_stats();  // 监控");
     let stats = resources::cache_stats();
     println!("  ✓ 缓存统计: {}/{} 个纹理", stats.texture_cache_size, stats.texture_cache_capacity);

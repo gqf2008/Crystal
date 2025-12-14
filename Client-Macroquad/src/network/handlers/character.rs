@@ -26,11 +26,31 @@ impl PacketHandler for CharacterHandler {
                 }
             }
             
+            // StartGame
+            x if x == ServerPacketIds::StartGame as u16 => {
+                if let Ok(packet) = server::StartGame::read_body(&mut cursor) {
+                    tracing::info!("🎮 StartGame result: {}", packet.result);
+                    events.push(NetworkEvent::StartGame { packet });
+                }
+            }
+
+            // StartGameBanned
+            x if x == ServerPacketIds::StartGameBanned as u16 => {
+                if let Ok(packet) = server::StartGameBanned::read_body(&mut cursor) {
+                    tracing::warn!(
+                        "⛔ StartGame banned: {} (expiry {})",
+                        packet.reason,
+                        packet.expiry_date
+                    );
+                    events.push(NetworkEvent::StartGameBanned { packet });
+                }
+            }
+
             // StartGameDelay
             x if x == ServerPacketIds::StartGameDelay as u16 => {
                 if let Ok(packet) = server::StartGameDelay::read_body(&mut cursor) {
-                    events.push(NetworkEvent::StartGame { delay: packet.milliseconds as i32 });
-                    tracing::info!("🎮 Starting game with delay: {}ms", packet.milliseconds);
+                    tracing::info!("⏳ StartGameDelay: {}ms", packet.milliseconds);
+                    events.push(NetworkEvent::StartGameDelay { packet });
                 }
             }
             
@@ -57,17 +77,15 @@ impl PacketHandler for CharacterHandler {
             // UserInformation (player data after login)
             x if x == ServerPacketIds::UserInformation as u16 => {
                 if let Ok(packet) = server::UserInformation::read_body(&mut cursor) {
-                    // 🎯 推送UserInformation事件（SelectScene监听此事件切换到GameScene）
-                    events.push(NetworkEvent::UserInformation {
-                        location_x: packet.location_x,
-                        location_y: packet.location_y,
-                        hp: packet.hp,
-                        mp: packet.mp,
-                        gold: packet.gold,
-                    });
-                    
-                    tracing::info!("📊 User information loaded for player at ({}, {})", 
-                        packet.location_x, packet.location_y);
+                    tracing::info!(
+                        "📊 UserInformation: {} at ({}, {})",
+                        packet.name,
+                        packet.location_x,
+                        packet.location_y
+                    );
+
+                    // 🎯 推送UserInformation事件（进入游戏后的完整状态）
+                    events.push(NetworkEvent::UserInformation { packet });
                 }
             }
             

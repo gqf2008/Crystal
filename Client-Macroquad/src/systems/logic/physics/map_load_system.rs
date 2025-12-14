@@ -33,12 +33,13 @@
 //! ```
 
 use crate::core::GameError;
-use crate::game::{GameResult, MapLoader};
+use crate::game::GameResult;
 use crate::resources::MapReader;
 use tracing::{info, error};
 
 use crate::components::MapData;
 use crate::game::{GameContext};
+use crate::network::handlers::NetworkEvent;
 
 /// 地图管理组件
 /// 
@@ -74,68 +75,101 @@ pub struct MapLoadSystem;
 impl MapLoadSystem {
     /// 内部加载逻辑（使用 GameContext）
     fn do_update(ctx: &mut GameContext) -> GameResult {
-        // TODO: 实现地图加载事件处理
-        // use crate::network::handlers::GameEvent;
-        
-        // 从 GameContext 读取地图切换事件
-        let map_changes: Vec<(i32, String, String)> = ctx
-            .map_events()
-            .iter()
-            .filter_map(|_event| {
-                // TODO: 当 GameEvent 统一后，解析 MapChanged 事件
-                // if let GameEvent::MapChanged { map_index, file_name, title } = event {
-                //     Some((*map_index, file_name.clone(), title.clone()))
-                // } else {
-                //     None
-                // }
-                None
-            })
-            .collect();
-
-        // 如果没有地图切换事件，直接返回
-        if map_changes.is_empty() {
+        if !ctx.events().has_network_events() {
             return Ok(());
         }
 
-        // 处理第一个地图切换事件（通常一帧只有一个）
-        let (map_index, map_file, map_title) = &map_changes[0];
-        info!("📂 收到地图切换事件: index={}, file={}, title={}", 
-              map_index, map_file, map_title);
+        // 取本帧最后一个 MapChanged/MapInformation（后发更权威）
+        let mut selected: Option<(i32, String, String)> = None;
+        for event in ctx.events().network_events() {
+            match event {
+                NetworkEvent::MapChanged { packet } => {
+                    selected = Some((packet.map_index, packet.file_name.clone(), packet.title.clone()));
+                }
+                NetworkEvent::MapInformation { packet } => {
+                    // MapInformation 也包含 file/title，但一般 MapChanged 才携带落点
+                    if selected.is_none() {
+                        selected = Some((packet.map_index, packet.file_name.clone(), packet.title.clone()));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let Some((map_index, map_file, map_title)) = selected else {
+            return Ok(());
+        };
+
+        // 如果 MapManager 里已经是同一张图，则不重复加载
+        let current_map = {
+            let mut q = ctx.world.query::<&MapManager>();
+            q.iter()
+                .next()
+                .map(|(_, mgr)| (mgr.current_map_index, mgr.current_map_file.clone()))
+        };
+        if let Some((idx, file)) = current_map {
+            if idx == map_index && file == map_file {
+                return Ok(());
+            }
+        }
+
+        info!("📂 MapLoadSystem: map_index={} file={} title={}", map_index, map_file, map_title);
 
         // ====================================================================
         // 执行地图加载
         // ====================================================================
         
         info!("🗺️  开始加载地图: {} (文件: {})", map_title, map_file);
-        
-        // map_file 是纯文件名 (例如 "0"), 需要拼接成 "Map/0.map"
-        let map_path = format!("Map/{}.map", map_file);
-        let map_index = *map_index;
-        let map_file = map_file.clone();
-        let map_title = map_title.clone();
+
+        // map_file 通常是纯文件名（不含扩展名）；兼容 "0"/"0.map"/"Map/0.map"。
+        let map_path = normalize_map_path(&map_file);
         
         match MapReader::new(&map_path) {
             Ok(reader) => {
                 info!("✅ 地图文件读取成功: {}x{}", reader.width, reader.height);
-                
-                // 删除旧地图数据（瓦片实体）
-                Self::clear_old_map_data(&mut ctx.world);
-                
-                // 加载地图瓦片
-                if let Err(e) = MapLoader::load_map(&mut ctx.world, reader) {
-                    error!("❌ 地图瓦片加载失败: {}", e);
-                    return Err(e);
+
+                // 只更新 MapData（寻路/碰撞依赖），不在 ECS 内生成大量瓦片实体。
+                let new_map = MapData {
+                    cells: reader.map_cells.clone(),
+                    width: reader.width,
+                    height: reader.height,
+                };
+
+                let existing_map_entity = {
+                    let mut q = ctx.world.query::<&MapData>();
+                    q.iter().next().map(|(e, _)| e)
+                };
+                match existing_map_entity {
+                    Some(entity) => {
+                        if let Ok(mut map) = ctx.world.get::<&mut MapData>(entity) {
+                            map.cells = new_map.cells;
+                            map.width = new_map.width;
+                            map.height = new_map.height;
+                        }
+                    }
+                    None => {
+                        ctx.world.spawn((new_map,));
+                    }
                 }
-                
-                // 创建/更新 MapManager
+
+                // MapManager 作为单例：清理旧的再创建
+                let old: Vec<_> = ctx
+                    .world
+                    .query::<&MapManager>()
+                    .iter()
+                    .map(|(e, _)| e)
+                    .collect();
+                for e in old {
+                    let _ = ctx.world.despawn(e);
+                }
                 ctx.world.spawn((MapManager {
                     current_map_index: map_index,
                     current_map_file: map_file.clone(),
                     current_map_title: map_title.clone(),
                     is_loading: false,
                 },));
-                
-                info!("✅ 地图加载完成: {}", map_title);
+
+                info!("✅ MapLoadSystem: MapData/MapManager 已更新");
             }
             Err(e) => {
                 error!("❌ 地图文件读取失败: {}", e);
@@ -148,23 +182,20 @@ impl MapLoadSystem {
         Ok(())
     }
 
-    /// 清除旧地图数据
-    /// 
-    /// 删除所有带有 MapData 的实体（地图瓦片）
-    fn clear_old_map_data(world: &mut hecs::World) {
-        // 收集所有地图相关实体
-        let entities_to_remove: Vec<_> = world
-            .query::<&MapData>()
-            .iter()
-            .map(|(entity, _)| entity)
-            .collect();
+}
 
-        // 删除实体
-        for entity in entities_to_remove {
-            let _ = world.despawn(entity);
-        }
-
-        info!("🧹 已清除旧地图数据");
+fn normalize_map_path(file_name: &str) -> String {
+    let mut f = file_name.trim().replace('\\', "/");
+    if f.is_empty() {
+        return "Map/0.map".to_string();
+    }
+    if !f.ends_with(".map") {
+        f.push_str(".map");
+    }
+    if f.contains('/') {
+        f
+    } else {
+        format!("Map/{}", f)
     }
 }
 

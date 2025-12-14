@@ -10,3 +10,112 @@ mod mock;                 // 模拟网络实现（用于开发工具）
 // 导出
 pub use builder::{NetworkBuilder, NetContext};
 pub use handlers::NetworkEvent;
+
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+
+static GLOBAL_NET: Lazy<Mutex<Option<NetContext>>> = Lazy::new(|| Mutex::new(None));
+
+#[derive(Debug, Clone)]
+pub struct NetworkRuntimeConfig {
+	pub server_addr: String,
+	pub use_mock: bool,
+}
+
+impl Default for NetworkRuntimeConfig {
+	fn default() -> Self {
+		Self {
+			server_addr: "127.0.0.1:7000".to_string(),
+			// 默认走 mock：保证离线可跑；需要真服时在 config.ini 设置 UseMock=false
+			use_mock: true,
+		}
+	}
+}
+
+/// 从 `config.ini` 读取网络运行时配置。
+///
+/// 支持：
+/// - [Network] UseMock=true/false
+/// - [Network] ServerAddr=IP:PORT
+/// - 兼容键：ServerAddress=IP, ServerPort=7000
+pub fn load_network_runtime_config() -> NetworkRuntimeConfig {
+	let mut cfg = NetworkRuntimeConfig::default();
+
+	let Ok(content) = std::fs::read_to_string("config.ini") else {
+		return cfg;
+	};
+
+	let mut section = String::new();
+	let mut server_address: Option<String> = None;
+	let mut server_port: Option<u16> = None;
+
+	for raw in content.lines() {
+		let line = raw.trim();
+		if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+			continue;
+		}
+
+		if line.starts_with('[') && line.ends_with(']') {
+			section = line[1..line.len() - 1].trim().to_string();
+			continue;
+		}
+
+		let Some((k, v)) = line.split_once('=') else {
+			continue;
+		};
+		let key = k.trim();
+		let value = v.trim();
+
+		let in_network = section.eq_ignore_ascii_case("Network") || section.is_empty();
+		if !in_network {
+			continue;
+		}
+
+		if key.eq_ignore_ascii_case("UseMock") {
+			cfg.use_mock = match value.to_ascii_lowercase().as_str() {
+				"1" | "true" | "yes" | "y" | "on" => true,
+				"0" | "false" | "no" | "n" | "off" => false,
+				_ => cfg.use_mock,
+			};
+			continue;
+		}
+
+		if key.eq_ignore_ascii_case("ServerAddr") {
+			if !value.is_empty() {
+				cfg.server_addr = value.to_string();
+			}
+			continue;
+		}
+
+		if key.eq_ignore_ascii_case("ServerAddress") {
+			if !value.is_empty() {
+				server_address = Some(value.to_string());
+			}
+			continue;
+		}
+
+		if key.eq_ignore_ascii_case("ServerPort") {
+			if let Ok(p) = value.parse::<u16>() {
+				server_port = Some(p);
+			}
+			continue;
+		}
+	}
+
+	if let (Some(addr), Some(port)) = (server_address, server_port) {
+		cfg.server_addr = format!("{}:{}", addr, port);
+	}
+
+	cfg
+}
+
+/// 设置全局网络上下文（用于场景间移交连接）。
+pub fn set_global_net(net: NetContext) {
+	let mut guard = GLOBAL_NET.lock().expect("GLOBAL_NET poisoned");
+	*guard = Some(net);
+}
+
+/// 取走全局网络上下文（用于进入 GameScene 时接管连接）。
+pub fn take_global_net() -> Option<NetContext> {
+	GLOBAL_NET.lock().expect("GLOBAL_NET poisoned").take()
+}

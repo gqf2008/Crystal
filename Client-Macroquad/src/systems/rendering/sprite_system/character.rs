@@ -24,7 +24,7 @@
 // ============================================================================
 
 use super::SpriteRenderSystem;
-use crate::components::{AnimationFrame, Camera, LocalPlayer, Monster, MountState, NPC, Player, PlayerAppearance, Position, RenderPass, TimeTracker};
+use crate::components::{AnimationFrame, Camera, HoverHighlight, LocalPlayer, Monster, MountState, NPC, Player, PlayerAppearance, Position, RenderPass, TimeTracker};
 use crate::game::GameResult;
 use crate::objects::frames::get_player_frame;
 use crate::resources::LibraryName;
@@ -368,6 +368,12 @@ impl SpriteRenderSystem {
             .map(|(_, pass)| (pass.alpha, pass.local_only))
             .unwrap_or((1.0, false));
 
+        let hovered_npc_object_id = world
+            .query::<&HoverHighlight>()
+            .iter()
+            .next()
+            .and_then(|(_, hh)| hh.npc_object_id);
+
         // 收集并排序可渲染对象（玩家/怪物/NPC）
         #[derive(Clone)]
         enum Renderable {
@@ -381,6 +387,7 @@ impl SpriteRenderSystem {
             NPC {
                 name: String,
                 pos: Position,
+                object_id: Option<u32>,
             },
             Monster {
                 name: String,
@@ -436,7 +443,19 @@ impl SpriteRenderSystem {
                 if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
-                renderables.push((pos.y, 0, Renderable::NPC { name: npc.name.clone(), pos: *pos }));
+                let object_id = world
+                    .get::<&crate::components::NetworkSync>(_entity)
+                    .ok()
+                    .map(|s| s.object_id);
+                renderables.push((
+                    pos.y,
+                    0,
+                    Renderable::NPC {
+                        name: npc.name.clone(),
+                        pos: *pos,
+                        object_id,
+                    },
+                ));
             }
             for (_entity, (monster, pos)) in world.query::<(&Monster, &Position)>().iter() {
                 if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
@@ -472,8 +491,16 @@ impl SpriteRenderSystem {
                         mount_index,
                     )?;
                 }
-                Renderable::NPC { name, pos } => {
+                Renderable::NPC { name, pos, object_id } => {
                     let tint = Color::new(0.3, 0.8, 1.0, alpha.clamp(0.0, 1.0));
+                    // 悬停高亮：当前 NPC 还是占位圆点渲染，所以用“圈/描边”模拟悬停效果。
+                    // 真正的精灵描边（LibrarySprite）仍由 EffectRenderSystem 负责。
+                    if let Some(oid) = object_id {
+                        if Some(oid) == hovered_npc_object_id {
+                            let outline = Color::new(0.1, 1.0, 0.1, (0.9 * alpha).clamp(0.0, 1.0));
+                            draw_circle_lines(pos.x, pos.y - 16.0, 16.0, 3.0, outline);
+                        }
+                    }
                     draw_circle(pos.x, pos.y - 16.0, 10.0, tint);
                     draw_text(&name, pos.x - 20.0, pos.y - 30.0, 16.0, tint);
                 }

@@ -37,9 +37,19 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::GainedGold as u16 => {
                 if let Ok(packet) = server::GainedGold::read_body(&mut cursor) {
                     events.push(NetworkEvent::GoldChanged {
-                        amount: packet.gold as u32,
+                        delta: packet.gold as i32,
                     });
                     tracing::debug!("💰 Gold gained: {}", packet.gold);
+                }
+            }
+
+            // LoseGold
+            x if x == ServerPacketIds::LoseGold as u16 => {
+                if let Ok(packet) = server::LoseGold::read_body(&mut cursor) {
+                    events.push(NetworkEvent::GoldChanged {
+                        delta: -(packet.gold as i32),
+                    });
+                    tracing::debug!("💸 Gold lost: {}", packet.gold);
                 }
             }
             

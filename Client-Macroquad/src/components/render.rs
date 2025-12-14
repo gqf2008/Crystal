@@ -22,6 +22,20 @@ pub struct RenderPass {
     pub local_only: bool,
 }
 
+/// 当前鼠标悬停对象（用于渲染高亮/轮廓等视觉效果）
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HoverHighlight {
+    pub npc_object_id: Option<u32>,
+}
+
+/// 当前正在交互的 NPC（对齐 C# 的 GameScene.NPCID）
+///
+/// 说明：服务器的 NPCResponse 可能不带 object id，因此需要客户端侧保留“当前 NPC”。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ActiveNpc {
+    pub npc_object_id: Option<u32>,
+}
+
 impl Default for RenderPass {
     fn default() -> Self {
         Self {

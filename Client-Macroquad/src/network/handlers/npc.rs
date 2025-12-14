@@ -24,6 +24,20 @@ impl PacketHandler for NpcHandler {
                     tracing::debug!("🗨️ NPC dialog: {}", dialog);
                 }
             }
+
+            // NPCGoods (shop list)
+            x if x == ServerPacketIds::NPCGoods as u16 => {
+                if let Ok(packet) = server::NPCGoods::read_body(&mut cursor) {
+                    let count = packet.list.len();
+                    events.push(NetworkEvent::NPCGoods {
+                        items: packet.list,
+                        rate: packet.rate,
+                        panel_type: packet.panel_type,
+                        hide_added_stats: packet.hide_added_stats,
+                    });
+                    tracing::debug!("🛒 NPC goods: {} items (rate={}, type={:?}, hide_added={})", count, packet.rate, packet.panel_type, packet.hide_added_stats);
+                }
+            }
             
             _ => {
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });

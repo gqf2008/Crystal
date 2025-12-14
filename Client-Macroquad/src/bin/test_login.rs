@@ -15,7 +15,7 @@ use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
 
 // 引用库模块
-use client_macroquad::scenes::{SceneKind, Scene, SceneTransition, LoginScene, SelectScene, GameScene, LoadingScene};
+use client_macroquad::scenes::{CharacterInfo, GameScene, LoadingScene, LoginScene, Scene, SceneKind, SceneTransition, SelectScene};
 
 // ============================================================================
 // 常量配置
@@ -91,7 +91,15 @@ async fn main() {
             Ok(SceneTransition::CharacterSelect) => {
                 println!("🎬 切换场景: {} -> 角色选择", current_scene.name());
                 current_scene.on_exit().ok();
-                let characters = vec![];  // TODO: 从服务器获取角色列表
+                // 临时：LoginScene 还未接入真实网络拉取角色列表，这里提供测试角色，打通闭环。
+                let characters = vec![CharacterInfo {
+                    index: 0,
+                    name: "测试角色".to_string(),
+                    level: 1,
+                    class: 0,
+                    gender: 0,
+                    last_access: "刚刚".to_string(),
+                }];
                 let mut new_scene = SceneKind::CharacterSelect(SelectScene::new(characters).expect("SelectScene 创建失败"));
                 new_scene.on_enter().expect("场景初始化失败");
                 current_scene = new_scene;
@@ -99,7 +107,9 @@ async fn main() {
             Ok(SceneTransition::Game) => {
                 println!("🎬 切换场景: {} -> 游戏", current_scene.name());
                 current_scene.on_exit().ok();
-                let mut new_scene = SceneKind::Game(GameScene::new());
+                let mut scene = GameScene::new();
+                scene.load_textures().await;
+                let mut new_scene = SceneKind::Game(scene);
                 new_scene.on_enter().expect("场景初始化失败");
                 current_scene = new_scene;
             }

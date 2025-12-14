@@ -173,10 +173,15 @@ impl Packet for LoginSuccess {
 #[derive(Debug, Clone)]
 pub struct StartGame {
     pub result: u8,
-    // 0: Not logged in
-    // 1: Character not found
-    // 2: Already in game
-    // 3: Success
+    pub resolution: i32,
+
+    // C# 参考: Shared/ServerPackets.cs::StartGame
+    // Result:
+    // 0: Disabled.
+    // 1: Not logged in
+    // 2: Character not found.
+    // 3: Start Game Error
+    // 4: Success (客户端会根据 Resolution 调整分辨率)
 }
 
 impl Packet for StartGame {
@@ -184,11 +189,13 @@ impl Packet for StartGame {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let result = reader.read_u8()?;
-        Ok(Self { result })
+        let resolution = reader.read_i32::<LittleEndian>()?;
+        Ok(Self { result, resolution })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u8(self.result)?;
+        writer.write_i32::<LittleEndian>(self.resolution)?;
         Ok(())
     }
 }

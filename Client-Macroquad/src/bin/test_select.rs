@@ -1,8 +1,7 @@
 // 角色选择场景测试程序
 
 use client_macroquad::game::GameResult;
-use client_macroquad::scenes::select_scene::{SelectScene, CharacterInfo};
-use client_macroquad::scenes::{Scene, SceneTransition};
+use client_macroquad::scenes::{CharacterInfo, GameScene, Scene, SceneTransition, SelectScene};
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
@@ -42,9 +41,16 @@ async fn main() -> GameResult {
         },
     ];
     
-    // 创建场景
-    let mut scene = SelectScene::new(characters)?;
-    scene.on_enter()?;
+    // 创建初始场景
+    enum LocalScene {
+        Select(SelectScene),
+        Game(GameScene),
+    }
+
+    let mut scene = LocalScene::Select(SelectScene::new(characters)?);
+    if let LocalScene::Select(s) = &mut scene {
+        s.on_enter()?;
+    }
     
     let mut last_time = get_time();
     
@@ -53,22 +59,48 @@ async fn main() -> GameResult {
         let dt = (current_time - last_time) as f32;
         last_time = current_time;
         
-        // 更新
-        let transition = scene.update(dt)?;
-        if let SceneTransition::None = transition {
-            // 继续
-        } else {
-            println!("🎬 场景切换请求: {:?}", transition);
-            break;
+        // 更新 + 切换
+        match &mut scene {
+            LocalScene::Select(s) => {
+                let transition = s.update(dt)?;
+                match transition {
+                    SceneTransition::None => {}
+                    SceneTransition::Game => {
+                        println!("🎬 场景切换: Select -> Game");
+                        s.on_exit().ok();
+                        let mut g = GameScene::new();
+                        g.load_textures().await;
+                        g.on_enter()?;
+                        scene = LocalScene::Game(g);
+                    }
+                    other => {
+                        println!("🎬 场景切换请求: {:?}", other);
+                        break;
+                    }
+                }
+            }
+            LocalScene::Game(g) => {
+                let _ = g.update(dt)?;
+            }
         }
-        
+
         // 渲染
-        scene.render()?;
+        match &mut scene {
+            LocalScene::Select(s) => s.render()?,
+            LocalScene::Game(g) => g.render()?,
+        }
         
         next_frame().await;
     }
     
-    scene.on_exit()?;
+    match &mut scene {
+        LocalScene::Select(s) => {
+            s.on_exit()?;
+        }
+        LocalScene::Game(g) => {
+            g.on_exit()?;
+        }
+    }
     
     Ok(())
 }

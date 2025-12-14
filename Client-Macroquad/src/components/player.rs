@@ -274,6 +274,42 @@ impl GuildMembership {
     }
 }
 
+/// 角色公会信息（服务器下发字符串）
+#[derive(Debug, Clone)]
+pub struct GuildInfo {
+    pub name: String,
+    pub rank: String,
+}
+
+/// 名字颜色（服务器下发）
+#[derive(Debug, Clone, Copy)]
+pub struct NameColor(pub i32);
+
+/// 等级特效标记（服务器下发 bitflags）
+#[derive(Debug, Clone, Copy)]
+pub struct LevelEffectsFlags(pub mir2_shared::enums::LevelEffects);
+
+/// 观战/被观战状态
+#[derive(Debug, Clone, Copy)]
+pub struct ObserveState {
+    pub allow_observe: bool,
+    pub observer: bool,
+}
+
+/// 英雄状态（P0 仅落地，不做渲染/逻辑）
+#[derive(Debug, Clone, Copy)]
+pub struct HeroState {
+    pub has_hero: bool,
+    pub behaviour: mir2_shared::enums::HeroBehaviour,
+}
+
+/// 召唤物状态（P0 仅落地）
+#[derive(Debug, Clone, Copy)]
+pub struct SummonedCreatureState {
+    pub creature_type: u8,
+    pub summoned: bool,
+}
+
 // ============================================================================
 // 战斗属性组件 (Combat & Stats Components)
 // ============================================================================

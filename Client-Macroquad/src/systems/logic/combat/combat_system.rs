@@ -27,7 +27,6 @@ use crate::components::{
     LocalPlayer, Position, Health, Monster, NetworkSync, CombatStats, NetworkObjectType
 };
 use crate::network::handlers::NetworkEvent as NetworkCommand;
-use crossbeam_channel::Sender;
 use mir2_shared::enums::MirDirection;
 use crate::game::GameResult;
 use super::super::super::LogicSystem;
@@ -70,84 +69,129 @@ impl LogicSystem for CombatSystem {
     
 
     fn update(&mut self, ctx:&mut GameContext, _delay_time: f32) -> GameResult {
-        // 检查玩家是否有攻击意图
-        let attack_request = {
-            let mut request = None;
+        // 原版体验：右键点怪后持续追砍，直到目标死亡或玩家取消。
+        // 这里保持 server-authoritative 结果：客户端只发 AttackRequest。
 
-            for (_, (_, input)) in ctx.world.query::<(&LocalPlayer, &crate::components::PlayerInput)>().iter() {
-                if let Some(target_entity) = input.attack_target {
-                    request = Some(target_entity);
+        // 1) 取本地玩家 attack_target
+        let (player_entity, target_entity) = {
+            let mut result: Option<(hecs::Entity, hecs::Entity)> = None;
+            for (e, (_local, input)) in ctx
+                .world
+                .query::<(&LocalPlayer, &crate::components::PlayerInput)>()
+                .iter()
+            {
+                if let Some(t) = input.attack_target {
+                    result = Some((e, t));
                     break;
                 }
             }
-            
-            request
-        };
-        
-        // 如果有攻击请求，执行攻击逻辑
-        if let Some(target_entity) = attack_request {
-            // 1. 获取目标的 NetworkSync 组件以获取 object_id
-            let target_id = {
-                let mut id = None;
-                
-                if let Ok(sync) = ctx.world.get::<&NetworkSync>(target_entity) {
-                    id = Some(sync.object_id);
-                }
-                id
-            };
-            
-            if let Some(target_id) = target_id {
-                // 2. 检查目标是否存在且为怪物
-                let target_exists = {
-                    let mut exists = false;
-                    for (_, (_, net_sync)) in ctx.world.query::<(&Monster, &NetworkSync)>().iter() {
-                        if net_sync.object_id == target_id {
-                            exists = true;
-                            break;
-                        }
-                    }
-                    exists
-                };
-                
-                if !target_exists {
-                    tracing::warn!("⚠️ 攻击目标不存在");
-                    
-                    // 清除攻击输入
-                    for (_, (_, input)) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>() {
-                        input.attack_target = None;
-                        break;
-                    }
-                    
-                    return Ok(());
-                }
-                
-                // 3. 计算攻击方向（朝向目标）
-                let _direction = Self::calculate_attack_direction(&ctx.world, target_id);
-                
-                // 4. 发送攻击命令到网络（如果网络发送器存在）
-                // TODO: 从 World 中获取 NetworkCommand sender
-                // let _ = network_tx.send(NetworkCommand::Attack {
-                //     direction,
-                //     spell: mir2_shared::enums::Spell::None,
-                // });
-                
-                // 5. 本地预览伤害（不修改实际数据，实际伤害由服务器计算）
-                Self::calculate_local_attack_preview(&ctx.world, target_id);
-                
-                tracing::info!("⚔️ 攻击怪物: ID={}", target_id);
+            match result {
+                None => return Ok(()),
+                Some(v) => v,
             }
-            
-            // 6. 清除攻击输入
-            for (_, (_, input)) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>() {
+        };
+
+        // 2) 目标实体拿 object_id；拿不到说明目标已被移除
+        let target_id = match ctx.world.get::<&NetworkSync>(target_entity).ok() {
+            None => {
+                if let Ok(mut input) = ctx.world.get::<&mut crate::components::PlayerInput>(player_entity) {
+                    input.attack_target = None;
+                }
+                return Ok(());
+            }
+            Some(sync) => sync.object_id,
+        };
+
+        // 3) 目标必须是怪物且仍存在
+        let target_exists = ctx
+            .world
+            .query::<(&Monster, &NetworkSync)>()
+            .iter()
+            .any(|(_, (_m, sync))| sync.object_id == target_id);
+
+        if !target_exists {
+            if let Ok(mut input) = ctx.world.get::<&mut crate::components::PlayerInput>(player_entity) {
                 input.attack_target = None;
             }
+            return Ok(());
         }
+
+        // 4) 不在近战范围：保持 attack_target（输入系统会负责自动走近）
+        if !Self::is_in_melee_range(&ctx.world, target_id) {
+            return Ok(());
+        }
+
+        // 5) 正在攻击动画中：本帧不重复出手（AttackState 作为冷却）
+        if ctx.world.get::<&crate::components::AttackState>(player_entity).is_ok() {
+            return Ok(());
+        }
+
+        // 6) 进入范围且不在攻击中：面向目标 + 播放攻击动画 + 发 AttackRequest
+        let direction = Self::calculate_attack_direction(&ctx.world, target_id);
+        if let Ok(mut player) = ctx.world.get::<&mut crate::components::Player>(player_entity) {
+            player.direction = direction;
+            player.action = crate::components::PlayerAction::Attack1;
+        }
+
+        let _ = ctx.world.insert_one(
+            player_entity,
+            crate::components::AttackState {
+                start_time: std::time::Instant::now(),
+                attack_type: crate::components::PlayerAction::Attack1,
+            },
+        );
+
+        if ctx.session.server_authoritative_combat {
+            if let Some(net) = ctx.net() {
+                let _ = net.send(NetworkCommand::AttackRequest {
+                    direction,
+                    spell: 0,
+                });
+            }
+        }
+
+        // 攻击时停止继续移动（避免贴脸后还继续跑）
+        if let Ok(mut input) = ctx.world.get::<&mut crate::components::PlayerInput>(player_entity) {
+            input.move_to = None;
+            input.movement_mode = crate::components::MovementMode::None;
+        }
+
+        Self::calculate_local_attack_preview(&ctx.world, target_id);
         
         Ok(())
     }
 }
 
 impl CombatSystem {
+    fn is_in_melee_range(world: &World, target_id: u32) -> bool {
+        let player_grid = world
+            .query::<(&LocalPlayer, &Position)>()
+            .iter()
+            .next()
+            .map(|(_, (_local, pos))| crate::coord::Coord::world_to_grid(pos.x, pos.y));
+        let Some((pgx, pgy)) = player_grid else {
+            return false;
+        };
+
+        let target_grid = world
+            .query::<(&Monster, &NetworkSync, &Position)>()
+            .iter()
+            .find_map(|(_, (_m, sync, pos))| {
+                if sync.object_id == target_id {
+                    Some(crate::coord::Coord::world_to_grid(pos.x, pos.y))
+                } else {
+                    None
+                }
+            });
+        let Some((tgx, tgy)) = target_grid else {
+            return false;
+        };
+
+        let dx = (tgx - pgx).abs();
+        let dy = (tgy - pgy).abs();
+        dx.max(dy) <= 1
+    }
+
     /// 计算物理攻击伤害
     /// 
     /// 伤害计算公式：
@@ -235,44 +279,6 @@ impl CombatSystem {
             is_critical,
             damage_type: DamageType::Magic,
         }
-    }
-    
-    /// 玩家攻击怪物（供外部调用）
-    pub fn player_attack_monster(
-        world: &mut World,
-        target_id: u32,
-        direction: MirDirection,
-        network_tx: &Sender<NetworkCommand>,
-    ) -> bool {
-        // 检查目标是否存在
-        let target_exists = {
-            let mut exists = false;
-            for (_, (_, net_sync)) in world.query::<(&Monster, &NetworkSync)>().iter() {
-                if net_sync.object_id == target_id {
-                    exists = true;
-                    break;
-                }
-            }
-            exists
-        };
-        
-        if !target_exists {
-            println!("⚠️ 攻击目标不存在");
-            return false;
-        }
-        
-        println!("⚔️ 攻击怪物: ID={}", target_id);
-        
-        // 发送攻击命令到服务器
-        let _ = network_tx.send(NetworkCommand::AttackRequest {
-            direction,
-            spell: 0, // Spell::None
-        });
-        
-        // 本地预计算伤害 (实际伤害由服务器计算)
-        Self::calculate_local_attack_preview(world, target_id);
-        
-        true
     }
     
     /// 本地预览伤害 (不修改实际数据)

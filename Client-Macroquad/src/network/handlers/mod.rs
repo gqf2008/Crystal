@@ -30,6 +30,7 @@ pub use npc::NpcHandler;
 pub use quest::QuestHandler;
 
 use mir2_shared::packets::PacketHeader;
+use crate::resources::LibraryName;
 
 /// Network events - 网络事件（服务器 ↔ 客户端）
 /// 
@@ -103,21 +104,18 @@ pub enum NetworkEvent {
     // 服务器 → 客户端
     CharacterCreated { name: String },
     CharacterDeleted { index: u32 },
-    StartGame { delay: i32 },
-    UserInformation {  // 🎯 玩家进入游戏后的完整状态信息
-        location_x: i32,
-        location_y: i32,
-        hp: i32,
-        mp: i32,
-        gold: u32,
-    },
+    StartGame { packet: mir2_shared::packets::server::StartGame },
+    StartGameDelay { packet: mir2_shared::packets::server::StartGameDelay },
+    StartGameBanned { packet: mir2_shared::packets::server::StartGameBanned },
+    UserInformation { packet: mir2_shared::packets::server::UserInformation },
     
     // ========================================================================
     // 地图事件（Map Events）
     // ========================================================================
     
     // 服务器 → 客户端
-    MapChanged { map_index: i32, file_name: String, title: String },
+    MapInformation { packet: mir2_shared::packets::server::MapInformation },
+    MapChanged { packet: mir2_shared::packets::server::MapChanged },
     
     // ========================================================================
     // 玩家移动事件（Player Movement Events）
@@ -142,7 +140,9 @@ pub enum NetworkEvent {
     ManaChanged { current: u32, max: u32 },
     ExperienceGained { amount: i64 },
     LevelUp { new_level: u16 },
-    GoldChanged { amount: u32 },
+    /// 金币变化（对齐协议：GainedGold / LoseGold）。
+    /// 语义是“变化量”，可能为负数。
+    GoldChanged { delta: i32 },
     
     // ========================================================================
     // 战斗事件（Combat Events）
@@ -164,7 +164,7 @@ pub enum NetworkEvent {
     // ========================================================================
     
     // 客户端 → 服务器
-    ChatRequest { message: String, chat_type: mir2_shared::enums::ChatType },
+    ChatRequest { message: String, linked_items: Vec<mir2_shared::ChatItem> },
     
     // 服务器 → 客户端
     ChatMessage { sender: String, message: String, chat_type: mir2_shared::enums::ChatType },
@@ -177,6 +177,25 @@ pub enum NetworkEvent {
     // 服务器 → 客户端
     ObjectSpawned { object_id: u32, object_type: ObjectType },
     ObjectRemoved { object_id: u32 },
+
+    // 服务器 → 客户端（真实对象包：用于 server-driven 世界同步）
+    ObjectMonster { packet: mir2_shared::packets::server::ObjectMonster },
+    ObjectNpc { packet: mir2_shared::packets::server::ObjectNpc },
+    ObjectRemove { packet: mir2_shared::packets::server::ObjectRemove },
+    ObjectTurn { packet: mir2_shared::packets::server::ObjectTurn },
+    ObjectWalk { packet: mir2_shared::packets::server::ObjectWalk },
+    ObjectRun { packet: mir2_shared::packets::server::ObjectRun },
+
+    // Mock / 离线可视化：直接携带渲染所需数据（不代表真实协议）
+    MockLibrarySpriteSpawn {
+        object_id: u32,
+        object_type: ObjectType,
+        library: LibraryName,
+        index: i32,
+        location_x: i32,
+        location_y: i32,
+    },
+    MockLibrarySpriteDespawn { object_id: u32 },
     
     // ========================================================================
     // 物品事件（Item Events）
@@ -261,14 +280,22 @@ pub enum NetworkEvent {
     // ========================================================================
     
     // 客户端 → 服务器
-    NPCCallRequest { npc_object_id: u32 },
-    BuyItemRequest { item_index: u32, count: u32, panel_type: u8 },
+    /// 对齐 C#：ClientPackets.CallNPC { ObjectID, Key }
+    /// - 初次点击 NPC：key 通常为空字符串
+    /// - 点击对话选项：key 通常为 "[@Action]"
+    NPCCallRequest { npc_object_id: u32, key: String },
+    BuyItemRequest { item_index: u64, count: u32, panel_type: u8 },
     SellItemRequest { unique_id: u64, count: u32 },
     RepairItemRequest { unique_id: u64 },
     
     // 服务器 → 客户端
     NpcDialog { npc_id: u32, dialog: String },
-    NPCGoods { items: Vec<mir2_shared::UserItem> },
+    NPCGoods {
+        items: Vec<mir2_shared::UserItem>,
+        rate: f32,
+        panel_type: mir2_shared::enums::PanelType,
+        hide_added_stats: bool,
+    },
     
     // ========================================================================
     // 通用事件（Generic Events）

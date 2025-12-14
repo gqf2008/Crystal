@@ -50,6 +50,13 @@ impl FrameInput {
         }
         macroquad::prelude::is_mouse_button_pressed(MouseButton::Left)
     }
+
+    pub fn mouse_left_down(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        macroquad::prelude::is_mouse_button_down(MouseButton::Left)
+    }
     
     pub fn mouse_right_pressed(&self) -> bool {
         if !self.enabled {
@@ -57,12 +64,26 @@ impl FrameInput {
         }
         macroquad::prelude::is_mouse_button_pressed(MouseButton::Right)
     }
+
+    pub fn mouse_right_down(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        macroquad::prelude::is_mouse_button_down(MouseButton::Right)
+    }
     
     pub fn mouse_middle_pressed(&self) -> bool {
         if !self.enabled {
             return false;
         }
         macroquad::prelude::is_mouse_button_pressed(MouseButton::Middle)
+    }
+
+    pub fn mouse_middle_down(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        macroquad::prelude::is_mouse_button_down(MouseButton::Middle)
     }
     
     pub fn mouse_position(&self) -> (f32, f32) {
@@ -94,6 +115,13 @@ impl FrameInput {
         }
         macroquad::prelude::is_mouse_button_pressed(button)
     }
+
+    pub fn button_down(&self, button: MouseButton) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        macroquad::prelude::is_mouse_button_down(button)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -107,6 +135,13 @@ impl MouseState {
             return false;
         }
         macroquad::prelude::is_mouse_button_pressed(button)
+    }
+
+    pub fn button_down(&self, button: MouseButton) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        macroquad::prelude::is_mouse_button_down(button)
     }
     
     pub fn position(&self) -> Vec2 {
@@ -127,11 +162,19 @@ impl MouseState {
 pub struct GameContext {
     pub world: hecs::World,                     // ECS 世界
     pub network: crate::components::network::NetworkContext,  // 网络服务
+    /// 真实网络连接（双线程 NetContext）。
+    ///
+    /// - `None`: 当前未连接服务器（例如 test_game_scene）
+    /// - `Some`: NetworkSystem 会从这里拉取入站事件并写入 EventBus
+    pub net: Option<crate::network::NetContext>,
     pub settings: crate::components::settings::Settings,      // 设置
    
     pub events: crate::event_bus::EventBus,                   // 事件总线
     pub delta_time: f32,                        // 帧时间
     pub start_time: std::time::Instant,         // 启动时间
+
+    /// 会话/进场状态（跨帧保留 StartGame* 等关键结果）
+    pub session: crate::components::SessionState,
 
     /// 是否屏蔽本帧 ECS 输入读取（用于 UI 交互期间防止误触）
     pub input_blocked: bool,
@@ -142,11 +185,14 @@ impl GameContext {
         Self {
             world: hecs::World::new(),
             network: crate::components::network::NetworkContext::new(),
+            net: None,
             settings: crate::components::settings::Settings::default(),
            
             events: crate::event_bus::EventBus::new(),
             delta_time: 0.0,
             start_time: std::time::Instant::now(),
+
+            session: crate::components::SessionState::default(),
 
             input_blocked: false,
         }
@@ -183,6 +229,16 @@ impl GameContext {
     /// 获取可变网络上下文
     pub fn network_mut(&mut self) -> &mut crate::components::network::NetworkContext {
         &mut self.network
+    }
+
+    /// 获取网络连接上下文（如果已连接）
+    pub fn net(&self) -> Option<&crate::network::NetContext> {
+        self.net.as_ref()
+    }
+
+    /// 设置/替换网络连接上下文
+    pub fn set_net(&mut self, net: crate::network::NetContext) {
+        self.net = Some(net);
     }
     
     
@@ -279,7 +335,18 @@ impl GameState {
         // 创建新场景
         let mut new_scene = match transition {
             SceneTransition::Login => SceneKind::Login(LoginScene::new()),
-            SceneTransition::CharacterSelect => SceneKind::CharacterSelect(SelectScene::new(vec![])?),
+            SceneTransition::CharacterSelect => {
+                // 临时：登录场景目前未接入真实网络拉取角色列表，这里给一个最小示例角色，打通“选择 -> 开始游戏 -> 进入游戏场景”闭环。
+                let characters = vec![CharacterInfo {
+                    index: 0,
+                    name: "测试角色".to_string(),
+                    level: 1,
+                    class: 0,
+                    gender: 0,
+                    last_access: "刚刚".to_string(),
+                }];
+                SceneKind::CharacterSelect(SelectScene::new(characters)?)
+            }
             SceneTransition::Game => {
                 // 创建游戏场景并异步加载纹理
                 let mut scene = GameScene::new();
