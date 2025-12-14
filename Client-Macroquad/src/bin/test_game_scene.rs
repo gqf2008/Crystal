@@ -31,6 +31,11 @@ fn window_conf() -> Conf {
 async fn main() {
     println!("🎮 传奇2 - GameScene 测试（直接进入主场景）");
 
+    // 统一资源根目录：避免从不同工作目录启动时找不到 Data/
+    let data_dir = format!("{}/Data", env!("CARGO_MANIFEST_DIR"));
+    client_macroquad::resources::resource_manager::set_data_path(&data_dir);
+    client_macroquad::resources::libraries::set_data_path(data_dir);
+
     // 初始化中文字体（MainDialog/各对话框会用到）
     init_chinese_font().await;
 

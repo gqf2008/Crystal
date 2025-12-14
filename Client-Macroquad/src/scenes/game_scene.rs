@@ -59,7 +59,6 @@ pub struct GameScene {
 
     // NPC 对话框（对齐 C# NPCDialog）
     npc_dialog: NpcDialogHybrid,
-    npc_dialog_cooldown_until: f64,
 
     // NPC 商店（对齐 C# NPCGoodsDialog）
     npc_goods_dialog: NpcGoodsDialogHybrid,
@@ -117,6 +116,7 @@ impl GameScene {
             .add_system(MountStateSyncSystem::new(), priority::MOUNT_STATE_SYNC)
             .add_system(AnimationSystem::new(), priority::ANIMATION)
             .add_system(crate::systems::ParticleSystem, priority::PARTICLE)
+            .add_system(crate::systems::FloatingTextSystem::default(), priority::PARTICLE)
             .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW)
             .add_system(CameraSystem::new(), priority::CAMERA)
             // ECS 渲染系统：先最小接入 SpriteRenderSystem（角色/坐骑/武器特效）
@@ -137,7 +137,6 @@ impl GameScene {
             main_dialog: MainDialog::new(),
 
             npc_dialog: NpcDialogHybrid::new(),
-            npc_dialog_cooldown_until: 0.0,
 
             npc_goods_dialog: NpcGoodsDialogHybrid::new(),
 
@@ -159,6 +158,32 @@ impl GameScene {
             ui_mouse_captured: false,
             initialized: false,
         }
+    }
+
+    fn try_consume_npc_call_cooldown(&mut self) -> bool {
+        let now = get_time();
+
+        let Some(pass_entity) = self.ecs_render_pass_entity else {
+            return true;
+        };
+
+        if let Ok(mut cd) = self
+            .ecs_ctx
+            .world
+            .get::<&mut crate::components::NpcCallCooldown>(pass_entity)
+        {
+            if now >= cd.until {
+                cd.until = now + 5.0;
+                return true;
+            }
+            return false;
+        }
+
+        let _ = self
+            .ecs_ctx
+            .world
+            .insert_one(pass_entity, crate::components::NpcCallCooldown { until: now + 5.0 });
+        true
     }
 
     fn handle_npc_goods_action(&mut self, action: crate::scenes::dialogs::game::npc_goods_dialog_hybrid::NpcGoodsDialogAction) {
@@ -479,6 +504,7 @@ impl GameScene {
                     RenderPass::default(),
                     crate::components::HoverHighlight::default(),
                     crate::components::ActiveNpc::default(),
+                    crate::components::NpcCallCooldown::default(),
                 ));
             self.ecs_render_pass_entity = Some(entity);
         }
@@ -786,7 +812,45 @@ impl GameScene {
     }
 
     fn find_hovered_npc_tile(&self, mouse_world: Vec2) -> Option<(u32, i32, i32)> {
-        use crate::components::{NetworkObjectType, NetworkSync, Position};
+        use crate::components::{LibrarySprite, NetworkObjectType, NetworkSync, Position};
+
+        // 贴近原版：优先像素级命中（BodyLibrary.VisiblePixel）
+        // 选择规则：命中里取 y 最大（最前景）
+        let mut best_pixel: Option<(u32, f32, i32, i32)> = None;
+        for (_, (sync, spr, pos)) in self
+            .ecs_ctx
+            .world
+            .query::<(&NetworkSync, &LibrarySprite, &Position)>()
+            .iter()
+        {
+            if sync.object_type != NetworkObjectType::NPC {
+                continue;
+            }
+
+            let Some(info) = spr.library.get_texture(spr.texture_index()) else {
+                continue;
+            };
+
+            let draw_x = pos.x + info.offset_x as f32;
+            let draw_y = pos.y + info.offset_y as f32;
+            let local_x = (mouse_world.x - draw_x).floor() as i32;
+            let local_y = (mouse_world.y - draw_y).floor() as i32;
+            if !info.visible_pixel(local_x, local_y) {
+                continue;
+            }
+
+            let (gx, gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+            match best_pixel {
+                None => best_pixel = Some((sync.object_id, pos.y, gx, gy)),
+                Some((_oid, best_y, _bgx, _bgy)) if pos.y > best_y => {
+                    best_pixel = Some((sync.object_id, pos.y, gx, gy))
+                }
+                _ => {}
+            }
+        }
+        if let Some((oid, _y, gx, gy)) = best_pixel {
+            return Some((oid, gx, gy));
+        }
 
         // 贴近原版：用“屏幕像素半径”做 hover 命中，避免缩放后难以悬停。
         // world_radius = screen_px / zoom
@@ -966,6 +1030,13 @@ impl GameScene {
     pub async fn load_textures(&mut self) {
         println!("🎮 GameScene: 加载对话框纹理...");
 
+        // 资源根目录：使用绝对路径，避免从不同工作目录启动时找不到 Data/
+        // 例如：从仓库根目录 `cargo run -p client-macroquad --bin test_game_scene`
+        // 或从 `Client-Macroquad/` 目录启动都应能正常加载。
+        let data_dir = format!("{}/Data", env!("CARGO_MANIFEST_DIR"));
+        crate::resources::resource_manager::set_data_path(&data_dir);
+        crate::resources::libraries::set_data_path(data_dir.clone());
+
         self.main_dialog.load_native_textures().await;
 
         // 加载地图（用于主场景背景渲染）
@@ -975,8 +1046,8 @@ impl GameScene {
             println!("⚠️ GameScene: 地图库初始化失败: {}", e);
         }
 
-        let map_path = "Map/n0.map";
-        match MapReader::new(map_path) {
+        let map_path = crate::resources::map_reader::resolve_map_path("n0");
+        match MapReader::new(&map_path) {
             Ok(reader) => {
                 println!("✅ GameScene: 地图加载成功 {} ({}x{})", map_path, reader.width, reader.height);
                 self.loaded_map_file = Some("n0".to_string());
@@ -1118,20 +1189,7 @@ impl GameScene {
     }
 
     fn normalize_map_path(file_name: &str) -> String {
-        let mut f = file_name.trim().replace('\\', "/");
-        if f.is_empty() {
-            return "Map/0.map".to_string();
-        }
-
-        // file_name 可能是 "0" / "n0" / "0.map" / "Map/0.map"。
-        if !f.ends_with(".map") {
-            f.push_str(".map");
-        }
-        if f.contains('/') {
-            f
-        } else {
-            format!("Map/{}", f)
-        }
+        crate::resources::map_reader::resolve_map_path(file_name)
     }
 }
 
@@ -1436,10 +1494,7 @@ impl Scene for GameScene {
                     }
                     NpcDialogAction::ClickAction { action } => {
                         // 对齐 C#：5s 内只允许一次 CallNPC
-                        let now = get_time();
-                        if now >= self.npc_dialog_cooldown_until {
-                            self.npc_dialog_cooldown_until = now + 5.0;
-
+                        if self.try_consume_npc_call_cooldown() {
                             if let Some(npc_object_id) = self.active_npc_object_id() {
                                 if let Some(net) = self.ecs_ctx.net.as_ref() {
                                     let key = format!("[{}]", action);

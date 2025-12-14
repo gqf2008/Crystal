@@ -515,7 +515,9 @@ impl MockNetwork {
                 };
 
                 let key = key.trim().to_string();
-                if key.is_empty() {
+                // 对齐客户端：左键 NPC 默认发 [@Main]。
+                // 这里把 "" 与 "[@Main]" 都视为“初次打开/主入口”。
+                if key.is_empty() || key == "[@Main]" {
                     // 初次打开：返回带可点击选项的对话（对齐 C# 的 <text/@Action>）
                     let _ = response_tx.send(NetworkEvent::NpcDialog {
                         // 对齐真服：NPCResponse 只有 page，不带 object_id；客户端用 ActiveNpc 追踪
@@ -673,22 +675,23 @@ impl MockNetwork {
         spawn_y: i32,
         direction: u8,
     ) {
-        tracing::info!("📂 尝试加载地图: {}", map_path);
+        let resolved_path = crate::resources::map_reader::resolve_map_path(map_path);
+        tracing::info!("📂 尝试加载地图: {} -> {}", map_path, resolved_path);
 
-        match MapReader::new(map_path) {
+        match MapReader::new(&resolved_path) {
             Ok(map_reader) => {
                 tracing::info!(
                     "✅ 成功加载地图: {} ({}x{})",
-                    map_path,
+                    resolved_path,
                     map_reader.width,
                     map_reader.height
                 );
 
-                // 提取纯文件名（不含路径和扩展名）
-                // 例如: "Map/0.map" -> "0"
-                let file_name = map_path
-                    .trim_start_matches("Map/")
-                    .trim_end_matches(".map")
+                // 提取纯文件名（不含路径和扩展名）用于下发 MapChanged
+                let file_name = std::path::Path::new(&resolved_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("0")
                     .to_string();
 
                 // 发送 MapChanged 事件 (与 C# Server 格式一致)

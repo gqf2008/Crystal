@@ -24,7 +24,7 @@
 // ============================================================================
 
 use super::SpriteRenderSystem;
-use crate::components::{AnimationFrame, Camera, HoverHighlight, LocalPlayer, Monster, MountState, NPC, Player, PlayerAppearance, Position, RenderPass, TimeTracker};
+use crate::components::{AnimationFrame, Camera, LibrarySprite, LocalPlayer, MountState, Player, PlayerAppearance, Position, RenderPass, SpriteBlendMode, TimeTracker};
 use crate::game::GameResult;
 use crate::objects::frames::get_player_frame;
 use crate::resources::LibraryName;
@@ -368,12 +368,6 @@ impl SpriteRenderSystem {
             .map(|(_, pass)| (pass.alpha, pass.local_only))
             .unwrap_or((1.0, false));
 
-        let hovered_npc_object_id = world
-            .query::<&HoverHighlight>()
-            .iter()
-            .next()
-            .and_then(|(_, hh)| hh.npc_object_id);
-
         // 收集并排序可渲染对象（玩家/怪物/NPC）
         #[derive(Clone)]
         enum Renderable {
@@ -384,14 +378,10 @@ impl SpriteRenderSystem {
                 appearance: PlayerAppearance,
                 anim_frame: AnimationFrame,
             },
-            NPC {
-                name: String,
+            LibrarySprite {
+                spr: LibrarySprite,
                 pos: Position,
-                object_id: Option<u32>,
-            },
-            Monster {
-                name: String,
-                pos: Position,
+                kind_order: i32,
             },
         }
 
@@ -439,29 +429,29 @@ impl SpriteRenderSystem {
 
         // NPC/Monster：当前先用占位绘制（后续接入真实库映射/动画组件）
         if !local_only {
-            for (_entity, (npc, pos)) in world.query::<(&NPC, &Position)>().iter() {
+            use crate::components::{NetworkObjectType, NetworkSync};
+            for (_entity, (sync, spr, pos)) in world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
+                if sync.object_type != NetworkObjectType::NPC && sync.object_type != NetworkObjectType::Monster {
+                    continue;
+                }
+                if !matches!(spr.blend_mode, SpriteBlendMode::Alpha) {
+                    continue;
+                }
                 if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
-                let object_id = world
-                    .get::<&crate::components::NetworkSync>(_entity)
-                    .ok()
-                    .map(|s| s.object_id);
+
+                // kind order: NPC(0) < Monster(1) < Player(2)
+                let kind_order = if sync.object_type == NetworkObjectType::NPC { 0 } else { 1 };
                 renderables.push((
                     pos.y,
-                    0,
-                    Renderable::NPC {
-                        name: npc.name.clone(),
+                    kind_order,
+                    Renderable::LibrarySprite {
+                        spr: *spr,
                         pos: *pos,
-                        object_id,
+                        kind_order,
                     },
                 ));
-            }
-            for (_entity, (monster, pos)) in world.query::<(&Monster, &Position)>().iter() {
-                if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
-                    continue;
-                }
-                renderables.push((pos.y, 1, Renderable::Monster { name: monster.name.clone(), pos: *pos }));
             }
         }
 
@@ -491,23 +481,18 @@ impl SpriteRenderSystem {
                         mount_index,
                     )?;
                 }
-                Renderable::NPC { name, pos, object_id } => {
-                    let tint = Color::new(0.3, 0.8, 1.0, alpha.clamp(0.0, 1.0));
-                    // 悬停高亮：当前 NPC 还是占位圆点渲染，所以用“圈/描边”模拟悬停效果。
-                    // 真正的精灵描边（LibrarySprite）仍由 EffectRenderSystem 负责。
-                    if let Some(oid) = object_id {
-                        if Some(oid) == hovered_npc_object_id {
-                            let outline = Color::new(0.1, 1.0, 0.1, (0.9 * alpha).clamp(0.0, 1.0));
-                            draw_circle_lines(pos.x, pos.y - 16.0, 16.0, 3.0, outline);
-                        }
-                    }
-                    draw_circle(pos.x, pos.y - 16.0, 10.0, tint);
-                    draw_text(&name, pos.x - 20.0, pos.y - 30.0, 16.0, tint);
-                }
-                Renderable::Monster { name, pos } => {
-                    let tint = Color::new(1.0, 0.3, 0.3, alpha.clamp(0.0, 1.0));
-                    draw_circle(pos.x, pos.y - 16.0, 12.0, tint);
-                    draw_text(&name, pos.x - 20.0, pos.y - 30.0, 16.0, tint);
+                Renderable::LibrarySprite { spr, pos, kind_order: _ } => {
+                    let tint = Color::new(1.0, 1.0, 1.0, alpha.clamp(0.0, 1.0));
+                    let Some(info) = spr.library.get_texture(spr.texture_index()) else {
+                        continue;
+                    };
+                    let Some(tex) = info.image else {
+                        continue;
+                    };
+
+                    let draw_x = pos.x + info.offset_x as f32;
+                    let draw_y = pos.y + info.offset_y as f32;
+                    draw_texture_ex(&tex, draw_x, draw_y, tint, DrawTextureParams { ..Default::default() });
                 }
             }
         }

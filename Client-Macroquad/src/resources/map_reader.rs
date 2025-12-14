@@ -5,6 +5,50 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
+/// 统一解析地图文件路径。
+///
+/// 支持输入："0" / "n0" / "0.map" / "Map/0.map" / 绝对路径。
+///
+/// 搜索顺序（从高到低）：
+/// 1) 输入本身（可能是绝对路径或相对路径）
+/// 2) `Client-Macroquad/Data/` 下
+/// 3) `Client-Macroquad/` 下
+/// 4) `../ClientRust/` 下（当前仓库的地图文件实际在这里）
+pub fn resolve_map_path(file_name: &str) -> String {
+    let mut f = file_name.trim().replace('\\', "/");
+    if f.is_empty() {
+        f = "Map/0.map".to_string();
+    }
+
+    if !f.to_ascii_lowercase().ends_with(".map") {
+        f.push_str(".map");
+    }
+    if !f.contains('/') {
+        f = format!("Map/{}", f);
+    }
+
+    let looks_absolute = f.contains(':') || f.starts_with('/') || f.starts_with("\\\\");
+    if looks_absolute && Path::new(&f).exists() {
+        return f;
+    }
+
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let candidates = [
+        f.clone(),
+        format!("{}/Data/{}", manifest_dir, f),
+        format!("{}/{}", manifest_dir, f),
+        format!("{}/../ClientRust/{}", manifest_dir, f),
+    ];
+    for c in candidates {
+        if Path::new(&c).exists() {
+            return c;
+        }
+    }
+
+    // 没找到就返回规范化后的相对路径，交给调用方处理错误。
+    f
+}
+
 
 // ============================================================================
 // CellInfo - 对应 C# 的 CellInfo 类
@@ -275,16 +319,15 @@ impl MapReader {
 
     // 对应 C# 的 initiate() 方法
     fn initiate(&mut self) -> io::Result<()> {
-        if Path::new(&self.file_name).exists() {
-            let mut file = File::open(&self.file_name)?;
-            file.read_to_end(&mut self.bytes)?;
-        } else {
-            // 文件不存在时创建空地图
-            self.width = 1000;
-            self.height = 1000;
-            self.map_cells = vec![vec![CellInfo::new(); self.height as usize]; self.width as usize];
-            return Ok(());
+        if !Path::new(&self.file_name).exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Map file not found: {}", self.file_name),
+            ));
         }
+
+        let mut file = File::open(&self.file_name)?;
+        file.read_to_end(&mut self.bytes)?;
 
         // 检测地图格式
         self.detect_and_load()?;

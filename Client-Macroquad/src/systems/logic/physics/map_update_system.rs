@@ -66,10 +66,16 @@ impl MapUpdateSystem {
                 .map(|(_, (pos, cam))| (pos.clone(), cam.zoom, cam.screen_width, cam.screen_height))
                 .unwrap_or((Position { x: 800.0, y: 600.0 }, 1.0, 1600.0, 1200.0));
 
-            // 加载新地图
-            match MapReader::new(&new_path) {
+            // 加载新地图（兼容不同工作目录/仓库布局）
+            let resolved_path = crate::resources::map_reader::resolve_map_path(&new_path);
+            match MapReader::new(&resolved_path) {
                 Ok(reader) => {
-                    println!("✅ 地图读取成功: {}x{}", reader.width, reader.height);
+                    println!(
+                        "✅ 地图读取成功: {} ({}x{})",
+                        resolved_path,
+                        reader.width,
+                        reader.height
+                    );
 
                     // 清空世界
                     ctx.world.clear();

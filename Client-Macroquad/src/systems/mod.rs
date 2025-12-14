@@ -147,7 +147,7 @@ pub use logic::combat::{
 };
 pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
 pub use logic::physics::{CollisionSystem, MapLoadSystem, MapManager, MovementSystem, PathfindingSystem};
-pub use presentation::{AnimationSystem, CameraFollowSystem, CameraSystem, MountStateSyncSystem, ParticleSystem};
+pub use presentation::{AnimationSystem, CameraFollowSystem, CameraSystem, FloatingTextSystem, MountStateSyncSystem, ParticleSystem};
 
 // ============================================================================
 // 系统 Trait 设计

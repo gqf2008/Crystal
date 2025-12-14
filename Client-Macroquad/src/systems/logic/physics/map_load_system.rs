@@ -185,18 +185,7 @@ impl MapLoadSystem {
 }
 
 fn normalize_map_path(file_name: &str) -> String {
-    let mut f = file_name.trim().replace('\\', "/");
-    if f.is_empty() {
-        return "Map/0.map".to_string();
-    }
-    if !f.ends_with(".map") {
-        f.push_str(".map");
-    }
-    if f.contains('/') {
-        f
-    } else {
-        format!("Map/{}", f)
-    }
+    crate::resources::map_reader::resolve_map_path(file_name)
 }
 
 // ============================================================================

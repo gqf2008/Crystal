@@ -39,7 +39,7 @@ use crate::{
     game::{GameContext, GameResult},
     systems::LogicSystem,
 };
-use macroquad::prelude::MouseButton;
+use macroquad::prelude::{get_time, MouseButton};
 use std::time::{Duration, Instant};
 use mir2_shared::enums::MirDirection;
 
@@ -85,6 +85,9 @@ pub struct PlayerControlSystem {
     double_click_threshold: Duration,
     long_press_threshold: Duration,
 
+    // 单击 NPC：不在范围时先走近；进入范围后自动触发一次对话
+    pending_npc_call: Option<u32>,
+
     // local-player -> server movement sync
     last_net_move_sent: Option<Instant>,
     net_move_interval: Duration,
@@ -99,9 +102,22 @@ impl PlayerControlSystem {
             // “按住移动”需要一个阈值，避免快速单击也触发 DirectFollow 导致轻微位移。
             long_press_threshold: Duration::from_millis(120),
 
+            pending_npc_call: None,
+
             last_net_move_sent: None,
             net_move_interval: Duration::from_millis(80),
         }
+    }
+
+    fn find_object_world_pos(ctx: &GameContext, object_id: u32) -> Option<(f32, f32)> {
+        use crate::components::{NetworkSync, Position};
+
+        for (_e, (sync, pos)) in ctx.world.query::<(&NetworkSync, &Position)>().iter() {
+            if sync.object_id == object_id {
+                return Some((pos.x, pos.y));
+            }
+        }
+        None
     }
 
     fn grid_direction_towards(from: (i32, i32), to: (i32, i32)) -> Option<MirDirection> {
@@ -158,13 +174,40 @@ impl PlayerControlSystem {
     }
 
     fn find_clicked_npc_object_id(ctx: &GameContext, click_world: (f32, f32)) -> Option<u32> {
-        use crate::components::{NetworkObjectType, NetworkSync, Position};
+        use crate::components::{LibrarySprite, NetworkObjectType, NetworkSync, Position};
 
+        // 贴近原版：优先像素级命中（VisiblePixel）
+        // 选择规则：命中里取 y 最大（最前景）
+        let mut best_pixel: Option<(u32, f32)> = None;
+        for (_, (sync, spr, pos)) in ctx.world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
+            if sync.object_type != NetworkObjectType::NPC {
+                continue;
+            }
+
+            let Some(info) = spr.library.get_texture(spr.texture_index()) else {
+                continue;
+            };
+            let draw_x = pos.x + info.offset_x as f32;
+            let draw_y = pos.y + info.offset_y as f32;
+            let local_x = (click_world.0 - draw_x).floor() as i32;
+            let local_y = (click_world.1 - draw_y).floor() as i32;
+            if !info.visible_pixel(local_x, local_y) {
+                continue;
+            }
+
+            match best_pixel {
+                None => best_pixel = Some((sync.object_id, pos.y)),
+                Some((_oid, best_y)) if pos.y > best_y => best_pixel = Some((sync.object_id, pos.y)),
+                _ => {}
+            }
+        }
+        if let Some((oid, _y)) = best_pixel {
+            return Some(oid);
+        }
+
+        // fallback：格子/距离近似（避免纹理未加载/异常时完全点不到）
         let (click_gx, click_gy) = crate::coord::Coord::world_to_grid(click_world.0, click_world.1);
-
-        // 找到落在同一格（或相邻格）的 NPC（基于 NetworkSync.object_type）
-        let mut best: Option<(u32, i32, i32, f32)> = None;
-
+        let mut best: Option<(u32, f32)> = None;
         for (_, (sync, pos)) in ctx.world.query::<(&NetworkSync, &Position)>().iter() {
             if sync.object_type != NetworkObjectType::NPC {
                 continue;
@@ -175,19 +218,41 @@ impl PlayerControlSystem {
             if dx > 1 || dy > 1 {
                 continue;
             }
-            // 在候选里选“离点击点最近”的 NPC
             let dist2 = (pos.x - click_world.0) * (pos.x - click_world.0)
                 + (pos.y - click_world.1) * (pos.y - click_world.1);
             match best {
-                None => best = Some((sync.object_id, gx, gy, dist2)),
-                Some((_oid, _bgx, _bgy, bdist2)) if dist2 < bdist2 => {
-                    best = Some((sync.object_id, gx, gy, dist2))
-                }
+                None => best = Some((sync.object_id, dist2)),
+                Some((_oid, bdist2)) if dist2 < bdist2 => best = Some((sync.object_id, dist2)),
                 _ => {}
             }
         }
+        best.map(|(oid, _)| oid)
+    }
 
-        best.map(|(oid, _, _, _)| oid)
+    fn try_send_npc_main(ctx: &mut GameContext, npc_object_id: u32) {
+        // 对齐 C#：ClientPackets.CallNPC { ObjectID, Key="[@Main]" } 且 5s 内只允许一次
+        let now = get_time();
+        let mut allowed = true;
+
+        // 共享冷却：优先复用 GameScene 挂在 render-pass 实体上的组件
+        if let Some((_e, cd)) = ctx.world.query_mut::<&mut crate::components::NpcCallCooldown>().into_iter().next() {
+            if now < cd.until {
+                allowed = false;
+            } else {
+                cd.until = now + 5.0;
+            }
+        }
+
+        if !allowed {
+            return;
+        }
+
+        if let Some(net) = ctx.net() {
+            let _ = net.send(crate::network::handlers::NetworkEvent::NPCCallRequest {
+                npc_object_id,
+                key: "[@Main]".to_string(),
+            });
+        }
     }
 
     fn find_clicked_monster_entity(ctx: &GameContext, click_world: (f32, f32)) -> Option<hecs::Entity> {
@@ -381,7 +446,10 @@ impl LogicSystem for PlayerControlSystem {
         let has_single_click = left_single_click || right_single_click;
 
         // 克隆网络句柄（避免在持有 ctx.world 的可变借用时再借用 ctx）
-        let net = ctx.net().cloned();
+        let net = ctx.net.clone();
+
+        // NPC 对话请求：延迟到 player loop 之后再发（避免 hecs 可变借用冲突）
+        let mut npc_call_immediate: Option<u32> = None;
 
         // 语义：本地玩家正常移动，但把移动意图同步到服务器；并接受服务器回包校正。
         let sync_move_to_server = ctx.session.server_authoritative_movement;
@@ -390,28 +458,32 @@ impl LogicSystem for PlayerControlSystem {
         // 单击：优先判定是否点到 NPC（近似拾取：按格子命中）
         // 原版习惯：鼠标点 NPC 直接对话；这里同时保留右键交互。
         let mut npc_interaction_target_left: Option<u32> = None;
+        let mut npc_approach_target_left: Option<u32> = None;
         if left_single_click {
             if let Some((sx, sy)) = self.mouse_state.left_press_position {
                 let click_world = Self::screen_to_world(sx, sy, &camera_pos, &camera);
-                npc_interaction_target_left = Self::find_clicked_npc_object_id(ctx, click_world);
-                if let Some(npc_id) = npc_interaction_target_left {
-                    if !Self::player_in_talk_range(ctx, npc_id, 2) {
-                        // 走近再交互：当前先不触发（避免远距离“隔空对话”）
-                        npc_interaction_target_left = None;
+                let clicked = Self::find_clicked_npc_object_id(ctx, click_world);
+                if let Some(npc_id) = clicked {
+                    if Self::player_in_talk_range(ctx, npc_id, 2) {
+                        npc_interaction_target_left = Some(npc_id);
+                    } else {
+                        npc_approach_target_left = Some(npc_id);
                     }
                 }
             }
         }
 
         let mut npc_interaction_target_right: Option<u32> = None;
+        let mut npc_approach_target_right: Option<u32> = None;
         if right_single_click {
             if let Some((sx, sy)) = self.mouse_state.right_press_position {
                 let click_world = Self::screen_to_world(sx, sy, &camera_pos, &camera);
-                npc_interaction_target_right = Self::find_clicked_npc_object_id(ctx, click_world);
-                if let Some(npc_id) = npc_interaction_target_right {
-                    if !Self::player_in_talk_range(ctx, npc_id, 2) {
-                        // 走近再交互：当前先不触发（避免远距离“隔空对话”）
-                        npc_interaction_target_right = None;
+                let clicked = Self::find_clicked_npc_object_id(ctx, click_world);
+                if let Some(npc_id) = clicked {
+                    if Self::player_in_talk_range(ctx, npc_id, 2) {
+                        npc_interaction_target_right = Some(npc_id);
+                    } else {
+                        npc_approach_target_right = Some(npc_id);
                     }
                 }
             }
@@ -419,19 +491,34 @@ impl LogicSystem for PlayerControlSystem {
 
         // 记录当前交互 NPC（对齐 C# GameScene.NPCID）
         // 注意：必须在进入下面的 `query_mut::<(&mut PlayerInput, ..)>` 之前做，避免二次可变借用。
-        let npc_interaction_target = if left_single_click {
+        let npc_clicked_target = if left_single_click {
+            npc_interaction_target_left.or(npc_approach_target_left)
+        } else if right_single_click {
+            npc_interaction_target_right.or(npc_approach_target_right)
+        } else {
+            None
+        };
+
+        let _npc_interaction_target = if left_single_click {
             npc_interaction_target_left
         } else if right_single_click {
             npc_interaction_target_right
         } else {
             None
         };
-        if let Some(npc_object_id) = npc_interaction_target {
+
+        if let Some(npc_object_id) = npc_clicked_target {
             for (_e, active) in ctx.world.query_mut::<&mut crate::components::ActiveNpc>() {
                 active.npc_object_id = Some(npc_object_id);
                 break;
             }
         }
+
+        // 走近目标的世界坐标：必须在进入 query_mut 之前算好（避免 hecs 借用冲突）
+        let npc_approach_left_world: Option<(u32, f32, f32)> = npc_approach_target_left
+            .and_then(|oid| Self::find_object_world_pos(ctx, oid).map(|(x, y)| (oid, x, y)));
+        let npc_approach_right_world: Option<(u32, f32, f32)> = npc_approach_target_right
+            .and_then(|oid| Self::find_object_world_pos(ctx, oid).map(|(x, y)| (oid, x, y)));
 
         // 右键攻击：在进入 query_mut 之前，先把“点击世界坐标/点到的怪物实体”算好，避免可变借用期间再借用 ctx。
         let right_click_attack_world: Option<(f32, f32)> = if right_single_click && npc_interaction_target_right.is_none() {
@@ -494,29 +581,36 @@ impl LogicSystem for PlayerControlSystem {
                     // 左键单击：优先 NPC 对话（对齐原版体验）
                     if let Some(npc_object_id) = npc_interaction_target_left {
                         tracing::warn!("💬 左键点到NPC，发送NPCCallRequest: {}", npc_object_id);
-                        if let Some(net) = net.as_ref() {
-                            let _ = net.send(crate::network::handlers::NetworkEvent::NPCCallRequest {
-                                npc_object_id,
-                                key: String::new(),
-                            });
-                        }
+                        npc_call_immediate = Some(npc_object_id);
                         player.action = PlayerAction::Stand;
+                        self.pending_npc_call = None;
+                    } else if let Some((npc_object_id, wx, wy)) = npc_approach_left_world {
+                        // 走近再对话：先寻路靠近 NPC
+                        player_input.move_to = Some((wx, wy));
+                        player_input.movement_mode = crate::components::MovementMode::Pathfinding;
+                        player.action = PlayerAction::Walk;
+                        self.pending_npc_call = Some(npc_object_id);
                     } else {
                         // 左键单击 = 站立
                         tracing::warn!("⏹️ 检测到左键单击，立即停止移动");
                         player.action = PlayerAction::Stand;
+                        self.pending_npc_call = None;
                     }
                 } else if right_single_click {
                     // 右键单击：优先 NPC 交互（服务器驱动），否则才是攻击
                     if let Some(npc_object_id) = npc_interaction_target_right {
                         tracing::warn!("💬 右键点到NPC，发送NPCCallRequest: {}", npc_object_id);
-                        if let Some(net) = net.as_ref() {
-                            let _ = net.send(crate::network::handlers::NetworkEvent::NPCCallRequest {
-                                npc_object_id,
-                                key: String::new(),
-                            });
+                        // 原版主要是左键；此处仍允许右键交互，但同样走 [@Main]
+                        if npc_call_immediate.is_none() {
+                            npc_call_immediate = Some(npc_object_id);
                         }
                         player.action = PlayerAction::Stand;
+                        self.pending_npc_call = None;
+                    } else if let Some((npc_object_id, wx, wy)) = npc_approach_right_world {
+                        player_input.move_to = Some((wx, wy));
+                        player_input.movement_mode = crate::components::MovementMode::Pathfinding;
+                        player.action = PlayerAction::Walk;
+                        self.pending_npc_call = Some(npc_object_id);
                     } else {
                         // 右键单击 = 攻击动作
                         tracing::warn!("⚔️ 检测到右键单击，触发攻击");
@@ -692,6 +786,19 @@ impl LogicSystem for PlayerControlSystem {
                         }
                     }
                 }
+            }
+        }
+
+        // 发送 NPC 主对话请求（共享 5 秒冷却）
+        if let Some(npc_object_id) = npc_call_immediate {
+            Self::try_send_npc_main(ctx, npc_object_id);
+        }
+
+        // 点过 NPC 但当时不在范围：走近后自动触发一次对话请求
+        if let Some(npc_id) = self.pending_npc_call {
+            if Self::player_in_talk_range(ctx, npc_id, 2) {
+                Self::try_send_npc_main(ctx, npc_id);
+                self.pending_npc_call = None;
             }
         }
         

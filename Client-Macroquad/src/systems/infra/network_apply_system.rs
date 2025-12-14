@@ -572,10 +572,31 @@ impl NetworkApplySystem {
             packet.location_x,
             packet.location_y,
         );
+
+        // 同步怪物名称（用于悬停/调试 overlay，避免“只有贴图没有名字”）
+        if let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) {
+            // 先插入；若已存在则更新
+            if ctx
+                .world
+                .insert_one(e, crate::components::Monster::new(packet.name.clone(), packet.image))
+                .is_err()
+            {
+                if let Ok(mut m) = ctx.world.get::<&mut crate::components::Monster>(e) {
+                    m.name = packet.name.clone();
+                    m.monster_type = packet.image;
+                }
+            }
+
+            // 最小血条支撑：若无服务器 HP 信息，则给一个默认血池，保证可见
+            if ctx.world.get::<&crate::components::Health>(e).is_err() {
+                let _ = ctx.world.insert_one(e, crate::components::Health { current: 100, max: 100 });
+            }
+        }
     }
 
     fn apply_object_npc(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectNpc) {
         use crate::components::network::NetworkObjectType;
+        use crate::components::NameColor;
 
         // C# 对应：Libraries.NPCs[Image]
         let library = crate::resources::LibraryName::Npcs(packet.image as usize);
@@ -589,6 +610,29 @@ impl NetworkApplySystem {
             packet.location_x,
             packet.location_y,
         );
+
+        // 同步 NPC 名称（用于悬停显示/交互提示）
+        if let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) {
+            if ctx
+                .world
+                .insert_one(
+                    e,
+                    crate::components::NPC::new(packet.name.clone(), format!("npc:{}", packet.image)),
+                )
+                .is_err()
+            {
+                if let Ok(mut npc) = ctx.world.get::<&mut crate::components::NPC>(e) {
+                    npc.name = packet.name.clone();
+                }
+            }
+
+            // 对齐 C#：NPCObject.NameColour
+            if ctx.world.insert_one(e, NameColor(packet.name_colour)).is_err() {
+                if let Ok(mut c) = ctx.world.get::<&mut NameColor>(e) {
+                    c.0 = packet.name_colour;
+                }
+            }
+        }
     }
 
     fn apply_object_remove(ctx: &mut GameContext, object_id: u32) {
@@ -643,6 +687,11 @@ impl LogicSystem for NetworkApplySystem {
         let mut items_gained: Vec<mir2_shared::data::item::UserItem> = Vec::new();
         let mut items_lost: Vec<u64> = Vec::new();
         let mut items_moved: Vec<(u32, u32)> = Vec::new();
+
+        // combat feedback
+        let mut player_health_changed: Option<(u32, u32)> = None;
+        let mut object_struck: Vec<(u32, i32)> = Vec::new();
+        let mut object_died: Vec<u32> = Vec::new();
 
         for event in ctx.events().network_events() {
             match event {
@@ -710,6 +759,19 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ItemMoved { from, to } => {
                     items_moved.push((*from, *to));
                 }
+
+                // ===== combat feedback =====
+                NetworkEvent::HealthChanged { current, max } => {
+                    player_health_changed = Some((*current, *max));
+                }
+                NetworkEvent::ObjectStruck {
+                    object_id, damage, ..
+                } => {
+                    object_struck.push((*object_id, *damage));
+                }
+                NetworkEvent::ObjectDied { object_id } => {
+                    object_died.push(*object_id);
+                }
                 _ => {}
             }
         }
@@ -756,6 +818,27 @@ impl LogicSystem for NetworkApplySystem {
         };
 
         if let Some(e) = local_player_entity {
+            // 血量同步（来自服务器；优先于本地推断）
+            if let Some((cur, max)) = player_health_changed {
+                let mut inserted = false;
+                {
+                    if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(e) {
+                        hp.current = cur as i32;
+                        hp.max = max as i32;
+                        inserted = true;
+                    }
+                }
+                if !inserted {
+                    let _ = ctx.world.insert_one(
+                        e,
+                        crate::components::Health {
+                            current: cur as i32,
+                            max: max as i32,
+                        },
+                    );
+                }
+            }
+
             // 位置校正（格子坐标 -> 世界像素）
             // 仅在“服务器权威移动”开启时落地；否则会与本地 MovementSystem 双驱动，导致抖动/乱跳。
             if ctx.session.server_authoritative_movement {
@@ -843,6 +926,58 @@ impl LogicSystem for NetworkApplySystem {
                     for item in items_gained {
                         let _ = inv.add_item(item);
                     }
+                }
+            }
+        }
+
+        // ===== server-driven: combat落地到对象（怪物/其他对象） =====
+        // ObjectStruck: 最小可见闭环：扣血 + 飘字（用于 mock / 真实服都可用）。
+        for (object_id, damage) in object_struck {
+            let Some(target) = Self::find_entity_by_object_id(ctx, object_id) else {
+                continue;
+            };
+
+            // 更新 Health（若无则创建一个默认血池，便于测试可见）
+            let (spawn_x, spawn_y) = {
+                if let Ok(pos) = ctx.world.get::<&crate::components::Position>(target) {
+                    (pos.x, pos.y)
+                } else {
+                    (0.0, 0.0)
+                }
+            };
+
+            let mut had_hp = false;
+            {
+                if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(target) {
+                    hp.take_damage(damage);
+                    had_hp = true;
+                }
+            }
+            if !had_hp {
+                let mut hp = crate::components::Health { current: 100, max: 100 };
+                hp.take_damage(damage);
+                let _ = ctx.world.insert_one(target, hp);
+            }
+
+            // 飘字实体（独立 entity，避免污染目标组件）
+            let now = macroquad::prelude::get_time();
+            let text = format!("{}", damage);
+            ctx.world.spawn((
+                crate::components::Position::new(spawn_x, spawn_y - 72.0),
+                crate::components::FloatingText {
+                    text,
+                    start_time: now,
+                    duration: 0.8,
+                    rise_speed: 36.0,
+                },
+            ));
+        }
+
+        // ObjectDied: 标记血量为 0（ObjectRemove 可能会在后续把 entity 删掉）
+        for object_id in object_died {
+            if let Some(target) = Self::find_entity_by_object_id(ctx, object_id) {
+                if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(target) {
+                    hp.current = 0;
                 }
             }
         }

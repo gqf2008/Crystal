@@ -36,6 +36,22 @@ pub struct ActiveNpc {
     pub npc_object_id: Option<u32>,
 }
 
+/// CallNPC 发送节流（对齐 C# GameScene.NPCTime：5s 内只允许一次）
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NpcCallCooldown {
+    pub until: f64,
+}
+
+/// 漂浮文本（用于伤害数字等临时反馈）
+#[derive(Debug, Clone)]
+pub struct FloatingText {
+    pub text: String,
+    pub start_time: f64,
+    pub duration: f64,
+    /// 上浮速度（像素/秒）
+    pub rise_speed: f32,
+}
+
 impl Default for RenderPass {
     fn default() -> Self {
         Self {
