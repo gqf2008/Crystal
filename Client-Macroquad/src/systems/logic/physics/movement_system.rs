@@ -21,6 +21,7 @@ use crate::game::GameResult;
 use crate::components::{Player, Position, movement::{MovementVelocity, Path}};
 use crate::systems::LogicSystem;
 use mir2_shared::enums::MirDirection;
+use std::collections::HashSet;
 
 /// 移动系统 - 实现格子对齐的移动逻辑
 #[derive(ecs_macros::LogicSystem)]
@@ -73,14 +74,71 @@ impl MovementSystem {
         }
     }
 
+    fn direction_index(d: MirDirection) -> i32 {
+        match d {
+            MirDirection::Up => 0,
+            MirDirection::UpRight => 1,
+            MirDirection::Right => 2,
+            MirDirection::DownRight => 3,
+            MirDirection::Down => 4,
+            MirDirection::DownLeft => 5,
+            MirDirection::Left => 6,
+            MirDirection::UpLeft => 7,
+        }
+    }
+
+    fn index_direction(i: i32) -> MirDirection {
+        match i.rem_euclid(8) {
+            0 => MirDirection::Up,
+            1 => MirDirection::UpRight,
+            2 => MirDirection::Right,
+            3 => MirDirection::DownRight,
+            4 => MirDirection::Down,
+            5 => MirDirection::DownLeft,
+            6 => MirDirection::Left,
+            _ => MirDirection::UpLeft,
+        }
+    }
+
+    fn step_towards_direction(current: MirDirection, desired: MirDirection, max_steps: i32) -> MirDirection {
+        let cur = Self::direction_index(current);
+        let des = Self::direction_index(desired);
+        let diff = (des - cur).rem_euclid(8);
+        if diff == 0 {
+            return current;
+        }
+
+        // 选择最短方向旋转（顺时针 diff，逆时针 8-diff）
+        let cw = diff;
+        let ccw = 8 - diff;
+
+        let steps = max_steps.clamp(1, 3);
+        if cw <= ccw {
+            Self::index_direction(cur + cw.min(steps))
+        } else {
+            Self::index_direction(cur - ccw.min(steps))
+        }
+    }
+
 }
 
 impl LogicSystem for MovementSystem {
     
 
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
+        // 每秒最多转向几步（8向），做一点“转身缓冲”让方向更自然
+        let turn_steps = (delay_time * 12.0).ceil() as i32;
+
+        // 先收集所有正在攻击的实体，避免在 query_mut 循环中再次借用 world。
+        let attacking_entities: HashSet<_> = ctx
+            .world
+            .query::<&crate::components::AttackState>()
+            .iter()
+            .map(|(e, _)| e)
+            .collect();
+
         // 🎯 处理有Player组件的实体（玩家、NPC等）
-        for (_, (position, velocity, path, player, player_input)) in ctx.world.query_mut::<(
+        for (entity, (position, velocity, path, player, player_input)) in ctx.world.query_mut::<(
             &mut Position,
             &mut MovementVelocity,
             &mut Path,
@@ -88,6 +146,16 @@ impl LogicSystem for MovementSystem {
             &mut crate::components::PlayerInput,
         )>() {
             use crate::components::MovementMode;
+
+            // ⚔️ 攻击中：强制停止移动/清理路径，避免“边跑边砍/攻击时仍播放跑走”。
+            // AttackState 的生命周期由 AnimationSystem 管理（完成后自动移除）。
+            if attacking_entities.contains(&entity) {
+                velocity.stop();
+                path.clear();
+                player_input.move_to = None;
+                player_input.movement_mode = MovementMode::None;
+                continue;
+            }
             
             // 🎯 统一处理所有移动模式的动画状态
             // 检查是否有velocity (移动中)
@@ -97,7 +165,8 @@ impl LogicSystem for MovementSystem {
                 // DirectFollow模式: 直接用velocity更新位置
                 if has_velocity {
                     // 移动中: 更新位置和方向
-                    player.direction = Self::calculate_direction(velocity.x, velocity.y);
+                    let desired_dir = Self::calculate_direction(velocity.x, velocity.y);
+                    player.direction = Self::step_towards_direction(player.direction, desired_dir, turn_steps);
                     
                     // 🎯 关键修复：只在有velocity时才更新position
                     position.x += velocity.x * delay_time;
@@ -154,7 +223,8 @@ impl LogicSystem for MovementSystem {
                     }
                 } else {
                     // 🎯 计算8方向
-                    player.direction = Self::calculate_direction(dx, dy);
+                    let desired_dir = Self::calculate_direction(dx, dy);
+                    player.direction = Self::step_towards_direction(player.direction, desired_dir, turn_steps);
                     
                     // ✅ 根据 Player.action 判断速度（统一数据源）
                     use crate::components::PlayerAction;

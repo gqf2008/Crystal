@@ -38,6 +38,35 @@ impl Position {
     }
 }
 
+/// 位置插值组件 - 用于远程对象平滑移动
+///
+/// 说明：
+/// - NetworkApplySystem 收到 ObjectWalk/ObjectRun 后，为远程玩家挂载该组件
+/// - PositionInterpolationSystem 每帧将 Position 线性插值到目标点
+#[derive(Debug, Clone, Copy)]
+pub struct PositionInterpolation {
+    pub start_x: f32,
+    pub start_y: f32,
+    pub target_x: f32,
+    pub target_y: f32,
+    pub start_time: f64,
+    /// 插值持续时间（秒）
+    pub duration: f32,
+}
+
+impl PositionInterpolation {
+    pub fn new(start_x: f32, start_y: f32, target_x: f32, target_y: f32, start_time: f64, duration: f32) -> Self {
+        Self {
+            start_x,
+            start_y,
+            target_x,
+            target_y,
+            start_time,
+            duration,
+        }
+    }
+}
+
 /// 速度组件 - 移动实体必备
 #[derive(Debug, Clone, Copy)]
 pub struct Velocity {

@@ -20,6 +20,10 @@ static GLOBAL_NET: Lazy<Mutex<Option<NetContext>>> = Lazy::new(|| Mutex::new(Non
 pub struct NetworkRuntimeConfig {
 	pub server_addr: String,
 	pub use_mock: bool,
+	/// 远程玩家走路插值时长（毫秒），用于消除“瞬移感”
+	pub remote_interp_walk_ms: u32,
+	/// 远程玩家跑路插值时长（毫秒），用于消除“瞬移感”
+	pub remote_interp_run_ms: u32,
 }
 
 impl Default for NetworkRuntimeConfig {
@@ -28,6 +32,9 @@ impl Default for NetworkRuntimeConfig {
 			server_addr: "127.0.0.1:7000".to_string(),
 			// 默认走 mock：保证离线可跑；需要真服时在 config.ini 设置 UseMock=false
 			use_mock: true,
+			// 默认值匹配当前手感（walk≈0.16s, run≈0.11s）
+			remote_interp_walk_ms: 160,
+			remote_interp_run_ms: 110,
 		}
 	}
 }
@@ -38,6 +45,8 @@ impl Default for NetworkRuntimeConfig {
 /// - [Network] UseMock=true/false
 /// - [Network] ServerAddr=IP:PORT
 /// - 兼容键：ServerAddress=IP, ServerPort=7000
+/// - [Network] RemoteInterpWalkMs=160
+/// - [Network] RemoteInterpRunMs=110
 pub fn load_network_runtime_config() -> NetworkRuntimeConfig {
 	let mut cfg = NetworkRuntimeConfig::default();
 
@@ -97,6 +106,20 @@ pub fn load_network_runtime_config() -> NetworkRuntimeConfig {
 		if key.eq_ignore_ascii_case("ServerPort") {
 			if let Ok(p) = value.parse::<u16>() {
 				server_port = Some(p);
+			}
+			continue;
+		}
+
+		if key.eq_ignore_ascii_case("RemoteInterpWalkMs") {
+			if let Ok(ms) = value.parse::<u32>() {
+				cfg.remote_interp_walk_ms = ms;
+			}
+			continue;
+		}
+
+		if key.eq_ignore_ascii_case("RemoteInterpRunMs") {
+			if let Ok(ms) = value.parse::<u32>() {
+				cfg.remote_interp_run_ms = ms;
 			}
 			continue;
 		}

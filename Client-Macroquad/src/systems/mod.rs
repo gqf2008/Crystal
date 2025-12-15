@@ -61,6 +61,8 @@ pub mod priority {
     pub const MAP_BOOTSTRAP: u32 = 117;
     /// 消费 MapInformation/MapChanged 并加载/更新 MapData
     pub const MAP_LOAD: u32 = 118;
+    /// 本地玩家自动战斗/挂机 AI（在 PlayerControlSystem 之前注入 PlayerInput）
+    pub const LOCAL_PLAYER_AI: u32 = 119;
     pub const PLAYER_CONTROL: u32 = 120;
     pub const GAME_EVENT: u32 = 130;
     // 第2层：游戏逻辑(200-599)
@@ -85,6 +87,9 @@ pub mod priority {
     pub const PATHFINDING: u32 = 490;
     pub const MOVEMENT: u32 = 500;
     pub const COLLISION: u32 = 510; // 碰撞检测在移动之后，检查并修正位置
+
+    /// 远程玩家/对象位置插值（消除“瞬移感”）
+    pub const REMOTE_INTERPOLATION: u32 = 585;
 
     // 第3层：表现层(600-899)
     // ├── 动画特效: AnimationSystem → ParticleSystem → WeatherSystem
@@ -146,7 +151,7 @@ pub use ecs_macros::{LogicSystem, RenderSystem};
 // 重新导出各层系统（保持向后兼容）
 // 注意：新代码应使用 update:: 和 render:: 模块
 
-pub use input::PlayerControlSystem;
+pub use input::{LocalPlayerAiSystem, PlayerControlSystem};
 pub use infra::NetworkSystem;
 pub use infra::NetworkApplySystem;
 pub use infra::{FrameEndSystem, TimeTickSystem};
@@ -158,7 +163,7 @@ pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
 pub use logic::physics::{CollisionSystem, MapLoadSystem, MapManager, MovementSystem, PathfindingSystem};
 pub use presentation::{
     AnimationSystem, CameraBoundsSystem, CameraFollowSystem, CameraSpaceGateSystem, CameraSystem,
-    FloatingTextSystem, MountStateSyncSystem, ParticleSystem,
+    FloatingTextSystem, MountStateSyncSystem, ParticleSystem, PositionInterpolationSystem,
 };
 
 // ============================================================================

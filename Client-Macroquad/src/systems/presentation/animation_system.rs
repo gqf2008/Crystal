@@ -95,7 +95,11 @@ impl AnimationSystem {
             match player.action {
                 PlayerAction::Walk => mir2_shared::enums::MirAction::MountWalking,
                 PlayerAction::Run => mir2_shared::enums::MirAction::MountRunning,
-                // 先覆盖最常见的 3 个；攻击/受击等后续再扩展
+                // 骑乘攻击：使用 MountAttack（原版就是一套骑乘攻击动作）
+                PlayerAction::Attack1 | PlayerAction::Attack2 | PlayerAction::Attack3 => {
+                    mir2_shared::enums::MirAction::MountAttack
+                }
+                // 先覆盖最常见的几种；受击/死亡等后续再扩展
                 _ => mir2_shared::enums::MirAction::MountStanding,
             }
         } else {
@@ -145,12 +149,22 @@ let now = Instant::now();
         // 收集需要移除 AttackState 的实体
         let mut finished_attacks = Vec::new();
         
-        for (entity, attack_state) in ctx.world
-            .query_mut::<&AttackState>()
+        for (entity, (attack_state, mount_state)) in ctx
+            .world
+            .query_mut::<(&AttackState, Option<&MountState>)>()
             .into_iter()
         {
+            let mounted = mount_state.and_then(|m| m.mount_index).is_some();
+
             // 从 PLAYER_FRAMES 获取攻击动画时长
-            let duration_ms = if let Some(frame) = get_player_frame(attack_state.attack_type.to_mir_action()) {
+            let duration_ms = if mounted {
+                get_player_frame(mir2_shared::enums::MirAction::MountAttack)
+                    .map(|frame| (frame.count * frame.interval) as u64)
+                    .unwrap_or_else(|| {
+                        tracing::warn!("⚠️ 未找到骑乘攻击动画配置: MountAttack, 使用默认时长");
+                        600
+                    })
+            } else if let Some(frame) = get_player_frame(attack_state.attack_type.to_mir_action()) {
                 (frame.count * frame.interval) as u64
             } else {
                 // 后备：默认600ms (6帧 * 100ms)

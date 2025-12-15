@@ -568,8 +568,11 @@ impl LogicSystem for PlayerControlSystem {
         // NPC 对话请求：延迟到 player loop 之后再发（避免 hecs 可变借用冲突）
         let mut npc_call_immediate: Option<u32> = None;
 
-        // 语义：本地玩家正常移动，但把移动意图同步到服务器；并接受服务器回包校正。
-        let sync_move_to_server = ctx.session.server_authoritative_movement;
+        // 语义：本地玩家正常移动；可选择把移动意图同步到服务器。
+        // - server_authoritative_movement=true: 同步 + 接受服务器回包校正
+        // - sync_movement_intent_to_server=true: 仅同步（用于 Mock 命中判定），不做服务器纠偏
+        let sync_move_to_server = ctx.session.server_authoritative_movement
+            || ctx.session.sync_movement_intent_to_server;
         let sync_combat_to_server = ctx.session.server_authoritative_combat;
 
         // 单击：优先判定是否点到 NPC（近似拾取：按格子命中）
@@ -896,15 +899,32 @@ impl LogicSystem for PlayerControlSystem {
                                 tracing::warn!("⏹️⏹️ 松开鼠标,停止跟随 (mode={:?})", player_input.movement_mode);
                                 player_input.move_to = None;
                                 player_input.movement_mode = MovementMode::None;
-                                
+
                                 // 🎬 设置站立动作（PlayerControlSystem 独占写入）
-                                player.action = PlayerAction::Stand;
+                                // 但若正在攻击（AttackState 存在），不要覆盖攻击动画。
+                                let is_attacking = attacking_entities.contains(&entity);
+                                if !is_attacking && !player.action.is_attack() {
+                                    player.action = PlayerAction::Stand;
+                                }
                             }
                         }
                         MovementMode::Pathfinding => {
                             // 寻路模式下,松开不停止,继续走完路径
+                            // ✅ move_to 可能来自 AI/脚本（非鼠标双击），此时也需要维持走/跑动作，
+                            // 否则会出现“位置在动但动画不播放”的平移效果。
+                            let is_attacking = attacking_entities.contains(&entity);
+                            if !is_attacking && player_input.move_to.is_some() && !player.action.is_attack() {
+                                if player.action == PlayerAction::Stand {
+                                    player.action = PlayerAction::Walk;
+                                }
+                            }
+
                             // 但如果 MovementSystem 已清除 move_to (到达目的地)，则设置站立
-                            if player_input.move_to.is_none() && player.action != PlayerAction::Stand {
+                            if !is_attacking
+                                && player_input.move_to.is_none()
+                                && player.action != PlayerAction::Stand
+                                && !player.action.is_attack()
+                            {
                                 player.action = PlayerAction::Stand;
                                 player_input.movement_mode = MovementMode::None;
                                 tracing::info!("🎬 到达目的地,设置站立动作");
@@ -912,7 +932,12 @@ impl LogicSystem for PlayerControlSystem {
                         }
                         MovementMode::None => {
                             // 确保没有移动目标时是站立状态
-                            if player_input.move_to.is_none() && player.action != PlayerAction::Stand {
+                            let is_attacking = attacking_entities.contains(&entity);
+                            if !is_attacking
+                                && player_input.move_to.is_none()
+                                && player.action != PlayerAction::Stand
+                                && !player.action.is_attack()
+                            {
                                 player.action = PlayerAction::Stand;
                             }
                         }

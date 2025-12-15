@@ -883,12 +883,53 @@ impl NetworkApplySystem {
     }
 
     fn apply_object_walk(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectWalk) {
-        use crate::components::{Player, PlayerAction};
+        use crate::components::{LocalPlayer, Player, PlayerAction, Position, PositionInterpolation};
 
-        Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
         let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
             return;
         };
+
+        let is_local = ctx.world.get::<&LocalPlayer>(e).is_ok();
+        let (wx, wy) = crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
+
+        if is_local {
+            // 本地玩家：保持原语义（若未来启用 server_authoritative_movement 才会纠偏）
+            Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+        } else {
+            // 远程玩家：插值到目标点，消除“瞬移感”
+            let existing_pos = ctx.world.get::<&Position>(e).ok().map(|pos| (pos.x, pos.y));
+            let (sx, sy) = match existing_pos {
+                Some(v) => v,
+                None => {
+                    // 无 Position 时直接落地
+                    let _ = ctx.world.insert_one(e, Position::new(wx, wy));
+                    (wx, wy)
+                }
+            };
+
+            // 按实际跨越的格子数缩放插值时长：
+            // - Walk 通常是 1 格；Run 往往是 2 格
+            // - 若跨越过大（比如卡顿/纠偏/瞬移），直接落地，避免“慢慢滑过去”
+            let start_grid = crate::coord::Coord::world_to_grid(sx, sy);
+            let target_grid = (packet.location_x, packet.location_y);
+            let step_dx = (target_grid.0 - start_grid.0).abs();
+            let step_dy = (target_grid.1 - start_grid.1).abs();
+            let steps = step_dx.max(step_dy);
+
+            let base_duration = ctx.session.remote_player_walk_interp_secs;
+            if base_duration > 0.0 && steps == 1 && ((sx - wx).abs() > 0.01 || (sy - wy).abs() > 0.01) {
+                let now = macroquad::prelude::get_time();
+                let interp = PositionInterpolation::new(sx, sy, wx, wy, now, base_duration);
+                if ctx.world.insert_one(e, interp).is_err() {
+                    if let Ok(mut i) = ctx.world.get::<&mut PositionInterpolation>(e) {
+                        *i = interp;
+                    }
+                }
+            } else if base_duration <= 0.0 || steps > 1 {
+                // 配置禁用插值：直接落地
+                Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+            }
+        }
 
         if let Ok(mut p) = ctx.world.get::<&mut Player>(e) {
             p.direction = packet.direction;
@@ -897,12 +938,49 @@ impl NetworkApplySystem {
     }
 
     fn apply_object_run(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectRun) {
-        use crate::components::{Player, PlayerAction};
+        use crate::components::{LocalPlayer, Player, PlayerAction, Position, PositionInterpolation};
 
-        Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
         let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
             return;
         };
+
+        let is_local = ctx.world.get::<&LocalPlayer>(e).is_ok();
+        let (wx, wy) = crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
+
+        if is_local {
+            Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+        } else {
+            let existing_pos = ctx.world.get::<&Position>(e).ok().map(|pos| (pos.x, pos.y));
+            let (sx, sy) = match existing_pos {
+                Some(v) => v,
+                None => {
+                    let _ = ctx.world.insert_one(e, Position::new(wx, wy));
+                    (wx, wy)
+                }
+            };
+
+            // Run 包可能一次跨越 2 格；按跨越格数缩放时长，避免看起来“跑太快”。
+            // 若跨越过大（>2 格），认为是纠偏/瞬移，直接落地。
+            let start_grid = crate::coord::Coord::world_to_grid(sx, sy);
+            let target_grid = (packet.location_x, packet.location_y);
+            let step_dx = (target_grid.0 - start_grid.0).abs();
+            let step_dy = (target_grid.1 - start_grid.1).abs();
+            let steps = step_dx.max(step_dy);
+
+            let base_duration = ctx.session.remote_player_run_interp_secs;
+            if base_duration > 0.0 && (steps == 1 || steps == 2) && ((sx - wx).abs() > 0.01 || (sy - wy).abs() > 0.01) {
+                let now = macroquad::prelude::get_time();
+                let duration = base_duration * steps as f32;
+                let interp = PositionInterpolation::new(sx, sy, wx, wy, now, duration);
+                if ctx.world.insert_one(e, interp).is_err() {
+                    if let Ok(mut i) = ctx.world.get::<&mut PositionInterpolation>(e) {
+                        *i = interp;
+                    }
+                }
+            } else if base_duration <= 0.0 || steps > 2 {
+                Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+            }
+        }
 
         if let Ok(mut p) = ctx.world.get::<&mut Player>(e) {
             p.direction = packet.direction;

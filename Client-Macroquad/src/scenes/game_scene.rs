@@ -19,7 +19,7 @@ use crate::{
     systems::{
         priority, AnimationSystem, CameraBoundsSystem, CameraFollowSystem, CameraSpaceGateSystem,
         CameraSystem, CollisionSystem, CombatSystem, FrameEndSystem, HealthRegenSystem,
-        MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SkillSystem,
+        LocalPlayerAiSystem, MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SkillSystem,
         SystemScheduler, TimeTickSystem,
     },
 };
@@ -97,6 +97,7 @@ impl GameScene {
             )
             .add_system(crate::systems::MapLoadSystem, priority::MAP_LOAD)
             .add_system(TimeTickSystem::default(), priority::GAME_EVENT)
+            .add_system(LocalPlayerAiSystem::default(), priority::LOCAL_PLAYER_AI)
             .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
             // 战斗/技能/自然回复：先接入闭环（目前 test_game_scene 默认不会触发）
             .add_system(CombatSystem::default(), priority::COMBAT)
@@ -105,6 +106,10 @@ impl GameScene {
             .add_system(PathfindingSystem::new(), priority::PATHFINDING)
             .add_system(MovementSystem, priority::MOVEMENT)
             .add_system(CollisionSystem::new(), priority::COLLISION)
+            .add_system(
+                crate::systems::PositionInterpolationSystem::default(),
+                priority::REMOTE_INTERPOLATION,
+            )
             .add_system(MountStateSyncSystem::new(), priority::MOUNT_STATE_SYNC)
             .add_system(AnimationSystem::new(), priority::ANIMATION)
             .add_system(crate::systems::ParticleSystem, priority::PARTICLE)
@@ -365,9 +370,16 @@ impl Scene for GameScene {
         // 场景间移交网络连接：SelectScene 已把 NetContext 放入全局，这里接管到 ECS。
         if let Some(net) = crate::network::take_global_net() {
             self.ecs_ctx.set_net(net);
+
+			// 从 config.ini 同步运行时手感参数（例如远程插值时长）
+			let cfg = crate::network::load_network_runtime_config();
+			self.ecs_ctx.session.remote_player_walk_interp_secs = (cfg.remote_interp_walk_ms as f32) / 1000.0;
+			self.ecs_ctx.session.remote_player_run_interp_secs = (cfg.remote_interp_run_ms as f32) / 1000.0;
+
             // 目前本地玩家移动仍由客户端 MovementSystem 驱动；开启 server_authoritative_movement
             // 会导致“本地移动 + 服务器回包纠偏”双重驱动，从而出现抖动/乱跳（坐骑更明显）。
             self.ecs_ctx.session.server_authoritative_movement = false;
+            self.ecs_ctx.session.sync_movement_intent_to_server = true;
             self.ecs_ctx.session.server_authoritative_combat = true;
         }
 
@@ -381,8 +393,14 @@ impl Scene for GameScene {
                     .build()
                 {
                     self.ecs_ctx.set_net(net);
+
+					// 从 config.ini 同步远程插值时长（用于 multi-remote AI）
+					self.ecs_ctx.session.remote_player_walk_interp_secs = (cfg.remote_interp_walk_ms as f32) / 1000.0;
+					self.ecs_ctx.session.remote_player_run_interp_secs = (cfg.remote_interp_run_ms as f32) / 1000.0;
+
                     // Mock 场景下默认使用本地移动（避免双驱动抖动）。
                     self.ecs_ctx.session.server_authoritative_movement = false;
+                    self.ecs_ctx.session.sync_movement_intent_to_server = true;
                     self.ecs_ctx.session.server_authoritative_combat = true;
                     auto_start_game = true;
                 }

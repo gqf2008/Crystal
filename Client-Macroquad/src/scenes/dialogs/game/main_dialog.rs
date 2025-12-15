@@ -350,13 +350,13 @@ impl MainDialog {
     /// 往聊天窗口追加一条系统提示（用于网络/脚本调试输出）
     pub fn push_system_chat_line(&mut self, text: impl Into<String>) {
         self.chat_dialog
-            .add_message(text, Color::from_rgba(255, 230, 120, 255));
+            .add_message(text, Color::from_rgba(100, 150, 255, 255));
     }
 
     /// 往聊天窗口追加一条普通消息
     pub fn push_chat_line(&mut self, text: impl Into<String>) {
         self.chat_dialog
-            .add_message(text, Color::from_rgba(220, 220, 220, 255));
+            .add_message(text, Color::from_rgba(100, 150, 255, 255));
     }
 
     /// 是否有任何“弹窗类”对话框打开（用于 ESC 逻辑）

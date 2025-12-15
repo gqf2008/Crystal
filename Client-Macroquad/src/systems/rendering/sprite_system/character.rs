@@ -247,6 +247,9 @@ impl SpriteRenderSystem {
             let mount_action = match player.action {
                 crate::components::PlayerAction::Walk => mir2_shared::enums::MirAction::MountWalking,
                 crate::components::PlayerAction::Run => mir2_shared::enums::MirAction::MountRunning,
+                crate::components::PlayerAction::Attack1
+                | crate::components::PlayerAction::Attack2
+                | crate::components::PlayerAction::Attack3 => mir2_shared::enums::MirAction::MountAttack,
                 _ => mir2_shared::enums::MirAction::MountStanding,
             };
 
