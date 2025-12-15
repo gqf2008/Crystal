@@ -21,6 +21,165 @@ impl Default for NetworkApplySystem {
 }
 
 impl NetworkApplySystem {
+    fn apply_object_player(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectPlayer) {
+        use crate::components::{
+            AnimationFrame, MountState, OtherPlayer, Player, PlayerAction, PlayerAppearance, Position, RemotePlayer,
+        };
+        use crate::components::network::{NetworkObjectType, NetworkSync};
+
+        let (wx, wy) = crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
+
+        let appearance = PlayerAppearance {
+            class: packet.class,
+            gender: packet.gender,
+            hair: packet.hair,
+            weapon: packet.weapon,
+            armour: packet.armour,
+            weapon_effect: packet.weapon_effect,
+            wing_effect: packet.wing_effect,
+        };
+
+        // 诊断：确认远程玩家（ObjectPlayer）确实收到并落地（只打印一次）。
+        static OBJECT_PLAYER_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        let _ = OBJECT_PLAYER_DIAG_ONCE.set(()).map(|_| {
+            println!(
+                "[DIAG][NetworkApplySystem] ObjectPlayer applied: id={} name={} class={:?} gender={:?} hair={} loc=({}, {}) dir={:?} weapon={} weapon_eff={} armour={} wing_eff={} riding_mount={}",
+                packet.object_id,
+                packet.name,
+                packet.class,
+                packet.gender,
+                packet.hair,
+                packet.location_x,
+                packet.location_y,
+                packet.direction,
+                packet.weapon,
+                packet.weapon_effect,
+                packet.armour,
+                packet.wing_effect,
+                packet.riding_mount
+            );
+        });
+
+        let player = Player {
+            direction: packet.direction,
+            action: PlayerAction::Stand,
+        };
+
+        if let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) {
+            // NetworkSync 只要存在即可；类型不匹配时更新。
+            let mut has_sync = false;
+            {
+                if let Ok(mut sync) = ctx.world.get::<&mut NetworkSync>(e) {
+                    sync.object_id = packet.object_id;
+                    sync.object_type = NetworkObjectType::Player;
+                    has_sync = true;
+                }
+            }
+            if !has_sync {
+                let _ = ctx
+                    .world
+                    .insert_one(e, NetworkSync::new(packet.object_id, NetworkObjectType::Player));
+            }
+
+            // 远程玩家标记
+            if ctx.world.get::<&RemotePlayer>(e).is_err() {
+                let _ = ctx.world.insert_one(e, RemotePlayer { id: packet.object_id });
+            }
+
+            // 位置
+            let mut has_pos = false;
+            {
+                if let Ok(mut pos) = ctx.world.get::<&mut Position>(e) {
+                    pos.x = wx;
+                    pos.y = wy;
+                    has_pos = true;
+                }
+            }
+            if !has_pos {
+                let _ = ctx.world.insert_one(e, Position::new(wx, wy));
+            }
+
+            // 核心 Player 状态
+            let mut has_player = false;
+            {
+                if let Ok(mut p) = ctx.world.get::<&mut Player>(e) {
+                    p.direction = player.direction;
+                    // 只做最小落地：不覆盖 action（避免将来接入 ObjectWalk/Attack 时抖动）
+                    has_player = true;
+                }
+            }
+            if !has_player {
+                let _ = ctx.world.insert_one(e, player);
+            }
+
+            // 外观
+            let mut has_appearance = false;
+            {
+                if let Ok(mut a) = ctx.world.get::<&mut PlayerAppearance>(e) {
+                    *a = appearance.clone();
+                    has_appearance = true;
+                }
+            }
+            if !has_appearance {
+                let _ = ctx.world.insert_one(e, appearance);
+            }
+
+            // 动画帧（若没有就补一个默认，AnimationSystem 会更新）
+            if ctx.world.get::<&AnimationFrame>(e).is_err() {
+                let _ = ctx.world.insert_one(e, AnimationFrame::default());
+            }
+
+            // 坐骑：本需求明确“不要坐骑”，因此确保 mount_index 为空。
+            let mut has_mount = false;
+            {
+                if let Ok(mut m) = ctx.world.get::<&mut MountState>(e) {
+                    m.mount_index = None;
+                    has_mount = true;
+                }
+            }
+            if !has_mount {
+                let _ = ctx.world.insert_one(e, MountState::default());
+            }
+
+            // 基本身份信息（未来做名字/血条会用到）
+            let mut has_other = false;
+            {
+                if let Ok(mut op) = ctx.world.get::<&mut OtherPlayer>(e) {
+                    op.name = packet.name.clone();
+                    op.class = packet.class;
+                    op.gender = packet.gender;
+                    op.level = packet.level;
+                    op.guild_name = if packet.guild_name.is_empty() {
+                        None
+                    } else {
+                        Some(packet.guild_name.clone())
+                    };
+                    has_other = true;
+                }
+            }
+            if !has_other {
+                let mut op = OtherPlayer::new(packet.name.clone(), packet.class, packet.gender, packet.level);
+                op.guild_name = if packet.guild_name.is_empty() {
+                    None
+                } else {
+                    Some(packet.guild_name.clone())
+                };
+                let _ = ctx.world.insert_one(e, op);
+            }
+        } else {
+            ctx.world.spawn((
+                NetworkSync::new(packet.object_id, NetworkObjectType::Player),
+                RemotePlayer { id: packet.object_id },
+                player,
+                Position::new(wx, wy),
+                appearance,
+                AnimationFrame::default(),
+                // 明确不要坐骑：default 即 None
+                MountState::default(),
+                OtherPlayer::new(packet.name, packet.class, packet.gender, packet.level),
+            ));
+        }
+    }
     fn apply_user_information(ctx: &mut GameContext, packet: mir2_shared::packets::server::UserInformation) {
         use crate::components::{
             AnimationFrame, CombatStats, Health, LocalPlayer, Mana, MovementVelocity, Path, Player,
@@ -51,8 +210,30 @@ impl NetworkApplySystem {
                 PlayerInput::default(),
                 Path::new(),
                 MovementVelocity::new(crate::components::movement::DEFAULT_MAX_SPEED),
+                // 渲染/派生状态依赖：
+                // - Weapon/Armour/翅膀/坐骑等外观通常由装备推导
+                // - MountStateSyncSystem 需要 Equipment + MountState
+                Equipment::default(),
+                crate::components::MountState::default(),
             )),
         };
+
+        // 诊断：确认是否真的收到了 UserInformation 并创建/更新了本地玩家。
+        // 只打印一次，避免刷屏。
+        static USERINFO_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        let _ = USERINFO_DIAG_ONCE.set(()).map(|_| {
+            println!(
+                "[DIAG][NetworkApplySystem] UserInformation applied: entity={:?} name={} class={:?} gender={:?} hair={} loc=({}, {}) dir={:?}",
+                local_entity,
+                packet.name,
+                packet.class,
+                packet.gender,
+                packet.hair,
+                packet.location_x,
+                packet.location_y,
+                packet.direction
+            );
+        });
 
         // 位置：协议是格子坐标（i32），ECS 用世界像素（f32）
         let (wx, wy) = crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
@@ -256,6 +437,10 @@ impl NetworkApplySystem {
         }
 
         if let Some(items) = packet.equipment.clone() {
+            // 诊断：确认 mock/服务器下发的装备槽位是否完整，以及是否能驱动外观派生。
+            // 只打印一次，避免刷屏。
+            static EQUIP_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
             let has_equip = ctx.world.get::<&Equipment>(local_entity).is_ok();
             if has_equip {
                 if let Ok(mut eq) = ctx.world.get::<&mut Equipment>(local_entity) {
@@ -310,6 +495,30 @@ impl NetworkApplySystem {
                         }
                     }
                 }
+
+                let _ = EQUIP_DIAG_ONCE.set(()).map(|_| {
+                    let weapon_shape = items
+                        .get(0)
+                        .and_then(|x| x.as_ref())
+                        .and_then(|it| it.info.as_ref())
+                        .map(|info| (info.item_type, info.shape, info.effect));
+                    let mount_shape = items
+                        .get(13)
+                        .and_then(|x| x.as_ref())
+                        .and_then(|it| it.info.as_ref())
+                        .map(|info| (info.item_type, info.shape, info.effect));
+
+                    println!(
+                        "[DIAG][NetworkApplySystem] equipment received: len={} weapon_slot(info)={:?} mount_slot(info)={:?} => appearance.weapon={} armour={} weapon_effect={} wing_effect={}",
+                        items.len(),
+                        weapon_shape,
+                        mount_shape,
+                        appearance.weapon,
+                        appearance.armour,
+                        appearance.weapon_effect,
+                        appearance.wing_effect
+                    );
+                });
             }
         }
 
@@ -659,6 +868,83 @@ impl NetworkApplySystem {
             let _ = ctx.world.insert_one(e, Position::new(wx, wy));
         }
     }
+
+    fn apply_object_turn(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectTurn) {
+        use crate::components::Player;
+
+        Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+        let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
+            return;
+        };
+
+        if let Ok(mut p) = ctx.world.get::<&mut Player>(e) {
+            p.direction = packet.direction;
+        }
+    }
+
+    fn apply_object_walk(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectWalk) {
+        use crate::components::{Player, PlayerAction};
+
+        Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+        let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
+            return;
+        };
+
+        if let Ok(mut p) = ctx.world.get::<&mut Player>(e) {
+            p.direction = packet.direction;
+            p.action = PlayerAction::Walk;
+        }
+    }
+
+    fn apply_object_run(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectRun) {
+        use crate::components::{Player, PlayerAction};
+
+        Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+        let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
+            return;
+        };
+
+        if let Ok(mut p) = ctx.world.get::<&mut Player>(e) {
+            p.direction = packet.direction;
+            p.action = PlayerAction::Run;
+        }
+    }
+
+    fn apply_object_attack(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectAttack) {
+        use crate::components::{AttackState, Player, PlayerAction};
+        use std::time::Instant;
+
+        Self::apply_object_move(ctx, packet.object_id, packet.location_x as i32, packet.location_y as i32);
+        let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
+            return;
+        };
+
+        let dir = match mir2_shared::enums::MirDirection::try_from(packet.direction) {
+            Ok(d) => d,
+            Err(_) => mir2_shared::enums::MirDirection::Down,
+        };
+
+        let attack_action = match packet.attack_type {
+            1 => PlayerAction::Attack2,
+            2 => PlayerAction::Attack3,
+            _ => PlayerAction::Attack1,
+        };
+
+        if let Ok(mut p) = ctx.world.get::<&mut Player>(e) {
+            p.direction = dir;
+            p.action = attack_action;
+        }
+
+        if ctx.world.get::<&AttackState>(e).is_err() {
+            let _ = ctx.world.insert_one(
+                e,
+                AttackState {
+                    start_time: Instant::now(),
+                    attack_type: attack_action,
+                },
+            );
+        }
+    }
 }
 
 impl LogicSystem for NetworkApplySystem {
@@ -678,8 +964,12 @@ impl LogicSystem for NetworkApplySystem {
 
         let mut object_monsters: Vec<mir2_shared::packets::server::ObjectMonster> = Vec::new();
         let mut object_npcs: Vec<mir2_shared::packets::server::ObjectNpc> = Vec::new();
+        let mut object_players: Vec<mir2_shared::packets::server::ObjectPlayer> = Vec::new();
         let mut object_removes: Vec<u32> = Vec::new();
-        let mut object_moves: Vec<(u32, i32, i32)> = Vec::new();
+        let mut object_walks: Vec<mir2_shared::packets::server::ObjectWalk> = Vec::new();
+        let mut object_runs: Vec<mir2_shared::packets::server::ObjectRun> = Vec::new();
+        let mut object_turns: Vec<mir2_shared::packets::server::ObjectTurn> = Vec::new();
+        let mut object_attacks: Vec<mir2_shared::packets::server::ObjectAttack> = Vec::new();
 
         // 本地玩家：server-driven 状态（对齐真服）
         let mut player_location_changed: Option<(i32, i32)> = None;
@@ -730,17 +1020,23 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectNpc { packet } => {
                     object_npcs.push(packet.clone());
                 }
+                NetworkEvent::ObjectPlayer { packet } => {
+                    object_players.push(packet.clone());
+                }
                 NetworkEvent::ObjectRemove { packet } => {
                     object_removes.push(packet.object_id);
                 }
                 NetworkEvent::ObjectWalk { packet } => {
-                    object_moves.push((packet.object_id, packet.location_x, packet.location_y));
+                    object_walks.push(packet.clone());
                 }
                 NetworkEvent::ObjectRun { packet } => {
-                    object_moves.push((packet.object_id, packet.location_x, packet.location_y));
+                    object_runs.push(packet.clone());
                 }
                 NetworkEvent::ObjectTurn { packet } => {
-                    object_moves.push((packet.object_id, packet.location_x, packet.location_y));
+                    object_turns.push(packet.clone());
+                }
+                NetworkEvent::ObjectAttack { packet } => {
+                    object_attacks.push(packet.clone());
                 }
 
                 // ===== server-driven: local player state =====
@@ -796,6 +1092,9 @@ impl LogicSystem for NetworkApplySystem {
         }
 
         // server-driven objects
+        for packet in object_players {
+            Self::apply_object_player(ctx, packet);
+        }
         for packet in object_monsters {
             Self::apply_object_monster(ctx, packet);
         }
@@ -805,8 +1104,17 @@ impl LogicSystem for NetworkApplySystem {
         for object_id in object_removes {
             Self::apply_object_remove(ctx, object_id);
         }
-        for (object_id, x, y) in object_moves {
-            Self::apply_object_move(ctx, object_id, x, y);
+        for p in object_turns {
+            Self::apply_object_turn(ctx, p);
+        }
+        for p in object_walks {
+            Self::apply_object_walk(ctx, p);
+        }
+        for p in object_runs {
+            Self::apply_object_run(ctx, p);
+        }
+        for p in object_attacks {
+            Self::apply_object_attack(ctx, p);
         }
 
         // ===== server-driven: local player state落地 =====

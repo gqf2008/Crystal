@@ -16,8 +16,8 @@
 //
 // ============================================================================
 
-use crate::game::GameResult;
 use crate::game::GameContext;
+use crate::game::GameResult;
 use crate::components::{Player, Position, movement::{MovementVelocity, Path}};
 use crate::systems::LogicSystem;
 use mir2_shared::enums::MirDirection;
@@ -72,6 +72,7 @@ impl MovementSystem {
             _ => Up,
         }
     }
+
 }
 
 impl LogicSystem for MovementSystem {
@@ -155,7 +156,7 @@ impl LogicSystem for MovementSystem {
                     // 🎯 计算8方向
                     player.direction = Self::calculate_direction(dx, dy);
                     
-                    // � 根据 Player.action 判断速度（统一数据源）
+                    // ✅ 根据 Player.action 判断速度（统一数据源）
                     use crate::components::PlayerAction;
                     let speed = if player.action == PlayerAction::Run {
                         velocity.run_speed
@@ -166,10 +167,7 @@ impl LogicSystem for MovementSystem {
                     // PlayerControlSystem 已设置 player.action，这里只负责移动
                     
                     // 设置速度方向 (归一化)
-                    velocity.set(
-                        (dx / distance) * speed,
-                        (dy / distance) * speed
-                    );
+                    velocity.set((dx / distance) * speed, (dy / distance) * speed);
 
                     // 应用速度到位置
                     let move_x = velocity.x * delay_time;

@@ -77,6 +77,41 @@
 			"label": "Build IME Test",
 			"type": "shell",
 			"command": "cmd /c D:\\Users\\gxh\\Documents\\GitHub\\Crystal\\Client-Macroquad\\build_ime_test.bat"
+		},
+		{
+			"label": "run test_game_scene",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--bin",
+				"test_game_scene"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run test_game_scene",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--package",
+				"client_macroquad",
+				"--bin",
+				"test_game_scene"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "cargo check (Client-Macroquad)",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check"
+			],
+			"isBackground": false
 		}
 	]
 }

@@ -47,6 +47,12 @@ struct MockWorldState {
     // server-authoritative monsters (position + HP)
     monsters: HashMap<u32, MockMonsterState>,
 
+    // server-authoritative remote player (AI-driven)
+    remote_player_id: u32,
+    remote_player_grid: (i32, i32),
+    remote_player_last_tick: Instant,
+    remote_player_last_attack: Instant,
+
     moving_monster_id: u32,
     moving_monster_pos: (i32, i32),
     moving_monster_path_idx: usize,
@@ -60,12 +66,18 @@ impl Default for MockWorldState {
 
             player_gold: 1000,
             inventory_capacity: 40,
-            player_grid: (330, 330),
+            // 330,330 在 n0.map 上容易被前景遮挡；换到更空旷的位置，避免一直只能看到 ghost。
+            player_grid: (336, 334),
             last_shop_goods: Vec::new(),
 
             last_player_move_req: Instant::now(),
 
             monsters: HashMap::new(),
+
+            remote_player_id: 2,
+            remote_player_grid: (338, 334),
+            remote_player_last_tick: Instant::now(),
+            remote_player_last_attack: Instant::now(),
 
             moving_monster_id: 3001,
             moving_monster_pos: (338, 332),
@@ -231,8 +243,8 @@ impl MockNetwork {
                     "Map/n0.map",
                     0,
                     "盟重土城",
-                    330,
-                    330,
+                    336,
+                    334,
                     mir2_shared::enums::MirDirection::Down as u8,
                 );
 
@@ -240,7 +252,76 @@ impl MockNetwork {
                 // 关键：下发初始背包（None = 不下发，会导致后续 ItemGained 没 UI 承载）
                 state.player_gold = 1000;
                 state.inventory_capacity = 40;
-                state.player_grid = (330, 330);
+                state.player_grid = (336, 334);
+
+                // 下发最小装备：用于验证“装备→外观/坐骑派生→渲染”链路。
+                // 槽位约定（见 NetworkApplySystem::apply_equipment_vec）:
+                // 0 weapon, 1 armour, ... 13 mount
+                let mut equipment: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 14];
+
+                // 武器：CWeapon/{:02}
+                {
+                    use mir2_shared::data::item::{ItemInfo, UserItem};
+                    use mir2_shared::enums::ItemType;
+                    let mut info = ItemInfo::default();
+                    info.index = 10001;
+                    info.name = "Mock Weapon".to_string();
+                    info.item_type = ItemType::Weapon;
+                    // ClientRust “神豪玩家”同款：weapon=78
+                    info.shape = 78;
+                    info.durability = 10;
+                    // 武器特效索引（对应 Data/CWeaponEffect/{:02}.Lib）
+                    // ClientRust “神豪玩家”同款：weapon_fx=66
+                    info.effect = 66;
+
+                    let mut item = UserItem::with_info(info);
+                    item.unique_id = 10001;
+                    item.current_dura = 10;
+                    item.max_dura = 10;
+                    equipment[0] = Some(item);
+                }
+
+                // 衣服：CArmour/{:02}，用于驱动人物外观；同时用 effect 驱动翅膀/人物特效（CHumEffect/{:02}）。
+                {
+                    use mir2_shared::data::item::{ItemInfo, UserItem};
+                    use mir2_shared::enums::ItemType;
+                    let mut info = ItemInfo::default();
+                    info.index = 10002;
+                    info.name = "Mock Armour".to_string();
+                    info.item_type = ItemType::Armour;
+                    // ClientRust “神豪玩家”同款：armour=58
+                    info.shape = 58;
+                    info.durability = 10;
+                    // 翅膀/人物特效：本项目用 CHumEffect/{:02}.Lib
+                    // ClientRust “神豪玩家”同款：wing=5
+                    info.effect = 5;
+
+                    let mut item = UserItem::with_info(info);
+                    item.unique_id = 10002;
+                    item.current_dura = 10;
+                    item.max_dura = 10;
+                    equipment[1] = Some(item);
+                }
+
+                // 坐骑：Mount/{:02}
+                {
+                    use mir2_shared::data::item::{ItemInfo, UserItem};
+                    use mir2_shared::enums::ItemType;
+                    let mut info = ItemInfo::default();
+                    info.index = 10013;
+                    info.name = "Mock Mount".to_string();
+                    info.item_type = ItemType::Mount;
+                    // ClientRust “神豪玩家”同款：mount=11
+                    info.shape = 11;
+                    info.durability = 10;
+                    info.effect = 0;
+
+                    let mut item = UserItem::with_info(info);
+                    item.unique_id = 10013;
+                    item.current_dura = 10;
+                    item.max_dura = 10;
+                    equipment[13] = Some(item);
+                }
 
                 let _ = response_tx.send(NetworkEvent::UserInformation {
                     packet: mir2_shared::packets::server::UserInformation {
@@ -253,10 +334,10 @@ impl MockNetwork {
                         class: mir2_shared::enums::MirClass::Warrior,
                         gender: mir2_shared::enums::MirGender::Male,
                         level: 1,
-                        location_x: 330,
-                        location_y: 330,
+                        location_x: 336,
+                        location_y: 334,
                         direction: mir2_shared::enums::MirDirection::Down,
-                        hair: 0,
+                        hair: 1,
                         hp: 100,
                         mp: 50,
                         experience: 0,
@@ -265,7 +346,7 @@ impl MockNetwork {
                         has_hero: false,
                         hero_behaviour: mir2_shared::enums::HeroBehaviour::Follow,
                         inventory: Some(vec![None; state.inventory_capacity]),
-                        equipment: None,
+                        equipment: Some(equipment),
                         quest_inventory: None,
                         gold: state.player_gold,
                         credit: 0,
@@ -278,6 +359,56 @@ impl MockNetwork {
                         observer: false,
                     },
                 });
+
+                // ====== Mock：再生成一个“远程玩家”（用于验证非 LocalPlayer 的全套外观渲染，不带坐骑） ======
+                // 备注：这里用真实协议形状 ObjectPlayer（而不是 UserInformation），更接近真服世界同步。
+                let _ = response_tx.send(NetworkEvent::ObjectPlayer {
+                    packet: mir2_shared::packets::server::ObjectPlayer {
+                        object_id: 2,
+                        name: "RemoteGuy".to_string(),
+                        guild_name: "".to_string(),
+                        guild_rank_name: "".to_string(),
+                        name_colour: 0,
+                        class: mir2_shared::enums::MirClass::Warrior,
+                        gender: mir2_shared::enums::MirGender::Female,
+                        level: 50,
+                        location_x: 338,
+                        location_y: 334,
+                        direction: mir2_shared::enums::MirDirection::Left,
+                        hair: 4,
+                        light: 0,
+                        // 这套索引在离线资源里存在：
+                        // - Data/CWeapon/60.Lib
+                        // - Data/CArmour/25.Lib
+                        // - Data/CWeaponEffect/12.Lib
+                        // - Data/CHumEffect/04.Lib
+                        weapon: 60,
+                        weapon_effect: 12,
+                        armour: 25,
+                        poison: mir2_shared::enums::PoisonType::empty(),
+                        dead: false,
+                        hidden: false,
+                        effect: mir2_shared::enums::SpellEffect::None,
+                        wing_effect: 4,
+                        extra: false,
+                        // 明确不要坐骑：mount_type=0 + riding_mount=false
+                        mount_type: 0,
+                        riding_mount: false,
+                        fishing: false,
+                        transform_type: 0,
+                        element_orb_effect: 0,
+                        element_orb_lvl: 0,
+                        element_orb_max: 0,
+                        buffs: Vec::new(),
+                        level_effects: mir2_shared::enums::LevelEffects::empty(),
+                    },
+                });
+
+                // 初始化远程玩家（AI）权威状态（与 ObjectPlayer 下发一致）
+                state.remote_player_id = 2;
+                state.remote_player_grid = (338, 334);
+                state.remote_player_last_tick = Instant::now();
+                state.remote_player_last_attack = Instant::now();
 
                 // ====== Mock(权威服务器)：用真实 server packet 形状生成 NPC/怪物 ======
                 // 坐标为格子坐标（与 UserInformation/MapChanged 一致）
@@ -626,6 +757,9 @@ impl MockNetwork {
             return;
         }
 
+        // 远程玩家 AI：更高频率推进（与怪物巡逻 tick 解耦）
+        Self::tick_remote_player_ai(response_tx, state);
+
         // 1000ms 一步，模拟服务器驱动的 ObjectWalk（慢一点，观感更接近原版）
         if state.last_world_tick.elapsed() < Duration::from_millis(1000) {
             return;
@@ -660,6 +794,120 @@ impl MockNetwork {
         let _ = response_tx.send(NetworkEvent::ObjectWalk {
             packet: mir2_shared::packets::server::ObjectWalk {
                 object_id: state.moving_monster_id,
+                location_x: nx,
+                location_y: ny,
+                direction: dir,
+            },
+        });
+    }
+
+    fn tick_remote_player_ai(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
+        static REMOTE_AI_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        let _ = REMOTE_AI_DIAG_ONCE.set(()).map(|_| {
+            println!("[MOCK][AI] Remote player AI enabled (id={})", state.remote_player_id);
+        });
+
+        if state.remote_player_last_tick.elapsed() < Duration::from_millis(200) {
+            return;
+        }
+        state.remote_player_last_tick = Instant::now();
+
+        // 找最近的活怪
+        let (rx, ry) = state.remote_player_grid;
+        let mut target: Option<(u32, MockMonsterState, i32)> = None;
+        for (mid, m) in state.monsters.iter() {
+            if m.hp <= 0 {
+                continue;
+            }
+            let dist = (m.pos.0 - rx).abs() + (m.pos.1 - ry).abs();
+            match target {
+                None => target = Some((*mid, *m, dist)),
+                Some((_, _, best)) if dist < best => target = Some((*mid, *m, dist)),
+                _ => {}
+            }
+        }
+
+        let Some((mid, m, dist)) = target else {
+            return;
+        };
+
+        // 简单视距：看到就追（避免无意义走到地图边缘）
+        if dist > 12 {
+            return;
+        }
+
+        // 计算面对方向
+        let dx = (m.pos.0 - rx).signum();
+        let dy = (m.pos.1 - ry).signum();
+        let dir = match (dx, dy) {
+            (0, -1) => mir2_shared::enums::MirDirection::Up,
+            (1, -1) => mir2_shared::enums::MirDirection::UpRight,
+            (1, 0) => mir2_shared::enums::MirDirection::Right,
+            (1, 1) => mir2_shared::enums::MirDirection::DownRight,
+            (0, 1) => mir2_shared::enums::MirDirection::Down,
+            (-1, 1) => mir2_shared::enums::MirDirection::DownLeft,
+            (-1, 0) => mir2_shared::enums::MirDirection::Left,
+            (-1, -1) => mir2_shared::enums::MirDirection::UpLeft,
+            _ => mir2_shared::enums::MirDirection::Down,
+        };
+
+        // 近战：相邻就砍
+        if dist <= 1 {
+            // 攻击冷却（避免 200ms 一刀太快）
+            if state.remote_player_last_attack.elapsed() < Duration::from_millis(700) {
+                return;
+            }
+            state.remote_player_last_attack = Instant::now();
+
+            // 发 ObjectAttack（用于动画/朝向）
+            let _ = response_tx.send(NetworkEvent::ObjectAttack {
+                packet: mir2_shared::packets::server::ObjectAttack {
+                    object_id: state.remote_player_id,
+                    location_x: rx as u32,
+                    location_y: ry as u32,
+                    direction: dir as u8,
+                    spell: 0,
+                    level: 0,
+                    attack_type: 0,
+                },
+            });
+
+            // 结算伤害（服务器权威）
+            let damage = 7;
+            if let Some(mm) = state.monsters.get_mut(&mid) {
+                mm.hp -= damage;
+            }
+
+            let _ = response_tx.send(NetworkEvent::ObjectStruck {
+                object_id: mid,
+                attacker_id: state.remote_player_id,
+                damage,
+            });
+
+            let dead = state
+                .monsters
+                .get(&mid)
+                .map(|mm| mm.hp <= 0)
+                .unwrap_or(false);
+            if dead {
+                let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: mid });
+                let _ = response_tx.send(NetworkEvent::ObjectRemove {
+                    packet: mir2_shared::packets::server::ObjectRemove { object_id: mid },
+                });
+                state.monsters.remove(&mid);
+                println!("[MOCK][AI] Remote player {} killed monster {}", state.remote_player_id, mid);
+            }
+            return;
+        }
+
+        // 否则朝目标跑一步
+        let nx = rx + dx;
+        let ny = ry + dy;
+        state.remote_player_grid = (nx, ny);
+
+        let _ = response_tx.send(NetworkEvent::ObjectRun {
+            packet: mir2_shared::packets::server::ObjectRun {
+                object_id: state.remote_player_id,
                 location_x: nx,
                 location_y: ny,
                 direction: dir,

@@ -266,22 +266,20 @@ impl ImageInfo {
             let b = chunk[0];
             let g = chunk[1];
             let r = chunk[2];
-            let a = chunk[3];
             
             // 🔧 纯黑色背景透明化（匹配C#原版逻辑）
             // C# 原版: if (pixels[i] == 0 && pixels[i + 1] == 0 && pixels[i + 2] == 0) pixels[i + 3] = 0;
             //
-            // 但由于DXT压缩/解压可能导致精度损失，纯黑(0,0,0)可能变成接近黑(1,1,1)或(2,2,2)
-            // 所以放宽到 RGB < 3 来容错
-            let is_near_black = r < 3 && g < 3 && b < 3; // 接近纯黑（容忍DXT压缩误差）
-            let is_opaque = a > 250; // 完全不透明
+            // 注意：将“接近黑”也透明化会误伤深色描边/阴影，导致部分装备/坐骑/特效出现“纹理/混合不对”。
+            // 这里收紧为“严格纯黑”以避免误杀。
+            let is_pure_black = r == 0 && g == 0 && b == 0;
             
             // BGRA -> RGBA: 交换 B 和 R 通道
             chunk[0] = r;
             chunk[2] = b;
             
             // 纯黑背景 → 完全透明
-            if is_near_black && is_opaque {
+            if is_pure_black {
                 chunk[3] = 0;
             }
             // 其他所有情况保持原始alpha值

@@ -27,7 +27,7 @@ use crate::game::{GameResult, GameContext};
 use std::time::Instant;
 use crate::{
     components::{
-        AnimationFrame, AttackState, Player, PlayerAction, TimeTracker,
+        AnimationFrame, AttackState, MountState, Player, PlayerAction, TimeTracker,
     },
     systems::LogicSystem,
 };
@@ -59,17 +59,23 @@ impl AnimationSystem {
             .unwrap_or_default();
 
         // 更新所有角色的动画帧
-        for (_entity, (player, anim_frame)) in ctx
+        for (_entity, (player, mount_state, anim_frame)) in ctx
             .world
-            .query_mut::<(&Player, &mut AnimationFrame)>()
+            .query_mut::<(&Player, Option<&MountState>, &mut AnimationFrame)>()
             .into_iter()
         {
-            // Mir2 原版渲染的核心是 DrawFrame：武器/武器特效通常与身体共用同一套帧序号，
-            // 只在取纹理时叠加 WeaponOffSet/性别偏移。
-            // 之前用 effect_* 作为武器帧会与身体脱节，表现为左右“乱晃”。
-            let frame = Self::calculate_character_frame(player, &time_tracker);
-            anim_frame.character_frame = frame;
-            anim_frame.weapon_frame = frame;
+            // C# 原版核心：
+            // - DrawFrame = Frame.Start + Frame.OffSet * Direction + FrameIndex
+            // - DrawWingFrame = Frame.EffectStart + Frame.EffectOffSet * Direction + EffectFrameIndex
+            // - 角色骑乘时 CurrentAction 会切到 Mount*，从而同时影响 DrawFrame/DrawWingFrame
+
+            let mounted = mount_state.and_then(|m| m.mount_index).is_some();
+            let (draw_frame, effect_frame) = Self::calculate_frames(player, &time_tracker, mounted);
+
+            anim_frame.character_frame = draw_frame;
+            // 武器/武器特效：C# 用同一套 DrawFrame，只是在取纹理时叠加 WeaponOffSet
+            anim_frame.weapon_frame = draw_frame;
+            anim_frame.effect_frame = effect_frame;
         }
 
         Ok(())
@@ -83,25 +89,51 @@ impl AnimationSystem {
     /// ```csharp
     /// int index = BaseIndex + (Direction * FrameCount) + CurrentFrame
     /// ```
-    fn calculate_character_frame(player: &Player, time_tracker: &TimeTracker) -> i32 {
-        // 从 PLAYER_FRAMES 获取动画配置
-        let mir_action = player.action.to_mir_action();
-        let frame = match get_player_frame(mir_action) {
-            Some(f) => f,
-            None => {
-                tracing::warn!("⚠️ 未找到动画配置: {:?}, 使用默认值", mir_action);
-                // 返回站立动画的第一帧作为后备
-                return player.direction as u8 as i32 * 4;
+    fn calculate_frames(player: &Player, time_tracker: &TimeTracker, mounted: bool) -> (i32, i32) {
+        // 选择 MirAction（对齐 C#：骑乘时使用 Mount*）
+        let mir_action = if mounted {
+            match player.action {
+                PlayerAction::Walk => mir2_shared::enums::MirAction::MountWalking,
+                PlayerAction::Run => mir2_shared::enums::MirAction::MountRunning,
+                // 先覆盖最常见的 3 个；攻击/受击等后续再扩展
+                _ => mir2_shared::enums::MirAction::MountStanding,
             }
+        } else {
+            player.action.to_mir_action()
         };
 
-        // 基于全局动画计数器和配置的 interval 计算当前帧
+        let Some(frame) = get_player_frame(mir_action) else {
+            tracing::warn!("⚠️ 未找到动画配置: {:?}, 使用默认值", mir_action);
+            let fallback = player.direction as u8 as i32 * 4;
+            return (fallback, 0);
+        };
+
+        let dir = player.direction as u8 as i32;
+
+        // body: DrawFrame
         let interval = frame.interval.max(1);
         let animation_tick = (time_tracker.animation_count as i32) * 100 / interval;
-        let current_frame = animation_tick % frame.count;
+        let mut frame_index = animation_tick.rem_euclid(frame.count.max(1));
+        if frame.reverse {
+            frame_index = (frame.count.max(1) - 1) - frame_index;
+        }
+        let draw_frame = frame.start + (dir * frame.offset()) + frame_index;
 
-        // 计算最终索引：基础索引 + 方向偏移 + 帧偏移
-        frame.start + (player.direction as u8 as i32 * frame.count) + current_frame
+        // effect: DrawWingFrame
+        let effect_frame = if frame.effect_count > 0 {
+            let effect_interval = frame.effect_interval.max(1);
+            let effect_tick = (time_tracker.animation_count as i32) * 100 / effect_interval;
+            let mut effect_index = effect_tick.rem_euclid(frame.effect_count.max(1));
+            if frame.reverse {
+                effect_index = (frame.effect_count.max(1) - 1) - effect_index;
+            }
+            frame.effect_start + (dir * frame.effect_offset()) + effect_index
+        } else {
+            // 没有 effect_* 配置时，退回到身体帧（比固定 0 更接近“跟随动作帧”）
+            draw_frame
+        };
+
+        (draw_frame, effect_frame)
     }
 
     // 注意：武器帧独立逻辑暂时保留在 WeaponState/WeaponAnimation（用于未来的“挥砍特效触发帧”等）。
@@ -163,6 +195,33 @@ impl LogicSystem for AnimationSystem {
         self.update_attack_animation(ctx, dt)?;
         
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::{MirDirection, Player};
+
+    #[test]
+    fn effect_frame_matches_csharp_drawwingframe_formula_for_mount_standing() {
+        let player = Player {
+            direction: MirDirection::Down,
+            action: PlayerAction::Stand,
+        };
+        let time_tracker = TimeTracker::default();
+
+        // mounted=true 会将 Stand 映射为 MountStanding
+        let (draw_frame, effect_frame) = AnimationSystem::calculate_frames(&player, &time_tracker, true);
+        let frame = get_player_frame(mir2_shared::enums::MirAction::MountStanding).expect("mount standing frame");
+
+        let dir = player.direction as u8 as i32;
+        let expected_draw = frame.start + dir * frame.offset();
+        let expected_effect = frame.effect_start + dir * frame.effect_offset();
+
+        assert_eq!(draw_frame, expected_draw);
+        assert_eq!(effect_frame, expected_effect);
+        assert!(frame.effect_count > 0);
     }
 }
 

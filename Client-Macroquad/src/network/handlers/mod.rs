@@ -157,7 +157,7 @@ pub enum NetworkEvent {
     PlayerDied,
     ObjectStruck { object_id: u32, attacker_id: u32, damage: i32 },
     ObjectDied { object_id: u32 },
-    ObjectAttack { object_id: u32, target_id: u32, direction: mir2_shared::enums::MirDirection },
+    ObjectAttack { packet: mir2_shared::packets::server::ObjectAttack },
     
     // ========================================================================
     // 聊天事件（Chat Events）
@@ -179,6 +179,7 @@ pub enum NetworkEvent {
     ObjectRemoved { object_id: u32 },
 
     // 服务器 → 客户端（真实对象包：用于 server-driven 世界同步）
+    ObjectPlayer { packet: mir2_shared::packets::server::ObjectPlayer },
     ObjectMonster { packet: mir2_shared::packets::server::ObjectMonster },
     ObjectNpc { packet: mir2_shared::packets::server::ObjectNpc },
     ObjectRemove { packet: mir2_shared::packets::server::ObjectRemove },

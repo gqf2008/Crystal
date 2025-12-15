@@ -54,6 +54,21 @@ impl PacketHandler for MovementHandler {
             }
 
             // ===== Object spawns =====
+            x if x == ServerPacketIds::ObjectPlayer as u16 => {
+                if let Ok(packet) = server::ObjectPlayer::read_body(&mut cursor) {
+                    tracing::trace!(
+                        "🧑 ObjectPlayer: id={} name={} armour={} weapon={} wing={} loc=({}, {})",
+                        packet.object_id,
+                        packet.name,
+                        packet.armour,
+                        packet.weapon,
+                        packet.wing_effect,
+                        packet.location_x,
+                        packet.location_y
+                    );
+                    events.push(NetworkEvent::ObjectPlayer { packet });
+                }
+            }
             x if x == ServerPacketIds::ObjectMonster as u16 => {
                 if let Ok(packet) = server::ObjectMonster::read_body(&mut cursor) {
                     tracing::trace!(

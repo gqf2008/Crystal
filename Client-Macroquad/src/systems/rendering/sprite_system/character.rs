@@ -34,10 +34,18 @@ use macroquad::prelude::*;
 
 impl SpriteRenderSystem {
     // 武器特效强度（DrawBlend 的 alpha 近似值）
-    const WEAPON_EFFECT_ALPHA: f32 = 0.4;
+    // C# 原版 PlayerObject.DrawWeapon(): WeaponEffectLibrary1.DrawBlend(..., rate=0.4F)
+    pub(crate) const WEAPON_EFFECT_ALPHA: f32 = 0.4;
 
     // 坐骑时，人物在坐骑上的上移（纯视觉，不影响碰撞/寻路）
     const MOUNT_RIDER_OFFSET_Y_PX: f32 = -24.0;
+
+    // 坐骑时翅膀的额外上移：翅膀应更贴合“人在坐骑上更高”的观感。
+    // 若你觉得还不够/太多，优先调这个常量。
+    const MOUNT_WING_OFFSET_Y_PX: f32 = -24.0;
+
+    // 坐骑时翅膀的额外水平偏移：用于修正“翅膀偏左”。
+    const MOUNT_WING_OFFSET_X_PX: f32 = 12.0;
 
     /// 渲染单个角色
     /// 渲染单个角色（macroquad 版本）
@@ -54,9 +62,44 @@ impl SpriteRenderSystem {
         alpha: f32,
         add_blend_material: &Material,
         mount_index: Option<usize>,
+        is_local: bool,
     ) -> GameResult {
+        // 诊断：外观索引（LOCAL/REMOTE 各打印一次，避免只看到远程而看不到本地）
+        static APPEARANCE_LOCAL_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        static APPEARANCE_REMOTE_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        if is_local {
+            let _ = APPEARANCE_LOCAL_ONCE.set(()).map(|_| {
+                println!(
+                    "[DIAG][SpriteRenderSystem][LOCAL] appearance: class={:?} gender={:?} hair={} armour={} weapon={} weapon_effect={} wing_effect={} mount_index={:?}",
+                    appearance.class,
+                    appearance.gender,
+                    appearance.hair,
+                    appearance.armour,
+                    appearance.weapon,
+                    appearance.weapon_effect,
+                    appearance.wing_effect,
+                    mount_index
+                );
+            });
+        } else {
+            let _ = APPEARANCE_REMOTE_ONCE.set(()).map(|_| {
+                println!(
+                    "[DIAG][SpriteRenderSystem][REMOTE] appearance: class={:?} gender={:?} hair={} armour={} weapon={} weapon_effect={} wing_effect={} mount_index={:?}",
+                    appearance.class,
+                    appearance.gender,
+                    appearance.hair,
+                    appearance.armour,
+                    appearance.weapon,
+                    appearance.weapon_effect,
+                    appearance.wing_effect,
+                    mount_index
+                );
+            });
+        }
+
         let base_frame = anim_frame.character_frame;
         let weapon_frame = anim_frame.weapon_frame;
+        let effect_frame = anim_frame.effect_frame;
 
         let tint = Color::new(1.0, 1.0, 1.0, alpha.clamp(0.0, 1.0));
 
@@ -215,7 +258,9 @@ impl SpriteRenderSystem {
                 let current = tick % count;
 
                 rider_base_frame = frame.start + (dir * frame.count) + current;
-                rider_weapon_frame = rider_base_frame;
+                // 注意：骑乘时人物身体会切换到 Mount* 帧，但武器资源未必包含同一套 Mount* 帧索引。
+                // 为了更稳定地显示武器，这里保持使用 AnimationSystem 计算的 weapon_frame（与非骑乘一致）。
+                rider_weapon_frame = weapon_frame;
                 rider_uses_mount_frames = true;
             }
         }
@@ -232,14 +277,108 @@ impl SpriteRenderSystem {
             *pos
         };
 
-        // 翅膀（简单实现：优先用 rider_base_frame；取不到就回退到 0 帧）
+        // 翅膀：本项目使用 CHumEffect 作为人物特效库。
+        // 关键点：骑乘时人物身体会切换到 Mount* 帧段(416+)，但 CHumEffect 往往按普通动作帧布局。
+        // 所以这里把 Mount* 帧映射回普通 Standing/Walking/Running 帧段，避免“抽到奇怪帧导致位置/效果怪”。
         if appearance.wing_effect > 0 {
-            let wing_lib = LibraryName::Wings(appearance.wing_effect as usize);
-            if !draw_layer(wing_lib, rider_base_frame, &actor_pos, tint) {
-                drew_any |= draw_layer(wing_lib, 0, &actor_pos, tint);
+            // C# 原版 SetLibraries(): WingLibrary = Libraries.CHumEffect[WingEffect - 1]
+            let wing_lib_index = (appearance.wing_effect - 1).max(0) as usize;
+            let wing_lib = LibraryName::CHumEffect(wing_lib_index);
+
+            // 对齐 C# PlayerObject.SetLibraries():
+            // - WingOffset: 男=0，女=840（altAnim 暂未实现，先走最常见路径）
+            // 若不加这个偏移，女号会从翅膀库里取到“另一套帧段”，表现为错位/叠影。
+            let wing_offset = if appearance.gender == crate::components::MirGender::Male {
+                0
             } else {
-                drew_any = true;
+                840
+            };
+
+            // 对齐 C# PlayerObject.DrawWings():
+            // - DrawWingFrame 在逻辑层 AnimationSystem 里按 Frame.EffectStart/EffectOffSet/EffectInterval 统一计算。
+            // 渲染层只读取 effect_frame，避免“渲染层再算一遍”导致方向步进/interval 不一致。
+            let wing_primary = effect_frame;
+
+            // 翅膀位置：
+            // - 若人物已切换到 Mount* 帧段（rider_uses_mount_frames=true），库内 offset 已与坐骑对齐，
+            //   再叠加人工偏移容易导致“翅膀飘/歪”。
+            // - 只有在未能切到 Mount* 帧段、使用旧的 rider 偏移兜底时，才需要额外修正翅膀位置。
+            let wing_pos = if mounted && mount_drawn && !rider_uses_mount_frames {
+                Position::new(
+                    actor_pos.x + Self::MOUNT_WING_OFFSET_X_PX,
+                    actor_pos.y + Self::MOUNT_WING_OFFSET_Y_PX,
+                )
+            } else {
+                actor_pos
+            };
+            let candidates = [wing_primary + wing_offset, wing_primary, 0 + wing_offset, 0];
+            let mut wing_drawn = false;
+            let mut wing_frame_used: Option<i32> = None;
+            for f in candidates {
+                // 翅膀/人物特效通常是发光效果，用 additive 混合更接近原版观感。
+                if draw_layer_additive(add_blend_material, wing_lib, f, &wing_pos, tint) {
+                    wing_drawn = true;
+                    wing_frame_used = Some(f);
+                    break;
+                }
             }
+
+            // 兜底：如果候选帧都不存在，首次扫描前 64 帧找一个“能画出来”的帧。
+            if !wing_drawn {
+                static WING_PROBE_ONCE: std::sync::OnceLock<Option<i32>> = std::sync::OnceLock::new();
+                let probe = WING_PROBE_ONCE.get_or_init(|| {
+                    // 先按当前性别的帧段（wing_offset）扫描，避免女号落到男号帧段。
+                    for i in 0..64 {
+                        let idx = (i as i32 + wing_offset) as usize;
+                        if wing_lib.get_texture(idx).and_then(|info| info.image).is_some() {
+                            return Some(i as i32 + wing_offset);
+                        }
+                    }
+                    // 再兜底扫描低位帧段
+                    for i in 0..64 {
+                        if wing_lib.get_texture(i).and_then(|info| info.image).is_some() {
+                            return Some(i as i32);
+                        }
+                    }
+                    None
+                });
+
+                if let Some(f) = *probe {
+                    if draw_layer_additive(add_blend_material, wing_lib, f, &wing_pos, tint) {
+                        wing_drawn = true;
+                        wing_frame_used = Some(f);
+                    }
+                }
+            }
+
+            static WING_DRAW_LOCAL_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+            static WING_DRAW_REMOTE_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+            if is_local {
+                let _ = WING_DRAW_LOCAL_ONCE.set(()).map(|_| {
+                    println!(
+                        "[DIAG][SpriteRenderSystem][LOCAL] wing_drawn={} wing_effect={} frame_used={:?} (using CHumEffect/{:02}) mounted={} mount_drawn={}",
+                        wing_drawn,
+                        appearance.wing_effect,
+                        wing_frame_used,
+                        appearance.wing_effect,
+                        mounted,
+                        mount_drawn
+                    );
+                });
+            } else {
+                let _ = WING_DRAW_REMOTE_ONCE.set(()).map(|_| {
+                    println!(
+                        "[DIAG][SpriteRenderSystem][REMOTE] wing_drawn={} wing_effect={} frame_used={:?} (using CHumEffect/{:02}) mounted={} mount_drawn={}",
+                        wing_drawn,
+                        appearance.wing_effect,
+                        wing_frame_used,
+                        appearance.wing_effect,
+                        mounted,
+                        mount_drawn
+                    );
+                });
+            }
+            drew_any |= wing_drawn;
         }
 
         // 武器层前后关系（参考原版）：右侧/下方方向武器在前，其余方向武器在后
@@ -254,28 +393,26 @@ impl SpriteRenderSystem {
         // weapon behind
         if !weapon_front {
             if let Some(weapon_index) = weapon_index_opt {
-                drew_any |= draw_layer(
-                    weapon_library(weapon_index),
+                let weapon_lib = weapon_library(weapon_index);
+                let candidates = [
+                    rider_base_frame + weapon_offset,
                     rider_weapon_frame + weapon_offset,
+                    rider_weapon_frame,
+                    rider_base_frame,
+                    0 + weapon_offset,
+                    0,
+                ];
+                drew_any |= Self::draw_weapon_with_effect(
+                    &draw_layer,
+                    &draw_layer_additive,
+                    add_blend_material,
                     &actor_pos,
                     tint,
+                    weapon_lib,
+                    weapon_index,
+                    weapon_effect_index_opt,
+                    candidates,
                 );
-
-                if let Some(effect_index) = weapon_effect_index_opt {
-                    let effect_tint = Color::new(
-                        tint.r,
-                        tint.g,
-                        tint.b,
-                        (tint.a * Self::WEAPON_EFFECT_ALPHA).clamp(0.0, 1.0),
-                    );
-                    drew_any |= draw_layer_additive(
-                        add_blend_material,
-                        LibraryName::CWeaponEffect(effect_index),
-                        rider_weapon_frame + weapon_offset,
-                        &actor_pos,
-                        effect_tint,
-                    );
-                }
             }
         }
 
@@ -298,28 +435,26 @@ impl SpriteRenderSystem {
         // weapon front
         if weapon_front {
             if let Some(weapon_index) = weapon_index_opt {
-                drew_any |= draw_layer(
-                    weapon_library(weapon_index),
+                let weapon_lib = weapon_library(weapon_index);
+                let candidates = [
+                    rider_base_frame + weapon_offset,
                     rider_weapon_frame + weapon_offset,
+                    rider_weapon_frame,
+                    rider_base_frame,
+                    0 + weapon_offset,
+                    0,
+                ];
+                drew_any |= Self::draw_weapon_with_effect(
+                    &draw_layer,
+                    &draw_layer_additive,
+                    add_blend_material,
                     &actor_pos,
                     tint,
+                    weapon_lib,
+                    weapon_index,
+                    weapon_effect_index_opt,
+                    candidates,
                 );
-
-                if let Some(effect_index) = weapon_effect_index_opt {
-                    let effect_tint = Color::new(
-                        tint.r,
-                        tint.g,
-                        tint.b,
-                        (tint.a * Self::WEAPON_EFFECT_ALPHA).clamp(0.0, 1.0),
-                    );
-                    drew_any |= draw_layer_additive(
-                        add_blend_material,
-                        LibraryName::CWeaponEffect(effect_index),
-                        rider_weapon_frame + weapon_offset,
-                        &actor_pos,
-                        effect_tint,
-                    );
-                }
             }
         }
 
@@ -339,6 +474,10 @@ impl SpriteRenderSystem {
         alpha: f32,
         local_only: bool,
     ) -> GameResult {
+        // 诊断：确认 PostFront 的 ghost 绘制路径确实进入了 draw_character。
+        // 只打印一次，避免刷屏。
+        static DRAW_CHAR_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
         // 相机（用于裁剪；真正的坐标变换由 GameScene 的 macroquad Camera2D 完成）
         let (cam_x, cam_y, cam_zoom, sw, sh) = world
             .query::<(&Camera, &Position)>()
@@ -355,6 +494,33 @@ impl SpriteRenderSystem {
         let view_min_y = cam_y - half_h;
         let view_max_y = cam_y + half_h;
         const CULL_MARGIN: f32 = 200.0;
+
+        let stage = world
+            .query::<&crate::components::RenderPass>()
+            .iter()
+            .next()
+            .map(|(_, p)| p.stage)
+            .unwrap_or(crate::components::RenderStage::Normal);
+
+        if stage == crate::components::RenderStage::PostFront && local_only {
+            let local_player_count = world
+                .query::<&crate::components::LocalPlayer>()
+                .iter()
+                .count();
+            let _ = DRAW_CHAR_DIAG_ONCE.set(()).map(|_| {
+                println!(
+                    "[DIAG][SpriteRenderSystem] draw_character(PostFront, local_only): locals={} cam=({:.1},{:.1}) zoom={:.3} view=({:.1},{:.1})-({:.1},{:.1})",
+                    local_player_count,
+                    cam_x,
+                    cam_y,
+                    cam_zoom,
+                    view_min_x,
+                    view_min_y,
+                    view_max_x,
+                    view_max_y
+                );
+            });
+        }
 
         let animation_count = world
             .query::<&TimeTracker>()
@@ -465,6 +631,7 @@ impl SpriteRenderSystem {
                         .get::<&MountState>(entity)
                         .ok()
                         .and_then(|m| m.mount_index);
+                    let is_local = world.get::<&LocalPlayer>(entity).is_ok();
                     Self::render_character(
                         &player,
                         &pos,
@@ -474,6 +641,7 @@ impl SpriteRenderSystem {
                         alpha,
                         add_blend_material,
                         mount_index,
+                        is_local,
                     )?;
                 }
                 Renderable::LibrarySprite { spr, pos, kind_order: _ } => {

@@ -17,6 +17,8 @@
 
 use macroquad::prelude::*;
 
+use std::time::{Duration, Instant};
+
 use crate::components::{Camera, FrontOcclusion, LocalPlayer, Position, RenderConfig, RenderPass, RenderStage};
 use crate::game::{GameContext, GameResult};
 use crate::map_renderer::MeshMapRenderer;
@@ -29,6 +31,11 @@ pub struct MapRenderSystem {
     renderer: MeshMapRenderer,
     map_reader: Option<MapReader>,
     loaded_map_file: Option<String>,
+
+    // 遮挡检测很重（会扫描大量 front tiles）。这里做缓存+节流，避免每帧都跑。
+    last_occlusion_check: Instant,
+    last_occlusion_pos: Vec2,
+    last_occluded: bool,
 }
 
 impl MapRenderSystem {
@@ -37,6 +44,10 @@ impl MapRenderSystem {
             renderer: MeshMapRenderer::new(48.0, 32.0),
             map_reader: None,
             loaded_map_file: None,
+
+            last_occlusion_check: Instant::now(),
+            last_occlusion_pos: vec2(f32::NAN, f32::NAN),
+            last_occluded: false,
         }
     }
 
@@ -123,31 +134,64 @@ impl RenderSystem for MapRenderSystem {
                     };
 
                     if !px.is_finite() || !py.is_finite() {
+                        self.last_occluded = false;
+                        self.last_occlusion_pos = vec2(px, py);
+                        self.last_occlusion_check = Instant::now();
                         false
                     } else {
-                        const FRONT_OCCLUSION_SEARCH_RADIUS_X_TILES: i32 = 3;
-                        const FRONT_OCCLUSION_SEARCH_RADIUS_Y_TILES: i32 = 10;
-                        const PLAYER_OCCLUSION_PROBE_WIDTH_PX: f32 = 26.0;
-                        const PLAYER_OCCLUSION_PROBE_HEIGHT_PX: f32 = 56.0;
+                        // 节流：大多数帧复用上次结果。
+                        // 经验值：100ms 对“遮挡半透明”视觉足够稳定，但能显著省 CPU。
+                        const OCCLUSION_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+                        const OCCLUSION_MOVE_EPS_PX: f32 = 2.0;
 
-                        let foot = vec2(px, py);
-                        let probe = Rect::new(
-                            foot.x - PLAYER_OCCLUSION_PROBE_WIDTH_PX * 0.5,
-                            foot.y - PLAYER_OCCLUSION_PROBE_HEIGHT_PX,
-                            PLAYER_OCCLUSION_PROBE_WIDTH_PX,
-                            PLAYER_OCCLUSION_PROBE_HEIGHT_PX,
-                        );
-                        self.renderer.front_layer_occludes_probe(
-                            map,
-                            probe,
-                            FRONT_OCCLUSION_SEARCH_RADIUS_X_TILES,
-                            FRONT_OCCLUSION_SEARCH_RADIUS_Y_TILES,
-                        )
+                        let now = Instant::now();
+                        let moved = (vec2(px, py) - self.last_occlusion_pos).length() > OCCLUSION_MOVE_EPS_PX;
+                        let due = now.duration_since(self.last_occlusion_check) >= OCCLUSION_CHECK_INTERVAL;
+                        let use_cache = !moved && !due;
+
+                        if use_cache {
+                            self.last_occluded
+                        } else {
+                            // 一些很长的 Front 贴图（屋檐/墙体/树冠）可能“基准格”离玩家较远，
+                            // 但实际贴图矩形会覆盖到玩家；需要扩大搜索半径以避免漏判。
+                            const FRONT_OCCLUSION_SEARCH_RADIUS_X_TILES: i32 = 16;
+                            const FRONT_OCCLUSION_SEARCH_RADIUS_Y_TILES: i32 = 14;
+                            // 说明：玩家实际可见范围（衣服/翅膀/武器）会比“脚下 26x56”更大，
+                            // 而一些前景物（树叶/屋檐）可能只遮住上半身/左右边缘。
+                            // 为了让“部分遮挡”也触发 ghost，这里使用多个 probe 覆盖脚下到头部的大致范围。
+                            let foot = vec2(px, py);
+
+                            let probes = [
+                                // 1) 原来的窄探针（脚下到上半身）
+                                Rect::new(foot.x - 13.0, foot.y - 56.0, 26.0, 56.0),
+                                // 2) 更高：覆盖到头顶（常见“遮住上半身但脚下露出”的情况）
+                                Rect::new(foot.x - 16.0, foot.y - 88.0, 32.0, 88.0),
+                                // 3) 更宽：覆盖左右边缘（常见“只遮住一侧肩膀/翅膀”的情况）
+                                Rect::new(foot.x - 24.0, foot.y - 72.0, 48.0, 72.0),
+                                // 4) 更大：覆盖翅膀/武器上半部的极端外扩（避免“明明遮住了翅膀但不触发 ghost”）
+                                Rect::new(foot.x - 40.0, foot.y - 112.0, 80.0, 112.0),
+                            ];
+
+                            let computed = probes.into_iter().any(|probe| {
+                                self.renderer.front_layer_occludes_probe(
+                                    map,
+                                    probe,
+                                    FRONT_OCCLUSION_SEARCH_RADIUS_X_TILES,
+                                    FRONT_OCCLUSION_SEARCH_RADIUS_Y_TILES,
+                                )
+                            });
+
+                            self.last_occluded = computed;
+                            self.last_occlusion_pos = vec2(px, py);
+                            self.last_occlusion_check = now;
+                            computed
+                        }
                     }
                 }
                 None => false,
             }
         } else {
+            self.last_occluded = false;
             false
         };
         Self::update_front_occlusion(ctx, occluded);
@@ -209,6 +253,11 @@ impl RenderSystem for MapRenderSystem {
             RenderStage::PostFront => {
                 // 只画 Front
                 if cfg.show_front {
+                    // 前景建筑贴图可能非常“长”，其基准格子在屏幕外（更下方），
+                    // 但贴图本体会伸到屏幕底部区域；需要额外向下过扫描避免缺块。
+                    let old_bottom_margin = self.renderer.bottom_margin;
+                    self.renderer.bottom_margin = old_bottom_margin.max(420.0);
+
                     let _ = self.renderer.render_front_layer_with_focus(
                         map,
                         snapped_x,
@@ -222,6 +271,8 @@ impl RenderSystem for MapRenderSystem {
                         0,
                         1.0,
                     );
+
+                    self.renderer.bottom_margin = old_bottom_margin;
                 }
             }
             RenderStage::Ui => {}

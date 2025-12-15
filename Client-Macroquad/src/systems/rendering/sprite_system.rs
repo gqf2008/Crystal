@@ -1,4 +1,5 @@
 mod character;
+// weapon 模块目前是占位（未接线）。装备相关绘制在 character 模块里完成。
 mod weapon;
 
 use crate::components::{Camera, FrontOcclusion, Position, RenderPass, RenderStage};
@@ -75,12 +76,113 @@ impl RenderSystem for SpriteRenderSystem {
         &mut self,
         world: &hecs::World,
     ) -> crate::game::GameResult {
+        // 诊断：如果连红点都没有，优先确认：
+        // 1) SpriteRenderSystem 是否被调度到；2) 世界里是否存在 Player/LocalPlayer；3) 是否有 Camera。
+        // 只打印一次，避免刷屏。
+        static SPRITE_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        static SPRITE_DIAG_WHEN_PLAYER_EXISTS: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        static SPRITE_DIAG_POST_FRONT_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        static SPRITE_DIAG_POST_FRONT_WHEN_PLAYER_EXISTS: std::sync::OnceLock<()> =
+            std::sync::OnceLock::new();
+
         let pass = world
             .query::<&RenderPass>()
             .iter()
             .next()
             .map(|(_, pass)| *pass)
             .unwrap_or_default();
+
+        let _ = SPRITE_DIAG_ONCE.set(()).map(|_| {
+            let player_count = world.query::<&crate::components::Player>().iter().count();
+            let local_player_count = world.query::<&crate::components::LocalPlayer>().iter().count();
+            let cam_count = world.query::<&crate::components::Camera>().iter().count();
+            let pos_count = world.query::<&crate::components::Position>().iter().count();
+            let occluded = world
+                .query::<&crate::components::FrontOcclusion>()
+                .iter()
+                .next()
+                .map(|(_, o)| o.local_player_occluded)
+                .unwrap_or(false);
+            println!(
+                "[DIAG][SpriteRenderSystem] draw called: stage={:?} alpha={} local_only={} players={} local_players={} cameras={} positions={} occluded={}",
+                pass.stage,
+                pass.alpha,
+                pass.local_only,
+                player_count,
+                local_player_count,
+                cam_count,
+                pos_count,
+                occluded
+            );
+        });
+
+        // 诊断：确认 PostFront pass 是否执行。
+        if pass.stage == RenderStage::PostFront {
+            let player_count = world.query::<&crate::components::Player>().iter().count();
+            let local_player_count = world.query::<&crate::components::LocalPlayer>().iter().count();
+            let occluded = world
+                .query::<&crate::components::FrontOcclusion>()
+                .iter()
+                .next()
+                .map(|(_, o)| o.local_player_occluded)
+                .unwrap_or(false);
+
+            let _ = SPRITE_DIAG_POST_FRONT_ONCE.set(()).map(|_| {
+                println!(
+                    "[DIAG][SpriteRenderSystem] PostFront pass: players={} local_players={} occluded={} (ghost should draw if occluded)",
+                    player_count,
+                    local_player_count,
+                    occluded
+                );
+            });
+
+            if player_count > 0 {
+                let _ = SPRITE_DIAG_POST_FRONT_WHEN_PLAYER_EXISTS.set(()).map(|_| {
+                    println!(
+                        "[DIAG][SpriteRenderSystem] PostFront with player: players={} local_players={} occluded={} => will_draw_ghost={}",
+                        player_count,
+                        local_player_count,
+                        occluded,
+                        occluded
+                    );
+                });
+            }
+        }
+
+        // 如果首帧 draw 时玩家还没生成，后续玩家出现时再打一次关键坐标。
+        if pass.stage == RenderStage::Normal {
+            let player_count = world.query::<&crate::components::Player>().iter().count();
+            if player_count > 0 {
+                let _ = SPRITE_DIAG_WHEN_PLAYER_EXISTS.set(()).map(|_| {
+                    let first_player_pos = world
+                        .query::<(&crate::components::Player, &crate::components::Position)>()
+                        .iter()
+                        .next()
+                        .map(|(_, (_p, pos))| (pos.x, pos.y));
+
+                    let cam_pos = world
+                        .query::<(&crate::components::Camera, &crate::components::Position)>()
+                        .iter()
+                        .next()
+                        .map(|(_, (_c, pos))| (pos.x, pos.y));
+
+                    let occluded = world
+                        .query::<&crate::components::FrontOcclusion>()
+                        .iter()
+                        .next()
+                        .map(|(_, o)| o.local_player_occluded)
+                        .unwrap_or(false);
+
+                    println!(
+                        "[DIAG][SpriteRenderSystem] players now exist: players={} first_player_pos={:?} camera_pos={:?} occluded={}",
+                        player_count,
+                        first_player_pos,
+                        cam_pos,
+                        occluded
+                    );
+                });
+            }
+        }
 
         match pass.stage {
             RenderStage::Normal => {
@@ -97,7 +199,8 @@ impl RenderSystem for SpriteRenderSystem {
                     .unwrap_or(false);
 
                 if occluded {
-                    const PLAYER_GHOST_ALPHA: f32 = 0.45;
+                    // 前景遮挡：画一层半透明的本地玩家（类似原版“被遮挡仍可见”的观感）。
+                    const PLAYER_GHOST_ALPHA: f32 = 0.55;
                     self.draw_character(world, &self.add_blend_material, PLAYER_GHOST_ALPHA, true)?;
                 }
             }

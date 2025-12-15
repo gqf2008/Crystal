@@ -6,7 +6,7 @@
 //   ESC = 返回角色选择
 
 use crate::game::{GameContext, GameResult};
-use crate::resources::init_map_libraries;
+use crate::resources::initialize_all_libraries;
 use crate::scenes::{Scene, SceneTransition};
 use crate::systems::presentation::{DialogSystem, HUDSystem, MinimapSystem, UISystem};
 use crate::systems::rendering::{EffectRenderSystem, SpriteRenderSystem, UIRenderSystem};
@@ -324,14 +324,10 @@ impl GameScene {
         // 或从 `Client-Macroquad/` 目录启动都应能正常加载。
         let data_dir = format!("{}/Data", env!("CARGO_MANIFEST_DIR"));
         crate::resources::resource_manager::set_data_path(&data_dir);
-        crate::resources::libraries::set_data_path(data_dir.clone());
-
-        // 初始化地图库（贴图/库资源）
-        // 地图文件的读取/切换由 ECS MapRenderSystem/MapLoadSystem 处理。
-        println!("🗺️ GameScene: 初始化地图库...");
-        if let Err(e) = init_map_libraries() {
-            println!("⚠️ GameScene: 地图库初始化失败: {}", e);
-        }
+        // 初始化 Libraries（包含 UI/特效/物品/角色/武器/坐骑 + MapLibs）
+        // 否则会出现“地图能画，但人物/装备/坐骑贴图为空”的现象。
+        println!("📚 GameScene: 初始化游戏资源库...");
+        let libs_ok = initialize_all_libraries(&data_dir).is_ok();
 
         if let Some(pass_entity) = self.ecs_render_pass_entity {
             if let Ok(mut s) = self
@@ -339,7 +335,7 @@ impl GameScene {
                 .world
                 .get::<&mut ResourceInitState>(pass_entity)
             {
-                s.initialized = true;
+                s.initialized = libs_ok;
             }
         }
 
@@ -451,8 +447,12 @@ impl Scene for GameScene {
 
         if self.is_resources_initialized() {
             self.update_map_camera();
+            // 注意：部分渲染器（例如 MeshMapRenderer 的 chunk RenderTarget）会临时切换相机。
+            // 为了保证每个 pass 的后续 RenderSystem 都在同一套世界相机下绘制，
+            // 这里在每个 pass 入口重新设置一次相机。
             set_camera(&self.map_camera);
             self.draw_ecs_pass(1.0, false, RenderStage::Normal)?;
+            set_camera(&self.map_camera);
             self.draw_ecs_pass(1.0, false, RenderStage::PostFront)?;
             set_default_camera();
         } else {

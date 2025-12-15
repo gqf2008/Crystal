@@ -1240,31 +1240,22 @@ pub fn get_from_array(
 ///
 /// 这是推荐的初始化方式，一次性完成所有准备工作
 pub fn initialize_all_libraries(data_path: &str) -> std::io::Result<()> {
+    // 注意：LIBRARIES 是 thread_local + RefCell；必须避免嵌套 borrow_mut。
+    // 这里按“多个小步骤”初始化，每一步结束后借用都会释放。
+    tracing::info!("=== 开始初始化所有库 ===");
+
+    // 0) 设置数据路径
+    set_data_path(data_path.to_string());
+
+    // 1) 加载核心库（内部会 borrow_mut LIBRARIES）
+    load_core_libraries()?;
+
+    // 2) 初始化地图库 MapLibs（内部会 borrow_mut LIBRARIES）
+    init_map_libraries()?;
+
+    // 3) 初始化游戏内容数组库（不阻塞；失败仅记录）
     LIBRARIES.with(|libs| {
         let mut libs = libs.borrow_mut();
-        libs.set_data_path(data_path);
-
-        tracing::info!("=== 开始初始化所有库 ===");
-        load_core_libraries()?;
-        // 1. 初始化 MapLibs[0-399]
-        libs.init_map_libraries()?;
-        // // 2. 加载核心 UI 库 (同步)
-        // let core_libs = [
-        //     LibraryName::ChrSel,
-        //     LibraryName::Prguse,
-        //     LibraryName::Prguse2,
-        //     LibraryName::Prguse3,
-        //     LibraryName::Title,
-        // ];
-
-        // for lib_name in core_libs {
-        //     if let Err(e) = libs.load(lib_name.clone()) {
-        //         tracing::warn!("核心库 {} 加载失败: {}", lib_name, e);
-        //     }
-        // }
-
-        // 3. 初始化游戏内容数组库 (异步/延迟加载)
-        // 这些库在后台加载，不会阻塞主线程
         if let Err(e) = libs.init_game_libraries() {
             tracing::warn!("游戏内容库初始化部分失败: {}", e);
         }
@@ -1286,9 +1277,9 @@ pub fn initialize_all_libraries(data_path: &str) -> std::io::Result<()> {
             libs.get_array_size(LibraryArray::NPCs)
         );
         tracing::info!("  - 单体库: {} 个已加载", libs.loaded_count());
+    });
 
-        Ok(())
-    })
+    Ok(())
 }
 
 /// 便捷函数: 初始化数据路径

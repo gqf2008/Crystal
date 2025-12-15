@@ -1,4 +1,4 @@
-use crate::components::{Equipment, MountState};
+use crate::components::{Equipment, MountState, movement::MovementVelocity};
 use crate::game::{GameContext, GameResult};
 use crate::systems::LogicSystem;
 use mir2_shared::enums::ItemType;
@@ -13,6 +13,11 @@ impl MountStateSyncSystem {
 
     // Libraries.rs uses {:02} → Mount/00..99
     const MAX_MOUNT_LIBRARY_INDEX: i16 = 99;
+
+    // 骑乘速度：直接写入 MovementVelocity，保证所有移动路径（含 DirectFollow）一致。
+    // 需求：骑马“走路”不需要变快，只让“跑”更快。
+    const MOUNT_RUN_SPEED: f32 = 210.0;
+    const MOUNT_MAX_SPEED: f32 = 240.0;
 
     fn derive_mount_index(equipment: &Equipment) -> Option<Option<usize>> {
         let Some(item) = equipment.mount.as_ref() else {
@@ -38,13 +43,36 @@ impl MountStateSyncSystem {
 
 impl LogicSystem for MountStateSyncSystem {
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
-        for (_entity, (equipment, mount_state)) in ctx
-            .world
-            .query_mut::<(&Equipment, &mut MountState)>()
-            .into_iter()
-        {
+        for (_entity, (equipment, mount_state, velocity)) in ctx.world.query_mut::<(
+            &Equipment,
+            &mut MountState,
+            &mut MovementVelocity,
+        )>() {
+            let prev = mount_state.mount_index;
             if let Some(derived) = Self::derive_mount_index(equipment) {
                 mount_state.mount_index = derived;
+            }
+            let now = mount_state.mount_index;
+
+            if now.is_some() {
+                velocity.walk_speed = crate::components::movement::DEFAULT_WALK_SPEED;
+                velocity.run_speed = Self::MOUNT_RUN_SPEED;
+                velocity.max_speed = Self::MOUNT_MAX_SPEED;
+            } else {
+                velocity.walk_speed = crate::components::movement::DEFAULT_WALK_SPEED;
+                velocity.run_speed = crate::components::movement::DEFAULT_RUN_SPEED;
+                velocity.max_speed = crate::components::movement::DEFAULT_MAX_SPEED;
+            }
+
+            if prev != now {
+                tracing::info!(
+                    "🐎 MountState changed: {:?} -> {:?}; speeds: walk={} run={} max={}",
+                    prev,
+                    now,
+                    velocity.walk_speed,
+                    velocity.run_speed,
+                    velocity.max_speed
+                );
             }
         }
         Ok(())

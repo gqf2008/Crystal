@@ -13,6 +13,14 @@ impl PacketHandler for CombatHandler {
         let mut cursor = Cursor::new(payload);
         
         match header.opcode as u16 {
+            // ObjectAttack - another object attacks
+            x if x == ServerPacketIds::ObjectAttack as u16 => {
+                if let Ok(packet) = server::ObjectAttack::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ObjectAttack { packet });
+                    tracing::trace!("⚔️ ObjectAttack received");
+                }
+            }
+
             // Struck - player was hit
             x if x == ServerPacketIds::Struck as u16 => {
                 if let Ok(packet) = server::Struck::read_body(&mut cursor) {
