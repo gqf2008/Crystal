@@ -4,8 +4,8 @@ use macroquad::prelude::Vec2;
 
 use crate::scenes::dialogs::game::{
     amount_box::AmountBoxResult,
-    npc_dialog_hybrid::NpcDialogAction,
-    npc_goods_dialog_hybrid::NpcGoodsDialogAction,
+    npc_dialog::NpcDialogAction,
+    npc_goods_dialog::NpcGoodsDialogAction,
 };
 
 use mir2_shared::data::item::UserItem;

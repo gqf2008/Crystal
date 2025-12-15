@@ -166,11 +166,11 @@ impl DialogSystem {
         }
     }
 
-    fn handle_npc_goods_action(&mut self, ctx: &mut GameContext, action: crate::scenes::dialogs::game::npc_goods_dialog_hybrid::NpcGoodsDialogAction) {
+    fn handle_npc_goods_action(&mut self, ctx: &mut GameContext, action: crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction) {
         use crate::network::handlers::NetworkEvent as NetEv;
 
         match action {
-            crate::scenes::dialogs::game::npc_goods_dialog_hybrid::NpcGoodsDialogAction::OpenSubGoods {
+            crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction::OpenSubGoods {
                 items,
                 rate,
                 hide_added_stats,
@@ -186,7 +186,7 @@ impl DialogSystem {
                     ui.pending_commands.push(UiCommand::OpenInventory);
                 });
             }
-            crate::scenes::dialogs::game::npc_goods_dialog_hybrid::NpcGoodsDialogAction::OpenAmountBox {
+            crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction::OpenAmountBox {
                 title,
                 image_index,
                 default_amount,
@@ -272,7 +272,7 @@ impl DialogSystem {
                     });
                 }
             }
-            crate::scenes::dialogs::game::npc_goods_dialog_hybrid::NpcGoodsDialogAction::RequestBuy {
+            crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction::RequestBuy {
                 unique_id,
                 count,
                 item_index,
@@ -339,19 +339,19 @@ impl DialogSystem {
         for action in actions {
             match action {
                 UiAction::NpcDialog(a) => match a {
-                    crate::scenes::dialogs::game::npc_dialog_hybrid::NpcDialogAction::None => {}
-                    crate::scenes::dialogs::game::npc_dialog_hybrid::NpcDialogAction::Close => {
+                    crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::None => {}
+                    crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::Close => {
                         let _ = Self::with_ui_state_mut(ctx, |ui| {
                             ui.pending_commands.push(UiCommand::CloseNpcRelatedDialogs);
                         });
                     }
-                    crate::scenes::dialogs::game::npc_dialog_hybrid::NpcDialogAction::OpenLink { url } => {
+                    crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::OpenLink { url } => {
                         let _ = Self::with_ui_state_mut(ctx, |ui| {
                             ui.pending_commands
                                 .push(UiCommand::PushSystemChatLine(format!("链接：{}", url)));
                         });
                     }
-                    crate::scenes::dialogs::game::npc_dialog_hybrid::NpcDialogAction::ClickAction { action } => {
+                    crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::ClickAction { action } => {
                         if !Self::try_consume_npc_call_cooldown(ctx) {
                             continue;
                         }

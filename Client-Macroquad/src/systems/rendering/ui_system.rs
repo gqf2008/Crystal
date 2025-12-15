@@ -1,12 +1,13 @@
-use macroquad::prelude::{is_key_pressed, is_mouse_button_down, is_mouse_button_pressed, mouse_position, mouse_wheel, vec2, KeyCode, MouseButton};
+use macroquad::prelude::{
+    is_key_pressed, is_mouse_button_down, is_mouse_button_pressed, mouse_position, mouse_wheel,
+    vec2, KeyCode, MouseButton,
+};
 
 use crate::components::{RenderPass, RenderStage, UiWorldInputBlock};
 use crate::game::{GameContext, GameResult};
 use crate::scenes::dialogs::game::{
-    amount_box::AmountBoxHybrid,
-    npc_dialog_hybrid::NpcDialogHybrid,
-    npc_goods_dialog_hybrid::NpcGoodsDialogHybrid,
-    MainDialog,
+    amount_box::AmountBoxHybrid, npc_dialog::NpcDialogHybrid,
+    npc_goods_dialog::NpcGoodsDialogHybrid, MainDialog,
 };
 use crate::systems::RenderSystem;
 use crate::ui::ui_state::{UiAction, UiCommand, UiState};
@@ -18,28 +19,19 @@ pub struct UIRenderSystem {
     npc_goods_dialog: NpcGoodsDialogHybrid,
     npc_sub_goods_dialog: NpcGoodsDialogHybrid,
     amount_box: AmountBoxHybrid,
-
-    textures_loaded: bool,
 }
 
 impl UIRenderSystem {
     pub fn new() -> Self {
+        let mut main_dialog = MainDialog::new();
+        main_dialog.load_native_textures();
         Self {
-            main_dialog: MainDialog::new(),
+            main_dialog,
             npc_dialog: NpcDialogHybrid::new(),
             npc_goods_dialog: NpcGoodsDialogHybrid::new(),
             npc_sub_goods_dialog: NpcGoodsDialogHybrid::new(),
             amount_box: AmountBoxHybrid::new(),
-            textures_loaded: false,
         }
-    }
-
-    pub fn load_textures(&mut self) {
-        if self.textures_loaded {
-            return;
-        }
-        self.main_dialog.load_native_textures();
-        self.textures_loaded = true;
     }
 
     fn close_npc_related_dialogs(&mut self) {
@@ -48,24 +40,10 @@ impl UIRenderSystem {
         self.npc_sub_goods_dialog.hide();
         self.amount_box.hide();
     }
-
-    fn ensure_textures_loaded_sync_only(&self) -> bool {
-        self.textures_loaded
-    }
 }
 
 impl RenderSystem for UIRenderSystem {
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
-        // 纹理加载现在是同步的：在首次 update 时懒加载。
-        // 依赖 GameScene::load_textures() 已设置 Data 路径与库根目录。
-        if !self.ensure_textures_loaded_sync_only() {
-            self.load_textures();
-        }
-
-        if !self.ensure_textures_loaded_sync_only() {
-            return Ok(());
-        }
-
         // 1) 应用表现层写入的 UI 命令（驱动具体 UI 组件）
         let commands = ctx
             .world
@@ -101,8 +79,12 @@ impl RenderSystem for UIRenderSystem {
                     is_sub,
                 } => {
                     if is_sub {
-                        self.npc_sub_goods_dialog
-                            .new_goods(items, rate, panel_type, hide_added_stats);
+                        self.npc_sub_goods_dialog.new_goods(
+                            items,
+                            rate,
+                            panel_type,
+                            hide_added_stats,
+                        );
                     } else {
                         self.npc_goods_dialog
                             .new_goods(items, rate, panel_type, hide_added_stats);
@@ -117,8 +99,13 @@ impl RenderSystem for UIRenderSystem {
                     default_amount,
                     buy_uid,
                 } => {
-                    self.amount_box
-                        .show(title, image_index, max_quantity, min_quantity, default_amount);
+                    self.amount_box.show(
+                        title,
+                        image_index,
+                        max_quantity,
+                        min_quantity,
+                        default_amount,
+                    );
                     if let Some((_e, s)) = ctx.world.query::<&UiState>().iter().next() {
                         s.borrow_mut().amount_box_buy_uid = Some(buy_uid);
                     }
@@ -146,7 +133,11 @@ impl RenderSystem for UIRenderSystem {
                 .next()
                 .map(|(_, s)| {
                     let s = s.borrow();
-                    (s.minimap_world_size, s.minimap_player_pos, s.minimap_player_dir_radians)
+                    (
+                        s.minimap_world_size,
+                        s.minimap_player_pos,
+                        s.minimap_player_dir_radians,
+                    )
                 })
                 .unwrap_or((None, None, 0.0))
         };
@@ -260,10 +251,6 @@ impl RenderSystem for UIRenderSystem {
     }
 
     fn draw(&mut self, _world: &hecs::World) -> GameResult {
-        if !self.ensure_textures_loaded_sync_only() {
-            return Ok(());
-        }
-
         let pass = _world
             .query::<&RenderPass>()
             .iter()
@@ -291,9 +278,14 @@ impl RenderSystem for UIRenderSystem {
         if self.npc_dialog.is_visible() {
             npc_dialog_consumed = true;
             let action = self.npc_dialog.update_and_draw();
-            if !matches!(action, crate::scenes::dialogs::game::npc_dialog_hybrid::NpcDialogAction::None) {
+            if !matches!(
+                action,
+                crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::None
+            ) {
                 if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
-                    s.borrow_mut().pending_actions.push(UiAction::NpcDialog(action));
+                    s.borrow_mut()
+                        .pending_actions
+                        .push(UiAction::NpcDialog(action));
                 }
             }
         }
@@ -309,12 +301,16 @@ impl RenderSystem for UIRenderSystem {
 
         if let Some(action) = self.npc_goods_dialog.take_action() {
             if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
-                s.borrow_mut().pending_actions.push(UiAction::NpcGoods(action));
+                s.borrow_mut()
+                    .pending_actions
+                    .push(UiAction::NpcGoods(action));
             }
         }
         if let Some(action) = self.npc_sub_goods_dialog.take_action() {
             if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
-                s.borrow_mut().pending_actions.push(UiAction::NpcSubGoods(action));
+                s.borrow_mut()
+                    .pending_actions
+                    .push(UiAction::NpcSubGoods(action));
             }
         }
 
@@ -323,7 +319,10 @@ impl RenderSystem for UIRenderSystem {
         if self.amount_box.is_visible() {
             amount_consumed = true;
             let r = self.amount_box.update_and_draw();
-            if !matches!(r, crate::scenes::dialogs::game::amount_box::AmountBoxResult::None) {
+            if !matches!(
+                r,
+                crate::scenes::dialogs::game::amount_box::AmountBoxResult::None
+            ) {
                 if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
                     s.borrow_mut().pending_actions.push(UiAction::AmountBox(r));
                 }
@@ -331,8 +330,11 @@ impl RenderSystem for UIRenderSystem {
         }
 
         if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
-            s.borrow_mut().ui_consumed_last_frame =
-                ui_consumed || npc_consumed || npc_sub_consumed || amount_consumed || npc_dialog_consumed;
+            s.borrow_mut().ui_consumed_last_frame = ui_consumed
+                || npc_consumed
+                || npc_sub_consumed
+                || amount_consumed
+                || npc_dialog_consumed;
         }
         Ok(())
     }
