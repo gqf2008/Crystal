@@ -1,24 +1,28 @@
 // GameScene - 游戏主场景
-// 
+//
 // 快捷键:
 //   I = 背包, C = 角色, B = 快捷栏, S = 商城
 //   F1-F6 = 快捷栏技能
 //   ESC = 返回角色选择
 
 use crate::game::{GameContext, GameResult};
+use crate::resources::init_map_libraries;
 use crate::scenes::{Scene, SceneTransition};
-use crate::ui::text_renderer::draw_text_cn;
+use crate::systems::presentation::{DialogSystem, HUDSystem, MinimapSystem, UISystem};
+use crate::systems::rendering::{EffectRenderSystem, SpriteRenderSystem, UIRenderSystem};
 use crate::ui::ui_state::UiState;
 use crate::{
     components::{
-        Camera as EcsCamera, CameraMode, LocalPlayer, MapData, Path, Position, Draggable,
-        RenderConfig, RenderPass, RenderStage, TimeTracker,
+        Camera as EcsCamera, CameraMode, Draggable, LocalPlayer, MapData, Position, RenderConfig,
+        RenderPass, RenderStage, ResourceInitState, SceneExitBlock, TimeTracker,
     },
-    systems::{priority, AnimationSystem, CameraBoundsSystem, CameraFollowSystem, CameraSpaceGateSystem, CameraSystem, CollisionSystem, CombatSystem, FrameEndSystem, HealthRegenSystem, MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SkillSystem, SystemScheduler, TimeTickSystem},
+    systems::{
+        priority, AnimationSystem, CameraBoundsSystem, CameraFollowSystem, CameraSpaceGateSystem,
+        CameraSystem, CollisionSystem, CombatSystem, FrameEndSystem, HealthRegenSystem,
+        MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SkillSystem,
+        SystemScheduler, TimeTickSystem,
+    },
 };
-use crate::resources::init_map_libraries;
-use crate::systems::presentation::{DialogSystem, HUDSystem, MinimapSystem, UISystem};
-use crate::systems::rendering::{EffectRenderSystem, SpriteRenderSystem, UIRenderSystem};
 use macroquad::prelude::*;
 
 /// 游戏主场景 - 集成所有混合对话框
@@ -34,32 +38,39 @@ pub struct GameScene {
     ecs_local_player_entity: Option<hecs::Entity>,
     ecs_time_entity: Option<hecs::Entity>,
     ecs_render_pass_entity: Option<hecs::Entity>,
-
-    // 初始化状态
-    initialized: bool,
 }
 
 impl GameScene {
-    fn with_ui_state<R>(
-        &self,
-        f: impl FnOnce(&crate::ui::ui_state::UiStateData) -> R,
-    ) -> Option<R> {
-        let mut q = self.ecs_ctx.world.query::<&UiState>();
-        let (_e, s) = q.iter().next()?;
-        let data = s.borrow();
-        Some(f(&data))
+    fn is_resources_initialized(&self) -> bool {
+        let Some(pass_entity) = self.ecs_render_pass_entity else {
+            return false;
+        };
+        self.ecs_ctx
+            .world
+            .get::<&ResourceInitState>(pass_entity)
+            .map(|s| s.initialized)
+            .unwrap_or(false)
     }
 
-    fn any_modal_or_popup_open(&self) -> bool {
-        self.with_ui_state(|ui| ui.any_modal_or_popup_open)
-            .unwrap_or(false)
+    fn can_escape_exit(&self) -> bool {
+        let Some(pass_entity) = self.ecs_render_pass_entity else {
+            return true;
+        };
+        self.ecs_ctx
+            .world
+            .get::<&SceneExitBlock>(pass_entity)
+            .map(|b| !b.block_escape_exit)
+            .unwrap_or(true)
     }
 
     pub fn new() -> Self {
         // Camera2D 初始值（真实参数会在地图加载后更新）
         let map_camera = Camera2D {
             target: vec2(0.0, 0.0),
-            zoom: vec2(2.0 / screen_width().max(1.0), 2.0 / screen_height().max(1.0)),
+            zoom: vec2(
+                2.0 / screen_width().max(1.0),
+                2.0 / screen_height().max(1.0),
+            ),
             offset: vec2(0.0, 0.0),
             render_target: None,
             rotation: 0.0,
@@ -70,10 +81,20 @@ impl GameScene {
         ecs_scheduler
             // UI 输入阻塞必须早于 PlayerControlSystem 执行，因此将 UIRenderSystem.update 提前。
             // draw 仍然只在 RenderStage::Ui 时生效。
-            .add_system(UIRenderSystem::new(), priority::INPUT + 1)
+            .add_render_system_staged(
+                UIRenderSystem::new(),
+                priority::INPUT + 1,
+                crate::systems::RenderStageMask::UI,
+            )
             .add_system(crate::systems::NetworkSystem::default(), priority::NETWORK)
-            .add_system(crate::systems::NetworkApplySystem::default(), priority::NETWORK_APPLY)
-            .add_system(crate::systems::MapBootstrapSystem::default(), priority::MAP_BOOTSTRAP)
+            .add_system(
+                crate::systems::NetworkApplySystem::default(),
+                priority::NETWORK_APPLY,
+            )
+            .add_system(
+                crate::systems::MapBootstrapSystem::default(),
+                priority::MAP_BOOTSTRAP,
+            )
             .add_system(crate::systems::MapLoadSystem, priority::MAP_LOAD)
             .add_system(TimeTickSystem::default(), priority::GAME_EVENT)
             .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
@@ -87,8 +108,14 @@ impl GameScene {
             .add_system(MountStateSyncSystem::new(), priority::MOUNT_STATE_SYNC)
             .add_system(AnimationSystem::new(), priority::ANIMATION)
             .add_system(crate::systems::ParticleSystem, priority::PARTICLE)
-            .add_system(crate::systems::FloatingTextSystem::default(), priority::PARTICLE)
-            .add_system(CameraSpaceGateSystem::default(), priority::CAMERA_SPACE_GATE)
+            .add_system(
+                crate::systems::FloatingTextSystem::default(),
+                priority::PARTICLE,
+            )
+            .add_system(
+                CameraSpaceGateSystem::default(),
+                priority::CAMERA_SPACE_GATE,
+            )
             .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW)
             .add_system(CameraSystem::new(), priority::CAMERA)
             .add_system(CameraBoundsSystem::default(), priority::CAMERA_BOUNDS)
@@ -98,24 +125,57 @@ impl GameScene {
             .add_system(MinimapSystem::new(), priority::MINIMAP)
             .add_system(DialogSystem::new(), priority::DIALOG)
             // ECS 渲染系统：先最小接入 SpriteRenderSystem（角色/坐骑/武器特效）
-            .add_system(crate::systems::rendering::MapRenderSystem::new(), priority::MAP_RENDER)
-            .add_system(SpriteRenderSystem::new(), priority::SPRITE_RENDER)
-            .add_system(EffectRenderSystem::new(), priority::EFFECT_RENDER)
-            .add_system(FrameEndSystem::default(), priority::FRAME_END)
-            ;
+            .add_render_system_staged(
+                crate::systems::rendering::MapRenderSystem::new(),
+                priority::MAP_RENDER,
+                crate::systems::RenderStageMask::NORMAL
+                    .union(crate::systems::RenderStageMask::POST_FRONT),
+            )
+            .add_render_system_staged(
+                SpriteRenderSystem::new(),
+                priority::SPRITE_RENDER,
+                crate::systems::RenderStageMask::NORMAL
+                    .union(crate::systems::RenderStageMask::POST_FRONT),
+            )
+            .add_render_system_staged(
+                EffectRenderSystem::new(),
+                priority::EFFECT_RENDER,
+                crate::systems::RenderStageMask::NORMAL
+                    .union(crate::systems::RenderStageMask::POST_FRONT),
+            )
+            .add_render_system_staged(
+                crate::systems::dbug::DebugSystem::new(),
+                priority::DEBUG,
+                crate::systems::RenderStageMask::POST_FRONT
+                    .union(crate::systems::RenderStageMask::UI),
+            )
+            .add_system(FrameEndSystem::default(), priority::FRAME_END);
+
+        let mut ecs_ctx = GameContext::new();
+        // 提前创建 RenderPass 单例：保证 UI/Debug 叠加层在资源未初始化时也能渲染（例如“加载中”）。
+        let ecs_render_pass_entity = ecs_ctx.world.spawn((
+            RenderPass::default(),
+            crate::components::FrontOcclusion::default(),
+            crate::components::HoverHighlight::default(),
+            crate::components::ActiveNpc::default(),
+            crate::components::NpcCallCooldown::default(),
+            crate::components::UiWorldInputBlock::default(),
+            UiState::new(),
+            ResourceInitState::default(),
+            SceneExitBlock::default(),
+        ));
 
         Self {
             map_camera,
             map_camera_position: vec2(0.0, 0.0),
             map_zoom: 1.0,
 
-            ecs_ctx: GameContext::new(),
+            ecs_ctx,
             ecs_scheduler,
             ecs_camera_entity: None,
             ecs_local_player_entity: None,
             ecs_time_entity: None,
-            ecs_render_pass_entity: None,
-            initialized: false,
+            ecs_render_pass_entity: Some(ecs_render_pass_entity),
         }
     }
 
@@ -144,7 +204,7 @@ impl GameScene {
     }
 
     fn ensure_ecs_bootstrap(&mut self) {
-        if !self.initialized {
+        if !self.is_resources_initialized() {
             return;
         }
 
@@ -209,19 +269,7 @@ impl GameScene {
             self.ecs_time_entity = Some(entity);
         }
 
-        // 5) 渲染 pass 参数（用于 ghost pass / UI stage 等多次绘制）
-        if self.ecs_render_pass_entity.is_none() {
-            let entity = self.ecs_ctx.world.spawn((
-                RenderPass::default(),
-                crate::components::FrontOcclusion::default(),
-                crate::components::HoverHighlight::default(),
-                crate::components::ActiveNpc::default(),
-                crate::components::NpcCallCooldown::default(),
-                crate::components::UiWorldInputBlock::default(),
-                UiState::new(),
-            ));
-            self.ecs_render_pass_entity = Some(entity);
-        }
+        // 5) RenderPass/UiState/ResourceInitState：已在 new() 阶段创建单例。
 
         // 6) 本地玩家：由网络（真服/MockNetwork）落地；这里仅做“发现并缓存”，避免重复生成。
         if self.ecs_local_player_entity.is_none() {
@@ -232,8 +280,12 @@ impl GameScene {
         }
     }
 
-
-    fn draw_ecs_sprites(&mut self, alpha: f32, local_only: bool, stage: RenderStage) -> GameResult {
+    /// 触发一次 ECS 渲染 pass。
+    ///
+    /// 职责很窄：
+    /// - 把本次 pass 的参数写入 `RenderPass` 单例（`alpha/local_only/stage`）
+    /// - 调用调度器的 `draw()`，由各个 RenderSystem 按 `stage` 自行绘制
+    fn draw_ecs_pass(&mut self, alpha: f32, local_only: bool, stage: RenderStage) -> GameResult {
         let Some(pass_entity) = self.ecs_render_pass_entity else {
             return Ok(());
         };
@@ -247,45 +299,25 @@ impl GameScene {
         self.ecs_scheduler.draw(&self.ecs_ctx.world)
     }
 
-    fn draw_ecs_path_overlay(&mut self) {
-        let Some(player_entity) = self.ecs_local_player_entity else {
-            return;
-        };
-
-        // 路径（格子→世界）
-        if let (Ok(pos), Ok(path)) = (
-            self.ecs_ctx.world.get::<&Position>(player_entity),
-            self.ecs_ctx.world.get::<&Path>(player_entity),
-        ) {
-            if path.is_valid && !path.waypoints.is_empty() {
-                let mut last = (pos.x, pos.y);
-                for (gx, gy) in path.waypoints.iter().copied() {
-                    let wx = gx as f32 * 48.0;
-                    let wy = gy as f32 * 32.0;
-                    draw_line(last.0, last.1, wx, wy, 2.0, Color::from_rgba(255, 255, 0, 180));
-                    last = (wx, wy);
-                }
-            }
-        }
-    }
-
     fn update_map_camera(&mut self) {
         // 像素对齐（抗闪烁）：
         // Linear 过滤 + 子像素相机移动会导致阴影/暗部出现“深浅闪烁”(shimmering)。
         // 将渲染相机 target 对齐到 1/map_zoom 的网格（世界像素）上，可显著稳定采样。
         let zoom = self.effective_map_zoom().max(0.0001);
         let cam_pos = self.effective_map_camera_position();
-        let snapped_target = vec2((cam_pos.x * zoom).round() / zoom, (cam_pos.y * zoom).round() / zoom);
+        let snapped_target = vec2(
+            (cam_pos.x * zoom).round() / zoom,
+            (cam_pos.y * zoom).round() / zoom,
+        );
         self.map_camera.target = snapped_target;
         let sw = screen_width().max(1.0);
         let sh = screen_height().max(1.0);
         self.map_camera.zoom = vec2(2.0 / sw * zoom, 2.0 / sh * zoom);
     }
 
-    
-    /// 加载所有对话框纹理
+    /// 初始化资源路径与地图库（UI 纹理由 UIRenderSystem 负责）
     pub fn load_textures(&mut self) {
-        println!("🎮 GameScene: 加载对话框纹理...");
+        println!("🎮 GameScene: 初始化资源...");
 
         // 资源根目录：使用绝对路径，避免从不同工作目录启动时找不到 Data/
         // 例如：从仓库根目录 `cargo run -p client-macroquad --bin test_game_scene`
@@ -300,38 +332,21 @@ impl GameScene {
         if let Err(e) = init_map_libraries() {
             println!("⚠️ GameScene: 地图库初始化失败: {}", e);
         }
-        
-        self.initialized = true;
+
+        if let Some(pass_entity) = self.ecs_render_pass_entity {
+            if let Ok(mut s) = self
+                .ecs_ctx
+                .world
+                .get::<&mut ResourceInitState>(pass_entity)
+            {
+                s.initialized = true;
+            }
+        }
 
         // 地图加载完成后，立即完成 ECS 最小引导（MapData/Camera/LocalPlayer）
         self.ensure_ecs_bootstrap();
 
-        println!("✅ GameScene: 对话框纹理加载完成");
-    }
-    
-    /// 绘制快捷键提示
-    fn draw_help_text(&self) {
-        let y = screen_height() - 25.0;
-        draw_text_cn(
-            "快捷键: Space+拖拽/滚轮=地图 | Enter=聊天 M=小地图 Tab=小地图大小 | ESC=返回角色选择",
-            10.0, y, 14.0, Color::from_rgba(200, 200, 200, 180)
-        );
-    }
-
-    fn draw_debug_fps(&self) {
-        if !cfg!(debug_assertions) {
-            return;
-        }
-
-        // macroquad 内置 FPS 计数（debug 下足够用）
-        let fps = get_fps();
-        draw_text(
-            &format!("FPS: {}", fps),
-            12.0,
-            22.0,
-            20.0,
-            Color::from_rgba(0, 255, 0, 220),
-        );
+        println!("✅ GameScene: 资源初始化完成");
     }
 
     // 地图的视觉加载/切换由 ECS MapRenderSystem 接管。
@@ -344,8 +359,10 @@ impl Default for GameScene {
 }
 
 impl Scene for GameScene {
-    fn name(&self) -> &str { "游戏场景" }
-    
+    fn name(&self) -> &str {
+        "游戏场景"
+    }
+
     fn on_enter(&mut self) -> GameResult {
         println!("🎬 进入游戏场景");
 
@@ -363,7 +380,10 @@ impl Scene for GameScene {
         if self.ecs_ctx.net.is_none() {
             let cfg = crate::network::load_network_runtime_config();
             if cfg.use_mock {
-                if let Ok(net) = crate::network::NetworkBuilder::new(cfg.server_addr).with_mock(true).build() {
+                if let Ok(net) = crate::network::NetworkBuilder::new(cfg.server_addr)
+                    .with_mock(true)
+                    .build()
+                {
                     self.ecs_ctx.set_net(net);
                     // Mock 场景下默认使用本地移动（避免双驱动抖动）。
                     self.ecs_ctx.session.server_authoritative_movement = false;
@@ -382,11 +402,10 @@ impl Scene for GameScene {
             }
         }
 
-        // 注意: 纹理需要异步加载，这里无法调用 async 函数
-        // 应该在进入场景前或通过 Loading 场景预加载
+        // 资源/纹理加载由外部在进入场景前调用 `load_textures()` 完成。
         Ok(())
     }
-    
+
     fn on_exit(&mut self) -> GameResult {
         println!("🎬 离开游戏场景");
 
@@ -397,14 +416,13 @@ impl Scene for GameScene {
 
         Ok(())
     }
-    
+
     fn update(&mut self, _dt: f32) -> GameResult<SceneTransition> {
         // ECS 整合：
         // - update 阶段驱动 ECS 世界
-        // - Space 按下时：地图相机为手动（由现有 map_input 控制）
-        // - Space 松开时：地图相机会跟随 ECS Camera（CameraFollowSystem）
+        // - Space 按下/松开：由 ECS 的 CameraSpaceGateSystem/CameraFollowSystem 控制相机模式
         // - 点击 UI 时：屏蔽 ECS 输入，避免 UI 操作导致角色乱走
-        if self.initialized {
+        if self.is_resources_initialized() {
             self.ensure_ecs_bootstrap();
 
             self.ecs_ctx.delta_time = _dt;
@@ -412,14 +430,14 @@ impl Scene for GameScene {
         }
 
         // 快捷键交由 UIRenderSystem 统一处理（避免 GameScene 直连 UI 组件）
-        
+
         // ESC 且没有打开的对话框 = 返回角色选择
         if is_key_pressed(KeyCode::Escape) {
-            if !self.any_modal_or_popup_open() {
+            if self.can_escape_exit() {
                 return Ok(SceneTransition::CharacterSelect);
             }
         }
-        
+
         Ok(SceneTransition::None)
     }
 
@@ -430,36 +448,24 @@ impl Scene for GameScene {
         // 世界渲染：
         // - Normal: Map(back+middle) + sprites/effects
         // - PostFront: Map(front) + ghost(local player) + overlays
-        self.update_map_camera();
-        set_camera(&self.map_camera);
-        self.draw_ecs_sprites(1.0, false, RenderStage::Normal)?;
-        self.draw_ecs_path_overlay();
-        self.draw_ecs_sprites(1.0, false, RenderStage::PostFront)?;
-        set_default_camera();
-        
-        // 提示文字
-        if !self.initialized {
-            draw_text_cn(
-                "⏳ 正在加载游戏资源...",
-                screen_width() / 2.0 - 100.0,
-                screen_height() / 2.0,
-                24.0, WHITE
-            );
+
+        if self.is_resources_initialized() {
+            self.update_map_camera();
+            set_camera(&self.map_camera);
+            self.draw_ecs_pass(1.0, false, RenderStage::Normal)?;
+            self.draw_ecs_pass(1.0, false, RenderStage::PostFront)?;
+            set_default_camera();
         } else {
-            // UI 渲染：交由 ECS 渲染层 UIRenderSystem
-            self.draw_ecs_sprites(1.0, false, RenderStage::Ui)?;
-            
-            // 绘制帮助提示
-            self.draw_help_text();
+            set_default_camera();
         }
 
-        // Debug overlay（放在最后，覆盖在 UI 之上）
-        self.draw_debug_fps();
-        
+        // UI/覆盖层渲染：交由 ECS 渲染层（UIRenderSystem/DebugSystem）
+        self.draw_ecs_pass(1.0, false, RenderStage::Ui)?;
+
         Ok(())
     }
-    
-    fn handle_input(&mut self) -> GameResult { 
-        Ok(()) 
+
+    fn handle_input(&mut self) -> GameResult {
+        Ok(())
     }
 }

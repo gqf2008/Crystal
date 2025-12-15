@@ -1,15 +1,16 @@
 use macroquad::prelude::{
     is_key_pressed, is_mouse_button_down, is_mouse_button_pressed, mouse_position, mouse_wheel,
-    vec2, KeyCode, MouseButton,
+    screen_height, screen_width, vec2, Color, KeyCode, MouseButton, WHITE,
 };
 
-use crate::components::{RenderPass, RenderStage, UiWorldInputBlock};
+use crate::components::{RenderPass, RenderStage, ResourceInitState, SceneExitBlock, UiWorldInputBlock};
 use crate::game::{GameContext, GameResult};
 use crate::scenes::dialogs::game::{
     amount_box::AmountBoxHybrid, npc_dialog::NpcDialogHybrid,
     npc_goods_dialog::NpcGoodsDialogHybrid, MainDialog,
 };
 use crate::systems::RenderSystem;
+use crate::ui::text_renderer::draw_text_cn;
 use crate::ui::ui_state::{UiAction, UiCommand, UiState};
 
 #[derive(ecs_macros::RenderSystem)]
@@ -247,6 +248,18 @@ impl RenderSystem for UIRenderSystem {
                 || self.amount_box.is_visible();
         }
 
+        // Scene 退出 gating：避免 Scene 直接读取 UiState 内部结构。
+        if let Some((pass_entity, _)) = ctx.world.query::<&UiState>().iter().next() {
+            let any_modal_or_popup_open = ctx
+                .world
+                .get::<&UiState>(pass_entity)
+                .map(|s| s.borrow().any_modal_or_popup_open)
+                .unwrap_or(false);
+            if let Ok(mut b) = ctx.world.get::<&mut SceneExitBlock>(pass_entity) {
+                b.block_escape_exit = any_modal_or_popup_open;
+            }
+        }
+
         Ok(())
     }
 
@@ -259,6 +272,25 @@ impl RenderSystem for UIRenderSystem {
             .unwrap_or_default();
 
         if pass.stage != RenderStage::Ui {
+            return Ok(());
+        }
+
+        let initialized = _world
+            .query::<&ResourceInitState>()
+            .iter()
+            .next()
+            .map(|(_, s)| s.initialized)
+            .unwrap_or(false);
+
+        // 资源未初始化时，仅显示加载提示，避免 UI 组件访问未就绪资源。
+        if !initialized {
+            draw_text_cn(
+                "⏳ 正在加载游戏资源...",
+                screen_width() / 2.0 - 100.0,
+                screen_height() / 2.0,
+                24.0,
+                WHITE,
+            );
             return Ok(());
         }
 
@@ -336,6 +368,16 @@ impl RenderSystem for UIRenderSystem {
                 || amount_consumed
                 || npc_dialog_consumed;
         }
+
+        // 快捷键提示（覆盖在 UI 之上）
+        let y = screen_height() - 25.0;
+        draw_text_cn(
+            "快捷键: Space+拖拽/滚轮=地图 | Enter=聊天 M=小地图 Tab=小地图大小 | ESC=返回角色选择",
+            10.0,
+            y,
+            14.0,
+            Color::from_rgba(200, 200, 200, 180),
+        );
         Ok(())
     }
 }

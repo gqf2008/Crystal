@@ -129,6 +129,36 @@ pub struct TimeTracker {
     pub last_frame_time: std::time::Instant,
 }
 
+/// 资源初始化状态（单例）
+///
+/// 用于在渲染系统中决定是否显示“加载中”等覆盖层，避免在 Scene 内直接绘制。
+#[derive(Debug, Clone, Copy)]
+pub struct ResourceInitState {
+    pub initialized: bool,
+}
+
+impl Default for ResourceInitState {
+    fn default() -> Self {
+        Self { initialized: false }
+    }
+}
+
+/// 场景退出阻塞（单例）
+///
+/// 由 UI 系统写入，Scene 只读取结果，避免 Scene 直接查询 UiState 细节。
+#[derive(Debug, Clone, Copy)]
+pub struct SceneExitBlock {
+    pub block_escape_exit: bool,
+}
+
+impl Default for SceneExitBlock {
+    fn default() -> Self {
+        Self {
+            block_escape_exit: false,
+        }
+    }
+}
+
 impl Default for TimeTracker {
     fn default() -> Self {
         Self {

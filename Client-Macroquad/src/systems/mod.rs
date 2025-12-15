@@ -344,6 +344,29 @@ pub trait RenderSystem {
     fn draw(&mut self, _world: &hecs::World) -> crate::game::GameResult;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderStageMask(u8);
+
+impl RenderStageMask {
+    pub const NONE: Self = Self(0);
+    pub const NORMAL: Self = Self(1 << 0);
+    pub const POST_FRONT: Self = Self(1 << 1);
+    pub const UI: Self = Self(1 << 2);
+    pub const ALL: Self = Self(Self::NORMAL.0 | Self::POST_FRONT.0 | Self::UI.0);
+
+    pub fn contains(self, stage: crate::components::RenderStage) -> bool {
+        match stage {
+            crate::components::RenderStage::Normal => (self.0 & Self::NORMAL.0) != 0,
+            crate::components::RenderStage::PostFront => (self.0 & Self::POST_FRONT.0) != 0,
+            crate::components::RenderStage::Ui => (self.0 & Self::UI.0) != 0,
+        }
+    }
+
+    pub fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
 pub enum SystemKind {
     Update(Box<dyn LogicSystem>),
     Render(Box<dyn RenderSystem>),
@@ -419,6 +442,7 @@ enum SystemEntry {
         system: Box<dyn RenderSystem>,
         priority: u32,
         order: u64,
+        draw_mask: RenderStageMask,
     },
 }
 
@@ -490,11 +514,39 @@ impl SystemScheduler {
                     system: sys,
                     priority,
                     order,
+                    draw_mask: RenderStageMask::ALL,
                 });
             }
         }
 
         // 按优先级排序（数字越小越优先）；相同优先级保持插入顺序稳定
+        self.systems
+            .sort_by_key(|entry| (entry.priority(), entry.order()));
+        self
+    }
+
+    /// 添加渲染系统（可指定仅在某些 RenderStage 下执行 draw）
+    ///
+    /// 注意：stage 过滤只影响 draw，不影响 update。
+    pub fn add_render_system_staged<S>(
+        &mut self,
+        system: S,
+        priority: u32,
+        draw_mask: RenderStageMask,
+    ) -> &mut Self
+    where
+        S: RenderSystem + 'static,
+    {
+        let order = self.next_order;
+        self.next_order = self.next_order.wrapping_add(1);
+
+        self.systems.push(SystemEntry::Hybrid {
+            system: Box::new(system),
+            priority,
+            order,
+            draw_mask,
+        });
+
         self.systems
             .sort_by_key(|entry| (entry.priority(), entry.order()));
         self
@@ -527,6 +579,14 @@ impl SystemScheduler {
         world: &hecs::World,
     ) -> crate::game::GameResult {
         tracing::trace!("🎨 Starting draw phase");
+
+        let stage = world
+            .query::<&crate::components::RenderPass>()
+            .iter()
+            .next()
+            .map(|(_, p)| p.stage)
+            .unwrap_or(crate::components::RenderStage::Normal);
+
         for entry in &mut self.systems {
             if !entry.is_enabled() {
                 continue;
@@ -538,7 +598,14 @@ impl SystemScheduler {
                 //     system.draw(world)?;
                 //     tracing::trace!("✅ System draw completed: {}", system.name());
                 // }
-                SystemEntry::Hybrid { system, .. } => {
+                SystemEntry::Hybrid {
+                    system,
+                    draw_mask,
+                    ..
+                } => {
+                    if !draw_mask.contains(stage) {
+                        continue;
+                    }
                     tracing::trace!("🎨 Drawing hybrid system: {}", system.name());
                     system.draw(world)?;
                     tracing::trace!("✅ Hybrid system draw completed: {}", system.name());

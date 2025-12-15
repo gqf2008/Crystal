@@ -135,6 +135,8 @@ pub struct MainDialog {
     /// UI 产生的“自动寻路目标”（世界坐标像素）；由 GameScene 在 update 阶段消费
     pending_auto_path_target: Option<(f32, f32, bool)>,
 
+    /// 小地图左键双击检测
+    minimap_left_last_click_time: Option<Instant>,
     /// 小地图右键双击检测
     minimap_right_last_click_time: Option<Instant>,
     minimap_double_click_threshold: Duration,
@@ -231,6 +233,7 @@ impl MainDialog {
             last_main_dialog_x: main_dialog_x,
 
             pending_auto_path_target: None,
+            minimap_left_last_click_time: None,
             minimap_right_last_click_time: None,
             minimap_double_click_threshold: Duration::from_millis(260),
         }
@@ -464,10 +467,20 @@ impl MainDialog {
             // 小地图点击：在地图区域内则触发自动寻路（由 GameScene 消费）
             if dialog_type == DialogType::MiniMap {
                 if left_clicked {
+                    // 左键：双击触发“奔跑寻路”，单击只记录时间
                     if let Some((wx, wy)) = self.minimap_dialog.pick_world_target_from_mouse(mouse_pos) {
-                        // 左键：走路寻路
-                        self.pending_auto_path_target = Some((wx, wy, false));
-                        consumed = true;
+                        let now = Instant::now();
+                        let is_double = self
+                            .minimap_left_last_click_time
+                            .is_some_and(|t| now.duration_since(t) <= self.minimap_double_click_threshold);
+
+                        if is_double {
+                            self.pending_auto_path_target = Some((wx, wy, true));
+                            self.minimap_left_last_click_time = None;
+                            consumed = true;
+                        } else {
+                            self.minimap_left_last_click_time = Some(now);
+                        }
                     }
                 }
 

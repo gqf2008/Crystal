@@ -1,7 +1,7 @@
-use crate::components::RenderConfig;
+use crate::components::{LocalPlayer, Path, Position, RenderConfig, RenderPass, RenderStage};
 use crate::systems::logic::physics::MapUpdateSystem;
 use crate::systems::RenderSystem;
-use macroquad::prelude::KeyCode;  // ✅ 直接使用 macroquad
+use macroquad::prelude::*;
 
 /// DebugSystemV2 - 使用 GameContext 的调试系统
 ///
@@ -222,15 +222,83 @@ impl DebugSystem {
 impl RenderSystem for DebugSystem {
     fn draw(
         &mut self,
-        _world: &hecs::World,
+        world: &hecs::World,
     ) -> crate::game::GameResult {
-        // TODO: 重写为 macroquad API
-        // 原实现包括:
-        // 1. FPS 显示
-        // 2. 相机信息显示
-        // 3. 调试网格绘制
-        // 4. 障碍物显示
-        // 5. 路径可视化
+        let stage = world
+            .query::<&RenderPass>()
+            .iter()
+            .next()
+            .map(|(_, p)| p.stage)
+            .unwrap_or(RenderStage::Normal);
+
+        match stage {
+            // 世界空间叠加层：依赖 GameScene 已经 set_camera(map_camera)
+            RenderStage::PostFront => {
+                self.draw_path_overlay(world);
+            }
+            // 屏幕空间叠加层：依赖 GameScene 已经 set_default_camera()
+            RenderStage::Ui => {
+                self.draw_debug_fps(world);
+            }
+            _ => {}
+        }
+
         Ok(())
+    }
+}
+
+impl DebugSystem {
+    fn draw_debug_fps(&self, _world: &hecs::World) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+
+        let fps = get_fps();
+        draw_text(
+            &format!("FPS: {}", fps),
+            12.0,
+            22.0,
+            20.0,
+            Color::from_rgba(0, 255, 0, 220),
+        );
+    }
+
+    fn draw_path_overlay(&self, world: &hecs::World) {
+        // 保持与原先 GameScene 的表现一致：存在有效 Path 就绘制。
+        // 由 DebugSystem 的按键切换（P）控制。
+        let show_path = world
+            .query::<&RenderConfig>()
+            .iter()
+            .next()
+            .map(|(_, c)| c.show_path)
+            .unwrap_or(false);
+
+        if !show_path {
+            return;
+        }
+
+        let mut q = world.query::<(&LocalPlayer, &Position, &Path)>();
+        let Some((_e, (_lp, pos, path))) = q.iter().next() else {
+            return;
+        };
+
+        if !path.is_valid || path.waypoints.is_empty() {
+            return;
+        }
+
+        let mut last = (pos.x, pos.y);
+        for (gx, gy) in path.waypoints.iter().copied() {
+            let wx = gx as f32 * 48.0;
+            let wy = gy as f32 * 32.0;
+            draw_line(
+                last.0,
+                last.1,
+                wx,
+                wy,
+                2.0,
+                Color::from_rgba(255, 255, 0, 180),
+            );
+            last = (wx, wy);
+        }
     }
 }
