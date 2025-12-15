@@ -40,7 +40,7 @@ async fn main() {
     init_chinese_font().await;
 
     let mut scene = GameScene::new();
-    scene.load_textures().await;
+    scene.load_textures();
     scene.on_enter().ok();
 
     loop {

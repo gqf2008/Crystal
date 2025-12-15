@@ -250,7 +250,7 @@ impl CharacterDialogHybrid {
         }
     }
     
-    pub async fn load_textures(&mut self) {
+    pub fn load_textures(&mut self) {
         println!("👤 CharacterDialogHybrid: 加载纹理...");
         
         // 主背景 Title[504]

@@ -57,6 +57,8 @@ pub mod priority {
     pub const NETWORK: u32 = 110; // 网络系统
     /// NetworkSystem 拉取事件后，立刻落地到 ECS 状态（本地玩家/切图定位等）
     pub const NETWORK_APPLY: u32 = 115;
+    /// 无网络事件时的地图启动兜底（创建默认 MapManager/MapData）
+    pub const MAP_BOOTSTRAP: u32 = 117;
     /// 消费 MapInformation/MapChanged 并加载/更新 MapData
     pub const MAP_LOAD: u32 = 118;
     pub const PLAYER_CONTROL: u32 = 120;
@@ -97,7 +99,11 @@ pub mod priority {
     pub const SOUND: u32 = 630;
     pub const VOICE_CHAT: u32 = 640;
     pub const CAMERA_FOLLOW: u32 = 700;
+    /// Space 按住时启用拖拽/缩放并切到 Manual
+    pub const CAMERA_SPACE_GATE: u32 = 695;
     pub const CAMERA: u32 = 710;
+    /// 相机边界限制（防止拖出地图）
+    pub const CAMERA_BOUNDS: u32 = 720;
     pub const UI: u32 = 800;
     pub const HUD: u32 = 810;
     pub const MINIMAP: u32 = 820;
@@ -124,6 +130,7 @@ pub mod priority {
     pub const LOGGING: u32 = 9300;
     // ↓
     // 帧结束
+    pub const FRAME_END: u32 = 20000;
 }
 
 pub mod dbug;
@@ -142,12 +149,17 @@ pub use ecs_macros::{LogicSystem, RenderSystem};
 pub use input::PlayerControlSystem;
 pub use infra::NetworkSystem;
 pub use infra::NetworkApplySystem;
+pub use infra::{FrameEndSystem, TimeTickSystem};
+pub use infra::MapBootstrapSystem;
 pub use logic::combat::{
     CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem,
 };
 pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
 pub use logic::physics::{CollisionSystem, MapLoadSystem, MapManager, MovementSystem, PathfindingSystem};
-pub use presentation::{AnimationSystem, CameraFollowSystem, CameraSystem, FloatingTextSystem, MountStateSyncSystem, ParticleSystem};
+pub use presentation::{
+    AnimationSystem, CameraBoundsSystem, CameraFollowSystem, CameraSpaceGateSystem, CameraSystem,
+    FloatingTextSystem, MountStateSyncSystem, ParticleSystem,
+};
 
 // ============================================================================
 // 系统 Trait 设计

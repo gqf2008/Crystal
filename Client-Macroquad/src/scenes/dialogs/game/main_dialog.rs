@@ -299,7 +299,7 @@ impl MainDialog {
     }
 
     /// 异步加载纹理
-    pub async fn load_native_textures(&mut self) {
+    pub fn load_native_textures(&mut self) {
         // 加载主背景纹理
         if let Some(texture) = LibraryName::Prguse.get_texture(self.resolution_index) {
             self.bg_size = vec2(texture.width as f32, texture.height as f32);
@@ -309,18 +309,17 @@ impl MainDialog {
         }
 
         // 加载所有子对话框纹理
-        self.belt_dialog.load_textures().await;
-        self.chat_dialog.load_textures().await;
-        self.chat_control_bar.load_textures().await;
-        self.chat_option_dialog.load_textures().await;
-        self.inventory_dialog.load_textures().await;
-        self.character_dialog.load_textures().await;
-        self.quest_log_dialog.load_textures().await;
-        self.option_dialog.load_textures().await;
-        self.game_shop_dialog.load_textures().await;
-        self.menu_dialog.load_textures().await;
-        self.minimap_dialog.load_textures().await;
-
+        self.belt_dialog.load_textures();
+        self.chat_dialog.load_textures();
+        self.chat_control_bar.load_textures();
+        self.chat_option_dialog.load_textures();
+        self.inventory_dialog.load_textures();
+        self.character_dialog.load_textures();
+        self.quest_log_dialog.load_textures();
+        self.option_dialog.load_textures();
+        self.game_shop_dialog.load_textures();
+        self.menu_dialog.load_textures();
+        self.minimap_dialog.load_textures();
         // 设置快捷栏初始位置
         let screen_h = screen_height() / screen_dpi_scale();
         let screen_w = screen_width() / screen_dpi_scale();

@@ -217,7 +217,7 @@ impl MiniMapDialogHybrid {
     }
 
     /// 异步加载纹理
-    pub async fn load_textures(&mut self) {
+    pub fn load_textures(&mut self) {
         // 预加载小地图纹理
         for idx in [2090, 2091, 2102, 2103, 2104] {
             let _ = LibraryName::Prguse.get_texture(idx);

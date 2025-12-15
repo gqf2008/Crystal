@@ -147,7 +147,7 @@ impl BeltDialogHybrid {
     }
     
     /// 异步加载纹理
-    pub async fn load_textures(&mut self) {
+    pub  fn load_textures(&mut self) {
         println!("🎒 BeltDialogHybrid: 加载纹理...");
         
         // 水平背景（主 + 覆盖层）

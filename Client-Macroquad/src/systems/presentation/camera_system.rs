@@ -124,7 +124,7 @@ impl LogicSystem for CameraSystem {
 
         // ⌨️ 使用 InputContext API 访问键盘和其他事件
         let ctrl_pressed = ctx.input().ctrl_pressed();
-        let space_pressed = ctx.input().key_pressed(KeyCode::Space);
+        let space_down = ctx.input().key_down(KeyCode::Space);
 
         let scroll_y = {
             let (_, y) = ctx.input().mouse_wheel();
@@ -176,9 +176,15 @@ impl LogicSystem for CameraSystem {
 
             // macroquad 通过 drawable_size() 轮询窗口尺寸；无需额外 resize 事件。
 
-            // 处理鼠标拖拽 - 只有中键或Ctrl+左键才触发地图拖拽
+            // 处理鼠标拖拽
+            // - GameScene: Space + 左键拖拽
+            // - MapViewer/调试: Ctrl + 左键 或 中键拖拽
             if camera_drag_enabled {
-                let should_drag = (mouse_left && ctrl_pressed) || mouse_middle;
+                let should_drag = if space_down {
+                    mouse_left
+                } else {
+                    (mouse_left && ctrl_pressed) || mouse_middle
+                };
 
                 if should_drag && !draggable.is_dragging {
                     // 开始拖拽
@@ -207,15 +213,11 @@ impl LogicSystem for CameraSystem {
             // TODO: 处理角色移动 - 左键/右键单独点击时让角色移动
             // 这部分逻辑应该在角色移动系统中实现,这里只负责相机控制
 
-            // 🔍 处理滚轮缩放
-            if let Some(scroll) = scroll_y {
-                Self::handle_zoom(camera, pos, mode, Some(scroll), mouse_pos.x, mouse_pos.y);
-            }
-
-            // 🔄 按空格键切换回跟随模式
-            if space_pressed && **mode == CameraMode::Manual {
-                **mode = CameraMode::FollowPlayer;
-                tracing::info!("📷 相机切换到跟随模式");
+            // 🔍 处理滚轮缩放（约定：仅在允许地图交互时生效）
+            if camera_drag_enabled {
+                if let Some(scroll) = scroll_y {
+                    Self::handle_zoom(camera, pos, mode, Some(scroll), mouse_pos.x, mouse_pos.y);
+                }
             }
         }
 

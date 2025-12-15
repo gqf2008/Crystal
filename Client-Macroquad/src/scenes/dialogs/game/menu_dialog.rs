@@ -149,7 +149,7 @@ impl MenuDialogHybrid {
     }
 
     /// 异步加载纹理
-    pub async fn load_textures(&mut self) {
+    pub fn load_textures(&mut self) {
         // 加载背景纹理 Title[567]
         if let Some(texture) = LibraryName::Title.get_texture(567) {
             self.size = vec2(texture.width as f32, texture.height as f32);

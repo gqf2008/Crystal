@@ -303,7 +303,7 @@ impl ChatDialogHybrid {
     }
 
     /// 异步加载纹理
-    pub async fn load_textures(&mut self) {
+    pub  fn load_textures(&mut self) {
         // 预加载聊天窗口纹理
         for idx in [2201, 2204, 2207, 2221, 2224, 2227] {
             let _ = LibraryName::Prguse.get_texture(idx);

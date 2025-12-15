@@ -29,7 +29,7 @@ async fn main() {
     let mut main_dialog = MainDialog::new();
     
     // 加载原生UI纹理
-    main_dialog.load_native_textures().await;
+    main_dialog.load_native_textures();
     
     println!("✅ MainDialog 及所有子对话框已创建（纯 Hybrid 模式）");
     println!("💡 提示:");

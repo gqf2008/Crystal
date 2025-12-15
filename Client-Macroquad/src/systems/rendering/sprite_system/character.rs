@@ -24,7 +24,7 @@
 // ============================================================================
 
 use super::SpriteRenderSystem;
-use crate::components::{AnimationFrame, Camera, LibrarySprite, LocalPlayer, MountState, Player, PlayerAppearance, Position, RenderPass, SpriteBlendMode, TimeTracker};
+use crate::components::{AnimationFrame, Camera, LibrarySprite, LocalPlayer, MountState, Player, PlayerAppearance, Position, SpriteBlendMode, TimeTracker};
 use crate::game::GameResult;
 use crate::objects::frames::get_player_frame;
 use crate::resources::LibraryName;
@@ -336,6 +336,8 @@ impl SpriteRenderSystem {
         &self,
         world: &hecs::World,
         add_blend_material: &Material,
+        alpha: f32,
+        local_only: bool,
     ) -> GameResult {
         // 相机（用于裁剪；真正的坐标变换由 GameScene 的 macroquad Camera2D 完成）
         let (cam_x, cam_y, cam_zoom, sw, sh) = world
@@ -360,13 +362,6 @@ impl SpriteRenderSystem {
             .next()
             .map(|(_, tt)| tt.animation_count)
             .unwrap_or(0);
-
-        let (alpha, local_only) = world
-            .query::<&RenderPass>()
-            .iter()
-            .next()
-            .map(|(_, pass)| (pass.alpha, pass.local_only))
-            .unwrap_or((1.0, false));
 
         // 收集并排序可渲染对象（玩家/怪物/NPC）
         #[derive(Clone)]

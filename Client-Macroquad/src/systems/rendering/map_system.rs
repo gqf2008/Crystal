@@ -2,62 +2,72 @@
 // 地图渲染系统 - 混合系统(Hybrid System)
 // ============================================================================
 //
-// 状态说明：
-// - 当前主线 GameScene 的地图渲染使用 `map_renderer/`（MeshMapRenderer 等），本系统暂未接入主循环。
-// - 保留此文件用于后续把地图渲染迁移到 ECS 渲染管线（SystemScheduler.draw）。
-// 职责：
-// 1. update(): 更新地图瓦片动画帧(水波、岩浆、火焰等)
-// 2. draw(): 渲染地图三层(Back/Middle/Front)
+// 目标：把 scenes/ 内的地图渲染（MeshMapRenderer + MapReader）迁移到 ECS 渲染管线。
 //
-// 功能：
-// - 瓦片动画管理(AnimatedTile)
-// - 三层渲染架构(Back/Middle/Front)
-// - 视口裁剪优化
-// - 混合模式支持(Normal/ADD)
+// 职责：
+// - update():
+//   - 跟随 MapManager.current_map_file 切换 MapReader
+//   - 驱动 MeshMapRenderer 动画
+//   - 写入 UiState.minimap_world_size
+//   - 计算 FrontOcclusion.local_player_occluded（用于 PostFront ghost）
+// - draw():
+//   - RenderStage::Normal 画 Back + Middle
+//   - RenderStage::PostFront 画 Front
 // ============================================================================
 
-use crate::components::{AnimatedTile, MapTile, RenderConfig};
-use crate::systems::RenderSystem;
-use crate::game::{GameContext, GameResult};
+use macroquad::prelude::*;
 
-/// 地图渲染系统 - 混合系统
-///
-/// update(): 更新动画瓦片的帧索引
-/// draw(): 渲染地图到屏幕
+use crate::components::{Camera, FrontOcclusion, LocalPlayer, Position, RenderConfig, RenderPass, RenderStage};
+use crate::game::{GameContext, GameResult};
+use crate::map_renderer::MeshMapRenderer;
+use crate::resources::MapReader;
+use crate::systems::{MapManager, RenderSystem};
+use crate::ui::ui_state::UiState;
+
 #[derive(ecs_macros::RenderSystem)]
 pub struct MapRenderSystem {
-    /// 全局动画计数器(模拟 C# AnimationCount)
-    animation_counter: u32,
-    /// 累积时间(秒)
-    accumulated_time: f32,
-    /// 每次递增计数器需要的时间(秒)
-    counter_interval: f32,
+    renderer: MeshMapRenderer,
+    map_reader: Option<MapReader>,
+    loaded_map_file: Option<String>,
 }
 
 impl MapRenderSystem {
     pub fn new() -> Self {
         Self {
-            animation_counter: 0,
-            accumulated_time: 0.0,
-            counter_interval: 1.0 / 60.0, // 60 FPS 基准
+            renderer: MeshMapRenderer::new(48.0, 32.0),
+            map_reader: None,
+            loaded_map_file: None,
         }
     }
 
-    /// 计算动画帧偏移
-    ///
-    /// C# 逻辑:
-    /// ```csharp
-    /// index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
-    /// ```
-    fn calculate_frame_offset(&self, frame_count: u8, frame_interval: u8) -> i32 {
-        if frame_count == 0 {
-            return 0;
+    fn desired_map_file(ctx: &GameContext) -> Option<String> {
+        let mut q = ctx.world.query::<&MapManager>();
+        q.iter().next().map(|(_, mgr)| mgr.current_map_file.clone())
+    }
+
+    fn render_config(ctx: &GameContext) -> RenderConfig {
+        let mut q = ctx.world.query::<&RenderConfig>();
+        q.iter().next().map(|(_, cfg)| cfg.clone()).unwrap_or_default()
+    }
+
+    fn update_minimap_world_size(ctx: &mut GameContext, width: i32, height: i32) {
+        let mut q = ctx.world.query::<&UiState>();
+        let Some((_e, ui)) = q.iter().next() else {
+            return;
+        };
+        let mut ui = ui.borrow_mut();
+        ui.minimap_world_size = Some(Vec2::new(width as f32, height as f32));
+    }
+
+    fn update_front_occlusion(ctx: &mut GameContext, occluded: bool) {
+        // 约定：FrontOcclusion 挂在 RenderPass 单例实体上。
+        if let Some((_e, o)) = ctx.world.query_mut::<&mut FrontOcclusion>().into_iter().next() {
+            o.local_player_occluded = occluded;
+            return;
         }
 
-        let total_ticks = frame_count as u32 + frame_count as u32 * frame_interval as u32;
-        let divisor = 1 + frame_interval as u32;
-
-        ((self.animation_counter % total_ticks) / divisor) as i32
+        // 兜底：若未挂载，动态创建一个（避免初始化顺序导致不可用）。
+        ctx.world.spawn((FrontOcclusion { local_player_occluded: occluded },));
     }
 }
 
@@ -72,55 +82,151 @@ impl Default for MapRenderSystem {
 // ============================================================================
 impl RenderSystem for MapRenderSystem {
     fn update(&mut self, ctx: &mut GameContext, delta_time: f32) -> GameResult {
-        // 检查是否启用动画
-        let animations_enabled = {
-            let mut config_query = ctx.world.query::<&RenderConfig>();
-            config_query
-                .iter()
-                .next()
-                .map(|(_, cfg)| cfg.show_animations)
-                .unwrap_or(true) // 默认启用
+        let cfg = Self::render_config(ctx);
+
+        // 1) 跟随 MapManager 切换地图
+        if let Some(file) = Self::desired_map_file(ctx) {
+            if !file.is_empty() && self.loaded_map_file.as_deref() != Some(file.as_str()) {
+                let map_path = crate::resources::map_reader::resolve_map_path(&file);
+                match MapReader::new(&map_path) {
+                    Ok(reader) => {
+                        tracing::info!("🗺️ MapRenderSystem: loaded map {} ({}x{})", map_path, reader.width, reader.height);
+                        Self::update_minimap_world_size(ctx, reader.width, reader.height);
+                        self.map_reader = Some(reader);
+                        self.loaded_map_file = Some(file);
+                    }
+                    Err(e) => {
+                        tracing::warn!("⚠️ MapRenderSystem: failed to load map {}: {}", map_path, e);
+                        self.map_reader = None;
+                        self.loaded_map_file = None;
+                    }
+                }
+            }
+        }
+
+        // 2) 动画
+        if cfg.show_animations {
+            self.renderer.update(delta_time);
+        }
+
+        // 3) 前景遮挡检测（用于本地玩家 ghost）
+        let occluded = if cfg.show_front {
+            match self.map_reader.as_ref() {
+                Some(map) => {
+                    // 本地玩家脚下位置（复制出数值，避免 query borrow 生命周期问题）
+                    let (px, py) = {
+                        let mut q = ctx.world.query::<(&LocalPlayer, &Position)>();
+                        match q.iter().next() {
+                            Some((_e, (_local, p))) => (p.x, p.y),
+                            None => (f32::NAN, f32::NAN),
+                        }
+                    };
+
+                    if !px.is_finite() || !py.is_finite() {
+                        false
+                    } else {
+                        const FRONT_OCCLUSION_SEARCH_RADIUS_X_TILES: i32 = 3;
+                        const FRONT_OCCLUSION_SEARCH_RADIUS_Y_TILES: i32 = 10;
+                        const PLAYER_OCCLUSION_PROBE_WIDTH_PX: f32 = 26.0;
+                        const PLAYER_OCCLUSION_PROBE_HEIGHT_PX: f32 = 56.0;
+
+                        let foot = vec2(px, py);
+                        let probe = Rect::new(
+                            foot.x - PLAYER_OCCLUSION_PROBE_WIDTH_PX * 0.5,
+                            foot.y - PLAYER_OCCLUSION_PROBE_HEIGHT_PX,
+                            PLAYER_OCCLUSION_PROBE_WIDTH_PX,
+                            PLAYER_OCCLUSION_PROBE_HEIGHT_PX,
+                        );
+                        self.renderer.front_layer_occludes_probe(
+                            map,
+                            probe,
+                            FRONT_OCCLUSION_SEARCH_RADIUS_X_TILES,
+                            FRONT_OCCLUSION_SEARCH_RADIUS_Y_TILES,
+                        )
+                    }
+                }
+                None => false,
+            }
+        } else {
+            false
         };
-
-        // 如果动画被禁用,直接返回
-        if !animations_enabled {
-            return Ok(());
-        }
-
-        // 累积时间
-        self.accumulated_time += delta_time;
-
-        // 每个计数器间隔递增计数器
-        while self.accumulated_time >= self.counter_interval {
-            self.animation_counter = self.animation_counter.wrapping_add(1);
-            self.accumulated_time -= self.counter_interval;
-        }
-
-        // 更新所有动画瓦片的 image_index
-        for (_, (tile, anim)) in ctx.world.query_mut::<(&mut MapTile, &AnimatedTile)>() {
-            let frame_offset = self.calculate_frame_offset(anim.frame_count, anim.frame_interval);
-            tile.image_index = anim.base_image_index + frame_offset;
-        }
+        Self::update_front_occlusion(ctx, occluded);
 
         Ok(())
     }
-    /// 主渲染方法
-    ///
-    /// 参数：
-    /// - ctx: ggez上下文，用于创建纹理
-    /// - canvas: 画布，用于绘制图形
-    ///
-    /// 返回：渲染结果
-    fn draw(
-        &mut self,
-        _world: &hecs::World,
-    ) -> crate::game::GameResult {
-        // TODO: 重写为 macroquad API
-        // 原实现有 470+ 行，需要重写:
-        // 1. 获取相机和渲染配置
-        // 2. 计算可见区域
-        // 3. 渲染地图瓦片 (back/middle/front 三层)
-        // 4. 处理动画瓦片
+
+    fn draw(&mut self, world: &hecs::World) -> GameResult {
+        let pass = world
+            .query::<&RenderPass>()
+            .iter()
+            .next()
+            .map(|(_, p)| *p)
+            .unwrap_or_default();
+
+        if pass.stage == RenderStage::Ui {
+            return Ok(());
+        }
+
+        let cfg = world
+            .query::<&RenderConfig>()
+            .iter()
+            .next()
+            .map(|(_, c)| c.clone())
+            .unwrap_or_default();
+
+        let Some(map) = self.map_reader.as_ref() else {
+            return Ok(());
+        };
+
+        // camera 参数：用于 MeshMapRenderer 计算视口范围；真实坐标变换仍由 GameScene 的 Camera2D 完成。
+        let (cam_x, cam_y, cam_zoom, sw, sh) = world
+            .query::<(&Camera, &Position)>()
+            .iter()
+            .next()
+            .map(|(_, (c, p))| (p.x, p.y, c.zoom, c.screen_width, c.screen_height))
+            .unwrap_or((0.0, 0.0, 1.0, screen_width(), screen_height()));
+
+        let zoom = cam_zoom.max(0.0001);
+
+        // 与 GameScene 的像素对齐策略保持一致
+        let snapped_x = (cam_x * zoom).round() / zoom;
+        let snapped_y = (cam_y * zoom).round() / zoom;
+
+        self.renderer.show_back_layer = cfg.show_back;
+        self.renderer.show_middle_layer = cfg.show_middle;
+        self.renderer.show_front_layer = cfg.show_front;
+
+        match pass.stage {
+            RenderStage::Normal => {
+                // 只画 Back+Middle
+                let original_front = self.renderer.show_front_layer;
+                self.renderer.show_front_layer = false;
+                let _ = self
+                    .renderer
+                    .render(map, snapped_x, snapped_y, sw, sh, zoom, WHITE);
+                self.renderer.show_front_layer = original_front;
+            }
+            RenderStage::PostFront => {
+                // 只画 Front
+                if cfg.show_front {
+                    let _ = self.renderer.render_front_layer_with_focus(
+                        map,
+                        snapped_x,
+                        snapped_y,
+                        sw,
+                        sh,
+                        zoom,
+                        WHITE,
+                        None,
+                        0,
+                        0,
+                        1.0,
+                    );
+                }
+            }
+            RenderStage::Ui => {}
+        }
+
         Ok(())
     }
 }

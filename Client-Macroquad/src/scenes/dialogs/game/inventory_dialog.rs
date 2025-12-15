@@ -180,7 +180,7 @@ impl InventoryDialogHybrid {
         }
     }
     
-    pub async fn load_textures(&mut self) {
+    pub  fn load_textures(&mut self) {
         println!("📦 InventoryDialogHybrid: 加载纹理...");
         
         // 背景

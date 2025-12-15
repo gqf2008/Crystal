@@ -44,7 +44,7 @@ async fn main() {
     
     // 创建背包
     let mut inventory = InventoryDialogHybrid::new();
-    inventory.load_textures().await;
+    inventory.load_textures();
     inventory.set_position(vec2(100.0, 100.0));
     inventory.open();
     

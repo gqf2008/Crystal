@@ -69,7 +69,7 @@ async fn main() -> GameResult {
                         println!("🎬 场景切换: Select -> Game");
                         s.on_exit().ok();
                         let mut g = GameScene::new();
-                        g.load_textures().await;
+                        g.load_textures();
                         g.on_enter()?;
                         scene = LocalScene::Game(g);
                     }

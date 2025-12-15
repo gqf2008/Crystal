@@ -149,7 +149,7 @@ impl ChatOptionDialogHybrid {
         self.settings
     }
 
-    pub async fn load_textures(&mut self) {
+    pub fn load_textures(&mut self) {
         // 背景
         for (i, idx) in [466usize, 467].iter().enumerate() {
             if let Some(texture) = LibraryName::Title.get_texture(*idx) {

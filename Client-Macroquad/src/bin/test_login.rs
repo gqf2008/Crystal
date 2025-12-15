@@ -108,7 +108,7 @@ async fn main() {
                 println!("🎬 切换场景: {} -> 游戏", current_scene.name());
                 current_scene.on_exit().ok();
                 let mut scene = GameScene::new();
-                scene.load_textures().await;
+                scene.load_textures();
                 let mut new_scene = SceneKind::Game(scene);
                 new_scene.on_enter().expect("场景初始化失败");
                 current_scene = new_scene;

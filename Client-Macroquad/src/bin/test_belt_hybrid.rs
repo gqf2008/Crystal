@@ -59,7 +59,7 @@ async fn main() {
     
     // 创建混合版快捷栏
     let mut belt_dialog = BeltDialogHybrid::new();
-    belt_dialog.load_textures().await;
+    belt_dialog.load_textures();
     belt_dialog.set_position(vec2(
         screen_width() / 2.0 - belt_dialog.get_size().x / 2.0,
         screen_height() - 100.0

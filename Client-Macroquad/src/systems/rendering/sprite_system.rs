@@ -1,7 +1,7 @@
 mod character;
 mod weapon;
 
-use crate::components::{Camera,Position, RenderPass, RenderStage};
+use crate::components::{Camera, FrontOcclusion, Position, RenderPass, RenderStage};
 use crate::systems::RenderSystem;
 // use ggez::{graphics::GraphicsContext, GameResult};
 use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
@@ -75,18 +75,36 @@ impl RenderSystem for SpriteRenderSystem {
         &mut self,
         world: &hecs::World,
     ) -> crate::game::GameResult {
-        // PostFront pass 只画“世界叠加层”，精灵/角色应在 Normal pass 完成。
-        let stage = world
+        let pass = world
             .query::<&RenderPass>()
             .iter()
             .next()
-            .map(|(_, pass)| pass.stage)
-            .unwrap_or(RenderStage::Normal);
-        if stage != RenderStage::Normal {
-            return Ok(());
-        }
+            .map(|(_, pass)| *pass)
+            .unwrap_or_default();
 
-        self.draw_character(world, &self.add_blend_material)?;
+        match pass.stage {
+            RenderStage::Normal => {
+                // 正常世界渲染
+                self.draw_character(world, &self.add_blend_material, pass.alpha, pass.local_only)?;
+            }
+            RenderStage::PostFront => {
+                // PostFront：如果本地玩家被前景遮挡，则画一层 ghost（半透明本地玩家）
+                let occluded = world
+                    .query::<&FrontOcclusion>()
+                    .iter()
+                    .next()
+                    .map(|(_, o)| o.local_player_occluded)
+                    .unwrap_or(false);
+
+                if occluded {
+                    const PLAYER_GHOST_ALPHA: f32 = 0.45;
+                    self.draw_character(world, &self.add_blend_material, PLAYER_GHOST_ALPHA, true)?;
+                }
+            }
+            RenderStage::Ui => {
+                // UI stage 不画世界精灵
+            }
+        }
         Ok(())
     }
 }

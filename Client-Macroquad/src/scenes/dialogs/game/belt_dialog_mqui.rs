@@ -117,7 +117,7 @@ impl BeltDialogMqui {
     }
     
     /// 加载纹理并创建 Skin
-    pub async fn load_textures(&mut self) {
+    pub  fn load_textures(&mut self) {
         println!("🎒 BeltDialogMqui: 加载纹理并创建 Skin...");
         
         // 加载背景纹理为 Image（用于 Skin）

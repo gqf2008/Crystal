@@ -22,6 +22,8 @@ pub enum RenderStage {
     Normal,
     /// 后置渲染（位于地图 Front 之后的世界叠加层：名字/血条/轮廓/漂浮字等）
     PostFront,
+    /// UI 渲染（默认相机下的覆盖层 UI；必须在世界渲染完成后执行）
+    Ui,
 }
 
 impl Default for RenderStage {
@@ -36,6 +38,14 @@ pub struct RenderPass {
     pub alpha: f32,
     pub local_only: bool,
     pub stage: RenderStage,
+}
+
+/// 地图前景遮挡信息（单例组件）。
+///
+/// 用于在 RenderStage::PostFront 中决定是否绘制“本地玩家 ghost”。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FrontOcclusion {
+    pub local_player_occluded: bool,
 }
 
 /// 当前鼠标悬停对象（用于渲染高亮/轮廓等视觉效果）

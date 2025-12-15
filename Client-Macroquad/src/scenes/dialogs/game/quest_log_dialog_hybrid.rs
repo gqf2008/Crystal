@@ -180,7 +180,7 @@ impl QuestLogDialogHybrid {
     }
 
     /// 异步加载纹理
-    pub async fn load_textures(&mut self) {
+    pub fn load_textures(&mut self) {
         // 背景纹理 - Prguse[961]
         if let Some(texture) = LibraryName::Prguse.get_texture(961) {
             self.size = vec2(texture.width as f32, texture.height as f32);

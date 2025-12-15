@@ -3,6 +3,7 @@
 pub mod components;
 pub mod dialogs;
 pub mod text_renderer;
+pub mod ui_state;
 
 // 导出 text_renderer
 pub use text_renderer::*;

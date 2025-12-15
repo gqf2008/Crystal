@@ -43,6 +43,13 @@ impl FrameInput {
         }
         macroquad::prelude::is_key_pressed(key)
     }
+
+    pub fn key_down(&self, key: KeyCode) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        macroquad::prelude::is_key_down(key)
+    }
     
     pub fn mouse_left_pressed(&self) -> bool {
         if !self.enabled {
@@ -350,7 +357,7 @@ impl GameState {
             SceneTransition::Game => {
                 // 创建游戏场景并异步加载纹理
                 let mut scene = GameScene::new();
-                scene.load_textures().await;
+                scene.load_textures();
                 SceneKind::Game(scene)
             }
             SceneTransition::Loading => SceneKind::Loading(LoadingScene::new()),

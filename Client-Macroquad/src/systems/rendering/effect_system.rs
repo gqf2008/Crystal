@@ -302,6 +302,11 @@ impl RenderSystem for EffectRenderSystem {
             return Ok(());
         }
 
+        // UI：不画任何世界特效
+        if pass.stage == RenderStage::Ui {
+            return Ok(());
+        }
+
         let draw_layer = |lib_sprite: &LibrarySprite, pos: &Position, tint: Color, offset: Vec2| -> bool {
             let Some(info) = lib_sprite.library.get_texture(lib_sprite.texture_index()) else {
                 return false;

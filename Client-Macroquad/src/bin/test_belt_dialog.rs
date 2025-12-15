@@ -24,11 +24,11 @@ async fn main() {
     let mut main_dialog = MainDialog::new();
     
     // 加载原生UI纹理
-    main_dialog.load_native_textures().await;
+    main_dialog.load_native_textures();
     
     // 创建快捷栏
     let mut belt_dialog = BeltDialogHybrid::new();
-    belt_dialog.load_textures().await;
+    belt_dialog.load_textures();
     belt_dialog.open();
     
     // 设置位置

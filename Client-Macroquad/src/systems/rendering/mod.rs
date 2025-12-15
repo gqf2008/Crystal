@@ -73,20 +73,14 @@
 // ============================================================================
 pub mod sprite_system;
 pub mod effect_system;
-
-#[cfg(feature = "ecs_rendering")]
 pub mod map_system;
 
-#[cfg(feature = "ecs_rendering")]
 pub mod ui_system;
 
 pub use sprite_system::SpriteRenderSystem;
 pub use effect_system::EffectRenderSystem;
-
-#[cfg(feature = "ecs_rendering")]
 pub use map_system::MapRenderSystem;
 
-#[cfg(feature = "ecs_rendering")]
 pub use ui_system::UIRenderSystem;
 
 

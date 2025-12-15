@@ -145,7 +145,7 @@ impl OptionDialogHybrid {
     }
 
     /// 异步加载纹理
-    pub async fn load_textures(&mut self) {
+    pub fn load_textures(&mut self) {
         // 背景纹理 - Title[411]
         if let Some(texture) = LibraryName::Title.get_texture(411) {
             self.size = vec2(texture.width as f32, texture.height as f32);

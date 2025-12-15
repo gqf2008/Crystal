@@ -267,7 +267,7 @@ impl GameShopDialogHybrid {
     }
     
     /// 加载纹理
-    pub async fn load_textures(&mut self) {
+    pub fn load_textures(&mut self) {
         println!("🛒 GameShopDialogHybrid: 加载纹理...");
         
         // 主要纹理

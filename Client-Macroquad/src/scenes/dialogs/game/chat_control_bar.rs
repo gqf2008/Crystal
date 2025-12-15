@@ -153,7 +153,7 @@ impl ChatControlBarHybrid {
     }
 
     /// 异步加载纹理
-    pub async fn load_textures(&mut self) {
+    pub  fn load_textures(&mut self) {
         // 预加载背景纹理
         let bg_index = if self.resolution_index == 0 { 2035 } else { 2034 };
         if let Some(texture) = LibraryName::Prguse.get_texture(bg_index) {
