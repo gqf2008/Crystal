@@ -192,9 +192,9 @@ impl LogicSystem for MovementSystem {
             }
 
             if let Some(target) = path.current_waypoint() {
-                // 转换格子坐标到像素坐标
-                let target_x = target.0 as f32 * CELL_WIDTH;
-                let target_y = target.1 as f32 * CELL_HEIGHT;
+                // 转换格子坐标到像素坐标（使用格子中心点，和 spawn/碰撞/寻路保持一致）
+                let target_x = target.0 as f32 * CELL_WIDTH + CELL_WIDTH / 2.0;
+                let target_y = target.1 as f32 * CELL_HEIGHT + CELL_HEIGHT / 2.0;
 
                 // 计算方向和距离
                 let dx = target_x - position.x;

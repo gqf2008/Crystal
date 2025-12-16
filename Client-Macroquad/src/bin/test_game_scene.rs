@@ -7,15 +7,17 @@ use macroquad::prelude::*;
 
 use client_macroquad::scenes::{GameScene, Scene, SceneTransition};
 use client_macroquad::ui::text_renderer::init_chinese_font;
-
 use client_macroquad::components::{Health, LibrarySprite, MirAction, Monster, MonsterAnimState, Position};
 use client_macroquad::components::network::{NetworkObjectType, NetworkSync};
 use client_macroquad::objects::frames::get_monster_frame;
 use client_macroquad::resources::LibraryName;
 
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+
 const WINDOW_WIDTH: i32 = 1024;
 const WINDOW_HEIGHT: i32 = 768;
-
 struct SpecialFramesValidator {
     initialized: bool,
     direction: u8,

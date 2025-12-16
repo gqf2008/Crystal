@@ -1571,29 +1571,17 @@ impl LogicSystem for NetworkApplySystem {
                 let should_apply = if ctx.session.server_authoritative_movement {
                     true
                 } else {
-                    // 非 server-authoritative movement 时，仅允许“传送类”修正：
-                    // - 玩家已死亡（用于复活回城）
-                    // - 或者偏差足够大（避免小抖动纠偏）
+                    // 非 server-authoritative movement 时，只允许“死亡/复活”类修正：
+                    // - Mock/真服在同步移动意图时，回包可能滞后于本地连续像素移动。
+                    // - 若按“偏差足够大”触发纠偏，会出现自动寻路时被拉回起点（rubber-banding）。
+                    // 因此：活着时一律不应用 PlayerLocationChanged 的位置校正。
                     let dead = ctx
                         .world
                         .get::<&crate::components::Health>(e)
                         .ok()
                         .map(|hp| hp.current <= 0)
                         .unwrap_or(false);
-                    if dead {
-                        true
-                    } else {
-                        let dist_tiles = ctx
-                            .world
-                            .get::<&crate::components::Position>(e)
-                            .ok()
-                            .map(|pos| {
-                                let (cgx, cgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-                                (cgx - gx).abs() + (cgy - gy).abs()
-                            })
-                            .unwrap_or(0);
-                        dist_tiles >= 8
-                    }
+                    dead
                 };
 
                 if should_apply {

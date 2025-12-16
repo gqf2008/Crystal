@@ -17,7 +17,7 @@
 
 use crate::game::GameResult;
 use crate::game::GameContext;
-use crate::components::{Position, movement::MovementVelocity, map::MapBounds};
+use crate::components::{Position, movement::{MovementVelocity, Path}, map::MapBounds};
 use crate::systems::LogicSystem;
 
 /// 碰撞检测系统
@@ -47,6 +47,53 @@ impl CollisionSystem {
         pos.x = pos.x.clamp(0.0, (bounds.width - 1) as f32);
         pos.y = pos.y.clamp(0.0, (bounds.height - 1) as f32);
     }
+
+    fn is_walkable(cells: &Vec<Vec<crate::resources::map_reader::CellInfo>>, width: i32, height: i32, gx: i32, gy: i32) -> bool {
+        if gx < 0 || gy < 0 || gx >= width || gy >= height {
+            return false;
+        }
+        let x = gx as usize;
+        let y = gy as usize;
+        if x >= cells.len() || y >= cells[x].len() {
+            return false;
+        }
+        cells[x][y].is_walkable()
+    }
+
+    fn nearest_walkable(
+        cells: &Vec<Vec<crate::resources::map_reader::CellInfo>>,
+        width: i32,
+        height: i32,
+        target: (i32, i32),
+        max_radius: i32,
+    ) -> Option<(i32, i32)> {
+        if Self::is_walkable(cells, width, height, target.0, target.1) {
+            return Some(target);
+        }
+
+        for r in 1..=max_radius {
+            for dx in -r..=r {
+                for dy in [-r, r] {
+                    let gx = target.0 + dx;
+                    let gy = target.1 + dy;
+                    if Self::is_walkable(cells, width, height, gx, gy) {
+                        return Some((gx, gy));
+                    }
+                }
+            }
+            for dy in (-r + 1)..=(r - 1) {
+                for dx in [-r, r] {
+                    let gx = target.0 + dx;
+                    let gy = target.1 + dy;
+                    if Self::is_walkable(cells, width, height, gx, gy) {
+                        return Some((gx, gy));
+                    }
+                }
+            }
+        }
+
+        None
+    }
 }
 
 impl Default for CollisionSystem {
@@ -58,7 +105,7 @@ impl Default for CollisionSystem {
 impl LogicSystem for CollisionSystem {
     
 
-    fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
+    fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         use crate::components::map::MapData;
         
         // 获取地图数据
@@ -82,9 +129,16 @@ impl LogicSystem for CollisionSystem {
         let Some(cells) = map_cells else { return Ok(()); };
 
         // 检查移动方向的下一个格子是否有障碍物
-        use crate::components::{PlayerInput, Player};
-        
-        for (_entity, (pos, vel, player_input, _player)) in ctx.world.query_mut::<(&mut Position, &mut MovementVelocity, Option<&mut PlayerInput>, Option<&Player>)>() {
+        // 重要：MovementSystem 已经更新了 position，本系统负责“阻止进一步进入阻挡”和“把已经进入阻挡的情况拉回”。
+        use crate::components::{MovementMode, PlayerInput, Player};
+
+        for (_entity, (pos, vel, player_input, path, _player)) in ctx.world.query_mut::<(
+            &mut Position,
+            &mut MovementVelocity,
+            Option<&mut PlayerInput>,
+            Option<&mut Path>,
+            Option<&Player>,
+        )>() {
             // 🎯 检查velocity是否为零或接近零
             // 注意: 如果velocity为零,说明没有移动,不需要检查碰撞
             if vel.x.abs() < 0.01 && vel.y.abs() < 0.01 {
@@ -94,20 +148,73 @@ impl LogicSystem for CollisionSystem {
             // 记录是否为玩家（用于日志输出）
             let is_player = player_input.is_some();
             
-            // 🎯 关键修复：预测下一帧的位置，而不是检查当前位置
-            // 这样可以在实际移动前就阻止碰撞
-            let next_x = pos.x + vel.x * _delay_time;
-            let next_y = pos.y + vel.y * _delay_time;
-            
-            let grid_x = (next_x / 48.0) as i32;
-            let grid_y = (next_y / 32.0) as i32;
+            // 1) 若“当前位置已经在阻挡格子里”，说明上一帧已经穿进去了。
+            //    这种情况必须立刻拉回，否则会出现“进房子出不来”。
+            let (cur_gx, cur_gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+            if !Self::is_walkable(&cells, width, height, cur_gx, cur_gy) {
+                // 尝试回滚到上一帧位置（假设 MovementSystem 的更新是 pos += vel * dt）
+                let prev_x = pos.x - vel.x * delay_time;
+                let prev_y = pos.y - vel.y * delay_time;
+                let (prev_gx, prev_gy) = crate::coord::Coord::world_to_grid(prev_x, prev_y);
+
+                if Self::is_walkable(&cells, width, height, prev_gx, prev_gy) {
+                    pos.x = prev_x;
+                    pos.y = prev_y;
+                } else if let Some((gx, gy)) = Self::nearest_walkable(&cells, width, height, (cur_gx, cur_gy), 8) {
+                    let (wx, wy) = crate::coord::Coord::grid_to_world_center(gx, gy);
+                    pos.x = wx;
+                    pos.y = wy;
+                }
+
+                vel.stop();
+                if let Some(p) = path {
+                    p.clear();
+                }
+                if let Some(input) = player_input {
+                    // 进入阻挡属于严重异常：直接停止自动移动，避免继续顶墙/越陷越深
+                    input.move_to = None;
+                    input.movement_mode = MovementMode::None;
+                    input.run = false;
+                }
+
+                if is_player {
+                    tracing::warn!(
+                        "🛑 位置落在阻挡格，已回滚/拉回：grid=({}, {}) pos=({:.1},{:.1})",
+                        cur_gx,
+                        cur_gy,
+                        pos.x,
+                        pos.y
+                    );
+                }
+                continue;
+            }
+
+            // 2) 预测下一帧的位置（用于提前阻止进入阻挡格）
+            let next_x = pos.x + vel.x * delay_time;
+            let next_y = pos.y + vel.y * delay_time;
+
+            // 使用统一的 world_to_grid（不要手写 /48 /32，避免边界误差）
+            let (grid_x, grid_y) = crate::coord::Coord::world_to_grid(next_x, next_y);
             
             // 边界检查
             if grid_x < 0 || grid_y < 0 || grid_x >= width || grid_y >= height {
                 vel.stop();
-                // 🎯 不清除 move_to，保持动画继续播放
-                tracing::warn!("🛑 边界碰撞！停止velocity但保持动画 - Grid({}, {}), Pos({:.1}, {:.1})", 
-                               grid_x, grid_y, pos.x, pos.y);
+                if let Some(p) = path {
+                    p.clear();
+                }
+                if let Some(input) = player_input {
+                    // 边界外直接停掉移动指令
+                    input.move_to = None;
+                    input.movement_mode = MovementMode::None;
+                    input.run = false;
+                }
+                tracing::warn!(
+                    "🛑 边界碰撞：停止移动 - NextGrid({}, {}), CurPos({:.1}, {:.1})",
+                    grid_x,
+                    grid_y,
+                    pos.x,
+                    pos.y
+                );
                 continue;
             }
 
@@ -121,14 +228,28 @@ impl LogicSystem for CollisionSystem {
             let has_obstacle = !cell.is_walkable();
             
             if has_obstacle {
-                // 🎯 关键修复：下一个位置有障碍物！立即停止velocity
-                // 但保持 move_to 不变，让动画继续播放
+                // 下一个位置有障碍物：立即停止，并清掉当前 path，避免继续沿错误路径推进。
                 vel.stop();
-                
-                // 🎯 不清除 move_to，不修改 movement_mode
-                // 这样 PlayerStateSystem 仍认为在移动状态，动画会继续
-                // 但由于 velocity=0，position 不会更新，形成"原地踏步"
-                
+
+                if let Some(p) = path {
+                    p.clear();
+                }
+
+                if let Some(input) = player_input {
+                    match input.movement_mode {
+                        MovementMode::Pathfinding => {
+                            // 保留 move_to：下一帧 PathfindingSystem 会重新算路（绕开障碍）
+                        }
+                        MovementMode::DirectFollow => {
+                            // DirectFollow：避免一直“顶墙”导致抖动，直接停止跟随
+                            input.move_to = None;
+                            input.movement_mode = MovementMode::None;
+                            input.run = false;
+                        }
+                        MovementMode::None => {}
+                    }
+                }
+
                 if is_player {
                     tracing::warn!("🛑 碰撞！停止velocity但保持动画 - NextGrid({}, {}), CurPos({:.1}, {:.1})", 
                                    grid_x, grid_y, pos.x, pos.y);

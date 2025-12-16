@@ -6,14 +6,14 @@
 // 目标：让本地玩家在离线 mock 世界中，自动找怪 → 走近 → 攻击。
 // 约束：
 // - 支持开关：可随时启用/禁用 AI 控制
-// - 发现用户有输入时，短时间内不干预（避免与手动操作打架）
+// - **模式互斥**：当启用挂机/AT/BT 控制时，本系统拥有本地玩家控制权；手动控制系统不应再写入 PlayerInput。
 // - 复用现有链路：写入 PlayerInput.attack_target/move_to，由 CombatSystem/PathfindingSystem 驱动发包
 //
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use macroquad::prelude::{KeyCode, MouseButton};
+use macroquad::prelude::KeyCode;
 
 use crate::{
     components::{LocalPlayer, Monster, PlayerInput, Position, MovementMode},
@@ -183,9 +183,6 @@ impl Default for Blackboard {
 
 #[derive(ecs_macros::LogicSystem)]
 pub struct LocalPlayerAiSystem {
-    last_user_input: Instant,
-    user_suppress: Duration,
-
     last_scan: Instant,
     scan_interval: Duration,
 
@@ -224,19 +221,6 @@ impl Default for LocalPlayerAiSystem {
             nodes.len() - 1
         };
 
-        let cond_user_active = push(BtNode::Condition(LocalPlayerAiSystem::bt_cond_user_active));
-        let act_noop = push(BtNode::Action(LocalPlayerAiSystem::bt_act_noop_success));
-        let seq_user_active = push(BtNode::Sequence {
-            children: vec![cond_user_active, act_noop],
-            running_child: 0,
-        });
-
-        let cond_user_suppressed = push(BtNode::Condition(LocalPlayerAiSystem::bt_cond_user_suppressed));
-        let seq_user_suppressed = push(BtNode::Sequence {
-            children: vec![cond_user_suppressed, act_noop],
-            running_child: 0,
-        });
-
         let act_update_snapshot = push(BtNode::Action(LocalPlayerAiSystem::bt_act_update_snapshot));
         let act_acquire_target = push(BtNode::Action(LocalPlayerAiSystem::bt_act_acquire_target));
         let cond_in_melee = push(BtNode::Condition(LocalPlayerAiSystem::bt_cond_in_melee_range));
@@ -256,18 +240,12 @@ impl Default for LocalPlayerAiSystem {
             running_child: 0,
         });
 
-        let root = push(BtNode::Selector {
-            children: vec![seq_user_active, seq_user_suppressed, seq_autobattle],
-            running_child: 0,
-        });
+        // 模式互斥：只要启用 AI，本系统始终驱动自动战斗行为。
+        let root = seq_autobattle;
 
         let bt = BehaviorTree { nodes, root };
 
         Self {
-            last_user_input: Instant::now(),
-            // 用户有操作后，AI 暂停一会儿，避免抢控制。
-            user_suppress: Duration::from_millis(650),
-
             last_scan: Instant::now(),
             scan_interval: Duration::from_millis(160),
 
@@ -286,35 +264,6 @@ impl Default for LocalPlayerAiSystem {
 }
 
 impl LocalPlayerAiSystem {
-    fn user_is_active(ctx: &GameContext) -> bool {
-        if ctx.input_blocked {
-            return false;
-        }
-
-        let input = ctx.input();
-
-        // 鼠标任意按住都认为用户在操作。
-        if input.mouse.button_down(MouseButton::Left)
-            || input.mouse.button_down(MouseButton::Right)
-            || input.mouse.button_down(MouseButton::Middle)
-        {
-            return true;
-        }
-
-        // 常用按键：方向/交互/跑步。
-        input.key_down(KeyCode::W)
-            || input.key_down(KeyCode::A)
-            || input.key_down(KeyCode::S)
-            || input.key_down(KeyCode::D)
-            || input.key_down(KeyCode::Up)
-            || input.key_down(KeyCode::Left)
-            || input.key_down(KeyCode::Down)
-            || input.key_down(KeyCode::Right)
-            || input.key_down(KeyCode::LeftShift)
-            || input.key_down(KeyCode::RightShift)
-            || input.key_down(KeyCode::Space)
-    }
-
     fn find_local_player_snapshot(
         ctx: &GameContext,
     ) -> Option<(hecs::Entity, (i32, i32), Option<hecs::Entity>, bool)> {
@@ -431,15 +380,6 @@ impl LocalPlayerAiSystem {
 
     // ===== Behavior Tree: Conditions =====
 
-    fn bt_cond_user_active(&self, ctx: &GameContext, bb: &Blackboard) -> bool {
-        let _ = bb;
-        Self::user_is_active(ctx)
-    }
-
-    fn bt_cond_user_suppressed(&self, _ctx: &GameContext, bb: &Blackboard) -> bool {
-        bb.now.duration_since(self.last_user_input) < self.user_suppress
-    }
-
     fn bt_cond_in_melee_range(&self, _ctx: &GameContext, bb: &Blackboard) -> bool {
         let Some(pg) = bb.player_grid else {
             return false;
@@ -454,16 +394,7 @@ impl LocalPlayerAiSystem {
 
     // ===== Behavior Tree: Actions =====
 
-    fn bt_act_noop_success(&mut self, _ctx: &mut GameContext, _bb: &mut Blackboard) -> BtStatus {
-        BtStatus::Success
-    }
-
     fn bt_act_update_snapshot(&mut self, ctx: &mut GameContext, bb: &mut Blackboard) -> BtStatus {
-        // 若用户当前活跃，更新 last_user_input
-        if Self::user_is_active(ctx) {
-            self.last_user_input = bb.now;
-        }
-
         let Some((player_entity, player_grid, current_target, has_move_goal)) = Self::find_local_player_snapshot(ctx)
         else {
             bb.player_entity = None;
@@ -622,24 +553,22 @@ impl LogicSystem for LocalPlayerAiSystem {
         if !ctx.input_blocked && ctx.input().key_pressed(KeyCode::F8) {
             ctx.session.local_player_ai_enabled = !ctx.session.local_player_ai_enabled;
 
-            // 关闭时清理 AI 留下的意图，避免继续自动走/追砍。
-            if !ctx.session.local_player_ai_enabled {
-                for (_e, (_local, input, path)) in ctx
-                    .world
-                    .query_mut::<(
-                        &LocalPlayer,
-                        &mut PlayerInput,
-                        &mut crate::components::movement::Path,
-                    )>()
-                    .into_iter()
-                {
-                    input.attack_target = None;
-                    input.move_to = None;
-                    input.movement_mode = MovementMode::None;
-                    input.run = false;
-                    path.clear();
-                    break;
-                }
+            // 模式切换：无论开/关，都清理上一种控制模式残留的意图，避免“切了还在走/追砍”。
+            for (_e, (_local, input, path)) in ctx
+                .world
+                .query_mut::<(
+                    &LocalPlayer,
+                    &mut PlayerInput,
+                    &mut crate::components::movement::Path,
+                )>()
+                .into_iter()
+            {
+                input.attack_target = None;
+                input.move_to = None;
+                input.movement_mode = MovementMode::None;
+                input.run = false;
+                path.clear();
+                break;
             }
 
             // 给玩家一个可见反馈（写到聊天系统提示）
@@ -655,6 +584,11 @@ impl LogicSystem for LocalPlayerAiSystem {
 
         // 未开启：本帧不写入 PlayerInput
         if !ctx.session.local_player_ai_enabled {
+            return Ok(());
+        }
+
+        // UI 正在强占输入（例如对话框/输入框）时，暂停挂机，避免“边点 UI 边乱跑”。
+        if ctx.input_blocked {
             return Ok(());
         }
 

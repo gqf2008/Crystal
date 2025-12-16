@@ -253,7 +253,24 @@ impl LogicSystem for PathfindingSystem {
                                                 tracing::debug!("路径开始: {:?} ...", &full_path[..5]);
                                                 tracing::debug!("路径结束: ... {:?}", &full_path[full_path.len()-5..]);
                                             }
-                                            path.set_path(full_path);
+                                            // A* 通常会把起点也包含在路径里。
+                                            // 若直接把起点作为第一个 waypoint，MovementSystem 会先把角色“拉回”到当前格子中心，
+                                            // 双击小地图时体验很明显（看起来像被回拽/瞬移）。
+                                            // 这里移除起点，直接朝下一个格子走。
+                                            let mut waypoints = full_path;
+                                            if waypoints.first().copied() == Some(current_grid) {
+                                                waypoints.remove(0);
+                                            }
+
+                                            if waypoints.is_empty() {
+                                                // 已经在目标格子（或目标非常近），直接视为完成移动。
+                                                path.clear();
+                                                velocity.stop();
+                                                player_input.move_to = None;
+                                                player_input.movement_mode = MovementMode::None;
+                                            } else {
+                                                path.set_path(waypoints);
+                                            }
                                         }
                                         None => {
                                             tracing::warn!("❌ A* 找不到路径（含避障），停止移动");

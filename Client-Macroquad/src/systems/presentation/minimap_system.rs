@@ -1,5 +1,5 @@
 use crate::{
-    components::{LocalPlayer, MirDirection, MovementMode, Player, PlayerInput, Position},
+    components::{LocalPlayer, MirDirection, MovementMode, Player, PlayerAction, PlayerInput, Position},
     game::{GameContext, GameResult},
     systems::LogicSystem,
     ui::ui_state::UiState,
@@ -45,13 +45,24 @@ impl LogicSystem for MinimapSystem {
         if let Some((wx, wy, run)) =
             Self::with_ui_state_mut(ctx, |ui| ui.pending_auto_path_target.take()).flatten()
         {
-            // 说明：PlayerAction 由 PlayerControlSystem 统一写入。
-            // 小地图双击产生的“run”意图通过 PlayerInput.run 传递。
-            let mut q = ctx.world.query::<(&LocalPlayer, &mut PlayerInput)>();
-            if let Some((_entity, (_local, input))) = q.iter().next() {
-                input.move_to = Some((wx, wy));
-                input.movement_mode = MovementMode::Pathfinding;
-                input.run = run;
+            // 模式互斥：挂机/AT/BT 控制开启时，忽略小地图的手动寻路命令。
+            if ctx.session.local_player_ai_enabled {
+                // 仍继续后续“ECS -> UI”同步，避免点击时小地图状态丢一帧。
+            } else {
+                // 小地图双击是 UI 事件，不一定会触发 PlayerControlSystem 的鼠标分支。
+                // 若这里不设置 Player.action，可能出现“位置在动但动画不播放”的平移效果。
+                // 这里直接把 walk/run 意图落地到 PlayerInput + Player.action（攻击中则不覆盖）。
+                let mut q = ctx.world.query::<(&LocalPlayer, &mut PlayerInput, &mut Player)>();
+                if let Some((entity, (_local, input, player))) = q.iter().next() {
+                    input.move_to = Some((wx, wy));
+                    input.movement_mode = MovementMode::Pathfinding;
+                    input.run = run;
+
+                    let is_attacking = ctx.world.get::<&crate::components::AttackState>(entity).is_ok();
+                    if !is_attacking && !player.action.is_attack() {
+                        player.action = if run { PlayerAction::Run } else { PlayerAction::Walk };
+                    }
+                }
             }
         }
 

@@ -98,6 +98,8 @@ struct MockWorldState {
     player_hp_current: i32,
     player_hp_max: i32,
     player_dead_since: Option<Instant>,
+    // 复活/刚进入游戏的短暂无敌：避免出生点附近刷怪导致“无法操作/一直被拉回城”。
+    player_protected_until: Option<Instant>,
 
     // NPC 商店：最近一次下发给客户端的货单（用于 BuyItemRequest 通过 unique_id 反查）
     last_shop_goods: Vec<mir2_shared::data::item::UserItem>,
@@ -135,6 +137,7 @@ impl Default for MockWorldState {
             player_hp_current: 100,
             player_hp_max: 100,
             player_dead_since: None,
+            player_protected_until: None,
             last_shop_goods: Vec::new(),
 
             last_player_move_req: Instant::now(),
@@ -145,7 +148,9 @@ impl Default for MockWorldState {
                 // 为了离线可复现，使用同一张地图 n0.map 上的多个“刷怪区域”（不同坐标团）。
                 MockZone {
                     name: "TownEdge",
-                    center: (336, 334),
+                    // 出生点在 (336,334)。若刷怪区也在这里，会导致玩家一进入就被围殴→死亡→回城→再被打，
+                    // 体验上像“被拉回起点且完全无法控制”。把刷怪区挪远一点。
+                    center: (360, 334),
                     radius: 8,
                     max_monsters: 4,
                     respawn_interval: Duration::from_millis(2200),
@@ -359,6 +364,7 @@ impl MockNetwork {
                 state.player_hp_current = 100;
                 state.player_spawn_grid = state.player_grid;
                 state.player_dead_since = None;
+                state.player_protected_until = Some(Instant::now() + Duration::from_millis(3500));
 
                 // 下发最小装备：用于验证“装备→外观/坐骑派生→渲染”链路。
                 // 槽位约定（见 NetworkApplySystem::apply_equipment_vec）:
@@ -576,6 +582,7 @@ impl MockNetwork {
                 state.monsters.clear();
                 state.next_monster_id = 3001;
                 state.last_monster_wander_tick = Instant::now();
+                state.last_monster_combat_tick = Instant::now();
 
                 // 初始填充：每个区域先刷 2 只，便于立即看到“找怪→跑路→打怪”
                 for zone_idx in 0..state.zones.len() {
@@ -871,6 +878,7 @@ impl MockNetwork {
         state.player_dead_since = None;
         state.player_grid = state.player_spawn_grid;
         state.player_hp_current = state.player_hp_max.max(1);
+        state.player_protected_until = Some(Instant::now() + Duration::from_millis(3000));
 
         let _ = response_tx.send(NetworkEvent::HealthChanged {
             current: state.player_hp_current.max(0) as u32,
@@ -886,6 +894,15 @@ impl MockNetwork {
     }
 
     fn tick_monster_combat(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
+        // 无敌期间：怪物不追击不攻击，避免复活/进游戏后“无法操作”。
+        if let Some(until) = state.player_protected_until {
+            if Instant::now() < until {
+                return;
+            } else {
+                state.player_protected_until = None;
+            }
+        }
+
         if state.last_monster_combat_tick.elapsed() < Duration::from_millis(180) {
             return;
         }

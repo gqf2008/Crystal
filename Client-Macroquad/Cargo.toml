@@ -51,6 +51,7 @@ chrono = "0.4"
 
 # 文件对话框 (地图加载)
 rfd = "0.15"
+mimalloc = "0.1.48"
 
 # Patch miniquad to use local version with IME support
 [patch.crates-io]

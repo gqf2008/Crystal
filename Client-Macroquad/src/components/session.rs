@@ -60,7 +60,8 @@ impl Default for SessionState {
             sync_movement_intent_to_server: false,
             server_authoritative_combat: false,
 
-            local_player_ai_enabled: true,
+            // 默认手动控制；F8 可切到“挂机/自动战斗(AT/BT)”模式。
+            local_player_ai_enabled: false,
 
             // 默认值与当前手感保持一致
             remote_player_walk_interp_secs: 0.16,

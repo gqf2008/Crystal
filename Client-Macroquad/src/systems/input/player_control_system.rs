@@ -417,9 +417,37 @@ impl LogicSystem for PlayerControlSystem {
     
 
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
+        let ai_mode = ctx.session.local_player_ai_enabled;
+
+        // 模式互斥：挂机/AT/BT 控制开启时，本系统仍要做“本地移动→服务器同步”等维护逻辑，
+        // 但必须完全抑制手动鼠标输入对 PlayerInput/Path 的写入。
+        if ai_mode {
+            self.mouse_state.left_pressed = false;
+            self.mouse_state.left_press_start = None;
+            self.mouse_state.left_press_position = None;
+            self.mouse_state.left_last_click_time = None;
+            self.mouse_state.left_pending_double_click = None;
+
+            self.mouse_state.right_pressed = false;
+            self.mouse_state.right_press_start = None;
+            self.mouse_state.right_press_position = None;
+            self.mouse_state.right_last_click_time = None;
+            self.mouse_state.right_pending_double_click = None;
+
+            self.pending_npc_call = None;
+        }
+
         // ✅ 零拷贝：直接访问 GameContext
-        let mouse_left_down = ctx.input().mouse.button_down(MouseButton::Left);
-        let mouse_right_down = ctx.input().mouse.button_down(MouseButton::Right);
+        let mouse_left_down = if ai_mode {
+            false
+        } else {
+            ctx.input().mouse.button_down(MouseButton::Left)
+        };
+        let mouse_right_down = if ai_mode {
+            false
+        } else {
+            ctx.input().mouse.button_down(MouseButton::Right)
+        };
         let mouse_pos = ctx.input().mouse.position();
 
         // 更新鼠标位置 (Point2 使用 .x, .y 访问)
