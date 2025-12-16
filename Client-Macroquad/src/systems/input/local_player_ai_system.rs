@@ -560,6 +560,7 @@ impl LocalPlayerAiSystem {
             input.attack_target = Some(target_entity);
             input.move_to = None;
             input.movement_mode = MovementMode::None;
+            input.run = false;
         }
 
         BtStatus::Success
@@ -606,6 +607,8 @@ impl LocalPlayerAiSystem {
             input.attack_target = Some(target_entity);
             input.move_to = Some((awx, awy));
             input.movement_mode = MovementMode::Pathfinding;
+            // 追怪接近：默认跑步（更符合“追砍”节奏）
+            input.run = true;
         }
 
         BtStatus::Running
@@ -633,6 +636,7 @@ impl LogicSystem for LocalPlayerAiSystem {
                     input.attack_target = None;
                     input.move_to = None;
                     input.movement_mode = MovementMode::None;
+                    input.run = false;
                     path.clear();
                     break;
                 }

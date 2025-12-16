@@ -15,6 +15,7 @@ pub mod trade;
 pub mod item;
 pub mod npc;
 pub mod quest;
+pub mod ui_events;
 
 // Re-export all handlers
 pub use connection::ConnectionHandler;
@@ -28,6 +29,7 @@ pub use trade::TradeHandler;
 pub use item::ItemHandler;
 pub use npc::NpcHandler;
 pub use quest::QuestHandler;
+pub use ui_events::UiEventsHandler;
 
 use mir2_shared::packets::PacketHeader;
 use crate::resources::LibraryName;
@@ -301,6 +303,16 @@ pub enum NetworkEvent {
     // ========================================================================
     // 通用事件（Generic Events）
     // ========================================================================
+
+    // 坐骑更新（来自服务器；通常作用于本地玩家）
+    MountUpdated {
+        object_id: u32,
+        mount_type: i16,
+        riding_mount: bool,
+    },
+
+    // UI / 表现层事件（来自服务器）
+    PlaySound { sound_id: i32 },
     
     // 未处理的数据包（用于调试）
     UnhandledPacket { opcode: i16 },

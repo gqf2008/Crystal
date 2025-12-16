@@ -143,14 +143,162 @@ pub static PLAYER_FRAMES: LazyLock<FrameSet> = LazyLock::new(|| {
     frames
 });
 
+/// Static frame data for Default Monster
+///
+/// Mirrors C# FrameSet.DefaultMonster (Client/MirObjects/Frames.cs)
+pub static DEFAULT_MONSTER_FRAMES: LazyLock<FrameSet> = LazyLock::new(|| {
+    let mut frames = HashMap::new();
+
+    frames.insert(MirAction::Standing, Frame::basic(0, 4, 0, 500));
+    frames.insert(MirAction::Walking, Frame::basic(32, 6, 0, 100));
+    frames.insert(MirAction::Attack1, Frame::basic(80, 6, 0, 100));
+    frames.insert(MirAction::Struck, Frame::basic(128, 2, 0, 200));
+    frames.insert(MirAction::Die, Frame::basic(144, 10, 0, 100));
+    frames.insert(MirAction::Dead, Frame::basic(153, 1, 9, 1000));
+    frames.insert(MirAction::Revive, Frame::basic(144, 10, 0, 100).with_reverse(true));
+
+    frames
+});
+
+/// Static frame data for Default NPC
+///
+/// Mirrors C# FrameSet.DefaultNPC (Client/MirObjects/Frames.cs)
+pub static DEFAULT_NPC_FRAMES: LazyLock<FrameSet> = LazyLock::new(|| {
+    let mut frames = HashMap::new();
+    frames.insert(MirAction::Standing, Frame::basic(0, 4, 0, 450));
+    frames.insert(MirAction::Harvest, Frame::basic(12, 10, 0, 200));
+    frames
+});
+
+/// Special monster framesets
+///
+/// Mirrors C# Client/MirObjects/Frames.cs:
+/// - FrameSet.DragonStatue
+/// - FrameSet.GreatFoxSpirit
+/// - FrameSet.HellBomb
+/// - FrameSet.CaveStatue
+pub static DRAGON_STATUE_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
+    let mut list: Vec<FrameSet> = Vec::new();
+
+    // DragonStatue 1..6
+    for start in [300, 301, 302, 320, 321, 322] {
+        let mut frame = FrameSet::new();
+        frame.insert(MirAction::Standing, Frame::basic(start, 1, -1, 1000));
+        frame.insert(MirAction::AttackRange1, Frame::basic(start, 1, -1, 120));
+        frame.insert(MirAction::Struck, Frame::basic(start, 1, -1, 200));
+        list.push(frame);
+    }
+
+    list
+});
+
+pub static GREAT_FOX_SPIRIT_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
+    let mut list: Vec<FrameSet> = Vec::new();
+
+    // GreatFoxSpirit level 0..4
+    // Each level shifts standing/attack/struck by +60.
+    for base in [0, 60, 120, 180, 240] {
+        let mut frame = FrameSet::new();
+        frame.insert(MirAction::Standing, Frame::basic(base + 0, 20, -20, 100));
+        frame.insert(MirAction::Attack1, Frame::basic(base + 22, 8, -8, 120));
+        frame.insert(MirAction::Struck, Frame::basic(base + 20, 2, -2, 200));
+        frame.insert(MirAction::Die, Frame::basic(300, 18, -18, 120));
+        frame.insert(MirAction::Dead, Frame::basic(317, 1, -1, 1000));
+        frame.insert(MirAction::Revive, Frame::basic(300, 18, -18, 150).with_reverse(true));
+        list.push(frame);
+    }
+
+    list
+});
+
+pub static HELL_BOMB_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
+    let mut list: Vec<FrameSet> = Vec::new();
+
+    // HellBomb1/2/3
+    for start in [52, 70, 88] {
+        let mut frame = FrameSet::new();
+        frame.insert(MirAction::Standing, Frame::basic(start, 9, -9, 100).with_blend(true));
+        frame.insert(MirAction::Attack1, Frame::basic(999, 1, -1, 120).with_blend(true));
+        frame.insert(MirAction::Struck, Frame::basic(start, 9, -9, 100).with_blend(true));
+        list.push(frame);
+    }
+
+    list
+});
+
+pub static CAVE_STATUE_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
+    let mut list: Vec<FrameSet> = Vec::new();
+
+    // CaveStatue 1..2
+    // NOTE: C# marks Blend=false explicitly; default is false here.
+    let mut f1 = FrameSet::new();
+    f1.insert(MirAction::Standing, Frame::basic(0, 1, -1, 100));
+    f1.insert(MirAction::Struck, Frame::basic(0, 1, -1, 100));
+    f1.insert(MirAction::Die, Frame::basic(2, 8, -8, 100));
+    f1.insert(MirAction::Dead, Frame::basic(9, 1, -1, 100));
+    list.push(f1);
+
+    let mut f2 = FrameSet::new();
+    f2.insert(MirAction::Standing, Frame::basic(18, 1, -1, 100));
+    f2.insert(MirAction::Struck, Frame::basic(18, 1, -1, 100));
+    f2.insert(MirAction::Die, Frame::basic(20, 8, -8, 100));
+    f2.insert(MirAction::Dead, Frame::basic(27, 1, -1, 100));
+    list.push(f2);
+
+    list
+});
+
 /// Get player frame for a specific action
 pub fn get_player_frame(action: MirAction) -> Option<&'static Frame> {
     PLAYER_FRAMES.get(&action)
 }
 
+pub fn get_default_monster_frame(action: MirAction) -> Option<&'static Frame> {
+    DEFAULT_MONSTER_FRAMES.get(&action)
+}
+
+pub fn get_default_npc_frame(action: MirAction) -> Option<&'static Frame> {
+    DEFAULT_NPC_FRAMES.get(&action)
+}
+
+/// Get monster frame for a specific monster type and action.
+///
+/// Mirrors C# MonsterObject.Load() frame selection logic.
+pub fn get_monster_frame(
+    monster_type: u16,
+    action: MirAction,
+    direction: mir2_shared::enums::MirDirection,
+    stage: u8,
+) -> Option<&'static Frame> {
+    use mir2_shared::enums::Monster as MonsterKind;
+
+    match MonsterKind::try_from(monster_type) {
+        Ok(MonsterKind::GreatFoxSpirit) => {
+            let idx = (stage as usize).min(GREAT_FOX_SPIRIT_FRAMES.len().saturating_sub(1));
+            GREAT_FOX_SPIRIT_FRAMES.get(idx).and_then(|fs| fs.get(&action))
+        }
+        Ok(MonsterKind::DragonStatue) => {
+            let idx = (direction as u8 as usize).min(DRAGON_STATUE_FRAMES.len().saturating_sub(1));
+            DRAGON_STATUE_FRAMES.get(idx).and_then(|fs| fs.get(&action))
+        }
+        Ok(MonsterKind::HellBomb1) | Ok(MonsterKind::HellBomb2) | Ok(MonsterKind::HellBomb3) => {
+            let base = MonsterKind::HellBomb1 as u16;
+            let raw = monster_type.saturating_sub(base) as usize;
+            let idx = raw.min(HELL_BOMB_FRAMES.len().saturating_sub(1));
+            HELL_BOMB_FRAMES.get(idx).and_then(|fs| fs.get(&action))
+        }
+        Ok(MonsterKind::CaveStatue) => {
+            let idx = (direction as u8 as usize).min(CAVE_STATUE_FRAMES.len().saturating_sub(1));
+            CAVE_STATUE_FRAMES.get(idx).and_then(|fs| fs.get(&action))
+        }
+        _ => get_default_monster_frame(action),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mir2_shared::enums::{MirDirection, Monster as MonsterKind};
 
     #[test]
     fn player_frames_basic_sanity() {
@@ -161,5 +309,141 @@ mod tests {
 
         assert!(get_player_frame(MirAction::Walking).is_some());
         assert!(get_player_frame(MirAction::Attack1).is_some());
+    }
+
+    #[test]
+    fn special_monster_frames_dragon_statue_by_direction() {
+        // C#：FrameSet.DragonStatue[(byte)Direction]
+        let expected = [300, 301, 302, 320, 321, 322];
+
+        for (dir_u8, &start) in expected.iter().enumerate() {
+            let dir = MirDirection::try_from(dir_u8 as u8).expect("valid direction");
+            let frame = get_monster_frame(
+                MonsterKind::DragonStatue as u16,
+                MirAction::Standing,
+                dir,
+                0,
+            )
+            .expect("dragon statue standing frame");
+            assert_eq!(frame.start, start);
+            assert_eq!(frame.count, 1);
+            assert_eq!(frame.skip, -1);
+        }
+
+        // 超出 list 长度时：Rust 侧做了 clamp 兜底（避免 panic）
+        let dir7 = MirDirection::try_from(7).expect("dir7");
+        let frame = get_monster_frame(
+            MonsterKind::DragonStatue as u16,
+            MirAction::Standing,
+            dir7,
+            0,
+        )
+        .expect("dragon statue standing frame");
+        assert_eq!(frame.start, 322);
+    }
+
+    #[test]
+    fn special_monster_frames_great_fox_spirit_by_stage() {
+        // C#：FrameSet.GreatFoxSpirit[Stage]
+        let dir0 = MirDirection::try_from(0).unwrap();
+
+        let f0 = get_monster_frame(
+            MonsterKind::GreatFoxSpirit as u16,
+            MirAction::Standing,
+            dir0,
+            0,
+        )
+        .expect("gfs standing");
+        assert_eq!(f0.start, 0);
+        assert_eq!(f0.count, 20);
+        assert_eq!(f0.skip, -20);
+
+        let f4 = get_monster_frame(
+            MonsterKind::GreatFoxSpirit as u16,
+            MirAction::Attack1,
+            dir0,
+            4,
+        )
+        .expect("gfs attack1");
+        assert_eq!(f4.start, 262);
+        assert_eq!(f4.count, 8);
+        assert_eq!(f4.skip, -8);
+
+        // 超出 stage：clamp 到最后一套（level 4）
+        let f9 = get_monster_frame(
+            MonsterKind::GreatFoxSpirit as u16,
+            MirAction::Standing,
+            dir0,
+            9,
+        )
+        .expect("gfs standing");
+        assert_eq!(f9.start, 240);
+    }
+
+    #[test]
+    fn special_monster_frames_hell_bomb_by_base_image() {
+        let dir0 = MirDirection::try_from(0).unwrap();
+
+        let hb1 = get_monster_frame(
+            MonsterKind::HellBomb1 as u16,
+            MirAction::Standing,
+            dir0,
+            0,
+        )
+        .expect("hb1 standing");
+        assert_eq!(hb1.start, 52);
+        assert!(hb1.blend);
+
+        let hb2 = get_monster_frame(
+            MonsterKind::HellBomb2 as u16,
+            MirAction::Standing,
+            dir0,
+            0,
+        )
+        .expect("hb2 standing");
+        assert_eq!(hb2.start, 70);
+
+        let hb3 = get_monster_frame(
+            MonsterKind::HellBomb3 as u16,
+            MirAction::Standing,
+            dir0,
+            0,
+        )
+        .expect("hb3 standing");
+        assert_eq!(hb3.start, 88);
+
+        let hb_attack = get_monster_frame(
+            MonsterKind::HellBomb3 as u16,
+            MirAction::Attack1,
+            dir0,
+            0,
+        )
+        .expect("hb attack1");
+        assert_eq!(hb_attack.start, 999);
+        assert!(hb_attack.blend);
+    }
+
+    #[test]
+    fn special_monster_frames_cave_statue_by_direction() {
+        let dir0 = MirDirection::try_from(0).unwrap();
+        let dir1 = MirDirection::try_from(1).unwrap();
+
+        let s1 = get_monster_frame(
+            MonsterKind::CaveStatue as u16,
+            MirAction::Standing,
+            dir0,
+            0,
+        )
+        .expect("cave statue 1 standing");
+        assert_eq!(s1.start, 0);
+
+        let s2 = get_monster_frame(
+            MonsterKind::CaveStatue as u16,
+            MirAction::Standing,
+            dir1,
+            0,
+        )
+        .expect("cave statue 2 standing");
+        assert_eq!(s2.start, 18);
     }
 }

@@ -213,6 +213,14 @@ pub struct PlayerInput {
     
     /// 转向方向
     pub turn_to: Option<MirDirection>,
+
+    /// 是否以跑步模式移动。
+    ///
+    /// 说明：
+    /// - 鼠标右键双击/长按会设置为 true（跑）
+    /// - 鼠标左键双击/长按会设置为 false（走）
+    /// - AI/脚本也可以设置该值，让 PlayerControlSystem 在 Pathfinding 时选择 Walk/Run
+    pub run: bool,
 }
 
 impl PlayerInput {
@@ -226,6 +234,7 @@ impl PlayerInput {
             spell_target_entity: None,
             pickup_at: None,
             turn_to: None,
+            run: false,
         }
     }
     
@@ -238,18 +247,21 @@ impl PlayerInput {
         self.spell_target_entity = None;
         self.pickup_at = None;
         self.turn_to = None;
+        self.run = false;
     }
     
     /// 设置移动指令（寻路模式）
     pub fn set_move(&mut self, target: (f32, f32)) {
         self.move_to = Some(target);
         self.movement_mode = MovementMode::Pathfinding;
+        self.run = false;
     }
     
     /// 设置直接跟随指令（不使用寻路）
     pub fn set_follow(&mut self, target: (f32, f32)) {
         self.move_to = Some(target);
         self.movement_mode = MovementMode::DirectFollow;
+        self.run = false;
     }
     
     /// 设置攻击指令

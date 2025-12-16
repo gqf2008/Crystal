@@ -90,6 +90,11 @@ pub struct AttackState {
     pub start_time: std::time::Instant,
     /// 攻击类型 (Attack1/2/3)
     pub attack_type: PlayerAction,
+    /// 服务器 attack_type 原始值（主要用于怪物多段攻击音效偏移：+1/+6/+7/+8/+9）
+    ///
+    /// - 本地预测/输入系统默认填 0
+    /// - 网络包落地时填 ObjectAttack.attack_type
+    pub server_attack_type: u8,
 }
 
 /// 角色动作
@@ -203,6 +208,22 @@ pub struct PlayerAppearance {
 pub struct MountState {
     /// None = 未骑乘；Some(idx) = 使用 Mounts(idx) 库绘制坐骑
     pub mount_index: Option<usize>,
+}
+
+/// 坐骑信息（来自服务器/装备推导；主要用于行为对齐）
+///
+/// - `mount_type`：协议/资源表中的坐骑类型（0 表示无坐骑）
+/// - `riding_mount`：是否处于骑乘状态
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MountStatus {
+    pub mount_type: i16,
+    pub riding_mount: bool,
+}
+
+impl MountStatus {
+    pub fn is_riding(&self) -> bool {
+        self.riding_mount && self.mount_type >= 0
+    }
 }
 
 impl Default for MountState {

@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # Macroquad 核心
-macroquad = "0.4"
+macroquad = { version = "0.4", features = ["audio"] }
 macroquad-profiler = "0.2"
 
 # 共享库 (游戏协议和数据结构)

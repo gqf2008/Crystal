@@ -1,5 +1,5 @@
 use crate::{
-    components::{LocalPlayer, MirDirection, MovementMode, Player, PlayerAction, PlayerInput, Position},
+    components::{LocalPlayer, MirDirection, MovementMode, Player, PlayerInput, Position},
     game::{GameContext, GameResult},
     systems::LogicSystem,
     ui::ui_state::UiState,
@@ -45,11 +45,13 @@ impl LogicSystem for MinimapSystem {
         if let Some((wx, wy, run)) =
             Self::with_ui_state_mut(ctx, |ui| ui.pending_auto_path_target.take()).flatten()
         {
-            let mut q = ctx.world.query::<(&LocalPlayer, &mut PlayerInput, &mut Player)>();
-            if let Some((_entity, (_local, input, player))) = q.iter().next() {
+            // 说明：PlayerAction 由 PlayerControlSystem 统一写入。
+            // 小地图双击产生的“run”意图通过 PlayerInput.run 传递。
+            let mut q = ctx.world.query::<(&LocalPlayer, &mut PlayerInput)>();
+            if let Some((_entity, (_local, input))) = q.iter().next() {
                 input.move_to = Some((wx, wy));
                 input.movement_mode = MovementMode::Pathfinding;
-                player.action = if run { PlayerAction::Run } else { PlayerAction::Walk };
+                input.run = run;
             }
         }
 

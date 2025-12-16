@@ -220,6 +220,8 @@ pub struct AnimationFrame {
     pub weapon_frame: i32,
     /// 当前人物特效/翅膀动画帧索引（对应 C# DrawWingFrame 的 Frame.EffectStart... 计算结果）
     pub effect_frame: i32,
+    /// 当前动作内的相对帧索引（0..count-1，由 AnimationSystem 计算）
+    pub action_frame_index: i32,
 }
 
 impl AnimationFrame {
@@ -228,6 +230,7 @@ impl AnimationFrame {
             character_frame: 0,
             weapon_frame: 0,
             effect_frame: 0,
+            action_frame_index: 0,
         }
     }
 }

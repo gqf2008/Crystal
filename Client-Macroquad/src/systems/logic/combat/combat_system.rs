@@ -21,10 +21,11 @@
 // 
 // ============================================================================
 
-use hecs::World;
+use hecs::{Entity, World};
 use crate::game::GameContext;
 use crate::components::{
-    LocalPlayer, Position, Health, Monster, NetworkSync, CombatStats, NetworkObjectType
+    LocalPlayer, Position, Health, Monster, NetworkSync, CombatStats, NetworkObjectType,
+    MountState, MountStatus, MirClass, PlayerAppearance, SoundTrigger, SoundType,
 };
 use crate::network::handlers::NetworkEvent as NetworkCommand;
 use mir2_shared::enums::MirDirection;
@@ -138,6 +139,7 @@ impl LogicSystem for CombatSystem {
             crate::components::AttackState {
                 start_time: std::time::Instant::now(),
                 attack_type: crate::components::PlayerAction::Attack1,
+                server_attack_type: 0,
             },
         );
 
@@ -157,12 +159,89 @@ impl LogicSystem for CombatSystem {
         }
 
         Self::calculate_local_attack_preview(&ctx.world, target_id);
+
+        // 攻击音效改为由 AnimationSystem 按“攻击动作帧”触发（更接近 C# 原版）。
         
         Ok(())
     }
 }
 
 impl CombatSystem {
+    pub(crate) fn choose_player_attack_sound_id(world: &World, player_entity: Entity) -> Option<i32> {
+        // 对齐 C# PlayerObject.PlayAttackSound()
+        // - RidingMount: MountType < 7 => TigerAttack 10181..10183; < 12 => WolfAttack 10190..10192
+        // - Assassin with weapon: SwingShort
+        // - Archer + HasClassWeapon: return (Rust 暂无 HasClassWeapon 判定)
+        // - else: weapon switch => Swing*
+
+        const SWING_SHORT: i32 = 10050;
+        const SWING_WOOD: i32 = 10051;
+        const SWING_SWORD: i32 = 10052;
+        const SWING_SWORD2: i32 = 10053;
+        const SWING_AXE: i32 = 10054;
+        const SWING_CLUB: i32 = 10055;
+        const SWING_LONG: i32 = 10056;
+        const SWING_FIST: i32 = 10056;
+
+        let (class, weapon) = world
+            .get::<&PlayerAppearance>(player_entity)
+            .map(|a| (a.class, a.weapon))
+            .unwrap_or((MirClass::Warrior, -1));
+
+        // C# Globals.ClassWeaponCount = 100
+        let has_class_weapon = {
+            let group: i16 = weapon / 100;
+            match group {
+                1 => class == MirClass::Assassin,
+                2 => class == MirClass::Archer,
+                _ => matches!(class, MirClass::Wizard | MirClass::Warrior | MirClass::Taoist),
+            }
+        };
+
+        let mount_status = world.get::<&MountStatus>(player_entity).ok().map(|r| *r);
+        let mount_state = world.get::<&MountState>(player_entity).ok().map(|r| *r);
+
+        let riding_from_status = mount_status.map(|m| m.is_riding()).unwrap_or(false);
+        let riding_from_state = mount_state.map(|m| m.mount_index.is_some()).unwrap_or(false);
+        let is_riding = riding_from_status || riding_from_state;
+
+        let mount_type = mount_status
+            .map(|m| m.mount_type)
+            .or_else(|| mount_state.and_then(|m| m.mount_index.map(|idx| idx as i16)))
+            .unwrap_or(0);
+
+        if is_riding {
+            use rand::Rng;
+            let mut rng = rand::rng();
+            if mount_type < 7 {
+                return Some(rng.random_range(10181..=10183));
+            } else if mount_type < 12 {
+                return Some(rng.random_range(10190..=10192));
+            }
+            return None;
+        }
+
+        if weapon >= 0 && class == MirClass::Assassin {
+            return Some(SWING_SHORT);
+        }
+
+        // 原版：弓箭手拿职业武器（弓）时不播放 Swing
+        if class == MirClass::Archer && has_class_weapon {
+            return None;
+        }
+
+        match weapon {
+            0 | 23 | 28 | 40 => Some(SWING_WOOD),
+            1 | 12 => Some(SWING_SHORT),
+            2 | 8 | 11 | 15 | 18 | 20 | 25 | 31 | 33 | 34 | 37 | 41 => Some(SWING_SWORD),
+            3 | 5 | 7 | 9 | 13 | 19 | 24 | 26 | 29 | 32 | 35 => Some(SWING_SWORD2),
+            4 | 14 | 16 | 38 => Some(SWING_AXE),
+            6 | 10 | 17 | 22 | 27 | 30 | 36 | 39 => Some(SWING_LONG),
+            21 => Some(SWING_CLUB),
+            _ => Some(SWING_FIST),
+        }
+    }
+
     fn is_in_melee_range(world: &World, target_id: u32) -> bool {
         let player_grid = world
             .query::<(&LocalPlayer, &Position)>()
@@ -335,7 +414,11 @@ impl CombatSystem {
         damage_type: DamageType,
     ) {
         // 查找目标并扣血
-        for (_, (_, health, net_sync)) in world.query_mut::<(&Monster, &mut Health, &NetworkSync)>() {
+        let mut target_entity: Option<hecs::Entity> = None;
+        let mut target_monster_type: Option<u16> = None;
+        let mut target_died = false;
+
+        for (entity, (monster, health, net_sync)) in world.query_mut::<(&Monster, &mut Health, &NetworkSync)>() {
             if net_sync.object_id == target_id {
                 let old_hp = health.current;
                 health.current = (health.current - damage).max(0);
@@ -352,8 +435,28 @@ impl CombatSystem {
                 if health.current == 0 {
                     println!("💀 {} 已死亡", target_id);
                 }
+
+                target_entity = Some(entity);
+                target_monster_type = Some(monster.monster_type);
+                target_died = health.current == 0;
                 
                 break;
+            }
+        }
+
+        // Layer 3: 伤害事件 -> SoundTrigger
+        // 真正播放由 Layer 5 的 SoundSystem 统一处理（含音量策略/距离衰减）。
+        if let Some(entity) = target_entity {
+            // 按 Crystal 原版规则（见根目录 SoundRules.txt / C# MonsterObject）：
+            // BaseSound = monster_type * 10
+            // 2 = Flinch, 3 = Die
+            if let Some(monster_type) = target_monster_type {
+                let base_sound = monster_type as i32 * 10;
+                let sound_id = if target_died { base_sound + 3 } else { base_sound + 2 };
+                let _ = world.insert_one(
+                    entity,
+                    SoundTrigger::once(sound_id.to_string(), SoundType::CharacterAction),
+                );
             }
         }
         

@@ -847,11 +847,13 @@ impl LogicSystem for PlayerControlSystem {
                 if let Some((world_x, world_y)) = double_click_left {
                     player_input.move_to = Some((world_x, world_y));
                     player_input.movement_mode = crate::components::MovementMode::Pathfinding;
+                    player_input.run = false;
                     player.action = PlayerAction::Walk;
                     tracing::warn!("🚶🚶 左键双击走路到 ({:.1}, {:.1}) [寻路模式-松开后继续走]", world_x, world_y);
                 } else if let Some((world_x, world_y)) = double_click_right {
                     player_input.move_to = Some((world_x, world_y));
                     player_input.movement_mode = crate::components::MovementMode::Pathfinding;
+                    player_input.run = true;
                     player.action = PlayerAction::Run;
                     tracing::warn!("🏃🏃 右键双击跑步到 ({:.1}, {:.1}) [寻路模式-松开后继续走]", world_x, world_y);
                 }
@@ -886,8 +888,10 @@ impl LogicSystem for PlayerControlSystem {
 
                     // 🎬 设置动作（PlayerControlSystem 独占写入）
                     if can_follow_right {
+                        player_input.run = true;
                         player.action = PlayerAction::Run;
                     } else {
+                        player_input.run = false;
                         player.action = PlayerAction::Walk;
                     }
                 } else {
@@ -914,8 +918,17 @@ impl LogicSystem for PlayerControlSystem {
                             // 否则会出现“位置在动但动画不播放”的平移效果。
                             let is_attacking = attacking_entities.contains(&entity);
                             if !is_attacking && player_input.move_to.is_some() && !player.action.is_attack() {
-                                if player.action == PlayerAction::Stand {
-                                    player.action = PlayerAction::Walk;
+                                let desired = if player_input.run {
+                                    PlayerAction::Run
+                                } else {
+                                    PlayerAction::Walk
+                                };
+
+                                // move_to 可能来自 AI/脚本：这里根据 PlayerInput.run 维持 Walk/Run。
+                                if matches!(player.action, PlayerAction::Stand | PlayerAction::Walk | PlayerAction::Run)
+                                    && player.action != desired
+                                {
+                                    player.action = desired;
                                 }
                             }
 
@@ -927,6 +940,7 @@ impl LogicSystem for PlayerControlSystem {
                             {
                                 player.action = PlayerAction::Stand;
                                 player_input.movement_mode = MovementMode::None;
+                                player_input.run = false;
                                 tracing::info!("🎬 到达目的地,设置站立动作");
                             }
                         }
@@ -991,6 +1005,7 @@ impl LogicSystem for PlayerControlSystem {
             let _ = ctx.world.insert_one(entity, AttackState {
                 start_time: now,
                 attack_type: PlayerAction::Attack1,
+                server_attack_type: 0,
             });
         }
 

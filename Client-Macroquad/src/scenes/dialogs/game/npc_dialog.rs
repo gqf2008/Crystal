@@ -47,6 +47,11 @@ struct BigButton {
 pub struct NpcDialogHybrid {
     visible: bool,
 
+    // 窗口位置（可拖动）
+    pos: Vec2,
+    window_dragging: bool,
+    window_drag_offset: Vec2,
+
     // 文本
     lines: Vec<String>,
     index: usize,
@@ -80,9 +85,12 @@ pub struct NpcDialogHybrid {
 }
 
 impl NpcDialogHybrid {
-    // 对齐 C# 布局
-    const POS_X: f32 = 0.0;
-    const POS_Y: f32 = 0.0;
+    // 默认位置（对齐旧实现：左上角）
+    const DEFAULT_POS_X: f32 = 0.0;
+    const DEFAULT_POS_Y: f32 = 0.0;
+
+    // 顶部可拖动区域高度（简化实现：标题栏/顶部背景）
+    const DRAG_BAR_H: f32 = 32.0;
 
     const TEXT_X: f32 = 8.0;
     const TEXT_Y: f32 = 34.0;
@@ -114,6 +122,10 @@ impl NpcDialogHybrid {
     pub fn new() -> Self {
         Self {
             visible: false,
+
+            pos: vec2(Self::DEFAULT_POS_X, Self::DEFAULT_POS_Y),
+            window_dragging: false,
+            window_drag_offset: vec2(0.0, 0.0),
 
             lines: Vec::new(),
             index: 0,
@@ -157,6 +169,7 @@ impl NpcDialogHybrid {
         self.visible = false;
         self.scroll_dragging = false;
         self.big_scroll_offset = 0;
+        self.window_dragging = false;
     }
 
     pub fn rect(&self) -> Rect {
@@ -169,7 +182,28 @@ impl NpcDialogHybrid {
             h = h.max(y + panel_h);
         }
 
-        Rect::new(Self::POS_X, Self::POS_Y, w, h)
+        Rect::new(self.pos.x, self.pos.y, w, h)
+    }
+
+    fn title_drag_rect(&self) -> Rect {
+        let r = self.rect();
+        Rect::new(r.x, r.y, r.w, Self::DRAG_BAR_H.min(r.h))
+    }
+
+    fn clamp_pos_to_screen(&mut self) {
+        let r = self.rect();
+        let sw = screen_width();
+        let sh = screen_height();
+
+        // 保证窗口至少留一点在屏幕内，避免拖丢
+        let min_visible = 20.0;
+        let min_x = -(r.w - min_visible);
+        let max_x = (sw - min_visible).max(min_x);
+        let min_y = 0.0;
+        let max_y = (sh - min_visible).max(min_y);
+
+        self.pos.x = self.pos.x.clamp(min_x, max_x);
+        self.pos.y = self.pos.y.clamp(min_y, max_y);
     }
 
     pub fn is_mouse_over(&self, mouse_pos: Vec2) -> bool {
@@ -504,12 +538,19 @@ impl NpcDialogHybrid {
     }
 
     pub fn update_and_draw(&mut self) -> NpcDialogAction {
+        self.update_and_draw_with_input(true)
+    }
+
+    /// `input_enabled=false` 时：仍绘制窗口，但不响应点击/滚轮/ESC/拖拽。
+    ///
+    /// 用途：当窗口被其他 dialog 覆盖时，避免“看起来在下面但仍能吃输入”。
+    pub fn update_and_draw_with_input(&mut self, input_enabled: bool) -> NpcDialogAction {
         if !self.visible {
             return NpcDialogAction::None;
         }
 
         // 对齐 C#：ESC 关闭对话框
-        if is_key_pressed(KeyCode::Escape) {
+        if input_enabled && is_key_pressed(KeyCode::Escape) {
             self.hide();
             return NpcDialogAction::Close;
         }
@@ -518,10 +559,45 @@ impl NpcDialogHybrid {
 
         let (mx, my) = mouse_position();
         let mouse_pos = vec2(mx, my);
+        // 窗口拖拽（标题区域）
+        // 注意：避免与 close 按钮冲突；仅左键按住时生效。
+        if input_enabled {
+            let rect0 = self.rect();
+            let close_rect0 = Rect::new(
+                rect0.x + Self::CLOSE_X,
+                rect0.y + Self::CLOSE_Y,
+                self.close_btn.size.x,
+                self.close_btn.size.y,
+            );
+            let drag_rect0 = self.title_drag_rect();
+
+            if is_mouse_button_pressed(MouseButton::Left)
+                && drag_rect0.contains(mouse_pos)
+                && !close_rect0.contains(mouse_pos)
+            {
+                self.window_dragging = true;
+                self.window_drag_offset = mouse_pos - self.pos;
+                // 拖动窗口时不应继续拖滚动条
+                self.scroll_dragging = false;
+            }
+            if self.window_dragging {
+                if is_mouse_button_down(MouseButton::Left) {
+                    self.pos = mouse_pos - self.window_drag_offset;
+                    self.clamp_pos_to_screen();
+                } else {
+                    self.window_dragging = false;
+                }
+            }
+        } else {
+            // 失去输入权限时，立即终止拖拽，避免“松开”在别处导致跳动
+            self.window_dragging = false;
+            self.scroll_dragging = false;
+        }
+
         let rect = self.rect();
 
         // 鼠标滚轮滚动（对齐 C# MouseWheel）
-        if self.is_mouse_over(mouse_pos) && self.has_scroll() {
+        if input_enabled && self.is_mouse_over(mouse_pos) && self.has_scroll() {
             let wheel = mouse_wheel().1;
             if wheel != 0.0 {
                 // macroquad: wheel 上为正
@@ -557,7 +633,7 @@ impl NpcDialogHybrid {
         );
         let close_state = ButtonState::from_mouse(close_rect, mouse_pos);
         self.close_btn.draw(vec2(close_rect.x, close_rect.y), close_state);
-        if ButtonState::is_clicked(close_rect, mouse_pos) {
+        if input_enabled && ButtonState::is_clicked(close_rect, mouse_pos) {
             self.hide();
             return NpcDialogAction::Close;
         }
@@ -572,7 +648,7 @@ impl NpcDialogHybrid {
             );
             let up_state = ButtonState::from_mouse(up_rect, mouse_pos);
             self.up_btn.draw(vec2(up_rect.x, up_rect.y), up_state);
-            if ButtonState::is_clicked(up_rect, mouse_pos) {
+            if input_enabled && ButtonState::is_clicked(up_rect, mouse_pos) {
                 if self.index > 0 {
                     self.index -= 1;
                 }
@@ -586,7 +662,7 @@ impl NpcDialogHybrid {
             );
             let down_state = ButtonState::from_mouse(down_rect, mouse_pos);
             self.down_btn.draw(vec2(down_rect.x, down_rect.y), down_state);
-            if ButtonState::is_clicked(down_rect, mouse_pos) {
+            if input_enabled && ButtonState::is_clicked(down_rect, mouse_pos) {
                 if self.index + self.maximum_lines < self.lines.len() {
                     self.index += 1;
                 }
@@ -602,12 +678,15 @@ impl NpcDialogHybrid {
             );
 
             // 开始拖拽
-            if is_mouse_button_pressed(MouseButton::Left) && bar_rect.contains(mouse_pos) {
+            if input_enabled
+                && is_mouse_button_pressed(MouseButton::Left)
+                && bar_rect.contains(mouse_pos)
+            {
                 self.scroll_dragging = true;
                 self.scroll_drag_offset_y = mouse_pos.y - bar_rect.y;
             }
             // 结束拖拽
-            if self.scroll_dragging && !is_mouse_button_down(MouseButton::Left) {
+            if self.scroll_dragging && (!input_enabled || !is_mouse_button_down(MouseButton::Left)) {
                 self.scroll_dragging = false;
             }
 
@@ -654,7 +733,7 @@ impl NpcDialogHybrid {
                         draw_text_cn(&text, x, y + 14.0, Self::FONT_SIZE, color);
 
                         // 点击
-                        if hovered && is_mouse_button_pressed(MouseButton::Left) {
+                        if input_enabled && hovered && is_mouse_button_pressed(MouseButton::Left) {
                             action_clicked = Some(action.clone());
                         }
 
@@ -671,7 +750,7 @@ impl NpcDialogHybrid {
                         let hovered = span_rect.contains(mouse_pos);
                         let color = if hovered { RED } else { YELLOW };
                         draw_text_cn(&text, x, y + 14.0, Self::FONT_SIZE, color);
-                        if hovered && is_mouse_button_pressed(MouseButton::Left) {
+                        if input_enabled && hovered && is_mouse_button_pressed(MouseButton::Left) {
                             link_clicked = Some(url);
                         }
                         x += dims.width;
@@ -736,7 +815,7 @@ impl NpcDialogHybrid {
             let panel_rect = Rect::new(panel_x, panel_y, panel_w, panel_h);
 
             // big button 滚轮
-            if panel_rect.contains(mouse_pos) {
+            if input_enabled && panel_rect.contains(mouse_pos) {
                 let wheel = mouse_wheel().1;
                 if wheel != 0.0 {
                     let count = wheel.round() as i32;
@@ -762,7 +841,7 @@ impl NpcDialogHybrid {
                 );
                 let up_state = ButtonState::from_mouse(up_rect, mouse_pos);
                 self.up_btn.draw(vec2(up_rect.x, up_rect.y), up_state);
-                if ButtonState::is_clicked(up_rect, mouse_pos) {
+                if input_enabled && ButtonState::is_clicked(up_rect, mouse_pos) {
                     if self.big_scroll_offset > 0 {
                         self.big_scroll_offset -= 1;
                     }
@@ -776,7 +855,7 @@ impl NpcDialogHybrid {
                 );
                 let down_state = ButtonState::from_mouse(down_rect, mouse_pos);
                 self.down_btn.draw(vec2(down_rect.x, down_rect.y), down_state);
-                if ButtonState::is_clicked(down_rect, mouse_pos) {
+                if input_enabled && ButtonState::is_clicked(down_rect, mouse_pos) {
                     if self.big_scroll_offset + Self::BIG_MAX_ROWS < self.big_buttons.len() {
                         self.big_scroll_offset += 1;
                     }

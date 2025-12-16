@@ -27,6 +27,26 @@ pub struct SoundTrigger {
     pub looping: bool,
 }
 
+/// 临时音效发射器标记：用于一次性播放完即可销毁的实体。
+///
+/// 典型来源：服务器 PlaySound 包、UI 点击音效等。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OneShotSoundEmitter;
+
+/// 攻击音效已触发标记（用于按帧触发音效的去重）
+///
+/// 说明：AttackState 会在攻击结束时被移除；此标记也会同步移除。
+#[derive(Debug, Clone, Copy)]
+pub struct AttackSoundPlayed {
+    pub attack_start_time: std::time::Instant,
+}
+
+/// 挥砍/挥动音效已触发标记（用于怪物 SwingSound: base+4 的按帧触发去重）
+#[derive(Debug, Clone, Copy)]
+pub struct SwingSoundPlayed {
+    pub attack_start_time: std::time::Instant,
+}
+
 impl SoundTrigger {
     /// 创建一次性音效触发
     pub fn once(sound_file: impl Into<String>, sound_type: SoundType) -> Self {

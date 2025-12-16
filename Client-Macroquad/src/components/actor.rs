@@ -3,6 +3,8 @@
 // ============================================================================
 
 pub use mir2_shared::{MirClass, MirGender};
+pub use mir2_shared::{MirAction, MirDirection};
+use std::time::Instant;
 
 /// 怪物数据组件
 #[derive(Debug, Clone)]
@@ -132,8 +134,27 @@ impl NPC {
 pub struct Monster {
     pub name: String,
     pub monster_type: u16,
+    pub stage: u8,
     pub ai_state: MonsterAIState,
     pub target_id: Option<u32>,
+}
+
+/// 怪物动画状态（用于 LibrarySprite 动画与帧事件）
+#[derive(Debug, Clone, Copy)]
+pub struct MonsterAnimState {
+    pub direction: MirDirection,
+    pub action: MirAction,
+    pub start_time: Instant,
+}
+
+impl MonsterAnimState {
+    pub fn new(direction: MirDirection, action: MirAction) -> Self {
+        Self {
+            direction,
+            action,
+            start_time: Instant::now(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +171,7 @@ impl Monster {
         Self {
             name,
             monster_type,
+            stage: 0,
             ai_state: MonsterAIState::Idle,
             target_id: None,
         }

@@ -23,7 +23,8 @@ impl Default for NetworkApplySystem {
 impl NetworkApplySystem {
     fn apply_object_player(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectPlayer) {
         use crate::components::{
-            AnimationFrame, MountState, OtherPlayer, Player, PlayerAction, PlayerAppearance, Position, RemotePlayer,
+            AnimationFrame, MountState, MountStatus, OtherPlayer, Player, PlayerAction, PlayerAppearance, Position,
+            RemotePlayer,
         };
         use crate::components::network::{NetworkObjectType, NetworkSync};
 
@@ -63,6 +64,12 @@ impl NetworkApplySystem {
         let player = Player {
             direction: packet.direction,
             action: PlayerAction::Stand,
+        };
+
+        let mount_index_from_packet: Option<usize> = if packet.riding_mount && packet.mount_type >= 0 {
+            Some(packet.mount_type as usize)
+        } else {
+            None
         };
 
         if let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) {
@@ -129,16 +136,34 @@ impl NetworkApplySystem {
                 let _ = ctx.world.insert_one(e, AnimationFrame::default());
             }
 
-            // 坐骑：本需求明确“不要坐骑”，因此确保 mount_index 为空。
-            let mut has_mount = false;
+            // 坐骑：按服务器 ObjectPlayer 落地（用于行为对齐，如攻击音效选择）
+            let mut has_mount_state = false;
             {
                 if let Ok(mut m) = ctx.world.get::<&mut MountState>(e) {
-                    m.mount_index = None;
-                    has_mount = true;
+                    m.mount_index = mount_index_from_packet;
+                    has_mount_state = true;
                 }
             }
-            if !has_mount {
-                let _ = ctx.world.insert_one(e, MountState::default());
+            if !has_mount_state {
+                let _ = ctx.world.insert_one(e, MountState { mount_index: mount_index_from_packet });
+            }
+
+            let mut has_mount_status = false;
+            {
+                if let Ok(mut ms) = ctx.world.get::<&mut MountStatus>(e) {
+                    ms.mount_type = packet.mount_type;
+                    ms.riding_mount = packet.riding_mount;
+                    has_mount_status = true;
+                }
+            }
+            if !has_mount_status {
+                let _ = ctx.world.insert_one(
+                    e,
+                    MountStatus {
+                        mount_type: packet.mount_type,
+                        riding_mount: packet.riding_mount,
+                    },
+                );
             }
 
             // 基本身份信息（未来做名字/血条会用到）
@@ -174,8 +199,11 @@ impl NetworkApplySystem {
                 Position::new(wx, wy),
                 appearance,
                 AnimationFrame::default(),
-                // 明确不要坐骑：default 即 None
-                MountState::default(),
+                MountState { mount_index: mount_index_from_packet },
+                MountStatus {
+                    mount_type: packet.mount_type,
+                    riding_mount: packet.riding_mount,
+                },
                 OtherPlayer::new(packet.name, packet.class, packet.gender, packet.level),
             ));
         }
@@ -215,6 +243,7 @@ impl NetworkApplySystem {
                 // - MountStateSyncSystem 需要 Equipment + MountState
                 Equipment::default(),
                 crate::components::MountState::default(),
+                crate::components::MountStatus::default(),
             )),
         };
 
@@ -766,6 +795,8 @@ impl NetworkApplySystem {
 
     fn apply_object_monster(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectMonster) {
         use crate::components::network::NetworkObjectType;
+        use crate::components::{MirAction, MonsterAnimState, SoundTrigger, SoundType};
+        use std::time::Instant;
 
         // C# 对应：Libraries.Monsters[(ushort)MonsterEnum]
         // 这里 image 直接对应 Monster/XYZ 的库索引（XYZ 三位数）
@@ -785,14 +816,50 @@ impl NetworkApplySystem {
         // 同步怪物名称（用于悬停/调试 overlay，避免“只有贴图没有名字”）
         if let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) {
             // 先插入；若已存在则更新
-            if ctx
+            let inserted_monster_component = ctx
                 .world
                 .insert_one(e, crate::components::Monster::new(packet.name.clone(), packet.image))
-                .is_err()
-            {
+                .is_ok();
+            if !inserted_monster_component {
                 if let Ok(mut m) = ctx.world.get::<&mut crate::components::Monster>(e) {
                     m.name = packet.name.clone();
                     m.monster_type = packet.image;
+                    m.stage = packet.extra_byte;
+                }
+            } else {
+                if let Ok(mut m) = ctx.world.get::<&mut crate::components::Monster>(e) {
+                    m.stage = packet.extra_byte;
+                }
+            }
+
+            // 原版：怪物出现音效 BaseSound + 0（规则 0=Appear）
+            // 这里用“首次插入 Monster 组件”近似判断首次出现。
+            if inserted_monster_component {
+                let base_sound = packet.image * 10;
+                let _ = ctx.world.insert_one(
+                    e,
+                    SoundTrigger::once(base_sound.to_string(), SoundType::CharacterAction),
+                );
+            }
+
+            // 动画状态：方向来自包；初始动作为 Standing/Dead（最小集）
+            let initial_action = if packet.dead { MirAction::Dead } else { MirAction::Standing };
+            if ctx
+                .world
+                .insert_one(
+                    e,
+                    MonsterAnimState {
+                        direction: packet.direction,
+                        action: initial_action,
+                        start_time: Instant::now(),
+                    },
+                )
+                .is_err()
+            {
+                if let Ok(mut s) = ctx.world.get::<&mut MonsterAnimState>(e) {
+                    s.direction = packet.direction;
+                    s.action = initial_action;
+                    s.start_time = Instant::now();
                 }
             }
 
@@ -870,7 +937,8 @@ impl NetworkApplySystem {
     }
 
     fn apply_object_turn(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectTurn) {
-        use crate::components::Player;
+        use crate::components::{MonsterAnimState, Player};
+        use std::time::Instant;
 
         Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
         let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
@@ -880,10 +948,33 @@ impl NetworkApplySystem {
         if let Ok(mut p) = ctx.world.get::<&mut Player>(e) {
             p.direction = packet.direction;
         }
+
+        // Monster：仅更新方向
+        let is_monster = ctx.world.get::<&crate::components::Monster>(e).is_ok();
+        if is_monster {
+            if ctx
+                .world
+                .insert_one(
+                    e,
+                    MonsterAnimState {
+                        direction: packet.direction,
+                        action: crate::components::MirAction::Standing,
+                        start_time: Instant::now(),
+                    },
+                )
+                .is_err()
+            {
+                if let Ok(mut s) = ctx.world.get::<&mut MonsterAnimState>(e) {
+                    s.direction = packet.direction;
+                    // 仅转向不重置 start_time，避免站立动画跳帧
+                }
+            }
+        }
     }
 
     fn apply_object_walk(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectWalk) {
-        use crate::components::{LocalPlayer, Player, PlayerAction, Position, PositionInterpolation};
+        use crate::components::{LocalPlayer, MonsterAnimState, Player, PlayerAction, Position, PositionInterpolation};
+        use std::time::Instant;
 
         let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
             return;
@@ -935,10 +1026,34 @@ impl NetworkApplySystem {
             p.direction = packet.direction;
             p.action = PlayerAction::Walk;
         }
+
+        // Monster：走路动作
+        if ctx.world.get::<&crate::components::Monster>(e).is_ok() {
+            if ctx
+                .world
+                .insert_one(
+                    e,
+                    MonsterAnimState {
+                        direction: packet.direction,
+                        action: crate::components::MirAction::Walking,
+                        start_time: Instant::now(),
+                    },
+                )
+                .is_err()
+            {
+                if let Ok(mut s) = ctx.world.get::<&mut MonsterAnimState>(e) {
+                    s.direction = packet.direction;
+                    s.action = crate::components::MirAction::Walking;
+                    s.start_time = Instant::now();
+                }
+            }
+        }
     }
 
     fn apply_object_run(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectRun) {
         use crate::components::{LocalPlayer, Player, PlayerAction, Position, PositionInterpolation};
+        use crate::components::MonsterAnimState;
+        use std::time::Instant;
 
         let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
             return;
@@ -986,10 +1101,32 @@ impl NetworkApplySystem {
             p.direction = packet.direction;
             p.action = PlayerAction::Run;
         }
+
+        // Monster：默认复用 Walking（DefaultMonster 没有 Running）
+        if ctx.world.get::<&crate::components::Monster>(e).is_ok() {
+            if ctx
+                .world
+                .insert_one(
+                    e,
+                    MonsterAnimState {
+                        direction: packet.direction,
+                        action: crate::components::MirAction::Walking,
+                        start_time: Instant::now(),
+                    },
+                )
+                .is_err()
+            {
+                if let Ok(mut s) = ctx.world.get::<&mut MonsterAnimState>(e) {
+                    s.direction = packet.direction;
+                    s.action = crate::components::MirAction::Walking;
+                    s.start_time = Instant::now();
+                }
+            }
+        }
     }
 
     fn apply_object_attack(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectAttack) {
-        use crate::components::{AttackState, Player, PlayerAction};
+        use crate::components::{AttackState, LocalPlayer, MirAction, Monster, MonsterAnimState, Player, PlayerAction};
         use std::time::Instant;
 
         Self::apply_object_move(ctx, packet.object_id, packet.location_x as i32, packet.location_y as i32);
@@ -1013,15 +1150,81 @@ impl NetworkApplySystem {
             p.action = attack_action;
         }
 
-        if ctx.world.get::<&AttackState>(e).is_err() {
+        let is_local = ctx.world.get::<&LocalPlayer>(e).is_ok();
+        let mut need_insert_attack_state = true;
+        {
+            if let Ok(mut s) = ctx.world.get::<&mut AttackState>(e) {
+                need_insert_attack_state = false;
+                // 远程对象：每次攻击包都应重置攻击起点（否则动画/音效只能触发一次）
+                if !is_local {
+                    s.start_time = Instant::now();
+                    s.attack_type = attack_action;
+                    s.server_attack_type = packet.attack_type;
+                }
+            }
+        }
+
+        if need_insert_attack_state {
             let _ = ctx.world.insert_one(
                 e,
                 AttackState {
                     start_time: Instant::now(),
                     attack_type: attack_action,
+                    server_attack_type: packet.attack_type,
                 },
             );
         }
+
+        // Monster：进入攻击动作（用于动画帧与帧事件/音效规则）
+        if ctx.world.get::<&Monster>(e).is_ok() {
+            // 与 AttackState 对齐：若远程更新了 start_time，这里用当前值；否则用 now
+            let start_time = ctx
+                .world
+                .get::<&AttackState>(e)
+                .ok()
+                .map(|s| s.start_time)
+                .unwrap_or_else(Instant::now);
+
+            // 对齐原版：spell!=0 通常代表远程/技能攻击（AttackRange*）
+            let is_ranged = packet.spell != 0;
+
+            let action = if is_ranged {
+                match packet.attack_type {
+                    1 => MirAction::AttackRange2,
+                    2 => MirAction::AttackRange3,
+                    _ => MirAction::AttackRange1,
+                }
+            } else {
+                match packet.attack_type {
+                    1 => MirAction::Attack2,
+                    2 => MirAction::Attack3,
+                    3 => MirAction::Attack4,
+                    4 => MirAction::Attack5,
+                    _ => MirAction::Attack1,
+                }
+            };
+
+            if ctx
+                .world
+                .insert_one(
+                    e,
+                    MonsterAnimState {
+                        direction: dir,
+                        action,
+                        start_time,
+                    },
+                )
+                .is_err()
+            {
+                if let Ok(mut s) = ctx.world.get::<&mut MonsterAnimState>(e) {
+                    s.direction = dir;
+                    s.action = action;
+                    s.start_time = start_time;
+                }
+            }
+        }
+
+        // ===== 音效：攻击音效改为由 AnimationSystem 按“动作起始帧”触发（更贴近 C#：SetAction 时播放）
     }
 }
 
@@ -1058,8 +1261,12 @@ impl LogicSystem for NetworkApplySystem {
 
         // combat feedback
         let mut player_health_changed: Option<(u32, u32)> = None;
-        let mut object_struck: Vec<(u32, i32)> = Vec::new();
+        let mut object_struck: Vec<(u32, u32, i32)> = Vec::new();
         let mut object_died: Vec<u32> = Vec::new();
+
+        // UI / presentation feedback
+        let mut play_sounds: Vec<i32> = Vec::new();
+        let mut mount_updates: Vec<(u32, i16, bool)> = Vec::new();
 
         for event in ctx.events().network_events() {
             match event {
@@ -1139,12 +1346,26 @@ impl LogicSystem for NetworkApplySystem {
                     player_health_changed = Some((*current, *max));
                 }
                 NetworkEvent::ObjectStruck {
-                    object_id, damage, ..
+                    object_id,
+                    attacker_id,
+                    damage,
+                    ..
                 } => {
-                    object_struck.push((*object_id, *damage));
+                    object_struck.push((*object_id, *attacker_id, *damage));
                 }
                 NetworkEvent::ObjectDied { object_id } => {
                     object_died.push(*object_id);
+                }
+
+                NetworkEvent::PlaySound { sound_id } => {
+                    play_sounds.push(*sound_id);
+                }
+                NetworkEvent::MountUpdated {
+                    object_id,
+                    mount_type,
+                    riding_mount,
+                } => {
+                    mount_updates.push((*object_id, *mount_type, *riding_mount));
                 }
                 _ => {}
             }
@@ -1167,6 +1388,22 @@ impl LogicSystem for NetworkApplySystem {
 
         if let Some(packet) = map_changed {
             Self::apply_map_changed(ctx, packet);
+        }
+
+        // ===== server-driven: 播放声音（无位置，按全局/系统音效处理） =====
+        // 说明：
+        // - 服务器包只携带 sound_id；文件名由 SoundList.lst 映射。
+        // - 同一帧可能收到多个 PlaySound；因此这里为每个声音创建一个临时实体。
+        // - SoundSystem 播放完成后会自动 despawn 带 OneShotSoundEmitter 的实体，避免堆积。
+        if !play_sounds.is_empty() {
+            use crate::components::{OneShotSoundEmitter, SoundTrigger, SoundType};
+            for id in play_sounds {
+                let e = ctx.world.spawn((
+                    OneShotSoundEmitter,
+                    SoundTrigger::once(id.to_string(), SoundType::System),
+                ));
+                let _ = e;
+            }
         }
 
         // server-driven objects
@@ -1202,6 +1439,74 @@ impl LogicSystem for NetworkApplySystem {
             let mut q = ctx.world.query::<&LocalPlayer>();
             q.iter().next().map(|(e, _)| e)
         };
+
+        // 坐骑更新：按 object_id 落地（本地玩家没有 NetworkSync，因此需要用 PlayerData.id 匹配）
+        if !mount_updates.is_empty() {
+            use crate::components::{MountState, MountStatus, PlayerData, SoundTrigger, SoundType};
+
+            for (object_id, mount_type, riding_mount) in mount_updates {
+                let target_entity =
+                    if let Some(e) = Self::find_entity_by_object_id(ctx, object_id) {
+                        Some(e)
+                    } else {
+                        // local player path: match by PlayerData.id
+                        let mut q = ctx.world.query::<(&crate::components::LocalPlayer, &PlayerData)>();
+                        q.iter()
+                            .find(|(_, (_lp, pd))| pd.id == object_id)
+                            .map(|(e, _)| e)
+                    };
+
+                let Some(e) = target_entity else { continue; };
+
+                // capture previous mount status to decide whether to play mount sound
+                let prev = ctx.world.get::<&MountStatus>(e).ok().map(|r| *r);
+
+                // upsert MountStatus
+                let mut inserted = false;
+                {
+                    if let Ok(mut ms) = ctx.world.get::<&mut MountStatus>(e) {
+                        ms.mount_type = mount_type;
+                        ms.riding_mount = riding_mount;
+                        inserted = true;
+                    }
+                }
+                if !inserted {
+                    let _ = ctx.world.insert_one(
+                        e,
+                        MountStatus {
+                            mount_type,
+                            riding_mount,
+                        },
+                    );
+                }
+
+                // best-effort MountState sync for rendering/animation switching
+                if let Ok(mut m) = ctx.world.get::<&mut MountState>(e) {
+                    m.mount_index = if riding_mount && mount_type >= 0 {
+                        Some(mount_type as usize)
+                    } else {
+                        None
+                    };
+                }
+
+                // PlayMountSound() 对齐：MountUpdate 时播放一次
+                let changed = prev.map(|p| (p.mount_type, p.riding_mount))
+                    != Some((mount_type, riding_mount));
+                if changed && mount_type >= 0 {
+                    let sound_id: Option<i32> = if riding_mount {
+                        if mount_type < 7 { Some(10218) } else if mount_type < 12 { Some(10188) } else { None }
+                    } else {
+                        if mount_type < 7 { Some(10219) } else if mount_type < 12 { Some(10189) } else { None }
+                    };
+                    if let Some(id) = sound_id {
+                        let _ = ctx.world.insert_one(
+                            e,
+                            SoundTrigger::once(id.to_string(), SoundType::CharacterAction),
+                        );
+                    }
+                }
+            }
+        }
 
         if let Some(e) = local_player_entity {
             // 血量同步（来自服务器；优先于本地推断）
@@ -1318,10 +1623,87 @@ impl LogicSystem for NetworkApplySystem {
 
         // ===== server-driven: combat落地到对象（怪物/其他对象） =====
         // ObjectStruck: 最小可见闭环：扣血 + 飘字（用于 mock / 真实服都可用）。
-        for (object_id, damage) in object_struck {
+        for (object_id, attacker_id, damage) in object_struck {
             let Some(target) = Self::find_entity_by_object_id(ctx, object_id) else {
                 continue;
             };
+
+            // ===== 音效：受击（对齐原版） =====
+            // - 怪物：BaseSound + 2 (Flinch)
+            // - 玩家：PlayStruckSound（骑乘/护甲 add/按攻击者武器）
+            {
+                use crate::components::{Monster, MountStatus, PlayerAppearance, SoundTrigger, SoundType};
+
+                // helper: attacker weapon shape (unknown => -1)
+                let struck_weapon: i16 = Self::find_entity_by_object_id(ctx, attacker_id)
+                    .and_then(|att| ctx.world.get::<&PlayerAppearance>(att).ok().map(|a| a.weapon))
+                    .unwrap_or(-1);
+
+                let monster_type = ctx.world.get::<&Monster>(target).ok().map(|m| m.monster_type);
+                if let Some(monster_type) = monster_type {
+                    let base = monster_type * 10;
+                    let _ = ctx.world.insert_one(
+                        target,
+                        SoundTrigger::once((base + 2).to_string(), SoundType::CharacterAction),
+                    );
+
+                    // 动画：怪物受击动作
+                    if let Ok(mut s) = ctx.world.get::<&mut crate::components::MonsterAnimState>(target) {
+                        s.action = crate::components::MirAction::Struck;
+                        s.start_time = std::time::Instant::now();
+                    }
+                } else if let Some((victim_class, victim_armour)) = ctx
+                    .world
+                    .get::<&PlayerAppearance>(target)
+                    .ok()
+                    .map(|a| (a.class, a.armour))
+                {
+                    // riding mount struck sounds
+                    let mount_status = ctx.world.get::<&MountStatus>(target).ok().map(|r| *r);
+                    let is_riding = mount_status.map(|ms| ms.riding_mount).unwrap_or(false);
+                    let mount_type = mount_status.map(|ms| ms.mount_type).unwrap_or(-1);
+
+                    let mut sound_id: Option<i32> = None;
+                    if is_riding {
+                        use rand::Rng;
+                        let mut rng = rand::rng();
+                        if mount_type < 7 {
+                            sound_id = Some(rng.random_range(10179..=10180));
+                        } else if mount_type < 12 {
+                            sound_id = Some(10193);
+                        }
+                    } else {
+                        let mut add: i32 = 0;
+                        if victim_class != crate::components::MirClass::Assassin {
+                            match victim_armour {
+                                3 | 6 | 9 => add = 10,
+                                _ => {}
+                            }
+                        }
+
+                        let base = match struck_weapon {
+                            // sword-ish groups
+                            0 | 23 | 1 | 12 | 28 | 40
+                            | 2 | 8 | 11 | 15 | 18 | 20 | 25 | 31 | 33 | 34 | 37 | 41
+                            | 3 | 5 | 7 | 9 | 13 | 19 | 24 | 26 | 29 | 32 | 35 => 10070,
+                            // axe
+                            4 | 14 | 16 | 38 => 10071,
+                            // long stick / club
+                            6 | 10 | 17 | 22 | 27 | 30 | 36 | 39 | 21 => 10072,
+                            // fist / unknown
+                            _ => 10073,
+                        };
+                        sound_id = Some(base + add);
+                    }
+
+                    if let Some(id) = sound_id {
+                        let _ = ctx.world.insert_one(
+                            target,
+                            SoundTrigger::once(id.to_string(), SoundType::CharacterAction),
+                        );
+                    }
+                }
+            }
 
             // 更新 Health（若无则创建一个默认血池，便于测试可见）
             let (spawn_x, spawn_y) = {
@@ -1364,6 +1746,39 @@ impl LogicSystem for NetworkApplySystem {
             if let Some(target) = Self::find_entity_by_object_id(ctx, object_id) {
                 if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(target) {
                     hp.current = 0;
+                }
+
+                // ===== 音效：死亡 =====
+                {
+                    use crate::components::{MirGender, Monster, PlayerAppearance, SoundTrigger, SoundType};
+                    let monster_type = ctx.world.get::<&Monster>(target).ok().map(|m| m.monster_type);
+                    if let Some(monster_type) = monster_type {
+                        let base = monster_type * 10;
+                        let _ = ctx.world.insert_one(
+                            target,
+                            SoundTrigger::once((base + 3).to_string(), SoundType::CharacterAction),
+                        );
+
+                        // 动画：怪物死亡动作
+                        if let Ok(mut s) = ctx.world.get::<&mut crate::components::MonsterAnimState>(target) {
+                            s.action = crate::components::MirAction::Die;
+                            s.start_time = std::time::Instant::now();
+                        }
+                    } else if let Some(gender) = ctx
+                        .world
+                        .get::<&PlayerAppearance>(target)
+                        .ok()
+                        .map(|a| a.gender)
+                    {
+                        let id = match gender {
+                            MirGender::Male => 10144,
+                            _ => 10145,
+                        };
+                        let _ = ctx.world.insert_one(
+                            target,
+                            SoundTrigger::once(id.to_string(), SoundType::CharacterAction),
+                        );
+                    }
                 }
             }
         }

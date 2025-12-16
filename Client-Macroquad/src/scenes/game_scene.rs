@@ -41,6 +41,13 @@ pub struct GameScene {
 }
 
 impl GameScene {
+    /// 调试/验证入口：允许外部（例如 `test_game_scene`）直接操作 ECS 世界。
+    ///
+    /// 目的：做最小的“可视化验证器”（刷怪、切换 direction/stage），不引入额外 UI 面板。
+    pub fn debug_ecs_ctx_mut(&mut self) -> &mut GameContext {
+        &mut self.ecs_ctx
+    }
+
     fn is_resources_initialized(&self) -> bool {
         let Some(pass_entity) = self.ecs_render_pass_entity else {
             return false;
@@ -113,6 +120,10 @@ impl GameScene {
             .add_system(MountStateSyncSystem::new(), priority::MOUNT_STATE_SYNC)
             .add_system(AnimationSystem::new(), priority::ANIMATION)
             .add_system(crate::systems::ParticleSystem, priority::PARTICLE)
+            .add_system(
+                crate::systems::presentation::SoundSystem::default(),
+                priority::SOUND,
+            )
             .add_system(
                 crate::systems::FloatingTextSystem::default(),
                 priority::PARTICLE,

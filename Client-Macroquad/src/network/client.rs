@@ -453,7 +453,6 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::MarriageRequest as u16
             || x == SP::DivorceRequest as u16
             || x == SP::MentorRequest as u16
-            || x == SP::MountUpdate as u16
             || x == SP::FishingUpdate as u16
             || x == SP::CancelReincarnation as u16
             || x == SP::RequestReincarnation as u16
@@ -499,7 +498,6 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::ConfirmItemRental as u16
             || x == SP::NewRecipeInfo as u16
             || x == SP::OpenBrowser as u16
-            || x == SP::PlaySound as u16
             || x == SP::SetTimer as u16
             || x == SP::ExpireTimer as u16
             || x == SP::UpdateNotice as u16
@@ -511,6 +509,11 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             vec![NetworkEvent::UnhandledPacket {
                 opcode: header.opcode,
             }]
+        }
+
+        // ===== UI / 表现层事件 =====
+        x if x == SP::PlaySound as u16 || x == SP::MountUpdate as u16 => {
+            UiEventsHandler.handle(header, payload)
         }
 
         // 完全未知的 packet

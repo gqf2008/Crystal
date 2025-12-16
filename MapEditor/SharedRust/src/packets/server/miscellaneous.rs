@@ -128,7 +128,9 @@ impl Packet for RequestReincarnation {
 /// MountUpdate - 坐骑更新 (196)
 #[derive(Debug, Clone)]
 pub struct MountUpdate {
-    pub mount_type: i32,            // 坐骑类型
+    pub object_id: u32,
+    pub mount_type: i16,            // 坐骑类型
+    pub riding_mount: bool,
 }
 
 impl Packet for MountUpdate {
@@ -136,13 +138,21 @@ impl Packet for MountUpdate {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        writer.write_i32::<LittleEndian>(self.mount_type)?;
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        writer.write_i16::<LittleEndian>(self.mount_type)?;
+        writer.write_u8(self.riding_mount as u8)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let mount_type = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { mount_type })
+        let object_id = reader.read_u32::<LittleEndian>()?;
+        let mount_type = reader.read_i16::<LittleEndian>()?;
+        let riding_mount = reader.read_u8()? != 0;
+        Ok(Self {
+            object_id,
+            mount_type,
+            riding_mount,
+        })
     }
 }
 
