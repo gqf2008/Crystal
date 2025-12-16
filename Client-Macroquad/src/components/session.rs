@@ -51,6 +51,16 @@ pub struct SessionState {
 
 impl Default for SessionState {
     fn default() -> Self {
+        let env_truthy = |key: &str| -> bool {
+            std::env::var(key)
+                .ok()
+                .map(|v| {
+                    let v = v.trim().to_ascii_lowercase();
+                    v == "1" || v == "true" || v == "yes" || v == "on"
+                })
+                .unwrap_or(false)
+        };
+
         Self {
             start_game_delay_ms: None,
             start_game_banned: None,
@@ -61,7 +71,10 @@ impl Default for SessionState {
             server_authoritative_combat: false,
 
             // 默认手动控制；F8 可切到“挂机/自动战斗(AT/BT)”模式。
-            local_player_ai_enabled: false,
+            // 若需要录制/调试 AI，可用环境变量自动开启：
+            // - CRYSTAL_AI_AUTO=1
+            // - 或 CRYSTAL_AI_LOG=1（通常配合日志一起用）
+            local_player_ai_enabled: env_truthy("CRYSTAL_AI_AUTO") || env_truthy("CRYSTAL_AI_LOG"),
 
             // 默认值与当前手感保持一致
             remote_player_walk_interp_secs: 0.16,

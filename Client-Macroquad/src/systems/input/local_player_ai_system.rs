@@ -11,12 +11,13 @@
 //
 
 use std::collections::HashSet;
+use std::env;
 use std::time::{Duration, Instant};
 
 use macroquad::prelude::KeyCode;
 
 use crate::{
-    components::{LocalPlayer, Monster, PlayerInput, Position, MovementMode},
+    components::{Health, LocalPlayer, Monster, PlayerInput, Position, MovementMode},
     coord::Coord,
     game::{GameContext, GameResult},
     systems::LogicSystem,
@@ -197,6 +198,10 @@ pub struct LocalPlayerAiSystem {
 
     bt: BehaviorTree,
     bb: Blackboard,
+
+    debug_enabled: bool,
+    last_debug_log: Instant,
+    debug_interval: Duration,
 }
 
 impl Default for LocalPlayerAiSystem {
@@ -245,6 +250,14 @@ impl Default for LocalPlayerAiSystem {
 
         let bt = BehaviorTree { nodes, root };
 
+        let debug_enabled = env::var("CRYSTAL_AI_LOG")
+            .ok()
+            .map(|v| {
+                let v = v.trim().to_ascii_lowercase();
+                v == "1" || v == "true" || v == "yes" || v == "on"
+            })
+            .unwrap_or(false);
+
         Self {
             last_scan: Instant::now(),
             scan_interval: Duration::from_millis(160),
@@ -259,6 +272,10 @@ impl Default for LocalPlayerAiSystem {
 
             bt,
             bb: Blackboard::default(),
+
+            debug_enabled,
+            last_debug_log: Instant::now(),
+            debug_interval: Duration::from_millis(1000),
         }
     }
 }
@@ -280,7 +297,19 @@ impl LocalPlayerAiSystem {
     }
 
     fn target_is_valid(ctx: &GameContext, target: hecs::Entity) -> bool {
-        ctx.world.get::<&Monster>(target).is_ok() && ctx.world.get::<&Position>(target).is_ok()
+        if ctx.world.get::<&Monster>(target).is_err() {
+            return false;
+        }
+        if ctx.world.get::<&Position>(target).is_err() {
+            return false;
+        }
+        // 不要锁定已死亡目标（HP=0 的怪）
+        if let Ok(hp) = ctx.world.get::<&Health>(target) {
+            if hp.current <= 0 {
+                return false;
+            }
+        }
+        true
     }
 
     fn acquire_nearest_monster(
@@ -290,7 +319,10 @@ impl LocalPlayerAiSystem {
     ) -> Option<hecs::Entity> {
         let mut best: Option<(hecs::Entity, i32)> = None;
 
-        for (e, (_m, pos)) in ctx.world.query::<(&Monster, &Position)>().iter() {
+        for (e, (_m, pos, hp)) in ctx.world.query::<(&Monster, &Position, &Health)>().iter() {
+            if hp.current <= 0 {
+                continue;
+            }
             let (mgx, mgy) = Coord::world_to_grid(pos.x, pos.y);
             let dx = (mgx - player_grid.0).abs();
             let dy = (mgy - player_grid.1).abs();
@@ -403,6 +435,11 @@ impl LocalPlayerAiSystem {
             bb.stuck = false;
             bb.target_entity = None;
             bb.target_grid = None;
+
+            if self.debug_enabled && bb.now.duration_since(self.last_debug_log) >= self.debug_interval {
+                self.last_debug_log = bb.now;
+                eprintln!("[AI] no local player snapshot (need LocalPlayer+Position+PlayerInput)");
+            }
             return BtStatus::Failure;
         };
 
@@ -441,6 +478,9 @@ impl LocalPlayerAiSystem {
             return BtStatus::Failure;
         };
 
+        let prev_target = bb.target_entity;
+        let mut did_scan = false;
+
         // 校验现有目标
         let mut target = bb
             .target_entity
@@ -463,9 +503,14 @@ impl LocalPlayerAiSystem {
         }
 
         // 节流重搜
-        if target.is_none() && bb.now.duration_since(self.last_scan) >= self.scan_interval {
+        // 关键修复：即使已有旧目标，也要定期按“玩家当前坐标周边”重新评估最近怪。
+        // 否则玩家移动到别处后，AI 可能会一直追着出生点附近的旧目标不放。
+        if bb.now.duration_since(self.last_scan) >= self.scan_interval {
             self.last_scan = bb.now;
-            target = Self::acquire_nearest_monster(ctx, player_grid, self.max_acquire_range);
+            did_scan = true;
+            if let Some(candidate) = Self::acquire_nearest_monster(ctx, player_grid, self.max_acquire_range) {
+                target = Some(candidate);
+            }
         }
 
         bb.target_entity = target;
@@ -481,12 +526,43 @@ impl LocalPlayerAiSystem {
                 input.attack_target = Some(t);
             }
 
+            if self.debug_enabled && bb.now.duration_since(self.last_debug_log) >= self.debug_interval {
+                self.last_debug_log = bb.now;
+                let changed = prev_target != bb.target_entity;
+                let tg = bb.target_grid;
+                eprintln!(
+                    "[AI] pg={:?} target={:?} tg={:?} scan={} changed={} has_move_goal={} stuck={} repath={} max_range={}",
+                    Some(player_grid),
+                    bb.target_entity,
+                    tg,
+                    did_scan,
+                    changed,
+                    bb.player_has_move_goal,
+                    bb.stuck,
+                    self.repath_attempt,
+                    self.max_acquire_range,
+                );
+            }
+
             return BtStatus::Success;
         }
 
         // 没怪：只清攻击目标，不打断已有移动
         if let Ok(mut input) = ctx.world.get::<&mut PlayerInput>(player_entity) {
             input.attack_target = None;
+        }
+
+        if self.debug_enabled && bb.now.duration_since(self.last_debug_log) >= self.debug_interval {
+            self.last_debug_log = bb.now;
+            eprintln!(
+                "[AI] pg={:?} target=None scan={} has_move_goal={} stuck={} repath={} max_range={}",
+                Some(player_grid),
+                did_scan,
+                bb.player_has_move_goal,
+                bb.stuck,
+                self.repath_attempt,
+                self.max_acquire_range,
+            );
         }
         BtStatus::Failure
     }
@@ -540,13 +616,34 @@ impl LocalPlayerAiSystem {
             None
         };
         let occupied = Self::occupied_tiles(ctx, player_entity, target_entity);
-        let (agx, agy) = Self::choose_melee_goal(
-            player_grid,
-            target_grid,
-            &occupied,
-            self.repath_attempt,
-            avoid_goal,
-        );
+
+        // 关键修复：近战落脚点必须是“可走格子”。
+        // 否则 Pathfinding 会一直想走进墙里 -> 表现为“原地跑路/卡住”。
+        let mut chosen: Option<(i32, i32)> = None;
+        for j in 0..8_u32 {
+            let (agx, agy) = Self::choose_melee_goal(
+                player_grid,
+                target_grid,
+                &occupied,
+                self.repath_attempt.wrapping_add(j),
+                avoid_goal,
+            );
+            if Self::is_walkable_grid(ctx, agx, agy) {
+                chosen = Some((agx, agy));
+                break;
+            }
+        }
+
+        let Some((agx, agy)) = chosen else {
+            // 找不到可落脚点：停下，下一帧再重试/重搜
+            if let Ok(mut input) = ctx.world.get::<&mut PlayerInput>(player_entity) {
+                input.move_to = None;
+                input.movement_mode = MovementMode::None;
+                input.run = false;
+            }
+            return BtStatus::Failure;
+        };
+
         self.last_melee_goal = Some((agx, agy));
         let (awx, awy) = Coord::grid_to_world_center(agx, agy);
 
@@ -560,6 +657,25 @@ impl LocalPlayerAiSystem {
 
         BtStatus::Running
     }
+
+    fn is_walkable_grid(ctx: &GameContext, gx: i32, gy: i32) -> bool {
+        if gx < 0 || gy < 0 {
+            return false;
+        }
+        let mut q = ctx.world.query::<&crate::components::MapData>();
+        let Some((_, map)) = q.iter().next() else {
+            // 没地图数据时退化为“允许”，避免 AI 完全停摆
+            return true;
+        };
+        if gx >= map.width || gy >= map.height {
+            return false;
+        }
+        map.cells
+            .get(gx as usize)
+            .and_then(|col| col.get(gy as usize))
+            .map(|c| c.is_walkable())
+            .unwrap_or(false)
+    }
 }
 
 impl LogicSystem for LocalPlayerAiSystem {
@@ -570,7 +686,7 @@ impl LogicSystem for LocalPlayerAiSystem {
             ctx.session.local_player_ai_enabled = !ctx.session.local_player_ai_enabled;
 
             // 模式切换：无论开/关，都清理上一种控制模式残留的意图，避免“切了还在走/追砍”。
-            for (_e, (_local, input, path)) in ctx
+            for (e, (_local, input, path)) in ctx
                 .world
                 .query_mut::<(
                     &LocalPlayer,
@@ -584,6 +700,18 @@ impl LogicSystem for LocalPlayerAiSystem {
                 input.movement_mode = MovementMode::None;
                 input.run = false;
                 path.clear();
+
+                // 同时停掉速度/动作，避免“关了 AI 还在原地跑步动画”。
+                if let Ok(mut mv) = ctx.world.get::<&mut crate::components::MovementVelocity>(e) {
+                    mv.stop();
+                }
+                if let Ok(mut m) = ctx.world.get::<&mut crate::components::Movement>(e) {
+                    m.set_state(crate::components::MovementState::Idle);
+                }
+                if let Ok(mut p) = ctx.world.get::<&mut crate::components::Player>(e) {
+                    p.action = crate::components::PlayerAction::Stand;
+                }
+                let _ = ctx.world.remove_one::<crate::components::AttackState>(e);
                 break;
             }
 

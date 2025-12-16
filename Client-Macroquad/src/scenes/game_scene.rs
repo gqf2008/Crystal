@@ -117,6 +117,10 @@ impl GameScene {
                 crate::systems::PositionInterpolationSystem::default(),
                 priority::REMOTE_INTERPOLATION,
             )
+            .add_system(
+                crate::systems::LifetimeCleanupSystem::default(),
+                priority::LIFETIME_CLEANUP,
+            )
             .add_system(MountStateSyncSystem::new(), priority::MOUNT_STATE_SYNC)
             .add_system(AnimationSystem::new(), priority::ANIMATION)
             .add_system(

@@ -91,6 +91,9 @@ pub mod priority {
     /// 远程玩家/对象位置插值（消除“瞬移感”）
     pub const REMOTE_INTERPOLATION: u32 = 585;
 
+    /// 基于 Lifetime 组件的实体清理（死亡尸体/特效等）
+    pub const LIFETIME_CLEANUP: u32 = 598;
+
     // 第3层：表现层(600-899)
     // ├── 动画特效: AnimationSystem → ParticleSystem → WeatherSystem
     // ├── 音效系统: SoundSystem → VoiceChatSystem
@@ -161,6 +164,7 @@ pub use infra::MapBootstrapSystem;
 pub use logic::combat::{
     CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem,
 };
+pub use logic::lifetime_cleanup_system::LifetimeCleanupSystem;
 pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
 pub use logic::physics::{CollisionSystem, MapLoadSystem, MapManager, MovementSystem, PathfindingSystem};
 pub use presentation::{

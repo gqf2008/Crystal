@@ -67,3 +67,12 @@ impl NetworkContext {
         Self { connected: false }
     }
 }
+
+/// 客户端本地对象标记（不会由服务器/MockServer 同步驱动）。
+///
+/// 用途：
+/// - `test_game_scene` 里本地批量刷新的怪物并不在服务器对象表中，
+///   因此不会收到 ObjectStruck/HealthChanged。
+/// - 为了让“怪物头顶血条”能随攻击掉血，本地战斗系统可对带该标记的目标直接扣血。
+#[derive(Debug, Clone, Copy)]
+pub struct ClientOnly;

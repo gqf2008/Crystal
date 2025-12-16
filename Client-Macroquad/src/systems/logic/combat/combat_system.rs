@@ -24,9 +24,10 @@
 use hecs::{Entity, World};
 use crate::game::GameContext;
 use crate::components::{
-    LocalPlayer, Position, Health, Monster, NetworkSync, CombatStats, NetworkObjectType,
+    ClientOnly, LocalPlayer, Position, Health, Monster, NetworkSync, CombatStats, NetworkObjectType,
     MountState, MountStatus, MirClass, PlayerAppearance, SoundTrigger, SoundType,
 };
+use crate::components::network::Lifetime;
 use crate::network::handlers::NetworkEvent as NetworkCommand;
 use mir2_shared::enums::MirDirection;
 use crate::game::GameResult;
@@ -115,14 +116,14 @@ impl LogicSystem for CombatSystem {
             Some(sync) => sync.object_id,
         };
 
-        // 3) 目标必须是怪物且仍存在
-        let target_exists = ctx
+        // 3) 目标必须是怪物且仍存活（HP>0）
+        let target_alive = ctx
             .world
-            .query::<(&Monster, &NetworkSync)>()
+            .query::<(&Monster, &NetworkSync, &Health)>()
             .iter()
-            .any(|(_, (_m, sync))| sync.object_id == target_id);
+            .any(|(_, (_m, sync, hp))| sync.object_id == target_id && hp.current > 0);
 
-        if !target_exists {
+        if !target_alive {
             if let Ok(mut input) = ctx.world.get::<&mut crate::components::PlayerInput>(player_entity) {
                 input.attack_target = None;
             }
@@ -155,7 +156,16 @@ impl LogicSystem for CombatSystem {
             },
         );
 
-        if ctx.session.server_authoritative_combat {
+        // test_game_scene 下本地批量刷新的怪物并不在服务器/MockServer 对象表中。
+        // 这种目标不会收到 ObjectStruck，因此血条会永远满。
+        // 给这些怪物打上 ClientOnly 后，CombatSystem 直接在客户端扣血，保证可见闭环。
+        let is_client_only_target = ctx
+            .world
+            .query::<(&ClientOnly, &NetworkSync)>()
+            .iter()
+            .any(|(_, (_co, sync))| sync.object_id == target_id);
+
+        if ctx.session.server_authoritative_combat && !is_client_only_target {
             if let Some(net) = ctx.net() {
                 let _ = net.send(NetworkCommand::AttackRequest {
                     direction,
@@ -170,7 +180,14 @@ impl LogicSystem for CombatSystem {
             input.movement_mode = crate::components::MovementMode::None;
         }
 
-        Self::calculate_local_attack_preview(&ctx.world, target_id);
+        let preview = Self::calculate_local_attack_preview(&ctx.world, target_id);
+
+        // 本地扣血：
+        // - 非服务器权威战斗：直接扣血
+        // - 服务器权威战斗：仅对 ClientOnly 目标扣血（否则会与服务器回包重复）
+        if (!ctx.session.server_authoritative_combat) || is_client_only_target {
+            Self::take_damage(&mut ctx.world, target_id, preview.damage, preview.damage_type);
+        }
 
         // 攻击音效改为由 AnimationSystem 按“攻击动作帧”触发（更接近 C# 原版）。
         
@@ -373,7 +390,7 @@ impl CombatSystem {
     }
     
     /// 本地预览伤害 (不修改实际数据)
-    fn calculate_local_attack_preview(world: &World, target_id: u32) {
+    fn calculate_local_attack_preview(world: &World, target_id: u32) -> CombatResult {
         // 获取本地玩家的攻击力和等级
         let (player_attack, player_level) = {
             let mut attack = (5, 10);
@@ -416,6 +433,8 @@ impl CombatSystem {
             result.damage,
             if result.is_critical { "(暴击!)" } else { "" }
         );
+
+        result
     }
     
     /// 处理受到伤害
@@ -429,6 +448,7 @@ impl CombatSystem {
         let mut target_entity: Option<hecs::Entity> = None;
         let mut target_monster_type: Option<u16> = None;
         let mut target_died = false;
+        let mut target_is_client_only = false;
 
         for (entity, (monster, health, net_sync)) in world.query_mut::<(&Monster, &mut Health, &NetworkSync)>() {
             if net_sync.object_id == target_id {
@@ -451,8 +471,25 @@ impl CombatSystem {
                 target_entity = Some(entity);
                 target_monster_type = Some(monster.monster_type);
                 target_died = health.current == 0;
+                target_is_client_only = world.get::<&ClientOnly>(entity).is_ok();
                 
                 break;
+            }
+        }
+
+        // ClientOnly 怪物：死亡闭环（播放死亡动作 + 延时移除）
+        if let Some(entity) = target_entity {
+            if target_died && target_is_client_only {
+                if let Ok(mut s) = world.get::<&mut crate::components::MonsterAnimState>(entity) {
+                    s.action = crate::components::MirAction::Die;
+                    s.start_time = std::time::Instant::now();
+                }
+
+                // 避免重复插入：有就刷新时间
+                if world.insert_one(entity, Lifetime::new(1200)).is_err() {
+                    let _ = world.remove_one::<Lifetime>(entity);
+                    let _ = world.insert_one(entity, Lifetime::new(1200));
+                }
             }
         }
 

@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy)]
 struct MockMonsterState {
@@ -89,6 +89,12 @@ struct MockRemotePlayerState {
 struct MockWorldState {
     in_game: bool,
 
+    // Mock 地图碰撞（用于服务器权威移动校验，避免把玩家“纠正/瞬移”到障碍物里）
+    map_width: i32,
+    map_height: i32,
+    // 扁平数组：len = map_width * map_height，1=可走 0=不可走；为空表示未知（全部视为可走）
+    map_walkable: Vec<u8>,
+
     // 本地玩家（server-authoritative）
     player_object_id: u32,
     player_gold: u32,
@@ -125,8 +131,63 @@ struct MockWorldState {
 impl Default for MockWorldState {
     fn default() -> Self {
         let now = Instant::now();
+
+        // Mock 默认地图边界（n0.map 实测约 700x700）。
+        // 仅用于让 3000 远程玩家“分散到地图各处”时不至于跑出可视范围太远。
+        let map_w: i32 = std::env::var("CRYSTAL_MOCK_MAP_W")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(700);
+        let map_h: i32 = std::env::var("CRYSTAL_MOCK_MAP_H")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(700);
+
+        let clamp_x = |x: i32| x.clamp(0, map_w.saturating_sub(1).max(0));
+        let clamp_y = |y: i32| y.clamp(0, map_h.saturating_sub(1).max(0));
+
+        // 多区域刷怪：覆盖全图，避免 3000 远程玩家挤在出生点附近。
+        // 用一个规则网格生成多个 zone，AI 会在 zone 之间 Seek/Travel。
+        let mut zones: Vec<MockZone> = Vec::new();
+        let grid_cols = 5;
+        let grid_rows = 5;
+        let margin = 80;
+        let step_x = ((map_w - margin * 2).max(1)) / (grid_cols.max(1) - 1);
+        let step_y = ((map_h - margin * 2).max(1)) / (grid_rows.max(1) - 1);
+
+        for iy in 0..grid_rows {
+            for ix in 0..grid_cols {
+                let cx = clamp_x(margin + ix * step_x);
+                let cy = clamp_y(margin + iy * step_y);
+
+                let idx = (iy * grid_cols + ix) as i32;
+                let monster_image = (idx % 6).max(0) as u16;
+                let monster_hp = 24 + ((idx % 5) * 6);
+                let xp_reward = 10 + ((idx % 7) * 2) as i64;
+                let respawn_ms = 1200 + ((idx % 6) * 250) as u64;
+
+                zones.push(MockZone {
+                    name: "Field",
+                    center: (cx, cy),
+                    radius: 20,
+                    max_monsters: 18,
+                    respawn_interval: Duration::from_millis(respawn_ms),
+                    monster_image,
+                    monster_hp,
+                    xp_reward,
+                    last_spawn: now,
+                });
+            }
+        }
+
         Self {
             in_game: false,
+
+            map_width: 0,
+            map_height: 0,
+            map_walkable: Vec::new(),
 
             player_object_id: 1,
             player_gold: 1000,
@@ -144,44 +205,7 @@ impl Default for MockWorldState {
 
             monsters: HashMap::new(),
 
-            zones: vec![
-                // 为了离线可复现，使用同一张地图 n0.map 上的多个“刷怪区域”（不同坐标团）。
-                MockZone {
-                    name: "TownEdge",
-                    // 出生点在 (336,334)。若刷怪区也在这里，会导致玩家一进入就被围殴→死亡→回城→再被打，
-                    // 体验上像“被拉回起点且完全无法控制”。把刷怪区挪远一点。
-                    center: (360, 334),
-                    radius: 8,
-                    max_monsters: 4,
-                    respawn_interval: Duration::from_millis(2200),
-                    monster_image: 0,
-                    monster_hp: 28,
-                    xp_reward: 12,
-                    last_spawn: now,
-                },
-                MockZone {
-                    name: "EastField",
-                    center: (350, 334),
-                    radius: 9,
-                    max_monsters: 5,
-                    respawn_interval: Duration::from_millis(2000),
-                    monster_image: 1,
-                    monster_hp: 34,
-                    xp_reward: 15,
-                    last_spawn: now,
-                },
-                MockZone {
-                    name: "SouthRoad",
-                    center: (342, 346),
-                    radius: 10,
-                    max_monsters: 6,
-                    respawn_interval: Duration::from_millis(1800),
-                    monster_image: 2,
-                    monster_hp: 40,
-                    xp_reward: 18,
-                    last_spawn: now,
-                },
-            ],
+            zones,
             next_monster_id: 3001,
             last_monster_wander_tick: Instant::now(),
             last_monster_combat_tick: Instant::now(),
@@ -344,8 +368,9 @@ impl MockNetwork {
                 });
 
                 // 加载地图并发送 MapChanged 事件（落点要和 UserInformation 一致，否则相机会被拉到(0,0)）
-                Self::load_and_send_map(
+                let (spawn_x, spawn_y) = Self::load_and_send_map(
                     &response_tx,
+                    state,
                     "Map/n0.map",
                     0,
                     "盟重土城",
@@ -358,7 +383,7 @@ impl MockNetwork {
                 // 关键：下发初始背包（None = 不下发，会导致后续 ItemGained 没 UI 承载）
                 state.player_gold = 1000;
                 state.inventory_capacity = 40;
-                state.player_grid = (336, 334);
+                state.player_grid = (spawn_x, spawn_y);
                 state.player_object_id = 1;
                 state.player_hp_max = 100;
                 state.player_hp_current = 100;
@@ -446,8 +471,8 @@ impl MockNetwork {
                         class: mir2_shared::enums::MirClass::Warrior,
                         gender: mir2_shared::enums::MirGender::Male,
                         level: 1,
-                        location_x: 336,
-                        location_y: 334,
+                        location_x: state.player_grid.0,
+                        location_y: state.player_grid.1,
                         direction: mir2_shared::enums::MirDirection::Down,
                         hair: 1,
                         hp: state.player_hp_current.max(0),
@@ -475,25 +500,48 @@ impl MockNetwork {
                 // ====== Mock：生成多个“远程玩家”（不同区域找怪→跑路→打怪升级） ======
                 state.remote_players.clear();
                 let now = Instant::now();
-                let remote_defs = [
-                    (2_u32, "RemoteGuy", (338, 334), 1_u16, 0_usize, mir2_shared::enums::MirGender::Female, 4_u8),
-                    (3_u32, "Alice", (350, 333), 3_u16, 1_usize, mir2_shared::enums::MirGender::Female, 2_u8),
-                    (4_u32, "Bob", (343, 346), 2_u16, 2_usize, mir2_shared::enums::MirGender::Male, 1_u8),
-                    (5_u32, "Cathy", (334, 340), 4_u16, 0_usize, mir2_shared::enums::MirGender::Female, 3_u8),
-                ];
+                let remote_count: usize = std::env::var("CRYSTAL_REMOTE_PLAYERS")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .filter(|v| *v > 0)
+                    .unwrap_or(3000);
 
-                for (id, name, (x, y), level, zone_idx, gender, hair) in remote_defs {
-                    let class = mir2_shared::enums::MirClass::Warrior;
-                    let weapon: i16 = 60;
-                    let weapon_effect: i16 = 12;
-                    let armour: i16 = 25;
-                    let wing_effect: u8 = 4;
+                let class = mir2_shared::enums::MirClass::Warrior;
+                let weapon: i16 = 60;
+                let weapon_effect: i16 = 12;
+                let armour: i16 = 25;
+                let wing_effect: u8 = 4;
+
+                for i in 0..remote_count {
+                    let id = 2_u32.saturating_add(i as u32);
+
+                    let zone_idx = if state.zones.is_empty() {
+                        0
+                    } else {
+                        (Self::rng_next_u32(&mut state.rng) as usize) % state.zones.len()
+                    };
+                    let (x, y) = state
+                        .zones
+                        .get(zone_idx)
+                        .map(|z| Self::random_pos_in_zone(&mut state.rng, z))
+                        .unwrap_or((338, 334));
+
+                    let level = 1_u16
+                        .saturating_add((Self::rng_next_u32(&mut state.rng) % 4) as u16);
+                    let gender = if (Self::rng_next_u32(&mut state.rng) % 2) == 0 {
+                        mir2_shared::enums::MirGender::Male
+                    } else {
+                        mir2_shared::enums::MirGender::Female
+                    };
+                    let hair = ((Self::rng_next_u32(&mut state.rng) % 6) as u8).max(1);
                     let direction = mir2_shared::enums::MirDirection::Left;
+
+                    let name = format!("Remote{}", id);
 
                     let _ = response_tx.send(NetworkEvent::ObjectPlayer {
                         packet: mir2_shared::packets::server::ObjectPlayer {
                             object_id: id,
-                            name: name.to_string(),
+                            name: name.clone(),
                             guild_name: "".to_string(),
                             guild_rank_name: "".to_string(),
                             name_colour: 0,
@@ -534,7 +582,7 @@ impl MockNetwork {
                     };
                     state.remote_players.push(MockRemotePlayerState {
                         id,
-                        name: name.to_string(),
+                        name,
                         class,
                         gender,
                         hair,
@@ -618,9 +666,14 @@ impl MockNetwork {
                 // 一次请求推进一格（最简单的真服式“离散移动”模拟）
                 let nx = x + dx;
                 let ny = y + dy;
-                state.player_grid = (nx, ny);
-
-                let _ = response_tx.send(NetworkEvent::PlayerLocationChanged { x: nx, y: ny });
+                if Self::map_is_walkable(state, nx, ny) {
+                    state.player_grid = (nx, ny);
+                    let _ = response_tx.send(NetworkEvent::PlayerLocationChanged { x: nx, y: ny });
+                } else {
+                    // 被障碍物/边界挡住：不移动，同时回一个当前位置用于纠偏/停跑
+                    let (cx, cy) = state.player_grid;
+                    let _ = response_tx.send(NetworkEvent::PlayerLocationChanged { x: cx, y: cy });
+                }
             }
 
             // ===== 本地玩家攻击（服务器权威） =====
@@ -1203,6 +1256,23 @@ impl MockNetwork {
         );
     }
 
+    fn map_is_walkable(state: &MockWorldState, x: i32, y: i32) -> bool {
+        if x < 0 || y < 0 {
+            return false;
+        }
+        if state.map_width > 0 && state.map_height > 0 {
+            if x >= state.map_width || y >= state.map_height {
+                return false;
+            }
+        }
+        if state.map_walkable.is_empty() || state.map_width <= 0 || state.map_height <= 0 {
+            // 未加载碰撞：退化为“全部可走”
+            return true;
+        }
+        let idx = (y as usize).saturating_mul(state.map_width as usize) + (x as usize);
+        state.map_walkable.get(idx).copied().unwrap_or(1) != 0
+    }
+
     fn tick_zone_spawns(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
         // 每个区域按 respawn_interval 补怪
         for zone_idx in 0..state.zones.len() {
@@ -1343,8 +1413,7 @@ impl MockNetwork {
             response_tx: &'a Sender<NetworkEvent>,
             zones: &'a [MockZone],
             monsters: &'a mut HashMap<u32, MockMonsterState>,
-            left: &'a [MockRemotePlayerState],
-            rest: &'a [MockRemotePlayerState],
+            occupied: &'a mut HashSet<(i32, i32)>,
             rng: &'a mut u64,
             now: Instant,
             rp: &'a mut MockRemotePlayerState,
@@ -1353,7 +1422,7 @@ impl MockNetwork {
 
         impl<'a> RemoteBtCtx<'a> {
             fn is_occupied(&self, tile: (i32, i32)) -> bool {
-                self.left.iter().chain(self.rest.iter()).any(|p| p.grid == tile)
+                self.occupied.contains(&tile)
             }
 
             fn pick_target_in_zone(&mut self, perception: i32) {
@@ -1424,6 +1493,10 @@ impl MockNetwork {
                     return BtStatus::Success;
                 }
 
+                // 在计算新位置前，先从占位集合里移除自己当前格子，避免把自己当成障碍。
+                let old_tile = (rx, ry);
+                self.occupied.remove(&old_tile);
+
                 // 让对角移动偶尔退化成直线，显得更“人”。
                 if dx != 0 && dy != 0 && (MockNetwork::rng_next_u32(self.rng) % 3 == 0) {
                     if MockNetwork::rng_next_u32(self.rng) % 2 == 0 {
@@ -1437,6 +1510,21 @@ impl MockNetwork {
 
                 let mut nx = rx + dx;
                 let mut ny = ry + dy;
+
+                // 简单边界：避免大量玩家跑出默认地图范围太远导致“看起来都挤一块”。
+                // 可用环境变量覆盖 mock 地图尺寸。
+                let map_w: i32 = std::env::var("CRYSTAL_MOCK_MAP_W")
+                    .ok()
+                    .and_then(|v| v.parse::<i32>().ok())
+                    .filter(|v| *v > 0)
+                    .unwrap_or(700);
+                let map_h: i32 = std::env::var("CRYSTAL_MOCK_MAP_H")
+                    .ok()
+                    .and_then(|v| v.parse::<i32>().ok())
+                    .filter(|v| *v > 0)
+                    .unwrap_or(700);
+                nx = nx.clamp(0, map_w.saturating_sub(1).max(0));
+                ny = ny.clamp(0, map_h.saturating_sub(1).max(0));
                 if self.is_occupied((nx, ny)) {
                     if dx != 0 && dy != 0 {
                         if !self.is_occupied((rx + dx, ry)) {
@@ -1448,14 +1536,19 @@ impl MockNetwork {
                             ny = ry + dy;
                             self.rp.direction = MockNetwork::dir_from_delta(0, dy);
                         } else {
+                            // 恢复占位
+                            self.occupied.insert(old_tile);
                             return BtStatus::Failure;
                         }
                     } else {
+                        // 恢复占位
+                        self.occupied.insert(old_tile);
                         return BtStatus::Failure;
                     }
                 }
 
                 self.rp.grid = (nx, ny);
+                self.occupied.insert((nx, ny));
 
                 if prefer_run {
                     let _ = self.response_tx.send(NetworkEvent::ObjectRun {
@@ -1733,10 +1826,13 @@ impl MockNetwork {
         let monsters = &mut state.monsters;
         let mut rng = state.rng;
 
+        // 预构建占位集合：避免 3000 人时每步 O(n) 扫描导致 O(n^2)
+        let mut occupied_tiles: HashSet<(i32, i32)> = state.remote_players.iter().map(|p| p.grid).collect();
+
         let player_count = state.remote_players.len();
         for i in 0..player_count {
-            let (left, right) = state.remote_players.split_at_mut(i);
-            let Some((rp, rest)) = right.split_first_mut() else {
+            let (_left, right) = state.remote_players.split_at_mut(i);
+            let Some((rp, _rest)) = right.split_first_mut() else {
                 break;
             };
 
@@ -1749,8 +1845,7 @@ impl MockNetwork {
                 response_tx,
                 zones,
                 monsters,
-                left,
-                rest,
+                occupied: &mut occupied_tiles,
                 rng: &mut rng,
                 now,
                 rp,
@@ -1789,16 +1884,19 @@ impl MockNetwork {
         state.rng = rng;
     }
 
-    /// 加载地图并发送 MapChanged 事件
+    /// 加载地图并发送 MapChanged 事件，并将可走性缓存到 MockWorldState。
+    ///
+    /// 返回实际采用的出生点（若原出生点不可走，会在附近寻找可走格）。
     fn load_and_send_map(
         response_tx: &Sender<NetworkEvent>,
+        state: &mut MockWorldState,
         map_path: &str,
         map_index: i32,
         title: &str,
         spawn_x: i32,
         spawn_y: i32,
         direction: u8,
-    ) {
+    ) -> (i32, i32) {
         let resolved_path = crate::resources::map_reader::resolve_map_path(map_path);
         tracing::info!("📂 尝试加载地图: {} -> {}", map_path, resolved_path);
 
@@ -1810,6 +1908,47 @@ impl MockNetwork {
                     map_reader.width,
                     map_reader.height
                 );
+
+                // 缓存碰撞：map_cells[x][y] -> map_walkable[y * w + x]
+                state.map_width = map_reader.width.max(0);
+                state.map_height = map_reader.height.max(0);
+                let w = state.map_width as usize;
+                let h = state.map_height as usize;
+                state.map_walkable.clear();
+                state.map_walkable.reserve(w.saturating_mul(h));
+                for y in 0..h {
+                    for x in 0..w {
+                        let walkable = map_reader
+                            .map_cells
+                            .get(x)
+                            .and_then(|col| col.get(y))
+                            .map(|c| c.is_walkable())
+                            .unwrap_or(true);
+                        state.map_walkable.push(if walkable { 1 } else { 0 });
+                    }
+                }
+
+                // 如果出生点不可走（或地图加载异常导致越界），在附近找一个可走格。
+                let mut final_spawn = (spawn_x, spawn_y);
+                if !Self::map_is_walkable(state, final_spawn.0, final_spawn.1) {
+                    let max_r: i32 = 12;
+                    'outer: for r in 1..=max_r {
+                        for dy in -r..=r {
+                            for dx in -r..=r {
+                                // 优先扫描“边框”以更快找到最近点
+                                if dx.abs() != r && dy.abs() != r {
+                                    continue;
+                                }
+                                let tx = spawn_x + dx;
+                                let ty = spawn_y + dy;
+                                if Self::map_is_walkable(state, tx, ty) {
+                                    final_spawn = (tx, ty);
+                                    break 'outer;
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // 提取纯文件名（不含路径和扩展名）用于下发 MapChanged
                 let file_name = std::path::Path::new(&resolved_path)
@@ -1827,8 +1966,8 @@ impl MockNetwork {
                         minimap: 0,
                         big_map: 0,
                         lights: 0,
-                        location_x: spawn_x,
-                        location_y: spawn_y,
+                        location_x: final_spawn.0,
+                        location_y: final_spawn.1,
                         direction,
                         map_dark_light: 0,
                         music: 0,
@@ -1836,11 +1975,15 @@ impl MockNetwork {
                     },
                 });
 
-                // TODO: 这里需要将 MapReader 数据发送给客户端
-                // 目前暂时只发送事件，MapReader 需要在游戏循环中处理
+                final_spawn
             }
             Err(e) => {
                 tracing::error!("❌ 加载地图失败 {}: {:?}", map_path, e);
+                // 失败时退化：不做碰撞校验
+                state.map_width = 0;
+                state.map_height = 0;
+                state.map_walkable.clear();
+                (spawn_x, spawn_y)
             }
         }
     }

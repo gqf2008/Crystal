@@ -178,6 +178,10 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         if !in_view(pos.x, pos.y) {
             continue;
         }
+        // 死亡怪物：不画名字/血条（会在短延时后 despawn）
+        if hp.current <= 0 {
+            continue;
+        }
         if monster.name.is_empty() {
             continue;
         }

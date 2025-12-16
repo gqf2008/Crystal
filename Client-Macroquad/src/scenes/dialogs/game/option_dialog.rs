@@ -99,17 +99,26 @@ impl OptionDialogHybrid {
 
     /// 显示对话框
     pub fn open(&mut self) {
-        self.visible = true;
-        // 居中显示
-        self.position = vec2(
-            (screen_width() - self.size.x) / 2.0,
-            (screen_height() - self.size.y) / 2.0,
-        );
+        // 注意：MainDialog 会在每帧同步时反复调用 open()。
+        // 这里必须做到“幂等”，否则会导致：
+        // - 对话框无法拖动（每帧被重新居中）
+        // - 关闭按钮点击会触发 DragHelper 进入 dragging，随后 close 后没机会收到 mouse_released，
+        //   下一次打开就会在鼠标位置“闪一下”（立刻又被 close）。
+        if !self.visible {
+            self.visible = true;
+            // 仅在从关闭->打开时居中一次
+            self.position = vec2(
+                (screen_width() - self.size.x) / 2.0,
+                (screen_height() - self.size.y) / 2.0,
+            );
+        }
     }
 
     /// 关闭对话框
     pub fn close(&mut self) {
         self.visible = false;
+        // 强制停止拖动：避免关闭发生在拖动/按下期间导致 dragging 状态残留
+        self.drag_helper.dragging = false;
     }
 
     /// 切换显示状态

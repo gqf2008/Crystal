@@ -8,7 +8,7 @@ use macroquad::prelude::*;
 use client_macroquad::scenes::{GameScene, Scene, SceneTransition};
 use client_macroquad::ui::text_renderer::init_chinese_font;
 use client_macroquad::components::{Health, LibrarySprite, MapData, MirAction, Monster, MonsterAnimState, Position};
-use client_macroquad::components::network::{NetworkObjectType, NetworkSync};
+use client_macroquad::components::network::{ClientOnly, NetworkObjectType, NetworkSync};
 use client_macroquad::coord::Coord;
 use client_macroquad::objects::frames::get_monster_frame;
 use client_macroquad::resources::LibraryName;
@@ -127,6 +127,7 @@ impl MonsterFieldSpawner {
 
             ctx.world.spawn((
                 NetworkSync::new(self.next_object_id + spawned, NetworkObjectType::Monster),
+                ClientOnly,
                 Position::new(wx, wy),
                 LibrarySprite::new(LibraryName::Monsters(monster_type as usize), 0),
                 Monster {

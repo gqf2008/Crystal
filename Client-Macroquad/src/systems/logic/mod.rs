@@ -69,8 +69,10 @@
 pub mod combat;
 pub mod decision;
 pub mod physics;
+pub mod lifetime_cleanup_system;
 
 // 重新导出所有系统
 pub use decision::*;
 pub use combat::*;
 pub use physics::*;
+pub use lifetime_cleanup_system::*;
