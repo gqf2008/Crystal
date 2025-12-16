@@ -12,6 +12,9 @@
 // cargo run --release
 // ============================================================================
 
+// Windows: Release 模式不弹控制台（Debug 仍保留控制台便于调试）
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
 use macroquad::text::draw_text_ex;

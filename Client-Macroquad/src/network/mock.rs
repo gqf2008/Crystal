@@ -89,6 +89,9 @@ struct MockRemotePlayerState {
 struct MockWorldState {
     in_game: bool,
 
+    // 用于在“持续有客户端事件”时也能推进 mock 世界（否则远程 AI/刷怪可能完全不跑）
+    last_world_tick: Instant,
+
     // Mock 地图碰撞（用于服务器权威移动校验，避免把玩家“纠正/瞬移”到障碍物里）
     map_width: i32,
     map_height: i32,
@@ -185,6 +188,8 @@ impl Default for MockWorldState {
         Self {
             in_game: false,
 
+            last_world_tick: now,
+
             map_width: 0,
             map_height: 0,
             map_walkable: Vec::new(),
@@ -258,6 +263,13 @@ impl MockNetwork {
                 match mock_rx.recv_timeout(Duration::from_millis(100)) {
                     Ok(event) => {
                         Self::handle_game_event(event, &mock_tx, &mut state);
+
+                        // 关键：如果客户端持续发包（例如每帧输入/心跳），recv_timeout 永远不会 Timeout，
+                        // 那 tick_world 就不会被调用，远程玩家/刷怪/怪物 AI 都会“停摆”。
+                        if state.in_game && state.last_world_tick.elapsed() >= Duration::from_millis(80) {
+                            state.last_world_tick = Instant::now();
+                            Self::tick_world(&mock_tx, &mut state);
+                        }
                     }
                     Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                         // 正常超时：让 mock 世界在无输入时也能推进（server-driven）

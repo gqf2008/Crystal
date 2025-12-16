@@ -1,5 +1,8 @@
 // 测试 MainDialog - 纯 Hybrid 版本
 
+// Windows: Release 模式不弹控制台（Debug 仍保留控制台便于调试）
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use client_macroquad::scenes::dialogs::game::MainDialog;
 use client_macroquad::ui::text_renderer::{init_chinese_font, draw_text_cn, measure_text_cn};
 use macroquad::prelude::*;

@@ -1,3 +1,6 @@
+// Windows: Release 模式不弹控制台（Debug 仍保留控制台便于调试）
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 /// 测试 BeltDialog（快捷栏）- Hybrid 版本
 /// 
 /// 运行命令：cargo run --bin test_belt_dialog

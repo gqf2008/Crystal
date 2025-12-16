@@ -1,5 +1,8 @@
 // 角色选择场景测试程序
 
+// Windows: Release 模式不弹控制台（Debug 仍保留控制台便于调试）
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use client_macroquad::game::GameResult;
 use client_macroquad::scenes::{CharacterInfo, GameScene, Scene, SceneTransition, SelectScene};
 use macroquad::prelude::*;

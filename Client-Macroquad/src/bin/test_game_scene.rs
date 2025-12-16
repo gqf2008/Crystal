@@ -2,6 +2,9 @@
 // 测试 GameScene - 直接进入游戏主场景（含地图渲染）
 // ============================================================================
 
+// Windows: Release 模式不弹控制台（Debug 仍保留控制台便于调试）
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
 
