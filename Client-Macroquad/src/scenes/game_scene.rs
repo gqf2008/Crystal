@@ -119,6 +119,10 @@ impl GameScene {
             )
             .add_system(MountStateSyncSystem::new(), priority::MOUNT_STATE_SYNC)
             .add_system(AnimationSystem::new(), priority::ANIMATION)
+            .add_system(
+                crate::systems::presentation::HealthBarAnimSystem::default(),
+                priority::HEALTH_BAR_ANIM,
+            )
             .add_system(crate::systems::ParticleSystem, priority::PARTICLE)
             .add_system(
                 crate::systems::presentation::SoundSystem::default(),

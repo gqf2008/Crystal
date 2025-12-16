@@ -27,7 +27,7 @@ use crate::game::{GameResult, GameContext};
 use std::time::Instant;
 use crate::{
     components::{
-        AnimationFrame, AttackSoundPlayed, AttackState, MountState, MountStatus, Player, PlayerAction, PlayerAppearance, SoundTrigger, SoundType, TimeTracker,
+        AnimationFrame, AttackSoundPlayed, AttackState, DeathPhase, DeathState, MountState, MountStatus, Player, PlayerAction, PlayerAppearance, SoundTrigger, SoundType, TimeTracker,
     },
     systems::LogicSystem,
 };
@@ -62,9 +62,15 @@ impl AnimationSystem {
         let now = Instant::now();
 
         // 更新所有角色的动画帧
-        for (_entity, (player, mount_state, attack_state, anim_frame)) in ctx
+        for (_entity, (player, mount_state, attack_state, death_state, anim_frame)) in ctx
             .world
-            .query_mut::<(&Player, Option<&MountState>, Option<&AttackState>, &mut AnimationFrame)>()
+            .query_mut::<(
+                &Player,
+                Option<&MountState>,
+                Option<&AttackState>,
+                Option<&mut DeathState>,
+                &mut AnimationFrame,
+            )>()
             .into_iter()
         {
             // C# 原版核心：
@@ -74,7 +80,7 @@ impl AnimationSystem {
 
             let mounted = mount_state.and_then(|m| m.mount_index).is_some();
             let (draw_frame, effect_frame, frame_index) =
-                Self::calculate_frames(player, &time_tracker, mounted, now, attack_state.copied());
+                Self::calculate_frames(player, &time_tracker, mounted, now, attack_state.copied(), death_state);
 
             anim_frame.character_frame = draw_frame;
             // 武器/武器特效：C# 用同一套 DrawFrame，只是在取纹理时叠加 WeaponOffSet
@@ -100,8 +106,9 @@ impl AnimationSystem {
         mounted: bool,
         now: Instant,
         attack_state: Option<AttackState>,
+        death_state: Option<&mut DeathState>,
     ) -> (i32, i32, i32) {
-        Self::calculate_frames_with_attack(player, time_tracker, mounted, now, attack_state)
+        Self::calculate_frames_with_attack(player, time_tracker, mounted, now, attack_state, death_state)
     }
 
     fn calculate_frames_with_attack(
@@ -110,9 +117,34 @@ impl AnimationSystem {
         mounted: bool,
         now: Instant,
         attack_state: Option<AttackState>,
+        mut death_state: Option<&mut DeathState>,
     ) -> (i32, i32, i32) {
-        // 选择 MirAction（对齐 C#：骑乘时使用 Mount*）
-        let mir_action = if mounted {
+        // 选择 MirAction（优先级：死亡覆盖 > 骑乘覆盖 > 普通动作）
+        let mut override_start_time: Option<Instant> = None;
+        let mut override_play_once = false;
+
+        let mir_action = if let Some(ds) = death_state.as_deref_mut() {
+            // Die 播放完一次后，进入 Dead
+            if ds.phase == DeathPhase::Dying {
+                if let Some(die_frame) = get_player_frame(mir2_shared::enums::MirAction::Die) {
+                    let interval = die_frame.interval.max(1);
+                    let total_ms = (die_frame.count.max(1) * interval) as u128;
+                    let elapsed_ms = now.duration_since(ds.start_time).as_millis();
+                    if elapsed_ms >= total_ms {
+                        ds.phase = DeathPhase::Dead;
+                    }
+                }
+            }
+
+            match ds.phase {
+                DeathPhase::Dying => {
+                    override_start_time = Some(ds.start_time);
+                    override_play_once = true;
+                    mir2_shared::enums::MirAction::Die
+                }
+                DeathPhase::Dead => mir2_shared::enums::MirAction::Dead,
+            }
+        } else if mounted {
             match player.action {
                 PlayerAction::Walk => mir2_shared::enums::MirAction::MountWalking,
                 PlayerAction::Run => mir2_shared::enums::MirAction::MountRunning,
@@ -120,7 +152,6 @@ impl AnimationSystem {
                 PlayerAction::Attack1 | PlayerAction::Attack2 | PlayerAction::Attack3 => {
                     mir2_shared::enums::MirAction::MountAttack
                 }
-                // 先覆盖最常见的几种；受击/死亡等后续再扩展
                 _ => mir2_shared::enums::MirAction::MountStanding,
             }
         } else {
@@ -137,35 +168,48 @@ impl AnimationSystem {
 
         // body: DrawFrame
         let interval = frame.interval.max(1);
-        let mut frame_index = if attack_state.is_some() {
-            let elapsed_ms = now
-                .duration_since(attack_state.unwrap().start_time)
-                .as_millis() as i32;
-            (elapsed_ms / interval).rem_euclid(frame.count.max(1))
+        let count = frame.count.max(1);
+
+        // 计时基准：死亡(可 one-shot) > 攻击(start_time) > 全局 tick
+        let time_base = override_start_time.or_else(|| attack_state.map(|a| a.start_time));
+        let play_once = override_play_once;
+
+        let mut frame_index = if let Some(start) = time_base {
+            let elapsed_ms = now.duration_since(start).as_millis() as i32;
+            let raw = elapsed_ms / interval;
+            if play_once {
+                raw.clamp(0, count - 1)
+            } else {
+                raw.rem_euclid(count)
+            }
         } else {
             // 旧实现：使用全局 animation_count 作为时间基准
             let animation_tick = (time_tracker.animation_count as i32) * 100 / interval;
-            animation_tick.rem_euclid(frame.count.max(1))
+            animation_tick.rem_euclid(count)
         };
         if frame.reverse {
-            frame_index = (frame.count.max(1) - 1) - frame_index;
+            frame_index = (count - 1) - frame_index;
         }
         let draw_frame = frame.start + (dir * frame.offset()) + frame_index;
 
         // effect: DrawWingFrame
         let effect_frame = if frame.effect_count > 0 {
             let effect_interval = frame.effect_interval.max(1);
-            let mut effect_index = if attack_state.is_some() {
-                let elapsed_ms = now
-                    .duration_since(attack_state.unwrap().start_time)
-                    .as_millis() as i32;
-                (elapsed_ms / effect_interval).rem_euclid(frame.effect_count.max(1))
+            let ecount = frame.effect_count.max(1);
+            let mut effect_index = if let Some(start) = time_base {
+                let elapsed_ms = now.duration_since(start).as_millis() as i32;
+                let raw = elapsed_ms / effect_interval;
+                if play_once {
+                    raw.clamp(0, ecount - 1)
+                } else {
+                    raw.rem_euclid(ecount)
+                }
             } else {
                 let effect_tick = (time_tracker.animation_count as i32) * 100 / effect_interval;
-                effect_tick.rem_euclid(frame.effect_count.max(1))
+                effect_tick.rem_euclid(ecount)
             };
             if frame.reverse {
-                effect_index = (frame.effect_count.max(1) - 1) - effect_index;
+                effect_index = (ecount - 1) - effect_index;
             }
             frame.effect_start + (dir * frame.effect_offset()) + effect_index
         } else {

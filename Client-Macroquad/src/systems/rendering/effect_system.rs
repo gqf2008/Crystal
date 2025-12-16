@@ -1,6 +1,6 @@
 use crate::components::{
-    FloatingText, Health, HoverHighlight, LibrarySprite, Monster, NameColor, NPC, NetworkObjectType,
-    NetworkSync, Position, RenderPass, RenderStage, SpriteBlendMode,
+    FloatingText, Health, HealthBarAnim, HoverHighlight, LibrarySprite, Monster, NameColor, NPC,
+    NetworkObjectType, NetworkSync, Position, RenderPass, RenderStage, SpriteBlendMode,
 };
 use crate::game::GameResult;
 use crate::systems::RenderSystem;
@@ -174,7 +174,7 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         }
     }
 
-    for (_entity, (monster, pos, hp)) in world.query::<(&Monster, &Position, &Health)>().iter() {
+    for (entity, (monster, pos, hp)) in world.query::<(&Monster, &Position, &Health)>().iter() {
         if !in_view(pos.x, pos.y) {
             continue;
         }
@@ -202,7 +202,12 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         let bar_y = pos.y - 46.0;
 
         let max = hp.max.max(1) as f32;
-        let cur = hp.current.max(0) as f32;
+        let cur = world
+            .get::<&HealthBarAnim>(entity)
+            .ok()
+            .map(|a| a.displayed)
+            .unwrap_or(hp.current.max(0) as f32)
+            .clamp(0.0, max);
         let pct = (cur / max).clamp(0.0, 1.0);
 
         draw_rectangle(

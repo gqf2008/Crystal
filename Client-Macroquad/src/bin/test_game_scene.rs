@@ -7,10 +7,12 @@ use macroquad::prelude::*;
 
 use client_macroquad::scenes::{GameScene, Scene, SceneTransition};
 use client_macroquad::ui::text_renderer::init_chinese_font;
-use client_macroquad::components::{Health, LibrarySprite, MirAction, Monster, MonsterAnimState, Position};
+use client_macroquad::components::{Health, LibrarySprite, MapData, MirAction, Monster, MonsterAnimState, Position};
 use client_macroquad::components::network::{NetworkObjectType, NetworkSync};
+use client_macroquad::coord::Coord;
 use client_macroquad::objects::frames::get_monster_frame;
 use client_macroquad::resources::LibraryName;
+use mir2_shared::enums::{MirDirection, Monster as MonsterKind};
 
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -18,6 +20,141 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 const WINDOW_WIDTH: i32 = 1024;
 const WINDOW_HEIGHT: i32 = 768;
+
+struct MonsterFieldSpawner {
+    spawned: bool,
+    next_object_id: u32,
+}
+
+impl Default for MonsterFieldSpawner {
+    fn default() -> Self {
+        Self {
+            spawned: false,
+            next_object_id: 1_100_000,
+        }
+    }
+}
+
+impl MonsterFieldSpawner {
+    fn try_spawn(&mut self, ctx: &mut client_macroquad::game::GameContext) {
+        if self.spawned {
+            return;
+        }
+
+        let (map_w, map_h) = {
+            let mut q = ctx.world.query::<&MapData>();
+            let Some((_, map)) = q.iter().next() else {
+                return;
+            };
+            if map.width <= 0 || map.height <= 0 {
+                return;
+            }
+            (map.width, map.height)
+        };
+
+        // 目标数量上限：避免把测试场景卡死。地图越大，步长越大。
+        // 可通过环境变量调参做压力测试：
+        // - CRYSTAL_MONSTER_TARGET=8000
+        // - CRYSTAL_MONSTER_STEP=8 (直接覆盖步长，越大怪越少)
+        let target_count: i64 = std::env::var("CRYSTAL_MONSTER_TARGET")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .filter(|v| *v > 0)
+            // 默认先偏保守，避免 700x700 一次刷 2w+ 导致掉到 20fps
+            .unwrap_or(8_000);
+        let area = (map_w as i64).max(1) * (map_h as i64).max(1);
+        let mut step = ((area as f64 / target_count as f64).sqrt().round() as i32).max(2);
+        if let Ok(v) = std::env::var("CRYSTAL_MONSTER_STEP") {
+            if let Ok(parsed) = v.parse::<i32>() {
+                if parsed > 0 {
+                    step = parsed;
+                }
+            }
+        }
+        step = step.clamp(2, 24);
+
+        // “整张地图都是怪物”：把常见小怪混合铺开。
+        let kinds: [MonsterKind; 6] = [
+            MonsterKind::Hen,
+            MonsterKind::Sheep,
+            MonsterKind::RedSnake,
+            MonsterKind::TigerSnake,
+            MonsterKind::BlueSnake,
+            MonsterKind::Deer,
+        ];
+
+        let max_spawn: usize = target_count as usize;
+        let step_usize = step as usize;
+
+        // 先采样出可走格子坐标，避免克隆整张 MapData（可能非常大）。
+        let spawn_grids: Vec<(i32, i32)> = {
+            let mut grids = Vec::with_capacity(max_spawn.min(32_768));
+            let mut q = ctx.world.query::<&MapData>();
+            let Some((_, map)) = q.iter().next() else {
+                return;
+            };
+
+            for gx in (0..map_w).step_by(step_usize) {
+                for gy in (0..map_h).step_by(step_usize) {
+                    if grids.len() >= max_spawn {
+                        break;
+                    }
+                    let Some(col) = map.cells.get(gx as usize) else {
+                        continue;
+                    };
+                    let Some(cell) = col.get(gy as usize) else {
+                        continue;
+                    };
+                    if !cell.is_walkable() {
+                        continue;
+                    }
+                    grids.push((gx, gy));
+                }
+                if grids.len() >= max_spawn {
+                    break;
+                }
+            }
+
+            grids
+        };
+
+        let dir = MirDirection::Up;
+        let mut spawned: u32 = 0;
+        for (gx, gy) in spawn_grids {
+            let kind = kinds[(spawned as usize) % kinds.len()];
+            let monster_type = kind as u16;
+            let (wx, wy) = Coord::grid_to_world_center(gx, gy);
+
+            ctx.world.spawn((
+                NetworkSync::new(self.next_object_id + spawned, NetworkObjectType::Monster),
+                Position::new(wx, wy),
+                LibrarySprite::new(LibraryName::Monsters(monster_type as usize), 0),
+                Monster {
+                    name: format!("{:?}", kind),
+                    monster_type,
+                    stage: 0,
+                    ai_state: client_macroquad::components::MonsterAIState::Idle,
+                    target_id: None,
+                },
+                MonsterAnimState::new(dir, MirAction::Standing),
+                Health::new(10),
+            ));
+
+            spawned += 1;
+        }
+
+        self.spawned = true;
+        println!(
+            "[monster_field] map={}x{} step={} spawned={} (kinds={})",
+            map_w,
+            map_h,
+            step,
+            spawned,
+            kinds.len()
+        );
+    }
+}
+
 struct SpecialFramesValidator {
     initialized: bool,
     direction: u8,
@@ -50,8 +187,7 @@ impl SpecialFramesValidator {
             return;
         }
 
-        let dir = mir2_shared::enums::MirDirection::try_from(self.direction)
-            .unwrap_or(mir2_shared::enums::MirDirection::Up);
+        let dir = MirDirection::try_from(self.direction).unwrap_or(MirDirection::Up);
 
         // 摆在相机中心附近：默认相机在 (0,0)，因此这里能立刻看到。
         let dragon_pos = Position::new(-120.0, -40.0);
@@ -164,8 +300,7 @@ impl SpecialFramesValidator {
             return;
         }
 
-        let dir = mir2_shared::enums::MirDirection::try_from(self.direction)
-            .unwrap_or(mir2_shared::enums::MirDirection::Up);
+        let dir = MirDirection::try_from(self.direction).unwrap_or(MirDirection::Up);
 
         let now = std::time::Instant::now();
 
@@ -198,8 +333,7 @@ impl SpecialFramesValidator {
     }
 
     fn log_frames(&self) {
-        let dir = mir2_shared::enums::MirDirection::try_from(self.direction)
-            .unwrap_or(mir2_shared::enums::MirDirection::Up);
+        let dir = MirDirection::try_from(self.direction).unwrap_or(MirDirection::Up);
 
         // 这里只打印 Standing 对应的帧表选择；动画推进/帧索引由 AnimationSystem 驱动。
         let dragon = get_monster_frame(902, MirAction::Standing, dir, 0);
@@ -268,6 +402,8 @@ async fn main() {
     let mut validator = SpecialFramesValidator::default();
     validator.try_init(scene.debug_ecs_ctx_mut());
 
+    let mut monster_field = MonsterFieldSpawner::default();
+
     loop {
         let dt = get_frame_time();
 
@@ -285,6 +421,9 @@ async fn main() {
                 SceneTransition::None
             }
         };
+
+        // 等 MapBootstrap/MapLoad 把 MapData 准备好后，铺满整张地图的怪物。
+        monster_field.try_spawn(scene.debug_ecs_ctx_mut());
 
         if let Err(e) = scene.render() {
             eprintln!("❌ 场景渲染错误: {}", e);

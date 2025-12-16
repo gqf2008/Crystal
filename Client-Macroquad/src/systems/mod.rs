@@ -99,6 +99,8 @@ pub mod priority {
     // 装备/外观派生状态（渲染/动作切换）
     pub const MOUNT_STATE_SYNC: u32 = 590;
     pub const ANIMATION: u32 = 600;
+    /// 怪物血条显示值平滑过渡（掉血动画）
+    pub const HEALTH_BAR_ANIM: u32 = 605;
     pub const PARTICLE: u32 = 610;
     pub const WEATHER: u32 = 620;
     pub const SOUND: u32 = 630;

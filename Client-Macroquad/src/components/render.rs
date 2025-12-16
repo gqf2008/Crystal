@@ -79,6 +79,15 @@ pub struct FloatingText {
     pub rise_speed: f32,
 }
 
+/// 生命条显示动画（用于“掉血”平滑过渡）。
+///
+/// 说明：真实血量由 `Health` 决定；该组件仅用于渲染层显示。
+#[derive(Debug, Clone, Copy)]
+pub struct HealthBarAnim {
+    /// 当前显示的血量（允许为小数，用于平滑插值）。
+    pub displayed: f32,
+}
+
 impl Default for RenderPass {
     fn default() -> Self {
         Self {

@@ -331,7 +331,7 @@ impl LogicSystem for SoundSystem {
             // 这里保留“对齐 C# 逻辑”的落点：
             // - 技能/攻击/受击等由上游系统写入 SoundTrigger
             // - SoundSystem 统一做音量策略与播放/缓存
-            if cfg!(debug_assertions) {
+            if cfg!(debug_assertions) && sound_debug_log_enabled() {
                 println!(
                     "🔊 [SOUND] SoundTrigger file={} type={:?} vol={:.3} (global={:.3} attn={:.3}) looping={} (listener=({:.1},{:.1}))",
                     trigger.sound_file,
@@ -388,7 +388,7 @@ impl LogicSystem for SoundSystem {
                 continue;
             }
 
-            if cfg!(debug_assertions) {
+            if cfg!(debug_assertions) && sound_debug_log_enabled() {
                 println!(
                     "🔊 [SOUND] PersistentSound file={} type={:?} vol={:.3} looping={}",
                     ps.sound_file,
@@ -411,4 +411,11 @@ impl LogicSystem for SoundSystem {
 
         Ok(())
     }
+}
+
+fn sound_debug_log_enabled() -> bool {
+    // 默认关闭，避免 dev 模式下每帧刷屏；需要时手动开启：
+    // PowerShell: $env:CRYSTAL_SOUND_LOG='1'
+    // CMD: set CRYSTAL_SOUND_LOG=1
+    std::env::var("CRYSTAL_SOUND_LOG").is_ok_and(|v| v == "1")
 }

@@ -446,6 +446,22 @@ impl LocalPlayerAiSystem {
             .target_entity
             .filter(|t| Self::target_is_valid(ctx, *t));
 
+        // 若玩家已经离当前目标太远，则丢弃目标并按“玩家当前坐标周边”重新找怪。
+        // 这能避免 AI 一直追着出生点附近的旧目标不放。
+        if let Some(t) = target {
+            if let Ok(pos) = ctx.world.get::<&Position>(t) {
+                let (mgx, mgy) = Coord::world_to_grid(pos.x, pos.y);
+                let dx = (mgx - player_grid.0).abs();
+                let dy = (mgy - player_grid.1).abs();
+                let dist = dx.max(dy);
+                if dist > self.max_acquire_range {
+                    target = None;
+                    // 触发“立即重搜”（不必再等节流窗口）
+                    self.last_scan = bb.now - self.scan_interval;
+                }
+            }
+        }
+
         // 节流重搜
         if target.is_none() && bb.now.duration_since(self.last_scan) >= self.scan_interval {
             self.last_scan = bb.now;

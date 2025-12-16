@@ -1542,6 +1542,11 @@ impl LogicSystem for NetworkApplySystem {
                         },
                     );
                 }
+
+                // 复活/回血：清掉死亡动画状态
+                if (cur as i32) > 0 {
+                    let _ = ctx.world.remove_one::<crate::components::DeathState>(e);
+                }
             }
 
             // 魔法同步（来自服务器）
@@ -1800,16 +1805,41 @@ impl LogicSystem for NetworkApplySystem {
             };
 
             let mut had_hp = false;
+            let mut killed_player_to_zero = false;
             {
                 if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(target) {
                     hp.take_damage(damage);
+
+                    // 先记录是否打到 0，避免在持有 RefMut 时再改 world（会触发借用冲突）
+                    killed_player_to_zero = hp.current <= 0;
                     had_hp = true;
                 }
             }
+
+            // 玩家被打到 0：触发死亡动画（不依赖 ObjectDied 是否及时到达）
+            if killed_player_to_zero
+                && ctx.world.get::<&crate::components::Player>(target).is_ok()
+                && ctx.world.get::<&crate::components::DeathState>(target).is_err()
+            {
+                let _ = ctx.world.insert_one(target, crate::components::DeathState::new());
+                let _ = ctx.world.remove_one::<crate::components::AttackState>(target);
+            }
+
             if !had_hp {
                 let mut hp = crate::components::Health { current: 100, max: 100 };
                 hp.take_damage(damage);
                 let _ = ctx.world.insert_one(target, hp);
+
+                // 同上：若默认血池也被打到 0，补齐死亡动画状态
+                if ctx.world.get::<&crate::components::Player>(target).is_ok()
+                    && ctx.world.get::<&crate::components::DeathState>(target).is_err()
+                {
+                    // 这里用本地 hp 变量即可，避免 get() 借用与 insert_one 冲突
+                    if hp.current <= 0 {
+                    let _ = ctx.world.insert_one(target, crate::components::DeathState::new());
+                    let _ = ctx.world.remove_one::<crate::components::AttackState>(target);
+                    }
+                }
             }
 
             // 飘字实体（独立 entity，避免污染目标组件）
@@ -1831,6 +1861,22 @@ impl LogicSystem for NetworkApplySystem {
             if let Some(target) = Self::find_entity_by_object_id(ctx, object_id) {
                 if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(target) {
                     hp.current = 0;
+                }
+
+                // 玩家死亡动画：挂上/重置 DeathState（Die → Dead），并停止攻击动画
+                if ctx.world.get::<&crate::components::Player>(target).is_ok() {
+                    let mut updated = false;
+                    {
+                        if let Ok(mut ds) = ctx.world.get::<&mut crate::components::DeathState>(target) {
+                            ds.start_time = std::time::Instant::now();
+                            ds.phase = crate::components::DeathPhase::Dying;
+                            updated = true;
+                        }
+                    }
+                    if !updated {
+                        let _ = ctx.world.insert_one(target, crate::components::DeathState::new());
+                    }
+                    let _ = ctx.world.remove_one::<crate::components::AttackState>(target);
                 }
 
                 // 本地玩家死亡：立刻停止移动/攻击输入，避免“死了还在走/追砍”。

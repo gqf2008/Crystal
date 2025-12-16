@@ -3,6 +3,7 @@
 // ============================================================================
 
 pub use mir2_shared::{MirAction, MirClass, MirDirection, MirGender};
+use std::time::Instant;
 
 /// 玩家数据组件 (标记这是玩家实体 - 身份卡)
 /// 
@@ -106,6 +107,31 @@ pub enum PlayerAction {
     Attack1 = 3,  // 普通攻击1
     Attack2 = 4,  // 普通攻击2
     Attack3 = 5,  // 普通攻击3
+}
+
+/// 死亡动画状态（用于本地/远程玩家的 Die → Dead 动画衔接）
+///
+/// - `phase=Dying`：播放一次 Die 动画
+/// - `phase=Dead`：进入 Dead（通常是单帧/循环帧，保持倒地）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeathPhase {
+    Dying,
+    Dead,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DeathState {
+    pub start_time: Instant,
+    pub phase: DeathPhase,
+}
+
+impl DeathState {
+    pub fn new() -> Self {
+        Self {
+            start_time: Instant::now(),
+            phase: DeathPhase::Dying,
+        }
+    }
 }
 
 impl PlayerAction {
