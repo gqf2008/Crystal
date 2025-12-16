@@ -92,6 +92,7 @@ pub struct PlayerControlSystem {
     // local-player -> server movement sync
     last_net_move_sent: Option<Instant>,
     net_move_interval: Duration,
+    last_net_move_grid: Option<(i32, i32)>,
 }
 
 impl PlayerControlSystem {
@@ -109,6 +110,7 @@ impl PlayerControlSystem {
 
             last_net_move_sent: None,
             net_move_interval: Duration::from_millis(80),
+            last_net_move_grid: None,
         }
     }
 
@@ -281,8 +283,7 @@ impl PlayerControlSystem {
             if dx > 1 || dy > 1 {
                 continue;
             }
-            let dist2 = (pos.x - mouse_world.0) * (pos.x - mouse_world.0)
-                + (pos.y - mouse_world.1) * (pos.y - mouse_world.1);
+            let dist2 = (dx * dx + dy * dy) as f32;
             match best {
                 None => best = Some((sync.object_id, dist2)),
                 Some((_oid, bdist2)) if dist2 < bdist2 => best = Some((sync.object_id, dist2)),
@@ -688,7 +689,7 @@ impl LogicSystem for PlayerControlSystem {
         // 收集需要添加攻击状态的实体
         let mut entities_to_attack = Vec::new();
         
-        for (entity, (player_input, player, _local, pos, path)) in ctx
+        for (entity, (player_input, player, _local, pos, _path)) in ctx
             .world
             .query_mut::<(
                 &mut PlayerInput,
@@ -960,27 +961,36 @@ impl LogicSystem for PlayerControlSystem {
                 }
             }
 
-            // ===== local move -> server sync: 发送移动意图 =====
+            // ===== local move -> server sync: 同步“已发生的格子位移” =====
+            // 关键点：
+            // - 本地移动是连续像素移动；MockServer 的 Move/Walk/RunRequest 语义是“推进一格”。
+            // - 如果按固定时间间隔发送，会导致 Mock 端走得比本地快，累计偏差后触发客户端的大偏差纠偏（表现为瞬移）。
+            // - 这里改为：只有当本地玩家“跨入新格子”时，才给服务器发送一步，从而保持双方格子同步。
             if sync_move_to_server {
                 let now = Instant::now();
-                if self.can_send_net_move(now) {
-                    // 目标优先级：Path 当前 waypoint > move_to
-                    let target_grid = if path.is_valid {
-                        path.current_waypoint()
-                    } else {
-                        player_input
-                            .move_to
-                            .map(|(wx, wy)| crate::coord::Coord::world_to_grid(wx, wy))
-                    };
+                let (pgx, pgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
 
-                    if let Some((tgx, tgy)) = target_grid {
-                        let (pgx, pgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-                        if let Some(dir) = Self::grid_direction_towards((pgx, pgy), (tgx, tgy)) {
-                            let run = matches!(player.action, PlayerAction::Run);
-                            // 本地表现可先转向；服务器会回包校正位置
-                            player.direction = dir;
-                            Self::send_net_move_step(net.as_ref(), run, dir);
-                            self.last_net_move_sent = Some(now);
+                match self.last_net_move_grid {
+                    None => {
+                        // 首帧只建立基准，不发包（Mock StartGame 会把 player_grid 初始化到出生点）。
+                        self.last_net_move_grid = Some((pgx, pgy));
+                    }
+                    Some((sgx, sgy)) => {
+                        if (sgx, sgy) != (pgx, pgy) {
+                            let dist = (sgx - pgx).abs() + (sgy - pgy).abs();
+                            if dist == 1 {
+                                if self.can_send_net_move(now) {
+                                    if let Some(dir) = Self::grid_direction_towards((sgx, sgy), (pgx, pgy)) {
+                                        let run = matches!(player.action, PlayerAction::Run);
+                                        Self::send_net_move_step(net.as_ref(), run, dir);
+                                        self.last_net_move_sent = Some(now);
+                                        self.last_net_move_grid = Some((pgx, pgy));
+                                    }
+                                }
+                            } else {
+                                // 大跳变（传送/复活/强制对齐等）：直接重置基准，避免连发多步导致 server 位置飘。
+                                self.last_net_move_grid = Some((pgx, pgy));
+                            }
                         }
                     }
                 }

@@ -744,9 +744,19 @@ impl NetworkApplySystem {
         use crate::components::network::NetworkSync;
 
         let mut q = ctx.world.query::<&NetworkSync>();
-        q.iter()
-            .find(|(_, ns)| ns.object_id == object_id)
-            .map(|(e, _)| e)
+        if let Some((e, _)) = q.iter().find(|(_, ns)| ns.object_id == object_id) {
+            return Some(e);
+        }
+
+        // LocalPlayer 默认不挂 NetworkSync，但仍可能需要通过 object_id 落地（例如 mock 侧下发的
+        // ObjectStruck/ObjectDied/ObjectRemove 等）。
+        {
+            use crate::components::{LocalPlayer, PlayerData};
+            let mut q = ctx.world.query::<(&LocalPlayer, &PlayerData)>();
+            q.iter()
+                .find(|(_, (_lp, pd))| pd.id == object_id)
+                .map(|(e, _)| e)
+        }
     }
 
     fn upsert_library_sprite_object(
@@ -1261,6 +1271,7 @@ impl LogicSystem for NetworkApplySystem {
 
         // combat feedback
         let mut player_health_changed: Option<(u32, u32)> = None;
+        let mut player_mana_changed: Option<(u32, u32)> = None;
         let mut object_struck: Vec<(u32, u32, i32)> = Vec::new();
         let mut object_died: Vec<u32> = Vec::new();
 
@@ -1344,6 +1355,9 @@ impl LogicSystem for NetworkApplySystem {
                 // ===== combat feedback =====
                 NetworkEvent::HealthChanged { current, max } => {
                     player_health_changed = Some((*current, *max));
+                }
+                NetworkEvent::ManaChanged { current, max } => {
+                    player_mana_changed = Some((*current, *max));
                 }
                 NetworkEvent::ObjectStruck {
                     object_id,
@@ -1530,10 +1544,93 @@ impl LogicSystem for NetworkApplySystem {
                 }
             }
 
+            // 魔法同步（来自服务器）
+            if let Some((cur, max)) = player_mana_changed {
+                let mut inserted = false;
+                {
+                    if let Ok(mut mp) = ctx.world.get::<&mut crate::components::Mana>(e) {
+                        mp.current = cur as i32;
+                        mp.max = max as i32;
+                        inserted = true;
+                    }
+                }
+                if !inserted {
+                    let _ = ctx.world.insert_one(
+                        e,
+                        crate::components::Mana {
+                            current: cur as i32,
+                            max: max as i32,
+                        },
+                    );
+                }
+            }
+
             // 位置校正（格子坐标 -> 世界像素）
             // 仅在“服务器权威移动”开启时落地；否则会与本地 MovementSystem 双驱动，导致抖动/乱跳。
-            if ctx.session.server_authoritative_movement {
-                if let Some((gx, gy)) = player_location_changed {
+            if let Some((gx, gy)) = player_location_changed {
+                let should_apply = if ctx.session.server_authoritative_movement {
+                    true
+                } else {
+                    // 非 server-authoritative movement 时，仅允许“传送类”修正：
+                    // - 玩家已死亡（用于复活回城）
+                    // - 或者偏差足够大（避免小抖动纠偏）
+                    let dead = ctx
+                        .world
+                        .get::<&crate::components::Health>(e)
+                        .ok()
+                        .map(|hp| hp.current <= 0)
+                        .unwrap_or(false);
+                    if dead {
+                        true
+                    } else {
+                        let dist_tiles = ctx
+                            .world
+                            .get::<&crate::components::Position>(e)
+                            .ok()
+                            .map(|pos| {
+                                let (cgx, cgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+                                (cgx - gx).abs() + (cgy - gy).abs()
+                            })
+                            .unwrap_or(0);
+                        dist_tiles >= 8
+                    }
+                };
+
+                if should_apply {
+                    // 强制对齐（传送/复活回城）
+                    let (wx, wy) = crate::coord::Coord::grid_to_world_center(gx, gy);
+                    if let Ok(mut pos) = ctx.world.get::<&mut crate::components::Position>(e) {
+                        pos.x = wx;
+                        pos.y = wy;
+                    }
+
+                    // 重置移动/攻击状态，避免“复活还在追砍/寻路”
+                    if let Ok(mut input) = ctx.world.get::<&mut crate::components::PlayerInput>(e) {
+                        input.move_to = None;
+                        input.movement_mode = crate::components::MovementMode::None;
+                        input.attack_target = None;
+                        input.cast_spell = None;
+                        input.spell_target_pos = None;
+                        input.spell_target_entity = None;
+                        input.pickup_at = None;
+                        input.turn_to = None;
+                    }
+
+                    if let Ok(mut path) = ctx.world.get::<&mut crate::components::Path>(e) {
+                        path.clear();
+                    }
+                    if let Ok(mut mv) = ctx.world.get::<&mut crate::components::MovementVelocity>(e) {
+                        mv.stop();
+                    }
+                    if let Ok(mut m) = ctx.world.get::<&mut crate::components::Movement>(e) {
+                        m.set_state(crate::components::MovementState::Idle);
+                    }
+                    if let Ok(mut p) = ctx.world.get::<&mut crate::components::Player>(e) {
+                        p.action = crate::components::PlayerAction::Stand;
+                    }
+                    let _ = ctx.world.remove_one::<crate::components::AttackState>(e);
+                } else if ctx.session.server_authoritative_movement {
+                    // 兼容旧逻辑：小偏差不纠正
                     if let Ok(mut pos) = ctx.world.get::<&mut crate::components::Position>(e) {
                         let (wx, wy) = crate::coord::Coord::grid_to_world_center(gx, gy);
                         let dx = pos.x - wx;
@@ -1746,6 +1843,33 @@ impl LogicSystem for NetworkApplySystem {
             if let Some(target) = Self::find_entity_by_object_id(ctx, object_id) {
                 if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(target) {
                     hp.current = 0;
+                }
+
+                // 本地玩家死亡：立刻停止移动/攻击输入，避免“死了还在走/追砍”。
+                if ctx.world.get::<&crate::components::LocalPlayer>(target).is_ok() {
+                    if let Ok(mut input) = ctx.world.get::<&mut crate::components::PlayerInput>(target) {
+                        input.move_to = None;
+                        input.movement_mode = crate::components::MovementMode::None;
+                        input.attack_target = None;
+                        input.cast_spell = None;
+                        input.spell_target_pos = None;
+                        input.spell_target_entity = None;
+                        input.pickup_at = None;
+                        input.turn_to = None;
+                    }
+                    if let Ok(mut path) = ctx.world.get::<&mut crate::components::Path>(target) {
+                        path.clear();
+                    }
+                    if let Ok(mut mv) = ctx.world.get::<&mut crate::components::MovementVelocity>(target) {
+                        mv.stop();
+                    }
+                    if let Ok(mut m) = ctx.world.get::<&mut crate::components::Movement>(target) {
+                        m.set_state(crate::components::MovementState::Idle);
+                    }
+                    if let Ok(mut p) = ctx.world.get::<&mut crate::components::Player>(target) {
+                        p.action = crate::components::PlayerAction::Stand;
+                    }
+                    let _ = ctx.world.remove_one::<crate::components::AttackState>(target);
                 }
 
                 // ===== 音效：死亡 =====

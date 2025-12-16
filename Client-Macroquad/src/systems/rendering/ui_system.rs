@@ -204,6 +204,23 @@ impl RenderSystem for UIRenderSystem {
                 .update_minimap_player_position(p.x, p.y, minimap_player_dir_radians);
         }
 
+        // 2.5) 同步主面板红/蓝血（HP/MP）到真实 ECS 数据
+        {
+            use crate::components::{Health, LocalPlayer, Mana};
+
+            let mut q = ctx.world.query::<(&LocalPlayer, &Health)>();
+            if let Some((e, (_lp, hp))) = q.iter().next() {
+                let (mp_cur, mp_max) = ctx
+                    .world
+                    .get::<&Mana>(e)
+                    .map(|mp| (mp.current, mp.max))
+                    .unwrap_or((0, 1));
+
+                self.main_dialog
+                    .set_vitals(hp.current, hp.max, mp_cur, mp_max);
+            }
+        }
+
         // 3) 快捷键（由 UIRenderSystem 统一处理，避免 GameScene 直连 UI 组件）
         if !self.amount_box.is_visible() && !self.main_dialog.is_any_input_active() {
             if is_key_pressed(KeyCode::Enter) {

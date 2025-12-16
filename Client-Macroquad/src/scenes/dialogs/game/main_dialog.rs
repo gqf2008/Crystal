@@ -239,6 +239,16 @@ impl MainDialog {
         }
     }
 
+    /// 同步主面板生命/魔法显示（红/蓝球）。
+    ///
+    /// 说明：MainDialog 早期使用模拟字段；现在由渲染系统从 ECS 每帧推送真实值。
+    pub fn set_vitals(&mut self, hp: i32, max_hp: i32, mp: i32, max_mp: i32) {
+        self.hp = hp.max(0);
+        self.max_hp = max_hp.max(1);
+        self.mp = mp.max(0);
+        self.max_mp = max_mp.max(1);
+    }
+
     /// 设置小地图对应的地图尺寸（单位：地图格子数 width/height）
     ///
     /// 备注：小地图点击反算会先算出格子坐标，再用 `Coord::grid_to_world_center()` 转为世界像素。

@@ -92,6 +92,18 @@ impl LogicSystem for CombatSystem {
             }
         };
 
+        // 死亡时不允许继续出手/追砍
+        if let Ok(hp) = ctx.world.get::<&Health>(player_entity) {
+            if hp.current <= 0 {
+                if let Ok(mut input) = ctx.world.get::<&mut crate::components::PlayerInput>(player_entity) {
+                    input.attack_target = None;
+                    input.move_to = None;
+                    input.movement_mode = crate::components::MovementMode::None;
+                }
+                return Ok(());
+            }
+        }
+
         // 2) 目标实体拿 object_id；拿不到说明目标已被移除
         let target_id = match ctx.world.get::<&NetworkSync>(target_entity).ok() {
             None => {

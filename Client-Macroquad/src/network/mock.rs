@@ -30,6 +30,8 @@ struct MockMonsterState {
     hp: i32,
     zone_idx: usize,
     xp_reward: i64,
+    last_chase_step: Instant,
+    last_attack: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -88,9 +90,14 @@ struct MockWorldState {
     in_game: bool,
 
     // 本地玩家（server-authoritative）
+    player_object_id: u32,
     player_gold: u32,
     inventory_capacity: usize,
     player_grid: (i32, i32),
+    player_spawn_grid: (i32, i32),
+    player_hp_current: i32,
+    player_hp_max: i32,
+    player_dead_since: Option<Instant>,
 
     // NPC 商店：最近一次下发给客户端的货单（用于 BuyItemRequest 通过 unique_id 反查）
     last_shop_goods: Vec<mir2_shared::data::item::UserItem>,
@@ -104,6 +111,7 @@ struct MockWorldState {
     zones: Vec<MockZone>,
     next_monster_id: u32,
     last_monster_wander_tick: Instant,
+    last_monster_combat_tick: Instant,
 
     // server-authoritative remote players (AI-driven)
     remote_players: Vec<MockRemotePlayerState>,
@@ -118,10 +126,15 @@ impl Default for MockWorldState {
         Self {
             in_game: false,
 
+            player_object_id: 1,
             player_gold: 1000,
             inventory_capacity: 40,
             // 330,330 在 n0.map 上容易被前景遮挡；换到更空旷的位置，避免一直只能看到 ghost。
             player_grid: (336, 334),
+            player_spawn_grid: (336, 334),
+            player_hp_current: 100,
+            player_hp_max: 100,
+            player_dead_since: None,
             last_shop_goods: Vec::new(),
 
             last_player_move_req: Instant::now(),
@@ -166,6 +179,7 @@ impl Default for MockWorldState {
             ],
             next_monster_id: 3001,
             last_monster_wander_tick: Instant::now(),
+            last_monster_combat_tick: Instant::now(),
 
             remote_players: Vec::new(),
 
@@ -340,6 +354,11 @@ impl MockNetwork {
                 state.player_gold = 1000;
                 state.inventory_capacity = 40;
                 state.player_grid = (336, 334);
+                state.player_object_id = 1;
+                state.player_hp_max = 100;
+                state.player_hp_current = 100;
+                state.player_spawn_grid = state.player_grid;
+                state.player_dead_since = None;
 
                 // 下发最小装备：用于验证“装备→外观/坐骑派生→渲染”链路。
                 // 槽位约定（见 NetworkApplySystem::apply_equipment_vec）:
@@ -412,8 +431,8 @@ impl MockNetwork {
 
                 let _ = response_tx.send(NetworkEvent::UserInformation {
                     packet: mir2_shared::packets::server::UserInformation {
-                        object_id: 1,
-                        real_id: 1,
+                        object_id: state.player_object_id,
+                        real_id: state.player_object_id,
                         name: "TestUser".to_string(),
                         guild_name: "".to_string(),
                         guild_rank: "".to_string(),
@@ -425,7 +444,7 @@ impl MockNetwork {
                         location_y: 334,
                         direction: mir2_shared::enums::MirDirection::Down,
                         hair: 1,
-                        hp: 100,
+                        hp: state.player_hp_current.max(0),
                         mp: 50,
                         experience: 0,
                         max_experience: 0,
@@ -829,8 +848,220 @@ impl MockNetwork {
         // 刷怪：按区域补足数量
         Self::tick_zone_spawns(response_tx, state);
 
+        // 怪物 AI：追击 + 攻击本地玩家（server-driven combat）
+        Self::tick_monster_combat(response_tx, state);
+
+        // 玩家死亡：回城复活（离线 mock 最小闭环）
+        Self::tick_player_respawn(response_tx, state);
+
         // 怪物游荡：低频随机走动（避免刷屏/性能）
         Self::tick_monster_wander(response_tx, state);
+    }
+
+    fn tick_player_respawn(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
+        let Some(dead_since) = state.player_dead_since else {
+            return;
+        };
+
+        // 给一个短的死亡停留时间，让死亡音效/飘字可见
+        if dead_since.elapsed() < Duration::from_millis(1600) {
+            return;
+        }
+
+        state.player_dead_since = None;
+        state.player_grid = state.player_spawn_grid;
+        state.player_hp_current = state.player_hp_max.max(1);
+
+        let _ = response_tx.send(NetworkEvent::HealthChanged {
+            current: state.player_hp_current.max(0) as u32,
+            max: state.player_hp_max.max(1) as u32,
+        });
+        let _ = response_tx.send(NetworkEvent::PlayerLocationChanged {
+            x: state.player_grid.0,
+            y: state.player_grid.1,
+        });
+        let _ = response_tx.send(NetworkEvent::SystemMessage {
+            message: "(MOCK) Respawned at town".to_string(),
+        });
+    }
+
+    fn tick_monster_combat(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
+        if state.last_monster_combat_tick.elapsed() < Duration::from_millis(180) {
+            return;
+        }
+        state.last_monster_combat_tick = Instant::now();
+
+        if state.player_hp_current <= 0 {
+            return;
+        }
+
+        let player_id = state.player_object_id;
+        let (px, py) = state.player_grid;
+
+        // 每次最多处理少量怪，避免事件太多
+        let mut acted = 0usize;
+        let limit = 8usize;
+
+        let mut candidates: Vec<(u32, i32)> = state
+            .monsters
+            .iter()
+            .filter_map(|(mid, m)| {
+                if m.hp <= 0 {
+                    return None;
+                }
+                let dist = (m.pos.0 - px).abs() + (m.pos.1 - py).abs();
+                Some((*mid, dist))
+            })
+            .collect();
+        candidates.sort_by_key(|(_, d)| *d);
+
+        // 简单参数：不追求完全还原，只求闭环可玩
+        let aggro_range = 8i32;
+        let attack_cooldown = Duration::from_millis(900);
+        let chase_interval = Duration::from_millis(240);
+
+        for (mid, dist) in candidates {
+            if acted >= limit {
+                break;
+            }
+            if dist > aggro_range {
+                continue;
+            }
+
+            let Some(m) = state.monsters.get(&mid).copied() else {
+                continue;
+            };
+            if m.hp <= 0 {
+                continue;
+            }
+
+            let (mx, my) = m.pos;
+            let dx = (px - mx).signum();
+            let dy = (py - my).signum();
+            let dir = Self::dir_from_delta(dx, dy);
+
+            // 近战：相邻就打
+            if dist <= 1 {
+                if m.last_attack.elapsed() < attack_cooldown {
+                    continue;
+                }
+
+                // 更新 last_attack
+                if let Some(mm) = state.monsters.get_mut(&mid) {
+                    mm.last_attack = Instant::now();
+                }
+
+                let _ = response_tx.send(NetworkEvent::ObjectTurn {
+                    packet: mir2_shared::packets::server::ObjectTurn {
+                        object_id: mid,
+                        location_x: mx,
+                        location_y: my,
+                        direction: dir,
+                    },
+                });
+                let _ = response_tx.send(NetworkEvent::ObjectAttack {
+                    packet: mir2_shared::packets::server::ObjectAttack {
+                        object_id: mid,
+                        location_x: (mx.max(0) as u32),
+                        location_y: (my.max(0) as u32),
+                        direction: dir as u8,
+                        spell: 0,
+                        level: 0,
+                        attack_type: 0,
+                    },
+                });
+
+                let damage = 6 + (Self::rng_next_u32(&mut state.rng) % 7) as i32;
+                state.player_hp_current = (state.player_hp_current - damage).max(0);
+
+                // 用 ObjectStruck/ObjectDied 走统一落地（NetworkApplySystem 会给玩家播放受击/死亡音效 + 飘字）
+                let _ = response_tx.send(NetworkEvent::ObjectStruck {
+                    object_id: player_id,
+                    attacker_id: mid,
+                    damage,
+                });
+                let _ = response_tx.send(NetworkEvent::HealthChanged {
+                    current: state.player_hp_current.max(0) as u32,
+                    max: state.player_hp_max.max(1) as u32,
+                });
+
+                if state.player_hp_current <= 0 {
+                    let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: player_id });
+                    let _ = response_tx.send(NetworkEvent::SystemMessage {
+                        message: "(MOCK) You died".to_string(),
+                    });
+
+                    // 标记死亡开始时间，用于 respawn
+                    if state.player_dead_since.is_none() {
+                        state.player_dead_since = Some(Instant::now());
+                    }
+                }
+
+                acted += 1;
+                continue;
+            }
+
+            // 追击：朝玩家走/跑一步（更接近原版：远一点跑，贴近走）
+            if m.last_chase_step.elapsed() < chase_interval {
+                continue;
+            }
+
+            let mut nx = mx + dx;
+            let mut ny = my + dy;
+
+            // 避免踩到玩家格子：对角靠近时优先拆成直线
+            if (nx, ny) == (px, py) {
+                if dx != 0 && dy != 0 {
+                    if (mx + dx, my) != (px, py) {
+                        nx = mx + dx;
+                        ny = my;
+                    } else if (mx, my + dy) != (px, py) {
+                        nx = mx;
+                        ny = my + dy;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+
+            // 简单限制：不要无限跑出出生区太远
+            if let Some(z) = state.zones.get(m.zone_idx) {
+                let dist_from_center = (nx - z.center.0).abs() + (ny - z.center.1).abs();
+                if dist_from_center > z.radius * 6 {
+                    continue;
+                }
+            }
+
+            if let Some(mm) = state.monsters.get_mut(&mid) {
+                mm.pos = (nx, ny);
+                mm.last_chase_step = Instant::now();
+            }
+
+            let prefer_run = dist >= 3;
+            if prefer_run {
+                let _ = response_tx.send(NetworkEvent::ObjectRun {
+                    packet: mir2_shared::packets::server::ObjectRun {
+                        object_id: mid,
+                        location_x: nx,
+                        location_y: ny,
+                        direction: dir,
+                    },
+                });
+            } else {
+                let _ = response_tx.send(NetworkEvent::ObjectWalk {
+                    packet: mir2_shared::packets::server::ObjectWalk {
+                        object_id: mid,
+                        location_x: nx,
+                        location_y: ny,
+                        direction: dir,
+                    },
+                });
+            }
+
+            acted += 1;
+        }
     }
 
     fn exp_for_next_level(level: u16) -> i64 {
@@ -949,6 +1180,8 @@ impl MockNetwork {
                 hp: zone.monster_hp,
                 zone_idx,
                 xp_reward: zone.xp_reward,
+                last_chase_step: Instant::now() - Duration::from_millis(500),
+                last_attack: Instant::now() - Duration::from_millis(1000),
             },
         );
     }
@@ -997,6 +1230,12 @@ impl MockNetwork {
                 continue;
             };
             if m.hp <= 0 {
+                continue;
+            }
+
+            // 离玩家很近时不随机游荡，让追击逻辑接管
+            let dist_to_player = (m.pos.0 - state.player_grid.0).abs() + (m.pos.1 - state.player_grid.1).abs();
+            if dist_to_player <= 8 {
                 continue;
             }
             let (zone_center, zone_radius) = match state.zones.get(m.zone_idx) {
