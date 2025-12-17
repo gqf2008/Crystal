@@ -277,6 +277,11 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             ChatHandler.handle(header, payload)
         }
 
+        // ===== Player =====
+        x if x == SP::PlayerInspect as u16 => {
+            PlayerHandler.handle(header, payload)
+        }
+
         // ===== Items & Inventory =====
         x if x == SP::NewItemInfo as u16
             || x == SP::NewHeroInfo as u16
@@ -410,7 +415,6 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
 
         // ===== 其他系统功能（暂未分类处理）=====
         x if x == SP::PlayerUpdate as u16
-            || x == SP::PlayerInspect as u16
             || x == SP::ChangeAMode as u16
             || x == SP::ChangePMode as u16
             || x == SP::ColourChanged as u16
@@ -659,6 +663,11 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             };
             serialize_packet(stream, &packet)?;
             tracing::trace!("💬 Sent chat: {}", packet.message);
+        }
+
+        NetworkEvent::InspectRequest { object_id } => {
+            let packet = client::Inspect { object_id };
+            serialize_packet(stream, &packet)?;
         }
 
         // ===== 物品相关 =====

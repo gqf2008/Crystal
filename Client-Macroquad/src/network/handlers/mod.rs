@@ -9,6 +9,7 @@ pub mod character;
 pub mod movement;
 pub mod combat;
 pub mod chat;
+pub mod player;
 pub mod group;
 pub mod guild;
 pub mod trade;
@@ -23,6 +24,7 @@ pub use character::CharacterHandler;
 pub use movement::MovementHandler;
 pub use combat::CombatHandler;
 pub use chat::ChatHandler;
+pub use player::PlayerHandler;
 pub use group::GroupHandler;
 pub use guild::GuildHandler;
 pub use trade::TradeHandler;
@@ -167,10 +169,14 @@ pub enum NetworkEvent {
     
     // 客户端 → 服务器
     ChatRequest { message: String, linked_items: Vec<mir2_shared::ChatItem> },
+    /// 查看/检查另一个对象（通常用于查看其他玩家装备）
+    InspectRequest { object_id: u32 },
     
     // 服务器 → 客户端
     ChatMessage { sender: String, message: String, chat_type: mir2_shared::enums::ChatType },
     SystemMessage { message: String },
+    /// 服务器返回的玩家查看数据（装备栏等）
+    PlayerInspect { packet: mir2_shared::packets::server::PlayerInspect },
     
     // ========================================================================
     // 物体事件（Object Events）

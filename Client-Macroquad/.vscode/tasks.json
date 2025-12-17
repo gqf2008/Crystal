@@ -111,7 +111,9 @@
 			"args": [
 				"check"
 			],
-			"isBackground": false
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
 		}
 	]
 }

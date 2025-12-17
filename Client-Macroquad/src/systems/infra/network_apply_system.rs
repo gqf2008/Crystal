@@ -579,6 +579,93 @@ impl NetworkApplySystem {
         }
     }
 
+    fn apply_player_inspect(ctx: &mut GameContext, packet: mir2_shared::packets::server::PlayerInspect) {
+        use crate::components::{Equipment, OtherPlayer, PlayerAppearance};
+        use mir2_shared::enums::ItemType;
+
+        let target_entity = {
+            let mut q = ctx.world.query::<&OtherPlayer>();
+            q.iter()
+                .find_map(|(e, op)| if op.name == packet.name { Some(e) } else { None })
+        };
+
+        let Some(e) = target_entity else {
+            tracing::warn!("[NetworkApplySystem] PlayerInspect for unknown player name={}", packet.name);
+            return;
+        };
+
+        // 身份信息
+        if let Ok(mut op) = ctx.world.get::<&mut OtherPlayer>(e) {
+            op.class = packet.class;
+            op.gender = packet.gender;
+            op.level = packet.level;
+            op.guild_name = if packet.guild_name.is_empty() {
+                None
+            } else {
+                Some(packet.guild_name.clone())
+            };
+        }
+
+        // 装备栏
+        let has_equip = ctx.world.get::<&Equipment>(e).is_ok();
+        if has_equip {
+            if let Ok(mut eq) = ctx.world.get::<&mut Equipment>(e) {
+                Self::apply_equipment_vec(&mut eq, &packet.equipment);
+            }
+        } else {
+            let mut eq = Equipment::default();
+            Self::apply_equipment_vec(&mut eq, &packet.equipment);
+            let _ = ctx.world.insert_one(e, eq);
+        }
+
+        // 外观派生（与 UserInformation 的逻辑保持一致：weapon/armour/特效由装备导出）
+        if let Ok(mut appearance) = ctx.world.get::<&mut PlayerAppearance>(e) {
+            appearance.class = packet.class;
+            appearance.gender = packet.gender;
+            appearance.hair = packet.hair;
+
+            // weapon slot = 0
+            match packet.equipment.get(0).and_then(|x| x.as_ref()) {
+                None => {
+                    appearance.weapon = -1;
+                    appearance.weapon_effect = 0;
+                }
+                Some(item) => {
+                    if let Some(info) = item.info.as_ref() {
+                        let broken = item.current_dura == 0 && info.durability > 0;
+                        if !broken && info.item_type == ItemType::Weapon {
+                            appearance.weapon = info.shape;
+                            appearance.weapon_effect = info.effect as i16;
+                        } else {
+                            appearance.weapon = -1;
+                            appearance.weapon_effect = 0;
+                        }
+                    }
+                }
+            }
+
+            // armour slot = 1
+            match packet.equipment.get(1).and_then(|x| x.as_ref()) {
+                None => {
+                    appearance.armour = 0;
+                    appearance.wing_effect = 0;
+                }
+                Some(item) => {
+                    if let Some(info) = item.info.as_ref() {
+                        let broken = item.current_dura == 0 && info.durability > 0;
+                        if !broken && info.item_type == ItemType::Armour {
+                            appearance.armour = info.shape;
+                            appearance.wing_effect = info.effect;
+                        } else {
+                            appearance.armour = 0;
+                            appearance.wing_effect = 0;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn apply_equipment_vec(eq: &mut crate::components::Equipment, items: &[Option<mir2_shared::data::item::UserItem>]) {
         // C# 侧 Equipment 数组与这里的槽位约定：0..13
         // 0 weapon, 1 armour, 2 helmet, 3 necklace, 4 bracelet_l, 5 bracelet_r, 6 ring_l,
@@ -1278,6 +1365,7 @@ impl LogicSystem for NetworkApplySystem {
         // UI / presentation feedback
         let mut play_sounds: Vec<i32> = Vec::new();
         let mut mount_updates: Vec<(u32, i16, bool)> = Vec::new();
+        let mut player_inspects: Vec<mir2_shared::packets::server::PlayerInspect> = Vec::new();
 
         for event in ctx.events().network_events() {
             match event {
@@ -1381,6 +1469,10 @@ impl LogicSystem for NetworkApplySystem {
                 } => {
                     mount_updates.push((*object_id, *mount_type, *riding_mount));
                 }
+
+                NetworkEvent::PlayerInspect { packet } => {
+                    player_inspects.push(packet.clone());
+                }
                 _ => {}
             }
         }
@@ -1402,6 +1494,10 @@ impl LogicSystem for NetworkApplySystem {
 
         if let Some(packet) = map_changed {
             Self::apply_map_changed(ctx, packet);
+        }
+
+        for packet in player_inspects {
+            Self::apply_player_inspect(ctx, packet);
         }
 
         // ===== server-driven: 播放声音（无位置，按全局/系统音效处理） =====

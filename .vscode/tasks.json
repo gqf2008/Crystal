@@ -1,0 +1,39 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "git status (capture)",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"git status -sb > git_status.txt 2>&1"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "git diff name-only (capture)",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"git diff --name-only > git_diff_names.txt 2>&1"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "cargo check (Client-Macroquad)",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd /d Client-Macroquad & cargo check"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

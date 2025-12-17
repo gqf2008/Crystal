@@ -18,11 +18,295 @@
 use super::handlers::NetworkEvent;
 use crate::resources::MapReader;
 use crossbeam_channel::{Receiver, Sender};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use std::collections::{HashMap, HashSet};
+
+const CRYSTAL_REMOTE_PLAYERS: &str = "CRYSTAL_REMOTE_PLAYERS";
+const CRYSTAL_START_MAP: &str = "CRYSTAL_START_MAP";
+
+#[derive(Debug, Clone)]
+struct MockRuntimeConfig {
+    // 规模
+    remote_players: usize,
+    start_map: String,
+
+    // 外观（默认保持当前“离线资源已验证”的固定值）
+    weapon_min: i16,
+    weapon_max: i16,
+    armour_min: i16,
+    armour_max: i16,
+    weapon_effect_min: i16,
+    weapon_effect_max: i16,
+    wing_effect_min: u8,
+    wing_effect_max: u8,
+
+    // 坐骑
+    mount_min: i16,
+    mount_max: i16,
+    mount_min_level: u16,
+    mount_chance: f32,
+
+    // AI
+    ai_tick_ms: u64,
+    zone_eval_ms: u64,
+    roam_pick_ms: u64,
+    rest_chance: f32,
+    rest_ms: u64,
+    perception: i32,
+    chase_drop: i32,
+    attack_cooldown_ms: u64,
+}
+
+impl Default for MockRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            remote_players: 3000,
+            start_map: "Map/n0.map".to_string(),
+
+            weapon_min: 60,
+            weapon_max: 60,
+            armour_min: 25,
+            armour_max: 25,
+            weapon_effect_min: 12,
+            weapon_effect_max: 12,
+            wing_effect_min: 4,
+            wing_effect_max: 4,
+
+            mount_min: 0,
+            mount_max: 11,
+            mount_min_level: 22,
+            // 默认保持“无坐骑”（与当前远程玩家一致）；想开坐骑就改 config.ini
+            mount_chance: 0.0,
+
+            ai_tick_ms: 200,
+            zone_eval_ms: 1800,
+            roam_pick_ms: 1500,
+            rest_chance: 0.02,
+            rest_ms: 600,
+            perception: 18,
+            chase_drop: 32,
+            attack_cooldown_ms: 650,
+        }
+    }
+}
+
+fn normalize_map_path(input: &str) -> String {
+    let s = input.trim();
+    if s.is_empty() {
+        return "Map/n0.map".to_string();
+    }
+    let mut p = s.replace('\\', "/");
+    if !p.contains('/') {
+        if !p.to_ascii_lowercase().ends_with(".map") {
+            p.push_str(".map");
+        }
+        p = format!("Map/{p}");
+    }
+    if !p.to_ascii_lowercase().ends_with(".map") {
+        p.push_str(".map");
+    }
+    p
+}
+
+fn load_mock_runtime_config() -> MockRuntimeConfig {
+    let mut cfg = MockRuntimeConfig::default();
+
+    // 读取 config.ini（与 network/mod.rs 同风格的简易 INI 解析）
+    if let Ok(content) = std::fs::read_to_string("config.ini") {
+        let mut section = String::new();
+        for raw in content.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+                continue;
+            }
+            if line.starts_with('[') && line.ends_with(']') {
+                section = line[1..line.len() - 1].trim().to_string();
+                continue;
+            }
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
+            if !section.eq_ignore_ascii_case("Mock") {
+                continue;
+            }
+            let key = k.trim();
+            let value = v.trim();
+
+            if key.eq_ignore_ascii_case("RemotePlayers") {
+                if let Ok(n) = value.parse::<usize>() {
+                    if n > 0 {
+                        cfg.remote_players = n;
+                    }
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("StartMap") {
+                if !value.is_empty() {
+                    cfg.start_map = normalize_map_path(value);
+                }
+                continue;
+            }
+
+            if key.eq_ignore_ascii_case("WeaponMin") {
+                if let Ok(v) = value.parse::<i16>() {
+                    cfg.weapon_min = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("WeaponMax") {
+                if let Ok(v) = value.parse::<i16>() {
+                    cfg.weapon_max = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("ArmourMin") {
+                if let Ok(v) = value.parse::<i16>() {
+                    cfg.armour_min = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("ArmourMax") {
+                if let Ok(v) = value.parse::<i16>() {
+                    cfg.armour_max = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("WeaponEffectMin") {
+                if let Ok(v) = value.parse::<i16>() {
+                    cfg.weapon_effect_min = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("WeaponEffectMax") {
+                if let Ok(v) = value.parse::<i16>() {
+                    cfg.weapon_effect_max = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("WingEffectMin") {
+                if let Ok(v) = value.parse::<u8>() {
+                    cfg.wing_effect_min = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("WingEffectMax") {
+                if let Ok(v) = value.parse::<u8>() {
+                    cfg.wing_effect_max = v;
+                }
+                continue;
+            }
+
+            if key.eq_ignore_ascii_case("MountMin") {
+                if let Ok(v) = value.parse::<i16>() {
+                    cfg.mount_min = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("MountMax") {
+                if let Ok(v) = value.parse::<i16>() {
+                    cfg.mount_max = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("MountMinLevel") {
+                if let Ok(v) = value.parse::<u16>() {
+                    cfg.mount_min_level = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("MountChance") {
+                if let Ok(v) = value.parse::<f32>() {
+                    cfg.mount_chance = v.clamp(0.0, 1.0);
+                }
+                continue;
+            }
+
+            if key.eq_ignore_ascii_case("AiTickMs") {
+                if let Ok(v) = value.parse::<u64>() {
+                    cfg.ai_tick_ms = v.max(10);
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("ZoneEvalMs") {
+                if let Ok(v) = value.parse::<u64>() {
+                    cfg.zone_eval_ms = v.max(50);
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("RoamPickMs") {
+                if let Ok(v) = value.parse::<u64>() {
+                    cfg.roam_pick_ms = v.max(50);
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("RestChance") {
+                if let Ok(v) = value.parse::<f32>() {
+                    cfg.rest_chance = v.clamp(0.0, 1.0);
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("RestMs") {
+                if let Ok(v) = value.parse::<u64>() {
+                    cfg.rest_ms = v;
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("Perception") {
+                if let Ok(v) = value.parse::<i32>() {
+                    cfg.perception = v.max(1);
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("ChaseDrop") {
+                if let Ok(v) = value.parse::<i32>() {
+                    cfg.chase_drop = v.max(2);
+                }
+                continue;
+            }
+            if key.eq_ignore_ascii_case("AttackCooldownMs") {
+                if let Ok(v) = value.parse::<u64>() {
+                    cfg.attack_cooldown_ms = v.max(50);
+                }
+                continue;
+            }
+        }
+    }
+
+    // env 覆盖：保留老习惯（CRYSTAL_* 优先于 config.ini）
+    cfg.remote_players = std::env::var(CRYSTAL_REMOTE_PLAYERS)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(cfg.remote_players);
+
+    if let Ok(v) = std::env::var(CRYSTAL_START_MAP) {
+        if !v.trim().is_empty() {
+            cfg.start_map = normalize_map_path(v.trim());
+        }
+    }
+
+    // 修正 min/max 颠倒
+    if cfg.weapon_min > cfg.weapon_max {
+        std::mem::swap(&mut cfg.weapon_min, &mut cfg.weapon_max);
+    }
+    if cfg.armour_min > cfg.armour_max {
+        std::mem::swap(&mut cfg.armour_min, &mut cfg.armour_max);
+    }
+    if cfg.weapon_effect_min > cfg.weapon_effect_max {
+        std::mem::swap(&mut cfg.weapon_effect_min, &mut cfg.weapon_effect_max);
+    }
+    if cfg.wing_effect_min > cfg.wing_effect_max {
+        std::mem::swap(&mut cfg.wing_effect_min, &mut cfg.wing_effect_max);
+    }
+    if cfg.mount_min > cfg.mount_max {
+        std::mem::swap(&mut cfg.mount_min, &mut cfg.mount_max);
+    }
+
+    cfg
+}
 
 #[derive(Debug, Clone, Copy)]
 struct MockMonsterState {
@@ -57,6 +341,128 @@ enum RemoteAiMode {
     Rest,
 }
 
+fn make_mock_equipment_for_remote(
+    rng: &mut u64,
+    owner_id: u32,
+    level: u16,
+    weapon: i16,
+    weapon_effect: i16,
+    armour: i16,
+    wing_effect: u8,
+    mount_type: i16,
+    riding_mount: bool,
+) -> Vec<Option<mir2_shared::data::item::UserItem>> {
+    use mir2_shared::data::item::{ItemInfo, UserItem};
+    use mir2_shared::enums::ItemType;
+
+    // 槽位约定（与 NetworkApplySystem::apply_equipment_vec 一致）:
+    // 0 weapon, 1 armour, 2 helmet, 3 torch, 4 necklace, 5 bracel_l, 6 bracel_r,
+    // 7 ring_l, 8 ring_r, 9 amulet, 10 belt, 11 boots, 12 stone, 13 mount
+    let mut equipment: Vec<Option<UserItem>> = vec![None; 14];
+
+    let uid = |slot: u64| -> u64 { ((owner_id as u64) << 32) | (slot & 0xFFFF_FFFF) };
+
+    // Weapon
+    {
+        let mut info = ItemInfo::default();
+        info.index = 20000 + weapon as i32;
+        info.name = format!("RemoteWeapon{}", weapon);
+        info.item_type = ItemType::Weapon;
+        info.shape = weapon;
+        info.effect = weapon_effect as u8;
+        info.durability = 10;
+
+        let mut item = UserItem::with_info(info);
+        item.unique_id = uid(0);
+        item.current_dura = 10;
+        item.max_dura = 10;
+        equipment[0] = Some(item);
+    }
+
+    // Armour (驱动人物外观 + 翅膀特效)
+    {
+        let mut info = ItemInfo::default();
+        info.index = 21000 + armour as i32;
+        info.name = format!("RemoteArmour{}", armour);
+        info.item_type = ItemType::Armour;
+        info.shape = armour;
+        info.effect = wing_effect;
+        info.durability = 10;
+
+        let mut item = UserItem::with_info(info);
+        item.unique_id = uid(1);
+        item.current_dura = 10;
+        item.max_dura = 10;
+        equipment[1] = Some(item);
+    }
+
+    // Helmet / Necklace / Rings：给 Inspect 提供“真实不同”的槽位数据
+    {
+        let helmet_shape = 1 + (MockNetwork::rng_next_u32(rng) % 30) as i16;
+        let mut info = ItemInfo::default();
+        info.index = 22000 + helmet_shape as i32;
+        info.name = format!("RemoteHelmet{}", helmet_shape);
+        info.item_type = ItemType::Helmet;
+        info.shape = helmet_shape;
+
+        let mut item = UserItem::with_info(info);
+        item.unique_id = uid(2);
+        equipment[2] = Some(item);
+    }
+
+    {
+        let necklace_shape = 1 + (MockNetwork::rng_next_u32(rng) % 60) as i16;
+        let mut info = ItemInfo::default();
+        info.index = 23000 + necklace_shape as i32;
+        info.name = format!("RemoteNecklace{}", necklace_shape);
+        info.item_type = ItemType::Necklace;
+        info.shape = necklace_shape;
+
+        let mut item = UserItem::with_info(info);
+        item.unique_id = uid(4);
+        equipment[4] = Some(item);
+    }
+
+    {
+        let ring_l_shape = 1 + (MockNetwork::rng_next_u32(rng) % 80) as i16;
+        let ring_r_shape = 1 + (MockNetwork::rng_next_u32(rng) % 80) as i16;
+
+        let mut info_l = ItemInfo::default();
+        info_l.index = 24000 + ring_l_shape as i32;
+        info_l.name = format!("RemoteRingL{}", ring_l_shape);
+        info_l.item_type = ItemType::Ring;
+        info_l.shape = ring_l_shape;
+        let mut item_l = UserItem::with_info(info_l);
+        item_l.unique_id = uid(7);
+        equipment[7] = Some(item_l);
+
+        let mut info_r = ItemInfo::default();
+        info_r.index = 25000 + ring_r_shape as i32;
+        info_r.name = format!("RemoteRingR{}", ring_r_shape);
+        info_r.item_type = ItemType::Ring;
+        info_r.shape = ring_r_shape;
+        let mut item_r = UserItem::with_info(info_r);
+        item_r.unique_id = uid(8);
+        equipment[8] = Some(item_r);
+    }
+
+    // Mount
+    if riding_mount && mount_type > 0 {
+        let mut info = ItemInfo::default();
+        info.index = 26000 + mount_type as i32;
+        info.name = format!("RemoteMount{}", mount_type);
+        info.item_type = ItemType::Mount;
+        info.shape = mount_type;
+
+        let mut item = UserItem::with_info(info);
+        item.unique_id = uid(13);
+        equipment[13] = Some(item);
+    }
+
+    let _ = level;
+    equipment
+}
+
 #[derive(Debug, Clone)]
 struct MockRemotePlayerState {
     id: u32,
@@ -68,6 +474,9 @@ struct MockRemotePlayerState {
     weapon_effect: i16,
     armour: i16,
     wing_effect: u8,
+    mount_type: i16,
+    riding_mount: bool,
+    equipment: Vec<Option<mir2_shared::data::item::UserItem>>,
     grid: (i32, i32),
     direction: mir2_shared::enums::MirDirection,
     level: u16,
@@ -88,6 +497,9 @@ struct MockRemotePlayerState {
 #[derive(Debug, Clone)]
 struct MockWorldState {
     in_game: bool,
+
+    // [Mock] 运行时配置（来自 config.ini + env 覆盖）
+    mock_cfg: MockRuntimeConfig,
 
     // 用于在“持续有客户端事件”时也能推进 mock 世界（否则远程 AI/刷怪可能完全不跑）
     last_world_tick: Instant,
@@ -188,6 +600,8 @@ impl Default for MockWorldState {
         Self {
             in_game: false,
 
+            mock_cfg: MockRuntimeConfig::default(),
+
             last_world_tick: now,
 
             map_width: 0,
@@ -258,6 +672,7 @@ impl MockNetwork {
             let _ = mock_tx.send(NetworkEvent::Connected);
 
             let mut state = MockWorldState::default();
+            state.mock_cfg = load_mock_runtime_config();
 
             while running_clone.load(Ordering::Relaxed) {
                 match mock_rx.recv_timeout(Duration::from_millis(100)) {
@@ -364,6 +779,9 @@ impl MockNetwork {
                 tracing::info!("🎮 模拟开始游戏: 角色索引 {}", character_index);
                 thread::sleep(Duration::from_millis(200));
 
+                // 进入游戏前刷新 [Mock] 配置（支持运行中修改 config.ini 后重进游戏生效）
+                state.mock_cfg = load_mock_runtime_config();
+
                 // 发送开始游戏响应
                 let _ = response_tx.send(NetworkEvent::StartGameDelay {
                     packet: mir2_shared::packets::server::StartGameDelay {
@@ -380,10 +798,11 @@ impl MockNetwork {
                 });
 
                 // 加载地图并发送 MapChanged 事件（落点要和 UserInformation 一致，否则相机会被拉到(0,0)）
+                let start_map = state.mock_cfg.start_map.clone();
                 let (spawn_x, spawn_y) = Self::load_and_send_map(
                     &response_tx,
                     state,
-                    "Map/n0.map",
+                    start_map.as_str(),
                     0,
                     "盟重土城",
                     336,
@@ -512,43 +931,148 @@ impl MockNetwork {
                 // ====== Mock：生成多个“远程玩家”（不同区域找怪→跑路→打怪升级） ======
                 state.remote_players.clear();
                 let now = Instant::now();
-                let remote_count: usize = std::env::var("CRYSTAL_REMOTE_PLAYERS")
-                    .ok()
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .filter(|v| *v > 0)
-                    .unwrap_or(3000);
+                let cfg = state.mock_cfg.clone();
+                let remote_count: usize = cfg.remote_players;
 
                 let class = mir2_shared::enums::MirClass::Warrior;
-                let weapon: i16 = 60;
-                let weapon_effect: i16 = 12;
-                let armour: i16 = 25;
-                let wing_effect: u8 = 4;
+                let weapon_min = cfg.weapon_min;
+                let weapon_max = cfg.weapon_max;
+                let armour_min = cfg.armour_min;
+                let armour_max = cfg.armour_max;
+                let weapon_effect_min = cfg.weapon_effect_min;
+                let weapon_effect_max = cfg.weapon_effect_max;
+                let wing_effect_min = cfg.wing_effect_min;
+                let wing_effect_max = cfg.wing_effect_max;
+
+                // 出生点占位：确保玩家/怪物出生在可走格，并尽量避免大量远程玩家堆叠在同一格。
+                let mut occupied_tiles: HashSet<(i32, i32)> = HashSet::new();
+                occupied_tiles.insert(state.player_grid);
+
+                let map_width = state.map_width;
+                let map_height = state.map_height;
+                let (map_w_eff, map_h_eff) = Self::effective_map_dims(state);
+
+                // 避免同时借用 state 的不同字段触发 borrow checker：使用局部 rng，最后写回。
+                let mut rng = state.rng;
 
                 for i in 0..remote_count {
                     let id = 2_u32.saturating_add(i as u32);
 
+                    let weapon = if weapon_min == weapon_max {
+                        weapon_min
+                    } else {
+                        let lo = weapon_min.min(weapon_max) as i32;
+                        let hi = weapon_min.max(weapon_max) as i32;
+                        let span = (hi - lo + 1).max(1) as u32;
+                        (lo + (Self::rng_next_u32(&mut rng) % span) as i32) as i16
+                    };
+                    let armour = if armour_min == armour_max {
+                        armour_min
+                    } else {
+                        let lo = armour_min.min(armour_max) as i32;
+                        let hi = armour_min.max(armour_max) as i32;
+                        let span = (hi - lo + 1).max(1) as u32;
+                        (lo + (Self::rng_next_u32(&mut rng) % span) as i32) as i16
+                    };
+                    let weapon_effect = if weapon_effect_min == weapon_effect_max {
+                        weapon_effect_min
+                    } else {
+                        let lo = weapon_effect_min.min(weapon_effect_max) as i32;
+                        let hi = weapon_effect_min.max(weapon_effect_max) as i32;
+                        let span = (hi - lo + 1).max(1) as u32;
+                        (lo + (Self::rng_next_u32(&mut rng) % span) as i32) as i16
+                    };
+                    let wing_effect = if wing_effect_min == wing_effect_max {
+                        wing_effect_min
+                    } else {
+                        let lo = wing_effect_min.min(wing_effect_max) as i32;
+                        let hi = wing_effect_min.max(wing_effect_max) as i32;
+                        let span = (hi - lo + 1).max(1) as u32;
+                        (lo + (Self::rng_next_u32(&mut rng) % span) as i32) as u8
+                    };
+
+                    // 全图均匀分布：对整张地图做均匀采样（再用 walkable 拒绝采样），保证落点在可走格。
+                    let (x, y) = Self::pick_random_walkable_unoccupied_raw(
+                        map_width,
+                        map_height,
+                        state.map_walkable.as_slice(),
+                        map_w_eff,
+                        map_h_eff,
+                        &mut rng,
+                        &occupied_tiles,
+                        4096,
+                    )
+                        .unwrap_or_else(|| {
+                            // 退化：如果没有碰撞/地图尺寸信息，仍按 zone 随机，但也尽量避障。
+                            let zone_idx = if state.zones.is_empty() {
+                                0
+                            } else {
+                                (Self::rng_next_u32(&mut rng) as usize) % state.zones.len()
+                            };
+                            let z = state.zones.get(zone_idx);
+                            let mut picked = (338, 334);
+                            if let Some(z) = z {
+                                for _ in 0..32 {
+                                    let (tx, ty) = Self::random_pos_in_zone(&mut rng, z);
+                                    if Self::map_is_walkable(state, tx, ty) {
+                                        picked = (tx, ty);
+                                        break;
+                                    }
+                                }
+                            }
+                            picked
+                        });
+
                     let zone_idx = if state.zones.is_empty() {
                         0
                     } else {
-                        (Self::rng_next_u32(&mut state.rng) as usize) % state.zones.len()
+                        Self::nearest_zone_idx(&state.zones, x, y)
                     };
-                    let (x, y) = state
-                        .zones
-                        .get(zone_idx)
-                        .map(|z| Self::random_pos_in_zone(&mut state.rng, z))
-                        .unwrap_or((338, 334));
+
+                    occupied_tiles.insert((x, y));
 
                     let level = 1_u16
-                        .saturating_add((Self::rng_next_u32(&mut state.rng) % 4) as u16);
-                    let gender = if (Self::rng_next_u32(&mut state.rng) % 2) == 0 {
+                        .saturating_add((Self::rng_next_u32(&mut rng) % 4) as u16);
+
+                    // 坐骑：达到等级后按概率随机；默认概率=0（保持旧行为）
+                    let mut mount_type: i16 = 0;
+                    let mut riding_mount = false;
+                    if level >= cfg.mount_min_level {
+                        let roll = (Self::rng_next_u32(&mut rng) % 10_000) as f32 / 10_000.0;
+                        if roll < cfg.mount_chance {
+                            let lo = cfg.mount_min.min(cfg.mount_max) as i32;
+                            let hi = cfg.mount_min.max(cfg.mount_max) as i32;
+                            let span = (hi - lo + 1).max(1) as u32;
+                            mount_type = (lo + (Self::rng_next_u32(&mut rng) % span) as i32) as i16;
+                            if mount_type > 0 {
+                                riding_mount = true;
+                            } else {
+                                mount_type = 0;
+                                riding_mount = false;
+                            }
+                        }
+                    }
+                    let gender = if (Self::rng_next_u32(&mut rng) % 2) == 0 {
                         mir2_shared::enums::MirGender::Male
                     } else {
                         mir2_shared::enums::MirGender::Female
                     };
-                    let hair = ((Self::rng_next_u32(&mut state.rng) % 6) as u8).max(1);
+                    let hair = ((Self::rng_next_u32(&mut rng) % 6) as u8).max(1);
                     let direction = mir2_shared::enums::MirDirection::Left;
 
                     let name = format!("Remote{}", id);
+
+                    let equipment = make_mock_equipment_for_remote(
+                        &mut rng,
+                        id,
+                        level,
+                        weapon,
+                        weapon_effect,
+                        armour,
+                        wing_effect,
+                        mount_type,
+                        riding_mount,
+                    );
 
                     let _ = response_tx.send(NetworkEvent::ObjectPlayer {
                         packet: mir2_shared::packets::server::ObjectPlayer {
@@ -575,8 +1099,8 @@ impl MockNetwork {
                             effect: mir2_shared::enums::SpellEffect::None,
                             wing_effect,
                             extra: false,
-                            mount_type: 0,
-                            riding_mount: false,
+                            mount_type,
+                            riding_mount,
                             fishing: false,
                             transform_type: 0,
                             element_orb_effect: 0,
@@ -602,6 +1126,9 @@ impl MockNetwork {
                         weapon_effect,
                         armour,
                         wing_effect,
+                        mount_type,
+                        riding_mount,
+                        equipment,
                         grid: (x, y),
                         direction,
                         level,
@@ -619,6 +1146,8 @@ impl MockNetwork {
                         last_roam_pick: now,
                     });
                 }
+
+                state.rng = rng;
 
                 // ====== Mock(权威服务器)：用真实 server packet 形状生成 NPC/怪物 ======
                 // 坐标为格子坐标（与 UserInformation/MapChanged 一致）
@@ -757,6 +1286,26 @@ impl MockNetwork {
                     message: format!("Echo: {}", message),
                     chat_type: mir2_shared::enums::ChatType::Normal,
                 });
+            }
+
+            // 查看/检查其他玩家（Inspect → PlayerInspect）
+            NetworkEvent::InspectRequest { object_id } => {
+                if let Some(rp) = state.remote_players.iter().find(|p| p.id == object_id) {
+                    let packet = mir2_shared::packets::server::PlayerInspect {
+                        name: rp.name.clone(),
+                        guild_name: "".to_string(),
+                        guild_rank: "".to_string(),
+                        equipment: rp.equipment.clone(),
+                        class: rp.class,
+                        gender: rp.gender,
+                        hair: rp.hair,
+                        level: rp.level,
+                        lover_name: "".to_string(),
+                    };
+                    let _ = response_tx.send(NetworkEvent::PlayerInspect { packet });
+                } else {
+                    tracing::warn!("[MOCK] InspectRequest unknown object_id={}", object_id);
+                }
             }
 
             // ===== NPC 交互（Mock 权威服务器） =====
@@ -1116,6 +1665,33 @@ impl MockNetwork {
                 }
             }
 
+            // 避障：目标格不可走则尝试拆分/侧移（避免追击跑进障碍物里）
+            if !Self::map_is_walkable(state, nx, ny) {
+                let mut found: Option<(i32, i32)> = None;
+                let candidates: [(i32, i32); 6] = [
+                    (mx + dx, my),
+                    (mx, my + dy),
+                    (mx + dx, my + 1),
+                    (mx + dx, my - 1),
+                    (mx + 1, my + dy),
+                    (mx - 1, my + dy),
+                ];
+                for (tx, ty) in candidates {
+                    if (tx, ty) == (px, py) {
+                        continue;
+                    }
+                    if Self::map_is_walkable(state, tx, ty) {
+                        found = Some((tx, ty));
+                        break;
+                    }
+                }
+                let Some((fx, fy)) = found else {
+                    continue;
+                };
+                nx = fx;
+                ny = fy;
+            }
+
             if let Some(mm) = state.monsters.get_mut(&mid) {
                 mm.pos = (nx, ny);
                 mm.last_chase_step = Instant::now();
@@ -1190,8 +1766,8 @@ impl MockNetwork {
                 effect: mir2_shared::enums::SpellEffect::None,
                 wing_effect: rp.wing_effect,
                 extra: false,
-                mount_type: 0,
-                riding_mount: false,
+                mount_type: rp.mount_type,
+                riding_mount: rp.riding_mount,
                 fishing: false,
                 transform_type: 0,
                 element_orb_effect: 0,
@@ -1220,13 +1796,127 @@ impl MockNetwork {
         (zone.center.0 + dx, zone.center.1 + dy)
     }
 
+    fn effective_map_dims(state: &MockWorldState) -> (i32, i32) {
+        if state.map_width > 0 && state.map_height > 0 {
+            return (state.map_width, state.map_height);
+        }
+
+        let map_w: i32 = std::env::var("CRYSTAL_MOCK_MAP_W")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(700);
+        let map_h: i32 = std::env::var("CRYSTAL_MOCK_MAP_H")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(700);
+
+        (map_w.max(1), map_h.max(1))
+    }
+
+    fn map_is_walkable_raw(map_width: i32, map_height: i32, map_walkable: &[u8], x: i32, y: i32) -> bool {
+        if x < 0 || y < 0 {
+            return false;
+        }
+        if map_width > 0 && map_height > 0 {
+            if x >= map_width || y >= map_height {
+                return false;
+            }
+        }
+        if map_walkable.is_empty() || map_width <= 0 || map_height <= 0 {
+            // 未缓存碰撞：退化为“全部可走”
+            return true;
+        }
+        let idx = (y as usize).saturating_mul(map_width as usize) + (x as usize);
+        map_walkable.get(idx).copied().unwrap_or(1) != 0
+    }
+
+    /// 在整个地图范围内做“均匀采样 + walkable 拒绝采样”，因此对 walkable 格是严格均匀分布。
+    fn pick_random_walkable_unoccupied_raw(
+        map_width: i32,
+        map_height: i32,
+        map_walkable: &[u8],
+        map_w_eff: i32,
+        map_h_eff: i32,
+        rng: &mut u64,
+        occupied: &HashSet<(i32, i32)>,
+        max_tries: usize,
+    ) -> Option<(i32, i32)> {
+        if map_w_eff <= 0 || map_h_eff <= 0 {
+            return None;
+        }
+
+        for _ in 0..max_tries.max(1) {
+            let x = (Self::rng_next_u32(rng) as i32).rem_euclid(map_w_eff);
+            let y = (Self::rng_next_u32(rng) as i32).rem_euclid(map_h_eff);
+            if !Self::map_is_walkable_raw(map_width, map_height, map_walkable, x, y) {
+                continue;
+            }
+            if occupied.contains(&(x, y)) {
+                continue;
+            }
+            return Some((x, y));
+        }
+        None
+    }
+
+    fn nearest_zone_idx(zones: &[MockZone], x: i32, y: i32) -> usize {
+        if zones.is_empty() {
+            return 0;
+        }
+        let mut best_idx = 0usize;
+        let mut best_dist: i32 = i32::MAX;
+        for (idx, z) in zones.iter().enumerate() {
+            let d = (z.center.0 - x).abs() + (z.center.1 - y).abs();
+            if d < best_dist {
+                best_dist = d;
+                best_idx = idx;
+            }
+        }
+        best_idx
+    }
+
     fn spawn_monster_in_zone(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState, zone_idx: usize) {
         let Some(zone) = state.zones.get(zone_idx).cloned() else {
             return;
         };
 
-        // 选择一个区域内随机点作为出生点
-        let (x, y) = Self::random_pos_in_zone(&mut state.rng, &zone);
+        // 选择一个区域内随机点作为出生点（必须是可走格，避免刷在障碍物里）
+        let mut spawn: Option<(i32, i32)> = None;
+        for _ in 0..24 {
+            let (tx, ty) = Self::random_pos_in_zone(&mut state.rng, &zone);
+            if (tx, ty) == state.player_grid {
+                continue;
+            }
+            if Self::map_is_walkable(state, tx, ty) {
+                spawn = Some((tx, ty));
+                break;
+            }
+        }
+        let mut final_spawn = spawn.unwrap_or_else(|| zone.center);
+        if !Self::map_is_walkable(state, final_spawn.0, final_spawn.1) {
+            let max_r: i32 = 12;
+            'outer: for r in 1..=max_r {
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        if dx.abs() != r && dy.abs() != r {
+                            continue;
+                        }
+                        let tx = zone.center.0 + dx;
+                        let ty = zone.center.1 + dy;
+                        if (tx, ty) == state.player_grid {
+                            continue;
+                        }
+                        if Self::map_is_walkable(state, tx, ty) {
+                            final_spawn = (tx, ty);
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+        }
+        let (x, y) = final_spawn;
         let object_id = state.next_monster_id;
         state.next_monster_id = state.next_monster_id.saturating_add(1);
 
@@ -1367,6 +2057,11 @@ impl MockNetwork {
                 continue;
             }
 
+            // 避障：怪物不能走进障碍物
+            if !Self::map_is_walkable(state, nx, ny) {
+                continue;
+            }
+
             if let Some(mm) = state.monsters.get_mut(&mid) {
                 mm.pos = (nx, ny);
             }
@@ -1430,11 +2125,57 @@ impl MockNetwork {
             now: Instant,
             rp: &'a mut MockRemotePlayerState,
             alive_in_zone: usize,
+            cfg: &'a MockRuntimeConfig,
+
+            // 地图碰撞（只读）：用于严格避障
+            map_width: i32,
+            map_height: i32,
+            map_walkable: &'a [u8],
+            map_w_eff: i32,
+            map_h_eff: i32,
         }
 
         impl<'a> RemoteBtCtx<'a> {
             fn is_occupied(&self, tile: (i32, i32)) -> bool {
                 self.occupied.contains(&tile)
+            }
+
+            fn is_walkable(&self, x: i32, y: i32) -> bool {
+                if x < 0 || y < 0 {
+                    return false;
+                }
+                if self.map_width > 0 && self.map_height > 0 {
+                    if x >= self.map_width || y >= self.map_height {
+                        return false;
+                    }
+                }
+                if self.map_walkable.is_empty() || self.map_width <= 0 || self.map_height <= 0 {
+                    // 未缓存碰撞：退化为“全部可走”
+                    return true;
+                }
+                let idx = (y as usize).saturating_mul(self.map_width as usize) + (x as usize);
+                self.map_walkable.get(idx).copied().unwrap_or(1) != 0
+            }
+
+            fn nearest_walkable_around(&self, x: i32, y: i32, max_r: i32) -> Option<(i32, i32)> {
+                if self.is_walkable(x, y) {
+                    return Some((x, y));
+                }
+                for r in 1..=max_r.max(1) {
+                    for dy in -r..=r {
+                        for dx in -r..=r {
+                            if dx.abs() != r && dy.abs() != r {
+                                continue;
+                            }
+                            let tx = x + dx;
+                            let ty = y + dy;
+                            if self.is_walkable(tx, ty) {
+                                return Some((tx, ty));
+                            }
+                        }
+                    }
+                }
+                None
             }
 
             fn pick_target_in_zone(&mut self, perception: i32) {
@@ -1469,7 +2210,12 @@ impl MockNetwork {
             }
 
             fn eval_best_zone(&mut self) {
-                if self.rp.last_zone_eval.elapsed() <= Duration::from_millis(1800) {
+                if self
+                    .rp
+                    .last_zone_eval
+                    .elapsed()
+                    <= Duration::from_millis(self.cfg.zone_eval_ms)
+                {
                     return;
                 }
                 self.rp.last_zone_eval = self.now;
@@ -1518,47 +2264,47 @@ impl MockNetwork {
                     }
                 }
 
-                self.rp.direction = MockNetwork::dir_from_delta(dx, dy);
+                // 候选步进：优先向目标靠近；如果被占位/障碍挡住，尝试拆分/侧移。
+                // 注意：每个候选都必须通过 walkable 校验，保证“不会跑进障碍物里”。
+                let mut picked: Option<(i32, i32, i32, i32)> = None;
+                let candidates: [(i32, i32, i32, i32); 7] = [
+                    (rx + dx, ry + dy, dx, dy),
+                    (rx + dx, ry, dx, 0),
+                    (rx, ry + dy, 0, dy),
+                    (rx + dx, ry + 1, dx, 1),
+                    (rx + dx, ry - 1, dx, -1),
+                    (rx + 1, ry + dy, 1, dy),
+                    (rx - 1, ry + dy, -1, dy),
+                ];
 
-                let mut nx = rx + dx;
-                let mut ny = ry + dy;
+                for (cx, cy, cdx, cdy) in candidates {
+                    let mut nx = cx;
+                    let mut ny = cy;
+                    nx = nx.clamp(0, self.map_w_eff.saturating_sub(1).max(0));
+                    ny = ny.clamp(0, self.map_h_eff.saturating_sub(1).max(0));
 
-                // 简单边界：避免大量玩家跑出默认地图范围太远导致“看起来都挤一块”。
-                // 可用环境变量覆盖 mock 地图尺寸。
-                let map_w: i32 = std::env::var("CRYSTAL_MOCK_MAP_W")
-                    .ok()
-                    .and_then(|v| v.parse::<i32>().ok())
-                    .filter(|v| *v > 0)
-                    .unwrap_or(700);
-                let map_h: i32 = std::env::var("CRYSTAL_MOCK_MAP_H")
-                    .ok()
-                    .and_then(|v| v.parse::<i32>().ok())
-                    .filter(|v| *v > 0)
-                    .unwrap_or(700);
-                nx = nx.clamp(0, map_w.saturating_sub(1).max(0));
-                ny = ny.clamp(0, map_h.saturating_sub(1).max(0));
-                if self.is_occupied((nx, ny)) {
-                    if dx != 0 && dy != 0 {
-                        if !self.is_occupied((rx + dx, ry)) {
-                            nx = rx + dx;
-                            ny = ry;
-                            self.rp.direction = MockNetwork::dir_from_delta(dx, 0);
-                        } else if !self.is_occupied((rx, ry + dy)) {
-                            nx = rx;
-                            ny = ry + dy;
-                            self.rp.direction = MockNetwork::dir_from_delta(0, dy);
-                        } else {
-                            // 恢复占位
-                            self.occupied.insert(old_tile);
-                            return BtStatus::Failure;
-                        }
-                    } else {
-                        // 恢复占位
-                        self.occupied.insert(old_tile);
-                        return BtStatus::Failure;
+                    if (nx, ny) == (rx, ry) {
+                        continue;
                     }
+                    if self.is_occupied((nx, ny)) {
+                        continue;
+                    }
+                    if !self.is_walkable(nx, ny) {
+                        continue;
+                    }
+                    picked = Some((nx, ny, cdx, cdy));
+                    break;
                 }
 
+                let Some((nx, ny, _fdx, _fdy)) = picked else {
+                    // 恢复占位
+                    self.occupied.insert(old_tile);
+                    return BtStatus::Failure;
+                };
+
+                let fdx = (nx - rx).signum();
+                let fdy = (ny - ry).signum();
+                self.rp.direction = MockNetwork::dir_from_delta(fdx, fdy);
                 self.rp.grid = (nx, ny);
                 self.occupied.insert((nx, ny));
 
@@ -1606,14 +2352,19 @@ impl MockNetwork {
             ctx.eval_best_zone();
 
             // 寻敌
-            ctx.pick_target_in_zone(18);
+            ctx.pick_target_in_zone(ctx.cfg.perception);
             BtStatus::Success
         }
 
         fn act_rest_gate(ctx: &mut RemoteBtCtx) -> BtStatus {
             // 正在休息：到点后恢复 Seek，并允许继续决策
             if ctx.rp.mode == RemoteAiMode::Rest {
-                if ctx.rp.last_mode_change.elapsed() > Duration::from_millis(600) {
+                if ctx
+                    .rp
+                    .last_mode_change
+                    .elapsed()
+                    > Duration::from_millis(ctx.cfg.rest_ms)
+                {
                     ctx.rp.mode = RemoteAiMode::Seek;
                     ctx.rp.last_mode_change = ctx.now;
                     return BtStatus::Failure;
@@ -1622,12 +2373,13 @@ impl MockNetwork {
             }
 
             // 偶尔发呆（只在非战斗态）
-            if matches!(ctx.rp.mode, RemoteAiMode::Roam | RemoteAiMode::Seek)
-                && (MockNetwork::rng_next_u32(ctx.rng) % 50 == 0)
-            {
+            if matches!(ctx.rp.mode, RemoteAiMode::Roam | RemoteAiMode::Seek) {
+                let roll = (MockNetwork::rng_next_u32(ctx.rng) % 10_000) as f32 / 10_000.0;
+                if roll < ctx.cfg.rest_chance {
                 ctx.rp.mode = RemoteAiMode::Rest;
                 ctx.rp.last_mode_change = ctx.now;
                 return BtStatus::Running;
+                }
             }
 
             BtStatus::Failure
@@ -1646,7 +2398,7 @@ impl MockNetwork {
             }
             // 太远就丢目标
             let dist_far = (m.pos.0 - rx).abs() + (m.pos.1 - ry).abs();
-            if dist_far > 32 {
+            if dist_far > ctx.cfg.chase_drop {
                 ctx.rp.target_monster_id = None;
                 return BtStatus::Failure;
             }
@@ -1666,7 +2418,12 @@ impl MockNetwork {
 
             ctx.rp.mode = RemoteAiMode::Fight;
 
-            if ctx.rp.last_attack.elapsed() < Duration::from_millis(650) {
+            if ctx
+                .rp
+                .last_attack
+                .elapsed()
+                < Duration::from_millis(ctx.cfg.attack_cooldown_ms)
+            {
                 return BtStatus::Running;
             }
             ctx.rp.last_attack = ctx.now;
@@ -1780,7 +2537,7 @@ impl MockNetwork {
             };
             let (rx, ry) = ctx.rp.grid;
             let dist_far = (m.pos.0 - rx).abs() + (m.pos.1 - ry).abs();
-            if dist_far > 32 {
+            if dist_far > ctx.cfg.chase_drop {
                 ctx.rp.target_monster_id = None;
                 ctx.rp.mode = RemoteAiMode::Seek;
                 return BtStatus::Failure;
@@ -1809,22 +2566,39 @@ impl MockNetwork {
                 ctx.rp.mode = RemoteAiMode::Seek;
                 return BtStatus::Failure;
             };
+
+            let target = ctx
+                .nearest_walkable_around(z.center.0, z.center.1, 12)
+                .unwrap_or(z.center);
             let (rx, ry) = ctx.rp.grid;
-            let arrive_dist = (z.center.0 - rx).abs() + (z.center.1 - ry).abs();
+            let arrive_dist = (target.0 - rx).abs() + (target.1 - ry).abs();
             if arrive_dist <= 2 {
                 ctx.rp.zone_idx = ctx.rp.goal_zone_idx;
                 ctx.rp.mode = RemoteAiMode::Seek;
                 ctx.rp.last_mode_change = ctx.now;
                 return BtStatus::Success;
             }
-            ctx.step_towards(z.center.0, z.center.1, true)
+            ctx.step_towards(target.0, target.1, true)
         }
 
         fn act_roam(ctx: &mut RemoteBtCtx) -> BtStatus {
-            if ctx.rp.last_roam_pick.elapsed() > Duration::from_millis(1500) {
+            if ctx
+                .rp
+                .last_roam_pick
+                .elapsed()
+                > Duration::from_millis(ctx.cfg.roam_pick_ms)
+            {
                 ctx.rp.last_roam_pick = ctx.now;
                 if let Some(z) = ctx.zones.get(ctx.rp.zone_idx) {
-                    ctx.rp.roam_goal = MockNetwork::random_pos_in_zone(ctx.rng, z);
+                    let mut picked: Option<(i32, i32)> = None;
+                    for _ in 0..24 {
+                        let (tx, ty) = MockNetwork::random_pos_in_zone(ctx.rng, z);
+                        if ctx.is_walkable(tx, ty) {
+                            picked = Some((tx, ty));
+                            break;
+                        }
+                    }
+                    ctx.rp.roam_goal = picked.unwrap_or(z.center);
                 }
             }
             ctx.rp.mode = RemoteAiMode::Roam;
@@ -1835,11 +2609,24 @@ impl MockNetwork {
 
         let now = Instant::now();
         let zones = &state.zones;
-        let monsters = &mut state.monsters;
         let mut rng = state.rng;
+        let cfg = state.mock_cfg.clone();
+
+        let map_width = state.map_width;
+        let map_height = state.map_height;
+        let map_walkable: &[u8] = state.map_walkable.as_slice();
+        let (map_w_eff, map_h_eff) = MockNetwork::effective_map_dims(state);
 
         // 预构建占位集合：避免 3000 人时每步 O(n) 扫描导致 O(n^2)
         let mut occupied_tiles: HashSet<(i32, i32)> = state.remote_players.iter().map(|p| p.grid).collect();
+        occupied_tiles.insert(state.player_grid);
+        for m in state.monsters.values() {
+            if m.hp > 0 {
+                occupied_tiles.insert(m.pos);
+            }
+        }
+
+        let monsters = &mut state.monsters;
 
         let player_count = state.remote_players.len();
         for i in 0..player_count {
@@ -1848,7 +2635,11 @@ impl MockNetwork {
                 break;
             };
 
-            if rp.last_tick.elapsed() < Duration::from_millis(200) {
+            if rp
+                .last_tick
+                .elapsed()
+                < Duration::from_millis(cfg.ai_tick_ms)
+            {
                 continue;
             }
             rp.last_tick = now;
@@ -1862,6 +2653,13 @@ impl MockNetwork {
                 now,
                 rp,
                 alive_in_zone: 0,
+                cfg: &cfg,
+
+                map_width,
+                map_height,
+                map_walkable,
+                map_w_eff,
+                map_h_eff,
             };
 
             let _ = sequence(
