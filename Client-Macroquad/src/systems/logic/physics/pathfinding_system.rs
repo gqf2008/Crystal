@@ -183,20 +183,27 @@ impl LogicSystem for PathfindingSystem {
                             let check_distance = 10.0;
                             let next_x = position.x + dir_x * check_distance;
                             let next_y = position.y + dir_y * check_distance;
-                            let next_grid_x = (next_x / 48.0) as i32;
-                            let next_grid_y = (next_y / 32.0) as i32;
+                            // ✅ 使用统一坐标换算，避免手写 /48 /32 带来的边界误差
+                            let (next_grid_x, next_grid_y) = Coord::world_to_grid(next_x, next_y);
                             
                             // 检查是否有障碍物（需要地图数据）
                             let has_obstacle = if let Some(ref map) = map_data {
                                 // 检查目标格子是否在地图范围内
-                                let in_bounds = next_grid_x >= 0 && next_grid_y >= 0 
-                                    && next_grid_x < map.width && next_grid_y < map.height;
-                                
-                                if in_bounds {
-                                    let cell = &map.cells[next_grid_x as usize][next_grid_y as usize];
-                                    !cell.is_walkable()
-                                } else {
+                                let in_bounds = next_grid_x >= 0
+                                    && next_grid_y >= 0
+                                    && next_grid_x < map.width
+                                    && next_grid_y < map.height;
+
+                                if !in_bounds {
                                     true // 边界外视为障碍物
+                                } else {
+                                    let x = next_grid_x as usize;
+                                    let y = next_grid_y as usize;
+                                    if x >= map.cells.len() || y >= map.cells[x].len() {
+                                        true
+                                    } else {
+                                        !map.cells[x][y].is_walkable()
+                                    }
                                 }
                             } else {
                                 false // 没有地图数据，不阻挡
@@ -276,8 +283,14 @@ impl LogicSystem for PathfindingSystem {
                                             tracing::warn!("❌ A* 找不到路径（含避障），停止移动");
                                             path.clear();
                                             velocity.stop();
-                                            player_input.move_to = None;
-                                            player_input.movement_mode = MovementMode::None;
+                                            // 关键：若处于“本地挂机 AI 追砍”场景，不要清空 move_to。
+                                            // 否则 AI 的 stuck 检测无法触发，表现为“跑跑就卡死”。
+                                            let ai_should_retry = ctx.session.local_player_ai_enabled
+                                                && player_input.attack_target.is_some();
+                                            if !ai_should_retry {
+                                                player_input.move_to = None;
+                                                player_input.movement_mode = MovementMode::None;
+                                            }
                                             continue;
                                         }
                                     }
@@ -285,8 +298,12 @@ impl LogicSystem for PathfindingSystem {
                                     tracing::warn!("⚠️ 地图数据不存在，停止寻路");
                                     path.clear();
                                     velocity.stop();
-                                    player_input.move_to = None;
-                                    player_input.movement_mode = MovementMode::None;
+                                    let ai_should_retry = ctx.session.local_player_ai_enabled
+                                        && player_input.attack_target.is_some();
+                                    if !ai_should_retry {
+                                        player_input.move_to = None;
+                                        player_input.movement_mode = MovementMode::None;
+                                    }
                                     continue;
                                 }
                                 
