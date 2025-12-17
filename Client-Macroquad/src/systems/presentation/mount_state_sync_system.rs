@@ -21,7 +21,10 @@ impl MountStateSyncSystem {
 
     fn derive_mount_index(equipment: &Equipment) -> Option<Option<usize>> {
         let Some(item) = equipment.mount.as_ref() else {
-            return Some(None);
+            // 没有“坐骑装备”并不等于“不在骑乘”。
+            // 当前客户端的骑乘状态主要由 MountUpdated/ObjectPlayer（协议事件）驱动并写入 MountState。
+            // 因此：当装备槽为空时，不在这里覆写 MountState，避免把网络驱动的骑乘状态清空。
+            return None;
         };
 
         let Some(info) = item.info.as_ref() else {

@@ -1,311 +1,193 @@
 // ============================================================================
-// Mock Network - 模拟网络实现（用于开发工具和离线测试）
-// ============================================================================
-//
-// 提供完全本地的网络模拟，无需真实服务器：
-// - 模拟连接/断开
-// - 模拟角色数据
-// - 模拟地图数据
-// - 模拟基本的游戏事件响应
-//
-// 使用方式：
-//   let net_ctx = NetworkBuilder::new(settings)
-//       .mock(true)
-//       .build()?;
-//
+// Mock Network - 离线模拟网络（单机基础）
 // ============================================================================
 
-use super::handlers::NetworkEvent;
-use crate::resources::MapReader;
-use crossbeam_channel::{Receiver, Sender};
+mod config;
+mod map;
+mod mass_battle;
+mod monsters;
+mod remote_ai;
+mod util;
+mod world;
+
+use super::NetworkEvent;
+
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-const CRYSTAL_REMOTE_PLAYERS: &str = "CRYSTAL_REMOTE_PLAYERS";
-const CRYSTAL_START_MAP: &str = "CRYSTAL_START_MAP";
+use chrono::Utc;
+
+use mir2_shared::data::client_data::SelectInfo;
+use mir2_shared::data::item::{ItemInfo, UserItem};
+use mir2_shared::enums::{ChatType, HeroBehaviour, MirClass, MirDirection, MirGender, PanelType};
+
+pub const CRYSTAL_REMOTE_PLAYERS: &str = "CRYSTAL_REMOTE_PLAYERS";
+pub const CRYSTAL_START_MAP: &str = "CRYSTAL_START_MAP";
+
+pub struct MockNetwork;
 
 #[derive(Debug, Clone)]
-struct MockRuntimeConfig {
-    // 规模
-    remote_players: usize,
-    start_map: String,
+pub struct MockRuntimeConfig {
+    pub remote_players: usize,
+    pub start_map: String,
 
-    // 外观（默认保持当前“离线资源已验证”的固定值）
-    weapon_min: i16,
-    weapon_max: i16,
-    armour_min: i16,
-    armour_max: i16,
-    weapon_effect_min: i16,
-    weapon_effect_max: i16,
-    wing_effect_min: u8,
-    wing_effect_max: u8,
+    // Remote AI
+    pub ai_tick_ms: u64,
+    pub zone_eval_ms: u64,
+    pub roam_pick_ms: u64,
+    pub rest_chance: f32,
+    pub rest_ms: u64,
+    pub perception: i32,
+    pub chase_drop: i32,
+    pub attack_cooldown_ms: u64,
 
-    // 坐骑
-    mount_min: i16,
-    mount_max: i16,
-    mount_min_level: u16,
-    mount_chance: f32,
+    // Cosmetics / equipment ranges
+    pub weapon_min: i16,
+    pub weapon_max: i16,
+    pub armour_min: i16,
+    pub armour_max: i16,
+    pub weapon_effect_min: i16,
+    pub weapon_effect_max: i16,
+    pub wing_effect_min: u8,
+    pub wing_effect_max: u8,
 
-    // AI
-    ai_tick_ms: u64,
-    zone_eval_ms: u64,
-    roam_pick_ms: u64,
-    rest_chance: f32,
-    rest_ms: u64,
-    perception: i32,
-    chase_drop: i32,
-    attack_cooldown_ms: u64,
+    // Mounts
+    pub mount_min: i16,
+    pub mount_max: i16,
+    pub mount_min_level: u16,
+    pub mount_chance: f32,
+
+    // MassBattle
+    pub mass_battle_enabled: bool,
+    pub mass_battle_team_a: usize,
+    pub mass_battle_team_b: usize,
+    pub mass_battle_spawn_radius: i32,
+    pub mass_battle_engage_range: i32,
+    pub mass_battle_respawn_ms: u64,
+    pub mass_battle_attackers_per_tick: usize,
+    pub mass_battle_bucket: i32,
+
+    // Boss
+    pub boss_enabled: bool,
+    pub boss_count: usize,
+    pub boss_image: u16,
+    pub boss_hp: i32,
+    pub boss_respawn_ms: u64,
+    pub boss_zone_radius: i32,
+    pub boss_aggro_range: i32,
+    pub boss_damage_min: i32,
+    pub boss_damage_max: i32,
+    pub boss_attack_cooldown_ms: u64,
 }
 
 impl Default for MockRuntimeConfig {
     fn default() -> Self {
         Self {
-            remote_players: 3000,
+            remote_players: 25,
             start_map: "Map/n0.map".to_string(),
 
-            weapon_min: 60,
+            ai_tick_ms: 60,
+            zone_eval_ms: 800,
+            roam_pick_ms: 1000,
+            rest_chance: 0.08,
+            rest_ms: 420,
+            perception: 9,
+            chase_drop: 10,
+            attack_cooldown_ms: 900,
+
+            weapon_min: 0,
             weapon_max: 60,
-            armour_min: 25,
-            armour_max: 25,
-            weapon_effect_min: 12,
-            weapon_effect_max: 12,
-            wing_effect_min: 4,
-            wing_effect_max: 4,
+            armour_min: 0,
+            armour_max: 60,
+            weapon_effect_min: 0,
+            weapon_effect_max: 16,
+            wing_effect_min: 0,
+            wing_effect_max: 0,
 
             mount_min: 0,
-            mount_max: 11,
-            mount_min_level: 22,
-            // 默认保持“无坐骑”（与当前远程玩家一致）；想开坐骑就改 config.ini
-            mount_chance: 0.0,
+            mount_max: 0,
+            mount_min_level: 8,
+            mount_chance: 0.1,
 
-            ai_tick_ms: 200,
-            zone_eval_ms: 1800,
-            roam_pick_ms: 1500,
-            rest_chance: 0.02,
-            rest_ms: 600,
-            perception: 18,
-            chase_drop: 32,
-            attack_cooldown_ms: 650,
+            mass_battle_enabled: false,
+            mass_battle_team_a: 60,
+            mass_battle_team_b: 60,
+            mass_battle_spawn_radius: 25,
+            mass_battle_engage_range: 16,
+            mass_battle_respawn_ms: 4000,
+            mass_battle_attackers_per_tick: 24,
+            mass_battle_bucket: 8,
+
+            boss_enabled: true,
+            boss_count: 1,
+            boss_image: 902,
+            boss_hp: 6000,
+            boss_respawn_ms: 25000,
+            boss_zone_radius: 18,
+            boss_aggro_range: 16,
+            boss_damage_min: 18,
+            boss_damage_max: 35,
+            boss_attack_cooldown_ms: 1200,
         }
     }
 }
 
-fn normalize_map_path(input: &str) -> String {
-    let s = input.trim();
-    if s.is_empty() {
-        return "Map/n0.map".to_string();
-    }
-    let mut p = s.replace('\\', "/");
-    if !p.contains('/') {
-        if !p.to_ascii_lowercase().ends_with(".map") {
-            p.push_str(".map");
-        }
-        p = format!("Map/{p}");
-    }
-    if !p.to_ascii_lowercase().ends_with(".map") {
-        p.push_str(".map");
-    }
-    p
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteAiMode {
+    Roam,
+    Seek,
+    Chase,
+    Fight,
+    Travel,
+    Rest,
 }
 
-fn load_mock_runtime_config() -> MockRuntimeConfig {
-    let mut cfg = MockRuntimeConfig::default();
+#[derive(Debug, Clone)]
+struct MockRemotePlayerState {
+    id: u32,
+    name: String,
+    class: MirClass,
+    gender: MirGender,
+    level: u16,
 
-    // 读取 config.ini（与 network/mod.rs 同风格的简易 INI 解析）
-    if let Ok(content) = std::fs::read_to_string("config.ini") {
-        let mut section = String::new();
-        for raw in content.lines() {
-            let line = raw.trim();
-            if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
-                continue;
-            }
-            if line.starts_with('[') && line.ends_with(']') {
-                section = line[1..line.len() - 1].trim().to_string();
-                continue;
-            }
-            let Some((k, v)) = line.split_once('=') else {
-                continue;
-            };
-            if !section.eq_ignore_ascii_case("Mock") {
-                continue;
-            }
-            let key = k.trim();
-            let value = v.trim();
+    grid: (i32, i32),
+    direction: MirDirection,
+    hair: u8,
 
-            if key.eq_ignore_ascii_case("RemotePlayers") {
-                if let Ok(n) = value.parse::<usize>() {
-                    if n > 0 {
-                        cfg.remote_players = n;
-                    }
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("StartMap") {
-                if !value.is_empty() {
-                    cfg.start_map = normalize_map_path(value);
-                }
-                continue;
-            }
+    // visuals
+    weapon: i16,
+    weapon_effect: i16,
+    armour: i16,
+    wing_effect: u8,
+    mount_type: i16,
+    riding_mount: bool,
 
-            if key.eq_ignore_ascii_case("WeaponMin") {
-                if let Ok(v) = value.parse::<i16>() {
-                    cfg.weapon_min = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("WeaponMax") {
-                if let Ok(v) = value.parse::<i16>() {
-                    cfg.weapon_max = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("ArmourMin") {
-                if let Ok(v) = value.parse::<i16>() {
-                    cfg.armour_min = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("ArmourMax") {
-                if let Ok(v) = value.parse::<i16>() {
-                    cfg.armour_max = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("WeaponEffectMin") {
-                if let Ok(v) = value.parse::<i16>() {
-                    cfg.weapon_effect_min = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("WeaponEffectMax") {
-                if let Ok(v) = value.parse::<i16>() {
-                    cfg.weapon_effect_max = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("WingEffectMin") {
-                if let Ok(v) = value.parse::<u8>() {
-                    cfg.wing_effect_min = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("WingEffectMax") {
-                if let Ok(v) = value.parse::<u8>() {
-                    cfg.wing_effect_max = v;
-                }
-                continue;
-            }
+    // inspect
+    equipment: Vec<Option<UserItem>>,
 
-            if key.eq_ignore_ascii_case("MountMin") {
-                if let Ok(v) = value.parse::<i16>() {
-                    cfg.mount_min = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("MountMax") {
-                if let Ok(v) = value.parse::<i16>() {
-                    cfg.mount_max = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("MountMinLevel") {
-                if let Ok(v) = value.parse::<u16>() {
-                    cfg.mount_min_level = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("MountChance") {
-                if let Ok(v) = value.parse::<f32>() {
-                    cfg.mount_chance = v.clamp(0.0, 1.0);
-                }
-                continue;
-            }
+    // ai
+    mode: RemoteAiMode,
+    last_mode_change: Instant,
+    last_zone_eval: Instant,
+    goal_zone_idx: usize,
+    zone_idx: usize,
+    last_roam_pick: Instant,
+    roam_goal: (i32, i32),
+    target_monster_id: Option<u32>,
 
-            if key.eq_ignore_ascii_case("AiTickMs") {
-                if let Ok(v) = value.parse::<u64>() {
-                    cfg.ai_tick_ms = v.max(10);
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("ZoneEvalMs") {
-                if let Ok(v) = value.parse::<u64>() {
-                    cfg.zone_eval_ms = v.max(50);
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("RoamPickMs") {
-                if let Ok(v) = value.parse::<u64>() {
-                    cfg.roam_pick_ms = v.max(50);
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("RestChance") {
-                if let Ok(v) = value.parse::<f32>() {
-                    cfg.rest_chance = v.clamp(0.0, 1.0);
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("RestMs") {
-                if let Ok(v) = value.parse::<u64>() {
-                    cfg.rest_ms = v;
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("Perception") {
-                if let Ok(v) = value.parse::<i32>() {
-                    cfg.perception = v.max(1);
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("ChaseDrop") {
-                if let Ok(v) = value.parse::<i32>() {
-                    cfg.chase_drop = v.max(2);
-                }
-                continue;
-            }
-            if key.eq_ignore_ascii_case("AttackCooldownMs") {
-                if let Ok(v) = value.parse::<u64>() {
-                    cfg.attack_cooldown_ms = v.max(50);
-                }
-                continue;
-            }
-        }
-    }
+    // combat
+    hp_current: i32,
+    hp_max: i32,
+    experience: i64,
+    max_experience: i64,
+    last_attack: Instant,
+    last_tick: Instant,
 
-    // env 覆盖：保留老习惯（CRYSTAL_* 优先于 config.ini）
-    cfg.remote_players = std::env::var(CRYSTAL_REMOTE_PLAYERS)
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(cfg.remote_players);
-
-    if let Ok(v) = std::env::var(CRYSTAL_START_MAP) {
-        if !v.trim().is_empty() {
-            cfg.start_map = normalize_map_path(v.trim());
-        }
-    }
-
-    // 修正 min/max 颠倒
-    if cfg.weapon_min > cfg.weapon_max {
-        std::mem::swap(&mut cfg.weapon_min, &mut cfg.weapon_max);
-    }
-    if cfg.armour_min > cfg.armour_max {
-        std::mem::swap(&mut cfg.armour_min, &mut cfg.armour_max);
-    }
-    if cfg.weapon_effect_min > cfg.weapon_effect_max {
-        std::mem::swap(&mut cfg.weapon_effect_min, &mut cfg.weapon_effect_max);
-    }
-    if cfg.wing_effect_min > cfg.wing_effect_max {
-        std::mem::swap(&mut cfg.wing_effect_min, &mut cfg.wing_effect_max);
-    }
-    if cfg.mount_min > cfg.mount_max {
-        std::mem::swap(&mut cfg.mount_min, &mut cfg.mount_max);
-    }
-
-    cfg
+    // mass battle
+    team: u8,
+    dead_until: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -321,6 +203,7 @@ struct MockMonsterState {
 #[derive(Debug, Clone)]
 struct MockZone {
     name: &'static str,
+    is_boss: bool,
     center: (i32, i32),
     radius: i32,
     max_monsters: usize,
@@ -331,187 +214,27 @@ struct MockZone {
     last_spawn: Instant,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RemoteAiMode {
-    Roam,
-    Seek,
-    Travel,
-    Chase,
-    Fight,
-    Rest,
-}
-
-fn make_mock_equipment_for_remote(
-    rng: &mut u64,
-    owner_id: u32,
-    level: u16,
-    weapon: i16,
-    weapon_effect: i16,
-    armour: i16,
-    wing_effect: u8,
-    mount_type: i16,
-    riding_mount: bool,
-) -> Vec<Option<mir2_shared::data::item::UserItem>> {
-    use mir2_shared::data::item::{ItemInfo, UserItem};
-    use mir2_shared::enums::ItemType;
-
-    // 槽位约定（与 NetworkApplySystem::apply_equipment_vec 一致）:
-    // 0 weapon, 1 armour, 2 helmet, 3 torch, 4 necklace, 5 bracel_l, 6 bracel_r,
-    // 7 ring_l, 8 ring_r, 9 amulet, 10 belt, 11 boots, 12 stone, 13 mount
-    let mut equipment: Vec<Option<UserItem>> = vec![None; 14];
-
-    let uid = |slot: u64| -> u64 { ((owner_id as u64) << 32) | (slot & 0xFFFF_FFFF) };
-
-    // Weapon
-    {
-        let mut info = ItemInfo::default();
-        info.index = 20000 + weapon as i32;
-        info.name = format!("RemoteWeapon{}", weapon);
-        info.item_type = ItemType::Weapon;
-        info.shape = weapon;
-        info.effect = weapon_effect as u8;
-        info.durability = 10;
-
-        let mut item = UserItem::with_info(info);
-        item.unique_id = uid(0);
-        item.current_dura = 10;
-        item.max_dura = 10;
-        equipment[0] = Some(item);
-    }
-
-    // Armour (驱动人物外观 + 翅膀特效)
-    {
-        let mut info = ItemInfo::default();
-        info.index = 21000 + armour as i32;
-        info.name = format!("RemoteArmour{}", armour);
-        info.item_type = ItemType::Armour;
-        info.shape = armour;
-        info.effect = wing_effect;
-        info.durability = 10;
-
-        let mut item = UserItem::with_info(info);
-        item.unique_id = uid(1);
-        item.current_dura = 10;
-        item.max_dura = 10;
-        equipment[1] = Some(item);
-    }
-
-    // Helmet / Necklace / Rings：给 Inspect 提供“真实不同”的槽位数据
-    {
-        let helmet_shape = 1 + (MockNetwork::rng_next_u32(rng) % 30) as i16;
-        let mut info = ItemInfo::default();
-        info.index = 22000 + helmet_shape as i32;
-        info.name = format!("RemoteHelmet{}", helmet_shape);
-        info.item_type = ItemType::Helmet;
-        info.shape = helmet_shape;
-
-        let mut item = UserItem::with_info(info);
-        item.unique_id = uid(2);
-        equipment[2] = Some(item);
-    }
-
-    {
-        let necklace_shape = 1 + (MockNetwork::rng_next_u32(rng) % 60) as i16;
-        let mut info = ItemInfo::default();
-        info.index = 23000 + necklace_shape as i32;
-        info.name = format!("RemoteNecklace{}", necklace_shape);
-        info.item_type = ItemType::Necklace;
-        info.shape = necklace_shape;
-
-        let mut item = UserItem::with_info(info);
-        item.unique_id = uid(4);
-        equipment[4] = Some(item);
-    }
-
-    {
-        let ring_l_shape = 1 + (MockNetwork::rng_next_u32(rng) % 80) as i16;
-        let ring_r_shape = 1 + (MockNetwork::rng_next_u32(rng) % 80) as i16;
-
-        let mut info_l = ItemInfo::default();
-        info_l.index = 24000 + ring_l_shape as i32;
-        info_l.name = format!("RemoteRingL{}", ring_l_shape);
-        info_l.item_type = ItemType::Ring;
-        info_l.shape = ring_l_shape;
-        let mut item_l = UserItem::with_info(info_l);
-        item_l.unique_id = uid(7);
-        equipment[7] = Some(item_l);
-
-        let mut info_r = ItemInfo::default();
-        info_r.index = 25000 + ring_r_shape as i32;
-        info_r.name = format!("RemoteRingR{}", ring_r_shape);
-        info_r.item_type = ItemType::Ring;
-        info_r.shape = ring_r_shape;
-        let mut item_r = UserItem::with_info(info_r);
-        item_r.unique_id = uid(8);
-        equipment[8] = Some(item_r);
-    }
-
-    // Mount
-    if riding_mount && mount_type > 0 {
-        let mut info = ItemInfo::default();
-        info.index = 26000 + mount_type as i32;
-        info.name = format!("RemoteMount{}", mount_type);
-        info.item_type = ItemType::Mount;
-        info.shape = mount_type;
-
-        let mut item = UserItem::with_info(info);
-        item.unique_id = uid(13);
-        equipment[13] = Some(item);
-    }
-
-    let _ = level;
-    equipment
-}
-
-#[derive(Debug, Clone)]
-struct MockRemotePlayerState {
-    id: u32,
-    name: String,
-    class: mir2_shared::enums::MirClass,
-    gender: mir2_shared::enums::MirGender,
-    hair: u8,
-    weapon: i16,
-    weapon_effect: i16,
-    armour: i16,
-    wing_effect: u8,
-    mount_type: i16,
-    riding_mount: bool,
-    equipment: Vec<Option<mir2_shared::data::item::UserItem>>,
-    grid: (i32, i32),
-    direction: mir2_shared::enums::MirDirection,
-    level: u16,
-    experience: i64,
-    max_experience: i64,
-    zone_idx: usize,
-    goal_zone_idx: usize,
-    mode: RemoteAiMode,
-    target_monster_id: Option<u32>,
-    roam_goal: (i32, i32),
-    last_tick: Instant,
-    last_attack: Instant,
-    last_mode_change: Instant,
-    last_zone_eval: Instant,
-    last_roam_pick: Instant,
-}
-
-#[derive(Debug, Clone)]
 struct MockWorldState {
     in_game: bool,
-
-    // [Mock] 运行时配置（来自 config.ini + env 覆盖）
     mock_cfg: MockRuntimeConfig,
+    rng: u64,
 
-    // 用于在“持续有客户端事件”时也能推进 mock 世界（否则远程 AI/刷怪可能完全不跑）
-    last_world_tick: Instant,
+    // Character list
+    characters: Vec<SelectInfo>,
+    active_character_index: i32,
+    active_character_name: String,
 
-    // Mock 地图碰撞（用于服务器权威移动校验，避免把玩家“纠正/瞬移”到障碍物里）
+    // Map + collision
+    current_map_path: String,
     map_width: i32,
     map_height: i32,
-    // 扁平数组：len = map_width * map_height，1=可走 0=不可走；为空表示未知（全部视为可走）
     map_walkable: Vec<u8>,
 
-    // 本地玩家（server-authoritative）
+    // Local player (server-authoritative)
     player_object_id: u32,
+    player_level: u16,
+    player_experience: i64,
+    player_max_experience: i64,
     player_gold: u32,
     inventory_capacity: usize,
     player_grid: (i32, i32),
@@ -519,871 +242,763 @@ struct MockWorldState {
     player_hp_current: i32,
     player_hp_max: i32,
     player_dead_since: Option<Instant>,
-    // 复活/刚进入游戏的短暂无敌：避免出生点附近刷怪导致“无法操作/一直被拉回城”。
     player_protected_until: Option<Instant>,
-
-    // NPC 商店：最近一次下发给客户端的货单（用于 BuyItemRequest 通过 unique_id 反查）
-    last_shop_goods: Vec<mir2_shared::data::item::UserItem>,
-
     last_player_move_req: Instant,
 
-    // server-authoritative monsters (position + HP)
+    // NPC shop
+    last_shop_goods: Vec<UserItem>,
+
+    // Local player visual state (for UserInformation)
+    player_equipment: Vec<Option<UserItem>>,
+    player_mount_type: i16,
+    player_riding_mount: bool,
+
+    // World objects
+    remote_players: Vec<MockRemotePlayerState>,
     monsters: HashMap<u32, MockMonsterState>,
 
-    // multi-zone spawn + roaming
+    // Zones / spawns
     zones: Vec<MockZone>,
     next_monster_id: u32,
     last_monster_wander_tick: Instant,
     last_monster_combat_tick: Instant,
 
-    // server-authoritative remote players (AI-driven)
-    remote_players: Vec<MockRemotePlayerState>,
-
-    // deterministic RNG (no external crate)
-    rng: u64,
+    // MassBattle cached centers
+    mass_battle_center_a: Option<(i32, i32)>,
+    mass_battle_center_b: Option<(i32, i32)>,
 }
 
-impl Default for MockWorldState {
-    fn default() -> Self {
+impl MockWorldState {
+    fn new(cfg: MockRuntimeConfig) -> Self {
         let now = Instant::now();
-
-        // Mock 默认地图边界（n0.map 实测约 700x700）。
-        // 仅用于让 3000 远程玩家“分散到地图各处”时不至于跑出可视范围太远。
-        let map_w: i32 = std::env::var("CRYSTAL_MOCK_MAP_W")
-            .ok()
-            .and_then(|v| v.parse::<i32>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(700);
-        let map_h: i32 = std::env::var("CRYSTAL_MOCK_MAP_H")
-            .ok()
-            .and_then(|v| v.parse::<i32>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(700);
-
-        let clamp_x = |x: i32| x.clamp(0, map_w.saturating_sub(1).max(0));
-        let clamp_y = |y: i32| y.clamp(0, map_h.saturating_sub(1).max(0));
-
-        // 多区域刷怪：覆盖全图，避免 3000 远程玩家挤在出生点附近。
-        // 用一个规则网格生成多个 zone，AI 会在 zone 之间 Seek/Travel。
-        let mut zones: Vec<MockZone> = Vec::new();
-        let grid_cols = 5;
-        let grid_rows = 5;
-        let margin = 80;
-        let step_x = ((map_w - margin * 2).max(1)) / (grid_cols.max(1) - 1);
-        let step_y = ((map_h - margin * 2).max(1)) / (grid_rows.max(1) - 1);
-
-        for iy in 0..grid_rows {
-            for ix in 0..grid_cols {
-                let cx = clamp_x(margin + ix * step_x);
-                let cy = clamp_y(margin + iy * step_y);
-
-                let idx = (iy * grid_cols + ix) as i32;
-                let monster_image = (idx % 6).max(0) as u16;
-                let monster_hp = 24 + ((idx % 5) * 6);
-                let xp_reward = 10 + ((idx % 7) * 2) as i64;
-                let respawn_ms = 1200 + ((idx % 6) * 250) as u64;
-
-                zones.push(MockZone {
-                    name: "Field",
-                    center: (cx, cy),
-                    radius: 20,
-                    max_monsters: 18,
-                    respawn_interval: Duration::from_millis(respawn_ms),
-                    monster_image,
-                    monster_hp,
-                    xp_reward,
-                    last_spawn: now,
-                });
-            }
-        }
+        let mut characters = Vec::new();
+        characters.push(SelectInfo {
+            index: 0,
+            name: "Hero".to_string(),
+            level: 1,
+            class: MirClass::Warrior,
+            gender: MirGender::Male,
+            last_access: Utc::now(),
+        });
 
         Self {
             in_game: false,
+            mock_cfg: cfg.clone(),
+            rng: 0xC0FFEE_u64,
 
-            mock_cfg: MockRuntimeConfig::default(),
+            characters,
+            active_character_index: 0,
+            active_character_name: "Hero".to_string(),
 
-            last_world_tick: now,
-
+            current_map_path: cfg.start_map.clone(),
             map_width: 0,
             map_height: 0,
             map_walkable: Vec::new(),
 
             player_object_id: 1,
-            player_gold: 1000,
-            inventory_capacity: 40,
-            // 330,330 在 n0.map 上容易被前景遮挡；换到更空旷的位置，避免一直只能看到 ghost。
-            player_grid: (336, 334),
-            player_spawn_grid: (336, 334),
-            player_hp_current: 100,
-            player_hp_max: 100,
+            player_level: 1,
+            player_experience: 0,
+            player_max_experience: 100,
+            player_gold: 5000,
+            inventory_capacity: 46,
+            player_grid: (330, 330),
+            player_spawn_grid: (330, 330),
+            player_hp_current: 120,
+            player_hp_max: 120,
             player_dead_since: None,
-            player_protected_until: None,
+            player_protected_until: Some(now + Duration::from_millis(3000)),
+            last_player_move_req: now,
+
             last_shop_goods: Vec::new(),
-
-            last_player_move_req: Instant::now(),
-
+            player_equipment: vec![None; 14],
+            player_mount_type: 0,
+            player_riding_mount: false,
+            remote_players: Vec::new(),
             monsters: HashMap::new(),
 
-            zones,
-            next_monster_id: 3001,
-            last_monster_wander_tick: Instant::now(),
-            last_monster_combat_tick: Instant::now(),
+            zones: Vec::new(),
+            next_monster_id: 5000,
+            last_monster_wander_tick: now,
+            last_monster_combat_tick: now,
 
-            remote_players: Vec::new(),
-
-            rng: 0xC0FFEE_u64,
+            mass_battle_center_a: None,
+            mass_battle_center_b: None,
         }
     }
 }
 
-/// 模拟网络实现
-pub struct MockNetwork {
-    /// 线程是否运行
-    running: Arc<AtomicBool>,
-    /// 接收游戏层发送的事件
-    #[allow(dead_code)]
-    game_tx: Sender<NetworkEvent>,
-    /// 游戏层接收事件的通道
-    #[allow(dead_code)]
-    game_rx: Receiver<NetworkEvent>,
-    /// 模拟网络线程句柄
-    _handle: Option<thread::JoinHandle<()>>,
-}
-
 impl MockNetwork {
-    /// 创建新的模拟网络
-    ///
-    /// # 返回
-    /// (发送通道, 接收通道) - 供 NetContext 使用
     pub fn new() -> (Sender<NetworkEvent>, Receiver<NetworkEvent>) {
-        let (client_tx, mock_rx) = crossbeam_channel::unbounded();
-        let (mock_tx, client_rx) = crossbeam_channel::unbounded();
+        let (client_tx, client_rx) = unbounded::<NetworkEvent>();
+        let (server_tx, server_rx) = unbounded::<NetworkEvent>();
 
-        let running = Arc::new(AtomicBool::new(true));
-        let running_clone = running.clone();
+        thread::spawn(move || {
+            let cfg = config::load_mock_runtime_config();
+            let mut state = MockWorldState::new(cfg);
 
-        // 启动模拟网络线程
-        let handle = thread::spawn(move || {
-            // 备注：项目里不一定初始化了 tracing subscriber；为方便离线验收，关键点用 println 兜底输出。
-            println!("🌐 MockNetwork 启动");
-            tracing::info!("🌐 MockNetwork 启动");
+            let _ = server_tx.send(NetworkEvent::Connected);
+            let tick_sleep = Duration::from_millis(10);
 
-            // 立即发送连接成功事件
-            let _ = mock_tx.send(NetworkEvent::Connected);
-
-            let mut state = MockWorldState::default();
-            state.mock_cfg = load_mock_runtime_config();
-
-            while running_clone.load(Ordering::Relaxed) {
-                match mock_rx.recv_timeout(Duration::from_millis(100)) {
-                    Ok(event) => {
-                        Self::handle_game_event(event, &mock_tx, &mut state);
-
-                        // 关键：如果客户端持续发包（例如每帧输入/心跳），recv_timeout 永远不会 Timeout，
-                        // 那 tick_world 就不会被调用，远程玩家/刷怪/怪物 AI 都会“停摆”。
-                        if state.in_game && state.last_world_tick.elapsed() >= Duration::from_millis(80) {
-                            state.last_world_tick = Instant::now();
-                            Self::tick_world(&mock_tx, &mut state);
+            loop {
+                // event pump
+                match client_rx.recv_timeout(tick_sleep) {
+                    Ok(ev) => {
+                        let should_quit = matches!(ev, NetworkEvent::DisconnectRequest);
+                        Self::handle_game_event(ev, &server_tx, &mut state);
+                        if should_quit {
+                            break;
                         }
                     }
-                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                        // 正常超时：让 mock 世界在无输入时也能推进（server-driven）
-                        Self::tick_world(&mock_tx, &mut state);
-                    }
-                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                        println!("🔌 [MOCK] 客户端断开连接");
-                        tracing::info!("🔌 客户端断开连接");
-                        break;
-                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 }
-            }
 
-            println!("🛑 MockNetwork 关闭");
-            tracing::info!("🛑 MockNetwork 关闭");
+                Self::tick_world(&server_tx, &mut state);
+            }
         });
 
-        // 将 MockNetwork 实例泄漏到静态生命周期，防止被Drop
-        // 这样线程可以一直运行到程序结束
-        let mock = MockNetwork {
-            running,
-            game_tx: client_tx.clone(),
-            game_rx: client_rx.clone(),
-            _handle: Some(handle),
-        };
-
-        // 使用 Box::leak 防止 Drop
-        let _ = Box::leak(Box::new(mock));
-
-        // 返回通道供 NetContext 使用
-        (client_tx, client_rx)
+        (client_tx, server_rx)
     }
 
-    /// 处理游戏层发送的事件
     fn handle_game_event(event: NetworkEvent, response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
-        tracing::debug!("📥 MockNetwork 收到事件: {:?}", event);
-
         match event {
-            // 客户端版本校验
-            NetworkEvent::ClientVersionSend { .. } => {
-                let _ = response_tx.send(NetworkEvent::ClientVersionResponse { result: 1 });
+            NetworkEvent::DisconnectRequest => {
+                let _ = response_tx.send(NetworkEvent::Disconnected {
+                    reason: "(MOCK) Disconnected".to_string(),
+                });
             }
 
-            // 心跳
             NetworkEvent::KeepAliveSend { time } => {
                 let _ = response_tx.send(NetworkEvent::KeepAliveReceived { time });
             }
 
-            // 断开请求
-            NetworkEvent::DisconnectRequest => {
-                tracing::info!("👋 模拟断开连接");
-                let _ = response_tx.send(NetworkEvent::Disconnected {
-                    reason: "User requested".to_string(),
+            NetworkEvent::ClientVersionSend { .. } => {
+                let _ = response_tx.send(NetworkEvent::ClientVersionResponse { result: 1 });
+            }
+
+            NetworkEvent::LoginRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::LoginSuccess {
+                    characters: state.characters.clone(),
                 });
             }
 
-            // 登录请求
-            NetworkEvent::LoginRequest { username, .. } => {
-                tracing::info!("🔐 模拟登录: {}", username);
-                // 延迟一点模拟网络延迟
-                thread::sleep(Duration::from_millis(100));
-                // 返回空角色列表
-                let _ = response_tx.send(NetworkEvent::LoginSuccess { characters: vec![] });
+            NetworkEvent::NewCharacterRequest { name, class, gender } => {
+                let class = MirClass::try_from(class).unwrap_or(MirClass::Warrior);
+                let gender = MirGender::try_from(gender).unwrap_or(MirGender::Male);
+                let next_index = state.characters.len() as i32;
+                state.characters.push(SelectInfo {
+                    index: next_index,
+                    name: name.clone(),
+                    level: 1,
+                    class,
+                    gender,
+                    last_access: Utc::now(),
+                });
+                let _ = response_tx.send(NetworkEvent::CharacterCreated { name });
+                let _ = response_tx.send(NetworkEvent::LoginSuccess {
+                    characters: state.characters.clone(),
+                });
             }
 
-            // 新建账号请求
-            NetworkEvent::NewAccountRequest { account_id, .. } => {
-                tracing::info!("📝 模拟创建账号: {}", account_id);
-                thread::sleep(Duration::from_millis(100));
-                let _ = response_tx.send(NetworkEvent::NewAccountSuccess);
-            }
-
-            // 创建角色请求
-            NetworkEvent::NewCharacterRequest { name, .. } => {
-                tracing::info!("🧙 模拟创建角色: {}", name);
-                thread::sleep(Duration::from_millis(100));
-                let _ = response_tx.send(NetworkEvent::CharacterCreated { name: name.clone() });
-            }
-
-            // 删除角色请求
             NetworkEvent::DeleteCharacterRequest { index } => {
-                tracing::info!("🗑️ 模拟删除角色: {}", index);
-                thread::sleep(Duration::from_millis(100));
-                let _ = response_tx.send(NetworkEvent::CharacterDeleted {
-                    index: index as u32,
+                state.characters.retain(|c| c.index != index);
+                let _ = response_tx.send(NetworkEvent::CharacterDeleted { index: index as u32 });
+                let _ = response_tx.send(NetworkEvent::LoginSuccess {
+                    characters: state.characters.clone(),
                 });
             }
 
-            // 开始游戏请求
             NetworkEvent::StartGameRequest { character_index } => {
-                println!("🎮 [MOCK] StartGameRequest character_index={}", character_index);
-                tracing::info!("🎮 模拟开始游戏: 角色索引 {}", character_index);
-                thread::sleep(Duration::from_millis(200));
+                state.in_game = true;
+                state.active_character_index = character_index;
+                if let Some(c) = state.characters.iter().find(|c| c.index == character_index) {
+                    state.active_character_name = c.name.clone();
+                    state.player_level = c.level.max(1);
+                }
 
-                // 进入游戏前刷新 [Mock] 配置（支持运行中修改 config.ini 后重进游戏生效）
-                state.mock_cfg = load_mock_runtime_config();
-
-                // 发送开始游戏响应
-                let _ = response_tx.send(NetworkEvent::StartGameDelay {
-                    packet: mir2_shared::packets::server::StartGameDelay {
-                        milliseconds: 500,
-                    },
-                });
-
-                // 按 C# 协议：StartGame 带 Resolution；这里模拟成功
                 let _ = response_tx.send(NetworkEvent::StartGame {
                     packet: mir2_shared::packets::server::StartGame {
                         result: 4,
-                        resolution: 1024,
+                        resolution: 0,
                     },
                 });
 
-                // 加载地图并发送 MapChanged 事件（落点要和 UserInformation 一致，否则相机会被拉到(0,0)）
-                let start_map = state.mock_cfg.start_map.clone();
-                let (spawn_x, spawn_y) = Self::load_and_send_map(
-                    &response_tx,
+                // load map & spawn
+                let spawn = Self::load_and_send_map(
+                    response_tx,
                     state,
-                    start_map.as_str(),
+                    &state.current_map_path.clone(),
                     0,
-                    "盟重土城",
-                    336,
-                    334,
-                    mir2_shared::enums::MirDirection::Down as u8,
+                    "Mock",
+                    state.player_spawn_grid.0,
+                    state.player_spawn_grid.1,
+                    MirDirection::Down as u8,
                 );
+                state.player_spawn_grid = spawn;
+                state.player_grid = spawn;
 
-                // 模拟玩家信息
-                // 关键：下发初始背包（None = 不下发，会导致后续 ItemGained 没 UI 承载）
-                state.player_gold = 1000;
-                state.inventory_capacity = 40;
-                state.player_grid = (spawn_x, spawn_y);
-                state.player_object_id = 1;
-                state.player_hp_max = 100;
-                state.player_hp_current = 100;
-                state.player_spawn_grid = state.player_grid;
-                state.player_dead_since = None;
-                state.player_protected_until = Some(Instant::now() + Duration::from_millis(3500));
+                // base zones
+                state.zones.clear();
+                state.monsters.clear();
+                state.next_monster_id = 5000;
+                state.mass_battle_center_a = None;
+                state.mass_battle_center_b = None;
 
-                // 下发最小装备：用于验证“装备→外观/坐骑派生→渲染”链路。
-                // 槽位约定（见 NetworkApplySystem::apply_equipment_vec）:
-                // 0 weapon, 1 armour, ... 13 mount
-                let mut equipment: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 14];
-
-                // 武器：CWeapon/{:02}
-                {
-                    use mir2_shared::data::item::{ItemInfo, UserItem};
-                    use mir2_shared::enums::ItemType;
-                    let mut info = ItemInfo::default();
-                    info.index = 10001;
-                    info.name = "Mock Weapon".to_string();
-                    info.item_type = ItemType::Weapon;
-                    // ClientRust “神豪玩家”同款：weapon=78
-                    info.shape = 78;
-                    info.durability = 10;
-                    // 武器特效索引（对应 Data/CWeaponEffect/{:02}.Lib）
-                    // ClientRust “神豪玩家”同款：weapon_fx=66
-                    info.effect = 66;
-
-                    let mut item = UserItem::with_info(info);
-                    item.unique_id = 10001;
-                    item.current_dura = 10;
-                    item.max_dura = 10;
-                    equipment[0] = Some(item);
-                }
-
-                // 衣服：CArmour/{:02}，用于驱动人物外观；同时用 effect 驱动翅膀/人物特效（CHumEffect/{:02}）。
-                {
-                    use mir2_shared::data::item::{ItemInfo, UserItem};
-                    use mir2_shared::enums::ItemType;
-                    let mut info = ItemInfo::default();
-                    info.index = 10002;
-                    info.name = "Mock Armour".to_string();
-                    info.item_type = ItemType::Armour;
-                    // ClientRust “神豪玩家”同款：armour=58
-                    info.shape = 58;
-                    info.durability = 10;
-                    // 翅膀/人物特效：本项目用 CHumEffect/{:02}.Lib
-                    // ClientRust “神豪玩家”同款：wing=5
-                    info.effect = 5;
-
-                    let mut item = UserItem::with_info(info);
-                    item.unique_id = 10002;
-                    item.current_dura = 10;
-                    item.max_dura = 10;
-                    equipment[1] = Some(item);
-                }
-
-                // 坐骑：Mount/{:02}
-                {
-                    use mir2_shared::data::item::{ItemInfo, UserItem};
-                    use mir2_shared::enums::ItemType;
-                    let mut info = ItemInfo::default();
-                    info.index = 10013;
-                    info.name = "Mock Mount".to_string();
-                    info.item_type = ItemType::Mount;
-                    // ClientRust “神豪玩家”同款：mount=11
-                    info.shape = 11;
-                    info.durability = 10;
-                    info.effect = 0;
-
-                    let mut item = UserItem::with_info(info);
-                    item.unique_id = 10013;
-                    item.current_dura = 10;
-                    item.max_dura = 10;
-                    equipment[13] = Some(item);
-                }
-
-                let _ = response_tx.send(NetworkEvent::UserInformation {
-                    packet: mir2_shared::packets::server::UserInformation {
-                        object_id: state.player_object_id,
-                        real_id: state.player_object_id,
-                        name: "TestUser".to_string(),
-                        guild_name: "".to_string(),
-                        guild_rank: "".to_string(),
-                        name_colour: 0,
-                        class: mir2_shared::enums::MirClass::Warrior,
-                        gender: mir2_shared::enums::MirGender::Male,
-                        level: 1,
-                        location_x: state.player_grid.0,
-                        location_y: state.player_grid.1,
-                        direction: mir2_shared::enums::MirDirection::Down,
-                        hair: 1,
-                        hp: state.player_hp_current.max(0),
-                        mp: 50,
-                        experience: 0,
-                        max_experience: 0,
-                        level_effects: mir2_shared::enums::LevelEffects::empty(),
-                        has_hero: false,
-                        hero_behaviour: mir2_shared::enums::HeroBehaviour::Follow,
-                        inventory: Some(vec![None; state.inventory_capacity]),
-                        equipment: Some(equipment),
-                        quest_inventory: None,
-                        gold: state.player_gold,
-                        credit: 0,
-                        has_expanded_storage: false,
-                        expanded_storage_expiry_time: 0,
-                        magics: Vec::new(),
-                        summoned_creature_type: 0,
-                        creature_summoned: false,
-                        allow_observe: false,
-                        observer: false,
-                    },
-                });
-
-                // ====== Mock：生成多个“远程玩家”（不同区域找怪→跑路→打怪升级） ======
-                state.remote_players.clear();
-                let now = Instant::now();
-                let cfg = state.mock_cfg.clone();
-                let remote_count: usize = cfg.remote_players;
-
-                let class = mir2_shared::enums::MirClass::Warrior;
-                let weapon_min = cfg.weapon_min;
-                let weapon_max = cfg.weapon_max;
-                let armour_min = cfg.armour_min;
-                let armour_max = cfg.armour_max;
-                let weapon_effect_min = cfg.weapon_effect_min;
-                let weapon_effect_max = cfg.weapon_effect_max;
-                let wing_effect_min = cfg.wing_effect_min;
-                let wing_effect_max = cfg.wing_effect_max;
-
-                // 出生点占位：确保玩家/怪物出生在可走格，并尽量避免大量远程玩家堆叠在同一格。
-                let mut occupied_tiles: HashSet<(i32, i32)> = HashSet::new();
-                occupied_tiles.insert(state.player_grid);
-
-                let map_width = state.map_width;
-                let map_height = state.map_height;
                 let (map_w_eff, map_h_eff) = Self::effective_map_dims(state);
+                let mut occupied: HashSet<(i32, i32)> = HashSet::new();
+                occupied.insert(state.player_grid);
 
-                // 避免同时借用 state 的不同字段触发 borrow checker：使用局部 rng，最后写回。
-                let mut rng = state.rng;
-
-                for i in 0..remote_count {
-                    let id = 2_u32.saturating_add(i as u32);
-
-                    let weapon = if weapon_min == weapon_max {
-                        weapon_min
-                    } else {
-                        let lo = weapon_min.min(weapon_max) as i32;
-                        let hi = weapon_min.max(weapon_max) as i32;
-                        let span = (hi - lo + 1).max(1) as u32;
-                        (lo + (Self::rng_next_u32(&mut rng) % span) as i32) as i16
-                    };
-                    let armour = if armour_min == armour_max {
-                        armour_min
-                    } else {
-                        let lo = armour_min.min(armour_max) as i32;
-                        let hi = armour_min.max(armour_max) as i32;
-                        let span = (hi - lo + 1).max(1) as u32;
-                        (lo + (Self::rng_next_u32(&mut rng) % span) as i32) as i16
-                    };
-                    let weapon_effect = if weapon_effect_min == weapon_effect_max {
-                        weapon_effect_min
-                    } else {
-                        let lo = weapon_effect_min.min(weapon_effect_max) as i32;
-                        let hi = weapon_effect_min.max(weapon_effect_max) as i32;
-                        let span = (hi - lo + 1).max(1) as u32;
-                        (lo + (Self::rng_next_u32(&mut rng) % span) as i32) as i16
-                    };
-                    let wing_effect = if wing_effect_min == wing_effect_max {
-                        wing_effect_min
-                    } else {
-                        let lo = wing_effect_min.min(wing_effect_max) as i32;
-                        let hi = wing_effect_min.max(wing_effect_max) as i32;
-                        let span = (hi - lo + 1).max(1) as u32;
-                        (lo + (Self::rng_next_u32(&mut rng) % span) as i32) as u8
-                    };
-
-                    // 全图均匀分布：对整张地图做均匀采样（再用 walkable 拒绝采样），保证落点在可走格。
-                    let (x, y) = Self::pick_random_walkable_unoccupied_raw(
-                        map_width,
-                        map_height,
-                        state.map_walkable.as_slice(),
+                // Normal zones
+                let normal_zone_count = 6usize;
+                for i in 0..normal_zone_count {
+                    let prefer = (
+                        (map_w_eff / 2 + (i as i32 - 3) * 55).clamp(0, map_w_eff.saturating_sub(1).max(0)),
+                        (map_h_eff / 2 + ((i as i32 % 3) - 1) * 55).clamp(0, map_h_eff.saturating_sub(1).max(0)),
+                    );
+                    let center = Self::pick_random_walkable_near_center_raw(
+                        state.map_width,
+                        state.map_height,
+                        &state.map_walkable,
                         map_w_eff,
                         map_h_eff,
-                        &mut rng,
-                        &occupied_tiles,
+                        &mut state.rng,
+                        &occupied,
+                        prefer,
+                        40,
                         4096,
                     )
-                        .unwrap_or_else(|| {
-                            // 退化：如果没有碰撞/地图尺寸信息，仍按 zone 随机，但也尽量避障。
-                            let zone_idx = if state.zones.is_empty() {
-                                0
-                            } else {
-                                (Self::rng_next_u32(&mut rng) as usize) % state.zones.len()
-                            };
-                            let z = state.zones.get(zone_idx);
-                            let mut picked = (338, 334);
-                            if let Some(z) = z {
-                                for _ in 0..32 {
-                                    let (tx, ty) = Self::random_pos_in_zone(&mut rng, z);
-                                    if Self::map_is_walkable(state, tx, ty) {
-                                        picked = (tx, ty);
-                                        break;
-                                    }
-                                }
-                            }
-                            picked
-                        });
+                    .or_else(|| {
+                        Self::pick_random_walkable_unoccupied_raw(
+                            state.map_width,
+                            state.map_height,
+                            &state.map_walkable,
+                            map_w_eff,
+                            map_h_eff,
+                            &mut state.rng,
+                            &occupied,
+                            4096,
+                        )
+                    })
+                    .unwrap_or(prefer);
+                    occupied.insert(center);
 
-                    let zone_idx = if state.zones.is_empty() {
-                        0
+                    state.zones.push(MockZone {
+                        name: "Zone",
+                        is_boss: false,
+                        center,
+                        radius: 22,
+                        max_monsters: 6,
+                        respawn_interval: Duration::from_millis(2200),
+                        monster_image: 20 + (i as u16 % 10),
+                        monster_hp: 80,
+                        xp_reward: 25,
+                        last_spawn: Instant::now() - Duration::from_millis(99999),
+                    });
+                }
+
+                // Boss zones
+                Self::rebuild_boss_zones(state, state.player_grid);
+
+                // Spawn initial monsters quickly
+                Self::tick_zone_spawns(response_tx, state);
+
+                // Remote players
+                state.remote_players.clear();
+                let (count, team_a_count) = if state.mock_cfg.mass_battle_enabled {
+                    (
+                        state
+                            .mock_cfg
+                            .mass_battle_team_a
+                            .saturating_add(state.mock_cfg.mass_battle_team_b),
+                        state.mock_cfg.mass_battle_team_a,
+                    )
+                } else {
+                    (state.mock_cfg.remote_players, 0)
+                };
+
+                for i in 0..count {
+                    let id = 1000 + (i as u32);
+                    let name = format!("Mock{}", i + 1);
+                    let class = match Self::rng_next_u32(&mut state.rng) % 3 {
+                        0 => MirClass::Warrior,
+                        1 => MirClass::Wizard,
+                        _ => MirClass::Taoist,
+                    };
+                    let gender = if (Self::rng_next_u32(&mut state.rng) % 2) == 0 {
+                        MirGender::Male
                     } else {
-                        Self::nearest_zone_idx(&state.zones, x, y)
+                        MirGender::Female
                     };
 
-                    occupied_tiles.insert((x, y));
+                    let level = (1 + (Self::rng_next_u32(&mut state.rng) % 22) as u16).max(1);
 
-                    let level = 1_u16
-                        .saturating_add((Self::rng_next_u32(&mut rng) % 4) as u16);
+                    let pos = Self::pick_random_walkable_unoccupied_raw(
+                        state.map_width,
+                        state.map_height,
+                        &state.map_walkable,
+                        map_w_eff,
+                        map_h_eff,
+                        &mut state.rng,
+                        &occupied,
+                        8192,
+                    )
+                    .unwrap_or((0, 0));
+                    occupied.insert(pos);
 
-                    // 坐骑：达到等级后按概率随机；默认概率=0（保持旧行为）
-                    let mut mount_type: i16 = 0;
+                    let weapon = (state.mock_cfg.weapon_min
+                        + (Self::rng_next_u32(&mut state.rng)
+                            % ((state.mock_cfg.weapon_max - state.mock_cfg.weapon_min).max(0) as u32 + 1))
+                            as i16)
+                        .clamp(state.mock_cfg.weapon_min, state.mock_cfg.weapon_max);
+                    let armour = (state.mock_cfg.armour_min
+                        + (Self::rng_next_u32(&mut state.rng)
+                            % ((state.mock_cfg.armour_max - state.mock_cfg.armour_min).max(0) as u32 + 1))
+                            as i16)
+                        .clamp(state.mock_cfg.armour_min, state.mock_cfg.armour_max);
+                    let weapon_effect = (state.mock_cfg.weapon_effect_min
+                        + (Self::rng_next_u32(&mut state.rng)
+                            % ((state.mock_cfg.weapon_effect_max - state.mock_cfg.weapon_effect_min).max(0) as u32 + 1))
+                            as i16)
+                        .clamp(state.mock_cfg.weapon_effect_min, state.mock_cfg.weapon_effect_max);
+                    let wing_effect = if state.mock_cfg.wing_effect_max >= state.mock_cfg.wing_effect_min {
+                        let span = (state.mock_cfg.wing_effect_max - state.mock_cfg.wing_effect_min) as u32;
+                        state.mock_cfg.wing_effect_min + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as u8
+                    } else {
+                        0
+                    };
+
+                    let mut mount_type = 0i16;
                     let mut riding_mount = false;
-                    if level >= cfg.mount_min_level {
-                        let roll = (Self::rng_next_u32(&mut rng) % 10_000) as f32 / 10_000.0;
-                        if roll < cfg.mount_chance {
-                            let lo = cfg.mount_min.min(cfg.mount_max) as i32;
-                            let hi = cfg.mount_min.max(cfg.mount_max) as i32;
-                            let span = (hi - lo + 1).max(1) as u32;
-                            mount_type = (lo + (Self::rng_next_u32(&mut rng) % span) as i32) as i16;
-                            if mount_type > 0 {
-                                riding_mount = true;
-                            } else {
-                                mount_type = 0;
-                                riding_mount = false;
-                            }
+                    if level >= state.mock_cfg.mount_min_level && state.mock_cfg.mount_chance > 0.0 {
+                        let roll = (Self::rng_next_u32(&mut state.rng) as f32) / (u32::MAX as f32);
+                        if roll < state.mock_cfg.mount_chance {
+                            let span = (state.mock_cfg.mount_max - state.mock_cfg.mount_min).max(0) as u32;
+                            mount_type = state.mock_cfg.mount_min
+                                + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as i16;
+                            riding_mount = mount_type != 0;
                         }
                     }
-                    let gender = if (Self::rng_next_u32(&mut rng) % 2) == 0 {
-                        mir2_shared::enums::MirGender::Male
-                    } else {
-                        mir2_shared::enums::MirGender::Female
-                    };
-                    let hair = ((Self::rng_next_u32(&mut rng) % 6) as u8).max(1);
-                    let direction = mir2_shared::enums::MirDirection::Left;
 
-                    let name = format!("Remote{}", id);
+                    let mut equip: Vec<Option<UserItem>> = vec![None; 14];
+                    // Make a couple of fake items for inspection.
+                    if weapon != 0 {
+                        let mut info = ItemInfo::default();
+                        info.index = weapon as i32;
+                        info.item_type = mir2_shared::enums::ItemType::Weapon;
+                        info.shape = weapon;
+                        info.effect = weapon_effect as u8;
+                        info.durability = 1000;
+                        info.stack_size = 1;
+                        info.name = "MockWeapon".to_string();
+                        let mut ui = UserItem::with_info(info);
+                        ui.unique_id = 10_000_000 + id as u64;
+                        ui.count = 1;
+                        ui.current_dura = 1000;
+                        equip[0] = Some(ui);
+                    }
+                    if armour != 0 {
+                        let mut info = ItemInfo::default();
+                        info.index = armour as i32;
+                        info.item_type = mir2_shared::enums::ItemType::Armour;
+                        info.shape = armour;
+                        // Armour.effect 在客户端被用于 wing_effect（mock 用来表现翅膀/特效）
+                        info.effect = wing_effect;
+                        info.durability = 1000;
+                        info.stack_size = 1;
+                        info.name = "MockArmour".to_string();
+                        let mut ui = UserItem::with_info(info);
+                        ui.unique_id = 20_000_000 + id as u64;
+                        ui.count = 1;
+                        ui.current_dura = 1000;
+                        equip[1] = Some(ui);
+                    }
 
-                    let equipment = make_mock_equipment_for_remote(
-                        &mut rng,
-                        id,
-                        level,
-                        weapon,
-                        weapon_effect,
-                        armour,
-                        wing_effect,
-                        mount_type,
-                        riding_mount,
-                    );
-
-                    let _ = response_tx.send(NetworkEvent::ObjectPlayer {
-                        packet: mir2_shared::packets::server::ObjectPlayer {
-                            object_id: id,
-                            name: name.clone(),
-                            guild_name: "".to_string(),
-                            guild_rank_name: "".to_string(),
-                            name_colour: 0,
-                            class,
-                            gender,
-                            level,
-                            location_x: x,
-                            location_y: y,
-                            direction,
-                            hair,
-                            light: 0,
-                            // 为了保证离线资源命中，所有远程玩家都用已验证存在的外观索引。
-                            weapon,
-                            weapon_effect,
-                            armour,
-                            poison: mir2_shared::enums::PoisonType::empty(),
-                            dead: false,
-                            hidden: false,
-                            effect: mir2_shared::enums::SpellEffect::None,
-                            wing_effect,
-                            extra: false,
-                            mount_type,
-                            riding_mount,
-                            fishing: false,
-                            transform_type: 0,
-                            element_orb_effect: 0,
-                            element_orb_lvl: 0,
-                            element_orb_max: 0,
-                            buffs: Vec::new(),
-                            level_effects: mir2_shared::enums::LevelEffects::empty(),
-                        },
-                    });
-
-                    let max_experience = Self::exp_for_next_level(level);
-                    let roam_goal = match state.zones.get(zone_idx) {
-                        Some(z) => z.center,
-                        None => (x, y),
-                    };
-                    state.remote_players.push(MockRemotePlayerState {
+                    let now = Instant::now();
+                    let mut rp = MockRemotePlayerState {
                         id,
                         name,
                         class,
                         gender,
-                        hair,
+                        level,
+                        grid: pos,
+                        direction: MirDirection::Down,
+                        hair: (Self::rng_next_u32(&mut state.rng) % 6) as u8,
                         weapon,
                         weapon_effect,
                         armour,
                         wing_effect,
                         mount_type,
                         riding_mount,
-                        equipment,
-                        grid: (x, y),
-                        direction,
-                        level,
-                        experience: 0,
-                        max_experience,
-                        zone_idx,
-                        goal_zone_idx: zone_idx,
-                        mode: RemoteAiMode::Seek,
-                        target_monster_id: None,
-                        roam_goal,
-                        last_tick: now,
-                        last_attack: now,
+                        equipment: equip,
+                        mode: RemoteAiMode::Roam,
                         last_mode_change: now,
                         last_zone_eval: now,
+                        goal_zone_idx: 0,
+                        zone_idx: 0,
                         last_roam_pick: now,
+                        roam_goal: pos,
+                        target_monster_id: None,
+                        hp_current: 120,
+                        hp_max: 120,
+                        experience: 0,
+                        max_experience: Self::exp_for_next_level(level),
+                        last_attack: now - Duration::from_millis(state.mock_cfg.attack_cooldown_ms.max(50)),
+                        last_tick: now,
+                        team: if state.mock_cfg.mass_battle_enabled {
+                            if i < team_a_count { 0 } else { 1 }
+                        } else {
+                            (i % 2) as u8
+                        },
+                        dead_until: None,
+                    };
+
+                    rp.zone_idx = Self::nearest_zone_idx(&state.zones, rp.grid.0, rp.grid.1);
+                    rp.goal_zone_idx = rp.zone_idx;
+                    state.remote_players.push(rp);
+                }
+
+                for rp in &state.remote_players {
+                    Self::send_object_player_update(response_tx, rp);
+                }
+
+                // Local player: generate visible equipment + optional mount
+                // 注意：本地外观主要由 UserInformation.equipment 的 ItemInfo(shape/effect/type) 导出。
+                let mut eq: Vec<Option<UserItem>> = vec![None; 14];
+                {
+                    let cfg = state.mock_cfg.clone();
+
+                    // 资源约束（与仓库 Data/ 目录对齐，避免随机到不存在的 Lib 导致“武器/坐骑没了”）：
+                    // - Data/CWeapon: 00..78
+                    // - Data/Mount:   00..11
+                    const MAX_CWEAPON_INDEX: i16 = 78;
+                    const MAX_MOUNT_INDEX: i16 = 11;
+
+                    let weapon_min_cfg = cfg.weapon_min.clamp(0, MAX_CWEAPON_INDEX);
+                    let weapon_max_cfg = cfg.weapon_max.clamp(0, MAX_CWEAPON_INDEX);
+                    let armour_min_cfg = cfg.armour_min;
+                    let armour_max_cfg = cfg.armour_max;
+                    let mount_min_cfg = cfg.mount_min.clamp(0, MAX_MOUNT_INDEX);
+                    let mount_max_cfg = cfg.mount_max.clamp(0, MAX_MOUNT_INDEX);
+
+                    // weapon slot = 0
+                    let weapon_min_vis = if weapon_max_cfg > 0 {
+                        weapon_min_cfg.max(1)
+                    } else {
+                        weapon_min_cfg
+                    };
+                    let weapon_max_vis = weapon_max_cfg.max(weapon_min_vis);
+                    let w_shape = (weapon_min_vis
+                        + (Self::rng_next_u32(&mut state.rng)
+                            % ((weapon_max_vis - weapon_min_vis).max(0) as u32 + 1))
+                            as i16)
+                        .clamp(weapon_min_vis, weapon_max_vis);
+                    if w_shape > 0 {
+                        let mut info = ItemInfo::default();
+                        info.index = 5001;
+                        info.item_type = mir2_shared::enums::ItemType::Weapon;
+                        info.shape = w_shape;
+                        info.effect = (cfg.weapon_effect_min
+                            + (Self::rng_next_u32(&mut state.rng)
+                                % ((cfg.weapon_effect_max - cfg.weapon_effect_min).max(0) as u32 + 1))
+                                as i16)
+                            .clamp(cfg.weapon_effect_min, cfg.weapon_effect_max) as u8;
+                        info.durability = 1000;
+                        info.stack_size = 1;
+                        info.name = "MockWeapon".to_string();
+                        let mut ui = UserItem::with_info(info);
+                        ui.unique_id = 700_000_001;
+                        ui.count = 1;
+                        ui.current_dura = 1000;
+                        eq[0] = Some(ui);
+                    }
+
+                    // armour slot = 1
+                    let armour_min_vis = if armour_max_cfg > 0 {
+                        armour_min_cfg.max(1)
+                    } else {
+                        armour_min_cfg
+                    };
+                    let armour_max_vis = armour_max_cfg.max(armour_min_vis);
+                    let a_shape = (armour_min_vis
+                        + (Self::rng_next_u32(&mut state.rng)
+                            % ((armour_max_vis - armour_min_vis).max(0) as u32 + 1))
+                            as i16)
+                        .clamp(armour_min_vis, armour_max_vis);
+                    if a_shape > 0 {
+                        let mut info = ItemInfo::default();
+                        info.index = 5002;
+                        info.item_type = mir2_shared::enums::ItemType::Armour;
+                        info.shape = a_shape;
+                        // Armour.effect 在客户端被用于 wing_effect（mock 用来表现翅膀/特效）
+                        let span = (cfg.wing_effect_max - cfg.wing_effect_min) as u32;
+                        info.effect = if cfg.wing_effect_max >= cfg.wing_effect_min {
+                            cfg.wing_effect_min + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as u8
+                        } else {
+                            0
+                        };
+                        info.durability = 1000;
+                        info.stack_size = 1;
+                        info.name = "MockArmour".to_string();
+                        let mut ui = UserItem::with_info(info);
+                        ui.unique_id = 700_000_002;
+                        ui.count = 1;
+                        ui.current_dura = 1000;
+                        eq[1] = Some(ui);
+                    }
+
+                    // mount: use MountUpdated (local mount is driven by mount events, not equipment)
+                    let mut mount_type = 0i16;
+                    let mut riding = false;
+                    // 让本地玩家“默认可见坐骑”：
+                    // - 如果配置了 MountMin/Max（>0），就直接给坐骑（不受等级限制）
+                    // - 否则沿用原本概率逻辑
+                    if mount_max_cfg > 0 || mount_min_cfg > 0 {
+                        let span = (mount_max_cfg - mount_min_cfg).max(0) as u32;
+                        mount_type = mount_min_cfg + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as i16;
+                        if mount_type == 0 && mount_max_cfg > 0 {
+                            mount_type = mount_max_cfg;
+                        }
+                        riding = mount_type != 0;
+                    } else if state.player_level >= cfg.mount_min_level && cfg.mount_chance > 0.0 {
+                        let roll = (Self::rng_next_u32(&mut state.rng) as f32) / (u32::MAX as f32);
+                        if roll < cfg.mount_chance {
+                            let span = (mount_max_cfg - mount_min_cfg).max(0) as u32;
+                            mount_type = mount_min_cfg + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as i16;
+                            riding = mount_type != 0;
+                        }
+                    }
+                    state.player_mount_type = mount_type;
+                    state.player_riding_mount = riding;
+                }
+
+                state.player_equipment = eq.clone();
+
+                // Local user info
+                let user_packet = mir2_shared::packets::server::UserInformation {
+                    object_id: state.player_object_id,
+                    real_id: state.player_object_id,
+                    name: state.active_character_name.clone(),
+                    guild_name: String::new(),
+                    guild_rank: String::new(),
+                    name_colour: 0,
+                    class: MirClass::Warrior,
+                    gender: MirGender::Male,
+                    level: state.player_level,
+                    location_x: state.player_grid.0,
+                    location_y: state.player_grid.1,
+                    direction: MirDirection::Down,
+                    hair: 0,
+                    hp: state.player_hp_current,
+                    mp: 0,
+                    experience: state.player_experience,
+                    max_experience: state.player_max_experience.max(1),
+                    level_effects: mir2_shared::enums::LevelEffects::empty(),
+                    has_hero: false,
+                    hero_behaviour: HeroBehaviour::Attack,
+                    inventory: Some(vec![None; state.inventory_capacity]),
+                    equipment: Some(state.player_equipment.clone()),
+                    quest_inventory: None,
+                    gold: state.player_gold,
+                    credit: 0,
+                    has_expanded_storage: false,
+                    expanded_storage_expiry_time: 0,
+                    magics: Vec::new(),
+                    summoned_creature_type: 0,
+                    creature_summoned: false,
+                    allow_observe: false,
+                    observer: false,
+                };
+                let _ = response_tx.send(NetworkEvent::UserInformation { packet: user_packet });
+
+                // IMPORTANT: send local MountUpdated AFTER UserInformation.
+                // Otherwise the client may drop the mount update because the LocalPlayer entity
+                // (with PlayerData.id) doesn't exist yet.
+                if state.player_riding_mount {
+                    let _ = response_tx.send(NetworkEvent::MountUpdated {
+                        object_id: state.player_object_id,
+                        mount_type: state.player_mount_type,
+                        riding_mount: true,
                     });
                 }
-
-                state.rng = rng;
-
-                // ====== Mock(权威服务器)：用真实 server packet 形状生成 NPC/怪物 ======
-                // 坐标为格子坐标（与 UserInformation/MapChanged 一致）
-                let _ = response_tx.send(NetworkEvent::ObjectNpc {
-                    packet: mir2_shared::packets::server::ObjectNpc {
-                        object_id: 2001,
-                        name: "TestNPC".to_string(),
-                        name_colour: 0,
-                        image: 0,
-                        colour: 0,
-                        // 该地图部分点位会被前景树遮挡：这里放到玩家出生点附近更空旷处，便于测试交互。
-                        // 向右移动约 300px：1 格=48px，所以 300px≈+6 格（288px）
-                        location_x: 336,
-                        location_y: 334,
-                        direction: mir2_shared::enums::MirDirection::Down,
-                    },
+                let _ = response_tx.send(NetworkEvent::HealthChanged {
+                    current: state.player_hp_current as u32,
+                    max: state.player_hp_max as u32,
+                });
+                let _ = response_tx.send(NetworkEvent::PlayerLocationChanged {
+                    x: state.player_grid.0,
+                    y: state.player_grid.1,
+                });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "(MOCK) Entered game".to_string(),
                 });
 
-                // ====== Mock：多区域刷怪（server-authoritative） ======
-                state.in_game = true;
-                state.monsters.clear();
-                state.next_monster_id = 3001;
-                state.last_monster_wander_tick = Instant::now();
-                state.last_monster_combat_tick = Instant::now();
-
-                // 初始填充：每个区域先刷 2 只，便于立即看到“找怪→跑路→打怪”
-                for zone_idx in 0..state.zones.len() {
-                    for _ in 0..2 {
-                        Self::spawn_monster_in_zone(response_tx, state, zone_idx);
-                    }
-                }
+                // Make the local visual state obvious in logs/chat so we can confirm
+                // we're running the latest build and that equipment/mount data is non-empty.
+                let weapon_dbg = state
+                    .player_equipment
+                    .get(0)
+                    .and_then(|o| o.as_ref())
+                    .and_then(|ui| ui.info.as_ref())
+                    .map(|info| (info.shape, info.effect))
+                    .unwrap_or((0, 0));
+                let armour_dbg = state
+                    .player_equipment
+                    .get(1)
+                    .and_then(|o| o.as_ref())
+                    .and_then(|ui| ui.info.as_ref())
+                    .map(|info| (info.shape, info.effect))
+                    .unwrap_or((0, 0));
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!(
+                        "(MOCK) Local visuals: weapon(shape={},effect={}) armour(shape={},effect={}) mount_type={} riding={}",
+                        weapon_dbg.0,
+                        weapon_dbg.1,
+                        armour_dbg.0,
+                        armour_dbg.1,
+                        state.player_mount_type,
+                        state.player_riding_mount
+                    ),
+                });
             }
 
-            // ===== 本地玩家移动（服务器权威） =====
-            NetworkEvent::TurnRequest { direction } => {
-                // 真服一般会回 ObjectTurn / UserLocation；此处最小只刷新位置（不带方向），方向由客户端本地表现维护。
-                state.last_player_move_req = Instant::now();
-                let _ = direction; // 避免未使用告警（后续若加方向同步可用）
-            }
-            NetworkEvent::MoveRequest { direction }
-            | NetworkEvent::WalkRequest { direction }
-            | NetworkEvent::RunRequest { direction } => {
-                state.last_player_move_req = Instant::now();
-
-                let (x, y) = state.player_grid;
-                let (dx, dy) = match direction {
-                    mir2_shared::enums::MirDirection::Up => (0, -1),
-                    mir2_shared::enums::MirDirection::UpRight => (1, -1),
-                    mir2_shared::enums::MirDirection::Right => (1, 0),
-                    mir2_shared::enums::MirDirection::DownRight => (1, 1),
-                    mir2_shared::enums::MirDirection::Down => (0, 1),
-                    mir2_shared::enums::MirDirection::DownLeft => (-1, 1),
-                    mir2_shared::enums::MirDirection::Left => (-1, 0),
-                    mir2_shared::enums::MirDirection::UpLeft => (-1, -1),
-                };
-
-                // 一次请求推进一格（最简单的真服式“离散移动”模拟）
-                let nx = x + dx;
-                let ny = y + dy;
-                if Self::map_is_walkable(state, nx, ny) {
-                    state.player_grid = (nx, ny);
-                    let _ = response_tx.send(NetworkEvent::PlayerLocationChanged { x: nx, y: ny });
-                } else {
-                    // 被障碍物/边界挡住：不移动，同时回一个当前位置用于纠偏/停跑
-                    let (cx, cy) = state.player_grid;
-                    let _ = response_tx.send(NetworkEvent::PlayerLocationChanged { x: cx, y: cy });
-                }
-            }
-
-            // ===== 本地玩家攻击（服务器权威） =====
-            NetworkEvent::AttackRequest { direction, .. } => {
+            NetworkEvent::WalkRequest { direction }
+            | NetworkEvent::RunRequest { direction }
+            | NetworkEvent::MoveRequest { direction } => {
                 if !state.in_game {
                     return;
                 }
-
-                let (x, y) = state.player_grid;
-                let (dx, dy) = match direction {
-                    mir2_shared::enums::MirDirection::Up => (0, -1),
-                    mir2_shared::enums::MirDirection::UpRight => (1, -1),
-                    mir2_shared::enums::MirDirection::Right => (1, 0),
-                    mir2_shared::enums::MirDirection::DownRight => (1, 1),
-                    mir2_shared::enums::MirDirection::Down => (0, 1),
-                    mir2_shared::enums::MirDirection::DownLeft => (-1, 1),
-                    mir2_shared::enums::MirDirection::Left => (-1, 0),
-                    mir2_shared::enums::MirDirection::UpLeft => (-1, -1),
-                };
-
-                let hit_cell = (x + dx, y + dy);
-
-                // 真服常见语义：按方向取前方目标。这里做“一格命中”。
-                let mut hit_monster_id: Option<u32> = None;
-                for (mid, m) in state.monsters.iter() {
-                    if m.hp > 0 && m.pos == hit_cell {
-                        hit_monster_id = Some(*mid);
-                        break;
-                    }
-                }
-
-                let Some(mid) = hit_monster_id else {
+                if state.last_player_move_req.elapsed() < Duration::from_millis(40) {
                     return;
-                };
+                }
+                state.last_player_move_req = Instant::now();
 
-                let damage = 10;
-                if let Some(m) = state.monsters.get_mut(&mid) {
-                    m.hp -= damage;
-
-                    let _ = response_tx.send(NetworkEvent::ObjectStruck {
-                        object_id: mid,
-                        attacker_id: 1,
-                        damage,
-                    });
-
-                    if m.hp <= 0 {
-                        let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: mid });
-                        let _ = response_tx.send(NetworkEvent::ObjectRemove {
-                            packet: mir2_shared::packets::server::ObjectRemove { object_id: mid },
-                        });
-                        state.monsters.remove(&mid);
-                    }
+                let (dx, dy) = dir_to_delta(direction);
+                let nx = state.player_grid.0 + dx;
+                let ny = state.player_grid.1 + dy;
+                if Self::map_is_walkable(state, nx, ny) {
+                    state.player_grid = (nx, ny);
+                    let _ = response_tx.send(NetworkEvent::PlayerLocationChanged { x: nx, y: ny });
                 }
             }
 
-            // 聊天请求
-                NetworkEvent::ChatRequest {
-                    message,
-                    linked_items,
-                } => {
-                    tracing::info!(
-                        "[MOCK] ChatRequest: message={:?} linked_items={} ",
-                        message,
-                        linked_items.len()
-                    );
-                // 回显消息
+            NetworkEvent::TurnRequest { .. } => {}
+
+            NetworkEvent::ChatRequest { message, .. } => {
                 let _ = response_tx.send(NetworkEvent::ChatMessage {
-                    sender: "MockServer".to_string(),
+                    sender: "(MOCK)".to_string(),
                     message: format!("Echo: {}", message),
-                    chat_type: mir2_shared::enums::ChatType::Normal,
+                    chat_type: ChatType::Normal,
                 });
             }
 
-            // 查看/检查其他玩家（Inspect → PlayerInspect）
             NetworkEvent::InspectRequest { object_id } => {
                 if let Some(rp) = state.remote_players.iter().find(|p| p.id == object_id) {
                     let packet = mir2_shared::packets::server::PlayerInspect {
                         name: rp.name.clone(),
-                        guild_name: "".to_string(),
-                        guild_rank: "".to_string(),
+                        guild_name: String::new(),
+                        guild_rank: String::new(),
                         equipment: rp.equipment.clone(),
                         class: rp.class,
                         gender: rp.gender,
                         hair: rp.hair,
                         level: rp.level,
-                        lover_name: "".to_string(),
+                        lover_name: String::new(),
                     };
                     let _ = response_tx.send(NetworkEvent::PlayerInspect { packet });
-                } else {
-                    tracing::warn!("[MOCK] InspectRequest unknown object_id={}", object_id);
                 }
             }
 
-            // ===== NPC 交互（Mock 权威服务器） =====
-            NetworkEvent::NPCCallRequest { npc_object_id, key } => {
-                println!(
-                    "💬 [MOCK] NPCCallRequest npc_object_id={} key={:?}",
-                    npc_object_id, key
-                );
-                tracing::info!(
-                    "💬 [MOCK] NPCCallRequest npc_object_id={} key={:?}",
-                    npc_object_id, key
-                );
+            NetworkEvent::AttackRequest { direction, .. } => {
+                if !state.in_game {
+                    return;
+                }
 
-                let make_goods = || {
-                    // 提供可验证的商品列表：
-                    // - 1000 有两个版本（触发 BuySub 子商品窗口）
-                    // - 1000/1001 为可堆叠（触发 MirAmountBox 等价物）
-                    let mut items = Vec::new();
-                    let mut uid: u64 = 1;
+                let (dx, dy) = dir_to_delta(direction);
+                let tx = state.player_grid.0 + dx;
+                let ty = state.player_grid.1 + dy;
 
-                    let mut make_item =
-                        |idx: i32, is_shop_item: bool, price: u32, stack: u16, image: u16| {
-                            let mut info = mir2_shared::data::item::ItemInfo::default();
-                            info.index = idx;
-                            info.name = format!("MockItem{}", idx);
-                            info.price = price;
-                            info.stack_size = stack;
-                            info.image = image;
+                // find monster on that tile
+                let mut target: Option<u32> = None;
+                for (mid, m) in &state.monsters {
+                    if m.hp > 0 && m.pos == (tx, ty) {
+                        target = Some(*mid);
+                        break;
+                    }
+                }
 
-                            let mut it = mir2_shared::data::item::UserItem::with_info(info);
-                            it.unique_id = uid;
-                            uid += 1;
-                            it.is_shop_item = is_shop_item;
-                            it.count = 1;
-                            it
-                        };
+                let _ = response_tx.send(NetworkEvent::ObjectAttack {
+                    packet: mir2_shared::packets::server::ObjectAttack {
+                        object_id: state.player_object_id,
+                        location_x: state.player_grid.0.max(0) as u32,
+                        location_y: state.player_grid.1.max(0) as u32,
+                        direction: direction as u8,
+                        spell: 0,
+                        level: 0,
+                        attack_type: 0,
+                    },
+                });
 
-                    items.push(make_item(1000, true, 100, 10, 116));
-                    items.push(make_item(1000, false, 120, 10, 116));
-                    items.push(make_item(1001, true, 80, 20, 116));
-                    items.push(make_item(1002, true, 200, 1, 116));
-                    items.push(make_item(1003, true, 300, 1, 116));
-                    items.push(make_item(1004, true, 400, 1, 116));
-
-                    items
+                let Some(mid) = target else {
+                    return;
                 };
 
-                let key = key.trim().to_string();
-                // 对齐客户端：左键 NPC 默认发 [@Main]。
-                // 这里把 "" 与 "[@Main]" 都视为“初次打开/主入口”。
-                if key.is_empty() || key == "[@Main]" {
-                    // 初次打开：返回带可点击选项的对话（对齐 C# 的 <text/@Action>）
-                    let _ = response_tx.send(NetworkEvent::NpcDialog {
-                        // 对齐真服：NPCResponse 只有 page，不带 object_id；客户端用 ActiveNpc 追踪
-                        npc_id: 0,
-                        dialog: "欢迎！\n请选择：<购买/@Shop>  <离开/@Exit>\n\n<<大按钮购买/@Shop/RoyalBlue>>\n<<大按钮离开/@Exit/Red>>\n(调试) 点击 <购买/@Shop> 会打开商店窗口。"
-                            .to_string(),
-                    });
-                } else if key == "[@Shop]" {
-                    // 打开商店
-                    let _ = response_tx.send(NetworkEvent::NpcDialog {
-                        npc_id: 0,
-                        dialog: "已为你打开商店。{祝你购物愉快/Yellow}\n((官网/http://example.com))\n<继续购买/@Shop>  <离开/@Exit>"
-                            .to_string(),
+                let damage = 12 + (Self::rng_next_u32(&mut state.rng) % 10) as i32;
+                if let Some(mm) = state.monsters.get_mut(&mid) {
+                    mm.hp -= damage;
+                }
+                let _ = response_tx.send(NetworkEvent::ObjectStruck {
+                    object_id: mid,
+                    attacker_id: state.player_object_id,
+                    damage,
+                });
+
+                let dead = state.monsters.get(&mid).map(|m| m.hp <= 0).unwrap_or(false);
+                if dead {
+                    let xp = state.monsters.get(&mid).map(|m| m.xp_reward).unwrap_or(10);
+                    state.monsters.remove(&mid);
+                    let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: mid });
+                    let _ = response_tx.send(NetworkEvent::ObjectRemove {
+                        packet: mir2_shared::packets::server::ObjectRemove { object_id: mid },
                     });
 
-                    let items = make_goods();
-                    state.last_shop_goods = items.clone();
+                    state.player_experience += xp;
+                    let _ = response_tx.send(NetworkEvent::ExperienceGained { amount: xp });
+
+                    while state.player_experience >= state.player_max_experience {
+                        state.player_experience -= state.player_max_experience.max(1);
+                        state.player_level = state.player_level.saturating_add(1);
+                        state.player_max_experience = Self::exp_for_next_level(state.player_level).max(1);
+                        let _ = response_tx.send(NetworkEvent::LevelUp {
+                            new_level: state.player_level,
+                        });
+                    }
+                }
+            }
+
+            NetworkEvent::NPCCallRequest { npc_object_id, key } => {
+                // very small mock shop
+                if key.is_empty() {
+                    let dialog = "<font color=yellow>Mock Shop</font>\\n[@Buy]".to_string();
+                    let _ = response_tx.send(NetworkEvent::NpcDialog { npc_id: npc_object_id, dialog });
+
+                    let mut goods: Vec<UserItem> = Vec::new();
+                    for i in 0..6u64 {
+                        let mut info = ItemInfo::default();
+                        info.index = 1000 + i as i32;
+                        info.name = format!("MockItem{}", i + 1);
+                        info.price = 50 + (i as u32) * 10;
+                        info.stack_size = 99;
+                        let mut item = UserItem::with_info(info);
+                        item.unique_id = 900_000 + i;
+                        item.is_shop_item = true;
+                        goods.push(item);
+                    }
+                    state.last_shop_goods = goods.clone();
                     let _ = response_tx.send(NetworkEvent::NPCGoods {
-                        items,
+                        items: goods,
                         rate: 1.0,
-                        panel_type: mir2_shared::enums::PanelType::Buy,
+                        panel_type: PanelType::Buy,
                         hide_added_stats: false,
-                    });
-                } else {
-                    let _ = response_tx.send(NetworkEvent::NpcDialog {
-                        npc_id: 0,
-                        dialog: format!("(MOCK) 收到选项 key={}\n<购买/@Shop>  <离开/@Exit>", key),
                     });
                 }
             }
@@ -1393,25 +1008,10 @@ impl MockNetwork {
                 count,
                 panel_type,
             } => {
-                println!(
-                    "🛒 [MOCK] BuyItemRequest item_index={} count={} panel_type={}",
-                    item_index,
-                    count,
-                    panel_type
-                );
-                tracing::info!(
-                    "🛒 [MOCK] BuyItemRequest item_index={} count={} panel_type={}",
-                    item_index,
-                    count,
-                    panel_type
-                );
-                // 在最后一次下发的货单里按 unique_id 反查（对齐 C#：BuyItemRequest.item_index 携带 UniqueID）
-                let Some(template) = state
-                    .last_shop_goods
-                    .iter()
-                    .find(|it| it.unique_id == item_index)
-                    .cloned()
-                else {
+                if count == 0 {
+                    return;
+                }
+                let Some(template) = state.last_shop_goods.iter().find(|g| g.unique_id == item_index).cloned() else {
                     let _ = response_tx.send(NetworkEvent::SystemMessage {
                         message: format!("(MOCK) 购买失败：找不到商品 unique_id={}", item_index),
                     });
@@ -1424,25 +1024,19 @@ impl MockNetwork {
 
                 if state.player_gold < total_cost {
                     let _ = response_tx.send(NetworkEvent::SystemMessage {
-                        message: format!(
-                            "(MOCK) 金币不足：需要 {}，当前 {}",
-                            total_cost, state.player_gold
-                        ),
+                        message: format!("(MOCK) 金币不足：需要 {}，当前 {}", total_cost, state.player_gold),
                     });
                     return;
                 }
-
                 state.player_gold -= total_cost;
-
-                // 真服会发 LoseGold + GainedItem；这里用抽象事件驱动（会被 NetworkApplySystem 落地到 Inventory/Currency）
                 let _ = response_tx.send(NetworkEvent::GoldChanged {
                     delta: -(total_cost as i32),
                 });
 
                 let mut purchased = template.clone();
                 purchased.count = (count.min(u16::MAX as u32)) as u16;
+                purchased.unique_id = 1_000_000_000 + (Self::rng_next_u32(&mut state.rng) as u64);
                 let _ = response_tx.send(NetworkEvent::ItemGained { item: purchased });
-
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!(
                         "(MOCK) 购买成功：unique_id={} x{} 花费={} (panel_type={})",
@@ -1451,1364 +1045,23 @@ impl MockNetwork {
                 });
             }
 
-            // 其他事件暂不处理
             _ => {
-                tracing::debug!("⚠️ MockNetwork 暂不处理事件: {:?}", event);
+                // 未处理的事件：忽略即可
             }
         }
-    }
-
-    fn tick_world(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
-        if !state.in_game {
-            return;
-        }
-
-        // 远程玩家 AI：更高频率推进
-        Self::tick_remote_players_ai(response_tx, state);
-
-        // 刷怪：按区域补足数量
-        Self::tick_zone_spawns(response_tx, state);
-
-        // 怪物 AI：追击 + 攻击本地玩家（server-driven combat）
-        Self::tick_monster_combat(response_tx, state);
-
-        // 玩家死亡：回城复活（离线 mock 最小闭环）
-        Self::tick_player_respawn(response_tx, state);
-
-        // 怪物游荡：低频随机走动（避免刷屏/性能）
-        Self::tick_monster_wander(response_tx, state);
-    }
-
-    fn tick_player_respawn(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
-        let Some(dead_since) = state.player_dead_since else {
-            return;
-        };
-
-        // 给一个短的死亡停留时间，让死亡音效/飘字可见
-        if dead_since.elapsed() < Duration::from_millis(1600) {
-            return;
-        }
-
-        state.player_dead_since = None;
-        state.player_grid = state.player_spawn_grid;
-        state.player_hp_current = state.player_hp_max.max(1);
-        state.player_protected_until = Some(Instant::now() + Duration::from_millis(3000));
-
-        let _ = response_tx.send(NetworkEvent::HealthChanged {
-            current: state.player_hp_current.max(0) as u32,
-            max: state.player_hp_max.max(1) as u32,
-        });
-        let _ = response_tx.send(NetworkEvent::PlayerLocationChanged {
-            x: state.player_grid.0,
-            y: state.player_grid.1,
-        });
-        let _ = response_tx.send(NetworkEvent::SystemMessage {
-            message: "(MOCK) Respawned at town".to_string(),
-        });
-    }
-
-    fn tick_monster_combat(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
-        // 无敌期间：怪物不追击不攻击，避免复活/进游戏后“无法操作”。
-        if let Some(until) = state.player_protected_until {
-            if Instant::now() < until {
-                return;
-            } else {
-                state.player_protected_until = None;
-            }
-        }
-
-        if state.last_monster_combat_tick.elapsed() < Duration::from_millis(180) {
-            return;
-        }
-        state.last_monster_combat_tick = Instant::now();
-
-        if state.player_hp_current <= 0 {
-            return;
-        }
-
-        let player_id = state.player_object_id;
-        let (px, py) = state.player_grid;
-
-        // 每次最多处理少量怪，避免事件太多
-        let mut acted = 0usize;
-        let limit = 8usize;
-
-        let mut candidates: Vec<(u32, i32)> = state
-            .monsters
-            .iter()
-            .filter_map(|(mid, m)| {
-                if m.hp <= 0 {
-                    return None;
-                }
-                let dist = (m.pos.0 - px).abs() + (m.pos.1 - py).abs();
-                Some((*mid, dist))
-            })
-            .collect();
-        candidates.sort_by_key(|(_, d)| *d);
-
-        // 简单参数：不追求完全还原，只求闭环可玩
-        let aggro_range = 8i32;
-        let attack_cooldown = Duration::from_millis(900);
-        let chase_interval = Duration::from_millis(240);
-
-        for (mid, dist) in candidates {
-            if acted >= limit {
-                break;
-            }
-            if dist > aggro_range {
-                continue;
-            }
-
-            let Some(m) = state.monsters.get(&mid).copied() else {
-                continue;
-            };
-            if m.hp <= 0 {
-                continue;
-            }
-
-            let (mx, my) = m.pos;
-            let dx = (px - mx).signum();
-            let dy = (py - my).signum();
-            let dir = Self::dir_from_delta(dx, dy);
-
-            // 近战：相邻就打
-            if dist <= 1 {
-                if m.last_attack.elapsed() < attack_cooldown {
-                    continue;
-                }
-
-                // 更新 last_attack
-                if let Some(mm) = state.monsters.get_mut(&mid) {
-                    mm.last_attack = Instant::now();
-                }
-
-                let _ = response_tx.send(NetworkEvent::ObjectTurn {
-                    packet: mir2_shared::packets::server::ObjectTurn {
-                        object_id: mid,
-                        location_x: mx,
-                        location_y: my,
-                        direction: dir,
-                    },
-                });
-                let _ = response_tx.send(NetworkEvent::ObjectAttack {
-                    packet: mir2_shared::packets::server::ObjectAttack {
-                        object_id: mid,
-                        location_x: (mx.max(0) as u32),
-                        location_y: (my.max(0) as u32),
-                        direction: dir as u8,
-                        spell: 0,
-                        level: 0,
-                        attack_type: 0,
-                    },
-                });
-
-                let damage = 6 + (Self::rng_next_u32(&mut state.rng) % 7) as i32;
-                state.player_hp_current = (state.player_hp_current - damage).max(0);
-
-                // 用 ObjectStruck/ObjectDied 走统一落地（NetworkApplySystem 会给玩家播放受击/死亡音效 + 飘字）
-                let _ = response_tx.send(NetworkEvent::ObjectStruck {
-                    object_id: player_id,
-                    attacker_id: mid,
-                    damage,
-                });
-                let _ = response_tx.send(NetworkEvent::HealthChanged {
-                    current: state.player_hp_current.max(0) as u32,
-                    max: state.player_hp_max.max(1) as u32,
-                });
-
-                if state.player_hp_current <= 0 {
-                    let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: player_id });
-                    let _ = response_tx.send(NetworkEvent::SystemMessage {
-                        message: "(MOCK) You died".to_string(),
-                    });
-
-                    // 标记死亡开始时间，用于 respawn
-                    if state.player_dead_since.is_none() {
-                        state.player_dead_since = Some(Instant::now());
-                    }
-                }
-
-                acted += 1;
-                continue;
-            }
-
-            // 追击：朝玩家走/跑一步（更接近原版：远一点跑，贴近走）
-            if m.last_chase_step.elapsed() < chase_interval {
-                continue;
-            }
-
-            let mut nx = mx + dx;
-            let mut ny = my + dy;
-
-            // 避免踩到玩家格子：对角靠近时优先拆成直线
-            if (nx, ny) == (px, py) {
-                if dx != 0 && dy != 0 {
-                    if (mx + dx, my) != (px, py) {
-                        nx = mx + dx;
-                        ny = my;
-                    } else if (mx, my + dy) != (px, py) {
-                        nx = mx;
-                        ny = my + dy;
-                    } else {
-                        continue;
-                    }
-                } else {
-                    continue;
-                }
-            }
-
-            // 简单限制：不要无限跑出出生区太远
-            if let Some(z) = state.zones.get(m.zone_idx) {
-                let dist_from_center = (nx - z.center.0).abs() + (ny - z.center.1).abs();
-                if dist_from_center > z.radius * 6 {
-                    continue;
-                }
-            }
-
-            // 避障：目标格不可走则尝试拆分/侧移（避免追击跑进障碍物里）
-            if !Self::map_is_walkable(state, nx, ny) {
-                let mut found: Option<(i32, i32)> = None;
-                let candidates: [(i32, i32); 6] = [
-                    (mx + dx, my),
-                    (mx, my + dy),
-                    (mx + dx, my + 1),
-                    (mx + dx, my - 1),
-                    (mx + 1, my + dy),
-                    (mx - 1, my + dy),
-                ];
-                for (tx, ty) in candidates {
-                    if (tx, ty) == (px, py) {
-                        continue;
-                    }
-                    if Self::map_is_walkable(state, tx, ty) {
-                        found = Some((tx, ty));
-                        break;
-                    }
-                }
-                let Some((fx, fy)) = found else {
-                    continue;
-                };
-                nx = fx;
-                ny = fy;
-            }
-
-            if let Some(mm) = state.monsters.get_mut(&mid) {
-                mm.pos = (nx, ny);
-                mm.last_chase_step = Instant::now();
-            }
-
-            let prefer_run = dist >= 3;
-            if prefer_run {
-                let _ = response_tx.send(NetworkEvent::ObjectRun {
-                    packet: mir2_shared::packets::server::ObjectRun {
-                        object_id: mid,
-                        location_x: nx,
-                        location_y: ny,
-                        direction: dir,
-                    },
-                });
-            } else {
-                let _ = response_tx.send(NetworkEvent::ObjectWalk {
-                    packet: mir2_shared::packets::server::ObjectWalk {
-                        object_id: mid,
-                        location_x: nx,
-                        location_y: ny,
-                        direction: dir,
-                    },
-                });
-            }
-
-            acted += 1;
-        }
-    }
-
-    fn exp_for_next_level(level: u16) -> i64 {
-        // 简单曲线：等级越高升级所需越高。离线 mock 不追求严格还原。
-        (level as i64) * 60 + 40
-    }
-
-    fn dir_from_delta(dx: i32, dy: i32) -> mir2_shared::enums::MirDirection {
-        match (dx.signum(), dy.signum()) {
-            (0, -1) => mir2_shared::enums::MirDirection::Up,
-            (1, -1) => mir2_shared::enums::MirDirection::UpRight,
-            (1, 0) => mir2_shared::enums::MirDirection::Right,
-            (1, 1) => mir2_shared::enums::MirDirection::DownRight,
-            (0, 1) => mir2_shared::enums::MirDirection::Down,
-            (-1, 1) => mir2_shared::enums::MirDirection::DownLeft,
-            (-1, 0) => mir2_shared::enums::MirDirection::Left,
-            (-1, -1) => mir2_shared::enums::MirDirection::UpLeft,
-            _ => mir2_shared::enums::MirDirection::Down,
-        }
-    }
-
-    fn send_object_player_update(response_tx: &Sender<NetworkEvent>, rp: &MockRemotePlayerState) {
-        let _ = response_tx.send(NetworkEvent::ObjectPlayer {
-            packet: mir2_shared::packets::server::ObjectPlayer {
-                object_id: rp.id,
-                name: rp.name.clone(),
-                guild_name: "".to_string(),
-                guild_rank_name: "".to_string(),
-                name_colour: 0,
-                class: rp.class,
-                gender: rp.gender,
-                level: rp.level,
-                location_x: rp.grid.0,
-                location_y: rp.grid.1,
-                direction: rp.direction,
-                hair: rp.hair,
-                light: 0,
-                weapon: rp.weapon,
-                weapon_effect: rp.weapon_effect,
-                armour: rp.armour,
-                poison: mir2_shared::enums::PoisonType::empty(),
-                dead: false,
-                hidden: false,
-                effect: mir2_shared::enums::SpellEffect::None,
-                wing_effect: rp.wing_effect,
-                extra: false,
-                mount_type: rp.mount_type,
-                riding_mount: rp.riding_mount,
-                fishing: false,
-                transform_type: 0,
-                element_orb_effect: 0,
-                element_orb_lvl: 0,
-                element_orb_max: 0,
-                buffs: Vec::new(),
-                level_effects: mir2_shared::enums::LevelEffects::empty(),
-            },
-        });
-    }
-
-    fn rng_next_u32(seed: &mut u64) -> u32 {
-        // xorshift64*
-        let mut x = *seed;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        *seed = x;
-        ((x.wrapping_mul(0x2545F4914F6CDD1D_u64)) >> 32) as u32
-    }
-
-    fn random_pos_in_zone(seed: &mut u64, zone: &MockZone) -> (i32, i32) {
-        let r = zone.radius.max(1);
-        let dx = (Self::rng_next_u32(seed) as i32 % (r * 2 + 1)) - r;
-        let dy = (Self::rng_next_u32(seed) as i32 % (r * 2 + 1)) - r;
-        (zone.center.0 + dx, zone.center.1 + dy)
-    }
-
-    fn effective_map_dims(state: &MockWorldState) -> (i32, i32) {
-        if state.map_width > 0 && state.map_height > 0 {
-            return (state.map_width, state.map_height);
-        }
-
-        let map_w: i32 = std::env::var("CRYSTAL_MOCK_MAP_W")
-            .ok()
-            .and_then(|v| v.parse::<i32>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(700);
-        let map_h: i32 = std::env::var("CRYSTAL_MOCK_MAP_H")
-            .ok()
-            .and_then(|v| v.parse::<i32>().ok())
-            .filter(|v| *v > 0)
-            .unwrap_or(700);
-
-        (map_w.max(1), map_h.max(1))
-    }
-
-    fn map_is_walkable_raw(map_width: i32, map_height: i32, map_walkable: &[u8], x: i32, y: i32) -> bool {
-        if x < 0 || y < 0 {
-            return false;
-        }
-        if map_width > 0 && map_height > 0 {
-            if x >= map_width || y >= map_height {
-                return false;
-            }
-        }
-        if map_walkable.is_empty() || map_width <= 0 || map_height <= 0 {
-            // 未缓存碰撞：退化为“全部可走”
-            return true;
-        }
-        let idx = (y as usize).saturating_mul(map_width as usize) + (x as usize);
-        map_walkable.get(idx).copied().unwrap_or(1) != 0
-    }
-
-    /// 在整个地图范围内做“均匀采样 + walkable 拒绝采样”，因此对 walkable 格是严格均匀分布。
-    fn pick_random_walkable_unoccupied_raw(
-        map_width: i32,
-        map_height: i32,
-        map_walkable: &[u8],
-        map_w_eff: i32,
-        map_h_eff: i32,
-        rng: &mut u64,
-        occupied: &HashSet<(i32, i32)>,
-        max_tries: usize,
-    ) -> Option<(i32, i32)> {
-        if map_w_eff <= 0 || map_h_eff <= 0 {
-            return None;
-        }
-
-        for _ in 0..max_tries.max(1) {
-            let x = (Self::rng_next_u32(rng) as i32).rem_euclid(map_w_eff);
-            let y = (Self::rng_next_u32(rng) as i32).rem_euclid(map_h_eff);
-            if !Self::map_is_walkable_raw(map_width, map_height, map_walkable, x, y) {
-                continue;
-            }
-            if occupied.contains(&(x, y)) {
-                continue;
-            }
-            return Some((x, y));
-        }
-        None
-    }
-
-    fn nearest_zone_idx(zones: &[MockZone], x: i32, y: i32) -> usize {
-        if zones.is_empty() {
-            return 0;
-        }
-        let mut best_idx = 0usize;
-        let mut best_dist: i32 = i32::MAX;
-        for (idx, z) in zones.iter().enumerate() {
-            let d = (z.center.0 - x).abs() + (z.center.1 - y).abs();
-            if d < best_dist {
-                best_dist = d;
-                best_idx = idx;
-            }
-        }
-        best_idx
-    }
-
-    fn spawn_monster_in_zone(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState, zone_idx: usize) {
-        let Some(zone) = state.zones.get(zone_idx).cloned() else {
-            return;
-        };
-
-        // 选择一个区域内随机点作为出生点（必须是可走格，避免刷在障碍物里）
-        let mut spawn: Option<(i32, i32)> = None;
-        for _ in 0..24 {
-            let (tx, ty) = Self::random_pos_in_zone(&mut state.rng, &zone);
-            if (tx, ty) == state.player_grid {
-                continue;
-            }
-            if Self::map_is_walkable(state, tx, ty) {
-                spawn = Some((tx, ty));
-                break;
-            }
-        }
-        let mut final_spawn = spawn.unwrap_or_else(|| zone.center);
-        if !Self::map_is_walkable(state, final_spawn.0, final_spawn.1) {
-            let max_r: i32 = 12;
-            'outer: for r in 1..=max_r {
-                for dy in -r..=r {
-                    for dx in -r..=r {
-                        if dx.abs() != r && dy.abs() != r {
-                            continue;
-                        }
-                        let tx = zone.center.0 + dx;
-                        let ty = zone.center.1 + dy;
-                        if (tx, ty) == state.player_grid {
-                            continue;
-                        }
-                        if Self::map_is_walkable(state, tx, ty) {
-                            final_spawn = (tx, ty);
-                            break 'outer;
-                        }
-                    }
-                }
-            }
-        }
-        let (x, y) = final_spawn;
-        let object_id = state.next_monster_id;
-        state.next_monster_id = state.next_monster_id.saturating_add(1);
-
-        let dir = mir2_shared::enums::MirDirection::Down;
-        let _ = response_tx.send(NetworkEvent::ObjectMonster {
-            packet: mir2_shared::packets::server::ObjectMonster {
-                object_id,
-                name: format!("{}-Mob{}", zone.name, object_id),
-                name_colour: 0,
-                location_x: x,
-                location_y: y,
-                image: zone.monster_image,
-                direction: dir,
-                effect: 0,
-                ai: 0,
-                light: 0,
-                dead: false,
-                skeleton: false,
-                poison: mir2_shared::enums::PoisonType::empty(),
-                hidden: false,
-                shock_time: 0,
-                binding_shot_center: false,
-                extra: false,
-                extra_byte: 0,
-                buffs: Vec::new(),
-            },
-        });
-
-        state.monsters.insert(
-            object_id,
-            MockMonsterState {
-                pos: (x, y),
-                hp: zone.monster_hp,
-                zone_idx,
-                xp_reward: zone.xp_reward,
-                last_chase_step: Instant::now() - Duration::from_millis(500),
-                last_attack: Instant::now() - Duration::from_millis(1000),
-            },
-        );
-    }
-
-    fn map_is_walkable(state: &MockWorldState, x: i32, y: i32) -> bool {
-        if x < 0 || y < 0 {
-            return false;
-        }
-        if state.map_width > 0 && state.map_height > 0 {
-            if x >= state.map_width || y >= state.map_height {
-                return false;
-            }
-        }
-        if state.map_walkable.is_empty() || state.map_width <= 0 || state.map_height <= 0 {
-            // 未加载碰撞：退化为“全部可走”
-            return true;
-        }
-        let idx = (y as usize).saturating_mul(state.map_width as usize) + (x as usize);
-        state.map_walkable.get(idx).copied().unwrap_or(1) != 0
-    }
-
-    fn tick_zone_spawns(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
-        // 每个区域按 respawn_interval 补怪
-        for zone_idx in 0..state.zones.len() {
-            let Some(zone) = state.zones.get_mut(zone_idx) else {
-                continue;
-            };
-            if zone.last_spawn.elapsed() < zone.respawn_interval {
-                continue;
-            }
-
-            let alive_in_zone = state
-                .monsters
-                .values()
-                .filter(|m| m.hp > 0 && m.zone_idx == zone_idx)
-                .count();
-            if alive_in_zone >= zone.max_monsters {
-                continue;
-            }
-
-            zone.last_spawn = Instant::now();
-            Self::spawn_monster_in_zone(response_tx, state, zone_idx);
-        }
-    }
-
-    fn tick_monster_wander(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
-        if state.last_monster_wander_tick.elapsed() < Duration::from_millis(900) {
-            return;
-        }
-        state.last_monster_wander_tick = Instant::now();
-
-        // 每次最多移动少量怪，避免事件太多
-        let mut moved = 0usize;
-        let limit = 5usize;
-
-        // 为了稳定遍历，先收集 id
-        let monster_ids: Vec<u32> = state.monsters.keys().copied().collect();
-        for mid in monster_ids {
-            if moved >= limit {
-                break;
-            }
-            let Some(m) = state.monsters.get(&mid).copied() else {
-                continue;
-            };
-            if m.hp <= 0 {
-                continue;
-            }
-
-            // 离玩家很近时不随机游荡，让追击逻辑接管
-            let dist_to_player = (m.pos.0 - state.player_grid.0).abs() + (m.pos.1 - state.player_grid.1).abs();
-            if dist_to_player <= 8 {
-                continue;
-            }
-            let (zone_center, zone_radius) = match state.zones.get(m.zone_idx) {
-                Some(z) => (z.center, z.radius),
-                None => continue,
-            };
-
-            // 25% 概率动一下
-            if (Self::rng_next_u32(&mut state.rng) % 4) != 0 {
-                continue;
-            }
-
-            let (x, y) = m.pos;
-            let (dx, dy, dir) = match Self::rng_next_u32(&mut state.rng) % 8 {
-                0 => (0, -1, mir2_shared::enums::MirDirection::Up),
-                1 => (1, -1, mir2_shared::enums::MirDirection::UpRight),
-                2 => (1, 0, mir2_shared::enums::MirDirection::Right),
-                3 => (1, 1, mir2_shared::enums::MirDirection::DownRight),
-                4 => (0, 1, mir2_shared::enums::MirDirection::Down),
-                5 => (-1, 1, mir2_shared::enums::MirDirection::DownLeft),
-                6 => (-1, 0, mir2_shared::enums::MirDirection::Left),
-                _ => (-1, -1, mir2_shared::enums::MirDirection::UpLeft),
-            };
-            let nx = x + dx;
-            let ny = y + dy;
-
-            // 限制在区域半径内
-            let dist_from_center = (nx - zone_center.0).abs() + (ny - zone_center.1).abs();
-            if dist_from_center > zone_radius * 2 {
-                continue;
-            }
-
-            // 避障：怪物不能走进障碍物
-            if !Self::map_is_walkable(state, nx, ny) {
-                continue;
-            }
-
-            if let Some(mm) = state.monsters.get_mut(&mid) {
-                mm.pos = (nx, ny);
-            }
-
-            let _ = response_tx.send(NetworkEvent::ObjectWalk {
-                packet: mir2_shared::packets::server::ObjectWalk {
-                    object_id: mid,
-                    location_x: nx,
-                    location_y: ny,
-                    direction: dir,
-                },
-            });
-            moved += 1;
-        }
-    }
-
-    fn tick_remote_players_ai(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
-        static REMOTE_AI_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-        let _ = REMOTE_AI_DIAG_ONCE.set(()).map(|_| {
-            println!("[MOCK][AI] Multi-remote AI enabled (count={})", state.remote_players.len());
-        });
-
-        // 行为树风格（方案 A）：用 stateless BT 组织决策，而不是显式“状态机大 switch”。
-        // 仍然复用 rp.mode 作为可视化/权重提示，不作为唯一驱动。
-
-        #[derive(Clone, Copy, PartialEq, Eq)]
-        enum BtStatus {
-            Success,
-            Failure,
-            Running,
-        }
-
-        fn selector(ctx: &mut RemoteBtCtx, nodes: &[fn(&mut RemoteBtCtx) -> BtStatus]) -> BtStatus {
-            for n in nodes {
-                match n(ctx) {
-                    BtStatus::Success => return BtStatus::Success,
-                    BtStatus::Running => return BtStatus::Running,
-                    BtStatus::Failure => {}
-                }
-            }
-            BtStatus::Failure
-        }
-
-        fn sequence(ctx: &mut RemoteBtCtx, nodes: &[fn(&mut RemoteBtCtx) -> BtStatus]) -> BtStatus {
-            for n in nodes {
-                match n(ctx) {
-                    BtStatus::Success => {}
-                    BtStatus::Running => return BtStatus::Running,
-                    BtStatus::Failure => return BtStatus::Failure,
-                }
-            }
-            BtStatus::Success
-        }
-
-        struct RemoteBtCtx<'a> {
-            response_tx: &'a Sender<NetworkEvent>,
-            zones: &'a [MockZone],
-            monsters: &'a mut HashMap<u32, MockMonsterState>,
-            occupied: &'a mut HashSet<(i32, i32)>,
-            rng: &'a mut u64,
-            now: Instant,
-            rp: &'a mut MockRemotePlayerState,
-            alive_in_zone: usize,
-            cfg: &'a MockRuntimeConfig,
-
-            // 地图碰撞（只读）：用于严格避障
-            map_width: i32,
-            map_height: i32,
-            map_walkable: &'a [u8],
-            map_w_eff: i32,
-            map_h_eff: i32,
-        }
-
-        impl<'a> RemoteBtCtx<'a> {
-            fn is_occupied(&self, tile: (i32, i32)) -> bool {
-                self.occupied.contains(&tile)
-            }
-
-            fn is_walkable(&self, x: i32, y: i32) -> bool {
-                if x < 0 || y < 0 {
-                    return false;
-                }
-                if self.map_width > 0 && self.map_height > 0 {
-                    if x >= self.map_width || y >= self.map_height {
-                        return false;
-                    }
-                }
-                if self.map_walkable.is_empty() || self.map_width <= 0 || self.map_height <= 0 {
-                    // 未缓存碰撞：退化为“全部可走”
-                    return true;
-                }
-                let idx = (y as usize).saturating_mul(self.map_width as usize) + (x as usize);
-                self.map_walkable.get(idx).copied().unwrap_or(1) != 0
-            }
-
-            fn nearest_walkable_around(&self, x: i32, y: i32, max_r: i32) -> Option<(i32, i32)> {
-                if self.is_walkable(x, y) {
-                    return Some((x, y));
-                }
-                for r in 1..=max_r.max(1) {
-                    for dy in -r..=r {
-                        for dx in -r..=r {
-                            if dx.abs() != r && dy.abs() != r {
-                                continue;
-                            }
-                            let tx = x + dx;
-                            let ty = y + dy;
-                            if self.is_walkable(tx, ty) {
-                                return Some((tx, ty));
-                            }
-                        }
-                    }
-                }
-                None
-            }
-
-            fn pick_target_in_zone(&mut self, perception: i32) {
-                if self.rp.target_monster_id.is_some() {
-                    return;
-                }
-
-                let (rx, ry) = self.rp.grid;
-                let mut best: Option<(u32, i32)> = None;
-                for (mid, m) in self.monsters.iter() {
-                    if m.hp <= 0 || m.zone_idx != self.rp.zone_idx {
-                        continue;
-                    }
-                    let dist = (m.pos.0 - rx).abs() + (m.pos.1 - ry).abs();
-                    if dist > perception {
-                        continue;
-                    }
-                    match best {
-                        None => best = Some((*mid, dist)),
-                        Some((_bid, bdist)) if dist < bdist => best = Some((*mid, dist)),
-                        _ => {}
-                    }
-                }
-
-                if let Some((mid, _)) = best {
-                    self.rp.target_monster_id = Some(mid);
-                    if self.rp.mode != RemoteAiMode::Chase {
-                        self.rp.mode = RemoteAiMode::Chase;
-                        self.rp.last_mode_change = self.now;
-                    }
-                }
-            }
-
-            fn eval_best_zone(&mut self) {
-                if self
-                    .rp
-                    .last_zone_eval
-                    .elapsed()
-                    <= Duration::from_millis(self.cfg.zone_eval_ms)
-                {
-                    return;
-                }
-                self.rp.last_zone_eval = self.now;
-
-                if self.zones.is_empty() {
-                    return;
-                }
-
-                let (rx, ry) = self.rp.grid;
-                let mut best_zone = self.rp.goal_zone_idx;
-                let mut best_score: i32 = i32::MIN;
-                for (idx, z) in self.zones.iter().enumerate() {
-                    let alive = self
-                        .monsters
-                        .values()
-                        .filter(|m| m.hp > 0 && m.zone_idx == idx)
-                        .count() as i32;
-                    let dist = (z.center.0 - rx).abs() + (z.center.1 - ry).abs();
-                    let score = alive * 20 - dist;
-                    if score > best_score {
-                        best_score = score;
-                        best_zone = idx;
-                    }
-                }
-                self.rp.goal_zone_idx = best_zone;
-            }
-
-            fn step_towards(&mut self, tx: i32, ty: i32, prefer_run: bool) -> BtStatus {
-                let (rx, ry) = self.rp.grid;
-                let mut dx = (tx - rx).signum();
-                let mut dy = (ty - ry).signum();
-                if dx == 0 && dy == 0 {
-                    return BtStatus::Success;
-                }
-
-                // 在计算新位置前，先从占位集合里移除自己当前格子，避免把自己当成障碍。
-                let old_tile = (rx, ry);
-                self.occupied.remove(&old_tile);
-
-                // 让对角移动偶尔退化成直线，显得更“人”。
-                if dx != 0 && dy != 0 && (MockNetwork::rng_next_u32(self.rng) % 3 == 0) {
-                    if MockNetwork::rng_next_u32(self.rng) % 2 == 0 {
-                        dx = 0;
-                    } else {
-                        dy = 0;
-                    }
-                }
-
-                // 候选步进：优先向目标靠近；如果被占位/障碍挡住，尝试拆分/侧移。
-                // 注意：每个候选都必须通过 walkable 校验，保证“不会跑进障碍物里”。
-                let mut picked: Option<(i32, i32, i32, i32)> = None;
-                let candidates: [(i32, i32, i32, i32); 7] = [
-                    (rx + dx, ry + dy, dx, dy),
-                    (rx + dx, ry, dx, 0),
-                    (rx, ry + dy, 0, dy),
-                    (rx + dx, ry + 1, dx, 1),
-                    (rx + dx, ry - 1, dx, -1),
-                    (rx + 1, ry + dy, 1, dy),
-                    (rx - 1, ry + dy, -1, dy),
-                ];
-
-                for (cx, cy, cdx, cdy) in candidates {
-                    let mut nx = cx;
-                    let mut ny = cy;
-                    nx = nx.clamp(0, self.map_w_eff.saturating_sub(1).max(0));
-                    ny = ny.clamp(0, self.map_h_eff.saturating_sub(1).max(0));
-
-                    if (nx, ny) == (rx, ry) {
-                        continue;
-                    }
-                    if self.is_occupied((nx, ny)) {
-                        continue;
-                    }
-                    if !self.is_walkable(nx, ny) {
-                        continue;
-                    }
-                    picked = Some((nx, ny, cdx, cdy));
-                    break;
-                }
-
-                let Some((nx, ny, _fdx, _fdy)) = picked else {
-                    // 恢复占位
-                    self.occupied.insert(old_tile);
-                    return BtStatus::Failure;
-                };
-
-                let fdx = (nx - rx).signum();
-                let fdy = (ny - ry).signum();
-                self.rp.direction = MockNetwork::dir_from_delta(fdx, fdy);
-                self.rp.grid = (nx, ny);
-                self.occupied.insert((nx, ny));
-
-                if prefer_run {
-                    let _ = self.response_tx.send(NetworkEvent::ObjectRun {
-                        packet: mir2_shared::packets::server::ObjectRun {
-                            object_id: self.rp.id,
-                            location_x: nx,
-                            location_y: ny,
-                            direction: self.rp.direction,
-                        },
-                    });
-                } else {
-                    let _ = self.response_tx.send(NetworkEvent::ObjectWalk {
-                        packet: mir2_shared::packets::server::ObjectWalk {
-                            object_id: self.rp.id,
-                            location_x: nx,
-                            location_y: ny,
-                            direction: self.rp.direction,
-                        },
-                    });
-                }
-
-                BtStatus::Running
-            }
-        }
-
-        // ===== BT Nodes =====
-        fn act_refresh(ctx: &mut RemoteBtCtx) -> BtStatus {
-            // 目标保持：如果已有目标且仍存活就继续，否则清空
-            if let Some(tid) = ctx.rp.target_monster_id {
-                if !ctx.monsters.get(&tid).map(|m| m.hp > 0).unwrap_or(false) {
-                    ctx.rp.target_monster_id = None;
-                }
-            }
-
-            // 统计当前区怪物数（供 travel 条件使用）
-            ctx.alive_in_zone = ctx
-                .monsters
-                .values()
-                .filter(|m| m.hp > 0 && m.zone_idx == ctx.rp.zone_idx)
-                .count();
-
-            // 周期性评估去哪个区更划算
-            ctx.eval_best_zone();
-
-            // 寻敌
-            ctx.pick_target_in_zone(ctx.cfg.perception);
-            BtStatus::Success
-        }
-
-        fn act_rest_gate(ctx: &mut RemoteBtCtx) -> BtStatus {
-            // 正在休息：到点后恢复 Seek，并允许继续决策
-            if ctx.rp.mode == RemoteAiMode::Rest {
-                if ctx
-                    .rp
-                    .last_mode_change
-                    .elapsed()
-                    > Duration::from_millis(ctx.cfg.rest_ms)
-                {
-                    ctx.rp.mode = RemoteAiMode::Seek;
-                    ctx.rp.last_mode_change = ctx.now;
-                    return BtStatus::Failure;
-                }
-                return BtStatus::Running;
-            }
-
-            // 偶尔发呆（只在非战斗态）
-            if matches!(ctx.rp.mode, RemoteAiMode::Roam | RemoteAiMode::Seek) {
-                let roll = (MockNetwork::rng_next_u32(ctx.rng) % 10_000) as f32 / 10_000.0;
-                if roll < ctx.cfg.rest_chance {
-                ctx.rp.mode = RemoteAiMode::Rest;
-                ctx.rp.last_mode_change = ctx.now;
-                return BtStatus::Running;
-                }
-            }
-
-            BtStatus::Failure
-        }
-
-        fn cond_can_fight(ctx: &mut RemoteBtCtx) -> BtStatus {
-            let Some(tid) = ctx.rp.target_monster_id else {
-                return BtStatus::Failure;
-            };
-            let (rx, ry) = ctx.rp.grid;
-            let Some(m) = ctx.monsters.get(&tid).copied() else {
-                return BtStatus::Failure;
-            };
-            if m.zone_idx != ctx.rp.zone_idx {
-                return BtStatus::Failure;
-            }
-            // 太远就丢目标
-            let dist_far = (m.pos.0 - rx).abs() + (m.pos.1 - ry).abs();
-            if dist_far > ctx.cfg.chase_drop {
-                ctx.rp.target_monster_id = None;
-                return BtStatus::Failure;
-            }
-            let dist = (m.pos.0 - rx).abs() + (m.pos.1 - ry).abs();
-            if dist <= 1 {
-                BtStatus::Success
-            } else {
-                BtStatus::Failure
-            }
-        }
-
-        fn act_fight(ctx: &mut RemoteBtCtx) -> BtStatus {
-            let Some(tid) = ctx.rp.target_monster_id else {
-                return BtStatus::Failure;
-            };
-            let (rx, ry) = ctx.rp.grid;
-
-            ctx.rp.mode = RemoteAiMode::Fight;
-
-            if ctx
-                .rp
-                .last_attack
-                .elapsed()
-                < Duration::from_millis(ctx.cfg.attack_cooldown_ms)
-            {
-                return BtStatus::Running;
-            }
-            ctx.rp.last_attack = ctx.now;
-
-            let _ = ctx.response_tx.send(NetworkEvent::ObjectTurn {
-                packet: mir2_shared::packets::server::ObjectTurn {
-                    object_id: ctx.rp.id,
-                    location_x: rx,
-                    location_y: ry,
-                    direction: ctx.rp.direction,
-                },
-            });
-
-            let _ = ctx.response_tx.send(NetworkEvent::ObjectAttack {
-                packet: mir2_shared::packets::server::ObjectAttack {
-                    object_id: ctx.rp.id,
-                    location_x: rx as u32,
-                    location_y: ry as u32,
-                    direction: ctx.rp.direction as u8,
-                    spell: 0,
-                    level: 0,
-                    attack_type: 0,
-                },
-            });
-
-            // 命中/闪避
-            let hit_roll = (MockNetwork::rng_next_u32(ctx.rng) % 100) as i32;
-            let hit_chance = (75 + (ctx.rp.level as i32 * 2)).min(96);
-            if hit_roll > hit_chance {
-                ctx.rp.mode = RemoteAiMode::Chase;
-                return BtStatus::Running;
-            }
-
-            let damage = 6 + ((ctx.rp.level as i32).min(20) / 2);
-            if let Some(mm) = ctx.monsters.get_mut(&tid) {
-                mm.hp -= damage;
-            }
-
-            let _ = ctx.response_tx.send(NetworkEvent::ObjectStruck {
-                object_id: tid,
-                attacker_id: ctx.rp.id,
-                damage,
-            });
-
-            let dead = ctx.monsters.get(&tid).map(|mm| mm.hp <= 0).unwrap_or(false);
-            if dead {
-                let xp = ctx.monsters.get(&tid).map(|mm| mm.xp_reward).unwrap_or(10);
-
-                let _ = ctx.response_tx.send(NetworkEvent::ObjectDied { object_id: tid });
-                let _ = ctx.response_tx.send(NetworkEvent::ObjectRemove {
-                    packet: mir2_shared::packets::server::ObjectRemove { object_id: tid },
-                });
-                ctx.monsters.remove(&tid);
-                ctx.rp.target_monster_id = None;
-                ctx.rp.mode = RemoteAiMode::Seek;
-
-                ctx.rp.experience += xp;
-                let mut leveled = false;
-                while ctx.rp.experience >= ctx.rp.max_experience && ctx.rp.max_experience > 0 {
-                    ctx.rp.experience -= ctx.rp.max_experience;
-                    ctx.rp.level = ctx.rp.level.saturating_add(1);
-                    ctx.rp.max_experience = MockNetwork::exp_for_next_level(ctx.rp.level);
-                    leveled = true;
-                }
-
-                let _ = ctx.response_tx.send(NetworkEvent::SystemMessage {
-                    message: format!("(MOCK) {} killed monster {} (+{} exp)", ctx.rp.name, tid, xp),
-                });
-                if leveled {
-                    MockNetwork::send_object_player_update(ctx.response_tx, ctx.rp);
-                    let _ = ctx.response_tx.send(NetworkEvent::SystemMessage {
-                        message: format!("(MOCK) {} leveled up to {}!", ctx.rp.name, ctx.rp.level),
-                    });
-                }
-            } else {
-                ctx.rp.mode = RemoteAiMode::Chase;
-            }
-
-            BtStatus::Running
-        }
-
-        fn cond_has_target(ctx: &mut RemoteBtCtx) -> BtStatus {
-            let Some(tid) = ctx.rp.target_monster_id else {
-                return BtStatus::Failure;
-            };
-            let Some(m) = ctx.monsters.get(&tid).copied() else {
-                ctx.rp.target_monster_id = None;
-                return BtStatus::Failure;
-            };
-            if m.hp <= 0 {
-                ctx.rp.target_monster_id = None;
-                return BtStatus::Failure;
-            }
-            if m.zone_idx != ctx.rp.zone_idx {
-                // 目标跨区：转 Travel
-                ctx.rp.goal_zone_idx = m.zone_idx;
-                ctx.rp.mode = RemoteAiMode::Travel;
-                ctx.rp.last_mode_change = ctx.now;
-                return BtStatus::Failure;
-            }
-            BtStatus::Success
-        }
-
-        fn act_chase(ctx: &mut RemoteBtCtx) -> BtStatus {
-            let Some(tid) = ctx.rp.target_monster_id else {
-                return BtStatus::Failure;
-            };
-            let Some(m) = ctx.monsters.get(&tid).copied() else {
-                ctx.rp.target_monster_id = None;
-                return BtStatus::Failure;
-            };
-            let (rx, ry) = ctx.rp.grid;
-            let dist_far = (m.pos.0 - rx).abs() + (m.pos.1 - ry).abs();
-            if dist_far > ctx.cfg.chase_drop {
-                ctx.rp.target_monster_id = None;
-                ctx.rp.mode = RemoteAiMode::Seek;
-                return BtStatus::Failure;
-            }
-            ctx.rp.mode = RemoteAiMode::Chase;
-            ctx.step_towards(m.pos.0, m.pos.1, true)
-        }
-
-        fn cond_should_travel(ctx: &mut RemoteBtCtx) -> BtStatus {
-            if ctx.rp.target_monster_id.is_some() {
-                return BtStatus::Failure;
-            }
-            if ctx.rp.goal_zone_idx == ctx.rp.zone_idx {
-                return BtStatus::Failure;
-            }
-            // 当前区没怪：更倾向换区
-            if ctx.alive_in_zone == 0 {
-                return BtStatus::Success;
-            }
-            BtStatus::Failure
-        }
-
-        fn act_travel(ctx: &mut RemoteBtCtx) -> BtStatus {
-            ctx.rp.mode = RemoteAiMode::Travel;
-            let Some(z) = ctx.zones.get(ctx.rp.goal_zone_idx) else {
-                ctx.rp.mode = RemoteAiMode::Seek;
-                return BtStatus::Failure;
-            };
-
-            let target = ctx
-                .nearest_walkable_around(z.center.0, z.center.1, 12)
-                .unwrap_or(z.center);
-            let (rx, ry) = ctx.rp.grid;
-            let arrive_dist = (target.0 - rx).abs() + (target.1 - ry).abs();
-            if arrive_dist <= 2 {
-                ctx.rp.zone_idx = ctx.rp.goal_zone_idx;
-                ctx.rp.mode = RemoteAiMode::Seek;
-                ctx.rp.last_mode_change = ctx.now;
-                return BtStatus::Success;
-            }
-            ctx.step_towards(target.0, target.1, true)
-        }
-
-        fn act_roam(ctx: &mut RemoteBtCtx) -> BtStatus {
-            if ctx
-                .rp
-                .last_roam_pick
-                .elapsed()
-                > Duration::from_millis(ctx.cfg.roam_pick_ms)
-            {
-                ctx.rp.last_roam_pick = ctx.now;
-                if let Some(z) = ctx.zones.get(ctx.rp.zone_idx) {
-                    let mut picked: Option<(i32, i32)> = None;
-                    for _ in 0..24 {
-                        let (tx, ty) = MockNetwork::random_pos_in_zone(ctx.rng, z);
-                        if ctx.is_walkable(tx, ty) {
-                            picked = Some((tx, ty));
-                            break;
-                        }
-                    }
-                    ctx.rp.roam_goal = picked.unwrap_or(z.center);
-                }
-            }
-            ctx.rp.mode = RemoteAiMode::Roam;
-            let prefer_run = matches!(ctx.rp.mode, RemoteAiMode::Travel | RemoteAiMode::Chase)
-                || (MockNetwork::rng_next_u32(ctx.rng) % 4 == 0);
-            ctx.step_towards(ctx.rp.roam_goal.0, ctx.rp.roam_goal.1, prefer_run)
-        }
-
-        let now = Instant::now();
-        let zones = &state.zones;
-        let mut rng = state.rng;
-        let cfg = state.mock_cfg.clone();
-
-        let map_width = state.map_width;
-        let map_height = state.map_height;
-        let map_walkable: &[u8] = state.map_walkable.as_slice();
-        let (map_w_eff, map_h_eff) = MockNetwork::effective_map_dims(state);
-
-        // 预构建占位集合：避免 3000 人时每步 O(n) 扫描导致 O(n^2)
-        let mut occupied_tiles: HashSet<(i32, i32)> = state.remote_players.iter().map(|p| p.grid).collect();
-        occupied_tiles.insert(state.player_grid);
-        for m in state.monsters.values() {
-            if m.hp > 0 {
-                occupied_tiles.insert(m.pos);
-            }
-        }
-
-        let monsters = &mut state.monsters;
-
-        let player_count = state.remote_players.len();
-        for i in 0..player_count {
-            let (_left, right) = state.remote_players.split_at_mut(i);
-            let Some((rp, _rest)) = right.split_first_mut() else {
-                break;
-            };
-
-            if rp
-                .last_tick
-                .elapsed()
-                < Duration::from_millis(cfg.ai_tick_ms)
-            {
-                continue;
-            }
-            rp.last_tick = now;
-
-            let mut ctx = RemoteBtCtx {
-                response_tx,
-                zones,
-                monsters,
-                occupied: &mut occupied_tiles,
-                rng: &mut rng,
-                now,
-                rp,
-                alive_in_zone: 0,
-                cfg: &cfg,
-
-                map_width,
-                map_height,
-                map_walkable,
-                map_w_eff,
-                map_h_eff,
-            };
-
-            let _ = sequence(
-                &mut ctx,
-                &[
-                    act_refresh,
-                    // Rest gate：如果触发/处于休息，则本帧结束
-                    |c| match act_rest_gate(c) {
-                        BtStatus::Failure => BtStatus::Success,
-                        other => other,
-                    },
-                    // Engage
-                    |c| {
-                        selector(
-                            c,
-                            &[
-                                // Fight: in melee
-                                |cc| sequence(cc, &[cond_can_fight, act_fight]),
-                                // Chase: has target
-                                |cc| sequence(cc, &[cond_has_target, act_chase]),
-                                // Travel: empty zone
-                                |cc| sequence(cc, &[cond_should_travel, act_travel]),
-                                // Roam
-                                act_roam,
-                            ],
-                        )
-                    },
-                ],
-            );
-        }
-
-        state.rng = rng;
-    }
-
-    /// 加载地图并发送 MapChanged 事件，并将可走性缓存到 MockWorldState。
-    ///
-    /// 返回实际采用的出生点（若原出生点不可走，会在附近寻找可走格）。
-    fn load_and_send_map(
-        response_tx: &Sender<NetworkEvent>,
-        state: &mut MockWorldState,
-        map_path: &str,
-        map_index: i32,
-        title: &str,
-        spawn_x: i32,
-        spawn_y: i32,
-        direction: u8,
-    ) -> (i32, i32) {
-        let resolved_path = crate::resources::map_reader::resolve_map_path(map_path);
-        tracing::info!("📂 尝试加载地图: {} -> {}", map_path, resolved_path);
-
-        match MapReader::new(&resolved_path) {
-            Ok(map_reader) => {
-                tracing::info!(
-                    "✅ 成功加载地图: {} ({}x{})",
-                    resolved_path,
-                    map_reader.width,
-                    map_reader.height
-                );
-
-                // 缓存碰撞：map_cells[x][y] -> map_walkable[y * w + x]
-                state.map_width = map_reader.width.max(0);
-                state.map_height = map_reader.height.max(0);
-                let w = state.map_width as usize;
-                let h = state.map_height as usize;
-                state.map_walkable.clear();
-                state.map_walkable.reserve(w.saturating_mul(h));
-                for y in 0..h {
-                    for x in 0..w {
-                        let walkable = map_reader
-                            .map_cells
-                            .get(x)
-                            .and_then(|col| col.get(y))
-                            .map(|c| c.is_walkable())
-                            .unwrap_or(true);
-                        state.map_walkable.push(if walkable { 1 } else { 0 });
-                    }
-                }
-
-                // 如果出生点不可走（或地图加载异常导致越界），在附近找一个可走格。
-                let mut final_spawn = (spawn_x, spawn_y);
-                if !Self::map_is_walkable(state, final_spawn.0, final_spawn.1) {
-                    let max_r: i32 = 12;
-                    'outer: for r in 1..=max_r {
-                        for dy in -r..=r {
-                            for dx in -r..=r {
-                                // 优先扫描“边框”以更快找到最近点
-                                if dx.abs() != r && dy.abs() != r {
-                                    continue;
-                                }
-                                let tx = spawn_x + dx;
-                                let ty = spawn_y + dy;
-                                if Self::map_is_walkable(state, tx, ty) {
-                                    final_spawn = (tx, ty);
-                                    break 'outer;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 提取纯文件名（不含路径和扩展名）用于下发 MapChanged
-                let file_name = std::path::Path::new(&resolved_path)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("0")
-                    .to_string();
-
-                // 发送 MapChanged 事件 (与 C# Server 格式一致)
-                let _ = response_tx.send(NetworkEvent::MapChanged {
-                    packet: mir2_shared::packets::server::MapChanged {
-                        map_index,
-                        file_name, // 只发送纯文件名 "0"
-                        title: title.to_string(),
-                        minimap: 0,
-                        big_map: 0,
-                        lights: 0,
-                        location_x: final_spawn.0,
-                        location_y: final_spawn.1,
-                        direction,
-                        map_dark_light: 0,
-                        music: 0,
-                        weather: 0,
-                    },
-                });
-
-                final_spawn
-            }
-            Err(e) => {
-                tracing::error!("❌ 加载地图失败 {}: {:?}", map_path, e);
-                // 失败时退化：不做碰撞校验
-                state.map_width = 0;
-                state.map_height = 0;
-                state.map_walkable.clear();
-                (spawn_x, spawn_y)
-            }
-        }
-    }
-
-    /// 停止模拟网络
-    #[allow(dead_code)]
-    pub fn stop(&self) {
-        self.running.store(false, Ordering::Relaxed);
     }
 }
 
-impl Drop for MockNetwork {
-    fn drop(&mut self) {
-        self.running.store(false, Ordering::Relaxed);
-        tracing::debug!("MockNetwork 实例销毁");
+fn dir_to_delta(dir: MirDirection) -> (i32, i32) {
+    match dir {
+        MirDirection::Up => (0, -1),
+        MirDirection::UpRight => (1, -1),
+        MirDirection::Right => (1, 0),
+        MirDirection::DownRight => (1, 1),
+        MirDirection::Down => (0, 1),
+        MirDirection::DownLeft => (-1, 1),
+        MirDirection::Left => (-1, 0),
+        MirDirection::UpLeft => (-1, -1),
     }
 }
 
@@ -2820,29 +1073,22 @@ mod tests {
     fn test_mock_network_connection() {
         let (tx, rx) = MockNetwork::new();
 
-        // 等待自动发送的 Connected 事件
         thread::sleep(Duration::from_millis(200));
 
-        // 应该收到连接成功事件
         let events: Vec<_> = rx.try_iter().collect();
         assert!(events.iter().any(|e| matches!(e, NetworkEvent::Connected)));
 
-        // 发送断开请求
         tx.send(NetworkEvent::DisconnectRequest).unwrap();
         thread::sleep(Duration::from_millis(200));
 
-        // 应该收到断开事件
         let events: Vec<_> = rx.try_iter().collect();
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, NetworkEvent::Disconnected { .. })));
+        assert!(events.iter().any(|e| matches!(e, NetworkEvent::Disconnected { .. })));
     }
 
     #[test]
     fn test_mock_network_login() {
         let (tx, rx) = MockNetwork::new();
 
-        // 发送登录请求
         tx.send(NetworkEvent::LoginRequest {
             username: "test_user".to_string(),
             password: "test_pass".to_string(),
@@ -2851,10 +1097,7 @@ mod tests {
 
         thread::sleep(Duration::from_millis(300));
 
-        // 应该收到登录成功事件
         let events: Vec<_> = rx.try_iter().collect();
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, NetworkEvent::LoginSuccess { .. })));
+        assert!(events.iter().any(|e| matches!(e, NetworkEvent::LoginSuccess { .. })));
     }
 }

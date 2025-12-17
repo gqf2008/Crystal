@@ -67,6 +67,17 @@ impl PositionInterpolation {
     }
 }
 
+/// 远程移动动作的自动回站立计时器。
+///
+/// 背景：服务器只下发 Walk/Run/Turn，没有显式的 ObjectStand/Stop 包；
+/// 因此远程玩家收到一次 Walk/Run 后，如果后续没有新的移动包，客户端需要在
+/// “预计移动动画结束后”将动作恢复为 Stand，否则会出现“原地跑/走”的观感。
+#[derive(Debug, Clone, Copy)]
+pub struct RemoteMoveAnim {
+    /// 预计动作结束时间（macroquad::get_time()，秒）
+    pub end_time: f64,
+}
+
 /// 速度组件 - 移动实体必备
 #[derive(Debug, Clone, Copy)]
 pub struct Velocity {

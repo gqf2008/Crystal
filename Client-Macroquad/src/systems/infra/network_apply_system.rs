@@ -1070,7 +1070,7 @@ impl NetworkApplySystem {
     }
 
     fn apply_object_walk(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectWalk) {
-        use crate::components::{LocalPlayer, MonsterAnimState, Player, PlayerAction, Position, PositionInterpolation};
+        use crate::components::{LocalPlayer, MonsterAnimState, Player, PlayerAction, Position, PositionInterpolation, RemoteMoveAnim};
         use std::time::Instant;
 
         let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
@@ -1079,6 +1079,8 @@ impl NetworkApplySystem {
 
         let is_local = ctx.world.get::<&LocalPlayer>(e).is_ok();
         let (wx, wy) = crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
+
+        let now_secs = macroquad::prelude::get_time();
 
         if is_local {
             // 本地玩家：保持原语义（若未来启用 server_authoritative_movement 才会纠偏）
@@ -1106,8 +1108,7 @@ impl NetworkApplySystem {
 
             let base_duration = ctx.session.remote_player_walk_interp_secs;
             if base_duration > 0.0 && steps == 1 && ((sx - wx).abs() > 0.01 || (sy - wy).abs() > 0.01) {
-                let now = macroquad::prelude::get_time();
-                let interp = PositionInterpolation::new(sx, sy, wx, wy, now, base_duration);
+                let interp = PositionInterpolation::new(sx, sy, wx, wy, now_secs, base_duration);
                 if ctx.world.insert_one(e, interp).is_err() {
                     if let Ok(mut i) = ctx.world.get::<&mut PositionInterpolation>(e) {
                         *i = interp;
@@ -1116,6 +1117,18 @@ impl NetworkApplySystem {
             } else if base_duration <= 0.0 || steps > 1 {
                 // 配置禁用插值：直接落地
                 Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+            }
+
+            // 记录一个“预计动作结束时间”，用于自动回 Stand。
+            // 即使未启用插值，也需要回站立（否则远程会永久 Walk）。
+            let anim_duration = if base_duration > 0.0 { base_duration } else { 0.16 };
+            let timer = RemoteMoveAnim {
+                end_time: now_secs + anim_duration as f64,
+            };
+            if ctx.world.insert_one(e, timer).is_err() {
+                if let Ok(mut t) = ctx.world.get::<&mut RemoteMoveAnim>(e) {
+                    *t = timer;
+                }
             }
         }
 
@@ -1148,7 +1161,7 @@ impl NetworkApplySystem {
     }
 
     fn apply_object_run(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectRun) {
-        use crate::components::{LocalPlayer, Player, PlayerAction, Position, PositionInterpolation};
+        use crate::components::{LocalPlayer, Player, PlayerAction, Position, PositionInterpolation, RemoteMoveAnim};
         use crate::components::MonsterAnimState;
         use std::time::Instant;
 
@@ -1158,6 +1171,8 @@ impl NetworkApplySystem {
 
         let is_local = ctx.world.get::<&LocalPlayer>(e).is_ok();
         let (wx, wy) = crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
+
+        let now_secs = macroquad::prelude::get_time();
 
         if is_local {
             Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
@@ -1181,9 +1196,8 @@ impl NetworkApplySystem {
 
             let base_duration = ctx.session.remote_player_run_interp_secs;
             if base_duration > 0.0 && (steps == 1 || steps == 2) && ((sx - wx).abs() > 0.01 || (sy - wy).abs() > 0.01) {
-                let now = macroquad::prelude::get_time();
                 let duration = base_duration * steps as f32;
-                let interp = PositionInterpolation::new(sx, sy, wx, wy, now, duration);
+                let interp = PositionInterpolation::new(sx, sy, wx, wy, now_secs, duration);
                 if ctx.world.insert_one(e, interp).is_err() {
                     if let Ok(mut i) = ctx.world.get::<&mut PositionInterpolation>(e) {
                         *i = interp;
@@ -1191,6 +1205,21 @@ impl NetworkApplySystem {
                 }
             } else if base_duration <= 0.0 || steps > 2 {
                 Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+            }
+
+            // 同 Walk：记录一个到期时间，保证远程不会永久 Run。
+            let anim_duration = if base_duration > 0.0 {
+                base_duration * steps.max(1) as f32
+            } else {
+                0.11 * steps.max(1) as f32
+            };
+            let timer = RemoteMoveAnim {
+                end_time: now_secs + anim_duration as f64,
+            };
+            if ctx.world.insert_one(e, timer).is_err() {
+                if let Ok(mut t) = ctx.world.get::<&mut RemoteMoveAnim>(e) {
+                    *t = timer;
+                }
             }
         }
 

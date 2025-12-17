@@ -243,6 +243,7 @@ impl LoginScene {
     fn save_config(&self) {
         use std::fs;
         use std::io::Write;
+        use std::path::Path;
 
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -256,7 +257,8 @@ impl LoginScene {
             env!("CARGO_PKG_VERSION")
         );
 
-        if let Ok(mut file) = fs::File::create("config.ini") {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config.ini");
+        if let Ok(mut file) = fs::File::create(path) {
             let _ = file.write_all(config.as_bytes());
             println!("✅ 配置已保存");
         }
@@ -265,8 +267,10 @@ impl LoginScene {
     /// 加载配置
     fn load_config(&mut self) {
         use std::fs;
+        use std::path::Path;
 
-        if let Ok(content) = fs::read_to_string("config.ini") {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config.ini");
+        if let Ok(content) = fs::read_to_string(path) {
             for line in content.lines() {
                 if let Some(account) = line.strip_prefix("Account=") {
                     self.account = account.to_string();

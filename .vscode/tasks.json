@@ -34,6 +34,121 @@
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "run Client-Macroquad test_game_scene (mass battle)",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--manifest-path",
+				"Client-Macroquad/Cargo.toml",
+				"--bin",
+				"test_game_scene"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "cargo check Client-Macroquad",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check",
+				"--manifest-path",
+				"Client-Macroquad/Cargo.toml"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "cargo check Client-Macroquad (after config fix)",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check",
+				"--manifest-path",
+				"Client-Macroquad/Cargo.toml"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "run test_game_scene (verify mass battle cfg)",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--manifest-path",
+				"Client-Macroquad/Cargo.toml",
+				"--bin",
+				"test_game_scene"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "cargo check Client-Macroquad (run+mount tweaks)",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check",
+				"--manifest-path",
+				"Client-Macroquad/Cargo.toml"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "cargo check Client-Macroquad",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check",
+				"--manifest-path",
+				"Client-Macroquad/Cargo.toml"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "cargo check Client-Macroquad (after mass battle AI tweak)",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check",
+				"--manifest-path",
+				"Client-Macroquad/Cargo.toml"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run test_game_scene",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--manifest-path",
+				"Client-Macroquad/Cargo.toml",
+				"--bin",
+				"test_game_scene"
+			],
+			"isBackground": true
+		},
+		{
+			"label": "cargo check Client-Macroquad",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check",
+				"--manifest-path",
+				"Client-Macroquad/Cargo.toml"
+			],
+			"isBackground": false
 		}
 	]
 }

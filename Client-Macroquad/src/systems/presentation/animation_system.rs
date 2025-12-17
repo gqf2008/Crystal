@@ -722,7 +722,7 @@ mod tests {
 
         // mounted=true 会将 Stand 映射为 MountStanding
         let (draw_frame, effect_frame, _idx) =
-            AnimationSystem::calculate_frames(&player, &time_tracker, true, Instant::now(), None);
+            AnimationSystem::calculate_frames(&player, &time_tracker, true, Instant::now(), None, None);
         let frame = get_player_frame(mir2_shared::enums::MirAction::MountStanding).expect("mount standing frame");
 
         let dir = player.direction as u8 as i32;

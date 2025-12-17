@@ -91,6 +91,9 @@ pub mod priority {
     /// 远程玩家/对象位置插值（消除“瞬移感”）
     pub const REMOTE_INTERPOLATION: u32 = 585;
 
+    /// 远程 Walk/Run 动作到期后自动回 Stand（避免“原地跑/走”）
+    pub const REMOTE_MOVE_ANIM: u32 = 586;
+
     /// 基于 Lifetime 组件的实体清理（死亡尸体/特效等）
     pub const LIFETIME_CLEANUP: u32 = 598;
 
@@ -170,6 +173,7 @@ pub use logic::physics::{CollisionSystem, MapLoadSystem, MapManager, MovementSys
 pub use presentation::{
     AnimationSystem, CameraBoundsSystem, CameraFollowSystem, CameraSpaceGateSystem, CameraSystem,
     FloatingTextSystem, MountStateSyncSystem, ParticleSystem, PositionInterpolationSystem,
+    RemoteMoveAnimSystem,
 };
 
 // ============================================================================

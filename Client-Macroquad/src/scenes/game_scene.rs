@@ -118,6 +118,10 @@ impl GameScene {
                 priority::REMOTE_INTERPOLATION,
             )
             .add_system(
+                crate::systems::RemoteMoveAnimSystem::default(),
+                priority::REMOTE_MOVE_ANIM,
+            )
+            .add_system(
                 crate::systems::LifetimeCleanupSystem::default(),
                 priority::LIFETIME_CLEANUP,
             )

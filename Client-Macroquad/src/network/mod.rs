@@ -13,8 +13,20 @@ pub use handlers::NetworkEvent;
 
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
+use std::path::Path;
 
 static GLOBAL_NET: Lazy<Mutex<Option<NetContext>>> = Lazy::new(|| Mutex::new(None));
+
+pub(crate) fn read_config_ini() -> Option<String> {
+	// 优先读取当前工作目录（方便用户直接在运行目录放 config.ini）
+	if let Ok(content) = std::fs::read_to_string("config.ini") {
+		return Some(content);
+	}
+
+	// 回退到 crate 根目录（即 Client-Macroquad/），避免从仓库根目录启动时读不到配置。
+	let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config.ini");
+	std::fs::read_to_string(manifest_path).ok()
+}
 
 #[derive(Debug, Clone)]
 pub struct NetworkRuntimeConfig {
@@ -50,7 +62,7 @@ impl Default for NetworkRuntimeConfig {
 pub fn load_network_runtime_config() -> NetworkRuntimeConfig {
 	let mut cfg = NetworkRuntimeConfig::default();
 
-	let Ok(content) = std::fs::read_to_string("config.ini") else {
+	let Some(content) = read_config_ini() else {
 		return cfg;
 	};
 
