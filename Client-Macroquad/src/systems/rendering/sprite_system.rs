@@ -7,6 +7,7 @@ use crate::systems::RenderSystem;
 // use ggez::{graphics::GraphicsContext, GameResult};
 use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
 use macroquad::prelude::*;
+use std::sync::OnceLock;
 
 #[derive(ecs_macros::RenderSystem)]
 pub struct SpriteRenderSystem {
@@ -36,6 +37,11 @@ impl SpriteRenderSystem {
         .unwrap();
 
         Self { add_blend_material }
+    }
+
+    fn sprite_diag_enabled() -> bool {
+        static ENABLED: OnceLock<bool> = OnceLock::new();
+        *ENABLED.get_or_init(|| std::env::var_os("CRYSTAL_SPRITE_DIAG").is_some())
     }
 }
 
@@ -78,12 +84,12 @@ impl RenderSystem for SpriteRenderSystem {
     ) -> crate::game::GameResult {
         // 诊断：如果连红点都没有，优先确认：
         // 1) SpriteRenderSystem 是否被调度到；2) 世界里是否存在 Player/LocalPlayer；3) 是否有 Camera。
-        // 只打印一次，避免刷屏。
-        static SPRITE_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-        static SPRITE_DIAG_WHEN_PLAYER_EXISTS: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-        static SPRITE_DIAG_POST_FRONT_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-        static SPRITE_DIAG_POST_FRONT_WHEN_PLAYER_EXISTS: std::sync::OnceLock<()> =
-            std::sync::OnceLock::new();
+        // 默认关闭（避免影响帧率），需要时用环境变量 CRYSTAL_SPRITE_DIAG=1 打开。
+        // 即使打开，也只打印一次，避免刷屏。
+        static SPRITE_DIAG_ONCE: OnceLock<()> = OnceLock::new();
+        static SPRITE_DIAG_WHEN_PLAYER_EXISTS: OnceLock<()> = OnceLock::new();
+        static SPRITE_DIAG_POST_FRONT_ONCE: OnceLock<()> = OnceLock::new();
+        static SPRITE_DIAG_POST_FRONT_WHEN_PLAYER_EXISTS: OnceLock<()> = OnceLock::new();
 
         let pass = world
             .query::<&RenderPass>()
@@ -92,32 +98,34 @@ impl RenderSystem for SpriteRenderSystem {
             .map(|(_, pass)| *pass)
             .unwrap_or_default();
 
-        let _ = SPRITE_DIAG_ONCE.set(()).map(|_| {
-            let player_count = world.query::<&crate::components::Player>().iter().count();
-            let local_player_count = world.query::<&crate::components::LocalPlayer>().iter().count();
-            let cam_count = world.query::<&crate::components::Camera>().iter().count();
-            let pos_count = world.query::<&crate::components::Position>().iter().count();
-            let occluded = world
-                .query::<&crate::components::FrontOcclusion>()
-                .iter()
-                .next()
-                .map(|(_, o)| o.local_player_occluded)
-                .unwrap_or(false);
-            println!(
-                "[DIAG][SpriteRenderSystem] draw called: stage={:?} alpha={} local_only={} players={} local_players={} cameras={} positions={} occluded={}",
-                pass.stage,
-                pass.alpha,
-                pass.local_only,
-                player_count,
-                local_player_count,
-                cam_count,
-                pos_count,
-                occluded
-            );
-        });
+        if Self::sprite_diag_enabled() {
+            let _ = SPRITE_DIAG_ONCE.set(()).map(|_| {
+                let player_count = world.query::<&crate::components::Player>().iter().count();
+                let local_player_count = world.query::<&crate::components::LocalPlayer>().iter().count();
+                let cam_count = world.query::<&crate::components::Camera>().iter().count();
+                let pos_count = world.query::<&crate::components::Position>().iter().count();
+                let occluded = world
+                    .query::<&crate::components::FrontOcclusion>()
+                    .iter()
+                    .next()
+                    .map(|(_, o)| o.local_player_occluded)
+                    .unwrap_or(false);
+                println!(
+                    "[DIAG][SpriteRenderSystem] draw called: stage={:?} alpha={} local_only={} players={} local_players={} cameras={} positions={} occluded={}",
+                    pass.stage,
+                    pass.alpha,
+                    pass.local_only,
+                    player_count,
+                    local_player_count,
+                    cam_count,
+                    pos_count,
+                    occluded
+                );
+            });
+        }
 
         // 诊断：确认 PostFront pass 是否执行。
-        if pass.stage == RenderStage::PostFront {
+        if Self::sprite_diag_enabled() && pass.stage == RenderStage::PostFront {
             let player_count = world.query::<&crate::components::Player>().iter().count();
             let local_player_count = world.query::<&crate::components::LocalPlayer>().iter().count();
             let occluded = world
@@ -150,7 +158,7 @@ impl RenderSystem for SpriteRenderSystem {
         }
 
         // 如果首帧 draw 时玩家还没生成，后续玩家出现时再打一次关键坐标。
-        if pass.stage == RenderStage::Normal {
+        if Self::sprite_diag_enabled() && pass.stage == RenderStage::Normal {
             let player_count = world.query::<&crate::components::Player>().iter().count();
             if player_count > 0 {
                 let _ = SPRITE_DIAG_WHEN_PLAYER_EXISTS.set(()).map(|_| {

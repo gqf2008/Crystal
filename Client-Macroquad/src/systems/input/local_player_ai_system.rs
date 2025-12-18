@@ -189,10 +189,11 @@ pub struct LocalPlayerAiSystem {
 
     max_acquire_range: i32,
 
-    // 卡住检测：位置长时间不变且存在移动目标，则视为“被障碍/人墙卡住”
-    last_player_grid: Option<(i32, i32)>,
-    last_progress: Instant,
-    stuck_timeout: Duration,
+    // 卡住检测：处于运动状态时，若连续 N 帧坐标几乎不变，则视为“被障碍/人墙卡住”
+    // 触发一次“换方向/换落点”，避免每帧抖动。
+    last_player_pos: Option<(f32, f32)>,
+    no_progress_frames: u32,
+    stuck_frame_threshold: u32,
     repath_attempt: u32,
     last_melee_goal: Option<(i32, i32)>,
 
@@ -264,9 +265,10 @@ impl Default for LocalPlayerAiSystem {
 
             max_acquire_range: 26,
 
-            last_player_grid: None,
-            last_progress: Instant::now(),
-            stuck_timeout: Duration::from_millis(850),
+            last_player_pos: None,
+            no_progress_frames: 0,
+            // 约定：连续 50 帧没有位移视为卡住
+            stuck_frame_threshold: 50,
             repath_attempt: 0,
             last_melee_goal: None,
 
@@ -283,7 +285,7 @@ impl Default for LocalPlayerAiSystem {
 impl LocalPlayerAiSystem {
     fn find_local_player_snapshot(
         ctx: &GameContext,
-    ) -> Option<(hecs::Entity, (i32, i32), Option<hecs::Entity>, bool)> {
+    ) -> Option<(hecs::Entity, (i32, i32), (f32, f32), Option<hecs::Entity>, bool)> {
         for (e, (_local, pos, input)) in ctx
             .world
             .query::<(&LocalPlayer, &Position, &PlayerInput)>()
@@ -291,7 +293,7 @@ impl LocalPlayerAiSystem {
         {
             let (pgx, pgy) = Coord::world_to_grid(pos.x, pos.y);
             let has_move_goal = input.move_to.is_some();
-            return Some((e, (pgx, pgy), input.attack_target, has_move_goal));
+            return Some((e, (pgx, pgy), (pos.x, pos.y), input.attack_target, has_move_goal));
         }
         None
     }
@@ -410,6 +412,50 @@ impl LocalPlayerAiSystem {
         candidates[0]
     }
 
+    fn choose_escape_goal(
+        ctx: &GameContext,
+        player_grid: (i32, i32),
+        occupied: &HashSet<(i32, i32)>,
+        attempt: u32,
+    ) -> Option<(i32, i32)> {
+        // 脱困策略：从玩家周围半径 1~2 的环上找一个可走格子。
+        // 目的不是最短路，而是“侧移/挪开”以摆脱动态阻挡（人墙/怪堆）。
+        let mut candidates: Vec<(i32, i32)> = Vec::new();
+
+        for r in 1_i32..=2_i32 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    if dx.abs().max(dy.abs()) != r {
+                        continue;
+                    }
+                    candidates.push((player_grid.0 + dx, player_grid.1 + dy));
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // 轮换起点（deterministic），避免一直尝试同一方向。
+        let start = (attempt as usize) % candidates.len();
+        for i in 0..candidates.len() {
+            let g = candidates[(start + i) % candidates.len()];
+            if occupied.contains(&g) {
+                continue;
+            }
+            if !Self::is_walkable_grid(ctx, g.0, g.1) {
+                continue;
+            }
+            return Some(g);
+        }
+
+        None
+    }
+
     // ===== Behavior Tree: Conditions =====
 
     fn bt_cond_in_melee_range(&self, _ctx: &GameContext, bb: &Blackboard) -> bool {
@@ -427,7 +473,8 @@ impl LocalPlayerAiSystem {
     // ===== Behavior Tree: Actions =====
 
     fn bt_act_update_snapshot(&mut self, ctx: &mut GameContext, bb: &mut Blackboard) -> BtStatus {
-        let Some((player_entity, player_grid, current_target, has_move_goal)) = Self::find_local_player_snapshot(ctx)
+        let Some((player_entity, player_grid, player_pos, current_target, has_move_goal)) =
+            Self::find_local_player_snapshot(ctx)
         else {
             bb.player_entity = None;
             bb.player_grid = None;
@@ -447,16 +494,32 @@ impl LocalPlayerAiSystem {
         bb.player_grid = Some(player_grid);
         bb.player_has_move_goal = has_move_goal;
 
-        // 卡住检测（只在“有移动目标”时启用）
-        if self.last_player_grid != Some(player_grid) {
-            self.last_player_grid = Some(player_grid);
-            self.last_progress = bb.now;
-            bb.stuck = false;
-        } else if has_move_goal && bb.now.duration_since(self.last_progress) >= self.stuck_timeout {
-            bb.stuck = true;
-        } else {
-            bb.stuck = false;
+        // 卡住检测（只在“有移动目标”时启用）：连续 N 帧位置几乎不变 -> 触发一次 stuck
+        // 注意：用世界坐标（像素）而不是 grid，避免平滑移动时误判。
+        const EPS_PX: f32 = 0.01;
+        let mut stuck_event = false;
+
+        if !has_move_goal {
+            self.no_progress_frames = 0;
+        } else if let Some((lx, ly)) = self.last_player_pos {
+            let dx = (player_pos.0 - lx).abs();
+            let dy = (player_pos.1 - ly).abs();
+            let progressed = dx > EPS_PX || dy > EPS_PX;
+
+            if progressed {
+                self.no_progress_frames = 0;
+            } else {
+                self.no_progress_frames = self.no_progress_frames.saturating_add(1);
+                if self.no_progress_frames >= self.stuck_frame_threshold {
+                    stuck_event = true;
+                    // 触发一次后归零，避免每帧都 repath 导致抖动
+                    self.no_progress_frames = 0;
+                }
+            }
         }
+
+        self.last_player_pos = Some(player_pos);
+        bb.stuck = stuck_event;
 
         // 目标保持（先不做重搜，重搜在 AcquireTarget）
         bb.target_entity = current_target;
@@ -531,7 +594,7 @@ impl LocalPlayerAiSystem {
                 let changed = prev_target != bb.target_entity;
                 let tg = bb.target_grid;
                 eprintln!(
-                    "[AI] pg={:?} target={:?} tg={:?} scan={} changed={} has_move_goal={} stuck={} repath={} max_range={}",
+                    "[AI] pg={:?} target={:?} tg={:?} scan={} changed={} has_move_goal={} stuck={} repath={} max_range={} no_progress_frames={}",
                     Some(player_grid),
                     bb.target_entity,
                     tg,
@@ -541,6 +604,7 @@ impl LocalPlayerAiSystem {
                     bb.stuck,
                     self.repath_attempt,
                     self.max_acquire_range,
+                    self.no_progress_frames,
                 );
             }
 
@@ -555,13 +619,14 @@ impl LocalPlayerAiSystem {
         if self.debug_enabled && bb.now.duration_since(self.last_debug_log) >= self.debug_interval {
             self.last_debug_log = bb.now;
             eprintln!(
-                "[AI] pg={:?} target=None scan={} has_move_goal={} stuck={} repath={} max_range={}",
+                "[AI] pg={:?} target=None scan={} has_move_goal={} stuck={} repath={} max_range={} no_progress_frames={}",
                 Some(player_grid),
                 did_scan,
                 bb.player_has_move_goal,
                 bb.stuck,
                 self.repath_attempt,
                 self.max_acquire_range,
+                self.no_progress_frames,
             );
         }
         BtStatus::Failure
@@ -607,6 +672,35 @@ impl LocalPlayerAiSystem {
         let target_grid = Coord::world_to_grid(target_pos.x, target_pos.y);
         bb.target_grid = Some(target_grid);
 
+        // 占位集合（动态阻挡）：用于脱困和近战落点筛选。
+        let mut occupied = Self::occupied_tiles(ctx, player_entity, target_entity);
+        // 把目标怪物自身格子也视为“不可落脚”，避免脱困时踩进怪身上。
+        occupied.insert(target_grid);
+
+        // 卡住：先脱困一步（侧移/挪开），再继续追砍。
+        // 这比“只换怪物周围落点”更能处理动态人墙阻挡。
+        if bb.stuck {
+            self.repath_attempt = self.repath_attempt.wrapping_add(1);
+            if let Some((egx, egy)) =
+                Self::choose_escape_goal(ctx, player_grid, &occupied, self.repath_attempt)
+            {
+                let (ewx, ewy) = Coord::grid_to_world_center(egx, egy);
+                if let Ok(mut input) = ctx.world.get::<&mut PlayerInput>(player_entity) {
+                    input.attack_target = Some(target_entity);
+                    input.move_to = Some((ewx, ewy));
+                    input.movement_mode = MovementMode::Pathfinding;
+                    input.run = true;
+                }
+
+                if self.debug_enabled && bb.now.duration_since(self.last_debug_log) >= self.debug_interval {
+                    self.last_debug_log = bb.now;
+                    eprintln!("[AI] stuck: escape_step to grid=({},{})", egx, egy);
+                }
+
+                return BtStatus::Running;
+            }
+        }
+
         // 避障/防卡：优先选择怪物周围的“可落脚格子”。
         // 如果检测到卡住，会轮换目标格子触发重新寻路。
         let avoid_goal = if bb.stuck {
@@ -615,7 +709,6 @@ impl LocalPlayerAiSystem {
         } else {
             None
         };
-        let occupied = Self::occupied_tiles(ctx, player_entity, target_entity);
 
         // 关键修复：近战落脚点必须是“可走格子”。
         // 否则 Pathfinding 会一直想走进墙里 -> 表现为“原地跑路/卡住”。

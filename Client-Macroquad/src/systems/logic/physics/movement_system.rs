@@ -22,6 +22,7 @@ use crate::components::{Player, Position, movement::{MovementVelocity, Path}};
 use crate::systems::LogicSystem;
 use mir2_shared::enums::MirDirection;
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 /// 移动系统 - 实现格子对齐的移动逻辑
 #[derive(ecs_macros::LogicSystem)]
@@ -31,6 +32,11 @@ pub struct MovementSystem;
 const CELL_WIDTH: f32 = 48.0;
 const CELL_HEIGHT: f32 = 32.0;
 const ARRIVAL_THRESHOLD: f32 = 5.0; // 到达阈值(像素)
+
+fn movement_diag_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CRYSTAL_MOVE_DIAG").is_some())
+}
 
 impl MovementSystem {
     /// 根据移动向量计算8方向
@@ -245,11 +251,13 @@ impl LogicSystem for MovementSystem {
                     position.x += move_x;
                     position.y += move_y;
                     
-                    // 调试:打印移动信息
-                    tracing::info!(
-                        "✅ MovementSystem移动: pos=({:.1},{:.1}) target=({:.1},{:.1}) dist={:.1} dt={:.3} move=({:.2},{:.2})",
-                        position.x, position.y, target_x, target_y, distance, delay_time, move_x, move_y
-                    );
+                    // 调试：默认关闭（高频日志会严重影响帧率）。需要时用环境变量 CRYSTAL_MOVE_DIAG=1 打开。
+                    if movement_diag_enabled() {
+                        tracing::info!(
+                            "✅ MovementSystem移动: pos=({:.1},{:.1}) target=({:.1},{:.1}) dist={:.1} dt={:.3} move=({:.2},{:.2})",
+                            position.x, position.y, target_x, target_y, distance, delay_time, move_x, move_y
+                        );
+                    }
                 }
             }
         }

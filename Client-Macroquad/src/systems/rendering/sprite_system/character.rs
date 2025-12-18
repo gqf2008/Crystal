@@ -67,34 +67,36 @@ impl SpriteRenderSystem {
         // 诊断：外观索引（LOCAL/REMOTE 各打印一次，避免只看到远程而看不到本地）
         static APPEARANCE_LOCAL_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
         static APPEARANCE_REMOTE_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-        if is_local {
-            let _ = APPEARANCE_LOCAL_ONCE.set(()).map(|_| {
-                println!(
-                    "[DIAG][SpriteRenderSystem][LOCAL] appearance: class={:?} gender={:?} hair={} armour={} weapon={} weapon_effect={} wing_effect={} mount_index={:?}",
-                    appearance.class,
-                    appearance.gender,
-                    appearance.hair,
-                    appearance.armour,
-                    appearance.weapon,
-                    appearance.weapon_effect,
-                    appearance.wing_effect,
-                    mount_index
-                );
-            });
-        } else {
-            let _ = APPEARANCE_REMOTE_ONCE.set(()).map(|_| {
-                println!(
-                    "[DIAG][SpriteRenderSystem][REMOTE] appearance: class={:?} gender={:?} hair={} armour={} weapon={} weapon_effect={} wing_effect={} mount_index={:?}",
-                    appearance.class,
-                    appearance.gender,
-                    appearance.hair,
-                    appearance.armour,
-                    appearance.weapon,
-                    appearance.weapon_effect,
-                    appearance.wing_effect,
-                    mount_index
-                );
-            });
+        if Self::sprite_diag_enabled() {
+            if is_local {
+                let _ = APPEARANCE_LOCAL_ONCE.set(()).map(|_| {
+                    println!(
+                        "[DIAG][SpriteRenderSystem][LOCAL] appearance: class={:?} gender={:?} hair={} armour={} weapon={} weapon_effect={} wing_effect={} mount_index={:?}",
+                        appearance.class,
+                        appearance.gender,
+                        appearance.hair,
+                        appearance.armour,
+                        appearance.weapon,
+                        appearance.weapon_effect,
+                        appearance.wing_effect,
+                        mount_index
+                    );
+                });
+            } else {
+                let _ = APPEARANCE_REMOTE_ONCE.set(()).map(|_| {
+                    println!(
+                        "[DIAG][SpriteRenderSystem][REMOTE] appearance: class={:?} gender={:?} hair={} armour={} weapon={} weapon_effect={} wing_effect={} mount_index={:?}",
+                        appearance.class,
+                        appearance.gender,
+                        appearance.hair,
+                        appearance.armour,
+                        appearance.weapon,
+                        appearance.weapon_effect,
+                        appearance.wing_effect,
+                        mount_index
+                    );
+                });
+            }
         }
 
         let base_frame = anim_frame.character_frame;

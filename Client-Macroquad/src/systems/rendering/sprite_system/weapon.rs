@@ -61,12 +61,14 @@ impl SpriteRenderSystem {
         }
 
         static WEAPON_DRAW_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-        let _ = WEAPON_DRAW_DIAG_ONCE.set(()).map(|_| {
-            println!(
-                "[DIAG][SpriteRenderSystem] weapon_drawn={} weapon_index={} frame_used={:?}",
-                weapon_drawn, weapon_index, weapon_frame_used
-            );
-        });
+        if Self::sprite_diag_enabled() {
+            let _ = WEAPON_DRAW_DIAG_ONCE.set(()).map(|_| {
+                println!(
+                    "[DIAG][SpriteRenderSystem] weapon_drawn={} weapon_index={} frame_used={:?}",
+                    weapon_drawn, weapon_index, weapon_frame_used
+                );
+            });
+        }
 
         drew_any |= weapon_drawn;
 
@@ -88,12 +90,14 @@ impl SpriteRenderSystem {
                 }
             }
             static WEAPON_EFFECT_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-            let _ = WEAPON_EFFECT_DIAG_ONCE.set(()).map(|_| {
-                println!(
-                    "[DIAG][SpriteRenderSystem] weapon_effect_drawn={} effect_index={} frame_used={:?}",
-                    effect_drawn, effect_index, effect_frame_used
-                );
-            });
+            if Self::sprite_diag_enabled() {
+                let _ = WEAPON_EFFECT_DIAG_ONCE.set(()).map(|_| {
+                    println!(
+                        "[DIAG][SpriteRenderSystem] weapon_effect_drawn={} effect_index={} frame_used={:?}",
+                        effect_drawn, effect_index, effect_frame_used
+                    );
+                });
+            }
 
             drew_any |= effect_drawn;
         }

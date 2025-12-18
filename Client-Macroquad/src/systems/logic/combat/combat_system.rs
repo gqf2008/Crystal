@@ -32,6 +32,12 @@ use crate::network::handlers::NetworkEvent as NetworkCommand;
 use mir2_shared::enums::MirDirection;
 use crate::game::GameResult;
 use super::super::super::LogicSystem;
+use std::sync::OnceLock;
+
+fn combat_log_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("CRYSTAL_COMBAT_LOG").is_some())
+}
 
 /// 伤害类型
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -429,10 +435,13 @@ impl CombatSystem {
             target_level,
         );
         
-        println!("💥 预期伤害: {} {}", 
-            result.damage,
-            if result.is_critical { "(暴击!)" } else { "" }
-        );
+        if combat_log_enabled() {
+            println!(
+                "💥 预期伤害: {} {}",
+                result.damage,
+                if result.is_critical { "(暴击!)" } else { "" }
+            );
+        }
 
         result
     }
@@ -455,16 +464,19 @@ impl CombatSystem {
                 let old_hp = health.current;
                 health.current = (health.current - damage).max(0);
                 
-                println!("🩸 {} 受到 {} 点{:?}伤害 (HP: {} → {})",
-                    target_id,
-                    damage,
-                    damage_type,
-                    old_hp,
-                    health.current
-                );
+                if combat_log_enabled() {
+                    println!(
+                        "🩸 {} 受到 {} 点{:?}伤害 (HP: {} → {})",
+                        target_id,
+                        damage,
+                        damage_type,
+                        old_hp,
+                        health.current
+                    );
+                }
                 
                 // 检查是否死亡
-                if health.current == 0 {
+                if combat_log_enabled() && health.current == 0 {
                     println!("💀 {} 已死亡", target_id);
                 }
 
@@ -514,14 +526,17 @@ impl CombatSystem {
             let old_hp = health.current;
             health.current = (health.current - damage).max(0);
             
-            println!("❤️ 玩家受到 {} 点{:?}伤害 (HP: {} → {})",
-                damage,
-                damage_type,
-                old_hp,
-                health.current
-            );
+            if combat_log_enabled() {
+                println!(
+                    "❤️ 玩家受到 {} 点{:?}伤害 (HP: {} → {})",
+                    damage,
+                    damage_type,
+                    old_hp,
+                    health.current
+                );
+            }
             
-            if health.current == 0 {
+            if combat_log_enabled() && health.current == 0 {
                 println!("💀 玩家死亡");
             }
             
