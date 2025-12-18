@@ -415,14 +415,17 @@ impl LocalPlayerAiSystem {
     fn choose_escape_goal(
         ctx: &GameContext,
         player_grid: (i32, i32),
+        target_grid: Option<(i32, i32)>,
         occupied: &HashSet<(i32, i32)>,
         attempt: u32,
     ) -> Option<(i32, i32)> {
-        // 脱困策略：从玩家周围半径 1~2 的环上找一个可走格子。
+        // 脱困策略：从玩家周围半径 1~R 的环上找一个“可走且未被占用”的格子。
         // 目的不是最短路，而是“侧移/挪开”以摆脱动态阻挡（人墙/怪堆）。
-        let mut candidates: Vec<(i32, i32)> = Vec::new();
+        // 若有 target，则优先选择“更远离目标”的方向（更容易脱离怪堆）。
+        const MAX_R: i32 = 6;
 
-        for r in 1_i32..=2_i32 {
+        for r in 1_i32..=MAX_R {
+            let mut ring: Vec<(i32, i32)> = Vec::new();
             for dy in -r..=r {
                 for dx in -r..=r {
                     if dx == 0 && dy == 0 {
@@ -431,26 +434,46 @@ impl LocalPlayerAiSystem {
                     if dx.abs().max(dy.abs()) != r {
                         continue;
                     }
-                    candidates.push((player_grid.0 + dx, player_grid.1 + dy));
+                    ring.push((player_grid.0 + dx, player_grid.1 + dy));
                 }
             }
-        }
 
-        if candidates.is_empty() {
-            return None;
-        }
-
-        // 轮换起点（deterministic），避免一直尝试同一方向。
-        let start = (attempt as usize) % candidates.len();
-        for i in 0..candidates.len() {
-            let g = candidates[(start + i) % candidates.len()];
-            if occupied.contains(&g) {
+            if ring.is_empty() {
                 continue;
             }
-            if !Self::is_walkable_grid(ctx, g.0, g.1) {
-                continue;
+
+            // 轮换起点（deterministic），避免一直尝试同一方向。
+            let start = (attempt as usize) % ring.len();
+
+            let mut best: Option<((i32, i32), i32)> = None;
+            for i in 0..ring.len() {
+                let g = ring[(start + i) % ring.len()];
+                if occupied.contains(&g) {
+                    continue;
+                }
+                if !Self::is_walkable_grid(ctx, g.0, g.1) {
+                    continue;
+                }
+
+                let score = if let Some(tg) = target_grid {
+                    let dx = (g.0 - tg.0).abs();
+                    let dy = (g.1 - tg.1).abs();
+                    dx.max(dy)
+                } else {
+                    // 无目标时：同一环内分数一致，保持“先到先得”。
+                    0
+                };
+
+                match best {
+                    None => best = Some((g, score)),
+                    Some((_bg, bs)) if score > bs => best = Some((g, score)),
+                    _ => {}
+                }
             }
-            return Some(g);
+
+            if let Some((g, _)) = best {
+                return Some(g);
+            }
         }
 
         None
@@ -682,7 +705,7 @@ impl LocalPlayerAiSystem {
         if bb.stuck {
             self.repath_attempt = self.repath_attempt.wrapping_add(1);
             if let Some((egx, egy)) =
-                Self::choose_escape_goal(ctx, player_grid, &occupied, self.repath_attempt)
+                Self::choose_escape_goal(ctx, player_grid, Some(target_grid), &occupied, self.repath_attempt)
             {
                 let (ewx, ewy) = Coord::grid_to_world_center(egx, egy);
                 if let Ok(mut input) = ctx.world.get::<&mut PlayerInput>(player_entity) {
@@ -699,6 +722,27 @@ impl LocalPlayerAiSystem {
 
                 return BtStatus::Running;
             }
+
+            // 依然无法找到脱困落点：硬重置一次（清目标/清移动/清路径），避免一直原地卡死。
+            if let Ok(mut input) = ctx.world.get::<&mut PlayerInput>(player_entity) {
+                input.attack_target = None;
+                input.move_to = None;
+                input.movement_mode = MovementMode::None;
+                input.run = false;
+            }
+            if let Ok(mut path) = ctx.world.get::<&mut crate::components::movement::Path>(player_entity) {
+                path.clear();
+            }
+            self.last_melee_goal = None;
+            // 下帧强制重搜目标（不等节流窗口）
+            self.last_scan = bb.now - self.scan_interval;
+
+            if self.debug_enabled && bb.now.duration_since(self.last_debug_log) >= self.debug_interval {
+                self.last_debug_log = bb.now;
+                eprintln!("[AI] stuck: no escape goal; reset target+move and force rescan");
+            }
+
+            return BtStatus::Failure;
         }
 
         // 避障/防卡：优先选择怪物周围的“可落脚格子”。
