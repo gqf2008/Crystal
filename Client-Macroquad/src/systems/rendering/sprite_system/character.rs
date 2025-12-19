@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Character Render System - 角色渲染系统
 // ============================================================================
 //
@@ -71,7 +71,7 @@ impl SpriteRenderSystem {
             if is_local {
                 let _ = APPEARANCE_LOCAL_ONCE.set(()).map(|_| {
                     println!(
-                        "[DIAG][SpriteRenderSystem][LOCAL] appearance: class={:?} gender={:?} hair={} armour={} weapon={} weapon_effect={} wing_effect={} mount_index={:?}",
+                        "[DIAG][SpriteRenderSystem][LOCAL] appearance: class={:?} gender={:?} hair={} armour={} weapon={} weapon_effect={} wing_effect={} mount_index={:?} alpha={:.2}",
                         appearance.class,
                         appearance.gender,
                         appearance.hair,
@@ -79,13 +79,14 @@ impl SpriteRenderSystem {
                         appearance.weapon,
                         appearance.weapon_effect,
                         appearance.wing_effect,
-                        mount_index
+                        mount_index,
+                        alpha
                     );
                 });
             } else {
                 let _ = APPEARANCE_REMOTE_ONCE.set(()).map(|_| {
                     println!(
-                        "[DIAG][SpriteRenderSystem][REMOTE] appearance: class={:?} gender={:?} hair={} armour={} weapon={} weapon_effect={} wing_effect={} mount_index={:?}",
+                        "[DIAG][SpriteRenderSystem][REMOTE] appearance: class={:?} gender={:?} hair={} armour={} weapon={} weapon_effect={} wing_effect={} mount_index={:?} alpha={:.2}",
                         appearance.class,
                         appearance.gender,
                         appearance.hair,
@@ -93,7 +94,8 @@ impl SpriteRenderSystem {
                         appearance.weapon,
                         appearance.weapon_effect,
                         appearance.wing_effect,
-                        mount_index
+                        mount_index,
+                        alpha
                     );
                 });
             }
@@ -117,7 +119,23 @@ impl SpriteRenderSystem {
             416
         };
 
-        let armour_index = appearance.armour.max(0) as usize;
+        // 防御性检查：armour 索引越界时回退到 0（CArmours 一般有 59 个库，索引 0-58）
+        // 这里使用保守上限 58，避免越界导致身体层完全不绘制。
+        const MAX_ARMOUR_INDEX: usize = 58;
+        let raw_armour_index = appearance.armour.max(0) as usize;
+        let armour_index = if raw_armour_index > MAX_ARMOUR_INDEX {
+            static ARMOUR_OOB_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+            let _ = ARMOUR_OOB_ONCE.set(()).map(|_| {
+                eprintln!(
+                    "[WARN][SpriteRenderSystem] armour index {} out of bounds (max={}), fallback to 0",
+                    raw_armour_index, MAX_ARMOUR_INDEX
+                );
+            });
+            0
+        } else {
+            raw_armour_index
+        };
+
         let hair_index = appearance.hair as usize;
         let weapon_index_opt = if appearance.weapon >= 0 {
             Some(appearance.weapon as usize)
@@ -146,6 +164,24 @@ impl SpriteRenderSystem {
         };
 
         let mut drew_any = false;
+
+        let layer_has_texture = |lib: LibraryName, frame: i32| -> bool {
+            let frame_index = frame.max(0) as usize;
+            lib.get_texture(frame_index)
+                .and_then(|info| info.image)
+                .is_some()
+        };
+        
+        // 检查帧是否存在且尺寸合理（用于骑乘帧检测，避免把小特效图当成身体帧）
+        let layer_has_valid_body_texture = |lib: LibraryName, frame: i32| -> bool {
+            const MIN_BODY_SIZE: i16 = 40; // 身体帧至少应该 40x40 像素
+            let frame_index = frame.max(0) as usize;
+            lib.get_texture(frame_index)
+                .map(|info| {
+                    info.image.is_some() && info.width >= MIN_BODY_SIZE && info.height >= MIN_BODY_SIZE
+                })
+                .unwrap_or(false)
+        };
 
         let draw_layer = |lib: LibraryName, frame: i32, pos: &Position, tint: Color| -> bool {
             let frame_index = frame.max(0) as usize;
@@ -245,7 +281,7 @@ impl SpriteRenderSystem {
         let mut rider_base_frame = base_frame;
         let mut rider_weapon_frame = weapon_frame;
         let mut rider_uses_mount_frames = false;
-        if mounted && mount_drawn {
+        if mounted {
             let mount_action = match player.action {
                 crate::components::PlayerAction::Walk => mir2_shared::enums::MirAction::MountWalking,
                 crate::components::PlayerAction::Run => mir2_shared::enums::MirAction::MountRunning,
@@ -255,24 +291,80 @@ impl SpriteRenderSystem {
                 _ => mir2_shared::enums::MirAction::MountStanding,
             };
 
+            let normal_action = match player.action {
+                crate::components::PlayerAction::Walk => mir2_shared::enums::MirAction::Walking,
+                crate::components::PlayerAction::Run => mir2_shared::enums::MirAction::Running,
+                crate::components::PlayerAction::Attack1
+                | crate::components::PlayerAction::Attack2
+                | crate::components::PlayerAction::Attack3 => mir2_shared::enums::MirAction::Attack1,
+                _ => mir2_shared::enums::MirAction::Standing,
+            };
+
+            // 关键：不要用“本帧是否成功画出坐骑(mount_drawn)”来决定人物是否骑乘。
+            // mount_drawn 可能因资源缺帧而抖动，导致人物一会儿上、一会儿下。
+            // 这里用一个“稳定采样帧(当前方向 idx=0)”来判断该 armour 是否真的有 Mount* 身体帧段；
+            // 若没有，则整段动作都回退到普通帧，避免随着 current 帧索引变化而来回切换。
+            let dir = player.direction as u8 as i32;
+
+            // 默认：先尝试 Mount* 人物帧
+            let mut mount_base: Option<i32> = None;
+            let mut mount_sample_ok = false;
             if let Some(frame) = get_player_frame(mount_action) {
-                let dir = player.direction as u8 as i32;
                 let interval = frame.interval.max(1);
                 let count = frame.count.max(1);
                 let tick = animation_count * 100 / interval;
                 let current = tick % count;
 
-                rider_base_frame = frame.start + (dir * frame.count) + current;
-                // 注意：骑乘时人物身体会切换到 Mount* 帧，但武器资源未必包含同一套 Mount* 帧索引。
-                // 为了更稳定地显示武器，这里保持使用 AnimationSystem 计算的 weapon_frame（与非骑乘一致）。
+                let base = frame.start + (dir * frame.offset()) + current;
+                let sample_base = frame.start; // dir=0, idx=0 for stable detection
+                mount_base = Some(base);
+                mount_sample_ok = layer_has_valid_body_texture(armour_library, sample_base + body_hair_offset);
+            }
+
+            if mount_base.is_some() && mount_sample_ok {
+                rider_base_frame = mount_base.unwrap();
                 rider_weapon_frame = weapon_frame;
                 rider_uses_mount_frames = true;
+            } else {
+                // 回退到普通动作帧（并选一个能画出来的身体帧，避免“有坐骑但没身体/外观”）
+                let mut fallback_base = base_frame;
+                if let Some(frame) = get_player_frame(normal_action) {
+                    let interval = frame.interval.max(1);
+                    let count = frame.count.max(1);
+                    let tick = animation_count * 100 / interval;
+                    let current = tick % count;
+                    fallback_base = frame.start + (dir * frame.offset()) + current;
+                }
+
+                let candidates = [fallback_base, 0, 1, 2, base_frame];
+                let mut chosen: Option<i32> = None;
+                for b in candidates {
+                    if layer_has_texture(armour_library, b + body_hair_offset) {
+                        chosen = Some(b);
+                        break;
+                    }
+                }
+                rider_base_frame = chosen.unwrap_or(fallback_base);
+
+                rider_weapon_frame = weapon_frame;
+                rider_uses_mount_frames = false;
+
+                static MOUNT_ARMOUR_MISSING_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+                let _ = MOUNT_ARMOUR_MISSING_ONCE.set(()).map(|_| {
+                    eprintln!(
+                        "[WARN][SpriteRenderSystem] mounted armour mount-frames unavailable: armour_lib={:?} mount_sample_ok={} chosen_base={:?} (fallback to normal frames)",
+                        armour_library,
+                        mount_sample_ok,
+                        chosen
+                    );
+                });
             }
         }
 
-        // 只有真的画出了坐骑，才对人物位置做骑乘修正。
+        // 人物位置的骑乘修正必须仅依赖“是否骑乘(mounted)”，不能依赖 mount_drawn。
+        // 否则坐骑资源缺帧时会导致人物一会儿上、一会儿下。
         // 若使用 Mount* 人物帧，不再额外上移；否则用旧偏移做兜底对齐。
-        actor_pos = if mounted && mount_drawn {
+        actor_pos = if mounted {
             if rider_uses_mount_frames {
                 *pos
             } else {
@@ -300,15 +392,42 @@ impl SpriteRenderSystem {
             };
 
             // 对齐 C# PlayerObject.DrawWings():
-            // - DrawWingFrame 在逻辑层 AnimationSystem 里按 Frame.EffectStart/EffectOffSet/EffectInterval 统一计算。
-            // 渲染层只读取 effect_frame，避免“渲染层再算一遍”导致方向步进/interval 不一致。
-            let wing_primary = effect_frame;
+            // 骑乘时 AnimationSystem 使用 MountStanding 的 effect_start（如 448），但 CHumEffect 库的翅膀帧
+            // 通常在 0-200 范围内。所以骑乘时需要用普通 Standing 的 effect 配置重新计算翅膀帧。
+            let wing_primary = if mounted {
+                // 骑乘时：用普通 Standing 的 effect 配置
+                let normal_action = match player.action {
+                    crate::components::PlayerAction::Walk => mir2_shared::enums::MirAction::Walking,
+                    crate::components::PlayerAction::Run => mir2_shared::enums::MirAction::Running,
+                    crate::components::PlayerAction::Attack1
+                    | crate::components::PlayerAction::Attack2
+                    | crate::components::PlayerAction::Attack3 => mir2_shared::enums::MirAction::Attack1,
+                    _ => mir2_shared::enums::MirAction::Standing,
+                };
+                
+                if let Some(frame) = get_player_frame(normal_action) {
+                    if frame.effect_count > 0 {
+                        let dir = player.direction as u8 as i32;
+                        let effect_interval = frame.effect_interval.max(1);
+                        let ecount = frame.effect_count.max(1);
+                        let effect_tick = (animation_count * 100) / effect_interval;
+                        let effect_index = effect_tick.rem_euclid(ecount);
+                        frame.effect_start + (dir * frame.effect_offset()) + effect_index
+                    } else {
+                        effect_frame // 没有 effect 配置，使用原值
+                    }
+                } else {
+                    effect_frame
+                }
+            } else {
+                effect_frame // 非骑乘时直接使用 AnimationSystem 计算的值
+            };
 
             // 翅膀位置：
             // - 若人物已切换到 Mount* 帧段（rider_uses_mount_frames=true），库内 offset 已与坐骑对齐，
             //   再叠加人工偏移容易导致“翅膀飘/歪”。
             // - 只有在未能切到 Mount* 帧段、使用旧的 rider 偏移兜底时，才需要额外修正翅膀位置。
-            let wing_pos = if mounted && mount_drawn && !rider_uses_mount_frames {
+            let wing_pos = if mounted && !rider_uses_mount_frames {
                 Position::new(
                     actor_pos.x + Self::MOUNT_WING_OFFSET_X_PX,
                     actor_pos.y + Self::MOUNT_WING_OFFSET_Y_PX,
@@ -319,6 +438,35 @@ impl SpriteRenderSystem {
             let candidates = [wing_primary + wing_offset, wing_primary, 0 + wing_offset, 0];
             let mut wing_drawn = false;
             let mut wing_frame_used: Option<i32> = None;
+            
+            // 诊断：每帧打印翅膀候选帧的取帧情况（只打印一次）
+            static WING_CANDIDATE_DIAG: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+            if is_local {
+                let _ = WING_CANDIDATE_DIAG.set(()).map(|_| {
+                    println!(
+                        "[DIAG][Wing] wing_primary(effect_frame)={} wing_offset={} pos=({:.1},{:.1})",
+                        wing_primary, wing_offset, wing_pos.x, wing_pos.y
+                    );
+                    for f in candidates {
+                        let tex_info = wing_lib.get_texture(f.max(0) as usize);
+                        let (has_tex, w, h, ox, oy) = match tex_info {
+                            Some(info) => (
+                                info.image.is_some(),
+                                info.width,
+                                info.height,
+                                info.offset_x,
+                                info.offset_y,
+                            ),
+                            None => (false, 0, 0, 0, 0),
+                        };
+                        println!(
+                            "[DIAG][Wing] candidate frame={} lib={:?} has_texture={} size={}x{} offset=({},{})",
+                            f, wing_lib, has_tex, w, h, ox, oy
+                        );
+                    }
+                });
+            }
+            
             for f in candidates {
                 // 翅膀/人物特效通常是发光效果，用 additive 混合更接近原版观感。
                 if draw_layer_additive(add_blend_material, wing_lib, f, &wing_pos, tint) {
@@ -422,12 +570,36 @@ impl SpriteRenderSystem {
         }
 
         // body
-        drew_any |= draw_layer(
+        let body_frame = rider_base_frame + body_hair_offset;
+        let body_drew = draw_layer(
             armour_library,
-            rider_base_frame + body_hair_offset,
+            body_frame,
             &actor_pos,
             tint,
         );
+        drew_any |= body_drew;
+        
+        // 诊断：身体层绘制情况（只打印一次）
+        static BODY_DRAW_DIAG: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        if is_local {
+            let _ = BODY_DRAW_DIAG.set(()).map(|_| {
+                let tex_info = armour_library.get_texture(body_frame.max(0) as usize);
+                let (has_tex, w, h, ox, oy) = match tex_info {
+                    Some(info) => (
+                        info.image.is_some(),
+                        info.width,
+                        info.height,
+                        info.offset_x,
+                        info.offset_y,
+                    ),
+                    None => (false, 0, 0, 0, 0),
+                };
+                println!(
+                    "[DIAG][Body] armour_lib={:?} frame={} has_texture={} size={}x{} offset=({},{}) pos=({:.1},{:.1}) drew={}",
+                    armour_library, body_frame, has_tex, w, h, ox, oy, actor_pos.x, actor_pos.y, body_drew
+                );
+            });
+        }
 
         // hair
         drew_any |= draw_layer(
@@ -668,3 +840,4 @@ impl SpriteRenderSystem {
         Ok(())
     }
 }
+

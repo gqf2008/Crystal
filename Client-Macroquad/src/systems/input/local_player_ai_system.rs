@@ -571,7 +571,12 @@ impl LocalPlayerAiSystem {
         let mut target = bb
             .target_entity
             .filter(|t| Self::target_is_valid(ctx, *t));
-
+        // 关键修复：如果旧目标失效（死亡/消失），立即触发重搜，不等待节流窗口。
+        // 这能避免"打一会儿就停了"的问题：怪物死亡后立即找新怪，不等 160ms。
+        let target_lost = prev_target.is_some() && target.is_none();
+        if target_lost {
+            self.last_scan = bb.now - self.scan_interval;
+        }
         // 若玩家已经离当前目标太远，则丢弃目标并按“玩家当前坐标周边”重新找怪。
         // 这能避免 AI 一直追着出生点附近的旧目标不放。
         if let Some(t) = target {

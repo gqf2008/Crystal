@@ -787,7 +787,8 @@ impl MockNetwork {
                     location_x: state.player_grid.0,
                     location_y: state.player_grid.1,
                     direction: MirDirection::Down,
-                    hair: 0,
+                    // 头发/头盔：Data/CHair 有 00..08（共9种），随机一个炫酷的
+                    hair: (Self::rng_next_u32(&mut state.rng) % 9) as u8,
                     hp: state.player_hp_current,
                     mp: 0,
                     experience: state.player_experience,

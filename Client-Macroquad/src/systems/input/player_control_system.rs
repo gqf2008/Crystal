@@ -86,6 +86,9 @@ pub struct PlayerControlSystem {
     double_click_threshold: Duration,
     long_press_threshold: Duration,
 
+    // 记录上一帧 AI 模式，用于检测切换边沿（AI -> 手动）
+    prev_ai_mode: bool,
+
     // 单击 NPC：不在范围时先走近；进入范围后自动触发一次对话
     pending_npc_call: Option<u32>,
 
@@ -106,11 +109,69 @@ impl PlayerControlSystem {
             // 会把单击/双击误判为长按，从而导致双击偶发不触发。
             long_press_threshold: Duration::from_millis(200),
 
+            prev_ai_mode: false,
+
             pending_npc_call: None,
 
             last_net_move_sent: None,
             net_move_interval: Duration::from_millis(80),
             last_net_move_grid: None,
+        }
+    }
+
+    fn on_ai_disabled(&mut self, ctx: &mut GameContext) {
+        use crate::components::{MovementMode, PlayerAction};
+
+        // 1) 清理输入边缘状态：避免 AI 模式期间残留的 click 状态在切回手动后误触发。
+        self.mouse_state = MouseState::default();
+        self.pending_npc_call = None;
+
+        // 2) 重置“本地移动 -> 服务器同步”的基准。
+        //    切换时玩家可能仍在像素级移动/位置被服务器广播包更新，直接沿用旧基准容易出现
+        //    dist>1 的跳变分支，从而产生突兀的同步行为。
+        self.last_net_move_sent = None;
+        // 关键修复：设置 last_net_move_grid 为当前玩家格子位置，而不是清空
+        // 这样切换后第一步移动可以正常计算与上一格的距离，避免 dist>1 跳变导致瞬移
+        // (实际赋值移到下面获取 player_e 后)
+
+        // 3) 清掉 AI 留下的移动意图/路径/速度，保证手动接管后立刻“可控且稳定”。
+        //    这能避免：
+        //    - move_to 残留导致角色继续走/跑
+        //    - path/velocity 残留导致动作/动画与输入不一致
+        let Some((player_e, _)) = ctx.world.query::<&LocalPlayer>().iter().next() else {
+            return;
+        };
+
+        // 设置 last_net_move_grid 为当前玩家格子位置
+        if let Ok(pos) = ctx.world.get::<&crate::components::Position>(player_e) {
+            let current_grid = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+            self.last_net_move_grid = Some(current_grid);
+        } else {
+            self.last_net_move_grid = None;
+        }
+
+        let is_attacking = ctx.world.get::<&crate::components::AttackState>(player_e).is_ok();
+
+        if let Ok(mut input) = ctx.world.get::<&mut crate::components::PlayerInput>(player_e) {
+            input.move_to = None;
+            input.movement_mode = MovementMode::None;
+            input.run = false;
+            input.attack_target = None;
+        }
+
+        if let Ok(mut path) = ctx.world.get::<&mut crate::components::movement::Path>(player_e) {
+            path.clear();
+        }
+        if let Ok(mut mv) = ctx.world.get::<&mut crate::components::MovementVelocity>(player_e) {
+            mv.stop();
+        }
+        if let Ok(mut m) = ctx.world.get::<&mut crate::components::Movement>(player_e) {
+            m.set_state(crate::components::MovementState::Idle);
+        }
+        if let Ok(mut p) = ctx.world.get::<&mut crate::components::Player>(player_e) {
+            if !is_attacking && !p.action.is_attack() {
+                p.action = PlayerAction::Stand;
+            }
         }
     }
 
@@ -418,6 +479,12 @@ impl LogicSystem for PlayerControlSystem {
 
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         let ai_mode = ctx.session.local_player_ai_enabled;
+
+        // AI -> 手动：做一次性清理，避免残留 move_to/path/velocity 导致接管瞬间异常。
+        if self.prev_ai_mode && !ai_mode {
+            self.on_ai_disabled(ctx);
+        }
+        self.prev_ai_mode = ai_mode;
 
         // 模式互斥：挂机/AT/BT 控制开启时，本系统仍要做“本地移动→服务器同步”等维护逻辑，
         // 但必须完全抑制手动鼠标输入对 PlayerInput/Path 的写入。

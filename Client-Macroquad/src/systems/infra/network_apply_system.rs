@@ -1015,14 +1015,35 @@ impl NetworkApplySystem {
     }
 
     fn apply_object_move(ctx: &mut GameContext, object_id: u32, x: i32, y: i32) {
-        use crate::components::Position;
+        use crate::components::{LocalPlayer, Position};
 
         let Some(e) = Self::find_entity_by_object_id(ctx, object_id) else {
             return;
         };
 
-        let (wx, wy) = crate::coord::Coord::grid_to_world_center(x, y);
+        // 本地玩家位置：
+        // - 默认由客户端 MovementSystem 驱动（连续像素移动）
+        // - 服务器仍会广播 ObjectWalk/Run/Attack 等包（格子坐标）
+        // 若直接落地，会在“AI->手动/同步开关/回包滞后”场景出现 rubber-banding（瞬间回拽到旧坐标）。
+        // 因此：非 server-authoritative movement 时，忽略本地玩家的“日常移动包”的位置落地。
+        // 例外：
+        // - 初次没有 Position（初始化需要落地）
+        // - 死亡/复活/回城等强制对齐（通过 Health<=0 放行；或走 PlayerLocationChanged）
         let has_pos = ctx.world.get::<&Position>(e).is_ok();
+        let is_local = ctx.world.get::<&LocalPlayer>(e).is_ok();
+        if is_local && !ctx.session.server_authoritative_movement && has_pos {
+            let dead = ctx
+                .world
+                .get::<&crate::components::Health>(e)
+                .ok()
+                .map(|hp| hp.current <= 0)
+                .unwrap_or(false);
+            if !dead {
+                return;
+            }
+        }
+
+        let (wx, wy) = crate::coord::Coord::grid_to_world_center(x, y);
         if has_pos {
             if let Ok(mut pos) = ctx.world.get::<&mut Position>(e) {
                 pos.x = wx;
