@@ -137,8 +137,6 @@ impl MonsterFieldSpawner {
                     name: format!("{:?}", kind),
                     monster_type,
                     stage: 0,
-                    ai_state: client_macroquad::components::MonsterAIState::Idle,
-                    target_id: None,
                 },
                 MonsterAnimState::new(dir, MirAction::Standing),
                 Health::new(10),
@@ -207,8 +205,6 @@ impl SpecialFramesValidator {
                 name: "DragonStatue".to_string(),
                 monster_type: 902,
                 stage: 0,
-                ai_state: client_macroquad::components::MonsterAIState::Idle,
-                target_id: None,
             },
             MonsterAnimState::new(dir, MirAction::Standing),
             Health::new(100),
@@ -222,8 +218,6 @@ impl SpecialFramesValidator {
                 name: "CaveStatue".to_string(),
                 monster_type: 321,
                 stage: 0,
-                ai_state: client_macroquad::components::MonsterAIState::Idle,
-                target_id: None,
             },
             MonsterAnimState::new(dir, MirAction::Standing),
             Health::new(100),
@@ -237,8 +231,6 @@ impl SpecialFramesValidator {
                 name: "GreatFoxSpirit".to_string(),
                 monster_type: 134,
                 stage: self.fox_stage,
-                ai_state: client_macroquad::components::MonsterAIState::Idle,
-                target_id: None,
             },
             MonsterAnimState::new(dir, MirAction::Standing),
             Health::new(100),
@@ -252,8 +244,6 @@ impl SpecialFramesValidator {
                 name: format!("HellBomb{}", (self.hellbomb_type - 902).clamp(1, 3)),
                 monster_type: self.hellbomb_type,
                 stage: 0,
-                ai_state: client_macroquad::components::MonsterAIState::Idle,
-                target_id: None,
             },
             MonsterAnimState::new(dir, MirAction::Standing),
             Health::new(100),
@@ -389,6 +379,7 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    client_macroquad::utils::logging::init_tracing();
     println!("🎮 传奇2 - GameScene 测试（专用帧集验证器）");
 
     // 统一资源根目录：避免从不同工作目录启动时找不到 Data/

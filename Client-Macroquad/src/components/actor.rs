@@ -6,26 +6,6 @@ pub use mir2_shared::{MirClass, MirGender};
 pub use mir2_shared::{MirAction, MirDirection};
 use std::time::Instant;
 
-/// 怪物数据组件
-#[derive(Debug, Clone)]
-pub struct MonsterData {
-    pub id: u32,
-    pub name: String,
-    pub monster_index: u16,  // 也可称为 image (怪物外观索引)
-    pub ai_mode: u8,
-    pub ai_type: u8,         // AI 类型 (0=无, 1=近战, 2=远程, 3=巡逻)
-    pub spawn_x: f32,        // 出生点 X
-    pub spawn_y: f32,        // 出生点 Y
-    pub direction: u8,       // ➕ 朝向 (0-7 八方向)
-}
-
-impl MonsterData {
-    /// 获取怪物外观索引（与 image 字段对应）
-    pub fn image(&self) -> u16 {
-        self.monster_index
-    }
-}
-
 /// AI 状态组件
 #[derive(Debug, Clone)]
 pub struct AIState {
@@ -135,8 +115,6 @@ pub struct Monster {
     pub name: String,
     pub monster_type: u16,
     pub stage: u8,
-    pub ai_state: MonsterAIState,
-    pub target_id: Option<u32>,
 }
 
 /// 怪物动画状态（用于 LibrarySprite 动画与帧事件）
@@ -157,23 +135,12 @@ impl MonsterAnimState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MonsterAIState {
-    Idle,
-    Patrol,
-    Chase,
-    Attack,
-    Dead,
-}
-
 impl Monster {
     pub fn new(name: String, monster_type: u16) -> Self {
         Self {
             name,
             monster_type,
             stage: 0,
-            ai_state: MonsterAIState::Idle,
-            target_id: None,
         }
     }
 }

@@ -34,6 +34,7 @@ byteorder = "1"
 
 # 日志
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 # 工具库
 once_cell = "1.21"

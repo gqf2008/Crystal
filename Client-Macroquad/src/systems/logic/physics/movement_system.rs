@@ -190,10 +190,21 @@ impl LogicSystem for MovementSystem {
             }
             
             // Pathfinding模式: 只检查path，velocity由MovementSystem自己计算
-            if !path.is_valid {
-                tracing::warn!("❌ MovementSystem: path无效, 停止 (mode={:?}, waypoints={}, current={}, valid={})", 
-                    player_input.movement_mode, path.waypoints.len(), path.current_index, path.is_valid);
+            if player_input.movement_mode == MovementMode::Pathfinding && !path.is_valid {
+                // 说明：Path 默认 is_valid=false。只有在“确实处于寻路移动”时，path 无效才算异常。
+                // 否则（如 movement_mode=None / 碰撞后清理）属于正常状态，不能每帧刷 WARN。
+                let has_move_intent = player_input.move_to.is_some() || !path.waypoints.is_empty();
+                if has_move_intent {
+                    tracing::debug!(
+                        "❌ MovementSystem: path无效, 停止 (mode={:?}, waypoints={}, current={}, valid={})",
+                        player_input.movement_mode,
+                        path.waypoints.len(),
+                        path.current_index,
+                        path.is_valid
+                    );
+                }
                 velocity.stop();
+                path.clear();
                 continue;
             }
 

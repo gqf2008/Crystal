@@ -63,6 +63,7 @@ fn world_to_screen(world_x: f32, world_y: f32, camera_pos: &Position, camera: &C
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    client_macroquad::utils::logging::init_tracing();
     println!("🧪 ECS 最小入口测试：PlayerControl -> Pathfinding -> Movement");
     println!("- 鼠标按住：DirectFollow（直线跟随）");
     println!("- 鼠标双击：Pathfinding（无 MapData 时会退化为直线目标格）");

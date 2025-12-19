@@ -3,6 +3,7 @@ use crate::game::GameResult;
 use crate::game::GameContext;
 use crate::systems::LogicSystem;
 use crate::components::{Particle, ParticleEmitter};
+use macroquad::prelude::get_time;
 
 /// 粒子系统 - 管理粒子效果生命周期
 #[derive(ecs_macros::LogicSystem)]
@@ -11,10 +12,8 @@ pub struct ParticleSystem;
 impl LogicSystem for ParticleSystem {
 
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs_f32();
+        // 使用 macroquad 的时间源（秒），避免 SystemTime 在极端情况下的 before-epoch unwrap。
+        let current_time = get_time() as f32;
 
         // 1. 更新粒子位置和速度
         for (_id, (particle, emitter)) in ctx.world.query_mut::<(&mut Particle, Option<&ParticleEmitter>)>() {

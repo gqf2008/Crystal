@@ -717,7 +717,7 @@ impl LogicSystem for PlayerControlSystem {
         // 收集需要添加攻击状态的实体
         let mut entities_to_attack = Vec::new();
         
-        for (entity, (player_input, player, _local, pos, _path)) in ctx
+        for (entity, (player_input, player, _local, pos, _path, velocity)) in ctx
             .world
             .query_mut::<(
                 &mut PlayerInput,
@@ -725,6 +725,7 @@ impl LogicSystem for PlayerControlSystem {
                 &LocalPlayer,
                 &Position,
                 &mut crate::components::movement::Path,
+                &crate::components::MovementVelocity,
             )>()
             .into_iter()
         {
@@ -947,17 +948,30 @@ impl LogicSystem for PlayerControlSystem {
                             // 否则会出现“位置在动但动画不播放”的平移效果。
                             let is_attacking = attacking_entities.contains(&entity);
                             if !is_attacking && player_input.move_to.is_some() && !player.action.is_attack() {
-                                let desired = if player_input.run {
-                                    PlayerAction::Run
-                                } else {
-                                    PlayerAction::Walk
-                                };
+                                // 关键：不要用“有 move_to”直接驱动跑/走动画。
+                                // 在碰撞/人墙场景下，move_to 会被保留用于下一帧重新算路，但 velocity/path 可能已被清空。
+                                // 若仍强制播放 Run，会出现“原地奔跑”。
+                                let has_velocity = velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01;
 
-                                // move_to 可能来自 AI/脚本：这里根据 PlayerInput.run 维持 Walk/Run。
-                                if matches!(player.action, PlayerAction::Stand | PlayerAction::Walk | PlayerAction::Run)
-                                    && player.action != desired
-                                {
-                                    player.action = desired;
+                                // 只用“实际速度”驱动 Walk/Run：
+                                // - Path/MoveTo 只是意图，可能长期存在（AI 追砍/重新算路）
+                                // - Velocity 才代表这一帧是否真的在动
+                                if has_velocity {
+                                    let desired = if player_input.run {
+                                        PlayerAction::Run
+                                    } else {
+                                        PlayerAction::Walk
+                                    };
+
+                                    // move_to 可能来自 AI/脚本：这里根据 PlayerInput.run 维持 Walk/Run。
+                                    if matches!(player.action, PlayerAction::Stand | PlayerAction::Walk | PlayerAction::Run)
+                                        && player.action != desired
+                                    {
+                                        player.action = desired;
+                                    }
+                                } else if player.action != PlayerAction::Stand {
+                                    // 有移动意图但当前帧确实没在动：用 Stand，避免“原地跑”。
+                                    player.action = PlayerAction::Stand;
                                 }
                             }
 
@@ -982,6 +996,19 @@ impl LogicSystem for PlayerControlSystem {
                                 && !player.action.is_attack()
                             {
                                 player.action = PlayerAction::Stand;
+                            }
+
+                            // 兜底：有 move_to 但 mode=None 且这一帧没在动时，也不要继续播放 Run/Walk。
+                            // 这种状态常见于“攻击结束/模式切换”边界，move_to 可能被上层保留，但本帧速度为 0。
+                            if !is_attacking
+                                && player_input.move_to.is_some()
+                                && !player.action.is_attack()
+                                && player.action != PlayerAction::Stand
+                            {
+                                let has_velocity = velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01;
+                                if !has_velocity {
+                                    player.action = PlayerAction::Stand;
+                                }
                             }
                         }
                     }

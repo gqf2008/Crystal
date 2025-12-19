@@ -105,6 +105,8 @@ impl GameScene {
             .add_system(crate::systems::MapLoadSystem, priority::MAP_LOAD)
             .add_system(TimeTickSystem::default(), priority::GAME_EVENT)
             .add_system(LocalPlayerAiSystem::default(), priority::LOCAL_PLAYER_AI)
+            // 决策层：怪物 AI（追击/攻击等）
+            .add_system(crate::systems::MonsterAISystem, priority::MONSTER_AI)
             .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
             // 战斗/技能/自然回复：先接入闭环（目前 test_game_scene 默认不会触发）
             .add_system(CombatSystem::default(), priority::COMBAT)

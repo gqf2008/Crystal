@@ -328,10 +328,9 @@ impl SkillSystem {
             pos
         };
 
-        if player_pos.is_none() {
+        let Some((px, py)) = player_pos else {
             return MirDirection::Down;
-        }
-        let (px, py) = player_pos.unwrap();
+        };
 
         // 查找目标位置
         let target_pos = {

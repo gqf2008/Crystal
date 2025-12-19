@@ -28,6 +28,7 @@ use crate::{
     },
     systems::LogicSystem,
 };
+use std::collections::HashSet;
 // use crate::objects::pathfinder::PathFinder;  // TODO: 实现 PathFinder
 
 pub struct PathfindingSystem;
@@ -74,6 +75,44 @@ impl PathfindingSystem {
         pathfinder.find_path(start, goal).map(|path| {
             path.into_iter()
                 .map(|p| (p.0 as i32, p.1 as i32))  // 转换 (usize, usize) -> (i32, i32)
+                .collect()
+        })
+    }
+
+    /// A*（带动态阻挡）
+    ///
+    /// 用途：本地挂机 AI 在怪堆/人墙场景下，如果只按静态地图寻路，
+    /// 往往会每帧撞人/撞怪导致“原地跑”。这里把实体占位当作临时阻挡格，让 A* 能绕开。
+    fn calculate_path_with_blocked(
+        map_data: &MapData,
+        start_grid: (i32, i32),
+        target_grid: (i32, i32),
+        blocked: HashSet<(usize, usize)>,
+    ) -> Option<Vec<(i32, i32)>> {
+        let start = (start_grid.0 as usize, start_grid.1 as usize);
+        let goal = (target_grid.0 as usize, target_grid.1 as usize);
+
+        let cells = map_data.cells.clone();
+        let width = map_data.width as usize;
+        let height = map_data.height as usize;
+
+        let is_blocking = move |x: usize, y: usize| -> bool {
+            if x >= width || y >= height {
+                return true;
+            }
+            if x >= cells.len() || y >= cells[x].len() {
+                return true;
+            }
+            if blocked.contains(&(x, y)) {
+                return true;
+            }
+            !cells[x][y].is_walkable()
+        };
+
+        let pathfinder = PathFinder::new(width, height, is_blocking);
+        pathfinder.find_path(start, goal).map(|path| {
+            path.into_iter()
+                .map(|p| (p.0 as i32, p.1 as i32))
                 .collect()
         })
     }
@@ -131,6 +170,29 @@ impl LogicSystem for PathfindingSystem {
             .into_iter()
             .next()
             .map(|(_, data)| data.clone());
+
+        // 动态占位（仅用于挂机 AI 的寻路避障）
+        // 注意：这里必须在 query_mut 循环之前收集，避免 hecs 的可变借用冲突。
+        let dynamic_occupied: Option<HashSet<(usize, usize)>> = if ctx.session.local_player_ai_enabled {
+            let mut occ: HashSet<(usize, usize)> = HashSet::new();
+
+            for (_e, (_p, pos)) in ctx.world.query::<(&Player, &Position)>().iter() {
+                let (gx, gy) = Coord::world_to_grid(pos.x, pos.y);
+                if gx >= 0 && gy >= 0 {
+                    occ.insert((gx as usize, gy as usize));
+                }
+            }
+            for (_e, (_m, pos)) in ctx.world.query::<(&crate::components::Monster, &Position)>().iter() {
+                let (gx, gy) = Coord::world_to_grid(pos.x, pos.y);
+                if gx >= 0 && gy >= 0 {
+                    occ.insert((gx as usize, gy as usize));
+                }
+            }
+
+            Some(occ)
+        } else {
+            None
+        };
 
         // 处理本地玩家的移动输入
         for (_entity, (player_input, position, path, player, _local, velocity)) in ctx.world
@@ -251,7 +313,23 @@ impl LogicSystem for PathfindingSystem {
                                     // 目标不可走时，先找一个最近可走的落点
                                     let goal = Self::nearest_walkable_goal(map_data, target_grid, 8).unwrap_or(target_grid);
 
-                                    match Self::calculate_path(map_data, current_grid, goal) {
+                                    let use_dynamic_blocked = ctx.session.local_player_ai_enabled;
+                                    let mut blocked = dynamic_occupied.clone().unwrap_or_default();
+
+                                    // 不要把自己当前格子视为阻挡，否则 A* 会直接失败。
+                                    if current_grid.0 >= 0 && current_grid.1 >= 0 {
+                                        blocked.remove(&(current_grid.0 as usize, current_grid.1 as usize));
+                                    }
+
+                                    // 若目标格子被占用（动态变化），这里保持“按占用阻挡”处理，
+                                    // 让上层 AI/脱困逻辑换落点；避免强行走进人/怪格子。
+                                    let path_res = if use_dynamic_blocked {
+                                        Self::calculate_path_with_blocked(map_data, current_grid, goal, blocked)
+                                    } else {
+                                        Self::calculate_path(map_data, current_grid, goal)
+                                    };
+
+                                    match path_res {
                                         Some(full_path) => {
                                             tracing::info!("✅ A* 找到路径，共 {} 个格子", full_path.len());
                                             if full_path.len() <= 10 {
