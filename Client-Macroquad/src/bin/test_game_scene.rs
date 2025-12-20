@@ -383,8 +383,33 @@ async fn main() {
     println!("🎮 传奇2 - GameScene 测试（专用帧集验证器）");
 
     // 统一资源根目录：避免从不同工作目录启动时找不到 Data/
-    //TODO : 首先读取当前目录，如果存在 Data/ 则优先使用当前目录下的 Data/ ，否则再使用可执行文件目录下的 Data/
-    let data_dir = format!("{}/Data", std::env::current_exe().unwrap().parent().unwrap().to_path_buf().display());
+    // 首先读取当前目录，如果存在 Data/ 则优先使用当前目录下的 Data/ ，否则再使用可执行文件目录下的 Data/
+   let data_dir = {
+        let current_dir_data = std::env::current_dir()
+            .ok()
+            .map(|p| p.join("Data"));
+        
+        if let Some(path) = &current_dir_data {
+            if path.exists() && path.is_dir() {
+                println!("✅ 使用当前目录: {}", path.display());
+                path.display().to_string()
+            } else {
+                let exe_dir_data = std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|p| p.join("Data")))
+                    .expect("无法获取可执行文件目录");
+                println!("✅ 使用可执行文件目录: {}", exe_dir_data.display());
+                exe_dir_data.display().to_string()
+            }
+        } else {
+            let exe_dir_data = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|p| p.join("Data")))
+                .expect("无法获取可执行文件目录");
+            println!("✅ 使用可执行文件目录: {}", exe_dir_data.display());
+            exe_dir_data.display().to_string()
+        }
+    };
     client_macroquad::resources::resource_manager::set_data_path(&data_dir);
     client_macroquad::resources::libraries::set_data_path(data_dir);
 
