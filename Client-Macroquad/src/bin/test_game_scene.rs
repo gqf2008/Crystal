@@ -383,7 +383,8 @@ async fn main() {
     println!("🎮 传奇2 - GameScene 测试（专用帧集验证器）");
 
     // 统一资源根目录：避免从不同工作目录启动时找不到 Data/
-    let data_dir = format!("{}/Data", env!("CARGO_MANIFEST_DIR"));
+    //TODO : 首先读取当前目录，如果存在 Data/ 则优先使用当前目录下的 Data/ ，否则再使用可执行文件目录下的 Data/
+    let data_dir = format!("{}/Data", std::env::current_exe().unwrap().parent().unwrap().to_path_buf().display());
     client_macroquad::resources::resource_manager::set_data_path(&data_dir);
     client_macroquad::resources::libraries::set_data_path(data_dir);
 
