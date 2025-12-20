@@ -302,7 +302,7 @@ impl LogicSystem for PathfindingSystem {
                         match player_input.movement_mode {
                             MovementMode::Pathfinding => {
                                 // 寻路模式 (双击): 使用A*算法
-                                tracing::info!(
+                                tracing::debug!(
                                     "🔍 寻路: ({}, {}) -> ({}, {})",
                                     current_grid.0, current_grid.1,
                                     target_grid.0, target_grid.1
@@ -331,7 +331,7 @@ impl LogicSystem for PathfindingSystem {
 
                                     match path_res {
                                         Some(full_path) => {
-                                            tracing::info!("✅ A* 找到路径，共 {} 个格子", full_path.len());
+                                            tracing::debug!("✅ A* 找到路径，共 {} 个格子", full_path.len());
                                             if full_path.len() <= 10 {
                                                 tracing::debug!("完整路径: {:?}", full_path);
                                             } else {
@@ -355,6 +355,30 @@ impl LogicSystem for PathfindingSystem {
                                                 player_input.movement_mode = MovementMode::None;
                                             } else {
                                                 path.set_path(waypoints);
+
+                                                // ✅ 关键修复：初始 velocity 必须指向“第一个 waypoint 的格子中心”，
+                                                // 而不是指向原始 move_to 的世界坐标。
+                                                // 否则当点击点落在不可走格/墙体边缘时，会出现：
+                                                // A* 算出可走路径 → 但 velocity 仍然顶向不可走点 → CollisionSystem 每帧清 path → 下一帧重复算路。
+                                                if let Some((wx_gx, wx_gy)) = path.current_waypoint() {
+                                                    let (wx, wy) = Coord::grid_to_world_center(wx_gx, wx_gy);
+                                                    use crate::components::PlayerAction;
+                                                    let speed = if player.action == PlayerAction::Run {
+                                                        velocity.run_speed
+                                                    } else {
+                                                        velocity.walk_speed
+                                                    };
+
+                                                    let dx = wx - position.x;
+                                                    let dy = wy - position.y;
+                                                    let distance = (dx * dx + dy * dy).sqrt();
+                                                    if distance > 0.1 {
+                                                        velocity.x = (dx / distance) * speed;
+                                                        velocity.y = (dy / distance) * speed;
+                                                    } else {
+                                                        velocity.stop();
+                                                    }
+                                                }
                                             }
                                         }
                                         None => {
@@ -395,15 +419,8 @@ impl LogicSystem for PathfindingSystem {
                                     velocity.walk_speed
                                 };
                                 
-                                // 🚀 立即计算朝向目标的初始velocity（让MovementSystem第一帧就能检测到has_velocity）
-                                let dx = target_x - position.x;
-                                let dy = target_y - position.y;
-                                let distance = (dx * dx + dy * dy).sqrt();
-                                if distance > 5.0 {
-                                    velocity.x = (dx / distance) * speed;
-                                    velocity.y = (dy / distance) * speed;
-                                    tracing::debug!("� 初始velocity=({:.1}, {:.1})", velocity.x, velocity.y);
-                                }
+                                // ⚠️ 不要在这里再用 (target_x, target_y) 设置 velocity。
+                                // Pathfinding 场景应以 waypoint 为准（上面已设置），否则会导致顶墙/反复算路。
                             }
                             MovementMode::DirectFollow => {
                                 // DirectFollow已在上面单独处理
