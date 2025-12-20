@@ -6,6 +6,9 @@ impl MockNetwork {
             return;
         }
 
+        // 每分钟轮换一张地图（开发/压测用）
+        Self::tick_map_rotation(response_tx, state);
+
         // 玩家死亡：回城复活（离线 mock 最小闭环）
         Self::tick_player_respawn(response_tx, state);
 
@@ -30,6 +33,44 @@ impl MockNetwork {
 
         // 怪物游荡：低频随机走动（避免刷屏/性能）
         Self::tick_monster_wander(response_tx, state);
+    }
+
+    fn tick_map_rotation(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
+        let interval = Duration::from_secs(60);
+        if state.last_map_rotate.elapsed() < interval {
+            return;
+        }
+        if state.map_rotate_paths.is_empty() {
+            return;
+        }
+
+        state.last_map_rotate = Instant::now();
+        state.map_rotate_idx = (state.map_rotate_idx + 1) % state.map_rotate_paths.len();
+        let next_map = state.map_rotate_paths[state.map_rotate_idx].clone();
+        state.current_map_path = next_map.clone();
+
+        // 使用当前位置作为“期望落点”，load_and_send_map 会自动修正到可走格。
+        let spawn = Self::load_and_send_map(
+            response_tx,
+            state,
+            &next_map,
+            state.map_rotate_idx as i32,
+            "Mock Rotate",
+            state.player_grid.0,
+            state.player_grid.1,
+            MirDirection::Down as u8,
+        );
+
+        state.player_spawn_grid = spawn;
+        state.player_grid = spawn;
+
+        let _ = response_tx.send(NetworkEvent::PlayerLocationChanged {
+            x: state.player_grid.0,
+            y: state.player_grid.1,
+        });
+        let _ = response_tx.send(NetworkEvent::SystemMessage {
+            message: format!("(MOCK) Map rotated: {}", next_map),
+        });
     }
 
     pub(super) fn rebuild_boss_zones(state: &mut MockWorldState, prefer_center: (i32, i32)) {

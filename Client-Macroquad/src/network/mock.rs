@@ -21,7 +21,7 @@ use chrono::Utc;
 
 use mir2_shared::data::client_data::SelectInfo;
 use mir2_shared::data::item::{ItemInfo, UserItem};
-use mir2_shared::enums::{ChatType, HeroBehaviour, MirClass, MirDirection, MirGender, PanelType};
+use mir2_shared::enums::{ChatType, HeroBehaviour, ItemType, MirClass, MirDirection, MirGender, PanelType};
 
 pub const CRYSTAL_REMOTE_PLAYERS: &str = "CRYSTAL_REMOTE_PLAYERS";
 pub const CRYSTAL_START_MAP: &str = "CRYSTAL_START_MAP";
@@ -230,6 +230,11 @@ struct MockWorldState {
     map_height: i32,
     map_walkable: Vec<u8>,
 
+    // Map rotation (debug/dev)
+    map_rotate_paths: Vec<String>,
+    map_rotate_idx: usize,
+    last_map_rotate: Instant,
+
     // Local player (server-authoritative)
     player_object_id: u32,
     player_level: u16,
@@ -237,6 +242,7 @@ struct MockWorldState {
     player_max_experience: i64,
     player_gold: u32,
     inventory_capacity: usize,
+    player_inventory: Vec<Option<UserItem>>,
     player_grid: (i32, i32),
     player_spawn_grid: (i32, i32),
     player_hp_current: i32,
@@ -271,6 +277,7 @@ struct MockWorldState {
 impl MockWorldState {
     fn new(cfg: MockRuntimeConfig) -> Self {
         let now = Instant::now();
+        let inventory_capacity: usize = 46;
         let mut characters = Vec::new();
         characters.push(SelectInfo {
             index: 0,
@@ -280,6 +287,23 @@ impl MockWorldState {
             gender: MirGender::Male,
             last_access: Utc::now(),
         });
+
+        // Map rotation list: keep small & stable to avoid unexpected missing assets.
+        // Ensure the configured start_map is included as the first entry.
+        let mut map_rotate_paths: Vec<String> = Vec::new();
+        map_rotate_paths.push(cfg.start_map.clone());
+        for p in [
+            "Map/n0.map",
+            "Map/0.map",
+            "Map/1.map",
+            "Map/2.map",
+            "Map/3.map",
+            "Map/whitevillage.map",
+        ] {
+            if !map_rotate_paths.iter().any(|x| x.eq_ignore_ascii_case(p)) {
+                map_rotate_paths.push(p.to_string());
+            }
+        }
 
         Self {
             in_game: false,
@@ -295,12 +319,17 @@ impl MockWorldState {
             map_height: 0,
             map_walkable: Vec::new(),
 
+            map_rotate_paths,
+            map_rotate_idx: 0,
+            last_map_rotate: now,
+
             player_object_id: 1,
             player_level: 1,
             player_experience: 0,
             player_max_experience: 100,
             player_gold: 5000,
-            inventory_capacity: 46,
+            inventory_capacity,
+            player_inventory: vec![None; inventory_capacity],
             player_grid: (330, 330),
             player_spawn_grid: (330, 330),
             player_hp_current: 120,
@@ -773,6 +802,27 @@ impl MockNetwork {
 
                 state.player_equipment = eq.clone();
 
+                // 默认给本地玩家一些红药，方便验证“自动喝药”
+                if state.player_inventory.iter().all(|x| x.is_none()) {
+                    let mut mk_potion = |slot: usize, uid: u64, name: &str| {
+                        if slot >= state.player_inventory.len() {
+                            return;
+                        }
+                        let mut info = ItemInfo::default();
+                        info.index = 20_000 + slot as i32;
+                        info.name = name.to_string();
+                        info.item_type = ItemType::Potion;
+                        info.stack_size = 1;
+                        let mut ui = UserItem::with_info(info);
+                        ui.unique_id = uid;
+                        ui.count = 1;
+                        state.player_inventory[slot] = Some(ui);
+                    };
+                    mk_potion(0, 880_000_001, "强效金创药");
+                    mk_potion(1, 880_000_002, "金创药(中)");
+                    mk_potion(2, 880_000_003, "太阳水");
+                }
+
                 // Local user info
                 let user_packet = mir2_shared::packets::server::UserInformation {
                     object_id: state.player_object_id,
@@ -796,7 +846,7 @@ impl MockNetwork {
                     level_effects: mir2_shared::enums::LevelEffects::empty(),
                     has_hero: false,
                     hero_behaviour: HeroBehaviour::Attack,
-                    inventory: Some(vec![None; state.inventory_capacity]),
+                    inventory: Some(state.player_inventory.clone()),
                     equipment: Some(state.player_equipment.clone()),
                     quest_inventory: None,
                     gold: state.player_gold,
@@ -1037,6 +1087,12 @@ impl MockNetwork {
                 let mut purchased = template.clone();
                 purchased.count = (count.min(u16::MAX as u32)) as u16;
                 purchased.unique_id = 1_000_000_000 + (Self::rng_next_u32(&mut state.rng) as u64);
+
+                // 写入 mock 服务器背包（便于后续 UseItemRequest 找到它）
+                if let Some(slot) = state.player_inventory.iter_mut().find(|s| s.is_none()) {
+                    *slot = Some(purchased.clone());
+                }
+
                 let _ = response_tx.send(NetworkEvent::ItemGained { item: purchased });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!(
@@ -1044,6 +1100,41 @@ impl MockNetwork {
                         item_index, count, total_cost, panel_type
                     ),
                 });
+            }
+
+            NetworkEvent::UseItemRequest { unique_id } => {
+                // 在 mock 世界里：支持最小闭环（喝红药回血 + 消耗物品）
+                let Some(slot_idx) = state
+                    .player_inventory
+                    .iter()
+                    .position(|x| x.as_ref().map(|it| it.unique_id) == Some(unique_id))
+                else {
+                    return;
+                };
+
+                let item = state.player_inventory[slot_idx].take();
+                let Some(item) = item else {
+                    return;
+                };
+
+                let is_potion = item
+                    .info
+                    .as_ref()
+                    .map(|info| info.item_type == ItemType::Potion)
+                    .unwrap_or(false);
+
+                if is_potion && state.player_hp_current > 0 {
+                    let heal = (state.player_hp_max / 3).max(20);
+                    state.player_hp_current = (state.player_hp_current + heal).min(state.player_hp_max);
+
+                    let _ = response_tx.send(NetworkEvent::HealthChanged {
+                        current: state.player_hp_current as u32,
+                        max: state.player_hp_max as u32,
+                    });
+                }
+
+                // 物品消耗：直接移除（count=1 的简化模型）
+                let _ = response_tx.send(NetworkEvent::ItemLost { unique_id });
             }
 
             _ => {

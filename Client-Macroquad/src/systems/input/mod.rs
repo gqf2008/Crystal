@@ -70,9 +70,11 @@
 //! - `InputStateSystem` 需要在“读取输入的系统之后”执行，才可以把“本帧状态”保存为“下一帧的 prev 状态”
 
 pub mod input_state_system;
+pub mod auto_potion_system;
 pub mod local_player_ai_system;
 pub mod player_control_system;
 
 pub use input_state_system::InputStateSystem;   
+pub use auto_potion_system::AutoPotionSystem;
 pub use local_player_ai_system::LocalPlayerAiSystem;
 pub use player_control_system::PlayerControlSystem;

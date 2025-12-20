@@ -19,7 +19,7 @@ use crate::{
     systems::{
         priority, AnimationSystem, CameraBoundsSystem, CameraFollowSystem, CameraSpaceGateSystem,
         CameraSystem, CollisionSystem, CombatSystem, FrameEndSystem, HealthRegenSystem,
-        LocalPlayerAiSystem, MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SkillSystem,
+        AutoPotionSystem, LocalPlayerAiSystem, MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SkillSystem,
         SystemScheduler, TimeTickSystem,
     },
 };
@@ -98,6 +98,7 @@ impl GameScene {
                 crate::systems::NetworkApplySystem::default(),
                 priority::NETWORK_APPLY,
             )
+            .add_system(AutoPotionSystem::default(), priority::AUTO_POTION)
             .add_system(
                 crate::systems::MapBootstrapSystem::default(),
                 priority::MAP_BOOTSTRAP,

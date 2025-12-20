@@ -57,6 +57,8 @@ pub mod priority {
     pub const NETWORK: u32 = 110; // 网络系统
     /// NetworkSystem 拉取事件后，立刻落地到 ECS 状态（本地玩家/切图定位等）
     pub const NETWORK_APPLY: u32 = 115;
+    /// 本地玩家自动喝药（自动回血）
+    pub const AUTO_POTION: u32 = 116;
     /// 无网络事件时的地图启动兜底（创建默认 MapManager/MapData）
     pub const MAP_BOOTSTRAP: u32 = 117;
     /// 消费 MapInformation/MapChanged 并加载/更新 MapData
@@ -159,7 +161,7 @@ pub use ecs_macros::{LogicSystem, RenderSystem};
 // 重新导出各层系统（保持向后兼容）
 // 注意：新代码应使用 update:: 和 render:: 模块
 
-pub use input::{LocalPlayerAiSystem, PlayerControlSystem};
+pub use input::{AutoPotionSystem, LocalPlayerAiSystem, PlayerControlSystem};
 pub use infra::NetworkSystem;
 pub use infra::NetworkApplySystem;
 pub use infra::{FrameEndSystem, TimeTickSystem};
