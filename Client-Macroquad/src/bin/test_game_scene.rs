@@ -8,18 +8,19 @@
 use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
 
-use client_macroquad::scenes::{GameScene, Scene, SceneTransition};
-use client_macroquad::ui::text_renderer::init_chinese_font;
-use client_macroquad::components::{Health, LibrarySprite, MapData, MirAction, Monster, MonsterAnimState, Position};
 use client_macroquad::components::network::{ClientOnly, NetworkObjectType, NetworkSync};
+use client_macroquad::components::{
+    Health, LibrarySprite, MapData, MirAction, Monster, MonsterAnimState, Position,
+};
 use client_macroquad::coord::Coord;
 use client_macroquad::objects::frames::get_monster_frame;
 use client_macroquad::resources::LibraryName;
+use client_macroquad::scenes::{GameScene, Scene, SceneTransition};
+use client_macroquad::ui::text_renderer::init_chinese_font;
 use mir2_shared::enums::{MirDirection, Monster as MonsterKind};
 
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 
 const WINDOW_WIDTH: i32 = 1024;
 const WINDOW_HEIGHT: i32 = 768;
@@ -298,7 +299,10 @@ impl SpecialFramesValidator {
 
         let now = std::time::Instant::now();
 
-        for e in [self.dragon, self.cave, self.fox, self.hellbomb].into_iter().flatten() {
+        for e in [self.dragon, self.cave, self.fox, self.hellbomb]
+            .into_iter()
+            .flatten()
+        {
             if let Ok(mut s) = ctx.world.get::<&mut MonsterAnimState>(e) {
                 s.direction = dir;
                 s.start_time = now;
@@ -382,37 +386,25 @@ async fn main() {
     client_macroquad::utils::logging::init_tracing();
     println!("🎮 传奇2 - GameScene 测试（专用帧集验证器）");
 
-    // 统一资源根目录：避免从不同工作目录启动时找不到 Data/
-    // 首先读取当前目录，如果存在 Data/ 则优先使用当前目录下的 Data/ ，否则再使用可执行文件目录下的 Data/
-   let data_dir = {
-        let current_dir_data = std::env::current_dir()
+    let exe_data_dir = || {
+        std::env::current_exe()
             .ok()
-            .map(|p| p.join("Data"));
-        
-        if let Some(path) = &current_dir_data {
-            if path.exists() && path.is_dir() {
-                println!("✅ 使用当前目录: {}", path.display());
-                path.display().to_string()
-            } else {
-                let exe_dir_data = std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.join("Data")))
-                    .expect("无法获取可执行文件目录");
-                println!("✅ 使用可执行文件目录: {}", exe_dir_data.display());
-                exe_dir_data.display().to_string()
-            }
-        } else {
-            let exe_dir_data = std::env::current_exe()
-                .ok()
-                .and_then(|exe| exe.parent().map(|p| p.join("Data")))
-                .expect("无法获取可执行文件目录");
-            println!("✅ 使用可执行文件目录: {}", exe_dir_data.display());
-            exe_dir_data.display().to_string()
-        }
+            .and_then(|exe| exe.parent().map(|p| p.join("Data")))
+            .expect("无法获取可执行文件目录")
     };
+
+    let current_data_dir = std::env::current_dir().ok().map(|p| p.join("Data"));
+
+    let (data_dir_path, source) = match current_data_dir.filter(|p| p.is_dir()) {
+        Some(p) => (p, "当前目录"),
+        None => (exe_data_dir(), "可执行文件目录"),
+    };
+
+    println!("✅ 使用{}: {}", source, data_dir_path.display());
+
+    let data_dir = data_dir_path.to_string_lossy().into_owned();
     client_macroquad::resources::resource_manager::set_data_path(&data_dir);
     client_macroquad::resources::libraries::set_data_path(data_dir);
-
     // 初始化中文字体（MainDialog/各对话框会用到）
     init_chinese_font().await;
 

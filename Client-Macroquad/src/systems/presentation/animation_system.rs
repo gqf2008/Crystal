@@ -669,7 +669,7 @@ impl AnimationSystem {
             // 恢复到站立状态
             if let Ok(player) = ctx.world.query_one_mut::<&mut Player>(entity) {
                 player.action = PlayerAction::Stand;
-                tracing::info!("✅ 攻击完成，返回站立状态");
+                tracing::debug!("✅ 攻击完成，返回站立状态");
             }
 
             // Monster：攻击结束回到 Standing

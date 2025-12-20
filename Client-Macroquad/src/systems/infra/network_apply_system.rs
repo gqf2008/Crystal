@@ -211,7 +211,7 @@ impl NetworkApplySystem {
     fn apply_user_information(ctx: &mut GameContext, packet: mir2_shared::packets::server::UserInformation) {
         use crate::components::{
             AnimationFrame, CombatStats, Health, LocalPlayer, Mana, MovementVelocity, Path, Player,
-            PlayerAction, PlayerAppearance, PlayerInput, Position,
+            PlayerAction, PlayerAppearance, PlayerInput, Position, RegenTimer,
         };
         use crate::components::{Currency, Equipment, Experience, Inventory, MagicList, PlayerData, QuestInventory};
         use crate::components::{GuildInfo, HeroState, LevelEffectsFlags, NameColor, ObserveState, SummonedCreatureState};
@@ -233,6 +233,7 @@ impl NetworkApplySystem {
                 Position::new(0.0, 0.0),
                 Health::new(packet.hp.max(1)),
                 Mana::new(packet.mp.max(1)),
+                RegenTimer::default(),
                 PlayerAppearance::default(),
                 AnimationFrame::default(),
                 PlayerInput::default(),
@@ -246,6 +247,11 @@ impl NetworkApplySystem {
                 crate::components::MountStatus::default(),
             )),
         };
+
+        // 兜底：旧存档/旧实体可能缺少 RegenTimer，导致 HealthRegenSystem 永远不生效。
+        if ctx.world.get::<&RegenTimer>(local_entity).is_err() {
+            let _ = ctx.world.insert_one(local_entity, RegenTimer::default());
+        }
 
         // 诊断：确认是否真的收到了 UserInformation 并创建/更新了本地玩家。
         // 只打印一次，避免刷屏。

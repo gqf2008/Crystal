@@ -1,4 +1,7 @@
-use crate::components::{LocalPlayer, Path, Position, RenderConfig, RenderPass, RenderStage};
+use crate::components::{
+    AttackState, LocalPlayer, MountState, Movement, MovementVelocity, Path, Player, PlayerData,
+    Position, RenderConfig, RenderPass, RenderStage, Velocity, Camera, MapData,
+};
 use crate::systems::logic::physics::MapUpdateSystem;
 use crate::systems::RenderSystem;
 use macroquad::prelude::*;
@@ -220,6 +223,48 @@ impl DebugSystem {
 }
 
 impl RenderSystem for DebugSystem {
+    fn update(&mut self, ctx: &mut crate::game::GameContext, _delay_time: f32) -> crate::game::GameResult {
+        if !cfg!(debug_assertions) {
+            return Ok(());
+        }
+
+        // macroquad 的 is_key_pressed 本身就是“边缘触发”（本帧刚按下），
+        // 这里不需要依赖 InputState.prev_pressed_keys 做额外检测。
+        const DEBUG_KEYS: &[KeyCode] = &[
+            KeyCode::O,
+            KeyCode::P,
+            KeyCode::G,
+            KeyCode::B,
+            KeyCode::A,
+            KeyCode::S,
+            KeyCode::D,
+            KeyCode::L,
+            KeyCode::M,
+            KeyCode::Key1,
+            KeyCode::Key2,
+            KeyCode::Key3,
+            KeyCode::F2,
+            KeyCode::F9,
+            KeyCode::F10,
+            KeyCode::F11,
+            KeyCode::Equal,
+            KeyCode::KpAdd,
+            KeyCode::Minus,
+            KeyCode::KpSubtract,
+            KeyCode::Escape,
+        ];
+
+        // 注意：Debug 热键应当不受 UI 的 world-input 阻塞影响。
+        // 这里直接读 macroquad 的按键边缘事件。
+        for &key in DEBUG_KEYS {
+            if is_key_pressed(key) {
+                Self::handle_keycode(&mut ctx.world, key);
+            }
+        }
+
+        Ok(())
+    }
+
     fn draw(
         &mut self,
         world: &hecs::World,
@@ -234,11 +279,13 @@ impl RenderSystem for DebugSystem {
         match stage {
             // 世界空间叠加层：依赖 GameScene 已经 set_camera(map_camera)
             RenderStage::PostFront => {
+                self.draw_world_debug_overlays(world);
                 self.draw_path_overlay(world);
             }
             // 屏幕空间叠加层：依赖 GameScene 已经 set_default_camera()
             RenderStage::Ui => {
                 self.draw_debug_fps(world);
+                self.draw_player_debug(world);
             }
             _ => {}
         }
@@ -248,6 +295,153 @@ impl RenderSystem for DebugSystem {
 }
 
 impl DebugSystem {
+    fn draw_world_debug_overlays(&self, world: &hecs::World) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+
+        let cfg = world
+            .query::<&RenderConfig>()
+            .iter()
+            .next()
+            .map(|(_, c)| c)
+            .cloned()
+            .unwrap_or_default();
+
+        if !cfg.show_grid && !cfg.show_obstacles && !cfg.show_borders {
+            return;
+        }
+
+        // 获取相机（Position 表示 camera center）
+        let (cam_pos, cam) = {
+            let mut q = world.query::<(&Position, &Camera)>();
+            let Some((_e, (p, c))) = q.iter().next() else {
+                return;
+            };
+            (*p, c.clone())
+        };
+
+        let zoom = cam.zoom.max(0.01);
+        let view_left = cam_pos.x - cam.screen_width / (2.0 * zoom);
+        let view_right = cam_pos.x + cam.screen_width / (2.0 * zoom);
+        let view_top = cam_pos.y - cam.screen_height / (2.0 * zoom);
+        let view_bottom = cam_pos.y + cam.screen_height / (2.0 * zoom);
+
+        let tile_w = 48.0;
+        let tile_h = 32.0;
+
+        let mut start_x = ((view_left / tile_w).floor() as i32 - 1).max(0);
+        let mut end_x = ((view_right / tile_w).floor() as i32 + 1).max(0);
+        let mut start_y = ((view_top / tile_h).floor() as i32 - 1).max(0);
+        let mut end_y = ((view_bottom / tile_h).floor() as i32 + 1).max(0);
+
+        // 可选：根据 MapData clamp 范围，并用于障碍物查询
+        // 注意：QueryBorrow 需要绑定到局部变量，避免临时值提前释放。
+        let mut map_q = world.query::<&MapData>();
+        let map_data = map_q.iter().next().map(|(_, m)| m);
+        if let Some(m) = map_data {
+            start_x = start_x.min(m.width.saturating_sub(1));
+            end_x = end_x.min(m.width.saturating_sub(1));
+            start_y = start_y.min(m.height.saturating_sub(1));
+            end_y = end_y.min(m.height.saturating_sub(1));
+        }
+
+        // O：障碍物格子
+        if cfg.show_obstacles {
+            if let Some(m) = map_data {
+                for gx in start_x..=end_x {
+                    let ux = gx as usize;
+                    if ux >= m.cells.len() {
+                        continue;
+                    }
+                    for gy in start_y..=end_y {
+                        let uy = gy as usize;
+                        if uy >= m.cells[ux].len() {
+                            continue;
+                        }
+                        if !m.cells[ux][uy].is_walkable() {
+                            draw_rectangle(
+                                gx as f32 * tile_w,
+                                gy as f32 * tile_h,
+                                tile_w,
+                                tile_h,
+                                Color::from_rgba(255, 0, 0, 70),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // G：网格线（每格）
+        if cfg.show_grid {
+            let top = start_y as f32 * tile_h;
+            let bottom = (end_y as f32 + 1.0) * tile_h;
+            for gx in start_x..=(end_x + 1) {
+                let x = gx as f32 * tile_w;
+                draw_line(x, top, x, bottom, 1.0, Color::from_rgba(255, 255, 255, 60));
+            }
+
+            let left = start_x as f32 * tile_w;
+            let right = (end_x as f32 + 1.0) * tile_w;
+            for gy in start_y..=(end_y + 1) {
+                let y = gy as f32 * tile_h;
+                draw_line(left, y, right, y, 1.0, Color::from_rgba(255, 255, 255, 60));
+            }
+        }
+
+        // B：Chunk 边界（32x32 tiles，对齐 MeshMapRenderer 的 chunk cache）
+        if cfg.show_borders {
+            let chunk_tiles_x: i32 = 32;
+            let chunk_tiles_y: i32 = 32;
+
+            let chunk_start_x = (start_x / chunk_tiles_x) * chunk_tiles_x;
+            let chunk_end_x = (end_x / chunk_tiles_x) * chunk_tiles_x;
+            let chunk_start_y = (start_y / chunk_tiles_y) * chunk_tiles_y;
+            let chunk_end_y = (end_y / chunk_tiles_y) * chunk_tiles_y;
+
+            let mut cx = chunk_start_x;
+            while cx <= chunk_end_x + chunk_tiles_x {
+                let x = cx as f32 * tile_w;
+                draw_line(
+                    x,
+                    chunk_start_y as f32 * tile_h,
+                    x,
+                    (chunk_end_y as f32 + chunk_tiles_y as f32) * tile_h,
+                    2.0,
+                    Color::from_rgba(0, 200, 255, 120),
+                );
+                cx += chunk_tiles_x;
+            }
+
+            let mut cy = chunk_start_y;
+            while cy <= chunk_end_y + chunk_tiles_y {
+                let y = cy as f32 * tile_h;
+                draw_line(
+                    chunk_start_x as f32 * tile_w,
+                    y,
+                    (chunk_end_x as f32 + chunk_tiles_x as f32) * tile_w,
+                    y,
+                    2.0,
+                    Color::from_rgba(0, 200, 255, 120),
+                );
+                cy += chunk_tiles_y;
+            }
+
+            // 地图边界（如果有 MapData）
+            if let Some(m) = map_data {
+                draw_rectangle_lines(
+                    0.0,
+                    0.0,
+                    m.width as f32 * tile_w,
+                    m.height as f32 * tile_h,
+                    3.0,
+                    Color::from_rgba(255, 255, 0, 140),
+                );
+            }
+        }
+    }
+
     fn draw_debug_fps(&self, _world: &hecs::World) {
         if !cfg!(debug_assertions) {
             return;
@@ -299,6 +493,111 @@ impl DebugSystem {
                 Color::from_rgba(255, 255, 0, 180),
             );
             last = (wx, wy);
+        }
+    }
+
+    fn draw_player_debug(&self, world: &hecs::World) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+
+        let show_player_debug = world
+            .query::<&RenderConfig>()
+            .iter()
+            .next()
+            .map(|(_, c)| c.show_player_debug)
+            .unwrap_or(false);
+
+        if !show_player_debug {
+            return;
+        }
+
+        let mut q = world.query::<(&LocalPlayer, &Position, &Player)>();
+        let Some((entity, (_lp, pos, player))) = q.iter().next() else {
+            draw_text(
+                "LocalPlayer: <not found>",
+                12.0,
+                46.0,
+                18.0,
+                Color::from_rgba(255, 255, 255, 220),
+            );
+            return;
+        };
+
+        let player_data = world.get::<&PlayerData>(entity).ok();
+        let movement = world.get::<&Movement>(entity).ok();
+        let movement_velocity = world.get::<&MovementVelocity>(entity).ok();
+        let velocity = world.get::<&Velocity>(entity).ok();
+        let mount_state = world.get::<&MountState>(entity).ok();
+        let attack_state = world.get::<&AttackState>(entity).ok();
+        let path = world.get::<&Path>(entity).ok();
+
+        let grid_x = (pos.x / 48.0).floor() as i32;
+        let grid_y = (pos.y / 32.0).floor() as i32;
+
+        let mut lines: Vec<String> = Vec::with_capacity(10);
+        if let Some(pd) = player_data.as_deref() {
+            lines.push(format!("Player: {} (id={})", pd.name, pd.id));
+        } else {
+            lines.push("Player: <no PlayerData>".to_string());
+        }
+
+        lines.push(format!(
+            "Action: {:?} | Dir: {:?}",
+            player.action, player.direction
+        ));
+        lines.push(format!("Pos(px): {:.1}, {:.1}", pos.x, pos.y));
+        lines.push(format!("Pos(grid): {}, {}", grid_x, grid_y));
+
+        if let Some(m) = movement.as_deref() {
+            lines.push(format!("Move: {:?} | moving={}", m.state, m.is_moving()));
+        }
+        if let Some(v) = movement_velocity.as_deref() {
+            lines.push(format!(
+                "MovementVelocity(px/frame): {:.2}, {:.2} | mag={:.2}",
+                v.x,
+                v.y,
+                v.magnitude()
+            ));
+        }
+        if let Some(v) = velocity.as_deref() {
+            lines.push(format!("Velocity(dx/dy): {:.2}, {:.2}", v.dx, v.dy));
+        }
+        if let Some(ms) = mount_state.as_deref() {
+            lines.push(format!("Mount: {:?}", ms.mount_index));
+        }
+
+        if let Some(a) = attack_state.as_deref() {
+            let elapsed_ms = a.start_time.elapsed().as_millis();
+            lines.push(format!(
+                "AttackState: {:?} | elapsed={}ms | server_type={}",
+                a.attack_type, elapsed_ms, a.server_attack_type
+            ));
+        }
+
+        if let Some(p) = path.as_deref() {
+            lines.push(format!(
+                "Path: valid={} | points={} | idx={}",
+                p.is_valid,
+                p.waypoints.len(),
+                p.current_index
+            ));
+        }
+
+        let font_size = 28.0;
+        let line_height = 32.0;
+
+        let x = 12.0;
+        let mut y = 58.0;
+        for line in lines {
+            draw_text(
+                &line,
+                x,
+                y,
+                font_size,
+                Color::from_rgba(255, 255, 255, 220),
+            );
+            y += line_height;
         }
     }
 }
