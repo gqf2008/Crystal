@@ -123,11 +123,20 @@ impl LogicSystem for CombatSystem {
         };
 
         // 3) 目标必须是怪物且仍存活（HP>0）
+        // 注意：真服下怪物的血量可能不会在 ObjectMonster 时立即下发，
+        // Health 可能要等到首次 ObjectStruck/其它状态包后才创建。
+        // 如果这里强依赖 Health，会导致根本不发送 AttackRequest（服务端也就不会掉血）。
         let target_alive = ctx
             .world
-            .query::<(&Monster, &NetworkSync, &Health)>()
+            .query::<(&Monster, &NetworkSync, Option<&Health>)>()
             .iter()
-            .any(|(_, (_m, sync, hp))| sync.object_id == target_id && hp.current > 0);
+            .any(|(_, (_m, sync, hp))| {
+                if sync.object_id != target_id {
+                    return false;
+                }
+
+                hp.map(|h| h.current > 0).unwrap_or(true)
+            });
 
         if !target_alive {
             if let Ok(mut input) = ctx.world.get::<&mut crate::components::PlayerInput>(player_entity) {

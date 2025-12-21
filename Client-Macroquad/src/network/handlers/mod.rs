@@ -162,6 +162,16 @@ pub enum NetworkEvent {
     ObjectStruck { object_id: u32, attacker_id: u32, damage: i32 },
     ObjectDied { object_id: u32 },
     ObjectAttack { packet: mir2_shared::packets::server::ObjectAttack },
+
+    /// 伤害数值提示（真实协议：DamageIndicator）
+    ///
+    /// 说明：部分服务器用它承载实际 damage，而 ObjectStruck 只表示“受击”。
+    DamageIndicator { object_id: u32, damage: i32, damage_type: u8 },
+
+    /// 物体血量百分比同步（真实协议：ObjectHealth）
+    ///
+    /// 说明：多数情况下只下发 percent，不下发 max。渲染端可用 0..100 的虚拟血条。
+    ObjectHealthPercent { object_id: u32, percent: u8, expire: u16 },
     
     // ========================================================================
     // 聊天事件（Chat Events）

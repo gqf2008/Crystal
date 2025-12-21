@@ -1443,6 +1443,10 @@ impl LogicSystem for NetworkApplySystem {
         let mut object_struck: Vec<(u32, u32, i32)> = Vec::new();
         let mut object_died: Vec<u32> = Vec::new();
 
+        // combat aux packets
+        let mut damage_indicators: Vec<(u32, i32, u8)> = Vec::new();
+        let mut object_health_percents: Vec<(u32, u8, u16)> = Vec::new();
+
         // UI / presentation feedback
         let mut play_sounds: Vec<i32> = Vec::new();
         let mut mount_updates: Vec<(u32, i16, bool)> = Vec::new();
@@ -1527,6 +1531,20 @@ impl LogicSystem for NetworkApplySystem {
                 }
                 NetworkEvent::ManaChanged { current, max } => {
                     player_mana_changed = Some((*current, *max));
+                }
+                NetworkEvent::DamageIndicator {
+                    object_id,
+                    damage,
+                    damage_type,
+                } => {
+                    damage_indicators.push((*object_id, *damage, *damage_type));
+                }
+                NetworkEvent::ObjectHealthPercent {
+                    object_id,
+                    percent,
+                    expire,
+                } => {
+                    object_health_percents.push((*object_id, *percent, *expire));
                 }
                 NetworkEvent::ObjectStruck {
                     object_id,
@@ -1706,7 +1724,12 @@ impl LogicSystem for NetworkApplySystem {
                 {
                     if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(e) {
                         hp.current = cur as i32;
-                        hp.max = max as i32;
+                        if max != 0 {
+                            hp.max = max as i32;
+                        } else if hp.max < hp.current {
+                            // max 未知：至少保证 max >= current
+                            hp.max = hp.current;
+                        }
                         inserted = true;
                     }
                 }
@@ -1715,7 +1738,7 @@ impl LogicSystem for NetworkApplySystem {
                         e,
                         crate::components::Health {
                             current: cur as i32,
-                            max: max as i32,
+                            max: if max != 0 { max as i32 } else { cur as i32 },
                         },
                     );
                 }
@@ -1732,7 +1755,11 @@ impl LogicSystem for NetworkApplySystem {
                 {
                     if let Ok(mut mp) = ctx.world.get::<&mut crate::components::Mana>(e) {
                         mp.current = cur as i32;
-                        mp.max = max as i32;
+                        if max != 0 {
+                            mp.max = max as i32;
+                        } else if mp.max < mp.current {
+                            mp.max = mp.current;
+                        }
                         inserted = true;
                     }
                 }
@@ -1741,7 +1768,7 @@ impl LogicSystem for NetworkApplySystem {
                         e,
                         crate::components::Mana {
                             current: cur as i32,
-                            max: max as i32,
+                            max: if max != 0 { max as i32 } else { cur as i32 },
                         },
                     );
                 }
@@ -1757,6 +1784,11 @@ impl LogicSystem for NetworkApplySystem {
                     // - Mock/真服在同步移动意图时，回包可能滞后于本地连续像素移动。
                     // - 若按“偏差足够大”触发纠偏，会出现自动寻路时被拉回起点（rubber-banding）。
                     // 因此：活着时一律不应用 PlayerLocationChanged 的位置校正。
+                    //
+                    // 注意：此前这里允许 "large_jump"（大跨度）时纠偏，期望覆盖“传送/回城”。
+                    // 但当前 world<->grid 的换算在连续像素移动场景下可能产生较大误差，
+                    // 进而把正常走两步误判为大跳变，导致被拉回出生点。
+                    // 传送/切图等应优先通过 MapChanged / UserInformation 落地。
                     let dead = ctx
                         .world
                         .get::<&crate::components::Health>(e)
@@ -1764,20 +1796,7 @@ impl LogicSystem for NetworkApplySystem {
                         .map(|hp| hp.current <= 0)
                         .unwrap_or(false);
 
-                    // 允许“大跨度跳变”：通常代表传送/回城复活/换图落点修正。
-                    // 选择一个偏大的阈值，避免正常移动时偶发的对齐包造成拉扯。
-                    let large_jump = ctx
-                        .world
-                        .get::<&crate::components::Position>(e)
-                        .ok()
-                        .map(|pos| {
-                            let (cgx, cgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-                            let manhattan = (cgx - gx).abs() + (cgy - gy).abs();
-                            manhattan >= 12
-                        })
-                        .unwrap_or(true);
-
-                    dead || large_jump
+                    dead
                 };
 
                 if should_apply {
@@ -1903,6 +1922,47 @@ impl LogicSystem for NetworkApplySystem {
         }
 
         // ===== server-driven: combat落地到对象（怪物/其他对象） =====
+        // DamageIndicator：很多服务端把实际伤害放在这个包里。
+        // 这里复用 ObjectStruck 的可见闭环（扣血 + 飘字），attacker_id 用 0 占位。
+        if !damage_indicators.is_empty() {
+            for (object_id, damage, _damage_type) in damage_indicators {
+                if damage != 0 {
+                    object_struck.push((object_id, 0, damage));
+                }
+            }
+        }
+
+        // ObjectHealthPercent：驱动远程对象血条显示。
+        // 由于协议只给 percent，这里使用 0..100 的虚拟血池（max=100）。
+        for (object_id, percent, _expire) in object_health_percents {
+            let Some(target) = Self::find_entity_by_object_id(ctx, object_id) else {
+                continue;
+            };
+            let p = (percent as i32).clamp(0, 100);
+            let mut inserted = false;
+            {
+                if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(target) {
+                    // 若之前 max 不是虚拟血池，则尽量按既有 max 计算 current
+                    if hp.max > 0 && hp.max != 100 {
+                        hp.current = ((hp.max as i64) * (p as i64) / 100) as i32;
+                    } else {
+                        hp.max = 100;
+                        hp.current = p;
+                    }
+                    inserted = true;
+                }
+            }
+            if !inserted {
+                let _ = ctx.world.insert_one(
+                    target,
+                    crate::components::Health {
+                        current: p,
+                        max: 100,
+                    },
+                );
+            }
+        }
+
         // ObjectStruck: 最小可见闭环：扣血 + 飘字（用于 mock / 真实服都可用）。
         for (object_id, attacker_id, damage) in object_struck {
             let Some(target) = Self::find_entity_by_object_id(ctx, object_id) else {

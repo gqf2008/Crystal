@@ -18,6 +18,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use client_macroquad::game::{GameResult, GameState};
+use client_macroquad::ui::init_chinese_font;
 use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
 
@@ -50,7 +51,26 @@ fn init_tracing() {
 #[macroquad::main(window_conf)]
 async fn main() {
     init_tracing();
+    let exe_data_dir = || {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.join("Data")))
+            .expect("无法获取可执行文件目录")
+    };
 
+    let current_data_dir = std::env::current_dir().ok().map(|p| p.join("Data"));
+
+    let (data_dir_path, source) = match current_data_dir.filter(|p| p.is_dir()) {
+        Some(p) => (p, "当前目录"),
+        None => (exe_data_dir(), "可执行文件目录"),
+    };
+
+    println!("✅ 使用{}: {}", source, data_dir_path.display());
+
+    let data_dir = data_dir_path.to_string_lossy().into_owned();
+    client_macroquad::resources::resource_manager::set_data_path(&data_dir);
+    client_macroquad::resources::libraries::set_data_path(data_dir);
+    init_chinese_font().await;
     let result: GameResult = async {
         let game = GameState::new().await?;
         game.run().await?;

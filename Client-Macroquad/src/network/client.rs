@@ -13,7 +13,18 @@ use crate::network::handlers::NetworkEvent;
 use anyhow::Result;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::io::{Read, Write};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
+
+static OUT_WALK_COUNT: AtomicU64 = AtomicU64::new(0);
+static OUT_RUN_COUNT: AtomicU64 = AtomicU64::new(0);
+static OUT_ATTACK_COUNT: AtomicU64 = AtomicU64::new(0);
+
+// server protection: avoid flooding Attack packets (some servers disconnect on spam)
+static LAST_ATTACK_SENT_MS: AtomicI64 = AtomicI64::new(0);
+static OUT_ATTACK_DROPPED: AtomicU64 = AtomicU64::new(0);
 
 /// 网络客户端 - 零大小类型
 ///
@@ -39,14 +50,18 @@ impl Network {
         let (game_to_net_tx, game_to_net_rx) = bounded(1024);
         let (net_to_game_tx, net_to_game_rx) = bounded(1024);
 
+        // 用于跨线程的“断线/关闭”信号，避免 read 线程退出后 write 线程仍在发 KeepAlive。
+        let shutdown = Arc::new(AtomicBool::new(false));
+
         // 读线程：packet → NetworkEvent
         {
             let tx = net_to_game_tx.clone();
             let to_write = game_to_net_tx.clone(); // 用于自动发送ClientVersion等
+            let shutdown_flag = shutdown.clone();
             std::thread::Builder::new()
                 .name("net-read".into())
                 .spawn(move || {
-                    read_loop(r, tx, to_write, client_version_hash);
+                    read_loop(r, tx, to_write, client_version_hash, shutdown_flag);
                 })
                 .expect("Failed to spawn read thread");
         }
@@ -54,10 +69,11 @@ impl Network {
         // 写线程：NetworkEvent → packet
         {
             let rx = game_to_net_rx;
+            let shutdown_flag = shutdown.clone();
             std::thread::Builder::new()
                 .name("net-write".into())
                 .spawn(move || {
-                    write_loop(w, rx);
+                    write_loop(w, rx, shutdown_flag);
                 })
                 .expect("Failed to spawn write thread");
         }
@@ -72,17 +88,38 @@ fn read_loop<S: Read + Send>(
     tx: Sender<NetworkEvent>,
     to_write: Sender<NetworkEvent>,
     client_version_hash: [u8; 16],
+    shutdown: Arc<AtomicBool>,
 ) {
     use mir2_shared::packets::PacketHeader;
+    use mir2_shared::data::stats::SharedError;
 
     loop {
         let header = {
             match PacketHeader::read_from(&mut stream) {
                 Ok(h) => h,
                 Err(e) => {
-                    tracing::error!("Read header error: {}", e);
+                    shutdown.store(true, Ordering::Relaxed);
+
+                    // Windows 下常见：服务端在 accept 后立刻 close，会表现为 read_u16 UnexpectedEof。
+                    // 这通常意味着：IPBlock/MaxIP 限制、端口不对、或服务端尚未进入 Running 状态。
+                    let mut reason = e.to_string();
+                    if let SharedError::Io(ioe) = &e {
+                        if ioe.kind() == std::io::ErrorKind::UnexpectedEof {
+                            reason = "Server closed connection immediately (EOF while reading header). \
+Possible causes: server IP blocked (often 24h ban after Invalid packet / MaxPacket), MaxIP limit, wrong port, or server not ready.".to_string();
+                            tracing::warn!(
+                                "Read header EOF: server closed immediately. \
+Check server console for 'Too many connections' / 'Invalid packet' / 'Large amount of Packets'. \
+If IP was blocked, restart server or use GM command CLEARIPBLOCKS; also verify ServerAddr & server Setup.ini settings."
+                            );
+                        } else {
+                            tracing::error!("Read header IO error: {}", ioe);
+                        }
+                    } else {
+                        tracing::error!("Read header error: {}", e);
+                    }
                     let _ = tx.send(NetworkEvent::Disconnected {
-                        reason: e.to_string(),
+                        reason,
                     });
                     break;
                 }
@@ -101,6 +138,7 @@ fn read_loop<S: Read + Send>(
         let mut payload = vec![0u8; payload_len];
         {
             if let Err(e) = stream.read_exact(&mut payload) {
+                shutdown.store(true, Ordering::Relaxed);
                 tracing::error!("Read payload error: {}", e);
                 let _ = tx.send(NetworkEvent::Disconnected {
                     reason: e.to_string(),
@@ -134,30 +172,41 @@ fn read_loop<S: Read + Send>(
 /// 写线程：持续接收 NetworkEvent 并转换为 packet
 ///
 /// 自动心跳机制: 如果超过 5 秒没有发送任何包,自动发送 KeepAlive 防止服务器超时断开
-fn write_loop<S: Write + Send>(mut stream: S, rx: Receiver<NetworkEvent>) {
+fn write_loop<S: Write + Send>(mut stream: S, rx: Receiver<NetworkEvent>, shutdown: Arc<AtomicBool>) {
     let heartbeat_interval = Duration::from_secs(5); // 5秒发送一次心跳 (服务器超时是10秒)
 
     loop {
+        if shutdown.load(Ordering::Relaxed) {
+            tracing::info!("Write thread stopping (shutdown signaled)");
+            return;
+        }
+
         // 使用 heartbeat_interval 作为超时时间,这样每个心跳周期都会检查一次
         match rx.recv_timeout(heartbeat_interval) {
             Ok(event) => {
                 // 收到游戏层的事件,立即发送
                 if let Err(e) = handle_outbound_event(&mut stream, event) {
+                    shutdown.store(true, Ordering::Relaxed);
                     tracing::error!("Send packet error: {}", e);
                     return;
                 }
             }
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                if shutdown.load(Ordering::Relaxed) {
+                    tracing::info!("Write thread stopping (shutdown signaled)");
+                    return;
+                }
                 // 超时 = 游戏层在 heartbeat_interval 时间内没有发送任何事件
                 // 发送心跳包
                 let keep_alive = NetworkEvent::KeepAliveSend {
                     time: chrono::Utc::now().timestamp_millis(),
                 };
                 if let Err(e) = handle_outbound_event(&mut stream, keep_alive) {
+                    shutdown.store(true, Ordering::Relaxed);
                     tracing::error!("❌ Send KeepAlive error: {}", e);
                     return;
                 }
-                tracing::info!("💓 Auto-sent KeepAlive (preventing timeout)");
+                tracing::debug!("💓 Auto-sent KeepAlive (preventing timeout)");
             }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
                 tracing::info!("Game thread closed, stopping write thread");
@@ -621,11 +670,21 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         NetworkEvent::WalkRequest { direction } => {
             let packet = client::movement::Walk { direction };
             serialize_packet(stream, &packet)?;
+
+            let n = OUT_WALK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+            if n == 1 || n % 30 == 0 {
+                tracing::info!("📤 Sent Walk x{} dir={:?}", n, packet.direction);
+            }
         }
 
         NetworkEvent::RunRequest { direction } => {
             let packet = client::movement::Run { direction };
             serialize_packet(stream, &packet)?;
+
+            let n = OUT_RUN_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+            if n == 1 || n % 30 == 0 {
+                tracing::info!("📤 Sent Run x{} dir={:?}", n, packet.direction);
+            }
         }
 
         NetworkEvent::TurnRequest { direction } => {
@@ -636,11 +695,38 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         // ===== 战斗相关 =====
         NetworkEvent::AttackRequest { direction, spell } => {
             use mir2_shared::enums::Spell;
+
+            // 节流：避免攻击包过于频繁导致服务端判定异常（"Large amount of Packets. LastPackets: Attack"）
+            // 注：这里用系统时间毫秒做简单门限；即使上层逻辑误触发每帧攻击，也不会把连接打爆。
+            const MIN_ATTACK_INTERVAL_MS: i64 = 250;
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let last_ms = LAST_ATTACK_SENT_MS.load(Ordering::Relaxed);
+            let dt = now_ms.saturating_sub(last_ms);
+            if last_ms != 0 && dt < MIN_ATTACK_INTERVAL_MS {
+                let dropped = OUT_ATTACK_DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
+                // 采样提示，避免刷屏
+                if dropped == 1 || dropped % 50 == 0 {
+                    tracing::debug!(
+                        "🧯 Throttled AttackRequest (dropped x{}, dt={}ms < {}ms)",
+                        dropped,
+                        dt,
+                        MIN_ATTACK_INTERVAL_MS
+                    );
+                }
+                return Ok(());
+            }
+            LAST_ATTACK_SENT_MS.store(now_ms, Ordering::Relaxed);
+
             let packet = client::combat::Attack {
                 direction,
                 spell: Spell::try_from(spell).unwrap_or(Spell::None),
             };
             serialize_packet(stream, &packet)?;
+
+            let n = OUT_ATTACK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+            if n == 1 || n % 10 == 0 {
+                tracing::info!("📤 Sent Attack x{} dir={:?} spell={:?}", n, packet.direction, packet.spell);
+            }
         }
 
         NetworkEvent::MagicRequest {

@@ -52,6 +52,23 @@ impl PacketHandler for CombatHandler {
                         packet.object_id, packet.attacker_id);
                 }
             }
+
+            // DamageIndicator - damage number & target id
+            x if x == ServerPacketIds::DamageIndicator as u16 => {
+                if let Ok(packet) = server::DamageIndicator::read_body(&mut cursor) {
+                    events.push(NetworkEvent::DamageIndicator {
+                        object_id: packet.object_id,
+                        damage: packet.damage,
+                        damage_type: packet.damage_type,
+                    });
+                    tracing::trace!(
+                        "💥 DamageIndicator: object={} dmg={} type={}",
+                        packet.object_id,
+                        packet.damage,
+                        packet.damage_type
+                    );
+                }
+            }
             
             // ObjectDied - another object died
             x if x == ServerPacketIds::ObjectDied as u16 => {
@@ -60,6 +77,47 @@ impl PacketHandler for CombatHandler {
                         object_id: packet.object_id,
                     });
                     tracing::trace!("💀 Object {} died", packet.object_id);
+                }
+            }
+
+            // HealthChanged - local player hp/mp updated
+            x if x == ServerPacketIds::HealthChanged as u16 => {
+                if let Ok(packet) = server::HealthChanged::read_body(&mut cursor) {
+                    // 协议只携带 hp/mp 当前值；max 由客户端已有状态决定。
+                    // 用 max=0 作为“未知/不要覆盖 max”的标记，由落地层处理。
+                    events.push(NetworkEvent::HealthChanged {
+                        current: packet.hp,
+                        max: 0,
+                    });
+                    events.push(NetworkEvent::ManaChanged {
+                        current: packet.mp,
+                        max: 0,
+                    });
+                    tracing::debug!("❤️ HealthChanged hp={} mp={}", packet.hp, packet.mp);
+                }
+            }
+
+            // HeroHealthChanged - ignore for now (no hero ECS yet), but keep parser to avoid Unhandled
+            x if x == ServerPacketIds::HeroHealthChanged as u16 => {
+                if let Ok(packet) = server::HeroHealthChanged::read_body(&mut cursor) {
+                    tracing::trace!("🧡 HeroHealthChanged hp={} mp={}", packet.hp, packet.mp);
+                }
+            }
+
+            // ObjectHealth - percent based health update
+            x if x == ServerPacketIds::ObjectHealth as u16 => {
+                if let Ok(packet) = server::ObjectHealth::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ObjectHealthPercent {
+                        object_id: packet.object_id,
+                        percent: packet.percent,
+                        expire: packet.expire,
+                    });
+                    tracing::trace!(
+                        "🩸 ObjectHealthPercent object={} {}% expire={}",
+                        packet.object_id,
+                        packet.percent,
+                        packet.expire
+                    );
                 }
             }
             

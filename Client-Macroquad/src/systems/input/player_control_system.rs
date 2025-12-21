@@ -1099,10 +1099,18 @@ impl LogicSystem for PlayerControlSystem {
                     }
                     Some((sgx, sgy)) => {
                         if (sgx, sgy) != (pgx, pgy) {
-                            let dist = (sgx - pgx).abs() + (sgy - pgy).abs();
-                            if dist == 1 {
+                            // 允许一步移动：直走/对角都算一步。
+                            // 之前用曼哈顿距离(dist==1)会把对角步长(dist==2)误判为“大跳变”，
+                            // 导致对角移动时完全不发 Walk/Run，从而服务器看不到玩家移动。
+                            let dx = pgx - sgx;
+                            let dy = pgy - sgy;
+                            let is_single_step = dx.abs() <= 1 && dy.abs() <= 1;
+
+                            if is_single_step {
                                 if self.can_send_net_move(now) {
-                                    if let Some(dir) = Self::grid_direction_towards((sgx, sgy), (pgx, pgy)) {
+                                    if let Some(dir) =
+                                        Self::grid_direction_towards((sgx, sgy), (pgx, pgy))
+                                    {
                                         let run = matches!(player.action, PlayerAction::Run);
                                         Self::send_net_move_step(net.as_ref(), run, dir);
                                         self.last_net_move_sent = Some(now);

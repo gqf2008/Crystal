@@ -170,7 +170,12 @@ namespace Server.MirNetwork
             }
             catch
             {
-                Envir.UpdateIPBlock(IPAddress, TimeSpan.FromHours(24));
+                Envir.UpdateIPBlock(
+                    IPAddress,
+                    Settings.TestServer
+                        ? TimeSpan.FromSeconds(Settings.IPBlockSeconds)
+                        : TimeSpan.FromHours(24)
+                );
 
                 MessageQueue.Enqueue($"{IPAddress} Disconnected, Invalid packet.");
 
@@ -180,7 +185,12 @@ namespace Server.MirNetwork
 
             if (_dataCounter > Settings.MaxPacket)
             {
-                Envir.UpdateIPBlock(IPAddress, TimeSpan.FromHours(24));
+                Envir.UpdateIPBlock(
+                    IPAddress,
+                    Settings.TestServer
+                        ? TimeSpan.FromSeconds(Settings.IPBlockSeconds)
+                        : TimeSpan.FromHours(24)
+                );
 
                 List<string> packetList = new List<string>();
 

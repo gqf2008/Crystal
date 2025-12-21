@@ -178,16 +178,22 @@ impl SelectScene {
     }
 
     fn pump_network_for_start_game(&mut self) -> Option<SceneTransition> {
-        let Some(net) = self.net.as_ref() else {
+        // 临时取走 net，避免在持有 `&NetContext` 时又去 `&mut self` 触发借用冲突。
+        let Some(net) = self.net.take() else {
             return None;
         };
 
-        let events = net.recv_all();
-        if events.is_empty() {
-            return None;
-        }
-
-        for ev in events {
+        // 重要：这里不能用 recv_all() 把队列一次性“清空”。
+        // 真服通常会在 StartGame 成功后紧跟发送 UserInformation/MapInformation/Object* 等关键数据。
+        // 如果在选角场景把这些事件都 drain 掉，GameScene 就收不到，会表现为：
+        // - 看不到玩家
+        // - 相机停在地图左上角（默认 0,0）
+        //
+        // 因此这里按事件逐个处理：一旦收到 StartGame 成功，立刻切场景，
+        // 让剩余事件留在队列里由 GameScene 的 NetworkSystem 消费。
+        let mut saw_any = false;
+        while let Some(ev) = net.try_recv() {
+            saw_any = true;
             match ev {
                 NetworkEvent::LoginSuccess { characters } => {
                     // 角色列表刷新（登录后/创建删除后可能都会推）
@@ -231,9 +237,7 @@ impl SelectScene {
                     // C#：Result=4 表示 Success，带 Resolution。
                     if packet.result == 4 {
                         // 场景间移交连接：Select -> Game
-                        if let Some(net) = self.net.take() {
-                            crate::network::set_global_net(net);
-                        }
+                        crate::network::set_global_net(net);
                         return Some(SceneTransition::Game);
                     }
                     self.show_message(&format!("StartGame 失败: result={}", packet.result));
@@ -259,6 +263,13 @@ impl SelectScene {
                 }
                 _ => {}
             }
+        }
+
+        // 未切场景：把 net 放回去
+        self.net = Some(net);
+
+        if !saw_any {
+            return None;
         }
 
         None

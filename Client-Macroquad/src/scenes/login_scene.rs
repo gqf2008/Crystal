@@ -285,21 +285,68 @@ impl LoginScene {
         use std::io::Write;
         use std::path::Path;
 
+        fn upsert_ini_section(existing: &str, section_name: &str, replacement_section: &str) -> String {
+            let mut out = String::with_capacity(existing.len() + replacement_section.len() + 16);
+            let mut in_target = false;
+            let mut replaced = false;
+
+            for line in existing.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                    if in_target {
+                        in_target = false;
+                    }
+
+                    let name = trimmed[1..trimmed.len().saturating_sub(1)].trim();
+                    if name.eq_ignore_ascii_case(section_name) {
+                        if !replaced {
+                            out.push_str(replacement_section.trim_end_matches('\n'));
+                            out.push('\n');
+                            replaced = true;
+                        }
+                        in_target = true;
+                        continue;
+                    }
+                }
+
+                if !in_target {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+
+            if !replaced {
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push_str(replacement_section.trim_end_matches('\n'));
+                out.push('\n');
+            }
+
+            out
+        }
+
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
 
-        let config = format!(
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config.ini");
+        let login_section = format!(
             "[Login]\nAccount={}\nSavePassword=false\nLastLogin={}\nVersion={}\n",
             self.account,
             timestamp,
             env!("CARGO_PKG_VERSION")
         );
 
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config.ini");
+        let content = fs::read_to_string(&path).ok();
+        let merged = match content {
+            Some(existing) => upsert_ini_section(&existing, "Login", &login_section),
+            None => login_section,
+        };
+
         if let Ok(mut file) = fs::File::create(path) {
-            let _ = file.write_all(config.as_bytes());
+            let _ = file.write_all(merged.as_bytes());
             println!("✅ 配置已保存");
         }
     }
