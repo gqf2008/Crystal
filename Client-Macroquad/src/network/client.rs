@@ -28,7 +28,10 @@ impl Network {
     /// 返回：(发送channel, 接收channel)
     /// - 发送channel: 游戏 → 网络 (NetworkEvent)
     /// - 接收channel: 网络 → 游戏 (NetworkEvent)
-    pub fn new<W, R>((w, r): (W, R)) -> (Sender<NetworkEvent>, Receiver<NetworkEvent>)
+    pub fn new<W, R>(
+        (w, r): (W, R),
+        client_version_hash: [u8; 16],
+    ) -> (Sender<NetworkEvent>, Receiver<NetworkEvent>)
     where
         W: Write + Send + 'static,
         R: Read + Send + 'static,
@@ -43,7 +46,7 @@ impl Network {
             std::thread::Builder::new()
                 .name("net-read".into())
                 .spawn(move || {
-                    read_loop(r, tx, to_write);
+                    read_loop(r, tx, to_write, client_version_hash);
                 })
                 .expect("Failed to spawn read thread");
         }
@@ -64,7 +67,12 @@ impl Network {
 }
 
 /// 读线程：持续读取 packet 并转换为 NetworkEvent
-fn read_loop<S: Read + Send>(mut stream: S, tx: Sender<NetworkEvent>, to_write: Sender<NetworkEvent>) {
+fn read_loop<S: Read + Send>(
+    mut stream: S,
+    tx: Sender<NetworkEvent>,
+    to_write: Sender<NetworkEvent>,
+    client_version_hash: [u8; 16],
+) {
     use mir2_shared::packets::PacketHeader;
 
     loop {
@@ -108,7 +116,7 @@ fn read_loop<S: Read + Send>(mut stream: S, tx: Sender<NetworkEvent>, to_write: 
             if matches!(event, NetworkEvent::Connected) {
                 // 立即发送ClientVersion到write线程
                 if let Err(e) = to_write.send(NetworkEvent::ClientVersionSend {
-                    version_hash: vec![0u8; 16], // TODO: 计算实际MD5
+                    version_hash: client_version_hash.to_vec(),
                 }) {
                     tracing::error!("Failed to send ClientVersionSend: {}", e);
                 }

@@ -235,6 +235,9 @@ struct MockWorldState {
     map_rotate_idx: usize,
     last_map_rotate: Instant,
 
+    // AFK watchdog (debug/dev): prevent "no targets => stand still" for long runs.
+    last_afk_watchdog: Instant,
+
     // Local player (server-authoritative)
     player_object_id: u32,
     player_level: u16,
@@ -323,6 +326,8 @@ impl MockWorldState {
             map_rotate_idx: 0,
             last_map_rotate: now,
 
+            last_afk_watchdog: now,
+
             player_object_id: 1,
             player_level: 1,
             player_experience: 0,
@@ -366,6 +371,8 @@ impl MockNetwork {
             let mut state = MockWorldState::new(cfg);
 
             let _ = server_tx.send(NetworkEvent::Connected);
+                // mock 下直接接受版本校验，避免 LoginScene 卡在 version_ok 等待。
+                let _ = server_tx.send(NetworkEvent::ClientVersionResponse { result: 1 });
             let tick_sleep = Duration::from_millis(10);
 
             loop {
@@ -411,6 +418,27 @@ impl MockNetwork {
                 });
             }
 
+            NetworkEvent::NewAccountRequest { account_id, .. } => {
+                // mock 下默认返回成功，便于验证 UI/流程。
+                // 约定：account_id 为 "exists" 时返回“账号已存在”。
+                if account_id.trim().is_empty() {
+                    let _ = response_tx.send(NetworkEvent::NewAccountFailed {
+                        reason: "账号不能为空".to_string(),
+                    });
+                } else if account_id.eq_ignore_ascii_case("exists") {
+                    let _ = response_tx.send(NetworkEvent::NewAccountFailed {
+                        reason: "账号已存在".to_string(),
+                    });
+                } else {
+                    let _ = response_tx.send(NetworkEvent::NewAccountSuccess);
+                }
+            }
+
+            NetworkEvent::ChangePasswordRequest { .. } => {
+                // mock 下直接视为成功，便于验证 UI/流程。
+                let _ = response_tx.send(NetworkEvent::ChangePasswordSuccess);
+            }
+
             NetworkEvent::NewCharacterRequest { name, class, gender } => {
                 let class = MirClass::try_from(class).unwrap_or(MirClass::Warrior);
                 let gender = MirGender::try_from(gender).unwrap_or(MirGender::Male);
@@ -423,7 +451,11 @@ impl MockNetwork {
                     gender,
                     last_access: Utc::now(),
                 });
-                let _ = response_tx.send(NetworkEvent::CharacterCreated { name });
+                if let Some(c) = state.characters.iter().find(|c| c.index == next_index) {
+                    let _ = response_tx.send(NetworkEvent::CharacterCreated {
+                        character: c.clone(),
+                    });
+                }
                 let _ = response_tx.send(NetworkEvent::LoginSuccess {
                     characters: state.characters.clone(),
                 });

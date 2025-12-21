@@ -18,7 +18,7 @@ use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
 
 // 引用库模块
-use client_macroquad::scenes::{CharacterInfo, GameScene, LoadingScene, LoginScene, Scene, SceneKind, SceneTransition, SelectScene};
+use client_macroquad::{scenes::{CharacterInfo, GameScene, LoadingScene, LoginScene, Scene, SceneKind, SceneTransition, SelectScene}, ui::init_chinese_font};
 
 // ============================================================================
 // 常量配置
@@ -56,7 +56,7 @@ async fn main() {
     println!("🎮 传奇2 - 登录场景测试");
     println!("📐 窗口尺寸: {}x{}", WINDOW_WIDTH, WINDOW_HEIGHT);
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
+    init_chinese_font().await;
     // 创建初始场景 (登录场景)
     let mut current_scene = SceneKind::Login(LoginScene::new());
     

@@ -2,8 +2,10 @@
 
 pub mod components;
 pub mod dialogs;
+pub mod additive;
 pub mod text_renderer;
 pub mod ui_state;
+pub mod widgets;
 
 // 导出 text_renderer
 pub use text_renderer::*;

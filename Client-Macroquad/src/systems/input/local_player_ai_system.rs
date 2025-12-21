@@ -203,6 +203,10 @@ pub struct LocalPlayerAiSystem {
     debug_enabled: bool,
     last_debug_log: Instant,
     debug_interval: Duration,
+
+    // 诊断：AI 因 UI 暂停时的低频提示（避免“突然站桩但无提示”）。
+    last_ui_pause_log: Instant,
+    ui_pause_log_interval: Duration,
 }
 
 impl Default for LocalPlayerAiSystem {
@@ -259,8 +263,10 @@ impl Default for LocalPlayerAiSystem {
             })
             .unwrap_or(false);
 
+        let now = Instant::now();
+
         Self {
-            last_scan: Instant::now(),
+            last_scan: now,
             scan_interval: Duration::from_millis(160),
 
             max_acquire_range: 26,
@@ -276,8 +282,11 @@ impl Default for LocalPlayerAiSystem {
             bb: Blackboard::default(),
 
             debug_enabled,
-            last_debug_log: Instant::now(),
+            last_debug_log: now,
             debug_interval: Duration::from_millis(1000),
+
+            last_ui_pause_log: now,
+            ui_pause_log_interval: Duration::from_secs(20),
         }
     }
 }
@@ -873,9 +882,44 @@ impl LogicSystem for LocalPlayerAiSystem {
             return Ok(());
         }
 
-        // UI 正在强占输入（例如对话框/输入框）时，暂停挂机，避免“边点 UI 边乱跑”。
+        // UI 占用输入时暂停挂机，但不要被“宽泛阻塞条件”永久卡死。
+        // 例如：UI 每帧都标记 ui_consumed_last_frame=true，会导致 ctx.input_blocked 永远为 true，
+        // 从而 AI 永久站桩。
         if ctx.input_blocked {
-            return Ok(());
+            let (ui_input_active, ui_mouse_captured, any_modal_or_popup_open, ui_consumed_last_frame) = ctx
+                .world
+                .query::<&UiState>()
+                .iter()
+                .next()
+                .map(|(_, s)| {
+                    let s = s.borrow();
+                    (
+                        s.ui_input_active,
+                        s.ui_mouse_captured,
+                        s.any_modal_or_popup_open,
+                        s.ui_consumed_last_frame,
+                    )
+                })
+                .unwrap_or((false, false, false, false));
+
+            // 只在“真实交互”时暂停（输入框/鼠标捕获/弹窗）。
+            let should_pause = ui_input_active || ui_mouse_captured || any_modal_or_popup_open;
+            if should_pause {
+                if self.last_ui_pause_log.elapsed() >= self.ui_pause_log_interval {
+                    self.last_ui_pause_log = Instant::now();
+                    if let Some((_e, ui)) = ctx.world.query::<&UiState>().iter().next() {
+                        ui.borrow_mut().pending_commands.push(UiCommand::PushSystemChatLine(
+                            format!(
+                                "[AI] 暂停：UI 占用输入 (input_active={}, mouse_captured={}, modal={}, consumed_last_frame={})",
+                                ui_input_active, ui_mouse_captured, any_modal_or_popup_open, ui_consumed_last_frame
+                            ),
+                        ));
+                    }
+                }
+                return Ok(());
+            }
+
+            // 否则：仅因 ui_consumed_last_frame / wheel over UI 等导致的阻塞，不应影响挂机。
         }
 
         // 为避免 `&mut self` 与 `&mut self.bb` 的同时借用冲突，将 bt/bb 临时移出。

@@ -106,7 +106,7 @@ pub enum NetworkEvent {
     StartGameRequest { character_index: i32 },
     
     // 服务器 → 客户端
-    CharacterCreated { name: String },
+    CharacterCreated { character: mir2_shared::SelectInfo },
     CharacterDeleted { index: u32 },
     StartGame { packet: mir2_shared::packets::server::StartGame },
     StartGameDelay { packet: mir2_shared::packets::server::StartGameDelay },

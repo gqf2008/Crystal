@@ -5,6 +5,7 @@
 
 use client_macroquad::game::GameResult;
 use client_macroquad::scenes::{CharacterInfo, GameScene, Scene, SceneTransition, SelectScene};
+use client_macroquad::ui::init_chinese_font;
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
@@ -23,7 +24,7 @@ async fn main() -> GameResult {
     println!("🎮 传奇2 - 角色选择场景测试");
     println!("📐 窗口尺寸: {}x{}", screen_width(), screen_height());
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
+    init_chinese_font().await;
     // 创建测试角色数据 - 只创建2个角色，留出空间测试创建功能
     let characters = vec![
         CharacterInfo {

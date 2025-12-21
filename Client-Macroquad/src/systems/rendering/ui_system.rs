@@ -10,7 +10,7 @@ use crate::scenes::dialogs::game::{
     npc_goods_dialog::NpcGoodsDialogHybrid, MainDialog,
 };
 use crate::systems::RenderSystem;
-use crate::ui::text_renderer::draw_text_cn;
+use crate::ui::text_renderer::{draw_text_cn, draw_text_with_outline, measure_text_cn};
 use crate::ui::ui_state::{UiAction, UiCommand, UiState};
 
 #[derive(ecs_macros::RenderSystem)]
@@ -545,6 +545,44 @@ impl RenderSystem for UIRenderSystem {
                 || npc_sub_consumed
                 || amount_consumed
                 || npc_dialog_consumed;
+        }
+
+        // 死亡倒计时（回城复活）
+        // - 仅显示给本地玩家
+        // - 倒计时来源：DeathState.start_time（ObjectDied/HealthChanged->0 时挂载）
+        // - 当前 mock 复活延迟为 5 秒
+        {
+            use crate::components::{DeathState, Health, LocalPlayer};
+
+            const RESPAWN_DELAY_SECS: f32 = 5.0;
+
+            let mut q = _world.query::<(&LocalPlayer, &Health, &DeathState)>();
+            if let Some((_e, (_lp, hp, ds))) = q.iter().next() {
+                if hp.current <= 0 {
+                    let elapsed = std::time::Instant::now()
+                        .duration_since(ds.start_time)
+                        .as_secs_f32();
+                    let remaining = (RESPAWN_DELAY_SECS - elapsed).ceil() as i32;
+
+                    let text = if remaining > 0 {
+                        format!("你已死亡，{} 秒后回城复活", remaining)
+                    } else {
+                        "正在回城复活...".to_string()
+                    };
+                    let font_size = 36.0;
+                    let dims = measure_text_cn(&text, font_size);
+                    let x = screen_width() / 2.0 - dims.width / 2.0;
+                    let y = screen_height() * 0.28;
+                    draw_text_with_outline(
+                        &text,
+                        x,
+                        y,
+                        font_size,
+                        Color::from_rgba(255, 255, 255, 230),
+                        Color::from_rgba(0, 0, 0, 220),
+                    );
+                }
+            }
         }
 
         // 快捷键提示（覆盖在 UI 之上）

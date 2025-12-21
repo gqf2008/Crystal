@@ -11,6 +11,7 @@ use crate::core::GameError;
 use crate::network::NetworkEvent;
 use crate::scenes::*;
 use macroquad::prelude::*;
+use mir2_shared::SelectInfo;
 
 // 重导出常用类型
 pub use crate::coord::{Coord, MapUtils};
@@ -343,15 +344,22 @@ impl GameState {
         let mut new_scene = match transition {
             SceneTransition::Login => SceneKind::Login(LoginScene::new()),
             SceneTransition::CharacterSelect => {
-                // 临时：登录场景目前未接入真实网络拉取角色列表，这里给一个最小示例角色，打通“选择 -> 开始游戏 -> 进入游戏场景”闭环。
-                let characters = vec![CharacterInfo {
-                    index: 0,
-                    name: "测试角色".to_string(),
-                    level: 1,
-                    class: 0,
-                    gender: 0,
-                    last_access: "刚刚".to_string(),
-                }];
+                // 来自 LoginScene 的真实角色列表（无则回退到最小示例，保证离线可跑）
+                let characters: Vec<CharacterInfo> = match crate::network::take_global_characters() {
+                    Some(list) => {
+                        // 写回全局：保证返回选角时还能继续显示真实角色
+                        crate::network::set_global_characters(list.clone());
+                        list.into_iter().map(select_info_to_character_info).collect()
+                    }
+                    None => vec![CharacterInfo {
+                        index: 0,
+                        name: "测试角色".to_string(),
+                        level: 1,
+                        class: 0,
+                        gender: 0,
+                        last_access: "刚刚".to_string(),
+                    }],
+                };
                 SceneKind::CharacterSelect(SelectScene::new(characters)?)
             }
             SceneTransition::Game => {
@@ -375,6 +383,19 @@ impl GameState {
         self.current_scene = new_scene;
         
         Ok(())
+    }
+}
+
+fn select_info_to_character_info(info: SelectInfo) -> CharacterInfo {
+    let last_access = info.last_access.format("%Y-%m-%d %H:%M").to_string();
+
+    CharacterInfo {
+        index: info.index,
+        name: info.name,
+        level: info.level,
+        class: info.class as u8,
+        gender: info.gender as u8,
+        last_access,
     }
 }
 

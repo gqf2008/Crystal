@@ -416,6 +416,7 @@ impl Scene for GameScene {
             if cfg.use_mock {
                 if let Ok(net) = crate::network::NetworkBuilder::new(cfg.server_addr)
                     .with_mock(true)
+                    .with_client_version_hash(cfg.client_version_hash)
                     .build()
                 {
                     self.ecs_ctx.set_net(net);

@@ -1279,13 +1279,31 @@ impl NetworkApplySystem {
     }
 
     fn apply_object_attack(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectAttack) {
-        use crate::components::{AttackState, LocalPlayer, MirAction, Monster, MonsterAnimState, Player, PlayerAction};
+        use crate::components::{AttackState, LocalPlayer, MirAction, Monster, MonsterAnimState, Player, PlayerAction, Position};
         use std::time::Instant;
-
-        Self::apply_object_move(ctx, packet.object_id, packet.location_x as i32, packet.location_y as i32);
         let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
             return;
         };
+
+        // 远程对象：不要在每个攻击包上都硬矫正位置，否则会把 walk/run 的插值打断，导致“瞬移/抽风”。
+        // 只有差距较大（例如>2格）才强制矫正。
+        let is_local = ctx.world.get::<&LocalPlayer>(e).is_ok();
+        if is_local {
+            Self::apply_object_move(ctx, packet.object_id, packet.location_x as i32, packet.location_y as i32);
+        } else {
+            let should_apply_pos = match ctx.world.get::<&Position>(e) {
+                Ok(pos) => {
+                    let (gx, gy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+                    let dx = (gx - packet.location_x as i32).abs();
+                    let dy = (gy - packet.location_y as i32).abs();
+                    dx.max(dy) > 2
+                }
+                Err(_) => true,
+            };
+            if should_apply_pos {
+                Self::apply_object_move(ctx, packet.object_id, packet.location_x as i32, packet.location_y as i32);
+            }
+        }
 
         let dir = match mir2_shared::enums::MirDirection::try_from(packet.direction) {
             Ok(d) => d,
@@ -1303,7 +1321,6 @@ impl NetworkApplySystem {
             p.action = attack_action;
         }
 
-        let is_local = ctx.world.get::<&LocalPlayer>(e).is_ok();
         let mut need_insert_attack_state = true;
         {
             if let Ok(mut s) = ctx.world.get::<&mut AttackState>(e) {
@@ -1387,6 +1404,15 @@ impl LogicSystem for NetworkApplySystem {
             return Ok(());
         }
 
+        // 同一帧内 mock/网络层可能会对同一对象推送多条 walk/run/attack。
+        // 这里做一次“按 object_id 合并取最后一条”，避免插值/动画被频繁打断导致瞬移/抽风。
+        use std::collections::HashMap;
+
+        enum RemoteMovePacket {
+            Walk(mir2_shared::packets::server::ObjectWalk),
+            Run(mir2_shared::packets::server::ObjectRun),
+        }
+
         let mut user_info: Option<mir2_shared::packets::server::UserInformation> = None;
         let mut map_changed: Option<mir2_shared::packets::server::MapChanged> = None;
         let mut start_game: Option<mir2_shared::packets::server::StartGame> = None;
@@ -1400,10 +1426,9 @@ impl LogicSystem for NetworkApplySystem {
         let mut object_npcs: Vec<mir2_shared::packets::server::ObjectNpc> = Vec::new();
         let mut object_players: Vec<mir2_shared::packets::server::ObjectPlayer> = Vec::new();
         let mut object_removes: Vec<u32> = Vec::new();
-        let mut object_walks: Vec<mir2_shared::packets::server::ObjectWalk> = Vec::new();
-        let mut object_runs: Vec<mir2_shared::packets::server::ObjectRun> = Vec::new();
+        let mut object_moves: HashMap<u32, RemoteMovePacket> = HashMap::new();
         let mut object_turns: Vec<mir2_shared::packets::server::ObjectTurn> = Vec::new();
-        let mut object_attacks: Vec<mir2_shared::packets::server::ObjectAttack> = Vec::new();
+        let mut object_attacks: HashMap<u32, mir2_shared::packets::server::ObjectAttack> = HashMap::new();
 
         // 本地玩家：server-driven 状态（对齐真服）
         let mut player_location_changed: Option<(i32, i32)> = None;
@@ -1467,16 +1492,16 @@ impl LogicSystem for NetworkApplySystem {
                     object_removes.push(packet.object_id);
                 }
                 NetworkEvent::ObjectWalk { packet } => {
-                    object_walks.push(packet.clone());
+                    object_moves.insert(packet.object_id, RemoteMovePacket::Walk(packet.clone()));
                 }
                 NetworkEvent::ObjectRun { packet } => {
-                    object_runs.push(packet.clone());
+                    object_moves.insert(packet.object_id, RemoteMovePacket::Run(packet.clone()));
                 }
                 NetworkEvent::ObjectTurn { packet } => {
                     object_turns.push(packet.clone());
                 }
                 NetworkEvent::ObjectAttack { packet } => {
-                    object_attacks.push(packet.clone());
+                    object_attacks.insert(packet.object_id, packet.clone());
                 }
 
                 // ===== server-driven: local player state =====
@@ -1588,13 +1613,13 @@ impl LogicSystem for NetworkApplySystem {
         for p in object_turns {
             Self::apply_object_turn(ctx, p);
         }
-        for p in object_walks {
-            Self::apply_object_walk(ctx, p);
+        for (_, p) in object_moves {
+            match p {
+                RemoteMovePacket::Walk(p) => Self::apply_object_walk(ctx, p),
+                RemoteMovePacket::Run(p) => Self::apply_object_run(ctx, p),
+            }
         }
-        for p in object_runs {
-            Self::apply_object_run(ctx, p);
-        }
-        for p in object_attacks {
+        for (_, p) in object_attacks {
             Self::apply_object_attack(ctx, p);
         }
 
@@ -1738,7 +1763,21 @@ impl LogicSystem for NetworkApplySystem {
                         .ok()
                         .map(|hp| hp.current <= 0)
                         .unwrap_or(false);
-                    dead
+
+                    // 允许“大跨度跳变”：通常代表传送/回城复活/换图落点修正。
+                    // 选择一个偏大的阈值，避免正常移动时偶发的对齐包造成拉扯。
+                    let large_jump = ctx
+                        .world
+                        .get::<&crate::components::Position>(e)
+                        .ok()
+                        .map(|pos| {
+                            let (cgx, cgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+                            let manhattan = (cgx - gx).abs() + (cgy - gy).abs();
+                            manhattan >= 12
+                        })
+                        .unwrap_or(true);
+
+                    dead || large_jump
                 };
 
                 if should_apply {
@@ -2090,6 +2129,34 @@ impl LogicSystem for NetworkApplySystem {
                         );
                     }
                 }
+            }
+        }
+
+        // ===== final reconcile: local player HP is server-authoritative =====
+        // 说明：本帧内可能同时到达 ObjectStruck/ObjectDied 与 HealthChanged。
+        // 为避免后续处理把本地玩家血量又改回 0（导致死亡 UI 卡住），这里在帧末再用 HealthChanged 覆盖一次。
+        if let (Some(e), Some((cur, max))) = (local_player_entity, player_health_changed) {
+            let mut inserted = false;
+            {
+                if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(e) {
+                    hp.current = cur as i32;
+                    hp.max = max as i32;
+                    inserted = true;
+                }
+            }
+            if !inserted {
+                let _ = ctx.world.insert_one(
+                    e,
+                    crate::components::Health {
+                        current: cur as i32,
+                        max: max as i32,
+                    },
+                );
+            }
+
+            // 复活/回血：清掉死亡动画状态
+            if (cur as i32) > 0 {
+                let _ = ctx.world.remove_one::<crate::components::DeathState>(e);
             }
         }
 

@@ -14,8 +14,10 @@ pub use handlers::NetworkEvent;
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 use std::path::Path;
+use mir2_shared::SelectInfo;
 
 static GLOBAL_NET: Lazy<Mutex<Option<NetContext>>> = Lazy::new(|| Mutex::new(None));
+static GLOBAL_CHARACTERS: Lazy<Mutex<Option<Vec<SelectInfo>>>> = Lazy::new(|| Mutex::new(None));
 
 pub(crate) fn read_config_ini() -> Option<String> {
 	// 优先读取当前工作目录（方便用户直接在运行目录放 config.ini）
@@ -32,6 +34,10 @@ pub(crate) fn read_config_ini() -> Option<String> {
 pub struct NetworkRuntimeConfig {
 	pub server_addr: String,
 	pub use_mock: bool,
+	/// ClientVersion 的 MD5(16 bytes)，用于通过服务端版本校验。
+	///
+	/// 对应服务端 `Settings.VersionHashes`，如果服务端 `CheckVersion=true`，则必须匹配其中之一。
+	pub client_version_hash: [u8; 16],
 	/// 远程玩家走路插值时长（毫秒），用于消除“瞬移感”
 	pub remote_interp_walk_ms: u32,
 	/// 远程玩家跑路插值时长（毫秒），用于消除“瞬移感”
@@ -44,11 +50,41 @@ impl Default for NetworkRuntimeConfig {
 			server_addr: "127.0.0.1:7000".to_string(),
 			// 默认走 mock：保证离线可跑；需要真服时在 config.ini 设置 UseMock=false
 			use_mock: true,
+			// 默认 0：如果服务端开启 CheckVersion，这会被拒绝，需要在 config.ini 配置实际 hash
+			client_version_hash: [0u8; 16],
 			// 默认值匹配当前手感（walk≈0.16s, run≈0.11s）
 			remote_interp_walk_ms: 160,
 			remote_interp_run_ms: 110,
 		}
 	}
+}
+
+fn parse_hex_16_bytes(value: &str) -> Option<[u8; 16]> {
+	let mut s = value.trim();
+	if s.starts_with("0x") || s.starts_with("0X") {
+		s = &s[2..];
+	}
+
+	// 允许中间有空格或分隔符
+	let mut hex = String::with_capacity(s.len());
+	for ch in s.chars() {
+		if ch.is_ascii_hexdigit() {
+			hex.push(ch);
+		}
+	}
+	if hex.len() != 32 {
+		return None;
+	}
+
+	let mut out = [0u8; 16];
+	for i in 0..16 {
+		let hi = hex.as_bytes()[i * 2];
+		let lo = hex.as_bytes()[i * 2 + 1];
+		let pair = [hi, lo];
+		let byte_str = std::str::from_utf8(&pair).ok()?;
+		out[i] = u8::from_str_radix(byte_str, 16).ok()?;
+	}
+	Some(out)
 }
 
 /// 从 `config.ini` 读取网络运行时配置。
@@ -57,6 +93,7 @@ impl Default for NetworkRuntimeConfig {
 /// - [Network] UseMock=true/false
 /// - [Network] ServerAddr=IP:PORT
 /// - 兼容键：ServerAddress=IP, ServerPort=7000
+/// - [Network] ClientVersionHash=32位HEX (用于服务端 CheckVersion)
 /// - [Network] RemoteInterpWalkMs=160
 /// - [Network] RemoteInterpRunMs=110
 pub fn load_network_runtime_config() -> NetworkRuntimeConfig {
@@ -135,6 +172,18 @@ pub fn load_network_runtime_config() -> NetworkRuntimeConfig {
 			}
 			continue;
 		}
+
+		if key.eq_ignore_ascii_case("ClientVersionHash") {
+			if let Some(hash) = parse_hex_16_bytes(value) {
+				cfg.client_version_hash = hash;
+			} else {
+				tracing::warn!(
+					"Invalid ClientVersionHash '{}', expected 32 hex digits; using default.",
+					value
+				);
+			}
+			continue;
+		}
 	}
 
 	if let (Some(addr), Some(port)) = (server_address, server_port) {
@@ -153,4 +202,15 @@ pub fn set_global_net(net: NetContext) {
 /// 取走全局网络上下文（用于进入 GameScene 时接管连接）。
 pub fn take_global_net() -> Option<NetContext> {
 	GLOBAL_NET.lock().expect("GLOBAL_NET poisoned").take()
+}
+
+/// 设置全局角色列表（用于 LoginScene -> SelectScene 的数据移交）。
+pub fn set_global_characters(characters: Vec<SelectInfo>) {
+	let mut guard = GLOBAL_CHARACTERS.lock().expect("GLOBAL_CHARACTERS poisoned");
+	*guard = Some(characters);
+}
+
+/// 取走全局角色列表（用于创建 SelectScene）。
+pub fn take_global_characters() -> Option<Vec<SelectInfo>> {
+	GLOBAL_CHARACTERS.lock().expect("GLOBAL_CHARACTERS poisoned").take()
 }

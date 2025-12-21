@@ -10,10 +10,18 @@
 // ============================================================================
 
 use crate::game::GameResult;
+use crate::network::{NetContext, NetworkBuilder, NetworkEvent};
 use crate::resources::LibraryName;
 use crate::scenes::{Scene, SceneTransition};
 use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
+use crate::ui::widgets::{draw_button, draw_input_box, draw_message_box};
 use macroquad::prelude::*;
+
+mod change_password_dialog;
+mod new_account_dialog;
+
+use change_password_dialog::ChangePasswordFocus;
+use new_account_dialog::NewAccountFocus;
 
 /// 登录场景 - 纯 Native 版本
 pub struct LoginScene {
@@ -37,6 +45,34 @@ pub struct LoginScene {
     // 消息框
     show_message: bool,
     message_text: String,
+
+    // 改密码对话框（对应原版 ChangePasswordDialog）
+    show_change_password: bool,
+    cp_account_id: String,
+    cp_current_password: String,
+    cp_new_password1: String,
+    cp_new_password2: String,
+    cp_focus: ChangePasswordFocus,
+    cp_in_flight: bool,
+
+    // 新建账号对话框（对应原版 NewAccountDialog）
+    show_new_account: bool,
+    na_account_id: String,
+    na_password1: String,
+    na_password2: String,
+    na_user_name: String,
+    na_birth_date: String,
+    na_question: String,
+    na_answer: String,
+    na_email: String,
+    na_focus: NewAccountFocus,
+    na_in_flight: bool,
+
+    // 网络
+    net: Option<NetContext>,
+    cfg: crate::network::NetworkRuntimeConfig,
+    login_pending: bool,
+    version_ok: bool,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -65,7 +101,117 @@ impl LoginScene {
             
             show_message: false,
             message_text: String::new(),
+
+            show_change_password: false,
+            cp_account_id: String::new(),
+            cp_current_password: String::new(),
+            cp_new_password1: String::new(),
+            cp_new_password2: String::new(),
+            cp_focus: ChangePasswordFocus::AccountId,
+            cp_in_flight: false,
+
+            show_new_account: false,
+            na_account_id: String::new(),
+            na_password1: String::new(),
+            na_password2: String::new(),
+            na_user_name: String::new(),
+            na_birth_date: String::new(),
+            na_question: String::new(),
+            na_answer: String::new(),
+            na_email: String::new(),
+            na_focus: NewAccountFocus::AccountId,
+            na_in_flight: false,
+
+            net: None,
+            cfg: crate::network::load_network_runtime_config(),
+            login_pending: false,
+            version_ok: false,
         }
+    }
+
+    fn ensure_network(&mut self) {
+        if self.net.is_some() {
+            return;
+        }
+
+        self.cfg = crate::network::load_network_runtime_config();
+        let builder = NetworkBuilder::new(self.cfg.server_addr.clone())
+            .with_mock(self.cfg.use_mock)
+            .with_client_version_hash(self.cfg.client_version_hash);
+        match builder.build() {
+            Ok(net) => {
+                self.net = Some(net);
+                self.version_ok = self.cfg.use_mock;
+            }
+            Err(e) => {
+                self.message_text = format!("网络初始化失败: {e}");
+                self.show_message = true;
+            }
+        }
+    }
+
+    fn pump_network(&mut self) -> Option<Vec<mir2_shared::SelectInfo>> {
+        let Some(net) = self.net.as_ref() else {
+            return None;
+        };
+
+        let events = net.recv_all();
+        if events.is_empty() {
+            return None;
+        }
+
+        for ev in events {
+            match ev {
+                NetworkEvent::ClientVersionResponse { result } => {
+                    if result == 1 {
+                        self.version_ok = true;
+                    } else {
+                        self.message_text = "客户端版本不匹配（ClientVersion 被服务器拒绝）".to_string();
+                        self.show_message = true;
+                    }
+                }
+                NetworkEvent::Disconnected { reason } => {
+                    self.message_text = format!("已断开连接: {reason}");
+                    self.show_message = true;
+                }
+                NetworkEvent::LoginSuccess { characters } => {
+                    return Some(characters);
+                }
+                NetworkEvent::LoginFailed { reason } => {
+                    self.message_text = reason;
+                    self.show_message = true;
+                }
+                NetworkEvent::NewAccountSuccess => {
+                    self.na_in_flight = false;
+                    self.message_text = "账号创建成功".to_string();
+                    self.show_message = true;
+
+                    // 便于后续直接登录：预填登录框
+                    self.account = self.na_account_id.clone();
+                    self.password = self.na_password1.clone();
+                    self.close_new_account_dialog();
+                }
+                NetworkEvent::NewAccountFailed { reason } => {
+                    self.na_in_flight = false;
+                    self.message_text = reason;
+                    self.show_message = true;
+                }
+                NetworkEvent::ChangePasswordSuccess => {
+                    self.cp_in_flight = false;
+                    self.message_text = "密码修改成功".to_string();
+                    self.show_message = true;
+                    self.close_change_password_dialog();
+                }
+                NetworkEvent::ChangePasswordFailed { reason } => {
+                    self.cp_in_flight = false;
+                    self.message_text = reason;
+                    self.show_message = true;
+                }
+                _ => {}
+            }
+        }
+
+        None
     }
 
     /// 绘制登录对话框背景
@@ -73,27 +219,18 @@ impl LoginScene {
         let screen_w = screen_width();
         let screen_h = screen_height();
 
-        // 获取背景纹理并计算居中位置
-        let (dialog_w, dialog_h, dialog_x, dialog_y) =
-            if let Some(info) = LibraryName::Prguse.get_texture(1084) {
-                if let Some(ref bg_tex) = info.image {
-                    let w = bg_tex.width();
-                    let h = bg_tex.height();
-                    let x = (screen_w - w) / 2.0;
-                    let y = (screen_h - h) / 2.0;
+        // 原版固定对话框尺寸：328x220
+        let dialog_w = 328.0;
+        let dialog_h = 220.0;
+        let dialog_x = (screen_w - dialog_w) / 2.0;
+        let dialog_y = (screen_h - dialog_h) / 2.0;
 
-                    draw_texture(bg_tex, x, y, WHITE);
-                    (w, h, x, y)
-                } else {
-                    let w = 328.0;
-                    let h = 220.0;
-                    (w, h, (screen_w - w) / 2.0, (screen_h - h) / 2.0)
-                }
-            } else {
-                let w = 328.0;
-                let h = 220.0;
-                (w, h, (screen_w - w) / 2.0, (screen_h - h) / 2.0)
-            };
+        // 背景 Prguse[1084]
+        if let Some(info) = LibraryName::Prguse.get_texture(1084) {
+            if let Some(ref bg_tex) = info.image {
+                draw_texture(bg_tex, dialog_x, dialog_y, WHITE);
+            }
+        }
 
         // 绘制标题 (Title 30)
         if let Some(info) = LibraryName::Title.get_texture(30) {
@@ -122,104 +259,7 @@ impl LoginScene {
         (dialog_w, dialog_h, dialog_x, dialog_y)
     }
 
-    /// 绘制输入框
-    fn draw_input_box(&self, x: f32, y: f32, width: f32, height: f32, text: &str, is_password: bool, is_focused: bool) {
-        // 绘制背景
-        let bg_color = if is_focused {
-            Color::from_rgba(40, 40, 50, 255)
-        } else {
-            Color::from_rgba(30, 30, 40, 255)
-        };
-        draw_rectangle(x, y, width, height, bg_color);
-        
-        // 绘制边框
-        let border_color = if is_focused {
-            Color::from_rgba(100, 150, 200, 255)
-        } else {
-            Color::from_rgba(60, 60, 80, 255)
-        };
-        draw_rectangle_lines(x, y, width, height, 1.0, border_color);
-        
-        // 绘制文本
-        let display_text = if is_password {
-            "*".repeat(text.len())
-        } else {
-            text.to_string()
-        };
-        
-        let text_y = y + height / 2.0 + 5.0;
-        draw_text_cn(&display_text, x + 5.0, text_y, 14.0, WHITE);
-        
-        // 绘制光标
-        if is_focused && self.cursor_visible {
-            let text_width = measure_text_cn(&display_text, 14.0).width;
-            let cursor_x = x + 5.0 + text_width;
-            draw_line(cursor_x, y + 3.0, cursor_x, y + height - 3.0, 1.0, WHITE);
-        }
-    }
-
-    /// 绘制按钮
-    fn draw_button(&self, x: f32, y: f32, normal_idx: usize, hover_idx: usize, pressed_idx: usize) -> bool {
-        let (mx, my) = mouse_position();
-        
-        let btn_size = if let Some(info) = LibraryName::Prguse.get_texture(normal_idx) {
-            (info.width as f32, info.height as f32)
-        } else {
-            (80.0, 25.0)
-        };
-        
-        let is_hovered = mx >= x && mx <= x + btn_size.0 && my >= y && my <= y + btn_size.1;
-        let is_pressed = is_hovered && is_mouse_button_down(MouseButton::Left);
-        
-        let texture_idx = if is_pressed {
-            pressed_idx
-        } else if is_hovered {
-            hover_idx
-        } else {
-            normal_idx
-        };
-        
-        if let Some(info) = LibraryName::Prguse.get_texture(texture_idx) {
-            if let Some(ref tex) = info.image {
-                draw_texture(tex, x, y, WHITE);
-            }
-        } else {
-            // 降级绘制
-            let color = if is_pressed {
-                Color::from_rgba(100, 100, 150, 255)
-            } else if is_hovered {
-                Color::from_rgba(80, 80, 100, 255)
-            } else {
-                Color::from_rgba(60, 60, 80, 255)
-            };
-            draw_rectangle(x, y, btn_size.0, btn_size.1, color);
-            draw_rectangle_lines(x, y, btn_size.0, btn_size.1, 1.0, WHITE);
-        }
-        
-        is_hovered && is_mouse_button_pressed(MouseButton::Left)
-    }
-
-    /// 绘制消息框
-    fn draw_message_box(&self) {
-        let screen_w = screen_width();
-        let screen_h = screen_height();
-        
-        let box_w = 300.0;
-        let box_h = 150.0;
-        let box_x = (screen_w - box_w) / 2.0;
-        let box_y = (screen_h - box_h) / 2.0;
-        
-        // 背景
-        draw_rectangle(box_x, box_y, box_w, box_h, Color::from_rgba(40, 40, 50, 240));
-        draw_rectangle_lines(box_x, box_y, box_w, box_h, 2.0, Color::from_rgba(100, 100, 120, 255));
-        
-        // 标题
-        draw_text_cn("提示", box_x + box_w / 2.0 - 15.0, box_y + 30.0, 18.0, WHITE);
-        
-        // 消息文本
-        let text_width = measure_text_cn(&self.message_text, 14.0).width;
-        draw_text_cn(&self.message_text, box_x + (box_w - text_width) / 2.0, box_y + 70.0, 14.0, WHITE);
-    }
+    // 通用 UI 绘制（输入框/按钮/消息框）已抽到 crate::ui::widgets
 
     /// 登录按钮点击
     fn on_login_clicked(&mut self) {
@@ -234,9 +274,9 @@ impl LoginScene {
         // 保存配置
         self.save_config();
 
-        // 开始播放登录成功动画
-        self.animation_playing = true;
-        self.background_frame = 0;
+        // 触发真实登录流程：连接服务器 + 登录
+        self.ensure_network();
+        self.login_pending = true;
     }
 
     /// 保存配置到本地文件
@@ -339,6 +379,13 @@ impl Scene for LoginScene {
         self.account.clear();
         self.password.clear();
         self.load_config();
+
+        self.net = None;
+        self.cfg = crate::network::load_network_runtime_config();
+        self.login_pending = false;
+        self.version_ok = false;
+        self.animation_playing = false;
+        self.background_frame = 0;
         println!("🎬 进入登录界面");
         Ok(())
     }
@@ -370,6 +417,46 @@ impl Scene for LoginScene {
             }
         }
 
+        // 处理登录请求（在 update 中发包，避免 render 阶段做 IO）
+        if self.login_pending {
+            self.ensure_network();
+            if let Some(net) = self.net.as_ref() {
+                if !self.version_ok {
+                    // 等待 ClientVersionResponse；保持 pending，版本 OK 后自动发送 LoginRequest
+                    self.message_text = "正在校验版本...".to_string();
+                    self.show_message = true;
+                } else {
+                    self.login_pending = false;
+                    if let Err(e) = net.send(NetworkEvent::LoginRequest {
+                        username: self.account.clone(),
+                        password: self.password.clone(),
+                    }) {
+                        self.message_text = format!("发送 LoginRequest 失败: {e}");
+                        self.show_message = true;
+                    } else {
+                        self.message_text = "正在登录...".to_string();
+                        self.show_message = true;
+                    }
+                }
+            }
+        }
+
+        // 轮询网络：等待登录成功
+        if !self.animation_playing {
+            if let Some(characters) = self.pump_network() {
+                // 成功：把连接与角色列表移交给后续场景
+                crate::network::set_global_characters(characters);
+                if let Some(net) = self.net.take() {
+                    crate::network::set_global_net(net);
+                }
+
+                self.show_message = false;
+                self.animation_playing = true;
+                self.background_frame = 0;
+                self.frame_timer = 0.0;
+            }
+        }
+
         self.handle_input()?;
 
         Ok(SceneTransition::None)
@@ -393,54 +480,133 @@ impl Scene for LoginScene {
 
         // 如果没有播放动画，绘制登录对话框
         if !self.animation_playing {
-            let (dialog_w, _dialog_h, dialog_x, dialog_y) = self.draw_login_background();
+            // 改密码弹窗优先（原版会隐藏登录对话框）
+            if self.show_change_password {
+                self.draw_change_password_dialog();
+                // 仍允许显示消息框
+            } else if self.show_new_account {
+                self.draw_new_account_dialog();
+            } else {
+                let (_dialog_w, dialog_h, dialog_x, dialog_y) = self.draw_login_background();
             
             // 绘制输入框
-            let input_x = dialog_x + 86.0;
+            // 原版坐标：AccountIDTextBox (85,85) size(136,15), PasswordTextBox (85,108) size(136,15)
+            let input_x = dialog_x + 85.0;
             let input_w = 136.0;
-            let input_h = 18.0;
+            let input_h = 15.0;
             
             // 账号输入框
-            let account_y = dialog_y + 71.0;
-            self.draw_input_box(input_x, account_y, input_w, input_h, &self.account, false, self.input_focus == InputFocus::Account);
+            let account_y = dialog_y + 85.0;
+            draw_input_box(
+                input_x,
+                account_y,
+                input_w,
+                input_h,
+                &self.account,
+                false,
+                self.input_focus == InputFocus::Account,
+                self.cursor_visible,
+                14.0,
+            );
             
             // 密码输入框
-            let password_y = dialog_y + 93.0;
-            self.draw_input_box(input_x, password_y, input_w, input_h, &self.password, true, self.input_focus == InputFocus::Password);
-            
-            // 绘制按钮
-            let btn_y = dialog_y + 130.0;
-            let btn_spacing = 80.0;
-            let btn_start_x = dialog_x + (dialog_w - 4.0 * btn_spacing) / 2.0;
-            
-            // 登录按钮 (Prguse 192-194)
-            if self.draw_button(btn_start_x, btn_y, 192, 193, 194) {
+            let password_y = dialog_y + 108.0;
+            draw_input_box(
+                input_x,
+                password_y,
+                input_w,
+                input_h,
+                &self.password,
+                true,
+                self.input_focus == InputFocus::Password,
+                self.cursor_visible,
+                14.0,
+            );
+
+            // 按钮：对齐原版 C# LoginDialog
+            // OKButton Title[320-322] at (227,81) size 42x42
+            let ok_enabled = !self.account.is_empty() && !self.password.is_empty();
+            if draw_button(
+                LibraryName::Title,
+                dialog_x + 227.0,
+                dialog_y + 81.0,
+                320,
+                321,
+                322,
+                ok_enabled,
+            ) {
                 self.on_login_clicked();
             }
-            
-            // 新建账号按钮 (Prguse 195-197)
-            if self.draw_button(btn_start_x + btn_spacing, btn_y, 195, 196, 197) {
-                println!("🆕 新建账号");
+
+            // AccountButton Title[323-325] at (60,163)
+            if draw_button(
+                LibraryName::Title,
+                dialog_x + 60.0,
+                dialog_y + 163.0,
+                323,
+                324,
+                325,
+                true,
+            ) {
+                self.open_new_account_dialog();
             }
-            
-            // 修改密码按钮 (Prguse 198-200)
-            if self.draw_button(btn_start_x + btn_spacing * 2.0, btn_y, 198, 199, 200) {
-                println!("🔑 修改密码");
+
+            // PassButton Title[326-328] at (166,163)
+            if draw_button(
+                LibraryName::Title,
+                dialog_x + 166.0,
+                dialog_y + 163.0,
+                326,
+                327,
+                328,
+                true,
+            ) {
+                self.open_change_password_dialog();
             }
-            
-            // 退出按钮 (Prguse 201-203)
-            if self.draw_button(btn_start_x + btn_spacing * 3.0, btn_y, 201, 202, 203) {
+
+            // ViewKeyButton Title[332-334] at (60,189)
+            if draw_button(
+                LibraryName::Title,
+                dialog_x + 60.0,
+                dialog_y + 189.0,
+                332,
+                333,
+                334,
+                true,
+            ) {
+                println!("🔎 查看密钥");
+            }
+
+            // CloseButton Title[329-331] at (166,189)
+            if draw_button(
+                LibraryName::Title,
+                dialog_x + 166.0,
+                dialog_y + 189.0,
+                329,
+                330,
+                331,
+                true,
+            ) {
                 std::process::exit(0);
             }
+
+            // 左下角显示当前服务器/模式（不增加交互，仅提示）
+            let status = if self.cfg.use_mock {
+                format!("服务器: {}  模式: Mock", self.cfg.server_addr)
+            } else {
+                format!("服务器: {}", self.cfg.server_addr)
+            };
+            draw_text_cn(&status, dialog_x + 10.0, dialog_y + dialog_h - 10.0, 12.0, LIGHTGRAY);
             
-            // 处理点击输入框切换焦点
-            let (mx, my) = mouse_position();
-            if is_mouse_button_pressed(MouseButton::Left) {
-                if mx >= input_x && mx <= input_x + input_w {
-                    if my >= account_y && my <= account_y + input_h {
-                        self.input_focus = InputFocus::Account;
-                    } else if my >= password_y && my <= password_y + input_h {
-                        self.input_focus = InputFocus::Password;
+                // 处理点击输入框切换焦点
+                let (mx, my) = mouse_position();
+                if is_mouse_button_pressed(MouseButton::Left) {
+                    if mx >= input_x && mx <= input_x + input_w {
+                        if my >= account_y && my <= account_y + input_h {
+                            self.input_focus = InputFocus::Account;
+                        } else if my >= password_y && my <= password_y + input_h {
+                            self.input_focus = InputFocus::Password;
+                        }
                     }
                 }
             }
@@ -448,7 +614,7 @@ impl Scene for LoginScene {
 
         // 绘制消息框
         if self.show_message {
-            self.draw_message_box();
+            draw_message_box(&self.message_text);
             
             // 点击任意位置关闭消息框
             if is_mouse_button_pressed(MouseButton::Left) {
@@ -463,6 +629,10 @@ impl Scene for LoginScene {
         if is_key_pressed(KeyCode::Escape) {
             if self.show_message {
                 self.show_message = false;
+            } else if self.show_new_account {
+                self.close_new_account_dialog();
+            } else if self.show_change_password {
+                self.close_change_password_dialog();
             } else {
                 std::process::exit(0);
             }
@@ -470,7 +640,13 @@ impl Scene for LoginScene {
 
         // 处理文本输入
         if !self.animation_playing && !self.show_message {
-            self.handle_text_input();
+            if self.show_change_password {
+                self.handle_change_password_text_input();
+            } else if self.show_new_account {
+                self.handle_new_account_text_input();
+            } else {
+                self.handle_text_input();
+            }
         }
 
         Ok(())

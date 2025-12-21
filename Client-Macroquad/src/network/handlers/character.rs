@@ -16,6 +16,31 @@ impl PacketHandler for CharacterHandler {
         let mut cursor = Cursor::new(payload);
         
         match header.opcode as u16 {
+            // Login (failed)
+            x if x == ServerPacketIds::Login as u16 => {
+                if let Ok(packet) = server::Login::read_body(&mut cursor) {
+                    let reason = match packet.result {
+                        0 => "登录已禁用".to_string(),
+                        1 => "账号无效".to_string(),
+                        2 => "密码无效".to_string(),
+                        3 => "账号不存在".to_string(),
+                        4 => "账号或密码错误".to_string(),
+                        other => format!("登录失败: result={other}"),
+                    };
+                    tracing::warn!("❌ Login failed: {}", reason);
+                    events.push(NetworkEvent::LoginFailed { reason });
+                }
+            }
+
+            // LoginBanned
+            x if x == ServerPacketIds::LoginBanned as u16 => {
+                if let Ok(packet) = server::LoginBanned::read_body(&mut cursor) {
+                    let reason = format!("登录被禁止: {}", packet.reason);
+                    tracing::warn!("⛔ {}", reason);
+                    events.push(NetworkEvent::LoginFailed { reason });
+                }
+            }
+
             // LoginSuccess
             x if x == ServerPacketIds::LoginSuccess as u16 => {
                 if let Ok(packet) = server::LoginSuccess::read_body(&mut cursor) {
@@ -23,6 +48,90 @@ impl PacketHandler for CharacterHandler {
                     events.push(NetworkEvent::LoginSuccess { 
                         characters: packet.characters 
                     });
+                }
+            }
+
+            // NewAccount (response)
+            x if x == ServerPacketIds::NewAccount as u16 => {
+                if let Ok(packet) = server::NewAccount::read_body(&mut cursor) {
+                    match packet.result {
+                        8 => {
+                            tracing::info!("✅ NewAccount success");
+                            events.push(NetworkEvent::NewAccountSuccess);
+                        }
+                        0 => events.push(NetworkEvent::NewAccountFailed {
+                            reason: "当前服务器禁止创建账号".to_string(),
+                        }),
+                        1 => events.push(NetworkEvent::NewAccountFailed {
+                            reason: "账号不合法".to_string(),
+                        }),
+                        2 => events.push(NetworkEvent::NewAccountFailed {
+                            reason: "密码不合法".to_string(),
+                        }),
+                        3 => events.push(NetworkEvent::NewAccountFailed {
+                            reason: "邮箱不合法".to_string(),
+                        }),
+                        4 => events.push(NetworkEvent::NewAccountFailed {
+                            reason: "用户名不合法".to_string(),
+                        }),
+                        5 => events.push(NetworkEvent::NewAccountFailed {
+                            reason: "密保问题不合法".to_string(),
+                        }),
+                        6 => events.push(NetworkEvent::NewAccountFailed {
+                            reason: "密保答案不合法".to_string(),
+                        }),
+                        7 => events.push(NetworkEvent::NewAccountFailed {
+                            reason: "账号已存在".to_string(),
+                        }),
+                        other => events.push(NetworkEvent::NewAccountFailed {
+                            reason: format!("创建账号失败: result={other}"),
+                        }),
+                    }
+                }
+            }
+
+            // ChangePassword (response)
+            x if x == ServerPacketIds::ChangePassword as u16 => {
+                if let Ok(packet) = server::ChangePassword::read_body(&mut cursor) {
+                    match packet.result {
+                        6 => {
+                            tracing::info!("✅ ChangePassword success");
+                            events.push(NetworkEvent::ChangePasswordSuccess);
+                        }
+                        0 => events.push(NetworkEvent::ChangePasswordFailed {
+                            reason: "修改密码已禁用".to_string(),
+                        }),
+                        1 => events.push(NetworkEvent::ChangePasswordFailed {
+                            reason: "账号不合法".to_string(),
+                        }),
+                        2 => events.push(NetworkEvent::ChangePasswordFailed {
+                            reason: "当前密码不合法".to_string(),
+                        }),
+                        3 => events.push(NetworkEvent::ChangePasswordFailed {
+                            reason: "新密码不合法".to_string(),
+                        }),
+                        4 => events.push(NetworkEvent::ChangePasswordFailed {
+                            reason: "账号不存在".to_string(),
+                        }),
+                        5 => events.push(NetworkEvent::ChangePasswordFailed {
+                            reason: "当前密码错误".to_string(),
+                        }),
+                        other => events.push(NetworkEvent::ChangePasswordFailed {
+                            reason: format!("修改密码失败: result={other}"),
+                        }),
+                    }
+                }
+            }
+
+            // ChangePasswordBanned
+            x if x == ServerPacketIds::ChangePasswordBanned as u16 => {
+                if let Ok(packet) = server::ChangePasswordBanned::read_body(&mut cursor) {
+                    let reason = format!(
+                        "修改密码被禁止: {} (expiry_ticks={})",
+                        packet.reason, packet.expiry_date
+                    );
+                    tracing::warn!("⛔ {}", reason);
+                    events.push(NetworkEvent::ChangePasswordFailed { reason });
                 }
             }
             
@@ -54,23 +163,49 @@ impl PacketHandler for CharacterHandler {
                 }
             }
             
-            // NewCharacter (character created)
+            // NewCharacter (failed/response)
             x if x == ServerPacketIds::NewCharacter as u16 => {
-                if let Ok(_packet) = server::NewCharacter::read_body(&mut cursor) {
-                    events.push(NetworkEvent::CharacterCreated { 
-                        name: "New Character".to_string()  // NewCharacter只有result字段
-                    });
-                    tracing::info!("👤 Character creation response received");
+                if let Ok(packet) = server::NewCharacter::read_body(&mut cursor) {
+                    let message = match packet.result {
+                        0 => "Creating new characters is currently disabled.".to_string(),
+                        1 => "Your Character Name is not acceptable.".to_string(),
+                        2 => "The gender you selected does not exist.\n Contact a GM for assistance.".to_string(),
+                        3 => "The class you selected does not exist.\n Contact a GM for assistance.".to_string(),
+                        4 => format!(
+                            "You cannot make anymore then {} Characters.",
+                            mir2_shared::MAX_CHARACTER_COUNT
+                        ),
+                        5 => "A Character with this name already exists.".to_string(),
+                        _ => format!("Create character failed: result={}", packet.result),
+                    };
+                    events.push(NetworkEvent::SystemMessage { message });
                 }
             }
-            
-            // DeleteCharacter (character deleted)
+
+            // NewCharacterSuccess
+            x if x == ServerPacketIds::NewCharacterSuccess as u16 => {
+                if let Ok(packet) = server::NewCharacterSuccess::read_body(&mut cursor) {
+                    tracing::info!("👤 Character created: {}", packet.character.name);
+                    events.push(NetworkEvent::CharacterCreated { character: packet.character });
+                }
+            }
+
+            // DeleteCharacter (failed/response)
             x if x == ServerPacketIds::DeleteCharacter as u16 => {
-                if let Ok(_packet) = server::DeleteCharacter::read_body(&mut cursor) {
-                    events.push(NetworkEvent::CharacterDeleted { 
-                        index: 0  // DeleteCharacter只有result字段
+                if let Ok(packet) = server::DeleteCharacter::read_body(&mut cursor) {
+                    events.push(NetworkEvent::SystemMessage {
+                        message: format!("删除角色失败: result={}", packet.result),
                     });
-                    tracing::info!("🗑️ Character deletion response received");
+                }
+            }
+
+            // DeleteCharacterSuccess
+            x if x == ServerPacketIds::DeleteCharacterSuccess as u16 => {
+                if let Ok(packet) = server::DeleteCharacterSuccess::read_body(&mut cursor) {
+                    tracing::info!("🗑️ Character deleted: index={}", packet.character_index);
+                    events.push(NetworkEvent::CharacterDeleted {
+                        index: packet.character_index as u32,
+                    });
                 }
             }
             

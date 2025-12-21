@@ -279,6 +279,7 @@ impl CategorizedEvents {
 pub struct NetworkBuilder {
     server_addr: String,
     use_mock: bool,
+    client_version_hash: [u8; 16],
 }
 
 impl NetworkBuilder {
@@ -286,11 +287,17 @@ impl NetworkBuilder {
         Self {
             server_addr,
             use_mock: false,
+            client_version_hash: [0u8; 16],
         }
     }
 
     pub fn with_mock(mut self, use_mock: bool) -> Self {
         self.use_mock = use_mock;
+        self
+    }
+
+    pub fn with_client_version_hash(mut self, hash: [u8; 16]) -> Self {
+        self.client_version_hash = hash;
         self
     }
 
@@ -323,7 +330,7 @@ impl NetworkBuilder {
             tracing::info!("Connected to {}", addr);
 
             // 2. 创建 Network（自动启动读写线程）
-            let (tx, rx) = Network::new((w, r));
+            let (tx, rx) = Network::new((w, r), self.client_version_hash);
 
             // 3. 返回 NetContext
             Ok(NetContext {
