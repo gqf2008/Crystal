@@ -43,6 +43,52 @@ impl PathfindingSystem {
         Coord::world_to_grid(world_x, world_y)
     }
 
+    /// 将逐格 A* 路径压缩为“跑步两格一步”的 waypoint 列表。
+    ///
+    /// 原版 Crystal 协议语义：Run 包一次推进 2 格（直线/斜线）。
+    /// Macroquad 本地移动若仍按 1 格 waypoint 前进，只会导致：
+    /// - 本地在跑，但网络侧只能发 Walk（否则服务端会推进 2 格产生漂移）
+    /// - 其它玩家视角/服务端节奏异常
+    ///
+    /// 规则：只有当连续两步方向一致时，才跳过中间格子（2 格一步）；否则保持 1 格。
+    fn compress_waypoints_for_run(
+        current_grid: (i32, i32),
+        waypoints: Vec<(i32, i32)>,
+    ) -> Vec<(i32, i32)> {
+        let mut out: Vec<(i32, i32)> = Vec::with_capacity(waypoints.len());
+        let mut prev = current_grid;
+        let mut i = 0usize;
+
+        while i < waypoints.len() {
+            let next1 = waypoints[i];
+
+            if i + 1 < waypoints.len() {
+                let next2 = waypoints[i + 1];
+
+                let dx1 = (next1.0 - prev.0).clamp(-1, 1);
+                let dy1 = (next1.1 - prev.1).clamp(-1, 1);
+                let dx2 = (next2.0 - next1.0).clamp(-1, 1);
+                let dy2 = (next2.1 - next1.1).clamp(-1, 1);
+
+                let dir_ok = (dx1 != 0 || dy1 != 0) && (dx1, dy1) == (dx2, dy2);
+                let two_step_ok = (next2.0 - prev.0, next2.1 - prev.1) == (dx1 * 2, dy1 * 2);
+
+                if dir_ok && two_step_ok {
+                    out.push(next2);
+                    prev = next2;
+                    i += 2;
+                    continue;
+                }
+            }
+
+            out.push(next1);
+            prev = next1;
+            i += 1;
+        }
+
+        out
+    }
+
     /// 使用 A* 算法计算路径
     fn calculate_path(
         map_data: &MapData,
@@ -345,6 +391,13 @@ impl LogicSystem for PathfindingSystem {
                                             let mut waypoints = full_path;
                                             if waypoints.first().copied() == Some(current_grid) {
                                                 waypoints.remove(0);
+                                            }
+
+                                            // 跑步：将逐格路径压缩为“每步两格”（方向一致时才跳过中间格）。
+                                            // 这样本地 MovementSystem 与网络 Run(2格/包) 语义一致。
+                                            use crate::components::PlayerAction;
+                                            if player.action == PlayerAction::Run && waypoints.len() >= 2 {
+                                                waypoints = Self::compress_waypoints_for_run(current_grid, waypoints);
                                             }
 
                                             if waypoints.is_empty() {

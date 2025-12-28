@@ -21,6 +21,14 @@ impl Default for NetworkApplySystem {
 }
 
 impl NetworkApplySystem {
+    fn net_recv_diag_enabled() -> bool {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            std::env::var_os("CRYSTAL_NETRECV_DIAG").is_some()
+                || std::env::var_os("CRYSTAL_NETMOVE_DIAG").is_some()
+        })
+    }
+
     fn apply_object_player(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectPlayer) {
         use crate::components::{
             AnimationFrame, MountState, MountStatus, OtherPlayer, Player, PlayerAction, PlayerAppearance, Position,
@@ -293,6 +301,7 @@ impl NetworkApplySystem {
         if has_player_data {
             if let Ok(mut pd) = ctx.world.get::<&mut PlayerData>(local_entity) {
                 pd.id = packet.real_id;
+                pd.object_id = packet.object_id;
                 pd.name = packet.name.clone();
                 pd.class = packet.class;
                 pd.gender = packet.gender;
@@ -303,6 +312,7 @@ impl NetworkApplySystem {
                 local_entity,
                 PlayerData {
                     id: packet.real_id,
+                    object_id: packet.object_id,
                     name: packet.name.clone(),
                     class: packet.class,
                     gender: packet.gender,
@@ -847,7 +857,7 @@ impl NetworkApplySystem {
             use crate::components::{LocalPlayer, PlayerData};
             let mut q = ctx.world.query::<(&LocalPlayer, &PlayerData)>();
             q.iter()
-                .find(|(_, (_lp, pd))| pd.id == object_id)
+                .find(|(_, (_lp, pd))| pd.object_id == object_id)
                 .map(|(e, _)| e)
         }
     }
@@ -1016,6 +1026,12 @@ impl NetworkApplySystem {
 
     fn apply_object_remove(ctx: &mut GameContext, object_id: u32) {
         if let Some(e) = Self::find_entity_by_object_id(ctx, object_id) {
+            // 对齐原版：不要因为 ObjectRemove 把本地玩家实体删掉。
+            // 服务器可能在切图/传送等边界广播 ObjectRemove；本地玩家应由 UserInformation/MapChanged 重建位置。
+            if ctx.world.get::<&crate::components::LocalPlayer>(e).is_ok() {
+                tracing::warn!("[NETRECV] Ignored ObjectRemove for LocalPlayer: object_id={}", object_id);
+                return;
+            }
             let _ = ctx.world.despawn(e);
         }
     }
@@ -1029,7 +1045,6 @@ impl NetworkApplySystem {
 
         // 本地玩家位置：
         // - 默认由客户端 MovementSystem 驱动（连续像素移动）
-        // - 服务器仍会广播 ObjectWalk/Run/Attack 等包（格子坐标）
         // 若直接落地，会在“AI->手动/同步开关/回包滞后”场景出现 rubber-banding（瞬间回拽到旧坐标）。
         // 因此：非 server-authoritative movement 时，忽略本地玩家的“日常移动包”的位置落地。
         // 例外：
@@ -1064,6 +1079,31 @@ impl NetworkApplySystem {
         use crate::components::{MonsterAnimState, Player};
         use std::time::Instant;
 
+        // 诊断：用于对照客户端发步进与服务器回包。
+        // 只对本地玩家打印，避免刷屏。
+        if Self::net_recv_diag_enabled() {
+            if let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) {
+                let is_local = ctx.world.get::<&crate::components::LocalPlayer>(e).is_ok();
+                if is_local {
+                    let before_grid = ctx
+                        .world
+                        .get::<&crate::components::Position>(e)
+                        .ok()
+                        .map(|p| crate::coord::Coord::world_to_grid(p.x, p.y));
+                    tracing::info!(
+                        "[NETRECV] ObjectTurn: id={} loc=({},{}) dir={:?} local_before={:?}",
+                        packet.object_id,
+                        packet.location_x,
+                        packet.location_y,
+                        packet.direction,
+                        before_grid
+                    );
+                }
+            }
+        }
+
+        // 本地玩家默认不做位置落地（除非 server-authoritative 或强制对齐）。
+        // 这里保持 apply_object_move 的既有规则。
         Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
         let Some(e) = Self::find_entity_by_object_id(ctx, packet.object_id) else {
             return;
@@ -1111,7 +1151,35 @@ impl NetworkApplySystem {
 
         if is_local {
             // 本地玩家：保持原语义（若未来启用 server_authoritative_movement 才会纠偏）
-            Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+            let has_pos = ctx.world.get::<&Position>(e).is_ok();
+            let dead = ctx
+                .world
+                .get::<&crate::components::Health>(e)
+                .ok()
+                .map(|hp| hp.current <= 0)
+                .unwrap_or(false);
+            let will_apply = ctx.session.server_authoritative_movement || !has_pos || dead;
+
+            if Self::net_recv_diag_enabled() {
+                let before_grid = ctx
+                    .world
+                    .get::<&Position>(e)
+                    .ok()
+                    .map(|p| crate::coord::Coord::world_to_grid(p.x, p.y));
+                tracing::info!(
+                    "[NETRECV] ObjectWalk(local): id={} loc=({},{}) dir={:?} will_apply={} local_before={:?}",
+                    packet.object_id,
+                    packet.location_x,
+                    packet.location_y,
+                    packet.direction,
+                    will_apply,
+                    before_grid
+                );
+            }
+
+            if will_apply {
+                Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+            }
         } else {
             // 远程玩家：插值到目标点，消除“瞬移感”
             let existing_pos = ctx.world.get::<&Position>(e).ok().map(|pos| (pos.x, pos.y));
@@ -1202,7 +1270,35 @@ impl NetworkApplySystem {
         let now_secs = macroquad::prelude::get_time();
 
         if is_local {
-            Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+            let has_pos = ctx.world.get::<&Position>(e).is_ok();
+            let dead = ctx
+                .world
+                .get::<&crate::components::Health>(e)
+                .ok()
+                .map(|hp| hp.current <= 0)
+                .unwrap_or(false);
+            let will_apply = ctx.session.server_authoritative_movement || !has_pos || dead;
+
+            if Self::net_recv_diag_enabled() {
+                let before_grid = ctx
+                    .world
+                    .get::<&Position>(e)
+                    .ok()
+                    .map(|p| crate::coord::Coord::world_to_grid(p.x, p.y));
+                tracing::info!(
+                    "[NETRECV] ObjectRun(local): id={} loc=({},{}) dir={:?} will_apply={} local_before={:?}",
+                    packet.object_id,
+                    packet.location_x,
+                    packet.location_y,
+                    packet.direction,
+                    will_apply,
+                    before_grid
+                );
+            }
+
+            if will_apply {
+                Self::apply_object_move(ctx, packet.object_id, packet.location_x, packet.location_y);
+            }
         } else {
             let existing_pos = ctx.world.get::<&Position>(e).ok().map(|pos| (pos.x, pos.y));
             let (sx, sy) = match existing_pos {
@@ -1649,7 +1745,7 @@ impl LogicSystem for NetworkApplySystem {
             q.iter().next().map(|(e, _)| e)
         };
 
-        // 坐骑更新：按 object_id 落地（本地玩家没有 NetworkSync，因此需要用 PlayerData.id 匹配）
+        // 坐骑更新：按 object_id 落地（本地玩家没有 NetworkSync，因此需要用 PlayerData.object_id 匹配）
         if !mount_updates.is_empty() {
             use crate::components::{MountState, MountStatus, PlayerData, SoundTrigger, SoundType};
 
@@ -1658,10 +1754,10 @@ impl LogicSystem for NetworkApplySystem {
                     if let Some(e) = Self::find_entity_by_object_id(ctx, object_id) {
                         Some(e)
                     } else {
-                        // local player path: match by PlayerData.id
+                        // local player path: match by PlayerData.object_id
                         let mut q = ctx.world.query::<(&crate::components::LocalPlayer, &PlayerData)>();
                         q.iter()
-                            .find(|(_, (_lp, pd))| pd.id == object_id)
+                            .find(|(_, (_lp, pd))| pd.object_id == object_id)
                             .map(|(e, _)| e)
                     };
 

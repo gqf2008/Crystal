@@ -26,6 +26,10 @@ static OUT_ATTACK_COUNT: AtomicU64 = AtomicU64::new(0);
 static LAST_ATTACK_SENT_MS: AtomicI64 = AtomicI64::new(0);
 static OUT_ATTACK_DROPPED: AtomicU64 = AtomicU64::new(0);
 
+// server protection: avoid flooding movement packets (some servers disconnect on "Large amount of Packets")
+static LAST_MOVE_SENT_MS: AtomicI64 = AtomicI64::new(0);
+static OUT_MOVE_DROPPED: AtomicU64 = AtomicU64::new(0);
+
 /// 网络客户端 - 零大小类型
 ///
 /// 此结构体本身不存储任何数据，只提供静态的 `new()` 方法来创建网络连接。
@@ -668,6 +672,28 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
 
         // ===== 移动相关 =====
         NetworkEvent::WalkRequest { direction } => {
+            // 节流：服务端默认 5 秒窗口最多 50 次 receive（MaxPacket=50），
+            // Walk/Run 往往每个包都变成一次 receive 回调，走路/跑步必须限制发送频率。
+            // 注意：这里是兜底节流（输入层还会限速）。
+            // 原版客户端移动节拍约 100ms，并且 Run 一次推进 2 格，因此实际移动包频率会低于逐格发送。
+            const MIN_MOVE_INTERVAL_MS: i64 = 100;
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let last_ms = LAST_MOVE_SENT_MS.load(Ordering::Relaxed);
+            let dt = now_ms.saturating_sub(last_ms);
+            if last_ms != 0 && dt < MIN_MOVE_INTERVAL_MS {
+                let dropped = OUT_MOVE_DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
+                if dropped == 1 || dropped % 100 == 0 {
+                    tracing::debug!(
+                        "🧯 Throttled WalkRequest (dropped x{}, dt={}ms < {}ms)",
+                        dropped,
+                        dt,
+                        MIN_MOVE_INTERVAL_MS
+                    );
+                }
+                return Ok(());
+            }
+            LAST_MOVE_SENT_MS.store(now_ms, Ordering::Relaxed);
+
             let packet = client::movement::Walk { direction };
             serialize_packet(stream, &packet)?;
 
@@ -678,6 +704,24 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         NetworkEvent::RunRequest { direction } => {
+            const MIN_MOVE_INTERVAL_MS: i64 = 100;
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let last_ms = LAST_MOVE_SENT_MS.load(Ordering::Relaxed);
+            let dt = now_ms.saturating_sub(last_ms);
+            if last_ms != 0 && dt < MIN_MOVE_INTERVAL_MS {
+                let dropped = OUT_MOVE_DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
+                if dropped == 1 || dropped % 100 == 0 {
+                    tracing::debug!(
+                        "🧯 Throttled RunRequest (dropped x{}, dt={}ms < {}ms)",
+                        dropped,
+                        dt,
+                        MIN_MOVE_INTERVAL_MS
+                    );
+                }
+                return Ok(());
+            }
+            LAST_MOVE_SENT_MS.store(now_ms, Ordering::Relaxed);
+
             let packet = client::movement::Run { direction };
             serialize_packet(stream, &packet)?;
 

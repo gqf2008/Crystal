@@ -16,6 +16,7 @@ use client_macroquad::coord::Coord;
 use client_macroquad::objects::frames::get_monster_frame;
 use client_macroquad::resources::LibraryName;
 use client_macroquad::scenes::{GameScene, Scene, SceneTransition};
+use client_macroquad::network::{load_network_runtime_config, NetworkBuilder, NetworkEvent};
 use client_macroquad::ui::text_renderer::init_chinese_font;
 use mir2_shared::enums::{MirDirection, Monster as MonsterKind};
 
@@ -411,6 +412,42 @@ async fn main() {
     let mut scene = GameScene::new();
     scene.load_textures();
     scene.on_enter().ok();
+
+    // test_game_scene 需要“必定有本地玩家”来验证渲染/相机/输入。
+    // 真实流程里 LocalPlayer 是由网络下发 UserInformation 创建的；
+    // 但你可能为了真服把 config.ini 设置成 UseMock=false，从而导致这里完全不连网。
+    // 因此：如果当前没有 net，则强制接入 MockNetwork，并主动触发 StartGameRequest。
+    {
+        let ctx = scene.debug_ecs_ctx_mut();
+        if ctx.net.is_none() {
+            let cfg = load_network_runtime_config();
+            match NetworkBuilder::new(cfg.server_addr)
+                .with_mock(true)
+                .with_client_version_hash(cfg.client_version_hash)
+                .build()
+            {
+                Ok(net) => {
+                    ctx.set_net(net);
+                    ctx.session.remote_player_walk_interp_secs = (cfg.remote_interp_walk_ms as f32) / 1000.0;
+                    ctx.session.remote_player_run_interp_secs = (cfg.remote_interp_run_ms as f32) / 1000.0;
+                    ctx.session.server_authoritative_movement = false;
+                    ctx.session.sync_movement_intent_to_server = true;
+                    ctx.session.server_authoritative_combat = true;
+
+                    if let Some(net) = ctx.net() {
+                        let _ = net.send(NetworkEvent::StartGameRequest {
+                            character_index: 0,
+                        });
+                    }
+
+                    println!("[test_game_scene] Attached MockNetwork (forced) and sent StartGameRequest.");
+                }
+                Err(e) => {
+                    eprintln!("[test_game_scene] Failed to start MockNetwork: {e}");
+                }
+            }
+        }
+    }
 
     let mut validator = SpecialFramesValidator::default();
     validator.try_init(scene.debug_ecs_ctx_mut());

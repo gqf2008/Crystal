@@ -537,7 +537,7 @@ impl DebugSystem {
 
         let mut lines: Vec<String> = Vec::with_capacity(10);
         if let Some(pd) = player_data.as_deref() {
-            lines.push(format!("Player: {} (id={})", pd.name, pd.id));
+            lines.push(format!("Player: {} (real_id={} object_id={})", pd.name, pd.id, pd.object_id));
         } else {
             lines.push("Player: <no PlayerData>".to_string());
         }

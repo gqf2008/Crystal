@@ -71,8 +71,14 @@ pub fn serialize_packet<W: Write, P: Packet>(
     let total_len = PacketHeader::HEADER_SIZE + body.len();
     let length = u16::try_from(total_len).map_err(|_| SharedError::PacketTooLarge(body.len()))?;
     let header = PacketHeader::new(length, P::OPCODE);
-    header.write_to(writer)?;
-    writer.write_all(&body)?;
+
+    // IMPORTANT: 写到网络时尽量一次 write_all。
+    // 服务端的洪泛保护计数基于 socket receive 回调次数；多次小 write 在 TCP_NODELAY 下更容易被拆包，
+    // 导致服务端计数异常升高并断开连接。
+    let mut out = Vec::with_capacity(PacketHeader::HEADER_SIZE + body.len());
+    header.write_to(&mut out)?;
+    out.extend_from_slice(&body);
+    writer.write_all(&out)?;
     Ok(())
 }
 

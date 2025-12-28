@@ -207,7 +207,12 @@ impl Health {
     }
 
     pub fn take_damage(&mut self, damage: i32) {
-        self.current = (self.current - damage).max(0);
+        // damage 理论上应为正数；但网络包解析异常/协议差异可能导致出现负数或 i32::MIN。
+        // 这里用 saturating_sub 防止 debug 下溢出 panic，并忽略非正伤害。
+        if damage <= 0 {
+            return;
+        }
+        self.current = self.current.saturating_sub(damage).max(0);
     }
 
     pub fn heal(&mut self, amount: i32) {

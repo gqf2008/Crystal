@@ -20,7 +20,10 @@ use std::time::Instant;
 /// **参考**: `ECS_COMPONENTS_ARCHITECTURE.md` - Player Component
 #[derive(Debug, Clone)]
 pub struct PlayerData {
+    /// 角色的永久ID（数据库/存档意义上的 RealID）
     pub id: u32,
+    /// 会话内的网络对象ID（协议里的 ObjectID，用于 ObjectWalk/ObjectRemove 等包）
+    pub object_id: u32,
     pub name: String,
     pub class: MirClass,
     pub gender: MirGender,

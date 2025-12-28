@@ -895,7 +895,7 @@ impl MockNetwork {
 
                 // IMPORTANT: send local MountUpdated AFTER UserInformation.
                 // Otherwise the client may drop the mount update because the LocalPlayer entity
-                // (with PlayerData.id) doesn't exist yet.
+                // (with PlayerData.object_id) doesn't exist yet.
                 if state.player_riding_mount {
                     let _ = response_tx.send(NetworkEvent::MountUpdated {
                         object_id: state.player_object_id,

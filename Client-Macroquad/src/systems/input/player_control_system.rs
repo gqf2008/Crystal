@@ -43,6 +43,7 @@ use crate::{
 use macroquad::prelude::{get_time, MouseButton};
 use std::time::{Duration, Instant};
 use mir2_shared::enums::MirDirection;
+use std::sync::OnceLock;
 
 /// 鼠标状态追踪（用于双击和长按检测）
 #[derive(Debug)]
@@ -100,6 +101,17 @@ pub struct PlayerControlSystem {
 
 impl PlayerControlSystem {
     const NPC_CALL_COOLDOWN_SECS: f64 = 0.35;
+
+    // 与 Crystal 原版协议/服务端保持一致：
+    // - Walk: 前进 1 格
+    // - Run: 前进 2 格（骑马/疾风脚等可到 3，但 Macroquad 端暂按 2 处理）
+    const NET_RUN_STEPS: i32 = 2;
+
+    fn net_move_diag_enabled() -> bool {
+        static ENABLED: OnceLock<bool> = OnceLock::new();
+        *ENABLED.get_or_init(|| std::env::var_os("CRYSTAL_NETMOVE_DIAG").is_some())
+    }
+
     pub fn new() -> Self {
         Self {
             mouse_state: MouseState::default(),
@@ -114,7 +126,16 @@ impl PlayerControlSystem {
             pending_npc_call: None,
 
             last_net_move_sent: None,
-            net_move_interval: Duration::from_millis(80),
+            // 服务端 `MirConnection` 的洪泛保护是按 5 秒窗口统计 socket receive 次数：
+            // `_dataCounter > Settings.MaxPacket (默认 50)` 会直接断开并 IPBlock。
+            // 我们每次移动都独立发一个 Walk/Run 包，Windows 下很可能对应一次 receive，
+            // 因此移动同步需要保守一些（< 10 次/秒，且还要给 KeepAlive/战斗等包留空间）。
+            // 说明：同步是“按格一步 Walk/Run”，而 Position 是连续像素。
+            // interval 过大，会出现本地已跨过多个格子（尤其从格子中心出发，跨过中点只需半格），
+            // 导致服务器收不到连续步进。
+            // 原版客户端的移动“节拍”是 100ms（GameScene.MoveTime），并且移动包是“步进意图”。
+            // 这里选择 100ms 以贴近原版；同时由于 Run 一次推进 2 格，实际 Run 包频率会显著低于逐格发送。
+            net_move_interval: Duration::from_millis(100),
             last_net_move_grid: None,
         }
     }
@@ -899,6 +920,9 @@ impl LogicSystem for PlayerControlSystem {
 
                             // 点击到怪：攻击动画由 CombatSystem 在“进入范围并实际出手”时添加。
                             // 这里不添加 AttackState，避免跑近过程中出现“挥刀后又站住”的不一致。
+                            // IMPORTANT: 必须清除单击状态，否则本次单击会在后续帧被重复判定，导致刷屏/重复发包。
+                            self.mouse_state.left_last_click_time = None;
+                            self.mouse_state.right_last_click_time = None;
                             continue;
                         }
 
@@ -1098,28 +1122,78 @@ impl LogicSystem for PlayerControlSystem {
                         self.last_net_move_grid = Some((pgx, pgy));
                     }
                     Some((sgx, sgy)) => {
-                        if (sgx, sgy) != (pgx, pgy) {
-                            // 允许一步移动：直走/对角都算一步。
-                            // 之前用曼哈顿距离(dist==1)会把对角步长(dist==2)误判为“大跳变”，
-                            // 导致对角移动时完全不发 Walk/Run，从而服务器看不到玩家移动。
+                        if (sgx, sgy) == (pgx, pgy) {
+                            // 同一格：不需要发步进。
+                        } else {
+                            // 与原版 Crystal 对齐：
+                            // - Walk: 前进 1 格
+                            // - Run: 前进 2 格（服务端 HumanObject.Run steps=2/3）
+                            // 因此这里不能简单“每格都发 Run”，否则服务端会按 2 格推进并导致坐标漂移。
+                            // 策略：每次允许发送时“追赶一步”，并根据剩余 delta 决定发 Walk(1) 还是 Run(2)。
                             let dx = pgx - sgx;
                             let dy = pgy - sgy;
-                            let is_single_step = dx.abs() <= 1 && dy.abs() <= 1;
 
-                            if is_single_step {
-                                if self.can_send_net_move(now) {
-                                    if let Some(dir) =
-                                        Self::grid_direction_towards((sgx, sgy), (pgx, pgy))
-                                    {
-                                        let run = matches!(player.action, PlayerAction::Run);
-                                        Self::send_net_move_step(net.as_ref(), run, dir);
-                                        self.last_net_move_sent = Some(now);
-                                        self.last_net_move_grid = Some((pgx, pgy));
-                                    }
+                            // 传送/复活/强制对齐等：差距过大时不尝试补步，直接重置基准。
+                            let is_large_jump = dx.abs() > 3 || dy.abs() > 3;
+                            if is_large_jump {
+                                if Self::net_move_diag_enabled() {
+                                    tracing::info!(
+                                        "[NETMOVE] reset baseline (large jump): last=({},{}), cur=({},{}), d=({},{}), run={} mode={:?}",
+                                        sgx,
+                                        sgy,
+                                        pgx,
+                                        pgy,
+                                        dx,
+                                        dy,
+                                        player_input.run,
+                                        player_input.movement_mode
+                                    );
                                 }
-                            } else {
-                                // 大跳变（传送/复活/强制对齐等）：直接重置基准，避免连发多步导致 server 位置飘。
                                 self.last_net_move_grid = Some((pgx, pgy));
+                            } else if self.can_send_net_move(now) {
+                                let step_x = dx.clamp(-1, 1);
+                                let step_y = dy.clamp(-1, 1);
+
+                                // 不要用 player.action 推断跑/走：它可能因为“这一帧没速度”被设为 Stand。
+                                // 原版的跑步并不是“更快的一格”，而是“一次两格”。
+                                let want_run = player_input.run;
+
+                                let run_is_possible = want_run
+                                    && ((step_x == 0) || dx.abs() >= Self::NET_RUN_STEPS)
+                                    && ((step_y == 0) || dy.abs() >= Self::NET_RUN_STEPS);
+
+                                let steps = if run_is_possible {
+                                    Self::NET_RUN_STEPS
+                                } else {
+                                    1
+                                };
+
+                                let next_gx = sgx + step_x * steps;
+                                let next_gy = sgy + step_y * steps;
+
+                                if let Some(dir) =
+                                    Self::grid_direction_towards((sgx, sgy), (next_gx, next_gy))
+                                {
+                                    let run = run_is_possible;
+                                    if Self::net_move_diag_enabled() {
+                                        tracing::info!(
+                                            "[NETMOVE] step: last=({},{})->next=({},{})->cur=({},{}), dir={:?}, run={} steps={} mode={:?}",
+                                            sgx,
+                                            sgy,
+                                            next_gx,
+                                            next_gy,
+                                            pgx,
+                                            pgy,
+                                            dir,
+                                            run,
+                                            steps,
+                                            player_input.movement_mode
+                                        );
+                                    }
+                                    Self::send_net_move_step(net.as_ref(), run, dir);
+                                    self.last_net_move_sent = Some(now);
+                                    self.last_net_move_grid = Some((next_gx, next_gy));
+                                }
                             }
                         }
                     }
