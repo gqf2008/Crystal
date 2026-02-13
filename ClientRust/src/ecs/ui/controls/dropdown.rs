@@ -45,7 +45,7 @@ impl MirDropDownBox {
     pub fn new() -> Self {
         Self {
             visible: true,
-            enabled: false,
+            enabled: true,
             position: (0.0, 0.0),
             size: (120.0, 20.0),
             is_open: false,

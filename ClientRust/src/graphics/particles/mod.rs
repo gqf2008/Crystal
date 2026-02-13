@@ -529,24 +529,38 @@ impl ParticleEngine {
     }
 }
 
-// 简单的随机数辅助 (不引入 rand 依赖)
+// 简单的伪随机数生成器 (xorshift32, 不引入 rand 依赖)
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static RNG_STATE: AtomicU32 = AtomicU32::new(0);
+
+fn next_rng() -> u32 {
+    let mut s = RNG_STATE.load(Ordering::Relaxed);
+    if s == 0 {
+        // 用时间戳初始化种子
+        s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos()
+            | 1; // 确保非零
+    }
+    // xorshift32
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    RNG_STATE.store(s, Ordering::Relaxed);
+    s
+}
+
 fn rand_index(max: usize) -> usize {
     if max == 0 {
         return 0;
     }
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos() as usize;
-    t % max
+    next_rng() as usize % max
 }
 
 fn rand_f32() -> f32 {
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    (t % 1000) as f32 / 1000.0
+    (next_rng() % 1000) as f32 / 1000.0
 }
 
 fn rand_range(min: i32, max: i32) -> i32 {

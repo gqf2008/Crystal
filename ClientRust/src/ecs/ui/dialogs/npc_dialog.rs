@@ -152,7 +152,11 @@ impl NpcDialog {
                         has_link = true;
                         continue;
                     }
+                    // '<' found with '>' but no '/' — skip past this '>'
+                    remaining = remaining[start + end + 1..].to_string();
+                    continue;
                 }
+                // '<' found but no '>' — treat rest as plain text
                 break;
             }
 
