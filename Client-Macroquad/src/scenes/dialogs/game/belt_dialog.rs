@@ -94,6 +94,7 @@ pub struct BeltDialogHybrid {
     
     // === 交互状态 ===
     hovered_cell: Option<usize>,
+    pending_to_inventory: Option<usize>,
     /// 上次点击时间（用于检测双击）
     last_click_time: f64,
     last_click_slot: Option<usize>,
@@ -141,6 +142,7 @@ impl BeltDialogHybrid {
             
             cells,
             hovered_cell: None,
+            pending_to_inventory: None,
             last_click_time: 0.0,
             last_click_slot: None,
         }
@@ -341,6 +343,45 @@ impl BeltDialogHybrid {
         let size = self.get_size();
         Rect::new(self.position.x, self.position.y, size.x, size.y).contains(pos)
     }
+
+    pub fn take_transfer_to_inventory_request(&mut self) -> Option<usize> {
+        self.pending_to_inventory.take()
+    }
+
+    pub fn take_item_from_slot(&mut self, slot: usize) -> Option<BeltItemHybrid> {
+        if slot >= 6 {
+            return None;
+        }
+        self.cells[slot].take()
+    }
+
+    pub fn restore_item_to_slot(&mut self, slot: usize, item: BeltItemHybrid) -> bool {
+        if slot >= 6 {
+            return false;
+        }
+        self.cells[slot] = Some(item);
+        true
+    }
+
+    pub fn try_insert_item(&mut self, item: BeltItemHybrid) -> Result<(), BeltItemHybrid> {
+        if let Some(stack_slot) = self
+            .cells
+            .iter_mut()
+            .find(|s| s.as_ref().is_some_and(|existing_item| existing_item.icon_index == item.icon_index))
+        {
+            if let Some(existing) = stack_slot.as_mut() {
+                existing.count = existing.count.saturating_add(item.count);
+                return Ok(());
+            }
+        }
+
+        if let Some(empty_slot) = self.cells.iter_mut().find(|s| s.is_none()) {
+            *empty_slot = Some(item);
+            return Ok(());
+        }
+
+        Err(item)
+    }
     
     /// 更新和绘制（主入口）
     pub fn update_and_draw(&mut self) -> bool {
@@ -366,6 +407,13 @@ impl BeltDialogHybrid {
             } else if hovered_close {
                 self.close();
                 return false;
+            }
+        }
+        if is_mouse_button_pressed(MouseButton::Right) && !self.item_dragging {
+            if let Some(slot_idx) = self.hovered_cell {
+                if self.cells[slot_idx].is_some() {
+                    self.pending_to_inventory = Some(slot_idx);
+                }
             }
         }
         

@@ -17,6 +17,7 @@
 
 use macroquad::prelude::*;
 use super::{
+    BeltItemHybrid,
     BeltDialogHybrid,
     CharacterDialogHybrid,
     CharacterTabHybrid,
@@ -25,6 +26,7 @@ use super::{
     ChatOptionDialogHybrid,
     GameShopDialog,
     InventoryDialogHybrid,
+    ItemSlotHybrid,
     MenuDialogHybrid,
     MiniMapDialogHybrid,
     OptionDialogHybrid,
@@ -530,6 +532,7 @@ impl MainDialog {
                 DialogType::MiniMap => self.sync_and_draw_minimap(&mut consumed, mouse_pos),
             }
         }
+        self.process_inventory_belt_interop();
 
         consumed
     }
@@ -986,6 +989,48 @@ impl MainDialog {
         }
         if self.inventory_dialog_open && self.inventory_dialog.contains(mouse_pos) {
             *consumed = true;
+        }
+    }
+
+    fn process_inventory_belt_interop(&mut self) {
+        if let Some((tab, slot)) = self.inventory_dialog.take_transfer_to_belt_request() {
+            if let Some(item) = self.inventory_dialog.take_item_from_slot(tab, slot) {
+                if let Some(icon_index) = item.icon_index {
+                    let belt_item = BeltItemHybrid::new(icon_index, item.count);
+                    if let Err(rollback_item) = self.belt_dialog.try_insert_item(belt_item) {
+                        if !self.inventory_dialog.restore_item_to_slot(
+                            tab,
+                            slot,
+                            ItemSlotHybrid::new(rollback_item.icon_index, rollback_item.count),
+                        ) {
+                            eprintln!(
+                                "⚠️ Inventory rollback failed: tab={tab:?}, slot={slot}, icon={}, count={}",
+                                rollback_item.icon_index,
+                                rollback_item.count
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(slot) = self.belt_dialog.take_transfer_to_inventory_request() {
+            if let Some(item) = self.belt_dialog.take_item_from_slot(slot) {
+                let inventory_item = ItemSlotHybrid::new(item.icon_index, item.count);
+                if let Err(rollback_item) = self.inventory_dialog.try_insert_item(inventory_item) {
+                    if let Some(icon_index) = rollback_item.icon_index {
+                        if !self.belt_dialog.restore_item_to_slot(
+                            slot,
+                            BeltItemHybrid::new(icon_index, rollback_item.count),
+                        ) {
+                            eprintln!(
+                                "⚠️ Belt rollback failed: slot={slot}, icon={icon_index}, count={}",
+                                rollback_item.count
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 
