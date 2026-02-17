@@ -220,8 +220,8 @@ pub enum ClientPacketIds {
     ItemRentalLockFee = 141,
     ItemRentalLockItem = 142,
     ConfirmItemRental = 143,
-    GuildTerritoryPage,
-    PurchaseGuildTerritory,
+    GuildTerritoryPage = 144,
+    PurchaseGuildTerritory = 145,
 }
 
 #[derive(

@@ -364,24 +364,23 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /Build
-/SharedRust/target
-/SharedRust/target
-/ClientRust/target
-/ClientRust/Data
 /target
+
+# Rust build artifacts
+/SharedRust/target
 /ClientRust/target
-ClientRust/map_viewer.exe
-ClientRust/map_viewer_ecs.exe
-ClientRust/mir2x.exe
-*.txt
 /Client-Macroquad/target
 /Client-Macroquad/ecs_macros/target
-/SharedRust/target
+
+# Game data directories (not in source control)
+/ClientRust/Data
 /Client-Macroquad/Data
 /Client-Macroquad/Map
-/Client-Macroquad/target
-/Client-Macroquad/target
-ClientRust/map_viewer_v3.exe
+/Client-Macroquad/miniquad
+
+# Generated/temporary files
+*.txt
 *.c
 *.exe
-/Client-Macroquad/miniquad
+*.bak
+*.bak[0-9]*
