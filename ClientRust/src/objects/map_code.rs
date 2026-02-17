@@ -188,16 +188,20 @@ impl CellInfo {
     }
 
     pub fn back_tile(&self) -> Option<(i16, i32)> {
-        let index = (self.back_image & 0x1FFFFFFF) - 1;
-        if self.back_image == 0 || self.back_index == -1 || index < 0 {
+        // Return raw masked value (1-based from map file)
+        // Caller should subtract 1 to get 0-based library index
+        let index = self.back_image & 0x1FFFFFFF;
+        if self.back_image == 0 || self.back_index == -1 || index == 0 {
             return None;
         }
         Some((self.back_index, index))
     }
 
     pub fn middle_tile(&self) -> Option<(i16, i32)> {
-        let index = self.middle_image - 1;
-        if index < 0 || self.middle_index == -1 {
+        // Return raw value (1-based from map file)
+        // Caller should subtract 1 to get 0-based library index
+        let index = self.middle_image;
+        if index == 0 || self.middle_index == -1 {
             return None;
         }
         Some((self.middle_index, index))
@@ -212,8 +216,10 @@ impl CellInfo {
     }
 
     pub fn front_tile(&self) -> Option<(i16, i32)> {
-        let index = (self.front_image & 0x7FFF) - 1;
-        if index == -1 || self.front_index == -1 || self.front_index == 200 {
+        // Return raw masked value (1-based from map file)
+        // Caller should subtract 1 to get 0-based library index
+        let index = self.front_image & 0x7FFF;
+        if index == 0 || self.front_index == -1 || self.front_index == 200 {
             return None;
         }
         Some((self.front_index, index))

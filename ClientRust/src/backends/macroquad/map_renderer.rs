@@ -121,9 +121,9 @@ impl MapRenderer {
 
                     if let Some((file_index, image_index)) = cell.back_tile() {
                         let lib_name = format!("MapLib_{}", file_index);
-                        // Note: back_tile() already returns index-1, so use it directly
+                        let adjusted_index = if image_index > 0 { image_index - 1 } else { 0 };
                         if let Some(texture) =
-                            library_manager.get_or_create_texture(&lib_name, image_index as usize)
+                            library_manager.get_or_create_texture(&lib_name, adjusted_index as usize)
                         {
                             let world_x = x as f32 * self.tile_width;
                             let world_y = y as f32 * self.tile_height;
@@ -178,7 +178,7 @@ impl MapRenderer {
 
                     if let Some((file_index, image_index)) = cell.middle_tile() {
                         let lib_name = format!("MapLib_{}", file_index);
-                        // Note: middle_tile() already returns index-1, so use it directly
+                        let image_index = image_index - 1;
                         if let Some(texture) =
                             library_manager.get_or_create_texture(&lib_name, image_index as usize)
                         {
@@ -236,7 +236,7 @@ impl MapRenderer {
 
                     if let Some((file_index, image_index)) = cell.front_tile() {
                         let lib_name = format!("MapLib_{}", file_index);
-                        // Note: front_tile() already returns index-1, so use it directly
+                        let image_index = image_index - 1;
                         if let Some(texture) =
                             library_manager.get_or_create_texture(&lib_name, image_index as usize)
                         {
