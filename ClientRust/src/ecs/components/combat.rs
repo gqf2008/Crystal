@@ -207,11 +207,17 @@ impl Health {
     }
 
     pub fn take_damage(&mut self, damage: i32) {
-        self.current = (self.current - damage).max(0);
+        if damage <= 0 {
+            return;
+        }
+        self.current = self.current.saturating_sub(damage).max(0);
     }
 
     pub fn heal(&mut self, amount: i32) {
-        self.current = (self.current + amount).min(self.max);
+        if amount <= 0 {
+            return;
+        }
+        self.current = self.current.saturating_add(amount).min(self.max);
     }
 }
 
@@ -232,6 +238,9 @@ impl Mana {
     }
 
     pub fn consume(&mut self, cost: i32) -> bool {
+        if cost < 0 {
+            return false;
+        }
         if self.current >= cost {
             self.current -= cost;
             true
@@ -241,7 +250,10 @@ impl Mana {
     }
 
     pub fn restore(&mut self, amount: i32) {
-        self.current = (self.current + amount).min(self.max);
+        if amount <= 0 {
+            return;
+        }
+        self.current = self.current.saturating_add(amount).min(self.max);
     }
 
     pub fn percent(&self) -> f32 {

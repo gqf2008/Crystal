@@ -102,7 +102,7 @@ pub mod priority {
     pub const MAP_RENDER: u32 = 900;
     pub const SPRITE_RENDER: u32 = 910;
     pub const ENTITY_RENDER: u32 = 920; // EntityRenderSystem: 实体渲染（玩家/怪物）
-    pub const EFFECT_RENDER: u32 = 920;
+    pub const EFFECT_RENDER: u32 = 925;
     pub const UI_RENDER: u32 = 930;
     pub const LIGHTING_RENDER: u32 = 940;
     pub const POST_PROCESS: u32 = 1000;

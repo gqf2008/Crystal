@@ -375,6 +375,7 @@ ClientRust/map_viewer_ecs.exe
 ClientRust/mir2x.exe
 *.txt
 /Client-Macroquad/target
+/Client-Macroquad/ecs_macros/target
 /SharedRust/target
 /Client-Macroquad/Data
 /Client-Macroquad/Map
