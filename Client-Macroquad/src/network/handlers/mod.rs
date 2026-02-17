@@ -17,6 +17,10 @@ pub mod item;
 pub mod npc;
 pub mod quest;
 pub mod ui_events;
+pub mod buff;
+pub mod mail;
+pub mod spell;
+pub mod environment;
 
 // Re-export all handlers
 pub use connection::ConnectionHandler;
@@ -32,6 +36,10 @@ pub use item::ItemHandler;
 pub use npc::NpcHandler;
 pub use quest::QuestHandler;
 pub use ui_events::UiEventsHandler;
+pub use buff::BuffHandler;
+pub use mail::MailHandler;
+pub use spell::SpellHandler;
+pub use environment::EnvironmentHandler;
 
 use mir2_shared::packets::PacketHeader;
 use crate::resources::LibraryName;
@@ -230,6 +238,15 @@ pub enum NetworkEvent {
     ItemGained { item: mir2_shared::UserItem },
     ItemLost { unique_id: u64 },
     ItemMoved { from: u32, to: u32 },
+    DuraChanged { unique_id: u64, current_dura: u16 },
+    ItemCombined {
+        grid: mir2_shared::enums::MirGridType,
+        id_from: u64,
+        id_to: u64,
+        success: bool,
+        destroy: bool,
+    },
+    ItemUpgraded { item: mir2_shared::UserItem },
     
     // ========================================================================
     // 组队事件（Group Events）
@@ -261,6 +278,14 @@ pub enum NetworkEvent {
     GuildInvite { inviter: String, guild_name: String },
     GuildJoined { guild_name: String },
     GuildLeft,
+    GuildStatusReceived { guild_name: String, rank_name: String },
+    GuildNoticeReceived { notice: Vec<String> },
+    GuildMemberListReceived {
+        name: String,
+        rank_index: u8,
+        status: u8,
+        ranks: Vec<mir2_shared::GuildRank>,
+    },
     
     // ========================================================================
     // 交易事件（Trade Events）
@@ -278,6 +303,9 @@ pub enum NetworkEvent {
     TradeStarted { partner: String },
     TradeCompleted,
     TradeCancelled,
+    TradeItemReceived { trade_items: Vec<Option<mir2_shared::UserItem>> },
+    TradeGoldReceived { amount: u32 },
+    TradeConfirmed,
     
     // ========================================================================
     // 任务事件（Quest Events）
@@ -293,6 +321,8 @@ pub enum NetworkEvent {
     QuestAccepted { quest_id: u32 },
     QuestCompleted { quest_id: u32 },
     QuestProgress { quest_id: u32, progress: String },
+    QuestChanged { quest: mir2_shared::ClientQuestProgress },
+    QuestItemGained { item_id: i32 },
     
     // ========================================================================
     // NPC 事件（NPC Events）
@@ -315,6 +345,41 @@ pub enum NetworkEvent {
         panel_type: mir2_shared::enums::PanelType,
         hide_added_stats: bool,
     },
+    
+    // ========================================================================
+    // Buff 事件（Buff Events）
+    // ========================================================================
+    
+    // 服务器 → 客户端
+    BuffAdded { buff: mir2_shared::packets::server::ClientBuff },
+    BuffRemoved { buff_type: mir2_shared::enums::BuffType, object_id: u32 },
+    BuffPaused { buff_type: mir2_shared::enums::BuffType, object_id: u32, paused: bool },
+    
+    // ========================================================================
+    // 邮件事件（Mail Events）
+    // ========================================================================
+    
+    // 服务器 → 客户端
+    MailListReceived { mail_list: Vec<mir2_shared::packets::server::MailInfo> },
+    MailSendRequested { mail_id: u64 },
+    MailSentResult { mail_id: u64, result: u8 },
+    MailCollected { mail_id: u64, success: bool },
+    
+    // ========================================================================
+    // 魔法事件（Spell Events）
+    // ========================================================================
+    
+    // 服务器 → 客户端
+    NewMagicReceived { magic: mir2_shared::ClientMagic, hero: bool },
+    MagicLeveledUp { spell: mir2_shared::enums::Spell, level: u8, hero: bool },
+    SpellToggled { spell: mir2_shared::enums::Spell, can_use: bool, hero: bool },
+    
+    // ========================================================================
+    // 环境事件（Environment Events）
+    // ========================================================================
+    
+    // 服务器 → 客户端
+    TimeOfDayChanged { lights: u8 },
     
     // ========================================================================
     // 通用事件（Generic Events）
