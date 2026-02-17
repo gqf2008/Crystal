@@ -338,13 +338,15 @@ impl InspectDialogHybrid {
 
         // 互动按钮行
         let btn_y = pos.y + 357.0;
-        let btn_defs: [(f32, &ButtonTextures, InspectAction); 4] = [
-            (55.0, &self.group_btn.clone(), InspectAction::InviteGroup),
-            (85.0, &self.friend_btn.clone(), InspectAction::AddFriend),
-            (115.0, &self.mail_btn.clone(), InspectAction::SendMail),
-            (145.0, &self.trade_btn.clone(), InspectAction::RequestTrade),
+        let btn_offsets: [(f32, InspectAction); 4] = [
+            (55.0, InspectAction::InviteGroup),
+            (85.0, InspectAction::AddFriend),
+            (115.0, InspectAction::SendMail),
+            (145.0, InspectAction::RequestTrade),
         ];
-        for (offset_x, btn_tex, btn_action) in &btn_defs {
+        let btn_textures = [&self.group_btn, &self.friend_btn, &self.mail_btn, &self.trade_btn];
+        for (i, (offset_x, btn_action)) in btn_offsets.iter().enumerate() {
+            let btn_tex = btn_textures[i];
             let bx = pos.x + offset_x;
             let btn_rect = Rect::new(bx, btn_y, btn_tex.size.x, btn_tex.size.y);
             let state = ButtonState::from_mouse(btn_rect, mouse_pos);

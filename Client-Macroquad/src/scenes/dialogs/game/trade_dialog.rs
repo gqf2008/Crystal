@@ -242,14 +242,10 @@ impl TradeDialogHybrid {
         let mut action = None;
 
         // 绘制己方面板
-        if let Some(a) = self.draw_panel(
-            true,
-            &mut self.own_position.clone(),
-            &self.own_name.clone(),
-            self.own_gold,
-            self.locked,
-            mouse_pos,
-        ) {
+        let own_name = self.own_name.clone();
+        let own_gold = self.own_gold;
+        let locked = self.locked;
+        if let Some(a) = self.draw_own_panel(&own_name, own_gold, locked, mouse_pos) {
             action = Some(a);
         }
 
@@ -260,10 +256,8 @@ impl TradeDialogHybrid {
     }
 
     /// 绘制己方交易面板
-    fn draw_panel(
+    fn draw_own_panel(
         &mut self,
-        is_own: bool,
-        position: &mut Vec2,
         name: &str,
         gold: u64,
         locked: bool,
@@ -273,9 +267,8 @@ impl TradeDialogHybrid {
 
         // 窗口拖动
         let bg_size = self.bg_texture.size;
-        let drag_rect = Rect::new(position.x, position.y, bg_size.x, bg_size.y);
-        let new_pos = self.drag_helper_own.update(drag_rect, *position, mouse_pos);
-        self.own_position = new_pos;
+        let drag_rect = Rect::new(self.own_position.x, self.own_position.y, bg_size.x, bg_size.y);
+        self.own_position = self.drag_helper_own.update(drag_rect, self.own_position, mouse_pos);
         let pos = self.own_position;
 
         // 背景
@@ -337,7 +330,7 @@ impl TradeDialogHybrid {
                     draw_rectangle(cell_x, cell_y, CELL_SIZE, CELL_SIZE, Color::new(1.0, 1.0, 1.0, 0.15));
 
                     // 点击
-                    if is_own && is_mouse_button_pressed(MouseButton::Left) && !locked {
+                    if is_mouse_button_pressed(MouseButton::Left) && !locked {
                         action = Some(TradeAction::ClickOwnSlot { slot: idx });
                     }
                 }
@@ -353,7 +346,7 @@ impl TradeDialogHybrid {
         draw_text_cn(&gold_text, pos.x + 55.0, pos.y + 133.0, 10.0, YELLOW);
 
         // 金币点击区域
-        if is_own {
+        { // own panel
             let gold_rect = Rect::new(pos.x + 35.0, pos.y + 120.0, 90.0, 15.0);
             if gold_rect.contains(mouse_pos) && is_mouse_button_pressed(MouseButton::Left) && !locked {
                 action = Some(TradeAction::SetGold);
@@ -366,7 +359,7 @@ impl TradeDialogHybrid {
         let btn_rect = Rect::new(btn_x, btn_y, 48.0, 25.0);
         let btn_state = ButtonState::from_mouse(btn_rect, mouse_pos);
         self.confirm_btn.draw(vec2(btn_x, btn_y), btn_state);
-        if is_own && ButtonState::is_clicked(btn_rect, mouse_pos) {
+        if ButtonState::is_clicked(btn_rect, mouse_pos) {
             action = Some(TradeAction::Confirm);
         }
 
@@ -376,7 +369,7 @@ impl TradeDialogHybrid {
         let close_rect = Rect::new(close_x, close_y, 20.0, 20.0);
         let close_state = ButtonState::from_mouse(close_rect, mouse_pos);
         self.close_btn.draw(vec2(close_x, close_y), close_state);
-        if is_own && ButtonState::is_clicked(close_rect, mouse_pos) {
+        if ButtonState::is_clicked(close_rect, mouse_pos) {
             action = Some(TradeAction::Cancel);
         }
 
