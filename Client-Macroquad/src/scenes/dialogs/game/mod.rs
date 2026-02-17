@@ -9,6 +9,7 @@ pub mod chat_control_bar;
 pub mod chat_dialog;
 pub mod chat_option_dialog;
 pub mod amount_box;
+pub mod dura_status_dialog;
 pub mod game_shop_dialog; 
 pub mod inspect_dialog;
 pub mod npc_dialog;
@@ -20,6 +21,7 @@ pub mod minimap_dialog;
 pub mod option_dialog;
 pub mod quest_log_dialog;
 pub mod skillbar_dialog;
+pub mod storage_dialog;
 pub mod trade_dialog;
 
 // 导出 hybrid 版本作为主要实现
@@ -32,6 +34,7 @@ pub use chat_dialog::ChatDialogHybrid;
 pub use chat_dialog::ChatMessageKind;
 pub use chat_option_dialog::{ChatOptionDialogHybrid, ChatOptionSettingsHybrid};
 pub use amount_box::{AmountBoxHybrid, AmountBoxResult};
+pub use dura_status_dialog::{DuraStatusDialogHybrid, EquipDurability};
 pub use game_shop_dialog::{GameShopDialogHybrid, ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid};
 pub use inspect_dialog::{InspectDialogHybrid, InspectAction, InspectEquipSlot, InspectEquipItem};
 pub use npc_dialog::{NpcDialogHybrid, NpcDialogAction};
@@ -43,6 +46,7 @@ pub use minimap_dialog::MiniMapDialogHybrid;
 pub use option_dialog::OptionDialogHybrid;
 pub use quest_log_dialog::QuestLogDialogHybrid;
 pub use skillbar_dialog::{SkillBarDialogHybrid, SkillBarAction, SkillSlot};
+pub use storage_dialog::{StorageDialogHybrid, StorageAction, StorageItem};
 pub use trade_dialog::{TradeDialogHybrid, TradeAction, TradeItem};
 
 // 为了兼容性，创建别名
@@ -52,6 +56,7 @@ pub type CharacterDialog = CharacterDialogHybrid;
 pub type ChatControlBar = ChatControlBarHybrid;
 pub type ChatDialog = ChatDialogHybrid;
 pub type ChatOptionDialog = ChatOptionDialogHybrid;
+pub type DuraStatusDialog = DuraStatusDialogHybrid;
 pub type GameShopDialog = GameShopDialogHybrid;
 pub type InspectDialog = InspectDialogHybrid;
 pub type InventoryDialog = InventoryDialogHybrid;
@@ -60,4 +65,5 @@ pub type MiniMapDialog = MiniMapDialogHybrid;
 pub type OptionDialog = OptionDialogHybrid;
 pub type QuestLogDialog = QuestLogDialogHybrid;
 pub type SkillBarDialog = SkillBarDialogHybrid;
+pub type StorageDialog = StorageDialogHybrid;
 pub type TradeDialog = TradeDialogHybrid;
