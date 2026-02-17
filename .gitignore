@@ -369,6 +369,7 @@ FodyWeavers.xsd
 # Rust build artifacts
 /SharedRust/target
 /ClientRust/target
+/ClientRust/ecs_macros/target
 /Client-Macroquad/target
 /Client-Macroquad/ecs_macros/target
 
