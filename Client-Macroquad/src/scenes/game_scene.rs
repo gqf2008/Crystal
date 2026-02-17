@@ -141,7 +141,7 @@ impl GameScene {
             )
             .add_system(
                 crate::systems::FloatingTextSystem::default(),
-                priority::PARTICLE,
+                priority::FLOATING_TEXT,
             )
             .add_system(
                 CameraSpaceGateSystem::default(),

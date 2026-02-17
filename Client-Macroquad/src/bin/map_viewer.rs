@@ -40,8 +40,10 @@ const RENDER_HEIGHT: f32 = 1200.0;
 const TILE_WIDTH: f32 = 48.0;
 const TILE_HEIGHT: f32 = 32.0;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 /// 调试：首次渲染标志
-static mut FIRST_RENDER: bool = true;
+static FIRST_RENDER: AtomicBool = AtomicBool::new(true);
 
 // ============================================================================
 // 渲染配置
@@ -698,10 +700,8 @@ impl MapViewerState {
         );
         
         // 首次渲染标记
-        unsafe {
-            if FIRST_RENDER {
-                FIRST_RENDER = false;
-            }
+        if FIRST_RENDER.load(Ordering::Relaxed) {
+            FIRST_RENDER.store(false, Ordering::Relaxed);
         }
     }
     
