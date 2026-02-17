@@ -219,7 +219,7 @@ impl Health {
         if amount <= 0 {
             return;
         }
-        self.current = (self.current.saturating_add(amount)).min(self.max);
+        self.current = self.current.saturating_add(amount).min(self.max);
     }
 }
 
@@ -240,7 +240,7 @@ impl Mana {
     }
 
     pub fn consume(&mut self, cost: i32) -> bool {
-        if cost <= 0 {
+        if cost < 0 {
             return false;
         }
         if self.current >= cost {
@@ -255,7 +255,7 @@ impl Mana {
         if amount <= 0 {
             return;
         }
-        self.current = (self.current.saturating_add(amount)).min(self.max);
+        self.current = self.current.saturating_add(amount).min(self.max);
     }
 
     pub fn percent(&self) -> f32 {
