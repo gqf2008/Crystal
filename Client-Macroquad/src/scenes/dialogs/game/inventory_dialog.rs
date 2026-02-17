@@ -100,6 +100,7 @@ pub struct InventoryDialogHybrid {
     
     // 悬停
     hovered_slot: Option<usize>,
+    pending_to_belt: Option<(InventoryTabHybrid, usize)>,
     
     // 双击检测
     last_click_time: f64,
@@ -168,6 +169,7 @@ impl InventoryDialogHybrid {
             
             scroll_offsets: [0.0, 0.0, 0.0],
             hovered_slot: None,
+            pending_to_belt: None,
             
             last_click_time: 0.0,
             last_click_slot: None,
@@ -348,6 +350,55 @@ impl InventoryDialogHybrid {
     pub fn contains(&self, pos: Vec2) -> bool {
         self.visible && Rect::new(self.position.x, self.position.y, self.size.x, self.size.y).contains(pos)
     }
+
+    pub fn take_transfer_to_belt_request(&mut self) -> Option<(InventoryTabHybrid, usize)> {
+        self.pending_to_belt.take()
+    }
+
+    pub fn take_item_from_slot(&mut self, tab: InventoryTabHybrid, slot: usize) -> Option<ItemSlotHybrid> {
+        let items = &mut self.tab_items[tab as usize];
+        if slot >= items.len() {
+            return None;
+        }
+        let item = items[slot].clone();
+        if item.icon_index.is_none() || item.count == 0 {
+            return None;
+        }
+        items[slot] = ItemSlotHybrid::empty();
+        Some(item)
+    }
+
+    pub fn restore_item_to_slot(&mut self, tab: InventoryTabHybrid, slot: usize, item: ItemSlotHybrid) -> bool {
+        let items = &mut self.tab_items[tab as usize];
+        if slot >= items.len() {
+            return false;
+        }
+        items[slot] = item;
+        true
+    }
+
+    pub fn try_insert_item(&mut self, item: ItemSlotHybrid) -> Result<(), ItemSlotHybrid> {
+        let Some(icon_index) = item.icon_index else {
+            return Ok(());
+        };
+        if item.count == 0 {
+            return Ok(());
+        }
+
+        let items = self.current_items_mut();
+
+        if let Some(existing) = items.iter_mut().find(|s| s.icon_index == Some(icon_index)) {
+            existing.count = existing.count.saturating_add(item.count);
+            return Ok(());
+        }
+
+        if let Some(empty_slot) = items.iter_mut().find(|s| s.icon_index.is_none() || s.count == 0) {
+            *empty_slot = ItemSlotHybrid::new(icon_index, item.count);
+            return Ok(());
+        }
+
+        Err(item)
+    }
     
     // === 主更新循环 ===
     
@@ -390,6 +441,17 @@ impl InventoryDialogHybrid {
             } else if close_hovered {
                 self.close();
                 return;
+            }
+        }
+        if is_mouse_button_pressed(MouseButton::Right) && !self.item_dragging {
+            if let Some(slot_idx) = self.hovered_slot {
+                if self
+                    .current_items()
+                    .get(slot_idx)
+                    .is_some_and(|slot| slot.icon_index.is_some() && slot.count > 0)
+                {
+                    self.pending_to_belt = Some((self.current_tab, slot_idx));
+                }
             }
         }
         
