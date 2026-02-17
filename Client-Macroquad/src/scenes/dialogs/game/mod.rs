@@ -27,6 +27,7 @@ pub mod quest_log_dialog;
 pub mod skillbar_dialog;
 pub mod storage_dialog;
 pub mod trade_dialog;
+pub mod ui_controls;
 
 // 导出 hybrid 版本作为主要实现
 //pub use belt_dialog_native::{BeltDialogNative, BeltLayout, BeltItem};
@@ -56,6 +57,7 @@ pub use quest_log_dialog::QuestLogDialogHybrid;
 pub use skillbar_dialog::{SkillBarDialogHybrid, SkillBarAction, SkillSlot};
 pub use storage_dialog::{StorageDialogHybrid, StorageAction, StorageItem};
 pub use trade_dialog::{TradeDialogHybrid, TradeAction, TradeItem};
+pub use ui_controls::{CheckBoxHybrid, TextBoxHybrid, DropDownBoxHybrid, ScrollingLabelHybrid, GoodsCellHybrid, ShopGoodsItem};
 
 // 为了兼容性，创建别名
 pub type BeltDialog = BeltDialogHybrid;
