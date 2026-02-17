@@ -178,20 +178,20 @@ impl NPCDropDialogHybrid {
         self.item.as_ref()
     }
 
+    /// 计算 NPC 修理费用
+    fn apply_npc_rate(&self, base_cost: u64, multiplier: f32) -> u64 {
+        (base_cost as f32 * multiplier * self.npc_rate) as u64
+    }
+
     /// 计算并格式化金币信息
     fn gold_info(&self) -> String {
         if let Some(item) = &self.item {
             let cost = item.gold_cost;
             match self.panel_type {
+                // 出售价格 = 物品价值 / 2 (整数截断，与 C# 一致)
                 PanelType::Sell => format!("出售价格: {} 金", cost / 2),
-                PanelType::Repair => {
-                    let repair = (cost as f32 * self.npc_rate) as u64;
-                    format!("修理费用: {} 金", repair)
-                }
-                PanelType::SpecialRepair => {
-                    let repair = (cost as f32 * 3.0 * self.npc_rate) as u64;
-                    format!("特修费用: {} 金", repair)
-                }
+                PanelType::Repair => format!("修理费用: {} 金", self.apply_npc_rate(cost, 1.0)),
+                PanelType::SpecialRepair => format!("特修费用: {} 金", self.apply_npc_rate(cost, 3.0)),
                 PanelType::Consign => "设定寄售价格".to_string(),
                 PanelType::Refine | PanelType::CheckRefine => format!("精炼费用: {} 金", cost),
                 PanelType::Disassemble => format!("分解费用: {} 金", cost),

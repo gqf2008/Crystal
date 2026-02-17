@@ -34,6 +34,8 @@ const NPC_LIST_X: f32 = 340.0;
 const NPC_LIST_Y: f32 = 55.0;
 const NPC_LIST_W: f32 = 130.0;
 const NPC_ROW_H: f32 = 18.0;
+/// 地图坐标缩放因子（归一化→游戏单位）
+const MAP_COORDINATE_SCALE: f32 = 300.0;
 /// NPC 列表可见行数
 const NPC_VISIBLE_ROWS: usize = 15;
 
@@ -210,7 +212,7 @@ impl BigMapDialogHybrid {
             self.mouse_map_coord = Some((rel_x, rel_y));
 
             // 坐标提示
-            let coord_text = format!("({:.0}, {:.0})", rel_x * 300.0, rel_y * 300.0);
+            let coord_text = format!("({:.0}, {:.0})", rel_x * MAP_COORDINATE_SCALE, rel_y * MAP_COORDINATE_SCALE);
             draw_text_cn(&coord_text, mouse.x + 12.0, mouse.y - 5.0, 10.0, LIGHTGRAY);
 
             // 点击寻路
@@ -276,7 +278,7 @@ impl BigMapDialogHybrid {
         }
 
         // --- 坐标信息 ---
-        let coord_label = format!("坐标: ({:.0}, {:.0})", self.player_x * 300.0, self.player_y * 300.0);
+        let coord_label = format!("坐标: ({:.0}, {:.0})", self.player_x * MAP_COORDINATE_SCALE, self.player_y * MAP_COORDINATE_SCALE);
         draw_text_cn(&coord_label, x + MAP_X, y + DIALOG_HEIGHT - 15.0, 11.0, WHITE);
 
         // --- 关闭按钮 ---

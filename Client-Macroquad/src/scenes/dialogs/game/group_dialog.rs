@@ -101,9 +101,13 @@ impl GroupDialogHybrid {
         self.close_btn = CloseButton::load_prguse2();
     }
 
-    /// 设置组队成员
+    /// 设置组队成员（超出上限截断）
     pub fn set_members(&mut self, members: Vec<GroupMember>) {
-        self.members = members;
+        self.members = if members.len() > MAX_GROUP {
+            members.into_iter().take(MAX_GROUP).collect()
+        } else {
+            members
+        };
     }
 
     /// 清除组队

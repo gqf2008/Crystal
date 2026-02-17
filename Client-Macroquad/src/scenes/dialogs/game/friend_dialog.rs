@@ -138,7 +138,7 @@ impl FriendDialogHybrid {
             .collect()
     }
 
-    /// 当前页签的总页数
+    /// 当前页签的总页数 (ceiling division)
     fn total_pages(&self) -> usize {
         let count = self.filtered_friends().len();
         if count == 0 { 1 } else { (count + ROWS_PER_PAGE - 1) / ROWS_PER_PAGE }
