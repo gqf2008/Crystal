@@ -3,6 +3,7 @@
 pub mod native_ui_utils;
 // pub mod belt_dialog_native;
 pub mod belt_dialog;
+pub mod buff_dialog;
 pub mod character_dialog;
 pub mod chat_control_bar;
 pub mod chat_dialog;
@@ -17,10 +18,12 @@ pub mod menu_dialog;
 pub mod minimap_dialog;
 pub mod option_dialog;
 pub mod quest_log_dialog;
+pub mod skillbar_dialog;
 
 // 导出 hybrid 版本作为主要实现
 //pub use belt_dialog_native::{BeltDialogNative, BeltLayout, BeltItem};
 pub use belt_dialog::{BeltDialogHybrid, BeltItemHybrid, BeltLayoutHybrid};
+pub use buff_dialog::{BuffDialogHybrid, BuffType, ClientBuff};
 pub use character_dialog::{CharacterDialogHybrid, CharacterTabHybrid, EquipmentItemHybrid, EquipSlot};
 pub use chat_control_bar::{ChatControlBarHybrid, ChatFilterHybrid};
 pub use chat_dialog::ChatDialogHybrid;
@@ -36,9 +39,11 @@ pub use menu_dialog::{MenuDialogHybrid, MenuAction};
 pub use minimap_dialog::MiniMapDialogHybrid;
 pub use option_dialog::OptionDialogHybrid;
 pub use quest_log_dialog::QuestLogDialogHybrid;
+pub use skillbar_dialog::{SkillBarDialogHybrid, SkillBarAction, SkillSlot};
 
 // 为了兼容性，创建别名
 pub type BeltDialog = BeltDialogHybrid;
+pub type BuffDialog = BuffDialogHybrid;
 pub type CharacterDialog = CharacterDialogHybrid;
 pub type ChatControlBar = ChatControlBarHybrid;
 pub type ChatDialog = ChatDialogHybrid;
@@ -49,3 +54,4 @@ pub type MenuDialog = MenuDialogHybrid;
 pub type MiniMapDialog = MiniMapDialogHybrid;
 pub type OptionDialog = OptionDialogHybrid;
 pub type QuestLogDialog = QuestLogDialogHybrid;
+pub type SkillBarDialog = SkillBarDialogHybrid;
