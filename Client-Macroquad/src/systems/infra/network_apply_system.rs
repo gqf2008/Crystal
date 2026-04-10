@@ -3398,18 +3398,18 @@ impl LogicSystem for NetworkApplySystem {
             use mir2_shared::enums::Spell;
             let spell_enum = spell as u8;
             let (effect_text, effect_color) = match spell_enum {
-                x if x == Spell::FireBall as u8 => ("🔥", macroquad::prelude::ORANGE),
-                x if x == Spell::GreatFireBall as u8 => ("🔥🔥", macroquad::prelude::RED),
-                x if x == Spell::HellFire as u8 => ("🔥🔥🔥", macroquad::prelude::YELLOW),
-                x if x == Spell::ThunderBolt as u8 => ("⚡", macroquad::prelude::Color::from_rgba(150, 150, 255, 255)),
-                x if x == Spell::Lightning as u8 => ("⚡⚡", macroquad::prelude::Color::from_rgba(100, 100, 255, 255)),
-                x if x == Spell::Healing as u8 => ("💚", macroquad::prelude::GREEN),
-                x if x == Spell::Poisoning as u8 => ("☠", macroquad::prelude::Color::from_rgba(128, 0, 128, 255)),
-                x if x == Spell::Teleport as u8 => ("✨", macroquad::prelude::WHITE),
-                x if x == Spell::MagicShield as u8 => ("🛡", macroquad::prelude::Color::from_rgba(100, 200, 255, 255)),
-                x if x == Spell::HalfMoon as u8 => ("🌙", macroquad::prelude::Color::from_rgba(255, 255, 200, 255)),
-                x if x == Spell::ShoulderDash as u8 => ("💨", macroquad::prelude::Color::from_rgba(200, 200, 200, 255)),
-                _ => ("✨", macroquad::prelude::Color::from_rgba(255, 255, 100, 255)),
+                x if x == Spell::FireBall as u8 => ("火球术", macroquad::prelude::ORANGE),
+                x if x == Spell::GreatFireBall as u8 => ("大火球", macroquad::prelude::RED),
+                x if x == Spell::HellFire as u8 => ("地狱火", macroquad::prelude::YELLOW),
+                x if x == Spell::ThunderBolt as u8 => ("雷电", macroquad::prelude::Color::from_rgba(150, 150, 255, 255)),
+                x if x == Spell::Lightning as u8 => ("闪电", macroquad::prelude::Color::from_rgba(100, 100, 255, 255)),
+                x if x == Spell::Healing as u8 => ("治疗术", macroquad::prelude::GREEN),
+                x if x == Spell::Poisoning as u8 => ("施毒", macroquad::prelude::Color::from_rgba(128, 0, 128, 255)),
+                x if x == Spell::Teleport as u8 => ("瞬移", macroquad::prelude::WHITE),
+                x if x == Spell::MagicShield as u8 => ("魔法盾", macroquad::prelude::Color::from_rgba(100, 200, 255, 255)),
+                x if x == Spell::HalfMoon as u8 => ("半月", macroquad::prelude::Color::from_rgba(255, 255, 200, 255)),
+                x if x == Spell::ShoulderDash as u8 => ("野蛮冲撞", macroquad::prelude::Color::from_rgba(200, 200, 200, 255)),
+                _ => ("施法", macroquad::prelude::Color::from_rgba(255, 255, 100, 255)),
             };
 
             // 飘字特效
@@ -3476,7 +3476,7 @@ impl LogicSystem for NetworkApplySystem {
                     ctx.world.spawn((
                         crate::components::Position::new(pos.x, pos.y - 80.0),
                         crate::components::FloatingText {
-                            text: "🛡".to_string(),
+                            text: "护盾".to_string(),
                             start_time: now,
                             duration: 1.0,
                             rise_speed: 40.0,
@@ -3488,7 +3488,7 @@ impl LogicSystem for NetworkApplySystem {
                     ctx.world.spawn((
                         crate::components::Position::new(pos.x, pos.y - 80.0),
                         crate::components::FloatingText {
-                            text: "🛡破碎".to_string(),
+                            text: "护盾破碎".to_string(),
                             start_time: now,
                             duration: 1.0,
                             rise_speed: 40.0,

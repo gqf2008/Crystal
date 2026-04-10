@@ -27,6 +27,7 @@ use crate::components::{
     TargetSelection, TargetType, NPC,
 };
 use crate::game::GameContext;
+use crate::game::KeyCode;
 use crate::network::handlers::NetworkEvent as NetworkCommand;
 use crate::game::GameResult;
 use hecs::World;
@@ -102,13 +103,12 @@ impl LogicSystem for SkillSystem {
                 return Ok(());
             }
 
-            // 1.5 检查冷却时间
+            // 1.5 检查冷却时间（同时清理已过期条目）
             let on_cooldown = {
                 let mut cd = false;
-                for (_, (_, cooldowns)) in ctx.world.query::<(&LocalPlayer, &crate::components::spell::SpellCooldowns)>().iter() {
-                    let mut cooldowns_mut = cooldowns.clone();
-                    cooldowns_mut.cleanup();
-                    if cooldowns_mut.is_on_cooldown(spell as u8) {
+                for (_, (_, cooldowns)) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>() {
+                    cooldowns.cleanup();
+                    if cooldowns.is_on_cooldown(spell as u8) {
                         cd = true;
                     }
                     break;
@@ -490,8 +490,6 @@ impl SkillSystem {
 // - 根据 MagicList 中 key_slot 绑定或默认顺序映射到 SpellType
 // - 写入 PlayerInput.cast_spell 供 SkillSystem 消费
 //
-
-use crate::game::KeyCode;
 
 /// 快捷键技能输入系统
 #[derive(ecs_macros::LogicSystem)]
