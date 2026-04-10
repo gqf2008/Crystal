@@ -464,7 +464,7 @@ impl LogicSystem for PathfindingSystem {
                                 
                                 // 🎬 根据 Player.action 计算初始速度（MovementSystem会从Player.action读取）
                                 use crate::components::PlayerAction;
-                                let speed = if player.action == PlayerAction::Run {
+                                let _speed = if player.action == PlayerAction::Run {
                                     tracing::debug!("🏃 使用跑步速度: {}", velocity.run_speed);
                                     velocity.run_speed
                                 } else {

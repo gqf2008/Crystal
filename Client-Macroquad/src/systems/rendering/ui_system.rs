@@ -41,10 +41,8 @@ enum UiStackTop {
 
 impl UIRenderSystem {
     pub fn new() -> Self {
-        let mut main_dialog = MainDialog::new();
-        main_dialog.load_native_textures();
         Self {
-            main_dialog,
+            main_dialog: MainDialog::new(),
             npc_dialog: NpcDialogHybrid::new(),
             npc_goods_dialog: NpcGoodsDialogHybrid::new(),
             npc_sub_goods_dialog: NpcGoodsDialogHybrid::new(),
@@ -364,6 +362,9 @@ impl RenderSystem for UIRenderSystem {
             );
             return Ok(());
         }
+
+        // 确保所有对话框纹理已加载（惰性加载，此时 data_path 一定已设置）
+        self.main_dialog.ensure_textures_loaded();
 
         let (mx, my) = mouse_position();
         let mouse_pos = vec2(mx, my);

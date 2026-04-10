@@ -584,4 +584,86 @@ mod tests {
         let stats = rm.cache_stats();
         assert_eq!(stats.texture_cache_capacity, 100);
     }
+
+    /// 验证 UI 对话框所需的 .Lib 文件存在且能正确读取纹理尺寸
+    #[test]
+    fn test_ui_library_textures_exist() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let data_path = format!("{}/Data", manifest_dir);
+
+        let mut rm = ResourceManager::new();
+        rm.set_data_path(&data_path);
+
+        // FriendDialog: Title[199]=背景, Title[6]=标题
+        let (w, h) = rm.get_size(LibraryName::Title, 199)
+            .expect("FriendDialog 背景 Title[199] 不存在");
+        assert!(w > 0 && h > 0, "FriendDialog 背景尺寸异常: {}x{}", w, h);
+
+        let (w, h) = rm.get_size(LibraryName::Title, 6)
+            .expect("FriendDialog 标题 Title[6] 不存在");
+        assert!(w > 0 && h > 0);
+
+        // GroupDialog: Prguse[120]=背景
+        let (w, h) = rm.get_size(LibraryName::Prguse, 120)
+            .expect("GroupDialog 背景 Prguse[120] 不存在");
+        assert!(w > 0 && h > 0);
+
+        // NameInputDialog: Prguse[660]=背景
+        let (w, h) = rm.get_size(LibraryName::Prguse, 660)
+            .expect("NameInputDialog 背景 Prguse[660] 不存在");
+        assert!(w > 0 && h > 0);
+
+        // NameInputDialog 按钮: Title[200]=OK, Title[203]=Cancel
+        let (w, h) = rm.get_size(LibraryName::Title, 200)
+            .expect("OK 按钮 Title[200] 不存在");
+        assert!(w > 0 && h > 0);
+    }
+
+    /// 验证 FriendDialog 底部操作按钮纹理存在
+    #[test]
+    fn test_friend_dialog_action_buttons() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let data_path = format!("{}/Data", manifest_dir);
+
+        let mut rm = ResourceManager::new();
+        rm.set_data_path(&data_path);
+
+        // Add: Prguse[554/555/556], Remove: [557/558/559], Memo: [560/561/562]
+        for &idx in &[554, 555, 556, 557, 558, 559, 560, 561, 562] {
+            let (w, h) = rm.get_size(LibraryName::Prguse, idx)
+                .unwrap_or_else(|| panic!("Prguse[{}] 不存在", idx));
+            assert!(w > 0 && h > 0, "Prguse[{}] 尺寸异常: {}x{}", idx, w, h);
+        }
+    }
+
+    /// 验证 GroupDialog 底部按钮纹理存在
+    #[test]
+    fn test_group_dialog_buttons() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let data_path = format!("{}/Data", manifest_dir);
+
+        let mut rm = ResourceManager::new();
+        rm.set_data_path(&data_path);
+
+        // 组队开关: Prguse[114-116](禁止), [117-119](允许)
+        for &idx in &[114, 115, 116, 117, 118, 119] {
+            let (w, h) = rm.get_size(LibraryName::Prguse, idx)
+                .unwrap_or_else(|| panic!("Prguse[{}] 不存在", idx));
+            assert!(w > 0 && h > 0, "Prguse[{}] 尺寸异常: {}x{}", idx, w, h);
+        }
+
+        // 添加: Title[130-132](无成员), [133-135](有成员)
+        for &idx in &[130, 131, 132, 133, 134, 135] {
+            let (w, h) = rm.get_size(LibraryName::Title, idx)
+                .unwrap_or_else(|| panic!("Title[{}] 不存在", idx));
+            assert!(w > 0 && h > 0, "Title[{}] 尺寸异常: {}x{}", idx, w, h);
+        }
+
+        // 删除: Title[136/137/138]
+        for &idx in &[136, 137, 138] {
+            let (w, h) = rm.get_size(LibraryName::Title, idx)
+                .unwrap_or_else(|| panic!("Title[{}] 不存在", idx));
+            assert!(w > 0 && h > 0, "Title[{}] 尺寸异常: {}x{}", idx, w, h);
+        }
+    }
 }

@@ -11,6 +11,7 @@
 use macroquad::prelude::*;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
+use crate::utils::ime::{set_ime_enabled, set_ime_position};
 use super::native_ui_utils::DragHelper;
 use super::ChatOptionSettingsHybrid;
 
@@ -209,7 +210,7 @@ impl ChatDialogHybrid {
         if self.visible && !self.input_active {
             self.input_active = true;
             // 启用 IME 输入法
-            miniquad::window::set_ime_enabled(true);
+            set_ime_enabled(true);
         }
     }
 
@@ -218,7 +219,7 @@ impl ChatDialogHybrid {
         if self.input_active {
             self.input_active = false;
             // 禁用 IME 输入法
-            miniquad::window::set_ime_enabled(false);
+            set_ime_enabled(false);
         }
     }
 
@@ -772,18 +773,18 @@ impl ChatDialogHybrid {
             if !self.input_active {
                 self.input_active = true;
                 // 启用 IME 输入法
-                miniquad::window::set_ime_enabled(true);
+                set_ime_enabled(true);
                 // 设置 IME 候选窗口位置到输入框下方
                 let dpi = miniquad::window::dpi_scale();
                 let ime_x = (input_rect.x * dpi) as i32;
                 let ime_y = ((input_rect.y + input_rect.h + 2.0) * dpi) as i32;
-                miniquad::window::set_ime_position(ime_x, ime_y);
+                set_ime_position(ime_x, ime_y);
             }
         } else if !input_rect.contains(mouse_pos) && is_mouse_button_pressed(MouseButton::Left) {
             if self.input_active {
                 self.input_active = false;
                 // 禁用 IME 输入法（用于游戏控制）
-                miniquad::window::set_ime_enabled(false);
+                set_ime_enabled(false);
             }
         }
 
@@ -794,7 +795,7 @@ impl ChatDialogHybrid {
             let dpi = miniquad::window::dpi_scale();
             let ime_x = (cursor_x * dpi) as i32;
             let ime_y = ((input_rect.y + input_rect.h + 2.0) * dpi) as i32;
-            miniquad::window::set_ime_position(ime_x, ime_y);
+            set_ime_position(ime_x, ime_y);
             
             // 获取输入的字符（支持中文和其他Unicode字符）
             // 注意：macroquad 的 get_char_pressed() 在同一帧内可能以“后进先出”顺序吐出多个字符，
@@ -844,7 +845,7 @@ impl ChatDialogHybrid {
                 self.input_text.clear();
                 self.input_active = false;
                 // 禁用 IME 输入法
-                miniquad::window::set_ime_enabled(false);
+                set_ime_enabled(false);
             }
             // Backspace 删除字符（支持按住连续删除）
             if is_key_down(KeyCode::Backspace) {

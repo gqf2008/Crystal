@@ -11,7 +11,7 @@ impl PacketHandler for GroupHandler {
     fn handle(&self, header: &PacketHeader, payload: &[u8]) -> Vec<NetworkEvent> {
         let mut events = Vec::new();
         let mut cursor = Cursor::new(payload);
-        
+
         match header.opcode as u16 {
             // GroupInvite
             x if x == ServerPacketIds::GroupInvite as u16 => {
@@ -22,7 +22,7 @@ impl PacketHandler for GroupHandler {
                     tracing::info!("👥 Group invite from: {}", packet.name);
                 }
             }
-            
+
             // AddMember
             x if x == ServerPacketIds::AddMember as u16 => {
                 if let Ok(packet) = server::AddMember::read_body(&mut cursor) {
@@ -32,7 +32,7 @@ impl PacketHandler for GroupHandler {
                     tracing::info!("👥 Member added to group: {}", packet.name);
                 }
             }
-            
+
             // DeleteMember
             x if x == ServerPacketIds::DeleteMember as u16 => {
                 if let Ok(packet) = server::DeleteMember::read_body(&mut cursor) {
@@ -42,7 +42,7 @@ impl PacketHandler for GroupHandler {
                     tracing::info!("👥 Member removed from group: {}", packet.name);
                 }
             }
-            
+
             // DeleteGroup
             x if x == ServerPacketIds::DeleteGroup as u16 => {
                 if let Ok(_packet) = server::DeleteGroup::read_body(&mut cursor) {
@@ -50,12 +50,33 @@ impl PacketHandler for GroupHandler {
                     tracing::info!("👥 Group disbanded");
                 }
             }
-            
+
+            // SwitchGroup
+            x if x == ServerPacketIds::SwitchGroup as u16 => {
+                if let Ok(packet) = server::SwitchGroup::read_body(&mut cursor) {
+                    tracing::info!("👥 Group mode switched: allow_group={}", packet.allow_group);
+                }
+            }
+
+            // GroupMembersMap
+            x if x == ServerPacketIds::GroupMembersMap as u16 => {
+                if let Ok(packet) = server::GroupMembersMap::read_body(&mut cursor) {
+                    tracing::info!("👥 Group members map: {} members", packet.members.len());
+                }
+            }
+
+            // SendMemberLocation
+            x if x == ServerPacketIds::SendMemberLocation as u16 => {
+                if let Ok(packet) = server::SendMemberLocation::read_body(&mut cursor) {
+                    tracing::debug!("👥 Group member {} at ({}, {})", packet.member_name, packet.location.x, packet.location.y);
+                }
+            }
+
             _ => {
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }
-        
+
         events
     }
 }

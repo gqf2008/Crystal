@@ -223,7 +223,143 @@ impl PacketHandler for CharacterHandler {
                     events.push(NetworkEvent::UserInformation { packet });
                 }
             }
-            
+
+            // ====================================================================
+            // Player State
+            // ====================================================================
+
+            // PlayerUpdate
+            x if x == ServerPacketIds::PlayerUpdate as u16 => {
+                if let Ok(_packet) = server::PlayerUpdate::read_body(&mut cursor) {
+                    events.push(NetworkEvent::PlayerUpdated);
+                    tracing::debug!("🔄 PlayerUpdate received");
+                }
+            }
+
+            // ChangeAMode
+            x if x == ServerPacketIds::ChangeAMode as u16 => {
+                if let Ok(packet) = server::ChangeAMode::read_body(&mut cursor) {
+                    events.push(NetworkEvent::AttackModeChanged { mode: packet.mode as u8 });
+                    tracing::debug!("⚔️ AttackModeChanged: {:?}", packet.mode);
+                }
+            }
+
+            // ChangePMode
+            x if x == ServerPacketIds::ChangePMode as u16 => {
+                if let Ok(packet) = server::ChangePMode::read_body(&mut cursor) {
+                    events.push(NetworkEvent::PetModeChanged { mode: packet.mode as u8 });
+                    tracing::debug!("🐾 PetModeChanged: {:?}", packet.mode);
+                }
+            }
+
+            // ColourChanged
+            x if x == ServerPacketIds::ColourChanged as u16 => {
+                if let Ok(packet) = server::ColourChanged::read_body(&mut cursor) {
+                    events.push(NetworkEvent::PlayerColourChanged { colour: packet.name_colour_argb as u32 });
+                    tracing::debug!("🎨 PlayerColourChanged: {}", packet.name_colour_argb);
+                }
+            }
+
+            // ObjectColourChanged
+            x if x == ServerPacketIds::ObjectColourChanged as u16 => {
+                if let Ok(packet) = server::ObjectColourChanged::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ObjectColourChanged {
+                        object_id: packet.object_id,
+                        colour: packet.name_colour_argb as u32,
+                    });
+                    tracing::debug!(
+                        "🎨 ObjectColourChanged: object={} colour={}",
+                        packet.object_id, packet.name_colour_argb
+                    );
+                }
+            }
+
+            // ObjectGuildNameChanged
+            x if x == ServerPacketIds::ObjectGuildNameChanged as u16 => {
+                if let Ok(packet) = server::ObjectGuildNameChanged::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ObjectGuildNameChanged2 {
+                        object_id: packet.object_id,
+                        guild_name: packet.guild_name.clone(),
+                    });
+                    tracing::debug!(
+                        "🏰 ObjectGuildNameChanged: object={} guild={}",
+                        packet.object_id, packet.guild_name
+                    );
+                }
+            }
+
+            // ObjectName
+            x if x == ServerPacketIds::ObjectName as u16 => {
+                if let Ok(_packet) = server::ObjectName::read_body(&mut cursor) {
+                    events.push(NetworkEvent::PlayerNameUpdated);
+                    tracing::debug!("📛 PlayerNameUpdated");
+                }
+            }
+
+            // UserName
+            x if x == ServerPacketIds::UserName as u16 => {
+                if let Ok(_packet) = server::UserName::read_body(&mut cursor) {
+                    events.push(NetworkEvent::UserNameUpdated);
+                    tracing::debug!("📛 UserNameUpdated");
+                }
+            }
+
+            // ChatItemStats
+            x if x == ServerPacketIds::ChatItemStats as u16 => {
+                if let Ok(_packet) = server::ChatItemStats::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ChatItemStatsReceived);
+                    tracing::debug!("📊 ChatItemStatsReceived");
+                }
+            }
+
+            // ====================================================================
+            // Logout / Reincarnation
+            // ====================================================================
+
+            // LogOutSuccess
+            x if x == ServerPacketIds::LogOutSuccess as u16 => {
+                if let Ok(_packet) = server::LogOutSuccess::read_body(&mut cursor) {
+                    tracing::info!("🚪 LogOutSuccess");
+                }
+            }
+
+            // LogOutFailed
+            x if x == ServerPacketIds::LogOutFailed as u16 => {
+                if let Ok(_packet) = server::LogOutFailed::read_body(&mut cursor) {
+                    tracing::warn!("🚪 LogOutFailed");
+                }
+            }
+
+            // ReturnToLogin
+            x if x == ServerPacketIds::ReturnToLogin as u16 => {
+                if let Ok(_packet) = server::ReturnToLogin::read_body(&mut cursor) {
+                    tracing::info!("🔙 ReturnToLogin");
+                }
+            }
+
+            // CancelReincarnation
+            x if x == ServerPacketIds::CancelReincarnation as u16 => {
+                if let Ok(_packet) = server::CancelReincarnation::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ReincarnationCancelled);
+                    tracing::debug!("🔮 Reincarnation cancelled");
+                }
+            }
+
+            // RequestReincarnation
+            x if x == ServerPacketIds::RequestReincarnation as u16 => {
+                if let Ok(_packet) = server::RequestReincarnation::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ReincarnationRequested);
+                    tracing::debug!("🔮 Reincarnation requested");
+                }
+            }
+
+            // UserSlotsRefresh
+            x if x == ServerPacketIds::UserSlotsRefresh as u16 => {
+                if let Ok(_packet) = server::UserSlotsRefresh::read_body(&mut cursor) {
+                    tracing::debug!("🔄 UserSlotsRefresh");
+                }
+            }
+
             _ => {
                 tracing::debug!("⚠️ CharacterHandler: Unhandled opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });

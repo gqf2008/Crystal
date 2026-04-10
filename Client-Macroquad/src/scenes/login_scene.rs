@@ -13,7 +13,7 @@ use crate::game::GameResult;
 use crate::network::{NetContext, NetworkBuilder, NetworkEvent};
 use crate::resources::LibraryName;
 use crate::scenes::{Scene, SceneTransition};
-use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
+use crate::ui::text_renderer::draw_text_cn;
 use crate::ui::widgets::{draw_button, draw_input_box, draw_message_box};
 use macroquad::prelude::*;
 

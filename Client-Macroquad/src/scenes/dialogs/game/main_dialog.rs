@@ -313,8 +313,37 @@ impl MainDialog {
         }
     }
 
+    /// 确保纹理已加载（惰性加载，避免在 data_path 设置前调用）
+    pub fn ensure_textures_loaded(&mut self) {
+        if self.bg_texture.is_some() {
+            return;
+        }
+
+        // 加载主背景纹理
+        if let Some(texture) = LibraryName::Prguse.get_texture(self.resolution_index) {
+            self.bg_size = vec2(texture.width as f32, texture.height as f32);
+            if let Some(tex) = texture.image {
+                self.bg_texture = Some(tex);
+            }
+        }
+
+        // 加载所有子对话框纹理
+        self.belt_dialog.load_textures();
+        self.chat_dialog.load_textures();
+        self.chat_control_bar.load_textures();
+        self.chat_option_dialog.load_textures();
+        self.inventory_dialog.load_textures();
+        self.character_dialog.load_textures();
+        self.quest_log_dialog.load_textures();
+        self.option_dialog.load_textures();
+        self.game_shop_dialog.load_textures();
+        self.menu_dialog.load_textures();
+        self.minimap_dialog.load_textures();
+    }
+
     /// 异步加载纹理
     pub fn load_native_textures(&mut self) {
+        self.ensure_textures_loaded();
         // 加载主背景纹理
         if let Some(texture) = LibraryName::Prguse.get_texture(self.resolution_index) {
             self.bg_size = vec2(texture.width as f32, texture.height as f32);

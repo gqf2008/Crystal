@@ -16,7 +16,13 @@ pub mod trade;
 pub mod item;
 pub mod npc;
 pub mod quest;
+pub mod friend;
 pub mod ui_events;
+pub mod hero;
+pub mod mail;
+pub mod market;
+pub mod creature;
+pub mod social;
 
 // Re-export all handlers
 pub use connection::ConnectionHandler;
@@ -31,7 +37,13 @@ pub use trade::TradeHandler;
 pub use item::ItemHandler;
 pub use npc::NpcHandler;
 pub use quest::QuestHandler;
+pub use friend::FriendHandler;
 pub use ui_events::UiEventsHandler;
+pub use hero::HeroHandler;
+pub use mail::MailHandler;
+pub use market::MarketHandler;
+pub use creature::CreatureHandler;
+pub use social::SocialHandler;
 
 use mir2_shared::packets::PacketHeader;
 use crate::resources::LibraryName;
@@ -172,6 +184,9 @@ pub enum NetworkEvent {
     ///
     /// 说明：多数情况下只下发 percent，不下发 max。渲染端可用 0..100 的虚拟血条。
     ObjectHealthPercent { object_id: u32, percent: u8, expire: u16 },
+
+    /// 物体 mana 百分比同步（真实协议：ObjectMana）
+    ObjectManaPercent { object_id: u32, percent: u8 },
     
     // ========================================================================
     // 聊天事件（Chat Events）
@@ -230,6 +245,50 @@ pub enum NetworkEvent {
     ItemGained { item: mir2_shared::UserItem },
     ItemLost { unique_id: u64 },
     ItemMoved { from: u32, to: u32 },
+    ItemEquipped { item: mir2_shared::UserItem },
+    ItemUnequipped { unique_id: u64 },
+    ItemMerged { unique_id: u64, count: u32 },
+    ItemRemoved { unique_id: u64 },
+    ItemSlotRemoved { slot: u32 },
+    ItemTakenBack { item: mir2_shared::UserItem },
+    ItemStored { item: mir2_shared::UserItem },
+    ItemSplit { unique_id: u64, count: u32 },
+    ItemUsed { unique_id: u64 },
+    ItemDropped { unique_id: u64 },
+    ItemRefreshed { item: mir2_shared::UserItem },
+    ItemSlotSizeChanged { slot: u32, size: u32 },
+    ItemSealed { unique_id: u64 },
+    ItemSlotEquipped { slot: u32, item: mir2_shared::UserItem },
+    ItemCombined { item: mir2_shared::UserItem },
+    ItemUpgraded { item: mir2_shared::UserItem },
+    GroundItem { packet: mir2_shared::packets::server::ObjectItem },
+    GroundGold { amount: u32 },
+    CreditChanged { delta: i32 },
+    ObjectHarvested { object_id: u32 },
+    RefineItemDeposited,
+    RefineItemRetrieved,
+    RefineCancelled,
+    RefineItemCompleted,
+    TradeItemDeposited,
+    TradeItemRetrieved,
+    HeroItemTakenBack,
+    HeroItemTransferred,
+    NewItemInfoReceived,
+    /// 地面金币（ObjectGold）
+    ObjectGoldReceived { packet: mir2_shared::packets::server::ObjectGold },
+
+    // 客户端 → 服务器（物品操作）
+    EquipItemRequest { unique_id: u64 },
+    RemoveItemRequest { unique_id: u64 },
+    RemoveSlotItemRequest { slot: u32 },
+    SplitItemRequest { unique_id: u64, count: u32 },
+    MergeItemRequest { from: u64, to: u64 },
+    StoreItemRequest { unique_id: u64 },
+    TakeBackItemRequest { unique_id: u64 },
+    DropGoldRequest { amount: u32 },
+    EquipSlotItemRequest { slot: u32, unique_id: u64 },
+    CombineItemRequest { from: u64, to: u64 },
+    DropItemStackRequest { unique_id: u64, count: u32 },
     
     // ========================================================================
     // 组队事件（Group Events）
@@ -329,7 +388,407 @@ pub enum NetworkEvent {
 
     // UI / 表现层事件（来自服务器）
     PlaySound { sound_id: i32 },
-    
+    // ========================================================================
+    // 魔法/技能事件（Magic Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    MagicListReceived,
+    MagicLearned { spell: mir2_shared::enums::Spell, level: u8 },
+    MagicRemoved { spell: mir2_shared::enums::Spell },
+    MagicLeveledUp { spell: mir2_shared::enums::Spell, level: u8 },
+    MagicDelayReceived { object_id: u32, spell: mir2_shared::enums::Spell, delay: u32 },
+    MagicCastEvent { spell: mir2_shared::enums::Spell },
+    ObjectMagicCast { object_id: u32, spell: mir2_shared::enums::Spell, target_id: u32 },
+    ObjectEffectReceived { object_id: u32, effect: u16, effect_type: u8 },
+    ObjectProjectileReceived { spell: mir2_shared::enums::Spell, source: u32, destination: u32 },
+    SpellToggled { spell: mir2_shared::enums::Spell, can_use: bool },
+
+    // 客户端 -> 服务器
+    MagicKeySet,
+
+    // ========================================================================
+    // Buff 事件（Buff Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    BuffAdded { object_id: u32, buff_id: u32 },
+    BuffRemoved { object_id: u32, buff_id: u32 },
+    BuffPaused { object_id: u32, buff_id: u32, paused: bool },
+
+    // ========================================================================
+    // 移动扩展事件（Movement Extension Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    ObjectHeroSpawned,
+    ObjectHidden { object_id: u32 },
+    ObjectShown { object_id: u32 },
+    ObjectTeleportingOut { object_id: u32 },
+    ObjectTeleportingIn,
+    PlayerTeleportedIn,
+    ObjectBackStepped,
+    PlayerBackStepped { x: i32, y: i32 },
+    ObjectDashing,
+    PlayerDashing { x: i32, y: i32 },
+    ObjectDashFailed { object_id: u32 },
+    PlayerDashFailed,
+    ObjectSatDown { object_id: u32 },
+    NewMapInfoReceived,
+    WorldMapSetupReceived,
+    SearchMapResultReceived,
+    TimeOfDayChanged { time_of_day: u8 },
+
+    // ========================================================================
+    // 玩家状态事件（Player State Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    PlayerUpdated,
+    AttackModeChanged { mode: u8 },
+    PetModeChanged { mode: u8 },
+    PlayerColourChanged { colour: u32 },
+    ObjectColourChanged { object_id: u32, colour: u32 },
+    ObjectGuildNameChanged2 { object_id: u32, guild_name: String },
+    PlayerNameUpdated,
+    UserNameUpdated,
+
+    // ========================================================================
+    // 交易扩展事件（Trade Extended Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    TradeGoldAdded { amount: u32 },
+    TradeItemAdded,
+    TradeConfirmedEvent { locked: bool },
+    TradeCancelledEvent,
+
+    // ========================================================================
+    // 任务扩展事件（Quest Extended Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    QuestListUpdated,
+    QuestItemGained,
+    QuestItemLost { unique_id: u64 },
+    QuestShared { quest_id: u32 },
+    QuestProgressUpdated { quest_id: u32, progress: String },
+
+    // ========================================================================
+    // 好友事件（Friend Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    FriendUpdated,
+
+    // 客户端 -> 服务器
+    AddFriendRequest { name: String },
+    RemoveFriendRequest { name: String },
+    RefreshFriendsRequest,
+    AddMemoRequest { name: String, memo: String },
+
+    // ========================================================================
+    // 公会扩展事件（Guild Extended Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    GuildNoticeUpdated { notice: String },
+    GuildMemberUpdated { name: String, rank: u8, online: bool },
+    GuildExpGained { amount: i64 },
+    GuildNameReceived { name: String },
+    GuildStorageGoldChanged { delta: i64 },
+    GuildStorageItemChanged,
+    GuildStorageListReceived,
+    GuildWarRequested,
+    GuildBuffListReceived,
+    GuildTerritoryPageReceived,
+    GuildTerritoryPurchased,
+
+    // 客户端 -> 服务器
+    EditGuildMember { member_name: String, rank: u8 },
+    EditGuildNotice { notice: String },
+    GuildNameReturn,
+    RequestGuildInfo,
+    GuildStorageGoldChange { amount: i64 },
+    GuildStorageItemChangeRequest,
+    GuildWarReturn,
+    GuildBuffUpdate { buff_id: u32, action: u8 },
+
+    // ========================================================================
+    // NPC 扩展事件（NPC Extended Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    NPCSellReceived,
+    NPCRepairReceived,
+    NPCSRepairReceived,
+    NPCRefineReceived,
+    NPCCheckRefineReceived,
+    NPCCollectRefineReceived,
+    NPCReplaceWedRingReceived,
+    NPCStorageReceived,
+    NPCConsignReceived,
+    NPCMarketEvent,
+    NPCMarketPageEvent,
+    ConsignItemReceived,
+    MarketFailedEvent { reason: String },
+    MarketSuccessEvent,
+    SellItemReceived,
+    CraftItemReceived,
+    RepairItemReceived,
+    ItemRepairedEvent,
+    DefaultNPCReceived { npc_id: u32, message: String },
+    NPCUpdated,
+    NPCImageUpdated,
+    NPCAwakeningReceived,
+    NPCDisassembleReceived,
+    NPCDowngradeReceived,
+    NPCResetReceived,
+    AwakeningNeedMaterialsReceived,
+    AwakeningLockedItemReceived,
+    AwakeningReceived,
+    NPCPearlGoodsReceived,
+    NPCRequestInputReceived { npc_id: u32, prompt: String },
+
+    // 客户端 -> 服务器
+    LogOutRequest,
+    HarvestRequest,
+    BuyItemBackRequest,
+    SRepairItemRequest { unique_id: u64 },
+    CheckRefineRequest,
+    ReplaceWedRingRequest,
+    NPCConfirmInput { npc_id: u32, input: String },
+
+    // ========================================================================
+    // 英雄事件（Hero Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    HeroCreateRequested,
+    NewHeroCreated,
+    HeroInfoReceived,
+    HeroSpawnStateUpdated { state: u8 },
+    HeroAutoPotUnlocked,
+    HeroAutoPotSet { pot_type: u8, value: u32 },
+    HeroAutoPotItemSet { item_id: u32 },
+    HeroBehaviourSet { behaviour: u8 },
+    HeroManageReceived,
+    HeroChanged,
+    HeroBaseStatsReceived,
+    NewHeroInfoReceived,
+    HeroExperienceGained { amount: i64 },
+    HeroLevelUp { new_level: u16 },
+
+    // 客户端 -> 服务器
+    CreateHeroRequest { name: String },
+    SetHeroAutoPotValue { pot_type: u8, value: u32 },
+    SetHeroAutoPotItem { item_id: u32 },
+    SetHeroBehaviourRequest { behaviour: u8 },
+    ChangeHeroRequest { hero_index: u8 },
+
+    // ========================================================================
+    // 邮件事件（Mail Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    MailReceived,
+    MailLockedItemReceived,
+    MailSendRequestReceived,
+    MailSentEvent,
+    ParcelCollectedEvent,
+    MailCostReceived { cost: u32 },
+
+    // 客户端 -> 服务器
+    SendMailRequest { to: String, subject: String, body: String },
+    ReadMailRequest { mail_id: u64 },
+    CollectParcelRequest { mail_id: u64 },
+    DeleteMailRequest { mail_id: u64 },
+    LockMailRequest { mail_id: u64 },
+
+    // ========================================================================
+    // 市场/寄售事件（Market Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    NPCConsignEvent,
+    NPCMarketEvent2,
+    NPCMarketPageEvent2,
+    ConsignItemEvent,
+    MarketFailedEvent2 { reason: String },
+    MarketSuccessEvent2,
+
+    // 客户端 -> 服务器
+    ConsignItemRequest { item_id: u64, price: u64 },
+    MarketSearchRequest { query: String },
+    MarketRefreshRequest,
+    MarketPageRequest { page: u32 },
+    MarketBuyRequest { listing_id: u64 },
+    MarketGetBackRequest { listing_id: u64 },
+    MarketSellNowRequest { item_id: u64 },
+
+    // ========================================================================
+    // 智能宠物事件（Intelligent Creature Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    NewIntelligentCreatureReceived,
+    IntelligentCreatureListUpdated,
+    IntelligentCreatureRenameEnabled,
+    IntelligentCreaturePickupReceived,
+
+    // 客户端 -> 服务器
+    UpdateIntelligentCreatureRequest,
+    IntelligentCreaturePickupRequest,
+    RequestIntelligentCreatureUpdates,
+
+    // ========================================================================
+    // 婚姻/师徒事件（Social Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    MarriageRequested2 { requester: String },
+    DivorceRequested2,
+    MentorRequested2,
+    LoverUpdated,
+    MentorUpdated,
+
+    // 客户端 -> 服务器
+    MarriageRequestSend { target: String },
+    MarriageReply { accept: bool },
+    ChangeMarriageRequest,
+    DivorceRequestSend,
+    DivorceReply { accept: bool },
+    AddMentorRequest { name: String },
+    MentorReply { accept: bool },
+    AllowMentorRequest { enabled: bool },
+    CancelMentorRequest,
+
+    // ========================================================================
+    // 物品租赁事件（Item Rental Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    RentalItemsReceived,
+    ItemRentalRequested,
+    ItemRentalFeeReceived { fee: u32 },
+    ItemRentalPeriodReceived { period: u32 },
+    RentalItemDeposited,
+    RentalItemRetrieved,
+    RentalItemUpdated,
+    ItemRentalCancelled,
+    ItemRentalLocked,
+    ItemRentalPartnerLocked,
+    ItemRentalConfirmable,
+    ItemRentalConfirmed,
+
+    // 客户端 -> 服务器
+    GetRentedItemsRequest,
+    RentalItemDepositRequest { item_id: u64 },
+    RentalItemRetrieveRequest { item_id: u64 },
+    ItemRentalConfirm,
+    ItemRentalCancel,
+
+    // ========================================================================
+    // 钓鱼事件（Fishing Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    FishingStatusUpdated { state: u8 },
+
+    // 客户端 -> 服务器
+    FishingCastRequest,
+    FishingAutocastToggle { enabled: bool },
+
+    // ========================================================================
+    // 转生事件（Reincarnation Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    ReincarnationRequested,
+    ReincarnationCancelled,
+
+    // 客户端 -> 服务器
+    AcceptReincarnationRequest,
+    CancelReincarnationRequest,
+
+    // ========================================================================
+    // 排名/游戏商店事件（Ranking & Game Shop Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    RankingsReceived,
+    GameShopInfoReceived,
+    GameShopStockReceived,
+
+    // 客户端 -> 服务器
+    GameShopBuyRequest { item_id: u32, count: u32 },
+    ReportIssueRequest { issue: String },
+    GetRankingRequest { ranking_type: u8 },
+
+    // ========================================================================
+    // 计时器/UI 事件（Timer & UI Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    TimerSet { timer_id: u8, seconds: u32 },
+    TimerExpired { timer_id: u8 },
+    NoticeUpdated { notice: String },
+    RollReceivedEvent { value: u32 },
+    CompassUpdated { direction: u8 },
+    BrowserOpened { url: String },
+
+    // ========================================================================
+    // 门事件（Door Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端 / 客户端 -> 服务器
+    DoorOpened { door_id: u32 },
+
+    // 客户端 -> 服务器
+    OpenDoorRequest { door_id: u32 },
+    RequestMapInfoRequest,
+    TeleportToNPCRequest { npc_name: String },
+    SearchMapRequest { query: String },
+    ObserveRequest { target: String },
+
+    // ========================================================================
+    // 杂项事件（Misc Events）
+    // ========================================================================
+
+    // 服务器 -> 客户端
+    DuraChanged { unique_id: u64, durability: i32 },
+    PlayerPoisoned { object_id: u32, poison_type: u8 },
+    ObjectPoisonedEvent { object_id: u32, poison_type: u8 },
+    RangeAttacked { object_id: u32 },
+    ObjectRangeAttacked { object_id: u32 },
+    PushedEvent { object_id: u32, x: i32, y: i32 },
+    ObjectPushedEvent { object_id: u32, x: i32, y: i32 },
+    UserDashAttacked,
+    ObjectDashAttacked { object_id: u32 },
+    UserAttackMoved { x: i32, y: i32 },
+    PlayerRevived,
+    ObjectRevivedEvent { object_id: u32 },
+    ObjectLeveled { object_id: u32 },
+    TrapRockEntered { object_id: u32 },
+    BaseStatsReceived,
+    InventoryResized { new_size: u32 },
+    StorageResized { new_size: u32 },
+    TransformUpdated { form: u8 },
+    MapEffectReceived { effect: u8 },
+    ObserveAllowed { allowed: bool },
+    ObjectHiddenByName { name: String },
+    ObjectSpellReceived { object_id: u32 },
+    ObjectDecoReceived { object_id: u32 },
+    ObjectSneakingReceived { object_id: u32 },
+    ObjectLevelEffectsReceived { object_id: u32 },
+    BindingShotSet { enabled: bool },
+    OutputMessageReceived { message: String },
+    UserStorageReceived,
+    ChatItemStatsReceived,
+    ConcentrationSet { enabled: bool },
+    ElementalSet { element: u8 },
+    DelayedExplosionRemoved,
+
     // 未处理的数据包（用于调试）
     UnhandledPacket { opcode: i16 },
 }

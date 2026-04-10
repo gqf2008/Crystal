@@ -328,7 +328,22 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::Revived as u16
             || x == SP::ObjectRevived as u16
             || x == SP::ObjectHealth as u16
-            || x == SP::ObjectMana as u16 =>
+            || x == SP::ObjectMana as u16
+            // Magic/Spell packets
+            || x == SP::NewMagic as u16
+            || x == SP::RemoveMagic as u16
+            || x == SP::MagicLeveled as u16
+            || x == SP::Magic as u16
+            || x == SP::MagicDelay as u16
+            || x == SP::MagicCast as u16
+            || x == SP::ObjectMagic as u16
+            || x == SP::ObjectEffect as u16
+            || x == SP::ObjectProjectile as u16
+            || x == SP::SpellToggle as u16
+            // Buff packets
+            || x == SP::AddBuff as u16
+            || x == SP::RemoveBuff as u16
+            || x == SP::PauseBuff as u16 =>
         {
             CombatHandler.handle(header, payload)
         }
@@ -396,12 +411,6 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::NPCCollectRefine as u16
             || x == SP::NPCReplaceWedRing as u16
             || x == SP::NPCStorage as u16
-            || x == SP::NPCConsign as u16
-            || x == SP::NPCMarket as u16
-            || x == SP::NPCMarketPage as u16
-            || x == SP::ConsignItem as u16
-            || x == SP::MarketFail as u16
-            || x == SP::MarketSuccess as u16
             || x == SP::SellItem as u16
             || x == SP::CraftItem as u16
             || x == SP::RepairItem as u16
@@ -420,6 +429,17 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::NPCRequestInput as u16 =>
         {
             NpcHandler.handle(header, payload)
+        }
+
+        // ===== Market/Consign =====
+        x if x == SP::NPCConsign as u16
+            || x == SP::NPCMarket as u16
+            || x == SP::NPCMarketPage as u16
+            || x == SP::ConsignItem as u16
+            || x == SP::MarketFail as u16
+            || x == SP::MarketSuccess as u16 =>
+        {
+            MarketHandler.handle(header, payload)
         }
 
         // ===== Group =====
@@ -474,38 +494,22 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             QuestHandler.handle(header, payload)
         }
 
-        // ===== 其他系统功能（暂未分类处理）=====
+        // ===== Player State =====
         x if x == SP::PlayerUpdate as u16
             || x == SP::ChangeAMode as u16
             || x == SP::ChangePMode as u16
             || x == SP::ColourChanged as u16
             || x == SP::ObjectColourChanged as u16
             || x == SP::ObjectGuildNameChanged as u16
-            || x == SP::NewMagic as u16
-            || x == SP::RemoveMagic as u16
-            || x == SP::MagicLeveled as u16
-            || x == SP::Magic as u16
-            || x == SP::MagicDelay as u16
-            || x == SP::MagicCast as u16
-            || x == SP::ObjectMagic as u16
-            || x == SP::ObjectEffect as u16
-            || x == SP::ObjectProjectile as u16
             || x == SP::ObjectName as u16
-            || x == SP::UserStorage as u16
-            || x == SP::SpellToggle as u16
-            || x == SP::MapEffect as u16
-            || x == SP::AllowObserve as u16
-            || x == SP::AddBuff as u16
-            || x == SP::RemoveBuff as u16
-            || x == SP::PauseBuff as u16
-            || x == SP::ObjectHidden as u16
-            || x == SP::ObjectSpell as u16
-            || x == SP::InTrapRock as u16
-            || x == SP::BaseStatsInfo as u16
-            || x == SP::HeroBaseStatsInfo as u16
             || x == SP::UserName as u16
-            || x == SP::ChatItemStats as u16
-            || x == SP::HeroCreateRequest as u16
+            || x == SP::ChatItemStats as u16 =>
+        {
+            CharacterHandler.handle(header, payload)
+        }
+
+        // ===== Hero =====
+        x if x == SP::HeroCreateRequest as u16
             || x == SP::NewHero as u16
             || x == SP::HeroInformation as u16
             || x == SP::UpdateHeroSpawnState as u16
@@ -515,13 +519,72 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::SetHeroBehaviour as u16
             || x == SP::ManageHeroes as u16
             || x == SP::ChangeHero as u16
-            || x == SP::MarriageRequest as u16
+            || x == SP::HeroBaseStatsInfo as u16 =>
+        {
+            HeroHandler.handle(header, payload)
+        }
+
+        // ===== Mail =====
+        x if x == SP::ReceiveMail as u16
+            || x == SP::MailLockedItem as u16
+            || x == SP::MailSendRequest as u16
+            || x == SP::MailSent as u16
+            || x == SP::ParcelCollected as u16
+            || x == SP::MailCost as u16 =>
+        {
+            MailHandler.handle(header, payload)
+        }
+
+        // ===== Intelligent Creature =====
+        x if x == SP::NewIntelligentCreature as u16
+            || x == SP::UpdateIntelligentCreatureList as u16
+            || x == SP::IntelligentCreatureEnableRename as u16
+            || x == SP::IntelligentCreaturePickup as u16 =>
+        {
+            CreatureHandler.handle(header, payload)
+        }
+
+        // ===== Social (Marriage/Mentor/Lover) =====
+        x if x == SP::MarriageRequest as u16
             || x == SP::DivorceRequest as u16
             || x == SP::MentorRequest as u16
-            || x == SP::FishingUpdate as u16
-            || x == SP::CancelReincarnation as u16
-            || x == SP::RequestReincarnation as u16
-            || x == SP::SetConcentration as u16
+            || x == SP::LoverUpdate as u16
+            || x == SP::MentorUpdate as u16 =>
+        {
+            SocialHandler.handle(header, payload)
+        }
+
+        // ===== Fishing =====
+        x if x == SP::FishingUpdate as u16 => {
+            UiEventsHandler.handle(header, payload)
+        }
+
+        // ===== Reincarnation =====
+        x if x == SP::CancelReincarnation as u16
+            || x == SP::RequestReincarnation as u16 =>
+        {
+            CharacterHandler.handle(header, payload)
+        }
+
+        // ===== Item Rental =====
+        x if x == SP::GetRentedItems as u16
+            || x == SP::ItemRentalRequest as u16
+            || x == SP::ItemRentalFee as u16
+            || x == SP::ItemRentalPeriod as u16
+            || x == SP::DepositRentalItem as u16
+            || x == SP::RetrieveRentalItem as u16
+            || x == SP::UpdateRentalItem as u16
+            || x == SP::CancelItemRental as u16
+            || x == SP::ItemRentalLock as u16
+            || x == SP::ItemRentalPartnerLock as u16
+            || x == SP::CanConfirmItemRental as u16
+            || x == SP::ConfirmItemRental as u16 =>
+        {
+            ItemHandler.handle(header, payload)
+        }
+
+        // ===== Misc / Combat & Status =====
+        x if x == SP::SetConcentration as u16
             || x == SP::SetElemental as u16
             || x == SP::RemoveDelayedExplosion as u16
             || x == SP::ObjectDeco as u16
@@ -529,25 +592,22 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::ObjectLevelEffects as u16
             || x == SP::SetBindingShot as u16
             || x == SP::SendOutputMessage as u16
-            || x == SP::ReceiveMail as u16
-            || x == SP::MailLockedItem as u16
-            || x == SP::MailSendRequest as u16
-            || x == SP::MailSent as u16
-            || x == SP::ParcelCollected as u16
-            || x == SP::MailCost as u16
-            || x == SP::ResizeInventory as u16
+            || x == SP::InTrapRock as u16
+            || x == SP::BaseStatsInfo as u16
+            || x == SP::ObjectHidden as u16
+            || x == SP::ObjectSpell as u16
+            || x == SP::MapEffect as u16
+            || x == SP::AllowObserve as u16
+            || x == SP::UserStorage as u16 =>
+        {
+            CombatHandler.handle(header, payload)
+        }
+
+        // ===== Item Resize / Transform / Door / Rental =====
+        x if x == SP::ResizeInventory as u16
             || x == SP::ResizeStorage as u16
-            || x == SP::NewIntelligentCreature as u16
-            || x == SP::UpdateIntelligentCreatureList as u16
-            || x == SP::IntelligentCreatureEnableRename as u16
-            || x == SP::IntelligentCreaturePickup as u16
             || x == SP::TransformUpdate as u16
-            || x == SP::FriendUpdate as u16
-            || x == SP::LoverUpdate as u16
-            || x == SP::MentorUpdate as u16
-            || x == SP::GameShopInfo as u16
-            || x == SP::GameShopStock as u16
-            || x == SP::Rankings as u16
+            || x == SP::NewRecipeInfo as u16
             || x == SP::Opendoor as u16
             || x == SP::GetRentedItems as u16
             || x == SP::ItemRentalRequest as u16
@@ -560,20 +620,24 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::ItemRentalLock as u16
             || x == SP::ItemRentalPartnerLock as u16
             || x == SP::CanConfirmItemRental as u16
-            || x == SP::ConfirmItemRental as u16
-            || x == SP::NewRecipeInfo as u16
-            || x == SP::OpenBrowser as u16
-            || x == SP::SetTimer as u16
+            || x == SP::ConfirmItemRental as u16 =>
+        {
+            ItemHandler.handle(header, payload)
+        }
+
+        // ===== UI / Timer / Notice / Misc =====
+        x if x == SP::SetTimer as u16
             || x == SP::ExpireTimer as u16
             || x == SP::UpdateNotice as u16
             || x == SP::Roll as u16
-            || x == SP::SetCompass as u16 =>
+            || x == SP::SetCompass as u16
+            || x == SP::OpenBrowser as u16
+            || x == SP::FishingUpdate as u16
+            || x == SP::Rankings as u16
+            || x == SP::GameShopInfo as u16
+            || x == SP::GameShopStock as u16 =>
         {
-            // 暂时返回 UnhandledPacket，等待后续实现
-            tracing::debug!("📦 未实现的系统功能 packet: 0x{:04X}", opcode);
-            vec![NetworkEvent::UnhandledPacket {
-                opcode: header.opcode,
-            }]
+            UiEventsHandler.handle(header, payload)
         }
 
         // ===== UI / 表现层事件 =====
@@ -1016,11 +1080,678 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             return Ok(());
         }
 
-        // ===== 未实现的事件 =====
-        _ => {
-            tracing::warn!("⚠️ Unhandled outgoing event: {:?}", event);
-            return Ok(());
+        // ===== 物品操作扩展 =====
+
+        NetworkEvent::EquipItemRequest { unique_id } => {
+            use mir2_shared::enums::MirGridType;
+            let packet = client::item::EquipItem {
+                grid: MirGridType::Inventory,
+                unique_id,
+                to: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 EquipItem: unique_id={}", unique_id);
         }
+
+        NetworkEvent::RemoveItemRequest { unique_id } => {
+            use mir2_shared::enums::MirGridType;
+            let packet = client::item::RemoveItem {
+                grid: MirGridType::Equipment,
+                unique_id,
+                to: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RemoveItem: unique_id={}", unique_id);
+        }
+
+        NetworkEvent::RemoveSlotItemRequest { slot } => {
+            use mir2_shared::enums::MirGridType;
+            let packet = client::item::RemoveSlotItem {
+                grid: MirGridType::Equipment,
+                unique_id: 0,
+                to: 0,
+                from_slot: slot as i32,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RemoveSlotItem: slot={}", slot);
+        }
+
+        NetworkEvent::SplitItemRequest { unique_id, count } => {
+            use mir2_shared::enums::MirGridType;
+            let packet = client::item::SplitItem {
+                grid: MirGridType::Inventory,
+                unique_id,
+                count,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 SplitItem: unique_id={}, count={}", unique_id, count);
+        }
+
+        NetworkEvent::MergeItemRequest { from, to } => {
+            use mir2_shared::enums::MirGridType;
+            let packet = client::item::MergeItem {
+                grid_from: MirGridType::Inventory,
+                grid_to: MirGridType::Inventory,
+                id_from: from,
+                id_to: to,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MergeItem: from={}, to={}", from, to);
+        }
+
+        NetworkEvent::StoreItemRequest { unique_id } => {
+            let packet = client::item::StoreItem {
+                from: 0,
+                to: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 StoreItem: unique_id={} (slot mapping not available)", unique_id);
+        }
+
+        NetworkEvent::TakeBackItemRequest { unique_id } => {
+            let packet = client::item::TakeBackItem {
+                from: 0,
+                to: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 TakeBackItem: unique_id={} (slot mapping not available)", unique_id);
+        }
+
+        NetworkEvent::DropGoldRequest { amount } => {
+            let packet = client::item::DropGold { amount };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 DropGold: amount={}", amount);
+        }
+
+        NetworkEvent::EquipSlotItemRequest { slot, unique_id } => {
+            use mir2_shared::enums::MirGridType;
+            let packet = client::EquipSlotItem {
+                grid: MirGridType::Inventory,
+                unique_id,
+                to_slot: slot as i32,
+                grid_to: MirGridType::Equipment,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 EquipSlotItem: slot={}, unique_id={}", slot, unique_id);
+        }
+
+        NetworkEvent::CombineItemRequest { from, to } => {
+            use mir2_shared::enums::MirGridType;
+            let packet = client::CombineItem {
+                grid: MirGridType::Inventory,
+                id_from: from,
+                id_to: to,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 CombineItem: from={}, to={}", from, to);
+        }
+
+        NetworkEvent::DropItemStackRequest { unique_id, count } => {
+            let packet = client::item::DropItem {
+                unique_id,
+                count,
+                hero_inventory: false,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 DropItemStack: unique_id={}, count={}", unique_id, count);
+        }
+
+        // ===== 魔法/技能 =====
+
+        NetworkEvent::MagicKeySet => {
+            use mir2_shared::enums::Spell;
+            let packet = client::combat::MagicKey {
+                spell: Spell::None,
+                key: 0,
+                old_key: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MagicKeySet (no spell/key info in event)");
+        }
+
+        // ===== 好友 =====
+
+        NetworkEvent::AddFriendRequest { name } => {
+            let packet = client::friend::AddFriend {
+                name: name.clone(),
+                blocked: false,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 AddFriend: name={}", name);
+        }
+
+        NetworkEvent::RemoveFriendRequest { name: _ } => {
+            // RemoveFriend requires character_index (i32), but event only has name.
+            // Log and skip for now - would need a name→index lookup.
+            tracing::debug!("📤 RemoveFriend skipped: requires character_index, got name");
+        }
+
+        NetworkEvent::RefreshFriendsRequest => {
+            let packet = client::friend::RefreshFriends;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RefreshFriends");
+        }
+
+        NetworkEvent::AddMemoRequest { name: _, memo: _ } => {
+            // AddMemo requires character_index (i32), but event only has name+memo.
+            tracing::debug!("📤 AddMemo skipped: requires character_index, got name+memo");
+        }
+
+        // ===== 公会扩展 =====
+
+        NetworkEvent::EditGuildMember { member_name, rank } => {
+            let packet = client::guild::EditGuildMember {
+                change_type: 0,
+                rank_index: rank,
+                name: member_name.clone(),
+                rank_name: String::new(),
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 EditGuildMember: member_name={}, rank={}", member_name, rank);
+        }
+
+        NetworkEvent::EditGuildNotice { notice } => {
+            let packet = client::guild::EditGuildNotice {
+                notice_lines: vec![notice],
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 EditGuildNotice");
+        }
+
+        NetworkEvent::GuildNameReturn => {
+            let packet = client::guild::GuildNameReturn {
+                name: String::new(),
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 GuildNameReturn");
+        }
+
+        NetworkEvent::RequestGuildInfo => {
+            let packet = client::guild::RequestGuildInfo {
+                info_type: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RequestGuildInfo");
+        }
+
+        NetworkEvent::GuildStorageGoldChange { amount } => {
+            let packet = client::guild::GuildStorageGoldChange {
+                change_type: if amount >= 0 { 0 } else { 1 },
+                amount: amount.unsigned_abs() as u32,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 GuildStorageGoldChange: amount={}", amount);
+        }
+
+        NetworkEvent::GuildStorageItemChangeRequest => {
+            let packet = client::guild::GuildStorageItemChange {
+                change_type: 0,
+                from_slot: 0,
+                to_slot: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 GuildStorageItemChange (slot info not available)");
+        }
+
+        NetworkEvent::GuildWarReturn => {
+            let packet = client::guild::GuildWarReturn {
+                guild_name: String::new(),
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 GuildWarReturn");
+        }
+
+        NetworkEvent::GuildBuffUpdate { buff_id, action } => {
+            let packet = client::guild::GuildBuffUpdate {
+                action,
+                buff_id: buff_id as i32,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 GuildBuffUpdate: buff_id={}, action={}", buff_id, action);
+        }
+
+        // ===== NPC 扩展 =====
+
+        NetworkEvent::LogOutRequest => {
+            let packet = client::LogOut;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 LogOut");
+        }
+
+        NetworkEvent::HarvestRequest => {
+            use mir2_shared::enums::MirDirection;
+            let packet = client::combat::Harvest {
+                direction: MirDirection::Up,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 Harvest");
+        }
+
+        NetworkEvent::BuyItemBackRequest => {
+            let packet = client::npc::BuyItemBack {
+                unique_id: 0,
+                count: 1,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 BuyItemBack (unique_id not available)");
+        }
+
+        NetworkEvent::SRepairItemRequest { unique_id } => {
+            let packet = client::npc::SRepairItem { unique_id };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 SRepairItem: unique_id={}", unique_id);
+        }
+
+        NetworkEvent::CheckRefineRequest => {
+            let packet = client::CheckRefine {
+                unique_id: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 CheckRefine (unique_id not available)");
+        }
+
+        NetworkEvent::ReplaceWedRingRequest => {
+            let packet = client::ReplaceWedRing {
+                unique_id: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ReplaceWedRing (unique_id not available)");
+        }
+
+        NetworkEvent::NPCConfirmInput { npc_id, input } => {
+            let packet = client::npc::NPCConfirmInput {
+                npc_id,
+                page_name: String::new(),
+                value: input,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 NPCConfirmInput: npc_id={}", npc_id);
+        }
+
+        // ===== 英雄 =====
+
+        NetworkEvent::CreateHeroRequest { name } => {
+            use mir2_shared::enums::{MirClass, MirGender};
+            let packet = client::hero::NewHero {
+                name,
+                gender: MirGender::Male,
+                class: MirClass::Warrior,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 NewHero");
+        }
+
+        NetworkEvent::SetHeroAutoPotValue { pot_type, value } => {
+            let packet = client::hero::SetAutoPotValue {
+                stat: pot_type,
+                value: (value as u8).min(100),
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 SetAutoPotValue: stat={}, value={}", pot_type, value);
+        }
+
+        NetworkEvent::SetHeroAutoPotItem { item_id } => {
+            let packet = client::hero::SetAutoPotItem {
+                grid: 0,
+                item_index: item_id as u64,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 SetAutoPotItem: item_id={}", item_id);
+        }
+
+        NetworkEvent::SetHeroBehaviourRequest { behaviour } => {
+            use mir2_shared::enums::HeroBehaviour;
+            let packet = client::hero::SetHeroBehaviour {
+                behaviour: HeroBehaviour::try_from(behaviour).unwrap_or(HeroBehaviour::Attack),
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 SetHero Behaviour: behaviour={}", behaviour);
+        }
+
+        NetworkEvent::ChangeHeroRequest { hero_index } => {
+            let packet = client::hero::ChangeHero {
+                list_index: hero_index,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ChangeHero: hero_index={}", hero_index);
+        }
+
+        // ===== 邮件 =====
+
+        NetworkEvent::SendMailRequest { to, subject, body } => {
+            let packet = client::mail::SendMail {
+                name: to.clone(),
+                message: format!("{}\n{}", subject, body),
+                gold: 0,
+                items_idx: [0u64; 5],
+                stamped: false,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 SendMail: to={}", to);
+        }
+
+        NetworkEvent::ReadMailRequest { mail_id } => {
+            let packet = client::mail::ReadMail { mail_id };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ReadMail: mail_id={}", mail_id);
+        }
+
+        NetworkEvent::CollectParcelRequest { mail_id } => {
+            let packet = client::mail::CollectParcel { mail_id };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 CollectParcel: mail_id={}", mail_id);
+        }
+
+        NetworkEvent::DeleteMailRequest { mail_id } => {
+            let packet = client::mail::DeleteMail { mail_id };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 DeleteMail: mail_id={}", mail_id);
+        }
+
+        NetworkEvent::LockMailRequest { mail_id } => {
+            let packet = client::mail::LockMail {
+                mail_id,
+                lock: true,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 LockMail: mail_id={}", mail_id);
+        }
+
+        // ===== 市场/寄售 =====
+
+        NetworkEvent::ConsignItemRequest { item_id, price } => {
+            use mir2_shared::enums::MarketPanelType;
+            let packet = client::market::ConsignItem {
+                unique_id: item_id,
+                price: price as u32,
+                panel_type: MarketPanelType::Consign,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ConsignItem: item_id={}, price={}", item_id, price);
+        }
+
+        NetworkEvent::MarketSearchRequest { query } => {
+            use mir2_shared::enums::{MarketPanelType, ItemType};
+            let packet = client::market::MarketSearch {
+                match_text: query,
+                item_type: ItemType::Nothing,
+                user_mode: false,
+                min_shape: 0,
+                max_shape: 0,
+                market_type: MarketPanelType::Consign,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MarketSearch");
+        }
+
+        NetworkEvent::MarketRefreshRequest => {
+            let packet = client::market::MarketRefresh;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MarketRefresh");
+        }
+
+        NetworkEvent::MarketPageRequest { page } => {
+            let packet = client::market::MarketPage { page: page as i32 };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MarketPage: page={}", page);
+        }
+
+        NetworkEvent::MarketBuyRequest { listing_id } => {
+            let packet = client::market::MarketBuy {
+                auction_id: listing_id,
+                bid_price: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MarketBuy: listing_id={}", listing_id);
+        }
+
+        NetworkEvent::MarketGetBackRequest { listing_id } => {
+            let packet = client::market::MarketGetBack {
+                mode: 0,
+                auction_id: listing_id,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MarketGetBack: listing_id={}", listing_id);
+        }
+
+        NetworkEvent::MarketSellNowRequest { item_id } => {
+            let packet = client::market::MarketSellNow {
+                auction_id: item_id,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MarketSellNow: item_id={}", item_id);
+        }
+
+        // ===== 智能宠物 =====
+
+        NetworkEvent::UpdateIntelligentCreatureRequest => {
+            let packet = client::UpdateIntelligentCreature {
+                summon_me: false,
+                unsummon_me: false,
+                release_me: false,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 UpdateIntelligentCreature");
+        }
+
+        NetworkEvent::IntelligentCreaturePickupRequest => {
+            use mir2_shared::Point;
+            let packet = client::IntelligentCreaturePickup {
+                mouse_mode: false,
+                location: Point { x: 0, y: 0 },
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 IntelligentCreaturePickup");
+        }
+
+        NetworkEvent::RequestIntelligentCreatureUpdates => {
+            let packet = client::RequestIntelligentCreatureUpdates {
+                update: true,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RequestIntelligentCreatureUpdates");
+        }
+
+        // ===== 社交（婚姻/师徒）=====
+
+        NetworkEvent::MarriageRequestSend { target: _ } => {
+            let packet = client::MarriageRequest;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MarriageRequest");
+        }
+
+        NetworkEvent::MarriageReply { accept } => {
+            let packet = client::MarriageReply {
+                accept_invite: accept,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MarriageReply: accept={}", accept);
+        }
+
+        NetworkEvent::ChangeMarriageRequest => {
+            let packet = client::ChangeMarriage;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ChangeMarriage");
+        }
+
+        NetworkEvent::DivorceRequestSend => {
+            let packet = client::DivorceRequest;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 DivorceRequest");
+        }
+
+        NetworkEvent::DivorceReply { accept } => {
+            let packet = client::DivorceReply {
+                accept_invite: accept,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 DivorceReply: accept={}", accept);
+        }
+
+        NetworkEvent::AddMentorRequest { name } => {
+            let packet = client::AddMentor { name: name.clone() };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 AddMentor: name={}", name);
+        }
+
+        NetworkEvent::MentorReply { accept } => {
+            let packet = client::MentorReply {
+                accept_invite: accept,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MentorReply: accept={}", accept);
+        }
+
+        NetworkEvent::AllowMentorRequest { enabled } => {
+            if enabled {
+                let packet = client::AllowMentor;
+                serialize_packet(stream, &packet)?;
+            }
+            tracing::debug!("📤 AllowMentor: enabled={}", enabled);
+        }
+
+        NetworkEvent::CancelMentorRequest => {
+            let packet = client::CancelMentor;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 CancelMentor");
+        }
+
+        // ===== 租赁 =====
+
+        NetworkEvent::GetRentedItemsRequest => {
+            let packet = client::item::GetRentedItems;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 GetRentedItems");
+        }
+
+        NetworkEvent::RentalItemDepositRequest { item_id: _ } => {
+            // DepositRentalItem uses from/to slots, not item_id
+            tracing::debug!("📤 DepositRentalItem: slot mapping not available from item_id");
+        }
+
+        NetworkEvent::RentalItemRetrieveRequest { item_id: _ } => {
+            // RetrieveRentalItem uses from/to slots, not item_id
+            tracing::debug!("📤 RetrieveRentalItem: slot mapping not available from item_id");
+        }
+
+        NetworkEvent::ItemRentalConfirm => {
+            let packet = client::ConfirmItemRental;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ConfirmItemRental");
+        }
+
+        NetworkEvent::ItemRentalCancel => {
+            let packet = client::CancelItemRental;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 CancelItemRental");
+        }
+
+        // ===== 钓鱼 =====
+
+        NetworkEvent::FishingCastRequest => {
+            let packet = client::FishingCast {
+                cast_out: true,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 FishingCast");
+        }
+
+        NetworkEvent::FishingAutocastToggle { enabled } => {
+            let packet = client::FishingChangeAutocast {
+                auto_cast: enabled,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 FishingChangeAutocast: enabled={}", enabled);
+        }
+
+        // ===== 转生 =====
+
+        NetworkEvent::AcceptReincarnationRequest => {
+            let packet = client::AcceptReincarnation;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 AcceptReincarnation");
+        }
+
+        NetworkEvent::CancelReincarnationRequest => {
+            let packet = client::CancelReincarnation;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 CancelReincarnation");
+        }
+
+        // ===== 游戏商店/排名/报告 =====
+
+        NetworkEvent::GameShopBuyRequest { item_id, count } => {
+            let packet = client::GameshopBuy {
+                g_index: item_id as i32,
+                quantity: (count as u8).min(255),
+                p_type: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 GameshopBuy: item_id={}, count={}", item_id, count);
+        }
+
+        NetworkEvent::ReportIssueRequest { issue } => {
+            let packet = client::ReportIssue {
+                message: issue,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ReportIssue");
+        }
+
+        NetworkEvent::GetRankingRequest { ranking_type } => {
+            let packet = client::GetRanking {
+                rank_index: ranking_type,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 GetRanking: ranking_type={}", ranking_type);
+        }
+
+        // ===== 门/地图 =====
+
+        NetworkEvent::OpenDoorRequest { door_id } => {
+            let packet = client::Opendoor {
+                door_index: (door_id as u8).min(255),
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 Opendoor: door_id={}", door_id);
+        }
+
+        NetworkEvent::RequestMapInfoRequest => {
+            let packet = client::npc::RequestMapInfo {
+                map_index: 0,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RequestMapInfo (map_index not available)");
+        }
+
+        NetworkEvent::TeleportToNPCRequest { npc_name } => {
+            let packet = client::npc::TeleportToNPC {
+                object_id: 0, // npc_name needs resolution to object_id
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 TeleportToNPC: npc_name={} (object_id not resolved)", npc_name);
+        }
+
+        NetworkEvent::SearchMapRequest { query } => {
+            let packet = client::npc::SearchMap {
+                text: query,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 SearchMap");
+        }
+
+        NetworkEvent::ObserveRequest { target } => {
+            let packet = client::Observe {
+                name: target,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 Observe");
+        }
+
+        // ===== 未实现的事件 =====
+        // 注意：大部分 NetworkEvent 是 server→client 的入站事件，
+        // 不需要出站发送。这个分支是安全兜底。
+        _ => {}
     }
 
     stream.flush()?;
