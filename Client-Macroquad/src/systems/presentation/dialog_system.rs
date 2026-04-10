@@ -329,6 +329,29 @@ impl DialogSystem {
                     });
                 }
             }
+            crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction::RequestSell {
+                unique_id,
+                count,
+            } => {
+                if let Some(net) = ctx.net.as_ref() {
+                    let _ = net.send(NetEv::SellItemRequest { unique_id, count });
+                }
+            }
+            crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction::RequestRepair {
+                unique_id,
+            } => {
+                if let Some(net) = ctx.net.as_ref() {
+                    let _ = net.send(NetEv::RepairItemRequest { unique_id });
+                }
+            }
+            crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction::RequestStorage {
+                unique_id,
+                deposit: _,
+            } => {
+                if let Some(net) = ctx.net.as_ref() {
+                    let _ = net.send(NetEv::StoreItemRequest { unique_id });
+                }
+            }
         }
     }
 

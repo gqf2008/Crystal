@@ -53,11 +53,34 @@ pub enum NpcGoodsDialogAction {
         unit_price: u32,
         use_pearls: bool,
     },
+    /// 请求出售物品
+    RequestSell {
+        unique_id: u64,
+        count: u32,
+    },
+    /// 请求修理装备
+    RequestRepair {
+        unique_id: u64,
+    },
+    /// 请求存取仓库
+    RequestStorage {
+        unique_id: u64,
+        deposit: bool, // true=存入, false=取出
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HoverTarget {
     Cell(usize),
+}
+
+/// NPC 商店对话框模式
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NpcGoodsMode {
+    Buy,       // 购买模式
+    Sell,      // 出售模式
+    Repair,    // 修理模式
+    Storage,   // 仓库模式
 }
 
 pub struct NpcGoodsDialogHybrid {
@@ -76,6 +99,11 @@ pub struct NpcGoodsDialogHybrid {
 
     goods: Vec<UserItem>,
     display_goods: Vec<UserItem>,
+
+    /// 出售/修理模式下的物品（来自背包）
+    inventory_goods: Vec<UserItem>,
+    /// 当前对话框模式
+    dialog_mode: NpcGoodsMode,
 
     // 服务端下发
     npc_rate: f32,
@@ -161,6 +189,9 @@ impl NpcGoodsDialogHybrid {
             goods: Vec::new(),
             display_goods: Vec::new(),
 
+            inventory_goods: Vec::new(),
+            dialog_mode: NpcGoodsMode::Buy,
+
             npc_rate: 1.0,
             hide_added_stats: false,
 
@@ -203,6 +234,8 @@ impl NpcGoodsDialogHybrid {
         self.scroll_dragging = false;
         self.window_dragging = false;
         self.pending_action = None;
+        self.inventory_goods.clear();
+        self.dialog_mode = NpcGoodsMode::Buy;
     }
 
     pub fn show(&mut self) {
@@ -239,18 +272,75 @@ impl NpcGoodsDialogHybrid {
     }
 
     pub fn new_goods(&mut self, list: Vec<UserItem>, rate: f32, panel_type: PanelType, hide_added_stats: bool) {
+        self.dialog_mode = NpcGoodsMode::Buy;
         self.ptype = panel_type;
         self.npc_rate = rate;
         self.hide_added_stats = hide_added_stats;
 
         self.goods.clear();
         self.display_goods.clear();
+        self.inventory_goods.clear();
         self.start_index = 0;
         self.selected_unique_id = None;
         self.pending_action = None;
 
         self.add_goods(list);
         self.show();
+    }
+
+    /// 显示出售物品列表（来自背包）
+    pub fn show_sell_mode(&mut self, inventory_items: Vec<UserItem>, rate: f32) {
+        self.dialog_mode = NpcGoodsMode::Sell;
+        self.ptype = PanelType::Sell;
+        self.npc_rate = rate;
+        self.goods.clear();
+        self.display_goods.clear();
+        self.inventory_goods = inventory_items;
+        self.display_goods = self.inventory_goods.clone();
+        self.start_index = 0;
+        self.selected_unique_id = None;
+        self.pending_action = None;
+        self.show();
+    }
+
+    /// 显示修理物品列表（来自背包中已损坏的装备）
+    pub fn show_repair_mode(&mut self, damaged_items: Vec<UserItem>, rate: f32) {
+        self.dialog_mode = NpcGoodsMode::Repair;
+        self.ptype = PanelType::Repair;
+        self.npc_rate = rate;
+        self.goods.clear();
+        self.display_goods.clear();
+        self.inventory_goods = damaged_items;
+        self.display_goods = self.inventory_goods.clone();
+        self.start_index = 0;
+        self.selected_unique_id = None;
+        self.pending_action = None;
+        self.show();
+    }
+
+    /// 显示仓库存取列表
+    pub fn show_storage_mode(&mut self, storage_items: Vec<UserItem>, rate: f32) {
+        self.dialog_mode = NpcGoodsMode::Storage;
+        self.ptype = PanelType::BuySub; // closest available
+        self.npc_rate = rate;
+        self.goods.clear();
+        self.display_goods.clear();
+        self.inventory_goods = storage_items;
+        self.display_goods = self.inventory_goods.clone();
+        self.start_index = 0;
+        self.selected_unique_id = None;
+        self.pending_action = None;
+        self.show();
+    }
+
+    /// 添加出售物品（用于拖拽添加）
+    pub fn add_sell_item(&mut self, item: UserItem) {
+        if self.dialog_mode == NpcGoodsMode::Sell {
+            if !self.display_goods.iter().any(|x| x.unique_id == item.unique_id) {
+                self.inventory_goods.push(item.clone());
+                self.display_goods.push(item);
+            }
+        }
     }
 
     fn add_goods(&mut self, list: Vec<UserItem>) {
@@ -391,7 +481,7 @@ impl NpcGoodsDialogHybrid {
         self.clamp_start_index();
     }
 
-    fn queue_buy_action(&mut self) {
+    fn queue_action(&mut self) {
         if self.pending_action.is_some() {
             return;
         }
@@ -400,7 +490,31 @@ impl NpcGoodsDialogHybrid {
             return;
         };
 
-        // 对齐 C#：CheckSubGoods 仅在 Buy && !UsePearls
+        match self.dialog_mode {
+            NpcGoodsMode::Buy => {
+                self.queue_buy_action_inner(item);
+            }
+            NpcGoodsMode::Sell => {
+                self.pending_action = Some(NpcGoodsDialogAction::RequestSell {
+                    unique_id: item.unique_id,
+                    count: (item.count as u32).max(1),
+                });
+            }
+            NpcGoodsMode::Repair => {
+                self.pending_action = Some(NpcGoodsDialogAction::RequestRepair {
+                    unique_id: item.unique_id,
+                });
+            }
+            NpcGoodsMode::Storage => {
+                self.pending_action = Some(NpcGoodsDialogAction::RequestStorage {
+                    unique_id: item.unique_id,
+                    deposit: false, // 从仓库取出到背包
+                });
+            }
+        }
+    }
+
+    fn queue_buy_action_inner(&mut self, item: UserItem) {
         if self.ptype == PanelType::Buy && !self.use_pearls {
             let list: Vec<UserItem> = self
                 .goods
@@ -491,33 +605,53 @@ impl NpcGoodsDialogHybrid {
             }
         }
 
-        // 名称/数量
-        let name = item
+        // 名称
+        let name_text = item
             .info
             .as_ref()
-            .map(|i| i.name.as_str())
-            .unwrap_or_else(|| "<Unknown>");
-        let name_text = if item.info.is_some() {
-            name.to_string()
-        } else {
-            format!("Item #{}", item.item_index)
-        };
-
+            .map(|i| i.name.clone())
+            .unwrap_or_else(|| format!("Item #{}", item.item_index));
         draw_text_cn(&name_text, rect.x + 44.0, rect.y + 12.0, 14.0, WHITE);
 
-        if item.count > 1 {
-            draw_text_cn(&format!("{}", item.count), rect.x + 23.0, rect.y + 28.0, 14.0, YELLOW);
-        }
-
-        // 价格（对齐 C#：Price: {price * rate} gold）
-        let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
-        let price = (base_price * self.npc_rate).round() as u32;
-        let price_text = if self.use_pearls {
-            format!("Price: {} pearl", price)
-        } else {
-            format!("Price: {} gold", price)
+        // 价格/说明（根据模式不同显示不同内容）
+        let info_text = match self.dialog_mode {
+            NpcGoodsMode::Buy => {
+                let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
+                let price = (base_price * self.npc_rate).round() as u32;
+                if self.use_pearls {
+                    format!("Price: {} pearl", price)
+                } else {
+                    format!("Price: {} gold", price)
+                }
+            }
+            NpcGoodsMode::Sell => {
+                // 出售价格为原价的一半
+                let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
+                let sell_price = (base_price * 0.5 * self.npc_rate).round() as u32;
+                format!("Sell: {} gold", sell_price)
+            }
+            NpcGoodsMode::Repair => {
+                // 显示耐久度
+                let max_durability = item.info.as_ref().map(|i| i.durability).unwrap_or(0);
+                let cur_durability = item.current_dura;
+                if max_durability > 0 {
+                    format!("Durability: {}/{}", cur_durability, max_durability)
+                } else {
+                    "Click to repair".to_string()
+                }
+            }
+            NpcGoodsMode::Storage => {
+                "Storage item".to_string()
+            }
         };
-        draw_text_cn(&price_text, rect.x + 44.0, rect.y + 28.0, 14.0, WHITE);
+        draw_text_cn(&info_text, rect.x + 44.0, rect.y + 28.0, 14.0, WHITE);
+
+        // 数量显示
+        if item.count > 1 {
+            let qty_x = rect.x + 23.0;
+            let qty_y = rect.y + 28.0;
+            draw_text_cn(&format!("x{}", item.count), qty_x, qty_y, 14.0, YELLOW);
+        }
 
         // New 图标：对齐 C#：!IsShopItem || MultipleAvailable
         if let Some(icon) = self.new_icon.as_ref() {
@@ -723,22 +857,36 @@ impl NpcGoodsDialogHybrid {
                     self.last_click_row = Some(row);
                 }
 
-                // 悬停提示：对齐 C# 的 CreateItemLabel（这里用简化 tooltip）
-                let (title, base_price) = {
-                    let item = &self.display_goods[idx];
-                    let title = item
-                        .info
-                        .as_ref()
-                        .map(|i| i.name.clone())
-                        .unwrap_or_else(|| format!("Item #{}", item.item_index));
-                    let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
-                    (title, base_price)
-                };
-                let price = (base_price * self.npc_rate).round() as u32;
-                let tip = if self.use_pearls {
-                    format!("{}\nPrice: {} pearl", title, price)
-                } else {
-                    format!("{}\nPrice: {} gold", title, price)
+                // 悬停提示：根据模式显示不同内容
+                let item = &self.display_goods[idx];
+                let title = item
+                    .info
+                    .as_ref()
+                    .map(|i| i.name.clone())
+                    .unwrap_or_else(|| format!("Item #{}", item.item_index));
+                let tip = match self.dialog_mode {
+                    NpcGoodsMode::Buy => {
+                        let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
+                        let price = (base_price * self.npc_rate).round() as u32;
+                        if self.use_pearls {
+                            format!("{}\nPrice: {} pearl", title, price)
+                        } else {
+                            format!("{}\nPrice: {} gold", title, price)
+                        }
+                    }
+                    NpcGoodsMode::Sell => {
+                        let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
+                        let sell_price = (base_price * 0.5 * self.npc_rate).round() as u32;
+                        format!("{}\nSell: {} gold", title, sell_price)
+                    }
+                    NpcGoodsMode::Repair => {
+                        let max_dur = item.info.as_ref().map(|i| i.durability).unwrap_or(0);
+                        let cur_dur = item.current_dura;
+                        format!("{}\nDurability: {}/{}\nClick to repair", title, cur_dur, max_dur)
+                    }
+                    NpcGoodsMode::Storage => {
+                        format!("{}\nStorage item", title)
+                    }
                 };
                 draw_tooltip_at_mouse(&tip, vec2(14.0, 14.0));
             }
@@ -749,7 +897,7 @@ impl NpcGoodsDialogHybrid {
             }
 
             if child_input_enabled && trigger_buy {
-                self.queue_buy_action();
+                self.queue_action();
             }
         }
 
@@ -757,7 +905,7 @@ impl NpcGoodsDialogHybrid {
         if child_input_enabled && self.ptype != PanelType::Craft {
             let buy_rect = self.buy_rect();
             if self.buy_btn.draw_button(buy_rect, mouse_pos) {
-                self.queue_buy_action();
+                self.queue_action();
                 consumed = true;
             }
         }
