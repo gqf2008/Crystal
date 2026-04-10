@@ -579,7 +579,7 @@ impl MainDialog {
         let screen_w = screen_width() / screen_dpi_scale();
         let screen_h = screen_height() / screen_dpi_scale();
 
-        // 先计算新的 MainDialog 位置，再基于“旧布局”迁移子对话框
+        // 先计算新的 MainDialog 位置，再基于”旧布局”迁移子对话框
         let old_screen_w = self.last_screen_w;
         let old_screen_h = self.last_screen_h;
         let old_main_x = self.last_main_dialog_x;
@@ -592,6 +592,12 @@ impl MainDialog {
         self.last_screen_w = screen_w;
         self.last_screen_h = screen_h;
         self.last_main_dialog_x = new_main_x;
+
+        // 处理全局快捷键（攻击模式/宠物模式/技能模式/快捷栏使用）
+        if !self.is_any_input_active() && !self.any_popup_open() {
+            self.handle_mode_shortcuts();
+            self.belt_dialog.handle_number_keys();
+        }
 
         // 绘制主背景
         self.draw_background();
@@ -1319,12 +1325,12 @@ impl MainDialog {
         if let Some((tab, slot)) = self.inventory_dialog.take_transfer_to_belt_request() {
             if let Some(item) = self.inventory_dialog.take_item_from_slot(tab, slot) {
                 if let Some(icon_index) = item.icon_index {
-                    let belt_item = BeltItemHybrid::new(icon_index, item.count);
+                    let belt_item = BeltItemHybrid::with_name(icon_index, item.name.clone(), item.count);
                     if let Err(rollback_item) = self.belt_dialog.try_insert_item(belt_item) {
                         if !self.inventory_dialog.restore_item_to_slot(
                             tab,
                             slot,
-                            ItemSlotHybrid::new(rollback_item.icon_index, String::new(), rollback_item.count),
+                            ItemSlotHybrid::new(rollback_item.icon_index, rollback_item.name.clone().unwrap_or_default(), rollback_item.count),
                         ) {
                             eprintln!(
                                 "⚠️ Inventory rollback failed: tab={tab:?}, slot={slot}, icon={}, count={}",
@@ -1339,12 +1345,12 @@ impl MainDialog {
 
         if let Some(slot) = self.belt_dialog.take_transfer_to_inventory_request() {
             if let Some(item) = self.belt_dialog.take_item_from_slot(slot) {
-                let inventory_item = ItemSlotHybrid::new(item.icon_index, String::new(), item.count);
+                let inventory_item = ItemSlotHybrid::new(item.icon_index, item.name.unwrap_or_default(), item.count);
                 if let Err(rollback_item) = self.inventory_dialog.try_insert_item(inventory_item) {
                     if let Some(icon_index) = rollback_item.icon_index {
                         if !self.belt_dialog.restore_item_to_slot(
                             slot,
-                            BeltItemHybrid::new(icon_index, rollback_item.count),
+                            BeltItemHybrid::with_name(icon_index, rollback_item.name.clone(), rollback_item.count),
                         ) {
                             eprintln!(
                                 "⚠️ Belt rollback failed: slot={slot}, icon={icon_index}, count={}",

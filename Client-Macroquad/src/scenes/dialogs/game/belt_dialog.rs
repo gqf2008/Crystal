@@ -28,15 +28,20 @@ pub enum BeltLayoutHybrid {
 }
 
 /// 快捷栏格子物品
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BeltItemHybrid {
     pub icon_index: usize,
+    pub name: Option<String>,
     pub count: u32,
 }
 
 impl BeltItemHybrid {
     pub fn new(icon_index: usize, count: u32) -> Self {
-        Self { icon_index, count }
+        Self { icon_index, name: None, count }
+    }
+
+    pub fn with_name(icon_index: usize, name: String, count: u32) -> Self {
+        Self { icon_index, name: Some(name), count }
     }
 }
 
@@ -112,12 +117,12 @@ impl BeltDialogHybrid {
         
         // 初始化示例物品
         let cells = [
-            Some(BeltItemHybrid::new(0, 15)),
-            Some(BeltItemHybrid::new(1, 8)),
-            Some(BeltItemHybrid::new(2, 12)),
-            Some(BeltItemHybrid::new(3, 6)),
-            Some(BeltItemHybrid::new(5, 3)),
-            Some(BeltItemHybrid::new(6, 2)),
+            Some(BeltItemHybrid::with_name(0, "金创药(小量)".to_string(), 15)),
+            Some(BeltItemHybrid::with_name(1, "魔力水(小量)".to_string(), 8)),
+            Some(BeltItemHybrid::with_name(2, "太阳水".to_string(), 12)),
+            Some(BeltItemHybrid::with_name(3, "回城卷".to_string(), 6)),
+            Some(BeltItemHybrid::with_name(5, "随机传送卷".to_string(), 3)),
+            Some(BeltItemHybrid::with_name(6, "地牢逃脱卷".to_string(), 2)),
         ];
         
         Self {
@@ -382,6 +387,31 @@ impl BeltDialogHybrid {
 
         Err(item)
     }
+
+    /// 从背包接收物品（由 MainDialog 调用）
+    /// 返回 true 表示成功接收
+    pub fn accept_item_from_inventory(&mut self, icon_index: usize, name: &str, count: u32) -> bool {
+        // 尝试堆叠到相同物品
+        if let Some(slot) = self.cells.iter_mut().find(|s| {
+            s.as_ref().is_some_and(|item| item.icon_index == icon_index)
+        }) {
+            if let Some(existing) = slot.as_mut() {
+                existing.count = existing.count.saturating_add(count);
+                println!("🎒 快捷栏: 堆叠 {} x{} -> {}", name, count, existing.count);
+                return true;
+            }
+        }
+
+        // 放入空格子
+        if let Some(slot) = self.cells.iter_mut().find(|s| s.is_none()) {
+            *slot = Some(BeltItemHybrid::with_name(icon_index, name.to_string(), count));
+            println!("🎒 快捷栏: 放入 {} x{}", name, count);
+            return true;
+        }
+
+        println!("🎒 快捷栏: 已满，无法放入 {}", name);
+        false
+    }
     
     /// 更新和绘制（主入口）
     pub fn update_and_draw(&mut self) -> bool {
@@ -436,7 +466,7 @@ impl BeltDialogHybrid {
         self.current_bg().draw(self.position);
         
         // ========== 5. 收集数据用于 mqui 拖放 ==========
-        let cells_snapshot: [Option<BeltItemHybrid>; 6] = self.cells;
+        let cells_snapshot: [Option<BeltItemHybrid>; 6] = std::array::from_fn(|i| self.cells[i].clone());
         let item_dragging = self.item_dragging;
         let _layout = self.layout;
         
@@ -563,6 +593,22 @@ impl BeltDialogHybrid {
             }
             None => {}
         }
+
+        // ========== 12. Tooltip ==========
+        if !self.item_dragging {
+            if let Some(slot) = self.hovered_cell {
+                if let Some(item) = &self.cells[slot] {
+                    if let Some(ref name) = item.name {
+                        let tip = if item.count > 1 {
+                            format!("{} x{}", name, item.count)
+                        } else {
+                            name.clone()
+                        };
+                        draw_tooltip(mouse, &tip);
+                    }
+                }
+            }
+        }
         
         true
     }
@@ -651,6 +697,18 @@ impl BeltDialogHybrid {
             }
         }
     }
+
+    /// 处理数字键 1-6 快捷使用
+    pub fn handle_number_keys(&mut self) {
+        for i in 0..6 {
+            if is_key_pressed(KeyCode::Key1) && i == 0 { self.use_item(i); break; }
+            if is_key_pressed(KeyCode::Key2) && i == 1 { self.use_item(i); break; }
+            if is_key_pressed(KeyCode::Key3) && i == 2 { self.use_item(i); break; }
+            if is_key_pressed(KeyCode::Key4) && i == 3 { self.use_item(i); break; }
+            if is_key_pressed(KeyCode::Key5) && i == 4 { self.use_item(i); break; }
+            if is_key_pressed(KeyCode::Key6) && i == 5 { self.use_item(i); break; }
+        }
+    }
     
     /// 设置格子物品
     pub fn set_item(&mut self, slot: usize, item: Option<BeltItemHybrid>) {
@@ -665,4 +723,10 @@ impl BeltDialogHybrid {
 
 impl Default for BeltDialogHybrid {
     fn default() -> Self { Self::new() }
+}
+
+fn draw_tooltip(mouse: Vec2, text: &str) {
+    let w = text.chars().count() as f32 * 7.0 + 8.0;
+    draw_rectangle(mouse.x + 12.0, mouse.y - 18.0, w, 20.0, Color::from_rgba(0, 0, 0, 200));
+    draw_text(text, mouse.x + 16.0, mouse.y - 2.0, 14.0, WHITE);
 }
