@@ -219,6 +219,43 @@ impl RenderSystem for UIRenderSystem {
             }
         }
 
+        // 2.6) 同步玩家属性（等级/金币/经验/负重/背包）
+        {
+            use crate::components::{CombatStats, Currency, Experience, Inventory, LocalPlayer};
+
+            let mut q = ctx.world.query::<(&LocalPlayer, &CombatStats)>();
+            if let Some((e, (_lp, stats))) = q.iter().next() {
+                let exp = ctx.world.get::<&Experience>(e).ok().map(|e| e.percent()).unwrap_or(0.0);
+                let currency = ctx.world.get::<&Currency>(e)
+                    .map(|c| c.gold)
+                    .unwrap_or(0);
+                let (weight, max_weight, bag_space, bag_capacity) = ctx.world.get::<&Inventory>(e)
+                    .map(|inv| (
+                        inv.current_weight,
+                        inv.max_weight,
+                        inv.items.iter().filter(|s| s.is_some()).count() as u32,
+                        inv.items.len() as u32,
+                    ))
+                    .unwrap_or((0, 100, 0, 40));
+
+                self.main_dialog.set_player_stats(
+                    stats.level,
+                    currency,
+                    exp,
+                    weight,
+                    max_weight,
+                    bag_space,
+                    bag_capacity,
+                    None, // character name 从 ECS 暂不可用
+                );
+
+                // 同步背包 InventoryDialog
+                if let Ok(inv) = ctx.world.get::<&Inventory>(e) {
+                    self.main_dialog.sync_inventory(&inv);
+                }
+            }
+        }
+
         // 3) 快捷键（由 UIRenderSystem 统一处理，避免 GameScene 直连 UI 组件）
         if !self.amount_box.is_visible() && !self.main_dialog.is_any_input_active() {
             if is_key_pressed(KeyCode::Enter) {

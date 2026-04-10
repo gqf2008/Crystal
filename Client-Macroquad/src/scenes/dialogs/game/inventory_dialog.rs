@@ -265,8 +265,62 @@ impl InventoryDialogHybrid {
     pub fn toggle(&mut self) {
         if self.visible { self.close(); } else { self.open(); }
     }
-    
+
     pub fn is_visible(&self) -> bool { self.visible }
+
+    /// 从 ECS Inventory 组件同步物品数据
+    pub fn sync_from_ecs_inventory(&mut self, inv: &crate::components::Inventory) {
+        self.gold = inv.gold;
+
+        let mut equip_slots: Vec<ItemSlotHybrid> = Vec::with_capacity(46);
+        let mut item_slots: Vec<ItemSlotHybrid> = Vec::with_capacity(46);
+        let mut quest_slots: Vec<ItemSlotHybrid> = Vec::with_capacity(20);
+
+        for (i, slot) in inv.items.iter().enumerate() {
+            if let Some(item) = slot {
+                // 根据物品类型分配到不同标签页
+                let is_equip = matches!(item.info.as_ref().map(|x| x.item_type),
+                    Some(mir2_shared::enums::ItemType::Weapon) |
+                    Some(mir2_shared::enums::ItemType::Armour) |
+                    Some(mir2_shared::enums::ItemType::Helmet) |
+                    Some(mir2_shared::enums::ItemType::Necklace) |
+                    Some(mir2_shared::enums::ItemType::Bracelet) |
+                    Some(mir2_shared::enums::ItemType::Ring) |
+                    Some(mir2_shared::enums::ItemType::Boots) |
+                    Some(mir2_shared::enums::ItemType::Belt) |
+                    Some(mir2_shared::enums::ItemType::Amulet) |
+                    Some(mir2_shared::enums::ItemType::Torch) |
+                    Some(mir2_shared::enums::ItemType::Mount) |
+                    Some(mir2_shared::enums::ItemType::Stone)
+                );
+
+                // icon_index 使用 shape 作为占位，后续对接 ResourceManager
+                let shape = item.info.as_ref().and_then(|x| Some(x.shape)).unwrap_or(0) as usize;
+                let slot_item = ItemSlotHybrid {
+                    icon_index: Some(shape),
+                    count: item.count as u32,
+                };
+
+                if is_equip {
+                    equip_slots.push(slot_item);
+                } else {
+                    // 任务物品 vs 普通物品简单按索引判断
+                    if i < 20 {
+                        quest_slots.push(slot_item);
+                    } else {
+                        item_slots.push(slot_item);
+                    }
+                }
+            }
+        }
+
+        // 填充空格到目标大小
+        while equip_slots.len() < 46 { equip_slots.push(ItemSlotHybrid::empty()); }
+        while item_slots.len() < 46 { item_slots.push(ItemSlotHybrid::empty()); }
+        while quest_slots.len() < 20 { quest_slots.push(ItemSlotHybrid::empty()); }
+
+        self.tab_items = [equip_slots, item_slots, quest_slots];
+    }
     
     pub fn set_position(&mut self, pos: Vec2) { self.position = pos; }
     

@@ -78,6 +78,8 @@ pub struct MainDialog {
     max_weight: u32,
     /// 模拟数据 - 背包空格数
     bag_space: u32,
+    /// 模拟数据 - 背包总容量
+    bag_capacity: u32,
 
     // 子对话框（全部使用 Hybrid 版本）
     /// 快捷栏
@@ -184,6 +186,7 @@ impl MainDialog {
             weight: 75,
             max_weight: 100,
             bag_space: 28,
+            bag_capacity: 40,
 
             // 子对话框
             belt_dialog: BeltDialogHybrid::new(),
@@ -251,11 +254,40 @@ impl MainDialog {
         self.max_mp = max_mp.max(1);
     }
 
+    /// 同步玩家基础属性（等级/金币/经验/负重/背包空间/角色名）
+    pub fn set_player_stats(
+        &mut self,
+        level: u16,
+        gold: u32,
+        exp_percent: f32,
+        weight: u16,
+        max_weight: u16,
+        bag_space: u32,
+        bag_capacity: u32,
+        character_name: Option<String>,
+    ) {
+        self.level = level as u32;
+        self.gold = gold;
+        self.exp_percent = exp_percent.clamp(0.0, 1.0);
+        self.weight = weight as u32;
+        self.max_weight = max_weight as u32;
+        self.bag_space = bag_space;
+        self.bag_capacity = bag_capacity;
+        if let Some(name) = character_name {
+            self.character_name = name;
+        }
+    }
+
     /// 设置小地图对应的地图尺寸（单位：地图格子数 width/height）
     ///
     /// 备注：小地图点击反算会先算出格子坐标，再用 `Coord::grid_to_world_center()` 转为世界像素。
     pub fn set_minimap_world_size(&mut self, grid_w: f32, grid_h: f32) {
         self.minimap_dialog.set_world_size(grid_w, grid_h);
+    }
+
+    /// 同步背包数据到 InventoryDialog
+    pub fn sync_inventory(&mut self, inv: &crate::components::Inventory) {
+        self.inventory_dialog.sync_from_ecs_inventory(inv);
     }
 
     /// 同步小地图上的玩家点（世界坐标像素 + 朝向弧度）
