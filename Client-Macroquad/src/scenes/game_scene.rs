@@ -106,6 +106,8 @@ impl GameScene {
             .add_system(crate::systems::MapLoadSystem, priority::MAP_LOAD)
             .add_system(TimeTickSystem::default(), priority::GAME_EVENT)
             .add_system(LocalPlayerAiSystem::default(), priority::LOCAL_PLAYER_AI)
+            // 快捷键技能输入（在 PlayerControlSystem 之前，NETWORK_APPLY 之后）
+            .add_system(crate::systems::SpellInputSystem::default(), 118)
             // 决策层：怪物 AI（追击/攻击等）
             .add_system(crate::systems::MonsterAISystem, priority::MONSTER_AI)
             .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)

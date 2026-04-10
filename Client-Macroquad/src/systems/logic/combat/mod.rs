@@ -64,5 +64,5 @@ pub mod combat_system;
 pub mod regen_system;
 
 pub use regen_system::HealthRegenSystem;
-pub use skill_system::SkillSystem;
+pub use skill_system::{SkillSystem, SpellInputSystem};
 pub use combat_system::{CombatSystem, DamageType, CombatResult};

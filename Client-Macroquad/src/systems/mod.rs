@@ -169,7 +169,7 @@ pub use infra::NetworkApplySystem;
 pub use infra::{FrameEndSystem, TimeTickSystem};
 pub use infra::MapBootstrapSystem;
 pub use logic::combat::{
-    CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem,
+    CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem, SpellInputSystem,
 };
 pub use logic::lifetime_cleanup_system::LifetimeCleanupSystem;
 pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};

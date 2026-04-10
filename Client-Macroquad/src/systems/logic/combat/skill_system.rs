@@ -102,6 +102,34 @@ impl LogicSystem for SkillSystem {
                 return Ok(());
             }
 
+            // 1.5 检查冷却时间
+            let on_cooldown = {
+                let mut cd = false;
+                for (_, (_, cooldowns)) in ctx.world.query::<(&LocalPlayer, &crate::components::spell::SpellCooldowns)>().iter() {
+                    let mut cooldowns_mut = cooldowns.clone();
+                    cooldowns_mut.cleanup();
+                    if cooldowns_mut.is_on_cooldown(spell as u8) {
+                        cd = true;
+                    }
+                    break;
+                }
+                cd
+            };
+
+            if on_cooldown {
+                tracing::warn!("⚠️ 技能冷却中: {}", spell.name());
+
+                for (_, (_, input)) in ctx
+                    .world
+                    .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
+                {
+                    input.cast_spell = None;
+                    break;
+                }
+
+                return Ok(());
+            }
+
             // 2. 检查魔法值
             let mp_cost = Self::get_spell_mp_cost(spell);
             let has_enough_mp = {
@@ -206,11 +234,22 @@ impl SkillSystem {
             return false;
         }
 
-        // 3. TODO: 检查冷却时间
-        // if !Self::check_cooldown(world, spell) {
-        //     println!("⚠️ 技能冷却中");
-        //     return false;
-        // }
+        // 3. 检查冷却时间
+        let on_cooldown = {
+            let mut cd = false;
+            for (_, (_, cooldowns)) in world.query::<(&LocalPlayer, &crate::components::spell::SpellCooldowns)>().iter() {
+                if cooldowns.is_on_cooldown(spell as u8) {
+                    cd = true;
+                }
+                break;
+            }
+            cd
+        };
+
+        if on_cooldown {
+            println!("⚠️ 技能冷却中: {}", spell.name());
+            return false;
+        }
 
         // 4. 获取目标信息
         let (direction, target_id, location) = Self::get_target_info(world);
@@ -440,3 +479,112 @@ impl SkillSystem {
         MirDirection::Down
     }
 }
+
+// ============================================================================
+// SpellInputSystem - 快捷键技能输入
+// Priority: 118 (between NETWORK_APPLY and PLAYER_CONTROL)
+// ============================================================================
+//
+// 职责：
+// - 检测 F1-F8 按键
+// - 根据 MagicList 中 key_slot 绑定或默认顺序映射到 SpellType
+// - 写入 PlayerInput.cast_spell 供 SkillSystem 消费
+//
+
+use crate::game::KeyCode;
+
+/// 快捷键技能输入系统
+#[derive(ecs_macros::LogicSystem)]
+pub struct SpellInputSystem {
+    prev_f_keys: [bool; 8], // F1-F8 上一帧状态
+}
+
+impl Default for SpellInputSystem {
+    fn default() -> Self {
+        Self {
+            prev_f_keys: [false; 8],
+        }
+    }
+}
+
+impl LogicSystem for SpellInputSystem {
+    fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
+        use crate::components::{LocalPlayer, MagicList, PlayerInput};
+
+        let f_keys: [KeyCode; 8] = [
+            KeyCode::F1, KeyCode::F2, KeyCode::F3, KeyCode::F4,
+            KeyCode::F5, KeyCode::F6, KeyCode::F7, KeyCode::F8,
+        ];
+
+        // 找到本地玩家实体
+        let player_entity = {
+            let mut q = ctx.world.query::<&LocalPlayer>();
+            q.iter().next().map(|(e, _)| e)
+        };
+
+        let Some(player_entity) = player_entity else {
+            // 更新上一帧状态
+            for (i, &key) in f_keys.iter().enumerate() {
+                self.prev_f_keys[i] = ctx.input().key_pressed(key);
+            }
+            return Ok(());
+        };
+
+        // 检查是否有施法输入（已有则跳过快捷键）
+        let has_existing_spell = ctx.world.get::<&PlayerInput>(player_entity)
+            .ok()
+            .map(|input| input.cast_spell.is_some())
+            .unwrap_or(false);
+
+        if has_existing_spell {
+            // 仍更新按键状态
+            for (i, &key) in f_keys.iter().enumerate() {
+                self.prev_f_keys[i] = ctx.input().key_pressed(key);
+            }
+            return Ok(());
+        }
+
+        // 检测 F1-F8 边缘触发
+        let mut triggered_slot: Option<usize> = None;
+        for (i, &key) in f_keys.iter().enumerate() {
+            let pressed = ctx.input().key_pressed(key);
+            let just_pressed = pressed && !self.prev_f_keys[i];
+            self.prev_f_keys[i] = pressed;
+
+            if just_pressed {
+                triggered_slot = Some(i);
+                break;
+            }
+        }
+
+        let Some(slot_idx) = triggered_slot else {
+            return Ok(());
+        };
+
+        // 根据 MagicList 中 key_slot 绑定查找技能
+        let slot_u8 = (slot_idx + 1) as u8; // 1-based slot
+        let spell = ctx.world.get::<&MagicList>(player_entity)
+            .ok()
+            .and_then(|ml| ml.get_by_slot(slot_u8).map(|m| m.spell))
+            .or_else(|| {
+                // 退而求其次：按 MagicList 中的顺序取第 N 个
+                ctx.world.get::<&MagicList>(player_entity)
+                    .ok()
+                    .and_then(|ml| ml.magics.get(slot_idx).map(|m| m.spell))
+            });
+
+        if let Some(spell) = spell {
+            if let Ok(mut input) = ctx.world.get::<&mut PlayerInput>(player_entity) {
+                input.cast_spell = Some(spell);
+                input.spell_target_pos = None;
+                input.spell_target_entity = None;
+                tracing::debug!("⌨️ 快捷键触发: {:?} (F{})", spell, slot_idx + 1);
+            }
+        } else {
+            tracing::trace!("⌨️ F{} 无绑定技能", slot_idx + 1);
+        }
+
+        Ok(())
+    }
+}
+

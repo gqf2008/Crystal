@@ -452,3 +452,73 @@ impl Default for LearnableMagicList {
         Self::new()
     }
 }
+
+/// 技能冷却组件
+///
+/// 存储多个技能的冷却时间，由 NetworkApplySystem 根据 MagicDelayReceived 设置
+#[derive(Debug, Clone)]
+pub struct SpellCooldowns {
+    /// (skill_id, cooldown_end_time_ms)
+    pub active_cooldowns: std::collections::HashMap<u8, u64>,
+}
+
+impl SpellCooldowns {
+    pub fn new() -> Self {
+        Self {
+            active_cooldowns: std::collections::HashMap::new(),
+        }
+    }
+
+    /// 设置技能冷却
+    pub fn set(&mut self, spell_id: u8, duration_ms: u32) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        self.active_cooldowns.insert(spell_id, now + duration_ms as u64);
+    }
+
+    /// 检查技能是否在冷却中
+    pub fn is_on_cooldown(&self, spell_id: u8) -> bool {
+        if let Some(&end_time) = self.active_cooldowns.get(&spell_id) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            if now >= end_time {
+                return false;
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 清理已过期的冷却
+    pub fn cleanup(&mut self) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        self.active_cooldowns.retain(|_, &mut v| v > now);
+    }
+
+    /// 获取某技能的剩余冷却时间（毫秒）
+    pub fn remaining_ms(&self, spell_id: u8) -> u64 {
+        if let Some(&end_time) = self.active_cooldowns.get(&spell_id) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            end_time.saturating_sub(now)
+        } else {
+            0
+        }
+    }
+}
+
+impl Default for SpellCooldowns {
+    fn default() -> Self {
+        Self::new()
+    }
+}

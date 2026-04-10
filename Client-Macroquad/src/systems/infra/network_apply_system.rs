@@ -1591,6 +1591,9 @@ impl LogicSystem for NetworkApplySystem {
         let mut spell_casts: Vec<(u32, u8, u32)> = Vec::new(); // (object_id, spell, target_id)
         let mut effect_received: Vec<(u32, u8, u32)> = Vec::new(); // (object_id, effect, effect_type)
 
+        // spell cooldowns (collected for post-loop application)
+        let mut spell_delays: Vec<(u8, u32)> = Vec::new(); // (spell_id, delay_ms)
+
         // UI / presentation feedback
         let mut play_sounds: Vec<i32> = Vec::new();
         let mut mount_updates: Vec<(u32, i16, bool)> = Vec::new();
@@ -1747,6 +1750,8 @@ impl LogicSystem for NetworkApplySystem {
 
                 // ===== 魔法/技能 =====
                 NetworkEvent::MagicListReceived { .. } => {
+                    // Magic 包通常用于施放通知（cast=true），也用于初始化技能列表
+                    // 这里记录追踪即可，具体技能添加由 MagicLearned 处理
                     tracing::trace!("✨ Magic list received");
                 }
                 NetworkEvent::MagicLearned { spell, level } => {
@@ -1791,6 +1796,8 @@ impl LogicSystem for NetworkApplySystem {
                     }
                 }
                 NetworkEvent::MagicDelayReceived { object_id: _, spell, delay } => {
+                    // 收集到循环外处理，避免借用冲突
+                    spell_delays.push((*spell as u8, *delay));
                     tracing::trace!("⏳ Magic cooldown: {:?} delay={}ms", spell, delay);
                 }
                 NetworkEvent::MagicCastEvent { spell } => {
@@ -3515,6 +3522,21 @@ impl LogicSystem for NetworkApplySystem {
                 }
                 _ => {
                     tracing::trace!("✨ Effect received: effect={}, type={}", effect, effect_type);
+                }
+            }
+        }
+
+        // ===== 技能冷却应用 =====
+        // MagicDelayReceived: 设置本地玩家技能冷却
+        if !spell_delays.is_empty() {
+            if let Some(e) = local_player_entity {
+                if ctx.world.get::<&crate::components::spell::SpellCooldowns>(e).is_err() {
+                    let _ = ctx.world.insert_one(e, crate::components::spell::SpellCooldowns::new());
+                }
+                if let Ok(mut cooldowns) = ctx.world.get::<&mut crate::components::spell::SpellCooldowns>(e) {
+                    for (spell_id, delay_ms) in spell_delays {
+                        cooldowns.set(spell_id, delay_ms);
+                    }
                 }
             }
         }
