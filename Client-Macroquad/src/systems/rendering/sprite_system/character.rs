@@ -24,10 +24,11 @@
 // ============================================================================
 
 use super::SpriteRenderSystem;
-use crate::components::{AnimationFrame, Camera, LibrarySprite, LocalPlayer, MountState, Player, PlayerAppearance, Position, SpriteBlendMode, TimeTracker};
+use crate::components::{AnimationFrame, Camera, Health, LibrarySprite, LocalPlayer, Monster, MountState, OtherPlayer, Player, PlayerAppearance, Position, SpriteBlendMode, TimeTracker};
 use crate::game::GameResult;
 use crate::objects::frames::get_player_frame;
 use crate::resources::LibraryName;
+use crate::ui::text_renderer::draw_text_cn;
 use macroquad::prelude::*;
 
 /// 精灵渲染系统
@@ -720,6 +721,9 @@ impl SpriteRenderSystem {
                 spr: LibrarySprite,
                 pos: Position,
                 kind_order: i32,
+                name: Option<String>,
+                hp_current: Option<i32>,
+                hp_max: Option<i32>,
             },
         }
 
@@ -765,11 +769,11 @@ impl SpriteRenderSystem {
             }
         }
 
-        // NPC/Monster：当前先用占位绘制（后续接入真实库映射/动画组件）
+        // NPC/Monster：渲染 LibrarySprite + 名称 + 血条
         if !local_only {
             use crate::components::{NetworkObjectType, NetworkSync};
-            for (_entity, (sync, spr, pos)) in world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
-                if sync.object_type != NetworkObjectType::NPC && sync.object_type != NetworkObjectType::Monster {
+            for (entity, (_sync, spr, pos)) in world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
+                if _sync.object_type != NetworkObjectType::NPC && _sync.object_type != NetworkObjectType::Monster {
                     continue;
                 }
                 if !matches!(spr.blend_mode, SpriteBlendMode::Alpha) {
@@ -779,8 +783,22 @@ impl SpriteRenderSystem {
                     continue;
                 }
 
+                // 获取名称（Monster 或 OtherPlayer）
+                let name = world.get::<&Monster>(entity)
+                    .ok()
+                    .map(|m| m.name.clone())
+                    .or_else(|| world.get::<&OtherPlayer>(entity)
+                        .ok()
+                        .map(|op| op.name.clone()));
+
+                // 获取血量
+                let (hp_cur, hp_max) = world.get::<&Health>(entity)
+                    .ok()
+                    .map(|hp| (Some(hp.current), Some(hp.max)))
+                    .unwrap_or((None, None));
+
                 // kind order: NPC(0) < Monster(1) < Player(2)
-                let kind_order = if sync.object_type == NetworkObjectType::NPC { 0 } else { 1 };
+                let kind_order = if _sync.object_type == NetworkObjectType::NPC { 0 } else { 1 };
                 renderables.push((
                     pos.y,
                     kind_order,
@@ -788,6 +806,9 @@ impl SpriteRenderSystem {
                         spr: *spr,
                         pos: *pos,
                         kind_order,
+                        name,
+                        hp_current: hp_cur,
+                        hp_max,
                     },
                 ));
             }
@@ -821,23 +842,72 @@ impl SpriteRenderSystem {
                         is_local,
                     )?;
                 }
-                Renderable::LibrarySprite { spr, pos, kind_order: _ } => {
+                Renderable::LibrarySprite { spr, pos, kind_order: _, name, hp_current, hp_max } => {
                     let tint = Color::new(1.0, 1.0, 1.0, alpha.clamp(0.0, 1.0));
-                    let Some(info) = spr.library.get_texture(spr.texture_index()) else {
+                    let Some(ref info) = spr.library.get_texture(spr.texture_index()) else {
                         continue;
                     };
-                    let Some(tex) = info.image else {
+                    let Some(ref tex) = info.image else {
                         continue;
                     };
 
                     let draw_x = pos.x + info.offset_x as f32;
                     let draw_y = pos.y + info.offset_y as f32;
-                    draw_texture_ex(&tex, draw_x, draw_y, tint, DrawTextureParams { ..Default::default() });
+                    draw_texture_ex(tex, draw_x, draw_y, tint, DrawTextureParams { ..Default::default() });
+
+                    // 名称和血条
+                    Self::draw_object_name_and_health(&pos, info, name.as_deref(), hp_current, hp_max);
                 }
             }
         }
 
         Ok(())
+    }
+
+    /// 在物体头顶绘制名称和血条
+    fn draw_object_name_and_health(
+        pos: &Position,
+        sprite_info: &crate::resources::mlibrary::ImageInfo,
+        name: Option<&str>,
+        hp_current: Option<i32>,
+        hp_max: Option<i32>,
+    ) {
+        // 名称绘制在精灵顶部
+        let name_y = pos.y - sprite_info.height as f32 - 14.0;
+        let name_x = pos.x - 30.0; // 居中偏移
+
+        if let Some(name) = name {
+            if !name.is_empty() {
+                draw_text_cn(name, name_x, name_y, 10.0, WHITE);
+            }
+        }
+
+        // 血条：在名称下方
+        if let (Some(cur), Some(max)) = (hp_current, hp_max) {
+            if max > 0 {
+                let bar_width = 60.0;
+                let bar_height = 4.0;
+                let bar_x = pos.x - bar_width / 2.0;
+                let bar_y = name_y + 2.0;
+
+                // 背景
+                draw_rectangle(bar_x, bar_y, bar_width, bar_height, Color::from_rgba(80, 0, 0, 200));
+
+                // 血条填充
+                let fill = (cur as f32 / max as f32).clamp(0.0, 1.0);
+                let bar_color = if fill > 0.6 {
+                    Color::from_rgba(0, 200, 0, 255)
+                } else if fill > 0.3 {
+                    Color::from_rgba(255, 255, 0, 255)
+                } else {
+                    Color::from_rgba(255, 50, 50, 255)
+                };
+                draw_rectangle(bar_x, bar_y, bar_width * fill, bar_height, bar_color);
+
+                // 边框
+                draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.0, Color::from_rgba(200, 200, 200, 180));
+            }
+        }
     }
 }
 
