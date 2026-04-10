@@ -211,8 +211,8 @@ impl InventoryDialogHybrid {
             self.tab_items2_disabled_texture = info.image;
         }
         
-        // 物品图标
-        self.item_cache.preload(LibraryName::Items, 0, 60);
+        // 物品图标：按需加载（不再预加载，image 值范围通常 1000+）
+        // item_cache 使用 lazy get 模式，见下方渲染处
         
         // 透明 Skin
         self.create_transparent_skin();
@@ -294,10 +294,10 @@ impl InventoryDialogHybrid {
                     Some(mir2_shared::enums::ItemType::Stone)
                 );
 
-                // icon_index 使用 shape 作为占位，后续对接 ResourceManager
-                let shape = item.info.as_ref().and_then(|x| Some(x.shape)).unwrap_or(0) as usize;
+                // icon_index 使用 ItemInfo.image（C# UserItem.Image 对齐）
+                let icon_idx = item.info.as_ref().map(|x| x.image as usize).unwrap_or(0);
                 let slot_item = ItemSlotHybrid {
-                    icon_index: Some(shape),
+                    icon_index: Some(icon_idx),
                     count: item.count as u32,
                 };
 
@@ -615,13 +615,12 @@ impl InventoryDialogHybrid {
         // 拖动中的物品
         if self.item_dragging {
             if let Some(from) = self.dragging_from {
-                if let Some(slot) = self.current_items().get(from) {
-                    if let Some(icon_idx) = slot.icon_index {
-                        if let Some(tex) = self.item_cache.get_cached(icon_idx) {
-                            draw_texture(tex, mouse.x - tex.width() / 2.0, mouse.y - tex.height() / 2.0, WHITE);
-                            if slot.count > 1 {
-                                draw_text_cn(&format!("{}", slot.count), mouse.x + 10.0, mouse.y + 10.0, 14.0, WHITE);
-                            }
+                let icon_and_count = self.current_items().get(from).map(|slot| (slot.icon_index, slot.count));
+                if let (Some(icon_idx), count) = icon_and_count.unwrap_or((None, 0)) {
+                    if let Some(tex) = self.item_cache.get(LibraryName::Items, icon_idx) {
+                        draw_texture(tex, mouse.x - tex.width() / 2.0, mouse.y - tex.height() / 2.0, WHITE);
+                        if count > 1 {
+                            draw_text_cn(&format!("{}", count), mouse.x + 10.0, mouse.y + 10.0, 14.0, WHITE);
                         }
                     }
                 }
@@ -699,14 +698,15 @@ impl InventoryDialogHybrid {
         }
     }
     
-    fn draw_slots(&self, mouse: Vec2) {
-        let items = self.current_items();
-        
-        for (i, slot) in items.iter().enumerate() {
+    fn draw_slots(&mut self, mouse: Vec2) {
+        // Clone items to avoid borrow conflict with item_cache.get()
+        let items_snapshot: Vec<ItemSlotHybrid> = self.current_items().iter().cloned().collect();
+
+        for (i, slot) in items_snapshot.iter().enumerate() {
             if !self.is_slot_visible(i) { continue; }
-            
+
             let rect = self.get_slot_rect(i);
-            
+
             // 只在高亮时绘制边框（背景纹理已有网格）
             let highlight = if self.item_dragging && self.dragging_from == Some(i) {
                 CellHighlight::Selected
@@ -717,7 +717,7 @@ impl InventoryDialogHybrid {
             } else {
                 CellHighlight::None
             };
-            
+
             // 只有高亮时才绘制边框
             if highlight != CellHighlight::None {
                 let color = match highlight {
@@ -728,11 +728,11 @@ impl InventoryDialogHybrid {
                 };
                 draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.0, color);
             }
-            
-            // 物品图标
+
+            // 物品图标（按需加载）
             if let Some(icon_idx) = slot.icon_index {
                 let alpha = if self.item_dragging && self.dragging_from == Some(i) { 0.4 } else { 1.0 };
-                if let Some(tex) = self.item_cache.get_cached(icon_idx) {
+                if let Some(tex) = self.item_cache.get(LibraryName::Items, icon_idx) {
                     draw_item_icon(rect, tex, alpha);
                 }
                 if !(self.item_dragging && self.dragging_from == Some(i)) {
