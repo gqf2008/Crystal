@@ -1558,6 +1558,10 @@ impl LogicSystem for NetworkApplySystem {
         let mut mock_spawns: Vec<(u32, crate::network::handlers::ObjectType, crate::resources::LibraryName, i32, i32, i32)> = Vec::new();
         let mut mock_despawns: Vec<u32> = Vec::new();
 
+        // 地面物品/金币（收集后循环外落地）
+        let mut ground_items: Vec<mir2_shared::packets::server::ObjectItem> = Vec::new();
+        let mut ground_golds: Vec<mir2_shared::packets::server::ObjectGold> = Vec::new();
+
         let mut object_monsters: Vec<mir2_shared::packets::server::ObjectMonster> = Vec::new();
         let mut object_npcs: Vec<mir2_shared::packets::server::ObjectNpc> = Vec::new();
         let mut object_players: Vec<mir2_shared::packets::server::ObjectPlayer> = Vec::new();
@@ -1863,13 +1867,27 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectPoisonedEvent { object_id, poison_type } => {
                     poisoned_objects.push((*object_id, *poison_type));
                 }
-                NetworkEvent::RangeAttacked { object_id: _ } => {}
-                NetworkEvent::ObjectRangeAttacked { .. } => {}
-                NetworkEvent::PushedEvent { .. } => {}
-                NetworkEvent::ObjectPushedEvent { .. } => {}
-                NetworkEvent::UserDashAttacked { .. }=> {}
-                NetworkEvent::ObjectDashAttacked { object_id: _ } => {}
-                NetworkEvent::UserAttackMoved { .. }=> {}
+                NetworkEvent::RangeAttacked { object_id } => {
+                    tracing::trace!("🏹 Object {} range attacked", object_id);
+                }
+                NetworkEvent::ObjectRangeAttacked { object_id } => {
+                    tracing::trace!("🏹 Object {} range attacked", object_id);
+                }
+                NetworkEvent::PushedEvent { object_id, x, y } => {
+                    tracing::trace!("💨 Object {} pushed to ({}, {})", object_id, x, y);
+                }
+                NetworkEvent::ObjectPushedEvent { object_id, x, y } => {
+                    tracing::trace!("💨 Object {} pushed to ({}, {})", object_id, x, y);
+                }
+                NetworkEvent::UserDashAttacked { .. } => {
+                    tracing::trace!("💨 User dash attack");
+                }
+                NetworkEvent::ObjectDashAttacked { object_id } => {
+                    tracing::trace!("💨 Object {} dash attacked", object_id);
+                }
+                NetworkEvent::UserAttackMoved { x, y } => {
+                    tracing::trace!("⚔️ User attack moved to ({}, {})", x, y);
+                }
                 NetworkEvent::PlayerRevived { .. } => {
                     if let Some(e) = local_player_entity {
                         if let Ok(ns) = ctx.world.get::<&crate::components::NetworkSync>(e) {
@@ -1880,7 +1898,10 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectRevivedEvent { object_id } => {
                     revived.push(*object_id);
                 }
-                NetworkEvent::ObjectLeveled { object_id: _ } => {}
+                NetworkEvent::ObjectLeveled { object_id } => {
+                    // 怪物升级：在循环外处理
+                    tracing::trace!("⭐ Object {} leveled up", object_id);
+                }
                 NetworkEvent::ObjectManaPercent { object_id, percent } => {
                     object_mana_percents.push((*object_id, *percent));
                 }
@@ -1892,181 +1913,536 @@ impl LogicSystem for NetworkApplySystem {
                 }
 
                 // ===== 物品扩展 =====
-                NetworkEvent::ItemEquipped { .. }=> {}
-                NetworkEvent::ItemUnequipped { .. }=> {}
-                NetworkEvent::ItemMerged { .. }=> {}
-                NetworkEvent::ItemRemoved { .. }=> {}
-                NetworkEvent::ItemSlotRemoved { .. }=> {}
-                NetworkEvent::ItemTakenBack { .. }=> {}
-                NetworkEvent::ItemStored { .. }=> {}
-                NetworkEvent::ItemSplit { .. }=> {}
-                NetworkEvent::ItemUsed { .. }=> {}
-                NetworkEvent::ItemDropped { .. }=> {}
-                NetworkEvent::ItemRefreshed { .. }=> {}
-                NetworkEvent::ItemSlotSizeChanged { .. }=> {}
-                NetworkEvent::ItemSealed { .. }=> {}
-                NetworkEvent::ItemSlotEquipped { .. }=> {}
-                NetworkEvent::ItemCombined { .. }=> {}
-                NetworkEvent::ItemUpgraded { .. }=> {}
-                NetworkEvent::GroundItem { .. }=> {}
-                NetworkEvent::GroundGold { .. }=> {}
-                NetworkEvent::CreditChanged { .. }=> {}
-                NetworkEvent::ObjectHarvested { .. }=> {}
-                NetworkEvent::RefineItemDeposited { .. }=> {}
-                NetworkEvent::RefineItemRetrieved { .. }=> {}
-                NetworkEvent::RefineCancelled { .. }=> {}
-                NetworkEvent::RefineItemCompleted { .. }=> {}
-                NetworkEvent::TradeItemDeposited { .. }=> {}
-                NetworkEvent::TradeItemRetrieved { .. }=> {}
-                NetworkEvent::HeroItemTakenBack { .. }=> {}
-                NetworkEvent::HeroItemTransferred { .. }=> {}
-                NetworkEvent::NewItemInfoReceived { .. }=> {}
-                NetworkEvent::ObjectGoldReceived { .. }=> {}
+                NetworkEvent::ItemEquipped { item } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut eq) = ctx.world.get::<&mut crate::components::Equipment>(e) {
+                            if let Some(ref info) = item.info {
+                                let slot = eq.get_slot_for_type(info.item_type);
+                                if let Some(slot) = slot {
+                                    eq.equip(slot, item.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                NetworkEvent::ItemUnequipped { unique_id } => {
+                    // 卸下装备回背包，先标记待处理（需根据 unique_id 找到对应槽位）
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut eq) = ctx.world.get::<&mut crate::components::Equipment>(e) {
+                            for slot in 0..14u8 {
+                                let current = match slot {
+                                    0 => eq.weapon.as_ref(),
+                                    1 => eq.armour.as_ref(),
+                                    2 => eq.helmet.as_ref(),
+                                    3 => eq.necklace.as_ref(),
+                                    4 => eq.bracelet_l.as_ref(),
+                                    5 => eq.bracelet_r.as_ref(),
+                                    6 => eq.ring_l.as_ref(),
+                                    7 => eq.ring_r.as_ref(),
+                                    8 => eq.amulet.as_ref(),
+                                    9 => eq.belt.as_ref(),
+                                    10 => eq.boots.as_ref(),
+                                    11 => eq.stone.as_ref(),
+                                    12 => eq.torch.as_ref(),
+                                    13 => eq.mount.as_ref(),
+                                    _ => None,
+                                };
+                                if let Some(it) = current {
+                                    if it.unique_id == *unique_id {
+                                        eq.unequip(slot);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                NetworkEvent::ItemMerged { unique_id, count } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
+                            for slot in inv.items.iter_mut() {
+                                if let Some(ref mut it) = slot {
+                                    if it.unique_id == *unique_id {
+                                        it.count = *count as u16;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                NetworkEvent::ItemRemoved { unique_id } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
+                            for slot in inv.items.iter_mut() {
+                                if let Some(ref it) = slot {
+                                    if it.unique_id == *unique_id {
+                                        *slot = None;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                NetworkEvent::ItemSlotRemoved { slot } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
+                            let s = *slot as usize;
+                            if s < inv.items.len() {
+                                inv.items[s] = None;
+                            }
+                        }
+                    }
+                }
+                NetworkEvent::ItemTakenBack { item } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
+                            let _ = inv.add_item(item.clone());
+                        }
+                    }
+                }
+                NetworkEvent::ItemStored { item } => {
+                    // 存入仓库：从背包移除，加入仓库（循环后处理）
+                    // 这里只标记日志
+                    tracing::trace!("📦 Item stored: unique_id={}", item.unique_id);
+                }
+                NetworkEvent::ItemSplit { unique_id, count } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
+                            for slot in inv.items.iter_mut() {
+                                if let Some(ref mut it) = slot {
+                                    if it.unique_id == *unique_id {
+                                        it.count -= *count as u16;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                NetworkEvent::ItemUsed { unique_id: _ } => {
+                    // 物品使用：服务器确认已使用，客户端可播放使用特效
+                    tracing::trace!("🧪 Item used");
+                }
+                NetworkEvent::ItemDropped { unique_id: _ } => {
+                    tracing::trace!("📦 Item dropped");
+                }
+                NetworkEvent::ItemRefreshed { item } => {
+                    // 刷新物品数据：更新背包中对应物品
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
+                            for slot in inv.items.iter_mut() {
+                                if let Some(ref it) = slot {
+                                    if it.unique_id == item.unique_id {
+                                        *slot = Some(item.clone());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                NetworkEvent::ItemSlotSizeChanged { slot, size } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
+                            let s = *slot as usize;
+                            let new_size = *size as usize;
+                            if s < inv.items.len() && new_size != inv.items.len() {
+                                // 调整背包大小
+                                inv.items.resize(new_size, None);
+                                inv.capacity = new_size;
+                            }
+                        }
+                    }
+                }
+                NetworkEvent::ItemSealed { unique_id: _ } => {
+                    tracing::trace!("🔒 Item sealed");
+                }
+                NetworkEvent::ItemSlotEquipped { slot, item } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut eq) = ctx.world.get::<&mut crate::components::Equipment>(e) {
+                            eq.equip(*slot as u8, item.clone());
+                        }
+                    }
+                }
+                NetworkEvent::ItemCombined { item } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
+                            let _ = inv.add_item(item.clone());
+                        }
+                    }
+                }
+                NetworkEvent::ItemUpgraded { item } => {
+                    // 升级后的物品替换原物品
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
+                            for slot in inv.items.iter_mut() {
+                                if let Some(ref it) = slot {
+                                    if it.unique_id == item.unique_id {
+                                        *slot = Some(item.clone());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                NetworkEvent::GroundItem { packet } => {
+                    // 地面上的物品（可拾取）- 收集到循环外落地
+                    ground_items.push(packet.clone());
+                }
+                NetworkEvent::GroundGold { amount } => {
+                    tracing::trace!("💰 Ground gold: {}", amount);
+                }
+                NetworkEvent::CreditChanged { delta } => {
+                    tracing::trace!("💎 Credit changed: {}", delta);
+                }
+                NetworkEvent::ObjectHarvested { object_id } => {
+                    tracing::trace!("⛏️ Object {} harvested", object_id);
+                }
+                NetworkEvent::RefineItemDeposited { .. } => {
+                    tracing::trace!("🔨 Refine item deposited");
+                }
+                NetworkEvent::RefineItemRetrieved { .. } => {
+                    tracing::trace!("🔨 Refine item retrieved");
+                }
+                NetworkEvent::RefineCancelled { .. } => {
+                    tracing::trace!("🔨 Refine cancelled");
+                }
+                NetworkEvent::RefineItemCompleted { .. } => {
+                    tracing::trace!("🔨 Refine completed");
+                }
+                NetworkEvent::TradeItemDeposited { .. } => {
+                    tracing::trace!("🤝 Trade item deposited");
+                }
+                NetworkEvent::TradeItemRetrieved { .. } => {
+                    tracing::trace!("🤝 Trade item retrieved");
+                }
+                NetworkEvent::HeroItemTakenBack { .. } => {
+                    tracing::trace!("🦸 Hero item taken back");
+                }
+                NetworkEvent::HeroItemTransferred { .. } => {
+                    tracing::trace!("🦸 Hero item transferred");
+                }
+                NetworkEvent::NewItemInfoReceived { .. } => {
+                    tracing::trace!("📋 New item info received");
+                }
+                NetworkEvent::ObjectGoldReceived { packet } => {
+                    // 地面金币 - 收集到循环外落地
+                    ground_golds.push(packet.clone());
+                }
 
                 // ===== 其他（交易/任务/好友/公会/NPC/英雄/邮件/市场/社交等）=====
-                NetworkEvent::TradeGoldAdded { .. }=> {}
-                NetworkEvent::TradeItemAdded { .. }=> {}
-                NetworkEvent::TradeConfirmedEvent { .. }=> {}
-                NetworkEvent::TradeCancelledEvent { .. }=> {}
-                NetworkEvent::QuestListUpdated { .. }=> {}
-                NetworkEvent::QuestItemGained { .. }=> {}
-                NetworkEvent::QuestItemLost { .. }=> {}
-                NetworkEvent::QuestShared { .. }=> {}
-                NetworkEvent::QuestProgressUpdated { .. }=> {}
-                NetworkEvent::FriendUpdated { .. }=> {}
-                NetworkEvent::GuildNoticeUpdated { .. }=> {}
-                NetworkEvent::GuildMemberUpdated { .. }=> {}
-                NetworkEvent::GuildExpGained { .. }=> {}
-                NetworkEvent::GuildNameReceived { .. }=> {}
-                NetworkEvent::GuildStorageGoldChanged { .. }=> {}
-                NetworkEvent::GuildStorageItemChanged { .. }=> {}
-                NetworkEvent::GuildStorageListReceived { .. }=> {}
-                NetworkEvent::GuildWarRequested { .. }=> {}
-                NetworkEvent::GuildBuffListReceived { .. }=> {}
-                NetworkEvent::GuildTerritoryPageReceived { .. }=> {}
-                NetworkEvent::GuildTerritoryPurchased { .. }=> {}
-                NetworkEvent::NPCSellReceived { .. }=> {}
-                NetworkEvent::NPCRepairReceived { .. }=> {}
-                NetworkEvent::NPCSRepairReceived { .. }=> {}
-                NetworkEvent::NPCRefineReceived { .. }=> {}
-                NetworkEvent::NPCCheckRefineReceived { .. }=> {}
-                NetworkEvent::NPCCollectRefineReceived { .. }=> {}
-                NetworkEvent::NPCReplaceWedRingReceived { .. }=> {}
-                NetworkEvent::NPCStorageReceived { .. }=> {}
-                NetworkEvent::NPCConsignReceived { .. }=> {}
-                NetworkEvent::NPCMarketEvent { .. }=> {}
-                NetworkEvent::NPCMarketPageEvent { .. }=> {}
-                NetworkEvent::ConsignItemReceived { .. }=> {}
-                NetworkEvent::MarketFailedEvent { .. }=> {}
-                NetworkEvent::MarketSuccessEvent { .. }=> {}
-                NetworkEvent::SellItemReceived { .. }=> {}
-                NetworkEvent::CraftItemReceived { .. }=> {}
-                NetworkEvent::RepairItemReceived { .. }=> {}
-                NetworkEvent::ItemRepairedEvent { .. }=> {}
-                NetworkEvent::DefaultNPCReceived { .. }=> {}
-                NetworkEvent::NPCUpdated { .. }=> {}
-                NetworkEvent::NPCImageUpdated { .. }=> {}
-                NetworkEvent::NPCAwakeningReceived { .. }=> {}
-                NetworkEvent::NPCDisassembleReceived { .. }=> {}
-                NetworkEvent::NPCDowngradeReceived { .. }=> {}
-                NetworkEvent::NPCResetReceived { .. }=> {}
-                NetworkEvent::AwakeningNeedMaterialsReceived { .. }=> {}
-                NetworkEvent::AwakeningLockedItemReceived { .. }=> {}
-                NetworkEvent::AwakeningReceived { .. }=> {}
-                NetworkEvent::NPCPearlGoodsReceived { .. }=> {}
-                NetworkEvent::NPCRequestInputReceived { .. }=> {}
-                NetworkEvent::HeroCreateRequested { .. }=> {}
-                NetworkEvent::NewHeroCreated { .. }=> {}
-                NetworkEvent::HeroInfoReceived { .. }=> {}
-                NetworkEvent::HeroSpawnStateUpdated { .. }=> {}
-                NetworkEvent::HeroAutoPotUnlocked { .. }=> {}
-                NetworkEvent::HeroAutoPotSet { .. }=> {}
-                NetworkEvent::HeroAutoPotItemSet { .. }=> {}
-                NetworkEvent::HeroBehaviourSet { .. }=> {}
-                NetworkEvent::HeroManageReceived { .. }=> {}
-                NetworkEvent::HeroChanged { .. }=> {}
-                NetworkEvent::HeroBaseStatsReceived { .. }=> {}
-                NetworkEvent::NewHeroInfoReceived { .. }=> {}
-                NetworkEvent::MailReceived { .. }=> {}
-                NetworkEvent::MailLockedItemReceived { .. }=> {}
-                NetworkEvent::MailSendRequestReceived { .. }=> {}
-                NetworkEvent::MailSentEvent { .. }=> {}
-                NetworkEvent::ParcelCollectedEvent { .. }=> {}
-                NetworkEvent::MailCostReceived { .. }=> {}
-                NetworkEvent::NPCConsignEvent { .. }=> {}
-                NetworkEvent::NPCMarketEvent2 { .. }=> {}
-                NetworkEvent::NPCMarketPageEvent2 { .. }=> {}
-                NetworkEvent::ConsignItemEvent { .. }=> {}
-                NetworkEvent::MarketFailedEvent2 { .. }=> {}
-                NetworkEvent::MarketSuccessEvent2 { .. }=> {}
-                NetworkEvent::NewIntelligentCreatureReceived { .. }=> {}
-                NetworkEvent::IntelligentCreatureListUpdated { .. }=> {}
-                NetworkEvent::IntelligentCreatureRenameEnabled { .. }=> {}
-                NetworkEvent::IntelligentCreaturePickupReceived { .. }=> {}
-                NetworkEvent::MarriageRequested2 { .. }=> {}
-                NetworkEvent::DivorceRequested2 { .. }=> {}
-                NetworkEvent::MentorRequested2 { .. }=> {}
-                NetworkEvent::LoverUpdated { .. }=> {}
-                NetworkEvent::MentorUpdated { .. }=> {}
-                NetworkEvent::RentalItemsReceived { .. }=> {}
-                NetworkEvent::ItemRentalRequested { .. }=> {}
-                NetworkEvent::ItemRentalFeeReceived { .. }=> {}
-                NetworkEvent::ItemRentalPeriodReceived { .. }=> {}
-                NetworkEvent::RentalItemDeposited { .. }=> {}
-                NetworkEvent::RentalItemRetrieved { .. }=> {}
-                NetworkEvent::RentalItemUpdated { .. }=> {}
-                NetworkEvent::ItemRentalCancelled { .. }=> {}
-                NetworkEvent::ItemRentalLocked { .. }=> {}
-                NetworkEvent::ItemRentalPartnerLocked { .. }=> {}
-                NetworkEvent::ItemRentalConfirmable { .. }=> {}
-                NetworkEvent::ItemRentalConfirmed { .. }=> {}
-                NetworkEvent::FishingStatusUpdated { .. }=> {}
-                NetworkEvent::ReincarnationRequested { .. }=> {}
-                NetworkEvent::ReincarnationCancelled { .. }=> {}
-                NetworkEvent::RankingsReceived { .. }=> {}
-                NetworkEvent::GameShopInfoReceived { .. }=> {}
-                NetworkEvent::GameShopStockReceived { .. }=> {}
-                NetworkEvent::TimerSet { .. }=> {}
-                NetworkEvent::TimerExpired { .. }=> {}
-                NetworkEvent::NoticeUpdated { .. }=> {}
-                NetworkEvent::RollReceivedEvent { .. }=> {}
-                NetworkEvent::CompassUpdated { .. }=> {}
-                NetworkEvent::BrowserOpened { .. }=> {}
-                NetworkEvent::DoorOpened { .. }=> {}
-                NetworkEvent::TrapRockEntered { .. }=> {}
-                NetworkEvent::BaseStatsReceived { .. }=> {}
-                NetworkEvent::InventoryResized { .. }=> {}
-                NetworkEvent::StorageResized { .. }=> {}
-                NetworkEvent::TransformUpdated { .. }=> {}
-                NetworkEvent::MapEffectReceived { .. }=> {}
-                NetworkEvent::ObserveAllowed { .. }=> {}
-                NetworkEvent::ObjectHiddenByName { .. }=> {}
-                NetworkEvent::ObjectSpellReceived { .. }=> {}
-                NetworkEvent::ObjectDecoReceived { .. }=> {}
-                NetworkEvent::ObjectSneakingReceived { .. }=> {}
-                NetworkEvent::ObjectLevelEffectsReceived { .. }=> {}
-                NetworkEvent::BindingShotSet { .. }=> {}
-                NetworkEvent::OutputMessageReceived { .. }=> {}
-                NetworkEvent::UserStorageReceived { .. }=> {}
-                NetworkEvent::ChatItemStatsReceived { .. }=> {}
-                NetworkEvent::ConcentrationSet { .. }=> {}
-                NetworkEvent::ElementalSet { .. }=> {}
-                NetworkEvent::DelayedExplosionRemoved { .. }=> {}
+                NetworkEvent::TradeGoldAdded { amount } => {
+                    tracing::trace!("💰 Trade gold added: {}", amount);
+                }
+                NetworkEvent::TradeItemAdded { .. } => {
+                    tracing::trace!("📦 Trade item added");
+                }
+                NetworkEvent::TradeConfirmedEvent { locked } => {
+                    tracing::trace!("🤝 Trade confirmed (locked={})", locked);
+                }
+                NetworkEvent::TradeCancelledEvent { .. } => {
+                    tracing::trace!("🤝 Trade cancelled");
+                }
+                NetworkEvent::QuestListUpdated { .. } => {
+                    tracing::trace!("📋 Quest list updated");
+                }
+                NetworkEvent::QuestItemGained { .. } => {
+                    // 获得任务物品：循环外处理
+                    tracing::trace!("📋 Quest item gained");
+                }
+                NetworkEvent::QuestItemLost { unique_id } => {
+                    // 失去任务物品
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut qinv) = ctx.world.get::<&mut crate::components::QuestInventory>(e) {
+                            for slot in qinv.items.iter_mut() {
+                                if let Some(ref it) = slot {
+                                    if it.unique_id == *unique_id {
+                                        *slot = None;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    tracing::trace!("📋 Quest item lost");
+                }
+                NetworkEvent::QuestShared { quest_id } => {
+                    tracing::trace!("📋 Quest {} shared", quest_id);
+                }
+                NetworkEvent::QuestProgressUpdated { quest_id, progress } => {
+                    tracing::trace!("📋 Quest {} progress: {}", quest_id, progress);
+                }
+                NetworkEvent::FriendUpdated { .. } => {
+                    tracing::trace!("👥 Friend updated");
+                }
+                NetworkEvent::GuildNoticeUpdated { notice } => {
+                    tracing::trace!("🏰 Guild notice updated: {}", notice);
+                }
+                NetworkEvent::GuildMemberUpdated { name, rank, online } => {
+                    tracing::trace!("🏰 Guild member updated: {} rank={} online={}", name, rank, online);
+                }
+                NetworkEvent::GuildExpGained { amount } => {
+                    tracing::trace!("🏰 Guild exp gained: {}", amount);
+                }
+                NetworkEvent::GuildNameReceived { name } => {
+                    tracing::trace!("🏰 Guild name received: {}", name);
+                }
+                NetworkEvent::GuildStorageGoldChanged { delta } => {
+                    tracing::trace!("🏰 Guild storage gold changed: {}", delta);
+                }
+                NetworkEvent::GuildStorageItemChanged { .. } => {
+                    tracing::trace!("🏰 Guild storage item changed");
+                }
+                NetworkEvent::GuildStorageListReceived { .. } => {
+                    tracing::trace!("🏰 Guild storage list received");
+                }
+                NetworkEvent::GuildWarRequested { .. } => {
+                    tracing::trace!("🏰 Guild war requested");
+                }
+                NetworkEvent::GuildBuffListReceived { .. } => {
+                    tracing::trace!("🏰 Guild buff list received");
+                }
+                NetworkEvent::GuildTerritoryPageReceived { .. } => {
+                    tracing::trace!("🏰 Guild territory page received");
+                }
+                NetworkEvent::GuildTerritoryPurchased { .. } => {
+                    tracing::trace!("🏰 Guild territory purchased");
+                }
+                NetworkEvent::NPCSellReceived { .. } => {
+                    tracing::trace!("🏪 NPC sell received");
+                }
+                NetworkEvent::NPCRepairReceived { .. } => {
+                    tracing::trace!("🔧 NPC repair received");
+                }
+                NetworkEvent::NPCSRepairReceived { .. } => {
+                    tracing::trace!("🔧 NPC special repair received");
+                }
+                NetworkEvent::NPCRefineReceived { .. } => {
+                    tracing::trace!("🔨 NPC refine received");
+                }
+                NetworkEvent::NPCCheckRefineReceived { .. } => {
+                    tracing::trace!("🔨 NPC check refine received");
+                }
+                NetworkEvent::NPCCollectRefineReceived { .. } => {
+                    tracing::trace!("🔨 NPC collect refine received");
+                }
+                NetworkEvent::NPCReplaceWedRingReceived { .. } => {
+                    tracing::trace!("💍 NPC replace wedding ring received");
+                }
+                NetworkEvent::NPCStorageReceived { .. } => {
+                    tracing::trace!("📦 NPC storage received");
+                }
+                NetworkEvent::NPCConsignReceived { .. } => {
+                    tracing::trace!("🏪 NPC consign received");
+                }
+                NetworkEvent::NPCMarketEvent { .. } => {
+                    tracing::trace!("🏪 NPC market event");
+                }
+                NetworkEvent::NPCMarketPageEvent { .. } => {
+                    tracing::trace!("🏪 NPC market page event");
+                }
+                NetworkEvent::ConsignItemReceived { .. } => {
+                    tracing::trace!("📦 Consign item received");
+                }
+                NetworkEvent::MarketFailedEvent { reason } => {
+                    tracing::warn!("🏪 Market failed: {}", reason);
+                }
+                NetworkEvent::MarketSuccessEvent { .. } => {
+                    tracing::trace!("🏪 Market success");
+                }
+                NetworkEvent::SellItemReceived { .. } => {
+                    tracing::trace!("💰 Sell item received");
+                }
+                NetworkEvent::CraftItemReceived { .. } => {
+                    tracing::trace!("🔨 Craft item received");
+                }
+                NetworkEvent::RepairItemReceived { .. } => {
+                    tracing::trace!("🔧 Repair item received");
+                }
+                NetworkEvent::ItemRepairedEvent { .. } => {
+                    tracing::trace!("🔧 Item repaired");
+                }
+                NetworkEvent::DefaultNPCReceived { npc_id, message } => {
+                    tracing::trace!("🗣️ NPC {} dialog: {}", npc_id, message);
+                }
+                NetworkEvent::NPCUpdated { .. } => {
+                    tracing::trace!("🗣️ NPC updated");
+                }
+                NetworkEvent::NPCImageUpdated { .. } => {
+                    tracing::trace!("🖼️ NPC image updated");
+                }
+                NetworkEvent::NPCAwakeningReceived { .. } => {
+                    tracing::trace!("🌟 NPC awakening received");
+                }
+                NetworkEvent::NPCDisassembleReceived { .. } => {
+                    tracing::trace!("🔧 NPC disassemble received");
+                }
+                NetworkEvent::NPCDowngradeReceived { .. } => {
+                    tracing::trace!("📉 NPC downgrade received");
+                }
+                NetworkEvent::NPCResetReceived { .. } => {
+                    tracing::trace!("🔄 NPC reset received");
+                }
+                NetworkEvent::AwakeningNeedMaterialsReceived { .. } => {
+                    tracing::trace!("🌟 Awakening need materials");
+                }
+                NetworkEvent::AwakeningLockedItemReceived { .. } => {
+                    tracing::trace!("🌟 Awakening locked item");
+                }
+                NetworkEvent::AwakeningReceived { .. } => {
+                    tracing::trace!("🌟 Awakening received");
+                }
+                NetworkEvent::NPCPearlGoodsReceived { .. } => {
+                    tracing::trace!("🔮 NPC pearl goods received");
+                }
+                NetworkEvent::NPCRequestInputReceived { npc_id, prompt } => {
+                    tracing::trace!("🗣️ NPC {} requests input: {}", npc_id, prompt);
+                }
+                NetworkEvent::HeroCreateRequested { .. } => {
+                    tracing::trace!("🦸 Hero create requested");
+                }
+                NetworkEvent::NewHeroCreated { .. } => {
+                    tracing::trace!("🦸 New hero created");
+                }
+                NetworkEvent::HeroInfoReceived { .. } => {
+                    tracing::trace!("🦸 Hero info received");
+                }
+                NetworkEvent::HeroSpawnStateUpdated { state } => {
+                    tracing::trace!("🦸 Hero spawn state updated: {}", state);
+                }
+                NetworkEvent::HeroAutoPotUnlocked { .. } => {
+                    tracing::trace!("🦸 Hero auto pot unlocked");
+                }
+                NetworkEvent::HeroAutoPotSet { .. } => {
+                    tracing::trace!("🦸 Hero auto pot set");
+                }
+                NetworkEvent::HeroAutoPotItemSet { .. } => {
+                    tracing::trace!("🦸 Hero auto pot item set");
+                }
+                NetworkEvent::HeroBehaviourSet { .. } => {
+                    tracing::trace!("🦸 Hero behaviour set");
+                }
+                NetworkEvent::HeroManageReceived { .. } => {
+                    tracing::trace!("🦸 Hero manage received");
+                }
+                NetworkEvent::HeroChanged { .. } => {
+                    tracing::trace!("🦸 Hero changed");
+                }
+                NetworkEvent::HeroBaseStatsReceived { .. } => {
+                    tracing::trace!("🦸 Hero base stats received");
+                }
+                NetworkEvent::NewHeroInfoReceived { .. } => {
+                    tracing::trace!("🦸 New hero info received");
+                }
+                NetworkEvent::MailReceived { .. } => {
+                    tracing::trace!("📬 Mail received");
+                }
+                NetworkEvent::MailLockedItemReceived { .. } => {
+                    tracing::trace!("📬 Mail locked item");
+                }
+                NetworkEvent::MailSendRequestReceived { .. } => {
+                    tracing::trace!("📬 Mail send request");
+                }
+                NetworkEvent::MailSentEvent { .. } => {
+                    tracing::trace!("📬 Mail sent");
+                }
+                NetworkEvent::ParcelCollectedEvent { .. } => {
+                    tracing::trace!("📦 Parcel collected");
+                }
+                NetworkEvent::MailCostReceived { cost } => {
+                    tracing::trace!("📬 Mail cost: {}", cost);
+                }
+                NetworkEvent::NPCConsignEvent { .. } => { tracing::trace!("🏪 NPC consign event"); }
+                NetworkEvent::NPCMarketEvent2 { .. } => { tracing::trace!("🏪 NPC market event 2"); }
+                NetworkEvent::NPCMarketPageEvent2 { .. } => { tracing::trace!("🏪 NPC market page event 2"); }
+                NetworkEvent::ConsignItemEvent { .. } => { tracing::trace!("📦 Consign item event"); }
+                NetworkEvent::MarketFailedEvent2 { reason } => { tracing::warn!("🏪 Market failed: {}", reason); }
+                NetworkEvent::MarketSuccessEvent2 { .. } => { tracing::trace!("🏪 Market success"); }
+                NetworkEvent::NewIntelligentCreatureReceived { .. } => { tracing::trace!("🐾 New intelligent creature"); }
+                NetworkEvent::IntelligentCreatureListUpdated { .. } => { tracing::trace!("🐾 Creature list updated"); }
+                NetworkEvent::IntelligentCreatureRenameEnabled { .. } => { tracing::trace!("🐾 Creature rename enabled"); }
+                NetworkEvent::IntelligentCreaturePickupReceived { .. } => { tracing::trace!("🐾 Creature pickup received"); }
+                NetworkEvent::MarriageRequested2 { requester } => { tracing::trace!("💒 Marriage requested by {}", requester); }
+                NetworkEvent::DivorceRequested2 { .. } => { tracing::trace!("💔 Divorce requested"); }
+                NetworkEvent::MentorRequested2 { .. } => { tracing::trace!("🎓 Mentor requested"); }
+                NetworkEvent::LoverUpdated { .. } => { tracing::trace!("💒 Lover updated"); }
+                NetworkEvent::MentorUpdated { .. } => { tracing::trace!("🎓 Mentor updated"); }
+                NetworkEvent::RentalItemsReceived { .. } => { tracing::trace!("📦 Rental items received"); }
+                NetworkEvent::ItemRentalRequested { .. } => { tracing::trace!("📦 Item rental requested"); }
+                NetworkEvent::ItemRentalFeeReceived { fee } => { tracing::trace!("📦 Rental fee: {}", fee); }
+                NetworkEvent::ItemRentalPeriodReceived { period } => { tracing::trace!("📦 Rental period: {}", period); }
+                NetworkEvent::RentalItemDeposited { .. } => { tracing::trace!("📦 Rental item deposited"); }
+                NetworkEvent::RentalItemRetrieved { .. } => { tracing::trace!("📦 Rental item retrieved"); }
+                NetworkEvent::RentalItemUpdated { .. } => { tracing::trace!("📦 Rental item updated"); }
+                NetworkEvent::ItemRentalCancelled { .. } => { tracing::trace!("📦 Item rental cancelled"); }
+                NetworkEvent::ItemRentalLocked { .. } => { tracing::trace!("📦 Item rental locked"); }
+                NetworkEvent::ItemRentalPartnerLocked { .. } => { tracing::trace!("📦 Rental partner locked"); }
+                NetworkEvent::ItemRentalConfirmable { .. } => { tracing::trace!("📦 Item rental confirmable"); }
+                NetworkEvent::ItemRentalConfirmed { .. } => { tracing::trace!("📦 Item rental confirmed"); }
+                NetworkEvent::FishingStatusUpdated { state } => { tracing::trace!("🎣 Fishing status updated: {}", state); }
+                NetworkEvent::ReincarnationRequested { .. } => { tracing::trace!("🔄 Reincarnation requested"); }
+                NetworkEvent::ReincarnationCancelled { .. } => { tracing::trace!("🔄 Reincarnation cancelled"); }
+                NetworkEvent::RankingsReceived { .. } => { tracing::trace!("🏆 Rankings received"); }
+                NetworkEvent::GameShopInfoReceived { .. } => { tracing::trace!("🛒 Game shop info received"); }
+                NetworkEvent::GameShopStockReceived { .. } => { tracing::trace!("🛒 Game shop stock received"); }
+                NetworkEvent::TimerSet { timer_id, seconds } => { tracing::trace!("⏱️ Timer {} set: {}s", timer_id, seconds); }
+                NetworkEvent::TimerExpired { timer_id } => { tracing::trace!("⏱️ Timer {} expired", timer_id); }
+                NetworkEvent::NoticeUpdated { notice } => { tracing::trace!("📢 Notice updated: {}", notice); }
+                NetworkEvent::RollReceivedEvent { value } => { tracing::trace!("🎲 Roll received: {}", value); }
+                NetworkEvent::CompassUpdated { direction } => { tracing::trace!("🧭 Compass updated: {}", direction); }
+                NetworkEvent::BrowserOpened { url } => { tracing::trace!("🌐 Browser opened: {}", url); }
+                NetworkEvent::DoorOpened { door_id } => { tracing::trace!("🚪 Door {} opened", door_id); }
+                NetworkEvent::TrapRockEntered { object_id } => { tracing::trace!("🪤 Trap rock entered by {}", object_id); }
+                NetworkEvent::BaseStatsReceived { .. } => { tracing::trace!("📊 Base stats received"); }
+                NetworkEvent::InventoryResized { new_size } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
+                            inv.items.resize(*new_size as usize, None);
+                            inv.capacity = *new_size as usize;
+                        }
+                    }
+                }
+                NetworkEvent::StorageResized { new_size } => {
+                    if let Some(e) = local_player_entity {
+                        if let Ok(mut st) = ctx.world.get::<&mut crate::components::Storage>(e) {
+                            st.items.resize(*new_size as usize, None);
+                            st.capacity = *new_size as usize;
+                        }
+                    }
+                }
+                NetworkEvent::TransformUpdated { form } => { tracing::trace!("🔄 Transform updated: {}", form); }
+                NetworkEvent::MapEffectReceived { effect } => { tracing::trace!("🌈 Map effect: {}", effect); }
+                NetworkEvent::ObserveAllowed { allowed } => { tracing::trace!("👁️ Observe allowed: {}", allowed); }
+                NetworkEvent::ObjectHiddenByName { name } => { tracing::trace!("👻 Object hidden by name: {}", name); }
+                NetworkEvent::ObjectSpellReceived { object_id } => { tracing::trace!("✨ Object {} spell received", object_id); }
+                NetworkEvent::ObjectDecoReceived { object_id } => { tracing::trace!("🎭 Object {} deco received", object_id); }
+                NetworkEvent::ObjectSneakingReceived { object_id } => { tracing::trace!("🥷 Object {} sneaking received", object_id); }
+                NetworkEvent::ObjectLevelEffectsReceived { object_id } => { tracing::trace!("⭐ Object {} level effects", object_id); }
+                NetworkEvent::BindingShotSet { enabled } => { tracing::trace!("🎯 Binding shot set: {}", enabled); }
+                NetworkEvent::OutputMessageReceived { message } => { tracing::trace!("💬 Message: {}", message); }
+                NetworkEvent::UserStorageReceived { .. } => { tracing::trace!("📦 User storage received"); }
+                NetworkEvent::ChatItemStatsReceived { .. } => { tracing::trace!("💬 Chat item stats received"); }
+                NetworkEvent::ConcentrationSet { enabled } => { tracing::trace!("🎯 Concentration set: {}", enabled); }
+                NetworkEvent::ElementalSet { element } => { tracing::trace!("🔥 Elemental set: {}", element); }
+                NetworkEvent::DelayedExplosionRemoved { .. } => { tracing::trace!("💥 Delayed explosion removed"); }
 
                 // 客户端 → 服务器（不需要 apply，已在 handle_outbound_event 中发送）
-                NetworkEvent::MagicKeySet { .. }=> {}
-                NetworkEvent::EquipItemRequest { .. }=> {}
-                NetworkEvent::RemoveItemRequest { .. }=> {}
-                NetworkEvent::RemoveSlotItemRequest { .. }=> {}
-                NetworkEvent::SplitItemRequest { .. }=> {}
-                NetworkEvent::MergeItemRequest { .. }=> {}
-                NetworkEvent::StoreItemRequest { .. }=> {}
-                NetworkEvent::TakeBackItemRequest { .. }=> {}
-                NetworkEvent::DropGoldRequest { .. }=> {}
-                NetworkEvent::EquipSlotItemRequest { .. }=> {}
-                NetworkEvent::CombineItemRequest { .. }=> {}
-                NetworkEvent::DropItemStackRequest { .. }=> {}
-                NetworkEvent::AddFriendRequest { .. }=> {}
+                NetworkEvent::MagicKeySet { .. } => {}
+                NetworkEvent::EquipItemRequest { .. } => {}
+                NetworkEvent::RemoveItemRequest { .. } => {}
+                NetworkEvent::RemoveSlotItemRequest { .. } => {}
+                NetworkEvent::SplitItemRequest { .. } => {}
+                NetworkEvent::MergeItemRequest { .. } => {}
+                NetworkEvent::StoreItemRequest { .. } => {}
+                NetworkEvent::TakeBackItemRequest { .. } => {}
+                NetworkEvent::DropGoldRequest { .. } => {}
+                NetworkEvent::EquipSlotItemRequest { .. } => {}
+                NetworkEvent::CombineItemRequest { .. } => {}
+                NetworkEvent::DropItemStackRequest { .. } => {}
+                NetworkEvent::AddFriendRequest { .. } => {}
                 NetworkEvent::RemoveFriendRequest { .. }=> {}
                 NetworkEvent::RefreshFriendsRequest { .. }=> {}
                 NetworkEvent::AddMemoRequest { .. }=> {}
@@ -2178,6 +2554,43 @@ impl LogicSystem for NetworkApplySystem {
                     SoundTrigger::once(id.to_string(), SoundType::System),
                 ));
                 let _ = e;
+            }
+        }
+
+        // 地面物品/金币落地
+        if !ground_items.is_empty() {
+            use crate::components::{GroundItem as GroundItemComp, NetworkSync, NetworkObjectType, Position};
+            for packet in &ground_items {
+                let existing = Self::find_entity_by_object_id(ctx, packet.object_id);
+                if existing.is_none() {
+                    let entity = ctx.world.spawn((
+                        NetworkSync::new(packet.object_id, NetworkObjectType::Item),
+                        GroundItemComp {
+                            object_id: packet.object_id,
+                            item: packet.item.clone(),
+                            gold_amount: 0,
+                        },
+                        Position { x: packet.location_x as f32, y: packet.location_y as f32 },
+                    ));
+                    tracing::trace!("📍 Ground item spawned: {} at ({}, {})", entity.id(), packet.location_x, packet.location_y);
+                }
+            }
+        }
+        if !ground_golds.is_empty() {
+            use crate::components::{GroundItem as GroundItemComp, NetworkSync, NetworkObjectType, Position};
+            for packet in &ground_golds {
+                let existing = Self::find_entity_by_object_id(ctx, packet.object_id);
+                if existing.is_none() {
+                    ctx.world.spawn((
+                        NetworkSync::new(packet.object_id, NetworkObjectType::Item),
+                        GroundItemComp {
+                            object_id: packet.object_id,
+                            item: mir2_shared::data::item::UserItem::default(),
+                            gold_amount: packet.gold,
+                        },
+                        Position { x: packet.location_x as f32, y: packet.location_y as f32 },
+                    ));
+                }
             }
         }
 
