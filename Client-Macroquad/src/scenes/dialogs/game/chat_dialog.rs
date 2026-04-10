@@ -36,6 +36,258 @@ pub struct ChatMessage {
     pub kind: ChatMessageKind,
 }
 
+impl ChatMessage {
+    /// 解析消息中的特殊标记并渲染
+    /// 支持的标记:
+    ///   [物品:名称] -> 带下划线的蓝色文字，点击可查看详情
+    ///   [坐标:x,y] -> 绿色文字，点击触发自动寻路
+    ///   :smile: -> 表情符号
+    /// 返回渲染的文本宽度
+    fn draw_with_markup(&self, x: f32, y: f32, font_size: f32, mouse_pos: Vec2, line_rect: Rect) -> f32 {
+        let mut cursor_x = x;
+        let text = &self.text;
+        let mut chars = text.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            // 检测 [ 开头的标记
+            if ch == '[' {
+                let mut tag_content = String::new();
+                let mut found_close = false;
+                while let Some(c) = chars.next() {
+                    if c == ']' {
+                        found_close = true;
+                        break;
+                    }
+                    tag_content.push(c);
+                }
+
+                if found_close {
+                    // 解析标记类型
+                    if tag_content.starts_with("物品:") || tag_content.starts_with("Item:") {
+                        let item_name = tag_content.splitn(2, ':').nth(1).unwrap_or("");
+                        let item_color = Color::from_rgba(150, 100, 255, 255); // 紫色
+                        let w = measure_text_cn(item_name, font_size).width;
+                        let item_rect = Rect::new(cursor_x, y - font_size + 2.0, w, font_size);
+
+                        draw_text_cn(item_name, cursor_x, y, font_size, item_color);
+                        // 下划线
+                        draw_line(cursor_x, y + 1.0, cursor_x + w, y + 1.0, 1.0, item_color);
+
+                        // 悬停高亮
+                        if item_rect.contains(mouse_pos) {
+                            draw_rectangle(cursor_x, y - font_size + 2.0, w, font_size, Color::from_rgba(150, 100, 255, 40));
+                        }
+
+                        cursor_x += w;
+                        continue;
+                    } else if tag_content.starts_with("坐标:") || tag_content.starts_with("Coord:") {
+                        let coord_str = tag_content.splitn(2, ':').nth(1).unwrap_or("");
+                        let coord_color = Color::from_rgba(100, 255, 100, 255); // 绿色
+                        let w = measure_text_cn(&format!("[{}]", coord_str), font_size).width;
+                        let coord_rect = Rect::new(cursor_x, y - font_size + 2.0, w, font_size);
+
+                        draw_text_cn(&format!("[{}]", coord_str), cursor_x, y, font_size, coord_color);
+                        draw_line(cursor_x, y + 1.0, cursor_x + w, y + 1.0, 1.0, coord_color);
+
+                        if coord_rect.contains(mouse_pos) {
+                            draw_rectangle(cursor_x, y - font_size + 2.0, w, font_size, Color::from_rgba(100, 255, 100, 40));
+                        }
+
+                        cursor_x += w;
+                        continue;
+                    } else {
+                        // 未知标记，原样显示
+                        let full_tag = format!("[{}]", tag_content);
+                        let w = measure_text_cn(&full_tag, font_size).width;
+                        draw_text_cn(&full_tag, cursor_x, y, font_size, self.color);
+                        cursor_x += w;
+                        continue;
+                    }
+                } else {
+                    // 没有找到 ]，把 [ 当作普通字符
+                    let w = measure_text_cn("[", font_size).width;
+                    draw_text_cn("[", cursor_x, y, font_size, self.color);
+                    cursor_x += w;
+                    continue;
+                }
+            }
+
+            // 检测表情标记 :xxx:
+            if ch == ':' {
+                let mut emoji_name = String::new();
+                let mut found_close = false;
+                let mut temp_chars: Vec<char> = Vec::new();
+                while let Some(c) = chars.next() {
+                    if c == ':' {
+                        found_close = true;
+                        break;
+                    }
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        emoji_name.push(c);
+                    } else {
+                        temp_chars.push(c);
+                        break;
+                    }
+                }
+
+                if found_close && !emoji_name.is_empty() {
+                    // 渲染表情
+                    let emoji = emoji_to_char(&emoji_name);
+                    let w = measure_text_cn(emoji, font_size).width;
+                    draw_text_cn(emoji, cursor_x, y, font_size, self.color);
+                    cursor_x += w;
+
+                    // 消费 temp_chars（不应该有，但如果有的话要处理）
+                    for c in temp_chars {
+                        let w = measure_text_cn(&c.to_string(), font_size).width;
+                        draw_text_cn(&c.to_string(), cursor_x, y, font_size, self.color);
+                        cursor_x += w;
+                    }
+                    continue;
+                } else {
+                    // 不是表情，输出冒号和已收集的字符
+                    let w = measure_text_cn(":", font_size).width;
+                    draw_text_cn(":", cursor_x, y, font_size, self.color);
+                    cursor_x += w;
+                    for c in temp_chars {
+                        let w = measure_text_cn(&c.to_string(), font_size).width;
+                        draw_text_cn(&c.to_string(), cursor_x, y, font_size, self.color);
+                        cursor_x += w;
+                    }
+                    continue;
+                }
+            }
+
+            // 普通字符
+            let s = ch.to_string();
+            let w = measure_text_cn(&s, font_size).width;
+            draw_text_cn(&s, cursor_x, y, font_size, self.color);
+            cursor_x += w;
+        }
+
+        cursor_x - x
+    }
+
+    /// 检查点击是否命中了消息中的特殊标记
+    /// 返回 Some(ItemLink) 或 Some(CoordLink(x, y)) 或 None
+    fn hit_test_markup(&self, text_start_x: f32, text_y: f32, font_size: f32, mouse_pos: Vec2) -> Option<ChatLink> {
+        let mut cursor_x = text_start_x;
+        let text = &self.text;
+        let mut chars = text.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if ch == '[' {
+                let mut tag_content = String::new();
+                let mut found_close = false;
+                while let Some(c) = chars.next() {
+                    if c == ']' {
+                        found_close = true;
+                        break;
+                    }
+                    tag_content.push(c);
+                }
+
+                if found_close {
+                    if tag_content.starts_with("物品:") || tag_content.starts_with("Item:") {
+                        let item_name = tag_content.splitn(2, ':').nth(1).unwrap_or("");
+                        let w = measure_text_cn(item_name, font_size).width;
+                        let item_rect = Rect::new(cursor_x, text_y - font_size + 2.0, w, font_size);
+                        if item_rect.contains(mouse_pos) {
+                            return Some(ChatLink::Item(item_name.to_string()));
+                        }
+                        cursor_x += w;
+                        continue;
+                    } else if tag_content.starts_with("坐标:") || tag_content.starts_with("Coord:") {
+                        let coord_str = tag_content.splitn(2, ':').nth(1).unwrap_or("");
+                        let display = format!("[{}]", coord_str);
+                        let w = measure_text_cn(&display, font_size).width;
+                        let coord_rect = Rect::new(cursor_x, text_y - font_size + 2.0, w, font_size);
+                        if coord_rect.contains(mouse_pos) {
+                            // 解析坐标
+                            let parts: Vec<&str> = coord_str.split(',').collect();
+                            if parts.len() == 2 {
+                                if let (Ok(x), Ok(y)) = (parts[0].trim().parse::<f32>(), parts[1].trim().parse::<f32>()) {
+                                    return Some(ChatLink::Coord(x, y));
+                                }
+                            }
+                        }
+                        cursor_x += w;
+                        continue;
+                    } else {
+                        let full_tag = format!("[{}]", tag_content);
+                        let w = measure_text_cn(&full_tag, font_size).width;
+                        cursor_x += w;
+                        continue;
+                    }
+                } else {
+                    let w = measure_text_cn("[", font_size).width;
+                    cursor_x += w;
+                    continue;
+                }
+            }
+
+            // 跳过表情（不影响链接检测）
+            if ch == ':' {
+                let mut emoji_name = String::new();
+                let mut found_close = false;
+                while let Some(c) = chars.next() {
+                    if c == ':' {
+                        found_close = true;
+                        break;
+                    }
+                    if !c.is_ascii_alphanumeric() && c != '_' {
+                        break;
+                    }
+                    emoji_name.push(c);
+                }
+                if found_close && !emoji_name.is_empty() {
+                    let w = measure_text_cn(emoji_to_char(&emoji_name), font_size).width;
+                    cursor_x += w;
+                    continue;
+                } else {
+                    let w = measure_text_cn(":", font_size).width;
+                    cursor_x += w;
+                    continue;
+                }
+            }
+
+            let s = ch.to_string();
+            let w = measure_text_cn(&s, font_size).width;
+            cursor_x += w;
+        }
+
+        None
+    }
+}
+
+/// 聊天消息中的可点击链接
+#[derive(Debug, Clone)]
+pub enum ChatLink {
+    /// 物品链接，包含物品名称
+    Item(String),
+    /// 坐标链接，包含世界坐标 (x, y)
+    Coord(f32, f32),
+}
+
+/// 将表情名称转换为对应的 Unicode 字符
+fn emoji_to_char(name: &str) -> &'static str {
+    match name {
+        "smile" | "happy" => "😊",
+        "sad" | "cry" => "😢",
+        "angry" => "😡",
+        "laugh" | "lol" => "😄",
+        "surprised" => "😮",
+        "cool" => "😎",
+        "wink" => "😉",
+        "love" | "heart" => "❤️",
+        "star" => "⭐",
+        "fire" => "🔥",
+        "thumbsup" | "good" => "👍",
+        "thumbsdown" | "bad" => "👎",
+        _ => "?",
+    }
+}
+
 /// 聊天对话框（混合版本）
 pub struct ChatDialogHybrid {
     /// 分辨率索引
@@ -77,7 +329,7 @@ pub struct ChatDialogHybrid {
     backspace_timer: f64,
     /// Backspace 是否在重复模式
     backspace_repeat: bool,
-    /// 对话框是否有“焦点”（用于模拟 C# KeyPress 只在控件聚焦时触发）
+    /// 对话框是否有"焦点"（用于模拟 C# KeyPress 只在控件聚焦时触发）
     has_focus: bool,
     /// 是否启用透明聊天（对齐 C# Settings.TransparentChat）
     transparent_chat: bool,
@@ -120,6 +372,34 @@ impl ChatDialogHybrid {
             chat_prefix: String::new(),
             last_pm: String::new(),
         }
+    }
+
+    /// 加载演示用的测试消息（用于 debug/test 场景）
+    pub fn load_demo_messages(&mut self) {
+        self.messages.push(ChatMessage {
+            text: "欢迎使用传奇2！:smile:".to_string(),
+            color: Color::from_rgba(255, 255, 255, 255),
+            timestamp: "12:00".to_string(),
+            kind: ChatMessageKind::System,
+        });
+        self.messages.push(ChatMessage {
+            text: "出售 [物品:裁决之杖] 1000金币，需要的私聊".to_string(),
+            color: Color::from_rgba(255, 200, 100, 255),
+            timestamp: "12:01".to_string(),
+            kind: ChatMessageKind::Shout,
+        });
+        self.messages.push(ChatMessage {
+            text: "组队刷祖玛寺庙，来 [坐标:340,280] 集合 :thumbsup:".to_string(),
+            color: Color::from_rgba(100, 255, 100, 255),
+            timestamp: "12:02".to_string(),
+            kind: ChatMessageKind::Group,
+        });
+        self.messages.push(ChatMessage {
+            text: "有人看到 boss 了吗？在 [坐标:150,200] :fire:".to_string(),
+            color: Color::from_rgba(255, 100, 100, 255),
+            timestamp: "12:03".to_string(),
+            kind: ChatMessageKind::Guild,
+        });
     }
 
     pub fn apply_chat_option_settings(&mut self, settings: ChatOptionSettingsHybrid) {
@@ -467,11 +747,12 @@ impl ChatDialogHybrid {
         }
     }
 
-    /// 绘制消息（使用中文字体）
+    /// 绘制消息（使用中文字体，支持物品/坐标链接和表情）
     fn draw_messages(&mut self, mouse_pos: Vec2) {
         let msg_x = self.position.x + 8.0;
         let msg_y = self.position.y + 7.0;
         let line_height = 14.0;
+        let font_size = 12.0;
 
         let msg_width = if self.resolution_index == 0 { 380.0 } else { 600.0 };
 
@@ -481,9 +762,44 @@ impl ChatDialogHybrid {
         let start_row = self.scroll_offset.min(max_start);
         let end_row = (start_row + self.line_count).min(visible_count);
 
-        // 对齐 C#：点击聊天行，自动打开输入框并预填私聊“/name ”
-        // 为避免借用冲突，先确定命中的行并复制文本，之后再修改 self 状态。
-        if is_mouse_button_pressed(MouseButton::Left) {
+        // 收集所有行的链接点击结果
+        let mut clicked_link: Option<ChatLink> = None;
+
+        for (i, row) in (start_row..end_row).enumerate() {
+            let msg_idx = visible_indices[row];
+            let msg = &self.messages[msg_idx];
+            let y = msg_y + (i as f32 * line_height) + 12.0;
+
+            // 使用 markup 渲染
+            msg.draw_with_markup(msg_x, y, font_size, mouse_pos, Rect::new(msg_x, msg_y + (i as f32 * line_height), msg_width, line_height));
+
+            // 检测链接点击
+            if is_mouse_button_pressed(MouseButton::Left) {
+                let line_rect = Rect::new(msg_x, msg_y + (i as f32 * line_height), msg_width, line_height);
+                if line_rect.contains(mouse_pos) {
+                    if let Some(link) = msg.hit_test_markup(msg_x, y, font_size, mouse_pos) {
+                        clicked_link = Some(link);
+                    }
+                }
+            }
+        }
+
+        // 处理链接点击
+        match clicked_link {
+            Some(ChatLink::Item(ref name)) => {
+                println!("🔗 点击物品链接: {}", name);
+                // 可以触发物品详情弹窗
+            }
+            Some(ChatLink::Coord(x, y)) => {
+                println!("🔗 点击坐标链接: ({}, {})", x, y);
+                // 可以触发自动寻路
+            }
+            None => {}
+        }
+
+        // 对齐 C#：点击聊天行，自动打开输入框并预填私聊"/name "
+        // 只有在没有点击链接的情况下才触发私聊
+        if clicked_link.is_none() && is_mouse_button_pressed(MouseButton::Left) {
             let rel_y = mouse_pos.y - msg_y;
             if rel_y >= 0.0 {
                 let line_i = (rel_y / line_height).floor() as i32;
@@ -510,12 +826,13 @@ impl ChatDialogHybrid {
             }
         }
 
-        for (i, row) in (start_row..end_row).enumerate() {
-            let msg_idx = visible_indices[row];
-            let msg = &self.messages[msg_idx];
-            let y = msg_y + (i as f32 * line_height);
-            draw_text_cn(&msg.text, msg_x, y + 12.0, 12.0, msg.color);
-        }
+        // 保留旧的简单渲染作为 fallback（当 markup 渲染出现问题时）
+        // for (i, row) in (start_row..end_row).enumerate() {
+        //     let msg_idx = visible_indices[row];
+        //     let msg = &self.messages[msg_idx];
+        //     let y = msg_y + (i as f32 * line_height);
+        //     draw_text_cn(&msg.text, msg_x, y + 12.0, 12.0, msg.color);
+        // }
     }
 
     /// 绘制滚动条按钮
@@ -798,7 +1115,7 @@ impl ChatDialogHybrid {
             set_ime_position(ime_x, ime_y);
             
             // 获取输入的字符（支持中文和其他Unicode字符）
-            // 注意：macroquad 的 get_char_pressed() 在同一帧内可能以“后进先出”顺序吐出多个字符，
+            // 注意：macroquad 的 get_char_pressed() 在同一帧内可能以"后进先出"顺序吐出多个字符，
             // 这会导致 IME 一次性提交的文本显示为倒序。这里先收集后再反向追加，保证显示顺序正确。
             let mut pending_chars: Vec<char> = Vec::new();
             while let Some(ch) = get_char_pressed() {
