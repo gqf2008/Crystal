@@ -1269,7 +1269,7 @@ impl MainDialog {
             }
 
             // F1-F8 快捷键提示
-            let key_hint = format!("{}", i + 1);
+            let key_hint = format!("F{}", i + 1);
             draw_text_cn(&key_hint, x + 1.0, bar_y + 1.0, 8.0, Color::from_rgba(200, 200, 200, 180));
 
             // 悬停高亮

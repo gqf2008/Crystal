@@ -13,7 +13,7 @@
 
 use macroquad::prelude::*;
 use crate::resources::LibraryName;
-use crate::ui::text_renderer::draw_text_cn;
+use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
 use super::native_ui_utils::DragHelper;
 
 const MAX_CONCURRENT_QUESTS: usize = 10;
@@ -331,19 +331,15 @@ impl QuestLogDialogHybrid {
 
     /// 更新任务进度
     pub fn update_quest_progress(&mut self, quest_id: u32, progress: u32) {
-        let quest_name_opt = self.quests.iter().find(|q| q.id == quest_id).map(|q| q.name.clone());
-        let quest_name = quest_name_opt.unwrap_or_default();
-        let quest_opt = self.quests.iter_mut().find(|q| q.id == quest_id);
-        if let Some(quest) = quest_opt {
+        if let Some(quest) = self.quests.iter_mut().find(|q| q.id == quest_id) {
             let old_progress = quest.progress;
             quest.progress = progress;
-            // 如果进度达到最大值，标记为完成
             if progress >= quest.max_progress && quest.max_progress > 0 {
                 quest.status = QuestStatus::Completed;
                 self.completion_notifications.push((quest_id, 3.0));
             }
             if progress != old_progress {
-                tracing::info!("任务进度更新: {} ({}/{})", quest_name, progress, quest.max_progress);
+                tracing::info!("任务进度更新: {} ({}/{})", quest.name, progress, quest.max_progress);
             }
         }
     }
@@ -621,7 +617,8 @@ impl QuestLogDialogHybrid {
 
             // 进度文字
             let progress_text = format!("{}/{}", quest.progress, quest.max_progress);
-            draw_text_cn(&progress_text, progress_x + progress_w / 2.0 - 15.0, progress_y + 9.0, 9.0, WHITE);
+            let dims = measure_text_cn(&progress_text, 9.0);
+            draw_text_cn(&progress_text, progress_x + (progress_w - dims.width) / 2.0, progress_y + 9.0, 9.0, WHITE);
         }
 
         // 奖励信息
@@ -704,7 +701,8 @@ impl QuestLogDialogHybrid {
 
                 // 进度文字
                 let progress_text = format!("{}/{}", quest.progress, quest.max_progress);
-                draw_text_cn(&progress_text, bar_x + bar_w / 2.0 - 10.0, bar_y + 6.0, 8.0, WHITE);
+                let dims = measure_text_cn(&progress_text, 8.0);
+                draw_text_cn(&progress_text, bar_x + (bar_w - dims.width) / 2.0, bar_y + 6.0, 8.0, WHITE);
             }
         }
     }

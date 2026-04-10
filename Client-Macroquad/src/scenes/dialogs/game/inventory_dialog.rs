@@ -913,11 +913,3 @@ impl InventoryDialogHybrid {
         }
     }
 }
-
-// === 辅助函数 ===
-
-fn draw_tooltip(mouse: Vec2, text: &str) {
-    let w = text.chars().count() as f32 * 7.0 + 8.0;
-    draw_rectangle(mouse.x + 12.0, mouse.y - 18.0, w, 20.0, Color::from_rgba(0, 0, 0, 200));
-    draw_text(text, mouse.x + 16.0, mouse.y - 2.0, 14.0, WHITE);
-}

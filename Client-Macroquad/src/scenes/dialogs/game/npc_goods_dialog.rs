@@ -625,9 +625,9 @@ impl NpcGoodsDialogHybrid {
                 }
             }
             NpcGoodsMode::Sell => {
-                // 出售价格为原价的一半
+                // 出售价格为原价的一半（不受 npc_rate 影响）
                 let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
-                let sell_price = (base_price * 0.5 * self.npc_rate).round() as u32;
+                let sell_price = (base_price * 0.5).round() as u32;
                 format!("Sell: {} gold", sell_price)
             }
             NpcGoodsMode::Repair => {
@@ -876,7 +876,7 @@ impl NpcGoodsDialogHybrid {
                     }
                     NpcGoodsMode::Sell => {
                         let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
-                        let sell_price = (base_price * 0.5 * self.npc_rate).round() as u32;
+                        let sell_price = (base_price * 0.5).round() as u32;
                         format!("{}\nSell: {} gold", title, sell_price)
                     }
                     NpcGoodsMode::Repair => {

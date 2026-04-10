@@ -11,6 +11,7 @@
 //
 // ============================================================================
 
+use crate::ui::text_renderer::draw_text_cn;
 use macroquad::prelude::*;
 use crate::resources::LibraryName;
 use std::collections::HashMap;
@@ -266,7 +267,7 @@ pub fn draw_tooltip(pos: Vec2, text: &str) {
     );
     
     // 文字
-    draw_text(text, pos.x, pos.y, 14.0, WHITE);
+    draw_text_cn(text, pos.x, pos.y, 14.0, WHITE);
 }
 
 /// 在鼠标位置绘制工具提示

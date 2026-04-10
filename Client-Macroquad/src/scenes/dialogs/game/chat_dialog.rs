@@ -825,14 +825,6 @@ impl ChatDialogHybrid {
                 }
             }
         }
-
-        // 保留旧的简单渲染作为 fallback（当 markup 渲染出现问题时）
-        // for (i, row) in (start_row..end_row).enumerate() {
-        //     let msg_idx = visible_indices[row];
-        //     let msg = &self.messages[msg_idx];
-        //     let y = msg_y + (i as f32 * line_height);
-        //     draw_text_cn(&msg.text, msg_x, y + 12.0, 12.0, msg.color);
-        // }
     }
 
     /// 绘制滚动条按钮

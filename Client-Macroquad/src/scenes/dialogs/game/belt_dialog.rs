@@ -700,13 +700,15 @@ impl BeltDialogHybrid {
 
     /// 处理数字键 1-6 快捷使用
     pub fn handle_number_keys(&mut self) {
-        for i in 0..6 {
-            if is_key_pressed(KeyCode::Key1) && i == 0 { self.use_item(i); break; }
-            if is_key_pressed(KeyCode::Key2) && i == 1 { self.use_item(i); break; }
-            if is_key_pressed(KeyCode::Key3) && i == 2 { self.use_item(i); break; }
-            if is_key_pressed(KeyCode::Key4) && i == 3 { self.use_item(i); break; }
-            if is_key_pressed(KeyCode::Key5) && i == 4 { self.use_item(i); break; }
-            if is_key_pressed(KeyCode::Key6) && i == 5 { self.use_item(i); break; }
+        let key_map: [(KeyCode, usize); 6] = [
+            (KeyCode::Key1, 0), (KeyCode::Key2, 1), (KeyCode::Key3, 2),
+            (KeyCode::Key4, 3), (KeyCode::Key5, 4), (KeyCode::Key6, 5),
+        ];
+        for (key, slot) in key_map {
+            if is_key_pressed(key) {
+                self.use_item(slot);
+                break;
+            }
         }
     }
     
@@ -723,10 +725,4 @@ impl BeltDialogHybrid {
 
 impl Default for BeltDialogHybrid {
     fn default() -> Self { Self::new() }
-}
-
-fn draw_tooltip(mouse: Vec2, text: &str) {
-    let w = text.chars().count() as f32 * 7.0 + 8.0;
-    draw_rectangle(mouse.x + 12.0, mouse.y - 18.0, w, 20.0, Color::from_rgba(0, 0, 0, 200));
-    draw_text(text, mouse.x + 16.0, mouse.y - 2.0, 14.0, WHITE);
 }
