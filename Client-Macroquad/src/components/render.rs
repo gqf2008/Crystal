@@ -77,6 +77,8 @@ pub struct FloatingText {
     pub duration: f64,
     /// 上浮速度（像素/秒）
     pub rise_speed: f32,
+    /// 文本颜色（伤害类型/暴击等）
+    pub color: Option<macroquad::prelude::Color>,
 }
 
 /// 生命条显示动画（用于“掉血”平滑过渡）。

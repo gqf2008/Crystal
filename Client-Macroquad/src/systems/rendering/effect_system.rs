@@ -249,12 +249,13 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         let dims = measure_text_cn(&ft.text, font_size);
         let x = pos.x - dims.width / 2.0;
         let y = pos.y;
+        let text_color = ft.color.unwrap_or_else(|| Color::new(1.0, 1.0, 1.0, alpha));
         draw_text_outline_world(
             &ft.text,
             x,
             y,
             font_size,
-            Color::new(1.0, 1.0, 1.0, alpha),
+            text_color,
             Color::new(0.0, 0.0, 0.0, alpha),
         );
     }

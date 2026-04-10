@@ -1587,6 +1587,10 @@ impl LogicSystem for NetworkApplySystem {
         let mut damage_indicators: Vec<(u32, i32, u8)> = Vec::new();
         let mut object_health_percents: Vec<(u32, u8, u16)> = Vec::new();
 
+        // spell effects (collected for post-loop visual spawning)
+        let mut spell_casts: Vec<(u32, u8, u32)> = Vec::new(); // (object_id, spell, target_id)
+        let mut effect_received: Vec<(u32, u8, u32)> = Vec::new(); // (object_id, effect, effect_type)
+
         // UI / presentation feedback
         let mut play_sounds: Vec<i32> = Vec::new();
         let mut mount_updates: Vec<(u32, i16, bool)> = Vec::new();
@@ -1793,10 +1797,10 @@ impl LogicSystem for NetworkApplySystem {
                     tracing::trace!("🪄 Magic cast: {:?}", spell);
                 }
                 NetworkEvent::ObjectMagicCast { object_id, spell, target_id } => {
-                    tracing::trace!("🔮 Object {} casts {:?} on {}", object_id, spell, target_id);
+                    spell_casts.push((*object_id, *spell as u8, *target_id));
                 }
                 NetworkEvent::ObjectEffectReceived { object_id, effect, effect_type } => {
-                    tracing::trace!("✨ Object {} effect: {:?} type={}", object_id, effect, effect_type);
+                    effect_received.push((*object_id, *effect as u8, *effect_type as u32));
                 }
                 NetworkEvent::ObjectProjectileReceived { spell, source, destination } => {
                     tracing::trace!("🪄 Projectile {:?} from {} to {}", spell, source, destination);
@@ -3075,14 +3079,23 @@ impl LogicSystem for NetworkApplySystem {
 
             let mut had_hp = false;
             let mut killed_player_to_zero = false;
+            let mut hp_after_damage: i32 = 0;
             {
                 if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(target) {
                     hp.take_damage(damage);
-
+                    hp_after_damage = hp.current;
                     // 先记录是否打到 0，避免在持有 RefMut 时再改 world（会触发借用冲突）
                     killed_player_to_zero = hp.current <= 0;
                     had_hp = true;
                 }
+            }
+
+            // 血条平滑过渡：更新 HealthBarAnim
+            if had_hp {
+                let _ = ctx.world.insert_one(
+                    target,
+                    crate::components::HealthBarAnim { displayed: hp_after_damage as f32 },
+                );
             }
 
             // 玩家被打到 0：触发死亡动画（不依赖 ObjectDied 是否及时到达）
@@ -3113,14 +3126,15 @@ impl LogicSystem for NetworkApplySystem {
 
             // 飘字实体（独立 entity，避免污染目标组件）
             let now = macroquad::prelude::get_time();
-            let text = format!("{}", damage);
+            let text = format!("-{}", damage);
             ctx.world.spawn((
                 crate::components::Position::new(spawn_x, spawn_y - 72.0),
                 crate::components::FloatingText {
                     text,
                     start_time: now,
-                    duration: 0.8,
-                    rise_speed: 36.0,
+                    duration: 1.0,
+                    rise_speed: 40.0,
+                    color: Some(macroquad::prelude::RED),
                 },
             ));
         }
@@ -3358,6 +3372,151 @@ impl LogicSystem for NetworkApplySystem {
         }
         for (object_id, object_type, library, index, x, y) in mock_spawns {
             Self::apply_mock_library_sprite_spawn(ctx, object_id, object_type, library, index, x, y);
+        }
+
+        // ===== 技能特效可视化 =====
+        // ObjectMagicCast: 为施法对象生成技能特效实体
+        for (object_id, spell, target_id) in spell_casts {
+            let caster_pos = Self::find_entity_by_object_id(ctx, object_id)
+                .and_then(|e| ctx.world.get::<&crate::components::Position>(e).ok().map(|p| *p));
+            let target_pos = Self::find_entity_by_object_id(ctx, target_id)
+                .and_then(|e| ctx.world.get::<&crate::components::Position>(e).ok().map(|p| *p));
+
+            let spawn_pos = target_pos.or(caster_pos)
+                .unwrap_or_else(|| crate::components::Position::new(0.0, 0.0));
+            let spawn_x = spawn_pos.x;
+            let spawn_y = spawn_pos.y;
+
+            // 根据技能类型选择特效颜色
+            use mir2_shared::enums::Spell;
+            let spell_enum = spell as u8;
+            let (effect_text, effect_color) = match spell_enum {
+                x if x == Spell::FireBall as u8 => ("🔥", macroquad::prelude::ORANGE),
+                x if x == Spell::GreatFireBall as u8 => ("🔥🔥", macroquad::prelude::RED),
+                x if x == Spell::HellFire as u8 => ("🔥🔥🔥", macroquad::prelude::YELLOW),
+                x if x == Spell::ThunderBolt as u8 => ("⚡", macroquad::prelude::Color::from_rgba(150, 150, 255, 255)),
+                x if x == Spell::Lightning as u8 => ("⚡⚡", macroquad::prelude::Color::from_rgba(100, 100, 255, 255)),
+                x if x == Spell::Healing as u8 => ("💚", macroquad::prelude::GREEN),
+                x if x == Spell::Poisoning as u8 => ("☠", macroquad::prelude::Color::from_rgba(128, 0, 128, 255)),
+                x if x == Spell::Teleport as u8 => ("✨", macroquad::prelude::WHITE),
+                x if x == Spell::MagicShield as u8 => ("🛡", macroquad::prelude::Color::from_rgba(100, 200, 255, 255)),
+                x if x == Spell::HalfMoon as u8 => ("🌙", macroquad::prelude::Color::from_rgba(255, 255, 200, 255)),
+                x if x == Spell::ShoulderDash as u8 => ("💨", macroquad::prelude::Color::from_rgba(200, 200, 200, 255)),
+                _ => ("✨", macroquad::prelude::Color::from_rgba(255, 255, 100, 255)),
+            };
+
+            // 飘字特效
+            let now = macroquad::prelude::get_time();
+            ctx.world.spawn((
+                crate::components::Position::new(spawn_x, spawn_y - 90.0),
+                crate::components::FloatingText {
+                    text: effect_text.to_string(),
+                    start_time: now,
+                    duration: 0.6,
+                    rise_speed: 50.0,
+                    color: Some(effect_color),
+                },
+            ));
+
+            // 施法者：设置施法动画
+            if let Some(e) = Self::find_entity_by_object_id(ctx, object_id) {
+                if let Ok(mut s) = ctx.world.get::<&mut crate::components::MonsterAnimState>(e) {
+                    s.action = crate::components::MirAction::Spell;
+                    s.start_time = std::time::Instant::now();
+                }
+            }
+
+            tracing::trace!("🔮 Spell cast: {:?} from {} to {}", spell_enum, object_id, target_id);
+        }
+
+        // ObjectEffectReceived: 命中/暴击等特效
+        for (object_id, effect, effect_type) in effect_received {
+            use mir2_shared::enums::SpellEffect;
+
+            let pos = Self::find_entity_by_object_id(ctx, object_id)
+                .and_then(|e| ctx.world.get::<&crate::components::Position>(e).ok().map(|p| *p))
+                .unwrap_or_else(|| crate::components::Position::new(0.0, 0.0));
+
+            let now = macroquad::prelude::get_time();
+
+            match effect as u8 {
+                x if x == SpellEffect::Critical as u8 => {
+                    // 暴击特效：黄色大字
+                    ctx.world.spawn((
+                        crate::components::Position::new(pos.x, pos.y - 80.0),
+                        crate::components::FloatingText {
+                            text: "暴击!".to_string(),
+                            start_time: now,
+                            duration: 1.2,
+                            rise_speed: 45.0,
+                            color: Some(macroquad::prelude::YELLOW),
+                        },
+                    ));
+                }
+                x if x == SpellEffect::FatalSword as u8 => {
+                    ctx.world.spawn((
+                        crate::components::Position::new(pos.x, pos.y - 80.0),
+                        crate::components::FloatingText {
+                            text: "致命!".to_string(),
+                            start_time: now,
+                            duration: 1.2,
+                            rise_speed: 45.0,
+                            color: Some(macroquad::prelude::Color::from_rgba(255, 100, 100, 255)),
+                        },
+                    ));
+                }
+                x if x == SpellEffect::MagicShieldUp as u8 => {
+                    ctx.world.spawn((
+                        crate::components::Position::new(pos.x, pos.y - 80.0),
+                        crate::components::FloatingText {
+                            text: "🛡".to_string(),
+                            start_time: now,
+                            duration: 1.0,
+                            rise_speed: 40.0,
+                            color: Some(macroquad::prelude::Color::from_rgba(100, 200, 255, 255)),
+                        },
+                    ));
+                }
+                x if x == SpellEffect::MagicShieldDown as u8 => {
+                    ctx.world.spawn((
+                        crate::components::Position::new(pos.x, pos.y - 80.0),
+                        crate::components::FloatingText {
+                            text: "🛡破碎".to_string(),
+                            start_time: now,
+                            duration: 1.0,
+                            rise_speed: 40.0,
+                            color: Some(macroquad::prelude::RED),
+                        },
+                    ));
+                }
+                x if x == SpellEffect::Healing as u8 => {
+                    ctx.world.spawn((
+                        crate::components::Position::new(pos.x, pos.y - 80.0),
+                        crate::components::FloatingText {
+                            text: "治疗".to_string(),
+                            start_time: now,
+                            duration: 1.0,
+                            rise_speed: 40.0,
+                            color: Some(macroquad::prelude::GREEN),
+                        },
+                    ));
+                }
+                x if x == SpellEffect::Stunned as u8 => {
+                    ctx.world.spawn((
+                        crate::components::Position::new(pos.x, pos.y - 80.0),
+                        crate::components::FloatingText {
+                            text: "眩晕!".to_string(),
+                            start_time: now,
+                            duration: 1.5,
+                            rise_speed: 30.0,
+                            color: Some(macroquad::prelude::Color::from_rgba(255, 200, 0, 255)),
+                        },
+                    ));
+                }
+                _ => {
+                    tracing::trace!("✨ Effect received: effect={}, type={}", effect, effect_type);
+                }
+            }
         }
 
         Ok(())
