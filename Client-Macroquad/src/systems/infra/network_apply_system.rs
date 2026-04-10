@@ -1742,7 +1742,9 @@ impl LogicSystem for NetworkApplySystem {
                 }
 
                 // ===== 魔法/技能 =====
-                NetworkEvent::MagicListReceived { .. } => {}
+                NetworkEvent::MagicListReceived { .. } => {
+                    tracing::trace!("✨ Magic list received");
+                }
                 NetworkEvent::MagicLearned { spell, level } => {
                     tracing::debug!("✨ Magic learned: {:?} level={}", spell, level);
                     if let Some(e) = local_player_entity {
@@ -1790,9 +1792,15 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::MagicCastEvent { spell } => {
                     tracing::trace!("🪄 Magic cast: {:?}", spell);
                 }
-                NetworkEvent::ObjectMagicCast { object_id: _, spell: _, target_id: _ } => {}
-                NetworkEvent::ObjectEffectReceived { object_id: _, effect: _, effect_type: _ } => {}
-                NetworkEvent::ObjectProjectileReceived { spell: _, source: _, destination: _ } => {}
+                NetworkEvent::ObjectMagicCast { object_id, spell, target_id } => {
+                    tracing::trace!("🔮 Object {} casts {:?} on {}", object_id, spell, target_id);
+                }
+                NetworkEvent::ObjectEffectReceived { object_id, effect, effect_type } => {
+                    tracing::trace!("✨ Object {} effect: {:?} type={}", object_id, effect, effect_type);
+                }
+                NetworkEvent::ObjectProjectileReceived { spell, source, destination } => {
+                    tracing::trace!("🪄 Projectile {:?} from {} to {}", spell, source, destination);
+                }
                 NetworkEvent::SpellToggled { spell, can_use } => {
                     tracing::trace!("🔄 Spell toggle: {:?} can_use={}", spell, can_use);
                 }
@@ -1809,7 +1817,9 @@ impl LogicSystem for NetworkApplySystem {
                 }
 
                 // ===== 移动扩展 =====
-                NetworkEvent::ObjectHeroSpawned { .. }=> {}
+                NetworkEvent::ObjectHeroSpawned { .. } => {
+                    tracing::trace!("🦸 Object hero spawned");
+                }
                 NetworkEvent::ObjectHidden { object_id } => {
                     hidden_objects.push(*object_id);
                 }
@@ -1819,26 +1829,50 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectTeleportingOut { object_id } => {
                     teleporting_out.push(*object_id);
                 }
-                NetworkEvent::ObjectTeleportingIn { .. }=> {}
-                NetworkEvent::PlayerTeleportedIn { .. }=> {}
-                NetworkEvent::ObjectBackStepped { .. }=> {}
-                NetworkEvent::PlayerBackStepped { .. }=> {}
-                NetworkEvent::ObjectDashing { .. }=> {}
-                NetworkEvent::PlayerDashing { .. }=> {}
+                NetworkEvent::ObjectTeleportingIn { .. } => {
+                    tracing::trace!("🌀 Object teleporting in");
+                }
+                NetworkEvent::PlayerTeleportedIn { .. } => {
+                    tracing::trace!("🌀 Player teleported in");
+                }
+                NetworkEvent::ObjectBackStepped { .. } => {
+                    tracing::trace!("💨 Object backstepped");
+                }
+                NetworkEvent::PlayerBackStepped { x, y } => {
+                    tracing::trace!("💨 Player backstepped to ({}, {})", x, y);
+                }
+                NetworkEvent::ObjectDashing { .. } => {
+                    tracing::trace!("💨 Object dashing");
+                }
+                NetworkEvent::PlayerDashing { x, y } => {
+                    tracing::trace!("💨 Player dashing to ({}, {})", x, y);
+                }
                 NetworkEvent::ObjectDashFailed { object_id } => {
                     dash_failed.push(*object_id);
                 }
-                NetworkEvent::PlayerDashFailed { .. }=> {}
+                NetworkEvent::PlayerDashFailed { .. } => {
+                    tracing::trace!("💨 Player dash failed");
+                }
                 NetworkEvent::ObjectSatDown { object_id } => {
                     sat_down.push(*object_id);
                 }
-                NetworkEvent::NewMapInfoReceived { .. }=> {}
-                NetworkEvent::WorldMapSetupReceived { .. }=> {}
-                NetworkEvent::SearchMapResultReceived { .. }=> {}
-                NetworkEvent::TimeOfDayChanged { .. }=> {}
+                NetworkEvent::NewMapInfoReceived { .. } => {
+                    tracing::trace!("🗺️ New map info received");
+                }
+                NetworkEvent::WorldMapSetupReceived { .. } => {
+                    tracing::trace!("🗺️ World map setup received");
+                }
+                NetworkEvent::SearchMapResultReceived { .. } => {
+                    tracing::trace!("🗺️ Search map result received");
+                }
+                NetworkEvent::TimeOfDayChanged { time_of_day } => {
+                    tracing::trace!("🌅 Time of day changed: {}", time_of_day);
+                }
 
                 // ===== 玩家状态 =====
-                NetworkEvent::PlayerUpdated { .. } => {}
+                NetworkEvent::PlayerUpdated { .. } => {
+                    tracing::trace!("👤 Player updated");
+                }
                 NetworkEvent::AttackModeChanged { mode } => {
                     // 本地玩家的攻击模式变化
                     if let Some(e) = local_player_entity {
@@ -1851,11 +1885,21 @@ impl LogicSystem for NetworkApplySystem {
                         pet_mode_changes.push((e, *mode));
                     }
                 }
-                NetworkEvent::PlayerColourChanged { .. }=> {}
-                NetworkEvent::ObjectColourChanged { .. } => {}
-                NetworkEvent::ObjectGuildNameChanged2 { .. } => {}
-                NetworkEvent::PlayerNameUpdated { .. }=> {}
-                NetworkEvent::UserNameUpdated { .. }=> {}
+                NetworkEvent::PlayerColourChanged { colour } => {
+                    tracing::trace!("🎨 Player colour changed: {}", colour);
+                }
+                NetworkEvent::ObjectColourChanged { object_id, colour } => {
+                    tracing::trace!("🎨 Object {} colour changed: {}", object_id, colour);
+                }
+                NetworkEvent::ObjectGuildNameChanged2 { object_id, guild_name } => {
+                    tracing::trace!("🏰 Object {} guild name changed: {}", object_id, guild_name);
+                }
+                NetworkEvent::PlayerNameUpdated { .. } => {
+                    tracing::trace!("👤 Player name updated");
+                }
+                NetworkEvent::UserNameUpdated { .. } => {
+                    tracing::trace!("👤 User name updated");
+                }
 
                 // ===== 战斗扩展 =====
                 NetworkEvent::DuraChanged { unique_id, durability } => {
