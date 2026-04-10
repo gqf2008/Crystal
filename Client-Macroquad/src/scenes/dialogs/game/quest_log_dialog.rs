@@ -85,6 +85,10 @@ pub struct QuestLogDialogHybrid {
     close_x_textures: [Option<Texture2D>; 3],
     /// 拖拽辅助器
     drag_helper: DragHelper,
+    /// 是否显示任务详情面板
+    show_details: bool,
+    /// 任务完成通知队列
+    completion_notifications: Vec<(u32, f32)>, // (quest_id, remaining_time)
 }
 
 impl QuestLogDialogHybrid {
@@ -123,6 +127,66 @@ impl QuestLogDialogHybrid {
                     items: vec![],
                 },
             },
+            QuestInfo {
+                id: 3,
+                name: "矿洞探险".to_string(),
+                description: "矿洞深处出现了奇怪的声响，前往调查并带回3块铁矿石。".to_string(),
+                npc_name: "矿工".to_string(),
+                status: QuestStatus::Accepted,
+                progress: 1,
+                max_progress: 3,
+                level_required: 10,
+                group: "主线任务".to_string(),
+                rewards: QuestRewards {
+                    experience: 2000,
+                    gold: 500,
+                    items: vec![QuestItem {
+                        icon_index: 1050,
+                        name: "铁剑".to_string(),
+                        count: 1,
+                    }],
+                },
+            },
+            QuestInfo {
+                id: 4,
+                name: "药店代购".to_string(),
+                description: "药店的太阳水库存不足，帮忙从商人处购买5个太阳水。".to_string(),
+                npc_name: "药店老板".to_string(),
+                status: QuestStatus::Available,
+                progress: 0,
+                max_progress: 5,
+                level_required: 8,
+                group: "支线任务".to_string(),
+                rewards: QuestRewards {
+                    experience: 1000,
+                    gold: 300,
+                    items: vec![QuestItem {
+                        icon_index: 1200,
+                        name: "金疮药".to_string(),
+                        count: 5,
+                    }],
+                },
+            },
+            QuestInfo {
+                id: 5,
+                name: "击败沃玛卫士".to_string(),
+                description: "沃玛寺庙出现了沃玛卫士，集合勇士们将其消灭。".to_string(),
+                npc_name: "比奇国王".to_string(),
+                status: QuestStatus::Completed,
+                progress: 1,
+                max_progress: 1,
+                level_required: 20,
+                group: "主线任务".to_string(),
+                rewards: QuestRewards {
+                    experience: 5000,
+                    gold: 1000,
+                    items: vec![QuestItem {
+                        icon_index: 1100,
+                        name: "银蛇剑".to_string(),
+                        count: 1,
+                    }],
+                },
+            },
         ];
 
         Self {
@@ -138,6 +202,8 @@ impl QuestLogDialogHybrid {
             close_button_textures: [None, None, None],
             close_x_textures: [None, None, None],
             drag_helper: DragHelper::new(),
+            show_details: false,
+            completion_notifications: Vec::new(),
         }
     }
 
@@ -225,11 +291,18 @@ impl QuestLogDialogHybrid {
             return;
         }
 
+        let dt = get_frame_time();
         let mouse_pos = vec2(mouse_position().0, mouse_position().1);
 
         // 拖拽
         let drag_area = Rect::new(self.position.x, self.position.y, self.size.x, 30.0);
         self.drag_helper.apply(drag_area, &mut self.position);
+
+        // 更新完成通知计时器
+        for (_, timer) in self.completion_notifications.iter_mut() {
+            *timer -= dt;
+        }
+        self.completion_notifications.retain(|(_, t)| *t > 0.0);
 
         // 绘制背景
         self.draw_background();
@@ -237,8 +310,64 @@ impl QuestLogDialogHybrid {
         // 绘制任务列表
         self.draw_quest_list(mouse_pos);
 
+        // 绘制任务详情面板
+        if self.show_details {
+            self.draw_quest_details(mouse_pos);
+        }
+
         // 绘制关闭按钮
         self.draw_close_buttons(mouse_pos);
+    }
+
+    /// 切换任务详情面板显示
+    pub fn toggle_details(&mut self) {
+        self.show_details = !self.show_details;
+    }
+
+    /// 添加任务完成通知
+    pub fn notify_quest_complete(&mut self, quest_id: u32) {
+        self.completion_notifications.push((quest_id, 3.0)); // 显示3秒
+    }
+
+    /// 更新任务进度
+    pub fn update_quest_progress(&mut self, quest_id: u32, progress: u32) {
+        let quest_name_opt = self.quests.iter().find(|q| q.id == quest_id).map(|q| q.name.clone());
+        let quest_name = quest_name_opt.unwrap_or_default();
+        let quest_opt = self.quests.iter_mut().find(|q| q.id == quest_id);
+        if let Some(quest) = quest_opt {
+            let old_progress = quest.progress;
+            quest.progress = progress;
+            // 如果进度达到最大值，标记为完成
+            if progress >= quest.max_progress && quest.max_progress > 0 {
+                quest.status = QuestStatus::Completed;
+                self.completion_notifications.push((quest_id, 3.0));
+            }
+            if progress != old_progress {
+                tracing::info!("任务进度更新: {} ({}/{})", quest_name, progress, quest.max_progress);
+            }
+        }
+    }
+
+    /// 添加新任务
+    pub fn add_quest(&mut self, quest: QuestInfo) {
+        self.quests.push(quest);
+    }
+
+    /// 移除任务
+    pub fn remove_quest(&mut self, quest_id: u32) {
+        self.quests.retain(|q| q.id != quest_id);
+        if let Some(selected) = self.selected_quest {
+            if selected >= self.quests.len() {
+                self.selected_quest = self.quests.last().map(|_| self.quests.len() - 1);
+            }
+        }
+    }
+
+    /// 获取可追踪的任务列表（已接受且未完成）
+    pub fn get_trackable_quests(&self) -> Vec<&QuestInfo> {
+        self.quests.iter()
+            .filter(|q| q.status == QuestStatus::Accepted && q.progress < q.max_progress)
+            .collect()
     }
 
     /// 绘制背景
@@ -418,6 +547,165 @@ impl QuestLogDialogHybrid {
 
         if let Some(idx) = clicked_quest {
             self.selected_quest = Some(idx);
+        }
+    }
+
+    /// 绘制任务详情面板
+    fn draw_quest_details(&mut self, _mouse_pos: Vec2) {
+        let Some(selected_idx) = self.selected_quest else { return; };
+        let Some(quest) = self.quests.get(selected_idx) else { return; };
+
+        // 详情面板区域（在对话框底部，列表下方）
+        let panel_x = self.position.x + 10.0;
+        let panel_y = self.position.y + 280.0;
+        let panel_w = self.size.x - 20.0;
+        let panel_h = 140.0;
+
+        // 半透明背景
+        draw_rectangle(panel_x, panel_y, panel_w, panel_h, Color::from_rgba(20, 20, 30, 200));
+
+        // 边框
+        draw_rectangle_lines(panel_x, panel_y, panel_w, panel_h, 1.0, Color::from_rgba(80, 80, 120, 255));
+
+        // 任务名称（大字体）
+        let name_color = match quest.status {
+            QuestStatus::Available => Color::from_rgba(255, 255, 100, 255),
+            QuestStatus::Accepted => WHITE,
+            QuestStatus::Completed => Color::from_rgba(100, 255, 100, 255),
+            QuestStatus::Failed => Color::from_rgba(255, 100, 100, 255),
+        };
+        draw_text_cn(&quest.name, panel_x + 10.0, panel_y + 15.0, 14.0, name_color);
+
+        // 任务状态标签
+        let status_text = match quest.status {
+            QuestStatus::Available => "可接受",
+            QuestStatus::Accepted => "进行中",
+            QuestStatus::Completed => "已完成",
+            QuestStatus::Failed => "已失败",
+        };
+        draw_text_cn(&format!("[{}]", status_text), panel_x + panel_w - 80.0, panel_y + 15.0, 12.0, name_color);
+
+        // 任务描述
+        draw_text_cn(&quest.description, panel_x + 10.0, panel_y + 35.0, 11.0, Color::from_rgba(200, 200, 200, 255));
+
+        // 任务来源 NPC
+        if !quest.npc_name.is_empty() {
+            draw_text_cn(&format!("来源: {}", quest.npc_name), panel_x + 10.0, panel_y + 70.0, 10.0, Color::from_rgba(180, 180, 255, 255));
+        }
+
+        // 等级需求
+        if quest.level_required > 0 {
+            let lvl_color = if quest.level_required > 0 { Color::from_rgba(255, 200, 100, 255) } else { GRAY };
+            draw_text_cn(&format!("需要等级: {}", quest.level_required), panel_x + 10.0, panel_y + 85.0, 10.0, lvl_color);
+        }
+
+        // 进度条
+        if quest.max_progress > 0 {
+            let progress_x = panel_x + 10.0;
+            let progress_y = panel_y + 100.0;
+            let progress_w = panel_w - 20.0;
+            let progress_h = 12.0;
+
+            // 背景
+            draw_rectangle(progress_x, progress_y, progress_w, progress_h, Color::from_rgba(40, 40, 50, 255));
+
+            // 进度填充
+            let progress_ratio = quest.progress as f32 / quest.max_progress as f32;
+            let fill_w = (progress_w * progress_ratio).clamp(0.0, progress_w);
+            let fill_color = if quest.status == QuestStatus::Completed {
+                Color::from_rgba(80, 200, 80, 200)
+            } else {
+                Color::from_rgba(100, 150, 255, 200)
+            };
+            draw_rectangle(progress_x, progress_y, fill_w, progress_h, fill_color);
+
+            // 进度文字
+            let progress_text = format!("{}/{}", quest.progress, quest.max_progress);
+            draw_text_cn(&progress_text, progress_x + progress_w / 2.0 - 15.0, progress_y + 9.0, 9.0, WHITE);
+        }
+
+        // 奖励信息
+        let reward_y = if quest.max_progress > 0 { panel_y + 118.0 } else { panel_y + 100.0 };
+        let mut reward_text = format!("奖励: {} 经验, {} 金币", quest.rewards.experience, quest.rewards.gold);
+        if !quest.rewards.items.is_empty() {
+            let item_names: Vec<&str> = quest.rewards.items.iter().map(|i| i.name.as_str()).collect();
+            reward_text.push_str(&format!(", 物品: {}", item_names.join(", ")));
+        }
+        draw_text_cn(&reward_text, panel_x + 10.0, reward_y, 10.0, Color::from_rgba(255, 220, 100, 255));
+    }
+
+    /// 绘制任务完成通知
+    pub fn draw_completion_notifications(&self) {
+        if self.completion_notifications.is_empty() {
+            return;
+        }
+
+        let screen_w = screen_width();
+        let start_y = 80.0;
+        let spacing = 30.0;
+
+        for (i, (quest_id, remaining)) in self.completion_notifications.iter().enumerate() {
+            if let Some(quest) = self.quests.iter().find(|q| q.id == *quest_id) {
+                let alpha = (remaining / 3.0 * 255.0) as u8;
+                let y = start_y + i as f32 * spacing;
+
+                // 半透明背景
+                let text_w = 300.0;
+                let text_h = 25.0;
+                let x = (screen_w - text_w) / 2.0;
+                draw_rectangle(x, y, text_w, text_h, Color::from_rgba(20, 40, 20, (alpha as f32 * 0.8).min(255.0) as u8));
+
+                // 完成文字
+                let msg = format!("任务完成: {}", quest.name);
+                draw_text_cn(&msg, x + 10.0, y + 15.0, 13.0, Color::from_rgba(100, 255, 100, alpha));
+            }
+        }
+    }
+
+    /// 绘制任务追踪面板（游戏屏幕右侧小面板）
+    pub fn draw_quest_tracker(&self, tracker_x: f32, tracker_y: f32) {
+        let trackable = self.get_trackable_quests();
+        if trackable.is_empty() {
+            return;
+        }
+
+        let panel_w = 220.0;
+        let header_h = 22.0;
+        let quest_h = 40.0;
+        let panel_h = header_h + trackable.len() as f32 * quest_h + 5.0;
+
+        // 面板背景
+        draw_rectangle(tracker_x, tracker_y, panel_w, panel_h, Color::from_rgba(15, 15, 25, 220));
+        draw_rectangle_lines(tracker_x, tracker_y, panel_w, header_h, 1.0, Color::from_rgba(80, 80, 120, 200));
+
+        // 标题
+        draw_text_cn("任务追踪", tracker_x + 5.0, tracker_y + 15.0, 12.0, Color::from_rgba(255, 220, 100, 255));
+
+        // 任务列表
+        for (i, quest) in trackable.iter().enumerate() {
+            let qy = tracker_y + header_h + i as f32 * quest_h;
+
+            // 任务名称
+            draw_text_cn(&quest.name, tracker_x + 5.0, qy + 12.0, 11.0, Color::from_rgba(255, 255, 150, 255));
+
+            // 进度
+            if quest.max_progress > 0 {
+                // 进度条背景
+                let bar_x = tracker_x + 5.0;
+                let bar_y = qy + 25.0;
+                let bar_w = panel_w - 15.0;
+                let bar_h = 8.0;
+                draw_rectangle(bar_x, bar_y, bar_w, bar_h, Color::from_rgba(40, 40, 50, 255));
+
+                // 进度填充
+                let progress_ratio = quest.progress as f32 / quest.max_progress as f32;
+                let fill_w = (bar_w * progress_ratio).clamp(0.0, bar_w);
+                draw_rectangle(bar_x, bar_y, fill_w, bar_h, Color::from_rgba(100, 150, 255, 180));
+
+                // 进度文字
+                let progress_text = format!("{}/{}", quest.progress, quest.max_progress);
+                draw_text_cn(&progress_text, bar_x + bar_w / 2.0 - 10.0, bar_y + 6.0, 8.0, WHITE);
+            }
         }
     }
 

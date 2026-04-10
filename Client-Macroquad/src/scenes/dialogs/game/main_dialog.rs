@@ -1578,4 +1578,22 @@ impl MainDialog {
             *consumed = true;
         }
     }
+
+    /// 绘制任务追踪面板（游戏屏幕右侧）
+    pub fn draw_quest_tracker(&self) {
+        self.quest_log_dialog.draw_quest_tracker(
+            screen_width() / screen_dpi_scale() - 230.0,
+            60.0,
+        );
+    }
+
+    /// 绘制任务完成通知
+    pub fn draw_quest_notifications(&self) {
+        self.quest_log_dialog.draw_completion_notifications();
+    }
+
+    /// 获取任务日志对话框的可变引用（用于更新进度等）
+    pub fn quest_log_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::quest_log_dialog::QuestLogDialogHybrid {
+        &mut self.quest_log_dialog
+    }
 }

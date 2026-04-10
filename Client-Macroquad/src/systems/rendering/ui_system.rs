@@ -540,6 +540,12 @@ impl RenderSystem for UIRenderSystem {
             }
         };
 
+        // 任务追踪面板（始终显示，不受对话框堆叠影响）
+        self.main_dialog.draw_quest_tracker();
+
+        // 任务完成通知
+        self.main_dialog.draw_quest_notifications();
+
         // UI -> ECS：小地图点击自动寻路（在 show_dialogs 后取，保证同帧可用）
         if let Some(target) = self.main_dialog.take_pending_auto_path_target() {
             if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
