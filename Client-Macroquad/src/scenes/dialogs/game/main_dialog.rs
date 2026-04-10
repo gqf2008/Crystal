@@ -136,7 +136,7 @@ pub struct MainDialog {
     /// 上一帧 MainDialog 的 X（用于子对话框相对布局）
     last_main_dialog_x: f32,
 
-    /// UI 产生的“自动寻路目标”（世界坐标像素）；由 GameScene 在 update 阶段消费
+    /// UI 产生的”自动寻路目标”（世界坐标像素）；由 GameScene 在 update 阶段消费
     pending_auto_path_target: Option<(f32, f32, bool)>,
 
     /// 小地图左键双击检测
@@ -144,6 +144,24 @@ pub struct MainDialog {
     /// 小地图右键双击检测
     minimap_right_last_click_time: Option<Instant>,
     minimap_double_click_threshold: Duration,
+
+    // === 攻击模式显示 ===
+    /// 攻击模式 (0=Peace, 1=Group, 2=Guild, 3=EnemyGuild, 4=RedBrown, 5=All)
+    attack_mode: u8,
+    /// 宠物模式 (0=Both, 1=MoveOnly, 2=AttackOnly, 3=None, 4=FocusMasterTarget)
+    pet_mode: u8,
+    /// 技能模式 (true=~, false=Ctrl)
+    skill_mode: bool,
+    /// 是否显示模式标签（默认隐藏，按 H 切换）
+    mode_view: bool,
+
+    // === 角色状态图标 ===
+    /// 中毒状态 (0=无, 1=普通中毒, 2=重度中毒, 3=麻痹)
+    poison_level: u8,
+
+    // === 快捷技能栏 ===
+    /// 快捷技能索引 (F1-F8 对应的技能 ID, 0 表示未绑定)
+    quick_skills: [u8; 8],
 }
 
 impl MainDialog {
@@ -241,6 +259,18 @@ impl MainDialog {
             minimap_left_last_click_time: None,
             minimap_right_last_click_time: None,
             minimap_double_click_threshold: Duration::from_millis(260),
+
+            // 攻击模式显示
+            attack_mode: 0,
+            pet_mode: 0,
+            skill_mode: false,
+            mode_view: false,
+
+            // 角色状态图标
+            poison_level: 0,
+
+            // 快捷技能栏
+            quick_skills: [0; 8],
         }
     }
 
@@ -275,6 +305,38 @@ impl MainDialog {
         self.bag_capacity = bag_capacity;
         if let Some(name) = character_name {
             self.character_name = name;
+        }
+    }
+
+    /// 同步攻击模式（服务器推送 ChangeAMode）
+    pub fn set_attack_mode(&mut self, mode: u8) {
+        self.attack_mode = mode;
+    }
+
+    /// 同步宠物模式（服务器推送 ChangePMode / HeroBehaviour）
+    pub fn set_pet_mode(&mut self, mode: u8) {
+        self.pet_mode = mode;
+    }
+
+    /// 切换技能模式（Ctrl/~ 切换）
+    pub fn toggle_skill_mode(&mut self) {
+        self.skill_mode = !self.skill_mode;
+    }
+
+    /// 切换模式标签显示（H 键）
+    pub fn toggle_mode_view(&mut self) {
+        self.mode_view = !self.mode_view;
+    }
+
+    /// 设置中毒状态 (0=无, 1=普通中毒, 2=重度中毒, 3=麻痹)
+    pub fn set_poison_level(&mut self, level: u8) {
+        self.poison_level = level;
+    }
+
+    /// 设置快捷技能 (slot 0-7, skill_id 0=未绑定)
+    pub fn set_quick_skill(&mut self, slot: usize, skill_id: u8) {
+        if slot < 8 {
+            self.quick_skills[slot] = skill_id;
         }
     }
 
@@ -471,6 +533,47 @@ impl MainDialog {
         self.minimap_dialog.toggle_size();
     }
 
+    /// 处理全局快捷键（攻击模式/宠物模式/技能模式切换）
+    /// 调用方：UISystem 在检测到非聊天输入时调用
+    pub fn handle_mode_shortcuts(&mut self) {
+        use macroquad::prelude::is_key_pressed;
+        use macroquad::prelude::KeyCode;
+
+        // H = 切换模式标签显示
+        if is_key_pressed(KeyCode::H) {
+            self.toggle_mode_view();
+        }
+
+        // Tab = 切换技能模式 (Ctrl+~ 的替代)
+        // 实际应该检测 Ctrl+~，这里简化为 Tab
+        if is_key_pressed(KeyCode::Tab) {
+            // 只在非聊天焦点时切换
+            if !self.is_any_input_active() {
+                self.toggle_skill_mode();
+            }
+        }
+
+        // Alt+A = 循环攻击模式
+        if is_key_pressed(KeyCode::A) && is_key_down(KeyCode::LeftAlt) {
+            self.cycle_attack_mode();
+        }
+
+        // Alt+P = 循环宠物模式
+        if is_key_pressed(KeyCode::P) && is_key_down(KeyCode::LeftAlt) {
+            self.cycle_pet_mode();
+        }
+    }
+
+    /// 循环攻击模式：Peace -> Group -> Guild -> EnemyGuild -> RedBrown -> All -> Peace
+    pub fn cycle_attack_mode(&mut self) {
+        self.attack_mode = (self.attack_mode + 1) % 6;
+    }
+
+    /// 循环宠物模式：Both -> MoveOnly -> AttackOnly -> None -> FocusMasterTarget -> Both
+    pub fn cycle_pet_mode(&mut self) {
+        self.pet_mode = (self.pet_mode + 1) % 5;
+    }
+
     /// 更新和绘制主界面
     pub fn update_and_draw(&mut self) {
         let screen_w = screen_width() / screen_dpi_scale();
@@ -507,6 +610,17 @@ impl MainDialog {
 
         // 绘制功能按钮组
         self.draw_buttons();
+
+        // 绘制模式标签（攻击模式/宠物模式/技能模式）
+        if self.mode_view {
+            self.draw_mode_labels();
+        }
+
+        // 绘制角色状态图标（中毒等）
+        self.draw_status_icons();
+
+        // 绘制快捷技能栏
+        self.draw_quick_skill_bar();
     }
 
     /// 显示所有子对话框
@@ -1009,6 +1123,154 @@ impl MainDialog {
         }
 
         is_hovered && is_mouse_button_pressed(MouseButton::Left)
+    }
+
+    // ========================================================================
+    // 模式标签（攻击模式/宠物模式/技能模式）
+    // ========================================================================
+
+    fn draw_mode_labels(&self) {
+        // 位置：小地图左侧，垂直排列
+        // C#: X = MiniMapDialog.Location.X - 3 - MainDialog.Location.X
+        //     Y = MiniMapDialog.Size.Height + 150/165/180 - ScreenHeight
+        // 简化：使用固定相对位置（在 MainDialog 右上方）
+        let base_x = self.position.x + self.bg_size.x - 60.0;
+        let base_y = self.position.y - 60.0; // 在工具栏上方
+
+        // SMode (技能模式) - 最上
+        let skill_mode_text = if self.skill_mode { "~" } else { "Ctrl" };
+        let s_label = format!("[Skill: {}]", skill_mode_text);
+        draw_text_cn(&s_label, base_x, base_y, 10.0, Color::from_rgba(50, 255, 50, 255));
+
+        // AMode (攻击模式) - 中间
+        let a_label = self.attack_mode_label();
+        let a_color = match self.attack_mode {
+            0 => Color::from_rgba(255, 255, 0, 255),    // Peace - Yellow
+            1 => Color::from_rgba(100, 255, 100, 255),  // Group - Light green
+            2 => Color::from_rgba(100, 150, 255, 255),  // Guild - Blue
+            3 => Color::from_rgba(255, 100, 100, 255),  // EnemyGuild - Red
+            4 => Color::from_rgba(255, 80, 80, 255),    // RedBrown - Red
+            5 => Color::from_rgba(255, 50, 50, 255),    // All - Red
+            _ => Color::from_rgba(255, 255, 0, 255),
+        };
+        draw_text_cn(&a_label, base_x, base_y + 15.0, 10.0, a_color);
+
+        // PMode (宠物模式) - 最下
+        if self.pet_mode > 0 || self.has_pet() {
+            let p_label = self.pet_mode_label();
+            draw_text_cn(&p_label, base_x, base_y + 30.0, 10.0, Color::from_rgba(255, 165, 0, 255));
+        }
+    }
+
+    fn attack_mode_label(&self) -> String {
+        match self.attack_mode {
+            0 => "[Mode: Peace]".to_string(),
+            1 => "[Mode: Group]".to_string(),
+            2 => "[Mode: Guild]".to_string(),
+            3 => "[Mode: Enemy]".to_string(),
+            4 => "[Mode: PK]".to_string(),
+            5 => "[Mode: All]".to_string(),
+            _ => format!("[Mode: {}]", self.attack_mode),
+        }
+    }
+
+    fn pet_mode_label(&self) -> String {
+        match self.pet_mode {
+            0 => "[Pet: Move+Atk]".to_string(),
+            1 => "[Pet: No Atk]".to_string(),
+            2 => "[Pet: No Move]".to_string(),
+            3 => "[Pet: Idle]".to_string(),
+            4 => "[Pet: Focus]".to_string(),
+            _ => format!("[Pet: {}]", self.pet_mode),
+        }
+    }
+
+    fn has_pet(&self) -> bool {
+        // 简单判断：如果有宠物实体存在则返回 true
+        // 实际应该从 ECS 查询 Pet 组件
+        false
+    }
+
+    // ========================================================================
+    // 角色状态图标（中毒等）
+    // ========================================================================
+
+    fn draw_status_icons(&self) {
+        if self.poison_level == 0 {
+            return;
+        }
+
+        // 位置：主工具栏左上方，靠近血球
+        let icon_x = self.position.x + 80.0;
+        let icon_y = self.position.y + 10.0;
+
+        // 中毒图标：使用 Prguse 纹理库的中毒图标
+        let poison_tex_idx = match self.poison_level {
+            1 => 1950, // 普通中毒
+            2 => 1951, // 重度中毒
+            3 => 1952, // 麻痹
+            _ => 0,
+        };
+
+        if poison_tex_idx > 0 {
+            if let Some(info) = LibraryName::Prguse.get_texture(poison_tex_idx) {
+                if let Some(tex) = info.image {
+                    draw_texture(&tex, icon_x, icon_y, WHITE);
+                }
+            } else {
+                // 降级：用彩色方块表示
+                let poison_color = match self.poison_level {
+                    1 => Color::from_rgba(150, 255, 0, 200),   // 绿色（轻度中毒）
+                    2 => Color::from_rgba(255, 150, 0, 200),   // 橙色（重度中毒）
+                    3 => Color::from_rgba(200, 200, 200, 200), // 灰色（麻痹）
+                    _ => WHITE,
+                };
+                draw_rectangle(icon_x, icon_y, 20.0, 20.0, poison_color);
+            }
+        }
+    }
+
+    // ========================================================================
+    // 快捷技能栏（功能按钮右侧）
+    // ========================================================================
+
+    fn draw_quick_skill_bar(&mut self) {
+        let mouse_pos = vec2(mouse_position().0, mouse_position().1);
+        let bar_y = self.position.y + 76.0; // 与功能按钮同一行
+        let icon_size = vec2(20.0, 20.0);
+
+        // 8 个快捷栏位（F1-F8），从功能按钮左侧开始
+        for (i, &skill_id) in self.quick_skills.iter().enumerate() {
+            let x = self.position.x + self.bg_size.x - 230.0 + i as f32 * 22.0;
+            let slot_rect = Rect::new(x, bar_y, icon_size.x, icon_size.y);
+
+            // 背景
+            draw_rectangle(x, bar_y, icon_size.x, icon_size.y, Color::from_rgba(40, 40, 50, 200));
+            draw_rectangle_lines(x, bar_y, icon_size.x, icon_size.y, 1.0, Color::from_rgba(100, 100, 120, 150));
+
+            // 如果绑定了技能，显示技能图标
+            if skill_id > 0 {
+                // 技能图标使用 Prguse 纹理库（1800+skill_id 作为索引）
+                let tex_idx = 1800 + skill_id as usize;
+                if let Some(info) = LibraryName::Prguse.get_texture(tex_idx) {
+                    if let Some(tex) = info.image {
+                        draw_texture(&tex, x, bar_y, WHITE);
+                    }
+                } else {
+                    // 降级：显示技能 ID
+                    draw_text_cn(&format!("{}", skill_id), x + 6.0, bar_y + 6.0, 10.0, WHITE);
+                }
+            }
+
+            // F1-F8 快捷键提示
+            let key_hint = format!("{}", i + 1);
+            draw_text_cn(&key_hint, x + 1.0, bar_y + 1.0, 8.0, Color::from_rgba(200, 200, 200, 180));
+
+            // 悬停高亮
+            if slot_rect.contains(mouse_pos) {
+                draw_rectangle_lines(x, bar_y, icon_size.x, icon_size.y, 1.0, Color::from_rgba(255, 255, 100, 255));
+            }
+        }
     }
 
     // ========================================================================
