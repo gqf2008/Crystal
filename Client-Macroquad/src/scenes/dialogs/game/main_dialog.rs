@@ -1062,7 +1062,7 @@ impl MainDialog {
                         if !self.inventory_dialog.restore_item_to_slot(
                             tab,
                             slot,
-                            ItemSlotHybrid::new(rollback_item.icon_index, rollback_item.count),
+                            ItemSlotHybrid::new(rollback_item.icon_index, String::new(), rollback_item.count),
                         ) {
                             eprintln!(
                                 "⚠️ Inventory rollback failed: tab={tab:?}, slot={slot}, icon={}, count={}",
@@ -1077,7 +1077,7 @@ impl MainDialog {
 
         if let Some(slot) = self.belt_dialog.take_transfer_to_inventory_request() {
             if let Some(item) = self.belt_dialog.take_item_from_slot(slot) {
-                let inventory_item = ItemSlotHybrid::new(item.icon_index, item.count);
+                let inventory_item = ItemSlotHybrid::new(item.icon_index, String::new(), item.count);
                 if let Err(rollback_item) = self.inventory_dialog.try_insert_item(inventory_item) {
                     if let Some(icon_index) = rollback_item.icon_index {
                         if !self.belt_dialog.restore_item_to_slot(
