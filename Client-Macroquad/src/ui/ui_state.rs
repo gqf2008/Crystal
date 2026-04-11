@@ -11,6 +11,15 @@ use crate::scenes::dialogs::game::{
 use mir2_shared::data::item::UserItem;
 use mir2_shared::enums::PanelType;
 
+/// 好友条目（从服务器 FriendUpdate 转换而来）
+#[derive(Debug, Clone)]
+pub struct FriendEntry {
+    pub object_id: u32,
+    pub name: String,
+    pub memo: String,
+    pub online: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum UiAction {
     NpcDialog(NpcDialogAction),
@@ -52,6 +61,60 @@ pub enum UiCommand {
     HideAmountBox,
     HideNpcGoodsSub,
     HideNpcGoods,
+
+    /// 更新坐骑状态（mount_type, riding）
+    UpdateMountState { mount_type: i16, riding: bool },
+
+    /// 更新英雄行为模式
+    UpdateHeroBehaviour { behaviour: u8 },
+
+    /// 系统提示：英雄相关
+    PushHeroSystemChat(String),
+
+    /// 更新钓鱼状态
+    UpdateFishingState { state: u8, chance: f32, progress: f32 },
+
+    /// 更新钓鱼自动抛竿
+    SetFishingAutoCast { enabled: bool },
+
+    /// 更新宠物列表
+    UpdateCreatureList { creatures: Vec<crate::scenes::dialogs::game::intelligent_creature_dialog::CreatureEntry> },
+
+    /// 更新好友列表
+    UpdateFriendList { friends: Vec<FriendEntry> },
+
+    /// 更新Buff
+    AddBuff { buff: crate::scenes::dialogs::game::buff_dialog::BuffEntry },
+    RemoveBuff { buff_type: u32 },
+
+    /// 英雄自动喝药
+    SetHeroAutoPotUnlocked,
+    SetHeroAutoPotValue { pot_type: u8, value: u32 },
+    SetHeroAutoPotItem { item_id: u32 },
+
+    /// Buff 暂停/恢复
+    SetBuffPaused { buff_id: u32, paused: bool },
+
+    /// 更新罗盘方向
+    UpdateCompass { direction: u8 },
+
+    /// 交易相关：打开/更新交易对话框
+    OpenTradeDialog { partner: String },
+    TradeGoldAdded { amount: u32 },
+    TradeItemAdded,
+    TradeConfirmed { locked: bool },
+    TradeCancelled,
+
+    /// 任务相关
+    QuestAccepted { quest_id: u32, name: String, description: String },
+    QuestCompleted { quest_id: u32 },
+    QuestProgressUpdated { quest_id: u32, progress_text: String },
+
+    /// 公会相关
+    GuildMemberUpdated { name: String, rank: String, online: bool },
+    GuildNoticeUpdated { notice: String },
+    GuildExpGained { amount: i64 },
+    GuildWarRequested,
 }
 
 #[derive(Debug, Clone, Default)]

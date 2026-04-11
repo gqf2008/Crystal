@@ -344,6 +344,18 @@ impl QuestLogDialogHybrid {
         }
     }
 
+    /// 从文本更新任务进度（网络消息：progress 是分号分隔的任务列表）
+    pub fn update_quest_progress_from_text(&mut self, quest_id: u32, progress_text: &str) {
+        if let Some(quest) = self.quests.iter_mut().find(|q| q.id == quest_id) {
+            // 计算完成的子任务数量
+            let tasks: Vec<&str> = progress_text.split(';').filter(|s| !s.trim().is_empty()).collect();
+            quest.max_progress = tasks.len().max(1) as u32;
+            quest.progress = tasks.len() as u32;
+            quest.description = progress_text.to_string();
+            tracing::debug!("任务进度更新: {} - {}", quest.name, progress_text);
+        }
+    }
+
     /// 添加新任务
     pub fn add_quest(&mut self, quest: QuestInfo) {
         self.quests.push(quest);

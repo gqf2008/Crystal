@@ -49,9 +49,6 @@ pub struct TradeDialogHybrid {
     /// 是否被对方锁定（对方已确认）
     partner_locked: bool,
 
-    /// 当前选中的物品槽位（-1=无, 0-11=自己的, 100+=对方的）
-    selected_slot: Option<usize>,
-
     /// 拖拽中的物品
     dragging_item: Option<ItemDragState>,
     /// 拖拽源（用于判断是添加还是移除）
@@ -91,7 +88,6 @@ impl TradeDialogHybrid {
             their_gold: 0,
             their_confirmed: false,
             partner_locked: false,
-            selected_slot: None,
             editing_gold: false,
             gold_input_text: String::new(),
             drag_helper: DragHelper::new(),
@@ -116,10 +112,22 @@ impl TradeDialogHybrid {
         self.their_gold = 0;
         self.their_confirmed = false;
         self.partner_locked = false;
-        self.selected_slot = None;
         self.editing_gold = false;
         self.gold_input_text.clear();
         self.visible = true;
+    }
+
+    /// 打开交易对话框
+    pub fn open(&mut self) {
+        self.open_trade("");
+    }
+
+    /// 检查点是否在对话框内
+    pub fn contains(&self, point: Vec2) -> bool {
+        if !self.visible {
+            return false;
+        }
+        Rect::new(self.position.x, self.position.y, self.size.x, self.size.y).contains(point)
     }
 
     /// 关闭对话框
@@ -130,9 +138,11 @@ impl TradeDialogHybrid {
         self.my_confirmed = false;
         self.their_confirmed = false;
         self.partner_locked = false;
+        self.item_texture_cache.clear();
     }
 
     /// 切换显示状态
+    #[allow(dead_code)]
     pub fn toggle(&mut self) {
         self.visible = !self.visible;
     }
@@ -140,11 +150,6 @@ impl TradeDialogHybrid {
     /// 是否可见
     pub fn is_visible(&self) -> bool {
         self.visible
-    }
-
-    /// 是否被鼠标覆盖
-    pub fn is_mouse_over(&self, mouse_pos: Vec2) -> bool {
-        self.visible && Rect::new(self.position.x, self.position.y, self.size.x, self.size.y).contains(mouse_pos)
     }
 
     /// 设置位置
@@ -190,6 +195,24 @@ impl TradeDialogHybrid {
     /// 对方取消确认
     pub fn unset_partner_locked(&mut self) {
         self.partner_locked = false;
+    }
+
+    /// 增加对方的金币（服务器 TradeGoldAdded 事件）
+    pub fn add_their_gold(&mut self, amount: u32) {
+        self.their_gold = self.their_gold.saturating_add(amount);
+        self.their_confirmed = false;
+    }
+
+    /// 重置双方确认状态（服务器 TradeCancelled 事件）
+    pub fn reset_confirmations(&mut self) {
+        self.my_confirmed = false;
+        self.their_confirmed = false;
+        self.partner_locked = false;
+    }
+
+    /// 设置对方确认/锁定状态（服务器 TradeConfirmedEvent）
+    pub fn set_partner_confirmed(&mut self, locked: bool) {
+        self.partner_locked = locked;
     }
 
     /// 添加自己的物品到交易栏
@@ -241,6 +264,20 @@ impl TradeDialogHybrid {
     /// 用户取消交易
     pub fn cancel_trade(&mut self) {
         self.my_confirmed = false;
+    }
+
+    fn on_confirm(&mut self) -> TradeAction {
+        if self.partner_locked {
+            self.my_confirmed = true;
+            TradeAction::Confirm
+        } else {
+            TradeAction::None
+        }
+    }
+
+    fn on_cancel(&mut self) -> TradeAction {
+        self.my_confirmed = false;
+        TradeAction::Cancel
     }
 
     /// 异步加载纹理
@@ -493,15 +530,6 @@ impl TradeDialogHybrid {
         }
     }
 
-    /// 获取槽位矩形
-    fn get_slot_rect(slot_start_x: f32, slot_start_y: f32, slot_size: f32, index: usize, cols: usize) -> Rect {
-        let col = index % cols;
-        let row = index / cols;
-        let sx = slot_start_x + col as f32 * (slot_size + 2.0);
-        let sy = slot_start_y + row as f32 * (slot_size + 2.0);
-        Rect::new(sx, sy, slot_size, slot_size)
-    }
-
     /// 绘制物品格子槽位（静态，仅显示）
     fn draw_item_panel_slots_static(
         x: f32, y: f32, w: f32, h: f32,
@@ -591,7 +619,7 @@ impl TradeDialogHybrid {
         let gold_display = if self.editing_gold {
             &self.gold_input_text
         } else {
-            &format!("对方: {}", self.their_gold)
+            &format!("{}", self.my_gold)
         };
         let gold_text_color = if self.editing_gold { WHITE } else { Color::from_rgba(255, 215, 0, 255) };
         draw_text_cn(gold_display, gold_input_rect.x + 5.0, gold_input_rect.y + 13.0, 11.0, gold_text_color);
@@ -639,12 +667,11 @@ impl TradeDialogHybrid {
 
         // 点击处理
         if is_mouse_button_pressed(MouseButton::Left) {
-            if confirm_rect.contains(mouse_pos) && self.partner_locked {
-                self.my_confirmed = true;
-                return TradeAction::Confirm;
+            if confirm_rect.contains(mouse_pos) {
+                return self.on_confirm();
             }
             if cancel_rect.contains(mouse_pos) {
-                return TradeAction::Cancel;
+                return self.on_cancel();
             }
         }
 
@@ -661,7 +688,7 @@ impl TradeDialogHybrid {
                 self.editing_gold = false;
                 self.gold_input_text.clear();
             } else {
-                return TradeAction::Cancel;
+                return self.on_cancel();
             }
         }
 
@@ -712,6 +739,7 @@ impl TradeDialogHybrid {
     }
 
     /// 提交金币输入（解析并返回金额）
+    #[allow(dead_code)]
     pub fn commit_gold_input(&mut self) -> Option<u32> {
         if self.editing_gold {
             self.editing_gold = false;

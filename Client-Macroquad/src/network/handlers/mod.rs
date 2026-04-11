@@ -386,6 +386,10 @@ pub enum NetworkEvent {
         riding_mount: bool,
     },
 
+    // 客户端 -> 服务器（坐骑操作）
+    MountRideRequest { mount_type: i16 },
+    MountDismountRequest,
+
     // UI / 表现层事件（来自服务器）
     PlaySound { sound_id: i32 },
     // ========================================================================
@@ -479,13 +483,13 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    FriendUpdated,
+    FriendUpdated { friends: Vec<crate::ui::ui_state::FriendEntry> },
 
     // 客户端 -> 服务器
     AddFriendRequest { name: String },
-    RemoveFriendRequest { name: String },
+    RemoveFriendRequest { object_id: u32 },
     RefreshFriendsRequest,
-    AddMemoRequest { name: String, memo: String },
+    AddMemoRequest { object_id: u32, memo: String },
 
     // ========================================================================
     // 公会扩展事件（Guild Extended Events）

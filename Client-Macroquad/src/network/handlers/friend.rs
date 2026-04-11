@@ -14,11 +14,19 @@ impl PacketHandler for FriendHandler {
         let mut cursor = Cursor::new(payload);
 
         match header.opcode as u16 {
-            // FriendUpdate - 好友列表更新
+            // FriendUpdate - 好友列表更新（完整列表同步）
             x if x == ServerPacketIds::FriendUpdate as u16 => {
                 if let Ok(packet) = server::FriendUpdate::read_body(&mut cursor) {
-                    events.push(NetworkEvent::FriendUpdated);
-                    tracing::debug!("👥 好友列表同步: {} 个好友", packet.friends.len());
+                    let friends: Vec<crate::ui::ui_state::FriendEntry> = packet.friends
+                        .into_iter()
+                        .map(|f| crate::ui::ui_state::FriendEntry {
+                            object_id: f.object_id,
+                            name: f.name,
+                            memo: f.memo,
+                            online: f.online,
+                        })
+                        .collect();
+                    events.push(NetworkEvent::FriendUpdated { friends });
                 }
             }
 

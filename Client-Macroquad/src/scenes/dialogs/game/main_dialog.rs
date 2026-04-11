@@ -50,6 +50,19 @@ pub enum DialogType {
     GameShop,
     Menu,
     MiniMap,
+    Group,
+    Friend,
+    Guild,
+    Mentor,
+    Relationship,
+    Trade,
+    Mount,
+    Hero,
+    Buff,
+    Fishing,
+    IntelligentCreature,
+    Compass,
+    Socket,
 }
 
 /// 主界面底部工具栏
@@ -96,6 +109,19 @@ pub struct MainDialog {
     character_dialog: CharacterDialogHybrid,
     /// 任务日志对话框
     quest_log_dialog: QuestLogDialogHybrid,
+    group_dialog: crate::scenes::dialogs::game::group_dialog::GroupDialogHybrid,
+    friend_dialog: crate::scenes::dialogs::game::friend_dialog::FriendDialogHybrid,
+    guild_dialog: crate::scenes::dialogs::game::guild_dialog::GuildDialogHybrid,
+    mentor_dialog: crate::scenes::dialogs::game::mentor_dialog::MentorDialogHybrid,
+    relationship_dialog: crate::scenes::dialogs::game::relationship_dialog::RelationshipDialogHybrid,
+    trade_dialog: crate::scenes::dialogs::game::trade_dialog::TradeDialogHybrid,
+    mount_dialog: crate::scenes::dialogs::game::mount_dialog::MountDialogHybrid,
+    hero_dialog: crate::scenes::dialogs::game::hero_dialog::HeroDialogHybrid,
+    buff_dialog: crate::scenes::dialogs::game::buff_dialog::BuffDialogHybrid,
+    fishing_dialog: crate::scenes::dialogs::game::fishing_dialog::FishingDialogHybrid,
+    intelligent_creature_dialog: crate::scenes::dialogs::game::intelligent_creature_dialog::IntelligentCreatureDialogHybrid,
+    compass_dialog: crate::scenes::dialogs::game::compass_dialog::CompassDialogHybrid,
+    socket_dialog: crate::scenes::dialogs::game::socket_dialog::SocketDialogHybrid,
     /// 设置对话框
     option_dialog: OptionDialogHybrid,
     /// 游戏商城对话框
@@ -113,6 +139,19 @@ pub struct MainDialog {
     inventory_dialog_open: bool,
     character_dialog_open: bool,
     quest_log_dialog_open: bool,
+    group_dialog_open: bool,
+    friend_dialog_open: bool,
+    guild_dialog_open: bool,
+    mentor_dialog_open: bool,
+    relationship_dialog_open: bool,
+    trade_dialog_open: bool,
+    mount_dialog_open: bool,
+    hero_dialog_open: bool,
+    buff_dialog_open: bool,
+    fishing_dialog_open: bool,
+    intelligent_creature_dialog_open: bool,
+    compass_dialog_open: bool,
+    socket_dialog_open: bool,
     option_dialog_open: bool,
     game_shop_dialog_open: bool,
     menu_dialog_open: bool,
@@ -144,6 +183,9 @@ pub struct MainDialog {
     /// 小地图右键双击检测
     minimap_right_last_click_time: Option<Instant>,
     minimap_double_click_threshold: Duration,
+
+    /// 暂存的交易对话框动作（由 show_dialogs 产出，由 ui_system.rs 消费发包）
+    pending_trade_action: Option<crate::scenes::dialogs::game::trade_dialog::TradeAction>,
 
     // === 攻击模式显示 ===
     /// 攻击模式 (0=Peace, 1=Group, 2=Guild, 3=EnemyGuild, 4=RedBrown, 5=All)
@@ -214,6 +256,19 @@ impl MainDialog {
             inventory_dialog: InventoryDialogHybrid::new(),
             character_dialog: CharacterDialogHybrid::new(),
             quest_log_dialog: QuestLogDialogHybrid::new(),
+            group_dialog: crate::scenes::dialogs::game::group_dialog::GroupDialogHybrid::new(),
+            friend_dialog: crate::scenes::dialogs::game::friend_dialog::FriendDialogHybrid::new(),
+            guild_dialog: crate::scenes::dialogs::game::guild_dialog::GuildDialogHybrid::new(),
+            mentor_dialog: crate::scenes::dialogs::game::mentor_dialog::MentorDialogHybrid::new(),
+            relationship_dialog: crate::scenes::dialogs::game::relationship_dialog::RelationshipDialogHybrid::new(),
+            trade_dialog: crate::scenes::dialogs::game::trade_dialog::TradeDialogHybrid::new(),
+            mount_dialog: crate::scenes::dialogs::game::mount_dialog::MountDialogHybrid::new(),
+            hero_dialog: crate::scenes::dialogs::game::hero_dialog::HeroDialogHybrid::new(),
+            buff_dialog: crate::scenes::dialogs::game::buff_dialog::BuffDialogHybrid::new(),
+            fishing_dialog: crate::scenes::dialogs::game::fishing_dialog::FishingDialogHybrid::new(),
+            intelligent_creature_dialog: crate::scenes::dialogs::game::intelligent_creature_dialog::IntelligentCreatureDialogHybrid::new(),
+            compass_dialog: crate::scenes::dialogs::game::compass_dialog::CompassDialogHybrid::new(),
+            socket_dialog: crate::scenes::dialogs::game::socket_dialog::SocketDialogHybrid::new(),
             option_dialog: OptionDialogHybrid::new(),
             game_shop_dialog: GameShopDialog::new(),
             menu_dialog: MenuDialogHybrid::new(),
@@ -227,6 +282,19 @@ impl MainDialog {
             inventory_dialog_open: false,
             character_dialog_open: false,
             quest_log_dialog_open: false,
+            group_dialog_open: false,
+            friend_dialog_open: false,
+            guild_dialog_open: false,
+            mentor_dialog_open: false,
+            relationship_dialog_open: false,
+            trade_dialog_open: false,
+            mount_dialog_open: false,
+            hero_dialog_open: false,
+            buff_dialog_open: false,
+            fishing_dialog_open: false,
+            intelligent_creature_dialog_open: false,
+            compass_dialog_open: false,
+            socket_dialog_open: false,
             option_dialog_open: false,
             game_shop_dialog_open: false,
             menu_dialog_open: false,
@@ -242,6 +310,19 @@ impl MainDialog {
                 DialogType::Inventory,
                 DialogType::Character,
                 DialogType::QuestLog,
+                DialogType::Group,
+                DialogType::Friend,
+                DialogType::Guild,
+                DialogType::Mentor,
+                DialogType::Relationship,
+                DialogType::Trade,
+                DialogType::Mount,
+                DialogType::Hero,
+                DialogType::Buff,
+                DialogType::Fishing,
+                DialogType::IntelligentCreature,
+                DialogType::Compass,
+                DialogType::Socket,
                 DialogType::Option,
                 DialogType::GameShop,
                 DialogType::Menu,
@@ -259,6 +340,7 @@ impl MainDialog {
             minimap_left_last_click_time: None,
             minimap_right_last_click_time: None,
             minimap_double_click_threshold: Duration::from_millis(260),
+            pending_trade_action: None,
 
             // 攻击模式显示
             attack_mode: 0,
@@ -429,6 +511,19 @@ impl MainDialog {
         self.inventory_dialog.load_textures();
         self.character_dialog.load_textures();
         self.quest_log_dialog.load_textures();
+        self.group_dialog.load_textures();
+        self.friend_dialog.load_textures();
+        self.guild_dialog.load_textures();
+        self.mentor_dialog.load_textures();
+        self.relationship_dialog.load_textures();
+        self.trade_dialog.load_textures();
+        self.mount_dialog.load_textures();
+        self.hero_dialog.load_textures();
+        self.buff_dialog.load_textures();
+        self.fishing_dialog.load_textures();
+        self.intelligent_creature_dialog.load_textures();
+        self.compass_dialog.load_textures();
+        self.socket_dialog.load_textures();
         self.option_dialog.load_textures();
         self.game_shop_dialog.load_textures();
         self.menu_dialog.load_textures();
@@ -454,6 +549,19 @@ impl MainDialog {
         self.inventory_dialog.load_textures();
         self.character_dialog.load_textures();
         self.quest_log_dialog.load_textures();
+        self.group_dialog.load_textures();
+        self.friend_dialog.load_textures();
+        self.guild_dialog.load_textures();
+        self.mentor_dialog.load_textures();
+        self.relationship_dialog.load_textures();
+        self.trade_dialog.load_textures();
+        self.mount_dialog.load_textures();
+        self.hero_dialog.load_textures();
+        self.buff_dialog.load_textures();
+        self.fishing_dialog.load_textures();
+        self.intelligent_creature_dialog.load_textures();
+        self.compass_dialog.load_textures();
+        self.socket_dialog.load_textures();
         self.option_dialog.load_textures();
         self.game_shop_dialog.load_textures();
         self.menu_dialog.load_textures();
@@ -500,6 +608,19 @@ impl MainDialog {
         self.inventory_dialog_open
             || self.character_dialog_open
             || self.quest_log_dialog_open
+            || self.group_dialog_open
+            || self.friend_dialog_open
+            || self.guild_dialog_open
+            || self.mentor_dialog_open
+            || self.relationship_dialog_open
+            || self.trade_dialog_open
+            || self.mount_dialog_open
+            || self.hero_dialog_open
+            || self.buff_dialog_open
+            || self.fishing_dialog_open
+            || self.intelligent_creature_dialog_open
+            || self.compass_dialog_open
+            || self.socket_dialog_open
             || self.option_dialog_open
             || self.game_shop_dialog_open
             || self.menu_dialog_open
@@ -511,6 +632,32 @@ impl MainDialog {
         self.inventory_dialog_open = false;
         self.character_dialog_open = false;
         self.quest_log_dialog_open = false;
+        self.group_dialog_open = false;
+        self.group_dialog.close();
+        self.friend_dialog_open = false;
+        self.friend_dialog.close();
+        self.guild_dialog_open = false;
+        self.guild_dialog.close();
+        self.mentor_dialog_open = false;
+        self.mentor_dialog.close();
+        self.relationship_dialog_open = false;
+        self.relationship_dialog.close();
+        self.trade_dialog_open = false;
+        self.trade_dialog.close();
+        self.mount_dialog_open = false;
+        self.mount_dialog.close();
+        self.hero_dialog_open = false;
+        self.hero_dialog.close();
+        self.buff_dialog_open = false;
+        self.buff_dialog.close();
+        self.fishing_dialog_open = false;
+        self.fishing_dialog.close();
+        self.intelligent_creature_dialog_open = false;
+        self.intelligent_creature_dialog.close();
+        self.compass_dialog_open = false;
+        self.compass_dialog.close();
+        self.socket_dialog_open = false;
+        self.socket_dialog.close();
         self.option_dialog_open = false;
         self.game_shop_dialog_open = false;
         self.menu_dialog_open = false;
@@ -542,6 +689,102 @@ impl MainDialog {
         // H = 切换模式标签显示
         if is_key_pressed(KeyCode::H) {
             self.toggle_mode_view();
+        }
+
+        // G = 切换组队对话框
+        if is_key_pressed(KeyCode::G) && is_key_down(KeyCode::LeftAlt) {
+            self.group_dialog_open = !self.group_dialog_open;
+            if self.group_dialog_open {
+                self.bring_to_front(DialogType::Group);
+            }
+        }
+
+        // F = 切换好友对话框
+        if is_key_pressed(KeyCode::F) && is_key_down(KeyCode::LeftAlt) {
+            self.friend_dialog_open = !self.friend_dialog_open;
+            if self.friend_dialog_open {
+                self.bring_to_front(DialogType::Friend);
+            }
+        }
+
+        // H = 切换行会对话框
+        if is_key_pressed(KeyCode::H) && is_key_down(KeyCode::LeftAlt) {
+            self.guild_dialog_open = !self.guild_dialog_open;
+            if self.guild_dialog_open {
+                self.bring_to_front(DialogType::Guild);
+            }
+        }
+
+        // M = 切换师徒对话框
+        if is_key_pressed(KeyCode::M) && is_key_down(KeyCode::LeftAlt) {
+            self.mentor_dialog_open = !self.mentor_dialog_open;
+            if self.mentor_dialog_open {
+                self.bring_to_front(DialogType::Mentor);
+            }
+        }
+
+        // R = 切换婚姻对话框
+        if is_key_pressed(KeyCode::R) && is_key_down(KeyCode::LeftAlt) {
+            self.relationship_dialog_open = !self.relationship_dialog_open;
+            if self.relationship_dialog_open {
+                self.bring_to_front(DialogType::Relationship);
+            }
+        }
+
+        // T = 切换交易对话框
+        if is_key_pressed(KeyCode::T) && is_key_down(KeyCode::LeftAlt) {
+            self.trade_dialog_open = !self.trade_dialog_open;
+            if self.trade_dialog_open {
+                self.bring_to_front(DialogType::Trade);
+            }
+        }
+
+        // B = 切换坐骑对话框
+        if is_key_pressed(KeyCode::B) && is_key_down(KeyCode::LeftAlt) {
+            self.mount_dialog_open = !self.mount_dialog_open;
+            if self.mount_dialog_open {
+                self.bring_to_front(DialogType::Mount);
+            }
+        }
+
+        // K = 切换英雄对话框
+        if is_key_pressed(KeyCode::K) && is_key_down(KeyCode::LeftAlt) {
+            self.hero_dialog_open = !self.hero_dialog_open;
+            if self.hero_dialog_open {
+                self.bring_to_front(DialogType::Hero);
+            }
+        }
+
+        // Q = 切换钓鱼对话框
+        if is_key_pressed(KeyCode::Q) && is_key_down(KeyCode::LeftAlt) {
+            self.fishing_dialog_open = !self.fishing_dialog_open;
+            if self.fishing_dialog_open {
+                self.bring_to_front(DialogType::Fishing);
+            }
+        }
+
+        // W = 切换智能宠物对话框
+        if is_key_pressed(KeyCode::W) && is_key_down(KeyCode::LeftAlt) {
+            self.intelligent_creature_dialog_open = !self.intelligent_creature_dialog_open;
+            if self.intelligent_creature_dialog_open {
+                self.bring_to_front(DialogType::IntelligentCreature);
+            }
+        }
+
+        // C = 切换罗盘对话框
+        if is_key_pressed(KeyCode::C) && is_key_down(KeyCode::LeftAlt) {
+            self.compass_dialog_open = !self.compass_dialog_open;
+            if self.compass_dialog_open {
+                self.bring_to_front(DialogType::Compass);
+            }
+        }
+
+        // S = 切换宝石镶嵌对话框
+        if is_key_pressed(KeyCode::S) && is_key_down(KeyCode::LeftAlt) {
+            self.socket_dialog_open = !self.socket_dialog_open;
+            if self.socket_dialog_open {
+                self.bring_to_front(DialogType::Socket);
+            }
         }
 
         // Tab = 切换技能模式 (Ctrl+~ 的替代)
@@ -707,6 +950,24 @@ impl MainDialog {
                 DialogType::Inventory => self.sync_and_draw_inventory(&mut consumed, mouse_pos),
                 DialogType::Character => self.sync_and_draw_character(&mut consumed, mouse_pos),
                 DialogType::QuestLog => self.sync_and_draw_quest_log(&mut consumed, mouse_pos),
+                DialogType::Group => self.sync_and_draw_group(&mut consumed, mouse_pos),
+                DialogType::Friend => self.sync_and_draw_friend(&mut consumed, mouse_pos),
+                DialogType::Guild => self.sync_and_draw_guild(&mut consumed, mouse_pos),
+                DialogType::Mentor => self.sync_and_draw_mentor(&mut consumed, mouse_pos),
+                DialogType::Relationship => self.sync_and_draw_relationship(&mut consumed, mouse_pos),
+                DialogType::Trade => {
+                    let trade_action = self.sync_and_draw_trade(&mut consumed, mouse_pos);
+                    if !matches!(trade_action, crate::scenes::dialogs::game::trade_dialog::TradeAction::None) {
+                        self.pending_trade_action = Some(trade_action);
+                    }
+                }
+                DialogType::Mount => self.sync_and_draw_mount(&mut consumed, mouse_pos),
+                DialogType::Hero => self.sync_and_draw_hero(&mut consumed, mouse_pos),
+                DialogType::Buff => self.sync_and_draw_buff(&mut consumed, mouse_pos),
+                DialogType::Fishing => self.sync_and_draw_fishing(&mut consumed, mouse_pos),
+                DialogType::IntelligentCreature => self.sync_and_draw_intelligent_creature(&mut consumed, mouse_pos),
+                DialogType::Compass => self.sync_and_draw_compass(&mut consumed, mouse_pos),
+                DialogType::Socket => self.sync_and_draw_socket(&mut consumed, mouse_pos),
                 DialogType::Option => self.sync_and_draw_option(&mut consumed, mouse_pos),
                 DialogType::GameShop => self.sync_and_draw_shop(&mut consumed, mouse_pos),
                 DialogType::Menu => self.sync_and_draw_menu(&mut consumed, mouse_pos),
@@ -756,6 +1017,19 @@ impl MainDialog {
             DialogType::Inventory => (self.inventory_dialog_open, self.inventory_dialog.contains(mouse_pos)),
             DialogType::Character => (self.character_dialog_open, self.character_dialog.contains(mouse_pos)),
             DialogType::QuestLog => (self.quest_log_dialog_open, self.quest_log_dialog.contains(mouse_pos)),
+            DialogType::Group => (self.group_dialog_open, self.group_dialog.contains(mouse_pos)),
+            DialogType::Friend => (self.friend_dialog_open, self.friend_dialog.contains(mouse_pos)),
+            DialogType::Guild => (self.guild_dialog_open, self.guild_dialog.contains(mouse_pos)),
+            DialogType::Mentor => (self.mentor_dialog_open, self.mentor_dialog.contains(mouse_pos)),
+            DialogType::Relationship => (self.relationship_dialog_open, self.relationship_dialog.contains(mouse_pos)),
+            DialogType::Trade => (self.trade_dialog_open, self.trade_dialog.contains(mouse_pos)),
+            DialogType::Mount => (self.mount_dialog_open, self.mount_dialog.contains(mouse_pos)),
+            DialogType::Hero => (self.hero_dialog_open, self.hero_dialog.contains(mouse_pos)),
+            DialogType::Buff => (self.buff_dialog_open, self.buff_dialog.contains(mouse_pos)),
+            DialogType::Fishing => (self.fishing_dialog_open, self.fishing_dialog.contains(mouse_pos)),
+            DialogType::IntelligentCreature => (self.intelligent_creature_dialog_open, self.intelligent_creature_dialog.contains(mouse_pos)),
+            DialogType::Compass => (self.compass_dialog_open, self.compass_dialog.contains(mouse_pos)),
+            DialogType::Socket => (self.socket_dialog_open, self.socket_dialog.contains(mouse_pos)),
             DialogType::Option => (self.option_dialog_open, self.option_dialog.contains(mouse_pos)),
             DialogType::GameShop => (self.game_shop_dialog_open, self.game_shop_dialog.contains(mouse_pos)),
             DialogType::Menu => (self.menu_dialog_open, self.menu_dialog.contains(mouse_pos)),
@@ -1400,13 +1674,68 @@ impl MainDialog {
             self.menu_dialog.close();
         }
         if let Some(action) = self.menu_dialog.update_and_draw() {
-            self.menu_dialog.handle_action(action);
+            self.handle_menu_action(action);
         }
         if !self.menu_dialog.is_visible() {
             self.menu_dialog_open = false;
         }
         if self.menu_dialog_open && self.menu_dialog.contains(mouse_pos) {
             *consumed = true;
+        }
+    }
+
+    /// 处理菜单对话框触发的动作
+    fn handle_menu_action(&mut self, action: crate::scenes::dialogs::game::menu_dialog::MenuAction) {
+        use crate::scenes::dialogs::game::menu_dialog::MenuAction;
+        match action {
+            MenuAction::Mount => {
+                self.mount_dialog_open = true;
+                self.bring_to_front(DialogType::Mount);
+            }
+            MenuAction::Friends => {
+                self.friend_dialog_open = true;
+                self.bring_to_front(DialogType::Friend);
+            }
+            MenuAction::Mentor => {
+                self.mentor_dialog_open = true;
+                self.bring_to_front(DialogType::Mentor);
+            }
+            MenuAction::Group => {
+                self.group_dialog_open = true;
+                self.bring_to_front(DialogType::Group);
+            }
+            MenuAction::Guild => {
+                self.guild_dialog_open = true;
+                self.bring_to_front(DialogType::Guild);
+            }
+            MenuAction::Relationship => {
+                self.relationship_dialog_open = true;
+                self.bring_to_front(DialogType::Relationship);
+            }
+            MenuAction::Exit => {
+                println!("❌ 退出游戏");
+                std::process::exit(0);
+            }
+            MenuAction::Logout => {
+                println!("🚪 安全下线");
+            }
+            MenuAction::Help => {
+                println!("❓ 显示帮助");
+            }
+            MenuAction::Keyboard => {
+                println!("⌨️ 键盘设置");
+            }
+            MenuAction::Ranking => {
+                println!("🏆 排名榜");
+            }
+            MenuAction::Creature => {
+                self.intelligent_creature_dialog_open = true;
+                self.bring_to_front(DialogType::IntelligentCreature);
+            }
+            MenuAction::Fishing => {
+                self.fishing_dialog_open = true;
+                self.bring_to_front(DialogType::Fishing);
+            }
         }
     }
 
@@ -1595,5 +1924,275 @@ impl MainDialog {
     /// 获取任务日志对话框的可变引用（用于更新进度等）
     pub fn quest_log_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::quest_log_dialog::QuestLogDialogHybrid {
         &mut self.quest_log_dialog
+    }
+
+    fn sync_and_draw_group(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.group_dialog_open {
+            self.group_dialog.open();
+        } else {
+            self.group_dialog.close();
+        }
+        self.group_dialog.update_and_draw();
+        if !self.group_dialog.is_visible() {
+            self.group_dialog_open = false;
+        }
+        if self.group_dialog_open && self.group_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取组队对话框的可变引用
+    pub fn group_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::group_dialog::GroupDialogHybrid {
+        &mut self.group_dialog
+    }
+
+    fn sync_and_draw_friend(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.friend_dialog_open {
+            self.friend_dialog.open();
+        } else {
+            self.friend_dialog.close();
+        }
+        self.friend_dialog.update_and_draw();
+        if !self.friend_dialog.is_visible() {
+            self.friend_dialog_open = false;
+        }
+        if self.friend_dialog_open && self.friend_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取好友对话框的可变引用
+    pub fn friend_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::friend_dialog::FriendDialogHybrid {
+        &mut self.friend_dialog
+    }
+
+    fn sync_and_draw_guild(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.guild_dialog_open {
+            self.guild_dialog.open();
+        } else {
+            self.guild_dialog.close();
+        }
+        self.guild_dialog.update_and_draw();
+        if !self.guild_dialog.is_visible() {
+            self.guild_dialog_open = false;
+        }
+        if self.guild_dialog_open && self.guild_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取行会对话框的可变引用
+    pub fn guild_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::guild_dialog::GuildDialogHybrid {
+        &mut self.guild_dialog
+    }
+
+    fn sync_and_draw_mentor(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.mentor_dialog_open {
+            self.mentor_dialog.open();
+        } else {
+            self.mentor_dialog.close();
+        }
+        self.mentor_dialog.update_and_draw();
+        if !self.mentor_dialog.is_visible() {
+            self.mentor_dialog_open = false;
+        }
+        if self.mentor_dialog_open && self.mentor_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取师徒对话框的可变引用
+    pub fn mentor_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::mentor_dialog::MentorDialogHybrid {
+        &mut self.mentor_dialog
+    }
+
+    fn sync_and_draw_relationship(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.relationship_dialog_open {
+            self.relationship_dialog.open();
+        } else {
+            self.relationship_dialog.close();
+        }
+        self.relationship_dialog.update_and_draw();
+        if !self.relationship_dialog.is_visible() {
+            self.relationship_dialog_open = false;
+        }
+        if self.relationship_dialog_open && self.relationship_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取婚姻对话框的可变引用
+    pub fn relationship_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::relationship_dialog::RelationshipDialogHybrid {
+        &mut self.relationship_dialog
+    }
+
+    fn sync_and_draw_trade(&mut self, consumed: &mut bool, mouse_pos: Vec2) -> crate::scenes::dialogs::game::trade_dialog::TradeAction {
+        if self.trade_dialog_open {
+            if !self.trade_dialog.is_visible() {
+                // 只在从隐藏→可见时初始化，不重置已有的交易内容
+                self.trade_dialog.open_trade("");
+            }
+        } else {
+            self.trade_dialog.close();
+        }
+        let action = self.trade_dialog.update_and_draw();
+        if !self.trade_dialog.is_visible() {
+            self.trade_dialog_open = false;
+        }
+        if self.trade_dialog_open && self.trade_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+        action
+    }
+
+    /// 获取交易对话框的可变引用
+    pub fn trade_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::trade_dialog::TradeDialogHybrid {
+        &mut self.trade_dialog
+    }
+
+    /// 打开交易对话框（由服务器 TradeStarted 事件驱动）
+    pub fn open_trade_dialog(&mut self, partner: &str) {
+        self.trade_dialog_open = true;
+        self.trade_dialog.open_trade(partner);
+        self.bring_to_front(DialogType::Trade);
+    }
+
+    /// 取出暂存的交易动作（由 ui_system.rs 消费发包）
+    pub fn take_pending_trade_action(&mut self) -> Option<crate::scenes::dialogs::game::trade_dialog::TradeAction> {
+        self.pending_trade_action.take()
+    }
+
+    fn sync_and_draw_mount(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.mount_dialog_open {
+            self.mount_dialog.open();
+        } else {
+            self.mount_dialog.close();
+        }
+        self.mount_dialog.update_and_draw();
+        if !self.mount_dialog.is_visible() {
+            self.mount_dialog_open = false;
+        }
+        if self.mount_dialog_open && self.mount_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取坐骑对话框的可变引用
+    pub fn mount_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::mount_dialog::MountDialogHybrid {
+        &mut self.mount_dialog
+    }
+
+    fn sync_and_draw_hero(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.hero_dialog_open {
+            self.hero_dialog.open();
+        } else {
+            self.hero_dialog.close();
+        }
+        self.hero_dialog.update_and_draw();
+        if !self.hero_dialog.is_visible() {
+            self.hero_dialog_open = false;
+        }
+        if self.hero_dialog_open && self.hero_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取英雄对话框的可变引用
+    pub fn hero_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::hero_dialog::HeroDialogHybrid {
+        &mut self.hero_dialog
+    }
+
+    /// 获取增益对话框的可变引用
+    pub fn buff_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::buff_dialog::BuffDialogHybrid {
+        &mut self.buff_dialog
+    }
+
+    fn sync_and_draw_buff(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        let dt = 0.016; // ~60fps
+        let screen_w = screen_width() / screen_dpi_scale();
+        self.buff_dialog.update_and_draw(dt, screen_w);
+        if self.buff_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    fn sync_and_draw_fishing(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.fishing_dialog_open {
+            self.fishing_dialog.open();
+        } else {
+            self.fishing_dialog.close();
+        }
+        self.fishing_dialog.update_and_draw();
+        if !self.fishing_dialog.is_visible() {
+            self.fishing_dialog_open = false;
+        }
+        if self.fishing_dialog_open && self.fishing_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取钓鱼对话框的可变引用
+    pub fn fishing_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::fishing_dialog::FishingDialogHybrid {
+        &mut self.fishing_dialog
+    }
+
+    fn sync_and_draw_intelligent_creature(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.intelligent_creature_dialog_open {
+            self.intelligent_creature_dialog.open();
+        } else {
+            self.intelligent_creature_dialog.close();
+        }
+        self.intelligent_creature_dialog.update_and_draw();
+        if !self.intelligent_creature_dialog.is_visible() {
+            self.intelligent_creature_dialog_open = false;
+        }
+        if self.intelligent_creature_dialog_open && self.intelligent_creature_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取智能宠物对话框的可变引用
+    pub fn intelligent_creature_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::intelligent_creature_dialog::IntelligentCreatureDialogHybrid {
+        &mut self.intelligent_creature_dialog
+    }
+
+    fn sync_and_draw_compass(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.compass_dialog_open {
+            self.compass_dialog.open();
+        } else {
+            self.compass_dialog.close();
+        }
+        self.compass_dialog.update_and_draw();
+        if !self.compass_dialog.is_visible() {
+            self.compass_dialog_open = false;
+        }
+        if self.compass_dialog_open && self.compass_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取罗盘对话框的可变引用
+    pub fn compass_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::compass_dialog::CompassDialogHybrid {
+        &mut self.compass_dialog
+    }
+
+    fn sync_and_draw_socket(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.socket_dialog_open {
+            self.socket_dialog.open();
+        } else {
+            self.socket_dialog.close();
+        }
+        self.socket_dialog.update_and_draw();
+        if !self.socket_dialog.is_visible() {
+            self.socket_dialog_open = false;
+        }
+        if self.socket_dialog_open && self.socket_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取宝石镶嵌对话框的可变引用
+    pub fn socket_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::socket_dialog::SocketDialogHybrid {
+        &mut self.socket_dialog
     }
 }

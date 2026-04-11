@@ -24,6 +24,9 @@ pub struct UIRenderSystem {
     npc_z_order: Vec<NpcUiLayer>,
 
     ui_stack_top: UiStackTop,
+
+    /// 暂存的交易动作（由 draw 阶段产出，由 update 阶段发包）
+    pending_trade_action: Option<crate::scenes::dialogs::game::trade_dialog::TradeAction>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -52,6 +55,7 @@ impl UIRenderSystem {
             npc_z_order: vec![NpcUiLayer::Dialog, NpcUiLayer::Goods, NpcUiLayer::SubGoods],
 
             ui_stack_top: UiStackTop::Main,
+            pending_trade_action: None,
         }
     }
 
@@ -100,7 +104,7 @@ impl RenderSystem for UIRenderSystem {
             .query::<&UiState>()
             .iter()
             .next()
-            .map(|(_, s)| std::mem::take(&mut s.borrow_mut().pending_commands))
+            .map(|s| std::mem::take(&mut s.borrow_mut().pending_commands))
             .unwrap_or_default();
         for cmd in commands {
             match cmd {
@@ -116,7 +120,7 @@ impl RenderSystem for UIRenderSystem {
                     self.npc_goods_dialog.hide();
                     self.npc_sub_goods_dialog.hide();
                     self.amount_box.hide();
-                    if let Some((_e, s)) = ctx.world.query::<&UiState>().iter().next() {
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
                         s.borrow_mut().amount_box_buy_uid = None;
                     }
                     self.npc_dialog.new_dialog(dialog);
@@ -159,13 +163,13 @@ impl RenderSystem for UIRenderSystem {
                         min_quantity,
                         default_amount,
                     );
-                    if let Some((_e, s)) = ctx.world.query::<&UiState>().iter().next() {
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
                         s.borrow_mut().amount_box_buy_uid = Some(buy_uid);
                     }
                 }
                 UiCommand::HideAmountBox => {
                     self.amount_box.hide();
-                    if let Some((_e, s)) = ctx.world.query::<&UiState>().iter().next() {
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
                         s.borrow_mut().amount_box_buy_uid = None;
                     }
                 }
@@ -174,6 +178,114 @@ impl RenderSystem for UIRenderSystem {
                 }
                 UiCommand::HideNpcGoods => {
                     self.npc_goods_dialog.hide();
+                }
+                UiCommand::UpdateMountState { mount_type, riding } => {
+                    self.main_dialog.mount_dialog_mut().update_mount_state(mount_type, riding);
+                }
+                UiCommand::UpdateHeroBehaviour { behaviour } => {
+                    if let Ok(b) = behaviour.try_into() {
+                        self.main_dialog.hero_dialog_mut().set_behaviour(b);
+                    }
+                }
+                UiCommand::PushHeroSystemChat(msg) => {
+                    self.main_dialog.push_system_chat_line(msg);
+                }
+                UiCommand::UpdateFishingState { state, chance, progress } => {
+                    self.main_dialog.fishing_dialog_mut().update_fishing_state(state, chance, progress);
+                }
+                UiCommand::SetFishingAutoCast { enabled } => {
+                    self.main_dialog.fishing_dialog_mut().set_auto_cast(enabled);
+                }
+                UiCommand::AddBuff { buff } => {
+                    self.main_dialog.buff_dialog_mut().add_buff(buff.clone());
+                }
+                UiCommand::RemoveBuff { buff_type } => {
+                    self.main_dialog.buff_dialog_mut().remove_buff(buff_type);
+                }
+                UiCommand::UpdateCreatureList { creatures } => {
+                    self.main_dialog.intelligent_creature_dialog_mut().update_creatures(creatures.clone());
+                }
+                UiCommand::UpdateFriendList { friends } => {
+                    let friend_infos: Vec<crate::scenes::dialogs::game::friend_dialog::FriendInfo> = friends
+                        .iter()
+                        .map(|f| crate::scenes::dialogs::game::friend_dialog::FriendInfo {
+                            object_id: f.object_id,
+                            name: f.name.clone(),
+                            memo: f.memo.clone(),
+                            online: f.online,
+                        })
+                        .collect();
+                    self.main_dialog.friend_dialog_mut().update_friends(friend_infos);
+                }
+                UiCommand::SetHeroAutoPotUnlocked => {
+                    tracing::debug!("Hero auto-pot unlocked");
+                }
+                UiCommand::SetHeroAutoPotValue { pot_type, value } => {
+                    tracing::debug!("Hero auto-pot value set: type={} value={}", pot_type, value);
+                }
+                UiCommand::SetHeroAutoPotItem { item_id } => {
+                    tracing::debug!("Hero auto-pot item set: {}", item_id);
+                }
+                UiCommand::SetBuffPaused { buff_id, paused } => {
+                    self.main_dialog.buff_dialog_mut().set_buff_paused(buff_id, paused);
+                }
+                UiCommand::UpdateCompass { direction } => {
+                    let dir = crate::scenes::dialogs::game::compass_dialog::CompassDirection::from_u8(direction);
+                    self.main_dialog.compass_dialog_mut().set_direction(dir);
+                }
+                UiCommand::OpenTradeDialog { partner } => {
+                    self.main_dialog.open_trade_dialog(&partner);
+                }
+                UiCommand::TradeGoldAdded { amount } => {
+                    self.main_dialog.trade_dialog_mut().add_their_gold(amount);
+                }
+                UiCommand::TradeItemAdded => {
+                    // 由 TradeDialog 内部通过 take_action 同步，此处仅作日志
+                    tracing::debug!("Trade item added (server-side sync)");
+                }
+                UiCommand::TradeConfirmed { locked } => {
+                    self.main_dialog.trade_dialog_mut().set_partner_confirmed(locked);
+                }
+                UiCommand::TradeCancelled => {
+                    self.main_dialog.trade_dialog_mut().reset_confirmations();
+                }
+                UiCommand::QuestAccepted { quest_id, name, description } => {
+                    self.main_dialog.quest_log_dialog_mut().add_quest(crate::scenes::dialogs::game::quest_log_dialog::QuestInfo {
+                        id: quest_id,
+                        name: name.clone(),
+                        description: description.clone(),
+                        npc_name: String::new(),
+                        status: crate::scenes::dialogs::game::quest_log_dialog::QuestStatus::Accepted,
+                        progress: 0,
+                        max_progress: 1,
+                        level_required: 0,
+                        rewards: crate::scenes::dialogs::game::quest_log_dialog::QuestRewards {
+                            experience: 0,
+                            gold: 0,
+                            items: Vec::new(),
+                        },
+                        group: String::new(),
+                    });
+                }
+                UiCommand::QuestCompleted { quest_id } => {
+                    self.main_dialog.quest_log_dialog_mut().notify_quest_complete(quest_id);
+                    self.main_dialog.quest_log_dialog_mut().remove_quest(quest_id);
+                }
+                UiCommand::QuestProgressUpdated { quest_id, progress_text } => {
+                    self.main_dialog.quest_log_dialog_mut().update_quest_progress_from_text(quest_id, progress_text.as_str());
+                }
+                // 公会扩展事件
+                UiCommand::GuildMemberUpdated { name, rank, online } => {
+                    self.main_dialog.guild_dialog_mut().update_member(name.clone(), rank.clone(), online);
+                }
+                UiCommand::GuildNoticeUpdated { notice } => {
+                    self.main_dialog.guild_dialog_mut().update_notice(notice.clone());
+                }
+                UiCommand::GuildExpGained { amount } => {
+                    self.main_dialog.push_system_chat_line(format!("行会经验 +{}", amount));
+                }
+                UiCommand::GuildWarRequested => {
+                    self.main_dialog.push_system_chat_line("行会战请求！".to_string());
                 }
             }
         }
@@ -184,7 +296,7 @@ impl RenderSystem for UIRenderSystem {
                 .query::<&UiState>()
                 .iter()
                 .next()
-                .map(|(_, s)| {
+                .map(|s| {
                     let s = s.borrow();
                     (
                         s.minimap_world_size,
@@ -207,7 +319,11 @@ impl RenderSystem for UIRenderSystem {
             use crate::components::{Health, LocalPlayer, Mana};
 
             let mut q = ctx.world.query::<(&LocalPlayer, &Health)>();
-            if let Some((e, (_lp, hp))) = q.iter().next() {
+            if let Some((e, _lp, hp)) = ctx.world.iter().find_map(|e| {
+                let lp = e.get::<&LocalPlayer>()?;
+                let hp = e.get::<&Health>()?;
+                Some((e.entity(), lp, hp))
+            }) {
                 let (mp_cur, mp_max) = ctx
                     .world
                     .get::<&Mana>(e)
@@ -224,7 +340,11 @@ impl RenderSystem for UIRenderSystem {
             use crate::components::{CombatStats, Currency, Experience, Inventory, LocalPlayer};
 
             let mut q = ctx.world.query::<(&LocalPlayer, &CombatStats)>();
-            if let Some((e, (_lp, stats))) = q.iter().next() {
+            if let Some((e, _lp, stats)) = ctx.world.iter().find_map(|e| {
+                let lp = e.get::<&LocalPlayer>()?;
+                let stats = e.get::<&CombatStats>()?;
+                Some((e.entity(), lp, stats))
+            }) {
                 let exp = ctx.world.get::<&Experience>(e).ok().map(|e| e.percent()).unwrap_or(0.0);
                 let currency = ctx.world.get::<&Currency>(e)
                     .map(|c| c.gold)
@@ -273,7 +393,7 @@ impl RenderSystem for UIRenderSystem {
         if is_key_pressed(KeyCode::Escape) {
             if self.amount_box.is_visible() {
                 self.amount_box.hide();
-                if let Some((_e, s)) = ctx.world.query::<&UiState>().iter().next() {
+                if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
                     s.borrow_mut().amount_box_buy_uid = None;
                 }
             } else if self.npc_sub_goods_dialog.is_visible() {
@@ -307,7 +427,7 @@ impl RenderSystem for UIRenderSystem {
             .query::<&UiState>()
             .iter()
             .next()
-            .map(|(_, s)| s.borrow().ui_mouse_captured)
+            .map(|s| s.borrow().ui_mouse_captured)
             .unwrap_or(false);
         if (left_pressed || right_pressed) && ui_over {
             ui_mouse_captured = true;
@@ -315,12 +435,12 @@ impl RenderSystem for UIRenderSystem {
         if ui_mouse_captured && !mouse_button_down {
             ui_mouse_captured = false;
         }
-        if let Some((_e, s)) = ctx.world.query::<&UiState>().iter().next() {
+        if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
             s.borrow_mut().ui_mouse_captured = ui_mouse_captured;
         }
 
         // 写入 ECS 单例：UiWorldInputBlock（与 UiState 同挂在 RenderPass 实体上）
-        if let Some((pass_entity, _)) = ctx.world.query::<&UiState>().iter().next() {
+        if let Some((pass_entity, _)) = ctx.world.iter().find_map(|e| e.get::<&UiState>().map(|ui| (e.entity(), ui))) {
             if let Ok(mut block) = ctx.world.get::<&mut UiWorldInputBlock>(pass_entity) {
                 block.mouse_over_ui = ui_over;
                 block.mouse_captured = ui_mouse_captured;
@@ -334,7 +454,7 @@ impl RenderSystem for UIRenderSystem {
             .query::<&UiState>()
             .iter()
             .next()
-            .map(|(_, s)| s.borrow().ui_consumed_last_frame)
+            .map(|s| s.borrow().ui_consumed_last_frame)
             .unwrap_or(false);
 
         ctx.input_blocked = ui_input_active
@@ -344,7 +464,7 @@ impl RenderSystem for UIRenderSystem {
             || amount_box_visible;
 
         // 5) 更新 UiState 的可观察标记（供 GameScene 做 ESC 退出 gating 等）
-        if let Some((_e, s)) = ctx.world.query::<&UiState>().iter().next() {
+        if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
             let mut s = s.borrow_mut();
             s.ui_input_active = ui_input_active;
             s.any_modal_or_popup_open = self.main_dialog.any_popup_open()
@@ -355,7 +475,7 @@ impl RenderSystem for UIRenderSystem {
         }
 
         // Scene 退出 gating：避免 Scene 直接读取 UiState 内部结构。
-        if let Some((pass_entity, _)) = ctx.world.query::<&UiState>().iter().next() {
+        if let Some((pass_entity, _)) = ctx.world.iter().find_map(|e| e.get::<&UiState>().map(|ui| (e.entity(), ui))) {
             let any_modal_or_popup_open = ctx
                 .world
                 .get::<&UiState>(pass_entity)
@@ -363,6 +483,281 @@ impl RenderSystem for UIRenderSystem {
                 .unwrap_or(false);
             if let Ok(mut b) = ctx.world.get::<&mut SceneExitBlock>(pass_entity) {
                 b.block_escape_exit = any_modal_or_popup_open;
+            }
+        }
+
+        // 组队对话框动作（本地切换 + 网络发包）
+        {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::group_dialog::GroupDialogAction;
+            let gd = self.main_dialog.group_dialog_mut();
+            let action = gd.take_action();
+            match action {
+                GroupDialogAction::AllowJoinToggle => {
+                    if gd.is_leader() {
+                        let current = gd.allow_join();
+                        gd.set_allow_join(!current);
+                    }
+                }
+                GroupDialogAction::Invite => {
+                    tracing::info!("👥 邀请组队功能待实现");
+                }
+                GroupDialogAction::Leave => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::GroupLeaveRequest);
+                    }
+                }
+                GroupDialogAction::KickSelected => {
+                    let _name = gd.get_selected_member_name();
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::GroupDeclineRequest);
+                    }
+                }
+                GroupDialogAction::None => {}
+            }
+        }
+
+        // 好友对话框动作
+        {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::friend_dialog::FriendDialogAction;
+            let fd = self.main_dialog.friend_dialog_mut();
+            let action = fd.take_action();
+            match action {
+                FriendDialogAction::AddFriend => {
+                    tracing::info!("👤 添加好友功能待实现（需弹出输入框）");
+                }
+                FriendDialogAction::RemoveSelected => {
+                    if let Some(object_id) = fd.get_selected_friend_object_id() {
+                        if let Some(net) = ctx.net.as_ref() {
+                            let _ = net.send(NetEv::RemoveFriendRequest { object_id });
+                        }
+                    }
+                }
+                FriendDialogAction::RefreshList => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::RefreshFriendsRequest);
+                    }
+                }
+                FriendDialogAction::PrivateChatSelected => {
+                    tracing::info!("💬 私聊功能待实现");
+                }
+                FriendDialogAction::None => {}
+            }
+        }
+
+        // 行会对话框动作
+        {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::guild_dialog::GuildDialogAction;
+            let gld = self.main_dialog.guild_dialog_mut();
+            let action = gld.take_action();
+            match action {
+                GuildDialogAction::LeaveGuild => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::GuildLeaveRequest);
+                    }
+                }
+                GuildDialogAction::RequestGuildInfo => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::RequestGuildInfo);
+                    }
+                }
+                GuildDialogAction::EditNotice(notice) => {
+                    tracing::info!("📝 编辑行会公告待实现（需输入框）");
+                    let _ = notice;
+                }
+                GuildDialogAction::EditMemberRank { ref name, ref rank } => {
+                    let _ = (name, rank);
+                    tracing::info!("👤 管理行会成员待实现");
+                }
+                GuildDialogAction::None => {}
+            }
+        }
+
+        // 师徒对话框动作
+        {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::mentor_dialog::MentorDialogAction;
+            let md = self.main_dialog.mentor_dialog_mut();
+            let action = md.take_action();
+            match action {
+                MentorDialogAction::AddMentor => {
+                    tracing::info!("👤 拜师功能待实现（需弹出输入框）");
+                }
+                MentorDialogAction::CancelMentor => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::CancelMentorRequest);
+                    }
+                }
+                MentorDialogAction::ToggleAllowRequest => {
+                    md.set_allow_request(!md.allow_request());
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::AllowMentorRequest { enabled: md.allow_request() });
+                    }
+                }
+                MentorDialogAction::AcceptMentor => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::MentorReply { accept: true });
+                    }
+                }
+                MentorDialogAction::DeclineMentor => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::MentorReply { accept: false });
+                    }
+                }
+                MentorDialogAction::None => {}
+            }
+        }
+
+        // 婚姻对话框动作
+        {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::relationship_dialog::RelationshipDialogAction;
+            let rd = self.main_dialog.relationship_dialog_mut();
+            let action = rd.take_action();
+            match action {
+                RelationshipDialogAction::RequestDivorce => {
+                    tracing::info!("💔 离婚功能待实现（需确认弹窗）");
+                }
+                RelationshipDialogAction::RequestMarriage => {
+                    tracing::info!("💍 求婚功能待实现");
+                }
+                RelationshipDialogAction::AcceptMarriage => {
+                    tracing::info!("💍 接受求婚（需服务端触发）");
+                }
+                RelationshipDialogAction::DeclineMarriage => {
+                    tracing::info!("💍 拒绝求婚（需服务端触发）");
+                }
+                RelationshipDialogAction::None => {}
+            }
+        }
+
+        // 坐骑对话框动作
+        {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::mount_dialog::MountDialogAction;
+            let md = self.main_dialog.mount_dialog_mut();
+            let action = md.take_action();
+            match action {
+                MountDialogAction::Ride => {
+                    if let Some(mount_type) = md.get_selected_mount_type() {
+                        if let Some(net) = ctx.net.as_ref() {
+                            let _ = net.send(NetEv::MountRideRequest { mount_type });
+                        }
+                    }
+                }
+                MountDialogAction::Dismount => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::MountDismountRequest);
+                    }
+                }
+                MountDialogAction::SelectMount(idx) => {
+                    tracing::debug!("Mount selected: index={}", idx);
+                }
+                MountDialogAction::None => {}
+            }
+        }
+
+        // 英雄对话框动作
+        {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::hero_dialog::HeroDialogAction;
+            let hd = self.main_dialog.hero_dialog_mut();
+            let action = hd.take_action();
+            match action {
+                HeroDialogAction::SetBehaviour(behaviour) => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::SetHeroBehaviourRequest { behaviour: behaviour as u8 });
+                    }
+                }
+                HeroDialogAction::ChangeHero(hero_index) => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::ChangeHeroRequest { hero_index });
+                    }
+                }
+                HeroDialogAction::SetAutoHpPot { value } => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::SetHeroAutoPotValue { pot_type: 0, value });
+                    }
+                }
+                HeroDialogAction::SetAutoMpPot { value } => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::SetHeroAutoPotValue { pot_type: 1, value });
+                    }
+                }
+                HeroDialogAction::None => {}
+            }
+        }
+
+        // 钓鱼对话框动作
+        {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            let fd = self.main_dialog.fishing_dialog_mut();
+            if let Some(enabled) = fd.take_pending_autocast() {
+                if let Some(net) = ctx.net.as_ref() {
+                    let _ = net.send(NetEv::FishingAutocastToggle { enabled });
+                }
+            }
+        }
+
+        // 智能宠物对话框动作
+        {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::intelligent_creature_dialog::CreatureDialogAction;
+            let cd = self.main_dialog.intelligent_creature_dialog_mut();
+            let action = cd.take_action();
+            match action {
+                CreatureDialogAction::SummonCreature(idx) => {
+                    tracing::debug!("Summon creature: index={}", idx);
+                }
+                CreatureDialogAction::DismissCreature => {
+                    tracing::debug!("Dismiss creature");
+                }
+                CreatureDialogAction::ReleaseCreature(idx) => {
+                    tracing::debug!("Release creature: index={}", idx);
+                }
+                CreatureDialogAction::ToggleMode => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::UpdateIntelligentCreatureRequest);
+                    }
+                }
+                CreatureDialogAction::OpenOptions => {
+                    tracing::debug!("Open creature options (not implemented)");
+                }
+                CreatureDialogAction::None => {}
+            }
+        }
+
+        // 交易对话框动作（由 draw 阶段产出，在此发包）
+        if let Some(action) = self.pending_trade_action.take() {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::trade_dialog::TradeAction;
+            match action {
+                TradeAction::Confirm => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::TradeConfirmRequest { locked: true });
+                    }
+                }
+                TradeAction::Cancel => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::TradeCancelRequest);
+                    }
+                }
+                TradeAction::SetGold { amount } => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::TradeGoldRequest { amount });
+                    }
+                }
+                TradeAction::AddItem { item_index } => {
+                    let _ = item_index;
+                    tracing::info!("📦 添加物品到交易栏（需背包联动）");
+                }
+                TradeAction::RemoveItem { slot_index } => {
+                    let _ = slot_index;
+                    tracing::info!("📤 从交易栏移除物品");
+                }
+                TradeAction::None => {}
             }
         }
 
@@ -374,7 +769,7 @@ impl RenderSystem for UIRenderSystem {
             .query::<&RenderPass>()
             .iter()
             .next()
-            .map(|(_, pass)| *pass)
+            .map(|pass| *pass)
             .unwrap_or_default();
 
         if pass.stage != RenderStage::Ui {
@@ -385,7 +780,7 @@ impl RenderSystem for UIRenderSystem {
             .query::<&ResourceInitState>()
             .iter()
             .next()
-            .map(|(_, s)| s.initialized)
+            .map(|s| s.initialized)
             .unwrap_or(false);
 
         // 资源未初始化时，仅显示加载提示，避免 UI 组件访问未就绪资源。
@@ -468,7 +863,7 @@ impl RenderSystem for UIRenderSystem {
                                     action,
                                     crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::None
                                 ) {
-                                    if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
+                                    if let Some(s) = _world.query::<&UiState>().iter().next() {
                                         s.borrow_mut().pending_actions.push(UiAction::NpcDialog(action));
                                     }
                                 }
@@ -513,7 +908,7 @@ impl RenderSystem for UIRenderSystem {
                                     action,
                                     crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::None
                                 ) {
-                                    if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
+                                    if let Some(s) = _world.query::<&UiState>().iter().next() {
                                         s.borrow_mut().pending_actions.push(UiAction::NpcDialog(action));
                                     }
                                 }
@@ -548,25 +943,32 @@ impl RenderSystem for UIRenderSystem {
 
         // UI -> ECS：小地图点击自动寻路（在 show_dialogs 后取，保证同帧可用）
         if let Some(target) = self.main_dialog.take_pending_auto_path_target() {
-            if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
+            if let Some(s) = _world.query::<&UiState>().iter().next() {
                 s.borrow_mut().pending_auto_path_target = Some(target);
             }
         }
 
+        // 交易对话框动作（draw 阶段产出，存入 pending，update 阶段发包）
+        if let Some(action) = self.main_dialog.take_pending_trade_action() {
+            self.pending_trade_action = Some(action);
+        }
+
         if let Some(action) = self.npc_goods_dialog.take_action() {
-            if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
+            if let Some(s) = _world.query::<&UiState>().iter().next() {
                 s.borrow_mut()
                     .pending_actions
                     .push(UiAction::NpcGoods(action));
             }
         }
         if let Some(action) = self.npc_sub_goods_dialog.take_action() {
-            if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
+            if let Some(s) = _world.query::<&UiState>().iter().next() {
                 s.borrow_mut()
                     .pending_actions
                     .push(UiAction::NpcSubGoods(action));
             }
         }
+
+        // 组队对话框动作已移至 update 处理（含网络发包）
 
         // 数量框（modal，最上层）
         let mut amount_consumed = false;
@@ -577,13 +979,13 @@ impl RenderSystem for UIRenderSystem {
                 r,
                 crate::scenes::dialogs::game::amount_box::AmountBoxResult::None
             ) {
-                if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
+                if let Some(s) = _world.query::<&UiState>().iter().next() {
                     s.borrow_mut().pending_actions.push(UiAction::AmountBox(r));
                 }
             }
         }
 
-        if let Some((_e, s)) = _world.query::<&UiState>().iter().next() {
+        if let Some(s) = _world.query::<&UiState>().iter().next() {
             s.borrow_mut().ui_consumed_last_frame = ui_consumed
                 || npc_consumed
                 || npc_sub_consumed
@@ -601,7 +1003,7 @@ impl RenderSystem for UIRenderSystem {
             const RESPAWN_DELAY_SECS: f32 = 5.0;
 
             let mut q = _world.query::<(&LocalPlayer, &Health, &DeathState)>();
-            if let Some((_e, (_lp, hp, ds))) = q.iter().next() {
+            if let Some((_lp, hp, ds)) = q.iter().next() {
                 if hp.current <= 0 {
                     let elapsed = std::time::Instant::now()
                         .duration_since(ds.start_time)

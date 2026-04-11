@@ -1220,10 +1220,12 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             tracing::debug!("📤 AddFriend: name={}", name);
         }
 
-        NetworkEvent::RemoveFriendRequest { name: _ } => {
-            // RemoveFriend requires character_index (i32), but event only has name.
-            // Log and skip for now - would need a name→index lookup.
-            tracing::debug!("📤 RemoveFriend skipped: requires character_index, got name");
+        NetworkEvent::RemoveFriendRequest { object_id } => {
+            let packet = client::friend::RemoveFriend {
+                character_index: object_id as i32,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RemoveFriend: object_id={}", object_id);
         }
 
         NetworkEvent::RefreshFriendsRequest => {
@@ -1232,9 +1234,13 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             tracing::debug!("📤 RefreshFriends");
         }
 
-        NetworkEvent::AddMemoRequest { name: _, memo: _ } => {
-            // AddMemo requires character_index (i32), but event only has name+memo.
-            tracing::debug!("📤 AddMemo skipped: requires character_index, got name+memo");
+        NetworkEvent::AddMemoRequest { object_id, memo } => {
+            let packet = client::friend::AddMemo {
+                character_index: object_id as i32,
+                memo: memo.clone(),
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 AddMemo: object_id={} memo={}", object_id, memo);
         }
 
         // ===== 公会扩展 =====
@@ -1662,6 +1668,15 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 FishingChangeAutocast: enabled={}", enabled);
+        }
+
+        // ===== 坐骑操作 =====
+        // 注意：当前协议无独立坐骑发包，通常通过 NPC 对话触发
+        NetworkEvent::MountRideRequest { mount_type } => {
+            tracing::debug!("🐴 MountRideRequest (type={}) - 需通过 NPC 触发，暂未实现发包", mount_type);
+        }
+        NetworkEvent::MountDismountRequest => {
+            tracing::debug!("🐴 MountDismountRequest - 需通过 NPC 触发，暂未实现发包");
         }
 
         // ===== 转生 =====
