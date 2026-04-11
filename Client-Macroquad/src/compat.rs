@@ -108,11 +108,12 @@ pub use macroquad::prelude::MouseButton;
 // ============================================================================
 
 /// MapLoader 占位符结构
+/// 注意：实际地图加载由 MapLoadSystem 处理，此结构仅保留接口兼容。
 pub struct MapLoader;
 
 impl MapLoader {
     pub fn load_map(_world: &mut hecs::World, _reader: impl std::any::Any) -> GameResult<()> {
-        // TODO: 实现地图加载
+        // 实际地图加载由 MapLoadSystem 处理
         Ok(())
     }
 }
