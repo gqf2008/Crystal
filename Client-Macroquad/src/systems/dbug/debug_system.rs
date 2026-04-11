@@ -518,12 +518,21 @@ impl DebugSystem {
             return;
         }
 
-        let entity = world.iter().find_map(|e| {
+        let Some(entity) = world.iter().find_map(|e| {
             if e.get::<&LocalPlayer>().is_some() {
                 return Some(e.entity());
             }
             None
-        }).unwrap();
+        }) else {
+            draw_text(
+                "LocalPlayer: <not found>",
+                12.0,
+                46.0,
+                18.0,
+                Color::from_rgba(255, 255, 255, 220),
+            );
+            return;
+        };
         let mut q = world.query::<(&LocalPlayer, &Position, &Player)>();
         let Some((_lp, pos, player)) = q.iter().next() else {
             draw_text(

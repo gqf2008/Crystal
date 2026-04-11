@@ -41,11 +41,11 @@ impl SpriteRenderSystem {
     // 坐骑时，人物在坐骑上的上移（纯视觉，不影响碰撞/寻路）
     const MOUNT_RIDER_OFFSET_Y_PX: f32 = -24.0;
 
-    // 坐骑时翅膀的额外上移：翅膀应更贴合“人在坐骑上更高”的观感。
+    // 坐骑时翅膀的额外上移：翅膀应更贴合"人在坐骑上更高"的观感。
     // 若你觉得还不够/太多，优先调这个常量。
     const MOUNT_WING_OFFSET_Y_PX: f32 = -24.0;
 
-    // 坐骑时翅膀的额外水平偏移：用于修正“翅膀偏左”。
+    // 坐骑时翅膀的额外水平偏移：用于修正"翅膀偏左"。
     const MOUNT_WING_OFFSET_X_PX: f32 = 12.0;
 
     /// 渲染单个角色
@@ -277,7 +277,7 @@ impl SpriteRenderSystem {
             }
         }
 
-        // 骑乘时，人物应使用 Mount* 动作帧（否则会看到“人在坐骑上还在跑路/跑步姿势”）
+        // 骑乘时，人物应使用 Mount* 动作帧（否则会看到"人在坐骑上还在跑路/跑步姿势"）
         // Mount* 人物帧本身已经包含与坐骑对齐的绘制偏移。
         let mut rider_base_frame = base_frame;
         let mut rider_weapon_frame = weapon_frame;
@@ -301,9 +301,9 @@ impl SpriteRenderSystem {
                 _ => mir2_shared::enums::MirAction::Standing,
             };
 
-            // 关键：不要用“本帧是否成功画出坐骑(mount_drawn)”来决定人物是否骑乘。
+            // 关键：不要用"本帧是否成功画出坐骑(mount_drawn)"来决定人物是否骑乘。
             // mount_drawn 可能因资源缺帧而抖动，导致人物一会儿上、一会儿下。
-            // 这里用一个“稳定采样帧(当前方向 idx=0)”来判断该 armour 是否真的有 Mount* 身体帧段；
+            // 这里用一个"稳定采样帧(当前方向 idx=0)"来判断该 armour 是否真的有 Mount* 身体帧段；
             // 若没有，则整段动作都回退到普通帧，避免随着 current 帧索引变化而来回切换。
             let dir = player.direction as u8 as i32;
 
@@ -322,47 +322,49 @@ impl SpriteRenderSystem {
                 mount_sample_ok = layer_has_valid_body_texture(armour_library, sample_base + body_hair_offset);
             }
 
-            if mount_base.is_some() && mount_sample_ok {
-                rider_base_frame = mount_base.unwrap();
-                rider_weapon_frame = weapon_frame;
-                rider_uses_mount_frames = true;
-            } else {
-                // 回退到普通动作帧（并选一个能画出来的身体帧，避免“有坐骑但没身体/外观”）
-                let mut fallback_base = base_frame;
-                if let Some(frame) = get_player_frame(normal_action) {
-                    let interval = frame.interval.max(1);
-                    let count = frame.count.max(1);
-                    let tick = animation_count * 100 / interval;
-                    let current = tick % count;
-                    fallback_base = frame.start + (dir * frame.offset()) + current;
-                }
-
-                let candidates = [fallback_base, 0, 1, 2, base_frame];
-                let mut chosen: Option<i32> = None;
-                for b in candidates {
-                    if layer_has_texture(armour_library, b + body_hair_offset) {
-                        chosen = Some(b);
-                        break;
+            if let Some(base) = mount_base {
+                if mount_sample_ok {
+                    rider_base_frame = base;
+                    rider_weapon_frame = weapon_frame;
+                    rider_uses_mount_frames = true;
+                } else {
+                    // 回退到普通动作帧（并选一个能画出来的身体帧，避免"有坐骑但没身体/外观"）
+                    let mut fallback_base = base_frame;
+                    if let Some(frame) = get_player_frame(normal_action) {
+                        let interval = frame.interval.max(1);
+                        let count = frame.count.max(1);
+                        let tick = animation_count * 100 / interval;
+                        let current = tick % count;
+                        fallback_base = frame.start + (dir * frame.offset()) + current;
                     }
+
+                    let candidates = [fallback_base, 0, 1, 2, base_frame];
+                    let mut chosen: Option<i32> = None;
+                    for b in candidates {
+                        if layer_has_texture(armour_library, b + body_hair_offset) {
+                            chosen = Some(b);
+                            break;
+                        }
+                    }
+                    rider_base_frame = chosen.unwrap_or(fallback_base);
+
+                    rider_weapon_frame = weapon_frame;
+                    rider_uses_mount_frames = false;
+
+                    static MOUNT_ARMOUR_MISSING_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+                    let _ = MOUNT_ARMOUR_MISSING_ONCE.set(()).map(|_| {
+                        eprintln!(
+                            "[WARN][SpriteRenderSystem] mounted armour mount-frames unavailable: armour_lib={:?} mount_sample_ok={} chosen_base={:?} (fallback to normal frames)",
+                            armour_library,
+                            mount_sample_ok,
+                            chosen
+                        );
+                    });
                 }
-                rider_base_frame = chosen.unwrap_or(fallback_base);
-
-                rider_weapon_frame = weapon_frame;
-                rider_uses_mount_frames = false;
-
-                static MOUNT_ARMOUR_MISSING_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-                let _ = MOUNT_ARMOUR_MISSING_ONCE.set(()).map(|_| {
-                    eprintln!(
-                        "[WARN][SpriteRenderSystem] mounted armour mount-frames unavailable: armour_lib={:?} mount_sample_ok={} chosen_base={:?} (fallback to normal frames)",
-                        armour_library,
-                        mount_sample_ok,
-                        chosen
-                    );
-                });
             }
         }
 
-        // 人物位置的骑乘修正必须仅依赖“是否骑乘(mounted)”，不能依赖 mount_drawn。
+        // 人物位置的骑乘修正必须仅依赖"是否骑乘(mounted)"，不能依赖 mount_drawn。
         // 否则坐骑资源缺帧时会导致人物一会儿上、一会儿下。
         // 若使用 Mount* 人物帧，不再额外上移；否则用旧偏移做兜底对齐。
         let actor_pos = if mounted {
@@ -377,7 +379,7 @@ impl SpriteRenderSystem {
 
         // 翅膀：本项目使用 CHumEffect 作为人物特效库。
         // 关键点：骑乘时人物身体会切换到 Mount* 帧段(416+)，但 CHumEffect 往往按普通动作帧布局。
-        // 所以这里把 Mount* 帧映射回普通 Standing/Walking/Running 帧段，避免“抽到奇怪帧导致位置/效果怪”。
+        // 所以这里把 Mount* 帧映射回普通 Standing/Walking/Running 帧段，避免"抽到奇怪帧导致位置/效果怪"。
         if appearance.wing_effect > 0 {
             // C# 原版 SetLibraries(): WingLibrary = Libraries.CHumEffect[WingEffect - 1]
             let wing_lib_index = (appearance.wing_effect - 1) as usize;
@@ -385,7 +387,7 @@ impl SpriteRenderSystem {
 
             // 对齐 C# PlayerObject.SetLibraries():
             // - WingOffset: 男=0，女=840（altAnim 暂未实现，先走最常见路径）
-            // 若不加这个偏移，女号会从翅膀库里取到“另一套帧段”，表现为错位/叠影。
+            // 若不加这个偏移，女号会从翅膀库里取到"另一套帧段"，表现为错位/叠影。
             let wing_offset = if appearance.gender == crate::components::MirGender::Male {
                 0
             } else {
@@ -426,7 +428,7 @@ impl SpriteRenderSystem {
 
             // 翅膀位置：
             // - 若人物已切换到 Mount* 帧段（rider_uses_mount_frames=true），库内 offset 已与坐骑对齐，
-            //   再叠加人工偏移容易导致“翅膀飘/歪”。
+            //   再叠加人工偏移容易导致"翅膀飘/歪"。
             // - 只有在未能切到 Mount* 帧段、使用旧的 rider 偏移兜底时，才需要额外修正翅膀位置。
             let wing_pos = if mounted && !rider_uses_mount_frames {
                 Position::new(
@@ -477,7 +479,7 @@ impl SpriteRenderSystem {
                 }
             }
 
-            // 兜底：如果候选帧都不存在，首次扫描前 64 帧找一个“能画出来”的帧。
+            // 兜底：如果候选帧都不存在，首次扫描前 64 帧找一个"能画出来"的帧。
             if !wing_drawn {
                 static WING_PROBE_ONCE: std::sync::OnceLock<Option<i32>> = std::sync::OnceLock::new();
                 let probe = WING_PROBE_ONCE.get_or_init(|| {

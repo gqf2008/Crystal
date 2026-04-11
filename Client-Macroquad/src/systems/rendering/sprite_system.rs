@@ -40,7 +40,7 @@ impl SpriteRenderSystem {
                 ..Default::default()
             },
         )
-        .unwrap();
+        .expect("Failed to create ADD blend material for SpriteRenderSystem");
 
         Self { add_blend_material }
     }

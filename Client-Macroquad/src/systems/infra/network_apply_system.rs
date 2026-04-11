@@ -2744,12 +2744,14 @@ impl LogicSystem for NetworkApplySystem {
         if let Some(e) = local_player_entity {
             // 血量同步（来自服务器；优先于本地推断）
             if let Some((cur, max)) = player_health_changed {
+                let new_current = (cur as i32).max(0);
+                let new_max = (max as i32).max(0);
                 let mut inserted = false;
                 {
                     if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(e) {
-                        hp.current = cur as i32;
-                        if max != 0 {
-                            hp.max = max as i32;
+                        hp.current = if new_max > 0 { new_current.clamp(0, new_max) } else { new_current };
+                        if new_max != 0 {
+                            hp.max = new_max;
                         } else if hp.max < hp.current {
                             // max 未知：至少保证 max >= current
                             hp.max = hp.current;
@@ -2758,11 +2760,12 @@ impl LogicSystem for NetworkApplySystem {
                     }
                 }
                 if !inserted {
+                    let effective_max = if new_max != 0 { new_max } else { new_current };
                     let _ = ctx.world.insert_one(
                         e,
                         crate::components::Health {
-                            current: cur as i32,
-                            max: if max != 0 { max as i32 } else { cur as i32 },
+                            current: if effective_max > 0 { new_current.clamp(0, effective_max) } else { new_current },
+                            max: effective_max,
                         },
                     );
                 }
@@ -2775,12 +2778,14 @@ impl LogicSystem for NetworkApplySystem {
 
             // 魔法同步（来自服务器）
             if let Some((cur, max)) = player_mana_changed {
+                let new_current = (cur as i32).max(0);
+                let new_max = (max as i32).max(0);
                 let mut inserted = false;
                 {
                     if let Ok(mut mp) = ctx.world.get::<&mut crate::components::Mana>(e) {
-                        mp.current = cur as i32;
-                        if max != 0 {
-                            mp.max = max as i32;
+                        mp.current = if new_max > 0 { new_current.clamp(0, new_max) } else { new_current };
+                        if new_max != 0 {
+                            mp.max = new_max;
                         } else if mp.max < mp.current {
                             mp.max = mp.current;
                         }
@@ -2788,11 +2793,12 @@ impl LogicSystem for NetworkApplySystem {
                     }
                 }
                 if !inserted {
+                    let effective_max = if new_max != 0 { new_max } else { new_current };
                     let _ = ctx.world.insert_one(
                         e,
                         crate::components::Mana {
-                            current: cur as i32,
-                            max: if max != 0 { max as i32 } else { cur as i32 },
+                            current: if effective_max > 0 { new_current.clamp(0, effective_max) } else { new_current },
+                            max: effective_max,
                         },
                     );
                 }
@@ -3232,17 +3238,21 @@ impl LogicSystem for NetworkApplySystem {
             let mut inserted = false;
             {
                 if let Ok(mut hp) = ctx.world.get::<&mut crate::components::Health>(e) {
-                    hp.current = cur as i32;
-                    hp.max = max as i32;
+                    let new_current = (cur as i32).max(0);
+                    let new_max = (max as i32).max(0);
+                    hp.current = new_current.clamp(0, new_max);
+                    hp.max = new_max;
                     inserted = true;
                 }
             }
             if !inserted {
+                let new_current = (cur as i32).max(0);
+                let new_max = (max as i32).max(0);
                 let _ = ctx.world.insert_one(
                     e,
                     crate::components::Health {
-                        current: cur as i32,
-                        max: max as i32,
+                        current: new_current.clamp(0, new_max),
+                        max: new_max,
                     },
                 );
             }

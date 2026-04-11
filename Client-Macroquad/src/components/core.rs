@@ -26,6 +26,9 @@ pub struct Position {
 
 impl Position {
     pub fn new(x: f32, y: f32) -> Self {
+        // 防御 NaN/Infinity：网络包解析异常或数学运算错误可能导致坐标污染
+        let x = if x.is_finite() { x } else { 0.0 };
+        let y = if y.is_finite() { y } else { 0.0 };
         Self { x, y }
     }
     
@@ -56,6 +59,11 @@ pub struct PositionInterpolation {
 
 impl PositionInterpolation {
     pub fn new(start_x: f32, start_y: f32, target_x: f32, target_y: f32, start_time: f64, duration: f32) -> Self {
+        let start_x = if start_x.is_finite() { start_x } else { 0.0 };
+        let start_y = if start_y.is_finite() { start_y } else { 0.0 };
+        let target_x = if target_x.is_finite() { target_x } else { 0.0 };
+        let target_y = if target_y.is_finite() { target_y } else { 0.0 };
+        let duration = if duration.is_finite() && duration > 0.0 { duration } else { 0.1 };
         Self {
             start_x,
             start_y,

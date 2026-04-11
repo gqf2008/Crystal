@@ -299,7 +299,7 @@ impl EffectRenderSystem {
                 ..Default::default()
             },
         )
-        .unwrap();
+        .expect("Failed to create ADD blend material for EffectRenderSystem");
 
         Self { add_blend_material }
     }

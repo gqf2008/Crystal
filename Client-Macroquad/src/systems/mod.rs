@@ -517,6 +517,15 @@ impl SystemScheduler {
         let order = self.next_order;
         self.next_order = self.next_order.wrapping_add(1);
 
+        // 运行时检查优先级唯一性，避免不同系统意外共享同一优先级
+        if let Some(existing) = self.systems.iter().find(|e| e.priority() == priority) {
+            tracing::warn!(
+                "⚠️ System priority collision: priority {} already used (order {}). New system will run after it.",
+                priority,
+                existing.order(),
+            );
+        }
+
         match IntoSystemKind::into_kind(Box::new(system)) {
             SystemKind::Update(sys) => {
                 // let priority = sys.priority();
