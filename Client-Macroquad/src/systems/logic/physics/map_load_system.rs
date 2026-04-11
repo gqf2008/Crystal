@@ -105,7 +105,7 @@ impl MapLoadSystem {
             let mut q = ctx.world.query::<&MapManager>();
             q.iter()
                 .next()
-                .map(|(_, mgr)| (mgr.current_map_index, mgr.current_map_file.clone()))
+                .map(|mgr| (mgr.current_map_index, mgr.current_map_file.clone()))
         };
         if let Some((idx, file)) = current_map {
             if idx == map_index && file == map_file {
@@ -135,10 +135,7 @@ impl MapLoadSystem {
                     height: reader.height,
                 };
 
-                let existing_map_entity = {
-                    let mut q = ctx.world.query::<&MapData>();
-                    q.iter().next().map(|(e, _)| e)
-                };
+                let existing_map_entity = ctx.world.iter().find_map(|e| e.get::<&MapData>().map(|_| e.entity()));
                 match existing_map_entity {
                     Some(entity) => {
                         if let Ok(mut map) = ctx.world.get::<&mut MapData>(entity) {
@@ -153,12 +150,13 @@ impl MapLoadSystem {
                 }
 
                 // MapManager 作为单例：清理旧的再创建
-                let old: Vec<_> = ctx
-                    .world
-                    .query::<&MapManager>()
-                    .iter()
-                    .map(|(e, _)| e)
-                    .collect();
+                let old: Vec<_> = ctx.world.iter().filter_map(|eref| {
+                    if eref.get::<&MapManager>().is_some() {
+                        Some(eref.entity())
+                    } else {
+                        None
+                    }
+                }).collect();
                 for e in old {
                     let _ = ctx.world.despawn(e);
                 }

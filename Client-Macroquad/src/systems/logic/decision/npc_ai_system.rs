@@ -29,7 +29,7 @@ impl NpcAISystem {
         let player_pos = Self::find_player_position(world);
         
         // 遍历所有NPC
-        for (_entity, (npc, pos, mut ai_state)) in world.query_mut::<(&NPC, &Position, Option<&mut AIState>)>() {
+        for (npc, pos, mut ai_state) in world.query_mut::<(&NPC, &Position, Option<&mut AIState>)>() {
             // 1. 检测玩家是否靠近（可以对话）
             if let Some((px, py)) = player_pos {
                 let distance = Self::calculate_distance((pos.x, pos.y), (px, py));
@@ -72,7 +72,7 @@ impl NpcAISystem {
         world.query::<(&LocalPlayer, &Position)>()
             .iter()
             .next()
-            .map(|(_, (_, pos))| (pos.x, pos.y))
+            .map(|(_local, pos)| (pos.x, pos.y))
     }
     
     /// 计算距离

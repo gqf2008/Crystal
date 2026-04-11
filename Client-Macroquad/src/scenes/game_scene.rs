@@ -248,7 +248,7 @@ impl GameScene {
             let mut q = self.ecs_ctx.world.query::<&MapData>();
             q.iter()
                 .next()
-                .map(|(_, m)| vec2(m.width as f32 * 48.0 * 0.5, m.height as f32 * 32.0 * 0.5))
+                .map(|m| vec2(m.width as f32 * 48.0 * 0.5, m.height as f32 * 32.0 * 0.5))
         };
 
         if self.ecs_camera_entity.is_none() {
@@ -307,7 +307,7 @@ impl GameScene {
         // 6) 本地玩家：由网络（真服/MockNetwork）落地；这里仅做“发现并缓存”，避免重复生成。
         if self.ecs_local_player_entity.is_none() {
             let mut q = self.ecs_ctx.world.query::<&LocalPlayer>();
-            if let Some((e, _)) = q.iter().next() {
+            if let Some(e) = self.ecs_ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) {
                 self.ecs_local_player_entity = Some(e);
             }
         }

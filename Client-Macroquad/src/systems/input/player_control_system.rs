@@ -35,7 +35,7 @@
 use crate::{
     components::{
         Camera, HoverHighlight, LibrarySprite, NetworkObjectType, NetworkSync, Position, UiWorldInputBlock,
-        LocalPlayer, Player, PlayerInput,
+        LocalPlayer, Player, PlayerInput, MovementVelocity,
     },
     game::{GameContext, GameResult},
     systems::LogicSystem,
@@ -159,7 +159,7 @@ impl PlayerControlSystem {
         //    这能避免：
         //    - move_to 残留导致角色继续走/跑
         //    - path/velocity 残留导致动作/动画与输入不一致
-        let Some((player_e, _)) = ctx.world.query::<&LocalPlayer>().iter().next() else {
+        let Some(player_e) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) else {
             return;
         };
 
@@ -199,7 +199,7 @@ impl PlayerControlSystem {
     fn find_object_world_pos(ctx: &GameContext, object_id: u32) -> Option<(f32, f32)> {
         use crate::components::{NetworkSync, Position};
 
-        for (_e, (sync, pos)) in ctx.world.query::<(&NetworkSync, &Position)>().iter() {
+        for (sync, pos) in ctx.world.query::<(&NetworkSync, &Position)>().iter() {
             if sync.object_id == object_id {
                 return Some((pos.x, pos.y));
             }
@@ -265,10 +265,15 @@ impl PlayerControlSystem {
         object_type: NetworkObjectType,
         object_id: u32,
     ) -> Option<hecs::Entity> {
-        for (e, sync) in ctx.world.query::<&NetworkSync>().iter() {
+        for e in ctx.world.iter().filter_map(|e| {
+            let sync = e.get::<&NetworkSync>()?;
             if sync.object_type == object_type && sync.object_id == object_id {
-                return Some(e);
+                Some(e.entity())
+            } else {
+                None
             }
+        }) {
+            return Some(e);
         }
         None
     }
@@ -280,7 +285,7 @@ impl PlayerControlSystem {
     ) -> Option<u32> {
         // 贴近原版：优先像素级命中（VisiblePixel），命中里取 y 最大（最前景）
         let mut best_pixel: Option<(u32, f32)> = None;
-        for (_, (sync, spr, pos)) in ctx.world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
+        for (sync, spr, pos) in ctx.world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
             if sync.object_type != object_type {
                 continue;
             }
@@ -309,7 +314,7 @@ impl PlayerControlSystem {
 
         // 命中兜底：鼠标落在当前帧纹理矩形内
         let mut best_rect: Option<(u32, f32)> = None;
-        for (_, (sync, spr, pos)) in ctx.world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
+        for (sync, spr, pos) in ctx.world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
             if sync.object_type != object_type {
                 continue;
             }
@@ -355,7 +360,7 @@ impl PlayerControlSystem {
         let (click_gx, click_gy) = crate::coord::Coord::world_to_grid(mouse_world.0, mouse_world.1);
         let mut best: Option<(u32, f32)> = None;
 
-        for (_, (sync, pos)) in ctx.world.query::<(&NetworkSync, &Position)>().iter() {
+        for (sync, pos) in ctx.world.query::<(&NetworkSync, &Position)>().iter() {
             if sync.object_type != object_type {
                 continue;
             }
@@ -380,10 +385,8 @@ impl PlayerControlSystem {
         // HoverHighlight 被挂在 render-pass 实体上（约定：世界里只有一个）
         let Some(pass_entity) = ctx
             .world
-            .query::<&HoverHighlight>()
             .iter()
-            .next()
-            .map(|(e, _)| e)
+            .find_map(|e| e.get::<&HoverHighlight>().map(|_| e.entity()))
         else {
             return;
         };
@@ -429,7 +432,7 @@ impl PlayerControlSystem {
         let mut allowed = true;
 
         // 共享冷却：优先复用 GameScene 挂在 render-pass 实体上的组件
-        if let Some((_e, cd)) = ctx.world.query_mut::<&mut crate::components::NpcCallCooldown>().into_iter().next() {
+        if let Some(cd) = ctx.world.query_mut::<&mut crate::components::NpcCallCooldown>().into_iter().next() {
             if now < cd.until {
                 allowed = false;
             } else {
@@ -462,7 +465,7 @@ impl PlayerControlSystem {
             .query::<(&LocalPlayer, &Position)>()
             .iter()
             .next()
-            .map(|(_, (_, pos))| crate::coord::Coord::world_to_grid(pos.x, pos.y));
+            .map(|(_, pos)| crate::coord::Coord::world_to_grid(pos.x, pos.y));
         let Some((px, py)) = player_grid else {
             return false;
         };
@@ -471,7 +474,7 @@ impl PlayerControlSystem {
             .world
             .query::<(&NetworkSync, &Position)>()
             .iter()
-            .find_map(|(_, (sync, pos))| {
+            .find_map(|(sync, pos)| {
                 if sync.object_id == npc_object_id {
                     Some(crate::coord::Coord::world_to_grid(pos.x, pos.y))
                 } else {
@@ -633,7 +636,7 @@ impl LogicSystem for PlayerControlSystem {
             .query_mut::<(&Position, &Camera)>()
             .into_iter()
             .next()
-            .map(|(_, (pos, cam))| (pos.clone(), cam.clone()))
+            .map(|(pos, cam)| (pos.clone(), cam.clone()))
             .unwrap_or((
                 Position { x: 0.0, y: 0.0 },
                 Camera {
@@ -745,7 +748,7 @@ impl LogicSystem for PlayerControlSystem {
         };
 
         if let Some(npc_object_id) = npc_clicked_target {
-            for (_e, active) in ctx.world.query_mut::<&mut crate::components::ActiveNpc>() {
+            for active in ctx.world.query_mut::<&mut crate::components::ActiveNpc>() {
                 active.npc_object_id = Some(npc_object_id);
                 break;
             }
@@ -797,31 +800,16 @@ impl LogicSystem for PlayerControlSystem {
         
         // 先收集所有有AttackState的实体
         let attacking_entities: std::collections::HashSet<_> = ctx.world
-            .query::<&AttackState>()
             .iter()
-            .map(|(entity, _)| entity)
+            .filter_map(|e| e.get::<&AttackState>().map(|_| e.entity()))
             .collect();
-        
-        // 收集需要添加攻击状态的实体
-        let mut entities_to_attack = Vec::new();
-        
-        for (entity, (player_input, player, _local, pos, _path, velocity)) in ctx
-            .world
-            .query_mut::<(
-                &mut PlayerInput,
-                &mut Player,
-                &LocalPlayer,
-                &Position,
-                &mut crate::components::movement::Path,
-                &crate::components::MovementVelocity,
-            )>()
-            .into_iter()
-        {
-            // ⚔️ 如果正在攻击,跳过输入处理 (由 AttackSystem 管理)
-            if attacking_entities.contains(&entity) {
-                continue;
-            }
-            // 🎯 优先处理单击
+
+        // There is only one local player. Find it and process.
+        if let Some(entity) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) {
+            if !attacking_entities.contains(&entity) {
+                if let Ok((mut player_input, mut player, pos, mut path, velocity)) =
+                    ctx.world.query_one_mut::<(&mut PlayerInput, &mut Player, &Position, &mut crate::components::movement::Path, &MovementVelocity)>(entity)
+                {
             // 🎯 优先处理单击
             if has_single_click {
                 // 停止移动
@@ -923,8 +911,9 @@ impl LogicSystem for PlayerControlSystem {
                             // IMPORTANT: 必须清除单击状态，否则本次单击会在后续帧被重复判定，导致刷屏/重复发包。
                             self.mouse_state.left_last_click_time = None;
                             self.mouse_state.right_last_click_time = None;
-                            continue;
-                        }
+                            // Skip double-click/movement handling; go straight to server sync
+                            // (was: continue in old for-loop; now single-entity, just exit this branch)
+                        } else {
 
                         // 2) 朝向点击方向；没点到怪则直接挥空发一次 AttackRequest
                         if let Some(click_world) = right_click_attack_world {
@@ -944,8 +933,9 @@ impl LogicSystem for PlayerControlSystem {
                         }
 
                         // 没点到怪：本地播放挥刀动画
-                        entities_to_attack.push(entity);
+                        // (will add attack state below)
 
+                        } // end else (not clicking monster, do swing)
                     }
                     
                     // TODO: 计算攻击方向(朝向鼠标点击位置)
@@ -955,11 +945,11 @@ impl LogicSystem for PlayerControlSystem {
                 // 清除 last_click_time 避免重复触发
                 self.mouse_state.left_last_click_time = None;
                 self.mouse_state.right_last_click_time = None;
-                continue;  // 跳过后续处理
             }
 
-            // ✅ 启用双击寻路功能
-            let has_double_click = double_click_left.is_some() || double_click_right.is_some();
+            // ✅ 启用双击寻路功能（仅在未处理单击时）
+            if !has_single_click {
+                let has_double_click = double_click_left.is_some() || double_click_right.is_some();
             
             if has_double_click {
                 use crate::components::PlayerAction;
@@ -1104,8 +1094,9 @@ impl LogicSystem for PlayerControlSystem {
                         }
                     }
 
-                }
-            }
+                } // end else (mouse release handling)
+            } // end if-else (has_double_click / else)
+            } // end if !has_single_click
 
             // ===== local move -> server sync: 同步“已发生的格子位移” =====
             // 关键点：
@@ -1199,7 +1190,9 @@ impl LogicSystem for PlayerControlSystem {
                     }
                 }
             }
-        }
+        } // end if let Ok(query_one_mut)
+        } // end if !attacking_entities
+        } // end if let Some(entity)
 
         // 发送 NPC 主对话请求（共享 5 秒冷却）
         if let Some(npc_object_id) = npc_call_immediate {
@@ -1214,15 +1207,6 @@ impl LogicSystem for PlayerControlSystem {
             }
         }
         
-        // ⚔️ 循环结束后,添加所有攻击状态
-        for entity in entities_to_attack {
-            let _ = ctx.world.insert_one(entity, AttackState {
-                start_time: now,
-                attack_type: PlayerAction::Attack1,
-                server_attack_type: 0,
-            });
-        }
-
         Ok(())
     }
 }

@@ -50,7 +50,7 @@ impl SpriteRenderSystem {
     #[allow(dead_code)]
     fn get_camera_transform(world: &hecs::World) -> Option<(f32, f32, f32)> {
         let mut query = world.query::<(&Camera, &Position)>();
-        if let Some((_, (camera, cam_pos))) = query.iter().next() {
+        if let Some((camera, cam_pos)) = query.iter().next() {
             Some((cam_pos.x, cam_pos.y, camera.zoom))
         } else {
             None
@@ -95,7 +95,7 @@ impl RenderSystem for SpriteRenderSystem {
             .query::<&RenderPass>()
             .iter()
             .next()
-            .map(|(_, pass)| *pass)
+            .map(|pass| *pass)
             .unwrap_or_default();
 
         if Self::sprite_diag_enabled() {
@@ -108,7 +108,7 @@ impl RenderSystem for SpriteRenderSystem {
                     .query::<&crate::components::FrontOcclusion>()
                     .iter()
                     .next()
-                    .map(|(_, o)| o.local_player_occluded)
+                    .map(|o| o.local_player_occluded)
                     .unwrap_or(false);
                 println!(
                     "[DIAG][SpriteRenderSystem] draw called: stage={:?} alpha={} local_only={} players={} local_players={} cameras={} positions={} occluded={}",
@@ -132,7 +132,7 @@ impl RenderSystem for SpriteRenderSystem {
                 .query::<&crate::components::FrontOcclusion>()
                 .iter()
                 .next()
-                .map(|(_, o)| o.local_player_occluded)
+                .map(|o| o.local_player_occluded)
                 .unwrap_or(false);
 
             let _ = SPRITE_DIAG_POST_FRONT_ONCE.set(()).map(|_| {
@@ -166,19 +166,19 @@ impl RenderSystem for SpriteRenderSystem {
                         .query::<(&crate::components::Player, &crate::components::Position)>()
                         .iter()
                         .next()
-                        .map(|(_, (_p, pos))| (pos.x, pos.y));
+                        .map(|(_p, pos)| (pos.x, pos.y));
 
                     let cam_pos = world
                         .query::<(&crate::components::Camera, &crate::components::Position)>()
                         .iter()
                         .next()
-                        .map(|(_, (_c, pos))| (pos.x, pos.y));
+                        .map(|(_c, pos)| (pos.x, pos.y));
 
                     let occluded = world
                         .query::<&crate::components::FrontOcclusion>()
                         .iter()
                         .next()
-                        .map(|(_, o)| o.local_player_occluded)
+                        .map(|o| o.local_player_occluded)
                         .unwrap_or(false);
 
                     println!(
@@ -203,7 +203,7 @@ impl RenderSystem for SpriteRenderSystem {
                     .query::<&FrontOcclusion>()
                     .iter()
                     .next()
-                    .map(|(_, o)| o.local_player_occluded)
+                    .map(|o| o.local_player_occluded)
                     .unwrap_or(false);
 
                 if occluded {

@@ -39,21 +39,27 @@ impl MonsterAISystem {
         let missing_ai: Vec<hecs::Entity> = world
             .query::<&Monster>()
             .iter()
-            .filter_map(|(e, _)| {
-                if world.get::<&AIState>(e).is_ok() {
-                    None
-                } else {
-                    Some(e)
-                }
+            .filter_map(|monster| {
+                let _ = monster;
+                None::<hecs::Entity>
             })
             .collect();
+
+        // Use world.iter() to get entities for AIState check
+        let missing_ai: Vec<hecs::Entity> = world.iter().filter_map(|eref| {
+            if eref.get::<&Monster>().is_some() && eref.get::<&AIState>().is_none() {
+                Some(eref.entity())
+            } else {
+                None
+            }
+        }).collect();
 
         for e in missing_ai {
             let _ = world.insert_one(e, AIState::default());
         }
         
         // 遍历所有怪物
-        for (_entity, (_monster, pos, ai_state, health)) in 
+        for (_monster, pos, ai_state, health) in
             world.query::<(&Monster, &mut Position, &mut AIState, &Health)>().iter() 
         {
             // 跳过死亡怪物
@@ -101,7 +107,7 @@ impl MonsterAISystem {
             .query::<(&LocalPlayer, &Position)>()
             .iter()
             .next()
-            .map(|(_, (_, pos))| (pos.x, pos.y))
+            .map(|(_local, pos)| (pos.x, pos.y))
     }
     
     /// 计算两点之间的距离

@@ -28,6 +28,7 @@ use crate::components::{
     MountState, MountStatus, MirClass, PlayerAppearance, SoundTrigger, SoundType,
 };
 use crate::components::network::Lifetime;
+use rand::RngExt;
 use crate::network::handlers::NetworkEvent as NetworkCommand;
 use mir2_shared::enums::MirDirection;
 use crate::game::GameResult;
@@ -83,14 +84,14 @@ impl LogicSystem for CombatSystem {
         // 1) 取本地玩家 attack_target
         let (player_entity, target_entity) = {
             let mut result: Option<(hecs::Entity, hecs::Entity)> = None;
-            for (e, (_local, input)) in ctx
-                .world
-                .query::<(&LocalPlayer, &crate::components::PlayerInput)>()
-                .iter()
-            {
-                if let Some(t) = input.attack_target {
-                    result = Some((e, t));
-                    break;
+            for entity in ctx.world.iter() {
+                if entity.get::<&LocalPlayer>().is_some() {
+                    if let Some(input) = entity.get::<&crate::components::PlayerInput>() {
+                        if let Some(t) = input.attack_target {
+                            result = Some((entity.entity(), t));
+                            break;
+                        }
+                    }
                 }
             }
             match result {
@@ -130,7 +131,7 @@ impl LogicSystem for CombatSystem {
             .world
             .query::<(&Monster, &NetworkSync, Option<&Health>)>()
             .iter()
-            .any(|(_, (_m, sync, hp))| {
+            .any(|(_m, sync, hp)| {
                 if sync.object_id != target_id {
                     return false;
                 }
@@ -178,7 +179,7 @@ impl LogicSystem for CombatSystem {
             .world
             .query::<(&ClientOnly, &NetworkSync)>()
             .iter()
-            .any(|(_, (_co, sync))| sync.object_id == target_id);
+            .any(|(_co, sync)| sync.object_id == target_id);
 
         if ctx.session.server_authoritative_combat && !is_client_only_target {
             if let Some(net) = ctx.net() {
@@ -291,7 +292,7 @@ impl CombatSystem {
             .query::<(&LocalPlayer, &Position)>()
             .iter()
             .next()
-            .map(|(_, (_local, pos))| crate::coord::Coord::world_to_grid(pos.x, pos.y));
+            .map(|(_local, pos)| crate::coord::Coord::world_to_grid(pos.x, pos.y));
         let Some((pgx, pgy)) = player_grid else {
             return false;
         };
@@ -299,7 +300,7 @@ impl CombatSystem {
         let target_grid = world
             .query::<(&Monster, &NetworkSync, &Position)>()
             .iter()
-            .find_map(|(_, (_m, sync, pos))| {
+            .find_map(|(_m, sync, pos)| {
                 if sync.object_id == target_id {
                     Some(crate::coord::Coord::world_to_grid(pos.x, pos.y))
                 } else {
@@ -411,7 +412,7 @@ impl CombatSystem {
             let mut attack = (5, 10);
             let mut level = 1;
             
-            for (_, (_local, combat_stats)) in world.query::<(&LocalPlayer, &CombatStats)>().iter() {
+            for (_local, combat_stats) in world.query::<(&LocalPlayer, &CombatStats)>().iter() {
                 attack = (combat_stats.attack_min, combat_stats.attack_max);
                 level = combat_stats.level;
                 break;
@@ -425,7 +426,7 @@ impl CombatSystem {
             let mut defense = 0;
             let mut level = 1;
             
-            for (_, (sync, combat_stats)) in world.query::<(&NetworkSync, &CombatStats)>().iter() {
+            for (sync, combat_stats) in world.query::<(&NetworkSync, &CombatStats)>().iter() {
                 if sync.object_id == target_id && sync.object_type == NetworkObjectType::Monster {
                     defense = combat_stats.defense;
                     level = combat_stats.level;
@@ -468,34 +469,41 @@ impl CombatSystem {
         let mut target_died = false;
         let mut target_is_client_only = false;
 
-        for (entity, (monster, health, net_sync)) in world.query_mut::<(&Monster, &mut Health, &NetworkSync)>() {
-            if net_sync.object_id == target_id {
-                let old_hp = health.current;
-                health.current = (health.current - damage).max(0);
-                
-                if combat_log_enabled() {
-                    println!(
-                        "🩸 {} 受到 {} 点{:?}伤害 (HP: {} → {})",
-                        target_id,
-                        damage,
-                        damage_type,
-                        old_hp,
-                        health.current
-                    );
-                }
-                
-                // 检查是否死亡
-                if combat_log_enabled() && health.current == 0 {
-                    println!("💀 {} 已死亡", target_id);
-                }
-
-                target_entity = Some(entity);
-                target_monster_type = Some(monster.monster_type);
-                target_died = health.current == 0;
-                target_is_client_only = world.get::<&ClientOnly>(entity).is_ok();
-                
-                break;
+        let take_damage_result: Option<(hecs::Entity, u16, bool, bool)> = world.iter().find_map(|eref| {
+            let monster = eref.get::<&Monster>()?;
+            let net_sync = eref.get::<&NetworkSync>()?;
+            if net_sync.object_id != target_id {
+                return None;
             }
+            let entity = eref.entity();
+            let mut health = eref.get::<&mut Health>()?;
+            let old_hp = health.current;
+            health.current = (health.current - damage).max(0);
+
+            if combat_log_enabled() {
+                println!(
+                    "🩸 {} 受到 {} 点{:?}伤害 (HP: {} → {})",
+                    target_id,
+                    damage,
+                    damage_type,
+                    old_hp,
+                    health.current
+                );
+            }
+
+            if combat_log_enabled() && health.current == 0 {
+                println!("💀 {} 已死亡", target_id);
+            }
+
+            let is_client_only = world.get::<&ClientOnly>(entity).is_ok();
+            Some((entity, monster.monster_type, health.current == 0, is_client_only))
+        });
+
+        if let Some((entity, monster_type, died, is_client_only)) = take_damage_result {
+            target_entity = Some(entity);
+            target_monster_type = Some(monster_type);
+            target_died = died;
+            target_is_client_only = is_client_only;
         }
 
         // ClientOnly 怪物：死亡闭环（播放死亡动作 + 延时移除）
@@ -531,7 +539,7 @@ impl CombatSystem {
         }
         
         // 玩家受伤
-        for (_, (_, health)) in world.query_mut::<(&LocalPlayer, &mut Health)>() {
+        for (_local, mut health) in world.query_mut::<(&LocalPlayer, &mut Health)>() {
             let old_hp = health.current;
             health.current = (health.current - damage).max(0);
             
@@ -562,15 +570,15 @@ impl CombatSystem {
         // 获取玩家位置
         let player_pos = {
             let mut pos = Position::new(0.0, 0.0);
-            for (_, (_, p)) in world.query::<(&LocalPlayer, &Position)>().iter() {
+            for (_local, p) in world.query::<(&LocalPlayer, &Position)>().iter() {
                 pos = *p;
                 break;
             }
             pos
         };
-        
+
         // 获取目标位置
-        for (_, (_, pos, net_sync)) in world.query::<(&Monster, &Position, &NetworkSync)>().iter() {
+        for (_monster, pos, net_sync) in world.query::<(&Monster, &Position, &NetworkSync)>().iter() {
             if net_sync.object_id == target_id {
                 let dx = (pos.x - player_pos.x) / 48.0;
                 let dy = (pos.y - player_pos.y) / 32.0;
@@ -591,40 +599,40 @@ impl CombatSystem {
     ) -> Vec<u32> {
         let mut targets = Vec::new();
         
-        for (_, (_, pos, net_sync)) in world.query::<(&Monster, &Position, &NetworkSync)>().iter() {
+        for (_monster, pos, net_sync) in world.query::<(&Monster, &Position, &NetworkSync)>().iter() {
             let dx = pos.x - center.x;
             let dy = pos.y - center.y;
             let distance = (dx * dx + dy * dy).sqrt();
-            
+
             if distance <= range {
                 targets.push(net_sync.object_id);
             }
         }
-        
+
         targets
     }
-    
+
     /// 计算朝向目标的攻击方向
     fn calculate_attack_direction(world: &World, target_id: u32) -> MirDirection {
         // 获取玩家位置
         let player_pos = {
             let mut pos = None;
-            for (_, (_, player_pos)) in world.query::<(&LocalPlayer, &Position)>().iter() {
+            for (_local, player_pos) in world.query::<(&LocalPlayer, &Position)>().iter() {
                 pos = Some((player_pos.x, player_pos.y));
                 break;
             }
             pos
         };
-        
+
         let Some((px, py)) = player_pos else {
             return MirDirection::Down;
         };
-        
+
         // 查找目标位置
         let target_pos = {
             let mut pos = None;
-            
-            for (_, (_, net_sync, target_pos)) in world.query::<(&Monster, &NetworkSync, &Position)>().iter() {
+
+            for (_monster, net_sync, target_pos) in world.query::<(&Monster, &NetworkSync, &Position)>().iter() {
                 if net_sync.object_id == target_id {
                     pos = Some((target_pos.x, target_pos.y));
                     break;

@@ -37,7 +37,7 @@ impl DebugSystem {
 
         // 查找 RenderConfig 组件
         let mut config_query = world.query::<&mut RenderConfig>();
-        let config = if let Some((_, cfg)) = config_query.iter().next() {
+        let config = if let Some(cfg) = config_query.iter().next() {
             cfg
         } else {
             return;
@@ -273,7 +273,7 @@ impl RenderSystem for DebugSystem {
             .query::<&RenderPass>()
             .iter()
             .next()
-            .map(|(_, p)| p.stage)
+            .map(|p| p.stage)
             .unwrap_or(RenderStage::Normal);
 
         match stage {
@@ -304,7 +304,7 @@ impl DebugSystem {
             .query::<&RenderConfig>()
             .iter()
             .next()
-            .map(|(_, c)| c)
+            .map(|c| c)
             .cloned()
             .unwrap_or_default();
 
@@ -315,7 +315,7 @@ impl DebugSystem {
         // 获取相机（Position 表示 camera center）
         let (cam_pos, cam) = {
             let mut q = world.query::<(&Position, &Camera)>();
-            let Some((_e, (p, c))) = q.iter().next() else {
+            let Some((p, c)) = q.iter().next() else {
                 return;
             };
             (*p, c.clone())
@@ -338,7 +338,7 @@ impl DebugSystem {
         // 可选：根据 MapData clamp 范围，并用于障碍物查询
         // 注意：QueryBorrow 需要绑定到局部变量，避免临时值提前释放。
         let mut map_q = world.query::<&MapData>();
-        let map_data = map_q.iter().next().map(|(_, m)| m);
+        let map_data = map_q.iter().next().map(|m| m);
         if let Some(m) = map_data {
             start_x = start_x.min(m.width.saturating_sub(1));
             end_x = end_x.min(m.width.saturating_sub(1));
@@ -464,7 +464,7 @@ impl DebugSystem {
             .query::<&RenderConfig>()
             .iter()
             .next()
-            .map(|(_, c)| c.show_path)
+            .map(|c| c.show_path)
             .unwrap_or(false);
 
         if !show_path {
@@ -472,7 +472,7 @@ impl DebugSystem {
         }
 
         let mut q = world.query::<(&LocalPlayer, &Position, &Path)>();
-        let Some((_e, (_lp, pos, path))) = q.iter().next() else {
+        let Some((_lp, pos, path)) = q.iter().next() else {
             return;
         };
 
@@ -505,15 +505,21 @@ impl DebugSystem {
             .query::<&RenderConfig>()
             .iter()
             .next()
-            .map(|(_, c)| c.show_player_debug)
+            .map(|c| c.show_player_debug)
             .unwrap_or(false);
 
         if !show_player_debug {
             return;
         }
 
+        let entity = world.iter().find_map(|e| {
+            if e.get::<&LocalPlayer>().is_some() {
+                return Some(e.entity());
+            }
+            None
+        }).unwrap();
         let mut q = world.query::<(&LocalPlayer, &Position, &Player)>();
-        let Some((entity, (_lp, pos, player))) = q.iter().next() else {
+        let Some((_lp, pos, player)) = q.iter().next() else {
             draw_text(
                 "LocalPlayer: <not found>",
                 12.0,

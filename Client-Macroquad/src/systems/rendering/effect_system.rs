@@ -27,7 +27,7 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         .query::<&crate::components::Camera>()
         .iter()
         .next()
-        .map(|(_, c)| c.zoom)
+        .map(|c| c.zoom)
         .unwrap_or(1.0)
         .max(0.0001);
 
@@ -35,7 +35,7 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         .query::<(&crate::components::Camera, &Position)>()
         .iter()
         .next()
-        .map(|(_, (c, p))| (p.x, p.y, c.screen_width, c.screen_height))
+        .map(|(c, p)| (p.x, p.y, c.screen_width, c.screen_height))
         .unwrap_or((0.0, 0.0, screen_width(), screen_height()));
     let half_w = (cam_screen_w / 2.0) / cam_zoom;
     let half_h = (cam_screen_h / 2.0) / cam_zoom;
@@ -62,11 +62,11 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         .query::<&HoverHighlight>()
         .iter()
         .next()
-        .map(|(_, hh)| (hh.npc_object_id, hh.monster_object_id))
+        .map(|hh| (hh.npc_object_id, hh.monster_object_id))
         .unwrap_or((None, None));
 
     if let Some(hover_oid) = hovered_npc_object_id {
-        for (_entity, (spr, pos, sync)) in world.query::<(&LibrarySprite, &Position, &NetworkSync)>().iter() {
+        for (spr, pos, sync) in world.query::<(&LibrarySprite, &Position, &NetworkSync)>().iter() {
             if sync.object_type != NetworkObjectType::NPC || sync.object_id != hover_oid {
                 continue;
             }
@@ -99,7 +99,7 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
     }
 
     if let Some(hover_oid) = hovered_monster_object_id {
-        for (_entity, (spr, pos, sync)) in world.query::<(&LibrarySprite, &Position, &NetworkSync)>().iter() {
+        for (spr, pos, sync) in world.query::<(&LibrarySprite, &Position, &NetworkSync)>().iter() {
             if sync.object_type != NetworkObjectType::Monster || sync.object_id != hover_oid {
                 continue;
             }
@@ -131,7 +131,11 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         }
     }
 
-    for (entity, (npc, pos)) in world.query::<(&NPC, &Position)>().iter() {
+    for (entity, npc, pos) in world.iter().filter_map(|e| {
+        let npc = e.get::<&NPC>()?;
+        let pos = e.get::<&Position>()?;
+        Some((e.entity(), npc, pos))
+    }) {
         if !in_view(pos.x, pos.y) {
             continue;
         }
@@ -174,7 +178,12 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         }
     }
 
-    for (entity, (monster, pos, hp)) in world.query::<(&Monster, &Position, &Health)>().iter() {
+    for (entity, monster, pos, hp) in world.iter().filter_map(|e| {
+        let monster = e.get::<&Monster>()?;
+        let pos = e.get::<&Position>()?;
+        let hp = e.get::<&Health>()?;
+        Some((e.entity(), monster, pos, hp))
+    }) {
         if !in_view(pos.x, pos.y) {
             continue;
         }
@@ -238,7 +247,7 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         );
     }
 
-    for (_entity, (ft, pos)) in world.query::<(&FloatingText, &Position)>().iter() {
+    for (ft, pos) in world.query::<(&FloatingText, &Position)>().iter() {
         if !in_view(pos.x, pos.y) {
             continue;
         }
@@ -296,7 +305,7 @@ impl RenderSystem for EffectRenderSystem {
             .query::<&RenderPass>()
             .iter()
             .next()
-            .map(|(_, pass)| *pass)
+            .map(|pass| *pass)
             .unwrap_or_default();
 
         // ghost pass 只画本地玩家，不画特效/叠加层
@@ -336,7 +345,7 @@ impl RenderSystem for EffectRenderSystem {
             true
         };
 
-        for (_entity, (spr, pos)) in _world.query::<(&LibrarySprite, &Position)>().iter() {
+        for (spr, pos) in _world.query::<(&LibrarySprite, &Position)>().iter() {
             let tint = Color::new(1.0, 1.0, 1.0, alpha);
 
             // 1) ADD 混合：当作“特效层”渲染（放在 SpriteRenderSystem 之后）

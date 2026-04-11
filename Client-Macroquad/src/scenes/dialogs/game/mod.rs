@@ -17,6 +17,13 @@ pub mod menu_dialog;
 pub mod minimap_dialog;
 pub mod option_dialog;
 pub mod quest_log_dialog;
+pub mod group_dialog;
+pub mod friend_dialog;
+pub mod guild_dialog;
+pub mod mentor_dialog;
+pub mod relationship_dialog;
+pub mod trade_dialog;
+pub mod mount_dialog;
 
 // 导出 hybrid 版本作为主要实现
 //pub use belt_dialog_native::{BeltDialogNative, BeltLayout, BeltItem};
@@ -36,6 +43,25 @@ pub use menu_dialog::{MenuDialogHybrid, MenuAction};
 pub use minimap_dialog::MiniMapDialogHybrid;
 pub use option_dialog::OptionDialogHybrid;
 pub use quest_log_dialog::QuestLogDialogHybrid;
+pub use group_dialog::{GroupDialogHybrid, GroupMember, GroupDialogAction};
+pub use friend_dialog::{FriendDialogHybrid, FriendInfo, FriendDialogAction};
+pub use guild_dialog::{GuildDialogHybrid, GuildInfo, GuildMember, GuildTab, GuildDialogAction};
+pub use mentor_dialog::{MentorDialogHybrid, MentorInfo, MentorDialogAction};
+pub use relationship_dialog::{RelationshipDialogHybrid, RelationshipInfo, RelationshipDialogAction};
+pub use trade_dialog::{TradeDialogHybrid, TradeItemSlot, TradeAction, DragSource};
+pub use mount_dialog::{MountDialogHybrid, MountEntry, MountDialogAction};
+pub use hero_dialog::{HeroDialogHybrid, HeroInfo, HeroBehaviour, HeroDialogAction};
+pub mod hero_dialog;
+pub mod buff_dialog;
+pub use buff_dialog::{BuffDialogHybrid, BuffEntry};
+pub mod fishing_dialog;
+pub use fishing_dialog::FishingDialogHybrid;
+pub mod intelligent_creature_dialog;
+pub use intelligent_creature_dialog::{IntelligentCreatureDialogHybrid, CreatureEntry};
+pub mod compass_dialog;
+pub use compass_dialog::{CompassDialogHybrid, CompassDirection};
+pub mod socket_dialog;
+pub use socket_dialog::{SocketDialogHybrid, SocketAction};
 
 // 为了兼容性，创建别名
 pub type BeltDialog = BeltDialogHybrid;

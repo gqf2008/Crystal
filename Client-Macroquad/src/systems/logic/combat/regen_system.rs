@@ -36,7 +36,7 @@ impl LogicSystem for HealthRegenSystem {
         let delta_ms = (delay_time * 1000.0) as u64;
 
         // 1. HP/MP自动恢复
-        for (_id, (health, mana, regen_timer)) in ctx.world.query_mut::<(&mut Health, &mut Mana, &mut RegenTimer)>() {
+        for (health, mana, regen_timer) in ctx.world.query_mut::<(&mut Health, &mut Mana, &mut RegenTimer)>() {
             // 死亡（HP=0）不自动回血；复活应由服务器/道具/技能驱动。
             if health.current <= 0 {
                 continue;
@@ -59,7 +59,7 @@ impl LogicSystem for HealthRegenSystem {
         }
 
         // 2. 处理Buff效果 (过期清理和DoT伤害)
-        for (_id, (health, buff_list)) in ctx.world.query_mut::<(&mut Health, &mut BuffList)>() {
+        for (mut health, buff_list) in ctx.world.query_mut::<(&mut Health, &mut BuffList)>() {
             if health.current <= 0 {
                 continue;
             }

@@ -67,7 +67,7 @@ impl EntityRenderSystem {
         -> Option<(f32, f32, f32, f32, f32)> 
     {
         let mut query = world.query::<(&Camera, &Position)>();
-        if let Some((_, (camera, cam_pos))) = query.iter().next() {
+        if let Some((camera, cam_pos)) = query.iter().next() {
             let zoom = camera.zoom;
             let half_width = (screen_width / 2.0) / zoom;
             let half_height = (screen_height / 2.0) / zoom;

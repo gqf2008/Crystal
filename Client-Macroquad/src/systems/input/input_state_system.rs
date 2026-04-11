@@ -92,7 +92,7 @@ impl LogicSystem for InputStateSystem {
         // 查询唯一的 InputState 组件
         let mut query = ctx.world.query::<&mut InputState>();
         
-        if let Some((_, state)) = query.iter().next() {
+        if let Some(state) = query.iter().next() {
             // ===== 更新键盘状态（为下一帧准备）=====
             state.prev_pressed_keys.clear();
             

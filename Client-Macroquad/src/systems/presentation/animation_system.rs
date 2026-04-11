@@ -56,13 +56,13 @@ impl AnimationSystem {
             .query::<&TimeTracker>()
             .iter()
             .next()
-            .map(|(_, t)| t.clone())
+            .map(|t| t.clone())
             .unwrap_or_default();
 
         let now = Instant::now();
 
         // 更新所有角色的动画帧
-        for (_entity, (player, mount_state, attack_state, death_state, anim_frame)) in ctx
+        for (player, mount_state, attack_state, death_state, mut anim_frame) in ctx
             .world
             .query_mut::<(
                 &Player,
@@ -71,7 +71,6 @@ impl AnimationSystem {
                 Option<&mut DeathState>,
                 &mut AnimationFrame,
             )>()
-            .into_iter()
         {
             // C# 原版核心：
             // - DrawFrame = Frame.Start + Frame.OffSet * Direction + FrameIndex
@@ -226,18 +225,19 @@ impl AnimationSystem {
 
         let mut triggers: Vec<(hecs::Entity, Instant, Option<i32>)> = Vec::new();
 
-        for (entity, (attack_state, anim, _appearance, _mount_status, _mount_state, played)) in ctx
-            .world
-            .query::<(
-                &AttackState,
-                &AnimationFrame,
-                &PlayerAppearance,
-                Option<&MountStatus>,
-                Option<&MountState>,
-                Option<&AttackSoundPlayed>,
-            )>()
-            .iter()
-        {
+        for entity in ctx.world.iter() {
+            let (Some(attack_state), Some(anim), _appearance, _mount_status, _mount_state, played) = (
+                entity.get::<&AttackState>(),
+                entity.get::<&AnimationFrame>(),
+                entity.get::<&PlayerAppearance>(),
+                entity.get::<&MountStatus>(),
+                entity.get::<&MountState>(),
+                entity.get::<&AttackSoundPlayed>(),
+            ) else {
+                continue;
+            };
+            let entity = entity.entity();
+
             if anim.action_frame_index != TRIGGER_FRAME {
                 continue;
             }
@@ -279,10 +279,9 @@ impl AnimationSystem {
     pub fn update_library_sprite_animations(&mut self, ctx: &mut GameContext) -> GameResult {
         use crate::components::{LibrarySprite, Monster, MonsterAnimState};
 
-        for (_entity, (monster, state, spr)) in ctx
+        for (monster, state, mut spr) in ctx
             .world
             .query_mut::<(&Monster, &MonsterAnimState, &mut LibrarySprite)>()
-            .into_iter()
         {
             let action = state.action;
             let frame = crate::objects::frames::get_monster_frame(
@@ -342,17 +341,18 @@ impl AnimationSystem {
 
         let mut triggers: Vec<(hecs::Entity, Instant, i32)> = Vec::new();
 
-        for (entity, (monster, anim, attack_state, spr, played)) in ctx
-            .world
-            .query::<(
-                &Monster,
-                &MonsterAnimState,
-                &AttackState,
-                &LibrarySprite,
-                Option<&SwingSoundPlayed>,
-            )>()
-            .iter()
-        {
+        for entity in ctx.world.iter() {
+            let (Some(monster), Some(anim), Some(attack_state), Some(spr), played) = (
+                entity.get::<&Monster>(),
+                entity.get::<&MonsterAnimState>(),
+                entity.get::<&AttackState>(),
+                entity.get::<&LibrarySprite>(),
+                entity.get::<&SwingSoundPlayed>(),
+            ) else {
+                continue;
+            };
+            let entity = entity.entity();
+
             // 对齐 C# MonsterObject.PlaySwingSound：部分怪物不播放 SwingSound
             // - DarkCaptain / EvilMir / DragonStatue: return
             let mt = monster.monster_type;
@@ -537,16 +537,17 @@ impl AnimationSystem {
 
         let mut triggers: Vec<(hecs::Entity, std::time::Instant, i32)> = Vec::new();
 
-        for (entity, (monster, anim, attack_state, played)) in ctx
-            .world
-            .query::<(
-                &Monster,
-                &MonsterAnimState,
-                &AttackState,
-                Option<&AttackSoundPlayed>,
-            )>()
-            .iter()
-        {
+        for entity in ctx.world.iter() {
+            let (Some(monster), Some(anim), Some(attack_state), played) = (
+                entity.get::<&Monster>(),
+                entity.get::<&MonsterAnimState>(),
+                entity.get::<&AttackState>(),
+                entity.get::<&AttackSoundPlayed>(),
+            ) else {
+                continue;
+            };
+            let entity = entity.entity();
+
             // 仅在攻击动作期间触发
             let is_attack_action = matches!(
                 anim.action,
@@ -618,11 +619,15 @@ impl AnimationSystem {
         // 收集需要移除 AttackState 的实体
         let mut finished_attacks = Vec::new();
         
-        for (entity, (attack_state, mount_state, monster)) in ctx
-            .world
-            .query_mut::<(&AttackState, Option<&MountState>, Option<&crate::components::Monster>)>()
-            .into_iter()
-        {
+        for eref in ctx.world.iter() {
+            let (Some(attack_state), mount_state, monster) = (
+                eref.get::<&AttackState>(),
+                eref.get::<&MountState>(),
+                eref.get::<&crate::components::Monster>(),
+            ) else {
+                continue;
+            };
+            let entity = eref.entity();
             let mounted = mount_state.and_then(|m| m.mount_index).is_some();
             let is_monster = monster.is_some();
 

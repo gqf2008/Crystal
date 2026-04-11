@@ -20,7 +20,11 @@ impl LogicSystem for HealthBarAnimSystem {
     fn update(&mut self, ctx: &mut GameContext, dt: f32) -> GameResult {
         // 1) 确保怪物都有 HealthBarAnim（初始化为当前血量）。
         let mut to_init: Vec<(hecs::Entity, f32)> = Vec::new();
-        for (e, (_m, hp)) in ctx.world.query::<(&Monster, &Health)>().iter() {
+        for (e, (_m, hp)) in ctx.world.iter().filter_map(|e| {
+            let m = e.get::<&Monster>()?;
+            let hp = e.get::<&Health>()?;
+            Some((e.entity(), (m, hp)))
+        }) {
             if ctx.world.get::<&HealthBarAnim>(e).is_err() {
                 to_init.push((e, hp.current.max(0) as f32));
             }
@@ -32,10 +36,9 @@ impl LogicSystem for HealthBarAnimSystem {
         // 2) 平滑下降：displayed 以固定速度向 target 逼近；回血/满血则直接对齐。
         // 速度策略：按 max 血量缩放，保证“看得到动画”但不拖泥带水。
         let dt = dt.max(0.0);
-        for (_e, (_m, hp, anim)) in ctx
+        for (_m, hp, mut anim) in ctx
             .world
             .query_mut::<(&Monster, &Health, &mut HealthBarAnim)>()
-            .into_iter()
         {
             let max = hp.max.max(1) as f32;
             let target = (hp.current.max(0) as f32).min(max);

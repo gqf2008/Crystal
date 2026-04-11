@@ -265,8 +265,10 @@ impl GameContext {
         use crate::components::core::Dead;
         let mut to_remove = Vec::new();
         
-        for (id, _dead) in self.world.query::<&Dead>().iter() {
-            to_remove.push(id);
+        for eref in self.world.iter() {
+            if eref.get::<&Dead>().is_some() {
+                to_remove.push(eref.entity());
+            }
         }
         
         for id in to_remove {

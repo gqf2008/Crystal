@@ -661,7 +661,7 @@ impl SpriteRenderSystem {
             .query::<(&Camera, &Position)>()
             .iter()
             .next()
-            .map(|(_, (c, p))| (p.x, p.y, c.zoom, c.screen_width, c.screen_height))
+            .map(|(c, p)| (p.x, p.y, c.zoom, c.screen_width, c.screen_height))
             .unwrap_or((0.0, 0.0, 1.0, screen_width(), screen_height()));
 
         let zoom = cam_zoom.max(0.0001);
@@ -677,7 +677,7 @@ impl SpriteRenderSystem {
             .query::<&crate::components::RenderPass>()
             .iter()
             .next()
-            .map(|(_, p)| p.stage)
+            .map(|p| p.stage)
             .unwrap_or(crate::components::RenderStage::Normal);
 
         if stage == crate::components::RenderStage::PostFront && local_only {
@@ -704,7 +704,7 @@ impl SpriteRenderSystem {
             .query::<&TimeTracker>()
             .iter()
             .next()
-            .map(|(_, tt)| tt.animation_count)
+            .map(|tt| tt.animation_count)
             .unwrap_or(0);
 
         // 收集并排序可渲染对象（玩家/怪物/NPC）
@@ -735,35 +735,40 @@ impl SpriteRenderSystem {
 
         // Players
         if local_only {
-            for (entity, (_local, player, pos, appearance, anim_frame)) in world
-                .query::<(&LocalPlayer, &Player, &Position, &PlayerAppearance, &AnimationFrame)>()
-                .iter()
-            {
-                if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+            for eref in world.iter() {
+                let Some(_local) = eref.get::<&LocalPlayer>() else { continue };
+                let Some(player) = eref.get::<&Player>() else { continue };
+                let Some(pos) = eref.get::<&Position>() else { continue };
+                let Some(appearance) = eref.get::<&PlayerAppearance>() else { continue };
+                let Some(anim_frame) = eref.get::<&AnimationFrame>() else { continue };
+                let entity = eref.entity();
+                if !in_view(&*pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
                 // kind order: NPC(0) < Monster(1) < Player(2)
                 renderables.push((pos.y, 2, Renderable::Player {
                     entity,
-                    player: player.clone(),
+                    player: (*player).clone(),
                     pos: *pos,
-                    appearance: appearance.clone(),
+                    appearance: (*appearance).clone(),
                     anim_frame: *anim_frame,
                 }));
             }
         } else {
-            for (entity, (player, pos, appearance, anim_frame)) in world
-                .query::<(&Player, &Position, &PlayerAppearance, &AnimationFrame)>()
-                .iter()
-            {
-                if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+            for eref in world.iter() {
+                let Some(player) = eref.get::<&Player>() else { continue };
+                let Some(pos) = eref.get::<&Position>() else { continue };
+                let Some(appearance) = eref.get::<&PlayerAppearance>() else { continue };
+                let Some(anim_frame) = eref.get::<&AnimationFrame>() else { continue };
+                let entity = eref.entity();
+                if !in_view(&*pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
                 renderables.push((pos.y, 2, Renderable::Player {
                     entity,
-                    player: player.clone(),
+                    player: (*player).clone(),
                     pos: *pos,
-                    appearance: appearance.clone(),
+                    appearance: (*appearance).clone(),
                     anim_frame: *anim_frame,
                 }));
             }
@@ -772,14 +777,19 @@ impl SpriteRenderSystem {
         // NPC/Monster：渲染 LibrarySprite + 名称 + 血条
         if !local_only {
             use crate::components::{NetworkObjectType, NetworkSync};
-            for (entity, (_sync, spr, pos)) in world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
-                if _sync.object_type != NetworkObjectType::NPC && _sync.object_type != NetworkObjectType::Monster {
+            for (entity, (sync, spr, pos)) in world.iter().filter_map(|e| {
+                let sync = e.get::<&NetworkSync>()?;
+                let spr = e.get::<&LibrarySprite>()?;
+                let pos = e.get::<&Position>()?;
+                Some((e.entity(), (sync, spr, pos)))
+            }) {
+                if sync.object_type != NetworkObjectType::NPC && sync.object_type != NetworkObjectType::Monster {
                     continue;
                 }
                 if !matches!(spr.blend_mode, SpriteBlendMode::Alpha) {
                     continue;
                 }
-                if !in_view(pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                if !in_view(&*pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
 
@@ -798,7 +808,7 @@ impl SpriteRenderSystem {
                     .unwrap_or((None, None));
 
                 // kind order: NPC(0) < Monster(1) < Player(2)
-                let kind_order = if _sync.object_type == NetworkObjectType::NPC { 0 } else { 1 };
+                let kind_order = if sync.object_type == NetworkObjectType::NPC { 0 } else { 1 };
                 renderables.push((
                     pos.y,
                     kind_order,

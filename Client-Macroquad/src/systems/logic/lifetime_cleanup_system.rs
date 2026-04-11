@@ -13,9 +13,11 @@ impl LogicSystem for LifetimeCleanupSystem {
         }
 
         let mut to_despawn: Vec<hecs::Entity> = Vec::new();
-        for (e, lt) in ctx.world.query_mut::<&mut Lifetime>().into_iter() {
-            if lt.update(delta_ms) {
-                to_despawn.push(e);
+        for eref in ctx.world.iter() {
+            if let Some(mut lt) = eref.get::<&mut Lifetime>() {
+                if lt.update(delta_ms) {
+                    to_despawn.push(eref.entity());
+                }
             }
         }
 

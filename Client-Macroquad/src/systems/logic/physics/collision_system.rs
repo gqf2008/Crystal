@@ -114,7 +114,7 @@ impl LogicSystem for CollisionSystem {
             let mut height = None;
             let mut cells = None;
             
-            for (_, map_data) in ctx.world.query::<&MapData>().iter() {
+            for map_data in ctx.world.query::<&MapData>().iter() {
                 width = Some(map_data.width);
                 height = Some(map_data.height);
                 cells = Some(map_data.cells.clone());
@@ -132,7 +132,7 @@ impl LogicSystem for CollisionSystem {
         // 重要：MovementSystem 已经更新了 position，本系统负责“阻止进一步进入阻挡”和“把已经进入阻挡的情况拉回”。
         use crate::components::{MovementMode, PlayerInput, Player};
 
-        for (_entity, (pos, vel, player_input, path, _player)) in ctx.world.query_mut::<(
+        for (pos, vel, player_input, path, player) in ctx.world.query_mut::<(
             &mut Position,
             &mut MovementVelocity,
             Option<&mut PlayerInput>,

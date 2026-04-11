@@ -16,7 +16,7 @@ impl LogicSystem for ParticleSystem {
         let current_time = get_time() as f32;
 
         // 1. 更新粒子位置和速度
-        for (_id, (particle, emitter)) in ctx.world.query_mut::<(&mut Particle, Option<&ParticleEmitter>)>() {
+        for (particle, emitter) in ctx.world.query_mut::<(&mut Particle, Option<&ParticleEmitter>)>() {
             // 更新位置: Position += Velocity
             let vx = particle.velocity.x;
             let vy = particle.velocity.y;
@@ -46,9 +46,11 @@ impl LogicSystem for ParticleSystem {
 
         // 2. 移除过期粒子
         let mut to_remove = Vec::new();
-        for (id, particle) in ctx.world.query_mut::<&Particle>() {
-            if current_time >= particle.alive_until {
-                to_remove.push(id);
+        for eref in ctx.world.iter() {
+            if let Some(particle) = eref.get::<&Particle>() {
+                if current_time >= particle.alive_until {
+                    to_remove.push(eref.entity());
+                }
             }
         }
 
@@ -57,7 +59,7 @@ impl LogicSystem for ParticleSystem {
         }
 
         // 3. 发射器生成新粒子
-        for (_id, emitter) in ctx.world.query_mut::<&mut ParticleEmitter>() {
+        for emitter in ctx.world.query_mut::<&mut ParticleEmitter>() {
             if emitter.generate_particles && current_time >= emitter.next_particle_time {
                 emitter.next_particle_time = current_time + emitter.spawn_interval;
                 

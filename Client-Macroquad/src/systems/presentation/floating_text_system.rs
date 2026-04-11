@@ -18,10 +18,13 @@ impl LogicSystem for FloatingTextSystem {
 
         let mut to_remove: Vec<hecs::Entity> = Vec::new();
 
-        for (entity, (pos, ft)) in ctx.world.query_mut::<(&mut Position, &FloatingText)>() {
+        for eref in ctx.world.iter() {
+            let (Some(mut pos), Some(ft)) = (eref.get::<&mut Position>(), eref.get::<&FloatingText>()) else {
+                continue;
+            };
             // 过期清理
             if now >= ft.start_time + ft.duration {
-                to_remove.push(entity);
+                to_remove.push(eref.entity());
                 continue;
             }
 

@@ -215,20 +215,20 @@ impl LogicSystem for PathfindingSystem {
             .query_mut::<&MapData>()
             .into_iter()
             .next()
-            .map(|(_, data)| data.clone());
+            .map(|data| data.clone());
 
         // 动态占位（仅用于挂机 AI 的寻路避障）
         // 注意：这里必须在 query_mut 循环之前收集，避免 hecs 的可变借用冲突。
         let dynamic_occupied: Option<HashSet<(usize, usize)>> = if ctx.session.local_player_ai_enabled {
             let mut occ: HashSet<(usize, usize)> = HashSet::new();
 
-            for (_e, (_p, pos)) in ctx.world.query::<(&Player, &Position)>().iter() {
+            for (_, pos) in ctx.world.query::<(&Player, &Position)>().iter() {
                 let (gx, gy) = Coord::world_to_grid(pos.x, pos.y);
                 if gx >= 0 && gy >= 0 {
                     occ.insert((gx as usize, gy as usize));
                 }
             }
-            for (_e, (_m, pos)) in ctx.world.query::<(&crate::components::Monster, &Position)>().iter() {
+            for (_, pos) in ctx.world.query::<(&crate::components::Monster, &Position)>().iter() {
                 let (gx, gy) = Coord::world_to_grid(pos.x, pos.y);
                 if gx >= 0 && gy >= 0 {
                     occ.insert((gx as usize, gy as usize));
@@ -241,7 +241,7 @@ impl LogicSystem for PathfindingSystem {
         };
 
         // 处理本地玩家的移动输入
-        for (_entity, (player_input, position, path, player, _local, velocity)) in ctx.world
+        for (player_input, position, path, player, _local, velocity) in ctx.world
             .query_mut::<(
                 &mut PlayerInput,
                 &Position,
@@ -250,7 +250,6 @@ impl LogicSystem for PathfindingSystem {
                 &LocalPlayer,
                 &mut MovementVelocity,
             )>()
-            .into_iter()
         {
             // 检查是否有移动指令
             if let Some((target_x, target_y)) = player_input.move_to {

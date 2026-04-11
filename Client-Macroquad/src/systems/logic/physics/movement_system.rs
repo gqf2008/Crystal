@@ -140,20 +140,33 @@ impl LogicSystem for MovementSystem {
             .world
             .query::<&crate::components::AttackState>()
             .iter()
-            .map(|(e, _)| e)
+            .filter_map(|_| None::<hecs::Entity>)
             .collect();
 
+        // Collect attacking entities with entity IDs
+        let attacking_entities: HashSet<_> = ctx.world.iter().filter_map(|eref| {
+            if eref.get::<&crate::components::AttackState>().is_some() {
+                Some(eref.entity())
+            } else {
+                None
+            }
+        }).collect();
+
         // 🎯 处理有Player组件的实体（玩家、NPC等）
-        for (entity, (position, velocity, path, player, player_input)) in ctx.world.query_mut::<(
-            &mut Position,
-            &mut MovementVelocity,
-            &mut Path,
-            &mut Player,
-            &mut crate::components::PlayerInput,
-        )>() {
+        for entity in ctx.world.iter() {
+            let (Some(mut position), Some(mut velocity), Some(mut path), Some(mut player), Some(mut player_input)) = (
+                entity.get::<&mut Position>(),
+                entity.get::<&mut MovementVelocity>(),
+                entity.get::<&mut Path>(),
+                entity.get::<&mut Player>(),
+                entity.get::<&mut crate::components::PlayerInput>(),
+            ) else {
+                continue;
+            };
+            let entity = entity.entity();
             use crate::components::MovementMode;
 
-            // ⚔️ 攻击中：强制停止移动/清理路径，避免“边跑边砍/攻击时仍播放跑走”。
+            // ⚔️ 攻击中：强制停止移动/清理路径，避免"边跑边砍/攻击时仍播放跑走"。
             // AttackState 的生命周期由 AnimationSystem 管理（完成后自动移除）。
             if attacking_entities.contains(&entity) {
                 velocity.stop();
@@ -275,16 +288,23 @@ impl LogicSystem for MovementSystem {
 
         // 🎯 处理没有Player组件的通用实体（怪物、道具等）
         // 先收集所有有Player组件的实体ID
-        let player_entities: Vec<_> = ctx.world.query::<&Player>()
-            .iter()
-            .map(|(entity, _)| entity)
-            .collect();
+        let player_entities: Vec<_> = ctx.world.iter().filter_map(|eref| {
+            if eref.get::<&Player>().is_some() {
+                Some(eref.entity())
+            } else {
+                None
+            }
+        }).collect();
 
-        for (entity, (position, velocity, path)) in ctx.world.query_mut::<(
-            &mut Position,
-            &mut MovementVelocity,
-            &mut Path,
-        )>() {
+        for eref in ctx.world.iter() {
+            let (Some(mut position), Some(mut velocity), Some(mut path)) = (
+                eref.get::<&mut Position>(),
+                eref.get::<&mut MovementVelocity>(),
+                eref.get::<&mut Path>(),
+            ) else {
+                continue;
+            };
+            let entity = eref.entity();
             // 跳过已经有Player组件的实体（避免重复处理）
             if player_entities.contains(&entity) {
                 continue;

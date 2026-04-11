@@ -48,7 +48,7 @@ impl MapUpdateSystem {
         // 查询 MapSwitchRequest 组件
         let map_path = {
             let mut query = ctx.world.query::<&MapSwitchRequest>();
-            if let Some((_, request)) = query.iter().next() {
+            if let Some(request) = query.iter().next() {
                 Some(request.map_path.clone())
             } else {
                 None
@@ -63,7 +63,7 @@ impl MapUpdateSystem {
                 .query::<(&Position, &Camera)>()
                 .into_iter()
                 .next()
-                .map(|(_, (pos, cam))| (pos.clone(), cam.zoom, cam.screen_width, cam.screen_height))
+                .map(|(pos, cam)| (pos.clone(), cam.zoom, cam.screen_width, cam.screen_height))
                 .unwrap_or((Position { x: 800.0, y: 600.0 }, 1.0, 1600.0, 1200.0));
 
             // 加载新地图（兼容不同工作目录/仓库布局）
@@ -91,7 +91,7 @@ impl MapUpdateSystem {
                         .query_mut::<&MapData>()
                         .into_iter()
                         .next()
-                        .map(|(_, data)| data.clone())
+                        .map(|data| data.clone())
                         .expect("地图数据未加载");
 
                     let (spawn_grid_x, spawn_grid_y) =
@@ -163,11 +163,13 @@ impl MapUpdateSystem {
             tracing::info!("📂 用户选择地图: {}", path_str);
 
             // 删除旧的 MapSwitchRequest（如果存在）
-            let to_remove: Vec<_> = world
-                .query::<&MapSwitchRequest>()
-                .iter()
-                .map(|(e, _)| e)
-                .collect();
+            let to_remove: Vec<_> = world.iter().filter_map(|eref| {
+                if eref.get::<&MapSwitchRequest>().is_some() {
+                    Some(eref.entity())
+                } else {
+                    None
+                }
+            }).collect();
             for entity in to_remove {
                 let _ = world.despawn(entity);
             }

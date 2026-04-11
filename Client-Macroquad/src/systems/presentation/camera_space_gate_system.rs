@@ -17,13 +17,13 @@ impl LogicSystem for CameraSpaceGateSystem {
 
         // 1) RenderConfig：决定 CameraSystem 是否允许拖拽/缩放。
         let mut cfg_q = ctx.world.query::<&mut RenderConfig>();
-        if let Some((_e, cfg)) = cfg_q.iter().next() {
+        if let Some(cfg) = cfg_q.iter().next() {
             cfg.enable_camera_drag = space_down;
         }
 
         // 2) CameraMode：Space 按住 = Manual；否则 = FollowPlayer。
         let mut mode_q = ctx.world.query::<&mut CameraMode>();
-        if let Some((_e, mode)) = mode_q.iter().next() {
+        if let Some(mode) = mode_q.iter().next() {
             *mode = if space_down {
                 CameraMode::Manual
             } else {

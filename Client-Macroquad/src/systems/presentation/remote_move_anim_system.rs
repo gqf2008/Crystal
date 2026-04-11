@@ -17,13 +17,16 @@ impl LogicSystem for RemoteMoveAnimSystem {
         let now = get_time();
         let mut done: Vec<hecs::Entity> = Vec::new();
 
-        for (e, (player, timer, interp, atk, dead)) in ctx.world.query_mut::<(
-            &mut Player,
-            &RemoteMoveAnim,
-            Option<&PositionInterpolation>,
-            Option<&AttackState>,
-            Option<&DeathState>,
-        )>() {
+        for eref in ctx.world.iter() {
+            let (Some(mut player), Some(timer), interp, atk, dead) = (
+                eref.get::<&mut Player>(),
+                eref.get::<&RemoteMoveAnim>(),
+                eref.get::<&PositionInterpolation>(),
+                eref.get::<&AttackState>(),
+                eref.get::<&DeathState>(),
+            ) else {
+                continue;
+            };
             // 有插值说明仍在移动；攻击/死亡由其他系统驱动，不在这里抢写动作。
             if interp.is_some() || atk.is_some() || dead.is_some() {
                 continue;
@@ -36,7 +39,7 @@ impl LogicSystem for RemoteMoveAnimSystem {
             if matches!(player.action, PlayerAction::Walk | PlayerAction::Run) {
                 player.action = PlayerAction::Stand;
             }
-            done.push(e);
+            done.push(eref.entity());
         }
 
         for e in done {

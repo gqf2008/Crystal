@@ -22,7 +22,7 @@ impl MapBootstrapSystem {
         // 若已存在 MapManager，直接返回当前 file
         {
             let mut q = ctx.world.query::<&MapManager>();
-            if let Some((_e, mgr)) = q.iter().next() {
+            if let Some(mgr) = q.iter().next() {
                 if !mgr.current_map_file.is_empty() {
                     return mgr.current_map_file.clone();
                 }

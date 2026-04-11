@@ -100,7 +100,7 @@ impl LogicSystem for AutoPotionSystem {
         }
 
         // 找到本地玩家
-        let Some(player_entity) = ctx.world.query::<&LocalPlayer>().iter().next().map(|(e, _)| e) else {
+        let Some(player_entity) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) else {
             return Ok(());
         };
 

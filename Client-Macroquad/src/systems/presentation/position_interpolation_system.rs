@@ -14,7 +14,10 @@ impl LogicSystem for PositionInterpolationSystem {
         let now = get_time();
         let mut done: Vec<hecs::Entity> = Vec::new();
 
-        for (e, (pos, interp)) in ctx.world.query_mut::<(&mut Position, &PositionInterpolation)>() {
+        for eref in ctx.world.iter() {
+            let (Some(mut pos), Some(interp)) = (eref.get::<&mut Position>(), eref.get::<&PositionInterpolation>()) else {
+                continue;
+            };
             let duration = interp.duration.max(0.0001) as f64;
             let t = ((now - interp.start_time) / duration).clamp(0.0, 1.0) as f32;
 
@@ -24,7 +27,7 @@ impl LogicSystem for PositionInterpolationSystem {
             if t >= 1.0 {
                 pos.x = interp.target_x;
                 pos.y = interp.target_y;
-                done.push(e);
+                done.push(eref.entity());
             }
         }
 

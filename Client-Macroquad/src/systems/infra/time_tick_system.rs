@@ -16,7 +16,7 @@ impl LogicSystem for TimeTickSystem {
 
         // 只维护第一个 TimeTracker（约定：单例）。
         let mut q = ctx.world.query::<&mut TimeTracker>();
-        let Some((_e, tt)) = q.iter().next() else {
+        let Some(tt) = q.iter().next() else {
             return Ok(());
         };
 

@@ -295,10 +295,15 @@ impl LocalPlayerAiSystem {
     fn find_local_player_snapshot(
         ctx: &GameContext,
     ) -> Option<(hecs::Entity, (i32, i32), (f32, f32), Option<hecs::Entity>, bool)> {
-        for (e, (_local, pos, input)) in ctx
+        for (e, _local, pos, input) in ctx
             .world
-            .query::<(&LocalPlayer, &Position, &PlayerInput)>()
             .iter()
+            .filter_map(|e| {
+                let lp = e.get::<&LocalPlayer>()?;
+                let pos = e.get::<&Position>()?;
+                let input = e.get::<&PlayerInput>()?;
+                Some((e.entity(), lp, pos, input))
+            })
         {
             let (pgx, pgy) = Coord::world_to_grid(pos.x, pos.y);
             let has_move_goal = input.move_to.is_some();
@@ -330,7 +335,12 @@ impl LocalPlayerAiSystem {
     ) -> Option<hecs::Entity> {
         let mut best: Option<(hecs::Entity, i32)> = None;
 
-        for (e, (_m, pos, hp)) in ctx.world.query::<(&Monster, &Position, &Health)>().iter() {
+        for (e, _m, pos, hp) in ctx.world.iter().filter_map(|e| {
+            let m = e.get::<&Monster>()?;
+            let pos = e.get::<&Position>()?;
+            let hp = e.get::<&Health>()?;
+            Some((e.entity(), m, pos, hp))
+        }) {
             if hp.current <= 0 {
                 continue;
             }
@@ -357,7 +367,11 @@ impl LocalPlayerAiSystem {
         let mut occ = HashSet::new();
 
         // 其他玩家
-        for (e, (_p, pos)) in ctx.world.query::<(&crate::components::Player, &Position)>().iter() {
+        for (e, _p, pos) in ctx.world.iter().filter_map(|e| {
+            let p = e.get::<&crate::components::Player>()?;
+            let pos = e.get::<&Position>()?;
+            Some((e.entity(), p, pos))
+        }) {
             if e == local_player {
                 continue;
             }
@@ -366,7 +380,11 @@ impl LocalPlayerAiSystem {
         }
 
         // 其他怪物（不把目标怪物自身占位加入，避免永远找不到相邻格时过度限制）
-        for (e, (_m, pos)) in ctx.world.query::<(&Monster, &Position)>().iter() {
+        for (e, _m, pos) in ctx.world.iter().filter_map(|e| {
+            let m = e.get::<&Monster>()?;
+            let pos = e.get::<&Position>()?;
+            Some((e.entity(), m, pos))
+        }) {
             if e == target_monster {
                 continue;
             }
@@ -814,7 +832,7 @@ impl LocalPlayerAiSystem {
             return false;
         }
         let mut q = ctx.world.query::<&crate::components::MapData>();
-        let Some((_, map)) = q.iter().next() else {
+        let Some(map) = q.iter().next() else {
             // 没地图数据时退化为“允许”，避免 AI 完全停摆
             return true;
         };
@@ -837,20 +855,19 @@ impl LogicSystem for LocalPlayerAiSystem {
             ctx.session.local_player_ai_enabled = !ctx.session.local_player_ai_enabled;
 
             // 模式切换：无论开/关，都清理上一种控制模式残留的意图，避免“切了还在走/追砍”。
-            for (e, (_local, input, path)) in ctx
-                .world
-                .query_mut::<(
-                    &LocalPlayer,
-                    &mut PlayerInput,
-                    &mut crate::components::movement::Path,
-                )>()
-                .into_iter()
-            {
-                input.attack_target = None;
-                input.move_to = None;
-                input.movement_mode = MovementMode::None;
-                input.run = false;
-                path.clear();
+            if let Some(e) = ctx.world.iter().find_map(|e| {
+                let _ = e.get::<&LocalPlayer>()?;
+                Some(e.entity())
+            }) {
+                if let Ok(mut input) = ctx.world.get::<&mut PlayerInput>(e) {
+                    input.attack_target = None;
+                    input.move_to = None;
+                    input.movement_mode = MovementMode::None;
+                    input.run = false;
+                }
+                if let Ok(mut path) = ctx.world.get::<&mut crate::components::movement::Path>(e) {
+                    path.clear();
+                }
 
                 // 同时停掉速度/动作，避免“关了 AI 还在原地跑步动画”。
                 if let Ok(mut mv) = ctx.world.get::<&mut crate::components::MovementVelocity>(e) {
@@ -863,11 +880,10 @@ impl LogicSystem for LocalPlayerAiSystem {
                     p.action = crate::components::PlayerAction::Stand;
                 }
                 let _ = ctx.world.remove_one::<crate::components::AttackState>(e);
-                break;
             }
 
             // 给玩家一个可见反馈（写到聊天系统提示）
-            if let Some((_e, ui)) = ctx.world.query::<&UiState>().iter().next() {
+            if let Some(ui) = ctx.world.query::<&UiState>().iter().next() {
                 let msg = if ctx.session.local_player_ai_enabled {
                     "[AI] 已开启（F8 切换）".to_string()
                 } else {
@@ -891,7 +907,7 @@ impl LogicSystem for LocalPlayerAiSystem {
                 .query::<&UiState>()
                 .iter()
                 .next()
-                .map(|(_, s)| {
+                .map(|s| {
                     let s = s.borrow();
                     (
                         s.ui_input_active,
@@ -907,7 +923,7 @@ impl LogicSystem for LocalPlayerAiSystem {
             if should_pause {
                 if self.last_ui_pause_log.elapsed() >= self.ui_pause_log_interval {
                     self.last_ui_pause_log = Instant::now();
-                    if let Some((_e, ui)) = ctx.world.query::<&UiState>().iter().next() {
+                    if let Some(ui) = ctx.world.query::<&UiState>().iter().next() {
                         ui.borrow_mut().pending_commands.push(UiCommand::PushSystemChatLine(
                             format!(
                                 "[AI] 暂停：UI 占用输入 (input_active={}, mouse_captured={}, modal={}, consumed_last_frame={})",

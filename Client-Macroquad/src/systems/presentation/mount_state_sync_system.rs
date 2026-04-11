@@ -46,7 +46,7 @@ impl MountStateSyncSystem {
 
 impl LogicSystem for MountStateSyncSystem {
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
-        for (_entity, (equipment, mount_state, velocity)) in ctx.world.query_mut::<(
+        for (equipment, mount_state, velocity) in ctx.world.query_mut::<(
             &Equipment,
             &mut MountState,
             &mut MovementVelocity,

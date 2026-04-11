@@ -1,6 +1,7 @@
 use crate::game::{GameContext, GameResult};
 use crate::network::handlers::NetworkEvent;
 use crate::systems::LogicSystem;
+use rand::RngExt;
 
 /// NetworkApplySystem - 网络事件落地系统
 ///
@@ -228,7 +229,7 @@ impl NetworkApplySystem {
         // 先找本地玩家实体；如果还没创建，则最小创建一个
         let existing = {
             let mut q = ctx.world.query::<&LocalPlayer>();
-            q.iter().next().map(|(e, _)| e)
+            ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
         };
         let local_entity = match existing {
             Some(e) => e,
@@ -600,9 +601,8 @@ impl NetworkApplySystem {
         use mir2_shared::enums::ItemType;
 
         let target_entity = {
-            let mut q = ctx.world.query::<&OtherPlayer>();
-            q.iter()
-                .find_map(|(e, op)| if op.name == packet.name { Some(e) } else { None })
+            ctx.world.iter()
+                .find_map(|e| e.get::<&OtherPlayer>().filter(|op| op.name == packet.name).map(|_| e.entity()))
         };
 
         let Some(e) = target_entity else {
@@ -749,7 +749,7 @@ impl NetworkApplySystem {
         use crate::components::{LocalPlayer, Player, Position};
 
         // MapChanged 里携带了落点与朝向（切图/传送时很关键）
-        let Some((entity, _)) = ctx.world.query::<&LocalPlayer>().iter().next() else {
+        let Some((entity, _)) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|lp| (e.entity(), lp))) else {
             return;
         };
 
@@ -787,10 +787,8 @@ impl NetworkApplySystem {
         };
 
         let existing = {
-            let mut q = ctx.world.query::<&NetworkSync>();
-            q.iter()
-                .find(|(_, ns)| ns.object_id == object_id)
-                .map(|(e, _)| e)
+            ctx.world.iter()
+                .find_map(|e| e.get::<&NetworkSync>().filter(|ns| ns.object_id == object_id).map(|_| e.entity()))
         };
 
         let (wx, wy) = crate::coord::Coord::grid_to_world_center(location_x, location_y);
@@ -832,10 +830,8 @@ impl NetworkApplySystem {
         use crate::components::network::NetworkSync;
 
         let entity = {
-            let mut q = ctx.world.query::<&NetworkSync>();
-            q.iter()
-                .find(|(_, ns)| ns.object_id == object_id)
-                .map(|(e, _)| e)
+            ctx.world.iter()
+                .find_map(|e| e.get::<&NetworkSync>().filter(|ns| ns.object_id == object_id).map(|_| e.entity()))
         };
 
         if let Some(e) = entity {
@@ -847,18 +843,25 @@ impl NetworkApplySystem {
         use crate::components::network::NetworkSync;
 
         let mut q = ctx.world.query::<&NetworkSync>();
-        if let Some((e, _)) = q.iter().find(|(_, ns)| ns.object_id == object_id) {
-            return Some(e);
+        if let Some(e) = ctx.world.iter().find(|e| e.get::<&NetworkSync>().map(|ns| ns.object_id == object_id).unwrap_or(false)) {
+            return Some(e.entity());
         }
 
         // LocalPlayer 默认不挂 NetworkSync，但仍可能需要通过 object_id 落地（例如 mock 侧下发的
         // ObjectStruck/ObjectDied/ObjectRemove 等）。
         {
             use crate::components::{LocalPlayer, PlayerData};
-            let mut q = ctx.world.query::<(&LocalPlayer, &PlayerData)>();
-            q.iter()
-                .find(|(_, (_lp, pd))| pd.object_id == object_id)
-                .map(|(e, _)| e)
+            ctx.world.iter()
+                .find_map(|e| {
+                    if e.get::<&LocalPlayer>().is_some() {
+                        if let Some(pd) = e.get::<&PlayerData>() {
+                            if pd.object_id == object_id {
+                                return Some(e.entity());
+                            }
+                        }
+                    }
+                    None
+                })
         }
     }
 
@@ -1624,7 +1627,7 @@ impl LogicSystem for NetworkApplySystem {
         let local_player_entity = {
             use crate::components::LocalPlayer;
             let mut q = ctx.world.query::<&LocalPlayer>();
-            q.iter().next().map(|(e, _)| e)
+            ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
         };
 
         for event in ctx.events().network_events() {
@@ -2688,10 +2691,17 @@ impl LogicSystem for NetworkApplySystem {
                         Some(e)
                     } else {
                         // local player path: match by PlayerData.object_id
-                        let mut q = ctx.world.query::<(&crate::components::LocalPlayer, &PlayerData)>();
-                        q.iter()
-                            .find(|(_, (_lp, pd))| pd.object_id == object_id)
-                            .map(|(e, _)| e)
+                        ctx.world.iter()
+                            .find_map(|e| {
+                                if e.get::<&crate::components::LocalPlayer>().is_some() {
+                                    if let Some(pd) = e.get::<&PlayerData>() {
+                                        if pd.object_id == object_id {
+                                            return Some(e.entity());
+                                        }
+                                    }
+                                }
+                                None
+                            })
                     };
 
                 let Some(e) = target_entity else { continue; };

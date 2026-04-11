@@ -19,7 +19,7 @@ impl MinimapSystem {
         f: impl FnOnce(&mut crate::ui::ui_state::UiStateData) -> R,
     ) -> Option<R> {
         let mut q = ctx.world.query::<&UiState>();
-        let (_e, s) = q.iter().next()?;
+        let s = q.iter().next()?;
         let mut data = s.borrow_mut();
         Some(f(&mut data))
     }
@@ -52,8 +52,12 @@ impl LogicSystem for MinimapSystem {
                 // 小地图双击是 UI 事件，不一定会触发 PlayerControlSystem 的鼠标分支。
                 // 若这里不设置 Player.action，可能出现“位置在动但动画不播放”的平移效果。
                 // 这里直接把 walk/run 意图落地到 PlayerInput + Player.action（攻击中则不覆盖）。
-                let mut q = ctx.world.query::<(&LocalPlayer, &mut PlayerInput, &mut Player)>();
-                if let Some((entity, (_local, input, player))) = q.iter().next() {
+                if let Some((entity, _local, mut input, mut player)) = ctx.world.iter().find_map(|e| {
+                    let _local = e.get::<&LocalPlayer>()?;
+                    let input = e.get::<&mut PlayerInput>()?;
+                    let player = e.get::<&mut Player>()?;
+                    Some((e.entity(), _local, input, player))
+                }) {
                     input.move_to = Some((wx, wy));
                     input.movement_mode = MovementMode::Pathfinding;
                     input.run = run;
@@ -71,7 +75,7 @@ impl LogicSystem for MinimapSystem {
             let mut q = ctx.world.query::<(&LocalPlayer, &Position, &Player)>();
             q.iter()
                 .next()
-                .map(|(_entity, (_local, pos, player))| (pos.x, pos.y, player.direction))
+                .map(|(_local, pos, player)| (pos.x, pos.y, player.direction))
         };
 
         if let Some((x, y, dir)) = player_snapshot {

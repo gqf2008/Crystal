@@ -143,7 +143,7 @@ impl LogicSystem for CameraSystem {
             .query::<&RenderConfig>()
             .iter()
             .next()
-            .map(|(_, cfg)| cfg.enable_camera_drag)
+            .map(|cfg| cfg.enable_camera_drag)
             .unwrap_or(false);
 
         // 🔧 先获取当前窗口尺寸(避免借用冲突)
@@ -156,7 +156,7 @@ impl LogicSystem for CameraSystem {
             .into_iter()
             .collect();
 
-        if let Some((_, (ref mut camera, ref mut draggable, ref mut pos, ref mut mode))) =
+        if let Some((ref mut camera, ref mut draggable, ref mut pos, ref mut mode)) =
             camera_query.first_mut()
         {
             // 🔧 每帧检查并同步相机尺寸(修复初始化时尺寸错误的问题)

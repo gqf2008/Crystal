@@ -60,7 +60,7 @@ impl LogicSystem for SkillSystem {
         let spell_request = {
             let mut request = None;
 
-            for (_, (_, input)) in ctx
+            for (_local, input) in ctx
                 .world
                 .query::<(&LocalPlayer, &crate::components::PlayerInput)>()
                 .iter()
@@ -79,7 +79,7 @@ impl LogicSystem for SkillSystem {
             // 1. 检查是否已学会该技能
             let learned = {
                 let mut found = false;
-                for (_, (_, magic_list)) in ctx.world.query::<(&LocalPlayer, &MagicList)>().iter() {
+                for (_local, magic_list) in ctx.world.query::<(&LocalPlayer, &MagicList)>().iter() {
                     if magic_list.has_learned(spell) {
                         found = true;
                     }
@@ -92,7 +92,7 @@ impl LogicSystem for SkillSystem {
                 tracing::warn!("⚠️ 尚未学会技能: {}", spell.name());
 
                 // 清除施法输入
-                for (_, (_, input)) in ctx
+                for (_local, mut input) in ctx
                     .world
                     .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
                 {
@@ -106,7 +106,7 @@ impl LogicSystem for SkillSystem {
             // 1.5 检查冷却时间（同时清理已过期条目）
             let on_cooldown = {
                 let mut cd = false;
-                for (_, (_, cooldowns)) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>() {
+                for (_local, mut cooldowns) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>() {
                     cooldowns.cleanup();
                     if cooldowns.is_on_cooldown(spell as u8) {
                         cd = true;
@@ -119,7 +119,7 @@ impl LogicSystem for SkillSystem {
             if on_cooldown {
                 tracing::warn!("⚠️ 技能冷却中: {}", spell.name());
 
-                for (_, (_, input)) in ctx
+                for (_local, mut input) in ctx
                     .world
                     .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
                 {
@@ -134,7 +134,7 @@ impl LogicSystem for SkillSystem {
             let mp_cost = Self::get_spell_mp_cost(spell);
             let has_enough_mp = {
                 let mut enough = false;
-                for (_, (_, mana)) in ctx.world.query::<(&LocalPlayer, &Mana)>().iter() {
+                for (_local, mana) in ctx.world.query::<(&LocalPlayer, &Mana)>().iter() {
                     if mana.has_enough(mp_cost) {
                         enough = true;
                     }
@@ -147,7 +147,7 @@ impl LogicSystem for SkillSystem {
                 tracing::warn!("⚠️ 魔法值不足,需要 {} MP", mp_cost);
 
                 // 清除施法输入
-                for (_, (_, input)) in ctx
+                for (_local, mut input) in ctx
                     .world
                     .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
                 {
@@ -171,12 +171,12 @@ impl LogicSystem for SkillSystem {
             // });
 
             // 5. 消耗魔法值
-            for (_, (_, mana)) in ctx.world.query_mut::<(&LocalPlayer, &mut Mana)>() {
+            for (_local, mut mana) in ctx.world.query_mut::<(&LocalPlayer, &mut Mana)>() {
                 mana.consume(mp_cost);
             }
 
             // 6. 清除施法输入
-            for (_, (_, input)) in ctx
+            for (_local, mut input) in ctx
                 .world
                 .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
             {
@@ -202,7 +202,7 @@ impl SkillSystem {
         // 1. 检查是否已学会该技能
         let learned = {
             let mut found = false;
-            for (_, (_, magic_list)) in world.query::<(&LocalPlayer, &MagicList)>().iter() {
+            for (_local, magic_list) in world.query::<(&LocalPlayer, &MagicList)>().iter() {
                 if magic_list.has_learned(spell) {
                     found = true;
                 }
@@ -220,7 +220,7 @@ impl SkillSystem {
         let mp_cost = Self::get_spell_mp_cost(spell);
         let has_enough_mp = {
             let mut enough = false;
-            for (_, (_, mana)) in world.query::<(&LocalPlayer, &Mana)>().iter() {
+            for (_local, mana) in world.query::<(&LocalPlayer, &Mana)>().iter() {
                 if mana.has_enough(mp_cost) {
                     enough = true;
                 }
@@ -237,7 +237,7 @@ impl SkillSystem {
         // 3. 检查冷却时间
         let on_cooldown = {
             let mut cd = false;
-            for (_, (_, cooldowns)) in world.query::<(&LocalPlayer, &crate::components::spell::SpellCooldowns)>().iter() {
+            for (_local, cooldowns) in world.query::<(&LocalPlayer, &crate::components::spell::SpellCooldowns)>().iter() {
                 if cooldowns.is_on_cooldown(spell as u8) {
                     cd = true;
                 }
@@ -263,7 +263,7 @@ impl SkillSystem {
         });
 
         // 6. 消耗魔法值
-        for (_, (_, mana)) in world.query_mut::<(&LocalPlayer, &mut Mana)>() {
+        for (_local, mut mana) in world.query_mut::<(&LocalPlayer, &mut Mana)>() {
             mana.consume(mp_cost);
         }
 
@@ -324,7 +324,7 @@ impl SkillSystem {
     /// 获取当前目标信息
     fn get_target_info(world: &World) -> (MirDirection, u32, Option<(i32, i32)>) {
         // 查询目标选择组件
-        for (_, (_, target_sel)) in world.query::<(&LocalPlayer, &TargetSelection)>().iter() {
+        for (_local, target_sel) in world.query::<(&LocalPlayer, &TargetSelection)>().iter() {
             match target_sel.current {
                 TargetType::Monster(id) => {
                     let direction = Self::calculate_direction_to_target(world, id);
@@ -360,7 +360,7 @@ impl SkillSystem {
         // 获取玩家位置
         let player_pos = {
             let mut pos = None;
-            for (_, (_, player_pos)) in world.query::<(&LocalPlayer, &Position)>().iter() {
+            for (_local, player_pos) in world.query::<(&LocalPlayer, &Position)>().iter() {
                 pos = Some((player_pos.x, player_pos.y));
                 break;
             }
@@ -376,7 +376,7 @@ impl SkillSystem {
             let mut pos = None;
 
             // 检查怪物
-            for (_, (_, net_sync, target_pos)) in
+            for (_monster, net_sync, target_pos) in
                 world.query::<(&Monster, &NetworkSync, &Position)>().iter()
             {
                 if net_sync.object_id == target_id {
@@ -387,7 +387,7 @@ impl SkillSystem {
 
             // 检查玩家
             if pos.is_none() {
-                for (_, (_, net_sync, target_pos)) in
+                for (_player, net_sync, target_pos) in
                     world.query::<(&Player, &NetworkSync, &Position)>().iter()
                 {
                     if net_sync.object_id == target_id {
@@ -399,7 +399,7 @@ impl SkillSystem {
 
             // 检查NPC
             if pos.is_none() {
-                for (_, (_, net_sync, target_pos)) in
+                for (_npc, net_sync, target_pos) in
                     world.query::<(&NPC, &NetworkSync, &Position)>().iter()
                 {
                     if net_sync.object_id == target_id {
@@ -427,7 +427,7 @@ impl SkillSystem {
     ) -> MirDirection {
         let player_pos = {
             let mut pos = None;
-            for (_, (_, player_pos)) in world.query::<(&LocalPlayer, &Position)>().iter() {
+            for (_local, player_pos) in world.query::<(&LocalPlayer, &Position)>().iter() {
                 pos = Some((player_pos.x, player_pos.y));
                 break;
             }
@@ -472,7 +472,7 @@ impl SkillSystem {
 
     /// 获取玩家当前朝向
     fn get_player_direction(world: &World) -> MirDirection {
-        for (_, (_, player)) in world.query::<(&LocalPlayer, &Player)>().iter() {
+        for (_local, player) in world.query::<(&LocalPlayer, &Player)>().iter() {
             // Player.direction 现在已经是 MirDirection 类型，直接返回
             return player.direction;
         }
@@ -515,10 +515,7 @@ impl LogicSystem for SpellInputSystem {
         ];
 
         // 找到本地玩家实体
-        let player_entity = {
-            let mut q = ctx.world.query::<&LocalPlayer>();
-            q.iter().next().map(|(e, _)| e)
-        };
+        let player_entity = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()));
 
         let Some(player_entity) = player_entity else {
             // 更新上一帧状态

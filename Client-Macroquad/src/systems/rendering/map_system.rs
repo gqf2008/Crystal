@@ -53,17 +53,17 @@ impl MapRenderSystem {
 
     fn desired_map_file(ctx: &GameContext) -> Option<String> {
         let mut q = ctx.world.query::<&MapManager>();
-        q.iter().next().map(|(_, mgr)| mgr.current_map_file.clone())
+        q.iter().next().map(|mgr| mgr.current_map_file.clone())
     }
 
     fn render_config(ctx: &GameContext) -> RenderConfig {
         let mut q = ctx.world.query::<&RenderConfig>();
-        q.iter().next().map(|(_, cfg)| cfg.clone()).unwrap_or_default()
+        q.iter().next().map(|cfg| cfg.clone()).unwrap_or_default()
     }
 
     fn update_minimap_world_size(ctx: &mut GameContext, width: i32, height: i32) {
         let mut q = ctx.world.query::<&UiState>();
-        let Some((_e, ui)) = q.iter().next() else {
+        let Some(ui) = q.iter().next() else {
             return;
         };
         let mut ui = ui.borrow_mut();
@@ -72,7 +72,7 @@ impl MapRenderSystem {
 
     fn update_front_occlusion(ctx: &mut GameContext, occluded: bool) {
         // 约定：FrontOcclusion 挂在 RenderPass 单例实体上。
-        if let Some((_e, o)) = ctx.world.query_mut::<&mut FrontOcclusion>().into_iter().next() {
+        if let Some(o) = ctx.world.query_mut::<&mut FrontOcclusion>().into_iter().next() {
             o.local_player_occluded = occluded;
             return;
         }
@@ -128,7 +128,7 @@ impl RenderSystem for MapRenderSystem {
                     let (px, py) = {
                         let mut q = ctx.world.query::<(&LocalPlayer, &Position)>();
                         match q.iter().next() {
-                            Some((_e, (_local, p))) => (p.x, p.y),
+                            Some((_local, p)) => (p.x, p.y),
                             None => (f32::NAN, f32::NAN),
                         }
                     };
@@ -204,7 +204,7 @@ impl RenderSystem for MapRenderSystem {
             .query::<&RenderPass>()
             .iter()
             .next()
-            .map(|(_, p)| *p)
+            .map(|p| *p)
             .unwrap_or_default();
 
         if pass.stage == RenderStage::Ui {
@@ -215,7 +215,7 @@ impl RenderSystem for MapRenderSystem {
             .query::<&RenderConfig>()
             .iter()
             .next()
-            .map(|(_, c)| c.clone())
+            .map(|c| c.clone())
             .unwrap_or_default();
 
         let Some(map) = self.map_reader.as_ref() else {
@@ -227,7 +227,7 @@ impl RenderSystem for MapRenderSystem {
             .query::<(&Camera, &Position)>()
             .iter()
             .next()
-            .map(|(_, (c, p))| (p.x, p.y, c.zoom, c.screen_width, c.screen_height))
+            .map(|(c, p)| (p.x, p.y, c.zoom, c.screen_width, c.screen_height))
             .unwrap_or((0.0, 0.0, 1.0, screen_width(), screen_height()));
 
         let zoom = cam_zoom.max(0.0001);

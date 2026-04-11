@@ -253,7 +253,7 @@ impl SoundSystem {
     fn try_update_listener_pos(&mut self, ctx: &GameContext) {
         // 监听者位置优先取 Camera，其次取 LocalPlayer。
         // 这里只做“有就用”的轻量策略，避免引入额外耦合。
-        if let Some((entity, _)) = ctx.world.query::<&crate::components::Camera>().iter().next() {
+        if let Some(entity) = ctx.world.iter().find_map(|e| e.get::<&crate::components::Camera>().map(|_| e.entity())) {
             // Camera 的位置通常放在同实体的 Position 上。
             if let Ok(p) = ctx.world.get::<&Position>(entity) {
                 self.listener_pos = (p.x, p.y);
@@ -261,7 +261,7 @@ impl SoundSystem {
             }
         }
 
-        if let Some((entity, _)) = ctx.world.query::<&crate::components::LocalPlayer>().iter().next() {
+        if let Some(entity) = ctx.world.iter().find_map(|e| e.get::<&crate::components::LocalPlayer>().map(|_| e.entity())) {
             if let Ok(p) = ctx.world.get::<&Position>(entity) {
                 self.listener_pos = (p.x, p.y);
             }
@@ -318,8 +318,11 @@ impl LogicSystem for SoundSystem {
         // 1) 一次性触发：播放后移除 SoundTrigger
         let mut to_remove: Vec<hecs::Entity> = Vec::new();
         let mut to_despawn: Vec<hecs::Entity> = Vec::new();
-        for (entity, trigger) in ctx.world.query::<&SoundTrigger>().iter() {
-            if !self.should_play(ctx, trigger) {
+        for (entity, trigger) in ctx.world.iter().filter_map(|e| {
+            let trigger = e.get::<&SoundTrigger>()?;
+            Some((e.entity(), trigger))
+        }) {
+            if !self.should_play(ctx, &*trigger) {
                 to_remove.push(entity);
                 continue;
             }
@@ -381,7 +384,7 @@ impl LogicSystem for SoundSystem {
         }
 
         // 2) 持续音效：目前只打点；后续可维护播放状态/handle
-        for (_entity, ps) in ctx.world.query::<&PersistentSound>().iter() {
+        for ps in ctx.world.query::<&PersistentSound>().iter() {
             let global = self.global_volume_for_type(ctx, ps.sound_type);
             let final_volume = (ps.volume * global).clamp(0.0, 1.0);
             if final_volume <= 0.0 || !ps.is_playing {

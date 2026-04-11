@@ -603,7 +603,7 @@ impl SystemScheduler {
             .query::<&crate::components::RenderPass>()
             .iter()
             .next()
-            .map(|(_, p)| p.stage)
+            .map(|p| p.stage)
             .unwrap_or(crate::components::RenderStage::Normal);
 
         for entry in &mut self.systems {

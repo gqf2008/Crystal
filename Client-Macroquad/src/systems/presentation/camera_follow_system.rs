@@ -28,7 +28,7 @@ impl LogicSystem for CameraFollowSystem {
         // 获取玩家位置
         let player_pos = {
             let mut pos = None;
-            for (_, (_, player_pos)) in ctx.world.query::<(&LocalPlayer, &Position)>().iter() {
+            for (_, player_pos) in ctx.world.query::<(&LocalPlayer, &Position)>().iter() {
                 pos = Some((player_pos.x, player_pos.y));
                 break;
             }
@@ -37,7 +37,7 @@ impl LogicSystem for CameraFollowSystem {
 
         // 如果找到玩家,更新摄像机位置（仅在 FollowPlayer 模式下）
         if let Some((player_x, player_y)) = player_pos {
-            for (_, (camera_pos, camera, mode)) in ctx
+            for (camera_pos, camera, mode) in ctx
                 .world
                 .query_mut::<(&mut Position, &Camera, &CameraMode)>()
             {

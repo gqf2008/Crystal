@@ -11,7 +11,7 @@ pub struct CameraBoundsSystem;
 impl LogicSystem for CameraBoundsSystem {
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         let mut map_q = ctx.world.query::<&MapData>();
-        let Some((_map_e, map)) = map_q.iter().next() else {
+        let Some(map) = map_q.iter().next() else {
             return Ok(());
         };
 
@@ -19,7 +19,7 @@ impl LogicSystem for CameraBoundsSystem {
 
         // 取第一个 Camera + Position（约定：单例相机）
         let mut q = ctx.world.query::<(&mut Position, &Camera)>();
-        let Some((_e, (pos, cam))) = q.iter().next() else {
+        let Some((pos, cam)) = q.iter().next() else {
             return Ok(());
         };
 
