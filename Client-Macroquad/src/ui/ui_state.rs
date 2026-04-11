@@ -95,8 +95,8 @@ pub enum UiCommand {
     /// Buff 暂停/恢复
     SetBuffPaused { buff_id: u32, paused: bool },
 
-    /// 更新罗盘方向
-    UpdateCompass { direction: u8 },
+    /// 更新罗盘位置
+    UpdateCompass { location: (i32, i32) },
 
     /// 交易相关：打开/更新交易对话框
     OpenTradeDialog { partner: String },

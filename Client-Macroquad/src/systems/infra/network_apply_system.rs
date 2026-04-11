@@ -2437,7 +2437,7 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::TimerExpired { timer_id } => { tracing::trace!("⏱️ Timer {} expired", timer_id); }
                 NetworkEvent::NoticeUpdated { notice } => { tracing::trace!("📢 Notice updated: {}", notice); }
                 NetworkEvent::RollReceivedEvent { value } => { tracing::trace!("🎲 Roll received: {}", value); }
-                NetworkEvent::CompassUpdated { direction } => { tracing::trace!("🧭 Compass updated: {}", direction); }
+                NetworkEvent::CompassUpdated { location } => { tracing::trace!("🧭 Compass updated: {:?}", location); }
                 NetworkEvent::BrowserOpened { url } => { tracing::trace!("🌐 Browser opened: {}", url); }
                 NetworkEvent::DoorOpened { door_id } => { tracing::trace!("🚪 Door {} opened", door_id); }
                 NetworkEvent::TrapRockEntered { object_id } => { tracing::trace!("🪤 Trap rock entered by {}", object_id); }

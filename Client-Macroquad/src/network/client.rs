@@ -43,6 +43,7 @@ impl Network {
     /// 返回：(发送channel, 接收channel)
     /// - 发送channel: 游戏 → 网络 (NetworkEvent)
     /// - 接收channel: 网络 → 游戏 (NetworkEvent)
+    #[allow(clippy::new_ret_no_self)]
     pub fn new<W, R>(
         (w, r): (W, R),
         client_version_hash: [u8; 16],
@@ -544,6 +545,11 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             CreatureHandler.handle(header, payload)
         }
 
+        // ===== Friend =====
+        x if x == SP::FriendUpdate as u16 => {
+            FriendHandler.handle(header, payload)
+        }
+
         // ===== Social (Marriage/Mentor/Lover) =====
         x if x == SP::MarriageRequest as u16
             || x == SP::DivorceRequest as u16
@@ -926,9 +932,10 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             serialize_packet(stream, &packet)?;
         }
 
-        NetworkEvent::GroupLeaveRequest => {
-            // 离开组队（通过删除自己实现）
-            tracing::warn!("GroupLeaveRequest not implemented - no direct packet");
+        NetworkEvent::GroupLeaveRequest { player_name } => {
+            // 离开组队：通过删除自己实现
+            let packet = client::group::DellMember { name: player_name };
+            serialize_packet(stream, &packet)?;
         }
 
         // ===== 公会相关 =====
@@ -953,9 +960,15 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             serialize_packet(stream, &packet)?;
         }
 
-        NetworkEvent::GuildLeaveRequest => {
-            // 离开公会（通过EditGuildMember实现）
-            tracing::warn!("GuildLeaveRequest not implemented - use EditGuildMember");
+        NetworkEvent::GuildLeaveRequest { player_name } => {
+            // 离开公会：使用 EditGuildMember 将自己移除
+            let packet = client::guild::EditGuildMember {
+                change_type: 2, // 2 = remove/kick
+                rank_index: 0,
+                name: player_name,
+                rank_name: String::new(),
+            };
+            serialize_packet(stream, &packet)?;
         }
 
         // ===== 交易相关 =====
@@ -1630,14 +1643,16 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             tracing::debug!("📤 GetRentedItems");
         }
 
-        NetworkEvent::RentalItemDepositRequest { item_id: _ } => {
-            // DepositRentalItem uses from/to slots, not item_id
-            tracing::debug!("📤 DepositRentalItem: slot mapping not available from item_id");
+        NetworkEvent::RentalItemDepositRequest { from_slot, to_slot } => {
+            let packet = client::item::DepositRentalItem { from: from_slot, to: to_slot };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 DepositRentalItem: from={} to={}", from_slot, to_slot);
         }
 
-        NetworkEvent::RentalItemRetrieveRequest { item_id: _ } => {
-            // RetrieveRentalItem uses from/to slots, not item_id
-            tracing::debug!("📤 RetrieveRentalItem: slot mapping not available from item_id");
+        NetworkEvent::RentalItemRetrieveRequest { from_slot, to_slot } => {
+            let packet = client::item::RetrieveRentalItem { from: from_slot, to: to_slot };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RetrieveRentalItem: from={} to={}", from_slot, to_slot);
         }
 
         NetworkEvent::ItemRentalConfirm => {

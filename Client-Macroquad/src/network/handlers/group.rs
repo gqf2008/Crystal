@@ -54,6 +54,9 @@ impl PacketHandler for GroupHandler {
             // SwitchGroup
             x if x == ServerPacketIds::SwitchGroup as u16 => {
                 if let Ok(packet) = server::SwitchGroup::read_body(&mut cursor) {
+                    events.push(NetworkEvent::GroupModeChanged {
+                        allow_group: if packet.allow_group { 1 } else { 0 },
+                    });
                     tracing::info!("👥 Group mode switched: allow_group={}", packet.allow_group);
                 }
             }
@@ -61,6 +64,8 @@ impl PacketHandler for GroupHandler {
             // GroupMembersMap
             x if x == ServerPacketIds::GroupMembersMap as u16 => {
                 if let Ok(packet) = server::GroupMembersMap::read_body(&mut cursor) {
+                    let member_names: Vec<String> = packet.members.clone();
+                    events.push(NetworkEvent::GroupMembersMapUpdated { member_names });
                     tracing::info!("👥 Group members map: {} members", packet.members.len());
                 }
             }
@@ -68,6 +73,11 @@ impl PacketHandler for GroupHandler {
             // SendMemberLocation
             x if x == ServerPacketIds::SendMemberLocation as u16 => {
                 if let Ok(packet) = server::SendMemberLocation::read_body(&mut cursor) {
+                    events.push(NetworkEvent::GroupMemberLocationUpdated {
+                        name: packet.member_name.clone(),
+                        x: packet.location.x,
+                        y: packet.location.y,
+                    });
                     tracing::debug!("👥 Group member {} at ({}, {})", packet.member_name, packet.location.x, packet.location.y);
                 }
             }

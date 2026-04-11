@@ -298,13 +298,16 @@ pub enum NetworkEvent {
     GroupInviteRequest { player_name: String },
     GroupAcceptRequest,
     GroupDeclineRequest,
-    GroupLeaveRequest,
+    GroupLeaveRequest { player_name: String },
     
     // 服务器 → 客户端
     GroupInvite { inviter: String },
     GroupMemberAdded { name: String },
     GroupMemberRemoved { name: String },
     GroupDisbanded,
+    GroupModeChanged { allow_group: u8 },
+    GroupMembersMapUpdated { member_names: Vec<String> },
+    GroupMemberLocationUpdated { name: String, x: i32, y: i32 },
     
     // ========================================================================
     // 公会事件（Guild Events）
@@ -314,7 +317,7 @@ pub enum NetworkEvent {
     GuildInviteRequest { player_name: String },
     GuildAcceptRequest,
     GuildDeclineRequest,
-    GuildLeaveRequest,
+    GuildLeaveRequest { player_name: String },
     
     // 服务器 → 客户端
     GuildInvite { inviter: String, guild_name: String },
@@ -687,8 +690,8 @@ pub enum NetworkEvent {
 
     // 客户端 -> 服务器
     GetRentedItemsRequest,
-    RentalItemDepositRequest { item_id: u64 },
-    RentalItemRetrieveRequest { item_id: u64 },
+    RentalItemDepositRequest { from_slot: i32, to_slot: i32 },
+    RentalItemRetrieveRequest { from_slot: i32, to_slot: i32 },
     ItemRentalConfirm,
     ItemRentalCancel,
 
@@ -738,7 +741,7 @@ pub enum NetworkEvent {
     TimerExpired { timer_id: u8 },
     NoticeUpdated { notice: String },
     RollReceivedEvent { value: u32 },
-    CompassUpdated { direction: u8 },
+    CompassUpdated { location: (i32, i32) },
     BrowserOpened { url: String },
 
     // ========================================================================

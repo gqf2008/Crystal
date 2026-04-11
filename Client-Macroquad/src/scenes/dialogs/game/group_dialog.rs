@@ -175,6 +175,11 @@ impl GroupDialogHybrid {
             .map(|m| m.name.clone())
     }
 
+    /// 获取本地玩家名称
+    pub fn get_local_player_name(&self) -> String {
+        self.local_player_name.clone()
+    }
+
     /// 加载纹理
     pub fn load_textures(&mut self) {
         // 背景纹理 - Prguse[964]

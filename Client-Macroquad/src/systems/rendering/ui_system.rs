@@ -235,8 +235,8 @@ impl RenderSystem for UIRenderSystem {
                 UiCommand::SetBuffPaused { buff_id, paused } => {
                     self.main_dialog.buff_dialog_mut().set_buff_paused(buff_id, paused);
                 }
-                UiCommand::UpdateCompass { direction } => {
-                    let dir = crate::scenes::dialogs::game::compass_dialog::CompassDirection::from_u8(direction);
+                UiCommand::UpdateCompass { location } => {
+                    let dir = crate::scenes::dialogs::game::compass_dialog::CompassDirection::from_location(location.0, location.1);
                     self.main_dialog.compass_dialog_mut().set_direction(dir);
                 }
                 UiCommand::OpenTradeDialog { partner } => {
@@ -507,8 +507,9 @@ impl RenderSystem for UIRenderSystem {
                     tracing::info!("👥 邀请组队功能待实现");
                 }
                 GroupDialogAction::Leave => {
+                    let player_name = gd.get_local_player_name();
                     if let Some(net) = ctx.net.as_ref() {
-                        let _ = net.send(NetEv::GroupLeaveRequest);
+                        let _ = net.send(NetEv::GroupLeaveRequest { player_name });
                     }
                 }
                 GroupDialogAction::KickSelected => {
@@ -558,8 +559,9 @@ impl RenderSystem for UIRenderSystem {
             let action = gld.take_action();
             match action {
                 GuildDialogAction::LeaveGuild => {
+                    let player_name = self.main_dialog.character_name().to_string();
                     if let Some(net) = ctx.net.as_ref() {
-                        let _ = net.send(NetEv::GuildLeaveRequest);
+                        let _ = net.send(NetEv::GuildLeaveRequest { player_name });
                     }
                 }
                 GuildDialogAction::RequestGuildInfo => {

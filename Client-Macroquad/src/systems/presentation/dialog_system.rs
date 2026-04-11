@@ -299,8 +299,8 @@ impl DialogSystem {
                 NetworkEvent::BuffPaused { object_id: _, buff_id, paused } => {
                     cmds.push(UiCommand::SetBuffPaused { buff_id: *buff_id, paused: *paused });
                 }
-                NetworkEvent::CompassUpdated { direction } => {
-                    cmds.push(UiCommand::UpdateCompass { direction: *direction });
+                NetworkEvent::CompassUpdated { location } => {
+                    cmds.push(UiCommand::UpdateCompass { location: *location });
                 }
                 // 交易进度事件
                 NetworkEvent::TradeStarted { partner } => {

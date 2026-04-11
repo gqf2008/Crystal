@@ -103,7 +103,7 @@ impl PacketHandler for UiEventsHandler {
             x if x == ServerPacketIds::SetCompass as u16 => {
                 if let Ok(packet) = server::SetCompass::read_body(&mut cursor) {
                     events.push(NetworkEvent::CompassUpdated {
-                        direction: 0, // SetCompass carries a location tuple, not a single direction
+                        location: packet.location,
                     });
                     tracing::debug!("🧭 CompassUpdated: location={:?}", packet.location);
                 } else {

@@ -54,6 +54,16 @@ impl CompassDirection {
             _ => Self::East,
         }
     }
+
+    /// 从坐标位置计算方向 (0=东, 顺时针)
+    pub fn from_location(dx: i32, dy: i32) -> Self {
+        // atan2 返回 -PI 到 PI，转换为 0-7 的 8 方向索引
+        // 0=东, 顺时针
+        let angle = (dy as f32).atan2(dx as f32); // -PI..PI
+        let mut sector = ((angle + std::f32::consts::PI) / (std::f32::consts::PI / 4.0)).round() as i32 % 8;
+        if sector < 0 { sector += 8; }
+        Self::from_u8(sector as u8)
+    }
 }
 
 pub struct CompassDialogHybrid {

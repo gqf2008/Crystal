@@ -400,6 +400,11 @@ impl MainDialog {
         }
     }
 
+    /// 获取角色名称
+    pub fn character_name(&self) -> &str {
+        &self.character_name
+    }
+
     /// 同步攻击模式（服务器推送 ChangeAMode）
     pub fn set_attack_mode(&mut self, mode: u8) {
         self.attack_mode = mode;
