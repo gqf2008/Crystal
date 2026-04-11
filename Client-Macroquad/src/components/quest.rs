@@ -11,6 +11,17 @@ pub enum QuestState {
     Failed,      // 已失败
 }
 
+/// 任务奖励物品
+#[derive(Debug, Clone)]
+pub struct QuestRewardItem {
+    /// 物品唯一标识（对应 SharedRust 中的 ItemIndex）
+    pub item_index: u32,
+    /// 物品名称（用于显示）
+    pub item_name: String,
+    /// 数量
+    pub count: u32,
+}
+
 /// 任务目标类型
 #[derive(Debug, Clone, PartialEq)]
 pub enum QuestObjective {
@@ -50,7 +61,7 @@ pub struct Quest {
     pub objectives: Vec<QuestObjective>,
     pub reward_exp: i64,
     pub reward_gold: u32,
-    pub reward_items: Vec<String>, // TODO: 改为具体的物品类型
+    pub reward_items: Vec<QuestRewardItem>,
 }
 
 impl Quest {

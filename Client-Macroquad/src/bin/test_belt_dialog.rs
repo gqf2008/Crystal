@@ -4,7 +4,6 @@
 /// 测试 BeltDialog（快捷栏）- Hybrid 版本
 /// 
 /// 运行命令：cargo run --bin test_belt_dialog
-
 use client_macroquad::scenes::dialogs::game::{BeltDialogHybrid, MainDialog};
 use client_macroquad::ui::text_renderer::{init_chinese_font, draw_text_cn};
 use macroquad::prelude::*;

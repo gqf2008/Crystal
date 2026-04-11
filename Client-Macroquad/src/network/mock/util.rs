@@ -1,6 +1,38 @@
 use super::*;
 
 impl MockNetwork {
+    /// 生成一个 mock 物品（用于拾取等场景）
+    pub(super) fn make_mock_item(rng: &mut u64) -> UserItem {
+        let item_kinds = [
+            ("金创药（小）", 0, 10, 1, ItemType::Potion),
+            ("魔法药水（小）", 1, 10, 1, ItemType::Potion),
+            ("金创药（中）", 2, 20, 1, ItemType::Potion),
+            ("魔法药水（中）", 3, 20, 1, ItemType::Potion),
+            ("回城卷", 4, 1, 1, ItemType::Scroll),
+            ("随机传送卷", 5, 1, 1, ItemType::Scroll),
+        ];
+        let idx = (Self::rng_next_u32(rng) as usize) % item_kinds.len();
+        let (name, image, price, stack_size, item_type) = item_kinds[idx];
+        let unique_id = 2_000_000_000 + (Self::rng_next_u32(rng) as u64);
+
+        UserItem {
+            item_index: idx as i32,
+            unique_id,
+            count: 1,
+            current_dura: 0,
+            max_dura: 0,
+            info: Some(ItemInfo {
+                name: name.to_string(),
+                image,
+                price,
+                stack_size,
+                item_type,
+                durability: 0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
     pub(super) fn exp_for_next_level(level: u16) -> i64 {
         // 简单曲线：等级越高升级所需越高。离线 mock 不追求严格还原。
         (level as i64) * 60 + 40

@@ -1,104 +1,80 @@
 // ============================================================================
-// GuildDialogHybrid - 行会对话框
+// MailDialogHybrid - 邮件对话框
 // ============================================================================
 //
-// C# 参考：Client/MirScenes/Dialogs/GuildDialog.cs (2,232 行)
+// C# 参考：Client/MirScenes/Dialogs/MailDialog.cs
 // - 背景：Prguse[956]
-// - 标题：Title[15] at (18, 9)
+// - 标题：Title[20] at (18, 9)
 // - 关闭按钮：Title[193/194/195] at (200, 256)
-// - 多标签页：行会信息、成员列表、行会公告、行会仓库
-// - 按钮：退出行会、编辑公告、管理成员
+// - 多标签页：收件箱、发件箱、写信
 //
 // ============================================================================
 
 use macroquad::prelude::*;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
+use crate::ui::ui_state::MailEntry;
 use super::native_ui_utils::DragHelper;
-
-/// 行会成员
-#[derive(Debug, Clone)]
-pub struct GuildMember {
-    pub name: String,
-    pub rank: String,
-    pub online: bool,
-}
-
-/// 行会信息
-#[derive(Debug, Clone, Default)]
-pub struct GuildInfo {
-    pub name: String,
-    pub notice: String,
-    pub members: Vec<GuildMember>,
-    pub member_count: u32,
-    pub max_members: u32,
-}
 
 /// 标签页
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GuildTab {
-    Info,
-    Members,
-    Notice,
+pub enum MailTab {
+    Inbox,
+    Outbox,
+    Compose,
 }
 
-/// 行会对话框动作
+/// 邮件对话框动作
 #[derive(Debug, Clone, PartialEq)]
-pub enum GuildDialogAction {
+pub enum MailDialogAction {
     None,
-    LeaveGuild,
-    EditNotice(String),
-    EditMemberRank { name: String, rank: String },
-    RequestGuildInfo,
-    ViewMemberDetail { name: String, rank: String, online: bool },
+    ReadMail { mail_id: u64 },
+    CollectParcel { mail_id: u64 },
+    DeleteMail { mail_id: u64 },
+    SendMail { to: String, subject: String, body: String },
 }
 
-pub struct GuildDialogHybrid {
+pub struct MailDialogHybrid {
     position: Vec2,
     visible: bool,
     size: Vec2,
-    guild_info: GuildInfo,
-    active_tab: GuildTab,
-    selected_member: Option<usize>,
+    active_tab: MailTab,
+    mails: Vec<MailEntry>,
+    selected_mail: Option<usize>,
     scroll_offset: f32,
     bg_texture: Option<Texture2D>,
     title_texture: Option<Texture2D>,
     close_button_textures: [Option<Texture2D>; 3],
     drag_helper: DragHelper,
-    pending_action: GuildDialogAction,
-    /// 双击检测（替代 static mut）
-    last_click_time: f64,
-    last_click_idx: Option<usize>,
+    pending_action: MailDialogAction,
 }
 
-impl Default for GuildDialogHybrid {
+impl Default for MailDialogHybrid {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl GuildDialogHybrid {
+impl MailDialogHybrid {
     const TAB_Y: f32 = 35.0;
     const CONTENT_START_Y: f32 = 60.0;
-    const ITEM_H: f32 = 20.0;
+    const ITEM_H: f32 = 22.0;
     const BUTTON_Y: f32 = 210.0;
 
     pub fn new() -> Self {
         Self {
             position: vec2(280.0, 80.0),
             visible: false,
-            size: vec2(320.0, 290.0),
-            guild_info: GuildInfo::default(),
-            active_tab: GuildTab::Info,
-            selected_member: None,
+            size: vec2(360.0, 290.0),
+            active_tab: MailTab::Inbox,
+            mails: Vec::new(),
+            selected_mail: None,
             scroll_offset: 0.0,
             bg_texture: None,
             title_texture: None,
             close_button_textures: [None, None, None],
             drag_helper: DragHelper::new(),
-            pending_action: GuildDialogAction::None,
-            last_click_time: 0.0,
-            last_click_idx: None,
+            pending_action: MailDialogAction::None,
         }
     }
 
@@ -108,7 +84,7 @@ impl GuildDialogHybrid {
 
     pub fn close(&mut self) {
         self.visible = false;
-        self.selected_member = None;
+        self.selected_mail = None;
     }
 
     pub fn toggle(&mut self) {
@@ -134,36 +110,28 @@ impl GuildDialogHybrid {
         Rect::new(self.position.x, self.position.y, self.size.x, self.size.y).contains(point)
     }
 
-    /// 更新行会信息
-    pub fn update_guild_info(&mut self, info: GuildInfo) {
-        self.guild_info = info;
+    /// 同步邮件列表
+    pub fn set_mails(&mut self, mails: Vec<MailEntry>) {
+        self.mails = mails;
+        self.selected_mail = None;
+        self.scroll_offset = 0.0;
     }
 
-    /// 更新行会公告
-    pub fn update_notice(&mut self, notice: String) {
-        self.guild_info.notice = notice;
-    }
-
-    /// 更新成员
-    pub fn update_member(&mut self, name: String, rank: String, online: bool) {
-        if let Some(m) = self.guild_info.members.iter_mut().find(|m| m.name == name) {
-            m.rank = rank;
-            m.online = online;
-        } else {
-            self.guild_info.members.push(GuildMember { name, rank, online });
-        }
+    /// 追加一封邮件
+    pub fn add_mail(&mut self, mail: MailEntry) {
+        self.mails.push(mail);
     }
 
     /// 获取待处理动作
-    pub fn take_action(&mut self) -> GuildDialogAction {
-        std::mem::replace(&mut self.pending_action, GuildDialogAction::None)
+    pub fn take_action(&mut self) -> MailDialogAction {
+        std::mem::replace(&mut self.pending_action, MailDialogAction::None)
     }
 
-    /// 获取当前选中成员的名称
-    pub fn get_selected_member_name(&self) -> Option<String> {
-        self.selected_member
-            .and_then(|i| self.guild_info.members.get(i))
-            .map(|m| m.name.clone())
+    /// 获取当前选中邮件的 ID
+    pub fn get_selected_mail_id(&self) -> Option<u64> {
+        self.selected_mail
+            .and_then(|i| self.mails.get(i))
+            .map(|m| m.mail_id)
     }
 
     /// 加载纹理
@@ -176,8 +144,8 @@ impl GuildDialogHybrid {
             }
         }
 
-        // 标题纹理 - Title[15]
-        if let Some(texture) = LibraryName::Title.get_texture(15) {
+        // 标题纹理 - Title[20]
+        if let Some(texture) = LibraryName::Title.get_texture(20) {
             if let Some(tex) = texture.image {
                 self.title_texture = Some(tex);
             }
@@ -212,9 +180,9 @@ impl GuildDialogHybrid {
 
         // 绘制内容
         match self.active_tab {
-            GuildTab::Info => self.draw_info_tab(),
-            GuildTab::Members => self.draw_members_list(mouse_pos),
-            GuildTab::Notice => self.draw_notice_tab(),
+            MailTab::Inbox => self.draw_mail_list(mouse_pos),
+            MailTab::Outbox => self.draw_outbox(),
+            MailTab::Compose => self.draw_compose(mouse_pos),
         }
 
         // 绘制按钮
@@ -253,8 +221,8 @@ impl GuildDialogHybrid {
         let tab_spacing = 2.0;
         let start_x = self.position.x + 15.0;
 
-        let tabs = ["行会信息", "成员列表", "行会公告"];
-        let tab_kinds = [GuildTab::Info, GuildTab::Members, GuildTab::Notice];
+        let tabs = ["收件箱", "发件箱", "写信"];
+        let tab_kinds = [MailTab::Inbox, MailTab::Outbox, MailTab::Compose];
 
         for (i, (label, kind)) in tabs.iter().zip(tab_kinds.iter()).enumerate() {
             let tab_x = start_x + i as f32 * (tab_w + tab_spacing);
@@ -276,25 +244,12 @@ impl GuildDialogHybrid {
 
             if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
                 self.active_tab = *kind;
+                self.selected_mail = None;
             }
         }
     }
 
-    fn draw_info_tab(&self) {
-        let content_y = self.position.y + Self::CONTENT_START_Y;
-        let content_x = self.position.x + 15.0;
-        let line_h = 22.0;
-
-        draw_text_cn("行会名称", content_x, content_y, 12.0, Color::from_rgba(200, 200, 200, 255));
-        draw_text_cn(&self.guild_info.name, content_x + 80.0, content_y, 12.0, WHITE);
-
-        let y2 = content_y + line_h;
-        draw_text_cn("成员数量", content_x, y2, 12.0, Color::from_rgba(200, 200, 200, 255));
-        let count_text = format!("{}/{}", self.guild_info.member_count, self.guild_info.max_members);
-        draw_text_cn(&count_text, content_x + 80.0, y2, 12.0, WHITE);
-    }
-
-    fn draw_members_list(&mut self, mouse_pos: Vec2) {
+    fn draw_mail_list(&mut self, mouse_pos: Vec2) {
         let list_x = self.position.x + 10.0;
         let list_w = self.size.x - 20.0;
         let list_top = self.position.y + Self::CONTENT_START_Y;
@@ -313,12 +268,17 @@ impl GuildDialogHybrid {
         let mut y = list_top - self.scroll_offset;
         let mut clicked: Option<usize> = None;
 
-        for (i, member) in self.guild_info.members.iter().enumerate() {
+        if self.mails.is_empty() {
+            draw_text_cn("收件箱为空", list_x + 15.0, list_top + 30.0, 12.0, GRAY);
+            return;
+        }
+
+        for (i, mail) in self.mails.iter().enumerate() {
             let item_rect = Rect::new(list_x + 5.0, y, list_w - 10.0, Self::ITEM_H);
             let item_visible = item_rect.y + item_rect.h > list_top && item_rect.y < list_bottom;
 
             if item_visible {
-                let is_selected = self.selected_member == Some(i);
+                let is_selected = self.selected_mail == Some(i);
                 let is_hovered = item_rect.contains(mouse_pos);
 
                 if is_selected || is_hovered {
@@ -330,35 +290,33 @@ impl GuildDialogHybrid {
                     draw_rectangle(item_rect.x, item_rect.y, item_rect.w, item_rect.h, color);
                 }
 
-                // 在线状态
-                let status_color = if member.online {
-                    Color::from_rgba(80, 200, 80, 255)
-                } else {
-                    Color::from_rgba(150, 150, 150, 255)
-                };
-                draw_circle(list_x + 15.0, y + 10.0, 4.0, status_color);
+                // 未读标记
+                let name_color = if mail.is_read { WHITE } else { Color::from_rgba(100, 200, 255, 255) };
+                let prefix = if !mail.is_read { "[新] " } else { "" };
 
-                // 名称
-                let name_color = if member.online { WHITE } else { GRAY };
-                draw_text_cn(&member.name, list_x + 25.0, item_rect.y + 14.0, 12.0, name_color);
+                draw_text_cn(
+                    &format!("{}{}", prefix, mail.sender),
+                    list_x + 10.0,
+                    item_rect.y + 14.0,
+                    11.0,
+                    name_color,
+                );
 
-                // 职位
-                draw_text_cn(&member.rank, list_x + 150.0, item_rect.y + 14.0, 11.0, Color::from_rgba(200, 180, 100, 255));
+                // 主题
+                draw_text_cn(&mail.subject, list_x + 80.0, item_rect.y + 14.0, 11.0, Color::from_rgba(200, 200, 200, 255));
+
+                // 包裹标记
+                if mail.has_parcel {
+                    draw_text_cn("[包裹]", list_x + 250.0, item_rect.y + 14.0, 10.0, Color::from_rgba(255, 200, 50, 255));
+                }
 
                 if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
-                    let now = get_time();
-                    if self.last_click_idx == Some(i) && (now - self.last_click_time) < 0.3 {
-                        if let Some(m) = self.guild_info.members.get(i) {
-                            self.pending_action = GuildDialogAction::ViewMemberDetail {
-                                name: m.name.clone(),
-                                rank: m.rank.clone(),
-                                online: m.online,
-                            };
-                        }
-                    }
-                    self.last_click_time = now;
-                    self.last_click_idx = Some(i);
                     clicked = Some(i);
+                }
+
+                // 双击读取邮件
+                if is_hovered && is_mouse_button_down(MouseButton::Left) {
+                    self.pending_action = MailDialogAction::ReadMail { mail_id: mail.mail_id };
                 }
             }
 
@@ -366,37 +324,27 @@ impl GuildDialogHybrid {
         }
 
         if let Some(idx) = clicked {
-            self.selected_member = Some(idx);
+            self.selected_mail = Some(idx);
         }
 
         // 限制滚动
-        let content_h = self.guild_info.members.len() as f32 * Self::ITEM_H;
+        let content_h = self.mails.len() as f32 * Self::ITEM_H;
         let max_scroll = (content_h - list_h).max(0.0);
         if self.scroll_offset > max_scroll {
             self.scroll_offset = max_scroll;
         }
     }
 
-    fn draw_notice_tab(&self) {
+    fn draw_outbox(&self) {
         let content_y = self.position.y + Self::CONTENT_START_Y;
         let content_x = self.position.x + 15.0;
-        let _line_w = self.size.x - 30.0;
-        let line_h = 16.0;
+        draw_text_cn("发件箱为空", content_x, content_y + 30.0, 12.0, GRAY);
+    }
 
-        if self.guild_info.notice.is_empty() {
-            draw_text_cn("暂无行会公告", content_x, content_y + 20.0, 12.0, GRAY);
-            return;
-        }
-
-        // 简单多行文本渲染（按换行符分割）
-        for (i, line) in self.guild_info.notice.lines().enumerate() {
-            let y = content_y + i as f32 * line_h;
-            let max_lines = ((self.position.y + Self::BUTTON_Y - 10.0 - content_y) / line_h) as usize;
-            if i >= max_lines {
-                break;
-            }
-            draw_text_cn(line, content_x, y, 11.0, WHITE);
-        }
+    fn draw_compose(&self, _mouse_pos: Vec2) {
+        let content_y = self.position.y + Self::CONTENT_START_Y;
+        let content_x = self.position.x + 15.0;
+        draw_text_cn("写信功能需要文本输入支持", content_x, content_y + 30.0, 12.0, GRAY);
     }
 
     fn draw_buttons(&mut self, mouse_pos: Vec2) {
@@ -405,14 +353,33 @@ impl GuildDialogHybrid {
         let btn_h = 25.0;
         let btn_spacing = 10.0;
 
-        let total_w = 3.0 * (btn_w + btn_spacing) - btn_spacing;
-        let start_x = self.position.x + (self.size.x - total_w) / 2.0;
+        // 根据当前选中邮件和标签页显示不同按钮
+        let has_selection = self.selected_mail.is_some() && self.active_tab == MailTab::Inbox;
+        let has_parcel = self.selected_mail
+            .and_then(|i| self.mails.get(i))
+            .map(|m| m.has_parcel)
+            .unwrap_or(false);
 
-        let buttons: [(&str, GuildDialogAction); 3] = [
-            ("退出行会", GuildDialogAction::LeaveGuild),
-            ("刷新信息", GuildDialogAction::RequestGuildInfo),
-            ("编辑公告", GuildDialogAction::EditNotice(String::new())),
-        ];
+        let buttons: Vec<(&str, MailDialogAction)> = if has_selection {
+            let mut btns = vec![("删除邮件", MailDialogAction::DeleteMail {
+                mail_id: self.get_selected_mail_id().unwrap_or(0),
+            })];
+            if has_parcel {
+                btns.push(("领取包裹", MailDialogAction::CollectParcel {
+                    mail_id: self.get_selected_mail_id().unwrap_or(0),
+                }));
+            }
+            btns
+        } else {
+            vec![]
+        };
+
+        if buttons.is_empty() {
+            return;
+        }
+
+        let total_w = buttons.len() as f32 * (btn_w + btn_spacing) - btn_spacing;
+        let start_x = self.position.x + (self.size.x - total_w) / 2.0;
 
         for (i, (label, action)) in buttons.iter().enumerate() {
             let btn_x = start_x + i as f32 * (btn_w + btn_spacing);

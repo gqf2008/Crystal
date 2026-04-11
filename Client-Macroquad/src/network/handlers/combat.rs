@@ -97,13 +97,6 @@ impl PacketHandler for CombatHandler {
                 }
             }
 
-            // HeroHealthChanged - ignore for now (no hero ECS yet), but keep parser to avoid Unhandled
-            x if x == ServerPacketIds::HeroHealthChanged as u16 => {
-                if let Ok(packet) = server::HeroHealthChanged::read_body(&mut cursor) {
-                    tracing::trace!("🧡 HeroHealthChanged hp={} mp={}", packet.hp, packet.mp);
-                }
-            }
-
             // ObjectHealth - percent based health update
             x if x == ServerPacketIds::ObjectHealth as u16 => {
                 if let Ok(packet) = server::ObjectHealth::read_body(&mut cursor) {
@@ -619,9 +612,10 @@ impl PacketHandler for CombatHandler {
 
             // UserStorage
             x if x == ServerPacketIds::UserStorage as u16 => {
-                if let Ok(_packet) = server::UserStorage::read_body(&mut cursor) {
-                    events.push(NetworkEvent::UserStorageReceived);
-                    tracing::debug!("🏦 UserStorageReceived");
+                if let Ok(packet) = server::UserStorage::read_body(&mut cursor) {
+                    let items: Vec<_> = packet.storage.into_iter().flatten().collect();
+                    events.push(NetworkEvent::UserStorageReceived { items: items.clone() });
+                    tracing::debug!("🏦 UserStorageReceived: {} items", items.len());
                 }
             }
 

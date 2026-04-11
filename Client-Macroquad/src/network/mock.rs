@@ -246,6 +246,7 @@ struct MockWorldState {
     player_gold: u32,
     _inventory_capacity: usize,
     player_inventory: Vec<Option<UserItem>>,
+    player_storage: Vec<Option<UserItem>>,
     player_grid: (i32, i32),
     player_spawn_grid: (i32, i32),
     player_hp_current: i32,
@@ -334,6 +335,7 @@ impl MockWorldState {
             player_gold: 5000,
             _inventory_capacity: inventory_capacity,
             player_inventory: vec![None; inventory_capacity],
+            player_storage: vec![None; 64],
             player_grid: (330, 330),
             player_spawn_grid: (330, 330),
             player_hp_current: 120,
@@ -497,6 +499,19 @@ impl MockNetwork {
                 );
                 state.player_spawn_grid = spawn;
                 state.player_grid = spawn;
+
+                // 预填充少量背包物品，便于测试双面板布局
+                for _ in 0..3 {
+                    if let Some(slot) = state.player_inventory.iter_mut().find(|s| s.is_none()) {
+                        *slot = Some(Self::make_mock_item(&mut state.rng));
+                    }
+                }
+                // 预填充少量仓库物品，便于测试双面板布局
+                for _ in 0..3 {
+                    if let Some(slot) = state.player_storage.iter_mut().find(|s| s.is_none()) {
+                        *slot = Some(Self::make_mock_item(&mut state.rng));
+                    }
+                }
 
                 // base zones
                 state.zones.clear();
@@ -976,11 +991,49 @@ impl MockNetwork {
             NetworkEvent::TurnRequest { .. } => {}
 
             NetworkEvent::ChatRequest { message, .. } => {
-                let _ = response_tx.send(NetworkEvent::ChatMessage {
-                    sender: "(MOCK)".to_string(),
-                    message: format!("Echo: {}", message),
-                    chat_type: ChatType::Normal,
-                });
+                // 模拟服务器识别聊天前缀
+                if message.starts_with('/') {
+                    // 私聊：/目标 消息
+                    let parts: Vec<&str> = message.splitn(2, ' ').collect();
+                    let target = parts[0].trim_start_matches('/');
+                    let body = parts.get(1).map(|s| *s).unwrap_or("");
+                    let _ = response_tx.send(NetworkEvent::ChatMessage {
+                        sender: format!("(私聊→{})", target),
+                        message: format!("/{} {}", target, body),
+                        chat_type: ChatType::WhisperOut,
+                    });
+                } else if message.starts_with('!') {
+                    // 喊话：!消息
+                    let body = message.trim_start_matches('!');
+                    let _ = response_tx.send(NetworkEvent::ChatMessage {
+                        sender: "Hero".to_string(),
+                        message: body.to_string(),
+                        chat_type: ChatType::Shout,
+                    });
+                } else if message.starts_with('@') {
+                    // 组队：@消息
+                    let body = message.trim_start_matches('@');
+                    let _ = response_tx.send(NetworkEvent::ChatMessage {
+                        sender: "Hero".to_string(),
+                        message: body.to_string(),
+                        chat_type: ChatType::Group,
+                    });
+                } else if message.starts_with('#') {
+                    // 行会：#消息
+                    let body = message.trim_start_matches('#');
+                    let _ = response_tx.send(NetworkEvent::ChatMessage {
+                        sender: "Hero".to_string(),
+                        message: body.to_string(),
+                        chat_type: ChatType::Guild,
+                    });
+                } else {
+                    // 普通聊天
+                    let _ = response_tx.send(NetworkEvent::ChatMessage {
+                        sender: "(MOCK)".to_string(),
+                        message: format!("Echo: {}", message),
+                        chat_type: ChatType::Normal,
+                    });
+                }
             }
 
             NetworkEvent::InspectRequest { object_id } => {
@@ -1178,6 +1231,883 @@ impl MockNetwork {
 
                 // 物品消耗：直接移除（count=1 的简化模型）
                 let _ = response_tx.send(NetworkEvent::ItemLost { unique_id });
+            }
+
+            // ===== 仓库操作（Mock 模式） =====
+            NetworkEvent::NPCStorageReceived => {
+                // 打开仓库时，发送当前仓库物品列表
+                let items: Vec<_> = state.player_storage.iter().filter_map(|s| s.clone()).collect();
+                let _ = response_tx.send(NetworkEvent::UserStorageReceived { items });
+                tracing::debug!("[MOCK] NPCStorageReceived: sending {} storage items", state.player_storage.len());
+            }
+
+            NetworkEvent::StoreItemRequest { unique_id } => {
+                // 从背包找物品，移到仓库
+                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                    if let Some(item) = state.player_inventory[slot_idx].take() {
+                        // 找仓库空位
+                        if let Some(storage_slot) = state.player_storage.iter_mut().find(|s| s.is_none()) {
+                            *storage_slot = Some(item.clone());
+                            let _ = response_tx.send(NetworkEvent::ItemLost { unique_id }); // 从背包移除
+                            let _ = response_tx.send(NetworkEvent::ItemGained { item: item.clone() }); // 重新通知（服务器权威）
+                            tracing::debug!("[MOCK] StoreItemRequest: unique_id={} stored", unique_id);
+                        } else {
+                            // 仓库满了，放回背包
+                            state.player_inventory[slot_idx] = Some(item);
+                            let _ = response_tx.send(NetworkEvent::SystemMessage {
+                                message: "[MOCK] 仓库已满，无法存入".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+
+            NetworkEvent::TakeBackItemRequest { unique_id } => {
+                // 从仓库找物品，移回背包
+                if let Some(slot_idx) = state.player_storage.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                    if let Some(item) = state.player_storage[slot_idx].take() {
+                        // 找背包空位
+                        if let Some(inventory_slot) = state.player_inventory.iter_mut().find(|s| s.is_none()) {
+                            *inventory_slot = Some(item.clone());
+                            let _ = response_tx.send(NetworkEvent::ItemLost { unique_id }); // 从仓库移除
+                            let _ = response_tx.send(NetworkEvent::ItemGained { item: item.clone() }); // 重新通知
+                            tracing::debug!("[MOCK] TakeBackItemRequest: unique_id={} retrieved", unique_id);
+                        } else {
+                            // 背包满了，放回仓库
+                            state.player_storage[slot_idx] = Some(item);
+                            let _ = response_tx.send(NetworkEvent::SystemMessage {
+                                message: "[MOCK] 背包已满，无法取出".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+
+            NetworkEvent::DropItemRequest { unique_id, count } => {
+                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                    let count = count as u16;
+                    if let Some(ref mut item) = state.player_inventory[slot_idx] {
+                        if item.count <= count {
+                            state.player_inventory[slot_idx] = None;
+                        } else {
+                            item.count -= count;
+                        }
+                    }
+                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id });
+                    tracing::debug!("[MOCK] DropItemRequest: unique_id={} count={}", unique_id, count);
+                }
+            }
+
+            NetworkEvent::MoveItemRequest { grid, from, to } => {
+                // 仅处理背包网格 (grid=0 为 Inventory)
+                if grid == 0 {
+                    let from_idx = from as usize;
+                    let to_idx = to as usize;
+                    if from_idx < state.player_inventory.len() && to_idx < state.player_inventory.len() {
+                        state.player_inventory.swap(from_idx, to_idx);
+                        tracing::debug!("[MOCK] MoveItemRequest: grid={} from={} to={}", grid, from, to);
+                    }
+                }
+            }
+
+            NetworkEvent::PickupItemRequest { location } => {
+                // 模拟拾取：生成一个随机物品放入背包
+                if let Some(slot) = state.player_inventory.iter_mut().find(|s| s.is_none()) {
+                    let mock_item = Self::make_mock_item(&mut state.rng);
+                    let _ = response_tx.send(NetworkEvent::ItemGained { item: mock_item.clone() });
+                    *slot = Some(mock_item);
+                    tracing::debug!("[MOCK] PickupItemRequest at {:?}", location);
+                } else {
+                    let _ = response_tx.send(NetworkEvent::SystemMessage {
+                        message: "[MOCK] 背包已满".to_string(),
+                    });
+                }
+            }
+
+            NetworkEvent::SellItemRequest { unique_id, count } => {
+                // 从背包找物品并出售
+                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                    if let Some(ref item) = state.player_inventory[slot_idx] {
+                        let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
+                        let sell_price = (base_price * 0.5).round() as u32;
+                        let total_gold = sell_price * count;
+                        state.player_inventory[slot_idx] = None;
+                        state.player_gold += total_gold;
+                        let _ = response_tx.send(NetworkEvent::ItemLost { unique_id });
+                        let _ = response_tx.send(NetworkEvent::GoldChanged {
+                            delta: total_gold as i32,
+                        });
+                        let _ = response_tx.send(NetworkEvent::SellItemReceived);
+                        tracing::debug!("[MOCK] SellItemRequest: unique_id={} count={} gold={}", unique_id, count, total_gold);
+                    }
+                }
+            }
+
+            NetworkEvent::RepairItemRequest { unique_id } => {
+                // 修理装备：恢复耐久到最大值
+                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                    if let Some(ref mut item) = state.player_inventory[slot_idx] {
+                        let max_dura = item.info.as_ref().map(|i| i.durability).unwrap_or(0);
+                        item.current_dura = max_dura;
+                        let _ = response_tx.send(NetworkEvent::RepairItemReceived);
+                        tracing::debug!("[MOCK] RepairItemRequest: unique_id={} dura={}/{}", unique_id, max_dura, max_dura);
+                    }
+                }
+            }
+
+            NetworkEvent::SRepairItemRequest { unique_id } => {
+                // 特殊修理（同普通修理的 mock 实现）
+                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                    if let Some(ref mut item) = state.player_inventory[slot_idx] {
+                        let max_dura = item.info.as_ref().map(|i| i.durability).unwrap_or(0);
+                        item.current_dura = max_dura;
+                        let _ = response_tx.send(NetworkEvent::RepairItemReceived);
+                        tracing::debug!("[MOCK] SRepairItemRequest: unique_id={}", unique_id);
+                    }
+                }
+            }
+
+            // ===== 坐骑操作（Mock 模式） =====
+            NetworkEvent::MountRideRequest { mount_type } => {
+                state.player_mount_type = mount_type;
+                state.player_riding_mount = mount_type != 0;
+                let _ = response_tx.send(NetworkEvent::MountUpdated {
+                    object_id: state.player_object_id,
+                    mount_type,
+                    riding_mount: true,
+                });
+                tracing::debug!("[MOCK] MountRideRequest: type={}", mount_type);
+            }
+
+            NetworkEvent::MountDismountRequest => {
+                state.player_riding_mount = false;
+                let _ = response_tx.send(NetworkEvent::MountUpdated {
+                    object_id: state.player_object_id,
+                    mount_type: state.player_mount_type,
+                    riding_mount: false,
+                });
+                tracing::debug!("[MOCK] MountDismountRequest");
+            }
+
+            // ===== 组队（Mock 模式） =====
+            NetworkEvent::GroupInviteRequest { ref player_name } => {
+                let _ = response_tx.send(NetworkEvent::GroupMemberAdded { name: player_name.clone() });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] {} 已加入你的队伍", player_name),
+                });
+            }
+            NetworkEvent::GroupKickRequest { ref player_name } => {
+                let _ = response_tx.send(NetworkEvent::GroupMemberRemoved { name: player_name.clone() });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] {} 已被踢出队伍", player_name),
+                });
+            }
+            NetworkEvent::GroupLeaveRequest { ref player_name } => {
+                let _ = response_tx.send(NetworkEvent::GroupMemberRemoved { name: player_name.clone() });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] {} 已离开队伍", player_name),
+                });
+            }
+            NetworkEvent::GroupAcceptRequest => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 已接受组队邀请".to_string(),
+                });
+            }
+            NetworkEvent::GroupDeclineRequest => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 已拒绝组队邀请".to_string(),
+                });
+            }
+
+            // ===== 婚姻/社交（Mock 模式） =====
+            NetworkEvent::MarriageRequestSend { ref target } => {
+                let _ = response_tx.send(NetworkEvent::LoverUpdated {
+                    lover_name: target.clone(),
+                    date: 1712800000,
+                });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 求婚请求已发送给 {}", target),
+                });
+            }
+            NetworkEvent::DivorceRequestSend => {
+                let _ = response_tx.send(NetworkEvent::DivorceRequested2);
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 离婚请求已处理".to_string(),
+                });
+            }
+            NetworkEvent::MarriageReply { accept } => {
+                if accept {
+                    let _ = response_tx.send(NetworkEvent::LoverUpdated {
+                        lover_name: "沙城霸主".to_string(),
+                        date: 1712800000,
+                    });
+                }
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 结婚回复: accept={}", accept),
+                });
+            }
+            NetworkEvent::AddMentorRequest { ref name } => {
+                let _ = response_tx.send(NetworkEvent::MentorUpdated {
+                    mentor_name: name.clone(),
+                    mentor_level: 50,
+                    mentor_online: true,
+                });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 拜师请求已发送: {}", name),
+                });
+            }
+
+            NetworkEvent::AddFriendRequest { ref name } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 好友请求已发送: {}", name),
+                });
+            }
+
+            // ===== 行会（Mock 模式） =====
+            NetworkEvent::RequestGuildInfo => {
+                let _ = response_tx.send(NetworkEvent::GuildNameReceived { name: "[MOCK] 传奇行会".to_string() });
+                let _ = response_tx.send(NetworkEvent::GuildNoticeUpdated { notice: "[MOCK] 欢迎来到传奇行会！\n请勿在行会内发布广告。".to_string() });
+                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated { name: "会长大人".to_string(), rank: 0, online: true });
+                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated { name: "小弟甲".to_string(), rank: 1, online: true });
+                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated { name: "摸鱼乙".to_string(), rank: 2, online: false });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 行会信息已刷新".to_string(),
+                });
+            }
+            NetworkEvent::GuildLeaveRequest { ref player_name } => {
+                let _ = response_tx.send(NetworkEvent::GuildLeft);
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] {} 已退出行会", player_name),
+                });
+            }
+            NetworkEvent::EditGuildNotice { ref notice } => {
+                let _ = response_tx.send(NetworkEvent::GuildNoticeUpdated { notice: notice.clone() });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 行会公告已更新".to_string(),
+                });
+            }
+            NetworkEvent::EditGuildMember { ref member_name, ref rank } => {
+                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated { name: member_name.clone(), rank: *rank, online: true });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 成员 {} 的 rank 已更新为 {}", member_name, rank),
+                });
+            }
+            NetworkEvent::GuildInviteRequest { ref player_name } => {
+                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated { name: player_name.clone(), rank: 3, online: true });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] {} 已加入行会", player_name),
+                });
+            }
+            NetworkEvent::GuildAcceptRequest => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 已接受行会邀请".to_string(),
+                });
+            }
+            NetworkEvent::GuildDeclineRequest => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 已拒绝行会邀请".to_string(),
+                });
+            }
+
+            // ===== 好友（Mock 模式） =====
+            NetworkEvent::RemoveFriendRequest { object_id } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 好友 {} 已删除", object_id),
+                });
+            }
+            NetworkEvent::RefreshFriendsRequest => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 好友列表已刷新".to_string(),
+                });
+            }
+
+            // ===== 邮件（Mock 模式） =====
+            NetworkEvent::ReadMailRequest { mail_id } => {
+                use mir2_shared::packets::server::MailInfo;
+                let mock_mail = MailInfo {
+                    mail_id,
+                    sender_name: "系统管理员".to_string(),
+                    mail_subject: "欢迎使用邮件系统".to_string(),
+                    message: "欢迎体验传奇2！这是系统发送的第一封测试邮件。".to_string(),
+                    gold: 100,
+                    items: Vec::new(),
+                    locked: false,
+                    collected: false,
+                    send_date: 1712800000,
+                };
+                let _ = response_tx.send(NetworkEvent::MailReceived {
+                    mails: vec![mock_mail],
+                });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 邮件 #{} 已读取", mail_id),
+                });
+            }
+            NetworkEvent::CollectParcelRequest { mail_id } => {
+                let _ = response_tx.send(NetworkEvent::ParcelCollectedEvent);
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 邮件 #{} 的包裹已领取", mail_id),
+                });
+            }
+            NetworkEvent::DeleteMailRequest { mail_id } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 邮件 #{} 已删除", mail_id),
+                });
+            }
+            NetworkEvent::SendMailRequest { ref to, ref subject, .. } => {
+                let _ = response_tx.send(NetworkEvent::MailSentEvent);
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 邮件已发送给 {}（主题：{}）", to, subject),
+                });
+            }
+
+            // ===== 师徒（Mock 模式） =====
+            NetworkEvent::CancelMentorRequest => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 师徒关系已解除".to_string(),
+                });
+            }
+            NetworkEvent::AllowMentorRequest { enabled } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 收徒状态已更新: {}", if enabled { "允许" } else { "禁止" }),
+                });
+            }
+            NetworkEvent::MentorReply { accept } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 拜师回复: {}", if accept { "接受" } else { "拒绝" }),
+                });
+            }
+
+            // ===== 任务（Mock 模式） =====
+            NetworkEvent::AcceptQuestRequest { npc_index, quest_index } => {
+                let quest_id = (npc_index * 100 + quest_index) as u32;
+                // 先发送 QuestInfoReceived（模拟服务器下发任务详情）
+                let _ = response_tx.send(NetworkEvent::QuestInfoReceived {
+                    quest_id,
+                    name: format!("任务 #{}", quest_id),
+                    group: "主线任务".to_string(),
+                    description: "这是一个由 mock 服务器生成的任务".to_string(),
+                    level_req: 1,
+                    reward_exp: 1000,
+                    reward_gold: 500,
+                });
+                let _ = response_tx.send(NetworkEvent::QuestAccepted { quest_id });
+                let _ = response_tx.send(NetworkEvent::QuestProgressUpdated {
+                    quest_id,
+                    progress: "任务进行中...".to_string(),
+                });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 已接取任务 #{}", quest_id),
+                });
+            }
+            NetworkEvent::FinishQuestRequest { quest_index, selected_item } => {
+                let _ = response_tx.send(NetworkEvent::QuestCompleted { quest_id: quest_index as u32 });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 任务 #{} 已完成（奖励物品 #{}）", quest_index, selected_item),
+                });
+            }
+            NetworkEvent::AbandonQuestRequest { quest_index } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 任务 #{} 已放弃", quest_index),
+                });
+            }
+            NetworkEvent::ShareQuestRequest { quest_index } => {
+                let _ = response_tx.send(NetworkEvent::QuestShared { quest_id: quest_index as u32 });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 任务 #{} 已共享", quest_index),
+                });
+            }
+
+            // ===== 英雄（Mock 模式） =====
+            NetworkEvent::SetHeroBehaviourRequest { behaviour } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 英雄行为已更新: {}", behaviour),
+                });
+            }
+            NetworkEvent::ChangeHeroRequest { hero_index } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 切换英雄: {}", hero_index),
+                });
+            }
+            NetworkEvent::SetHeroAutoPotValue { pot_type, value } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 英雄自动药水: type={} value={}", pot_type, value),
+                });
+            }
+
+            // ===== 钓鱼（Mock 模式） =====
+            NetworkEvent::FishingAutocastToggle { enabled } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 钓鱼自动抛竿: {}", if enabled { "开启" } else { "关闭" }),
+                });
+            }
+
+            // ===== 智能生物（Mock 模式） =====
+            NetworkEvent::UpdateIntelligentCreatureRequest => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 智能生物设置已更新".to_string(),
+                });
+            }
+
+            // ===== 交易（Mock 模式） =====
+            NetworkEvent::TradeRequest => {
+                let _ = response_tx.send(NetworkEvent::TradeStarted { partner: "(MOCK)".to_string() });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 交易已开始".to_string(),
+                });
+            }
+            NetworkEvent::TradeReplyRequest { accept } => {
+                if accept {
+                    let _ = response_tx.send(NetworkEvent::TradeStarted { partner: "(MOCK)".to_string() });
+                }
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 交易回复: {}", if accept { "接受" } else { "拒绝" }),
+                });
+            }
+            NetworkEvent::TradeConfirmRequest { locked } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 交易确认: locked={}", locked),
+                });
+            }
+            NetworkEvent::TradeCancelRequest => {
+                let _ = response_tx.send(NetworkEvent::TradeCancelled);
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 交易已取消".to_string(),
+                });
+            }
+            NetworkEvent::TradeGoldRequest { amount } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 交易金币: {}", amount),
+                });
+            }
+
+            // ===== 安全下线（Mock 模式） =====
+            NetworkEvent::LogOutRequest => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 安全下线请求已发送".to_string(),
+                });
+            }
+
+            // ===== 物品操作补充（Mock 模式） =====
+            NetworkEvent::LockMailRequest { mail_id } => {
+                let _ = response_tx.send(NetworkEvent::MailLockedItemReceived);
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 邮件 #{} 的物品已锁定", mail_id),
+                });
+            }
+
+            NetworkEvent::MergeItemRequest { from, to } => {
+                // 简单合并：把 from 和 to 的 count 合并到 to
+                let from_opt = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(from));
+                let to_opt = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(to));
+                if let (Some(from_idx), Some(to_idx)) = (from_opt, to_opt) {
+                    if from_idx != to_idx {
+                        let from_count = state.player_inventory[from_idx].as_ref().map(|i| i.count);
+                        let to_max = state.player_inventory[to_idx].as_ref().and_then(|i| i.info.as_ref().map(|info| info.stack_size as u32));
+                        let to_count = state.player_inventory[to_idx].as_ref().map(|i| i.count as u32);
+                        let same_type = {
+                            let fi = state.player_inventory[from_idx].as_ref().map(|i| i.item_index);
+                            let ti = state.player_inventory[to_idx].as_ref().map(|i| i.item_index);
+                            fi == ti
+                        };
+                        if same_type {
+                            if let (Some(fc), Some(tc), Some(ms)) = (from_count, to_count, to_max) {
+                                if tc + fc as u32 <= ms {
+                                    if let Some(ref mut to_item) = state.player_inventory[to_idx] {
+                                        to_item.count += fc;
+                                    }
+                                    state.player_inventory[from_idx] = None;
+                                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id: from });
+                                    tracing::debug!("[MOCK] MergeItemRequest: from={} to={}", from, to);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            NetworkEvent::SplitItemRequest { unique_id, count } => {
+                // 拆分堆叠物品
+                let slot_opt = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id));
+                if let Some(slot_idx) = slot_opt {
+                    let item_count = state.player_inventory[slot_idx].as_ref().map(|i| i.count);
+                    let split_count = (count as u16).min(item_count.unwrap_or(0));
+                    let has_empty = state.player_inventory.iter().any(|s| s.is_none());
+                    if let Some(ref mut item) = state.player_inventory[slot_idx] {
+                        if item.count > split_count && has_empty {
+                            let mut new_item = item.clone();
+                            new_item.count = split_count;
+                            new_item.unique_id = 3_000_000_000 + (Self::rng_next_u32(&mut state.rng) as u64);
+                            item.count -= split_count;
+                            let empty_idx = state.player_inventory.iter().position(|s| s.is_none()).unwrap();
+                            state.player_inventory[empty_idx] = Some(new_item.clone());
+                            let _ = response_tx.send(NetworkEvent::ItemGained { item: new_item });
+                            tracing::debug!("[MOCK] SplitItemRequest: unique_id={} split={}", unique_id, split_count);
+                        }
+                    }
+                }
+            }
+
+            NetworkEvent::DropItemStackRequest { unique_id, count } => {
+                // 丢弃指定数量的堆叠物品
+                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                    if let Some(ref mut item) = state.player_inventory[slot_idx] {
+                        if item.count as u32 <= count {
+                            state.player_inventory[slot_idx] = None;
+                        } else {
+                            item.count -= count as u16;
+                        }
+                    }
+                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id });
+                    tracing::debug!("[MOCK] DropItemStackRequest: unique_id={} count={}", unique_id, count);
+                }
+            }
+
+            NetworkEvent::DropGoldRequest { amount } => {
+                let actual = amount.min(state.player_gold);
+                state.player_gold -= actual;
+                let _ = response_tx.send(NetworkEvent::GoldChanged { delta: -(actual as i32) });
+                tracing::debug!("[MOCK] DropGoldRequest: amount={}", actual);
+            }
+
+            NetworkEvent::EquipItemRequest { unique_id } => {
+                // 装备物品（仅 mock：不改变视觉，只发通知）
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 装备物品: unique_id={}", unique_id),
+                });
+            }
+
+            NetworkEvent::RemoveItemRequest { unique_id } => {
+                // 卸下装备（仅 mock）
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 卸下装备: unique_id={}", unique_id),
+                });
+            }
+
+            // ===== 魔法/技能（Mock 模式） =====
+            NetworkEvent::MagicRequest { spell, .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 魔法施放: spell={}", spell),
+                });
+            }
+
+            NetworkEvent::MagicKeySet => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 魔法快捷键已设置".to_string(),
+                });
+            }
+
+            // ===== 商城（Mock 模式） =====
+            NetworkEvent::GameShopBuyRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::ItemGained {
+                    item: Self::make_mock_item(&mut state.rng),
+                });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 商城购买成功".to_string(),
+                });
+            }
+
+            // ===== 杂项（Mock 模式） =====
+            NetworkEvent::OpenDoorRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 门已打开".to_string(),
+                });
+            }
+
+            NetworkEvent::TeleportToNPCRequest { ref npc_name, .. } => {
+                // 模拟传送：随机传送到可走位置
+                if let Some(new_pos) = Self::pick_random_walkable_unoccupied_raw(
+                    state.map_width,
+                    state.map_height,
+                    &state.map_walkable,
+                    700,
+                    700,
+                    &mut state.rng,
+                    &HashSet::new(),
+                    64,
+                ) {
+                    state.player_grid = new_pos;
+                    let _ = response_tx.send(NetworkEvent::PlayerLocationChanged { x: new_pos.0, y: new_pos.1 });
+                }
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 已传送到 NPC {}", npc_name),
+                });
+            }
+
+            NetworkEvent::SetHeroAutoPotItem { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 英雄自动药水物品".to_string(),
+                });
+            }
+
+            NetworkEvent::EquipSlotItemRequest { slot, unique_id } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 装备到槽位: slot={} id={}", slot, unique_id),
+                });
+            }
+
+            NetworkEvent::RemoveSlotItemRequest { slot } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 卸下槽位装备: slot={}", slot),
+                });
+            }
+
+            NetworkEvent::CombineItemRequest { from, to } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 合成物品: from={} to={}", from, to),
+                });
+            }
+
+            NetworkEvent::BuyItemBackRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 回购物品".to_string(),
+                });
+            }
+
+            NetworkEvent::ReplaceWedRingRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::NPCReplaceWedRingReceived);
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 替换结婚戒指".to_string(),
+                });
+            }
+
+            NetworkEvent::ChangeMarriageRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 变更结婚对象".to_string(),
+                });
+            }
+
+            NetworkEvent::DivorceReply { accept } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: format!("[MOCK] 离婚回复: accept={}", accept),
+                });
+            }
+
+            NetworkEvent::HarvestRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 采集完成".to_string(),
+                });
+            }
+
+            NetworkEvent::FishingCastRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 钓鱼抛竿".to_string(),
+                });
+            }
+
+            NetworkEvent::IntelligentCreaturePickupRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 智能生物拾取".to_string(),
+                });
+            }
+
+            NetworkEvent::RequestIntelligentCreatureUpdates => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 智能生物更新请求".to_string(),
+                });
+            }
+
+            NetworkEvent::NPCConfirmInput { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] NPC 输入确认".to_string(),
+                });
+            }
+
+            NetworkEvent::RequestMapInfoRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 地图信息请求".to_string(),
+                });
+            }
+
+            NetworkEvent::SearchMapRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 地图搜索".to_string(),
+                });
+            }
+
+            NetworkEvent::AcceptReincarnationRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 接受转生".to_string(),
+                });
+            }
+
+            NetworkEvent::CancelReincarnationRequest => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 取消转生".to_string(),
+                });
+            }
+
+            NetworkEvent::CheckRefineRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 检查精炼".to_string(),
+                });
+            }
+
+            NetworkEvent::ConsignItemRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 寄售物品".to_string(),
+                });
+            }
+
+            NetworkEvent::CreateHeroRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 创建英雄".to_string(),
+                });
+            }
+
+            NetworkEvent::ReportIssueRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 报告问题".to_string(),
+                });
+            }
+
+            NetworkEvent::GetRankingRequest { ranking_type } => {
+                // 返回 mock 排行榜数据
+                let mock_players = &[
+                    ("沙城霸主", "99", "Lv.99"),
+                    ("传奇战士", "95", "Lv.95"),
+                    ("一刀999", "92", "Lv.92"),
+                    ("玛法之王", "88", "Lv.88"),
+                    ("屠龙宝刀", "85", "Lv.85"),
+                    ("法神降世", "82", "Lv.82"),
+                    ("道尊再临", "80", "Lv.80"),
+                    ("无名小卒", "75", "Lv.75"),
+                    ("新手上路", "60", "Lv.60"),
+                    ("路过打怪", "55", "Lv.55"),
+                    ("挖矿工人", "50", "Lv.50"),
+                    ("打鱼达人", "45", "Lv.45"),
+                    ("摸鱼大师", "40", "Lv.40"),
+                    ("挂机狂人", "35", "Lv.35"),
+                    ("佛系玩家", "30", "Lv.30"),
+                ];
+
+                // 按 tab 类型调整数值
+                let entries: Vec<_> = mock_players.iter().enumerate().map(|(i, &(name, val, _))| {
+                    let display_val = match ranking_type {
+                        0 => val.to_string(),  // Level
+                        1 => format!("{}", (i as u32 + 1) * 100000), // Gold
+                        2 => format!("{}", (15 - i as u32) * 100), // Reputation
+                        _ => val.to_string(),
+                    };
+                    (i as u32 + 1, name.to_string(), display_val)
+                }).collect();
+
+                let _ = response_tx.send(NetworkEvent::RankingsReceivedWithEntries {
+                    tab: ranking_type,
+                    entries,
+                });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 排行榜已刷新".to_string(),
+                });
+            }
+
+            NetworkEvent::GetRentedItemsRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 获取租赁物品".to_string(),
+                });
+            }
+
+            NetworkEvent::ItemRentalCancel => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 取消租赁".to_string(),
+                });
+            }
+
+            NetworkEvent::ItemRentalConfirm { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 确认租赁".to_string(),
+                });
+            }
+
+            NetworkEvent::RentalItemDepositRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 租赁物品存入".to_string(),
+                });
+            }
+
+            NetworkEvent::RentalItemRetrieveRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 租赁物品取回".to_string(),
+                });
+            }
+
+            NetworkEvent::AddMemoRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 添加备注".to_string(),
+                });
+            }
+
+            NetworkEvent::GuildBuffUpdate { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 行会 Buff 更新".to_string(),
+                });
+            }
+
+            NetworkEvent::GuildNameReturn { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 行会名称返回".to_string(),
+                });
+            }
+
+            NetworkEvent::GuildStorageGoldChange { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 行会仓库金币变更".to_string(),
+                });
+            }
+
+            NetworkEvent::GuildStorageItemChangeRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 行会仓库物品变更".to_string(),
+                });
+            }
+
+            NetworkEvent::GuildWarReturn { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 行会战返回".to_string(),
+                });
+            }
+
+            // ===== 市场（Mock 模式） =====
+            NetworkEvent::MarketRefreshRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 市场刷新".to_string(),
+                });
+            }
+
+            NetworkEvent::MarketSearchRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 市场搜索".to_string(),
+                });
+            }
+
+            NetworkEvent::MarketBuyRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 市场购买".to_string(),
+                });
+            }
+
+            NetworkEvent::MarketSellNowRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 市场出售".to_string(),
+                });
+            }
+
+            NetworkEvent::MarketGetBackRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 市场取回".to_string(),
+                });
+            }
+
+            NetworkEvent::MarketPageRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 市场翻页".to_string(),
+                });
+            }
+
+            NetworkEvent::ObserveRequest { .. } => {
+                let _ = response_tx.send(NetworkEvent::ObserveAllowed { allowed: true });
+                let _ = response_tx.send(NetworkEvent::SystemMessage {
+                    message: "[MOCK] 观察模式已开启".to_string(),
+                });
             }
 
             _ => {

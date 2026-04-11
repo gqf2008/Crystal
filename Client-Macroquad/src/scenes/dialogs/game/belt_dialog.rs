@@ -33,15 +33,20 @@ pub struct BeltItemHybrid {
     pub icon_index: usize,
     pub name: Option<String>,
     pub count: u32,
+    pub unique_id: u64,
 }
 
 impl BeltItemHybrid {
     pub fn new(icon_index: usize, count: u32) -> Self {
-        Self { icon_index, name: None, count }
+        Self { icon_index, name: None, count, unique_id: 0 }
     }
 
     pub fn with_name(icon_index: usize, name: String, count: u32) -> Self {
-        Self { icon_index, name: Some(name), count }
+        Self { icon_index, name: Some(name), count, unique_id: 0 }
+    }
+
+    pub fn with_id(icon_index: usize, name: String, count: u32, unique_id: u64) -> Self {
+        Self { icon_index, name: Some(name), count, unique_id }
     }
 }
 
@@ -52,8 +57,6 @@ enum DragCommand {
     Use { slot: usize },
     /// 交换物品
     Swap { from: usize, to: usize },
-    /// 丢弃物品（拖出快捷栏）
-    Drop { slot: usize },
 }
 
 /// 快捷栏对话框（混合版本）
@@ -100,6 +103,10 @@ pub struct BeltDialogHybrid {
     // === 交互状态 ===
     hovered_cell: Option<usize>,
     pending_to_inventory: Option<usize>,
+
+    /// 拖出窗口请求（跨对话框拖拽）：(slot, drop_position)
+    pending_drag_out: Option<(usize, Vec2)>,
+
     /// 上次点击时间（用于检测双击）
     last_click_time: f64,
     last_click_slot: Option<usize>,
@@ -148,6 +155,7 @@ impl BeltDialogHybrid {
             cells,
             hovered_cell: None,
             pending_to_inventory: None,
+            pending_drag_out: None,
             last_click_time: 0.0,
             last_click_slot: None,
         }
@@ -353,6 +361,11 @@ impl BeltDialogHybrid {
         self.pending_to_inventory.take()
     }
 
+    /// 取拖出窗口请求（跨对话框拖拽）：(slot, drop_position)
+    pub fn take_drag_out_request(&mut self) -> Option<(usize, Vec2)> {
+        self.pending_drag_out.take()
+    }
+
     pub fn take_item_from_slot(&mut self, slot: usize) -> Option<BeltItemHybrid> {
         if slot >= 6 {
             return None;
@@ -468,7 +481,6 @@ impl BeltDialogHybrid {
         // ========== 5. 收集数据用于 mqui 拖放 ==========
         let cells_snapshot: [Option<BeltItemHybrid>; 6] = std::array::from_fn(|i| self.cells[i].clone());
         let item_dragging = self.item_dragging;
-        let _layout = self.layout;
         
         // ========== 6. mqui Group 拖放处理 ==========
         let mut drag_command: Option<DragCommand> = None;
@@ -512,13 +524,13 @@ impl BeltDialogHybrid {
                     }
                 }
                 Drag::Dropped(drop_pos, None) if has_item => {
-                    // 检查是否拖出了快捷栏区域
+                    // 检查是否拖出了快捷栏区域 → 跨对话框拖拽
                     let window_rect = Rect::new(
                         self.position.x, self.position.y,
                         self.get_size().x, self.get_size().y
                     );
                     if !window_rect.contains(drop_pos) {
-                        drag_command = Some(DragCommand::Drop { slot: i });
+                        self.pending_drag_out = Some((i, drop_pos));
                     }
                 }
                 _ => {}
@@ -586,10 +598,6 @@ impl BeltDialogHybrid {
             Some(DragCommand::Swap { from, to }) => {
                 println!("🔄 交换物品: 格子{} <-> 格子{}", from + 1, to + 1);
                 self.cells.swap(from, to);
-            }
-            Some(DragCommand::Drop { slot }) => {
-                println!("🗑️ 丢弃物品: 格子{}", slot + 1);
-                self.cells[slot] = None;
             }
             None => {}
         }

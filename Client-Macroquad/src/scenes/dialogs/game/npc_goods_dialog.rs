@@ -105,6 +105,16 @@ pub struct NpcGoodsDialogHybrid {
     /// 当前对话框模式
     dialog_mode: NpcGoodsMode,
 
+    // 仓库模式：背包物品（右侧面板）
+    storage_inventory_goods: Vec<UserItem>,
+    storage_inventory_start_index: usize,
+    storage_inventory_selected: Option<u64>,
+
+    // 仓库模式：仓库物品（左侧面板）
+    storage_goods: Vec<UserItem>,
+    storage_start_index: usize,
+    storage_selected: Option<u64>,
+
     // 服务端下发
     npc_rate: f32,
     hide_added_stats: bool,
@@ -198,6 +208,14 @@ impl NpcGoodsDialogHybrid {
             inventory_goods: Vec::new(),
             dialog_mode: NpcGoodsMode::Buy,
 
+            storage_inventory_goods: Vec::new(),
+            storage_inventory_start_index: 0,
+            storage_inventory_selected: None,
+
+            storage_goods: Vec::new(),
+            storage_start_index: 0,
+            storage_selected: None,
+
             npc_rate: 1.0,
             hide_added_stats: false,
 
@@ -241,6 +259,8 @@ impl NpcGoodsDialogHybrid {
         self.window_dragging = false;
         self.pending_action = None;
         self.inventory_goods.clear();
+        self.storage_inventory_goods.clear();
+        self.storage_goods.clear();
         self.dialog_mode = NpcGoodsMode::Buy;
     }
 
@@ -324,19 +344,46 @@ impl NpcGoodsDialogHybrid {
         self.show();
     }
 
-    /// 显示仓库存取列表
-    pub fn show_storage_mode(&mut self, storage_items: Vec<UserItem>, rate: f32) {
+    /// 显示仓库存取列表（双面板：左侧仓库 + 右侧背包）
+    pub fn show_storage_mode(&mut self, storage_items: Vec<UserItem>, inventory_items: Vec<UserItem>, rate: f32) {
         self.dialog_mode = NpcGoodsMode::Storage;
-        self.ptype = PanelType::BuySub; // closest available
+        self.ptype = PanelType::BuySub;
         self.npc_rate = rate;
         self.goods.clear();
         self.display_goods.clear();
-        self.inventory_goods = storage_items;
-        self.display_goods = self.inventory_goods.clone();
-        self.start_index = 0;
+        self.inventory_goods.clear();
+
+        // 左侧：仓库物品
+        self.storage_goods = storage_items;
+        self.display_goods = self.storage_goods.clone();
+        self.storage_start_index = 0;
+        self.storage_selected = None;
+
+        // 右侧：背包物品
+        self.storage_inventory_goods = inventory_items;
+        self.storage_inventory_start_index = 0;
+        self.storage_inventory_selected = None;
+
         self.selected_unique_id = None;
         self.pending_action = None;
         self.show();
+    }
+
+    /// 更新仓库物品列表（用于服务器推送更新）
+    pub fn update_storage_items(&mut self, items: Vec<UserItem>) {
+        if self.dialog_mode == NpcGoodsMode::Storage {
+            self.storage_goods = items;
+            self.display_goods = self.storage_goods.clone();
+            self.clamp_storage_start_index();
+        }
+    }
+
+    /// 更新背包物品列表（用于本地背包变化）
+    pub fn update_storage_inventory_items(&mut self, items: Vec<UserItem>) {
+        if self.dialog_mode == NpcGoodsMode::Storage {
+            self.storage_inventory_goods = items;
+            self.clamp_storage_start_index();
+        }
     }
 
     /// 添加出售物品（用于拖拽添加）
@@ -484,6 +531,54 @@ impl NpcGoodsDialogHybrid {
             self.start_index = self.start_index.saturating_add(delta as usize);
         }
         self.clamp_start_index();
+    }
+
+    fn clamp_storage_start_index(&mut self) {
+        if self.storage_goods.len() <= Self::CELL_ROWS {
+            self.storage_start_index = 0;
+        } else {
+            let max_start = self.storage_goods.len().saturating_sub(Self::CELL_ROWS);
+            if self.storage_start_index > max_start {
+                self.storage_start_index = max_start;
+            }
+        }
+        if self.storage_inventory_goods.len() <= Self::CELL_ROWS {
+            self.storage_inventory_start_index = 0;
+        } else {
+            let max_start = self.storage_inventory_goods.len().saturating_sub(Self::CELL_ROWS);
+            if self.storage_inventory_start_index > max_start {
+                self.storage_inventory_start_index = max_start;
+            }
+        }
+    }
+
+    fn scroll_storage_by(&mut self, delta: i32, mouse_pos: Vec2) {
+        let panel_w = 205.0;
+        let left_panel_x = self.pos.x + 5.0;
+        let right_panel_x = left_panel_x + panel_w + 5.0;
+        let is_left = mouse_pos.x < right_panel_x;
+
+        if delta == 0 {
+            return;
+        }
+        if is_left {
+            if self.storage_goods.len() > Self::CELL_ROWS {
+                if delta < 0 {
+                    self.storage_start_index = self.storage_start_index.saturating_sub((-delta) as usize);
+                } else {
+                    self.storage_start_index = self.storage_start_index.saturating_add(delta as usize);
+                }
+            }
+        } else {
+            if self.storage_inventory_goods.len() > Self::CELL_ROWS {
+                if delta < 0 {
+                    self.storage_inventory_start_index = self.storage_inventory_start_index.saturating_sub((-delta) as usize);
+                } else {
+                    self.storage_inventory_start_index = self.storage_inventory_start_index.saturating_add(delta as usize);
+                }
+            }
+        }
+        self.clamp_storage_start_index();
     }
 
     fn queue_action(&mut self) {
@@ -667,6 +762,178 @@ impl NpcGoodsDialogHybrid {
         }
     }
 
+    /// 绘制仓库模式双面板（左侧仓库 + 右侧背包）
+    fn draw_storage_panels(&mut self, _consumed: &mut bool, child_input_enabled: bool, mouse_pos: Vec2) -> bool {
+        let mut local_consumed = false;
+
+        let panel_w = 205.0;
+        let panel_gap = 5.0;
+        let total_w = panel_w * 2.0 + panel_gap;
+        let left_panel_x = self.pos.x + 5.0;
+        let right_panel_x = left_panel_x + panel_w + panel_gap;
+        let cell_y_start = self.pos.y + Self::CELL_Y;
+        let cell_step_y = Self::CELL_STEP_Y;
+
+        // 面板标题
+        draw_text_cn("仓库", left_panel_x + 70.0, self.pos.y + 14.0, 14.0, YELLOW);
+        draw_text_cn("背包", right_panel_x + 70.0, self.pos.y + 14.0, 14.0, YELLOW);
+
+        // 左侧面板：仓库物品
+        let storage_goods_clone = self.storage_goods.clone();
+        Self::draw_storage_panel_items(
+            &storage_goods_clone,
+            &mut self.storage_start_index,
+            &mut self.storage_selected,
+            left_panel_x,
+            cell_y_start,
+            cell_step_y,
+            panel_w,
+            child_input_enabled,
+            mouse_pos,
+            &mut local_consumed,
+            false, // deposit = false means withdraw from storage
+        );
+
+        // 右侧面板：背包物品
+        let inventory_goods_clone = self.storage_inventory_goods.clone();
+        Self::draw_storage_panel_items(
+            &inventory_goods_clone,
+            &mut self.storage_inventory_start_index,
+            &mut self.storage_inventory_selected,
+            right_panel_x,
+            cell_y_start,
+            cell_step_y,
+            panel_w,
+            child_input_enabled,
+            mouse_pos,
+            &mut local_consumed,
+            true, // deposit = true means deposit to storage
+        );
+
+        // 存入/取出 按钮
+        if child_input_enabled {
+            let btn_w = 80.0;
+            let btn_h = 28.0;
+            let btn_y = self.pos.y + Self::BUY_Y;
+            let btn_gap = 10.0;
+            let total_btn_w = btn_w * 2.0 + btn_gap;
+            let btn_start_x = self.pos.x + (total_w - total_btn_w) / 2.0 + 5.0;
+
+            // 存入按钮（从背包取选中物品存入仓库）
+            let deposit_rect = Rect::new(btn_start_x, btn_y, btn_w, btn_h);
+            let dep_hovered = deposit_rect.contains(mouse_pos);
+            let dep_color = if dep_hovered && is_mouse_button_down(MouseButton::Left) {
+                Color::from_rgba(60, 140, 60, 255)
+            } else if dep_hovered {
+                Color::from_rgba(80, 160, 80, 255)
+            } else {
+                Color::from_rgba(50, 100, 50, 255)
+            };
+            draw_rectangle(deposit_rect.x, deposit_rect.y, deposit_rect.w, deposit_rect.h, dep_color);
+            draw_rectangle_lines(deposit_rect.x, deposit_rect.y, deposit_rect.w, deposit_rect.h, 1.0, Color::from_rgba(100, 180, 100, 255));
+            draw_text_cn("存入", deposit_rect.x + 20.0, deposit_rect.y + 17.0, 13.0, WHITE);
+            if dep_hovered && is_mouse_button_pressed(MouseButton::Left) {
+                if let Some(id) = self.storage_inventory_selected {
+                    self.pending_action = Some(NpcGoodsDialogAction::RequestStorage {
+                        unique_id: id,
+                        deposit: true,
+                    });
+                    local_consumed = true;
+                }
+            }
+
+            // 取出按钮（从仓库取选中物品到背包）
+            let retrieve_rect = Rect::new(btn_start_x + btn_w + btn_gap, btn_y, btn_w, btn_h);
+            let ret_hovered = retrieve_rect.contains(mouse_pos);
+            let ret_color = if ret_hovered && is_mouse_button_down(MouseButton::Left) {
+                Color::from_rgba(140, 60, 60, 255)
+            } else if ret_hovered {
+                Color::from_rgba(160, 80, 80, 255)
+            } else {
+                Color::from_rgba(100, 50, 50, 255)
+            };
+            draw_rectangle(retrieve_rect.x, retrieve_rect.y, retrieve_rect.w, retrieve_rect.h, ret_color);
+            draw_rectangle_lines(retrieve_rect.x, retrieve_rect.y, retrieve_rect.w, retrieve_rect.h, 1.0, Color::from_rgba(180, 100, 100, 255));
+            draw_text_cn("取出", retrieve_rect.x + 20.0, retrieve_rect.y + 17.0, 13.0, WHITE);
+            if ret_hovered && is_mouse_button_pressed(MouseButton::Left) {
+                if let Some(id) = self.storage_selected {
+                    self.pending_action = Some(NpcGoodsDialogAction::RequestStorage {
+                        unique_id: id,
+                        deposit: false,
+                    });
+                    local_consumed = true;
+                }
+            }
+        }
+
+        local_consumed
+    }
+
+    /// 绘制单个仓库面板的物品列表
+    fn draw_storage_panel_items(
+        items: &[UserItem],
+        start_index: &mut usize,
+        selected: &mut Option<u64>,
+        panel_x: f32,
+        cell_y_start: f32,
+        cell_step_y: f32,
+        panel_w: f32,
+        child_input_enabled: bool,
+        mouse_pos: Vec2,
+        consumed: &mut bool,
+        _is_deposit: bool,
+    ) {
+        for row in 0..Self::CELL_ROWS {
+            let idx = *start_index + row;
+            if idx >= items.len() {
+                continue;
+            }
+
+            let item = &items[idx];
+            let item_unique_id = item.unique_id;
+            let rect_x = panel_x + Self::CELL_X;
+            let rect_y = cell_y_start + row as f32 * cell_step_y;
+            let rect = Rect::new(rect_x, rect_y, panel_w - Self::CELL_X * 2.0, Self::CELL_H);
+            let hovered = rect.contains(mouse_pos);
+            let is_selected = *selected == Some(item_unique_id);
+
+            // 边框
+            let border_color = if is_selected { YELLOW } else { Color::new(0.0, 1.0, 0.0, 1.0) };
+            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, border_color);
+
+            // 图标
+            if let Some(info) = item.info.as_ref() {
+                if let Some(img) = LibraryName::Items.get_texture(info.image as usize).and_then(|i| i.image) {
+                    let _icon_w = img.width();
+                    let icon_h = img.height();
+                    let off_x = rect.x + 4.0;
+                    let off_y = rect.y + (rect.h - icon_h) / 2.0;
+                    draw_texture(&img, off_x, off_y, WHITE);
+                }
+            }
+
+            // 名称
+            let name_text = item.info.as_ref().map(|i| i.name.clone()).unwrap_or_else(|| format!("Item #{}", item.item_index));
+            draw_text_cn(&name_text, rect.x + 44.0, rect.y + 12.0, 14.0, WHITE);
+
+            // 数量
+            if item.count > 1 {
+                draw_text_cn(&format!("x{}", item.count), rect.x + 23.0, rect.y + 28.0, 14.0, YELLOW);
+            }
+
+            if child_input_enabled && hovered {
+                if is_mouse_button_released(MouseButton::Left) {
+                    *selected = Some(item_unique_id);
+                    *consumed = true;
+                }
+
+                // 悬停提示
+                let tip = format!("{}\n数量: {}", name_text, item.count);
+                draw_tooltip_at_mouse(&tip, vec2(14.0, 14.0));
+            }
+        }
+    }
+
     pub fn update_and_draw(&mut self, net: Option<&NetContext>) -> bool {
         self.update_and_draw_with_input(net, true)
     }
@@ -803,15 +1070,33 @@ impl NpcGoodsDialogHybrid {
         let wheel = mouse_wheel().1;
         if child_input_enabled && wheel != 0.0 {
             // macroquad：向上滚 wheel>0
-            if self.rect().contains(mouse_pos) {
+            if self.dialog_mode == NpcGoodsMode::Storage {
+                // 仓库模式：判断鼠标在左/右面板
+                let panel_w = 205.0;
+                let left_panel_x = self.pos.x + 5.0;
+                let right_panel_x = left_panel_x + panel_w + 5.0;
+                let rect_contains = |x: f32| -> bool {
+                    let rx = if x < right_panel_x { left_panel_x } else { right_panel_x };
+                    Rect::new(rx, self.pos.y, panel_w, self.bg_size.y).contains(mouse_pos)
+                };
+                if rect_contains(mouse_pos.x) {
+                    let delta = if wheel > 0.0 { -1 } else { 1 };
+                    self.scroll_storage_by(delta, mouse_pos);
+                    consumed = true;
+                }
+            } else if self.rect().contains(mouse_pos) {
                 let delta = if wheel > 0.0 { -1 } else { 1 };
                 self.scroll_by(delta);
                 consumed = true;
             }
         }
 
-        // 商品列表
-        self.hover = None;
+        // 仓库模式：双面板渲染
+        if self.dialog_mode == NpcGoodsMode::Storage {
+            consumed |= self.draw_storage_panels(&mut consumed, child_input_enabled, mouse_pos);
+        } else {
+            // 商品列表（非仓库模式）
+            self.hover = None;
 
         for row in 0..Self::CELL_ROWS {
             let idx = self.start_index + row;
@@ -904,10 +1189,11 @@ impl NpcGoodsDialogHybrid {
             if child_input_enabled && trigger_buy {
                 self.queue_action();
             }
-        }
+        } // end of 商品列表
+        } // end of else (非仓库模式)
 
-        // Buy 按钮（Craft 隐藏）
-        if child_input_enabled && self.ptype != PanelType::Craft {
+        // Buy 按钮（Craft/Storage 隐藏）
+        if child_input_enabled && self.ptype != PanelType::Craft && self.dialog_mode != NpcGoodsMode::Storage {
             let buy_rect = self.buy_rect();
             if self.buy_btn.draw_button(buy_rect, mouse_pos) {
                 self.queue_action();

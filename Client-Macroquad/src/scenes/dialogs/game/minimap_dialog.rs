@@ -16,6 +16,14 @@ use super::native_ui_utils::{
     DragHelper, draw_library_button_with_offset, draw_library_image_with_offset,
 };
 
+/// 小地图待处理动作
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MiniMapAction {
+    None,
+    OpenMail,
+    OpenBigMap,
+}
+
 /// 地图上的对象类型
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MapObjectType {
@@ -74,6 +82,8 @@ pub struct MiniMapDialogHybrid {
     current_size: Vec2,
     /// 拖拽辅助器
     drag_helper: DragHelper,
+    /// 待处理动作
+    pending_action: MiniMapAction,
 }
 
 impl Default for MiniMapDialogHybrid {
@@ -148,6 +158,7 @@ impl MiniMapDialogHybrid {
             bg_texture: None,
             current_size: vec2(124.0, 150.0),
             drag_helper: DragHelper::new(),
+            pending_action: MiniMapAction::None,
         }
     }
 
@@ -220,6 +231,11 @@ impl MiniMapDialogHybrid {
     /// 是否为大模式
     pub fn is_big_mode(&self) -> bool {
         self.big_mode
+    }
+
+    /// 取出并消费待处理动作（每帧由 UIRenderSystem 调用）
+    pub fn take_pending_actions(&mut self) -> MiniMapAction {
+        std::mem::replace(&mut self.pending_action, MiniMapAction::None)
     }
 
     /// 异步加载纹理
@@ -407,7 +423,8 @@ impl MiniMapDialogHybrid {
             vec2(self.position.x + 4.0, self.position.y + bottom_y),
             mouse_pos,
         ) {
-            println!("📮 MiniMap: MailButton clicked (stub)");
+            println!("📮 MiniMap: MailButton clicked");
+            self.pending_action = MiniMapAction::OpenMail;
         }
 
         // NewMail icon: Prguse[544] at (5,y+1) when visible
@@ -427,7 +444,8 @@ impl MiniMapDialogHybrid {
             vec2(self.position.x + 25.0, self.position.y + bottom_y),
             mouse_pos,
         ) {
-            println!("🗺️ MiniMap: BigMapButton clicked (stub)");
+            println!("🗺️ MiniMap: BigMapButton clicked");
+            self.pending_action = MiniMapAction::OpenBigMap;
         }
 
         // LightSetting image: Prguse[2093] at (102,y)

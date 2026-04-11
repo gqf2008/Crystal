@@ -41,17 +41,24 @@ impl PacketHandler for SocialHandler {
 
             // LoverUpdate
             x if x == ServerPacketIds::LoverUpdate as u16 => {
-                if let Ok(_packet) = server::LoverUpdate::read_body(&mut cursor) {
-                    events.push(NetworkEvent::LoverUpdated);
-                    tracing::debug!("💕 Lover updated");
+                if let Ok(packet) = server::LoverUpdate::read_body(&mut cursor) {
+                    events.push(NetworkEvent::LoverUpdated {
+                        lover_name: packet.lover_name.clone(),
+                        date: packet.date,
+                    });
+                    tracing::debug!("💕 Lover updated: {} (date: {})", packet.lover_name, packet.date);
                 }
             }
 
             // MentorUpdate
             x if x == ServerPacketIds::MentorUpdate as u16 => {
-                if let Ok(_packet) = server::MentorUpdate::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MentorUpdated);
-                    tracing::debug!("🎓 Mentor updated");
+                if let Ok(packet) = server::MentorUpdate::read_body(&mut cursor) {
+                    events.push(NetworkEvent::MentorUpdated {
+                        mentor_name: packet.mentor_name.clone(),
+                        mentor_level: packet.mentor_level,
+                        mentor_online: packet.mentor_online,
+                    });
+                    tracing::debug!("🎓 Mentor updated: {} (Lv.{})", packet.mentor_name, packet.mentor_level);
                 }
             }
 

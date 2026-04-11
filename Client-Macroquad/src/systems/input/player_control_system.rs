@@ -488,8 +488,8 @@ impl PlayerControlSystem {
         (nx - px).abs() <= max_range && (ny - py).abs() <= max_range
     }
 
-    // TODO: 实体点击功能待实现
-    // 需要等待 PlayerInput 结构体重构完成
+    // 实体点击：NPC 交互通过 NPCDialog 驱动，怪物点击通过右键攻击处理。
+    // 玩家/物品点击待后续补充。
 }
 
 impl Default for PlayerControlSystem {
@@ -939,8 +939,7 @@ impl LogicSystem for PlayerControlSystem {
                         } // end else (not clicking monster, do swing)
                     }
                     
-                    // TODO: 计算攻击方向(朝向鼠标点击位置)
-                    // 当前暂时保持原方向
+                    // 攻击方向已由 grid_direction_towards 计算并设置到 player.direction
                 }
                 
                 // 清除 last_click_time 避免重复触发

@@ -39,6 +39,7 @@ pub enum UiCommand {
 
     PushSystemChatLine(String),
     PushChatLine(String),
+    PushWhisperLine(String),
 
     ShowNpcDialog { dialog: String },
     ShowNpcGoods {
@@ -109,12 +110,57 @@ pub enum UiCommand {
     QuestAccepted { quest_id: u32, name: String, description: String },
     QuestCompleted { quest_id: u32 },
     QuestProgressUpdated { quest_id: u32, progress_text: String },
+    QuestInfoReceived {
+        quest_id: u32,
+        name: String,
+        group: String,
+        description: String,
+        level_req: u32,
+        reward_exp: u64,
+        reward_gold: u32,
+    },
 
     /// 公会相关
     GuildMemberUpdated { name: String, rank: String, online: bool },
     GuildNoticeUpdated { notice: String },
     GuildExpGained { amount: i64 },
     GuildWarRequested,
+    SetGuildName { name: String },
+
+    /// 小地图：邮件按钮
+    OpenMailDialog,
+    CloseMailDialog,
+
+    /// 小地图：大地图按钮
+    OpenBigMap,
+
+    /// 仓库对话框
+    OpenStorage,
+    /// 更新仓库物品列表（左侧面板：仓库物品）
+    UpdateStorageItems { items: Vec<mir2_shared::data::item::UserItem> },
+    /// 更新仓库对话框中的背包物品列表（右侧面板）
+    UpdateStorageInventoryItems { items: Vec<mir2_shared::data::item::UserItem> },
+
+    /// 婚姻/师徒
+    SetMarriageRequester { requester: String },
+    ClearMarriageRequester,
+    UpdateLover { name: String, date: i64 },
+    UpdateMentor { name: String, level: i32, online: bool },
+
+    /// 通用文本输入对话框（组队邀请/添加好友/拜师）
+    ShowTextInput {
+        kind: crate::scenes::dialogs::game::main_dialog::TextInputKind,
+        title: String,
+        placeholder: String,
+        max_length: usize,
+    },
+    HideTextInput,
+
+    /// 更新排行榜数据
+    UpdateRankings { tab: u8, entries: Vec<(u32, String, String)> },
+
+    /// 更新邮件列表
+    UpdateMailList { mails: Vec<crate::ui::ui_state::MailEntry> },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -144,11 +190,29 @@ pub struct UiStateData {
     pub minimap_player_pos: Option<Vec2>,
     pub minimap_player_dir_radians: f32,
 
+    /// 大地图：当前地图名称
+    pub big_map_map_name: Option<String>,
+
+    /// 邮件：待显示的邮件列表
+    pub mail_entries: Vec<MailEntry>,
+
     /// UI -> ECS：小地图点击产生的自动寻路目标（世界坐标像素 + run 标记）。
     pub pending_auto_path_target: Option<(f32, f32, bool)>,
 
     /// AmountBox 确认购买时需要的 uid（由表现层在打开时设置，逻辑层在确认后消费）。
     pub amount_box_buy_uid: Option<u64>,
+}
+
+/// 邮件条目（从服务器 MailReceived 转换而来）
+#[derive(Debug, Clone, Default)]
+pub struct MailEntry {
+    pub mail_id: u64,
+    pub sender: String,
+    pub subject: String,
+    pub body: String,
+    pub date: String,
+    pub has_parcel: bool,
+    pub is_read: bool,
 }
 
 impl UiStateData {

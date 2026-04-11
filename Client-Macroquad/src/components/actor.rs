@@ -109,6 +109,13 @@ impl NPC {
     }
 }
 
+/// NPC 交互提示标记
+///
+/// 由 NpcAISystem 在玩家靠近可交互 NPC 时添加，用于在 NPC 头顶绘制提示（如 "!"）。
+/// 玩家离开范围后自动移除。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InteractionHint;
+
 /// 怪物组件
 #[derive(Debug, Clone)]
 pub struct Monster {

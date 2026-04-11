@@ -1,7 +1,11 @@
 //! 实体渲染系统 (EntityRenderSystem)
-//! 
+//!
+//! **⚠️ 已废弃**: 本系统已被 `SpriteRenderSystem`（`sprite_system.rs` + `character.rs`）取代。
+//! 实际角色渲染走 `SpriteRenderSystem::draw_character`，包含完整的 armour/hair/weapon/wing/mount 多层绘制。
+//! 本文件保留仅作为参考，不应在 GameScene 中注册。
+//!
 //! **优先级**: 1020 (RENDER 层)
-//! **职责**: 渲染玩家和怪物实体
+//! **职责**: ~~渲染玩家和怪物实体~~（已由 SpriteRenderSystem 接管）
 //! 
 //! ## ECS 架构
 //! 
@@ -106,8 +110,8 @@ impl EntityRenderSystem {
         screen_width: f32,
         screen_height: f32,
     ) -> GameResult {
-        // TODO: 从 Libraries 获取精灵图数据
-        // 目前先绘制一个占位矩形
+        // ⚠️ 已废弃：精灵数据获取已由 SpriteRenderSystem 中的 LibraryName 系统完成
+        // 不再需要从此处读取 Libraries 精灵图数据
         
         // 将世界坐标转换为屏幕坐标
         let screen_x = (world_x - camera_x) * zoom + screen_width / 2.0;
@@ -137,12 +141,7 @@ impl RenderSystem for EntityRenderSystem {
         &mut self,
         _world: &GameWorld,
     ) -> crate::compat::GameResult {
-        // TODO: 重写为 macroquad API
-        // 需要实现:
-        // 1. 获取相机视图范围
-        // 2. 收集可见实体
-        // 3. 深度排序 (按 Y 坐标)
-        // 4. 渲染所有实体
+        // ⚠️ 已废弃：本 draw() 返回 Ok(()) 是占位，实际渲染由 SpriteRenderSystem 处理
         Ok(())
     }
 }

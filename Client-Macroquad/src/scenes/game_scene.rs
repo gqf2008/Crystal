@@ -20,7 +20,7 @@ use crate::{
         priority, AnimationSystem, CameraBoundsSystem, CameraFollowSystem, CameraSpaceGateSystem,
         CameraSystem, CollisionSystem, CombatSystem, FrameEndSystem, HealthRegenSystem,
         AutoPotionSystem, LocalPlayerAiSystem, MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SkillSystem,
-        SystemScheduler, TimeTickSystem,
+        SystemScheduler, TimeTickSystem, NpcAISystem, NpcDialogueSystem, BufSystem,
     },
 };
 use macroquad::prelude::*;
@@ -110,11 +110,16 @@ impl GameScene {
             .add_system(crate::systems::SpellInputSystem::default(), 118)
             // 决策层：怪物 AI（追击/攻击等）
             .add_system(crate::systems::MonsterAISystem, priority::MONSTER_AI)
+            // 决策层：NPC AI（交互提示等）
+            .add_system(NpcAISystem, priority::NPC_INTERACTION)
+            // 决策层：NPC 对话自动触发
+            .add_system(NpcDialogueSystem::new(), priority::NPC_DIALOGUE)
             .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
             // 战斗/技能/自然回复：先接入闭环（目前 test_game_scene 默认不会触发）
             .add_system(CombatSystem, priority::COMBAT)
             .add_system(SkillSystem, priority::SKILL)
             .add_system(HealthRegenSystem, priority::REGEN)
+            .add_system(BufSystem::new(), priority::BUFF_DEBUFF)
             .add_system(PathfindingSystem::new(), priority::PATHFINDING)
             .add_system(MovementSystem, priority::MOVEMENT)
             .add_system(CollisionSystem::new(), priority::COLLISION)
@@ -136,7 +141,7 @@ impl GameScene {
                 crate::systems::presentation::HealthBarAnimSystem,
                 priority::HEALTH_BAR_ANIM,
             )
-            .add_system(crate::systems::ParticleSystem, priority::PARTICLE)
+            .add_system(crate::systems::ParticleSystem::new(), priority::PARTICLE)
             .add_system(
                 crate::systems::presentation::SoundSystem::default(),
                 priority::SOUND,

@@ -299,6 +299,7 @@ pub enum NetworkEvent {
     GroupAcceptRequest,
     GroupDeclineRequest,
     GroupLeaveRequest { player_name: String },
+    GroupKickRequest { player_name: String },
     
     // 服务器 → 客户端
     GroupInvite { inviter: String },
@@ -480,6 +481,15 @@ pub enum NetworkEvent {
     QuestItemLost { unique_id: u64 },
     QuestShared { quest_id: u32 },
     QuestProgressUpdated { quest_id: u32, progress: String },
+    QuestInfoReceived {
+        quest_id: u32,
+        name: String,
+        group: String,
+        description: String,
+        level_req: u32,
+        reward_exp: u64,
+        reward_gold: u32,
+    },
 
     // ========================================================================
     // 好友事件（Friend Events）
@@ -598,7 +608,7 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    MailReceived,
+    MailReceived { mails: Vec<mir2_shared::packets::server::MailInfo> },
     MailLockedItemReceived,
     MailSendRequestReceived,
     MailSentEvent,
@@ -656,8 +666,8 @@ pub enum NetworkEvent {
     MarriageRequested2 { requester: String },
     DivorceRequested2,
     MentorRequested2,
-    LoverUpdated,
-    MentorUpdated,
+    LoverUpdated { lover_name: String, date: i64 },
+    MentorUpdated { mentor_name: String, mentor_level: i32, mentor_online: bool },
 
     // 客户端 -> 服务器
     MarriageRequestSend { target: String },
@@ -724,6 +734,11 @@ pub enum NetworkEvent {
 
     // 服务器 -> 客户端
     RankingsReceived,
+    /// 排行榜数据（Mock 模式用，携带实际排行数据）
+    RankingsReceivedWithEntries {
+        tab: u8, // 0=Level, 1=Gold, 2=Reputation
+        entries: Vec<(u32, String, String)>, // (rank, name, value)
+    },
     GameShopInfoReceived,
     GameShopStockReceived,
 
@@ -790,7 +805,7 @@ pub enum NetworkEvent {
     ObjectLevelEffectsReceived { object_id: u32 },
     BindingShotSet { enabled: bool },
     OutputMessageReceived { message: String },
-    UserStorageReceived,
+    UserStorageReceived { items: Vec<mir2_shared::data::item::UserItem> },
     ChatItemStatsReceived,
     ConcentrationSet { enabled: bool },
     ElementalSet { element: u8 },

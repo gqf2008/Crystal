@@ -103,56 +103,6 @@ impl PacketHandler for NpcHandler {
                 }
             }
 
-            // NPCConsign
-            x if x == ServerPacketIds::NPCConsign as u16 => {
-                if let Ok(_packet) = server::NPCConsign::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCConsignReceived);
-                    tracing::debug!("📋 NPC consign dialog opened");
-                }
-            }
-
-            // NPCMarket
-            x if x == ServerPacketIds::NPCMarket as u16 => {
-                if let Ok(packet) = server::NPCMarket::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCMarketEvent);
-                    tracing::debug!("🏪 NPC market: {} pages", packet.pages.len());
-                }
-            }
-
-            // NPCMarketPage
-            x if x == ServerPacketIds::NPCMarketPage as u16 => {
-                if let Ok(packet) = server::NPCMarketPage::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCMarketPageEvent);
-                    tracing::debug!("🏪 NPC market page: {} listings", packet.listings.len());
-                }
-            }
-
-            // ConsignItem
-            x if x == ServerPacketIds::ConsignItem as u16 => {
-                if let Ok(packet) = server::ConsignItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ConsignItemReceived);
-                    tracing::debug!("📋 Consign item: id={}, success={}", packet.unique_id, packet.success);
-                }
-            }
-
-            // MarketFail
-            x if x == ServerPacketIds::MarketFail as u16 => {
-                if let Ok(packet) = server::MarketFail::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MarketFailedEvent {
-                        reason: format!("reason_code={}", packet.reason),
-                    });
-                    tracing::warn!("🏪 Market failed: reason={}", packet.reason);
-                }
-            }
-
-            // MarketSuccess
-            x if x == ServerPacketIds::MarketSuccess as u16 => {
-                if let Ok(packet) = server::MarketSuccess::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MarketSuccessEvent);
-                    tracing::info!("🏪 Market success: {}", packet.message);
-                }
-            }
-
             // SellItem
             x if x == ServerPacketIds::SellItem as u16 => {
                 if let Ok(packet) = server::SellItem::read_body(&mut cursor) {
@@ -281,7 +231,7 @@ impl PacketHandler for NpcHandler {
             x if x == ServerPacketIds::NPCRequestInput as u16 => {
                 if let Ok(packet) = server::NPCRequestInput::read_body(&mut cursor) {
                     events.push(NetworkEvent::NPCRequestInputReceived {
-                        npc_id: 0,
+                        npc_id: 0, // 协议不携带 object_id
                         prompt: packet.message.clone(),
                     });
                     tracing::debug!("📝 NPC request input: {} (max_length={})", packet.message, packet.max_length);

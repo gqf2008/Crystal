@@ -1,6 +1,6 @@
 use crate::components::{
     FloatingText, Health, HealthBarAnim, HoverHighlight, LibrarySprite, Monster, NameColor, NPC,
-    NetworkObjectType, NetworkSync, Position, RenderPass, RenderStage, SpriteBlendMode,
+    NetworkObjectType, NetworkSync, Particle, Position, RenderPass, RenderStage, SpriteBlendMode,
 };
 use crate::game::GameResult;
 use crate::systems::RenderSystem;
@@ -362,6 +362,59 @@ impl RenderSystem for EffectRenderSystem {
             }
         }
 
+        // 2) 粒子效果渲染
+        draw_particles(_world, alpha);
+
         Ok(())
+    }
+}
+
+/// 渲染所有活跃粒子
+fn draw_particles(world: &hecs::World, alpha: f32) {
+    let alpha = alpha.clamp(0.0, 1.0);
+
+    // 获取相机参数用于视锥裁剪
+    let cam_zoom = world
+        .query::<&crate::components::Camera>()
+        .iter()
+        .next()
+        .map(|c| c.zoom)
+        .unwrap_or(1.0)
+        .max(0.0001);
+
+    let (cam_pos_x, cam_pos_y, cam_screen_w, cam_screen_h) = world
+        .query::<(&crate::components::Camera, &Position)>()
+        .iter()
+        .next()
+        .map(|(c, p)| (p.x, p.y, c.screen_width, c.screen_height))
+        .unwrap_or((0.0, 0.0, screen_width(), screen_height()));
+    let half_w = (cam_screen_w / 2.0) / cam_zoom;
+    let half_h = (cam_screen_h / 2.0) / cam_zoom;
+    let cull_margin = 60.0;
+    let view_left = cam_pos_x - half_w - cull_margin;
+    let view_right = cam_pos_x + half_w + cull_margin;
+    let view_top = cam_pos_y - half_h - cull_margin;
+    let view_bottom = cam_pos_y + half_h + cull_margin;
+
+    let in_view = |x: f32, y: f32| -> bool {
+        x >= view_left && x <= view_right && y >= view_top && y <= view_bottom
+    };
+
+    for particle in world.query::<&Particle>().iter() {
+        if !in_view(particle.position.x, particle.position.y) {
+            continue;
+        }
+
+        let c = &particle.color;
+        let a = (c.a as f32 / 255.0) * alpha * particle.blend_rate;
+        let tint = Color::new(c.r as f32 / 255.0, c.g as f32 / 255.0, c.b as f32 / 255.0, a);
+        let size = particle.size / cam_zoom;
+
+        if size < 0.5 {
+            // 极小粒子：用像素点
+            draw_circle(particle.position.x, particle.position.y, 1.0 / cam_zoom, tint);
+        } else {
+            draw_circle(particle.position.x, particle.position.y, size, tint);
+        }
     }
 }

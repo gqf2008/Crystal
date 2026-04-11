@@ -31,10 +31,24 @@ use super::{
     MiniMapDialogHybrid,
     OptionDialogHybrid,
     QuestLogDialogHybrid,
+    RankingDialogHybrid,
+    HelpDialogHybrid,
+    InspectDialogHybrid,
 };
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use std::time::{Duration, Instant};
+
+/// 文本输入请求类型（用于区分不同来源的 TextInputDialog 输入）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextInputKind {
+    None,
+    GroupInvite,
+    AddFriend,
+    AddMentor,
+    GuildNotice,
+    WhisperChat { target: String },
+}
 
 /// 对话框类型枚举，用于 z-order 管理
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -63,35 +77,39 @@ pub enum DialogType {
     IntelligentCreature,
     Compass,
     Socket,
+    Mail,
+    Ranking,
+    Help,
+    Inspect,
 }
 
 /// 主界面底部工具栏
 pub struct MainDialog {
     /// 当前分辨率索引 (0=800, 1=1024, 2=1280+)
     resolution_index: usize,
-    /// 模拟数据 - 当前生命值
+    /// UI 缓存 - 当前生命值（每帧由 UIRenderSystem 从 ECS Health 组件同步）
     hp: i32,
-    /// 模拟数据 - 最大生命值
+    /// UI 缓存 - 最大生命值
     max_hp: i32,
-    /// 模拟数据 - 当前魔法值
+    /// UI 缓存 - 当前魔法值（每帧由 UIRenderSystem 从 ECS Mana 组件同步）
     mp: i32,
-    /// 模拟数据 - 最大魔法值
+    /// UI 缓存 - 最大魔法值
     max_mp: i32,
-    /// 模拟数据 - 经验值百分比
+    /// UI 缓存 - 经验值百分比（每帧从 ECS Experience 组件同步）
     exp_percent: f32,
-    /// 模拟数据 - 等级
+    /// UI 缓存 - 等级（每帧从 ECS CombatStats 组件同步）
     level: u32,
-    /// 模拟数据 - 角色名
+    /// UI 缓存 - 角色名（由 UserInformation 事件设置）
     character_name: String,
-    /// 模拟数据 - 金币
+    /// UI 缓存 - 金币（每帧从 ECS Currency 组件同步）
     gold: u32,
-    /// 模拟数据 - 当前负重
+    /// UI 缓存 - 当前负重（每帧从 ECS Inventory 组件同步）
     weight: u32,
-    /// 模拟数据 - 最大负重
+    /// UI 缓存 - 最大负重
     max_weight: u32,
-    /// 模拟数据 - 背包空格数
+    /// UI 缓存 - 背包空格数
     bag_space: u32,
-    /// 模拟数据 - 背包总容量
+    /// UI 缓存 - 背包总容量
     bag_capacity: u32,
 
     // 子对话框（全部使用 Hybrid 版本）
@@ -122,6 +140,8 @@ pub struct MainDialog {
     intelligent_creature_dialog: crate::scenes::dialogs::game::intelligent_creature_dialog::IntelligentCreatureDialogHybrid,
     compass_dialog: crate::scenes::dialogs::game::compass_dialog::CompassDialogHybrid,
     socket_dialog: crate::scenes::dialogs::game::socket_dialog::SocketDialogHybrid,
+    /// 邮件对话框
+    mail_dialog: crate::scenes::dialogs::game::mail_dialog::MailDialogHybrid,
     /// 设置对话框
     option_dialog: OptionDialogHybrid,
     /// 游戏商城对话框
@@ -130,6 +150,21 @@ pub struct MainDialog {
     menu_dialog: MenuDialogHybrid,
     /// 小地图对话框
     minimap_dialog: MiniMapDialogHybrid,
+
+    /// 大地图对话框（全屏查看当前地图）
+    big_map_dialog: crate::scenes::dialogs::game::big_map_dialog::BigMapDialogHybrid,
+
+    /// 排行榜对话框
+    ranking_dialog: RankingDialogHybrid,
+    /// 帮助对话框
+    help_dialog: HelpDialogHybrid,
+    /// 查看装备对话框
+    inspect_dialog: InspectDialogHybrid,
+
+    /// 通用文本输入对话框（组队邀请/添加好友/拜师等）
+    text_input_dialog: crate::scenes::dialogs::game::text_input_dialog::TextInputDialogHybrid,
+    /// 当前输入请求类型（用于区分不同来源的文本输入）
+    pending_text_input_kind: TextInputKind,
 
     // 对话框打开状态
     belt_dialog_open: bool,
@@ -152,10 +187,14 @@ pub struct MainDialog {
     intelligent_creature_dialog_open: bool,
     compass_dialog_open: bool,
     socket_dialog_open: bool,
+    mail_dialog_open: bool,
     option_dialog_open: bool,
     game_shop_dialog_open: bool,
     menu_dialog_open: bool,
     minimap_dialog_open: bool,
+    ranking_dialog_open: bool,
+    help_dialog_open: bool,
+    inspect_dialog_open: bool,
 
     /// 待处理的安全下线请求（由 ui_system 消费）
     pending_logout_request: bool,
@@ -189,6 +228,12 @@ pub struct MainDialog {
 
     /// 暂存的交易对话框动作（由 show_dialogs 产出，由 ui_system.rs 消费发包）
     pending_trade_action: Option<crate::scenes::dialogs::game::trade_dialog::TradeAction>,
+
+    /// 暂存的排行榜刷新请求（由 show_dialogs 产出，由 ui_system.rs 消费发包）
+    pending_ranking_refresh_tab: Option<u8>,
+
+    /// 暂存的装备请求（Inventory 拖到 Character 面板时触发）
+    pending_equip_request: Option<u64>, // unique_id
 
     // === 攻击模式显示 ===
     /// 攻击模式 (0=Peace, 1=Group, 2=Guild, 3=EnemyGuild, 4=RedBrown, 5=All)
@@ -278,10 +323,15 @@ impl MainDialog {
             intelligent_creature_dialog: crate::scenes::dialogs::game::intelligent_creature_dialog::IntelligentCreatureDialogHybrid::new(),
             compass_dialog: crate::scenes::dialogs::game::compass_dialog::CompassDialogHybrid::new(),
             socket_dialog: crate::scenes::dialogs::game::socket_dialog::SocketDialogHybrid::new(),
+            mail_dialog: crate::scenes::dialogs::game::mail_dialog::MailDialogHybrid::new(),
             option_dialog: OptionDialogHybrid::new(),
             game_shop_dialog: GameShopDialog::new(),
             menu_dialog: MenuDialogHybrid::new(),
             minimap_dialog: MiniMapDialogHybrid::new(),
+            big_map_dialog: crate::scenes::dialogs::game::big_map_dialog::BigMapDialogHybrid::new(),
+            ranking_dialog: RankingDialogHybrid::new(),
+            help_dialog: HelpDialogHybrid::new(),
+            inspect_dialog: InspectDialogHybrid::new(),
 
             // 对话框打开状态
             belt_dialog_open: true,
@@ -304,10 +354,14 @@ impl MainDialog {
             intelligent_creature_dialog_open: false,
             compass_dialog_open: false,
             socket_dialog_open: false,
+            mail_dialog_open: false,
             option_dialog_open: false,
             game_shop_dialog_open: false,
             menu_dialog_open: false,
             minimap_dialog_open: true,
+            ranking_dialog_open: false,
+            help_dialog_open: false,
+            inspect_dialog_open: false,
             pending_logout_request: false,
 
             // 对话框 z-order（从后到前）
@@ -351,6 +405,8 @@ impl MainDialog {
             minimap_right_last_click_time: None,
             minimap_double_click_threshold: Duration::from_millis(260),
             pending_trade_action: None,
+            pending_ranking_refresh_tab: None,
+            pending_equip_request: None,
 
             // 攻击模式显示
             attack_mode: 0,
@@ -363,6 +419,10 @@ impl MainDialog {
 
             // 快捷技能栏
             quick_skills: [0; 8],
+
+            // 文本输入对话框
+            text_input_dialog: crate::scenes::dialogs::game::text_input_dialog::TextInputDialogHybrid::new(),
+            pending_text_input_kind: TextInputKind::None,
         }
     }
 
@@ -539,6 +599,10 @@ impl MainDialog {
         self.intelligent_creature_dialog.load_textures();
         self.compass_dialog.load_textures();
         self.socket_dialog.load_textures();
+        self.mail_dialog.load_textures();
+        self.ranking_dialog.load_textures();
+        self.help_dialog.load_textures();
+        self.inspect_dialog.load_textures();
         self.option_dialog.load_textures();
         self.game_shop_dialog.load_textures();
         self.menu_dialog.load_textures();
@@ -577,6 +641,10 @@ impl MainDialog {
         self.intelligent_creature_dialog.load_textures();
         self.compass_dialog.load_textures();
         self.socket_dialog.load_textures();
+        self.mail_dialog.load_textures();
+        self.ranking_dialog.load_textures();
+        self.help_dialog.load_textures();
+        self.inspect_dialog.load_textures();
         self.option_dialog.load_textures();
         self.game_shop_dialog.load_textures();
         self.menu_dialog.load_textures();
@@ -615,6 +683,12 @@ impl MainDialog {
     pub fn push_chat_line(&mut self, text: impl Into<String>) {
         self.chat_dialog
             .add_message(text, Color::from_rgba(100, 150, 255, 255));
+    }
+
+    /// 往聊天窗口追加一条私聊消息
+    pub fn push_whisper_line(&mut self, text: impl Into<String>) {
+        self.chat_dialog
+            .add_message(text, Color::from_rgba(255, 150, 100, 255));
     }
 
     /// 是否有任何“弹窗类”对话框打开（用于 ESC 逻辑）
@@ -673,6 +747,8 @@ impl MainDialog {
         self.compass_dialog.close();
         self.socket_dialog_open = false;
         self.socket_dialog.close();
+        self.mail_dialog_open = false;
+        self.mail_dialog.close();
         self.option_dialog_open = false;
         self.game_shop_dialog_open = false;
         self.menu_dialog_open = false;
@@ -983,6 +1059,10 @@ impl MainDialog {
                 DialogType::IntelligentCreature => self.sync_and_draw_intelligent_creature(&mut consumed, mouse_pos),
                 DialogType::Compass => self.sync_and_draw_compass(&mut consumed, mouse_pos),
                 DialogType::Socket => self.sync_and_draw_socket(&mut consumed, mouse_pos),
+                DialogType::Mail => self.sync_and_draw_mail(&mut consumed, mouse_pos),
+                DialogType::Ranking => self.sync_and_draw_ranking(&mut consumed, mouse_pos),
+                DialogType::Help => self.sync_and_draw_help(&mut consumed, mouse_pos),
+                DialogType::Inspect => self.sync_and_draw_inspect(&mut consumed, mouse_pos),
                 DialogType::Option => self.sync_and_draw_option(&mut consumed, mouse_pos),
                 DialogType::GameShop => self.sync_and_draw_shop(&mut consumed, mouse_pos),
                 DialogType::Menu => self.sync_and_draw_menu(&mut consumed, mouse_pos),
@@ -1045,10 +1125,14 @@ impl MainDialog {
             DialogType::IntelligentCreature => (self.intelligent_creature_dialog_open, self.intelligent_creature_dialog.contains(mouse_pos)),
             DialogType::Compass => (self.compass_dialog_open, self.compass_dialog.contains(mouse_pos)),
             DialogType::Socket => (self.socket_dialog_open, self.socket_dialog.contains(mouse_pos)),
+            DialogType::Mail => (self.mail_dialog_open, self.mail_dialog.contains(mouse_pos)),
             DialogType::Option => (self.option_dialog_open, self.option_dialog.contains(mouse_pos)),
             DialogType::GameShop => (self.game_shop_dialog_open, self.game_shop_dialog.contains(mouse_pos)),
             DialogType::Menu => (self.menu_dialog_open, self.menu_dialog.contains(mouse_pos)),
             DialogType::MiniMap => (self.minimap_dialog_open, self.minimap_dialog.contains(mouse_pos)),
+            DialogType::Ranking => (self.ranking_dialog_open, self.ranking_dialog.contains(mouse_pos)),
+            DialogType::Help => (self.help_dialog_open, self.help_dialog.contains(mouse_pos)),
+            DialogType::Inspect => (self.inspect_dialog_open, self.inspect_dialog.contains(mouse_pos)),
         }
     }
 
@@ -1611,44 +1695,126 @@ impl MainDialog {
     }
 
     fn process_inventory_belt_interop(&mut self) {
-        if let Some((tab, slot)) = self.inventory_dialog.take_transfer_to_belt_request() {
-            if let Some(item) = self.inventory_dialog.take_item_from_slot(tab, slot) {
-                if let Some(icon_index) = item.icon_index {
-                    let belt_item = BeltItemHybrid::with_name(icon_index, item.name.clone(), item.count);
-                    if let Err(rollback_item) = self.belt_dialog.try_insert_item(belt_item) {
-                        if !self.inventory_dialog.restore_item_to_slot(
-                            tab,
-                            slot,
-                            ItemSlotHybrid::new(rollback_item.icon_index, rollback_item.name.clone().unwrap_or_default(), rollback_item.count),
-                        ) {
-                            eprintln!(
-                                "⚠️ Inventory rollback failed: tab={tab:?}, slot={slot}, icon={}, count={}",
-                                rollback_item.icon_index,
-                                rollback_item.count
-                            );
+        // ===== Inventory 拖出窗口（跨对话框拖拽） =====
+        if let Some((tab, slot, drop_pos)) = self.inventory_dialog.take_drag_out_request() {
+            // 检查是否落在 Belt 对话框上
+            if self.belt_dialog.is_visible() && self.belt_dialog.contains(drop_pos) {
+                if let Some(item) = self.inventory_dialog.take_item_from_slot(tab, slot) {
+                    if let Some(icon_index) = item.icon_index {
+                        let belt_item = BeltItemHybrid::with_id(icon_index, item.name.clone(), item.count, item.unique_id);
+                        if let Err(rollback_item) = self.belt_dialog.try_insert_item(belt_item) {
+                            if !self.inventory_dialog.restore_item_to_slot(
+                                tab, slot,
+                                ItemSlotHybrid::new(rollback_item.icon_index, rollback_item.name.unwrap_or_default(), rollback_item.count),
+                            ) {
+                                eprintln!("⚠️ Inventory→Belt drag rollback failed: tab={tab:?}, slot={slot}");
+                            }
                         }
                     }
                 }
             }
+            // 检查是否落在 Character 对话框上（穿戴装备）
+            else if self.character_dialog_open && self.character_dialog.contains(drop_pos) {
+                if let Some(item) = self.inventory_dialog.peek_item_from_slot(tab, slot) {
+                    if item.unique_id > 0 {
+                        // 暂存装备请求，由 ui_system 发包
+                        self.pending_equip_request = Some(item.unique_id);
+                    }
+                }
+            }
+            // 拖出到屏幕外 → 物品留在原处（不做任何操作）
+            // 未来可在此处添加丢弃确认逻辑
         }
 
-        if let Some(slot) = self.belt_dialog.take_transfer_to_inventory_request() {
-            if let Some(item) = self.belt_dialog.take_item_from_slot(slot) {
-                let inventory_item = ItemSlotHybrid::new(item.icon_index, item.name.unwrap_or_default(), item.count);
-                if let Err(rollback_item) = self.inventory_dialog.try_insert_item(inventory_item) {
-                    if let Some(icon_index) = rollback_item.icon_index {
-                        if !self.belt_dialog.restore_item_to_slot(
-                            slot,
-                            BeltItemHybrid::with_name(icon_index, rollback_item.name.clone(), rollback_item.count),
-                        ) {
-                            eprintln!(
-                                "⚠️ Belt rollback failed: slot={slot}, icon={icon_index}, count={}",
-                                rollback_item.count
-                            );
+        // ===== Belt 拖出窗口（跨对话框拖拽） =====
+        if let Some((slot, drop_pos)) = self.belt_dialog.take_drag_out_request() {
+            // 检查是否落在 Inventory 对话框上
+            if self.inventory_dialog.is_visible() && self.inventory_dialog.contains(drop_pos) {
+                if let Some(item) = self.belt_dialog.take_item_from_slot(slot) {
+                    let inventory_item = ItemSlotHybrid::with_id(item.icon_index, item.name.unwrap_or_default(), item.count, item.unique_id);
+                    if let Err(rollback_item) = self.inventory_dialog.try_insert_item(inventory_item) {
+                        if let Some(icon_index) = rollback_item.icon_index {
+                            if !self.belt_dialog.restore_item_to_slot(
+                                slot,
+                                BeltItemHybrid::with_id(icon_index, rollback_item.name, rollback_item.count, rollback_item.unique_id),
+                            ) {
+                                eprintln!("⚠️ Belt→Inventory drag rollback failed: slot={slot}");
+                            }
                         }
                     }
                 }
             }
+            // 拖出到屏幕外 → 物品留在原处（不做任何操作）
+            // 未来可在此处添加丢弃确认逻辑
+        }
+
+        // Inventory → Belt: 右键转移（现有逻辑）
+        if self.belt_dialog.is_visible() {
+            if let Some((tab, slot)) = self.inventory_dialog.take_transfer_to_belt_request() {
+                if let Some(item) = self.inventory_dialog.take_item_from_slot(tab, slot) {
+                    if let Some(icon_index) = item.icon_index {
+                        let belt_item = BeltItemHybrid::with_id(icon_index, item.name.clone(), item.count, item.unique_id);
+                        if let Err(rollback_item) = self.belt_dialog.try_insert_item(belt_item) {
+                            if !self.inventory_dialog.restore_item_to_slot(
+                                tab,
+                                slot,
+                                ItemSlotHybrid::new(rollback_item.icon_index, rollback_item.name.unwrap_or_default(), rollback_item.count),
+                            ) {
+                                eprintln!(
+                                    "⚠️ Inventory rollback failed: tab={tab:?}, slot={slot}, icon={}, count={}",
+                                    rollback_item.icon_index,
+                                    rollback_item.count
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            let _ = self.inventory_dialog.take_transfer_to_belt_request();
+        }
+
+        // Belt → Inventory: 右键转移（现有逻辑）
+        if self.inventory_dialog_open {
+            if let Some(slot) = self.belt_dialog.take_transfer_to_inventory_request() {
+                if let Some(item) = self.belt_dialog.take_item_from_slot(slot) {
+                    let inventory_item = ItemSlotHybrid::with_id(item.icon_index, item.name.unwrap_or_default(), item.count, item.unique_id);
+                    if let Err(rollback_item) = self.inventory_dialog.try_insert_item(inventory_item) {
+                        if let Some(icon_index) = rollback_item.icon_index {
+                            if !self.belt_dialog.restore_item_to_slot(
+                                slot,
+                                BeltItemHybrid::with_id(icon_index, rollback_item.name, rollback_item.count, rollback_item.unique_id),
+                            ) {
+                                eprintln!(
+                                    "⚠️ Belt rollback failed: slot={slot}, icon={icon_index}, count={}",
+                                    rollback_item.count
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            let _ = self.belt_dialog.take_transfer_to_inventory_request();
+        }
+
+        // ===== Character 拖出窗口（卸下装备 → 背包） =====
+        if let Some((slot, drop_pos)) = self.character_dialog.take_drag_out_request() {
+            // 检查是否落在 Inventory 对话框上
+            if self.inventory_dialog.is_visible() && self.inventory_dialog.contains(drop_pos) {
+                if let Some(equip) = self.character_dialog.equipment[slot].take() {
+                    let inv_item = ItemSlotHybrid::with_id(equip.icon_index, equip.name.clone(), 1, equip.unique_id);
+                    if let Err(_rollback) = self.inventory_dialog.try_insert_item(inv_item) {
+                        // 背包已满，恢复装备
+                        self.character_dialog.equipment[slot] = Some(equip);
+                        eprintln!("⚠️ Character→Inventory drag failed: inventory full");
+                    } else {
+                        println!("🎒 卸下装备: {} (槽位{}) → 背包", equip.name, slot);
+                    }
+                }
+            }
+            // 拖出到屏幕外 → 装备留在原处（不做任何操作）
+            // 未来可在此处添加卸下装备网络请求
         }
     }
 
@@ -1736,13 +1902,15 @@ impl MainDialog {
                 self.push_system_chat_line("正在安全下线...".to_string());
             }
             MenuAction::Help => {
-                println!("❓ 显示帮助");
+                self.help_dialog_open = true;
+                self.bring_to_front(DialogType::Help);
             }
             MenuAction::Keyboard => {
                 println!("⌨️ 键盘设置");
             }
             MenuAction::Ranking => {
-                println!("🏆 排名榜");
+                self.ranking_dialog_open = true;
+                self.bring_to_front(DialogType::Ranking);
             }
             MenuAction::Creature => {
                 self.intelligent_creature_dialog_open = true;
@@ -2078,6 +2246,16 @@ impl MainDialog {
         self.pending_trade_action.take()
     }
 
+    /// 取出暂存的排行榜刷新请求（由 ui_system.rs 消费发包）
+    pub fn take_pending_ranking_refresh_tab(&mut self) -> Option<u8> {
+        self.pending_ranking_refresh_tab.take()
+    }
+
+    /// 取出暂存的装备请求（由 ui_system.rs 消费发包）
+    pub fn take_pending_equip_request(&mut self) -> Option<u64> {
+        self.pending_equip_request.take()
+    }
+
     fn sync_and_draw_mount(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
         if self.mount_dialog_open {
             self.mount_dialog.open();
@@ -2212,8 +2390,111 @@ impl MainDialog {
         &mut self.socket_dialog
     }
 
+    fn sync_and_draw_mail(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
+        if self.mail_dialog_open {
+            self.mail_dialog.open();
+        } else {
+            self.mail_dialog.close();
+        }
+        self.mail_dialog.update_and_draw();
+        if !self.mail_dialog.is_visible() {
+            self.mail_dialog_open = false;
+        }
+        if self.mail_dialog_open && self.mail_dialog.contains(mouse_pos) {
+            *consumed = true;
+        }
+    }
+
+    /// 获取邮件对话框的可变引用
+    pub fn mail_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::mail_dialog::MailDialogHybrid {
+        &mut self.mail_dialog
+    }
+
+    /// 获取小地图对话框的可变引用
+    pub fn minimap_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::minimap_dialog::MiniMapDialogHybrid {
+        &mut self.minimap_dialog
+    }
+
+    /// 获取大地图对话框的可变引用
+    pub fn big_map_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::big_map_dialog::BigMapDialogHybrid {
+        &mut self.big_map_dialog
+    }
+
+    /// 获取文本输入对话框的可变引用
+    pub fn text_input_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::text_input_dialog::TextInputDialogHybrid {
+        &mut self.text_input_dialog
+    }
+
+    /// 设置当前文本输入类型
+    pub fn set_pending_text_input_kind(&mut self, kind: TextInputKind) {
+        self.pending_text_input_kind = kind;
+    }
+
+    /// 重置文本输入类型
+    pub fn reset_pending_text_input_kind(&mut self) {
+        self.pending_text_input_kind = TextInputKind::None;
+    }
+
+    /// 获取当前文本输入类型
+    pub fn pending_text_input_kind(&self) -> TextInputKind {
+        self.pending_text_input_kind.clone()
+    }
+
+    /// 文本输入对话框是否可见
+    pub fn text_input_is_visible(&self) -> bool {
+        self.text_input_dialog.is_visible()
+    }
+
     /// 取出待处理的安全下线请求
     pub fn take_pending_logout(&mut self) -> bool {
         std::mem::replace(&mut self.pending_logout_request, false)
+    }
+
+    fn sync_and_draw_ranking(&mut self, _consumed: &mut bool, _mouse_pos: Vec2) {
+        if self.ranking_dialog_open {
+            self.ranking_dialog.open();
+        } else {
+            self.ranking_dialog.close();
+        }
+        self.ranking_dialog.update_and_draw();
+        if !self.ranking_dialog.is_visible() {
+            self.ranking_dialog_open = false;
+        }
+        // 处理刷新动作 → 暂存，由 ui_system 消费发包
+        match self.ranking_dialog.take_action() {
+            crate::scenes::dialogs::game::RankingDialogAction::Refresh { tab } => {
+                self.pending_ranking_refresh_tab = Some(tab);
+            }
+            crate::scenes::dialogs::game::RankingDialogAction::None => {}
+        }
+    }
+
+    /// 获取排行榜对话框的可变引用
+    pub fn ranking_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::ranking_dialog::RankingDialogHybrid {
+        &mut self.ranking_dialog
+    }
+
+    fn sync_and_draw_help(&mut self, _consumed: &mut bool, _mouse_pos: Vec2) {
+        if self.help_dialog_open {
+            self.help_dialog.open();
+        } else {
+            self.help_dialog.close();
+        }
+        self.help_dialog.update_and_draw();
+        if !self.help_dialog.is_visible() {
+            self.help_dialog_open = false;
+        }
+    }
+
+    fn sync_and_draw_inspect(&mut self, _consumed: &mut bool, _mouse_pos: Vec2) {
+        if self.inspect_dialog_open {
+            self.inspect_dialog.open("玩家");
+        } else {
+            self.inspect_dialog.close();
+        }
+        self.inspect_dialog.update_and_draw();
+        if !self.inspect_dialog.is_visible() {
+            self.inspect_dialog_open = false;
+        }
     }
 }

@@ -24,6 +24,8 @@ pub mod mentor_dialog;
 pub mod relationship_dialog;
 pub mod trade_dialog;
 pub mod mount_dialog;
+pub mod text_input_dialog;
+pub mod big_map_dialog;
 
 // 导出 hybrid 版本作为主要实现
 //pub use belt_dialog_native::{BeltDialogNative, BeltLayout, BeltItem};
@@ -62,6 +64,17 @@ pub mod compass_dialog;
 pub use compass_dialog::{CompassDialogHybrid, CompassDirection};
 pub mod socket_dialog;
 pub use socket_dialog::{SocketDialogHybrid, SocketAction};
+pub mod mail_dialog;
+pub use mail_dialog::{MailDialogHybrid, MailTab, MailDialogAction};
+
+pub mod ranking_dialog;
+pub use ranking_dialog::{RankingDialogHybrid, RankingTab, RankingEntry, RankingDialogAction};
+
+pub mod help_dialog;
+pub use help_dialog::{HelpDialogHybrid, HelpDialogAction};
+
+pub mod inspect_dialog;
+pub use inspect_dialog::{InspectDialogHybrid, InspectEquipSlot, InspectDialogAction};
 
 // 为了兼容性，创建别名
 pub type BeltDialog = BeltDialogHybrid;

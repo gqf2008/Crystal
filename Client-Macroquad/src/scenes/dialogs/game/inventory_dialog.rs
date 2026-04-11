@@ -26,15 +26,20 @@ pub struct ItemSlotHybrid {
     pub icon_index: Option<usize>,
     pub name: String,
     pub count: u32,
+    pub unique_id: u64,
 }
 
 impl ItemSlotHybrid {
     pub fn empty() -> Self {
-        Self { icon_index: None, name: String::new(), count: 0 }
+        Self { icon_index: None, name: String::new(), count: 0, unique_id: 0 }
     }
 
     pub fn new(icon_index: usize, name: String, count: u32) -> Self {
-        Self { icon_index: Some(icon_index), name, count }
+        Self { icon_index: Some(icon_index), name, count, unique_id: 0 }
+    }
+
+    pub fn with_id(icon_index: usize, name: String, count: u32, unique_id: u64) -> Self {
+        Self { icon_index: Some(icon_index), name, count, unique_id }
     }
 }
 
@@ -70,15 +75,6 @@ impl InventoryTabHybrid {
 enum DragCommand {
     Use { slot: usize },
     Swap { from: usize, to: usize },
-    Drop { slot: usize },
-}
-
-/// 丢弃确认对话框状态
-#[derive(Debug)]
-struct DropConfirm {
-    slot: usize,
-    item_name: String,
-    count: u32,
 }
 
 /// 背包对话框（混合版本）
@@ -110,6 +106,9 @@ pub struct InventoryDialogHybrid {
     // 悬停
     hovered_slot: Option<usize>,
     pending_to_belt: Option<(InventoryTabHybrid, usize)>,
+
+    /// 拖出窗口请求（跨对话框拖拽）：(tab, slot, drop_position)
+    pending_drag_out: Option<(InventoryTabHybrid, usize, Vec2)>,
     
     // 双击检测
     last_click_time: f64,
@@ -118,9 +117,6 @@ pub struct InventoryDialogHybrid {
     // 物品拆分模式：右键点击可堆叠物品后进入，点击空格放置一半
     splitting: bool,
     splitting_from: Option<usize>,
-
-    // 丢弃确认对话框
-    drop_confirm: Option<DropConfirm>,
 
     // 纹理
     bg_texture: Option<Texture2D>,
@@ -186,14 +182,13 @@ impl InventoryDialogHybrid {
             scroll_offsets: [0.0, 0.0, 0.0],
             hovered_slot: None,
             pending_to_belt: None,
+            pending_drag_out: None,
             
             last_click_time: 0.0,
             last_click_slot: None,
 
             splitting: false,
             splitting_from: None,
-
-            drop_confirm: None,
 
             bg_texture: None,
             close_btn: ButtonTextures::new(),
@@ -325,6 +320,7 @@ impl InventoryDialogHybrid {
                     icon_index: Some(icon_idx),
                     name,
                     count: item.count as u32,
+                    unique_id: item.unique_id,
                 };
 
                 if is_equip {
@@ -437,6 +433,11 @@ impl InventoryDialogHybrid {
         self.pending_to_belt.take()
     }
 
+    /// 取拖出窗口请求（跨对话框拖拽）：(tab, slot, drop_position)
+    pub fn take_drag_out_request(&mut self) -> Option<(InventoryTabHybrid, usize, Vec2)> {
+        self.pending_drag_out.take()
+    }
+
     pub fn take_item_from_slot(&mut self, tab: InventoryTabHybrid, slot: usize) -> Option<ItemSlotHybrid> {
         let items = &mut self.tab_items[tab as usize];
         if slot >= items.len() {
@@ -447,6 +448,19 @@ impl InventoryDialogHybrid {
             return None;
         }
         items[slot] = ItemSlotHybrid::empty();
+        Some(item)
+    }
+
+    /// 只读查看物品（不移除）
+    pub fn peek_item_from_slot(&self, tab: InventoryTabHybrid, slot: usize) -> Option<&ItemSlotHybrid> {
+        let items = &self.tab_items[tab as usize];
+        if slot >= items.len() {
+            return None;
+        }
+        let item = &items[slot];
+        if item.icon_index.is_none() || item.count == 0 {
+            return None;
+        }
         Some(item)
     }
 
@@ -545,6 +559,7 @@ impl InventoryDialogHybrid {
                                             icon_index: items[from_idx].icon_index,
                                             name: items[from_idx].name.clone(),
                                             count: half,
+                                            unique_id: 0, // 分割后新堆叠物品无独立 unique_id
                                         };
                                         items[from_idx].count = remain;
                                         placed = true;
@@ -644,10 +659,11 @@ impl InventoryDialogHybrid {
                     }
                 }
                 Drag::Dropped(pos, None) if has_item => {
-                    // 拖出窗口 = 丢弃（弹出确认）
+                    // 拖出窗口 = 跨对话框拖拽 or 丢弃
                     let window = Rect::new(self.position.x, self.position.y, self.size.x, self.size.y);
                     if !window.contains(pos) {
-                        drag_command = Some(DragCommand::Drop { slot: i });
+                        // 记录拖出请求，由 MainDialog 判断是否落在其他对话框上
+                        self.pending_drag_out = Some((self.current_tab, i, pos));
                     }
                 }
                 _ => {}
@@ -740,12 +756,6 @@ impl InventoryDialogHybrid {
             }
         }
 
-        // 丢弃确认对话框
-        let drop_confirm_data = self.drop_confirm.as_ref().map(|c| (c.slot, c.item_name.clone(), c.count));
-        if let Some((_slot, _name, _count)) = drop_confirm_data.as_ref() {
-            self.draw_drop_confirm(mouse, *_slot, _name, *_count);
-        }
-        
         // ========== 执行命令 ==========
         match drag_command {
             Some(DragCommand::Use { slot }) => {
@@ -761,16 +771,6 @@ impl InventoryDialogHybrid {
             Some(DragCommand::Swap { from, to }) => {
                 println!("🔄 交换: 格子{} <-> 格子{}", from, to);
                 self.current_items_mut().swap(from, to);
-            }
-            Some(DragCommand::Drop { slot }) => {
-                // 弹出丢弃确认对话框
-                if let Some(item) = self.current_items().get(slot) {
-                    self.drop_confirm = Some(DropConfirm {
-                        slot,
-                        item_name: item.name.clone(),
-                        count: item.count,
-                    });
-                }
             }
             None => {}
         }
@@ -847,69 +847,4 @@ impl InventoryDialogHybrid {
 
 impl Default for InventoryDialogHybrid {
     fn default() -> Self { Self::new() }
-}
-
-impl InventoryDialogHybrid {
-    /// 绘制丢弃确认对话框
-    fn draw_drop_confirm(&mut self, mouse: Vec2, slot: usize, item_name: &str, count: u32) {
-        let win_w = 260.0;
-        let win_h = 100.0;
-        let win_x = self.position.x + (self.size.x - win_w) / 2.0;
-        let win_y = self.position.y + (self.size.y - win_h) / 2.0;
-
-        // 背景
-        draw_rectangle(win_x, win_y, win_w, win_h, Color::from_rgba(40, 40, 50, 240));
-        draw_rectangle_lines(win_x, win_y, win_w, win_h, 2.0, Color::from_rgba(255, 100, 100, 255));
-
-        // 提示文字
-        let msg = if count > 1 {
-            format!("确定要丢弃 {} x{} 吗？", item_name, count)
-        } else {
-            format!("确定要丢弃 {} 吗？", item_name)
-        };
-        draw_text_cn(&msg, win_x + 10.0, win_y + 15.0, 14.0, WHITE);
-
-        // 确认按钮
-        let btn_w = 70.0;
-        let btn_h = 28.0;
-        let btn_y = win_y + win_h - btn_h - 10.0;
-        let confirm_btn = Rect::new(win_x + 30.0, btn_y, btn_w, btn_h);
-        let cancel_btn = Rect::new(win_x + win_w - 30.0 - btn_w, btn_y, btn_w, btn_h);
-
-        let confirm_hovered = confirm_btn.contains(mouse);
-        let cancel_hovered = cancel_btn.contains(mouse);
-
-        // 确认按钮
-        let confirm_color = if confirm_hovered {
-            Color::from_rgba(100, 200, 100, 255)
-        } else {
-            Color::from_rgba(60, 140, 60, 255)
-        };
-        draw_rectangle(confirm_btn.x, confirm_btn.y, confirm_btn.w, confirm_btn.h, confirm_color);
-        draw_rectangle_lines(confirm_btn.x, confirm_btn.y, confirm_btn.w, confirm_btn.h, 1.0, Color::from_rgba(255, 255, 255, 150));
-        draw_text_cn("确认", confirm_btn.x + 17.0, confirm_btn.y + 8.0, 14.0, WHITE);
-
-        // 取消按钮
-        let cancel_color = if cancel_hovered {
-            Color::from_rgba(200, 100, 100, 255)
-        } else {
-            Color::from_rgba(140, 60, 60, 255)
-        };
-        draw_rectangle(cancel_btn.x, cancel_btn.y, cancel_btn.w, cancel_btn.h, cancel_color);
-        draw_rectangle_lines(cancel_btn.x, cancel_btn.y, cancel_btn.w, cancel_btn.h, 1.0, Color::from_rgba(255, 255, 255, 150));
-        draw_text_cn("取消", cancel_btn.x + 17.0, cancel_btn.y + 8.0, 14.0, WHITE);
-
-        // 按钮点击检测
-        if is_mouse_button_pressed(MouseButton::Left) {
-            if confirm_hovered {
-                if let Some(item) = self.current_items_mut().get_mut(slot) {
-                    *item = ItemSlotHybrid::empty();
-                }
-                self.drop_confirm = None;
-                println!("🗑️ 确认丢弃: {}", item_name);
-            } else if cancel_hovered {
-                self.drop_confirm = None;
-            }
-        }
-    }
 }

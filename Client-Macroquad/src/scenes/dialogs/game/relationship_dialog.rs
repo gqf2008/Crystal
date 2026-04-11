@@ -25,6 +25,8 @@ pub struct RelationshipInfo {
     pub max_intimacy: u32,
     pub married: bool,
     pub wedding_date: String,
+    /// 待处理的求婚请求者（非空时显示接受/拒绝按钮）
+    pub pending_marriage_requester: String,
 }
 
 /// 婚姻对话框动作
@@ -112,6 +114,31 @@ impl RelationshipDialogHybrid {
     /// 获取待处理动作
     pub fn take_action(&mut self) -> RelationshipDialogAction {
         std::mem::replace(&mut self.pending_action, RelationshipDialogAction::None)
+    }
+
+    /// 设置待处理求婚请求者
+    pub fn set_marriage_requester(&mut self, name: String) {
+        self.relationship.pending_marriage_requester = name;
+    }
+
+    /// 清除待处理求婚请求
+    pub fn clear_marriage_requester(&mut self) {
+        self.relationship.pending_marriage_requester.clear();
+    }
+
+    /// 更新伴侣信息（增量合并，不清空师徒数据）
+    pub fn set_lover_info(&mut self, name: String, date: i64) {
+        self.relationship.partner_name = name;
+        self.relationship.married = true;
+        self.relationship.partner_online = true;
+        self.relationship.wedding_date = format!("{}", date);
+    }
+
+    /// 更新师徒信息（增量合并，不清空伴侣数据）
+    pub fn set_mentor_info(&mut self, name: String, level: u32, online: bool) {
+        self.relationship.partner_name = name;
+        self.relationship.partner_level = level;
+        self.relationship.partner_online = online;
     }
 
     /// 加载纹理
@@ -243,12 +270,21 @@ impl RelationshipDialogHybrid {
         let btn_h = 25.0;
         let btn_spacing = 10.0;
 
-        let buttons: Vec<(&str, RelationshipDialogAction)> = if self.relationship.married {
+        let buttons: Vec<(&str, RelationshipDialogAction)> = if !self.relationship.married {
+            if self.relationship.pending_marriage_requester.is_empty() {
+                vec![
+                    ("求婚", RelationshipDialogAction::RequestMarriage),
+                ]
+            } else {
+                vec![
+                    ("接受", RelationshipDialogAction::AcceptMarriage),
+                    ("拒绝", RelationshipDialogAction::DeclineMarriage),
+                ]
+            }
+        } else {
             vec![
                 ("离婚", RelationshipDialogAction::RequestDivorce),
             ]
-        } else {
-            vec![]
         };
 
         if buttons.is_empty() {

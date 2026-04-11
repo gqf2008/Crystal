@@ -18,7 +18,7 @@ use crate::game::GameResult;
 use crate::game::GameContext;
 use crate::systems::LogicSystem;
 use crate::components::{OneShotSoundEmitter, PersistentSound, Position, SoundTrigger, SoundType};
-use macroquad::audio::{play_sound, PlaySoundParams, Sound};
+use macroquad::audio::{play_sound, stop_sound, PlaySoundParams, Sound};
 use macroquad::experimental::coroutines::{start_coroutine, Coroutine};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -76,6 +76,10 @@ pub struct SoundSystem {
     /// SoundList.lst 映射：sound_id -> 文件名
     sound_list_loaded: bool,
     sound_list: HashMap<u32, String>,
+
+    /// PersistentSound 播放跟踪：entity → (sound_file, looping)
+    /// 用于避免每帧重复触发 play_sound（looped 声音会一直播放直到 stop）
+    persistent_playing: HashMap<hecs::Entity, (String, bool)>,
 }
 
 impl SoundSystem {
@@ -88,6 +92,7 @@ impl SoundSystem {
             missing: HashSet::new(),
             sound_list_loaded: false,
             sound_list: HashMap::new(),
+            persistent_playing: HashMap::new(),
         }
     }
 
@@ -358,8 +363,7 @@ impl LogicSystem for SoundSystem {
                 trigger.looping
             );
 
-            // TODO: 真正播放：
-            // - SFX/BGM: 都走 play_sound，looped 由 trigger.looping 控制
+            // SoundTrigger 已接入实际播放：try_play 处理缓存/加载/播放
             match self.try_play(&trigger.sound_file, trigger.looping, final_volume) {
                 PlayAttempt::Played | PlayAttempt::Missing => {
                     // 若是临时 OneShotSoundEmitter，则播放完成后直接销毁实体，避免空实体堆积。
@@ -383,34 +387,63 @@ impl LogicSystem for SoundSystem {
             let _ = ctx.world.despawn(entity);
         }
 
-        // 2) 持续音效：目前只打点；后续可维护播放状态/handle
-        for ps in ctx.world.query::<&PersistentSound>().iter() {
+        // 2) 持续音效：维护 PersistentSound 的播放/停止状态
+        // 收集当前存活的 PersistentSound entity（用于后续清理已移除的）
+        let mut current_ps_entities: Vec<hecs::Entity> = Vec::new();
+
+        for ps in ctx.world.query::<(&hecs::Entity, &PersistentSound)>().iter() {
+            let (entity, ps) = (ps.0, &ps.1);
+            current_ps_entities.push(*entity);
             let global = self.global_volume_for_type(ctx, ps.sound_type);
             let final_volume = (ps.volume * global).clamp(0.0, 1.0);
-            if final_volume <= 0.0 || !ps.is_playing {
-                continue;
-            }
 
-            if cfg!(debug_assertions) && sound_debug_log_enabled() {
-                println!(
-                    "🔊 [SOUND] PersistentSound file={} type={:?} vol={:.3} looping={}",
-                    ps.sound_file,
-                    ps.sound_type,
-                    final_volume,
-                    ps.looping
-                );
-            }
-            tracing::debug!(
-                target: "sound",
-                "PersistentSound: file={} type={:?} vol={:.3} looping={} ",
-                ps.sound_file,
-                ps.sound_type,
-                final_volume,
-                ps.looping
-            );
+            let was_playing = self.persistent_playing.contains_key(&entity);
 
-            // TODO: play/stop/update looped sounds
+            if ps.is_playing && final_volume > 0.0 {
+                // 需要播放
+                if !was_playing {
+                    // 首次播放或重新开始
+                    if let Some(sound) = self.cache.get(&ps.sound_file) {
+                        play_sound(
+                            sound,
+                            PlaySoundParams {
+                                looped: ps.looping,
+                                volume: final_volume,
+                            },
+                        );
+                        tracing::debug!(
+                            target: "sound",
+                            "PersistentSound PLAY: file={} vol={:.3} looping={}",
+                            ps.sound_file, final_volume, ps.looping
+                        );
+                    } else if !self.missing.contains(&ps.sound_file) {
+                        self.ensure_loading(&ps.sound_file);
+                    }
+                    self.persistent_playing.insert(*entity, (ps.sound_file.clone(), ps.looping));
+                }
+                // 已在播放：不重复调用 play_sound（looped 声音会持续播放）
+            } else if was_playing {
+                // 已播放但 now is_playing=false 或 volume=0 → 停止
+                if let Some((ref file, _)) = self.persistent_playing.remove(&entity) {
+                    if let Some(sound) = self.cache.get(file) {
+                        stop_sound(sound);
+                        tracing::debug!(target: "sound", "PersistentSound STOP: file={}", file);
+                    }
+                }
+            }
         }
+
+        // 清理已不存在的 PersistentSound 实体（组件被移除或实体被 despawn）
+        self.persistent_playing.retain(|entity, (file, _)| {
+            if current_ps_entities.contains(entity) {
+                true
+            } else {
+                if let Some(sound) = self.cache.get(file) {
+                    stop_sound(sound);
+                }
+                false
+            }
+        });
 
         Ok(())
     }

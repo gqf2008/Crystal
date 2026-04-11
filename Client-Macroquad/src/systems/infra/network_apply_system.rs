@@ -2220,6 +2220,9 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::QuestProgressUpdated { quest_id, progress } => {
                     tracing::trace!("📋 Quest {} progress: {}", quest_id, progress);
                 }
+                NetworkEvent::QuestInfoReceived { quest_id, name, .. } => {
+                    tracing::trace!("📋 Quest info received: #{} {}", quest_id, name);
+                }
                 NetworkEvent::FriendUpdated { .. } => {
                     tracing::trace!("👥 Friend updated");
                 }
@@ -2382,8 +2385,8 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::NewHeroInfoReceived => {
                     tracing::trace!("🦸 New hero info received");
                 }
-                NetworkEvent::MailReceived => {
-                    tracing::trace!("📬 Mail received");
+                NetworkEvent::MailReceived { mails } => {
+                    tracing::trace!("📬 Mail received: {} mails", mails.len());
                 }
                 NetworkEvent::MailLockedItemReceived => {
                     tracing::trace!("📬 Mail locked item");
@@ -2413,8 +2416,8 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::MarriageRequested2 { requester } => { tracing::trace!("💒 Marriage requested by {}", requester); }
                 NetworkEvent::DivorceRequested2 => { tracing::trace!("💔 Divorce requested"); }
                 NetworkEvent::MentorRequested2 => { tracing::trace!("🎓 Mentor requested"); }
-                NetworkEvent::LoverUpdated => { tracing::trace!("💒 Lover updated"); }
-                NetworkEvent::MentorUpdated => { tracing::trace!("🎓 Mentor updated"); }
+                NetworkEvent::LoverUpdated { lover_name, .. } => { tracing::trace!("💒 Lover updated: {}", lover_name); }
+                NetworkEvent::MentorUpdated { mentor_name, .. } => { tracing::trace!("🎓 Mentor updated: {}", mentor_name); }
                 NetworkEvent::RentalItemsReceived => { tracing::trace!("📦 Rental items received"); }
                 NetworkEvent::ItemRentalRequested => { tracing::trace!("📦 Item rental requested"); }
                 NetworkEvent::ItemRentalFeeReceived { fee } => { tracing::trace!("📦 Rental fee: {}", fee); }
@@ -2468,7 +2471,7 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectLevelEffectsReceived { object_id } => { tracing::trace!("⭐ Object {} level effects", object_id); }
                 NetworkEvent::BindingShotSet { enabled } => { tracing::trace!("🎯 Binding shot set: {}", enabled); }
                 NetworkEvent::OutputMessageReceived { message } => { tracing::trace!("💬 Message: {}", message); }
-                NetworkEvent::UserStorageReceived => { tracing::trace!("📦 User storage received"); }
+                NetworkEvent::UserStorageReceived { items: _ } => { tracing::trace!("📦 User storage received"); }
                 NetworkEvent::ChatItemStatsReceived => { tracing::trace!("💬 Chat item stats received"); }
                 NetworkEvent::ConcentrationSet { enabled } => { tracing::trace!("🎯 Concentration set: {}", enabled); }
                 NetworkEvent::ElementalSet { element } => { tracing::trace!("🔥 Elemental set: {}", element); }

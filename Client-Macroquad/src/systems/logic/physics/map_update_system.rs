@@ -6,7 +6,7 @@
 //! - 重新创建所有必要的实体（相机、玩家、配置等）
 
 use crate::game::{GameResult, Coord, MapUtils, MapLoader};
-use crate::resources::MapReader;
+use crate::resources::MapReader; // ✅ MapReader 已在 resources/map_reader.rs 中实现
 use rfd::FileDialog;
 use std::time::Instant;
 
@@ -16,7 +16,6 @@ use crate::components::{
     RenderConfig, TimeTracker, VisibleArea,
 };
 use crate::game::GameContext;
-// use crate::objects::MapReader;  // TODO: 实现 MapReader
 use mir2_shared::enums::{MirClass, MirDirection, MirGender};
 
 // 使用 map_load_system 中定义的 MapManager
@@ -116,15 +115,8 @@ impl MapUpdateSystem {
                         camera_zoom,
                     );
 
-                    // 恢复全局组件 - 使用固定实体ID
-                    // TODO: 实现 NETWORK_ENTITY 和 SETTING_ENTITY
-                    // use crate::compat::{NETWORK_ENTITY, SETTING_ENTITY};
-                    // if let Some(entity_id) = SETTING_ENTITY {
-                    //     ctx.world.spawn_at(entity_id, (settings,));
-                    // }
-                    // if let Some(entity_id) = NETWORK_ENTITY {
-                    //     ctx.world.spawn_at(entity_id, (net_ctx,));
-                    // }
+                    // 恢复全局组件：NetContext 和 Settings 由 GameScene 在地图切换后手动恢复
+                    // （M 键地图切换为调试功能，非核心游戏流程）
 
                     // 重新创建 MapManager（使用文件名）
                     let map_file = std::path::Path::new(&new_path)

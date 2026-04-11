@@ -32,7 +32,6 @@ use crate::ui::text_renderer::draw_text_cn;
 use macroquad::prelude::*;
 
 /// 精灵渲染系统
-
 impl SpriteRenderSystem {
     // 武器特效强度（DrawBlend 的 alpha 近似值）
     // C# 原版 PlayerObject.DrawWeapon(): WeaponEffectLibrary1.DrawBlend(..., rate=0.4F)
@@ -726,6 +725,7 @@ impl SpriteRenderSystem {
                 name: Option<String>,
                 hp_current: Option<i32>,
                 hp_max: Option<i32>,
+                has_interaction_hint: bool,
             },
         }
 
@@ -809,6 +809,9 @@ impl SpriteRenderSystem {
                     .map(|hp| (Some(hp.current), Some(hp.max)))
                     .unwrap_or((None, None));
 
+                // 检查是否有交互提示标记
+                let has_interaction_hint = world.get::<&crate::components::InteractionHint>(entity).is_ok();
+
                 // kind order: NPC(0) < Monster(1) < Player(2)
                 let kind_order = if sync.object_type == NetworkObjectType::NPC { 0 } else { 1 };
                 renderables.push((
@@ -821,6 +824,7 @@ impl SpriteRenderSystem {
                         name,
                         hp_current: hp_cur,
                         hp_max,
+                        has_interaction_hint,
                     },
                 ));
             }
@@ -854,7 +858,7 @@ impl SpriteRenderSystem {
                         is_local,
                     )?;
                 }
-                Renderable::LibrarySprite { spr, pos, kind_order: _, name, hp_current, hp_max } => {
+                Renderable::LibrarySprite { spr, pos, kind_order: _, name, hp_current, hp_max, has_interaction_hint } => {
                     let tint = Color::new(1.0, 1.0, 1.0, alpha.clamp(0.0, 1.0));
                     let Some(ref info) = spr.library.get_texture(spr.texture_index()) else {
                         continue;
@@ -867,8 +871,11 @@ impl SpriteRenderSystem {
                     let draw_y = pos.y + info.offset_y as f32;
                     draw_texture_ex(tex, draw_x, draw_y, tint, DrawTextureParams { ..Default::default() });
 
-                    // 名称和血条
+                    // 名称、血条和交互提示
                     Self::draw_object_name_and_health(&pos, info, name.as_deref(), hp_current, hp_max);
+                    if has_interaction_hint {
+                        Self::draw_interaction_hint(&pos, info);
+                    }
                 }
             }
         }
@@ -920,6 +927,21 @@ impl SpriteRenderSystem {
                 draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.0, Color::from_rgba(200, 200, 200, 180));
             }
         }
+    }
+
+    /// 在 NPC 头顶绘制交互提示（黄色 "!"）
+    ///
+    /// 绘制位置在名称上方，使用半透明金色文字，带简单脉冲动画。
+    fn draw_interaction_hint(pos: &Position, sprite_info: &crate::resources::mlibrary::ImageInfo) {
+        let hint_y = pos.y - sprite_info.height as f32 - 28.0;
+        let hint_x = pos.x - 4.0; // "!" 宽度约 8px，居中
+
+        // 简单脉冲：0.7 ~ 1.0 alpha，约 3Hz
+        let t = macroquad::time::get_time();
+        let pulse = 0.85 + 0.15 * (t * 3.0).sin() as f32;
+        let color = Color::from_rgba(255, 220, 50, (pulse * 255.0) as u8);
+
+        draw_text_cn("!", hint_x, hint_y, 14.0, color);
     }
 }
 

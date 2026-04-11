@@ -99,107 +99,11 @@ impl Default for QuestLogDialogHybrid {
 
 impl QuestLogDialogHybrid {
     pub fn new() -> Self {
-        // 创建示例任务
-        let quests = vec![
-            QuestInfo {
-                id: 1,
-                name: "消灭稻草人".to_string(),
-                description: "新手村外的稻草人威胁着村民的安全，请帮忙消灭10只稻草人。".to_string(),
-                npc_name: "村长".to_string(),
-                status: QuestStatus::Accepted,
-                progress: 3,
-                max_progress: 10,
-                level_required: 1,
-                group: "新手任务".to_string(),
-                rewards: QuestRewards {
-                    experience: 500,
-                    gold: 100,
-                    items: vec![],
-                },
-            },
-            QuestInfo {
-                id: 2,
-                name: "收集鸡毛".to_string(),
-                description: "铁匠需要20根鸡毛来制作羽毛箭，请到鸡舍收集。".to_string(),
-                npc_name: "铁匠".to_string(),
-                status: QuestStatus::Accepted,
-                progress: 15,
-                max_progress: 20,
-                level_required: 5,
-                group: "新手任务".to_string(),
-                rewards: QuestRewards {
-                    experience: 800,
-                    gold: 200,
-                    items: vec![],
-                },
-            },
-            QuestInfo {
-                id: 3,
-                name: "矿洞探险".to_string(),
-                description: "矿洞深处出现了奇怪的声响，前往调查并带回3块铁矿石。".to_string(),
-                npc_name: "矿工".to_string(),
-                status: QuestStatus::Accepted,
-                progress: 1,
-                max_progress: 3,
-                level_required: 10,
-                group: "主线任务".to_string(),
-                rewards: QuestRewards {
-                    experience: 2000,
-                    gold: 500,
-                    items: vec![QuestItem {
-                        icon_index: 1050,
-                        name: "铁剑".to_string(),
-                        count: 1,
-                    }],
-                },
-            },
-            QuestInfo {
-                id: 4,
-                name: "药店代购".to_string(),
-                description: "药店的太阳水库存不足，帮忙从商人处购买5个太阳水。".to_string(),
-                npc_name: "药店老板".to_string(),
-                status: QuestStatus::Available,
-                progress: 0,
-                max_progress: 5,
-                level_required: 8,
-                group: "支线任务".to_string(),
-                rewards: QuestRewards {
-                    experience: 1000,
-                    gold: 300,
-                    items: vec![QuestItem {
-                        icon_index: 1200,
-                        name: "金疮药".to_string(),
-                        count: 5,
-                    }],
-                },
-            },
-            QuestInfo {
-                id: 5,
-                name: "击败沃玛卫士".to_string(),
-                description: "沃玛寺庙出现了沃玛卫士，集合勇士们将其消灭。".to_string(),
-                npc_name: "比奇国王".to_string(),
-                status: QuestStatus::Completed,
-                progress: 1,
-                max_progress: 1,
-                level_required: 20,
-                group: "主线任务".to_string(),
-                rewards: QuestRewards {
-                    experience: 5000,
-                    gold: 1000,
-                    items: vec![QuestItem {
-                        icon_index: 1100,
-                        name: "银蛇剑".to_string(),
-                        count: 1,
-                    }],
-                },
-            },
-        ];
-
         Self {
             position: vec2(200.0, 60.0),
             visible: false,
             size: vec2(316.0, 466.0), // 默认值，会被纹理覆盖
-            quests,
+            quests: Vec::new(),
             selected_quest: None,
             scroll_offset: 0.0,
             expanded_groups: Vec::new(),
@@ -365,6 +269,12 @@ impl QuestLogDialogHybrid {
     /// 添加新任务
     pub fn add_quest(&mut self, quest: QuestInfo) {
         self.quests.push(quest);
+    }
+
+    /// 清空所有任务（用于切换到真实服务器数据前清除模拟数据）
+    pub fn clear_quests(&mut self) {
+        self.quests.clear();
+        self.selected_quest = None;
     }
 
     /// 移除任务

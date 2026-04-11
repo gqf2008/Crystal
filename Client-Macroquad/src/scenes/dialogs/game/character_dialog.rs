@@ -63,20 +63,26 @@ pub enum EquipSlot {
 }
 
 /// 装备数据
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct EquipmentItemHybrid {
     pub icon_index: usize,
     pub state_image: usize,  // StateItems库中的外观索引
     pub durability: (u32, u32),
+    pub name: String,
+    pub unique_id: u64,
 }
 
 impl EquipmentItemHybrid {
     pub fn new(icon_index: usize) -> Self {
-        Self { icon_index, state_image: 0, durability: (100, 100) }
+        Self { icon_index, state_image: 0, durability: (100, 100), name: String::new(), unique_id: 0 }
     }
-    
+
     pub fn with_state(icon_index: usize, state_image: usize) -> Self {
-        Self { icon_index, state_image, durability: (100, 100) }
+        Self { icon_index, state_image, durability: (100, 100), name: String::new(), unique_id: 0 }
+    }
+
+    pub fn with_details(icon_index: usize, state_image: usize, name: String, unique_id: u64) -> Self {
+        Self { icon_index, state_image, durability: (100, 100), name, unique_id }
     }
 }
 
@@ -111,8 +117,6 @@ impl Default for CharacterStatsHybrid {
 /// 拖放命令
 #[derive(Debug)]
 enum DragCommand {
-    /// 卸下装备到背包
-    Unequip { slot: usize },
     /// 交换装备位置（如左右戒指）
     SwapEquip { from: usize, to: usize },
 }
@@ -161,7 +165,10 @@ pub struct CharacterDialogHybrid {
     
     // 悬停
     hovered_slot: Option<usize>,
-    
+
+    /// 拖出窗口请求（跨对话框拖拽）：(slot, drop_position)
+    pending_drag_out: Option<(usize, Vec2)>,
+
     // 纹理
     bg_texture: Option<Texture2D>,
     page_textures: [Option<Texture2D>; 4],  // 4个页面背景
@@ -197,7 +204,7 @@ impl CharacterDialogHybrid {
     pub fn new() -> Self {
         // 示例装备 (带外观索引)
         // StateItems库的索引参考character_dialog.rs
-        let mut equipment = [None; 14];
+        let mut equipment = std::array::from_fn(|_| None);
         equipment[0] = Some(EquipmentItemHybrid::with_state(4, 10));   // 武器 - StateItems[10]
         equipment[1] = Some(EquipmentItemHybrid::with_state(24, 10)); // 衣服 - StateItems[10]  
         equipment[2] = Some(EquipmentItemHybrid::with_state(44, 10)); // 头盔 - StateItems[10]
@@ -239,6 +246,7 @@ impl CharacterDialogHybrid {
             transparent_skin: None,
             
             hovered_slot: None,
+            pending_drag_out: None,
             
             bg_texture: None,
             page_textures: [None, None, None, None],
@@ -377,6 +385,12 @@ impl CharacterDialogHybrid {
     
     // === 主更新循环 ===
     
+    pub fn take_drag_out_request(&mut self) -> Option<(usize, Vec2)> {
+        self.pending_drag_out.take()
+    }
+
+    // === 主更新循环 ===
+
     pub fn update_and_draw(&mut self) {
         if !self.visible { return; }
         
@@ -480,7 +494,7 @@ impl CharacterDialogHybrid {
         self.draw_character_model();
         
         // === mqui 装备拖放 ===
-        let equip_snapshot: [Option<EquipmentItemHybrid>; 14] = self.equipment;
+        let equip_snapshot: [Option<EquipmentItemHybrid>; 14] = std::array::from_fn(|i| self.equipment[i].clone());
         let item_dragging = self.item_dragging;
         let mut drag_command: Option<DragCommand> = None;
         let mut new_dragging = false;
@@ -517,7 +531,8 @@ impl CharacterDialogHybrid {
                 Drag::Dropped(pos, None) if has_item => {
                     let window = Rect::new(self.position.x, self.position.y, self.size.x, self.size.y);
                     if !window.contains(pos) {
-                        drag_command = Some(DragCommand::Unequip { slot: i });
+                        // 拖出窗口 → 跨对话框拖拽
+                        self.pending_drag_out = Some((i, pos));
                     }
                 }
                 _ => {}
@@ -578,10 +593,6 @@ impl CharacterDialogHybrid {
         
         // 执行命令
         match drag_command {
-            Some(DragCommand::Unequip { slot }) => {
-                println!("🎒 卸下装备: 槽位{}", slot);
-                self.equipment[slot] = None;
-            }
             Some(DragCommand::SwapEquip { from, to }) => {
                 println!("🔄 交换装备: 槽位{} <-> 槽位{}", from, to);
                 self.equipment.swap(from, to);

@@ -210,8 +210,7 @@ impl LogicSystem for CameraSystem {
                 }
             }
 
-            // TODO: 处理角色移动 - 左键/右键单独点击时让角色移动
-            // 这部分逻辑应该在角色移动系统中实现,这里只负责相机控制
+            // 角色移动由 PlayerControlSystem 处理，相机系统只负责视角控制
 
             // 🔍 处理滚轮缩放（约定：仅在允许地图交互时生效）
             if camera_drag_enabled {

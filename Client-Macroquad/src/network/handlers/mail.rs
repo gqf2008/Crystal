@@ -15,9 +15,11 @@ impl PacketHandler for MailHandler {
         match header.opcode as u16 {
             // ReceiveMail
             x if x == ServerPacketIds::ReceiveMail as u16 => {
-                if let Ok(_packet) = server::ReceiveMail::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MailReceived);
-                    tracing::debug!("📬 Mail received");
+                if let Ok(packet) = server::ReceiveMail::read_body(&mut cursor) {
+                    events.push(NetworkEvent::MailReceived {
+                        mails: packet.mail_list.clone(),
+                    });
+                    tracing::debug!("📬 Mail received: {} mails", packet.mail_list.len());
                 }
             }
 

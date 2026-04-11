@@ -143,18 +143,22 @@ impl LogicSystem for SkillSystem {
             }
 
             // 3. 获取目标信息
-            let (_direction, _target_id, _location) = Self::get_target_info(&ctx.world);
+            let (direction, target_id, location) = Self::get_target_info(&ctx.world);
 
-            // 4. 发送施法命令到网络（如果网络发送器存在）
-            // TODO: 从 World 中获取 NetworkCommand sender
-            // let _ = network_tx.send(NetworkCommand::Magic {
-            //     spell: spell as u8,
-            //     direction,
-            //     target_id,
-            //     location,
-            // });
+            // 4. 发送施法命令到网络
+            if let Some(net) = ctx.net.as_ref() {
+                let _ = net.send(NetworkCommand::MagicRequest {
+                    spell: spell as u8,
+                    direction,
+                    target_id,
+                    location,
+                });
+            }
 
-            // 5. 消耗魔法值
+            // 5. 设置客户端侧冷却回退（服务器通过 MagicDelayReceived 是权威来源）
+            Self::set_client_cooldown(&mut ctx.world, spell);
+
+            // 6. 消耗魔法值
             #[allow(clippy::never_loop)]
             for (_local, mana) in ctx.world.query_mut::<(&LocalPlayer, &mut Mana)>() {
                 mana.consume(mp_cost);
@@ -236,11 +240,73 @@ impl SkillSystem {
             break;
         }
 
-        // 7. TODO: 设置冷却时间
-        // Self::set_cooldown(world, spell);
+        // 7. 设置客户端侧冷却回退
+        Self::set_client_cooldown(world, spell);
 
         println!("✨ 施放技能: {} (MP: {})", spell.name(), mp_cost);
         true
+    }
+
+    /// 设置客户端侧冷却回退
+    ///
+    /// 服务器通过 MagicDelayReceived 是冷却的权威来源，
+    /// 但客户端在发包后立即设置一个保守的冷却回退，防止玩家连发。
+    fn set_client_cooldown(world: &mut World, spell: SpellType) {
+        let cooldown_ms = Self::get_client_cooldown_ms(spell);
+        #[allow(clippy::never_loop)]
+        for (_local, cooldowns) in world.query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>() {
+            cooldowns.set(spell as u8, cooldown_ms);
+            break;
+        }
+    }
+
+    /// 获取客户端侧冷却回退时长（毫秒）
+    ///
+    /// 这些值是保守估计，最终会被服务器的 MagicDelayReceived 覆盖。
+    fn get_client_cooldown_ms(spell: SpellType) -> u32 {
+        match spell {
+            // 战士技能：短冷却
+            SpellType::Fencing => 0,
+            SpellType::Slaying => 1000,
+            SpellType::Thrusting => 1500,
+            SpellType::HalfMoon => 2000,
+            SpellType::ShoulderDash => 5000,
+            SpellType::LionRoar => 8000,
+
+            // 法师技能：中等冷却
+            SpellType::FireBall => 1000,
+            SpellType::Repulsion => 3000,
+            SpellType::ElectricShock => 2000,
+            SpellType::GreatFireBall => 2000,
+            SpellType::HellFire => 2500,
+            SpellType::ThunderBolt => 1500,
+            SpellType::Teleport => 5000,
+            SpellType::Lightning => 2000,
+            SpellType::MagicShield => 10000,
+
+            // 道士技能
+            SpellType::Healing => 2000,
+            SpellType::SpiritSword => 3000,
+            SpellType::Poisoning => 3000,
+            SpellType::SoulFireBall => 2000,
+            SpellType::SummonSkeleton => 10000,
+            SpellType::Hiding => 8000,
+            SpellType::SoulShield => 10000,
+
+            // 刺客技能
+            SpellType::FatalSword => 1000,
+            SpellType::DoubleSlash => 1500,
+            SpellType::Haste => 8000,
+            SpellType::FlashDash => 10000,
+
+            // 弓箭手技能
+            SpellType::Focus => 5000,
+            SpellType::StraightShot => 1000,
+            SpellType::DoubleShot => 2000,
+            SpellType::Meditation => 10000,
+
+            _ => 1000, // 默认 1 秒
+        }
     }
 
     /// 获取技能魔法消耗

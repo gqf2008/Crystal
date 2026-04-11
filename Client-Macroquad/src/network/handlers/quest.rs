@@ -56,9 +56,25 @@ impl PacketHandler for QuestHandler {
 
             // NewQuestInfo - 新任务信息
             x if x == ServerPacketIds::NewQuestInfo as u16 => {
-                if let Ok(_packet) = server::NewQuestInfo::read_body(&mut cursor) {
+                if let Ok(packet) = server::NewQuestInfo::read_body(&mut cursor) {
+                    let quest_id = packet.quest.index as u32;
+                    let name = packet.quest.name.clone();
+                    let group = packet.quest.group.clone();
+                    let description = packet.quest.description.first().cloned().unwrap_or_default();
+                    let level_req = packet.quest.min_level_needed as u32;
+                    let reward_exp = packet.quest.reward_exp as u64;
+                    let reward_gold = packet.quest.reward_gold;
+                    events.push(NetworkEvent::QuestInfoReceived {
+                        quest_id,
+                        name,
+                        group,
+                        description,
+                        level_req,
+                        reward_exp,
+                        reward_gold,
+                    });
                     events.push(NetworkEvent::QuestListUpdated);
-                    tracing::debug!("📜 New quest info received");
+                    tracing::debug!("📜 New quest info: #{} {}", quest_id, packet.quest.name);
                 }
             }
 

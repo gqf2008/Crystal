@@ -26,13 +26,14 @@ pub struct GroupMember {
 }
 
 /// 组队对话框动作
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum GroupDialogAction {
     None,
     AllowJoinToggle,
     Invite,
     Leave,
     KickSelected,
+    ViewMemberDetail { name: String, hp_percent: f32, is_leader: bool },
 }
 
 pub struct GroupDialogHybrid {
@@ -361,8 +362,13 @@ impl GroupDialogHybrid {
         }
 
         if let Some(idx) = double_clicked {
-            // 双击查看玩家信息（TODO）
-            let _ = idx;
+            if let Some(m) = self.members.get(idx) {
+                self.pending_action = GroupDialogAction::ViewMemberDetail {
+                    name: m.name.clone(),
+                    hp_percent: m.hp_percent,
+                    is_leader: m.is_leader,
+                };
+            }
         }
 
         // 限制滚动偏移
@@ -410,7 +416,7 @@ impl GroupDialogHybrid {
             draw_text_cn(label, btn_x + 10.0, btn_y + 16.0, 12.0, WHITE);
 
             if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
-                self.pending_action = *action;
+                self.pending_action = action.clone();
             }
         }
 

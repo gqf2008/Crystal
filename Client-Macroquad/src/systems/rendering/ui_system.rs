@@ -3,7 +3,7 @@ use macroquad::prelude::{
     screen_height, screen_width, vec2, Color, KeyCode, MouseButton, WHITE,
 };
 
-use crate::components::{RenderPass, RenderStage, ResourceInitState, SceneExitBlock, UiWorldInputBlock};
+use crate::components::{MapData, RenderPass, RenderStage, ResourceInitState, SceneExitBlock, UiWorldInputBlock};
 use crate::game::{GameContext, GameResult};
 use crate::scenes::dialogs::game::{
     amount_box::AmountBoxHybrid, npc_dialog::NpcDialogHybrid,
@@ -27,6 +27,18 @@ pub struct UIRenderSystem {
 
     /// 暂存的交易动作（由 draw 阶段产出，由 update 阶段发包）
     pending_trade_action: Option<crate::scenes::dialogs::game::trade_dialog::TradeAction>,
+
+    /// 暂存的文本输入结果（由 draw 阶段产出，由 update 阶段发包）
+    pending_text_input: Option<(crate::scenes::dialogs::game::main_dialog::TextInputKind, String)>,
+
+    /// 暂存的排行榜刷新请求（由 draw 阶段产出，由 update 阶段发包）
+    pending_ranking_refresh_tab: Option<u8>,
+
+    /// 暂存的装备请求（由 draw 阶段 Inventory→Character 拖拽产出，由 update 阶段发包）
+    pending_equip_request: Option<u64>,
+
+    /// 缓存的任务信息（来自 NewQuestInfo，等待 QuestAccepted 到来时使用）
+    cached_quest_info: std::collections::HashMap<u32, (String, String, String, u32, u64, u32)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -62,6 +74,10 @@ impl UIRenderSystem {
 
             ui_stack_top: UiStackTop::Main,
             pending_trade_action: None,
+            pending_text_input: None,
+            pending_ranking_refresh_tab: None,
+            pending_equip_request: None,
+            cached_quest_info: std::collections::HashMap::new(),
         }
     }
 
@@ -122,6 +138,7 @@ impl RenderSystem for UIRenderSystem {
                 UiCommand::ToggleMinimapSize => self.main_dialog.toggle_minimap_size(),
                 UiCommand::PushSystemChatLine(line) => self.main_dialog.push_system_chat_line(line),
                 UiCommand::PushChatLine(line) => self.main_dialog.push_chat_line(line),
+                UiCommand::PushWhisperLine(line) => self.main_dialog.push_whisper_line(line),
                 UiCommand::ShowNpcDialog { dialog } => {
                     self.npc_goods_dialog.hide();
                     self.npc_sub_goods_dialog.hide();
@@ -256,21 +273,26 @@ impl RenderSystem for UIRenderSystem {
                     self.main_dialog.trade_dialog_mut().reset_confirmations();
                 }
                 UiCommand::QuestAccepted { quest_id, name, description } => {
-                    self.main_dialog.quest_log_dialog_mut().add_quest(crate::scenes::dialogs::game::quest_log_dialog::QuestInfo {
+                    use crate::scenes::dialogs::game::quest_log_dialog::{QuestInfo, QuestRewards, QuestStatus};
+                    // 优先使用缓存的真实数据（来自 NewQuestInfo），否则用传入的 stub 数据
+                    let (real_name, real_group, real_desc, level_req, reward_exp, reward_gold) =
+                        self.cached_quest_info.remove(&quest_id)
+                            .unwrap_or_else(|| (name.clone(), String::new(), description.clone(), 0u32, 0u64, 0u32));
+                    self.main_dialog.quest_log_dialog_mut().add_quest(QuestInfo {
                         id: quest_id,
-                        name: name.clone(),
-                        description: description.clone(),
+                        name: real_name,
+                        description: real_desc,
                         npc_name: String::new(),
-                        status: crate::scenes::dialogs::game::quest_log_dialog::QuestStatus::Accepted,
+                        status: QuestStatus::Accepted,
                         progress: 0,
                         max_progress: 1,
-                        level_required: 0,
-                        rewards: crate::scenes::dialogs::game::quest_log_dialog::QuestRewards {
-                            experience: 0,
-                            gold: 0,
+                        level_required: level_req,
+                        rewards: QuestRewards {
+                            experience: reward_exp,
+                            gold: reward_gold,
                             items: Vec::new(),
                         },
-                        group: String::new(),
+                        group: real_group,
                     });
                 }
                 UiCommand::QuestCompleted { quest_id } => {
@@ -279,6 +301,15 @@ impl RenderSystem for UIRenderSystem {
                 }
                 UiCommand::QuestProgressUpdated { quest_id, progress_text } => {
                     self.main_dialog.quest_log_dialog_mut().update_quest_progress_from_text(quest_id, progress_text.as_str());
+                }
+                UiCommand::QuestInfoReceived {
+                    quest_id, name, group, description, level_req, reward_exp, reward_gold,
+                } => {
+                    // 缓存任务信息，等 QuestAccepted 到来时使用真实数据
+                    self.cached_quest_info.insert(
+                        quest_id,
+                        (name.clone(), group.clone(), description.clone(), level_req, reward_exp, reward_gold),
+                    );
                 }
                 // 公会扩展事件
                 UiCommand::GuildMemberUpdated { name, rank, online } => {
@@ -292,6 +323,86 @@ impl RenderSystem for UIRenderSystem {
                 }
                 UiCommand::GuildWarRequested => {
                     self.main_dialog.push_system_chat_line("行会战请求！".to_string());
+                }
+                UiCommand::SetGuildName { name } => {
+                    self.main_dialog.guild_dialog_mut().update_guild_info(crate::scenes::dialogs::game::guild_dialog::GuildInfo {
+                        name: name.clone(),
+                        ..Default::default()
+                    });
+                    tracing::debug!("🏰 行会名称: {}", name);
+                }
+                UiCommand::OpenMailDialog => {
+                    tracing::debug!("📮 打开邮件对话框");
+                    self.main_dialog.mail_dialog_mut().open();
+                }
+                UiCommand::CloseMailDialog => {
+                    self.main_dialog.mail_dialog_mut().close();
+                }
+                UiCommand::UpdateMailList { mails } => {
+                    // 同步到对话框和 UiStateData
+                    self.main_dialog.mail_dialog_mut().set_mails(mails.clone());
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                        s.borrow_mut().mail_entries = mails.clone();
+                    }
+                }
+                UiCommand::OpenBigMap => {
+                    tracing::debug!("🗺️ 打开大地图");
+                    self.main_dialog.big_map_dialog_mut().show();
+                }
+                UiCommand::OpenStorage => {
+                    tracing::debug!("📦 打开仓库对话框");
+                    // 查询本地背包物品传入，实现双面板布局
+                    use crate::components::{Inventory, LocalPlayer};
+                    let inventory_items: Vec<mir2_shared::data::item::UserItem> = ctx
+                        .world
+                        .iter()
+                        .find_map(|e| {
+                            let _lp = e.get::<&LocalPlayer>()?;
+                            let inv = e.get::<&Inventory>()?;
+                            Some(inv.items.iter().filter_map(|s: &Option<mir2_shared::data::item::UserItem>| s.clone()).collect())
+                        })
+                        .unwrap_or_default();
+                    self.npc_goods_dialog.show_storage_mode(vec![], inventory_items, 1.0);
+                    self.bring_npc_layer_to_front(NpcUiLayer::Goods);
+                }
+                UiCommand::UpdateStorageItems { items } => {
+                    self.npc_goods_dialog.update_storage_items(items);
+                }
+                UiCommand::UpdateStorageInventoryItems { items } => {
+                    self.npc_goods_dialog.update_storage_inventory_items(items);
+                }
+                UiCommand::SetMarriageRequester { requester } => {
+                    self.main_dialog.relationship_dialog_mut().set_marriage_requester(requester.clone());
+                }
+                UiCommand::ClearMarriageRequester => {
+                    self.main_dialog.relationship_dialog_mut().clear_marriage_requester();
+                }
+                UiCommand::UpdateLover { name, date } => {
+                    self.main_dialog.relationship_dialog_mut().set_lover_info(name, date);
+                }
+                UiCommand::UpdateMentor { name, level, online } => {
+                    self.main_dialog.relationship_dialog_mut().set_mentor_info(name, level as u32, online);
+                }
+                UiCommand::ShowTextInput { kind, title, placeholder, max_length } => {
+                    self.main_dialog.set_pending_text_input_kind(kind);
+                    self.main_dialog.text_input_dialog_mut().show(&title, &placeholder, max_length);
+                }
+                UiCommand::HideTextInput => {
+                    self.main_dialog.reset_pending_text_input_kind();
+                    self.main_dialog.text_input_dialog_mut().hide();
+                }
+                UiCommand::UpdateRankings { tab, entries } => {
+                    tracing::debug!("🏆 更新排行榜: tab={}, {} entries", tab, entries.len());
+                    let ranking_dialog = self.main_dialog.ranking_dialog_mut();
+                    let tab_enum = crate::scenes::dialogs::game::RankingTab::from_index(tab as usize);
+                    let mapped: Vec<_> = entries.iter().map(|(rank, name, value)| {
+                        crate::scenes::dialogs::game::RankingEntry {
+                            rank: *rank,
+                            name: name.clone(),
+                            value: value.clone(),
+                        }
+                    }).collect();
+                    ranking_dialog.set_rankings(tab_enum, mapped);
                 }
             }
         }
@@ -318,6 +429,52 @@ impl RenderSystem for UIRenderSystem {
         if let Some(p) = minimap_player_pos {
             self.main_dialog
                 .update_minimap_player_position(p.x, p.y, minimap_player_dir_radians);
+        }
+
+        // 2.4a) 同步大地图数据
+        {
+            let (map_name, world_size, player_pos) = {
+                if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                    let s = s.borrow();
+                    (s.big_map_map_name.clone(), s.minimap_world_size, s.minimap_player_pos)
+                } else {
+                    (None, None, None)
+                }
+            };
+
+            if let Some(name) = map_name {
+                let ws = world_size.unwrap_or(macroquad::prelude::Vec2::ZERO);
+                self.main_dialog.big_map_dialog_mut().set_map_info(name, ws.x, ws.y);
+            }
+            if let Some(p) = player_pos {
+                self.main_dialog.big_map_dialog_mut().set_player_position(p.x, p.y);
+            }
+
+            // 同步地图瓦片数据
+            if let Some(map_data) = ctx.world.query::<&MapData>().iter().next() {
+                self.main_dialog.big_map_dialog_mut().set_map_data(map_data.cells.clone(), map_data.width, map_data.height);
+            }
+        }
+
+        // 2.4b) 消费小地图待处理动作
+        {
+            use crate::scenes::dialogs::game::minimap_dialog::MiniMapAction;
+            let action = self.main_dialog.minimap_dialog_mut().take_pending_actions();
+            match action {
+                MiniMapAction::OpenMail => {
+                    tracing::debug!("📮 小地图：打开邮件对话框");
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                        s.borrow_mut().pending_commands.push(UiCommand::OpenMailDialog);
+                    }
+                }
+                MiniMapAction::OpenBigMap => {
+                    tracing::debug!("🗺️ 小地图：打开大地图");
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                        s.borrow_mut().pending_commands.push(UiCommand::OpenBigMap);
+                    }
+                }
+                MiniMapAction::None => {}
+            }
         }
 
         // 2.5) 同步主面板红/蓝血（HP/MP）到真实 ECS 数据
@@ -504,7 +661,15 @@ impl RenderSystem for UIRenderSystem {
                     }
                 }
                 GroupDialogAction::Invite => {
-                    tracing::info!("👥 邀请组队功能待实现");
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                        use crate::scenes::dialogs::game::main_dialog::TextInputKind;
+                        s.borrow_mut().pending_commands.push(UiCommand::ShowTextInput {
+                            kind: TextInputKind::GroupInvite,
+                            title: "组队邀请".to_string(),
+                            placeholder: "输入玩家名称".to_string(),
+                            max_length: 32,
+                        });
+                    }
                 }
                 GroupDialogAction::Leave => {
                     let player_name = gd.get_local_player_name();
@@ -513,9 +678,19 @@ impl RenderSystem for UIRenderSystem {
                     }
                 }
                 GroupDialogAction::KickSelected => {
-                    let _name = gd.get_selected_member_name();
+                    if let Some(name) = gd.get_selected_member_name() {
+                        if let Some(net) = ctx.net.as_ref() {
+                            let _ = net.send(NetEv::GroupKickRequest { player_name: name });
+                        }
+                    }
+                }
+                GroupDialogAction::ViewMemberDetail { name, hp_percent, is_leader } => {
+                    let hp_display = (hp_percent * 100.0).max(0.0) as u32;
+                    let role_tag = if is_leader { "队长" } else { "队员" };
                     if let Some(net) = ctx.net.as_ref() {
-                        let _ = net.send(NetEv::GroupDeclineRequest);
+                        let _ = net.send(NetEv::SystemMessage {
+                            message: format!("{} - {} | HP: {}%", name, role_tag, hp_display),
+                        });
                     }
                 }
                 GroupDialogAction::None => {}
@@ -530,7 +705,15 @@ impl RenderSystem for UIRenderSystem {
             let action = fd.take_action();
             match action {
                 FriendDialogAction::AddFriend => {
-                    tracing::info!("👤 添加好友功能待实现（需弹出输入框）");
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                        use crate::scenes::dialogs::game::main_dialog::TextInputKind;
+                        s.borrow_mut().pending_commands.push(UiCommand::ShowTextInput {
+                            kind: TextInputKind::AddFriend,
+                            title: "添加好友".to_string(),
+                            placeholder: "输入玩家名称".to_string(),
+                            max_length: 32,
+                        });
+                    }
                 }
                 FriendDialogAction::RemoveSelected => {
                     if let Some(object_id) = fd.get_selected_friend_object_id() {
@@ -545,7 +728,17 @@ impl RenderSystem for UIRenderSystem {
                     }
                 }
                 FriendDialogAction::PrivateChatSelected => {
-                    tracing::info!("💬 私聊功能待实现");
+                    if let Some(name) = fd.get_selected_friend_name() {
+                        use crate::scenes::dialogs::game::main_dialog::TextInputKind;
+                        if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                            s.borrow_mut().pending_commands.push(UiCommand::ShowTextInput {
+                                kind: TextInputKind::WhisperChat { target: name.clone() },
+                                title: format!("私聊 - {}", name),
+                                placeholder: "输入消息".to_string(),
+                                max_length: 256,
+                            });
+                        }
+                    }
                 }
                 FriendDialogAction::None => {}
             }
@@ -569,13 +762,31 @@ impl RenderSystem for UIRenderSystem {
                         let _ = net.send(NetEv::RequestGuildInfo);
                     }
                 }
-                GuildDialogAction::EditNotice(notice) => {
-                    tracing::info!("📝 编辑行会公告待实现（需输入框）");
-                    let _ = notice;
+                GuildDialogAction::EditNotice(_) => {
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                        use crate::scenes::dialogs::game::main_dialog::TextInputKind;
+                        s.borrow_mut().pending_commands.push(UiCommand::ShowTextInput {
+                            kind: TextInputKind::GuildNotice,
+                            title: "编辑行会公告".to_string(),
+                            placeholder: "输入行会公告内容".to_string(),
+                            max_length: 200,
+                        });
+                    }
                 }
                 GuildDialogAction::EditMemberRank { ref name, ref rank } => {
-                    let _ = (name, rank);
-                    tracing::info!("👤 管理行会成员待实现");
+                    if name.is_empty() {
+                        tracing::info!("👤 管理行会成员待实现（需双击成员弹出输入框）");
+                    } else if let Ok(rank_num) = rank.parse::<u8>() {
+                        if let Some(net) = ctx.net.as_ref() {
+                            let _ = net.send(NetEv::EditGuildMember { member_name: name.clone(), rank: rank_num });
+                        }
+                    } else {
+                        tracing::warn!("⚠️ 行会成员 rank 不是有效数字: {}", rank);
+                    }
+                }
+                GuildDialogAction::ViewMemberDetail { ref name, ref rank, ref online } => {
+                    let status = if *online { "在线" } else { "离线" };
+                    self.main_dialog.push_system_chat_line(format!("行会成员: {} | 职位: {} | 状态: {}", name, rank, status));
                 }
                 GuildDialogAction::None => {}
             }
@@ -589,7 +800,15 @@ impl RenderSystem for UIRenderSystem {
             let action = md.take_action();
             match action {
                 MentorDialogAction::AddMentor => {
-                    tracing::info!("👤 拜师功能待实现（需弹出输入框）");
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                        use crate::scenes::dialogs::game::main_dialog::TextInputKind;
+                        s.borrow_mut().pending_commands.push(UiCommand::ShowTextInput {
+                            kind: TextInputKind::AddMentor,
+                            title: "拜师".to_string(),
+                            placeholder: "输入师傅名称".to_string(),
+                            max_length: 32,
+                        });
+                    }
                 }
                 MentorDialogAction::CancelMentor => {
                     if let Some(net) = ctx.net.as_ref() {
@@ -616,23 +835,65 @@ impl RenderSystem for UIRenderSystem {
             }
         }
 
+        // 邮件对话框动作
+        {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::mail_dialog::MailDialogAction;
+            let mail_action = self.main_dialog.mail_dialog_mut().take_action();
+            match mail_action {
+                MailDialogAction::ReadMail { mail_id } => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::ReadMailRequest { mail_id });
+                    }
+                }
+                MailDialogAction::CollectParcel { mail_id } => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::CollectParcelRequest { mail_id });
+                    }
+                }
+                MailDialogAction::DeleteMail { mail_id } => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::DeleteMailRequest { mail_id });
+                    }
+                }
+                MailDialogAction::SendMail { .. } => {
+                    tracing::info!("📬 写信功能需要文本输入支持");
+                }
+                MailDialogAction::None => {}
+            }
+        }
+
         // 婚姻对话框动作
         {
+            use crate::network::handlers::NetworkEvent as NetEv;
             use crate::scenes::dialogs::game::relationship_dialog::RelationshipDialogAction;
             let rd = self.main_dialog.relationship_dialog_mut();
             let action = rd.take_action();
             match action {
                 RelationshipDialogAction::RequestDivorce => {
-                    tracing::info!("💔 离婚功能待实现（需确认弹窗）");
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::DivorceRequestSend);
+                    }
+                    tracing::debug!("💔 发送离婚请求");
                 }
                 RelationshipDialogAction::RequestMarriage => {
-                    tracing::info!("💍 求婚功能待实现");
+                    if let Some(net) = ctx.net.as_ref() {
+                        // 求婚目标由服务器根据亲密度/位置等逻辑判定
+                        let _ = net.send(NetEv::MarriageRequestSend { target: String::new() });
+                    }
+                    tracing::debug!("💍 发送求婚请求");
                 }
                 RelationshipDialogAction::AcceptMarriage => {
-                    tracing::info!("💍 接受求婚（需服务端触发）");
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::MarriageReply { accept: true });
+                    }
+                    tracing::debug!("💍 接受求婚");
                 }
                 RelationshipDialogAction::DeclineMarriage => {
-                    tracing::info!("💍 拒绝求婚（需服务端触发）");
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::MarriageReply { accept: false });
+                    }
+                    tracing::debug!("💍 拒绝求婚");
                 }
                 RelationshipDialogAction::None => {}
             }
@@ -792,6 +1053,67 @@ impl RenderSystem for UIRenderSystem {
                 }
                 TradeAction::None => {}
             }
+        }
+
+        // 文本输入结果（由 draw 阶段产出，在此发包）
+        if let Some((kind, text)) = self.pending_text_input.take() {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            use crate::scenes::dialogs::game::main_dialog::TextInputKind;
+            match kind {
+                TextInputKind::GroupInvite => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::GroupInviteRequest { player_name: text.clone() });
+                    }
+                    tracing::debug!("👥 发送组队邀请: {}", text);
+                }
+                TextInputKind::AddFriend => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::AddFriendRequest { name: text.clone() });
+                    }
+                    tracing::debug!("👤 发送添加好友请求: {}", text);
+                }
+                TextInputKind::AddMentor => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::AddMentorRequest { name: text.clone() });
+                    }
+                    tracing::debug!("🎓 发送拜师请求: {}", text);
+                }
+                TextInputKind::GuildNotice => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::EditGuildNotice { notice: text.clone() });
+                    }
+                    tracing::debug!("📝 编辑行会公告: {}", text);
+                }
+                TextInputKind::WhisperChat { target } => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        // 服务器通过 `/目标 消息` 格式识别私聊（非专用 opcode）
+                        let whisper_message = format!("/{} {}", target, text);
+                        let _ = net.send(NetEv::ChatRequest { message: whisper_message.clone(), linked_items: vec![] });
+                    }
+                    tracing::debug!("💬 私聊 → {}: {}", target, text);
+                }
+                TextInputKind::None => {
+                    tracing::warn!("⚠️ 收到文本输入结果但 kind 为 None");
+                }
+            }
+        }
+
+        // 排行榜刷新请求（由 draw 阶段产出，在此发包）
+        if let Some(tab) = self.pending_ranking_refresh_tab.take() {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            if let Some(net) = ctx.net.as_ref() {
+                let _ = net.send(NetEv::GetRankingRequest { ranking_type: tab });
+            }
+            tracing::debug!("🏆 请求排行榜: tab={}", tab);
+        }
+
+        // 装备物品请求（由 draw 阶段 Inventory→Character 拖拽产出，在此发包）
+        if let Some(unique_id) = self.pending_equip_request.take() {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            if let Some(net) = ctx.net.as_ref() {
+                let _ = net.send(NetEv::EquipItemRequest { unique_id });
+            }
+            tracing::debug!("🎒 装备物品: unique_id={}", unique_id);
         }
 
         Ok(())
@@ -985,6 +1307,16 @@ impl RenderSystem for UIRenderSystem {
             self.pending_trade_action = Some(action);
         }
 
+        // 排行榜刷新请求（draw 阶段产出，存入 pending，update 阶段发包）
+        if let Some(tab) = self.main_dialog.take_pending_ranking_refresh_tab() {
+            self.pending_ranking_refresh_tab = Some(tab);
+        }
+
+        // 装备物品请求（draw 阶段 Inventory→Character 拖拽产出，存入 pending，update 阶段发包）
+        if let Some(unique_id) = self.main_dialog.take_pending_equip_request() {
+            self.pending_equip_request = Some(unique_id);
+        }
+
         if let Some(action) = self.npc_goods_dialog.take_action() {
             if let Some(s) = _world.query::<&UiState>().iter().next() {
                 s.borrow_mut()
@@ -1014,6 +1346,30 @@ impl RenderSystem for UIRenderSystem {
                 if let Some(s) = _world.query::<&UiState>().iter().next() {
                     s.borrow_mut().pending_actions.push(UiAction::AmountBox(r));
                 }
+            }
+        }
+
+        // 大地图对话框（全屏背景，在数量框和文本输入框之下）
+        if self.main_dialog.big_map_dialog_mut().is_visible() {
+            self.main_dialog.big_map_dialog_mut().update_and_draw();
+        }
+
+        // 文本输入对话框（modal，最上层，覆盖数量框）
+        use crate::scenes::dialogs::game::text_input_dialog::TextInputResult;
+        if self.main_dialog.text_input_is_visible() {
+            let result = self.main_dialog.text_input_dialog_mut().update_and_draw();
+            if !matches!(result, TextInputResult::None) {
+                match result {
+                    TextInputResult::Ok(text) => {
+                        let kind = self.main_dialog.pending_text_input_kind();
+                        self.pending_text_input = Some((kind, text));
+                    }
+                    TextInputResult::Cancel => {
+                        tracing::debug!("❌ 文本输入已取消");
+                    }
+                    TextInputResult::None => unreachable!(),
+                }
+                self.main_dialog.reset_pending_text_input_kind();
             }
         }
 

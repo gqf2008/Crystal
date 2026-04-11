@@ -13,7 +13,6 @@
 /// - **Floor vs Round**: 必须用 `floor()` 而非 `round()` 避免坐标跳变
 /// 
 /// 参考原版: Client/MirScenes/GameScene.cs MapControl
-
 use rand::RngExt;
 
 /// 地图格子宽度 (像素)
@@ -78,13 +77,7 @@ impl Coord {
     pub fn new(viewport: ViewportConfig) -> Self {
         Self { viewport }
     }
-    
-    // TODO: macroquad 实现
-    // pub fn window_to_ui_coords(window_x: f32, window_y: f32) -> (f32, f32) {
-    //     let (window_width, window_height) = screen_size();
-    //     ...
-    // }
-    
+
     /// 地图坐标 → 世界坐标 (格子左上角)
     /// 
     /// grid (286, 617) → world (13728.0, 19744.0)

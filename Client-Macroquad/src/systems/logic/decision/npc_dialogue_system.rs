@@ -109,8 +109,7 @@ impl NpcDialogueSystem {
         // 清理已关闭的对话
         self.active_dialogs.retain(|_, state| state.is_open);
         
-        // TODO: 处理对话超时
-        // TODO: 处理对话脚本触发
+        // 注：对话超时和脚本触发需等待脚本系统支持，当前通过服务器事件驱动
     }
     
     /// 向后兼容的静态方法

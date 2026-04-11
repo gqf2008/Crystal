@@ -70,6 +70,15 @@ impl MapRenderSystem {
         ui.minimap_world_size = Some(Vec2::new(width as f32, height as f32));
     }
 
+    fn update_big_map_name(ctx: &mut GameContext, map_name: String) {
+        let mut q = ctx.world.query::<&UiState>();
+        let Some(ui) = q.iter().next() else {
+            return;
+        };
+        let mut ui = ui.borrow_mut();
+        ui.big_map_map_name = Some(map_name);
+    }
+
     fn update_front_occlusion(ctx: &mut GameContext, occluded: bool) {
         // 约定：FrontOcclusion 挂在 RenderPass 单例实体上。
         if let Some(o) = ctx.world.query_mut::<&mut FrontOcclusion>().into_iter().next() {
@@ -103,6 +112,7 @@ impl RenderSystem for MapRenderSystem {
                     Ok(reader) => {
                         tracing::info!("🗺️ MapRenderSystem: loaded map {} ({}x{})", map_path, reader.width, reader.height);
                         Self::update_minimap_world_size(ctx, reader.width, reader.height);
+                        Self::update_big_map_name(ctx, file.clone());
                         self.map_reader = Some(reader);
                         self.loaded_map_file = Some(file);
                     }

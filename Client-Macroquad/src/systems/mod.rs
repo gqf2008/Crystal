@@ -78,6 +78,7 @@ pub mod priority {
     // ├── 移动&自动化系统: MovementSystem → CollisionSystem → TeleportSystem → AutoBattleSystem → AutoPathfindingSystem
     pub const MONSTER_AI: u32 = 200;
     pub const NPC_INTERACTION: u32 = 210;
+    pub const NPC_DIALOGUE: u32 = 220;
     pub const PET_AI: u32 = 230;
     pub const COMBAT: u32 = 300;
     pub const SKILL: u32 = 310;
@@ -169,7 +170,7 @@ pub use infra::NetworkApplySystem;
 pub use infra::{FrameEndSystem, TimeTickSystem};
 pub use infra::MapBootstrapSystem;
 pub use logic::combat::{
-    CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem, SpellInputSystem,
+    BufSystem, CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem, SpellInputSystem,
 };
 pub use logic::lifetime_cleanup_system::LifetimeCleanupSystem;
 pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};

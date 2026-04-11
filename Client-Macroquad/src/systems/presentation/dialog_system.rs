@@ -10,6 +10,19 @@ use crate::{
 
 use mir2_shared::enums::PanelType;
 
+/// 将 Unix 时间戳（秒）格式化为中文日期字符串
+fn format_mail_date(timestamp: i64) -> String {
+    if timestamp <= 0 {
+        return "未知时间".to_string();
+    }
+    // 简单按天格式化：从 epoch 开始计算
+    let days = timestamp / 86400;
+    let secs_of_day = (timestamp % 86400).abs();
+    let hours = secs_of_day / 3600;
+    let mins = (secs_of_day % 3600) / 60;
+    format!("{}天 {:02}:{:02}", days, hours, mins)
+}
+
 #[derive(ecs_macros::LogicSystem)]
 pub struct DialogSystem {
 }
@@ -158,8 +171,14 @@ impl DialogSystem {
                 NetworkEvent::SystemMessage { message } => {
                     cmds.push(UiCommand::PushSystemChatLine(message.clone()));
                 }
-                NetworkEvent::ChatMessage { sender, message, .. } => {
-                    cmds.push(UiCommand::PushChatLine(format!("{}: {}", sender, message)));
+                NetworkEvent::ChatMessage { sender, message, chat_type } => {
+                    use mir2_shared::enums::ChatType;
+                    let line = format!("{}: {}", sender, message);
+                    if matches!(chat_type, ChatType::WhisperIn) {
+                        cmds.push(UiCommand::PushWhisperLine(line));
+                    } else {
+                        cmds.push(UiCommand::PushChatLine(line));
+                    }
                 }
                 NetworkEvent::GroupInvite { inviter } => {
                     // 收到组队邀请，显示系统消息
@@ -193,11 +212,18 @@ impl DialogSystem {
                 NetworkEvent::MentorRequested2 => {
                     cmds.push(UiCommand::PushSystemChatLine("收到拜师请求".to_string()));
                 }
-                NetworkEvent::MentorUpdated => {
-                    cmds.push(UiCommand::PushSystemChatLine("师徒关系已更新".to_string()));
+                NetworkEvent::MentorUpdated { mentor_name, mentor_level, mentor_online } => {
+                    cmds.push(UiCommand::UpdateMentor {
+                        name: mentor_name.clone(),
+                        level: *mentor_level,
+                        online: *mentor_online,
+                    });
                 }
-                NetworkEvent::LoverUpdated => {
-                    cmds.push(UiCommand::PushSystemChatLine("婚姻关系已更新".to_string()));
+                NetworkEvent::LoverUpdated { lover_name, date } => {
+                    cmds.push(UiCommand::UpdateLover {
+                        name: lover_name.clone(),
+                        date: *date,
+                    });
                 }
                 NetworkEvent::TradeRequested { requester } => {
                     cmds.push(UiCommand::PushSystemChatLine(format!("{} 请求与你交易", requester)));
@@ -318,6 +344,19 @@ impl DialogSystem {
                 NetworkEvent::TradeCancelledEvent => {
                     cmds.push(UiCommand::TradeCancelled);
                 }
+                // 邮件事件
+                NetworkEvent::MailReceived { mails } => {
+                    let entries: Vec<_> = mails.iter().map(|m| crate::ui::ui_state::MailEntry {
+                        mail_id: m.mail_id,
+                        sender: m.sender_name.clone(),
+                        subject: m.mail_subject.clone(),
+                        body: m.message.clone(),
+                        date: format_mail_date(m.send_date),
+                        has_parcel: !m.items.is_empty(),
+                        is_read: m.collected,
+                    }).collect();
+                    cmds.push(UiCommand::UpdateMailList { mails: entries });
+                }
                 // 任务事件
                 NetworkEvent::QuestAccepted { quest_id } => {
                     cmds.push(UiCommand::QuestAccepted {
@@ -333,6 +372,19 @@ impl DialogSystem {
                     cmds.push(UiCommand::QuestProgressUpdated {
                         quest_id: *quest_id,
                         progress_text: progress.clone(),
+                    });
+                }
+                NetworkEvent::QuestInfoReceived {
+                    quest_id, name, group, description, level_req, reward_exp, reward_gold,
+                } => {
+                    cmds.push(UiCommand::QuestInfoReceived {
+                        quest_id: *quest_id,
+                        name: name.clone(),
+                        group: group.clone(),
+                        description: description.clone(),
+                        level_req: *level_req,
+                        reward_exp: *reward_exp,
+                        reward_gold: *reward_gold,
                     });
                 }
                 // 公会扩展事件
@@ -372,7 +424,7 @@ impl DialogSystem {
                     cmds.push(UiCommand::PushSystemChatLine("结婚戒指更换完成".to_string()));
                 }
                 NetworkEvent::NPCStorageReceived => {
-                    cmds.push(UiCommand::PushSystemChatLine("仓库操作完成".to_string()));
+                    cmds.push(UiCommand::OpenStorage);
                 }
                 NetworkEvent::NPCConsignReceived => {
                     cmds.push(UiCommand::PushSystemChatLine("寄售操作完成".to_string()));
@@ -455,10 +507,6 @@ impl DialogSystem {
                 NetworkEvent::AwakeningReceived => {
                     cmds.push(UiCommand::PushSystemChatLine("觉醒操作完成".to_string()));
                 }
-                // 邮件系统
-                NetworkEvent::MailReceived => {
-                    cmds.push(UiCommand::PushSystemChatLine("收到新邮件".to_string()));
-                }
                 NetworkEvent::MailLockedItemReceived => {
                     cmds.push(UiCommand::PushSystemChatLine("邮件附件已锁定".to_string()));
                 }
@@ -517,6 +565,17 @@ impl DialogSystem {
                 }
                 NetworkEvent::GameShopStockReceived => {
                     cmds.push(UiCommand::PushSystemChatLine("游戏商店库存已更新".to_string()));
+                }
+                // 排行榜
+                NetworkEvent::RankingsReceived => {
+                    cmds.push(UiCommand::PushSystemChatLine("排行榜已收到（待解析）".to_string()));
+                }
+                NetworkEvent::RankingsReceivedWithEntries { tab, entries } => {
+                    let entries_clone: Vec<_> = entries.clone();
+                    cmds.push(UiCommand::UpdateRankings {
+                        tab: *tab,
+                        entries: entries_clone,
+                    });
                 }
                 // 其他重要事件
                 NetworkEvent::RollReceivedEvent { value } => {
@@ -584,11 +643,11 @@ impl DialogSystem {
                     cmds.push(UiCommand::PushSystemChatLine("市场操作成功".to_string()));
                 }
                 // 婚姻/师徒补充
-                NetworkEvent::DivorceRequested2 => {
-                    cmds.push(UiCommand::PushSystemChatLine("收到离婚请求".to_string()));
-                }
                 NetworkEvent::MarriageRequested2 { requester } => {
-                    cmds.push(UiCommand::PushSystemChatLine(format!("收到结婚请求: {}", requester)));
+                    cmds.push(UiCommand::SetMarriageRequester { requester: requester.clone() });
+                }
+                NetworkEvent::DivorceRequested2 => {
+                    cmds.push(UiCommand::ClearMarriageRequester);
                 }
                 NetworkEvent::DoorOpened { door_id } => {
                     cmds.push(UiCommand::PushSystemChatLine(format!("门已打开 (id={})", door_id)));
@@ -626,11 +685,11 @@ impl DialogSystem {
                 NetworkEvent::StorageResized { new_size } => {
                     cmds.push(UiCommand::PushSystemChatLine(format!("仓库大小调整为: {}", new_size)));
                 }
-                NetworkEvent::UserStorageReceived => {
-                    cmds.push(UiCommand::PushSystemChatLine("个人仓库已打开".to_string()));
+                NetworkEvent::UserStorageReceived { items } => {
+                    cmds.push(UiCommand::UpdateStorageItems { items: items.clone() });
                 }
                 NetworkEvent::GuildNameReceived { name } => {
-                    cmds.push(UiCommand::PushSystemChatLine(format!("行会名称: {}", name)));
+                    cmds.push(UiCommand::SetGuildName { name: name.clone() });
                 }
                 NetworkEvent::ChangePasswordSuccess => {
                     cmds.push(UiCommand::PushSystemChatLine("密码修改成功".to_string()));
@@ -850,10 +909,14 @@ impl DialogSystem {
             }
             crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction::RequestStorage {
                 unique_id,
-                deposit: _,
+                deposit,
             } => {
                 if let Some(net) = ctx.net.as_ref() {
-                    let _ = net.send(NetEv::StoreItemRequest { unique_id });
+                    if deposit {
+                        let _ = net.send(NetEv::StoreItemRequest { unique_id });
+                    } else {
+                        let _ = net.send(NetEv::TakeBackItemRequest { unique_id });
+                    }
                 }
             }
         }

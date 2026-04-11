@@ -609,24 +609,12 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             CombatHandler.handle(header, payload)
         }
 
-        // ===== Item Resize / Transform / Door / Rental =====
+        // ===== Item Resize / Transform / Door / Recipe =====
         x if x == SP::ResizeInventory as u16
             || x == SP::ResizeStorage as u16
             || x == SP::TransformUpdate as u16
             || x == SP::NewRecipeInfo as u16
-            || x == SP::Opendoor as u16
-            || x == SP::GetRentedItems as u16
-            || x == SP::ItemRentalRequest as u16
-            || x == SP::ItemRentalFee as u16
-            || x == SP::ItemRentalPeriod as u16
-            || x == SP::DepositRentalItem as u16
-            || x == SP::RetrieveRentalItem as u16
-            || x == SP::UpdateRentalItem as u16
-            || x == SP::CancelItemRental as u16
-            || x == SP::ItemRentalLock as u16
-            || x == SP::ItemRentalPartnerLock as u16
-            || x == SP::CanConfirmItemRental as u16
-            || x == SP::ConfirmItemRental as u16 =>
+            || x == SP::Opendoor as u16 =>
         {
             ItemHandler.handle(header, payload)
         }
@@ -638,7 +626,6 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::Roll as u16
             || x == SP::SetCompass as u16
             || x == SP::OpenBrowser as u16
-            || x == SP::FishingUpdate as u16
             || x == SP::Rankings as u16
             || x == SP::GameShopInfo as u16
             || x == SP::GameShopStock as u16 =>
@@ -1686,12 +1673,13 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 坐骑操作 =====
-        // 注意：当前协议无独立坐骑发包，通常通过 NPC 对话触发
+        // 注意：真实服务器协议无独立坐骑发包，坐骑通过 NPC 对话或物品使用触发。
+        // Mock 模式由 mock.rs handle_game_event 处理（返回 MountUpdated）。
         NetworkEvent::MountRideRequest { mount_type } => {
-            tracing::debug!("🐴 MountRideRequest (type={}) - 需通过 NPC 触发，暂未实现发包", mount_type);
+            tracing::debug!("🐴 MountRideRequest (type={}) - 真实协议不支持独立坐骑发包，使用 Mock 模式", mount_type);
         }
         NetworkEvent::MountDismountRequest => {
-            tracing::debug!("🐴 MountDismountRequest - 需通过 NPC 触发，暂未实现发包");
+            tracing::debug!("🐴 MountDismountRequest - 真实协议不支持独立坐骑发包，使用 Mock 模式");
         }
 
         // ===== 转生 =====
