@@ -361,6 +361,7 @@ impl MockWorldState {
 }
 
 impl MockNetwork {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> (Sender<NetworkEvent>, Receiver<NetworkEvent>) {
         let (client_tx, client_rx) = unbounded::<NetworkEvent>();
         let (server_tx, server_rx) = unbounded::<NetworkEvent>();

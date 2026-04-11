@@ -359,7 +359,7 @@ pub trait RenderSystem {
     /// - draw_texture()
     /// - draw_text()
     /// - draw_rectangle()
-    /// 等等
+    ///   等等
     fn draw(&mut self, _world: &hecs::World) -> crate::game::GameResult;
 }
 

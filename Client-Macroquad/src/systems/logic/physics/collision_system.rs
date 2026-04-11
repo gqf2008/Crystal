@@ -48,7 +48,7 @@ impl CollisionSystem {
         pos.y = pos.y.clamp(0.0, (bounds.height - 1) as f32);
     }
 
-    fn is_walkable(cells: &Vec<Vec<crate::resources::map_reader::CellInfo>>, width: i32, height: i32, gx: i32, gy: i32) -> bool {
+    fn is_walkable(cells: &[Vec<crate::resources::map_reader::CellInfo>], width: i32, height: i32, gx: i32, gy: i32) -> bool {
         if gx < 0 || gy < 0 || gx >= width || gy >= height {
             return false;
         }
