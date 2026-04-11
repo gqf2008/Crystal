@@ -1231,7 +1231,9 @@ pub fn get_from_array(
     array_type: LibraryArray,
     index: usize,
 ) -> Option<Rc<RefCell<MLibrary>>> {
-    LIBRARIES.with(|libs| libs.borrow().get_from_array(array_type, index))
+    LIBRARIES.with(|libs| {
+        libs.try_borrow().ok().and_then(|l| l.get_from_array(array_type, index))
+    })
 }
 
 /// 便捷函数: 初始化所有库（包括 MapLibs）
@@ -1255,7 +1257,10 @@ pub fn initialize_all_libraries(data_path: &str) -> std::io::Result<()> {
 
     // 3) 初始化游戏内容数组库（不阻塞；失败仅记录）
     LIBRARIES.with(|libs| {
-        let mut libs = libs.borrow_mut();
+        let Ok(mut libs) = libs.try_borrow_mut() else {
+            tracing::error!("Failed to borrow LIBRARIES for init_game_libraries - recursive call?");
+            return;
+        };
         if let Err(e) = libs.init_game_libraries() {
             tracing::warn!("游戏内容库初始化部分失败: {}", e);
         }
@@ -1284,39 +1289,69 @@ pub fn initialize_all_libraries(data_path: &str) -> std::io::Result<()> {
 
 /// 便捷函数: 初始化数据路径
 pub fn set_data_path(path: impl Into<String>) {
-    LIBRARIES.with(|libs| libs.borrow_mut().set_data_path(path));
+    LIBRARIES.with(|libs| {
+        if let Ok(mut libs) = libs.try_borrow_mut() {
+            libs.set_data_path(path);
+        } else {
+            tracing::error!("Failed to borrow LIBRARIES for set_data_path - recursive call?");
+        }
+    });
 }
 
 /// 便捷函数: 初始化地图库 (MapLibs[0-399])
 pub fn init_map_libraries() -> std::io::Result<()> {
-    LIBRARIES.with(|libs| libs.borrow_mut().init_map_libraries())
+    LIBRARIES.with(|libs| {
+        let mut libs = libs.try_borrow_mut()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LIBRARIES borrow failed in init_map_libraries: {e}")))?;
+        libs.init_map_libraries()
+    })
 }
 
 /// 便捷函数: 加载库
 pub fn load_library(name: LibraryName) -> std::io::Result<()> {
-    LIBRARIES.with(|libs| libs.borrow_mut().load(name))
+    LIBRARIES.with(|libs| {
+        let mut libs = libs.try_borrow_mut()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LIBRARIES borrow failed in load_library: {e}")))?;
+        libs.load(name)
+    })
 }
 
 /// 便捷函数: 加载库（自定义路径）
 pub fn load_library_custom(name: LibraryName, path: impl AsRef<Path>) -> std::io::Result<()> {
-    LIBRARIES.with(|libs| libs.borrow_mut().load_custom(name, path))
+    LIBRARIES.with(|libs| {
+        let mut libs = libs.try_borrow_mut()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LIBRARIES borrow failed in load_library_custom: {e}")))?;
+        libs.load_custom(name, path)
+    })
 }
 
 // get_library 已在上面定义 (第620行附近)
 
 /// 便捷函数: 检查库是否已加载
 pub fn is_library_loaded(name: LibraryName) -> bool {
-    LIBRARIES.with(|libs| libs.borrow().is_loaded(name))
+    LIBRARIES.with(|libs| libs.try_borrow().ok().map(|l| l.is_loaded(name)).unwrap_or(false))
 }
 
 /// 便捷函数: 卸载库
 pub fn unload_library(name: LibraryName) {
-    LIBRARIES.with(|libs| libs.borrow_mut().unload(name));
+    LIBRARIES.with(|libs| {
+        if let Ok(mut libs) = libs.try_borrow_mut() {
+            libs.unload(name);
+        } else {
+            tracing::error!("Failed to borrow LIBRARIES for unload_library({:?})", name);
+        }
+    });
 }
 
 /// 便捷函数: 卸载所有库
 pub fn unload_all_libraries() {
-    LIBRARIES.with(|libs| libs.borrow_mut().unload_all());
+    LIBRARIES.with(|libs| {
+        if let Ok(mut libs) = libs.try_borrow_mut() {
+            libs.unload_all();
+        } else {
+            tracing::error!("Failed to borrow LIBRARIES for unload_all_libraries");
+        }
+    });
 }
 
 /// 批量加载核心游戏库
@@ -1324,7 +1359,8 @@ pub fn unload_all_libraries() {
 /// C# equivalent: Libraries 静态构造函数中的初始化逻辑
 pub fn load_core_libraries() -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
-        let mut libs = libs.borrow_mut();
+        let mut libs = libs.try_borrow_mut()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LIBRARIES borrow failed in load_core_libraries: {e}")))?;
 
         // 计算需要加载的库数量
         let core_libs = vec![
@@ -1377,7 +1413,8 @@ pub fn load_core_libraries() -> std::io::Result<()> {
 /// 包括 UI、魔法、物品、装备等所有库
 pub fn load_all_libraries() -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
-        let mut libs = libs.borrow_mut();
+        let mut libs = libs.try_borrow_mut()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LIBRARIES borrow failed in load_all_libraries: {e}")))?;
 
         let all_libs = vec![
             // UI
@@ -1458,5 +1495,7 @@ pub fn load_all_libraries() -> std::io::Result<()> {
 /// # 返回
 /// - Vec<Rc<RefCell<MLibrary>>>: 所有已加载的 MapLibs
 pub fn get_all_map_libraries() -> Vec<Rc<RefCell<MLibrary>>> {
-    LIBRARIES.with(|libs| libs.borrow().get_all_from_array(LibraryArray::MapLibs))
+    LIBRARIES.with(|libs| {
+        libs.try_borrow().ok().map(|l| l.get_all_from_array(LibraryArray::MapLibs)).unwrap_or_default()
+    })
 }
