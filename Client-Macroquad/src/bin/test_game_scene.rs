@@ -48,7 +48,7 @@ impl MonsterFieldSpawner {
 
         let (map_w, map_h) = {
             let mut q = ctx.world.query::<&MapData>();
-            let Some((_, map)) = q.iter().next() else {
+            let Some(map) = q.iter().next() else {
                 return;
             };
             if map.width <= 0 || map.height <= 0 {
@@ -95,7 +95,7 @@ impl MonsterFieldSpawner {
         let spawn_grids: Vec<(i32, i32)> = {
             let mut grids = Vec::with_capacity(max_spawn.min(32_768));
             let mut q = ctx.world.query::<&MapData>();
-            let Some((_, map)) = q.iter().next() else {
+            let Some(map) = q.iter().next() else {
                 return;
             };
 

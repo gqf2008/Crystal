@@ -35,16 +35,6 @@ impl MonsterAISystem {
         // 首先查找玩家位置
         let player_pos = Self::find_player_position(world);
 
-        // 确保所有 Monster 都有 AIState（最小收敛：怪物决策统一写入 AIState）
-        let missing_ai: Vec<hecs::Entity> = world
-            .query::<&Monster>()
-            .iter()
-            .filter_map(|monster| {
-                let _ = monster;
-                None::<hecs::Entity>
-            })
-            .collect();
-
         // Use world.iter() to get entities for AIState check
         let missing_ai: Vec<hecs::Entity> = world.iter().filter_map(|eref| {
             if eref.get::<&Monster>().is_some() && eref.get::<&AIState>().is_none() {

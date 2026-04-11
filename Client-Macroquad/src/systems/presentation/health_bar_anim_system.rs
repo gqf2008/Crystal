@@ -36,7 +36,7 @@ impl LogicSystem for HealthBarAnimSystem {
         // 2) 平滑下降：displayed 以固定速度向 target 逼近；回血/满血则直接对齐。
         // 速度策略：按 max 血量缩放，保证“看得到动画”但不拖泥带水。
         let dt = dt.max(0.0);
-        for (_m, hp, mut anim) in ctx
+        for (_m, hp, anim) in ctx
             .world
             .query_mut::<(&Monster, &Health, &mut HealthBarAnim)>()
         {

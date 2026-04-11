@@ -92,7 +92,7 @@ impl LogicSystem for SkillSystem {
                 tracing::warn!("⚠️ 尚未学会技能: {}", spell.name());
 
                 // 清除施法输入
-                for (_local, mut input) in ctx
+                for (_local, input) in ctx
                     .world
                     .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
                 {
@@ -106,7 +106,7 @@ impl LogicSystem for SkillSystem {
             // 1.5 检查冷却时间（同时清理已过期条目）
             let on_cooldown = {
                 let mut cd = false;
-                for (_local, mut cooldowns) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>() {
+                for (_local, cooldowns) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>() {
                     cooldowns.cleanup();
                     if cooldowns.is_on_cooldown(spell as u8) {
                         cd = true;
@@ -119,7 +119,7 @@ impl LogicSystem for SkillSystem {
             if on_cooldown {
                 tracing::warn!("⚠️ 技能冷却中: {}", spell.name());
 
-                for (_local, mut input) in ctx
+                for (_local, input) in ctx
                     .world
                     .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
                 {
@@ -147,7 +147,7 @@ impl LogicSystem for SkillSystem {
                 tracing::warn!("⚠️ 魔法值不足,需要 {} MP", mp_cost);
 
                 // 清除施法输入
-                for (_local, mut input) in ctx
+                for (_local, input) in ctx
                     .world
                     .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
                 {
@@ -171,12 +171,12 @@ impl LogicSystem for SkillSystem {
             // });
 
             // 5. 消耗魔法值
-            for (_local, mut mana) in ctx.world.query_mut::<(&LocalPlayer, &mut Mana)>() {
+            for (_local, mana) in ctx.world.query_mut::<(&LocalPlayer, &mut Mana)>() {
                 mana.consume(mp_cost);
             }
 
             // 6. 清除施法输入
-            for (_local, mut input) in ctx
+            for (_local, input) in ctx
                 .world
                 .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
             {
@@ -263,7 +263,7 @@ impl SkillSystem {
         });
 
         // 6. 消耗魔法值
-        for (_local, mut mana) in world.query_mut::<(&LocalPlayer, &mut Mana)>() {
+        for (_local, mana) in world.query_mut::<(&LocalPlayer, &mut Mana)>() {
             mana.consume(mp_cost);
         }
 

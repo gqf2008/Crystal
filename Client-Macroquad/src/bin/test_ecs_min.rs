@@ -107,7 +107,7 @@ async fn main() {
 
         // 同步 camera 的屏幕尺寸（PlayerControlSystem 的 screen_to_world 依赖它）
         let (sw, sh) = (screen_width(), screen_height());
-        for (_, cam) in ctx.world.query_mut::<&mut Camera>() {
+        for cam in ctx.world.query_mut::<&mut Camera>() {
             cam.screen_width = sw;
             cam.screen_height = sh;
         }
@@ -126,12 +126,12 @@ async fn main() {
             .query::<(&Camera, &Position)>()
             .iter()
             .next()
-            .map(|(_, (c, p))| (c.clone(), *p))
+            .map(|(c, p)| (c.clone(), *p))
             .unwrap_or((Camera::new(sw, sh), Position::new(0.0, 0.0)));
 
         // 读取 player
         let mut player_info = None;
-        for (_, (pos, vel, input, player, _local)) in ctx.world.query::<(
+        for (pos, vel, input, player, _local) in ctx.world.query::<(
             &Position,
             &MovementVelocity,
             &PlayerInput,

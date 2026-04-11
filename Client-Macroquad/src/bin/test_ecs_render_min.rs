@@ -92,7 +92,7 @@ impl RenderSystem for DrawProbe {
             .query::<(&Camera, &Position)>()
             .iter()
             .next()
-            .map(|(_, (c, p))| (c.clone(), *p))
+            .map(|(c, p)| (c.clone(), *p))
             .unwrap_or((Camera::new(screen_width(), screen_height()), Position::new(0.0, 0.0)));
 
         // 读取 player
@@ -100,7 +100,7 @@ impl RenderSystem for DrawProbe {
             .query::<(&LocalPlayer, &Position, &MovementVelocity, &PlayerInput, &Player)>()
             .iter()
             .next()
-            .map(|(_, (_lp, pos, vel, input, player))| (*pos, vel.clone(), input.clone(), player.clone()));
+            .map(|(_lp, pos, vel, input, player)| (*pos, vel.clone(), input.clone(), player.clone()));
 
         draw_text(
             "ECS Render(draw) MIN TEST | Scheduler.draw is running | ESC quit",
@@ -199,7 +199,7 @@ async fn main() {
 
         // 同步 camera 的屏幕尺寸（PlayerControlSystem/渲染换算都依赖它）
         let (sw, sh) = (screen_width(), screen_height());
-        for (_, cam) in ctx.world.query_mut::<&mut Camera>() {
+        for cam in ctx.world.query_mut::<&mut Camera>() {
             cam.screen_width = sw;
             cam.screen_height = sh;
         }

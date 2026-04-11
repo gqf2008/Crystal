@@ -256,7 +256,6 @@ impl CombatSystem {
             .unwrap_or(0);
 
         if is_riding {
-            use rand::Rng;
             let mut rng = rand::rng();
             if mount_type < 7 {
                 return Some(rng.random_range(10181..=10183));
@@ -329,7 +328,6 @@ impl CombatSystem {
         attacker_level: u16,
         target_level: u16,
     ) -> CombatResult {
-        use rand::Rng;
         let mut rng = rand::rng();
         
         // 1. 基础伤害 = 随机(最小攻击, 最大攻击)
@@ -374,7 +372,6 @@ impl CombatSystem {
         attacker_level: u16,
         target_level: u16,
     ) -> CombatResult {
-        use rand::Rng;
         let mut rng = rand::rng();
         
         // 1. 基础伤害 = 随机(最小魔攻, 最大魔攻) + 技能威力
@@ -539,7 +536,7 @@ impl CombatSystem {
         }
         
         // 玩家受伤
-        for (_local, mut health) in world.query_mut::<(&LocalPlayer, &mut Health)>() {
+        for (_local, health) in world.query_mut::<(&LocalPlayer, &mut Health)>() {
             let old_hp = health.current;
             health.current = (health.current - damage).max(0);
             

@@ -304,9 +304,8 @@ impl GameScene {
 
         // 5) RenderPass/UiState/ResourceInitState：已在 new() 阶段创建单例。
 
-        // 6) 本地玩家：由网络（真服/MockNetwork）落地；这里仅做“发现并缓存”，避免重复生成。
+        // 6) 本地玩家：由网络（真服/MockNetwork）落地；这里仅做”发现并缓存”，避免重复生成。
         if self.ecs_local_player_entity.is_none() {
-            let mut q = self.ecs_ctx.world.query::<&LocalPlayer>();
             if let Some(e) = self.ecs_ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) {
                 self.ecs_local_player_entity = Some(e);
             }

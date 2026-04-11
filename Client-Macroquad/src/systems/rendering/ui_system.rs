@@ -318,7 +318,6 @@ impl RenderSystem for UIRenderSystem {
         {
             use crate::components::{Health, LocalPlayer, Mana};
 
-            let mut q = ctx.world.query::<(&LocalPlayer, &Health)>();
             if let Some((e, _lp, hp)) = ctx.world.iter().find_map(|e| {
                 let lp = e.get::<&LocalPlayer>()?;
                 let hp = e.get::<&Health>()?;
@@ -339,7 +338,6 @@ impl RenderSystem for UIRenderSystem {
         {
             use crate::components::{CombatStats, Currency, Experience, Inventory, LocalPlayer};
 
-            let mut q = ctx.world.query::<(&LocalPlayer, &CombatStats)>();
             if let Some((e, _lp, stats)) = ctx.world.iter().find_map(|e| {
                 let lp = e.get::<&LocalPlayer>()?;
                 let stats = e.get::<&CombatStats>()?;
@@ -612,7 +610,6 @@ impl RenderSystem for UIRenderSystem {
 
         // 婚姻对话框动作
         {
-            use crate::network::handlers::NetworkEvent as NetEv;
             use crate::scenes::dialogs::game::relationship_dialog::RelationshipDialogAction;
             let rd = self.main_dialog.relationship_dialog_mut();
             let action = rd.take_action();

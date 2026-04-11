@@ -228,7 +228,6 @@ impl NetworkApplySystem {
 
         // 先找本地玩家实体；如果还没创建，则最小创建一个
         let existing = {
-            let mut q = ctx.world.query::<&LocalPlayer>();
             ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
         };
         let local_entity = match existing {
@@ -842,7 +841,6 @@ impl NetworkApplySystem {
     fn find_entity_by_object_id(ctx: &mut GameContext, object_id: u32) -> Option<hecs::Entity> {
         use crate::components::network::NetworkSync;
 
-        let mut q = ctx.world.query::<&NetworkSync>();
         if let Some(e) = ctx.world.iter().find(|e| e.get::<&NetworkSync>().map(|ns| ns.object_id == object_id).unwrap_or(false)) {
             return Some(e.entity());
         }
@@ -1626,7 +1624,6 @@ impl LogicSystem for NetworkApplySystem {
         // 提前计算 local_player_entity（后续 match 中需要用到）
         let local_player_entity = {
             use crate::components::LocalPlayer;
-            let mut q = ctx.world.query::<&LocalPlayer>();
             ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
         };
 
@@ -3045,7 +3042,6 @@ impl LogicSystem for NetworkApplySystem {
 
                     let mut sound_id: Option<i32> = None;
                     if is_riding {
-                        use rand::Rng;
                         let mut rng = rand::rng();
                         if mount_type < 7 {
                             sound_id = Some(rng.random_range(10179..=10180));

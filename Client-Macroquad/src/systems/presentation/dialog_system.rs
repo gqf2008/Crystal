@@ -182,6 +182,7 @@ impl DialogSystem {
                 }
                 NetworkEvent::GuildNoticeUpdated { notice } => {
                     cmds.push(UiCommand::PushSystemChatLine(format!("行会公告已更新：{}", notice)));
+                    cmds.push(UiCommand::GuildNoticeUpdated { notice: notice.clone() });
                 }
                 NetworkEvent::MentorRequested2 => {
                     cmds.push(UiCommand::PushSystemChatLine("收到拜师请求".to_string()));
@@ -335,9 +336,6 @@ impl DialogSystem {
                         rank: format!("Rank {}", rank),
                         online: *online,
                     });
-                }
-                NetworkEvent::GuildNoticeUpdated { notice } => {
-                    cmds.push(UiCommand::GuildNoticeUpdated { notice: notice.clone() });
                 }
                 NetworkEvent::GuildExpGained { amount } => {
                     cmds.push(UiCommand::GuildExpGained { amount: *amount });

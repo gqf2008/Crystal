@@ -796,8 +796,7 @@ impl LogicSystem for PlayerControlSystem {
         
         // 更新本地玩家输入和动作状态
         use crate::components::AttackState;
-        use crate::components::PlayerAction;
-        
+
         // 先收集所有有AttackState的实体
         let attacking_entities: std::collections::HashSet<_> = ctx.world
             .iter()
@@ -807,7 +806,7 @@ impl LogicSystem for PlayerControlSystem {
         // There is only one local player. Find it and process.
         if let Some(entity) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) {
             if !attacking_entities.contains(&entity) {
-                if let Ok((mut player_input, mut player, pos, mut path, velocity)) =
+                if let Ok((player_input, player, pos, _path, velocity)) =
                     ctx.world.query_one_mut::<(&mut PlayerInput, &mut Player, &Position, &mut crate::components::movement::Path, &MovementVelocity)>(entity)
                 {
             // 🎯 优先处理单击

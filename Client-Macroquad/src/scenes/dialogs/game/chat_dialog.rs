@@ -43,7 +43,7 @@ impl ChatMessage {
     ///   [坐标:x,y] -> 绿色文字，点击触发自动寻路
     ///   :smile: -> 表情符号
     /// 返回渲染的文本宽度
-    fn draw_with_markup(&self, x: f32, y: f32, font_size: f32, mouse_pos: Vec2, line_rect: Rect) -> f32 {
+    fn draw_with_markup(&self, x: f32, y: f32, font_size: f32, mouse_pos: Vec2, _line_rect: Rect) -> f32 {
         let mut cursor_x = x;
         let text = &self.text;
         let mut chars = text.chars().peekable();

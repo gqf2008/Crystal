@@ -135,14 +135,6 @@ impl LogicSystem for MovementSystem {
         // 每秒最多转向几步（8向），做一点“转身缓冲”让方向更自然
         let turn_steps = (delay_time * 12.0).ceil() as i32;
 
-        // 先收集所有正在攻击的实体，避免在 query_mut 循环中再次借用 world。
-        let attacking_entities: HashSet<_> = ctx
-            .world
-            .query::<&crate::components::AttackState>()
-            .iter()
-            .filter_map(|_| None::<hecs::Entity>)
-            .collect();
-
         // Collect attacking entities with entity IDs
         let attacking_entities: HashSet<_> = ctx.world.iter().filter_map(|eref| {
             if eref.get::<&crate::components::AttackState>().is_some() {

@@ -62,7 +62,7 @@ impl AnimationSystem {
         let now = Instant::now();
 
         // 更新所有角色的动画帧
-        for (player, mount_state, attack_state, death_state, mut anim_frame) in ctx
+        for (player, mount_state, attack_state, death_state, anim_frame) in ctx
             .world
             .query_mut::<(
                 &Player,
@@ -279,7 +279,7 @@ impl AnimationSystem {
     pub fn update_library_sprite_animations(&mut self, ctx: &mut GameContext) -> GameResult {
         use crate::components::{LibrarySprite, Monster, MonsterAnimState};
 
-        for (monster, state, mut spr) in ctx
+        for (monster, state, spr) in ctx
             .world
             .query_mut::<(&Monster, &MonsterAnimState, &mut LibrarySprite)>()
         {

@@ -59,7 +59,7 @@ impl LogicSystem for HealthRegenSystem {
         }
 
         // 2. 处理Buff效果 (过期清理和DoT伤害)
-        for (mut health, buff_list) in ctx.world.query_mut::<(&mut Health, &mut BuffList)>() {
+        for (health, buff_list) in ctx.world.query_mut::<(&mut Health, &mut BuffList)>() {
             if health.current <= 0 {
                 continue;
             }
