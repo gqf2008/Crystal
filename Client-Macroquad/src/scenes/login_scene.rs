@@ -157,9 +157,7 @@ impl LoginScene {
     }
 
     fn pump_network(&mut self) -> Option<Vec<mir2_shared::SelectInfo>> {
-        let Some(net) = self.net.as_ref() else {
-            return None;
-        };
+        let net = self.net.as_ref()?;
 
         let events = net.recv_all();
         if events.is_empty() {

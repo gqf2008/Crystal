@@ -19,6 +19,17 @@ pub struct NetContext {
     inbound: Receiver<NetworkEvent>,
 }
 
+impl Default for NetContext {
+    fn default() -> Self {
+        use crossbeam_channel::unbounded;
+        let (tx, rx) = unbounded();
+        Self {
+            outbound: tx,
+            inbound: rx,
+        }
+    }
+}
+
 impl NetContext {
     /// 创建空的 NetContext (用于测试/占位)
     /// 

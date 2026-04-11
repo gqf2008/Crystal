@@ -1302,7 +1302,7 @@ pub fn set_data_path(path: impl Into<String>) {
 pub fn init_map_libraries() -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
         let mut libs = libs.try_borrow_mut()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LIBRARIES borrow failed in init_map_libraries: {e}")))?;
+            .map_err(|e| std::io::Error::other(format!("LIBRARIES borrow failed in init_map_libraries: {e}")))?;
         libs.init_map_libraries()
     })
 }
@@ -1311,7 +1311,7 @@ pub fn init_map_libraries() -> std::io::Result<()> {
 pub fn load_library(name: LibraryName) -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
         let mut libs = libs.try_borrow_mut()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LIBRARIES borrow failed in load_library: {e}")))?;
+            .map_err(|e| std::io::Error::other(format!("LIBRARIES borrow failed in load_library: {e}")))?;
         libs.load(name)
     })
 }
@@ -1320,7 +1320,7 @@ pub fn load_library(name: LibraryName) -> std::io::Result<()> {
 pub fn load_library_custom(name: LibraryName, path: impl AsRef<Path>) -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
         let mut libs = libs.try_borrow_mut()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LIBRARIES borrow failed in load_library_custom: {e}")))?;
+            .map_err(|e| std::io::Error::other(format!("LIBRARIES borrow failed in load_library_custom: {e}")))?;
         libs.load_custom(name, path)
     })
 }
@@ -1360,7 +1360,7 @@ pub fn unload_all_libraries() {
 pub fn load_core_libraries() -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
         let mut libs = libs.try_borrow_mut()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LIBRARIES borrow failed in load_core_libraries: {e}")))?;
+            .map_err(|e| std::io::Error::other(format!("LIBRARIES borrow failed in load_core_libraries: {e}")))?;
 
         // 计算需要加载的库数量
         let core_libs = vec![
@@ -1414,7 +1414,7 @@ pub fn load_core_libraries() -> std::io::Result<()> {
 pub fn load_all_libraries() -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
         let mut libs = libs.try_borrow_mut()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("LIBRARIES borrow failed in load_all_libraries: {e}")))?;
+            .map_err(|e| std::io::Error::other(format!("LIBRARIES borrow failed in load_all_libraries: {e}")))?;
 
         let all_libs = vec![
             // UI

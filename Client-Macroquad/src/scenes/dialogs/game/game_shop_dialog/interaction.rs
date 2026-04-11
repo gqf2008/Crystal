@@ -257,34 +257,25 @@ impl GameShopDialogHybrid {
             let mouse = ui_mouse_pos();
             
             // 提示框内容
-            let lines = vec![
-                item.name.clone(),
-                item.description.clone(),
-                String::new(),  // 空行
-                format!("分类: {:?}", item.category),
-                if item.price_gold > 0 {
-                    format!("金币: {}", item.price_gold)
-                } else {
-                    String::new()
-                },
-                if item.price_ingot > 0 {
-                    format!("元宝: {}", item.price_ingot)
-                } else {
-                    String::new()
-                },
-                if item.count > 1 {
-                    format!("数量: {}", item.count)
-                } else {
-                    String::new()
-                },
-                if item.stock > 0 {
-                    format!("库存: {}", item.stock)
-                } else if item.stock == 0 {
-                    "库存: ∞".to_string()
-                } else {
-                    String::new()
-                },
-            ];
+            let mut lines = Vec::new();
+            lines.push(item.name.clone());
+            lines.push(item.description.clone());
+            lines.push(String::new()); // 空行
+            lines.push(format!("分类: {:?}", item.category));
+            if item.price_gold > 0 {
+                lines.push(format!("金币: {}", item.price_gold));
+            }
+            if item.price_ingot > 0 {
+                lines.push(format!("元宝: {}", item.price_ingot));
+            }
+            if item.count > 1 {
+                lines.push(format!("数量: {}", item.count));
+            }
+            if item.stock > 0 {
+                lines.push(format!("库存: {}", item.stock));
+            } else if item.stock == 0 {
+                lines.push("库存: ∞".to_string());
+            }
             
             // 过滤空行并计算尺寸
             let valid_lines: Vec<&String> = lines.iter().filter(|s| !s.is_empty()).collect();

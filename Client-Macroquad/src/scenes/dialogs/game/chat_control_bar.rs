@@ -302,10 +302,8 @@ impl ChatControlBarHybrid {
         let is_pressed = is_hovered && is_mouse_button_down(MouseButton::Left);
 
         // 根据状态选择纹理索引
-        let texture_idx = if is_selected {
-            base_index + 2 // 已选中状态
-        } else if is_pressed {
-            base_index + 2 // 按下状态
+        let texture_idx = if is_selected || is_pressed {
+            base_index + 2 // 已选中/按下状态
         } else if is_hovered {
             base_index + 1 // 悬停状态
         } else {

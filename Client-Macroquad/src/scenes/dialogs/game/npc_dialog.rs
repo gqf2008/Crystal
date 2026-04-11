@@ -294,7 +294,7 @@ impl NpcDialogHybrid {
     fn big_panel_row_count(&self) -> usize {
         let minimum_buttons = if self.lines.is_empty() { 4 } else { 0 };
         let count = minimum_buttons.max(self.big_buttons.len());
-        count.min(Self::BIG_MAX_ROWS).max(1)
+        count.clamp(1, Self::BIG_MAX_ROWS)
     }
 
     fn big_visible_buttons(&self) -> usize {

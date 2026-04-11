@@ -310,7 +310,6 @@ impl DebugSystem {
             .query::<&RenderConfig>()
             .iter()
             .next()
-            .map(|c| c)
             .cloned()
             .unwrap_or_default();
 
@@ -344,7 +343,7 @@ impl DebugSystem {
         // 可选：根据 MapData clamp 范围，并用于障碍物查询
         // 注意：QueryBorrow 需要绑定到局部变量，避免临时值提前释放。
         let mut map_q = world.query::<&MapData>();
-        let map_data = map_q.iter().next().map(|m| m);
+        let map_data = map_q.iter().next();
         if let Some(m) = map_data {
             start_x = start_x.min(m.width.saturating_sub(1));
             end_x = end_x.min(m.width.saturating_sub(1));

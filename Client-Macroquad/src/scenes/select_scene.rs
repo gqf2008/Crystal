@@ -179,9 +179,7 @@ impl SelectScene {
 
     fn pump_network_for_start_game(&mut self) -> Option<SceneTransition> {
         // 临时取走 net，避免在持有 `&NetContext` 时又去 `&mut self` 触发借用冲突。
-        let Some(net) = self.net.take() else {
-            return None;
-        };
+        let net = self.net.take()?;
 
         // 重要：这里不能用 recv_all() 把队列一次性“清空”。
         // 真服通常会在 StartGame 成功后紧跟发送 UserInformation/MapInformation/Object* 等关键数据。
