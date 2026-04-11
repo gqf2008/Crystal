@@ -61,7 +61,7 @@ impl CollisionSystem {
     }
 
     fn nearest_walkable(
-        cells: &Vec<Vec<crate::resources::map_reader::CellInfo>>,
+        cells: &[Vec<crate::resources::map_reader::CellInfo>],
         width: i32,
         height: i32,
         target: (i32, i32),
