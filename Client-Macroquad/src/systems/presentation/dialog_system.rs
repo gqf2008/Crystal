@@ -399,8 +399,9 @@ impl DialogSystem {
                 NetworkEvent::GuildStorageGoldChanged { delta } => {
                     cmds.push(UiCommand::PushSystemChatLine(format!("行会资金 {}", if *delta >= 0 { format!("+{}", delta) } else { format!("{}", delta) })));
                 }
-                NetworkEvent::GuildStorageItemChanged => {
-                    cmds.push(UiCommand::PushSystemChatLine("行会仓库物品变动".to_string()));
+                NetworkEvent::GuildStorageItemChanged { change_type, slot } => {
+                    let action = if *change_type == 0 { "存入" } else { "取出" };
+                    cmds.push(UiCommand::PushSystemChatLine(format!("行会仓库物品{}: 槽位{}", action, slot)));
                 }
                 NetworkEvent::GuildStorageListReceived => {
                     cmds.push(UiCommand::PushSystemChatLine("行会仓库列表已更新".to_string()));
@@ -411,8 +412,8 @@ impl DialogSystem {
                 NetworkEvent::GuildTerritoryPurchased => {
                     cmds.push(UiCommand::PushSystemChatLine("行会领地购买成功".to_string()));
                 }
-                NetworkEvent::GuildBuffListReceived => {
-                    cmds.push(UiCommand::PushSystemChatLine("行会Buff列表已更新".to_string()));
+                NetworkEvent::GuildBuffListReceived { buff_ids } => {
+                    cmds.push(UiCommand::PushSystemChatLine(format!("行会Buff列表已更新: {} 个", buff_ids.len())));
                 }
                 // NPC 市场/寄售事件
                 NetworkEvent::NPCMarketEvent => {

@@ -504,10 +504,10 @@ pub enum NetworkEvent {
     GuildExpGained { amount: i64 },
     GuildNameReceived { name: String },
     GuildStorageGoldChanged { delta: i64 },
-    GuildStorageItemChanged,
+    GuildStorageItemChanged { change_type: u8, slot: i32 },
     GuildStorageListReceived,
     GuildWarRequested,
-    GuildBuffListReceived,
+    GuildBuffListReceived { buff_ids: Vec<i32> },
     GuildTerritoryPageReceived,
     GuildTerritoryPurchased,
 

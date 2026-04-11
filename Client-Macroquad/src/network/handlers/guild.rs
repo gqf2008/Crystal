@@ -26,12 +26,11 @@ impl PacketHandler for GuildHandler {
 
             // GuildStatus (joined)
             x if x == ServerPacketIds::GuildStatus as u16 => {
-                if let Ok(_packet) = server::GuildStatus::read_body(&mut cursor) {
-                    // GuildStatus包结构需要进一步检查
+                if let Ok(packet) = server::GuildStatus::read_body(&mut cursor) {
                     events.push(NetworkEvent::GuildJoined {
-                        guild_name: String::new(),
+                        guild_name: packet.guild_name.clone(),
                     });
-                    tracing::info!("🏛️ Guild status updated");
+                    tracing::info!("🏛️ Guild status updated: {} ({})", packet.guild_name, packet.rank_name);
                 }
             }
 
@@ -89,9 +88,12 @@ impl PacketHandler for GuildHandler {
 
             // GuildStorageItemChange
             x if x == ServerPacketIds::GuildStorageItemChange as u16 => {
-                if let Ok(_packet) = server::GuildStorageItemChange::read_body(&mut cursor) {
-                    events.push(NetworkEvent::GuildStorageItemChanged);
-                    tracing::info!("🏛️ Guild storage item changed");
+                if let Ok(packet) = server::GuildStorageItemChange::read_body(&mut cursor) {
+                    events.push(NetworkEvent::GuildStorageItemChanged {
+                        change_type: packet.change_type,
+                        slot: packet.slot,
+                    });
+                    tracing::info!("🏛️ Guild storage item changed: type={} slot={}", packet.change_type, packet.slot);
                 }
             }
 
@@ -113,9 +115,9 @@ impl PacketHandler for GuildHandler {
 
             // GuildBuffList
             x if x == ServerPacketIds::GuildBuffList as u16 => {
-                if let Ok(_packet) = server::GuildBuffList::read_body(&mut cursor) {
-                    events.push(NetworkEvent::GuildBuffListReceived);
-                    tracing::info!("🏛️ Guild buff list received");
+                if let Ok(packet) = server::GuildBuffList::read_body(&mut cursor) {
+                    events.push(NetworkEvent::GuildBuffListReceived { buff_ids: packet.active_buffs.clone() });
+                    tracing::info!("🏛️ Guild buff list received: {} buffs", packet.active_buffs.len());
                 }
             }
 

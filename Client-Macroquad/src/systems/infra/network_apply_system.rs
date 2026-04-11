@@ -2238,8 +2238,8 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::GuildStorageGoldChanged { delta } => {
                     tracing::trace!("🏰 Guild storage gold changed: {}", delta);
                 }
-                NetworkEvent::GuildStorageItemChanged => {
-                    tracing::trace!("🏰 Guild storage item changed");
+                NetworkEvent::GuildStorageItemChanged { change_type, slot } => {
+                    tracing::trace!("🏰 Guild storage item changed: type={} slot={}", change_type, slot);
                 }
                 NetworkEvent::GuildStorageListReceived => {
                     tracing::trace!("🏰 Guild storage list received");
@@ -2247,8 +2247,8 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::GuildWarRequested => {
                     tracing::trace!("🏰 Guild war requested");
                 }
-                NetworkEvent::GuildBuffListReceived => {
-                    tracing::trace!("🏰 Guild buff list received");
+                NetworkEvent::GuildBuffListReceived { buff_ids } => {
+                    tracing::trace!("🏰 Guild buff list received: {} buffs", buff_ids.len());
                 }
                 NetworkEvent::GuildTerritoryPageReceived => {
                     tracing::trace!("🏰 Guild territory page received");
