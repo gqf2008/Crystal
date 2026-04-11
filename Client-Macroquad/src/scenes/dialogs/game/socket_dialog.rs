@@ -44,7 +44,7 @@ pub struct SocketDialogHybrid {
     bg_texture: Option<Texture2D>,
     close_texture: Option<Texture2D>,
     gem_texture: Option<Texture2D>,
-    empty_socket_texture: Option<Texture2D>,
+    _empty_socket_texture: Option<Texture2D>,
 }
 
 impl SocketDialogHybrid {
@@ -65,7 +65,7 @@ impl SocketDialogHybrid {
             bg_texture: None,
             close_texture: None,
             gem_texture: None,
-            empty_socket_texture: None,
+            _empty_socket_texture: None,
         }
     }
 

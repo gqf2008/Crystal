@@ -118,7 +118,7 @@ impl CreditsDialog {
         self.visible
     }
 
-    pub fn open(&mut self) {
+    pub fn _open(&mut self) {
         self.visible = true;
     }
 

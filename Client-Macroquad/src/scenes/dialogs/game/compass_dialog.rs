@@ -64,7 +64,7 @@ pub struct CompassDialogHybrid {
     drag_helper: DragHelper,
     // 纹理
     bg_texture: Option<Texture2D>,
-    needle_texture: Option<Texture2D>,
+    _needle_texture: Option<Texture2D>,
 }
 
 impl CompassDialogHybrid {
@@ -76,7 +76,7 @@ impl CompassDialogHybrid {
             direction: CompassDirection::North,
             drag_helper: DragHelper::new(),
             bg_texture: None,
-            needle_texture: None,
+            _needle_texture: None,
         }
     }
 
