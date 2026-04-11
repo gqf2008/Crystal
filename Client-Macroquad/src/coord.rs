@@ -366,7 +366,7 @@ mod tests {
         
         // 应该点击到玩家脚下
         assert_eq!(gx, 100);
-        assert_eq!(gy, 11); // 注意: 屏幕坐标 352 对应格子 11，不是 100
+        assert_eq!(gy, 100);
     }
 }
 

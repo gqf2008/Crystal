@@ -70,6 +70,7 @@ mod tests {
     #[test]
     fn test_connection_handler_creation() {
         let handler = ConnectionHandler;
-        assert!(handler.handle(&PacketHeader::new(4, 0x0001), &[]).len() > 0);
+        // opcode 0x0001 = ClientVersion, needs 1-byte payload (result)
+        assert!(handler.handle(&PacketHeader::new(5, 0x0001), &[1]).len() > 0);
     }
 }

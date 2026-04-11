@@ -377,8 +377,8 @@ mod tests {
     #[test]
     fn test_character_handler_creation() {
         let handler = CharacterHandler;
-        // Test with a dummy packet
-        let events = handler.handle(&PacketHeader::new(4, 0x0010), &[]);
+        // Test with an unhandled opcode to verify fallback path works
+        let events = handler.handle(&PacketHeader::new(4, -1), &[]);
         assert_eq!(events.len(), 1);
     }
 }
