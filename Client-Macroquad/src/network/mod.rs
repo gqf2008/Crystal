@@ -77,12 +77,11 @@ fn parse_hex_16_bytes(value: &str) -> Option<[u8; 16]> {
 	}
 
 	let mut out = [0u8; 16];
-	for i in 0..16 {
-		let hi = hex.as_bytes()[i * 2];
-		let lo = hex.as_bytes()[i * 2 + 1];
-		let pair = [hi, lo];
+	for (i, chunk) in out.iter_mut().enumerate() {
+		let bytes = hex.as_bytes();
+		let pair = [bytes[i * 2], bytes[i * 2 + 1]];
 		let byte_str = std::str::from_utf8(&pair).ok()?;
-		out[i] = u8::from_str_radix(byte_str, 16).ok()?;
+		*chunk = u8::from_str_radix(byte_str, 16).ok()?;
 	}
 	Some(out)
 }

@@ -490,7 +490,7 @@ impl CharacterDialogHybrid {
             root_ui().push_skin(skin);
         }
         
-        for i in 0..14 {
+        for (i, _slot) in equip_snapshot.iter().enumerate().take(14) {
             let rect = self.get_equip_slot_rect(i);
             let has_item = equip_snapshot[i].is_some();
             let slot_id = hash!("char_equip_slot", i);

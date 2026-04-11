@@ -480,7 +480,7 @@ impl BeltDialogHybrid {
             root_ui().push_skin(skin);
         }
         
-        for i in 0..6 {
+        for (i, _cell) in cells_snapshot.iter().enumerate().take(6) {
             let rect = self.get_cell_rect(i);
             let has_item = cells_snapshot[i].is_some();
             let slot_id = hash!("belt_hybrid_slot", i);

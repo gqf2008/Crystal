@@ -311,17 +311,13 @@ impl NpcDialogHybrid {
             }
 
             // 循环找出所有 << >>
-            loop {
-                let Some(start) = line.find("<<") else { break };
-                let Some(end) = line[start + 2..].find(">>").map(|i| i + start + 2) else { break };
-
+            while let (Some(start), Some(end)) = (line.find("<<"), line.find(">>").map(|i| i + 2)) {
                 let inner = line[start + 2..end].to_string();
                 if let Some(btn) = Self::parse_big_button_inner(&inner) {
                     buttons.push(btn);
                 }
-
                 // 移除 <<...>>
-                line.replace_range(start..end + 2, "");
+                line.replace_range(start..end, "");
             }
 
             *line = line.trim().to_string();

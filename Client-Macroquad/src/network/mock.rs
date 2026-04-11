@@ -281,15 +281,14 @@ impl MockWorldState {
     fn new(cfg: MockRuntimeConfig) -> Self {
         let now = Instant::now();
         let inventory_capacity: usize = 46;
-        let mut characters = Vec::new();
-        characters.push(SelectInfo {
+        let characters = vec![SelectInfo {
             index: 0,
             name: "Hero".to_string(),
             level: 1,
             class: MirClass::Warrior,
             gender: MirGender::Male,
             last_access: Utc::now(),
-        });
+        }];
 
         // Map rotation list: keep small & stable to avoid unexpected missing assets.
         // Ensure the configured start_map is included as the first entry.
