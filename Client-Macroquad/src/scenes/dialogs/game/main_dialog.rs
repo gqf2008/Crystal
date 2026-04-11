@@ -157,6 +157,9 @@ pub struct MainDialog {
     menu_dialog_open: bool,
     minimap_dialog_open: bool,
 
+    /// 待处理的安全下线请求（由 ui_system 消费）
+    pending_logout_request: bool,
+
     /// 对话框 z-order 列表（从后到前，最后一个在最上层）
     dialog_z_order: Vec<DialogType>,
 
@@ -299,6 +302,7 @@ impl MainDialog {
             game_shop_dialog_open: false,
             menu_dialog_open: false,
             minimap_dialog_open: true,
+            pending_logout_request: false,
 
             // 对话框 z-order（从后到前）
             dialog_z_order: vec![
@@ -1717,7 +1721,8 @@ impl MainDialog {
                 std::process::exit(0);
             }
             MenuAction::Logout => {
-                println!("🚪 安全下线");
+                self.pending_logout_request = true;
+                self.push_system_chat_line("正在安全下线...".to_string());
             }
             MenuAction::Help => {
                 println!("❓ 显示帮助");
@@ -2194,5 +2199,10 @@ impl MainDialog {
     /// 获取宝石镶嵌对话框的可变引用
     pub fn socket_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::socket_dialog::SocketDialogHybrid {
         &mut self.socket_dialog
+    }
+
+    /// 取出待处理的安全下线请求
+    pub fn take_pending_logout(&mut self) -> bool {
+        std::mem::replace(&mut self.pending_logout_request, false)
     }
 }

@@ -729,6 +729,34 @@ impl RenderSystem for UIRenderSystem {
             }
         }
 
+        // 宝石镶嵌对话框动作
+        {
+            use crate::scenes::dialogs::game::socket_dialog::SocketAction;
+            let sd = self.main_dialog.socket_dialog_mut();
+            let action = sd.take_action();
+            match action {
+                SocketAction::InsertGem(idx) => {
+                    tracing::debug!("💎 插入宝石: 孔位={}", idx);
+                }
+                SocketAction::RemoveGem(idx) => {
+                    tracing::debug!("💎 取出宝石: 孔位={}", idx);
+                }
+                SocketAction::Close => {
+                    // 本地关闭，无需发包
+                }
+                SocketAction::None => {}
+            }
+        }
+
+        // 安全下线请求
+        if self.main_dialog.take_pending_logout() {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            if let Some(net) = ctx.net.as_ref() {
+                let _ = net.send(NetEv::LogOutRequest);
+            }
+            tracing::info!("🚪 安全下线请求已发送");
+        }
+
         // 交易对话框动作（由 draw 阶段产出，在此发包）
         if let Some(action) = self.pending_trade_action.take() {
             use crate::network::handlers::NetworkEvent as NetEv;
