@@ -435,7 +435,7 @@ pub fn get_from_array(
 /// 获取地图库（快捷方式）
 #[inline]
 pub fn get_map_library(index: i16) -> Option<Rc<RefCell<MLibrary>>> {
-    if index < 0 || index >= 400 {
+    if !(0..400).contains(&index) {
         return None;
     }
     get_from_array(LibraryArray::MapLibs, index as usize)
@@ -464,7 +464,7 @@ pub fn get_map_library(index: i16) -> Option<Rc<RefCell<MLibrary>>> {
 /// ```
 #[inline]
 pub fn get_map_texture(file_index: i16, image_index: i32) -> Option<ImageInfo> {
-    if file_index < 0 || file_index >= 400 {
+    if !(0..400).contains(&file_index) {
         return None;
     }
     
@@ -516,7 +516,7 @@ pub fn get_map_texture(file_index: i16, image_index: i32) -> Option<ImageInfo> {
 /// ```
 #[inline]
 pub fn get_map_size(file_index: i16, image_index: i32) -> Option<(i16, i16)> {
-    if file_index < 0 || file_index >= 400 {
+    if !(0..400).contains(&file_index) {
         return None;
     }
     

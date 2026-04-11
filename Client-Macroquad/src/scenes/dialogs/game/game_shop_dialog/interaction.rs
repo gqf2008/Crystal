@@ -219,7 +219,7 @@ impl GameShopDialogHybrid {
             }
         }
         
-        if let Some(_) = &self.transparent_skin {
+        if self.transparent_skin.is_some() {
             ui::root_ui().pop_skin();
         }
     }

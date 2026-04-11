@@ -137,6 +137,12 @@ pub struct NpcGoodsDialogHybrid {
     pending_action: Option<NpcGoodsDialogAction>,
 }
 
+impl Default for NpcGoodsDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NpcGoodsDialogHybrid {
     // 布局参数（与 C# 原版一致）
     const DEFAULT_POS_X: f32 = 0.0;
@@ -211,9 +217,9 @@ impl NpcGoodsDialogHybrid {
             scroll_down_btn: ButtonTextures::load_from_library(LibraryName::Prguse2, 207),
             scroll_bar_btn: ButtonTextures::load_from_indices(LibraryName::Prguse2, [205, 206, 206]),
 
-            title_label: LibraryName::Title.get_texture(27).map(|i| i.image).flatten(),
-            title_label_craft: LibraryName::Title.get_texture(12).map(|i| i.image).flatten(),
-            new_icon: LibraryName::Prguse.get_texture(550).map(|i| i.image).flatten(),
+            title_label: LibraryName::Title.get_texture(27).and_then(|i| i.image),
+            title_label_craft: LibraryName::Title.get_texture(12).and_then(|i| i.image),
+            new_icon: LibraryName::Prguse.get_texture(550).and_then(|i| i.image),
 
             hover: None,
 
@@ -335,12 +341,11 @@ impl NpcGoodsDialogHybrid {
 
     /// 添加出售物品（用于拖拽添加）
     pub fn add_sell_item(&mut self, item: UserItem) {
-        if self.dialog_mode == NpcGoodsMode::Sell {
-            if !self.display_goods.iter().any(|x| x.unique_id == item.unique_id) {
+        if self.dialog_mode == NpcGoodsMode::Sell
+            && !self.display_goods.iter().any(|x| x.unique_id == item.unique_id) {
                 self.inventory_goods.push(item.clone());
                 self.display_goods.push(item);
             }
-        }
     }
 
     fn add_goods(&mut self, list: Vec<UserItem>) {

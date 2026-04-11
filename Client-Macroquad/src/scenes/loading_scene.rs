@@ -6,6 +6,12 @@ use macroquad::prelude::*;
 
 pub struct LoadingScene;
 
+impl Default for LoadingScene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoadingScene {
     pub fn new() -> Self { Self }
 }

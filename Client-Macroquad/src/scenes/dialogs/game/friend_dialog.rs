@@ -52,6 +52,12 @@ pub struct FriendDialogHybrid {
     last_click_idx: Option<usize>,
 }
 
+impl Default for FriendDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FriendDialogHybrid {
     const FRIEND_START_Y: f32 = 40.0;
     const FRIEND_ITEM_H: f32 = 20.0;

@@ -111,6 +111,7 @@ impl Inventory {
 
 /// 装备栏组件
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct Equipment {
     pub weapon: Option<mir2_shared::data::item::UserItem>,       // 武器
     pub armour: Option<mir2_shared::data::item::UserItem>,       // 衣服
@@ -128,26 +129,6 @@ pub struct Equipment {
     pub mount: Option<mir2_shared::data::item::UserItem>,        // 坐骑
 }
 
-impl Default for Equipment {
-    fn default() -> Self {
-        Self {
-            weapon: None,
-            armour: None,
-            helmet: None,
-            necklace: None,
-            bracelet_l: None,
-            bracelet_r: None,
-            ring_l: None,
-            ring_r: None,
-            amulet: None,
-            belt: None,
-            boots: None,
-            stone: None,
-            torch: None,
-            mount: None,
-        }
-    }
-}
 
 impl Equipment {
     pub fn new() -> Self {

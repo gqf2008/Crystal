@@ -14,10 +14,8 @@ pub async fn init_chinese_font() {
         Some(font)
     } else if let Ok(font) = load_ttf_font("assets/fonts/Chinese.ttc").await {
         Some(font)
-    } else if let Ok(font) = load_ttf_font("C:\\Windows\\Fonts\\msyh.ttc").await {
-        Some(font)
     } else {
-        None
+        load_ttf_font("C:\\Windows\\Fonts\\msyh.ttc").await.ok()
     };
     
     if font.is_some() {

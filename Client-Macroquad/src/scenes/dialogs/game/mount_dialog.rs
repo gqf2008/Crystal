@@ -49,6 +49,12 @@ pub struct MountDialogHybrid {
     local_object_id: u32,
 }
 
+impl Default for MountDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MountDialogHybrid {
     const MOUNT_START_Y: f32 = 50.0;
     const MOUNT_ITEM_H: f32 = 22.0;

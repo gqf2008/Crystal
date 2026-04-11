@@ -69,6 +69,12 @@ pub struct FishingDialogHybrid {
     pending_autocast_toggle: Option<bool>,
 }
 
+impl Default for FishingDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FishingDialogHybrid {
     pub fn new() -> Self {
         Self {

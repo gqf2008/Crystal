@@ -94,11 +94,10 @@ impl LoginScene {
         if self.na_email.len() > 50 {
             return false;
         }
-        if !self.na_birth_date.trim().is_empty() {
-            if Self::parse_birth_date_to_dotnet_binary(&self.na_birth_date).is_none() {
+        if !self.na_birth_date.trim().is_empty()
+            && Self::parse_birth_date_to_dotnet_binary(&self.na_birth_date).is_none() {
                 return false;
             }
-        }
 
         true
     }
@@ -241,11 +240,10 @@ impl LoginScene {
             };
         }
 
-        if is_key_pressed(KeyCode::Enter) {
-            if self.can_submit_new_account() {
+        if is_key_pressed(KeyCode::Enter)
+            && self.can_submit_new_account() {
                 self.submit_new_account();
             }
-        }
     }
 
     pub(super) fn draw_new_account_dialog(&mut self) {

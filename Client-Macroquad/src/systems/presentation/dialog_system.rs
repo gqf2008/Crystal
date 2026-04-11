@@ -14,6 +14,12 @@ use mir2_shared::enums::PanelType;
 pub struct DialogSystem {
 }
 
+impl Default for DialogSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DialogSystem {
     pub fn new() -> Self {
         Self {}

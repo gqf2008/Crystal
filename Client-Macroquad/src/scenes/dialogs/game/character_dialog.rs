@@ -692,9 +692,9 @@ impl CharacterDialogHybrid {
         }
         
         // 如果没有任何装备有外观，显示一个占位符
-        let has_any_visual = self.equipment[0].as_ref().map_or(false, |e| e.state_image > 0)
-            || self.equipment[1].as_ref().map_or(false, |e| e.state_image > 0)
-            || self.equipment[2].as_ref().map_or(false, |e| e.state_image > 0);
+        let has_any_visual = self.equipment[0].as_ref().is_some_and(|e| e.state_image > 0)
+            || self.equipment[1].as_ref().is_some_and(|e| e.state_image > 0)
+            || self.equipment[2].as_ref().is_some_and(|e| e.state_image > 0);
         
         if !has_any_visual {
             // 绘制简单的人物轮廓占位符

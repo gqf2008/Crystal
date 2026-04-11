@@ -660,14 +660,14 @@ impl CombatSystem {
         
         // 8方向划分（每方向45度）
         match angle_deg {
-            a if a >= -22.5 && a < 22.5 => MirDirection::Right,
-            a if a >= 22.5 && a < 67.5 => MirDirection::DownRight,
-            a if a >= 67.5 && a < 112.5 => MirDirection::Down,
-            a if a >= 112.5 && a < 157.5 => MirDirection::DownLeft,
-            a if a >= 157.5 || a < -157.5 => MirDirection::Left,
-            a if a >= -157.5 && a < -112.5 => MirDirection::UpLeft,
-            a if a >= -112.5 && a < -67.5 => MirDirection::Up,
-            a if a >= -67.5 && a < -22.5 => MirDirection::UpRight,
+            a if (-22.5..22.5).contains(&a) => MirDirection::Right,
+            a if (22.5..67.5).contains(&a) => MirDirection::DownRight,
+            a if (67.5..112.5).contains(&a) => MirDirection::Down,
+            a if (112.5..157.5).contains(&a) => MirDirection::DownLeft,
+            a if !(-157.5..157.5).contains(&a) => MirDirection::Left,
+            a if (-157.5..-112.5).contains(&a) => MirDirection::UpLeft,
+            a if (-112.5..-67.5).contains(&a) => MirDirection::Up,
+            a if (-67.5..-22.5).contains(&a) => MirDirection::UpRight,
             _ => MirDirection::Down,
         }
     }

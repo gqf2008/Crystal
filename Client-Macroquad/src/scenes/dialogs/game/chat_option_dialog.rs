@@ -33,6 +33,7 @@ use crate::resources::LibraryName;
 use super::native_ui_utils::DragHelper;
 
 #[derive(Debug, Clone, Copy)]
+#[derive(Default)]
 pub struct ChatOptionSettingsHybrid {
     // 与 C# Settings.Filter*Chat 语义一致：true = 过滤(隐藏)该类别
     pub filter_normal: bool,
@@ -46,21 +47,6 @@ pub struct ChatOptionSettingsHybrid {
     pub transparent_chat: bool,
 }
 
-impl Default for ChatOptionSettingsHybrid {
-    fn default() -> Self {
-        Self {
-            filter_normal: false,
-            filter_whisper: false,
-            filter_shout: false,
-            filter_system: false,
-            filter_lover: false,
-            filter_mentor: false,
-            filter_group: false,
-            filter_guild: false,
-            transparent_chat: false,
-        }
-    }
-}
 
 pub struct ChatOptionDialogHybrid {
     position: Vec2,
@@ -83,6 +69,12 @@ pub struct ChatOptionDialogHybrid {
     close_textures: [Option<Texture2D>; 3],
 
     drag_helper: DragHelper,
+}
+
+impl Default for ChatOptionDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ChatOptionDialogHybrid {
@@ -255,21 +247,19 @@ impl ChatOptionDialogHybrid {
         // 对齐 C# SwitchTab：不同 tab 下 Index/PressedIndex 交换
         // FilterTab at (8,8)
         let (filter_idx, filter_pressed) = if self.tab == 0 { (463, 462) } else { (462, 463) };
-        if self.draw_title_button(mouse_pos, 8.0, 8.0, filter_idx, None, filter_pressed) {
-            if self.tab != 0 {
+        if self.draw_title_button(mouse_pos, 8.0, 8.0, filter_idx, None, filter_pressed)
+            && self.tab != 0 {
                 self.tab = 0;
                 changed = true;
             }
-        }
 
         // ChatTab at (78,8)
         let (chat_idx, chat_pressed) = if self.tab == 0 { (464, 465) } else { (465, 464) };
-        if self.draw_title_button(mouse_pos, 78.0, 8.0, chat_idx, None, chat_pressed) {
-            if self.tab != 1 {
+        if self.draw_title_button(mouse_pos, 78.0, 8.0, chat_idx, None, chat_pressed)
+            && self.tab != 1 {
                 self.tab = 1;
                 changed = true;
             }
-        }
 
         changed
     }
@@ -421,12 +411,11 @@ impl ChatOptionDialogHybrid {
         } else {
             (471, 472)
         };
-        if self.draw_title_button(mouse_pos, 45.0, 90.0, off_idx, Some(off_hover), 470) {
-            if self.settings.transparent_chat {
+        if self.draw_title_button(mouse_pos, 45.0, 90.0, off_idx, Some(off_hover), 470)
+            && self.settings.transparent_chat {
                 self.settings.transparent_chat = false;
                 changed = true;
             }
-        }
 
         // On button visual indices
         let (on_idx, on_hover) = if self.settings.transparent_chat {
@@ -434,12 +423,11 @@ impl ChatOptionDialogHybrid {
         } else {
             (473, 473)
         };
-        if self.draw_title_button(mouse_pos, 115.0, 90.0, on_idx, Some(on_hover), 473) {
-            if !self.settings.transparent_chat {
+        if self.draw_title_button(mouse_pos, 115.0, 90.0, on_idx, Some(on_hover), 473)
+            && !self.settings.transparent_chat {
                 self.settings.transparent_chat = true;
                 changed = true;
             }
-        }
 
         changed
     }

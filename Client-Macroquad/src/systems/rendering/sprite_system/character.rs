@@ -236,7 +236,7 @@ impl SpriteRenderSystem {
         // 坐骑（由组件驱动）
         let mounted = mount_index.is_some();
         let mut mount_drawn = false;
-        let actor_pos;
+        
 
         if mounted {
             let mount_lib = LibraryName::Mounts(mount_index.unwrap_or(0));
@@ -260,7 +260,7 @@ impl SpriteRenderSystem {
 
             let candidates = [
                 primary_index,
-                0 + mount_dir_index * 4 + (current_frame % 4),
+                (mount_dir_index * 4) + (current_frame % 4),
                 mount_dir_index * frames_per_dir + current_frame,
                 current_frame,
                 0,
@@ -365,7 +365,7 @@ impl SpriteRenderSystem {
         // 人物位置的骑乘修正必须仅依赖“是否骑乘(mounted)”，不能依赖 mount_drawn。
         // 否则坐骑资源缺帧时会导致人物一会儿上、一会儿下。
         // 若使用 Mount* 人物帧，不再额外上移；否则用旧偏移做兜底对齐。
-        actor_pos = if mounted {
+        let actor_pos = if mounted {
             if rider_uses_mount_frames {
                 *pos
             } else {
@@ -380,7 +380,7 @@ impl SpriteRenderSystem {
         // 所以这里把 Mount* 帧映射回普通 Standing/Walking/Running 帧段，避免“抽到奇怪帧导致位置/效果怪”。
         if appearance.wing_effect > 0 {
             // C# 原版 SetLibraries(): WingLibrary = Libraries.CHumEffect[WingEffect - 1]
-            let wing_lib_index = (appearance.wing_effect - 1).max(0) as usize;
+            let wing_lib_index = (appearance.wing_effect - 1) as usize;
             let wing_lib = LibraryName::CHumEffect(wing_lib_index);
 
             // 对齐 C# PlayerObject.SetLibraries():
@@ -436,7 +436,7 @@ impl SpriteRenderSystem {
             } else {
                 actor_pos
             };
-            let candidates = [wing_primary + wing_offset, wing_primary, 0 + wing_offset, 0];
+            let candidates = [wing_primary + wing_offset, wing_primary, wing_offset, 0];
             let mut wing_drawn = false;
             let mut wing_frame_used: Option<i32> = None;
             
@@ -483,9 +483,9 @@ impl SpriteRenderSystem {
                 let probe = WING_PROBE_ONCE.get_or_init(|| {
                     // 先按当前性别的帧段（wing_offset）扫描，避免女号落到男号帧段。
                     for i in 0..64 {
-                        let idx = (i as i32 + wing_offset) as usize;
+                        let idx = (i + wing_offset) as usize;
                         if wing_lib.get_texture(idx).and_then(|info| info.image).is_some() {
-                            return Some(i as i32 + wing_offset);
+                            return Some(i + wing_offset);
                         }
                     }
                     // 再兜底扫描低位帧段
@@ -553,7 +553,7 @@ impl SpriteRenderSystem {
                     rider_weapon_frame + weapon_offset,
                     rider_weapon_frame,
                     rider_base_frame,
-                    0 + weapon_offset,
+                    weapon_offset,
                     0,
                 ];
                 drew_any |= Self::draw_weapon_with_effect(
@@ -619,7 +619,7 @@ impl SpriteRenderSystem {
                     rider_weapon_frame + weapon_offset,
                     rider_weapon_frame,
                     rider_base_frame,
-                    0 + weapon_offset,
+                    weapon_offset,
                     0,
                 ];
                 drew_any |= Self::draw_weapon_with_effect(
@@ -742,7 +742,7 @@ impl SpriteRenderSystem {
                 let Some(appearance) = eref.get::<&PlayerAppearance>() else { continue };
                 let Some(anim_frame) = eref.get::<&AnimationFrame>() else { continue };
                 let entity = eref.entity();
-                if !in_view(&*pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
                 // kind order: NPC(0) < Monster(1) < Player(2)
@@ -761,7 +761,7 @@ impl SpriteRenderSystem {
                 let Some(appearance) = eref.get::<&PlayerAppearance>() else { continue };
                 let Some(anim_frame) = eref.get::<&AnimationFrame>() else { continue };
                 let entity = eref.entity();
-                if !in_view(&*pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
                 renderables.push((pos.y, 2, Renderable::Player {
@@ -789,7 +789,7 @@ impl SpriteRenderSystem {
                 if !matches!(spr.blend_mode, SpriteBlendMode::Alpha) {
                     continue;
                 }
-                if !in_view(&*pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
 

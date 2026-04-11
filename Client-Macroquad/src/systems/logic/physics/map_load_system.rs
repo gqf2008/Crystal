@@ -55,6 +55,12 @@ pub struct MapManager {
     pub is_loading: bool,
 }
 
+impl Default for MapManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MapManager {
     pub fn new() -> Self {
         Self {

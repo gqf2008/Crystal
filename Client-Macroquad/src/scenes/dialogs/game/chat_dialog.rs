@@ -53,7 +53,7 @@ impl ChatMessage {
             if ch == '[' {
                 let mut tag_content = String::new();
                 let mut found_close = false;
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == ']' {
                         found_close = true;
                         break;
@@ -64,7 +64,7 @@ impl ChatMessage {
                 if found_close {
                     // 解析标记类型
                     if tag_content.starts_with("物品:") || tag_content.starts_with("Item:") {
-                        let item_name = tag_content.splitn(2, ':').nth(1).unwrap_or("");
+                        let item_name = tag_content.split_once(':').map(|x| x.1).unwrap_or("");
                         let item_color = Color::from_rgba(150, 100, 255, 255); // 紫色
                         let w = measure_text_cn(item_name, font_size).width;
                         let item_rect = Rect::new(cursor_x, y - font_size + 2.0, w, font_size);
@@ -81,7 +81,7 @@ impl ChatMessage {
                         cursor_x += w;
                         continue;
                     } else if tag_content.starts_with("坐标:") || tag_content.starts_with("Coord:") {
-                        let coord_str = tag_content.splitn(2, ':').nth(1).unwrap_or("");
+                        let coord_str = tag_content.split_once(':').map(|x| x.1).unwrap_or("");
                         let coord_color = Color::from_rgba(100, 255, 100, 255); // 绿色
                         let w = measure_text_cn(&format!("[{}]", coord_str), font_size).width;
                         let coord_rect = Rect::new(cursor_x, y - font_size + 2.0, w, font_size);
@@ -117,7 +117,7 @@ impl ChatMessage {
                 let mut emoji_name = String::new();
                 let mut found_close = false;
                 let mut temp_chars: Vec<char> = Vec::new();
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == ':' {
                         found_close = true;
                         break;
@@ -179,7 +179,7 @@ impl ChatMessage {
             if ch == '[' {
                 let mut tag_content = String::new();
                 let mut found_close = false;
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == ']' {
                         found_close = true;
                         break;
@@ -189,7 +189,7 @@ impl ChatMessage {
 
                 if found_close {
                     if tag_content.starts_with("物品:") || tag_content.starts_with("Item:") {
-                        let item_name = tag_content.splitn(2, ':').nth(1).unwrap_or("");
+                        let item_name = tag_content.split_once(':').map(|x| x.1).unwrap_or("");
                         let w = measure_text_cn(item_name, font_size).width;
                         let item_rect = Rect::new(cursor_x, text_y - font_size + 2.0, w, font_size);
                         if item_rect.contains(mouse_pos) {
@@ -198,7 +198,7 @@ impl ChatMessage {
                         cursor_x += w;
                         continue;
                     } else if tag_content.starts_with("坐标:") || tag_content.starts_with("Coord:") {
-                        let coord_str = tag_content.splitn(2, ':').nth(1).unwrap_or("");
+                        let coord_str = tag_content.split_once(':').map(|x| x.1).unwrap_or("");
                         let display = format!("[{}]", coord_str);
                         let w = measure_text_cn(&display, font_size).width;
                         let coord_rect = Rect::new(cursor_x, text_y - font_size + 2.0, w, font_size);
@@ -230,7 +230,7 @@ impl ChatMessage {
             if ch == ':' {
                 let mut emoji_name = String::new();
                 let mut found_close = false;
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == ':' {
                         found_close = true;
                         break;
@@ -811,7 +811,7 @@ impl ChatDialogHybrid {
                             let msg_idx = visible_indices[row];
                             let clicked_text = self.messages[msg_idx].text.clone();
                             let mut name_part = clicked_text
-                                .split(|c| c == ':' || c == ' ')
+                                .split([':', ' '])
                                 .next()
                                 .unwrap_or("")
                                 .to_string();
@@ -845,11 +845,10 @@ impl ChatDialogHybrid {
         }
 
         // Up 按钮
-        if self.draw_scroll_button(mouse_pos, scroll_x, 9.0, 2021, 2022, 2023) {
-            if self.scroll_offset > 0 {
+        if self.draw_scroll_button(mouse_pos, scroll_x, 9.0, 2021, 2022, 2023)
+            && self.scroll_offset > 0 {
                 self.scroll_offset -= 1;
             }
-        }
 
         // Down 按钮
         let down_y = match self.window_size {
@@ -1089,13 +1088,12 @@ impl ChatDialogHybrid {
                 let ime_y = ((input_rect.y + input_rect.h + 2.0) * dpi) as i32;
                 set_ime_position(ime_x, ime_y);
             }
-        } else if !input_rect.contains(mouse_pos) && is_mouse_button_pressed(MouseButton::Left) {
-            if self.input_active {
+        } else if !input_rect.contains(mouse_pos) && is_mouse_button_pressed(MouseButton::Left)
+            && self.input_active {
                 self.input_active = false;
                 // 禁用 IME 输入法（用于游戏控制）
                 set_ime_enabled(false);
             }
-        }
 
         // 处理键盘输入（支持中文）
         if self.input_active {

@@ -7,6 +7,12 @@ use crate::{
 pub struct UISystem {
 }
 
+impl Default for UISystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UISystem {
     pub fn new() -> Self {
         Self {}

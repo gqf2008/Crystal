@@ -44,7 +44,7 @@ async fn main() {
     println!("  R     - 旋转布局");
     println!("  1-6   - 使用物品");
     println!("  ESC   - 退出程序");
-    println!("");
+    println!();
     println!("拖放操作:");
     println!("  - 拖动物品到其他格子 → 交换");
     println!("  - 拖动物品到窗口外 → 丢弃");
@@ -122,9 +122,9 @@ async fn main() {
         
         // 显示状态
         let status = if belt_dialog.is_visible() {
-            format!("快捷栏: 打开")
+            "快捷栏: 打开".to_string()
         } else {
-            format!("快捷栏: 关闭 (按 B 打开)")
+            "快捷栏: 关闭 (按 B 打开)".to_string()
         };
         draw_text(&status, 10.0, screen_height() - 40.0, 18.0, GREEN);
         

@@ -54,7 +54,7 @@ async fn main() {
         // 绘制背景提示
         let text = "游戏主场景 - 点击 Size 按钮或按 Tab 切换聊天窗口大小";
         let font_size = 32.0;
-        let text_size = measure_text_cn(&text, font_size);
+        let text_size = measure_text_cn(text, font_size);
         draw_text_cn(
             text,
             screen_width() / 2.0 - text_size.width / 2.0,

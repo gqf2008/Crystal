@@ -172,8 +172,10 @@ use crate::components::SpellType;
 
 /// 移动模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum MovementMode {
     /// 无移动
+    #[default]
     None,
     /// 自动寻路(双击) - 计算完整路径,松开后继续走
     Pathfinding,
@@ -181,11 +183,6 @@ pub enum MovementMode {
     DirectFollow,
 }
 
-impl Default for MovementMode {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 /// 玩家输入组件 - 存储玩家的输入意图
 #[derive(Debug, Clone)]

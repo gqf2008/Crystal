@@ -14,6 +14,12 @@ pub struct SpriteRenderSystem {
     add_blend_material: Material,
 }
 
+impl Default for SpriteRenderSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpriteRenderSystem {
     pub fn new() -> Self {
         // 创建 ADD 混合材质 (dst + src * alpha)
@@ -94,8 +100,7 @@ impl RenderSystem for SpriteRenderSystem {
         let pass = world
             .query::<&RenderPass>()
             .iter()
-            .next()
-            .map(|pass| *pass)
+            .next().copied()
             .unwrap_or_default();
 
         if Self::sprite_diag_enabled() {

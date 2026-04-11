@@ -324,7 +324,7 @@ impl NetworkBuilder {
             // 1. 连接服务器
             let addr = &self.server_addr;
             tracing::info!("Connecting to {}...", addr);
-            let w = TcpStream::connect(&addr)?;
+            let w = TcpStream::connect(addr)?;
             // NOTE: Crystal 服务器端的洪泛保护 `MaxPacket` 实际统计的是 5 秒窗口内的 socket receive 回调次数。
             // 如果开启 TCP_NODELAY，小包会更容易被拆成多个 TCP 段，导致服务端计数飙升并误判为 "Large amount of Packets"。
             // 这里保持 Nagle 开启（默认），让小包尽可能合并。

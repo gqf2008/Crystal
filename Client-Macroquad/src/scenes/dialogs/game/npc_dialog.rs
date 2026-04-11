@@ -84,6 +84,12 @@ pub struct NpcDialogHybrid {
     big_btn: ButtonTextures,
 }
 
+impl Default for NpcDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NpcDialogHybrid {
     // 默认位置（对齐旧实现：左上角）
     const DEFAULT_POS_X: f32 = 0.0;
@@ -648,11 +654,10 @@ impl NpcDialogHybrid {
             );
             let up_state = ButtonState::from_mouse(up_rect, mouse_pos);
             self.up_btn.draw(vec2(up_rect.x, up_rect.y), up_state);
-            if input_enabled && ButtonState::is_clicked(up_rect, mouse_pos) {
-                if self.index > 0 {
+            if input_enabled && ButtonState::is_clicked(up_rect, mouse_pos)
+                && self.index > 0 {
                     self.index -= 1;
                 }
-            }
 
             let down_rect = Rect::new(
                 rect.x + Self::DOWN_X,
@@ -662,11 +667,10 @@ impl NpcDialogHybrid {
             );
             let down_state = ButtonState::from_mouse(down_rect, mouse_pos);
             self.down_btn.draw(vec2(down_rect.x, down_rect.y), down_state);
-            if input_enabled && ButtonState::is_clicked(down_rect, mouse_pos) {
-                if self.index + self.maximum_lines < self.lines.len() {
+            if input_enabled && ButtonState::is_clicked(down_rect, mouse_pos)
+                && self.index + self.maximum_lines < self.lines.len() {
                     self.index += 1;
                 }
-            }
 
             // PositionBar（可拖拽）
             let bar_y = rect.y + self.scroll_bar_y_from_index();
@@ -823,11 +827,10 @@ impl NpcDialogHybrid {
                         if self.big_scroll_offset > 0 {
                             self.big_scroll_offset -= 1;
                         }
-                    } else if count < 0 {
-                        if self.big_scroll_offset + Self::BIG_MAX_ROWS < self.big_buttons.len() {
+                    } else if count < 0
+                        && self.big_scroll_offset + Self::BIG_MAX_ROWS < self.big_buttons.len() {
                             self.big_scroll_offset += 1;
                         }
-                    }
                 }
             }
 
@@ -841,11 +844,10 @@ impl NpcDialogHybrid {
                 );
                 let up_state = ButtonState::from_mouse(up_rect, mouse_pos);
                 self.up_btn.draw(vec2(up_rect.x, up_rect.y), up_state);
-                if input_enabled && ButtonState::is_clicked(up_rect, mouse_pos) {
-                    if self.big_scroll_offset > 0 {
+                if input_enabled && ButtonState::is_clicked(up_rect, mouse_pos)
+                    && self.big_scroll_offset > 0 {
                         self.big_scroll_offset -= 1;
                     }
-                }
 
                 let down_rect = Rect::new(
                     panel_x + panel_w - 26.0,
@@ -855,11 +857,10 @@ impl NpcDialogHybrid {
                 );
                 let down_state = ButtonState::from_mouse(down_rect, mouse_pos);
                 self.down_btn.draw(vec2(down_rect.x, down_rect.y), down_state);
-                if input_enabled && ButtonState::is_clicked(down_rect, mouse_pos) {
-                    if self.big_scroll_offset + Self::BIG_MAX_ROWS < self.big_buttons.len() {
+                if input_enabled && ButtonState::is_clicked(down_rect, mouse_pos)
+                    && self.big_scroll_offset + Self::BIG_MAX_ROWS < self.big_buttons.len() {
                         self.big_scroll_offset += 1;
                     }
-                }
             }
 
             // 绘制按钮本体

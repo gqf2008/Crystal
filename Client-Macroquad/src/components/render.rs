@@ -17,8 +17,10 @@ pub enum RenderLayer {
 
 /// 渲染阶段参数（用于多次渲染 pass，例如遮挡后的 ghost pass）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum RenderStage {
     /// 正常渲染（位于地图 Middle 与 Front 之间的对象/特效）
+    #[default]
     Normal,
     /// 后置渲染（位于地图 Front 之后的世界叠加层：名字/血条/轮廓/漂浮字等）
     PostFront,
@@ -26,11 +28,6 @@ pub enum RenderStage {
     Ui,
 }
 
-impl Default for RenderStage {
-    fn default() -> Self {
-        RenderStage::Normal
-    }
-}
 
 /// 渲染阶段参数（用于多次渲染 pass，例如遮挡后的 ghost pass）
 #[derive(Debug, Clone, Copy)]
@@ -114,8 +111,10 @@ impl RenderOrder {
 
 /// 相机模式 - 控制相机行为
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum CameraMode {
     /// 跟随玩家模式 - CameraFollowSystem 自动更新相机位置
+    #[default]
     FollowPlayer,
     /// 手动控制模式 - 用户可以拖拽相机，不自动跟随
     Manual,
@@ -123,11 +122,6 @@ pub enum CameraMode {
     Fixed,
 }
 
-impl Default for CameraMode {
-    fn default() -> Self {
-        CameraMode::FollowPlayer
-    }
-}
 
 /// 相机组件 - 视口控制
 #[derive(Debug, Clone)]

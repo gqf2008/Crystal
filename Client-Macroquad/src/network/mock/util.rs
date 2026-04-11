@@ -104,11 +104,10 @@ impl MockNetwork {
         if x < 0 || y < 0 {
             return false;
         }
-        if map_width > 0 && map_height > 0 {
-            if x >= map_width || y >= map_height {
+        if map_width > 0 && map_height > 0
+            && (x >= map_width || y >= map_height) {
                 return false;
             }
-        }
         if map_walkable.is_empty() || map_width <= 0 || map_height <= 0 {
             // 未缓存碰撞：退化为“全部可走”
             return true;
@@ -353,11 +352,10 @@ impl MockNetwork {
         if x < 0 || y < 0 {
             return false;
         }
-        if state.map_width > 0 && state.map_height > 0 {
-            if x >= state.map_width || y >= state.map_height {
+        if state.map_width > 0 && state.map_height > 0
+            && (x >= state.map_width || y >= state.map_height) {
                 return false;
             }
-        }
         if state.map_walkable.is_empty() || state.map_width <= 0 || state.map_height <= 0 {
             // 未加载碰撞：退化为“全部可走”
             return true;

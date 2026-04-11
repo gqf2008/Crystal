@@ -62,6 +62,12 @@ pub struct NetworkContext {
     pub connected: bool,
 }
 
+impl Default for NetworkContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NetworkContext {
     pub fn new() -> Self {
         Self { connected: false }

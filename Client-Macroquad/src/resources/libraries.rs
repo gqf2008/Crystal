@@ -679,7 +679,7 @@ impl Libraries {
 
         // 否则尝试加载
         tracing::info!("🔄 懒加载库: {:?}", name);
-        if self.load(name.clone()).is_ok() {
+        if self.load(name).is_ok() {
             self.libraries.get(&name).cloned()
         } else {
             None
@@ -1349,7 +1349,7 @@ pub fn load_core_libraries() -> std::io::Result<()> {
         let mut errors = Vec::new();
 
         for lib_name in core_libs {
-            if let Err(e) = libs.load(lib_name.clone()) {
+            if let Err(e) = libs.load(lib_name) {
                 errors.push((lib_name, e));
             }
         }
@@ -1419,7 +1419,7 @@ pub fn load_all_libraries() -> std::io::Result<()> {
         let mut errors = Vec::new();
 
         for lib_name in all_libs {
-            if let Err(e) = libs.load(lib_name.clone()) {
+            if let Err(e) = libs.load(lib_name) {
                 errors.push((lib_name, e));
                 // 继续加载其他库，不中断
             }

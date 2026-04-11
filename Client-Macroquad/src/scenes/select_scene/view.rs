@@ -166,11 +166,9 @@ impl SelectScene {
                     && !self.show_delete_character
                     && !self.show_message_box
                     && !self.credits_dialog.is_visible()
-                {
-                    if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
+                    && is_hovered && is_mouse_button_pressed(MouseButton::Left) {
                         self.selected_index = Some(i);
                     }
-                }
             } else {
                 // 空槽位 - Prguse[44]
                 if let Some(info) = LibraryName::Prguse.get_texture(44) {
@@ -184,13 +182,10 @@ impl SelectScene {
                     && !self.show_delete_character
                     && !self.show_message_box
                     && !self.credits_dialog.is_visible()
-                {
-                    if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
-                        if self.characters.len() < 4 {
+                    && is_hovered && is_mouse_button_pressed(MouseButton::Left)
+                        && self.characters.len() < 4 {
                             self.show_new_character = true;
                         }
-                    }
-                }
             }
         }
     }
@@ -207,8 +202,8 @@ impl SelectScene {
             || self.credits_dialog.is_visible();
 
         // 开始游戏 Title[340-342]
-        if self.selected_index.is_some() {
-            if draw_button(
+        if self.selected_index.is_some()
+            && draw_button(
                 LibraryName::Title,
                 100.0 + x_point - x_point / 2.0 - 50.0,
                 y,
@@ -219,7 +214,6 @@ impl SelectScene {
             ) {
                 self.request_start_game();
             }
-        }
 
         // 新建角色 Title[343-345]
         if draw_button(
@@ -308,11 +302,10 @@ impl SelectScene {
             self.draw_delete_character_dialog();
         }
 
-        if self.show_message_box {
-            if draw_mir_message_box_ok(&self.message_text) {
+        if self.show_message_box
+            && draw_mir_message_box_ok(&self.message_text) {
                 self.show_message_box = false;
             }
-        }
 
         // Credits 最上层
         if self.credits_dialog.is_visible() {

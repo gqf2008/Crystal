@@ -318,11 +318,10 @@ impl GameShopDialogHybrid {
             [197, 198, 199],
             vec2(scroll_x, up_y),
             mouse_pos,
-        ) {
-            if self.category_scroll > 0 {
+        )
+            && self.category_scroll > 0 {
                 self.category_scroll -= 1;
             }
-        }
         
         // 下箭头 Prguse2[207-209]
         let down_y = pos.y + Self::SCROLL_DOWN_Y;
@@ -610,7 +609,7 @@ impl GameShopDialogHybrid {
         let total_pages = if self.filtered_items.is_empty() {
             1
         } else {
-            (self.filtered_items.len() + self.items_per_page - 1) / self.items_per_page
+            self.filtered_items.len().div_ceil(self.items_per_page)
         };
         
         let mouse_pos = ui_mouse_pos();

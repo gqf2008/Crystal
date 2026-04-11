@@ -188,6 +188,12 @@ pub struct GameContext {
     pub input_blocked: bool,
 }
 
+impl Default for GameContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GameContext {
     pub fn new() -> Self {
         Self {

@@ -58,7 +58,7 @@ impl MapRenderSystem {
 
     fn render_config(ctx: &GameContext) -> RenderConfig {
         let mut q = ctx.world.query::<&RenderConfig>();
-        q.iter().next().map(|cfg| cfg.clone()).unwrap_or_default()
+        q.iter().next().cloned().unwrap_or_default()
     }
 
     fn update_minimap_world_size(ctx: &mut GameContext, width: i32, height: i32) {
@@ -203,8 +203,7 @@ impl RenderSystem for MapRenderSystem {
         let pass = world
             .query::<&RenderPass>()
             .iter()
-            .next()
-            .map(|p| *p)
+            .next().copied()
             .unwrap_or_default();
 
         if pass.stage == RenderStage::Ui {
@@ -214,8 +213,7 @@ impl RenderSystem for MapRenderSystem {
         let cfg = world
             .query::<&RenderConfig>()
             .iter()
-            .next()
-            .map(|c| c.clone())
+            .next().cloned()
             .unwrap_or_default();
 
         let Some(map) = self.map_reader.as_ref() else {

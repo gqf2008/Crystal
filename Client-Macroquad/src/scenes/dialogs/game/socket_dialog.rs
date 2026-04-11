@@ -47,6 +47,12 @@ pub struct SocketDialogHybrid {
     _empty_socket_texture: Option<Texture2D>,
 }
 
+impl Default for SocketDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SocketDialogHybrid {
     const SLOT_SIZE: f32 = 40.0;
     const SLOT_GAP: f32 = 8.0;

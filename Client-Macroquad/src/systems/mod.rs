@@ -495,6 +495,12 @@ pub struct SystemScheduler {
     next_order: u64,
 }
 
+impl Default for SystemScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SystemScheduler {
     pub fn new() -> Self {
         Self {

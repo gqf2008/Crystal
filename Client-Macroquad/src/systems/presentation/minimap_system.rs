@@ -9,6 +9,12 @@ use crate::{
 pub struct MinimapSystem {
 }
 
+impl Default for MinimapSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MinimapSystem {
     pub fn new() -> Self {
         Self {}

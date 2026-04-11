@@ -19,6 +19,12 @@ use macroquad::prelude::*;
 #[derive(ecs_macros::RenderSystem)]
 pub struct DebugSystem;
 
+impl Default for DebugSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DebugSystem {
     pub fn new() -> Self {
         Self

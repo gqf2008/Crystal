@@ -93,6 +93,12 @@ pub struct CellInfo {
     pub fishing_cell: bool,
 }
 
+impl Default for CellInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CellInfo {
     pub fn new() -> Self {
         Self {
@@ -1025,7 +1031,7 @@ impl MapReader {
 
                 // 混合模式检测 (Shanda 使用相同的值)
                 if cell.front_animation_frame > 0x0F {
-                    cell.front_animation_frame = cell.front_animation_frame & 0x0F;
+                    cell.front_animation_frame &= 0x0F;
                 }
                 offset += 1;
 
@@ -1117,7 +1123,7 @@ impl MapReader {
 
                 // 混合模式检测 (与 Type 1 相同)
                 if cell.front_animation_frame > 0x0F {
-                    cell.front_animation_frame = cell.front_animation_frame & 0x0F;
+                    cell.front_animation_frame &= 0x0F;
                 }
                 offset += 1;
 

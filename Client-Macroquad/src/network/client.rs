@@ -746,7 +746,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             let dt = now_ms.saturating_sub(last_ms);
             if last_ms != 0 && dt < MIN_MOVE_INTERVAL_MS {
                 let dropped = OUT_MOVE_DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
-                if dropped == 1 || dropped % 100 == 0 {
+                if dropped == 1 || dropped.is_multiple_of(100) {
                     tracing::debug!(
                         "🧯 Throttled WalkRequest (dropped x{}, dt={}ms < {}ms)",
                         dropped,
@@ -762,7 +762,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             serialize_packet(stream, &packet)?;
 
             let n = OUT_WALK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-            if n == 1 || n % 30 == 0 {
+            if n == 1 || n.is_multiple_of(30) {
                 tracing::info!("📤 Sent Walk x{} dir={:?}", n, packet.direction);
             }
         }
@@ -774,7 +774,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             let dt = now_ms.saturating_sub(last_ms);
             if last_ms != 0 && dt < MIN_MOVE_INTERVAL_MS {
                 let dropped = OUT_MOVE_DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
-                if dropped == 1 || dropped % 100 == 0 {
+                if dropped == 1 || dropped.is_multiple_of(100) {
                     tracing::debug!(
                         "🧯 Throttled RunRequest (dropped x{}, dt={}ms < {}ms)",
                         dropped,
@@ -790,7 +790,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             serialize_packet(stream, &packet)?;
 
             let n = OUT_RUN_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-            if n == 1 || n % 30 == 0 {
+            if n == 1 || n.is_multiple_of(30) {
                 tracing::info!("📤 Sent Run x{} dir={:?}", n, packet.direction);
             }
         }
@@ -813,7 +813,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             if last_ms != 0 && dt < MIN_ATTACK_INTERVAL_MS {
                 let dropped = OUT_ATTACK_DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
                 // 采样提示，避免刷屏
-                if dropped == 1 || dropped % 50 == 0 {
+                if dropped == 1 || dropped.is_multiple_of(50) {
                     tracing::debug!(
                         "🧯 Throttled AttackRequest (dropped x{}, dt={}ms < {}ms)",
                         dropped,
@@ -832,7 +832,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             serialize_packet(stream, &packet)?;
 
             let n = OUT_ATTACK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-            if n == 1 || n % 10 == 0 {
+            if n == 1 || n.is_multiple_of(10) {
                 tracing::info!("📤 Sent Attack x{} dir={:?} spell={:?}", n, packet.direction, packet.spell);
             }
         }
@@ -1698,7 +1698,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         NetworkEvent::GameShopBuyRequest { item_id, count } => {
             let packet = client::GameshopBuy {
                 g_index: item_id as i32,
-                quantity: (count as u8).min(255),
+                quantity: (count as u8),
                 p_type: 0,
             };
             serialize_packet(stream, &packet)?;
@@ -1725,7 +1725,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
 
         NetworkEvent::OpenDoorRequest { door_id } => {
             let packet = client::Opendoor {
-                door_index: (door_id as u8).min(255),
+                door_index: (door_id as u8),
             };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 Opendoor: door_id={}", door_id);

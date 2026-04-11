@@ -91,6 +91,12 @@ pub struct QuestLogDialogHybrid {
     completion_notifications: Vec<(u32, f32)>, // (quest_id, remaining_time)
 }
 
+impl Default for QuestLogDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QuestLogDialogHybrid {
     pub fn new() -> Self {
         // 创建示例任务

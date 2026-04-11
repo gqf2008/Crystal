@@ -7,6 +7,12 @@ use crate::{
 pub struct HUDSystem {
 }
 
+impl Default for HUDSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HUDSystem {
     pub fn new() -> Self {
         Self {}

@@ -74,6 +74,12 @@ pub struct TradeDialogHybrid {
     item_texture_cache: std::collections::HashMap<usize, Texture2D>,
 }
 
+impl Default for TradeDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TradeDialogHybrid {
     pub fn new() -> Self {
         Self {
@@ -519,14 +525,13 @@ impl TradeDialogHybrid {
             }
 
             // 点击/拖拽处理：从交易栏移除物品
-            if can_remove && has_item && is_hovered {
-                if mouse_just_pressed {
+            if can_remove && has_item && is_hovered
+                && mouse_just_pressed {
                     let icon_idx = self.my_items.get(i).and_then(|s| s.icon_index).unwrap_or(0);
                     let count = self.my_items.get(i).map(|s| s.count).unwrap_or(1);
                     self.dragging_item = Some(ItemDragState::new(i, icon_idx, count));
                     self.drag_source = Some(DragSource::MyTradeSlot(i));
                 }
-            }
         }
     }
 

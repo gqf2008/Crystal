@@ -322,7 +322,7 @@ impl LogicSystem for SoundSystem {
             let trigger = e.get::<&SoundTrigger>()?;
             Some((e.entity(), trigger))
         }) {
-            if !self.should_play(ctx, &*trigger) {
+            if !self.should_play(ctx, &trigger) {
                 to_remove.push(entity);
                 continue;
             }

@@ -36,6 +36,12 @@ pub struct MapSwitchRequest {
 #[derive(ecs_macros::LogicSystem)]
 pub struct MapUpdateSystem;
 
+impl Default for MapUpdateSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MapUpdateSystem {
     pub fn new() -> Self {
         Self
@@ -48,11 +54,7 @@ impl MapUpdateSystem {
         // 查询 MapSwitchRequest 组件
         let map_path = {
             let mut query = ctx.world.query::<&MapSwitchRequest>();
-            if let Some(request) = query.iter().next() {
-                Some(request.map_path.clone())
-            } else {
-                None
-            }
+            query.iter().next().map(|request| request.map_path.clone())
         };
 
         if let Some(new_path) = map_path {
@@ -63,7 +65,7 @@ impl MapUpdateSystem {
                 .query::<(&Position, &Camera)>()
                 .into_iter()
                 .next()
-                .map(|(pos, cam)| (pos.clone(), cam.zoom, cam.screen_width, cam.screen_height))
+                .map(|(pos, cam)| (*pos, cam.zoom, cam.screen_width, cam.screen_height))
                 .unwrap_or((Position { x: 800.0, y: 600.0 }, 1.0, 1600.0, 1200.0));
 
             // 加载新地图（兼容不同工作目录/仓库布局）
@@ -90,8 +92,7 @@ impl MapUpdateSystem {
                     let map_data = ctx.world
                         .query_mut::<&MapData>()
                         .into_iter()
-                        .next()
-                        .map(|data| data.clone())
+                        .next().cloned()
                         .expect("地图数据未加载");
 
                     let (spawn_grid_x, spawn_grid_y) =

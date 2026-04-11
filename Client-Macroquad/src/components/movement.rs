@@ -97,6 +97,12 @@ pub struct Path {
     pub is_valid: bool,
 }
 
+impl Default for Path {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Path {
     pub fn new() -> Self {
         Self {

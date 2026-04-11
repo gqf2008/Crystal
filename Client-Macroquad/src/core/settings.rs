@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// 游戏配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct GameSettings {
     /// 窗口配置
     pub window: WindowSettings,
@@ -57,15 +58,6 @@ pub struct NetworkSettings {
     pub timeout_ms: u64,
 }
 
-impl Default for GameSettings {
-    fn default() -> Self {
-        Self {
-            window: WindowSettings::default(),
-            render: RenderSettings::default(),
-            network: NetworkSettings::default(),
-        }
-    }
-}
 
 impl Default for WindowSettings {
     fn default() -> Self {

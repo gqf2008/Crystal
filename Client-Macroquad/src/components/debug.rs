@@ -48,7 +48,7 @@ impl DebugCounters {
         }
         
         self.sync_counter += 1;
-        self.sync_counter == 1 || self.sync_counter % 300 == 0
+        self.sync_counter == 1 || self.sync_counter.is_multiple_of(300)
     }
     
     /// 递增绘制计数器并检查是否应该打印日志
@@ -81,7 +81,7 @@ impl DebugCounters {
         }
         
         self.frame_counter += 1;
-        self.frame_counter % 60 == 0
+        self.frame_counter.is_multiple_of(60)
     }
     
     /// 重置所有计数器

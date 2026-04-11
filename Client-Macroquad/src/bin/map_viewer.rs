@@ -976,11 +976,11 @@ impl MapViewerState {
                         // 计算实际文件名: MapLib_100=Tiles, 101=Tiles2, 104=Tiles5
                         let actual_file = if file_idx == 100 {
                             "Tiles.Lib".to_string()
-                        } else if file_idx >= 101 && file_idx <= 109 {
+                        } else if (101..=109).contains(&file_idx) {
                             format!("Tiles{}.Lib", file_idx - 99)
                         } else if file_idx == 110 {
                             "SmTiles.Lib".to_string()
-                        } else if file_idx >= 111 && file_idx <= 119 {
+                        } else if (111..=119).contains(&file_idx) {
                             format!("SmTiles{}.Lib", file_idx - 109)
                         } else if file_idx == 190 {
                             "AniTiles1.Lib".to_string()

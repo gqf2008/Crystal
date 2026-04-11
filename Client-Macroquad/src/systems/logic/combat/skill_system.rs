@@ -324,7 +324,7 @@ impl SkillSystem {
     /// 获取当前目标信息
     fn get_target_info(world: &World) -> (MirDirection, u32, Option<(i32, i32)>) {
         // 查询目标选择组件
-        for (_local, target_sel) in world.query::<(&LocalPlayer, &TargetSelection)>().iter() {
+        if let Some((_local, target_sel)) = world.query::<(&LocalPlayer, &TargetSelection)>().iter().next() {
             match target_sel.current {
                 TargetType::Monster(id) => {
                     let direction = Self::calculate_direction_to_target(world, id);
@@ -458,21 +458,21 @@ impl SkillSystem {
 
         // 8方向划分（每方向45度）
         match angle_deg {
-            a if a >= -22.5 && a < 22.5 => MirDirection::Right,
-            a if a >= 22.5 && a < 67.5 => MirDirection::DownRight,
-            a if a >= 67.5 && a < 112.5 => MirDirection::Down,
-            a if a >= 112.5 && a < 157.5 => MirDirection::DownLeft,
-            a if a >= 157.5 || a < -157.5 => MirDirection::Left,
-            a if a >= -157.5 && a < -112.5 => MirDirection::UpLeft,
-            a if a >= -112.5 && a < -67.5 => MirDirection::Up,
-            a if a >= -67.5 && a < -22.5 => MirDirection::UpRight,
+            a if (-22.5..22.5).contains(&a) => MirDirection::Right,
+            a if (22.5..67.5).contains(&a) => MirDirection::DownRight,
+            a if (67.5..112.5).contains(&a) => MirDirection::Down,
+            a if (112.5..157.5).contains(&a) => MirDirection::DownLeft,
+            a if !(-157.5..157.5).contains(&a) => MirDirection::Left,
+            a if (-157.5..-112.5).contains(&a) => MirDirection::UpLeft,
+            a if (-112.5..-67.5).contains(&a) => MirDirection::Up,
+            a if (-67.5..-22.5).contains(&a) => MirDirection::UpRight,
             _ => MirDirection::Down,
         }
     }
 
     /// 获取玩家当前朝向
     fn get_player_direction(world: &World) -> MirDirection {
-        for (_local, player) in world.query::<(&LocalPlayer, &Player)>().iter() {
+        if let Some((_local, player)) = world.query::<(&LocalPlayer, &Player)>().iter().next() {
             // Player.direction 现在已经是 MirDirection 类型，直接返回
             return player.direction;
         }
@@ -493,17 +493,11 @@ impl SkillSystem {
 
 /// 快捷键技能输入系统
 #[derive(ecs_macros::LogicSystem)]
+#[derive(Default)]
 pub struct SpellInputSystem {
     prev_f_keys: [bool; 8], // F1-F8 上一帧状态
 }
 
-impl Default for SpellInputSystem {
-    fn default() -> Self {
-        Self {
-            prev_f_keys: [false; 8],
-        }
-    }
-}
 
 impl LogicSystem for SpellInputSystem {
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {

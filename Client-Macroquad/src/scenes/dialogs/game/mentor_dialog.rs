@@ -54,6 +54,12 @@ pub struct MentorDialogHybrid {
     pending_action: MentorDialogAction,
 }
 
+impl Default for MentorDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MentorDialogHybrid {
     const CONTENT_START_Y: f32 = 50.0;
     const BUTTON_Y: f32 = 210.0;

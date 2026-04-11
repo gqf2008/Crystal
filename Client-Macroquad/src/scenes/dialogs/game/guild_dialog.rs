@@ -70,6 +70,12 @@ pub struct GuildDialogHybrid {
     last_click_idx: Option<usize>,
 }
 
+impl Default for GuildDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GuildDialogHybrid {
     const TAB_Y: f32 = 35.0;
     const CONTENT_START_Y: f32 = 60.0;

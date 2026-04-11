@@ -67,11 +67,10 @@ impl MockNetwork {
                 if x < 0 || y < 0 {
                     return false;
                 }
-                if self.map_width > 0 && self.map_height > 0 {
-                    if x >= self.map_width || y >= self.map_height {
+                if self.map_width > 0 && self.map_height > 0
+                    && (x >= self.map_width || y >= self.map_height) {
                         return false;
                     }
-                }
                 if self.map_walkable.is_empty() || self.map_width <= 0 || self.map_height <= 0 {
                     // 未缓存碰撞：退化为“全部可走”
                     return true;
@@ -179,8 +178,8 @@ impl MockNetwork {
                 self.occupied.remove(&old_tile);
 
                 // 让对角移动偶尔退化成直线，显得更“人”。
-                if dx != 0 && dy != 0 && (MockNetwork::rng_next_u32(self.rng) % 3 == 0) {
-                    if MockNetwork::rng_next_u32(self.rng) % 2 == 0 {
+                if dx != 0 && dy != 0 && MockNetwork::rng_next_u32(self.rng).is_multiple_of(3) {
+                    if MockNetwork::rng_next_u32(self.rng).is_multiple_of(2) {
                         dx = 0;
                     } else {
                         dy = 0;
@@ -600,7 +599,7 @@ impl MockNetwork {
             }
             ctx.rp.mode = RemoteAiMode::Roam;
             let prefer_run = matches!(ctx.rp.mode, RemoteAiMode::Travel | RemoteAiMode::Chase)
-                || (MockNetwork::rng_next_u32(ctx.rng) % 4 == 0);
+                || MockNetwork::rng_next_u32(ctx.rng).is_multiple_of(4);
             ctx.step_towards(ctx.rp.roam_goal.0, ctx.rp.roam_goal.1, prefer_run)
         }
 

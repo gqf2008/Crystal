@@ -37,6 +37,12 @@ use crate::systems::logic::combat::CombatSystem;
 #[derive(ecs_macros::LogicSystem)]
 pub struct AnimationSystem;
 
+impl Default for AnimationSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnimationSystem {
     pub fn new() -> Self {
         Self
@@ -55,8 +61,7 @@ impl AnimationSystem {
             .world
             .query::<&TimeTracker>()
             .iter()
-            .next()
-            .map(|t| t.clone())
+            .next().cloned()
             .unwrap_or_default();
 
         let now = Instant::now();
@@ -116,13 +121,13 @@ impl AnimationSystem {
         mounted: bool,
         now: Instant,
         attack_state: Option<AttackState>,
-        mut death_state: Option<&mut DeathState>,
+        death_state: Option<&mut DeathState>,
     ) -> (i32, i32, i32) {
         // 选择 MirAction（优先级：死亡覆盖 > 骑乘覆盖 > 普通动作）
         let mut override_start_time: Option<Instant> = None;
         let mut override_play_once = false;
 
-        let mir_action = if let Some(ds) = death_state.as_deref_mut() {
+        let mir_action = if let Some(ds) = death_state {
             // Die 播放完一次后，进入 Dead
             if ds.phase == DeathPhase::Dying {
                 if let Some(die_frame) = get_player_frame(mir2_shared::enums::MirAction::Die) {
@@ -183,7 +188,7 @@ impl AnimationSystem {
             }
         } else {
             // 旧实现：使用全局 animation_count 作为时间基准
-            let animation_tick = (time_tracker.animation_count as i32) * 100 / interval;
+            let animation_tick = time_tracker.animation_count * 100 / interval;
             animation_tick.rem_euclid(count)
         };
         if frame.reverse {
@@ -204,7 +209,7 @@ impl AnimationSystem {
                     raw.rem_euclid(ecount)
                 }
             } else {
-                let effect_tick = (time_tracker.animation_count as i32) * 100 / effect_interval;
+                let effect_tick = time_tracker.animation_count * 100 / effect_interval;
                 effect_tick.rem_euclid(ecount)
             };
             if frame.reverse {

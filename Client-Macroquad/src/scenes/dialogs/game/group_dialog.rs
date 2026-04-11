@@ -55,6 +55,12 @@ pub struct GroupDialogHybrid {
     local_player_name: String,
 }
 
+impl Default for GroupDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GroupDialogHybrid {
     const MEMBER_START_Y: f32 = 40.0;
     const MEMBER_ITEM_H: f32 = 20.0;

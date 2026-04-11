@@ -67,6 +67,12 @@ pub struct CompassDialogHybrid {
     _needle_texture: Option<Texture2D>,
 }
 
+impl Default for CompassDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CompassDialogHybrid {
     pub fn new() -> Self {
         Self {

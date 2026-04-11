@@ -382,7 +382,7 @@ impl InventoryDialogHybrid {
     }
     
     fn max_scroll(&self) -> f32 {
-        let rows = (self.current_items().len() + Self::GRID_COLS - 1) / Self::GRID_COLS;
+        let rows = self.current_items().len().div_ceil(Self::GRID_COLS);
         let total = rows as f32 * (Self::CELL_HEIGHT + Self::CELL_SPACING);
         let visible = Self::VISIBLE_ROWS as f32 * (Self::CELL_HEIGHT + Self::CELL_SPACING);
         (total - visible).max(0.0)
@@ -537,7 +537,7 @@ impl InventoryDialogHybrid {
                             // 放置一半到目标格子
                             if let Some(from_idx) = self.splitting_from {
                                 if let Some(src) = self.current_items().get(from_idx) {
-                                    let half = (src.count + 1) / 2; // 向上取整
+                                    let half = src.count.div_ceil(2); // 向上取整
                                     if src.count > 1 {
                                         let items = self.current_items_mut();
                                         let remain = items[from_idx].count - half;
@@ -606,7 +606,7 @@ impl InventoryDialogHybrid {
         }
         
         // ========== mqui 拖放处理 ==========
-        let items_snapshot: Vec<_> = self.current_items().iter().cloned().collect();
+        let items_snapshot: Vec<_> = self.current_items().to_vec();
         let item_dragging = self.item_dragging;
         let mut drag_command: Option<DragCommand> = None;
         let mut new_dragging = false;
@@ -733,7 +733,7 @@ impl InventoryDialogHybrid {
         if self.splitting {
             if let Some(from) = self.splitting_from {
                 if let Some(item) = self.current_items().get(from) {
-                    let half = (item.count + 1) / 2;
+                    let half = item.count.div_ceil(2);
                     let tip = format!("✂️ 拆分: {} (放{}个到空格子，右键取消)", item.name, half);
                     draw_tooltip(mouse, &tip);
                 }
@@ -798,7 +798,7 @@ impl InventoryDialogHybrid {
     
     fn draw_slots(&mut self, mouse: Vec2) {
         // Clone items to avoid borrow conflict with item_cache.get()
-        let items_snapshot: Vec<ItemSlotHybrid> = self.current_items().iter().cloned().collect();
+        let items_snapshot: Vec<ItemSlotHybrid> = self.current_items().to_vec();
 
         for (i, slot) in items_snapshot.iter().enumerate() {
             if !self.is_slot_visible(i) { continue; }

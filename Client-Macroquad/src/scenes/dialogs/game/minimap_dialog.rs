@@ -76,6 +76,12 @@ pub struct MiniMapDialogHybrid {
     drag_helper: DragHelper,
 }
 
+impl Default for MiniMapDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MiniMapDialogHybrid {
     pub fn new() -> Self {
         let screen_w = screen_width() / screen_dpi_scale();

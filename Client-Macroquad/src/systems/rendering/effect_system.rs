@@ -274,6 +274,12 @@ pub struct EffectRenderSystem {
     add_blend_material: Material,
 }
 
+impl Default for EffectRenderSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EffectRenderSystem {
     pub fn new() -> Self {
         let add_blend_material = load_material(
@@ -304,8 +310,7 @@ impl RenderSystem for EffectRenderSystem {
         let pass = _world
             .query::<&RenderPass>()
             .iter()
-            .next()
-            .map(|pass| *pass)
+            .next().copied()
             .unwrap_or_default();
 
         // ghost pass 只画本地玩家，不画特效/叠加层

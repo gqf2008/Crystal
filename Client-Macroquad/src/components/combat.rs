@@ -330,7 +330,7 @@ impl Experience {
     
     /// 传奇升级经验公式
     fn calculate_required(level: u16) -> i64 {
-        ((level as i64 + 1) * (level as i64 + 1) * 100) as i64
+        (level as i64 + 1) * (level as i64 + 1) * 100
     }
 }
 

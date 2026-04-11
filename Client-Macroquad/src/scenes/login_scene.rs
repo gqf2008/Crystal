@@ -83,6 +83,12 @@ enum InputFocus {
     None,
 }
 
+impl Default for LoginScene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoginScene {
     pub fn new() -> Self {
         Self {
@@ -647,15 +653,14 @@ impl Scene for LoginScene {
             
                 // 处理点击输入框切换焦点
                 let (mx, my) = mouse_position();
-                if is_mouse_button_pressed(MouseButton::Left) {
-                    if mx >= input_x && mx <= input_x + input_w {
+                if is_mouse_button_pressed(MouseButton::Left)
+                    && mx >= input_x && mx <= input_x + input_w {
                         if my >= account_y && my <= account_y + input_h {
                             self.input_focus = InputFocus::Account;
                         } else if my >= password_y && my <= password_y + input_h {
                             self.input_focus = InputFocus::Password;
                         }
                     }
-                }
             }
         }
 

@@ -585,7 +585,7 @@ impl MockNetwork {
                         1 => MirClass::Wizard,
                         _ => MirClass::Taoist,
                     };
-                    let gender = if (Self::rng_next_u32(&mut state.rng) % 2) == 0 {
+                    let gender = if Self::rng_next_u32(&mut state.rng).is_multiple_of(2) {
                         MirGender::Male
                     } else {
                         MirGender::Female
@@ -918,8 +918,7 @@ impl MockNetwork {
                 // Make the local visual state obvious in logs/chat so we can confirm
                 // we're running the latest build and that equipment/mount data is non-empty.
                 let weapon_dbg = state
-                    .player_equipment
-                    .get(0)
+                    .player_equipment.first()
                     .and_then(|o| o.as_ref())
                     .and_then(|ui| ui.info.as_ref())
                     .map(|info| (info.shape, info.effect))

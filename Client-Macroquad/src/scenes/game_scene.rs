@@ -93,14 +93,14 @@ impl GameScene {
                 priority::INPUT + 1,
                 crate::systems::RenderStageMask::UI,
             )
-            .add_system(crate::systems::NetworkSystem::default(), priority::NETWORK)
+            .add_system(crate::systems::NetworkSystem, priority::NETWORK)
             .add_system(
-                crate::systems::NetworkApplySystem::default(),
+                crate::systems::NetworkApplySystem,
                 priority::NETWORK_APPLY,
             )
             .add_system(AutoPotionSystem::default(), priority::AUTO_POTION)
             .add_system(
-                crate::systems::MapBootstrapSystem::default(),
+                crate::systems::MapBootstrapSystem,
                 priority::MAP_BOOTSTRAP,
             )
             .add_system(crate::systems::MapLoadSystem, priority::MAP_LOAD)
@@ -112,28 +112,28 @@ impl GameScene {
             .add_system(crate::systems::MonsterAISystem, priority::MONSTER_AI)
             .add_system(PlayerControlSystem::new(), priority::PLAYER_CONTROL)
             // 战斗/技能/自然回复：先接入闭环（目前 test_game_scene 默认不会触发）
-            .add_system(CombatSystem::default(), priority::COMBAT)
-            .add_system(SkillSystem::default(), priority::SKILL)
+            .add_system(CombatSystem, priority::COMBAT)
+            .add_system(SkillSystem, priority::SKILL)
             .add_system(HealthRegenSystem, priority::REGEN)
             .add_system(PathfindingSystem::new(), priority::PATHFINDING)
             .add_system(MovementSystem, priority::MOVEMENT)
             .add_system(CollisionSystem::new(), priority::COLLISION)
             .add_system(
-                crate::systems::PositionInterpolationSystem::default(),
+                crate::systems::PositionInterpolationSystem,
                 priority::REMOTE_INTERPOLATION,
             )
             .add_system(
-                crate::systems::RemoteMoveAnimSystem::default(),
+                crate::systems::RemoteMoveAnimSystem,
                 priority::REMOTE_MOVE_ANIM,
             )
             .add_system(
-                crate::systems::LifetimeCleanupSystem::default(),
+                crate::systems::LifetimeCleanupSystem,
                 priority::LIFETIME_CLEANUP,
             )
             .add_system(MountStateSyncSystem::new(), priority::MOUNT_STATE_SYNC)
             .add_system(AnimationSystem::new(), priority::ANIMATION)
             .add_system(
-                crate::systems::presentation::HealthBarAnimSystem::default(),
+                crate::systems::presentation::HealthBarAnimSystem,
                 priority::HEALTH_BAR_ANIM,
             )
             .add_system(crate::systems::ParticleSystem, priority::PARTICLE)
@@ -142,16 +142,16 @@ impl GameScene {
                 priority::SOUND,
             )
             .add_system(
-                crate::systems::FloatingTextSystem::default(),
+                crate::systems::FloatingTextSystem,
                 priority::FLOATING_TEXT,
             )
             .add_system(
-                CameraSpaceGateSystem::default(),
+                CameraSpaceGateSystem,
                 priority::CAMERA_SPACE_GATE,
             )
             .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW)
             .add_system(CameraSystem::new(), priority::CAMERA)
-            .add_system(CameraBoundsSystem::default(), priority::CAMERA_BOUNDS)
+            .add_system(CameraBoundsSystem, priority::CAMERA_BOUNDS)
             // 表现层 UI 系统（规划：UI/HUD/Minimap/Dialog）
             .add_system(UISystem::new(), priority::UI)
             .add_system(HUDSystem::new(), priority::HUD)
@@ -182,7 +182,7 @@ impl GameScene {
                 crate::systems::RenderStageMask::POST_FRONT
                     .union(crate::systems::RenderStageMask::UI),
             )
-            .add_system(FrameEndSystem::default(), priority::FRAME_END);
+            .add_system(FrameEndSystem, priority::FRAME_END);
 
         let mut ecs_ctx = GameContext::new();
         // 提前创建 RenderPass 单例：保证 UI/Debug 叠加层在资源未初始化时也能渲染（例如“加载中”）。
@@ -474,11 +474,10 @@ impl Scene for GameScene {
         // 快捷键交由 UIRenderSystem 统一处理（避免 GameScene 直连 UI 组件）
 
         // ESC 且没有打开的对话框 = 返回角色选择
-        if is_key_pressed(KeyCode::Escape) {
-            if self.can_escape_exit() {
+        if is_key_pressed(KeyCode::Escape)
+            && self.can_escape_exit() {
                 return Ok(SceneTransition::CharacterSelect);
             }
-        }
 
         Ok(SceneTransition::None)
     }

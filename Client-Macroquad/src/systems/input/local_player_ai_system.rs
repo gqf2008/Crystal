@@ -295,7 +295,7 @@ impl LocalPlayerAiSystem {
     fn find_local_player_snapshot(
         ctx: &GameContext,
     ) -> Option<(hecs::Entity, (i32, i32), (f32, f32), Option<hecs::Entity>, bool)> {
-        for (e, _local, pos, input) in ctx
+        if let Some((e, _local, pos, input)) = ctx
             .world
             .iter()
             .filter_map(|e| {
@@ -303,7 +303,7 @@ impl LocalPlayerAiSystem {
                 let pos = e.get::<&Position>()?;
                 let input = e.get::<&PlayerInput>()?;
                 Some((e.entity(), lp, pos, input))
-            })
+            }).next()
         {
             let (pgx, pgy) = Coord::world_to_grid(pos.x, pos.y);
             let has_move_goal = input.move_to.is_some();

@@ -282,7 +282,7 @@ impl MockNetwork {
                 break;
             }
         }
-        let mut final_spawn = spawn.unwrap_or_else(|| zone.center);
+        let mut final_spawn = spawn.unwrap_or(zone.center);
         if !Self::map_is_walkable(state, final_spawn.0, final_spawn.1) {
             let max_r: i32 = 12;
             'outer: for r in 1..=max_r {
@@ -421,7 +421,7 @@ impl MockNetwork {
             };
 
             // 25% 概率动一下
-            if (Self::rng_next_u32(&mut state.rng) % 4) != 0 {
+            if !Self::rng_next_u32(&mut state.rng).is_multiple_of(4) {
                 continue;
             }
 

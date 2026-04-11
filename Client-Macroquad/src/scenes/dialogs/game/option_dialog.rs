@@ -82,6 +82,12 @@ pub struct OptionDialogHybrid {
     drag_helper: DragHelper,
 }
 
+impl Default for OptionDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OptionDialogHybrid {
     pub fn new() -> Self {
         Self {

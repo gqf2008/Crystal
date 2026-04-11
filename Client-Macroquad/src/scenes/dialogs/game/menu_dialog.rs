@@ -58,6 +58,12 @@ pub struct MenuDialogHybrid {
     drag_helper: DragHelper,
 }
 
+impl Default for MenuDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MenuDialogHybrid {
     /// 菜单按钮配置 (基于 C# 源码)
     const MENU_BUTTONS: &'static [MenuButton] = &[
@@ -180,9 +186,9 @@ impl MenuDialogHybrid {
         self.draw_background();
 
         // 绘制菜单按钮并检测点击
-        let action = self.draw_menu_buttons(mouse_pos);
+        
 
-        action
+        self.draw_menu_buttons(mouse_pos)
     }
 
     /// 绘制背景

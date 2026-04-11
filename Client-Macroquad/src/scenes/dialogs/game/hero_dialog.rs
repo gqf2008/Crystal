@@ -85,6 +85,12 @@ pub struct HeroDialogHybrid {
     behaviour_bg_textures: [Option<Texture2D>; 4],
 }
 
+impl Default for HeroDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HeroDialogHybrid {
     const BEHAVIOUR_BTN_Y: f32 = 37.0;
     const BEHAVIOUR_BTN_START_X: f32 = 165.0;

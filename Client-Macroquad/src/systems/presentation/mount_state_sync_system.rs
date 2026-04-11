@@ -6,6 +6,12 @@ use mir2_shared::enums::ItemType;
 #[derive(ecs_macros::LogicSystem)]
 pub struct MountStateSyncSystem;
 
+impl Default for MountStateSyncSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MountStateSyncSystem {
     pub fn new() -> Self {
         Self

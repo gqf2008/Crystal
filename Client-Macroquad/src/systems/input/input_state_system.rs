@@ -78,6 +78,12 @@ const KEYS_TO_TRACK: &[KeyCode] = &[
 #[derive(ecs_macros::LogicSystem)]
 pub struct InputStateSystem;
 
+impl Default for InputStateSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InputStateSystem {
     pub fn new() -> Self {
         Self

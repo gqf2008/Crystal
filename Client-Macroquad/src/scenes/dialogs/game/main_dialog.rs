@@ -209,6 +209,12 @@ pub struct MainDialog {
     quick_skills: [u8; 8],
 }
 
+impl Default for MainDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MainDialog {
     pub fn new() -> Self {
         // 根据屏幕宽度决定分辨率索引

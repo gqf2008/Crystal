@@ -199,7 +199,7 @@ pub static GREAT_FOX_SPIRIT_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
     // Each level shifts standing/attack/struck by +60.
     for base in [0, 60, 120, 180, 240] {
         let mut frame = FrameSet::new();
-        frame.insert(MirAction::Standing, Frame::basic(base + 0, 20, -20, 100));
+        frame.insert(MirAction::Standing, Frame::basic(base, 20, -20, 100));
         frame.insert(MirAction::Attack1, Frame::basic(base + 22, 8, -8, 120));
         frame.insert(MirAction::Struck, Frame::basic(base + 20, 2, -2, 200));
         frame.insert(MirAction::Die, Frame::basic(300, 18, -18, 120));

@@ -140,7 +140,7 @@ impl StaticChunkCache {
     fn maybe_report_stats(&mut self, render_counter: u64, visible_chunks: u64) {
         // 轻量统计：避免刷屏，默认每 120 帧输出一次。
         const REPORT_INTERVAL_FRAMES: u64 = 120;
-        if render_counter % REPORT_INTERVAL_FRAMES != 0 {
+        if !render_counter.is_multiple_of(REPORT_INTERVAL_FRAMES) {
             return;
         }
 
@@ -793,7 +793,7 @@ impl MeshMapRenderer {
                     file_index == 14
                         || file_index == 27
                         || (file_index > 99 && file_index < 199)
-                        || (image_index >= 2723 && image_index <= 2732)
+                        || (2723..=2732).contains(&image_index)
                 } else if file_index == 28 {
                     offset_x != 0 || offset_y != 0
                 } else {
@@ -972,12 +972,11 @@ impl MeshMapRenderer {
                         continue;
                     }
 
-                    if skip_cached_static {
-                        if !cell.middle_use_blend() && !cell.middle_has_animation() {
+                    if skip_cached_static
+                        && !cell.middle_use_blend() && !cell.middle_has_animation() {
                             // 这部分已由静态 chunk 缓存绘制（priority=0/1 都包含）
                             continue;
                         }
-                    }
 
                     if cell.middle_use_blend() {
                         continue;
@@ -1276,7 +1275,7 @@ impl MeshMapRenderer {
                     let should_apply_offset = file_index == 14
                         || file_index == 27
                         || (file_index > 99 && file_index < 199)
-                        || (image_index >= 2723 && image_index <= 2732);
+                        || (2723..=2732).contains(&image_index);
 
                     let (pixel_x, pixel_y) = if file_index == 14
                         || file_index == 27
@@ -1505,7 +1504,7 @@ impl MeshMapRenderer {
                     let should_apply_offset = file_index == 14
                         || file_index == 27
                         || (file_index > 99 && file_index < 199)
-                        || (image_index >= 2723 && image_index <= 2732);
+                        || (2723..=2732).contains(&image_index);
 
                     let (pixel_x, pixel_y) = if file_index == 14
                         || file_index == 27

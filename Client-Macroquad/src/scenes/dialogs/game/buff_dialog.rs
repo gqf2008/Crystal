@@ -39,6 +39,12 @@ pub struct BuffDialogHybrid {
     pressed_expand_texture: Option<Texture2D>,
 }
 
+impl Default for BuffDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BuffDialogHybrid {
     const ICON_SIZE: f32 = 32.0;
     const ICON_PADDING: f32 = 4.0;
@@ -80,7 +86,7 @@ impl BuffDialogHybrid {
             return false;
         }
         let rows = if self.expanded {
-            (self.buffs.len() + Self::ICONS_PER_ROW - 1) / Self::ICONS_PER_ROW
+            self.buffs.len().div_ceil(Self::ICONS_PER_ROW)
         } else {
             1
         };
@@ -119,8 +125,8 @@ impl BuffDialogHybrid {
         for i in 20..=33 {
             if let Some(texture) = LibraryName::Prguse2.get_texture(i) {
                 if let Some(tex) = texture.image {
-                    if i as usize - 20 < self.bg_textures.len() {
-                        self.bg_textures[i as usize - 20] = Some(tex);
+                    if i - 20 < self.bg_textures.len() {
+                        self.bg_textures[i - 20] = Some(tex);
                     }
                 }
             }
@@ -205,7 +211,7 @@ impl BuffDialogHybrid {
             // 获取图标纹理
             let _icon_idx = self.resolve_buff_icon(buff.icon_index);
             let is_flashing = buff.remaining_secs > 0.0 && buff.remaining_secs < 5.0
-                && (get_time() as u32) % 2 == 0;
+                && (get_time() as u32).is_multiple_of(2);
 
             let icon_alpha = if is_flashing {
                 (self.opacity * 0.5).max(0.1)

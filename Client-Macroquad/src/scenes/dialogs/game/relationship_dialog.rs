@@ -49,6 +49,12 @@ pub struct RelationshipDialogHybrid {
     pending_action: RelationshipDialogAction,
 }
 
+impl Default for RelationshipDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RelationshipDialogHybrid {
     const CONTENT_START_Y: f32 = 50.0;
     const BUTTON_Y: f32 = 210.0;

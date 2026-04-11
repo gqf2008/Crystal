@@ -265,14 +265,14 @@ impl PlayerControlSystem {
         object_type: NetworkObjectType,
         object_id: u32,
     ) -> Option<hecs::Entity> {
-        for e in ctx.world.iter().filter_map(|e| {
+        if let Some(e) = ctx.world.iter().filter_map(|e| {
             let sync = e.get::<&NetworkSync>()?;
             if sync.object_type == object_type && sync.object_id == object_id {
                 Some(e.entity())
             } else {
                 None
             }
-        }) {
+        }).next() {
             return Some(e);
         }
         None
@@ -636,7 +636,7 @@ impl LogicSystem for PlayerControlSystem {
             .query_mut::<(&Position, &Camera)>()
             .into_iter()
             .next()
-            .map(|(pos, cam)| (pos.clone(), cam.clone()))
+            .map(|(pos, cam)| (*pos, cam.clone()))
             .unwrap_or((
                 Position { x: 0.0, y: 0.0 },
                 Camera {

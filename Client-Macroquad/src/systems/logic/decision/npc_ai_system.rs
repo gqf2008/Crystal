@@ -58,7 +58,7 @@ impl NpcAISystem {
             // 3. NPC闲逛逻辑（如果配置了）
             if !npc.can_interact {
                 // 非交互NPC才可能闲逛
-                if let Some(_ai) = ai_state.as_deref_mut() {
+                if let Some(_ai) = ai_state {
                     // TODO: 实现随机闲逛逻辑
                     // - 每隔一段时间随机选择一个方向
                     // - 行走几步后停下

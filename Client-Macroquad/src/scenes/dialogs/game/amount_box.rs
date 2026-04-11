@@ -41,6 +41,12 @@ pub struct AmountBoxHybrid {
     cancel_btn: ButtonTextures,
 }
 
+impl Default for AmountBoxHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AmountBoxHybrid {
     const BG_INDEX: usize = 238;
 

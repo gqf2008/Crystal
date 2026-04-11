@@ -362,10 +362,10 @@ impl ItemTextureCache {
     
     /// 获取物品纹理（按需加载）
     pub fn get(&mut self, library: LibraryName, index: usize) -> Option<&Texture2D> {
-        if !self.textures.contains_key(&index) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.textures.entry(index) {
             if let Some(info) = library.get_texture(index) {
                 if let Some(tex) = info.image {
-                    self.textures.insert(index, tex);
+                    e.insert(tex);
                 }
             }
         }

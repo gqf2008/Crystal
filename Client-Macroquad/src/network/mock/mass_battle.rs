@@ -21,9 +21,9 @@ impl MockNetwork {
         }
 
         let now = Instant::now();
-        let tick_every = Duration::from_millis(cfg.ai_tick_ms.max(10) as u64);
-        let attack_every = Duration::from_millis(cfg.attack_cooldown_ms.max(50) as u64);
-        let respawn_after = Duration::from_millis(cfg.mass_battle_respawn_ms.max(1) as u64);
+        let tick_every = Duration::from_millis(cfg.ai_tick_ms.max(10));
+        let attack_every = Duration::from_millis(cfg.attack_cooldown_ms.max(50));
+        let respawn_after = Duration::from_millis(cfg.mass_battle_respawn_ms.max(1));
 
         let (map_w_eff, map_h_eff) = Self::effective_map_dims(state);
         if map_w_eff <= 0 || map_h_eff <= 0 {

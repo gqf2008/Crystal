@@ -191,8 +191,8 @@ impl PathFinder {
 
         let heuristic = |x: usize, y: usize, tx: usize, ty: usize| -> u32 {
             // Octile distance (8方向)
-            let dx = if x > tx { x - tx } else { tx - x };
-            let dy = if y > ty { y - ty } else { ty - y };
+            let dx = x.abs_diff(tx);
+            let dy = y.abs_diff(ty);
             let min = dx.min(dy) as u32;
             let max = dx.max(dy) as u32;
             14 * min + 10 * (max - min)

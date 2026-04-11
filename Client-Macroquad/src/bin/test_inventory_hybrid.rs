@@ -28,7 +28,7 @@ async fn main() {
     println!("  I     - 打开/关闭背包");
     println!("  1/2/3 - 切换标签页");
     println!("  ESC   - 退出程序");
-    println!("");
+    println!();
     println!("拖放操作:");
     println!("  - 拖动物品到其他格子 → 交换");
     println!("  - 拖动物品到窗口外 → 丢弃");

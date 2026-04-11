@@ -70,6 +70,12 @@ pub struct IntelligentCreatureDialogHybrid {
     pearl_texture: Option<Texture2D>,
 }
 
+impl Default for IntelligentCreatureDialogHybrid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IntelligentCreatureDialogHybrid {
     const SLOT_W: f32 = 50.0;
     const SLOT_H: f32 = 60.0;

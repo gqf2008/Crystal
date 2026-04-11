@@ -36,7 +36,7 @@ pub struct Prediction {
 impl Prediction {
     pub fn new(initial_pos: Position) -> Self {
         Self {
-            predicted_position: initial_pos.clone(),
+            predicted_position: initial_pos,
             server_position: initial_pos,
             last_sync_time: Instant::now(),
             is_predicting: false,

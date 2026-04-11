@@ -502,7 +502,7 @@ impl NetworkApplySystem {
             // - info 尚未到达时（网络异步）不要覆写，避免外观闪烁
             if let Ok(mut appearance) = ctx.world.get::<&mut PlayerAppearance>(local_entity) {
                 // weapon slot = 0
-                match items.get(0).and_then(|x| x.as_ref()) {
+                match items.first().and_then(|x| x.as_ref()) {
                     None => {
                         appearance.weapon = -1;
                         appearance.weapon_effect = 0;
@@ -542,8 +542,7 @@ impl NetworkApplySystem {
                 }
 
                 let _ = EQUIP_DIAG_ONCE.set(()).map(|_| {
-                    let weapon_shape = items
-                        .get(0)
+                    let weapon_shape = items.first()
                         .and_then(|x| x.as_ref())
                         .and_then(|it| it.info.as_ref())
                         .map(|info| (info.item_type, info.shape, info.effect));
@@ -640,7 +639,7 @@ impl NetworkApplySystem {
             appearance.hair = packet.hair;
 
             // weapon slot = 0
-            match packet.equipment.get(0).and_then(|x| x.as_ref()) {
+            match packet.equipment.first().and_then(|x| x.as_ref()) {
                 None => {
                     appearance.weapon = -1;
                     appearance.weapon_effect = 0;
@@ -940,10 +939,8 @@ impl NetworkApplySystem {
                     m.monster_type = packet.image;
                     m.stage = packet.extra_byte;
                 }
-            } else {
-                if let Ok(mut m) = ctx.world.get::<&mut crate::components::Monster>(e) {
-                    m.stage = packet.extra_byte;
-                }
+            } else if let Ok(mut m) = ctx.world.get::<&mut crate::components::Monster>(e) {
+                m.stage = packet.extra_byte;
             }
 
             // 原版：怪物出现音效 BaseSound + 0（规则 0=Appear）
@@ -1151,8 +1148,8 @@ impl NetworkApplySystem {
 
         // Monster：仅更新方向
         let is_monster = ctx.world.get::<&crate::components::Monster>(e).is_ok();
-        if is_monster {
-            if ctx
+        if is_monster
+            && ctx
                 .world
                 .insert_one(
                     e,
@@ -1169,7 +1166,6 @@ impl NetworkApplySystem {
                     // 仅转向不重置 start_time，避免站立动画跳帧
                 }
             }
-        }
     }
 
     fn apply_object_walk(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectWalk) {
@@ -1269,8 +1265,8 @@ impl NetworkApplySystem {
         }
 
         // Monster：走路动作
-        if ctx.world.get::<&crate::components::Monster>(e).is_ok() {
-            if ctx
+        if ctx.world.get::<&crate::components::Monster>(e).is_ok()
+            && ctx
                 .world
                 .insert_one(
                     e,
@@ -1288,7 +1284,6 @@ impl NetworkApplySystem {
                     s.start_time = Instant::now();
                 }
             }
-        }
     }
 
     fn apply_object_run(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectRun) {
@@ -1388,8 +1383,8 @@ impl NetworkApplySystem {
         }
 
         // Monster：默认复用 Walking（DefaultMonster 没有 Running）
-        if ctx.world.get::<&crate::components::Monster>(e).is_ok() {
-            if ctx
+        if ctx.world.get::<&crate::components::Monster>(e).is_ok()
+            && ctx
                 .world
                 .insert_one(
                     e,
@@ -1407,7 +1402,6 @@ impl NetworkApplySystem {
                     s.start_time = Instant::now();
                 }
             }
-        }
     }
 
     fn apply_object_attack(ctx: &mut GameContext, packet: mir2_shared::packets::server::ObjectAttack) {
@@ -1749,7 +1743,7 @@ impl LogicSystem for NetworkApplySystem {
                 }
 
                 // ===== 魔法/技能 =====
-                NetworkEvent::MagicListReceived { .. } => {
+                NetworkEvent::MagicListReceived => {
                     // Magic 包通常用于施放通知（cast=true），也用于初始化技能列表
                     // 这里记录追踪即可，具体技能添加由 MagicLearned 处理
                     tracing::trace!("✨ Magic list received");
@@ -1828,7 +1822,7 @@ impl LogicSystem for NetworkApplySystem {
                 }
 
                 // ===== 移动扩展 =====
-                NetworkEvent::ObjectHeroSpawned { .. } => {
+                NetworkEvent::ObjectHeroSpawned => {
                     tracing::trace!("🦸 Object hero spawned");
                 }
                 NetworkEvent::ObjectHidden { object_id } => {
@@ -1840,19 +1834,19 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectTeleportingOut { object_id } => {
                     teleporting_out.push(*object_id);
                 }
-                NetworkEvent::ObjectTeleportingIn { .. } => {
+                NetworkEvent::ObjectTeleportingIn => {
                     tracing::trace!("🌀 Object teleporting in");
                 }
-                NetworkEvent::PlayerTeleportedIn { .. } => {
+                NetworkEvent::PlayerTeleportedIn => {
                     tracing::trace!("🌀 Player teleported in");
                 }
-                NetworkEvent::ObjectBackStepped { .. } => {
+                NetworkEvent::ObjectBackStepped => {
                     tracing::trace!("💨 Object backstepped");
                 }
                 NetworkEvent::PlayerBackStepped { x, y } => {
                     tracing::trace!("💨 Player backstepped to ({}, {})", x, y);
                 }
-                NetworkEvent::ObjectDashing { .. } => {
+                NetworkEvent::ObjectDashing => {
                     tracing::trace!("💨 Object dashing");
                 }
                 NetworkEvent::PlayerDashing { x, y } => {
@@ -1861,19 +1855,19 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectDashFailed { object_id } => {
                     dash_failed.push(*object_id);
                 }
-                NetworkEvent::PlayerDashFailed { .. } => {
+                NetworkEvent::PlayerDashFailed => {
                     tracing::trace!("💨 Player dash failed");
                 }
                 NetworkEvent::ObjectSatDown { object_id } => {
                     sat_down.push(*object_id);
                 }
-                NetworkEvent::NewMapInfoReceived { .. } => {
+                NetworkEvent::NewMapInfoReceived => {
                     tracing::trace!("🗺️ New map info received");
                 }
-                NetworkEvent::WorldMapSetupReceived { .. } => {
+                NetworkEvent::WorldMapSetupReceived => {
                     tracing::trace!("🗺️ World map setup received");
                 }
-                NetworkEvent::SearchMapResultReceived { .. } => {
+                NetworkEvent::SearchMapResultReceived => {
                     tracing::trace!("🗺️ Search map result received");
                 }
                 NetworkEvent::TimeOfDayChanged { time_of_day } => {
@@ -1881,7 +1875,7 @@ impl LogicSystem for NetworkApplySystem {
                 }
 
                 // ===== 玩家状态 =====
-                NetworkEvent::PlayerUpdated { .. } => {
+                NetworkEvent::PlayerUpdated => {
                     tracing::trace!("👤 Player updated");
                 }
                 NetworkEvent::AttackModeChanged { mode } => {
@@ -1905,10 +1899,10 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectGuildNameChanged2 { object_id, guild_name } => {
                     tracing::trace!("🏰 Object {} guild name changed: {}", object_id, guild_name);
                 }
-                NetworkEvent::PlayerNameUpdated { .. } => {
+                NetworkEvent::PlayerNameUpdated => {
                     tracing::trace!("👤 Player name updated");
                 }
-                NetworkEvent::UserNameUpdated { .. } => {
+                NetworkEvent::UserNameUpdated => {
                     tracing::trace!("👤 User name updated");
                 }
 
@@ -1934,7 +1928,7 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectPushedEvent { object_id, x, y } => {
                     tracing::trace!("💨 Object {} pushed to ({}, {})", object_id, x, y);
                 }
-                NetworkEvent::UserDashAttacked { .. } => {
+                NetworkEvent::UserDashAttacked => {
                     tracing::trace!("💨 User dash attack");
                 }
                 NetworkEvent::ObjectDashAttacked { object_id } => {
@@ -1943,7 +1937,7 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::UserAttackMoved { x, y } => {
                     tracing::trace!("⚔️ User attack moved to ({}, {})", x, y);
                 }
-                NetworkEvent::PlayerRevived { .. } => {
+                NetworkEvent::PlayerRevived => {
                     if let Some(e) = local_player_entity {
                         if let Ok(ns) = ctx.world.get::<&crate::components::NetworkSync>(e) {
                             revived.push(ns.object_id);
@@ -2015,12 +2009,10 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ItemMerged { unique_id, count } => {
                     if let Some(e) = local_player_entity {
                         if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
-                            for slot in inv.items.iter_mut() {
-                                if let Some(ref mut it) = slot {
-                                    if it.unique_id == *unique_id {
-                                        it.count = *count as u16;
-                                        break;
-                                    }
+                            for ref mut it in inv.items.iter_mut().flatten() {
+                                if it.unique_id == *unique_id {
+                                    it.count = *count as u16;
+                                    break;
                                 }
                             }
                         }
@@ -2065,12 +2057,10 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ItemSplit { unique_id, count } => {
                     if let Some(e) = local_player_entity {
                         if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
-                            for slot in inv.items.iter_mut() {
-                                if let Some(ref mut it) = slot {
-                                    if it.unique_id == *unique_id {
-                                        it.count -= *count as u16;
-                                        break;
-                                    }
+                            for ref mut it in inv.items.iter_mut().flatten() {
+                                if it.unique_id == *unique_id {
+                                    it.count -= *count as u16;
+                                    break;
                                 }
                             }
                         }
@@ -2156,31 +2146,31 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectHarvested { object_id } => {
                     tracing::trace!("⛏️ Object {} harvested", object_id);
                 }
-                NetworkEvent::RefineItemDeposited { .. } => {
+                NetworkEvent::RefineItemDeposited => {
                     tracing::trace!("🔨 Refine item deposited");
                 }
-                NetworkEvent::RefineItemRetrieved { .. } => {
+                NetworkEvent::RefineItemRetrieved => {
                     tracing::trace!("🔨 Refine item retrieved");
                 }
-                NetworkEvent::RefineCancelled { .. } => {
+                NetworkEvent::RefineCancelled => {
                     tracing::trace!("🔨 Refine cancelled");
                 }
-                NetworkEvent::RefineItemCompleted { .. } => {
+                NetworkEvent::RefineItemCompleted => {
                     tracing::trace!("🔨 Refine completed");
                 }
-                NetworkEvent::TradeItemDeposited { .. } => {
+                NetworkEvent::TradeItemDeposited => {
                     tracing::trace!("🤝 Trade item deposited");
                 }
-                NetworkEvent::TradeItemRetrieved { .. } => {
+                NetworkEvent::TradeItemRetrieved => {
                     tracing::trace!("🤝 Trade item retrieved");
                 }
-                NetworkEvent::HeroItemTakenBack { .. } => {
+                NetworkEvent::HeroItemTakenBack => {
                     tracing::trace!("🦸 Hero item taken back");
                 }
-                NetworkEvent::HeroItemTransferred { .. } => {
+                NetworkEvent::HeroItemTransferred => {
                     tracing::trace!("🦸 Hero item transferred");
                 }
-                NetworkEvent::NewItemInfoReceived { .. } => {
+                NetworkEvent::NewItemInfoReceived => {
                     tracing::trace!("📋 New item info received");
                 }
                 NetworkEvent::ObjectGoldReceived { packet } => {
@@ -2192,19 +2182,19 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::TradeGoldAdded { amount } => {
                     tracing::trace!("💰 Trade gold added: {}", amount);
                 }
-                NetworkEvent::TradeItemAdded { .. } => {
+                NetworkEvent::TradeItemAdded => {
                     tracing::trace!("📦 Trade item added");
                 }
                 NetworkEvent::TradeConfirmedEvent { locked } => {
                     tracing::trace!("🤝 Trade confirmed (locked={})", locked);
                 }
-                NetworkEvent::TradeCancelledEvent { .. } => {
+                NetworkEvent::TradeCancelledEvent => {
                     tracing::trace!("🤝 Trade cancelled");
                 }
-                NetworkEvent::QuestListUpdated { .. } => {
+                NetworkEvent::QuestListUpdated => {
                     tracing::trace!("📋 Quest list updated");
                 }
-                NetworkEvent::QuestItemGained { .. } => {
+                NetworkEvent::QuestItemGained => {
                     // 获得任务物品：循环外处理
                     tracing::trace!("📋 Quest item gained");
                 }
@@ -2248,127 +2238,127 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::GuildStorageGoldChanged { delta } => {
                     tracing::trace!("🏰 Guild storage gold changed: {}", delta);
                 }
-                NetworkEvent::GuildStorageItemChanged { .. } => {
+                NetworkEvent::GuildStorageItemChanged => {
                     tracing::trace!("🏰 Guild storage item changed");
                 }
-                NetworkEvent::GuildStorageListReceived { .. } => {
+                NetworkEvent::GuildStorageListReceived => {
                     tracing::trace!("🏰 Guild storage list received");
                 }
-                NetworkEvent::GuildWarRequested { .. } => {
+                NetworkEvent::GuildWarRequested => {
                     tracing::trace!("🏰 Guild war requested");
                 }
-                NetworkEvent::GuildBuffListReceived { .. } => {
+                NetworkEvent::GuildBuffListReceived => {
                     tracing::trace!("🏰 Guild buff list received");
                 }
-                NetworkEvent::GuildTerritoryPageReceived { .. } => {
+                NetworkEvent::GuildTerritoryPageReceived => {
                     tracing::trace!("🏰 Guild territory page received");
                 }
-                NetworkEvent::GuildTerritoryPurchased { .. } => {
+                NetworkEvent::GuildTerritoryPurchased => {
                     tracing::trace!("🏰 Guild territory purchased");
                 }
-                NetworkEvent::NPCSellReceived { .. } => {
+                NetworkEvent::NPCSellReceived => {
                     tracing::trace!("🏪 NPC sell received");
                 }
-                NetworkEvent::NPCRepairReceived { .. } => {
+                NetworkEvent::NPCRepairReceived => {
                     tracing::trace!("🔧 NPC repair received");
                 }
-                NetworkEvent::NPCSRepairReceived { .. } => {
+                NetworkEvent::NPCSRepairReceived => {
                     tracing::trace!("🔧 NPC special repair received");
                 }
-                NetworkEvent::NPCRefineReceived { .. } => {
+                NetworkEvent::NPCRefineReceived => {
                     tracing::trace!("🔨 NPC refine received");
                 }
-                NetworkEvent::NPCCheckRefineReceived { .. } => {
+                NetworkEvent::NPCCheckRefineReceived => {
                     tracing::trace!("🔨 NPC check refine received");
                 }
-                NetworkEvent::NPCCollectRefineReceived { .. } => {
+                NetworkEvent::NPCCollectRefineReceived => {
                     tracing::trace!("🔨 NPC collect refine received");
                 }
-                NetworkEvent::NPCReplaceWedRingReceived { .. } => {
+                NetworkEvent::NPCReplaceWedRingReceived => {
                     tracing::trace!("💍 NPC replace wedding ring received");
                 }
-                NetworkEvent::NPCStorageReceived { .. } => {
+                NetworkEvent::NPCStorageReceived => {
                     tracing::trace!("📦 NPC storage received");
                 }
-                NetworkEvent::NPCConsignReceived { .. } => {
+                NetworkEvent::NPCConsignReceived => {
                     tracing::trace!("🏪 NPC consign received");
                 }
-                NetworkEvent::NPCMarketEvent { .. } => {
+                NetworkEvent::NPCMarketEvent => {
                     tracing::trace!("🏪 NPC market event");
                 }
-                NetworkEvent::NPCMarketPageEvent { .. } => {
+                NetworkEvent::NPCMarketPageEvent => {
                     tracing::trace!("🏪 NPC market page event");
                 }
-                NetworkEvent::ConsignItemReceived { .. } => {
+                NetworkEvent::ConsignItemReceived => {
                     tracing::trace!("📦 Consign item received");
                 }
                 NetworkEvent::MarketFailedEvent { reason } => {
                     tracing::warn!("🏪 Market failed: {}", reason);
                 }
-                NetworkEvent::MarketSuccessEvent { .. } => {
+                NetworkEvent::MarketSuccessEvent => {
                     tracing::trace!("🏪 Market success");
                 }
-                NetworkEvent::SellItemReceived { .. } => {
+                NetworkEvent::SellItemReceived => {
                     tracing::trace!("💰 Sell item received");
                 }
-                NetworkEvent::CraftItemReceived { .. } => {
+                NetworkEvent::CraftItemReceived => {
                     tracing::trace!("🔨 Craft item received");
                 }
-                NetworkEvent::RepairItemReceived { .. } => {
+                NetworkEvent::RepairItemReceived => {
                     tracing::trace!("🔧 Repair item received");
                 }
-                NetworkEvent::ItemRepairedEvent { .. } => {
+                NetworkEvent::ItemRepairedEvent => {
                     tracing::trace!("🔧 Item repaired");
                 }
                 NetworkEvent::DefaultNPCReceived { npc_id, message } => {
                     tracing::trace!("🗣️ NPC {} dialog: {}", npc_id, message);
                 }
-                NetworkEvent::NPCUpdated { .. } => {
+                NetworkEvent::NPCUpdated => {
                     tracing::trace!("🗣️ NPC updated");
                 }
-                NetworkEvent::NPCImageUpdated { .. } => {
+                NetworkEvent::NPCImageUpdated => {
                     tracing::trace!("🖼️ NPC image updated");
                 }
-                NetworkEvent::NPCAwakeningReceived { .. } => {
+                NetworkEvent::NPCAwakeningReceived => {
                     tracing::trace!("🌟 NPC awakening received");
                 }
-                NetworkEvent::NPCDisassembleReceived { .. } => {
+                NetworkEvent::NPCDisassembleReceived => {
                     tracing::trace!("🔧 NPC disassemble received");
                 }
-                NetworkEvent::NPCDowngradeReceived { .. } => {
+                NetworkEvent::NPCDowngradeReceived => {
                     tracing::trace!("📉 NPC downgrade received");
                 }
-                NetworkEvent::NPCResetReceived { .. } => {
+                NetworkEvent::NPCResetReceived => {
                     tracing::trace!("🔄 NPC reset received");
                 }
-                NetworkEvent::AwakeningNeedMaterialsReceived { .. } => {
+                NetworkEvent::AwakeningNeedMaterialsReceived => {
                     tracing::trace!("🌟 Awakening need materials");
                 }
-                NetworkEvent::AwakeningLockedItemReceived { .. } => {
+                NetworkEvent::AwakeningLockedItemReceived => {
                     tracing::trace!("🌟 Awakening locked item");
                 }
-                NetworkEvent::AwakeningReceived { .. } => {
+                NetworkEvent::AwakeningReceived => {
                     tracing::trace!("🌟 Awakening received");
                 }
-                NetworkEvent::NPCPearlGoodsReceived { .. } => {
+                NetworkEvent::NPCPearlGoodsReceived => {
                     tracing::trace!("🔮 NPC pearl goods received");
                 }
                 NetworkEvent::NPCRequestInputReceived { npc_id, prompt } => {
                     tracing::trace!("🗣️ NPC {} requests input: {}", npc_id, prompt);
                 }
-                NetworkEvent::HeroCreateRequested { .. } => {
+                NetworkEvent::HeroCreateRequested => {
                     tracing::trace!("🦸 Hero create requested");
                 }
-                NetworkEvent::NewHeroCreated { .. } => {
+                NetworkEvent::NewHeroCreated => {
                     tracing::trace!("🦸 New hero created");
                 }
-                NetworkEvent::HeroInfoReceived { .. } => {
+                NetworkEvent::HeroInfoReceived => {
                     tracing::trace!("🦸 Hero info received");
                 }
                 NetworkEvent::HeroSpawnStateUpdated { state } => {
                     tracing::trace!("🦸 Hero spawn state updated: {}", state);
                 }
-                NetworkEvent::HeroAutoPotUnlocked { .. } => {
+                NetworkEvent::HeroAutoPotUnlocked => {
                     tracing::trace!("🦸 Hero auto pot unlocked");
                 }
                 NetworkEvent::HeroAutoPotSet { .. } => {
@@ -2380,69 +2370,69 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::HeroBehaviourSet { .. } => {
                     tracing::trace!("🦸 Hero behaviour set");
                 }
-                NetworkEvent::HeroManageReceived { .. } => {
+                NetworkEvent::HeroManageReceived => {
                     tracing::trace!("🦸 Hero manage received");
                 }
-                NetworkEvent::HeroChanged { .. } => {
+                NetworkEvent::HeroChanged => {
                     tracing::trace!("🦸 Hero changed");
                 }
-                NetworkEvent::HeroBaseStatsReceived { .. } => {
+                NetworkEvent::HeroBaseStatsReceived => {
                     tracing::trace!("🦸 Hero base stats received");
                 }
-                NetworkEvent::NewHeroInfoReceived { .. } => {
+                NetworkEvent::NewHeroInfoReceived => {
                     tracing::trace!("🦸 New hero info received");
                 }
-                NetworkEvent::MailReceived { .. } => {
+                NetworkEvent::MailReceived => {
                     tracing::trace!("📬 Mail received");
                 }
-                NetworkEvent::MailLockedItemReceived { .. } => {
+                NetworkEvent::MailLockedItemReceived => {
                     tracing::trace!("📬 Mail locked item");
                 }
-                NetworkEvent::MailSendRequestReceived { .. } => {
+                NetworkEvent::MailSendRequestReceived => {
                     tracing::trace!("📬 Mail send request");
                 }
-                NetworkEvent::MailSentEvent { .. } => {
+                NetworkEvent::MailSentEvent => {
                     tracing::trace!("📬 Mail sent");
                 }
-                NetworkEvent::ParcelCollectedEvent { .. } => {
+                NetworkEvent::ParcelCollectedEvent => {
                     tracing::trace!("📦 Parcel collected");
                 }
                 NetworkEvent::MailCostReceived { cost } => {
                     tracing::trace!("📬 Mail cost: {}", cost);
                 }
-                NetworkEvent::NPCConsignEvent { .. } => { tracing::trace!("🏪 NPC consign event"); }
-                NetworkEvent::NPCMarketEvent2 { .. } => { tracing::trace!("🏪 NPC market event 2"); }
-                NetworkEvent::NPCMarketPageEvent2 { .. } => { tracing::trace!("🏪 NPC market page event 2"); }
-                NetworkEvent::ConsignItemEvent { .. } => { tracing::trace!("📦 Consign item event"); }
+                NetworkEvent::NPCConsignEvent => { tracing::trace!("🏪 NPC consign event"); }
+                NetworkEvent::NPCMarketEvent2 => { tracing::trace!("🏪 NPC market event 2"); }
+                NetworkEvent::NPCMarketPageEvent2 => { tracing::trace!("🏪 NPC market page event 2"); }
+                NetworkEvent::ConsignItemEvent => { tracing::trace!("📦 Consign item event"); }
                 NetworkEvent::MarketFailedEvent2 { reason } => { tracing::warn!("🏪 Market failed: {}", reason); }
-                NetworkEvent::MarketSuccessEvent2 { .. } => { tracing::trace!("🏪 Market success"); }
-                NetworkEvent::NewIntelligentCreatureReceived { .. } => { tracing::trace!("🐾 New intelligent creature"); }
-                NetworkEvent::IntelligentCreatureListUpdated { .. } => { tracing::trace!("🐾 Creature list updated"); }
-                NetworkEvent::IntelligentCreatureRenameEnabled { .. } => { tracing::trace!("🐾 Creature rename enabled"); }
-                NetworkEvent::IntelligentCreaturePickupReceived { .. } => { tracing::trace!("🐾 Creature pickup received"); }
+                NetworkEvent::MarketSuccessEvent2 => { tracing::trace!("🏪 Market success"); }
+                NetworkEvent::NewIntelligentCreatureReceived => { tracing::trace!("🐾 New intelligent creature"); }
+                NetworkEvent::IntelligentCreatureListUpdated => { tracing::trace!("🐾 Creature list updated"); }
+                NetworkEvent::IntelligentCreatureRenameEnabled => { tracing::trace!("🐾 Creature rename enabled"); }
+                NetworkEvent::IntelligentCreaturePickupReceived => { tracing::trace!("🐾 Creature pickup received"); }
                 NetworkEvent::MarriageRequested2 { requester } => { tracing::trace!("💒 Marriage requested by {}", requester); }
-                NetworkEvent::DivorceRequested2 { .. } => { tracing::trace!("💔 Divorce requested"); }
-                NetworkEvent::MentorRequested2 { .. } => { tracing::trace!("🎓 Mentor requested"); }
-                NetworkEvent::LoverUpdated { .. } => { tracing::trace!("💒 Lover updated"); }
-                NetworkEvent::MentorUpdated { .. } => { tracing::trace!("🎓 Mentor updated"); }
-                NetworkEvent::RentalItemsReceived { .. } => { tracing::trace!("📦 Rental items received"); }
-                NetworkEvent::ItemRentalRequested { .. } => { tracing::trace!("📦 Item rental requested"); }
+                NetworkEvent::DivorceRequested2 => { tracing::trace!("💔 Divorce requested"); }
+                NetworkEvent::MentorRequested2 => { tracing::trace!("🎓 Mentor requested"); }
+                NetworkEvent::LoverUpdated => { tracing::trace!("💒 Lover updated"); }
+                NetworkEvent::MentorUpdated => { tracing::trace!("🎓 Mentor updated"); }
+                NetworkEvent::RentalItemsReceived => { tracing::trace!("📦 Rental items received"); }
+                NetworkEvent::ItemRentalRequested => { tracing::trace!("📦 Item rental requested"); }
                 NetworkEvent::ItemRentalFeeReceived { fee } => { tracing::trace!("📦 Rental fee: {}", fee); }
                 NetworkEvent::ItemRentalPeriodReceived { period } => { tracing::trace!("📦 Rental period: {}", period); }
-                NetworkEvent::RentalItemDeposited { .. } => { tracing::trace!("📦 Rental item deposited"); }
-                NetworkEvent::RentalItemRetrieved { .. } => { tracing::trace!("📦 Rental item retrieved"); }
-                NetworkEvent::RentalItemUpdated { .. } => { tracing::trace!("📦 Rental item updated"); }
-                NetworkEvent::ItemRentalCancelled { .. } => { tracing::trace!("📦 Item rental cancelled"); }
-                NetworkEvent::ItemRentalLocked { .. } => { tracing::trace!("📦 Item rental locked"); }
-                NetworkEvent::ItemRentalPartnerLocked { .. } => { tracing::trace!("📦 Rental partner locked"); }
-                NetworkEvent::ItemRentalConfirmable { .. } => { tracing::trace!("📦 Item rental confirmable"); }
-                NetworkEvent::ItemRentalConfirmed { .. } => { tracing::trace!("📦 Item rental confirmed"); }
+                NetworkEvent::RentalItemDeposited => { tracing::trace!("📦 Rental item deposited"); }
+                NetworkEvent::RentalItemRetrieved => { tracing::trace!("📦 Rental item retrieved"); }
+                NetworkEvent::RentalItemUpdated => { tracing::trace!("📦 Rental item updated"); }
+                NetworkEvent::ItemRentalCancelled => { tracing::trace!("📦 Item rental cancelled"); }
+                NetworkEvent::ItemRentalLocked => { tracing::trace!("📦 Item rental locked"); }
+                NetworkEvent::ItemRentalPartnerLocked => { tracing::trace!("📦 Rental partner locked"); }
+                NetworkEvent::ItemRentalConfirmable => { tracing::trace!("📦 Item rental confirmable"); }
+                NetworkEvent::ItemRentalConfirmed => { tracing::trace!("📦 Item rental confirmed"); }
                 NetworkEvent::FishingStatusUpdated { state } => { tracing::trace!("🎣 Fishing status updated: {}", state); }
-                NetworkEvent::ReincarnationRequested { .. } => { tracing::trace!("🔄 Reincarnation requested"); }
-                NetworkEvent::ReincarnationCancelled { .. } => { tracing::trace!("🔄 Reincarnation cancelled"); }
-                NetworkEvent::RankingsReceived { .. } => { tracing::trace!("🏆 Rankings received"); }
-                NetworkEvent::GameShopInfoReceived { .. } => { tracing::trace!("🛒 Game shop info received"); }
-                NetworkEvent::GameShopStockReceived { .. } => { tracing::trace!("🛒 Game shop stock received"); }
+                NetworkEvent::ReincarnationRequested => { tracing::trace!("🔄 Reincarnation requested"); }
+                NetworkEvent::ReincarnationCancelled => { tracing::trace!("🔄 Reincarnation cancelled"); }
+                NetworkEvent::RankingsReceived => { tracing::trace!("🏆 Rankings received"); }
+                NetworkEvent::GameShopInfoReceived => { tracing::trace!("🛒 Game shop info received"); }
+                NetworkEvent::GameShopStockReceived => { tracing::trace!("🛒 Game shop stock received"); }
                 NetworkEvent::TimerSet { timer_id, seconds } => { tracing::trace!("⏱️ Timer {} set: {}s", timer_id, seconds); }
                 NetworkEvent::TimerExpired { timer_id } => { tracing::trace!("⏱️ Timer {} expired", timer_id); }
                 NetworkEvent::NoticeUpdated { notice } => { tracing::trace!("📢 Notice updated: {}", notice); }
@@ -2451,7 +2441,7 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::BrowserOpened { url } => { tracing::trace!("🌐 Browser opened: {}", url); }
                 NetworkEvent::DoorOpened { door_id } => { tracing::trace!("🚪 Door {} opened", door_id); }
                 NetworkEvent::TrapRockEntered { object_id } => { tracing::trace!("🪤 Trap rock entered by {}", object_id); }
-                NetworkEvent::BaseStatsReceived { .. } => { tracing::trace!("📊 Base stats received"); }
+                NetworkEvent::BaseStatsReceived => { tracing::trace!("📊 Base stats received"); }
                 NetworkEvent::InventoryResized { new_size } => {
                     if let Some(e) = local_player_entity {
                         if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
@@ -2478,14 +2468,14 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectLevelEffectsReceived { object_id } => { tracing::trace!("⭐ Object {} level effects", object_id); }
                 NetworkEvent::BindingShotSet { enabled } => { tracing::trace!("🎯 Binding shot set: {}", enabled); }
                 NetworkEvent::OutputMessageReceived { message } => { tracing::trace!("💬 Message: {}", message); }
-                NetworkEvent::UserStorageReceived { .. } => { tracing::trace!("📦 User storage received"); }
-                NetworkEvent::ChatItemStatsReceived { .. } => { tracing::trace!("💬 Chat item stats received"); }
+                NetworkEvent::UserStorageReceived => { tracing::trace!("📦 User storage received"); }
+                NetworkEvent::ChatItemStatsReceived => { tracing::trace!("💬 Chat item stats received"); }
                 NetworkEvent::ConcentrationSet { enabled } => { tracing::trace!("🎯 Concentration set: {}", enabled); }
                 NetworkEvent::ElementalSet { element } => { tracing::trace!("🔥 Elemental set: {}", element); }
-                NetworkEvent::DelayedExplosionRemoved { .. } => { tracing::trace!("💥 Delayed explosion removed"); }
+                NetworkEvent::DelayedExplosionRemoved => { tracing::trace!("💥 Delayed explosion removed"); }
 
                 // 客户端 → 服务器（不需要 apply，已在 handle_outbound_event 中发送）
-                NetworkEvent::MagicKeySet { .. } => {}
+                NetworkEvent::MagicKeySet => {}
                 NetworkEvent::EquipItemRequest { .. } => {}
                 NetworkEvent::RemoveItemRequest { .. } => {}
                 NetworkEvent::RemoveSlotItemRequest { .. } => {}
@@ -2499,22 +2489,22 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::DropItemStackRequest { .. } => {}
                 NetworkEvent::AddFriendRequest { .. } => {}
                 NetworkEvent::RemoveFriendRequest { .. }=> {}
-                NetworkEvent::RefreshFriendsRequest { .. }=> {}
+                NetworkEvent::RefreshFriendsRequest=> {}
                 NetworkEvent::AddMemoRequest { .. }=> {}
                 NetworkEvent::EditGuildMember { .. }=> {}
                 NetworkEvent::EditGuildNotice { .. }=> {}
-                NetworkEvent::GuildNameReturn { .. }=> {}
-                NetworkEvent::RequestGuildInfo { .. }=> {}
+                NetworkEvent::GuildNameReturn=> {}
+                NetworkEvent::RequestGuildInfo=> {}
                 NetworkEvent::GuildStorageGoldChange { .. }=> {}
-                NetworkEvent::GuildStorageItemChangeRequest { .. }=> {}
-                NetworkEvent::GuildWarReturn { .. }=> {}
+                NetworkEvent::GuildStorageItemChangeRequest=> {}
+                NetworkEvent::GuildWarReturn=> {}
                 NetworkEvent::GuildBuffUpdate { .. }=> {}
-                NetworkEvent::LogOutRequest { .. }=> {}
-                NetworkEvent::HarvestRequest { .. }=> {}
-                NetworkEvent::BuyItemBackRequest { .. }=> {}
+                NetworkEvent::LogOutRequest=> {}
+                NetworkEvent::HarvestRequest=> {}
+                NetworkEvent::BuyItemBackRequest=> {}
                 NetworkEvent::SRepairItemRequest { .. }=> {}
-                NetworkEvent::CheckRefineRequest { .. }=> {}
-                NetworkEvent::ReplaceWedRingRequest { .. }=> {}
+                NetworkEvent::CheckRefineRequest=> {}
+                NetworkEvent::ReplaceWedRingRequest=> {}
                 NetworkEvent::NPCConfirmInput { .. }=> {}
                 NetworkEvent::CreateHeroRequest { .. }=> {}
                 NetworkEvent::SetHeroAutoPotValue { .. }=> {}
@@ -2528,37 +2518,37 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::LockMailRequest { .. }=> {}
                 NetworkEvent::ConsignItemRequest { .. }=> {}
                 NetworkEvent::MarketSearchRequest { .. }=> {}
-                NetworkEvent::MarketRefreshRequest { .. }=> {}
+                NetworkEvent::MarketRefreshRequest=> {}
                 NetworkEvent::MarketPageRequest { .. }=> {}
                 NetworkEvent::MarketBuyRequest { .. }=> {}
                 NetworkEvent::MarketGetBackRequest { .. }=> {}
                 NetworkEvent::MarketSellNowRequest { .. }=> {}
-                NetworkEvent::UpdateIntelligentCreatureRequest { .. }=> {}
-                NetworkEvent::IntelligentCreaturePickupRequest { .. }=> {}
-                NetworkEvent::RequestIntelligentCreatureUpdates { .. }=> {}
+                NetworkEvent::UpdateIntelligentCreatureRequest=> {}
+                NetworkEvent::IntelligentCreaturePickupRequest=> {}
+                NetworkEvent::RequestIntelligentCreatureUpdates=> {}
                 NetworkEvent::MarriageRequestSend { .. }=> {}
                 NetworkEvent::MarriageReply { .. }=> {}
-                NetworkEvent::ChangeMarriageRequest { .. }=> {}
-                NetworkEvent::DivorceRequestSend { .. }=> {}
+                NetworkEvent::ChangeMarriageRequest=> {}
+                NetworkEvent::DivorceRequestSend=> {}
                 NetworkEvent::DivorceReply { .. }=> {}
                 NetworkEvent::AddMentorRequest { .. }=> {}
                 NetworkEvent::MentorReply { .. }=> {}
                 NetworkEvent::AllowMentorRequest { .. }=> {}
-                NetworkEvent::CancelMentorRequest { .. }=> {}
-                NetworkEvent::GetRentedItemsRequest { .. }=> {}
+                NetworkEvent::CancelMentorRequest=> {}
+                NetworkEvent::GetRentedItemsRequest=> {}
                 NetworkEvent::RentalItemDepositRequest { .. }=> {}
                 NetworkEvent::RentalItemRetrieveRequest { .. }=> {}
-                NetworkEvent::ItemRentalConfirm { .. }=> {}
-                NetworkEvent::ItemRentalCancel { .. }=> {}
-                NetworkEvent::FishingCastRequest { .. }=> {}
+                NetworkEvent::ItemRentalConfirm=> {}
+                NetworkEvent::ItemRentalCancel=> {}
+                NetworkEvent::FishingCastRequest=> {}
                 NetworkEvent::FishingAutocastToggle { .. }=> {}
-                NetworkEvent::AcceptReincarnationRequest { .. }=> {}
-                NetworkEvent::CancelReincarnationRequest { .. }=> {}
+                NetworkEvent::AcceptReincarnationRequest=> {}
+                NetworkEvent::CancelReincarnationRequest=> {}
                 NetworkEvent::GameShopBuyRequest { .. }=> {}
                 NetworkEvent::ReportIssueRequest { .. }=> {}
                 NetworkEvent::GetRankingRequest { .. }=> {}
                 NetworkEvent::OpenDoorRequest { .. }=> {}
-                NetworkEvent::RequestMapInfoRequest { .. }=> {}
+                NetworkEvent::RequestMapInfoRequest=> {}
                 NetworkEvent::TeleportToNPCRequest { .. }=> {}
                 NetworkEvent::SearchMapRequest { .. }=> {}
                 NetworkEvent::ObserveRequest { .. }=> {}
@@ -2740,9 +2730,7 @@ impl LogicSystem for NetworkApplySystem {
                 if changed && mount_type >= 0 {
                     let sound_id: Option<i32> = if riding_mount {
                         if mount_type < 7 { Some(10218) } else if mount_type < 12 { Some(10188) } else { None }
-                    } else {
-                        if mount_type < 7 { Some(10219) } else if mount_type < 12 { Some(10189) } else { None }
-                    };
+                    } else if mount_type < 7 { Some(10219) } else if mount_type < 12 { Some(10189) } else { None };
                     if let Some(id) = sound_id {
                         let _ = ctx.world.insert_one(
                             e,
@@ -3402,7 +3390,7 @@ impl LogicSystem for NetworkApplySystem {
 
             // 根据技能类型选择特效颜色
             use mir2_shared::enums::Spell;
-            let spell_enum = spell as u8;
+            let spell_enum = spell;
             let (effect_text, effect_color) = match spell_enum {
                 x if x == Spell::FireBall as u8 => ("火球术", macroquad::prelude::ORANGE),
                 x if x == Spell::GreatFireBall as u8 => ("大火球", macroquad::prelude::RED),
@@ -3452,7 +3440,7 @@ impl LogicSystem for NetworkApplySystem {
 
             let now = macroquad::prelude::get_time();
 
-            match effect as u8 {
+            match effect {
                 x if x == SpellEffect::Critical as u8 => {
                     // 暴击特效：黄色大字
                     ctx.world.spawn((

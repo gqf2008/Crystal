@@ -214,8 +214,7 @@ impl LogicSystem for PathfindingSystem {
         let map_data = ctx.world
             .query_mut::<&MapData>()
             .into_iter()
-            .next()
-            .map(|data| data.clone());
+            .next().cloned();
 
         // 动态占位（仅用于挂机 AI 的寻路避障）
         // 注意：这里必须在 query_mut 循环之前收集，避免 hecs 的可变借用冲突。

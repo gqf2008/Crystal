@@ -179,11 +179,11 @@ impl SpellType {
     /// 获取技能所需职业
     pub fn required_class(&self) -> MirClass {
         let id = *self as u8;
-        if id >= 1 && id <= 17 { MirClass::Warrior }
-        else if id >= 31 && id <= 55 { MirClass::Wizard }
-        else if id >= 61 && id <= 86 { MirClass::Taoist }
-        else if id >= 91 && id <= 107 { MirClass::Assassin }
-        else if id >= 121 && id <= 141 { MirClass::Archer }
+        if (1..=17).contains(&id) { MirClass::Warrior }
+        else if (31..=55).contains(&id) { MirClass::Wizard }
+        else if (61..=86).contains(&id) { MirClass::Taoist }
+        else if (91..=107).contains(&id) { MirClass::Assassin }
+        else if (121..=141).contains(&id) { MirClass::Archer }
         else { MirClass::Warrior } // 默认
     }
 }

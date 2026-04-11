@@ -42,6 +42,12 @@ enum UiStackTop {
     Npc,
 }
 
+impl Default for UIRenderSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UIRenderSystem {
     pub fn new() -> Self {
         Self {
@@ -793,8 +799,7 @@ impl RenderSystem for UIRenderSystem {
         let pass = _world
             .query::<&RenderPass>()
             .iter()
-            .next()
-            .map(|pass| *pass)
+            .next().copied()
             .unwrap_or_default();
 
         if pass.stage != RenderStage::Ui {

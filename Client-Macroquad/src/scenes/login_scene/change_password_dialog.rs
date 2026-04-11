@@ -129,11 +129,10 @@ impl LoginScene {
             };
         }
 
-        if is_key_pressed(KeyCode::Enter) {
-            if self.can_submit_change_password() {
+        if is_key_pressed(KeyCode::Enter)
+            && self.can_submit_change_password() {
                 self.submit_change_password();
             }
-        }
     }
 
     pub(super) fn draw_change_password_dialog(&mut self) {
@@ -253,8 +252,8 @@ impl LoginScene {
 
         // 鼠标点输入框切换焦点
         let (mx, my) = mouse_position();
-        if is_mouse_button_pressed(MouseButton::Left) {
-            if mx >= input_x && mx <= input_x + input_w {
+        if is_mouse_button_pressed(MouseButton::Left)
+            && mx >= input_x && mx <= input_x + input_w {
                 if my >= y_account && my <= y_account + input_h {
                     self.cp_focus = ChangePasswordFocus::AccountId;
                 } else if my >= y_current && my <= y_current + input_h {
@@ -265,6 +264,5 @@ impl LoginScene {
                     self.cp_focus = ChangePasswordFocus::NewPassword2;
                 }
             }
-        }
     }
 }
