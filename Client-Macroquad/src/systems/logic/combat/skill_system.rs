@@ -77,25 +77,17 @@ impl LogicSystem for SkillSystem {
         // 如果有施法请求，执行施法逻辑
         if let Some((spell, _target_pos, _target_entity)) = spell_request {
             // 1. 检查是否已学会该技能
-            let learned = {
-                let mut found = false;
-                for (_local, magic_list) in ctx.world.query::<(&LocalPlayer, &MagicList)>().iter() {
-                    if magic_list.has_learned(spell) {
-                        found = true;
-                    }
-                    break;
-                }
-                found
-            };
+            let learned = ctx.world.query::<(&LocalPlayer, &MagicList)>().iter()
+                .next()
+                .map(|(_, ml)| ml.has_learned(spell))
+                .unwrap_or(false);
 
             if !learned {
                 tracing::warn!("⚠️ 尚未学会技能: {}", spell.name());
 
                 // 清除施法输入
-                for (_local, input) in ctx
-                    .world
-                    .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
-                {
+                #[allow(clippy::never_loop)]
+                for (_local, input) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>() {
                     input.cast_spell = None;
                     break;
                 }
@@ -106,11 +98,10 @@ impl LogicSystem for SkillSystem {
             // 1.5 检查冷却时间（同时清理已过期条目）
             let on_cooldown = {
                 let mut cd = false;
+                #[allow(clippy::never_loop)]
                 for (_local, cooldowns) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>() {
                     cooldowns.cleanup();
-                    if cooldowns.is_on_cooldown(spell as u8) {
-                        cd = true;
-                    }
+                    cd = cooldowns.is_on_cooldown(spell as u8);
                     break;
                 }
                 cd
@@ -119,10 +110,8 @@ impl LogicSystem for SkillSystem {
             if on_cooldown {
                 tracing::warn!("⚠️ 技能冷却中: {}", spell.name());
 
-                for (_local, input) in ctx
-                    .world
-                    .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
-                {
+                #[allow(clippy::never_loop)]
+                for (_local, input) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>() {
                     input.cast_spell = None;
                     break;
                 }
@@ -132,21 +121,16 @@ impl LogicSystem for SkillSystem {
 
             // 2. 检查魔法值
             let mp_cost = Self::get_spell_mp_cost(spell);
-            let has_enough_mp = {
-                let mut enough = false;
-                for (_local, mana) in ctx.world.query::<(&LocalPlayer, &Mana)>().iter() {
-                    if mana.has_enough(mp_cost) {
-                        enough = true;
-                    }
-                    break;
-                }
-                enough
-            };
+            let has_enough_mp = ctx.world.query::<(&LocalPlayer, &Mana)>().iter()
+                .next()
+                .map(|(_, mana)| mana.has_enough(mp_cost))
+                .unwrap_or(false);
 
             if !has_enough_mp {
                 tracing::warn!("⚠️ 魔法值不足,需要 {} MP", mp_cost);
 
                 // 清除施法输入
+                #[allow(clippy::never_loop)]
                 for (_local, input) in ctx
                     .world
                     .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
@@ -171,18 +155,19 @@ impl LogicSystem for SkillSystem {
             // });
 
             // 5. 消耗魔法值
+            #[allow(clippy::never_loop)]
             for (_local, mana) in ctx.world.query_mut::<(&LocalPlayer, &mut Mana)>() {
                 mana.consume(mp_cost);
+                break;
             }
 
             // 6. 清除施法输入
-            for (_local, input) in ctx
-                .world
-                .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
-            {
+            #[allow(clippy::never_loop)]
+            for (_local, input) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>() {
                 input.cast_spell = None;
                 input.spell_target_pos = None;
                 input.spell_target_entity = None;
+                break;
             }
 
             tracing::info!("✨ 施放技能: {} (MP: -{})", spell.name(), mp_cost);
@@ -200,16 +185,10 @@ impl SkillSystem {
         network_tx: &Sender<NetworkCommand>,
     ) -> bool {
         // 1. 检查是否已学会该技能
-        let learned = {
-            let mut found = false;
-            for (_local, magic_list) in world.query::<(&LocalPlayer, &MagicList)>().iter() {
-                if magic_list.has_learned(spell) {
-                    found = true;
-                }
-                break;
-            }
-            found
-        };
+        let learned = world.query::<(&LocalPlayer, &MagicList)>().iter()
+            .next()
+            .map(|(_, ml)| ml.has_learned(spell))
+            .unwrap_or(false);
 
         if !learned {
             println!("⚠️ 尚未学会技能: {}", spell.name());
@@ -218,16 +197,10 @@ impl SkillSystem {
 
         // 2. 检查魔法值
         let mp_cost = Self::get_spell_mp_cost(spell);
-        let has_enough_mp = {
-            let mut enough = false;
-            for (_local, mana) in world.query::<(&LocalPlayer, &Mana)>().iter() {
-                if mana.has_enough(mp_cost) {
-                    enough = true;
-                }
-                break;
-            }
-            enough
-        };
+        let has_enough_mp = world.query::<(&LocalPlayer, &Mana)>().iter()
+            .next()
+            .map(|(_, mana)| mana.has_enough(mp_cost))
+            .unwrap_or(false);
 
         if !has_enough_mp {
             println!("⚠️ 魔法值不足,需要 {} MP", mp_cost);
@@ -235,16 +208,10 @@ impl SkillSystem {
         }
 
         // 3. 检查冷却时间
-        let on_cooldown = {
-            let mut cd = false;
-            for (_local, cooldowns) in world.query::<(&LocalPlayer, &crate::components::spell::SpellCooldowns)>().iter() {
-                if cooldowns.is_on_cooldown(spell as u8) {
-                    cd = true;
-                }
-                break;
-            }
-            cd
-        };
+        let on_cooldown = world.query::<(&LocalPlayer, &crate::components::spell::SpellCooldowns)>().iter()
+            .next()
+            .map(|(_, cooldowns)| cooldowns.is_on_cooldown(spell as u8))
+            .unwrap_or(false);
 
         if on_cooldown {
             println!("⚠️ 技能冷却中: {}", spell.name());
@@ -263,8 +230,10 @@ impl SkillSystem {
         });
 
         // 6. 消耗魔法值
+        #[allow(clippy::never_loop)]
         for (_local, mana) in world.query_mut::<(&LocalPlayer, &mut Mana)>() {
             mana.consume(mp_cost);
+            break;
         }
 
         // 7. TODO: 设置冷却时间

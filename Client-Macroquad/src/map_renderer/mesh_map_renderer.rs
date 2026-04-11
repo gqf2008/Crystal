@@ -412,9 +412,11 @@ impl MeshMapRenderer {
                     );
 
                     // 恢复世界相机（GameScene 的 map_camera 也使用同一套参数）
-                    let mut world_cam = Camera2D::default();
-                    world_cam.target = vec2(camera_x, camera_y);
-                    world_cam.zoom = vec2(2.0 / viewport_width.max(1.0) * zoom, 2.0 / viewport_height.max(1.0) * zoom);
+                    let world_cam = Camera2D {
+                        target: vec2(camera_x, camera_y),
+                        zoom: vec2(2.0 / viewport_width.max(1.0) * zoom, 2.0 / viewport_height.max(1.0) * zoom),
+                        ..Default::default()
+                    };
                     set_camera(&world_cam);
 
                     // 写入缓存并绘制

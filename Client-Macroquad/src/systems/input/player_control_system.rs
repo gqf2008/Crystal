@@ -748,6 +748,8 @@ impl LogicSystem for PlayerControlSystem {
         };
 
         if let Some(npc_object_id) = npc_clicked_target {
+            // hecs query_mut returns an iterator; we only need the first result
+            #[allow(clippy::never_loop)]
             for active in ctx.world.query_mut::<&mut crate::components::ActiveNpc>() {
                 active.npc_object_id = Some(npc_object_id);
                 break;

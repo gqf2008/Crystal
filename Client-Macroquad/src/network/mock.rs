@@ -643,14 +643,16 @@ impl MockNetwork {
                     let mut equip: Vec<Option<UserItem>> = vec![None; 14];
                     // Make a couple of fake items for inspection.
                     if weapon != 0 {
-                        let mut info = ItemInfo::default();
-                        info.index = weapon as i32;
-                        info.item_type = mir2_shared::enums::ItemType::Weapon;
-                        info.shape = weapon;
-                        info.effect = weapon_effect as u8;
-                        info.durability = 1000;
-                        info.stack_size = 1;
-                        info.name = "MockWeapon".to_string();
+                        let info = ItemInfo {
+                            index: weapon as i32,
+                            item_type: mir2_shared::enums::ItemType::Weapon,
+                            shape: weapon,
+                            effect: weapon_effect as u8,
+                            durability: 1000,
+                            stack_size: 1,
+                            name: "MockWeapon".to_string(),
+                            ..Default::default()
+                        };
                         let mut ui = UserItem::with_info(info);
                         ui.unique_id = 10_000_000 + id as u64;
                         ui.count = 1;
@@ -658,15 +660,16 @@ impl MockNetwork {
                         equip[0] = Some(ui);
                     }
                     if armour != 0 {
-                        let mut info = ItemInfo::default();
-                        info.index = armour as i32;
-                        info.item_type = mir2_shared::enums::ItemType::Armour;
-                        info.shape = armour;
-                        // Armour.effect 在客户端被用于 wing_effect（mock 用来表现翅膀/特效）
-                        info.effect = wing_effect;
-                        info.durability = 1000;
-                        info.stack_size = 1;
-                        info.name = "MockArmour".to_string();
+                        let info = ItemInfo {
+                            index: armour as i32,
+                            item_type: mir2_shared::enums::ItemType::Armour,
+                            shape: armour,
+                            effect: wing_effect,
+                            durability: 1000,
+                            stack_size: 1,
+                            name: "MockArmour".to_string(),
+                            ..Default::default()
+                        };
                         let mut ui = UserItem::with_info(info);
                         ui.unique_id = 20_000_000 + id as u64;
                         ui.count = 1;
@@ -754,18 +757,21 @@ impl MockNetwork {
                             as i16)
                         .clamp(weapon_min_vis, weapon_max_vis);
                     if w_shape > 0 {
-                        let mut info = ItemInfo::default();
-                        info.index = 5001;
-                        info.item_type = mir2_shared::enums::ItemType::Weapon;
-                        info.shape = w_shape;
-                        info.effect = (cfg.weapon_effect_min
+                        let effect = (cfg.weapon_effect_min
                             + (Self::rng_next_u32(&mut state.rng)
                                 % ((cfg.weapon_effect_max - cfg.weapon_effect_min).max(0) as u32 + 1))
                                 as i16)
                             .clamp(cfg.weapon_effect_min, cfg.weapon_effect_max) as u8;
-                        info.durability = 1000;
-                        info.stack_size = 1;
-                        info.name = "MockWeapon".to_string();
+                        let info = ItemInfo {
+                            index: 5001,
+                            item_type: mir2_shared::enums::ItemType::Weapon,
+                            shape: w_shape,
+                            effect,
+                            durability: 1000,
+                            stack_size: 1,
+                            name: "MockWeapon".to_string(),
+                            ..Default::default()
+                        };
                         let mut ui = UserItem::with_info(info);
                         ui.unique_id = 700_000_001;
                         ui.count = 1;
@@ -786,20 +792,22 @@ impl MockNetwork {
                             as i16)
                         .clamp(armour_min_vis, armour_max_vis);
                     if a_shape > 0 {
-                        let mut info = ItemInfo::default();
-                        info.index = 5002;
-                        info.item_type = mir2_shared::enums::ItemType::Armour;
-                        info.shape = a_shape;
-                        // Armour.effect 在客户端被用于 wing_effect（mock 用来表现翅膀/特效）
                         let span = (cfg.wing_effect_max - cfg.wing_effect_min) as u32;
-                        info.effect = if cfg.wing_effect_max >= cfg.wing_effect_min {
+                        let effect = if cfg.wing_effect_max >= cfg.wing_effect_min {
                             cfg.wing_effect_min + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as u8
                         } else {
                             0
                         };
-                        info.durability = 1000;
-                        info.stack_size = 1;
-                        info.name = "MockArmour".to_string();
+                        let info = ItemInfo {
+                            index: 5002,
+                            item_type: mir2_shared::enums::ItemType::Armour,
+                            shape: a_shape,
+                            effect,
+                            durability: 1000,
+                            stack_size: 1,
+                            name: "MockArmour".to_string(),
+                            ..Default::default()
+                        };
                         let mut ui = UserItem::with_info(info);
                         ui.unique_id = 700_000_002;
                         ui.count = 1;
@@ -840,11 +848,13 @@ impl MockNetwork {
                         if slot >= state.player_inventory.len() {
                             return;
                         }
-                        let mut info = ItemInfo::default();
-                        info.index = 20_000 + slot as i32;
-                        info.name = name.to_string();
-                        info.item_type = ItemType::Potion;
-                        info.stack_size = 1;
+                        let info = ItemInfo {
+                            index: 20_000 + slot as i32,
+                            name: name.to_string(),
+                            item_type: ItemType::Potion,
+                            stack_size: 1,
+                            ..Default::default()
+                        };
                         let mut ui = UserItem::with_info(info);
                         ui.unique_id = uid;
                         ui.count = 1;
@@ -1065,11 +1075,13 @@ impl MockNetwork {
 
                     let mut goods: Vec<UserItem> = Vec::new();
                     for i in 0..6u64 {
-                        let mut info = ItemInfo::default();
-                        info.index = 1000 + i as i32;
-                        info.name = format!("MockItem{}", i + 1);
-                        info.price = 50 + (i as u32) * 10;
-                        info.stack_size = 99;
+                        let info = ItemInfo {
+                            index: 1000 + i as i32,
+                            name: format!("MockItem{}", i + 1),
+                            price: 50 + (i as u32) * 10,
+                            stack_size: 99,
+                            ..Default::default()
+                        };
                         let mut item = UserItem::with_info(info);
                         item.unique_id = 900_000 + i;
                         item.is_shop_item = true;
