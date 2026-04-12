@@ -591,6 +591,7 @@ impl PacketHandler for ItemHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ ItemHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

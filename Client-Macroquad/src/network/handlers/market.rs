@@ -64,6 +64,7 @@ impl PacketHandler for MarketHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ MarketHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

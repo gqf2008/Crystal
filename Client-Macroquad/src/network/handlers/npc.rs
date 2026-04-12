@@ -239,6 +239,7 @@ impl PacketHandler for NpcHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ NpcHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

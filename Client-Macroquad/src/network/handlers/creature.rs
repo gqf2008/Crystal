@@ -46,6 +46,7 @@ impl PacketHandler for CreatureHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ CreatureHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

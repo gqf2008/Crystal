@@ -38,6 +38,7 @@ impl PacketHandler for ChatHandler {
             }
             
             _ => {
+                tracing::debug!("⚠️ ChatHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

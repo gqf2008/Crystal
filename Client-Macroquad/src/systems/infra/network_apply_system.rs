@@ -2557,8 +2557,8 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObserveRequest { .. }=> {}
 
                 // 未处理的数据包（调试用）
-                NetworkEvent::UnhandledPacket { .. } => {
-                    tracing::trace!("📦 Unhandled packet opcode");
+                NetworkEvent::UnhandledPacket { opcode } => {
+                    tracing::warn!("⚠️ Unhandled packet opcode: {:04X}", opcode);
                 }
 
                 // 其他未显式匹配的事件（包括 Connected, Disconnected 等原始事件）

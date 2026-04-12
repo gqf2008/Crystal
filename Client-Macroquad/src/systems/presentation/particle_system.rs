@@ -104,7 +104,7 @@ impl ParticleSystem {
             ParticleType::Snow => Some(self.make_snow(x, y)),
             ParticleType::Fog => Some(self.make_fog(x, y)),
             ParticleType::Sand => Some(self.make_sand(x, y)),
-            ParticleType::Blizzard => Some(self.make_rain(x, y)),
+            ParticleType::Blizzard => Some(self.make_blizzard(x, y)),
             ParticleType::BlueFog => Some(self.make_colored_fog(x, y, 100, 150, 255)),
             ParticleType::YellowFog => Some(self.make_colored_fog(x, y, 255, 255, 100)),
             ParticleType::RedFog => Some(self.make_colored_fog(x, y, 255, 80, 80)),
@@ -113,9 +113,9 @@ impl ParticleSystem {
             ParticleType::RedFogEmber => Some(self.make_ember(x, y, 255, 80, 50)),
             ParticleType::BlizzardFrost => Some(self.make_frost(x, y)),
             ParticleType::Bird => Some(self.make_bird(x, y)),
-            ParticleType::FogCloud => Some(self.make_fog(x, y)),
+            ParticleType::FogCloud => Some(self.make_fog_cloud(x, y)),
             ParticleType::FloatingFlower => Some(self.make_flower(x, y)),
-            ParticleType::FlowersRain => Some(self.make_rain(x, y)),
+            ParticleType::FlowersRain => Some(self.make_flowers_rain(x, y)),
             ParticleType::Leaves => Some(self.make_leaf(x, y)),
             ParticleType::FireyLeaves => Some(self.make_firey_leaf(x, y)),
             ParticleType::PurpleLeaves => Some(self.make_purple_leaf(x, y)),
@@ -250,6 +250,45 @@ impl ParticleSystem {
         let mut p = Particle::new(x + self.rand(-50.0, 50.0), y, vx, vy, lifetime);
         p.color = ParticleColor { r: 150, g: 50, b: 200, a: 200 };
         p.size = self.rand(3.0, 6.0);
+        p
+    }
+
+    /// 暴风雪：比普通雨更快、更密集、带水平漂移
+    fn make_blizzard(&mut self, x: f32, y: f32) -> Particle {
+        let vx = self.rand(100.0, 300.0);   // 强水平风
+        let vy = self.rand(150.0, 350.0);   // 比普通雨稍慢
+        let lifetime = self.rand(0.8, 2.0);
+        let mut p = Particle::new(x + self.rand(-200.0, 200.0), y, vx, vy, lifetime);
+        p.color = ParticleColor { r: 200, g: 220, b: 255, a: 180 };
+        p.size = self.rand(1.5, 3.5);
+        p
+    }
+
+    /// 花瓣雨：带颜色变化、飘落效果（缓慢下降+水平摇摆）
+    fn make_flowers_rain(&mut self, x: f32, y: f32) -> Particle {
+        let vx = self.rand(-40.0, 40.0);    // 明显摇摆
+        let vy = self.rand(80.0, 180.0);    // 缓慢飘落
+        let lifetime = self.rand(2.0, 4.0);
+        let mut p = Particle::new(x + self.rand(-150.0, 150.0), y, vx, vy, lifetime);
+        let colors = [
+            ParticleColor { r: 255, g: 150, b: 180, a: 200 },
+            ParticleColor { r: 255, g: 200, b: 150, a: 200 },
+            ParticleColor { r: 255, g: 180, b: 220, a: 200 },
+            ParticleColor { r: 255, g: 220, b: 180, a: 200 },
+        ];
+        p.color = colors[(self.seed_counter as usize) % 4];
+        p.size = self.rand(2.0, 5.0);       // 比普通雨大
+        p
+    }
+
+    /// 云雾：大颗粒、缓慢移动、半透明
+    fn make_fog_cloud(&mut self, x: f32, y: f32) -> Particle {
+        let vx = self.rand(-5.0, 5.0);      // 极慢水平移动
+        let vy = self.rand(-3.0, 3.0);      // 轻微上下浮动
+        let lifetime = self.rand(5.0, 10.0); // 更长生命周期
+        let mut p = Particle::new(x + self.rand(-100.0, 100.0), y + self.rand(-40.0, 40.0), vx, vy, lifetime);
+        p.color = ParticleColor { r: 200, g: 200, b: 210, a: 60 }; // 更透明
+        p.size = self.rand(25.0, 50.0);     // 更大颗粒
         p
     }
 }

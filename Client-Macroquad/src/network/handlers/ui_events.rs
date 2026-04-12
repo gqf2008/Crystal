@@ -175,6 +175,7 @@ impl PacketHandler for UiEventsHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ UiEventsHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

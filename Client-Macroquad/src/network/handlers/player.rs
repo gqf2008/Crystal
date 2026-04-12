@@ -23,6 +23,7 @@ impl PacketHandler for PlayerHandler {
                 }
             }
             _ => {
+                tracing::debug!("⚠️ PlayerHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket {
                     opcode: header.opcode,
                 });

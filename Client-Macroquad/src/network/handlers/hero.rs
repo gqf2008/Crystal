@@ -111,6 +111,7 @@ impl PacketHandler for HeroHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ HeroHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

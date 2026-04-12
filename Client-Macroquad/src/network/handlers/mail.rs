@@ -66,6 +66,7 @@ impl PacketHandler for MailHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ MailHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

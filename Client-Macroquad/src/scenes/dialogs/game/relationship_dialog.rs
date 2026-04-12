@@ -236,27 +236,31 @@ impl RelationshipDialogHybrid {
             let lv_text = format!("Lv.{}", self.relationship.partner_level);
             draw_text_cn(&lv_text, content_x + 160.0, content_y + line_h, 11.0, GRAY);
 
-            // 亲密度
-            draw_text_cn("亲密度：", content_x, content_y + line_h * 2.0, 12.0, Color::from_rgba(200, 200, 200, 255));
-            let intimacy_text = format!("{}/{}", self.relationship.intimacy, self.relationship.max_intimacy);
-            draw_text_cn(&intimacy_text, content_x + 60.0, content_y + line_h * 2.0, 12.0, Color::from_rgba(255, 180, 200, 255));
+            // 亲密度（仅当服务器提供数据时显示）
+            if self.relationship.intimacy > 0 || self.relationship.max_intimacy > 0 {
+                draw_text_cn("亲密度：", content_x, content_y + line_h * 2.0, 12.0, Color::from_rgba(200, 200, 200, 255));
+                let intimacy_text = format!("{}/{}", self.relationship.intimacy, self.relationship.max_intimacy);
+                draw_text_cn(&intimacy_text, content_x + 60.0, content_y + line_h * 2.0, 12.0, Color::from_rgba(255, 180, 200, 255));
 
-            // 亲密度条
-            let bar_x = content_x;
-            let bar_y = content_y + line_h * 3.0 - 4.0;
-            let bar_w = self.size.x - 30.0;
-            let bar_h = 8.0;
-            let ratio = if self.relationship.max_intimacy > 0 {
-                (self.relationship.intimacy as f32 / self.relationship.max_intimacy as f32).clamp(0.0, 1.0)
+                // 亲密度条
+                let bar_x = content_x;
+                let bar_y = content_y + line_h * 3.0 - 4.0;
+                let bar_w = self.size.x - 30.0;
+                let bar_h = 8.0;
+                let ratio = if self.relationship.max_intimacy > 0 {
+                    (self.relationship.intimacy as f32 / self.relationship.max_intimacy as f32).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                draw_rectangle(bar_x, bar_y, bar_w, bar_h, Color::from_rgba(40, 40, 50, 255));
+                draw_rectangle(bar_x, bar_y, bar_w * ratio, bar_h, Color::from_rgba(255, 130, 170, 200));
+
+                if !self.relationship.wedding_date.is_empty() {
+                    draw_text_cn("结婚日期：", content_x, content_y + line_h * 4.0, 11.0, Color::from_rgba(180, 180, 180, 255));
+                    draw_text_cn(&self.relationship.wedding_date, content_x + 70.0, content_y + line_h * 4.0, 11.0, Color::from_rgba(180, 180, 180, 255));
+                }
             } else {
-                0.0
-            };
-            draw_rectangle(bar_x, bar_y, bar_w, bar_h, Color::from_rgba(40, 40, 50, 255));
-            draw_rectangle(bar_x, bar_y, bar_w * ratio, bar_h, Color::from_rgba(255, 130, 170, 200));
-
-            if !self.relationship.wedding_date.is_empty() {
-                draw_text_cn("结婚日期：", content_x, content_y + line_h * 4.0, 11.0, Color::from_rgba(180, 180, 180, 255));
-                draw_text_cn(&self.relationship.wedding_date, content_x + 70.0, content_y + line_h * 4.0, 11.0, Color::from_rgba(180, 180, 180, 255));
+                // 协议未提供亲密度数据，跳过显示
             }
         } else {
             draw_text_cn("未婚", content_x, content_y + line_h, 14.0, GRAY);

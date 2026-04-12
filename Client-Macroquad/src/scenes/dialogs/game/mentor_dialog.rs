@@ -253,15 +253,22 @@ impl MentorDialogHybrid {
             draw_text_cn("暂无师徒关系", content_x, content_y + line_h, 13.0, GRAY);
         }
 
-        // 师徒经验
-        draw_text_cn("师徒经验：", content_x, content_y + line_h * 2.0, 12.0, Color::from_rgba(200, 200, 200, 255));
-        let exp_text = format!("{}", self.mentor_info.exp_points);
-        draw_text_cn(&exp_text, content_x + 70.0, content_y + line_h * 2.0, 12.0, WHITE);
+        // 师徒经验（仅当服务器提供数据时显示）
+        if self.mentor_info.exp_points > 0 {
+            draw_text_cn("师徒经验：", content_x, content_y + line_h * 2.0, 12.0, Color::from_rgba(200, 200, 200, 255));
+            let exp_text = format!("{}", self.mentor_info.exp_points);
+            draw_text_cn(&exp_text, content_x + 70.0, content_y + line_h * 2.0, 12.0, WHITE);
 
-        // 允许拜师状态
-        let status_text = if self.mentor_info.allow_request { "允许拜师" } else { "拒绝拜师" };
-        let status_color = if self.mentor_info.allow_request { GREEN } else { RED };
-        draw_text_cn(status_text, content_x, content_y + line_h * 3.0, 12.0, status_color);
+            // 允许拜师状态
+            let status_text = if self.mentor_info.allow_request { "允许拜师" } else { "拒绝拜师" };
+            let status_color = if self.mentor_info.allow_request { GREEN } else { RED };
+            draw_text_cn(status_text, content_x, content_y + line_h * 3.0, 12.0, status_color);
+        } else {
+            // 协议未提供经验数据，仅显示状态
+            let status_text = if self.mentor_info.allow_request { "允许拜师" } else { "拒绝拜师" };
+            let status_color = if self.mentor_info.allow_request { GREEN } else { RED };
+            draw_text_cn(status_text, content_x, content_y + line_h * 2.0, 12.0, status_color);
+        }
     }
 
     fn draw_buttons(&mut self, mouse_pos: Vec2) {

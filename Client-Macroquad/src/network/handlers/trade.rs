@@ -68,6 +68,7 @@ impl PacketHandler for TradeHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ TradeHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

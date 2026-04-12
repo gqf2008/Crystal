@@ -279,6 +279,7 @@ impl PacketHandler for MovementHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ MovementHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

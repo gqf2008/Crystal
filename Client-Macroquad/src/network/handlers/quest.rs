@@ -97,6 +97,7 @@ impl PacketHandler for QuestHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ QuestHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

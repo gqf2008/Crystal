@@ -63,6 +63,7 @@ impl PacketHandler for SocialHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ SocialHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

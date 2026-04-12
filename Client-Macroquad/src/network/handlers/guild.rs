@@ -138,6 +138,7 @@ impl PacketHandler for GuildHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ GuildHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }

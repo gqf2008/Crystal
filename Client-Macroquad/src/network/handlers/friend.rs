@@ -31,6 +31,7 @@ impl PacketHandler for FriendHandler {
             }
 
             _ => {
+                tracing::debug!("⚠️ FriendHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
             }
         }
