@@ -1,604 +1,150 @@
-# GameScene UI 实现 TODO
+# GameScene UI 实现状态
 
-## 📋 总体目标
-实现传奇2游戏主场景的所有UI交互部分，游戏逻辑由ECS系统处理。
-
----
-
-## 🎯 阶段一：核心UI框架（优先级：⭐⭐⭐⭐⭐）
-
-### 1. MainDialog - 主界面底部工具栏
-**文件**: `src/scenes/dialogs/game/main_dialog.rs`
-
-**功能清单**:
-- [x] 底部工具栏背景（根据分辨率适配：800/1024/1280+）
-- [x] 生命值球（HealthOrb）+ 数值显示（Prguse[4] 动态裁剪）
-- [x] 魔法值球（ManaOrb）+ 数值显示（Prguse[4] 右半部分）
-- [x] 经验条（ExperienceBar）+ 百分比显示（Prguse[7/8] 动态裁剪）
-- [x] 负重条（WeightBar）+ 数值显示（Prguse[76] 动态裁剪）
-- [x] 角色名称、等级显示
-- [x] 金币显示
-- [x] 背包空格显示
-- [x] 功能按钮组：
-  - [x] 背包按钮（InventoryButton）- Prguse[1903-1905]
-  - [x] 角色按钮（CharacterButton）- Prguse[1900-1902]
-  - [x] 技能按钮（SkillButton）- Prguse[1906-1908]
-  - [x] 任务按钮（QuestButton）- Prguse[1909-1911]
-  - [x] 选项按钮（OptionButton）- Prguse[1912-1914]
-  - [x] 菜单按钮（MenuButton）- Prguse[1960-1962]
-  - [x] 商城按钮（GameShopButton）- Prguse[826-828]
-- [ ] 攻击模式显示（AMode/PMode/SMode）
-- [ ] 英雄信息面板（HeroInfoPanel）
-- [ ] 英雄行为面板（HeroBehaviourPanel）
-- [ ] 英雄菜单/召唤按钮
-
-**纹理资源**:
-- 主背景: Prguse[0/1/2] (根据分辨率)
-- 左右扩展: Prguse[12/13]
-- 按钮: Prguse[1900-1914, 1960-1962, 826-828]
-- 生命/魔法球: Prguse[4]
-- 经验条: Prguse[7/8]
-- 负重条: Prguse[76]
-
-**状态**: ✅ 基础功能已完成，待实现攻击模式和英雄面板
+> 最后更新: 2026-04-12
+> 本文档反映当前代码实际状态，非初始规划。
 
 ---
 
-### 2. BeltDialog - 快捷栏（血瓶框）
-**文件**: `src/scenes/dialogs/game/belt_dialog.rs`
+## 总体进度
 
-**功能清单**:
-- [x] 快捷栏背景（水平/垂直两种布局）
-- [x] 6个物品格子
-- [x] 物品图标显示（模拟数据）
-- [ ] 物品数量显示
-- [ ] 物品拖拽（与背包交互）
-- [x] 数字键提示（1-6）
-- [x] 旋转按钮（切换水平/垂直布局）
-- [x] 关闭按钮
-- [x] 技能冷却效果显示
-
-**纹理资源**:
-- 水平布局: Prguse[1932-1933]
-- 垂直布局: Prguse[1944-1945]
-- 旋转按钮: Prguse[1926-1928, 1938-1940]
-- 关闭按钮: Prguse[1923-1925, 1935-1937]
-
-**布局位置**:
-- 动态定位：紧贴 ChatControlBar 上方
-
-**状态**: ✅ 基础功能已完成，待实现物品拖拽
+| 类别 | 已实现 | 部分实现 | 缺失 | 完成度 |
+|---|---|---|---|---|
+| 对话框 UI | 24 | 6 | 1 | ~88% |
+| 网络协议 | 250+ opcode | 17 未处理 | - | ~94% |
+| ECS 系统 | 25+ 核心系统 | 10 轻量 | 3 空桩 | ~90% |
+| 场景流程 | Login → Select → Game | - | - | 100% |
 
 ---
 
-### 3. ChatDialog - 聊天窗口
-**文件**: `src/scenes/dialogs/game/chat_dialog.rs`
+## 已完整实现的对话框（纹理+内容+网络接线）
 
-**功能清单**:
-- [x] 聊天窗口背景（三种大小：小/中/大）
-- [x] 聊天消息滚动列表
-- [x] 消息显示区域（白色背景）
-- [x] 聊天输入框（Enter 发送，ESC 清空）
-- [x] 滚动条按钮（Home/Up/Down/End）
-- [x] 可拖动滑块
-- [x] 窗口大小切换（Tab 键或按钮）
-- [x] 消息时间戳
-- [ ] 多频道消息过滤显示
-- [ ] 表情功能
-- [ ] 链接点击（物品/坐标等）
-- [ ] 聊天记录保存
+| 对话框 | 文件 | 行数 | 说明 |
+|---|---|---|---|
+| MainDialog | `main_dialog.rs` | 2200+ | 底部工具栏、HP/MP/Exp/负重、7+ 功能按钮、快捷键(I/C/B/S/Tab/H/G) |
+| BeltDialog | `belt_dialog.rs` | 727 | 横/竖布局、6 格、物品图标/数量、拖拽交换、双击使用、冷却显示 |
+| ChatDialog | `chat_dialog.rs` | 1100+ | 三种窗口大小、消息滚动、时间戳、输入发送 |
+| ChatControlBar | `chat_control_bar.rs` | 300+ | 频道切换、交易/设置/举报按钮 |
+| InventoryDialog | `inventory_dialog.rs` | 800+ | 3 标签页(Items/Items2/Quest)、80+ 格子、锁定格、重量显示、拖拽到 Belt |
+| CharacterDialog | `character_dialog.rs` | 727 | 装备槽位(12 个)、纸娃娃、属性页、技能页、拖拽交互 |
+| NpcDialog | `npc_dialog.rs` | 800+ | 三种尺寸、对话文本、选项按钮、动作接线 |
+| NpcGoodsDialog | `npc_goods_dialog.rs` | 700+ | 商店列表、买/卖、数量选择、AmountBox |
+| MinimapDialog | `minimap_dialog.rs` | 500+ | 地图渲染、位置标记、邮件/大地图按钮、透明度/缩放 |
+| BigMapDialog | `big_map_dialog.rs` | 300+ | 全屏查看、瓦片地图(3层渲染)、拖拽平移/滚轮缩放、玩家标记、坐标显示 |
+| TextInputDialog | `text_input_dialog.rs` | 250+ | 通用文本输入、键盘/光标、Enter/Escape |
+| MenuDialog | `menu_dialog.rs` | 280+ | 退出/返回角色/设置/关于 |
+| OptionDialog | `option_dialog.rs` | 280+ | 图形/音效/游戏设置 |
+| TradeDialog | `trade_dialog.rs` | 600+ | 双方物品栏、金币、锁定/确认、拖拽占位 |
+| GroupDialog | `group_dialog.rs` | 420+ | 成员列表、HP 显示、队长标记、邀请/踢出/退出、双击查看 |
+| GuildDialog | `guild_dialog.rs` | 467 | 信息/成员/公告标签页、加入/刷新/编辑、双击查看详情 |
+| FriendDialog | `friend_dialog.rs` | 330+ | 好友列表、在线状态、添加/删除/刷新、双击私聊 |
+| MailDialog | `mail_dialog.rs` | 380+ | 收件箱/发件箱/写信标签、未读标记、包裹徽章、删除/领取 |
+| HeroDialog | `hero_dialog.rs` | 300+ | 英雄信息面板、属性显示 |
+| MountDialog | `mount_dialog.rs` | 300+ | 坐骑列表、骑乘/下马 |
 
-**纹理资源**:
-- 小窗口: Prguse[2201/2221] (800/1024+分辨率)
-- 中窗口: Prguse[2204/2224]
-- 大窗口: Prguse[2207/2227]
-- 滚动按钮: Prguse[2018-2029]
-- 滑块: Prguse[2015-2017]
+## 部分实现的对话框
 
-**布局位置**:
-- X: MainDialog.X + 230
-- Y: 根据窗口大小动态调整（小=97, 中=145, 大=193）
+| 对话框 | 状态 | 缺口 |
+|---|---|---|
+| QuestLogDialog | UI 完整(30KB)，标签页/列表 | 服务器数据已绑定（QuestAccepted/Completed/ProgressUpdated）|
+| RelationshipDialog | UI 完整(11KB)，婚姻/师徒 | 基础展示，亲密度/伙伴等级需服务器数据驱动 |
+| BuffDialog | UI 完整(10KB) | 数据来源已接入 |
+| FishingDialog | UI 面板(12KB) | 基础钓鱼界面 |
+| IntelligentCreatureDialog | UI 完整(16KB) | 守护管理 |
+| SocketDialog | UI 存在(8KB) | 宝石镶嵌基础界面 |
+| StorageDialog | 基于 NpcGoodsDialog | 双面板布局(仓库/背包)+存入/取出按钮+网络接线 ✅ 已完成 |
 
-**状态**: ✅ 基础功能已完成，待实现高级特性
+## 缺失的对话框
 
----
-
-### 4. ChatControlBar - 聊天控制栏
-**文件**: `src/scenes/dialogs/game/chat_control_bar.rs`
-
-**功能清单**:
-- [x] 控制栏背景
-- [x] 频道切换按钮（全体/喊话/私聊/夫妻/师徒/组队/行会）
-- [x] 当前频道高亮显示
-- [x] 交易按钮
-- [x] 大小调整按钮（同步 ChatDialog）
-- [x] 设置按钮
-- [x] 举报按钮
-
-**纹理资源**:
-- 背景: Prguse[2034/2035] (1024+/800分辨率)
-- 频道按钮: Prguse[2036-2057]
-- 功能按钮: Prguse[2058-2069, 2004-2006]
-
-**布局位置**:
-- X: MainDialog.X + 230
-- Y: ChatDialog.Y - 15
-
-**状态**: ✅ 已完成
-
-## 🎯 阶段一总结
-
-✅ **已完成组件**:
-1. MainDialog - 主界面底部工具栏（基础功能）
-2. BeltDialog - 快捷栏（基础功能）
-3. ChatDialog - 聊天窗口（基础功能）
-4. ChatControlBar - 聊天控制栏（完整功能）
-
-📝 **技术成果**:
-- ✅ macroquad + egui 混合架构稳定运行
-- ✅ UI 焦点管理系统完善（详见 docs/021.UI焦点管理指南.md）
-- ✅ 纹理资源加载和缓存系统
-- ✅ 中文字体渲染支持
-- ✅ 层级管理：Foreground > Middle > Background
-
-⏭️ **下一步优先级**:
-1. InventoryDialog - 背包系统（高优先级）
-2. CharacterDialog - 角色/装备面板
-3. 完善 MainDialog 的攻击模式和英雄面板
+| 对话框 | 说明 | 优先级 |
+|---|---|---|
+| ~~RankingDialog~~ | 排行榜 | ✅ 已实现 |
+| ~~HelpDialog~~ | 帮助文档 | ✅ 已实现 |
+| ~~InspectDialog~~ | 查看玩家装备 | ✅ 已实现 |
 
 ---
 
-## 🎯 阶段二：常用功能（优先级：⭐⭐⭐⭐）
+## ECS 系统状态
 
-### 5. InventoryDialog - 背包
-**文件**: `src/scenes/dialogs/game/inventory_dialog.rs`
+### 核心系统（完整实现）
+- **网络**: NetworkSystem, NetworkApplySystem(163KB), MapBootstrapSystem, MapLoadSystem
+- **输入**: PlayerControlSystem(59KB), AutoPotionSystem, SpellInputSystem, LocalPlayerAiSystem(37KB)
+- **逻辑**: CombatSystem(26KB), SkillSystem(22KB), HealthRegenSystem, BufSystem, MovementSystem(14KB), CollisionSystem(11KB), PathfindingSystem(26KB), MonsterAISystem, NpcAISystem, NpcDialogueSystem
+- **表现**: AnimationSystem(30KB), ParticleSystem, SoundSystem(17KB), CameraFollowSystem, CameraSystem, DialogSystem(46KB)
+- **渲染**: MapRenderSystem(14KB), SpriteRenderSystem(9KB), EffectRenderSystem(14KB), UIRenderSystem(58KB), DebugSystem(21KB)
 
-**功能清单**:
-- [x] 背包窗口背景（Title[196]）
-- [x] 三个标签页（Items/Items2/Quest）
-- [x] 物品格子（80格，前46格默认，后34格扩展）
-- [ ] 物品图标显示（待集成 Libraries.Items）
-- [ ] 物品数量显示
-- [ ] 物品拖拽（拖拽到其他格子/快捷栏/地面）
-- [ ] 物品右键菜单（使用/丢弃/拆分等）
-- [ ] 物品详情tooltip
-- [x] 金币显示（点击可拾取）
-- [x] 关闭按钮（Prguse2[360-362]）
-- [x] 扩展按钮（Prguse[1932-1945]）
-- [x] 重量显示（负重条 + 空格数显示）
-- [x] 锁定格子显示（Prguse2[307]）
-- [x] 窗口拖动支持
+### 空桩系统（3 个）
+- `ResourcePreloadSystem` (6 行) — 资源懒加载已接管
+- `SaveSystem` (5 行) — 设置由 config.ini 管理
+- `SceneSystem` (5 行) — 场景切换由 GameState 直接管理
 
-**设计说明**:
-- **分页显示，无滚动条**：
-  - 第1页（Items）：显示格子 0-45（46格）
-  - 第2页（Items2）：显示格子 46-85（最多40格，根据扩展数量）
-  - 任务页（Quest）：显示40个任务物品格子（独立空间）
-- **不需要鼠标滚轮滚动**：原版设计使用标签页切换，而非滚动列表
-- **扩展机制**：每次+4格，最多扩展10次（46→86格）
-- **格子布局**：每页最多8列×5行=40格（受窗口高度限制）
-
-**纹理资源**:
-- 背景: Title[196]
-- 关闭按钮: Prguse2[360-362]
-- 扩展按钮: Prguse[1932-1945]
-- 锁定图标: Prguse2[307]
-- 标签按钮: Title[197, 738, 739]（Items, Items2, Quest）
-
-**状态**: ✅ UI框架已完成，待实现物品图标和交互逻辑
+### 轻量系统
+HUDSystem(601B), UISystem(665B), MinimapSystem(3.8KB), FloatingTextSystem(1.2KB), HealthBarAnimSystem(2.5KB), PositionInterpolationSystem(1.4KB), RemoteMoveAnimSystem(1.9KB), MountStateSyncSystem(3.3KB), WeatherSystem(1.3KB)
 
 ---
 
-### 6. CharacterDialog - 角色/技能面板
-**文件**: `src/scenes/game/dialogs/character_dialog.rs`
+## 网络处理覆盖
 
-**功能清单**:
-- [ ] 窗口背景
-- [ ] 标签页切换（角色/技能）
-- [ ] **角色页面**:
-  - [ ] 角色3D模型/纸娃娃显示
-  - [ ] 装备栏（武器/头盔/项链/戒指等）
-  - [ ] 装备拖拽
-  - [ ] 属性显示（攻击/防御/魔法等）
-  - [ ] 详细属性列表
-- [ ] **技能页面**:
-  - [ ] 技能列表
-  - [ ] 技能图标
-  - [ ] 技能等级显示
-  - [ ] 技能拖拽到快捷栏
-  - [ ] 技能升级按钮
-  - [ ] 技能说明tooltip
-- [ ] 关闭按钮
-
-**纹理资源**:
-- 待查询原工程
-
----
-
-## 🎯 阶段二：常用功能（优先级：⭐⭐⭐⭐）
-
-### 5. MiniMapDialog - 小地图
-**文件**: `src/scenes/game/dialogs/minimap_dialog.rs`
-
-**功能清单**:
-- [ ] 小地图窗口
-- [ ] 地图绘制
-- [ ] 玩家位置标记
-- [ ] NPC位置标记
-- [ ] 怪物位置标记
-- [ ] 组队成员标记
-- [ ] 地图缩放
-- [ ] 大地图切换
-- [ ] 透明度调节
+| Handler | 已处理/总数 | 备注 |
+|---|---|---|
+| `item.rs` | 50/51 | 物品全生命周期 |
+| `combat.rs` | 47/47 | HeroHealthChanged 已发射 |
+| `movement.rs` | 29/30 | 移动/传送/闪现 |
+| `npc.rs` | 27/28 | 已清理死代码（6 个 market opcode） |
+| `guild.rs` | 14/15 | 完整 |
+| `chat.rs` | 2/3 | 群聊/私聊 |
+| `mail.rs` | 6/7 | 邮件/附件/发送/成本 |
+| `ui_events.rs` | 13/14 | 音效/坐骑/计时/钓鱼/排行榜/商城 |
+| `social.rs` | 5/6 | 婚姻/师徒 |
+| `friend.rs` | 1/2 | FriendUpdate |
+| `player.rs` | 1/2 | PlayerInspect |
+| `market.rs` | 6/7 | 寄售/市场 |
+| `creature.rs` | 4/5 | 守护生物 |
+| `hero.rs` | 11/12 | 英雄系统 |
+| `trade.rs` | 6/7 | 交易系统 |
+| `group.rs` | 7/8 | 组队系统 |
+| `quest.rs` | 6/7 | 任务系统 |
+| `character.rs` | 25/23 | LogOut/ReturnToLogin 已发射 |
+| `connection.rs` | 4/5 | 连接管理 |
 
 ---
 
-### 6. MenuDialog - 游戏菜单
-**文件**: `src/scenes/game/dialogs/menu_dialog.rs`
+## 已知代码问题
 
-**功能清单**:
-- [ ] 菜单窗口
-- [ ] 退出游戏
-- [ ] 返回角色选择
-- [ ] 游戏设置
-- [ ] 帮助文档
-- [ ] 关于信息
-
----
-
-### 7. OptionDialog - 游戏设置
-**文件**: `src/scenes/game/dialogs/option_dialog.rs`
-
-**功能清单**:
-- [ ] 设置窗口
-- [ ] 图形设置（分辨率/特效等）
-- [ ] 音效设置（音量/开关）
-- [ ] 游戏设置（攻击模式/显示选项等）
-- [ ] 键位设置
-- [ ] 保存/取消按钮
+| 问题 | 文件 | 影响 | 状态 |
+|---|---|---|---|
+| Struck 事件 damage=0 | `combat.rs:22` | 协议不携带 damage 字段 | 协议限制 |
+| NPCResponse npc_id=0 | `npc.rs:21` | 协议只有 page 字段 | 协议限制 |
+| NPCRequestInput npc_id=0 | `npc.rs:234` | 协议不携带 object_id | 协议限制 |
+| chat sender 为空 | `chat.rs:20` | Server chat 无 sender | 协议限制 |
+| ItemTakenBack/ItemStored 空数据 | `item.rs:111-127` | 协议不携带物品数据 | 协议限制 |
+| MarriageRequestSend 空 target | `ui_system.rs:886` | 由服务器根据亲密度/位置判定 | 协议限制 |
+| 未使用事件变体 | `mod.rs:66-800` | 大量 NetworkEvent 未 emit | 预留 |
 
 ---
 
-### 8. BeltDialog - 快捷栏
-**文件**: `src/scenes/game/dialogs/belt_dialog.rs`
-
-**功能清单**:
-- [ ] 快捷栏背景
-- [ ] 6个快捷格子
-- [ ] 技能/物品图标显示
-- [ ] 快捷键显示（F1-F6）
-- [ ] 拖拽绑定
-- [ ] 快捷键触发
-- [ ] 冷却时间显示
-
----
-
-## 🎯 阶段三：NPC交互（优先级：⭐⭐⭐）
-
-### 9. NPCDialog - NPC对话
-**文件**: `src/scenes/game/dialogs/npc_dialog.rs`
-
-**功能清单**:
-- [ ] NPC头像
-- [ ] 对话文本显示
-- [ ] 选项按钮列表
-- [ ] 上一页/下一页
-- [ ] 关闭按钮
-
----
-
-### 10. NPCGoodsDialog - NPC商店
-**文件**: `src/scenes/game/dialogs/npc_goods_dialog.rs`
-
-**功能清单**:
-- [ ] 商店窗口
-- [ ] 商品列表
-- [ ] 商品图标/名称/价格
-- [ ] 购买/出售切换
-- [ ] 数量选择
-- [ ] 金币显示
-- [ ] 确认/取消按钮
-
----
-
-### 11. 其他NPC对话框
-- [ ] NPCDropDialog - 物品回收
-- [ ] NPCAwakeDialog - 物品觉醒
-- [ ] CraftDialog - 物品制作
-- [ ] RefineDialog - 物品精炼
-- [ ] SocketDialog - 宝石镶嵌
-
----
-
-## 🎯 阶段四：社交功能（优先级：⭐⭐⭐）
-
-### 12. TradeDialog - 交易
-**文件**: `src/scenes/game/dialogs/trade_dialog.rs`
-
-**功能清单**:
-- [ ] 交易窗口
-- [ ] 自己物品栏
-- [ ] 对方物品栏
-- [ ] 金币输入
-- [ ] 锁定/确认按钮
-
----
-
-### 13. GroupDialog - 组队
-**文件**: `src/scenes/game/dialogs/group_dialog.rs`
-
-**功能清单**:
-- [ ] 组队窗口
-- [ ] 队员列表
-- [ ] 队员血量/等级显示
-- [ ] 队长标记
-- [ ] 离队/踢人按钮
-- [ ] 队伍设置
-
----
-
-### 14. GuildDialog - 公会
-**文件**: `src/scenes/game/dialogs/guild_dialog.rs`
-
-**功能清单**:
-- [ ] 公会窗口
-- [ ] 公会信息
-- [ ] 成员列表
-- [ ] 公会仓库
-- [ ] 公会设置
-- [ ] 职位管理
-
----
-
-### 15. FriendDialog - 好友
-**文件**: `src/scenes/game/dialogs/friend_dialog.rs`
-
-**功能清单**:
-- [ ] 好友窗口
-- [ ] 好友列表
-- [ ] 在线状态
-- [ ] 添加好友
-- [ ] 删除好友
-- [ ] 私聊快捷方式
-
----
-
-## 🎯 阶段五：高级功能（优先级：⭐⭐）
-
-### 16. QuestDialog 系列 - 任务系统
-- [ ] QuestListDialog - 任务列表
-- [ ] QuestDetailDialog - 任务详情
-- [ ] QuestDiaryDialog - 任务日志
-- [ ] QuestTrackingDialog - 任务追踪
-
----
-
-### 17. MailDialog 系列 - 邮件系统
-- [ ] MailListDialog - 邮件列表
-- [ ] MailReadLetterDialog - 读信
-- [ ] MailReadParcelDialog - 读包裹
-- [ ] MailComposeLetterDialog - 写信
-- [ ] MailComposeParcelDialog - 写包裹
-
----
-
-### 18. 英雄系统
-- [ ] NewHeroDialog - 创建英雄
-- [ ] HeroDialog - 英雄属性
-- [ ] HeroInventoryDialog - 英雄背包
-- [ ] HeroBeltDialog - 英雄快捷栏
-- [ ] HeroManageDialog - 英雄管理
-
----
-
-### 19. 特殊功能
-- [ ] StorageDialog - 仓库
-- [ ] MountDialog - 坐骑
-- [ ] FishingDialog - 钓鱼
-- [ ] IntelligentCreatureDialog - 守护
-- [ ] RankingDialog - 排行榜
-- [ ] GameShopDialog - 游戏商城
-- [ ] TrustMerchantDialog - 寄售商店
-- [ ] BigMapDialog - 大地图
-- [ ] InspectDialog - 查看玩家
-- [ ] HelpDialog - 帮助
-
----
-
-## 🎯 阶段六：UI增强功能（优先级：⭐）
-
-### 20. 通用UI组件
-**文件**: `src/scenes/game/ui/mod.rs`
-
-**组件清单**:
-- [ ] ItemCell - 物品格子组件
-- [ ] ItemTooltip - 物品tooltip
-- [ ] ProgressBar - 进度条组件
-- [ ] TabControl - 标签页控件
-- [ ] ScrollView - 滚动视图
-- [ ] InputBox - 输入框
-- [ ] Button - 按钮组件
-- [ ] Label - 文本标签
-- [ ] ImageControl - 图片控件
-
----
-
-### 21. 特效系统
-- [ ] 技能冷却动画
-- [ ] 物品闪烁特效
-- [ ] 按钮悬停特效
-- [ ] 窗口淡入淡出
-- [ ] 伤害数字飘字
-
----
-
-## 📐 技术架构
-
-### 目录结构
-```
-src/scenes/game/
-├── mod.rs                  # GameScene主模块
-├── dialogs/                # 对话框模块
-│   ├── mod.rs
-│   ├── main_dialog.rs
-│   ├── chat_dialog.rs
-│   ├── inventory_dialog.rs
-│   ├── character_dialog.rs
-│   ├── minimap_dialog.rs
-│   ├── menu_dialog.rs
-│   ├── option_dialog.rs
-│   ├── belt_dialog.rs
-│   ├── npc/                # NPC相关对话框
-│   │   ├── mod.rs
-│   │   ├── npc_dialog.rs
-│   │   ├── npc_goods_dialog.rs
-│   │   └── ...
-│   ├── social/             # 社交功能对话框
-│   │   ├── mod.rs
-│   │   ├── trade_dialog.rs
-│   │   ├── group_dialog.rs
-│   │   ├── guild_dialog.rs
-│   │   └── friend_dialog.rs
-│   └── ...
-├── ui/                     # 通用UI组件
-│   ├── mod.rs
-│   ├── item_cell.rs
-│   ├── progress_bar.rs
-│   └── ...
-└── state.rs               # GameScene状态管理
-```
-
-### Dialog Trait 扩展
-```rust
-pub trait GameDialog {
-    fn show(&mut self, ctx: &egui::Context, state: &mut GameState);
-    fn update(&mut self, dt: f32, state: &mut GameState);
-    fn handle_input(&mut self, state: &mut GameState) -> bool;
-    fn is_visible(&self) -> bool;
-    fn set_visible(&mut self, visible: bool);
-}
-```
-
-### GameState 结构
-```rust
-pub struct GameState {
-    // 玩家数据
-    pub player: PlayerData,
-    
-    // 对话框状态
-    pub dialogs: DialogManager,
-    
-    // UI状态
-    pub ui_state: UIState,
-    
-    // 网络通信
-    pub network: NetworkClient,
-}
-```
-
----
-
-## 🔧 开发规范
-
-### 1. 命名规范
-- 对话框：`XxxDialog`
-- UI组件：`XxxControl` 或 `XxxWidget`
-- 事件：`XxxEvent`
-- 状态：`XxxState`
-
-### 2. 代码组织
-- 每个对话框独立文件
-- 相关对话框归类到子目录
-- 通用组件抽取到 ui 模块
-- 保持与原工程的功能对应
-
-### 3. 渲染顺序
-1. 游戏世界（ECS系统渲染）
-2. MainDialog（最底层UI）
-3. 其他对话框（按Z-order）
-4. Tooltip和浮动提示（最上层）
-
-### 4. 事件处理
-- 从上到下检测鼠标事件
-- 对话框捕获事件后阻止穿透
-- 快捷键全局监听
-- 拖拽状态管理
-
----
-
-## 📝 实现检查清单
-
-### 每个对话框完成时需确认：
-- [ ] 基本显示正常
-- [ ] 可拖动（如果需要）
-- [ ] 关闭按钮工作
-- [ ] 快捷键响应
-- [ ] 数据绑定正确
-- [ ] 事件处理完整
-- [ ] 与其他对话框交互正常
-- [ ] 编译无警告
-- [ ] 性能无明显问题
-
----
-
-## 🎮 测试计划
-
-### 单元测试
-- [ ] 每个对话框创建测试bin
-- [ ] UI组件独立测试
-
-### 集成测试
-- [ ] 对话框组合显示测试
-- [ ] 拖拽交互测试
-- [ ] 快捷键冲突测试
-
-### 性能测试
-- [ ] 多对话框同时显示
-- [ ] 长时间运行内存测试
-- [ ] 帧率稳定性测试
-
----
-
-## 📅 里程碑
-
-### Milestone 1: 核心UI框架 (估计：2-3周)
-完成 MainDialog, ChatDialog, InventoryDialog, CharacterDialog
-
-### Milestone 2: 常用功能 (估计：1-2周)
-完成 MiniMap, Menu, Option, Belt
-
-### Milestone 3: NPC交互 (估计：1-2周)
-完成所有NPC相关对话框
-
-### Milestone 4: 社交功能 (估计：1-2周)
-完成交易、组队、公会、好友
-
-### Milestone 5: 高级功能 (估计：2-3周)
-完成任务、邮件、英雄、特殊功能
-
-### Milestone 6: 优化完善 (估计：1周)
-性能优化、bug修复、体验优化
-
----
-
-## 📚 参考资料
-
-- 原工程路径：`Client/MirScenes/Dialogs/`
-- 纹理资源：`Data/Prguse.lib`, `Data/Title.lib` 等
-- 网络协议：`Server/MirNetwork/` 和 `Client/MirNetwork/`
-
----
-
-## 🔄 更新日志
-
-- 2025-11-16: 创建 TODO 文档，规划整体架构
-- 2025-11-16: ✅ 完成 MainDialog 基础版本
-  - 实现底部工具栏背景自适应
-  - 实现生命值/魔法值显示（文字版）
-  - 实现经验条和负重条
-  - 实现7个功能按钮（背包/角色/技能/任务/选项/菜单/商城）
-  - 实现按钮悬停提示和点击事件
-  - 创建测试程序 `test_main_dialog`
-  - 文件：`src/scenes/dialogs/game/main_dialog.rs` (约370行)
-  - 实现按钮悬停提示和点击事件
-  - 创建测试程序 `test_main_dialog`
+## 待实现高优先级
+
+1. **Inventory ↔ Belt/Character 直接拖拽** — ✅ 完整实现：
+   - ✅ Inventory → Belt: 拖动物品到 Belt 窗口释放（含 rollback + unique_id 保留）
+   - ✅ Belt → Inventory: 拖动物品到 Inventory 窗口释放（含 rollback + unique_id 保留）
+   - ✅ Inventory → Character: 拖到角色面板（自动发送 EquipItemRequest）
+   - ✅ Character → Inventory: 卸下装备拖回背包（含背包已满处理 + RemoveItemRequest 发包）
+   - 右键转移机制保留作为补充
+2. **Mock 网络补充** — 已完善：
+   - ✅ 排行榜：GetRankingRequest → RankingsReceivedWithEntries（mock 15 条排行数据）
+   - ✅ 好友列表：基础 SystemMessage 响应
+   - ✅ 任务系统：AcceptQuest/FinishQuest/AbandonQuest 完整 mock
+   - ✅ 交易系统：TradeRequest/TradeReply/TradeConfirm/TradeCancel 完整 mock
+   - ✅ 公会系统：请求信息/加入/离开/编辑公告/成员管理 完整 mock
+   - ✅ 仓库系统：NPCStorage/StoreItem/TakeBackItem 完整 mock
+   - ✅ 市场系统：基础 SystemMessage 响应
+   - ✅ 组队系统：GroupMembersMapUpdated/GroupModeChanged 已接线 UI
+
+## 最近完成的改进
+
+- ✅ Handler 缺口修复：HeroHealthChanged, LogOutSuccess, LogOutFailed, ReturnToLogin
+- ✅ unique_id 全链路保留：Inventory ↔ Belt ↔ Character 拖拽/回滚/转移
+- ✅ Character → Inventory 卸下装备自动发包 RemoveItemRequest
+- ✅ 组队事件下游接线：成员列表更新、组队模式切换、位置跟踪
+- ✅ Clippy 0 warnings（51 → 0，含 mock.rs 修复、Default 派生等）
+- ✅ QuestLogDialog 已绑定服务器数据（TODO 标注已过时）
