@@ -1766,6 +1766,181 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             tracing::debug!("📤 Observe");
         }
 
+        // ===== 公会领地 =====
+        NetworkEvent::GuildTerritoryPageRequest { page } => {
+            let packet = client::guild::GuildTerritoryPage { page };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 GuildTerritoryPage: page={}", page);
+        }
+        NetworkEvent::PurchaseGuildTerritoryRequest { owner } => {
+            let packet = client::guild::PurchaseGuildTerritory { owner: owner.clone() };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 PurchaseGuildTerritory: owner={}", owner);
+        }
+
+        // ===== 攻击/玩家模式 =====
+        NetworkEvent::ChangeAModeRequest { mode } => {
+            let packet = client::misc::ChangeAMode { mode };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ChangeAMode: mode={:?}", mode);
+        }
+        NetworkEvent::ChangePModeRequest { mode } => {
+            let packet = client::misc::ChangePMode { mode };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ChangePMode: mode={:?}", mode);
+        }
+        NetworkEvent::ChangeTradeToggle => {
+            let packet = client::misc::ChangeTrade { allow_trade: true };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ChangeTrade");
+        }
+
+        // ===== 精炼系统 =====
+        NetworkEvent::DepositRefineItemRequest { from, to } => {
+            let packet = client::refine::DepositRefineItem { from, to };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 DepositRefineItem: from={} to={}", from, to);
+        }
+        NetworkEvent::RetrieveRefineItemRequest { from, to } => {
+            let packet = client::refine::RetrieveRefineItem { from, to };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RetrieveRefineItem: from={} to={}", from, to);
+        }
+        NetworkEvent::RefineCancelRequest => {
+            let packet = client::refine::RefineCancel {};
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RefineCancel");
+        }
+        NetworkEvent::RefineItemRequest { unique_id } => {
+            let packet = client::refine::RefineItem { unique_id };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RefineItem: unique_id={}", unique_id);
+        }
+        NetworkEvent::DepositTradeItemRequest { from, to } => {
+            let packet = client::refine::DepositTradeItem { from, to };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 DepositTradeItem: from={} to={}", from, to);
+        }
+        NetworkEvent::RetrieveTradeItemRequest { from, to } => {
+            let packet = client::refine::RetrieveTradeItem { from, to };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RetrieveTradeItem: from={} to={}", from, to);
+        }
+
+        // ===== 英雄物品 =====
+        NetworkEvent::TakeBackHeroItemRequest { from, to } => {
+            let packet = client::refine::TakeBackHeroItem { from, to };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 TakeBackHeroItem: from={} to={}", from, to);
+        }
+        NetworkEvent::TransferHeroItemRequest { from, to } => {
+            let packet = client::refine::TransferHeroItem { from, to };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 TransferHeroItem: from={} to={}", from, to);
+        }
+
+        // ===== 组队 =====
+        NetworkEvent::SwitchGroupRequest { allow } => {
+            let packet = client::group::SwitchGroup { allow_group: allow };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 SwitchGroup: allow={}", allow);
+        }
+
+        // ===== 魔法/战斗 =====
+        NetworkEvent::SpellToggleRequest { spell, can_use } => {
+            let packet = client::combat::SpellToggle { spell, can_use };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 SpellToggle: spell={:?} can_use={}", spell, can_use);
+        }
+        NetworkEvent::TownReviveRequest => {
+            let packet = client::misc::TownRevive;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 TownRevive");
+        }
+
+        // ===== 社交 =====
+        NetworkEvent::RequestUserNameQuery { user_id } => {
+            let packet = client::misc::RequestUserName { user_id };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RequestUserName: user_id={}", user_id);
+        }
+        NetworkEvent::RequestChatItemQuery { chat_item_id } => {
+            let packet = client::misc::RequestChatItem { chat_item_id };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RequestChatItem: chat_item_id={}", chat_item_id);
+        }
+
+        // ===== 物品觉醒 =====
+        NetworkEvent::AwakeningNeedMaterialsRequest { unique_id, awake_type } => {
+            let packet = client::misc::AwakeningNeedMaterials { unique_id, awake_type };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 AwakeningNeedMaterials: unique_id={}", unique_id);
+        }
+        NetworkEvent::AwakeningLockedItemRequest { unique_id, locked } => {
+            let packet = client::misc::AwakeningLockedItem { unique_id, locked };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 AwakeningLockedItem: unique_id={} locked={}", unique_id, locked);
+        }
+        NetworkEvent::AwakeningRequest { unique_id, awake_type, position_idx } => {
+            let packet = client::misc::Awakening { unique_id, awake_type, position_idx };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 Awakening: unique_id={} type={:?}", unique_id, awake_type);
+        }
+        NetworkEvent::DisassembleItemRequest { unique_id } => {
+            let packet = client::misc::DisassembleItem { unique_id };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 DisassembleItem: unique_id={}", unique_id);
+        }
+        NetworkEvent::DowngradeAwakeningRequest { unique_id } => {
+            let packet = client::misc::DowngradeAwakening { unique_id };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 DowngradeAwakening: unique_id={}", unique_id);
+        }
+        NetworkEvent::ResetAddedItemRequest { unique_id } => {
+            let packet = client::misc::ResetAddedItem { unique_id };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ResetAddedItem: unique_id={}", unique_id);
+        }
+
+        // ===== 邮件 =====
+        NetworkEvent::MailLockedItemRequest { unique_id, locked } => {
+            let packet = client::mail::MailLockedItem { unique_id, locked };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MailLockedItem: unique_id={} locked={}", unique_id, locked);
+        }
+        NetworkEvent::MailCostRequest { gold, items_idx, stamped } => {
+            let packet = client::mail::MailCost { gold, items_idx, stamped };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 MailCost: gold={}", gold);
+        }
+
+        // ===== 物品租赁 =====
+        NetworkEvent::ItemRentalRequestEvent => {
+            let packet = client::item::ItemRentalRequest;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ItemRentalRequest");
+        }
+        NetworkEvent::ItemRentalFeeRequest { amount } => {
+            let packet = client::item::ItemRentalFee { amount };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ItemRentalFee: amount={}", amount);
+        }
+        NetworkEvent::ItemRentalPeriodRequest { days } => {
+            let packet = client::item::ItemRentalPeriod { days };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ItemRentalPeriod: days={}", days);
+        }
+        NetworkEvent::ItemRentalLockFeeEvent => {
+            let packet = client::item::ItemRentalLockFee;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ItemRentalLockFee");
+        }
+        NetworkEvent::ItemRentalLockItemEvent => {
+            let packet = client::item::ItemRentalLockItem;
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 ItemRentalLockItem");
+        }
+
         // ===== 未实现的事件 =====
         // 注意：大部分 NetworkEvent 是 server→client 的入站事件，
         // 不需要出站发送。这个分支是安全兜底。

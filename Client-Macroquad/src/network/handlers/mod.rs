@@ -530,6 +530,55 @@ pub enum NetworkEvent {
     GuildStorageItemChangeRequest,
     GuildWarReturn,
     GuildBuffUpdate { buff_id: u32, action: u8 },
+    GuildTerritoryPageRequest { page: i32 },
+    PurchaseGuildTerritoryRequest { owner: String },
+
+    // 攻击/玩家模式
+    ChangeAModeRequest { mode: mir2_shared::enums::AttackMode },
+    ChangePModeRequest { mode: mir2_shared::enums::PetMode },
+    ChangeTradeToggle,
+
+    // 精炼系统
+    DepositRefineItemRequest { from: i32, to: i32 },
+    RetrieveRefineItemRequest { from: i32, to: i32 },
+    RefineCancelRequest,
+    RefineItemRequest { unique_id: u64 },
+    DepositTradeItemRequest { from: i32, to: i32 },
+    RetrieveTradeItemRequest { from: i32, to: i32 },
+
+    // 英雄物品
+    TakeBackHeroItemRequest { from: i32, to: i32 },
+    TransferHeroItemRequest { from: i32, to: i32 },
+
+    // 组队
+    SwitchGroupRequest { allow: bool },
+
+    // 魔法/战斗
+    SpellToggleRequest { spell: mir2_shared::enums::Spell, can_use: bool },
+    TownReviveRequest,
+
+    // 社交
+    RequestUserNameQuery { user_id: u32 },
+    RequestChatItemQuery { chat_item_id: u64 },
+
+    // 物品觉醒
+    AwakeningNeedMaterialsRequest { unique_id: u64, awake_type: mir2_shared::enums::AwakeType },
+    AwakeningLockedItemRequest { unique_id: u64, locked: bool },
+    AwakeningRequest { unique_id: u64, awake_type: mir2_shared::enums::AwakeType, position_idx: u32 },
+    DisassembleItemRequest { unique_id: u64 },
+    DowngradeAwakeningRequest { unique_id: u64 },
+    ResetAddedItemRequest { unique_id: u64 },
+
+    // 邮件
+    MailLockedItemRequest { unique_id: u64, locked: bool },
+    MailCostRequest { gold: u32, items_idx: [u64; 5], stamped: bool },
+
+    // 物品租赁
+    ItemRentalRequestEvent,
+    ItemRentalFeeRequest { amount: u32 },
+    ItemRentalPeriodRequest { days: u32 },
+    ItemRentalLockFeeEvent,
+    ItemRentalLockItemEvent,
 
     // ========================================================================
     // NPC 扩展事件（NPC Extended Events）
