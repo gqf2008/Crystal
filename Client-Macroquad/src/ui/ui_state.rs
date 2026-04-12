@@ -127,6 +127,10 @@ pub enum UiCommand {
     GuildWarRequested,
     SetGuildName { name: String },
 
+    /// 组队成员列表更新
+    UpdateGroupMembers { members: Vec<crate::scenes::dialogs::game::group_dialog::GroupMember> },
+    SetGroupAllowJoin { allow: bool },
+
     /// 小地图：邮件按钮
     OpenMailDialog,
     CloseMailDialog,

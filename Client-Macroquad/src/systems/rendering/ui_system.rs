@@ -244,6 +244,12 @@ impl RenderSystem for UIRenderSystem {
                         .collect();
                     self.main_dialog.friend_dialog_mut().update_friends(friend_infos);
                 }
+                UiCommand::UpdateGroupMembers { members } => {
+                    self.main_dialog.group_dialog_mut().update_members(members);
+                }
+                UiCommand::SetGroupAllowJoin { allow } => {
+                    self.main_dialog.group_dialog_mut().set_allow_join(allow);
+                }
                 UiCommand::SetHeroAutoPotUnlocked => {
                     tracing::debug!("Hero auto-pot unlocked");
                 }

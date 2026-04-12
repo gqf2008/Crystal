@@ -193,6 +193,31 @@ impl DialogSystem {
                 NetworkEvent::GroupDisbanded => {
                     cmds.push(UiCommand::PushSystemChatLine("队伍已解散".to_string()));
                 }
+                NetworkEvent::GroupMembersMapUpdated { member_names } => {
+                    // 同时更新组队对话框成员列表和系统聊天提示
+                    let members: Vec<_> = member_names.iter().map(|name| {
+                        crate::scenes::dialogs::game::group_dialog::GroupMember {
+                            name: name.clone(),
+                            hp_percent: 1.0, // 服务器未提供HP数据，默认满血
+                            online: true,
+                            is_leader: false,
+                        }
+                    }).collect();
+                    cmds.push(UiCommand::UpdateGroupMembers { members });
+                    cmds.push(UiCommand::PushSystemChatLine(
+                        format!("队伍成员: {}", member_names.join(", ")),
+                    ));
+                }
+                NetworkEvent::GroupMemberLocationUpdated { name, x, y } => {
+                    tracing::debug!("📍 队伍成员位置更新: {} ({}, {})", name, x, y);
+                }
+                NetworkEvent::GroupModeChanged { allow_group } => {
+                    let allow = *allow_group == 0;
+                    cmds.push(UiCommand::SetGroupAllowJoin { allow });
+                    cmds.push(UiCommand::PushSystemChatLine(
+                        format!("组队模式已切换为: {}", if allow { "允许组队" } else { "禁止组队" }),
+                    ));
+                }
                 NetworkEvent::FriendUpdated { friends } => {
                     cmds.push(UiCommand::UpdateFriendList { friends: friends.clone() });
                 }
