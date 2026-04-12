@@ -234,6 +234,7 @@ pub struct MainDialog {
 
     /// 暂存的装备请求（Inventory 拖到 Character 面板时触发）
     pending_equip_request: Option<u64>, // unique_id
+    pending_unequip_request: Option<u64>, // unique_id (Character→Inventory drag)
 
     // === 攻击模式显示 ===
     /// 攻击模式 (0=Peace, 1=Group, 2=Guild, 3=EnemyGuild, 4=RedBrown, 5=All)
@@ -407,6 +408,7 @@ impl MainDialog {
             pending_trade_action: None,
             pending_ranking_refresh_tab: None,
             pending_equip_request: None,
+            pending_unequip_request: None,
 
             // 攻击模式显示
             attack_mode: 0,
@@ -1705,7 +1707,7 @@ impl MainDialog {
                         if let Err(rollback_item) = self.belt_dialog.try_insert_item(belt_item) {
                             if !self.inventory_dialog.restore_item_to_slot(
                                 tab, slot,
-                                ItemSlotHybrid::new(rollback_item.icon_index, rollback_item.name.unwrap_or_default(), rollback_item.count),
+                                ItemSlotHybrid::with_id(rollback_item.icon_index, rollback_item.name.unwrap_or_default(), rollback_item.count, rollback_item.unique_id),
                             ) {
                                 eprintln!("⚠️ Inventory→Belt drag rollback failed: tab={tab:?}, slot={slot}");
                             }
@@ -1758,7 +1760,7 @@ impl MainDialog {
                             if !self.inventory_dialog.restore_item_to_slot(
                                 tab,
                                 slot,
-                                ItemSlotHybrid::new(rollback_item.icon_index, rollback_item.name.unwrap_or_default(), rollback_item.count),
+                                ItemSlotHybrid::with_id(rollback_item.icon_index, rollback_item.name.unwrap_or_default(), rollback_item.count, rollback_item.unique_id),
                             ) {
                                 eprintln!(
                                     "⚠️ Inventory rollback failed: tab={tab:?}, slot={slot}, icon={}, count={}",
@@ -1809,12 +1811,15 @@ impl MainDialog {
                         self.character_dialog.equipment[slot] = Some(equip);
                         eprintln!("⚠️ Character→Inventory drag failed: inventory full");
                     } else {
+                        // 发送卸下装备网络请求
+                        if equip.unique_id > 0 {
+                            self.pending_unequip_request = Some(equip.unique_id);
+                        }
                         println!("🎒 卸下装备: {} (槽位{}) → 背包", equip.name, slot);
                     }
                 }
             }
             // 拖出到屏幕外 → 装备留在原处（不做任何操作）
-            // 未来可在此处添加卸下装备网络请求
         }
     }
 
@@ -2254,6 +2259,11 @@ impl MainDialog {
     /// 取出暂存的装备请求（由 ui_system.rs 消费发包）
     pub fn take_pending_equip_request(&mut self) -> Option<u64> {
         self.pending_equip_request.take()
+    }
+
+    /// 取出暂存的卸下装备请求（由 ui_system.rs 消费发包）
+    pub fn take_pending_unequip_request(&mut self) -> Option<u64> {
+        self.pending_unequip_request.take()
     }
 
     fn sync_and_draw_mount(&mut self, consumed: &mut bool, mouse_pos: Vec2) {

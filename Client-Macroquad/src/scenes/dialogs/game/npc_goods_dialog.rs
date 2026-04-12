@@ -569,13 +569,11 @@ impl NpcGoodsDialogHybrid {
                     self.storage_start_index = self.storage_start_index.saturating_add(delta as usize);
                 }
             }
-        } else {
-            if self.storage_inventory_goods.len() > Self::CELL_ROWS {
-                if delta < 0 {
-                    self.storage_inventory_start_index = self.storage_inventory_start_index.saturating_sub((-delta) as usize);
-                } else {
-                    self.storage_inventory_start_index = self.storage_inventory_start_index.saturating_add(delta as usize);
-                }
+        } else if self.storage_inventory_goods.len() > Self::CELL_ROWS {
+            if delta < 0 {
+                self.storage_inventory_start_index = self.storage_inventory_start_index.saturating_sub((-delta) as usize);
+            } else {
+                self.storage_inventory_start_index = self.storage_inventory_start_index.saturating_add(delta as usize);
             }
         }
         self.clamp_storage_start_index();

@@ -26,6 +26,10 @@ pub struct HelpDialogHybrid {
     pending_action: HelpDialogAction,
 }
 
+impl Default for HelpDialogHybrid {
+    fn default() -> Self { Self::new() }
+}
+
 impl HelpDialogHybrid {
     const WIDTH: f32 = 400.0;
     const HEIGHT: f32 = 420.0;

@@ -37,6 +37,9 @@ pub struct UIRenderSystem {
     /// 暂存的装备请求（由 draw 阶段 Inventory→Character 拖拽产出，由 update 阶段发包）
     pending_equip_request: Option<u64>,
 
+    /// 暂存的卸下装备请求（由 draw 阶段 Character→Inventory 拖拽产出，由 update 阶段发包）
+    pending_unequip_request: Option<u64>,
+
     /// 缓存的任务信息（来自 NewQuestInfo，等待 QuestAccepted 到来时使用）
     cached_quest_info: std::collections::HashMap<u32, (String, String, String, u32, u64, u32)>,
 }
@@ -77,6 +80,7 @@ impl UIRenderSystem {
             pending_text_input: None,
             pending_ranking_refresh_tab: None,
             pending_equip_request: None,
+            pending_unequip_request: None,
             cached_quest_info: std::collections::HashMap::new(),
         }
     }
@@ -1116,6 +1120,15 @@ impl RenderSystem for UIRenderSystem {
             tracing::debug!("🎒 装备物品: unique_id={}", unique_id);
         }
 
+        // 卸下装备请求（由 draw 阶段 Character→Inventory 拖拽产出，在此发包）
+        if let Some(unique_id) = self.pending_unequip_request.take() {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            if let Some(net) = ctx.net.as_ref() {
+                let _ = net.send(NetEv::RemoveItemRequest { unique_id });
+            }
+            tracing::debug!("🎒 卸下装备: unique_id={}", unique_id);
+        }
+
         Ok(())
     }
 
@@ -1315,6 +1328,11 @@ impl RenderSystem for UIRenderSystem {
         // 装备物品请求（draw 阶段 Inventory→Character 拖拽产出，存入 pending，update 阶段发包）
         if let Some(unique_id) = self.main_dialog.take_pending_equip_request() {
             self.pending_equip_request = Some(unique_id);
+        }
+
+        // 卸下装备请求（draw 阶段 Character→Inventory 拖拽产出，存入 pending，update 阶段发包）
+        if let Some(unique_id) = self.main_dialog.take_pending_unequip_request() {
+            self.pending_unequip_request = Some(unique_id);
         }
 
         if let Some(action) = self.npc_goods_dialog.take_action() {

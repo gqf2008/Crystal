@@ -46,6 +46,10 @@ pub struct RankingDialogHybrid {
     pending_action: RankingDialogAction,
 }
 
+impl Default for RankingDialogHybrid {
+    fn default() -> Self { Self::new() }
+}
+
 impl RankingDialogHybrid {
     const WIDTH: f32 = 320.0;
     const HEIGHT: f32 = 380.0;

@@ -13,18 +13,10 @@ use crate::game::{GameContext, GameResult};
 use crate::systems::LogicSystem;
 use crate::ui::ui_state::{UiCommand, UiState};
 
-#[derive(ecs_macros::LogicSystem)]
+#[derive(ecs_macros::LogicSystem, Default)]
 pub struct BufSystem {
     /// 上次更新时间戳（毫秒），用于计算 delta
     last_tick_ms: u64,
-}
-
-impl Default for BufSystem {
-    fn default() -> Self {
-        Self {
-            last_tick_ms: 0,
-        }
-    }
 }
 
 impl BufSystem {

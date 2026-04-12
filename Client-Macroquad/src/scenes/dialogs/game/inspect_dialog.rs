@@ -37,6 +37,10 @@ pub struct InspectDialogHybrid {
     pending_action: InspectDialogAction,
 }
 
+impl Default for InspectDialogHybrid {
+    fn default() -> Self { Self::new() }
+}
+
 impl InspectDialogHybrid {
     const WIDTH: f32 = 280.0;
     const HEIGHT: f32 = 380.0;

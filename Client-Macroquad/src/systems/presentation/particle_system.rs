@@ -25,7 +25,7 @@ impl ParticleSystem {
 
     fn next_seed(&mut self) -> f32 {
         self.seed_counter = self.seed_counter.wrapping_add(1);
-        ((self.seed_counter as f32 * 0.618033988749895) % 1.0).abs().fract()
+        ((self.seed_counter as f32 * 0.618_034) % 1.0).abs().fract()
     }
 }
 

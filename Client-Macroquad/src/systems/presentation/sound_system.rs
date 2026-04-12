@@ -397,7 +397,7 @@ impl LogicSystem for SoundSystem {
             let global = self.global_volume_for_type(ctx, ps.sound_type);
             let final_volume = (ps.volume * global).clamp(0.0, 1.0);
 
-            let was_playing = self.persistent_playing.contains_key(&entity);
+            let was_playing = self.persistent_playing.contains_key(entity);
 
             if ps.is_playing && final_volume > 0.0 {
                 // 需要播放
@@ -424,7 +424,7 @@ impl LogicSystem for SoundSystem {
                 // 已在播放：不重复调用 play_sound（looped 声音会持续播放）
             } else if was_playing {
                 // 已播放但 now is_playing=false 或 volume=0 → 停止
-                if let Some((ref file, _)) = self.persistent_playing.remove(&entity) {
+                if let Some((ref file, _)) = self.persistent_playing.remove(entity) {
                     if let Some(sound) = self.cache.get(file) {
                         stop_sound(sound);
                         tracing::debug!(target: "sound", "PersistentSound STOP: file={}", file);

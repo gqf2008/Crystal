@@ -996,7 +996,7 @@ impl MockNetwork {
                     // 私聊：/目标 消息
                     let parts: Vec<&str> = message.splitn(2, ' ').collect();
                     let target = parts[0].trim_start_matches('/');
-                    let body = parts.get(1).map(|s| *s).unwrap_or("");
+                    let body = parts.get(1).copied().unwrap_or("");
                     let _ = response_tx.send(NetworkEvent::ChatMessage {
                         sender: format!("(私聊→{})", target),
                         message: format!("/{} {}", target, body),
@@ -1579,7 +1579,7 @@ impl MockNetwork {
 
             // ===== 任务（Mock 模式） =====
             NetworkEvent::AcceptQuestRequest { npc_index, quest_index } => {
-                let quest_id = (npc_index * 100 + quest_index) as u32;
+                let quest_id = npc_index * 100 + quest_index;
                 // 先发送 QuestInfoReceived（模拟服务器下发任务详情）
                 let _ = response_tx.send(NetworkEvent::QuestInfoReceived {
                     quest_id,
@@ -1600,7 +1600,7 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::FinishQuestRequest { quest_index, selected_item } => {
-                let _ = response_tx.send(NetworkEvent::QuestCompleted { quest_id: quest_index as u32 });
+                let _ = response_tx.send(NetworkEvent::QuestCompleted { quest_id: quest_index });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 任务 #{} 已完成（奖励物品 #{}）", quest_index, selected_item),
                 });
@@ -1611,7 +1611,7 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::ShareQuestRequest { quest_index } => {
-                let _ = response_tx.send(NetworkEvent::QuestShared { quest_id: quest_index as u32 });
+                let _ = response_tx.send(NetworkEvent::QuestShared { quest_id: quest_index });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 任务 #{} 已共享", quest_index),
                 });
@@ -1857,20 +1857,20 @@ impl MockNetwork {
                 });
             }
 
-            NetworkEvent::BuyItemBackRequest { .. } => {
+            NetworkEvent::BuyItemBackRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 回购物品".to_string(),
                 });
             }
 
-            NetworkEvent::ReplaceWedRingRequest { .. } => {
+            NetworkEvent::ReplaceWedRingRequest => {
                 let _ = response_tx.send(NetworkEvent::NPCReplaceWedRingReceived);
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 替换结婚戒指".to_string(),
                 });
             }
 
-            NetworkEvent::ChangeMarriageRequest { .. } => {
+            NetworkEvent::ChangeMarriageRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 变更结婚对象".to_string(),
                 });
@@ -1882,19 +1882,19 @@ impl MockNetwork {
                 });
             }
 
-            NetworkEvent::HarvestRequest { .. } => {
+            NetworkEvent::HarvestRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 采集完成".to_string(),
                 });
             }
 
-            NetworkEvent::FishingCastRequest { .. } => {
+            NetworkEvent::FishingCastRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 钓鱼抛竿".to_string(),
                 });
             }
 
-            NetworkEvent::IntelligentCreaturePickupRequest { .. } => {
+            NetworkEvent::IntelligentCreaturePickupRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 智能生物拾取".to_string(),
                 });
@@ -1912,7 +1912,7 @@ impl MockNetwork {
                 });
             }
 
-            NetworkEvent::RequestMapInfoRequest { .. } => {
+            NetworkEvent::RequestMapInfoRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 地图信息请求".to_string(),
                 });
@@ -1924,7 +1924,7 @@ impl MockNetwork {
                 });
             }
 
-            NetworkEvent::AcceptReincarnationRequest { .. } => {
+            NetworkEvent::AcceptReincarnationRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 接受转生".to_string(),
                 });
@@ -1936,7 +1936,7 @@ impl MockNetwork {
                 });
             }
 
-            NetworkEvent::CheckRefineRequest { .. } => {
+            NetworkEvent::CheckRefineRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 检查精炼".to_string(),
                 });
@@ -2000,7 +2000,7 @@ impl MockNetwork {
                 });
             }
 
-            NetworkEvent::GetRentedItemsRequest { .. } => {
+            NetworkEvent::GetRentedItemsRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 获取租赁物品".to_string(),
                 });
@@ -2012,7 +2012,7 @@ impl MockNetwork {
                 });
             }
 
-            NetworkEvent::ItemRentalConfirm { .. } => {
+            NetworkEvent::ItemRentalConfirm => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 确认租赁".to_string(),
                 });
@@ -2042,7 +2042,7 @@ impl MockNetwork {
                 });
             }
 
-            NetworkEvent::GuildNameReturn { .. } => {
+            NetworkEvent::GuildNameReturn => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 行会名称返回".to_string(),
                 });
@@ -2054,20 +2054,20 @@ impl MockNetwork {
                 });
             }
 
-            NetworkEvent::GuildStorageItemChangeRequest { .. } => {
+            NetworkEvent::GuildStorageItemChangeRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 行会仓库物品变更".to_string(),
                 });
             }
 
-            NetworkEvent::GuildWarReturn { .. } => {
+            NetworkEvent::GuildWarReturn => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 行会战返回".to_string(),
                 });
             }
 
             // ===== 市场（Mock 模式） =====
-            NetworkEvent::MarketRefreshRequest { .. } => {
+            NetworkEvent::MarketRefreshRequest => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 市场刷新".to_string(),
                 });

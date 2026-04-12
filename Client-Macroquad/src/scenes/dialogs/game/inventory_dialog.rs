@@ -491,7 +491,7 @@ impl InventoryDialogHybrid {
         }
 
         if let Some(empty_slot) = items.iter_mut().find(|s| s.icon_index.is_none() || s.count == 0) {
-            *empty_slot = ItemSlotHybrid::new(icon_index, item.name.clone(), item.count);
+            *empty_slot = item;
             return Ok(());
         }
 
