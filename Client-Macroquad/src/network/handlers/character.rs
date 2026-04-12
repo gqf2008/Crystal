@@ -319,6 +319,7 @@ impl PacketHandler for CharacterHandler {
             // LogOutSuccess
             x if x == ServerPacketIds::LogOutSuccess as u16 => {
                 if let Ok(_packet) = server::LogOutSuccess::read_body(&mut cursor) {
+                    events.push(NetworkEvent::LogOutSuccess);
                     tracing::info!("🚪 LogOutSuccess");
                 }
             }
@@ -326,6 +327,7 @@ impl PacketHandler for CharacterHandler {
             // LogOutFailed
             x if x == ServerPacketIds::LogOutFailed as u16 => {
                 if let Ok(_packet) = server::LogOutFailed::read_body(&mut cursor) {
+                    events.push(NetworkEvent::LogOutFailed);
                     tracing::warn!("🚪 LogOutFailed");
                 }
             }
@@ -333,6 +335,7 @@ impl PacketHandler for CharacterHandler {
             // ReturnToLogin
             x if x == ServerPacketIds::ReturnToLogin as u16 => {
                 if let Ok(_packet) = server::ReturnToLogin::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ReturnToLogin);
                     tracing::info!("🔙 ReturnToLogin");
                 }
             }

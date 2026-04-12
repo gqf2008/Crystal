@@ -723,6 +723,10 @@ pub enum NetworkEvent {
     // 服务器 -> 客户端
     ReincarnationRequested,
     ReincarnationCancelled,
+    HeroHealthChanged { hp: i32, mp: i32 },
+    LogOutSuccess,
+    LogOutFailed,
+    ReturnToLogin,
 
     // 客户端 -> 服务器
     AcceptReincarnationRequest,

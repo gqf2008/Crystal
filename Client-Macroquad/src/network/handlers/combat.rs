@@ -290,6 +290,10 @@ impl PacketHandler for CombatHandler {
             // HeroHealthChanged - hero hp/mp updated
             x if x == ServerPacketIds::HeroHealthChanged as u16 => {
                 if let Ok(packet) = server::HeroHealthChanged::read_body(&mut cursor) {
+                    events.push(NetworkEvent::HeroHealthChanged {
+                        hp: packet.hp as i32,
+                        mp: packet.mp as i32,
+                    });
                     tracing::trace!("🧡 HeroHealthChanged hp={} mp={}", packet.hp, packet.mp);
                 }
             }

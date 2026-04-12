@@ -703,6 +703,18 @@ impl DialogSystem {
                 NetworkEvent::ReincarnationCancelled => {
                     cmds.push(UiCommand::PushSystemChatLine("转生已取消".to_string()));
                 }
+                NetworkEvent::HeroHealthChanged { hp, mp } => {
+                    tracing::debug!("🧡 英雄HP/MP更新: hp={} mp={}", hp, mp);
+                }
+                NetworkEvent::LogOutSuccess => {
+                    cmds.push(UiCommand::PushSystemChatLine("已安全退出游戏".to_string()));
+                }
+                NetworkEvent::LogOutFailed => {
+                    cmds.push(UiCommand::PushSystemChatLine("退出游戏失败".to_string()));
+                }
+                NetworkEvent::ReturnToLogin => {
+                    cmds.push(UiCommand::PushSystemChatLine("返回登录界面".to_string()));
+                }
                 NetworkEvent::RefineItemDeposited => {
                     cmds.push(UiCommand::PushSystemChatLine("精炼物品已存入".to_string()));
                 }
