@@ -54,6 +54,11 @@ chrono = "0.4.44"
 rfd = "0.17.2"
 mimalloc = "0.1.48"
 
+# IME support was merged upstream in miniquad PR #591 but not yet released on crates.io.
+# Patch to git main branch for IME input support.
+[patch.crates-io]
+miniquad = { git = "https://github.com/not-fl3/miniquad.git" }
+
 [features]
 # Keep default feature set minimal.
 default = []
