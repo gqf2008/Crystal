@@ -1392,6 +1392,10 @@ impl MockNetwork {
             // ===== 组队（Mock 模式） =====
             NetworkEvent::GroupInviteRequest { ref player_name } => {
                 let _ = response_tx.send(NetworkEvent::GroupMemberAdded { name: player_name.clone() });
+                let _ = response_tx.send(NetworkEvent::GroupMembersMapUpdated {
+                    player_name: player_name.clone(),
+                    player_map: "初始地图".to_string(),
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] {} 已加入你的队伍", player_name),
                 });

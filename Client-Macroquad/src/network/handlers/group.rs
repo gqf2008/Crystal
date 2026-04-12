@@ -64,9 +64,14 @@ impl PacketHandler for GroupHandler {
             // GroupMembersMap
             x if x == ServerPacketIds::GroupMembersMap as u16 => {
                 if let Ok(packet) = server::GroupMembersMap::read_body(&mut cursor) {
-                    let member_names: Vec<String> = packet.members.clone();
-                    events.push(NetworkEvent::GroupMembersMapUpdated { member_names });
-                    tracing::info!("👥 Group members map: {} members", packet.members.len());
+                    events.push(NetworkEvent::GroupMembersMapUpdated {
+                        player_name: packet.player_name.clone(),
+                        player_map: packet.player_map.clone(),
+                    });
+                    tracing::info!(
+                        "👥 Group member '{}' on map '{}'",
+                        packet.player_name, packet.player_map
+                    );
                 }
             }
 

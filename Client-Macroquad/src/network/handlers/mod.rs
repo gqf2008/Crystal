@@ -307,7 +307,7 @@ pub enum NetworkEvent {
     GroupMemberRemoved { name: String },
     GroupDisbanded,
     GroupModeChanged { allow_group: u8 },
-    GroupMembersMapUpdated { member_names: Vec<String> },
+    GroupMembersMapUpdated { player_name: String, player_map: String },
     GroupMemberLocationUpdated { name: String, x: i32, y: i32 },
     
     // ========================================================================

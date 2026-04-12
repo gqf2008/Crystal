@@ -193,20 +193,16 @@ impl DialogSystem {
                 NetworkEvent::GroupDisbanded => {
                     cmds.push(UiCommand::PushSystemChatLine("队伍已解散".to_string()));
                 }
-                NetworkEvent::GroupMembersMapUpdated { member_names } => {
-                    // 同时更新组队对话框成员列表和系统聊天提示
-                    let members: Vec<_> = member_names.iter().map(|name| {
-                        crate::scenes::dialogs::game::group_dialog::GroupMember {
-                            name: name.clone(),
-                            hp_percent: 1.0, // 服务器未提供HP数据，默认满血
-                            online: true,
-                            is_leader: false,
-                        }
-                    }).collect();
-                    cmds.push(UiCommand::UpdateGroupMembers { members });
-                    cmds.push(UiCommand::PushSystemChatLine(
-                        format!("队伍成员: {}", member_names.join(", ")),
-                    ));
+                NetworkEvent::GroupMembersMapUpdated { player_name, player_map } => {
+                    cmds.push(UiCommand::UpdateGroupMemberMap {
+                        player_name: player_name.clone(),
+                        player_map: player_map.clone(),
+                    });
+                    if !player_map.is_empty() {
+                        cmds.push(UiCommand::PushSystemChatLine(
+                            format!("{} 在地图: {}", player_name, player_map),
+                        ));
+                    }
                 }
                 NetworkEvent::GroupMemberLocationUpdated { name, x, y } => {
                     tracing::debug!("📍 队伍成员位置更新: {} ({}, {})", name, x, y);

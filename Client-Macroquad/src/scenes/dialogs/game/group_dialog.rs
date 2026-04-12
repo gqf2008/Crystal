@@ -23,6 +23,7 @@ pub struct GroupMember {
     pub hp_percent: f32,   // 0.0 - 1.0
     pub online: bool,
     pub is_leader: bool,
+    pub map_name: String,   // 成员所在地图名称
 }
 
 /// 组队对话框动作
@@ -132,6 +133,13 @@ impl GroupDialogHybrid {
     /// 移除成员
     pub fn remove_member(&mut self, name: &str) {
         self.members.retain(|m| m.name != name);
+    }
+
+    /// 更新成员所在地图
+    pub fn update_member_map(&mut self, name: &str, map_name: String) {
+        if let Some(member) = self.members.iter_mut().find(|m| m.name == name) {
+            member.map_name = map_name;
+        }
     }
 
     /// 检查是否允许加入

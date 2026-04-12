@@ -129,6 +129,8 @@ pub enum UiCommand {
 
     /// 组队成员列表更新
     UpdateGroupMembers { members: Vec<crate::scenes::dialogs::game::group_dialog::GroupMember> },
+    /// 组队成员地图信息更新
+    UpdateGroupMemberMap { player_name: String, player_map: String },
     SetGroupAllowJoin { allow: bool },
 
     /// 小地图：邮件按钮

@@ -250,6 +250,9 @@ impl RenderSystem for UIRenderSystem {
                 UiCommand::SetGroupAllowJoin { allow } => {
                     self.main_dialog.group_dialog_mut().set_allow_join(allow);
                 }
+                UiCommand::UpdateGroupMemberMap { player_name, player_map } => {
+                    self.main_dialog.group_dialog_mut().update_member_map(&player_name, player_map);
+                }
                 UiCommand::SetHeroAutoPotUnlocked => {
                     tracing::debug!("Hero auto-pot unlocked");
                 }

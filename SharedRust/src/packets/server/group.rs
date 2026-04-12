@@ -39,30 +39,22 @@ impl Packet for SwitchGroup {
 /// Group members map info
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupMembersMap {
-    pub members: Vec<String>,
+    pub player_name: String,
+    pub player_map: String,
 }
 
 impl Packet for GroupMembersMap {
     const OPCODE: i16 = ServerPacketIds::GroupMembersMap as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let count = reader.read_i32::<LittleEndian>()? as usize;
-        let mut members = Vec::with_capacity(count);
-        
-        for _ in 0..count {
-            members.push(read_dotnet_string(reader)?);
-        }
-        
-        Ok(Self { members })
+        let player_name = read_dotnet_string(reader)?;
+        let player_map = read_dotnet_string(reader)?;
+        Ok(Self { player_name, player_map })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        writer.write_i32::<LittleEndian>(self.members.len() as i32)?;
-        
-        for member in &self.members {
-            write_dotnet_string(writer, member)?;
-        }
-        
+        write_dotnet_string(writer, &self.player_name)?;
+        write_dotnet_string(writer, &self.player_map)?;
         Ok(())
     }
 }
