@@ -150,19 +150,10 @@ impl Default for CollisionInfo {
 }
 
 /// 当前地图天气状态（全局资源组件，绑定到 World 中唯一实体）
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct WeatherState {
     /// 天气类型码：0=晴天, 1=雨, 2=雪, 3=雾, 4=沙尘
     pub weather_code: u16,
     /// 当前天气对应的粒子发射器实体（如果有）
     pub emitter_entity: Option<hecs::Entity>,
-}
-
-impl Default for WeatherState {
-    fn default() -> Self {
-        Self {
-            weather_code: 0,
-            emitter_entity: None,
-        }
-    }
 }

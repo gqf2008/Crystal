@@ -16,7 +16,7 @@ use macroquad::prelude::*;
 use macroquad::ui::{self, Skin};
 use crate::resources::LibraryName;
 
-use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopItemHybrid};
+use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid};
 use super::sample_items::create_sample_items;
 
 /// 商城对话框（混合版本）
@@ -249,8 +249,8 @@ impl GameShopDialogHybrid {
             filtered_items: Vec::new(),
             current_page: 0,
             items_per_page: 8,
-            player_gold: 999999,
-            player_ingot: 10000,
+            player_gold: 0,
+            player_ingot: 0,
             categories: Vec::new(),
             category_scroll: 0,
             selected_category: None,
@@ -450,6 +450,61 @@ impl GameShopDialogHybrid {
         if !self.visible { return false; }
         let rect = Rect::new(self.position.x, self.position.y, Self::DIALOG_WIDTH, Self::DIALOG_HEIGHT);
         rect.contains(pos)
+    }
+
+    /// 从服务器数据更新商品列表
+    pub fn update_from_server(&mut self, items: Vec<mir2_shared::packets::server::GameShopItem>, credit: u32, gold: u32) {
+        self.player_ingot = credit;
+        self.player_gold = gold;
+        self.shop_items = items.iter().map(|item| {
+            let class = match item.class {
+                0 => ShopClassHybrid::All,
+                1 => ShopClassHybrid::Warrior,
+                2 => ShopClassHybrid::Wizard,
+                3 => ShopClassHybrid::Taoist,
+                4 => ShopClassHybrid::Assassin,
+                5 => ShopClassHybrid::Archer,
+                _ => ShopClassHybrid::All,
+            };
+            let category = if item.category.contains("武器") || item.category.to_lowercase().contains("weapon") {
+                ShopCategoryHybrid::Weapon
+            } else if item.category.contains("防") || item.category.to_lowercase().contains("armor") {
+                ShopCategoryHybrid::Armor
+            } else if item.category.contains("药") || item.category.to_lowercase().contains("potion") {
+                ShopCategoryHybrid::Potion
+            } else if item.category.contains("时装") || item.category.to_lowercase().contains("fashion") {
+                ShopCategoryHybrid::Fashion
+            } else {
+                ShopCategoryHybrid::Special
+            };
+            ShopItemHybrid {
+                id: item.item_index as u32,
+                name: format!("物品 #{}", item.item_index),
+                description: format!("数量: {}", item.count),
+                icon_index: item.item_index as usize,
+                price_gold: item.gold_price,
+                price_ingot: item.credit_price,
+                class,
+                category,
+                in_stock: item.stock <= 0 || !item.is_bought,
+                hot: false,
+                new: false,
+                deal: item.deal,
+                days_ago: 0,
+                stock: if item.stock <= 0 { 0 } else { item.stock as u32 },
+                count: item.count as u32,
+            }
+        }).collect();
+        self.refresh_categories_and_items();
+    }
+
+    /// 更新单个商品库存
+    pub fn update_stock(&mut self, item_index: i32, stock: i32) {
+        if let Some(item) = self.shop_items.iter_mut().find(|i| i.id == item_index as u32) {
+            item.stock = if stock <= 0 { 0 } else { stock as u32 };
+            item.in_stock = stock > 0;
+            self.refresh_categories_and_items();
+        }
     }
 }
 

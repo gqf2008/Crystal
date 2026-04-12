@@ -33,26 +33,23 @@ impl PacketHandler for MailHandler {
 
             // MailSendRequest
             x if x == ServerPacketIds::MailSendRequest as u16 => {
-                if let Ok(_packet) = server::MailSendRequest::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MailSendRequestReceived);
-                    tracing::debug!("📤 Mail send request received");
-                }
+                let _ = server::MailSendRequest::read_body(&mut cursor);
+                events.push(NetworkEvent::MailSendRequestReceived);
+                tracing::debug!("📤 Mail send request received");
             }
 
             // MailSent
             x if x == ServerPacketIds::MailSent as u16 => {
-                if let Ok(_packet) = server::MailSent::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MailSentEvent);
-                    tracing::debug!("📬 Mail sent event");
-                }
+                let _ = server::MailSent::read_body(&mut cursor);
+                events.push(NetworkEvent::MailSentEvent);
+                tracing::debug!("📬 Mail sent event");
             }
 
             // ParcelCollected
             x if x == ServerPacketIds::ParcelCollected as u16 => {
-                if let Ok(_packet) = server::ParcelCollected::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ParcelCollectedEvent);
-                    tracing::debug!("📦 Parcel collected event");
-                }
+                let _ = server::ParcelCollected::read_body(&mut cursor);
+                events.push(NetworkEvent::ParcelCollectedEvent);
+                tracing::debug!("📦 Parcel collected event");
             }
 
             // MailCost

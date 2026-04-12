@@ -77,7 +77,7 @@ impl crate::systems::LogicSystem for WeatherSystem {
         use crate::components::WeatherState;
 
         // 查找 WeatherState 组件
-        let Some(weather_state) = ctx.world.iter().find_map(|e| e.get::<&WeatherState>().map(|w| (e.entity(), *w))).map(|(e, w)| (e, w)) else {
+        let Some(weather_state) = ctx.world.iter().find_map(|e| e.get::<&WeatherState>().map(|w| (e.entity(), *w))) else {
             return Ok(());
         };
 

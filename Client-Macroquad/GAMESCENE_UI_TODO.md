@@ -78,7 +78,7 @@
 - `SceneSystem` (5 行) — 场景切换由 GameState 直接管理
 
 ### 轻量系统
-HUDSystem(601B), UISystem(665B), MinimapSystem(3.8KB), FloatingTextSystem(1.2KB), HealthBarAnimSystem(2.5KB), PositionInterpolationSystem(1.4KB), RemoteMoveAnimSystem(1.9KB), MountStateSyncSystem(3.3KB), WeatherSystem(1.3KB)
+HUDSystem(601B), UISystem(665B), MinimapSystem(3.8KB), FloatingTextSystem(1.2KB), HealthBarAnimSystem(2.5KB), PositionInterpolationSystem(1.4KB), RemoteMoveAnimSystem(1.9KB), MountStateSyncSystem(3.3KB), WeatherSystem(3.4KB, 已实现天气码→粒子发射器)
 
 ---
 
@@ -148,3 +148,7 @@ HUDSystem(601B), UISystem(665B), MinimapSystem(3.8KB), FloatingTextSystem(1.2KB)
 - ✅ 组队事件下游接线：成员列表更新、组队模式切换、位置跟踪
 - ✅ Clippy 0 warnings（51 → 0，含 mock.rs 修复、Default 派生等）
 - ✅ QuestLogDialog 已绑定服务器数据（TODO 标注已过时）
+- ✅ WeatherSystem 完整实现：天气码→粒子发射器，Mock 随机天气
+- ✅ 粒子类型差异化：Blizzard/FlowersRain/FogCloud 专用生成逻辑
+- ✅ 亲密度/导师经验条件渲染：协议无数据时隐藏
+- ✅ UnhandledPacket 日志升级为 warn 并输出 opcode

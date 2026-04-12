@@ -344,6 +344,17 @@ impl RenderSystem for UIRenderSystem {
                     });
                     tracing::debug!("🏰 行会名称: {}", name);
                 }
+                UiCommand::UpdateGuildStorageGold { gold } => {
+                    self.main_dialog.guild_dialog_mut().update_storage_gold(gold);
+                }
+                UiCommand::UpdateGuildStorageItems { items } => {
+                    for item in items {
+                        self.main_dialog.guild_dialog_mut().update_storage_item(item.name.clone(), item.quantity, item.slot);
+                    }
+                }
+                UiCommand::ClearGuildStorageItems => {
+                    self.main_dialog.guild_dialog_mut().clear_storage_items();
+                }
                 UiCommand::OpenMailDialog => {
                     tracing::debug!("📮 打开邮件对话框");
                     self.main_dialog.mail_dialog_mut().open();
@@ -416,6 +427,13 @@ impl RenderSystem for UIRenderSystem {
                         }
                     }).collect();
                     ranking_dialog.set_rankings(tab_enum, mapped);
+                }
+                UiCommand::UpdateGameShopItems { items, credit, gold } => {
+                    tracing::debug!("🛒 更新商城商品列表: {} items", items.len());
+                    self.main_dialog.game_shop_dialog_mut().update_from_server(items, credit, gold);
+                }
+                UiCommand::UpdateGameShopStock { item_index, stock } => {
+                    self.main_dialog.game_shop_dialog_mut().update_stock(item_index, stock);
                 }
             }
         }
@@ -800,6 +818,11 @@ impl RenderSystem for UIRenderSystem {
                 GuildDialogAction::ViewMemberDetail { ref name, ref rank, ref online } => {
                     let status = if *online { "在线" } else { "离线" };
                     self.main_dialog.push_system_chat_line(format!("行会成员: {} | 职位: {} | 状态: {}", name, rank, status));
+                }
+                GuildDialogAction::RequestGuildWar => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::GuildWarReturn);
+                    }
                 }
                 GuildDialogAction::None => {}
             }

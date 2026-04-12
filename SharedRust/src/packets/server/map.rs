@@ -29,16 +29,31 @@ pub struct MapInformation {
 #[derive(Debug, Clone)]
 pub struct NewMapInfo {
     pub map_index: i32,
-    pub file_name: String,
     pub title: String,
-    pub minimap: u16,
-    pub big_map: u16,
-    pub music: u16,
-    pub lights: u8,
-    pub location_x: u32,
-    pub location_y: u32,
-    pub direction: u8,
-    pub map_dark_light: u8,
+    pub width: i32,
+    pub height: i32,
+    pub big_map: i32,
+    pub movements: Vec<MovementInfo>,
+    pub npcs: Vec<NpcMapInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MovementInfo {
+    pub destination: i32,
+    pub title: String,
+    pub location_x: i32,
+    pub location_y: i32,
+    pub icon: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct NpcMapInfo {
+    pub object_id: u32,
+    pub name: String,
+    pub location_x: i32,
+    pub location_y: i32,
+    pub icon: i32,
+    pub can_teleport_to: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -165,33 +180,74 @@ impl Packet for NewMapInfo {
     const OPCODE: i16 = ServerPacketIds::NewMapInfo as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        Ok(NewMapInfo {
-            map_index: reader.read_i32::<LittleEndian>()?,
-            file_name: read_dotnet_string(reader)?,
-            title: read_dotnet_string(reader)?,
-            minimap: reader.read_u16::<LittleEndian>()?,
-            big_map: reader.read_u16::<LittleEndian>()?,
-            music: reader.read_u16::<LittleEndian>()?,
-            lights: reader.read_u8()?,
-            location_x: reader.read_u32::<LittleEndian>()?,
-            location_y: reader.read_u32::<LittleEndian>()?,
-            direction: reader.read_u8()?,
-            map_dark_light: reader.read_u8()?,
+        let map_index = reader.read_i32::<LittleEndian>()?;
+        let title = read_dotnet_string(reader)?;
+        let width = reader.read_i32::<LittleEndian>()?;
+        let height = reader.read_i32::<LittleEndian>()?;
+        let big_map = reader.read_i32::<LittleEndian>()?;
+
+        let mov_count = reader.read_i32::<LittleEndian>()?;
+        let mut movements = Vec::with_capacity(mov_count as usize);
+        for _ in 0..mov_count {
+            movements.push(MovementInfo {
+                destination: reader.read_i32::<LittleEndian>()?,
+                title: read_dotnet_string(reader)?,
+                location_x: reader.read_i32::<LittleEndian>()?,
+                location_y: reader.read_i32::<LittleEndian>()?,
+                icon: reader.read_i32::<LittleEndian>()?,
+            });
+        }
+
+        let npc_count = reader.read_i32::<LittleEndian>()?;
+        let mut npcs = Vec::with_capacity(npc_count as usize);
+        for _ in 0..npc_count {
+            npcs.push(NpcMapInfo {
+                object_id: reader.read_u32::<LittleEndian>()?,
+                name: read_dotnet_string(reader)?,
+                location_x: reader.read_i32::<LittleEndian>()?,
+                location_y: reader.read_i32::<LittleEndian>()?,
+                icon: reader.read_i32::<LittleEndian>()?,
+                can_teleport_to: reader.read_u8()? != 0,
+            });
+        }
+
+        Ok(Self {
+            map_index,
+            title,
+            width,
+            height,
+            big_map,
+            movements,
+            npcs,
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.map_index)?;
-        write_dotnet_string(writer, &self.file_name)?;
         write_dotnet_string(writer, &self.title)?;
-        writer.write_u16::<LittleEndian>(self.minimap)?;
-        writer.write_u16::<LittleEndian>(self.big_map)?;
-        writer.write_u16::<LittleEndian>(self.music)?;
-        writer.write_u8(self.lights)?;
-        writer.write_u32::<LittleEndian>(self.location_x)?;
-        writer.write_u32::<LittleEndian>(self.location_y)?;
-        writer.write_u8(self.direction)?;
-        writer.write_u8(self.map_dark_light)?;
+        writer.write_i32::<LittleEndian>(self.width)?;
+        writer.write_i32::<LittleEndian>(self.height)?;
+        writer.write_i32::<LittleEndian>(self.big_map)?;
+
+        writer.write_i32::<LittleEndian>(self.movements.len() as i32)?;
+        for m in &self.movements {
+            writer.write_i32::<LittleEndian>(m.destination)?;
+            write_dotnet_string(writer, &m.title)?;
+            writer.write_i32::<LittleEndian>(m.location_x)?;
+            writer.write_i32::<LittleEndian>(m.location_y)?;
+            writer.write_i32::<LittleEndian>(m.icon)?;
+        }
+
+        writer.write_i32::<LittleEndian>(self.npcs.len() as i32)?;
+        for n in &self.npcs {
+            writer.write_u32::<LittleEndian>(n.object_id)?;
+            write_dotnet_string(writer, &n.name)?;
+            writer.write_i32::<LittleEndian>(n.location_x)?;
+            writer.write_i32::<LittleEndian>(n.location_y)?;
+            writer.write_i32::<LittleEndian>(n.icon)?;
+            writer.write_u8(n.can_teleport_to as u8)?;
+        }
+
         Ok(())
     }
 }

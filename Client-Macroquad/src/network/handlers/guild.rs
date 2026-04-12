@@ -30,7 +30,7 @@ impl PacketHandler for GuildHandler {
                     events.push(NetworkEvent::GuildJoined {
                         guild_name: packet.guild_name.clone(),
                     });
-                    tracing::info!("🏛️ Guild status updated: {} ({})", packet.guild_name, packet.rank_name);
+                    tracing::info!("🏛️ Guild status updated: {} ({}) level={} members={}/{}", packet.guild_name, packet.rank_name, packet.level, packet.member_count, packet.max_members);
                 }
             }
 

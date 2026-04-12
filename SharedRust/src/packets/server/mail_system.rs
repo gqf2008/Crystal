@@ -1,5 +1,6 @@
 // 邮件系统相关数据包
 use super::super::base::Packet;
+use crate::binary::read_dotnet_string;
 use crate::data::item::UserItem;
 use crate::data::stats::SharedResult;
 use crate::enums::ServerPacketIds;
@@ -14,127 +15,106 @@ pub struct ReceiveMail {
 
 #[derive(Debug, Clone)]
 pub struct MailInfo {
-    pub mail_id: u64,              // 邮件ID
-    pub sender_name: String,        // 发件人
-    pub mail_subject: String,       // 邮件主题
-    pub message: String,            // 邮件内容
-    pub gold: u32,                  // 金币数量
-    pub items: Vec<UserItem>,       // 附件物品列表
-    pub locked: bool,               // 是否锁定
-    pub collected: bool,            // 是否已收取
-    pub send_date: i64,             // 发送日期
+    pub mail_id: u64,
+    pub sender_name: String,
+    pub message: String,
+    pub opened: bool,
+    pub locked: bool,
+    pub can_reply: bool,
+    pub collected: bool,
+    pub send_date: i64,
+    pub gold: u32,
+    pub items: Vec<UserItem>,
 }
 
 impl Packet for ReceiveMail {
     const OPCODE: i16 = ServerPacketIds::ReceiveMail as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
+        use byteorder::{LittleEndian, WriteBytesExt};
         use crate::binary::write_dotnet_string;
-        
+
         writer.write_i32::<LittleEndian>(self.mail_list.len() as i32)?;
-        
+
         for mail in &self.mail_list {
             writer.write_u64::<LittleEndian>(mail.mail_id)?;
             write_dotnet_string(writer, &mail.sender_name)?;
-            write_dotnet_string(writer, &mail.mail_subject)?;
             write_dotnet_string(writer, &mail.message)?;
+            writer.write_u8(mail.opened as u8)?;
+            writer.write_u8(mail.locked as u8)?;
+            writer.write_u8(mail.can_reply as u8)?;
+            writer.write_u8(mail.collected as u8)?;
+            writer.write_i64::<LittleEndian>(mail.send_date)?;
             writer.write_u32::<LittleEndian>(mail.gold)?;
-            
             writer.write_i32::<LittleEndian>(mail.items.len() as i32)?;
             for item in &mail.items {
                 item.write_to(writer)?;
             }
-            
-            writer.write_u8(if mail.locked { 1 } else { 0 })?;
-            writer.write_u8(if mail.collected { 1 } else { 0 })?;
-            writer.write_i64::<LittleEndian>(mail.send_date)?;
         }
-        
+
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let count = reader.read_i32::<LittleEndian>()?;
         let mut mail_list = Vec::with_capacity(count as usize);
-        
+
         for _ in 0..count {
             let mail_id = reader.read_u64::<LittleEndian>()?;
-            
-            let sender_len = reader.read_i32::<LittleEndian>()?;
-            let mut sender_bytes = vec![0u8; sender_len as usize];
-            reader.read_exact(&mut sender_bytes)?;
-            let sender_name = String::from_utf8_lossy(&sender_bytes).to_string();
-            
-            let subject_len = reader.read_i32::<LittleEndian>()?;
-            let mut subject_bytes = vec![0u8; subject_len as usize];
-            reader.read_exact(&mut subject_bytes)?;
-            let mail_subject = String::from_utf8_lossy(&subject_bytes).to_string();
-            
-            let message_len = reader.read_i32::<LittleEndian>()?;
-            let mut message_bytes = vec![0u8; message_len as usize];
-            reader.read_exact(&mut message_bytes)?;
-            let message = String::from_utf8_lossy(&message_bytes).to_string();
-            
+            let sender_name = read_dotnet_string(reader)?;
+            let message = read_dotnet_string(reader)?;
+            let opened = reader.read_u8()? != 0;
+            let locked = reader.read_u8()? != 0;
+            let can_reply = reader.read_u8()? != 0;
+            let collected = reader.read_u8()? != 0;
+            let send_date = reader.read_i64::<LittleEndian>()?;
             let gold = reader.read_u32::<LittleEndian>()?;
-            
             let item_count = reader.read_i32::<LittleEndian>()?;
             let mut items = Vec::with_capacity(item_count as usize);
             for _ in 0..item_count {
                 items.push(UserItem::read_from(reader, i32::MAX, i32::MAX)?);
             }
-            
-            let locked = reader.read_u8()? != 0;
-            let collected = reader.read_u8()? != 0;
-            let send_date = reader.read_i64::<LittleEndian>()?;
-            
+
             mail_list.push(MailInfo {
                 mail_id,
                 sender_name,
-                mail_subject,
                 message,
-                gold,
-                items,
+                opened,
                 locked,
+                can_reply,
                 collected,
                 send_date,
+                gold,
+                items,
             });
         }
-        
+
         Ok(Self { mail_list })
     }
 }
 
 /// MailLockedItem - 邮件锁定物品 (230)
+/// C# sends: UniqueID(u64), Locked(bool) — no index field.
 #[derive(Debug, Clone)]
 pub struct MailLockedItem {
-    pub mail_id: u64,              // 邮件ID
-    pub index: i32,                 // 物品索引
-    pub locked: bool,               // 是否锁定
+    pub unique_id: u64,
+    pub locked: bool,
 }
 
 impl Packet for MailLockedItem {
     const OPCODE: i16 = ServerPacketIds::MailLockedItem as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        
-        writer.write_u64::<LittleEndian>(self.mail_id)?;
-        writer.write_i32::<LittleEndian>(self.index)?;
-        writer.write_u8(if self.locked { 1 } else { 0 })?;
-        
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u8(self.locked as u8)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let mail_id = reader.read_u64::<LittleEndian>()?;
-        let index = reader.read_i32::<LittleEndian>()?;
+        let unique_id = reader.read_u64::<LittleEndian>()?;
         let locked = reader.read_u8()? != 0;
-        Ok(Self {
-            mail_id,
-            index,
-            locked,
-        })
+        Ok(Self { unique_id, locked })
     }
 }
 
@@ -162,10 +142,10 @@ impl Packet for MailSendRequest {
 }
 
 /// MailSent - 邮件已发送 (232)
+/// C# sends only result(sbyte), no mail_id.
 #[derive(Debug, Clone)]
 pub struct MailSent {
-    pub mail_id: u64,              // 邮件ID
-    pub result: u8,                 // 发送结果
+    pub result: i8,
 }
 
 impl Packet for MailSent {
@@ -173,25 +153,21 @@ impl Packet for MailSent {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
-        writer.write_u64::<LittleEndian>(self.mail_id)?;
-        writer.write_u8(self.result)?;
-        
+        writer.write_i8(self.result)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let mail_id = reader.read_u64::<LittleEndian>()?;
-        let result = reader.read_u8()?;
-        Ok(Self { mail_id, result })
+        let result = reader.read_i8()?;
+        Ok(Self { result })
     }
 }
 
 /// ParcelCollected - 包裹已收取 (233)
+/// C# sends only success(bool), no mail_id.
 #[derive(Debug, Clone)]
 pub struct ParcelCollected {
-    pub mail_id: u64,              // 邮件ID
-    pub success: bool,              // 是否成功
+    pub success: bool,
 }
 
 impl Packet for ParcelCollected {
@@ -199,17 +175,13 @@ impl Packet for ParcelCollected {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
-        writer.write_u64::<LittleEndian>(self.mail_id)?;
-        writer.write_u8(if self.success { 1 } else { 0 })?;
-        
+        writer.write_u8(self.success as u8)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let mail_id = reader.read_u64::<LittleEndian>()?;
         let success = reader.read_u8()? != 0;
-        Ok(Self { mail_id, success })
+        Ok(Self { success })
     }
 }
 

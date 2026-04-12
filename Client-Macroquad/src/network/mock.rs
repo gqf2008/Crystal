@@ -1531,13 +1531,14 @@ impl MockNetwork {
                 let mock_mail = MailInfo {
                     mail_id,
                     sender_name: "系统管理员".to_string(),
-                    mail_subject: "欢迎使用邮件系统".to_string(),
                     message: "欢迎体验传奇2！这是系统发送的第一封测试邮件。".to_string(),
-                    gold: 100,
-                    items: Vec::new(),
+                    opened: false,
                     locked: false,
+                    can_reply: true,
                     collected: false,
                     send_date: 1712800000,
+                    gold: 100,
+                    items: Vec::new(),
                 };
                 let _ = response_tx.send(NetworkEvent::MailReceived {
                     mails: vec![mock_mail],

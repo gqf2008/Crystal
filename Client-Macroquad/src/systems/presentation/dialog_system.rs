@@ -370,7 +370,7 @@ impl DialogSystem {
                     let entries: Vec<_> = mails.iter().map(|m| crate::ui::ui_state::MailEntry {
                         mail_id: m.mail_id,
                         sender: m.sender_name.clone(),
-                        subject: m.mail_subject.clone(),
+                        subject: m.message.lines().next().unwrap_or("(无主题)").to_string(),
                         body: m.message.clone(),
                         date: format_mail_date(m.send_date),
                         has_parcel: !m.items.is_empty(),
@@ -477,6 +477,7 @@ impl DialogSystem {
                     cmds.push(UiCommand::PushSystemChatLine(format!("行会仓库物品{}: 槽位{}", action, slot)));
                 }
                 NetworkEvent::GuildStorageListReceived => {
+                    cmds.push(UiCommand::ClearGuildStorageItems);
                     cmds.push(UiCommand::PushSystemChatLine("行会仓库列表已更新".to_string()));
                 }
                 NetworkEvent::GuildTerritoryPageReceived => {
@@ -581,11 +582,18 @@ impl DialogSystem {
                     cmds.push(UiCommand::PushSystemChatLine("租赁已确认".to_string()));
                 }
                 // 游戏商店
-                NetworkEvent::GameShopInfoReceived => {
-                    cmds.push(UiCommand::PushSystemChatLine("游戏商店信息已更新".to_string()));
+                NetworkEvent::GameShopInfoReceived { items, credit, gold } => {
+                    cmds.push(UiCommand::UpdateGameShopItems {
+                        items: items.clone(),
+                        credit: *credit,
+                        gold: *gold,
+                    });
                 }
-                NetworkEvent::GameShopStockReceived => {
-                    cmds.push(UiCommand::PushSystemChatLine("游戏商店库存已更新".to_string()));
+                NetworkEvent::GameShopStockReceived { item_index, stock } => {
+                    cmds.push(UiCommand::UpdateGameShopStock {
+                        item_index: *item_index,
+                        stock: *stock,
+                    });
                 }
                 // 排行榜
                 NetworkEvent::RankingsReceived => {

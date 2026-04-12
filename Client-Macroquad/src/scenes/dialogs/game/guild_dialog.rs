@@ -32,6 +32,16 @@ pub struct GuildInfo {
     pub members: Vec<GuildMember>,
     pub member_count: u32,
     pub max_members: u32,
+    pub storage_gold: u32,
+    pub storage_items: Vec<GuildStorageItem>,
+}
+
+/// 行会仓库物品
+#[derive(Debug, Clone)]
+pub struct GuildStorageItem {
+    pub name: String,
+    pub quantity: i32,
+    pub slot: i32,
 }
 
 /// 标签页
@@ -40,6 +50,8 @@ pub enum GuildTab {
     Info,
     Members,
     Notice,
+    Storage,
+    War,
 }
 
 /// 行会对话框动作
@@ -51,6 +63,7 @@ pub enum GuildDialogAction {
     EditMemberRank { name: String, rank: String },
     RequestGuildInfo,
     ViewMemberDetail { name: String, rank: String, online: bool },
+    RequestGuildWar,
 }
 
 pub struct GuildDialogHybrid {
@@ -154,6 +167,26 @@ impl GuildDialogHybrid {
         }
     }
 
+    /// 更新行会仓库金币
+    pub fn update_storage_gold(&mut self, gold: u32) {
+        self.guild_info.storage_gold = gold;
+    }
+
+    /// 更新行会仓库物品
+    pub fn update_storage_item(&mut self, name: String, quantity: i32, slot: i32) {
+        if let Some(item) = self.guild_info.storage_items.iter_mut().find(|i| i.slot == slot) {
+            item.name = name;
+            item.quantity = quantity;
+        } else {
+            self.guild_info.storage_items.push(GuildStorageItem { name, quantity, slot });
+        }
+    }
+
+    /// 清空仓库物品列表
+    pub fn clear_storage_items(&mut self) {
+        self.guild_info.storage_items.clear();
+    }
+
     /// 获取待处理动作
     pub fn take_action(&mut self) -> GuildDialogAction {
         std::mem::replace(&mut self.pending_action, GuildDialogAction::None)
@@ -215,6 +248,8 @@ impl GuildDialogHybrid {
             GuildTab::Info => self.draw_info_tab(),
             GuildTab::Members => self.draw_members_list(mouse_pos),
             GuildTab::Notice => self.draw_notice_tab(),
+            GuildTab::Storage => self.draw_storage_tab(),
+            GuildTab::War => self.draw_war_tab(mouse_pos),
         }
 
         // 绘制按钮
@@ -253,8 +288,8 @@ impl GuildDialogHybrid {
         let tab_spacing = 2.0;
         let start_x = self.position.x + 15.0;
 
-        let tabs = ["行会信息", "成员列表", "行会公告"];
-        let tab_kinds = [GuildTab::Info, GuildTab::Members, GuildTab::Notice];
+        let tabs = ["行会信息", "成员列表", "行会公告", "行会仓库", "行会战"];
+        let tab_kinds = [GuildTab::Info, GuildTab::Members, GuildTab::Notice, GuildTab::Storage, GuildTab::War];
 
         for (i, (label, kind)) in tabs.iter().zip(tab_kinds.iter()).enumerate() {
             let tab_x = start_x + i as f32 * (tab_w + tab_spacing);
@@ -396,6 +431,72 @@ impl GuildDialogHybrid {
                 break;
             }
             draw_text_cn(line, content_x, y, 11.0, WHITE);
+        }
+    }
+
+    fn draw_storage_tab(&self) {
+        let content_y = self.position.y + Self::CONTENT_START_Y;
+        let content_x = self.position.x + 15.0;
+        let line_h = 22.0;
+
+        // 行会金币
+        draw_text_cn("行会金币:", content_x, content_y, 12.0, Color::from_rgba(200, 200, 200, 255));
+        draw_text_cn(&self.guild_info.storage_gold.to_string(), content_x + 80.0, content_y, 12.0, Color::from_rgba(255, 215, 0, 255));
+
+        // 仓库物品列表
+        let list_top = content_y + line_h + 5.0;
+        let list_bottom = self.position.y + Self::BUTTON_Y - 10.0;
+
+        draw_text_cn("仓库物品", content_x, list_top, 12.0, Color::from_rgba(200, 200, 200, 255));
+
+        if self.guild_info.storage_items.is_empty() {
+            draw_text_cn("暂无物品", content_x + 10.0, list_top + 25.0, 12.0, GRAY);
+            return;
+        }
+
+        for (i, item) in self.guild_info.storage_items.iter().enumerate() {
+            let y = list_top + 25.0 + i as f32 * (Self::ITEM_H + 2.0);
+            if y > list_bottom {
+                break;
+            }
+            let name_text = format!("{} x{}", item.name, item.quantity);
+            draw_text_cn(&name_text, content_x + 10.0, y, 11.0, WHITE);
+        }
+    }
+
+    fn draw_war_tab(&mut self, mouse_pos: Vec2) {
+        let content_y = self.position.y + Self::CONTENT_START_Y;
+        let content_x = self.position.x + 15.0;
+        let line_h = 22.0;
+
+        draw_text_cn("行会战设置", content_x, content_y, 13.0, Color::from_rgba(255, 200, 100, 255));
+
+        let info_y = content_y + line_h;
+        draw_text_cn("向其他行会发起战争", content_x, info_y, 11.0, GRAY);
+
+        // 请求行会战按钮
+        let btn_w = 120.0;
+        let btn_h = 28.0;
+        let btn_x = content_x + (self.size.x - 30.0 - btn_w) / 2.0;
+        let btn_y = info_y + 40.0;
+        let btn_rect = Rect::new(btn_x, btn_y, btn_w, btn_h);
+
+        let is_hovered = btn_rect.contains(mouse_pos);
+        let is_pressed = is_hovered && is_mouse_button_down(MouseButton::Left);
+
+        let btn_color = if is_pressed {
+            Color::from_rgba(180, 60, 60, 255)
+        } else if is_hovered {
+            Color::from_rgba(160, 50, 50, 255)
+        } else {
+            Color::from_rgba(140, 40, 40, 255)
+        };
+        draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
+        draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(200, 100, 100, 255));
+        draw_text_cn("请求行会战", btn_x + 15.0, btn_y + 18.0, 12.0, WHITE);
+
+        if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
+            self.pending_action = GuildDialogAction::RequestGuildWar;
         }
     }
 

@@ -147,9 +147,14 @@ impl PacketHandler for UiEventsHandler {
 
             // GameShopInfo
             x if x == ServerPacketIds::GameShopInfo as u16 => {
-                if let Ok(_packet) = server::GameShopInfo::read_body(&mut cursor) {
-                    events.push(NetworkEvent::GameShopInfoReceived);
-                    tracing::debug!("🛒 GameShopInfoReceived");
+                if let Ok(packet) = server::GameShopInfo::read_body(&mut cursor) {
+                    let item_count = packet.items.len();
+                    events.push(NetworkEvent::GameShopInfoReceived {
+                        items: packet.items,
+                        credit: packet.credit,
+                        gold: packet.gold,
+                    });
+                    tracing::debug!("🛒 GameShopInfoReceived: {} items", item_count);
                 } else {
                     events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
                 }
@@ -157,9 +162,12 @@ impl PacketHandler for UiEventsHandler {
 
             // GameShopStock
             x if x == ServerPacketIds::GameShopStock as u16 => {
-                if let Ok(_packet) = server::GameShopStock::read_body(&mut cursor) {
-                    events.push(NetworkEvent::GameShopStockReceived);
-                    tracing::debug!("📦 GameShopStockReceived");
+                if let Ok(packet) = server::GameShopStock::read_body(&mut cursor) {
+                    events.push(NetworkEvent::GameShopStockReceived {
+                        item_index: packet.item_index,
+                        stock: packet.stock,
+                    });
+                    tracing::debug!("📦 GameShopStockReceived: idx={} stock={}", packet.item_index, packet.stock);
                 } else {
                     events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
                 }

@@ -743,8 +743,8 @@ pub enum NetworkEvent {
         tab: u8, // 0=Level, 1=Gold, 2=Reputation
         entries: Vec<(u32, String, String)>, // (rank, name, value)
     },
-    GameShopInfoReceived,
-    GameShopStockReceived,
+    GameShopInfoReceived { items: Vec<mir2_shared::packets::server::GameShopItem>, credit: u32, gold: u32 },
+    GameShopStockReceived { item_index: i32, stock: i32 },
 
     // 客户端 -> 服务器
     GameShopBuyRequest { item_id: u32, count: u32 },

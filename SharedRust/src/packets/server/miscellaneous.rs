@@ -350,36 +350,83 @@ impl Packet for ChatItemStats {
 }
 
 /// GuildStatus - 公会状态 (166)
+///
+/// C# server sends 14 fields: GuildName, GuildRankName, Level, Experience,
+/// MaxExperience, Gold, SparePoints, MemberCount, MaxMembers, Voting,
+/// ItemCount, BuffCount, MyOptions, MyRankId.
 #[derive(Debug, Clone)]
 pub struct GuildStatus {
-    pub guild_name: String,         // 公会名称
-    pub rank_name: String,          // 等级名称
+    pub guild_name: String,
+    pub rank_name: String,
+    pub level: u8,
+    pub experience: i64,
+    pub max_experience: i64,
+    pub gold: u32,
+    pub spare_points: u8,
+    pub member_count: i32,
+    pub max_members: i32,
+    pub voting: bool,
+    pub item_count: u8,
+    pub buff_count: u8,
+    pub my_options: u8,
+    pub my_rank_id: i32,
 }
 
 impl Packet for GuildStatus {
     const OPCODE: i16 = ServerPacketIds::GuildStatus as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
         use crate::binary::write_dotnet_string;
         write_dotnet_string(writer, &self.guild_name)?;
         write_dotnet_string(writer, &self.rank_name)?;
+        writer.write_u8(self.level)?;
+        writer.write_i64::<LittleEndian>(self.experience)?;
+        writer.write_i64::<LittleEndian>(self.max_experience)?;
+        writer.write_u32::<LittleEndian>(self.gold)?;
+        writer.write_u8(self.spare_points)?;
+        writer.write_i32::<LittleEndian>(self.member_count)?;
+        writer.write_i32::<LittleEndian>(self.max_members)?;
+        writer.write_u8(self.voting as u8)?;
+        writer.write_u8(self.item_count)?;
+        writer.write_u8(self.buff_count)?;
+        writer.write_u8(self.my_options)?;
+        writer.write_i32::<LittleEndian>(self.my_rank_id)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let guild_len = reader.read_i32::<LittleEndian>()?;
-        let mut guild_bytes = vec![0u8; guild_len as usize];
-        reader.read_exact(&mut guild_bytes)?;
-        let guild_name = String::from_utf8_lossy(&guild_bytes).to_string();
-        
-        let rank_len = reader.read_i32::<LittleEndian>()?;
-        let mut rank_bytes = vec![0u8; rank_len as usize];
-        reader.read_exact(&mut rank_bytes)?;
-        let rank_name = String::from_utf8_lossy(&rank_bytes).to_string();
-        
+        use byteorder::{LittleEndian, ReadBytesExt};
+        use crate::binary::read_dotnet_string;
+        let guild_name = read_dotnet_string(reader)?;
+        let rank_name = read_dotnet_string(reader)?;
+        let level = reader.read_u8()?;
+        let experience = reader.read_i64::<LittleEndian>()?;
+        let max_experience = reader.read_i64::<LittleEndian>()?;
+        let gold = reader.read_u32::<LittleEndian>()?;
+        let spare_points = reader.read_u8()?;
+        let member_count = reader.read_i32::<LittleEndian>()?;
+        let max_members = reader.read_i32::<LittleEndian>()?;
+        let voting = reader.read_u8()? != 0;
+        let item_count = reader.read_u8()?;
+        let buff_count = reader.read_u8()?;
+        let my_options = reader.read_u8()?;
+        let my_rank_id = reader.read_i32::<LittleEndian>()?;
         Ok(Self {
             guild_name,
             rank_name,
+            level,
+            experience,
+            max_experience,
+            gold,
+            spare_points,
+            member_count,
+            max_members,
+            voting,
+            item_count,
+            buff_count,
+            my_options,
+            my_rank_id,
         })
     }
 }

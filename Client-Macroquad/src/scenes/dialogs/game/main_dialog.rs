@@ -2484,6 +2484,11 @@ impl MainDialog {
         &mut self.ranking_dialog
     }
 
+    /// 获取商城对话框的可变引用
+    pub fn game_shop_dialog_mut(&mut self) -> &mut GameShopDialog {
+        &mut self.game_shop_dialog
+    }
+
     fn sync_and_draw_help(&mut self, _consumed: &mut bool, _mouse_pos: Vec2) {
         if self.help_dialog_open {
             self.help_dialog.open();

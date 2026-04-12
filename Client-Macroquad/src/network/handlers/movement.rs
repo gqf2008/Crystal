@@ -246,9 +246,9 @@ impl PacketHandler for MovementHandler {
             x if x == ServerPacketIds::NewMapInfo as u16 => {
                 if let Ok(packet) = server::NewMapInfo::read_body(&mut cursor) {
                     tracing::info!(
-                        "🗺️ NewMapInfo: idx={} file={} title={} loc=({}, {})",
-                        packet.map_index, packet.file_name, packet.title,
-                        packet.location_x, packet.location_y
+                        "🗺️ NewMapInfo: idx={} title={} size={}x{} movements={} npcs={}",
+                        packet.map_index, packet.title, packet.width, packet.height,
+                        packet.movements.len(), packet.npcs.len()
                     );
                     events.push(NetworkEvent::NewMapInfoReceived);
                 }

@@ -1,6 +1,7 @@
 use crate::game::{GameContext, GameResult};
 use crate::network::handlers::NetworkEvent;
 use crate::systems::LogicSystem;
+use crate::ui::ui_state::UiState;
 use rand::RngExt;
 
 /// NetworkApplySystem - 网络事件落地系统
@@ -2440,8 +2441,26 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ReincarnationRequested => { tracing::trace!("🔄 Reincarnation requested"); }
                 NetworkEvent::ReincarnationCancelled => { tracing::trace!("🔄 Reincarnation cancelled"); }
                 NetworkEvent::RankingsReceived => { tracing::trace!("🏆 Rankings received"); }
-                NetworkEvent::GameShopInfoReceived => { tracing::trace!("🛒 Game shop info received"); }
-                NetworkEvent::GameShopStockReceived => { tracing::trace!("🛒 Game shop stock received"); }
+                NetworkEvent::GameShopInfoReceived { items, credit, gold } => {
+                    tracing::trace!("🛒 Game shop info received: {} items", items.len());
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                        let mut state = s.borrow_mut();
+                        state.shop_items = items.clone();
+                        state.shop_credit = *credit;
+                        state.shop_gold = *gold;
+                    }
+                }
+                NetworkEvent::GameShopStockReceived { item_index, stock } => {
+                    tracing::trace!("🛒 Game shop stock updated: idx={} stock={}", item_index, stock);
+                    if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
+                        let mut state = s.borrow_mut();
+                        let idx = *item_index;
+                        let stk = *stock;
+                        if let Some(item) = state.shop_items.iter_mut().find(|i| i.item_index == idx) {
+                            item.stock = stk;
+                        }
+                    }
+                }
                 NetworkEvent::TimerSet { timer_id, seconds } => { tracing::trace!("⏱️ Timer {} set: {}s", timer_id, seconds); }
                 NetworkEvent::TimerExpired { timer_id } => { tracing::trace!("⏱️ Timer {} expired", timer_id); }
                 NetworkEvent::NoticeUpdated { notice } => { tracing::trace!("📢 Notice updated: {}", notice); }

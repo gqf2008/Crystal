@@ -126,6 +126,12 @@ pub enum UiCommand {
     GuildExpGained { amount: i64 },
     GuildWarRequested,
     SetGuildName { name: String },
+    /// 更新行会仓库金币
+    UpdateGuildStorageGold { gold: u32 },
+    /// 更新行会仓库物品列表
+    UpdateGuildStorageItems { items: Vec<crate::scenes::dialogs::game::guild_dialog::GuildStorageItem> },
+    /// 清空行会仓库物品
+    ClearGuildStorageItems,
 
     /// 组队成员列表更新
     UpdateGroupMembers { members: Vec<crate::scenes::dialogs::game::group_dialog::GroupMember> },
@@ -164,6 +170,11 @@ pub enum UiCommand {
 
     /// 更新排行榜数据
     UpdateRankings { tab: u8, entries: Vec<(u32, String, String)> },
+
+    /// 更新商城商品列表（服务器数据）
+    UpdateGameShopItems { items: Vec<mir2_shared::packets::server::GameShopItem>, credit: u32, gold: u32 },
+    /// 更新商城单个商品库存
+    UpdateGameShopStock { item_index: i32, stock: i32 },
 
     /// 更新邮件列表
     UpdateMailList { mails: Vec<crate::ui::ui_state::MailEntry> },
@@ -207,6 +218,11 @@ pub struct UiStateData {
 
     /// AmountBox 确认购买时需要的 uid（由表现层在打开时设置，逻辑层在确认后消费）。
     pub amount_box_buy_uid: Option<u64>,
+
+    /// 商城：服务器商品列表（GameShopInfoReceived 写入，dialog_system 读取同步到 GameShopDialog）。
+    pub shop_items: Vec<mir2_shared::packets::server::GameShopItem>,
+    pub shop_credit: u32,
+    pub shop_gold: u32,
 }
 
 /// 邮件条目（从服务器 MailReceived 转换而来）

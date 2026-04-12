@@ -303,6 +303,7 @@ pub struct ObjectNpc {
     pub location_x: i32,
     pub location_y: i32,
     pub direction: MirDirection,
+    pub quest_ids: Vec<i32>,
 }
 
 impl Packet for ObjectNpc {
@@ -318,6 +319,12 @@ impl Packet for ObjectNpc {
         let location_y = reader.read_i32::<LittleEndian>()?;
         let direction = MirDirection::try_from(reader.read_u8()?)?;
 
+        let count = reader.read_i32::<LittleEndian>()?;
+        let mut quest_ids = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            quest_ids.push(reader.read_i32::<LittleEndian>()?);
+        }
+
         Ok(Self {
             object_id,
             name,
@@ -327,6 +334,7 @@ impl Packet for ObjectNpc {
             location_x,
             location_y,
             direction,
+            quest_ids,
         })
     }
 
@@ -339,6 +347,11 @@ impl Packet for ObjectNpc {
         writer.write_i32::<LittleEndian>(self.location_x)?;
         writer.write_i32::<LittleEndian>(self.location_y)?;
         writer.write_u8(self.direction as u8)?;
+
+        writer.write_i32::<LittleEndian>(self.quest_ids.len() as i32)?;
+        for quest_id in &self.quest_ids {
+            writer.write_i32::<LittleEndian>(*quest_id)?;
+        }
 
         Ok(())
     }
