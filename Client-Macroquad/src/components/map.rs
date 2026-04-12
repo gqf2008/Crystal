@@ -155,7 +155,7 @@ pub struct WeatherState {
     /// 天气类型码：0=晴天, 1=雨, 2=雪, 3=雾, 4=沙尘
     pub weather_code: u16,
     /// 当前天气对应的粒子发射器实体（如果有）
-    pub emitter_entity: Option<u64>,
+    pub emitter_entity: Option<hecs::Entity>,
 }
 
 impl Default for WeatherState {

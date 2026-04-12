@@ -43,7 +43,7 @@ impl WeatherSystem {
     }
 
     /// 销毁旧的天气粒子发射器
-    fn destroy_old_emitter(&self, ctx: &mut crate::game::GameContext, old_entity: u64) {
+    fn destroy_old_emitter(&self, ctx: &mut crate::game::GameContext, old_entity: hecs::Entity) {
         let _ = ctx.world.despawn(old_entity);
     }
 
@@ -52,19 +52,18 @@ impl WeatherSystem {
         &self,
         ctx: &mut crate::game::GameContext,
         particle_type: crate::components::ParticleType,
-    ) -> Option<u64> {
+    ) -> Option<hecs::Entity> {
         use crate::components::{ParticleEmitter, Position};
-        use macroquad::prelude::screen_width;
 
         let emitter = ParticleEmitter {
-            emitter_location: Position { x: 0.0, y: -screen_width() * 0.3 },
+            emitter_location: Position { x: 0.0, y: 0.0 },
             generate_particles: true,
             next_particle_time: 0.0,
-            spawn_interval: 0.01, // 每 10ms 生成一个粒子
+            spawn_interval: 0.02, // 每 20ms 生成一个粒子
             force_velocity: Position { x: 0.0, y: 0.0 },
             particle_type,
         };
-        let entity = ctx.world.spawn((emitter,)).id();
+        let entity = ctx.world.spawn((emitter,));
         Some(entity)
     }
 }
@@ -90,7 +89,7 @@ impl crate::systems::LogicSystem for WeatherSystem {
             return Ok(());
         }
 
-        // 销毁旧的发射器
+        // 销毁旧的发射器（粒子会自然过期）
         if let Some(old_entity) = state.emitter_entity {
             self.destroy_old_emitter(ctx, old_entity);
         }
@@ -100,13 +99,9 @@ impl crate::systems::LogicSystem for WeatherSystem {
             .and_then(|pt| self.create_emitter(ctx, pt));
 
         // 更新 WeatherState
-        let new_state = WeatherState {
-            weather_code: current_code,
-            emitter_entity: new_emitter,
-        };
         if let Ok(mut ws) = ctx.world.get::<&mut WeatherState>(entity) {
-            ws.weather_code = new_state.weather_code;
-            ws.emitter_entity = new_state.emitter_entity;
+            ws.weather_code = current_code;
+            ws.emitter_entity = new_emitter;
         }
 
         if current_code == 0 {

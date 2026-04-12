@@ -142,6 +142,7 @@ impl GameScene {
                 priority::HEALTH_BAR_ANIM,
             )
             .add_system(crate::systems::ParticleSystem::new(), priority::PARTICLE)
+            .add_system(crate::systems::presentation::WeatherSystem::new(), priority::WEATHER)
             .add_system(
                 crate::systems::presentation::SoundSystem::default(),
                 priority::SOUND,
