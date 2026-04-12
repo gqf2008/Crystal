@@ -744,7 +744,13 @@ impl NetworkApplySystem {
     }
 
     fn apply_map_changed(ctx: &mut GameContext, packet: mir2_shared::packets::server::MapChanged) {
-        use crate::components::{LocalPlayer, Player, Position};
+        use crate::components::{LocalPlayer, Player, Position, WeatherState};
+
+        // 更新天气状态
+        if let Some((_ws_entity, mut ws)) = ctx.world.iter().find_map(|e| e.get::<&mut WeatherState>().map(|w| (e.entity(), w))) {
+            ws.weather_code = packet.weather;
+            ws.emitter_entity = None; // 重置发射器，由 WeatherSystem 重建
+        }
 
         // MapChanged 里携带了落点与朝向（切图/传送时很关键）
         let Some((entity, _)) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|lp| (e.entity(), lp))) else {

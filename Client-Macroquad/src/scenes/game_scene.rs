@@ -201,6 +201,7 @@ impl GameScene {
             UiState::new(),
             ResourceInitState::default(),
             SceneExitBlock::default(),
+            crate::components::WeatherState::default(),
         ));
 
         Self {

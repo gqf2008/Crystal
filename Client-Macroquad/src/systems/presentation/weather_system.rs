@@ -1,21 +1,23 @@
 /// 天气效果系统
 ///
-/// 当前状态：
-/// - 地图数据中的 `weather` 字段在 mock 下硬编码为 0（晴天/无天气）
-/// - 粒子系统已支持 21 种 ParticleType 的生成逻辑（Rain/Snow/Fog/Sand/Ember 等）
-/// - WeatherType 枚举和 ChangeWeather 事件已在组件层定义
+/// 职责：
+/// - 从 `WeatherState` 组件读取当前天气码
+/// - 根据天气码创建/销毁对应的 `ParticleEmitter` 实体
+/// - 天气切换时清理旧发射器并创建新的
 ///
-/// 完整实现路径：
-/// 1. MapLoadSystem 从服务器响应中读取 weather 字段
-/// 2. 本系统根据 weather 值创建对应的 ParticleEmitter 实体
-/// 3. 天气切换时清理旧发射器并创建新的
-/// 4. 昼夜效果可叠加全屏色彩滤镜
+/// 天气码映射（来自 MapChanged.weather / MapInformation.weather_particles）：
+/// - 0 = 晴天（无粒子）
+/// - 1 = 雨（Rain）
+/// - 2 = 雪（Snow）
+/// - 3 = 雾（Fog）
+/// - 4 = 沙尘（SandStorm）
 ///
-/// 由于当前无天气数据源，系统作为空桩运行。
-/// 粒子系统本身已就绪：一旦有 ParticleEmitter 实体被创建，
-/// ParticleSystem 会自动根据 ParticleType 生成对应粒子。
+/// 注意：本系统只负责"根据天气码维护粒子发射器"，不直接从网络事件读取天气。
+/// 天气码由 `NetworkApplySystem` 从 `MapChanged`/`MapInformation` 包中提取并写入 `WeatherState`。
 #[derive(ecs_macros::LogicSystem)]
-pub struct WeatherSystem;
+pub struct WeatherSystem {
+    last_weather_code: u16,
+}
 
 impl Default for WeatherSystem {
     fn default() -> Self {
@@ -25,17 +27,95 @@ impl Default for WeatherSystem {
 
 impl WeatherSystem {
     pub fn new() -> Self {
-        Self
+        Self { last_weather_code: u16::MAX }
+    }
+
+    /// 将天气码映射为粒子类型
+    fn weather_to_particle_type(code: u16) -> Option<crate::components::ParticleType> {
+        use crate::components::ParticleType;
+        match code {
+            1 => Some(ParticleType::Rain),
+            2 => Some(ParticleType::Snow),
+            3 => Some(ParticleType::Fog),
+            4 => Some(ParticleType::Sand),
+            _ => None,
+        }
+    }
+
+    /// 销毁旧的天气粒子发射器
+    fn destroy_old_emitter(&self, ctx: &mut crate::game::GameContext, old_entity: u64) {
+        let _ = ctx.world.despawn(old_entity);
+    }
+
+    /// 创建新的天气粒子发射器
+    fn create_emitter(
+        &self,
+        ctx: &mut crate::game::GameContext,
+        particle_type: crate::components::ParticleType,
+    ) -> Option<u64> {
+        use crate::components::{ParticleEmitter, Position};
+        use macroquad::prelude::screen_width;
+
+        let emitter = ParticleEmitter {
+            emitter_location: Position { x: 0.0, y: -screen_width() * 0.3 },
+            generate_particles: true,
+            next_particle_time: 0.0,
+            spawn_interval: 0.01, // 每 10ms 生成一个粒子
+            force_velocity: Position { x: 0.0, y: 0.0 },
+            particle_type,
+        };
+        let entity = ctx.world.spawn((emitter,)).id();
+        Some(entity)
     }
 }
 
 impl crate::systems::LogicSystem for WeatherSystem {
     fn update(
         &mut self,
-        _ctx: &mut crate::game::GameContext,
+        ctx: &mut crate::game::GameContext,
         _dt: f32,
     ) -> crate::game::GameResult {
-        // 等待 MapLoadSystem 提供天气数据后再实现
+        use crate::components::WeatherState;
+
+        // 查找 WeatherState 组件
+        let Some(weather_state) = ctx.world.iter().find_map(|e| e.get::<&WeatherState>().map(|w| (e.entity(), *w))).map(|(e, w)| (e, w)) else {
+            return Ok(());
+        };
+
+        let (entity, state) = weather_state;
+        let current_code = state.weather_code;
+
+        // 天气未变化，跳过
+        if current_code == self.last_weather_code {
+            return Ok(());
+        }
+
+        // 销毁旧的发射器
+        if let Some(old_entity) = state.emitter_entity {
+            self.destroy_old_emitter(ctx, old_entity);
+        }
+
+        // 根据新天气码创建发射器
+        let new_emitter = Self::weather_to_particle_type(current_code)
+            .and_then(|pt| self.create_emitter(ctx, pt));
+
+        // 更新 WeatherState
+        let new_state = WeatherState {
+            weather_code: current_code,
+            emitter_entity: new_emitter,
+        };
+        if let Ok(mut ws) = ctx.world.get::<&mut WeatherState>(entity) {
+            ws.weather_code = new_state.weather_code;
+            ws.emitter_entity = new_state.emitter_entity;
+        }
+
+        if current_code == 0 {
+            tracing::debug!("🌤️ Weather cleared (sunny)");
+        } else {
+            tracing::debug!("🌦️ Weather changed to code {}", current_code);
+        }
+
+        self.last_weather_code = current_code;
         Ok(())
     }
 }

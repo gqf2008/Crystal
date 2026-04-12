@@ -77,6 +77,8 @@ impl MockNetwork {
                     .to_string();
 
                 // 发送 MapChanged 事件 (与 C# Server 格式一致)
+                // Mock 随机天气：0=晴天, 1=雨, 2=雪, 3=雾, 4=沙尘
+                let weather = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u16).unwrap_or(0)) % 5;
                 let _ = response_tx.send(NetworkEvent::MapChanged {
                     packet: mir2_shared::packets::server::MapChanged {
                         map_index,
@@ -90,7 +92,7 @@ impl MockNetwork {
                         direction,
                         map_dark_light: 0,
                         music: 0,
-                        weather: 0,
+                        weather,
                     },
                 });
 
