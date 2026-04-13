@@ -708,7 +708,7 @@ impl SpriteRenderSystem {
             .map(|tt| tt.animation_count)
             .unwrap_or(0);
 
-        // 收集并排序可渲染对象（玩家/怪物/NPC）
+        // 收集并排序可渲染对象（玩家/怪物/NPC/地面物品）
         #[derive(Clone)]
         enum Renderable {
             Player {
@@ -726,6 +726,10 @@ impl SpriteRenderSystem {
                 hp_current: Option<i32>,
                 hp_max: Option<i32>,
                 has_interaction_hint: bool,
+            },
+            GroundItem {
+                item: crate::components::GroundItem,
+                pos: Position,
             },
         }
 
@@ -747,8 +751,8 @@ impl SpriteRenderSystem {
                 if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
-                // kind order: NPC(0) < Monster(1) < Player(2)
-                renderables.push((pos.y, 2, Renderable::Player {
+                // kind order: NPC(0) < GroundItem(1) < Monster(2) < Player(3)
+                renderables.push((pos.y, 3, Renderable::Player {
                     entity,
                     player: (*player).clone(),
                     pos: *pos,
@@ -812,8 +816,8 @@ impl SpriteRenderSystem {
                 // 检查是否有交互提示标记
                 let has_interaction_hint = world.get::<&crate::components::InteractionHint>(entity).is_ok();
 
-                // kind order: NPC(0) < Monster(1) < Player(2)
-                let kind_order = if sync.object_type == NetworkObjectType::NPC { 0 } else { 1 };
+                // kind order: NPC(0) < GroundItem(1) < Monster(2) < Player(3)
+                let kind_order = if sync.object_type == NetworkObjectType::NPC { 0 } else { 2 };
                 renderables.push((
                     pos.y,
                     kind_order,
@@ -828,6 +832,22 @@ impl SpriteRenderSystem {
                     },
                 ));
             }
+        }
+
+        // 地面物品：渲染 GroundItem + Position
+        for (_entity, (gnd, pos)) in world.iter().filter_map(|e| {
+            let gnd = e.get::<&crate::components::GroundItem>()?;
+            let pos = e.get::<&Position>()?;
+            Some((e.entity(), (gnd, pos)))
+        }) {
+            if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                continue;
+            }
+            // kind order: GroundItem(1) 在 NPC(0) 之后、Monster(2) 之前
+            renderables.push((pos.y, 1, Renderable::GroundItem {
+                item: (*gnd).clone(),
+                pos: *pos,
+            }));
         }
 
         // 深度排序：先按 y（越靠下越后绘制），再按类型优先级
@@ -876,6 +896,10 @@ impl SpriteRenderSystem {
                     if has_interaction_hint {
                         Self::draw_interaction_hint(&pos, info);
                     }
+                }
+                Renderable::GroundItem { item, pos } => {
+                    // 绘制地面物品：简单图标+名称
+                    Self::draw_ground_item(&item, &pos, alpha);
                 }
             }
         }
@@ -942,6 +966,36 @@ impl SpriteRenderSystem {
         let color = Color::from_rgba(255, 220, 50, (pulse * 255.0) as u8);
 
         draw_text_cn("!", hint_x, hint_y, 14.0, color);
+    }
+
+    /// 绘制地面物品
+    ///
+    /// 绘制一个半透明光晕 + 物品名称/金币数量。
+    /// 未来可以从 UserItem.info 获取完整 ItemInfo 纹理。
+    fn draw_ground_item(item: &crate::components::GroundItem, pos: &Position, alpha: f32) {
+        // 脉冲光晕
+        let t = macroquad::time::get_time();
+        let pulse = 0.6 + 0.3 * (t * 2.0).sin() as f32;
+
+        if item.gold_amount > 0 {
+            // 金币袋：金色光晕
+            let glow_color = Color::from_rgba(255, 215, 0, (pulse * alpha * 180.0) as u8);
+            draw_circle(pos.x, pos.y, 16.0, glow_color);
+            draw_text_cn(&item.gold_amount.to_string(), pos.x - 12.0, pos.y + 4.0, 10.0,
+                Color::from_rgba(255, 215, 0, (alpha * 255.0) as u8));
+        } else {
+            // 物品：青色光晕 + 物品索引
+            let glow_color = Color::from_rgba(100, 200, 255, (pulse * alpha * 150.0) as u8);
+            draw_circle(pos.x, pos.y, 14.0, glow_color);
+
+            let name = if let Some(ref info) = item.item.info {
+                info.name.clone()
+            } else {
+                format!("物品 #{}", item.item.item_index)
+            };
+            draw_text_cn(&name, pos.x - 20.0, pos.y + 4.0, 9.0,
+                Color::from_rgba(200, 230, 255, (alpha * 255.0) as u8));
+        }
     }
 }
 

@@ -6,6 +6,7 @@
 // 3. 返回 NetContext 给游戏层
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use super::client::Network;
 use super::handlers::NetworkEvent;
@@ -335,22 +336,123 @@ impl NetworkBuilder {
             // 1. 连接服务器
             let addr = &self.server_addr;
             tracing::info!("Connecting to {}...", addr);
-            let w = TcpStream::connect(addr)?;
+            let raw = TcpStream::connect(addr)?;
             // NOTE: Crystal 服务器端的洪泛保护 `MaxPacket` 实际统计的是 5 秒窗口内的 socket receive 回调次数。
             // 如果开启 TCP_NODELAY，小包会更容易被拆成多个 TCP 段，导致服务端计数飙升并误判为 "Large amount of Packets"。
             // 这里保持 Nagle 开启（默认），让小包尽可能合并。
-            w.set_nodelay(false)?;
-            let r = w.try_clone()?;
+            raw.set_nodelay(false)?;
             tracing::info!("Connected to {}", addr);
 
-            // 2. 创建 Network（自动启动读写线程）
+            // 2. 克隆 TcpStream（TcpStream 支持并发读写）
+            let w = raw.try_clone()?;
+
+            // 3. 读侧包装 FramedStream（缓冲 + 帧解码），写侧用 WriteEncoder（帧编码）
+            let r = ReadDecoder::new(raw);
+            let w = WriteEncoder::new(w);
+
+            // 4. 创建 Network（自动启动读写线程）
             let (tx, rx) = Network::new((w, r), self.client_version_hash);
 
-            // 3. 返回 NetContext
+            // 4. 返回 NetContext
             Ok(NetContext {
                 outbound: tx,
                 inbound: rx,
             })
         }
+    }
+}
+
+/// ReadDecoder：读侧帧解码
+///
+/// 从 TCP 流读取原始字节 → 缓冲 → 按帧解码 → 返回内层数据
+struct ReadDecoder {
+    inner: std::net::TcpStream,
+    recv_buf: Vec<u8>,
+    decoded_buf: Vec<u8>,
+    decoded_pos: usize,
+}
+
+impl ReadDecoder {
+    fn new(inner: std::net::TcpStream) -> Self {
+        Self {
+            inner,
+            recv_buf: Vec::with_capacity(4096),
+            decoded_buf: Vec::new(),
+            decoded_pos: 0,
+        }
+    }
+
+    fn ensure_decoded(&mut self) -> std::io::Result<()> {
+        if self.decoded_pos < self.decoded_buf.len() {
+            return Ok(());
+        }
+        self.decoded_buf.clear();
+        self.decoded_pos = 0;
+
+        // 循环读取直到解出一帧
+        loop {
+            let mut temp = [0u8; 4096];
+            let n = self.inner.read(&mut temp)?;
+            if n == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "connection closed",
+                ));
+            }
+            self.recv_buf.extend_from_slice(&temp[..n]);
+
+            match crate::network::codec::decode(&self.recv_buf) {
+                Some(Ok((payload, consumed))) => {
+                    self.decoded_buf = payload;
+                    self.recv_buf.drain(..consumed);
+                    return Ok(());
+                }
+                Some(Err(e)) => return Err(e),
+                None => {
+                    // 数据不足，继续读取
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+impl Read for ReadDecoder {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.ensure_decoded()?;
+        let available = self.decoded_buf.len() - self.decoded_pos;
+        if available == 0 {
+            return Ok(0);
+        }
+        let to_read = buf.len().min(available);
+        buf[..to_read].copy_from_slice(&self.decoded_buf[self.decoded_pos..self.decoded_pos + to_read]);
+        self.decoded_pos += to_read;
+        Ok(to_read)
+    }
+}
+
+/// WriteEncoder：写侧帧编码
+///
+/// 将数据编码为 [2-byte LE length][XOR(data)] 后写出到 TCP 流
+struct WriteEncoder {
+    inner: std::net::TcpStream,
+}
+
+impl WriteEncoder {
+    fn new(inner: std::net::TcpStream) -> Self {
+        Self { inner }
+    }
+}
+
+impl Write for WriteEncoder {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut framed = Vec::with_capacity(2 + buf.len());
+        crate::network::codec::encode(buf, &mut framed);
+        self.inner.write_all(&framed)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }

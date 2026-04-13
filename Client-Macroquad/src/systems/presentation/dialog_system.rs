@@ -448,10 +448,10 @@ impl DialogSystem {
                     cmds.push(UiCommand::OpenStorage);
                 }
                 NetworkEvent::NPCConsignReceived => {
-                    cmds.push(UiCommand::PushSystemChatLine("寄售操作完成".to_string()));
+                    cmds.push(UiCommand::OpenTrustMerchant);
                 }
                 NetworkEvent::NPCAwakeningReceived => {
-                    cmds.push(UiCommand::PushSystemChatLine("觉醒操作完成".to_string()));
+                    // 觉醒对话框由 AwakeningNeedMaterialsReceived 触发
                 }
                 NetworkEvent::NPCDisassembleReceived => {
                     cmds.push(UiCommand::PushSystemChatLine("分解操作完成".to_string()));
@@ -481,7 +481,7 @@ impl DialogSystem {
                     cmds.push(UiCommand::PushSystemChatLine("行会仓库列表已更新".to_string()));
                 }
                 NetworkEvent::GuildTerritoryPageReceived => {
-                    cmds.push(UiCommand::PushSystemChatLine("行会领地信息已更新".to_string()));
+                    cmds.push(UiCommand::ShowGuildTerritory);
                 }
                 NetworkEvent::GuildTerritoryPurchased => {
                     cmds.push(UiCommand::PushSystemChatLine("行会领地购买成功".to_string()));
@@ -494,7 +494,7 @@ impl DialogSystem {
                     cmds.push(UiCommand::PushSystemChatLine("NPC 市场已打开".to_string()));
                 }
                 NetworkEvent::NPCMarketPageEvent => {
-                    cmds.push(UiCommand::PushSystemChatLine("NPC 市场页面已刷新".to_string()));
+                    // 寄售行页面刷新（具体数据由后续事件推送）
                 }
                 NetworkEvent::ConsignItemReceived => {
                     cmds.push(UiCommand::PushSystemChatLine("寄售物品状态已更新".to_string()));
@@ -521,7 +521,11 @@ impl DialogSystem {
                     cmds.push(UiCommand::PushSystemChatLine(message.clone()));
                 }
                 NetworkEvent::AwakeningNeedMaterialsReceived => {
-                    cmds.push(UiCommand::PushSystemChatLine("觉醒需要材料".to_string()));
+                    // 显示觉醒对话框（材料由服务器推送）
+                    cmds.push(UiCommand::ShowNPCAwake {
+                        item_name: "装备".to_string(),
+                        materials: Vec::new(),
+                    });
                 }
                 NetworkEvent::AwakeningLockedItemReceived => {
                     cmds.push(UiCommand::PushSystemChatLine("觉醒锁定物品".to_string()));
@@ -546,13 +550,13 @@ impl DialogSystem {
                 }
                 // 物品租赁事件
                 NetworkEvent::ItemRentalRequested => {
-                    cmds.push(UiCommand::PushSystemChatLine("物品租赁请求".to_string()));
+                    cmds.push(UiCommand::OpenItemRental { partner: "未知".to_string() });
                 }
                 NetworkEvent::ItemRentalFeeReceived { fee } => {
-                    cmds.push(UiCommand::PushSystemChatLine(format!("租赁费用: {} 金币", fee)));
+                    cmds.push(UiCommand::UpdateRentalFee { fee: *fee });
                 }
                 NetworkEvent::ItemRentalPeriodReceived { period } => {
-                    cmds.push(UiCommand::PushSystemChatLine(format!("租赁期限: {} 小时", period)));
+                    cmds.push(UiCommand::UpdateRentalPeriod { period: *period });
                 }
                 NetworkEvent::RentalItemDeposited => {
                     cmds.push(UiCommand::PushSystemChatLine("租赁物品已存入".to_string()));
@@ -567,19 +571,19 @@ impl DialogSystem {
                     cmds.push(UiCommand::PushSystemChatLine("租赁物品列表已收到".to_string()));
                 }
                 NetworkEvent::ItemRentalCancelled => {
-                    cmds.push(UiCommand::PushSystemChatLine("租赁已取消".to_string()));
+                    cmds.push(UiCommand::CloseItemRental);
                 }
                 NetworkEvent::ItemRentalLocked => {
-                    cmds.push(UiCommand::PushSystemChatLine("我的租赁已锁定".to_string()));
+                    cmds.push(UiCommand::SetRentalLocked { locked: true });
                 }
                 NetworkEvent::ItemRentalPartnerLocked => {
-                    cmds.push(UiCommand::PushSystemChatLine("对方租赁已锁定".to_string()));
+                    cmds.push(UiCommand::SetRentalPartnerLocked { locked: true });
                 }
                 NetworkEvent::ItemRentalConfirmable => {
                     cmds.push(UiCommand::PushSystemChatLine("租赁可确认".to_string()));
                 }
                 NetworkEvent::ItemRentalConfirmed => {
-                    cmds.push(UiCommand::PushSystemChatLine("租赁已确认".to_string()));
+                    cmds.push(UiCommand::CloseItemRental);
                 }
                 // 游戏商店
                 NetworkEvent::GameShopInfoReceived { items, credit, gold } => {
@@ -595,6 +599,21 @@ impl DialogSystem {
                         stock: *stock,
                     });
                 }
+                NetworkEvent::AttackModeChanged { mode } => {
+                    cmds.push(UiCommand::UpdateAttackMode { mode: *mode });
+                }
+                NetworkEvent::PetModeChanged { mode } => {
+                    cmds.push(UiCommand::UpdatePetMode { mode: *mode });
+                }
+                NetworkEvent::TimerSet { timer_id, seconds } => {
+                    cmds.push(UiCommand::SetTimer {
+                        timer_id: *timer_id,
+                        seconds: *seconds,
+                    });
+                }
+                NetworkEvent::TimerExpired { timer_id } => {
+                    cmds.push(UiCommand::TimerExpired { timer_id: *timer_id });
+                }
                 // 排行榜
                 NetworkEvent::RankingsReceived => {
                     cmds.push(UiCommand::PushSystemChatLine("排行榜已收到（待解析）".to_string()));
@@ -608,16 +627,16 @@ impl DialogSystem {
                 }
                 // 其他重要事件
                 NetworkEvent::RollReceivedEvent { value } => {
-                    cmds.push(UiCommand::PushSystemChatLine(format!("掷骰子点数: {}", value)));
+                    cmds.push(UiCommand::ShowRollResult { value: *value });
                 }
                 NetworkEvent::PlayerRevived => {
-                    cmds.push(UiCommand::PushSystemChatLine("你已复活".to_string()));
+                    cmds.push(UiCommand::PushChatNotice { text: "你已复活".to_string() });
                 }
                 NetworkEvent::PlayerPoisoned { object_id: _, poison_type } => {
-                    cmds.push(UiCommand::PushSystemChatLine(format!("你中毒了！(类型={})", poison_type)));
+                    cmds.push(UiCommand::PushChatNotice { text: format!("你中毒了！(类型={})", poison_type) });
                 }
                 NetworkEvent::ObjectPoisonedEvent { object_id: _, poison_type } => {
-                    cmds.push(UiCommand::PushSystemChatLine(format!("目标中毒(类型={})", poison_type)));
+                    cmds.push(UiCommand::PushChatNotice { text: format!("目标中毒(类型={})", poison_type) });
                 }
                 NetworkEvent::OutputMessageReceived { message } => {
                     cmds.push(UiCommand::PushSystemChatLine(message.clone()));
@@ -699,12 +718,6 @@ impl DialogSystem {
                 NetworkEvent::DelayedExplosionRemoved => {
                     cmds.push(UiCommand::PushSystemChatLine("延迟爆炸已移除".to_string()));
                 }
-                NetworkEvent::TimerExpired { timer_id } => {
-                    cmds.push(UiCommand::PushSystemChatLine(format!("计时器已到期 (id={})", timer_id)));
-                }
-                NetworkEvent::TimerSet { timer_id, seconds } => {
-                    cmds.push(UiCommand::PushSystemChatLine(format!("计时器已设置: {} 秒 (id={})", seconds, timer_id)));
-                }
                 NetworkEvent::ChatItemStatsReceived => {
                     cmds.push(UiCommand::PushSystemChatLine("聊天物品统计已收到".to_string()));
                 }
@@ -757,7 +770,7 @@ impl DialogSystem {
                     cmds.push(UiCommand::PushSystemChatLine("精炼完成！".to_string()));
                 }
                 NetworkEvent::NoticeUpdated { notice } => {
-                    cmds.push(UiCommand::PushSystemChatLine(format!("公告已更新: {}", notice)));
+                    cmds.push(UiCommand::ShowNotice { text: notice.clone() });
                 }
                 _ => {}
             }
@@ -959,6 +972,17 @@ impl DialogSystem {
                         let _ = net.send(NetEv::TakeBackItemRequest { unique_id });
                     }
                 }
+            }
+            crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction::RequestCraft { item } => {
+                // 打开合成对话框，配方信息来自 NPC 商品列表
+                let recipe = crate::scenes::dialogs::game::craft_dialog::CraftRecipe {
+                    name: item.info.as_ref().map(|i| i.name.clone()).unwrap_or_else(|| "未知配方".to_string()),
+                    recipe_unique_id: item.unique_id,
+                    materials: Vec::new(), // TODO: 从服务器配方数据填充
+                };
+                let _ = Self::with_ui_state_mut(ctx, |ui| {
+                    ui.pending_commands.push(UiCommand::ShowCraft { recipes: vec![recipe] });
+                });
             }
         }
     }

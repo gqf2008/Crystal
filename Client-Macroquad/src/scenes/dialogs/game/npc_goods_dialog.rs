@@ -67,6 +67,8 @@ pub enum NpcGoodsDialogAction {
         unique_id: u64,
         deposit: bool, // true=存入, false=取出
     },
+    /// 选择配方（Craft 模式下点击配方时触发）
+    RequestCraft { item: UserItem },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -587,6 +589,12 @@ impl NpcGoodsDialogHybrid {
         let Some(item) = self.selected_item().cloned() else {
             return;
         };
+
+        // Craft 模式：选择配方后打开合成对话框
+        if self.ptype == PanelType::Craft {
+            self.pending_action = Some(NpcGoodsDialogAction::RequestCraft { item: item.clone() });
+            return;
+        }
 
         match self.dialog_mode {
             NpcGoodsMode::Buy => {
@@ -1128,7 +1136,7 @@ impl NpcGoodsDialogHybrid {
             if child_input_enabled && hovered {
                 self.hover = Some(HoverTarget::Cell(row));
 
-                // 单击选择 + 双击购买
+                // 单击选择 + 双击购买（Craft 模式下单击即触发配方选择）
                 if is_mouse_button_released(MouseButton::Left) {
                     let now = get_time();
                     let is_double = self.last_click_row == Some(row)
@@ -1136,7 +1144,11 @@ impl NpcGoodsDialogHybrid {
 
                     self.selected_unique_id = Some(item_unique_id);
 
-                    if is_double && self.ptype != PanelType::Craft {
+                    if self.ptype == PanelType::Craft {
+                        // Craft 模式：单击即选择配方
+                        self.queue_action();
+                        consumed = true;
+                    } else if is_double {
                         trigger_buy = true;
                         consumed = true;
                     }

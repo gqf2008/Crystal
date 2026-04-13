@@ -753,6 +753,7 @@ pub enum NetworkEvent {
     RentalItemRetrieveRequest { from_slot: i32, to_slot: i32 },
     ItemRentalConfirm,
     ItemRentalCancel,
+    CraftItemRequest { recipe_unique_id: u64, count: u16, slots: Vec<i32> },
 
     // ========================================================================
     // 钓鱼事件（Fishing Events）

@@ -12,6 +12,7 @@ use crate::scenes::dialogs::game::{
 use crate::systems::RenderSystem;
 use crate::ui::text_renderer::{draw_text_cn, draw_text_with_outline, measure_text_cn};
 use crate::ui::ui_state::{UiAction, UiCommand, UiState};
+use crate::network::handlers::NetworkEvent;
 
 #[derive(ecs_macros::RenderSystem)]
 pub struct UIRenderSystem {
@@ -20,6 +21,19 @@ pub struct UIRenderSystem {
     npc_goods_dialog: NpcGoodsDialogHybrid,
     npc_sub_goods_dialog: NpcGoodsDialogHybrid,
     amount_box: AmountBoxHybrid,
+    timer_dialog: crate::scenes::dialogs::game::timer_dialog::TimerDialogHybrid,
+    chat_notice_dialog: crate::scenes::dialogs::game::chat_notice_dialog::ChatNoticeDialogHybrid,
+    notice_dialog: crate::scenes::dialogs::game::notice_dialog::NoticeDialogHybrid,
+    roll_dialog: crate::scenes::dialogs::game::roll_dialog::RollDialogHybrid,
+    dura_status_dialog: crate::scenes::dialogs::game::dura_status_dialog::DuraStatusDialogHybrid,
+    npc_drop_dialog: crate::scenes::dialogs::game::npc_drop_dialog::NPCDropDialogHybrid,
+    guild_territory_dialog: crate::scenes::dialogs::game::guild_territory_dialog::GuildTerritoryDialogHybrid,
+    keyboard_layout_dialog: crate::scenes::dialogs::game::keyboard_layout_dialog::KeyboardLayoutDialogHybrid,
+    npc_awake_dialog: crate::scenes::dialogs::game::npc_awake_dialog::NPCAwakeDialogHybrid,
+    craft_dialog: crate::scenes::dialogs::game::craft_dialog::CraftDialogHybrid,
+    refine_dialog: crate::scenes::dialogs::game::refine_dialog::RefineDialogHybrid,
+    item_rental_dialog: crate::scenes::dialogs::game::item_rental_dialog::ItemRentalDialogHybrid,
+    trust_merchant_dialog: crate::scenes::dialogs::game::trust_merchant_dialog::TrustMerchantDialogHybrid,
 
     npc_z_order: Vec<NpcUiLayer>,
 
@@ -71,6 +85,19 @@ impl UIRenderSystem {
             npc_goods_dialog: NpcGoodsDialogHybrid::new(),
             npc_sub_goods_dialog: NpcGoodsDialogHybrid::new(),
             amount_box: AmountBoxHybrid::new(),
+            timer_dialog: crate::scenes::dialogs::game::timer_dialog::TimerDialogHybrid::new(),
+            chat_notice_dialog: crate::scenes::dialogs::game::chat_notice_dialog::ChatNoticeDialogHybrid::new(),
+            notice_dialog: crate::scenes::dialogs::game::notice_dialog::NoticeDialogHybrid::new(),
+            roll_dialog: crate::scenes::dialogs::game::roll_dialog::RollDialogHybrid::new(),
+            dura_status_dialog: crate::scenes::dialogs::game::dura_status_dialog::DuraStatusDialogHybrid::new(),
+            npc_drop_dialog: crate::scenes::dialogs::game::npc_drop_dialog::NPCDropDialogHybrid::new(),
+            guild_territory_dialog: crate::scenes::dialogs::game::guild_territory_dialog::GuildTerritoryDialogHybrid::new(),
+            keyboard_layout_dialog: crate::scenes::dialogs::game::keyboard_layout_dialog::KeyboardLayoutDialogHybrid::new(),
+            npc_awake_dialog: crate::scenes::dialogs::game::npc_awake_dialog::NPCAwakeDialogHybrid::new(),
+            craft_dialog: crate::scenes::dialogs::game::craft_dialog::CraftDialogHybrid::new(),
+            refine_dialog: crate::scenes::dialogs::game::refine_dialog::RefineDialogHybrid::new(),
+            item_rental_dialog: crate::scenes::dialogs::game::item_rental_dialog::ItemRentalDialogHybrid::new(),
+            trust_merchant_dialog: crate::scenes::dialogs::game::trust_merchant_dialog::TrustMerchantDialogHybrid::new(),
 
             // 默认：SubGoods 在最上层（如果打开）。
             npc_z_order: vec![NpcUiLayer::Dialog, NpcUiLayer::Goods, NpcUiLayer::SubGoods],
@@ -434,6 +461,97 @@ impl RenderSystem for UIRenderSystem {
                 }
                 UiCommand::UpdateGameShopStock { item_index, stock } => {
                     self.main_dialog.game_shop_dialog_mut().update_stock(item_index, stock);
+                }
+                UiCommand::UpdateAttackMode { mode } => {
+                    self.main_dialog.set_attack_mode(mode);
+                }
+                UiCommand::UpdatePetMode { mode } => {
+                    self.main_dialog.set_pet_mode(mode);
+                }
+                UiCommand::SetTimer { timer_id, seconds } => {
+                    self.timer_dialog.set_timer(timer_id, seconds);
+                }
+                UiCommand::TimerExpired { timer_id } => {
+                    self.timer_dialog.remove_timer(timer_id);
+                }
+                UiCommand::PushChatNotice { text } => {
+                    self.chat_notice_dialog.push_notice_default(text);
+                }
+                UiCommand::ShowNotice { text } => {
+                    self.notice_dialog.set_notice(text);
+                }
+                UiCommand::CloseNotice => {
+                    self.notice_dialog.close();
+                }
+                UiCommand::ShowRollResult { value } => {
+                    self.roll_dialog.show_roll(value);
+                }
+                UiCommand::UpdateDuraStatus { items } => {
+                    self.dura_status_dialog.update_dura(items);
+                }
+                UiCommand::ToggleDuraStatus => {
+                    self.dura_status_dialog.toggle();
+                }
+                UiCommand::ShowNPCDrop { npc_name, items } => {
+                    self.npc_drop_dialog.show(npc_name, items);
+                }
+                UiCommand::ShowGuildTerritory => {
+                    self.guild_territory_dialog.show();
+                }
+                UiCommand::UpdateGuildTerritory { entries, page, total } => {
+                    self.guild_territory_dialog.update_territories(entries, page, total);
+                }
+                UiCommand::ToggleKeyboardLayout => {
+                    self.keyboard_layout_dialog.toggle();
+                }
+                UiCommand::ShowNPCAwake { item_name, materials } => {
+                    self.npc_awake_dialog.show(item_name, materials);
+                }
+                UiCommand::SetAwakeLocked { locked } => {
+                    self.npc_awake_dialog.set_locked(locked);
+                }
+                UiCommand::ShowCraft { recipes } => {
+                    self.craft_dialog.show(recipes);
+                }
+                UiCommand::ShowRefine { item_name, stats, material_name, material_have, material_need } => {
+                    self.refine_dialog.show(item_name, stats, material_name, material_have, material_need);
+                }
+                UiCommand::OpenItemRental { partner } => {
+                    self.item_rental_dialog.show(partner);
+                }
+                UiCommand::UpdateRentalFee { fee } => {
+                    self.item_rental_dialog.update_fee(fee);
+                }
+                UiCommand::UpdateRentalPeriod { period } => {
+                    self.item_rental_dialog.update_period(period);
+                }
+                UiCommand::SetRentalLocked { locked } => {
+                    self.item_rental_dialog.set_locked(locked);
+                }
+                UiCommand::SetRentalPartnerLocked { locked } => {
+                    self.item_rental_dialog.set_partner_locked(locked);
+                }
+                UiCommand::CloseItemRental => {
+                    self.item_rental_dialog.close();
+                }
+                UiCommand::OpenTrustMerchant => {
+                    self.trust_merchant_dialog.show();
+                }
+                UiCommand::UpdateMerchantItems { items, page, total } => {
+                    self.trust_merchant_dialog.update_items(items, page, total);
+                }
+                UiCommand::CloseTrustMerchant => {
+                    self.trust_merchant_dialog.close();
+                }
+                UiCommand::CraftItemRequest { recipe_unique_id, count, slots } => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetworkEvent::CraftItemRequest { recipe_unique_id, count, slots });
+                    }
+                }
+                UiCommand::ConfirmItemRental => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetworkEvent::ItemRentalConfirm);
+                    }
                 }
             }
         }
@@ -1339,6 +1457,79 @@ impl RenderSystem for UIRenderSystem {
 
         // 任务完成通知
         self.main_dialog.draw_quest_notifications();
+
+        // 服务器倒计时（全局 overlay，最上层绘制）
+        let delta = macroquad::time::get_frame_time();
+        self.timer_dialog.draw(screen_width(), screen_height(), delta);
+
+        // 屏幕中央 transient 通知
+        self.chat_notice_dialog.draw(screen_width(), screen_height(), delta);
+
+        // 服务器公告对话框（模态弹窗，阻塞其它输入）
+        let _notice_consumed = self.notice_dialog.draw(
+            mouse_pos, 0.0,
+            is_mouse_button_pressed(MouseButton::Left),
+            false,
+        );
+
+        // 骰子结果
+        self.roll_dialog.draw(screen_width(), screen_height(), delta);
+
+        // 耐久度状态
+        self.dura_status_dialog.draw(screen_width(), screen_height(), mouse_pos,
+            is_mouse_button_pressed(MouseButton::Left));
+
+        // NPC 赠送物品
+        self.npc_drop_dialog.draw(screen_width(), screen_height(), mouse_pos,
+            is_mouse_button_pressed(MouseButton::Left));
+
+        // 行会领地
+        let wheel_y = mouse_wheel().1;
+        self.guild_territory_dialog.draw(screen_width(), screen_height(), mouse_pos,
+            wheel_y, is_mouse_button_pressed(MouseButton::Left));
+
+        // 键位设置
+        let any_key = if self.keyboard_layout_dialog.is_rebinding() {
+            macroquad::input::get_keys_pressed().into_iter().next()
+        } else {
+            None
+        };
+        self.keyboard_layout_dialog.draw(screen_width(), screen_height(), mouse_pos,
+            wheel_y, is_mouse_button_pressed(MouseButton::Left), any_key);
+
+        // 装备觉醒
+        self.npc_awake_dialog.draw(screen_width(), screen_height(), mouse_pos,
+            is_mouse_button_pressed(MouseButton::Left));
+
+        // 合成
+        if let Some(craft_data) = self.craft_dialog.draw(screen_width(), screen_height(), mouse_pos,
+            wheel_y, is_mouse_button_pressed(MouseButton::Left)) {
+            if let Some(s) = _world.query::<&UiState>().iter().next() {
+                s.borrow_mut().pending_commands.push(UiCommand::CraftItemRequest {
+                    recipe_unique_id: craft_data.recipe_unique_id,
+                    count: craft_data.count,
+                    slots: craft_data.slots,
+                });
+            }
+        }
+
+        // 精炼
+        self.refine_dialog.draw(screen_width(), screen_height(), mouse_pos,
+            is_mouse_button_pressed(MouseButton::Left));
+
+        // 物品租赁
+        self.item_rental_dialog.draw(screen_width(), screen_height(), mouse_pos,
+            is_mouse_button_pressed(MouseButton::Left));
+        if self.item_rental_dialog.confirm_clicked {
+            if let Some(s) = _world.query::<&UiState>().iter().next() {
+                s.borrow_mut().pending_commands.push(UiCommand::ConfirmItemRental);
+            }
+            self.item_rental_dialog.confirm_clicked = false;
+        }
+
+        // 寄售行
+        self.trust_merchant_dialog.draw(screen_width(), screen_height(), mouse_pos,
+            wheel_y, is_mouse_button_pressed(MouseButton::Left));
 
         // UI -> ECS：小地图点击自动寻路（在 show_dialogs 后取，保证同帧可用）
         if let Some(target) = self.main_dialog.take_pending_auto_path_target() {

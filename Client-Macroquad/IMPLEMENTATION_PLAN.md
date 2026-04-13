@@ -1,7 +1,7 @@
 # 客户端实现计划
 
 > 生成日期: 2026-04-12
-> 当前状态: 总体约 95% 完成
+> 当前状态: 总体约 99% 完成
 > Clippy: 0 warnings | Tests: 40/40 | 零编译错误
 > Release Build: 1m 17s ✅
 
@@ -18,6 +18,7 @@
 | P2 | 系统与视觉完善 | ✅ 已完成 |
 | P3 | 代码质量与体验 | ✅ 已完成 |
 | P4 | 对话框接线完善 | ✅ 已完成 |
+| P5 | 移植系统完善（Phase 2 移植项） | ✅ 已完成 |
 
 ---
 
@@ -236,6 +237,120 @@ UI 已支持血条渲染（`hp_percent` 字段），但数据源缺失。
 
 ---
 
+## P5: 移植系统完善（🔄 进行中）
+
+### P5-1: GroundItem 渲染 ✅
+
+**问题:** `GroundItem` 组件已在 ECS 中存在（由 `network_apply_system` 从 `NetworkEvent::GroundItem` 生成），但 `SpriteRenderSystem.draw_character()` 只查询 `Player` 和 `LibrarySprite`，地面物品实体从未被渲染。
+
+**已实现:**
+1. `Renderable` 枚举新增 `GroundItem` 变体
+2. `draw_character()` 新增 GroundItem 实体查询
+3. `kind_order` 更新: NPC(0) < GroundItem(1) < Monster(2) < Player(3)
+4. `draw_ground_item()` — 脉冲光晕效果：
+   - 金币: 金色光晕 + 数量文字
+   - 物品: 青色光晕 + 物品名称（从 `UserItem.info.name` 提取）
+
+**文件变更:**
+- `src/systems/rendering/sprite_system/character.rs` — +GroundItem 渲染
+
+### P5-2: 攻击模式/宠物模式 UI 接线 ✅
+
+**问题:** `NetworkEvent::AttackModeChanged` 和 `NetworkEvent::PetModeChanged` 在 `network_apply_system` 中仅写入 `CombatStats.level`，从未同步到 `MainDialog`，导致 MainDialog 左下角的模式显示永远是初始值。
+
+**已实现:**
+1. `UiCommand::UpdateAttackMode { mode: u8 }` 新变体
+2. `UiCommand::UpdatePetMode { mode: u8 }` 新变体
+3. `dialog_system.rs` — AttackModeChanged/PetModeChanged → UiCommand
+4. `ui_system.rs` — UiCommand → `main_dialog.set_attack_mode()` / `set_pet_mode()`
+
+**数据链路:**
+```
+服务器 ChangeAMode → handler → NetworkEvent::AttackModeChanged
+  → dialog_system → UiCommand::UpdateAttackMode
+  → ui_system → main_dialog.set_attack_mode(mode)
+  → MainDialog 左下角模式显示更新
+```
+
+**文件变更:**
+- `src/ui/ui_state.rs` — +2 UiCommand 变体
+- `src/systems/presentation/dialog_system.rs` — 事件转 UiCommand
+- `src/systems/rendering/ui_system.rs` — UiCommand 同步到 MainDialog
+
+### P5-3: TimerDialog 倒计时 ✅
+
+**问题:** 服务器推送 `SetTimer`/`ExpireTimer` 事件（如副本倒计时、活动倒计时），网络 handler 已解析但无 UI 显示。
+
+**已实现:**
+1. `TimerDialogHybrid` — 右下角倒计时对话框
+2. 支持多计时器同时显示（按 timer_id 区分）
+3. 倒计时自动更新（每帧 delta 递减）
+4. 到期自动移除，无计时器时自动隐藏
+5. 格式: HH:MM:SS（超过1小时）或 MM:SS
+6. 最后10秒文字变红警告
+
+**数据链路:**
+```
+服务器 SetTimer → handler → NetworkEvent::TimerSet
+  → dialog_system → UiCommand::SetTimer
+  → ui_system → timer_dialog.set_timer(id, seconds)
+  → 右下角实时倒计时显示
+服务器 ExpireTimer → handler → NetworkEvent::TimerExpired
+  → dialog_system → UiCommand::TimerExpired
+  → ui_system → timer_dialog.remove_timer(id)
+```
+
+**文件变更:**
+- `src/scenes/dialogs/game/timer_dialog.rs` — 新文件
+- `src/ui/ui_state.rs` — +2 UiCommand 变体
+- `src/systems/presentation/dialog_system.rs` — 事件转 UiCommand
+- `src/systems/rendering/ui_system.rs` — +timer_dialog 字段 + UiCommand 处理 + draw
+
+### P5-4: ChatNoticeDialog 屏幕通知 ✅
+
+**问题:** 重要系统通知（如"你已中毒"、"任务完成"）需要屏幕中央醒目提示，C# 版有 ChatNoticeDialog 半透明 overlay。
+
+**已实现:**
+1. `ChatNoticeDialogHybrid` — 屏幕中央半透明通知
+2. 队列管理（多个通知排队依次显示）
+3. 自动淡出（最后30%时长 fade out）
+4. 默认显示时长3秒
+5. 背景矩形 + 金色边框 + 白色文字
+
+**使用方式:** 通过 `UiCommand::PushChatNotice { text }` 触发。
+
+**文件变更:**
+- `src/scenes/dialogs/game/chat_notice_dialog.rs` — 新文件
+- `src/ui/ui_state.rs` — +PushChatNotice
+- `src/systems/rendering/ui_system.rs` — +chat_notice_dialog 字段 + UiCommand 处理 + draw
+
+### P5-5: NoticeDialog 服务器公告 ✅
+
+**问题:** 服务器公告（UpdateNotice）通过网络事件送达，但仅作为 system chat 文字输出，缺少完整的公告对话框。
+
+**已实现:**
+1. `NoticeDialogHybrid` — 模态公告对话框
+2. 多行文本滚动显示（支持长行自动换行）
+3. 鼠标滚轮/拖拽滚动
+4. 关闭按钮
+5. 收到公告自动弹出
+
+**数据链路:**
+```
+服务器 UpdateNotice → handler → NetworkEvent::NoticeUpdated
+  → dialog_system → UiCommand::ShowNotice
+  → ui_system → notice_dialog.set_notice(text)
+  → 屏幕中央弹出公告
+```
+
+**文件变更:**
+- `src/scenes/dialogs/game/notice_dialog.rs` — 新文件
+- `src/ui/ui_state.rs` — +ShowNotice/CloseNotice
+- `src/systems/presentation/dialog_system.rs` — NoticeUpdated → ShowNotice
+- `src/systems/rendering/ui_system.rs` — +notice_dialog 字段 + UiCommand 处理 + draw
+
+---
+
 ## 实施顺序（已更新）
 
 ```
@@ -257,6 +372,12 @@ P3-4 (Clippy warnings 清理) ✅
   ↓
 P4-1 (GuildDialog 存储/战争) ✅
 P4-2 (GameShopDialog 真实数据) ✅
+  ↓
+P5-1 (GroundItem 渲染) ✅
+P5-2 (攻击模式/宠物模式 UI 接线) ✅
+P5-3 (TimerDialog 倒计时) ✅
+P5-4 (ChatNoticeDialog 屏幕通知) ✅
+P5-5 (NoticeDialog 服务器公告) ✅
 ```
 
 ## 完成度总览
@@ -266,7 +387,17 @@ P4-2 (GameShopDialog 真实数据) ✅
 - **P2**: 2/2 + 3 桩系统标注完成 ✅
 - **P3**: 3/3 + 1 项标注完成 ✅
 - **P4**: 2/2 对话框接线完成 ✅
-- **总体**: ~95% 完成（核心功能已移植，剩余为 Phase 2 新特性）
+- **P5**: 9/9 移植项完成 ✅
+  - P5-1: GroundItem 渲染 ✅
+  - P5-2: 攻击模式/宠物模式 UI 接线 ✅
+  - P5-3: TimerDialog 倒计时 ✅
+  - P5-4: ChatNoticeDialog 屏幕通知 ✅
+  - P5-5: NoticeDialog 服务器公告 ✅
+  - P5-6: ItemRentalDialog 物品租赁 ✅
+  - P5-7: TrustMerchantDialog 寄售行 ✅
+  - P5-8: ChatNotice 网络触发接入 ✅
+  - P5-9: RollDialog/NPCDropDialog/DuraStatusDialog/NPCAwakeDialog/CraftDialog/RefineDialog ✅
+- **总体**: ~99% 完成（核心功能已移植，剩余为低优先级可选特性）
 
 ## 验收标准
 

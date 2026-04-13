@@ -178,6 +178,68 @@ pub enum UiCommand {
 
     /// 更新邮件列表
     UpdateMailList { mails: Vec<crate::ui::ui_state::MailEntry> },
+
+    /// 更新攻击模式（服务器推送 ChangeAMode）
+    UpdateAttackMode { mode: u8 },
+    /// 更新宠物模式（服务器推送 ChangePMode）
+    UpdatePetMode { mode: u8 },
+
+    /// 服务器倒计时
+    SetTimer { timer_id: u8, seconds: u32 },
+    TimerExpired { timer_id: u8 },
+
+    /// 屏幕中央 transient 通知
+    PushChatNotice { text: String },
+
+    /// 服务器公告
+    ShowNotice { text: String },
+    CloseNotice,
+
+    /// 骰子结果
+    ShowRollResult { value: u32 },
+
+    /// 耐久度状态
+    UpdateDuraStatus { items: Vec<crate::scenes::dialogs::game::dura_status_dialog::DuraEntry> },
+    ToggleDuraStatus,
+
+    /// NPC 赠送物品
+    ShowNPCDrop { npc_name: String, items: Vec<mir2_shared::data::item::UserItem> },
+
+    /// 行会领地
+    ShowGuildTerritory,
+    UpdateGuildTerritory { entries: Vec<crate::scenes::dialogs::game::guild_territory_dialog::TerritoryEntry>, page: i32, total: i32 },
+
+    /// 键位设置
+    ToggleKeyboardLayout,
+
+    /// 装备觉醒
+    ShowNPCAwake { item_name: String, materials: Vec<crate::scenes::dialogs::game::npc_awake_dialog::AwakeningMaterial> },
+    SetAwakeLocked { locked: bool },
+
+    /// 合成
+    ShowCraft { recipes: Vec<crate::scenes::dialogs::game::craft_dialog::CraftRecipe> },
+
+    /// 精炼
+    ShowRefine { item_name: String, stats: Vec<crate::scenes::dialogs::game::refine_dialog::RefineStat>, material_name: String, material_have: u32, material_need: u32 },
+
+    /// 物品租赁
+    OpenItemRental { partner: String },
+    UpdateRentalFee { fee: u32 },
+    UpdateRentalPeriod { period: u32 },
+    SetRentalLocked { locked: bool },
+    SetRentalPartnerLocked { locked: bool },
+    CloseItemRental,
+
+    /// 寄售行
+    OpenTrustMerchant,
+    UpdateMerchantItems { items: Vec<crate::scenes::dialogs::game::trust_merchant_dialog::MerchantItem>, page: i32, total: i32 },
+    CloseTrustMerchant,
+
+    /// 合成：玩家点击合成按钮（含完整材料槽位数据）
+    CraftItemRequest { recipe_unique_id: u64, count: u16, slots: Vec<i32> },
+
+    /// 物品租赁：确认交易
+    ConfirmItemRental,
 }
 
 #[derive(Debug, Clone, Default)]

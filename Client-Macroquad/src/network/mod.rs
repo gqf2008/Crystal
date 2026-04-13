@@ -5,6 +5,7 @@
 pub mod handlers;         // NetworkEvent 定义
 pub mod builder;          // NetworkBuilder + NetContext
 mod client;               // 内部实现：Network (Read + Write + 两线程)
+mod codec;                // 帧编解码：2-byte length + XOR 0xAA
 mod mock;                 // 模拟网络实现（用于开发工具）
 
 // 导出

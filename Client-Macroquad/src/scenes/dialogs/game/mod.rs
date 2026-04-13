@@ -76,6 +76,45 @@ pub use help_dialog::{HelpDialogHybrid, HelpDialogAction};
 pub mod inspect_dialog;
 pub use inspect_dialog::{InspectDialogHybrid, InspectEquipSlot, InspectDialogAction};
 
+pub mod timer_dialog;
+pub use timer_dialog::{TimerDialogHybrid, TimerEntry};
+
+pub mod chat_notice_dialog;
+pub use chat_notice_dialog::ChatNoticeDialogHybrid;
+
+pub mod notice_dialog;
+pub use notice_dialog::NoticeDialogHybrid;
+
+pub mod roll_dialog;
+pub use roll_dialog::RollDialogHybrid;
+
+pub mod dura_status_dialog;
+pub use dura_status_dialog::{DuraStatusDialogHybrid, DuraEntry};
+
+pub mod npc_drop_dialog;
+pub use npc_drop_dialog::NPCDropDialogHybrid;
+
+pub mod guild_territory_dialog;
+pub use guild_territory_dialog::{GuildTerritoryDialogHybrid, TerritoryEntry};
+
+pub mod keyboard_layout_dialog;
+pub use keyboard_layout_dialog::KeyboardLayoutDialogHybrid;
+
+pub mod npc_awake_dialog;
+pub use npc_awake_dialog::{NPCAwakeDialogHybrid, AwakeningMaterial};
+
+pub mod craft_dialog;
+pub use craft_dialog::{CraftDialogHybrid, CraftRecipe, CraftResult};
+
+pub mod refine_dialog;
+pub use refine_dialog::{RefineDialogHybrid, RefineStat};
+
+pub mod item_rental_dialog;
+pub use item_rental_dialog::{ItemRentalDialogHybrid, RentalItem};
+
+pub mod trust_merchant_dialog;
+pub use trust_merchant_dialog::{TrustMerchantDialogHybrid, MerchantItem, MerchantTab};
+
 // 为了兼容性，创建别名
 pub type BeltDialog = BeltDialogHybrid;
 pub type CharacterDialog = CharacterDialogHybrid;

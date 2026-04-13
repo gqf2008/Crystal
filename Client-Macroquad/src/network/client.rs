@@ -1654,6 +1654,17 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             tracing::debug!("📤 CancelItemRental");
         }
 
+        NetworkEvent::CraftItemRequest { recipe_unique_id, count, slots } => {
+            let slots_clone = slots.clone();
+            let packet = client::CraftItem {
+                unique_id: recipe_unique_id,
+                count,
+                slots,
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 CraftItemRequest: unique_id={}, count={}, slots={:?}", recipe_unique_id, count, slots_clone);
+        }
+
         // ===== 钓鱼 =====
 
         NetworkEvent::FishingCastRequest => {
