@@ -175,6 +175,17 @@ fn dist_to_spawn(monster: &MonsterState) -> i32 {
     (monster.x - monster.spawn_x).abs() + (monster.y - monster.spawn_y).abs()
 }
 
+/// 运行时 NPC 状态
+#[allow(dead_code)]
+struct NpcState {
+    pub object_id: u32,
+    pub name: String,
+    pub image: u16,
+    pub x: i32,
+    pub y: i32,
+    pub direction: u8,
+}
+
 /// 方向增量 (8 方向 MirDirection)
 const MON_DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
 const MON_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
@@ -219,6 +230,8 @@ pub struct WorldActor {
     next_object_id: u32,
     /// 活跃怪物（按 object_id 索引）
     monsters: HashMap<u32, MonsterState>,
+    /// 活跃 NPC（按 object_id 索引）
+    npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
     respawn_queue: HashMap<u32, (MonsterSpawn, u64)>,
 }
@@ -234,6 +247,7 @@ impl WorldActor {
             spawn_dir,
             next_object_id: 1000,
             monsters: HashMap::new(),
+            npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
         }
     }
@@ -268,6 +282,22 @@ impl WorldActor {
             .filter(|r| r.session_id != exclude_session)
             .collect()
     }
+
+    /// 发送 NPC 商店商品列表（Phase 1：空列表，仅打开 UI）
+    fn send_npc_goods(&self, session_id: u64, npc: &NpcState) {
+        let mut body = Vec::new();
+        // NPCGoods: [count: i32 LE][items...][rate: f32 LE][panel_type: u8][hide_added_stats: bool]
+        body.extend_from_slice(&0i32.to_le_bytes()); // 空商品列表
+        body.extend_from_slice(&1.0f32.to_le_bytes()); // rate = 1.0
+        body.push(0u8); // PanelType::Buy
+        body.push(0u8); // hide_added_stats = false
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCGoods as i16, &body);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: packet,
+        });
+        debug!("Sent empty goods list from NPC '{}' to session {}", npc.name, session_id);
+    }
 }
 
 impl Actor for WorldActor {
@@ -298,6 +328,7 @@ impl Actor for WorldActor {
             spawn_dir: args.spawn_dir,
             next_object_id: 1000,
             monsters: HashMap::new(),
+            npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
         })
     }
@@ -350,6 +381,13 @@ pub struct PlayerLogOut {
 pub struct ChatRequest {
     pub session_id: u64,
     pub message: String,
+}
+
+/// NPC 对话请求（从 GateActor 转发）
+pub struct NPCCallRequest {
+    pub session_id: u64,
+    pub npc_object_id: u32,
+    pub key: String,
 }
 
 // ============================================================
@@ -683,7 +721,10 @@ impl Message<StartGameRequest> for WorldActor {
 
         // 发送地图上的 NPC 和怪物
         let spawn_dir = self.spawn_dir.clone();
-        let new_monsters = spawn_npcs_and_monsters(self.gate_ref.clone(), &spawn_dir, map_file, msg.session_id, &mut || self.alloc_object_id());
+        let (new_npcs, new_monsters) = spawn_npcs_and_monsters(self.gate_ref.clone(), &spawn_dir, map_file, msg.session_id, &mut || self.alloc_object_id());
+        for npc in new_npcs {
+            self.npcs.insert(npc.object_id, npc);
+        }
         for monster in new_monsters {
             self.monsters.insert(monster.object_id, monster);
         }
@@ -1074,6 +1115,78 @@ impl Message<ChatRequest> for WorldActor {
     }
 }
 
+impl Message<NPCCallRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: NPCCallRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r,
+            None => {
+                warn!("NPC call from unknown session {}", msg.session_id);
+                return;
+            }
+        };
+
+        // 获取玩家位置
+        let player_pos = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            (state.x, state.y)
+        } else {
+            return;
+        };
+
+        // 查找对应的 NPC
+        let npc = match self.npcs.get(&msg.npc_object_id) {
+            Some(n) => n,
+            None => {
+                warn!("NPC call for unknown object_id {}", msg.npc_object_id);
+                return;
+            }
+        };
+
+        // 距离校验（NPC 交互范围 2 格）
+        let dist = (npc.x - player_pos.0).abs() + (npc.y - player_pos.1).abs();
+        if dist > 2 {
+            debug!("Player too far from NPC {} (dist={})", npc.name, dist);
+            return;
+        }
+
+        debug!("Player called NPC '{}' (#{}) with key='{}'", npc.name, msg.npc_object_id, msg.key);
+
+        // 发送 NPCResponse 对话页面
+        let dialog_lines = match msg.key.as_str() {
+            "[@Main]" => vec![
+                format!("欢迎来到{}", npc.name),
+                "有什么我可以帮你的吗？".to_string(),
+            ],
+            "[@Buy]" => {
+                // 触发 NPC 商店（Phase 2：发送空商品列表打开商店 UI）
+                self.send_npc_goods(msg.session_id, npc);
+                return;
+            }
+            _ => vec![
+                format!("{} 说：", npc.name),
+                format!("你说了：{}", msg.key),
+            ],
+        };
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&(dialog_lines.len() as i32).to_le_bytes());
+        for line in &dialog_lines {
+            write_dotnet_string(&mut body, line);
+        }
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCResponse as i16, &body);
+
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: packet,
+        });
+    }
+}
+
 // ============================================================
 // 游戏进入序列
 // ============================================================
@@ -1290,31 +1403,41 @@ fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &st
     build_packet_bytes(ServerPacketIds::ObjectMonster as i16, &body)
 }
 
-/// 发送地图上的 NPC 和怪物给新玩家，返回创建的怪物列表
+/// 发送地图上的 NPC 和怪物给新玩家，返回 NPC 和怪物列表
 fn spawn_npcs_and_monsters(
     gate_ref: ActorRef<GateActor>,
     spawn_dir: &Option<PathBuf>,
     map_file: &str,
     session_id: u64,
     alloc_object_id: &mut dyn FnMut() -> u32,
-) -> Vec<MonsterState> {
+) -> (Vec<NpcState>, Vec<MonsterState>) {
     let spawn_dir = match spawn_dir {
         Some(d) => d,
-        None => return Vec::new(),
+        None => return (Vec::new(), Vec::new()),
     };
 
     let config = load_spawn_config(map_file, spawn_dir);
     if config.npcs.is_empty() && config.monsters.is_empty() {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
 
-    // 发送 NPC
+    // 发送 NPC 并创建运行时状态
+    let mut npcs = Vec::new();
     for npc in &config.npcs {
         let object_id = alloc_object_id();
         let packet = build_object_npc_packet(npc, object_id);
         let _ = gate_ref.ask(SendToClient {
             session_id,
             data: packet,
+        });
+
+        npcs.push(NpcState {
+            object_id,
+            name: npc.name.clone(),
+            image: npc.image,
+            x: npc.x,
+            y: npc.y,
+            direction: npc.direction,
         });
     }
 
@@ -1348,5 +1471,5 @@ fn spawn_npcs_and_monsters(
 
     info!("Spawned {} NPCs and {} monsters for session {}",
           config.npcs.len(), config.monsters.len(), session_id);
-    monsters
+    (npcs, monsters)
 }

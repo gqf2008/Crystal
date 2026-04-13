@@ -360,6 +360,18 @@ impl Message<ClientData> for GateActor {
                     }
                 }
             }
+            x if x == ClientPacketIds::CallNPC as i16 => {
+                // CallNPC - 与 NPC 对话
+                if let Some(world_ref) = &self.world_ref {
+                    if let Some((npc_object_id, key)) = parse_call_npc_payload(payload) {
+                        let _ = world_ref.ask(crate::actors::world::NPCCallRequest {
+                            session_id: msg.session_id,
+                            npc_object_id,
+                            key,
+                        }).await;
+                    }
+                }
+            }
             _ => {
                 debug!("Unknown opcode {} from session {}", opcode, msg.session_id);
             }
@@ -528,4 +540,19 @@ fn parse_chat_payload(payload: &[u8]) -> Option<String> {
 
     let mut cursor = Cursor::new(payload);
     read_dotnet_string(&mut cursor).ok()
+}
+
+/// 解析 CallNPC 包：[object_id: u32 LE][key: DotNetString]
+fn parse_call_npc_payload(payload: &[u8]) -> Option<(u32, String)> {
+    use std::io::Cursor;
+    use byteorder::{LittleEndian, ReadBytesExt};
+    use mir2_shared::binary::read_dotnet_string;
+
+    if payload.len() < 4 {
+        return None;
+    }
+    let mut cursor = Cursor::new(payload);
+    let object_id = ReadBytesExt::read_u32::<LittleEndian>(&mut cursor).ok()?;
+    let key = read_dotnet_string(&mut cursor).ok()?;
+    Some((object_id, key))
 }
