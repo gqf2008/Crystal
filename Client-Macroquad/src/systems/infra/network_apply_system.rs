@@ -322,6 +322,16 @@ impl NetworkApplySystem {
             );
         }
 
+        // 经验值：若缺失则兜底创建
+        if ctx.world.get::<&Experience>(local_entity).is_err() {
+            let _ = ctx.world.insert_one(local_entity, Experience::new(packet.level));
+        }
+        // 更新经验值（协议携带）
+        if let Ok(mut exp) = ctx.world.get::<&mut Experience>(local_entity) {
+            exp.current = packet.experience;
+            exp.required = packet.max_experience;
+        }
+
         // 公会/称号/名字颜色/等级特效/观战状态/英雄/召唤物：先落地到组件，后续 UI/表现再消费
         let mut updated = false;
         if let Ok(mut color) = ctx.world.get::<&mut NameColor>(local_entity) {
@@ -1615,6 +1625,8 @@ impl LogicSystem for NetworkApplySystem {
         let mut poisoned_objects: Vec<(u32, u8)> = Vec::new();
         let mut revived: Vec<u32> = Vec::new();
         // Experience/level
+        let mut player_exp_gains: Vec<i64> = Vec::new();
+        let mut player_level_ups: Vec<u16> = Vec::new();
         let mut hero_exp_gains: Vec<i64> = Vec::new();
         let mut hero_level_ups: Vec<u16> = Vec::new();
         // Object mana
@@ -1960,6 +1972,12 @@ impl LogicSystem for NetworkApplySystem {
                 }
                 NetworkEvent::ObjectManaPercent { object_id, percent } => {
                     object_mana_percents.push((*object_id, *percent));
+                }
+                NetworkEvent::ExperienceGained { amount } => {
+                    player_exp_gains.push(*amount);
+                }
+                NetworkEvent::LevelUp { new_level } => {
+                    player_level_ups.push(*new_level);
                 }
                 NetworkEvent::HeroExperienceGained { amount } => {
                     hero_exp_gains.push(*amount);
@@ -2568,6 +2586,9 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::RentalItemRetrieveRequest { .. }=> {}
                 NetworkEvent::ItemRentalConfirm=> {}
                 NetworkEvent::ItemRentalCancel=> {}
+                NetworkEvent::CraftItemRequest { recipe_unique_id, count, ref slots } => {
+                    tracing::trace!("🔨 Craft item request: unique_id={}, count={}, slots={:?}", recipe_unique_id, count, slots);
+                }
                 NetworkEvent::FishingCastRequest=> {}
                 NetworkEvent::FishingAutocastToggle { .. }=> {}
                 NetworkEvent::AcceptReincarnationRequest=> {}
@@ -3382,6 +3403,29 @@ impl LogicSystem for NetworkApplySystem {
             if let Some(e) = Self::find_entity_by_object_id(ctx, object_id) {
                 // 移除死亡状态
                 let _ = ctx.world.remove_one::<crate::components::DeathState>(e);
+            }
+        }
+
+        // 玩家经验
+        for amount in &player_exp_gains {
+            if let Some(e) = local_player_entity {
+                if let Ok(mut exp) = ctx.world.get::<&mut crate::components::Experience>(e) {
+                    exp.current += amount;
+                    tracing::debug!("⭐ Experience gained: {} (total={})", amount, exp.current);
+                }
+            }
+        }
+
+        // 玩家升级
+        for new_level in &player_level_ups {
+            if let Some(e) = local_player_entity {
+                if let Ok(mut data) = ctx.world.get::<&mut crate::components::PlayerData>(e) {
+                    data.level = *new_level;
+                    tracing::info!("🎉 Player leveled up to {}!", new_level);
+                }
+                if let Ok(mut exp) = ctx.world.get::<&mut crate::components::Experience>(e) {
+                    exp.required = crate::components::Experience::calculate_required(*new_level);
+                }
             }
         }
 
