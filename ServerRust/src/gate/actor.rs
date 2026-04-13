@@ -403,6 +403,57 @@ impl Message<ClientData> for GateActor {
             x if x == ClientPacketIds::Harvest as i16 => {
                 handle_harvest(&gate_ref, msg.session_id, payload);
             }
+            // NPC 商店
+            x if x == ClientPacketIds::BuyItem as i16 => {
+                handle_buy_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::SellItem as i16 => {
+                handle_sell_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RepairItem as i16 => {
+                handle_repair_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::SRepairItem as i16 => {
+                handle_s_repair_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::CraftItem as i16 => {
+                handle_craft_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::BuyItemBack as i16 => {
+                handle_buy_item_back(&gate_ref, msg.session_id, payload);
+            }
+            // 仓库操作
+            x if x == ClientPacketIds::StoreItem as i16 => {
+                handle_store_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::TakeBackItem as i16 => {
+                handle_take_back_item(&gate_ref, msg.session_id, payload);
+            }
+            // 其他常用操作
+            x if x == ClientPacketIds::DropGold as i16 => {
+                handle_drop_gold(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::Inspect as i16 => {
+                handle_inspect(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::ChangeAMode as i16 => {
+                handle_change_amode(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::ChangePMode as i16 => {
+                handle_change_pmode(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::MagicKey as i16 => {
+                handle_magic_key(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RemoveSlotItem as i16 => {
+                handle_remove_slot_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::SplitItem as i16 => {
+                handle_split_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::TeleportToNPC as i16 => {
+                handle_teleport_to_npc(&gate_ref, msg.session_id, payload);
+            }
             _ => {
                 debug!("Unknown opcode {} from session {}", opcode, msg.session_id);
             }
@@ -703,4 +754,171 @@ fn handle_harvest(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload
         debug!("Harvest: session={} dir={}", session_id, dir);
     }
     reply_item_op_failed(gate_ref, session_id, "采集功能暂未开放。");
+}
+
+// ============================================================================
+// NPC 商店 stub handlers
+// ============================================================================
+
+/// BuyItem: [npc_id: u32][item_index: u32][count: u32]
+fn handle_buy_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 12 {
+        let npc_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        let item_index = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+        let count = u32::from_le_bytes(payload[8..12].try_into().unwrap_or([0; 4]));
+        debug!("BuyItem: session={} npc={} item={} count={}", session_id, npc_id, item_index, count);
+    }
+    reply_item_op_failed(gate_ref, session_id, "购买功能暂未开放。");
+}
+
+/// SellItem: [grid: u8][unique_id: u64][count: u32]
+fn handle_sell_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 13 {
+        let grid = payload[0];
+        let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
+        let count = u32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
+        debug!("SellItem: session={} grid={} uid={} count={}", session_id, grid, uid, count);
+    }
+    reply_item_op_failed(gate_ref, session_id, "出售物品功能暂未开放。");
+}
+
+/// RepairItem: [unique_id: u64]
+fn handle_repair_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 8 {
+        let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+        debug!("RepairItem: session={} uid={}", session_id, uid);
+    }
+    reply_item_op_failed(gate_ref, session_id, "修理装备功能暂未开放。");
+}
+
+/// SRepairItem (特殊修理): [unique_id: u64]
+fn handle_s_repair_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 8 {
+        let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+        debug!("SRepairItem: session={} uid={}", session_id, uid);
+    }
+    reply_item_op_failed(gate_ref, session_id, "特殊修理功能暂未开放。");
+}
+
+/// CraftItem: [recipe_id: u32][materials_count: u32]
+fn handle_craft_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 8 {
+        let recipe_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("CraftItem: session={} recipe={}", session_id, recipe_id);
+    }
+    reply_item_op_failed(gate_ref, session_id, "合成功能暂未开放。");
+}
+
+/// BuyItemBack (回购): [item_index: u32]
+fn handle_buy_item_back(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let item_index = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("BuyItemBack: session={} index={}", session_id, item_index);
+    }
+    reply_item_op_failed(gate_ref, session_id, "回购功能暂未开放。");
+}
+
+// ============================================================================
+// 仓库 stub handlers
+// ============================================================================
+
+/// StoreItem (存入仓库): [grid: u8][unique_id: u64][count: u32]
+fn handle_store_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 13 {
+        let grid = payload[0];
+        let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
+        let count = u32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
+        debug!("StoreItem: session={} grid={} uid={} count={}", session_id, grid, uid, count);
+    }
+    reply_item_op_failed(gate_ref, session_id, "仓库存储功能暂未开放。");
+}
+
+/// TakeBackItem (从仓库取出): [grid: u8][unique_id: u64][count: u32]
+fn handle_take_back_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 13 {
+        let grid = payload[0];
+        let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
+        let count = u32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
+        debug!("TakeBackItem: session={} grid={} uid={} count={}", session_id, grid, uid, count);
+    }
+    reply_item_op_failed(gate_ref, session_id, "仓库取出功能暂未开放。");
+}
+
+// ============================================================================
+// 其他常用 stub handlers
+// ============================================================================
+
+/// DropGold (丢弃金币): [amount: u32]
+fn handle_drop_gold(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let amount = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("DropGold: session={} amount={}", session_id, amount);
+    }
+    reply_item_op_failed(gate_ref, session_id, "丢弃金币功能暂未开放。");
+}
+
+/// Inspect (查看玩家): [target_id: u32]
+fn handle_inspect(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("Inspect: session={} target={}", session_id, target_id);
+    }
+    reply_item_op_failed(gate_ref, session_id, "查看玩家信息功能暂未开放。");
+}
+
+/// ChangeAMode (切换攻击模式): [mode: u8]
+fn handle_change_amode(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if !payload.is_empty() {
+        let mode = payload[0];
+        debug!("ChangeAMode: session={} mode={}", session_id, mode);
+    }
+    // 切换攻击模式无需回复，客户端自行更新状态
+}
+
+/// ChangePMode (切换和平模式): [mode: u8]
+fn handle_change_pmode(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if !payload.is_empty() {
+        let mode = payload[0];
+        debug!("ChangePMode: session={} mode={}", session_id, mode);
+    }
+    // 切换模式无需回复
+}
+
+/// MagicKey (设置快捷键): [slot: u8][spell_id: u16]
+fn handle_magic_key(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 3 {
+        let slot = payload[0];
+        let spell_id = u16::from_le_bytes(payload[1..3].try_into().unwrap_or([0; 2]));
+        debug!("MagicKey: session={} slot={} spell={}", session_id, slot, spell_id);
+    }
+    // 快捷键设置由客户端本地处理
+}
+
+/// RemoveSlotItem (快捷栏移除): [slot: u8]
+fn handle_remove_slot_item(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if !payload.is_empty() {
+        let slot = payload[0];
+        debug!("RemoveSlotItem: session={} slot={}", session_id, slot);
+    }
+    // 快捷栏移除由客户端本地处理
+}
+
+/// SplitItem (物品拆分): [grid: u8][unique_id: u64][count: u32]
+fn handle_split_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 13 {
+        let grid = payload[0];
+        let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
+        let count = u32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
+        debug!("SplitItem: session={} grid={} uid={} count={}", session_id, grid, uid, count);
+    }
+    reply_item_op_failed(gate_ref, session_id, "拆分物品功能暂未开放。");
+}
+
+/// TeleportToNPC: [npc_id: u32]
+fn handle_teleport_to_npc(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let npc_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("TeleportToNPC: session={} npc={}", session_id, npc_id);
+    }
+    reply_item_op_failed(gate_ref, session_id, "传送功能暂未开放。");
 }
