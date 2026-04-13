@@ -376,6 +376,24 @@ impl Message<ClientData> for GateActor {
                 // PickUp - 拾取物品（Phase 1：回复无物品）
                 handle_pickup(&gate_ref, msg.session_id);
             }
+            x if x == ClientPacketIds::MoveItem as i16 => {
+                handle_move_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::UseItem as i16 => {
+                handle_use_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::EquipItem as i16 => {
+                handle_equip_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RemoveItem as i16 => {
+                handle_remove_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::DropItem as i16 => {
+                handle_drop_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::MergeItem as i16 => {
+                handle_merge_item(&gate_ref, msg.session_id, payload);
+            }
             _ => {
                 debug!("Unknown opcode {} from session {}", opcode, msg.session_id);
             }
@@ -571,4 +589,79 @@ fn parse_call_npc_payload(payload: &[u8]) -> Option<(u32, String)> {
     let object_id = ReadBytesExt::read_u32::<LittleEndian>(&mut cursor).ok()?;
     let key = read_dotnet_string(&mut cursor).ok()?;
     Some((object_id, key))
+}
+
+// ============================================================================
+// 物品操作 stub handler（Phase 1：回复操作失败/不支持）
+// ============================================================================
+
+/// 回复"操作失败"系统消息
+fn reply_item_op_failed(gate_ref: &ActorRef<GateActor>, session_id: SessionId, msg: &str) {
+    let mut body = Vec::new();
+    write_dotnet_string(&mut body, msg);
+    body.push(2u8); // ChatType::System
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
+    });
+}
+
+/// MoveItem: [grid: u8][from: i32][to: i32]
+fn handle_move_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 9 {
+        let grid = payload[0];
+        let from = i32::from_le_bytes([payload[1], payload[2], payload[3], payload[4]]);
+        let to = i32::from_le_bytes([payload[5], payload[6], payload[7], payload[8]]);
+        debug!("MoveItem: session={} grid={} from={} to={}", session_id, grid, from, to);
+    }
+    reply_item_op_failed(gate_ref, session_id, "背包整理功能暂未开放。");
+}
+
+/// UseItem: [unique_id: u64]
+fn handle_use_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 8 {
+        let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+        debug!("UseItem: session={} uid={}", session_id, uid);
+    }
+    reply_item_op_failed(gate_ref, session_id, "物品使用功能暂未开放。");
+}
+
+/// EquipItem: [grid: u8][unique_id: u64][to: u8]
+fn handle_equip_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 10 {
+        let grid = payload[0];
+        let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
+        let to = payload[9];
+        debug!("EquipItem: session={} grid={} uid={} slot={}", session_id, grid, uid, to);
+    }
+    reply_item_op_failed(gate_ref, session_id, "装备功能暂未开放。");
+}
+
+/// RemoveItem: [grid: u8][unique_id: u64][to: u8]
+fn handle_remove_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 10 {
+        let grid = payload[0];
+        let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
+        debug!("RemoveItem: session={} grid={} uid={}", session_id, grid, uid);
+    }
+    reply_item_op_failed(gate_ref, session_id, "卸下装备功能暂未开放。");
+}
+
+/// DropItem: [unique_id: u64][count: u16][hero_inventory: bool]
+fn handle_drop_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 10 {
+        let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+        debug!("DropItem: session={} uid={}", session_id, uid);
+    }
+    reply_item_op_failed(gate_ref, session_id, "丢弃物品功能暂未开放。");
+}
+
+/// MergeItem: [grid_from: u8][grid_to: u8][id_from: u64][id_to: u64]
+fn handle_merge_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 18 {
+        let from = u64::from_le_bytes(payload[2..10].try_into().unwrap_or([0; 8]));
+        let to = u64::from_le_bytes(payload[10..18].try_into().unwrap_or([0; 8]));
+        debug!("MergeItem: session={} from={} to={}", session_id, from, to);
+    }
+    reply_item_op_failed(gate_ref, session_id, "物品堆叠功能暂未开放。");
 }
