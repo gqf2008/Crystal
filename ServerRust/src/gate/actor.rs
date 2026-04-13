@@ -462,6 +462,9 @@ impl Message<ClientData> for GateActor {
                 handle_spell_toggle(&gate_ref, msg.session_id, payload);
             }
             // 账号管理
+            x if x == ClientPacketIds::NewCharacter as i16 => {
+                handle_new_character(&gate_ref, msg.session_id, payload);
+            }
             x if x == ClientPacketIds::ChangePassword as i16 => {
                 handle_change_password(&gate_ref, msg.session_id, payload);
             }
@@ -1101,6 +1104,14 @@ fn handle_change_password(gate_ref: &ActorRef<GateActor>, session_id: SessionId,
         debug!("ChangePassword: session={}", session_id);
     }
     send_system_message(gate_ref, session_id, "修改密码功能暂未开放。");
+}
+
+/// NewCharacter: [name: DotNetString][class: u8][gender: u8][hair: u16]
+fn handle_new_character(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        debug!("NewCharacter: session={}", session_id);
+    }
+    send_system_message(gate_ref, session_id, "创建角色功能暂未开放。");
 }
 
 /// DeleteCharacter: [character_index: i32]
