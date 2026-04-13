@@ -454,6 +454,153 @@ impl Message<ClientData> for GateActor {
             x if x == ClientPacketIds::TeleportToNPC as i16 => {
                 handle_teleport_to_npc(&gate_ref, msg.session_id, payload);
             }
+            // 死亡恢复
+            x if x == ClientPacketIds::TownRevive as i16 => {
+                handle_town_revive(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::SpellToggle as i16 => {
+                handle_spell_toggle(&gate_ref, msg.session_id, payload);
+            }
+            // 账号管理
+            x if x == ClientPacketIds::ChangePassword as i16 => {
+                handle_change_password(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::DeleteCharacter as i16 => {
+                handle_delete_character(&gate_ref, msg.session_id, payload);
+            }
+            // 社交/组队
+            x if x == ClientPacketIds::SwitchGroup as i16 => {
+                handle_switch_group(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::AddMember as i16 => {
+                handle_add_member(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::DellMember as i16 => {
+                handle_dell_member(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::GroupInvite as i16 => {
+                handle_group_invite(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::NewHero as i16 => {
+                handle_new_hero(&gate_ref, msg.session_id, payload);
+            }
+            // 交易
+            x if x == ClientPacketIds::ChangeTrade as i16 => {
+                handle_change_trade(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::TradeRequest as i16 => {
+                handle_trade_request(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::TradeReply as i16 => {
+                handle_trade_reply(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::TradeConfirm as i16 => {
+                handle_trade_confirm(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::TradeCancel as i16 => {
+                handle_trade_cancel(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::TradeGold as i16 => {
+                handle_trade_gold(&gate_ref, msg.session_id, payload);
+            }
+            // 好友
+            x if x == ClientPacketIds::AddFriend as i16 => {
+                handle_add_friend(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RemoveFriend as i16 => {
+                handle_remove_friend(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RefreshFriends as i16 => {
+                handle_refresh_friends(&gate_ref, msg.session_id);
+            }
+            // 邮件
+            x if x == ClientPacketIds::SendMail as i16 => {
+                handle_send_mail(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::ReadMail as i16 => {
+                handle_read_mail(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::CollectParcel as i16 => {
+                handle_collect_parcel(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::DeleteMail as i16 => {
+                handle_delete_mail(&gate_ref, msg.session_id, payload);
+            }
+            // 行会
+            x if x == ClientPacketIds::GuildInvite as i16 => {
+                handle_guild_invite(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RequestGuildInfo as i16 => {
+                handle_request_guild_info(&gate_ref, msg.session_id, payload);
+            }
+            // 婚姻
+            x if x == ClientPacketIds::MarriageRequest as i16 => {
+                handle_marriage_request(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::MarriageReply as i16 => {
+                handle_marriage_reply(&gate_ref, msg.session_id, payload);
+            }
+            // 任务
+            x if x == ClientPacketIds::AcceptQuest as i16 => {
+                handle_accept_quest(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::FinishQuest as i16 => {
+                handle_finish_quest(&gate_ref, msg.session_id, payload);
+            }
+            //  refining
+            x if x == ClientPacketIds::DepositRefineItem as i16 => {
+                handle_deposit_refine_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RetrieveRefineItem as i16 => {
+                handle_retrieve_refine_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RefineCancel as i16 => {
+                handle_refine_cancel(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RefineItem as i16 => {
+                handle_refine_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::CheckRefine as i16 => {
+                handle_check_refine(&gate_ref, msg.session_id, payload);
+            }
+            // 传送/地图
+            x if x == ClientPacketIds::RequestMapInfo as i16 => {
+                handle_request_map_info(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::SearchMap as i16 => {
+                handle_search_map(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::Observe as i16 => {
+                handle_observe(&gate_ref, msg.session_id, payload);
+            }
+            // 其他
+            x if x == ClientPacketIds::ReplaceWedRing as i16 => {
+                handle_replace_wed_ring(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RequestUserName as i16 => {
+                handle_request_user_name(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RequestChatItem as i16 => {
+                handle_request_chat_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::SetAutoPotValue as i16 => {
+                handle_set_autopot_value(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::SetAutoPotItem as i16 => {
+                handle_set_autopot_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::SetHeroBehaviour as i16 => {
+                handle_set_hero_behaviour(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::ChangeHero as i16 => {
+                handle_change_hero(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::TakeBackHeroItem as i16 => {
+                handle_take_back_hero_item(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::TransferHeroItem as i16 => {
+                handle_transfer_hero_item(&gate_ref, msg.session_id, payload);
+            }
             _ => {
                 debug!("Unknown opcode {} from session {}", opcode, msg.session_id);
             }
@@ -608,14 +755,7 @@ fn parse_login_payload(payload: &[u8]) -> Option<(String, String)> {
 
 /// 处理 PickUp：回复 "附近没有物品"（Phase 1：无地面物品系统）
 fn handle_pickup(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
-    // 发送 Chat 消息（ChatType::System = 2），客户端 chat handler 会解析为 SystemMessage
-    let mut body = Vec::new();
-    write_dotnet_string(&mut body, "附近没有可以拾取的物品。");
-    body.push(2u8); // ChatType::System
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
-    });
+    send_system_message(gate_ref, session_id, "附近没有可以拾取的物品。");
 }
 
 /// 处理心跳：回复 KeepAlive
@@ -655,8 +795,8 @@ fn parse_call_npc_payload(payload: &[u8]) -> Option<(u32, String)> {
 // 物品操作 stub handler（Phase 1：回复操作失败/不支持）
 // ============================================================================
 
-/// 回复"操作失败"系统消息
-fn reply_item_op_failed(gate_ref: &ActorRef<GateActor>, session_id: SessionId, msg: &str) {
+/// 发送系统消息（ChatType::System），用于提示/通知。
+fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: SessionId, msg: &str) {
     let mut body = Vec::new();
     write_dotnet_string(&mut body, msg);
     body.push(2u8); // ChatType::System
@@ -664,6 +804,11 @@ fn reply_item_op_failed(gate_ref: &ActorRef<GateActor>, session_id: SessionId, m
         session_id,
         data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
     });
+}
+
+/// 回复"操作失败"系统消息（别名，保持语义清晰）
+fn reply_item_op_failed(gate_ref: &ActorRef<GateActor>, session_id: SessionId, msg: &str) {
+    send_system_message(gate_ref, session_id, msg);
 }
 
 /// MoveItem: [grid: u8][from: i32][to: i32]
@@ -709,9 +854,11 @@ fn handle_remove_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, pay
 
 /// DropItem: [unique_id: u64][count: u16][hero_inventory: bool]
 fn handle_drop_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() >= 10 {
+    if payload.len() >= 11 {
         let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
-        debug!("DropItem: session={} uid={}", session_id, uid);
+        let count = u16::from_le_bytes(payload[8..10].try_into().unwrap_or([0; 2]));
+        let hero_inv = payload[10] != 0;
+        debug!("DropItem: session={} uid={} count={} hero={}", session_id, uid, count, hero_inv);
     }
     reply_item_op_failed(gate_ref, session_id, "丢弃物品功能暂未开放。");
 }
@@ -921,4 +1068,443 @@ fn handle_teleport_to_npc(gate_ref: &ActorRef<GateActor>, session_id: SessionId,
         debug!("TeleportToNPC: session={} npc={}", session_id, npc_id);
     }
     reply_item_op_failed(gate_ref, session_id, "传送功能暂未开放。");
+}
+
+// ============================================================================
+// 死亡恢复 / 技能切换
+// ============================================================================
+
+/// TownRevive: 死亡后在城镇复活
+fn handle_town_revive(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+    debug!("TownRevive: session={}", session_id);
+    // Phase 1: 回复系统消息，不实际传送
+    send_system_message(gate_ref, session_id, "复活功能暂未开放。");
+}
+
+/// SpellToggle: [spell_id: u8][on: bool]
+fn handle_spell_toggle(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 2 {
+        let spell_id = payload[0];
+        let on = payload[1] != 0;
+        debug!("SpellToggle: session={} spell={} on={}", session_id, spell_id, on);
+    }
+    // 技能开关由客户端本地处理
+}
+
+// ============================================================================
+// 账号管理
+// ============================================================================
+
+/// ChangePassword: [old_password: DotNetString][new_password: DotNetString]
+fn handle_change_password(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 2 {
+        debug!("ChangePassword: session={}", session_id);
+    }
+    send_system_message(gate_ref, session_id, "修改密码功能暂未开放。");
+}
+
+/// DeleteCharacter: [character_index: i32]
+fn handle_delete_character(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let idx = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("DeleteCharacter: session={} index={}", session_id, idx);
+    }
+    send_system_message(gate_ref, session_id, "删除角色功能暂未开放。");
+}
+
+// ============================================================================
+// 社交/组队
+// ============================================================================
+
+/// SwitchGroup: [target_id: u32]
+fn handle_switch_group(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("SwitchGroup: session={} target={}", session_id, target_id);
+    }
+    send_system_message(gate_ref, session_id, "切换队伍功能暂未开放。");
+}
+
+/// AddMember: [target_id: u32]
+fn handle_add_member(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("AddMember: session={} target={}", session_id, target_id);
+    }
+    send_system_message(gate_ref, session_id, "添加队员功能暂未开放。");
+}
+
+/// DellMember: [member_id: u32]
+fn handle_dell_member(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let member_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("DellMember: session={} member={}", session_id, member_id);
+    }
+    send_system_message(gate_ref, session_id, "踢出队员功能暂未开放。");
+}
+
+/// GroupInvite: [target_id: u32]
+fn handle_group_invite(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("GroupInvite: session={} target={}", session_id, target_id);
+    }
+    send_system_message(gate_ref, session_id, "组队邀请功能暂未开放。");
+}
+
+// ============================================================================
+// Hero/宠物
+// ============================================================================
+
+/// NewHero: [hero_type: u8]
+fn handle_new_hero(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if !payload.is_empty() {
+        let hero_type = payload[0];
+        debug!("NewHero: session={} type={}", session_id, hero_type);
+    }
+    send_system_message(gate_ref, session_id, "英雄系统功能暂未开放。");
+}
+
+/// SetAutoPotValue: [type: u8][value: i32]
+fn handle_set_autopot_value(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 5 {
+        let ptype = payload[0];
+        let value = i32::from_le_bytes(payload[1..5].try_into().unwrap_or([0; 4]));
+        debug!("SetAutoPotValue: session={} type={} value={}", session_id, ptype, value);
+    }
+    // 自动药水设置由客户端本地处理
+}
+
+/// SetAutoPotItem: [slot: u8][item_id: u32]
+fn handle_set_autopot_item(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 5 {
+        let slot = payload[0];
+        let item_id = u32::from_le_bytes(payload[1..5].try_into().unwrap_or([0; 4]));
+        debug!("SetAutoPotItem: session={} slot={} item={}", session_id, slot, item_id);
+    }
+    // 自动药水物品设置由客户端本地处理
+}
+
+/// SetHeroBehaviour: [behaviour: u8]
+fn handle_set_hero_behaviour(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if !payload.is_empty() {
+        let behaviour = payload[0];
+        debug!("SetHeroBehaviour: session={} behaviour={}", session_id, behaviour);
+    }
+    // 英雄行为设置由客户端本地处理
+}
+
+/// ChangeHero: [hero_index: u8]
+fn handle_change_hero(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if !payload.is_empty() {
+        let hero_index = payload[0];
+        debug!("ChangeHero: session={} index={}", session_id, hero_index);
+    }
+    send_system_message(gate_ref, session_id, "切换英雄功能暂未开放。");
+}
+
+/// TakeBackHeroItem: [grid: u8][unique_id: u64]
+fn handle_take_back_hero_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 9 {
+        let grid = payload[0];
+        let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
+        debug!("TakeBackHeroItem: session={} grid={} uid={}", session_id, grid, uid);
+    }
+    send_system_message(gate_ref, session_id, "取回英雄物品功能暂未开放。");
+}
+
+/// TransferHeroItem: [grid: u8][unique_id: u64]
+fn handle_transfer_hero_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 9 {
+        let grid = payload[0];
+        let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
+        debug!("TransferHeroItem: session={} grid={} uid={}", session_id, grid, uid);
+    }
+    send_system_message(gate_ref, session_id, "转移英雄物品功能暂未开放。");
+}
+
+// ============================================================================
+// 交易系统
+// ============================================================================
+
+/// ChangeTrade: [mode: u8]
+fn handle_change_trade(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if !payload.is_empty() {
+        let mode = payload[0];
+        debug!("ChangeTrade: session={} mode={}", session_id, mode);
+    }
+    // 交易模式切换由客户端本地处理
+}
+
+/// TradeRequest: [target_id: u32]
+fn handle_trade_request(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("TradeRequest: session={} target={}", session_id, target_id);
+    }
+    send_system_message(gate_ref, session_id, "交易功能暂未开放。");
+}
+
+/// TradeReply: [accept: bool]
+fn handle_trade_reply(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if !payload.is_empty() {
+        let accept = payload[0] != 0;
+        debug!("TradeReply: session={} accept={}", session_id, accept);
+    }
+    send_system_message(gate_ref, session_id, "交易功能暂未开放。");
+}
+
+/// TradeConfirm: []
+fn handle_trade_confirm(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+    debug!("TradeConfirm: session={}", session_id);
+    send_system_message(gate_ref, session_id, "交易功能暂未开放。");
+}
+
+/// TradeCancel: []
+fn handle_trade_cancel(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+    debug!("TradeCancel: session={}", session_id);
+    // 取消交易无需回复，客户端本地清除UI
+}
+
+/// TradeGold: [amount: u32]
+fn handle_trade_gold(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let amount = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("TradeGold: session={} amount={}", session_id, amount);
+    }
+    send_system_message(gate_ref, session_id, "交易功能暂未开放。");
+}
+
+// ============================================================================
+// 好友系统
+// ============================================================================
+
+/// AddFriend: [target_name: DotNetString]
+fn handle_add_friend(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        debug!("AddFriend: session={}", session_id);
+    }
+    send_system_message(gate_ref, session_id, "添加好友功能暂未开放。");
+}
+
+/// RemoveFriend: [friend_id: u32]
+fn handle_remove_friend(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let friend_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("RemoveFriend: session={} friend={}", session_id, friend_id);
+    }
+    send_system_message(gate_ref, session_id, "删除好友功能暂未开放。");
+}
+
+/// RefreshFriends: 刷新好友列表
+fn handle_refresh_friends(_gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
+    debug!("RefreshFriends: session={}", session_id);
+    // 好友列表刷新由客户端本地处理
+}
+
+// ============================================================================
+// 邮件系统
+// ============================================================================
+
+/// SendMail: [target_name: DotNetString][subject: DotNetString][message: DotNetString][gold: u32]
+fn handle_send_mail(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        debug!("SendMail: session={}", session_id);
+    }
+    send_system_message(gate_ref, session_id, "发送邮件功能暂未开放。");
+}
+
+/// ReadMail: [mail_id: u32]
+fn handle_read_mail(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let mail_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("ReadMail: session={} id={}", session_id, mail_id);
+    }
+    send_system_message(gate_ref, session_id, "邮件系统功能暂未开放。");
+}
+
+/// CollectParcel: [mail_id: u32]
+fn handle_collect_parcel(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let mail_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("CollectParcel: session={} id={}", session_id, mail_id);
+    }
+    send_system_message(gate_ref, session_id, "收取邮件附件功能暂未开放。");
+}
+
+/// DeleteMail: [mail_id: u32]
+fn handle_delete_mail(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let mail_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("DeleteMail: session={} id={}", session_id, mail_id);
+    }
+    send_system_message(gate_ref, session_id, "删除邮件功能暂未开放。");
+}
+
+// ============================================================================
+// 行会系统
+// ============================================================================
+
+/// GuildInvite: [target_name: DotNetString]
+fn handle_guild_invite(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        debug!("GuildInvite: session={}", session_id);
+    }
+    send_system_message(gate_ref, session_id, "行会邀请功能暂未开放。");
+}
+
+/// RequestGuildInfo: 请求行会信息
+fn handle_request_guild_info(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+    debug!("RequestGuildInfo: session={}", session_id);
+    send_system_message(gate_ref, session_id, "行会系统暂未开放。");
+}
+
+// ============================================================================
+// 婚姻系统
+// ============================================================================
+
+/// MarriageRequest: [target_name: DotNetString]
+fn handle_marriage_request(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        debug!("MarriageRequest: session={}", session_id);
+    }
+    send_system_message(gate_ref, session_id, "求婚功能暂未开放。");
+}
+
+/// MarriageReply: [accept: bool]
+fn handle_marriage_reply(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if !payload.is_empty() {
+        let accept = payload[0] != 0;
+        debug!("MarriageReply: session={} accept={}", session_id, accept);
+    }
+    send_system_message(gate_ref, session_id, "婚姻功能暂未开放。");
+}
+
+// ============================================================================
+// 任务系统
+// ============================================================================
+
+/// AcceptQuest: [quest_id: u32]
+fn handle_accept_quest(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let quest_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("AcceptQuest: session={} quest={}", session_id, quest_id);
+    }
+    send_system_message(gate_ref, session_id, "任务系统暂未开放。");
+}
+
+/// FinishQuest: [quest_id: u32]
+fn handle_finish_quest(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let quest_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("FinishQuest: session={} quest={}", session_id, quest_id);
+    }
+    send_system_message(gate_ref, session_id, "任务系统暂未开放。");
+}
+
+// ============================================================================
+// 精炼系统
+// ============================================================================
+
+/// DepositRefineItem: [unique_id: u64]
+fn handle_deposit_refine_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 8 {
+        let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+        debug!("DepositRefineItem: session={} uid={}", session_id, uid);
+    }
+    send_system_message(gate_ref, session_id, "精炼系统暂未开放。");
+}
+
+/// RetrieveRefineItem: [unique_id: u64]
+fn handle_retrieve_refine_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 8 {
+        let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+        debug!("RetrieveRefineItem: session={} uid={}", session_id, uid);
+    }
+    send_system_message(gate_ref, session_id, "精炼系统暂未开放。");
+}
+
+/// RefineCancel: []
+fn handle_refine_cancel(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+    debug!("RefineCancel: session={}", session_id);
+    send_system_message(gate_ref, session_id, "精炼系统暂未开放。");
+}
+
+/// RefineItem: [item_id: u32][materials: u32]
+fn handle_refine_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 8 {
+        let item_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("RefineItem: session={} item={}", session_id, item_id);
+    }
+    send_system_message(gate_ref, session_id, "精炼系统暂未开放。");
+}
+
+/// CheckRefine: [unique_id: u64]
+fn handle_check_refine(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 8 {
+        let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+        debug!("CheckRefine: session={} uid={}", session_id, uid);
+    }
+    send_system_message(gate_ref, session_id, "精炼系统暂未开放。");
+}
+
+// ============================================================================
+// 传送/地图
+// ============================================================================
+
+/// RequestMapInfo: [map_id: u32]
+fn handle_request_map_info(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let map_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("RequestMapInfo: session={} map={}", session_id, map_id);
+    }
+    send_system_message(gate_ref, session_id, "地图传送功能暂未开放。");
+}
+
+/// SearchMap: [keyword: DotNetString]
+fn handle_search_map(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        debug!("SearchMap: session={}", session_id);
+    }
+    send_system_message(gate_ref, session_id, "地图搜索功能暂未开放。");
+}
+
+/// Observe: [target_id: u32]
+fn handle_observe(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("Observe: session={} target={}", session_id, target_id);
+    }
+    send_system_message(gate_ref, session_id, "观察模式暂未开放。");
+}
+
+// ============================================================================
+// 其他
+// ============================================================================
+
+/// ReplaceWedRing: [unique_id: u64]
+fn handle_replace_wed_ring(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 8 {
+        let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+        debug!("ReplaceWedRing: session={} uid={}", session_id, uid);
+    }
+    send_system_message(gate_ref, session_id, "更换婚戒功能暂未开放。");
+}
+
+/// RequestUserName: [target_id: u32]
+fn handle_request_user_name(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("RequestUserName: session={} target={}", session_id, target_id);
+    }
+    // 用户名请求由客户端本地处理
+}
+
+/// RequestChatItem: [item_index: u32]
+fn handle_request_chat_item(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let item_index = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("RequestChatItem: session={} item={}", session_id, item_index);
+    }
+    // 聊天链接物品请求由客户端本地处理
 }
