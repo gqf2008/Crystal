@@ -394,6 +394,15 @@ impl Message<ClientData> for GateActor {
             x if x == ClientPacketIds::MergeItem as i16 => {
                 handle_merge_item(&gate_ref, msg.session_id, payload);
             }
+            x if x == ClientPacketIds::RangeAttack as i16 => {
+                handle_range_attack(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::Magic as i16 => {
+                handle_magic(&gate_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::Harvest as i16 => {
+                handle_harvest(&gate_ref, msg.session_id, payload);
+            }
             _ => {
                 debug!("Unknown opcode {} from session {}", opcode, msg.session_id);
             }
@@ -664,4 +673,34 @@ fn handle_merge_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payl
         debug!("MergeItem: session={} from={} to={}", session_id, from, to);
     }
     reply_item_op_failed(gate_ref, session_id, "物品堆叠功能暂未开放。");
+}
+
+/// RangeAttack: [dir: u8][x: i32][y: i32][target_id: u32][tx: i32][ty: i32]
+fn handle_range_attack(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 21 {
+        let dir = payload[0];
+        let target_id = u32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
+        debug!("RangeAttack: session={} dir={} target={}", session_id, dir, target_id);
+    }
+    // 远程攻击暂不支持，复用 Attack 的逻辑提示
+    reply_item_op_failed(gate_ref, session_id, "远程攻击功能暂未开放。");
+}
+
+/// Magic: [spell: u8][dir: u8][target_id: u32][x: i32][y: i32]
+fn handle_magic(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 12 {
+        let spell = payload[0];
+        let dir = payload[1];
+        debug!("Magic: session={} spell={} dir={}", session_id, spell, dir);
+    }
+    reply_item_op_failed(gate_ref, session_id, "魔法技能功能暂未开放。");
+}
+
+/// Harvest: [dir: u8]
+fn handle_harvest(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if !payload.is_empty() {
+        let dir = payload[0];
+        debug!("Harvest: session={} dir={}", session_id, dir);
+    }
+    reply_item_op_failed(gate_ref, session_id, "采集功能暂未开放。");
 }
