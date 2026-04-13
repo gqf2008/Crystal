@@ -1,0 +1,42 @@
+# 地图 n0 (Beginner Training) 刷怪配置
+# NPC 配置: [npcs]
+#   [[npcs.list]] - name, image(Monster enum), x, y, direction(0-7)
+# 怪物配置: [monsters]
+#   [[monsters.list]] - name, image(Monster enum), x, y, direction, hp, min_dmg, max_dmg, xp
+
+[[npcs]]
+name = "Guide NPC"
+image = 2  # Guard2
+x = 330
+y = 332
+direction = 4  # Down
+
+[[monsters]]
+name = "Chicken"
+image = 3  # Hen
+x = 320
+y = 320
+hp = 30
+min_dmg = 1
+max_dmg = 3
+xp = 10
+
+[[monsters]]
+name = "Deer"
+image = 4  # Deer
+x = 340
+y = 325
+hp = 40
+min_dmg = 2
+max_dmg = 5
+xp = 15
+
+[[monsters]]
+name = "Scarecrow"
+image = 5  # Scarecrow
+x = 345
+y = 335
+hp = 50
+min_dmg = 3
+max_dmg = 7
+xp = 20

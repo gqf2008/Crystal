@@ -1,0 +1,13 @@
+# Crystal Server 配置
+
+[network]
+listen_addr = "0.0.0.0:7000"
+xor_key = 170  # 0xAA
+max_connections = 1024
+
+[database]
+path = "data/server.db"
+
+[server]
+tick_ms = 100
+map_data_dir = "Data"

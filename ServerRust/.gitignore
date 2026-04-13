@@ -1,0 +1,8 @@
+# Build artifacts
+/target/
+
+# Database
+data/
+
+# Server map data (copied from client)
+Data/

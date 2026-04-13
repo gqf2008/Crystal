@@ -1,0 +1,93 @@
+// Crystal Server - Legend of Mir 2 game server
+// 启动入口：初始化 actors → 启动 TCP 监听 → 进入事件循环
+
+use std::env;
+use std::path::PathBuf;
+
+use kameo::actor::Spawn;
+use tracing::{info, error};
+
+use crystal_server::actors::account::AccountActor;
+use crystal_server::actors::world::{WorldActor, WorldActorArgs};
+use crystal_server::gate::actor::{GateActor, SetAccountRef, SetWorldRef};
+use crystal_server::util::config;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // 初始化日志
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("crystal_server=info".parse()?)
+                .add_directive("tokio=warn".parse()?)
+                .add_directive("kameo=warn".parse()?),
+        )
+        .init();
+
+    info!("Crystal Server starting...");
+
+    // 加载配置
+    let config_path = env::args()
+        .nth(1)
+        .unwrap_or_else(|| "config/server.toml".to_string());
+
+    let cfg = match config::load_config(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            info!("Config not found ({}), using defaults", e);
+            config::ServerConfig::default()
+        }
+    };
+
+    info!("Config loaded: listen={}", cfg.network.listen_addr);
+
+    // 启动 Actors
+    info!("Spawning actors...");
+
+    // GateActor 先启动
+    let gate_ref = GateActor::spawn(());
+    info!("GateActor spawned");
+
+    let map_dir = PathBuf::from(&cfg.server.map_data_dir);
+    let spawn_dir = PathBuf::from("Data/spawn");
+
+    // WorldActor 启动，携带 GateActor 引用 + 地图目录 + 刷怪目录
+    let world_ref = WorldActor::spawn(WorldActorArgs {
+        tick_interval_ms: cfg.server.tick_ms,
+        gate_ref: gate_ref.clone(),
+        map_dir,
+        spawn_dir: Some(spawn_dir),
+    });
+    info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
+
+    // AccountActor 需要 GateActor 的引用
+    let account_ref = AccountActor::spawn(gate_ref.clone());
+    info!("AccountActor spawned");
+
+    // 双向链接：GateActor 需要 AccountActor 和 WorldActor 的引用
+    let _ = gate_ref.ask(SetAccountRef {
+        account_ref: account_ref.clone(),
+    }).await;
+    let _ = gate_ref.ask(SetWorldRef {
+        world_ref: world_ref.clone(),
+    }).await;
+
+    // 启动 TCP 监听
+    info!("Starting gate listener on {}...", cfg.network.listen_addr);
+
+    let gate_addr = cfg.network.listen_addr.clone();
+    let gate_ref_for_listener = gate_ref.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crystal_server::gate::actor::run_gate_listener(gate_addr, gate_ref_for_listener).await {
+            error!("Gate listener error: {}", e);
+        }
+    });
+
+    info!("Server is ready! Press Ctrl+C to stop.");
+
+    // 保持运行
+    tokio::signal::ctrl_c().await?;
+    info!("Shutdown signal received");
+
+    Ok(())
+}

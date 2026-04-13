@@ -1,0 +1,42 @@
+[package]
+name = "crystal_server"
+version = "0.1.0"
+edition = "2021"
+authors = ["Crystal Porting Team"]
+description = "Legend of Mir 2 game server - Rust port of OpenMir2"
+
+[[bin]]
+name = "mir2_server"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Actor model
+kameo = "0.20.0"
+
+# Shared protocol definitions
+mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+byteorder = "1"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Config
+toml = "0.8"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
