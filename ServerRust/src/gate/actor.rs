@@ -337,6 +337,29 @@ impl Message<ClientData> for GateActor {
                     }
                 }
             }
+            x if x == ClientPacketIds::KeepAlive as i16 => {
+                // KeepAlive - 回复心跳
+                handle_keep_alive(&gate_ref, msg.session_id);
+            }
+            x if x == ClientPacketIds::LogOut as i16 => {
+                // LogOut - 通知 WorldActor 清理并断开
+                if let Some(world_ref) = &self.world_ref {
+                    let _ = world_ref.ask(crate::actors::world::PlayerLogOut {
+                        session_id: msg.session_id,
+                    }).await;
+                }
+            }
+            x if x == ClientPacketIds::Chat as i16 => {
+                // Chat - 解析并广播
+                if let Some(world_ref) = &self.world_ref {
+                    if let Some(message) = parse_chat_payload(payload) {
+                        let _ = world_ref.ask(crate::actors::world::ChatRequest {
+                            session_id: msg.session_id,
+                            message,
+                        }).await;
+                    }
+                }
+            }
             _ => {
                 debug!("Unknown opcode {} from session {}", opcode, msg.session_id);
             }
@@ -487,4 +510,22 @@ fn parse_login_payload(payload: &[u8]) -> Option<(String, String)> {
         (Ok(username), Ok(password)) => Some((username, password)),
         _ => None,
     }
+}
+
+/// 处理心跳：回复 KeepAlive
+fn handle_keep_alive(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
+    let response = build_packet_bytes(ServerPacketIds::KeepAlive as i16, &[]);
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: response,
+    });
+}
+
+/// 解析聊天包：DotNetString message + i32 linked_items_count
+fn parse_chat_payload(payload: &[u8]) -> Option<String> {
+    use std::io::Cursor;
+    use mir2_shared::binary::read_dotnet_string;
+
+    let mut cursor = Cursor::new(payload);
+    read_dotnet_string(&mut cursor).ok()
 }

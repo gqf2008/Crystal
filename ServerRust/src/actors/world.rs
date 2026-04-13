@@ -341,6 +341,17 @@ pub struct WorldAttackRequest {
     pub spell: u8,
 }
 
+/// 玩家主动登出（从 GateActor 转发）
+pub struct PlayerLogOut {
+    pub session_id: u64,
+}
+
+/// 聊天请求（从 GateActor 转发）
+pub struct ChatRequest {
+    pub session_id: u64,
+    pub message: String,
+}
+
 // ============================================================
 // Handler 实现
 // ============================================================
@@ -951,6 +962,114 @@ impl Message<WorldAttackRequest> for WorldActor {
                     });
                 }
             }
+        }
+    }
+}
+
+impl Message<PlayerLogOut> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: PlayerLogOut,
+        ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let record = match self.players.remove(&msg.session_id) {
+            Some(r) => r,
+            None => {
+                warn!("Logout request for unknown session {}", msg.session_id);
+                return;
+            }
+        };
+
+        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            info!("Player {} logged out (session={})", state.name, msg.session_id);
+
+            // 发送 LogOutSuccess 给客户端
+            let mut body = Vec::new();
+            body.extend_from_slice(&0i32.to_le_bytes()); // character count = 0
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16, &body),
+            });
+
+            // 通知其他玩家该玩家已离开
+            let others: Vec<_> = self.other_players(msg.session_id)
+                .into_iter()
+                .map(|r| (r.actor_ref.clone(), r.session_id))
+                .collect();
+
+            let opcode = mir2_shared::enums::ServerPacketIds::ObjectRemove as i16;
+            let mut remove_body = Vec::new();
+            remove_body.extend_from_slice(&state.object_id.to_le_bytes());
+            let packet = build_packet_bytes(opcode, &remove_body);
+
+            for (_, other_session) in others {
+                let _ = self.gate_ref.ask(SendToClient {
+                    session_id: other_session,
+                    data: packet.clone(),
+                });
+            }
+        }
+
+        // 主动断开连接
+        let _ = ctx.actor_ref().ask(crate::actors::world::PlayerDisconnected {
+            session_id: msg.session_id,
+        }).await;
+    }
+}
+
+impl Message<ChatRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: ChatRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        use mir2_shared::globals::MAX_CHAT_LENGTH;
+
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r,
+            None => {
+                warn!("Chat from unknown session {}", msg.session_id);
+                return;
+            }
+        };
+
+        // 截断过长消息
+        let message = if msg.message.len() > MAX_CHAT_LENGTH {
+            msg.message[..MAX_CHAT_LENGTH].to_string()
+        } else {
+            msg.message
+        };
+
+        if message.trim().is_empty() {
+            return;
+        }
+
+        // 获取玩家名称
+        let player_name = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            state.name
+        } else {
+            return;
+        };
+
+        let formatted = format!("[{}]: {}", player_name, message);
+        debug!("Chat from {}: {}", player_name, message);
+
+        // 广播给所有在线玩家（ChatType::Normal = 0）
+        // 客户端 read_body 期望: [message: DotNetString][chat_type: u8]
+        let mut body = Vec::new();
+        write_dotnet_string(&mut body, &formatted);
+        body.push(0u8); // ChatType::Normal
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+
+        for session_id in self.players.keys() {
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: *session_id,
+                data: packet.clone(),
+            });
         }
     }
 }
