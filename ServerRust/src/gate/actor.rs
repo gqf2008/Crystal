@@ -15,7 +15,7 @@ use tracing::{info, warn, error, debug};
 use mir2_shared::enums::{ClientPacketIds, ServerPacketIds};
 
 use super::codec::{encode, decode};
-use crate::util::wire::build_packet_bytes;
+use crate::util::wire::{build_packet_bytes, write_dotnet_string};
 
 /// 会话 ID
 pub type SessionId = u64;
@@ -372,6 +372,10 @@ impl Message<ClientData> for GateActor {
                     }
                 }
             }
+            x if x == ClientPacketIds::PickUp as i16 => {
+                // PickUp - 拾取物品（Phase 1：回复无物品）
+                handle_pickup(&gate_ref, msg.session_id);
+            }
             _ => {
                 debug!("Unknown opcode {} from session {}", opcode, msg.session_id);
             }
@@ -524,7 +528,17 @@ fn parse_login_payload(payload: &[u8]) -> Option<(String, String)> {
     }
 }
 
-/// 处理心跳：回复 KeepAlive
+/// 处理 PickUp：回复 "附近没有物品"（Phase 1：无地面物品系统）
+fn handle_pickup(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
+    // 发送 Chat 消息（ChatType::System = 2），客户端 chat handler 会解析为 SystemMessage
+    let mut body = Vec::new();
+    write_dotnet_string(&mut body, "附近没有可以拾取的物品。");
+    body.push(2u8); // ChatType::System
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
+    });
+}
 fn handle_keep_alive(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
     let response = build_packet_bytes(ServerPacketIds::KeepAlive as i16, &[]);
     let _ = gate_ref.ask(SendToClient {
