@@ -12,6 +12,7 @@ use macroquad::prelude::*;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
 use crate::utils::ime::{set_ime_enabled, set_ime_position};
+use super::ChatOptionSettingsHybrid;
 use super::native_ui_utils::DragHelper;
 
 /// 全局聊天发送桥接：ChatDialog 设置此标志，ui_system 消费并发送网络事件。
@@ -25,7 +26,6 @@ fn pending_chat() -> &'static std::sync::Mutex<Option<String>> {
 pub fn take_pending_chat_message() -> Option<String> {
     pending_chat().lock().unwrap().take()
 }
-use super::ChatOptionSettingsHybrid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatMessageKind {

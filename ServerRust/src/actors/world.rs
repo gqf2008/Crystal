@@ -1013,7 +1013,7 @@ impl Message<PlayerLogOut> for WorldActor {
     async fn handle(
         &mut self,
         msg: PlayerLogOut,
-        ctx: &mut Context<Self, Self::Reply>,
+        _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let record = match self.players.remove(&msg.session_id) {
             Some(r) => r,
@@ -1052,11 +1052,7 @@ impl Message<PlayerLogOut> for WorldActor {
                 });
             }
         }
-
-        // 主动断开连接
-        let _ = ctx.actor_ref().ask(crate::actors::world::PlayerDisconnected {
-            session_id: msg.session_id,
-        }).await;
+        // 玩家已从 self.players 移除，无需再发 PlayerDisconnected
     }
 }
 
@@ -1078,9 +1074,9 @@ impl Message<ChatRequest> for WorldActor {
             }
         };
 
-        // 截断过长消息
+        // 截断过长消息（避免 UTF-8 边界截断导致 panic）
         let message = if msg.message.len() > MAX_CHAT_LENGTH {
-            msg.message[..MAX_CHAT_LENGTH].to_string()
+            msg.message.chars().take(MAX_CHAT_LENGTH).collect()
         } else {
             msg.message
         };
@@ -1107,6 +1103,10 @@ impl Message<ChatRequest> for WorldActor {
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
 
         for session_id in self.players.keys() {
+            // 不给自己回发（本地已 add_message）
+            if *session_id == msg.session_id {
+                continue;
+            }
             let _ = self.gate_ref.ask(SendToClient {
                 session_id: *session_id,
                 data: packet.clone(),

@@ -539,6 +539,8 @@ fn handle_pickup(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
         data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
     });
 }
+
+/// 处理心跳：回复 KeepAlive
 fn handle_keep_alive(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
     let response = build_packet_bytes(ServerPacketIds::KeepAlive as i16, &[]);
     let _ = gate_ref.ask(SendToClient {
