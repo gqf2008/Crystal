@@ -157,12 +157,12 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::CombineItem as u16 => {
                 if let Ok(packet) = server::CombineItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemCombined {
-                        item: mir2_shared::UserItem {
-                            unique_id: packet.id_to,
-                            ..Default::default()
-                        },
+                        id_from: packet.id_from,
+                        id_to: packet.id_to,
+                        success: packet.success,
+                        destroy: packet.destroy,
                     });
-                    tracing::debug!("🔗 Items combined: from={} to={} (success={}, destroy={})",
+                    tracing::debug!("🔗 Items combined: from={} to={} success={} destroy={}",
                         packet.id_from, packet.id_to, packet.success, packet.destroy);
                 }
             }
@@ -415,12 +415,10 @@ impl PacketHandler for ItemHandler {
                 if let Ok(packet) = server::EquipSlotItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemSlotEquipped {
                         slot: packet.to as u32,
-                        item: mir2_shared::UserItem {
-                            unique_id: packet.unique_id,
-                            ..Default::default()
-                        },
+                        unique_id: packet.unique_id,
+                        success: packet.success,
                     });
-                    tracing::debug!("⚔️ Equip slot item: uid={}, slot={} (success={})",
+                    tracing::debug!("⚔️ Equip slot item: uid={}, slot={}, success={}",
                         packet.unique_id, packet.to, packet.success);
                 }
             }

@@ -2117,19 +2117,17 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ItemSealed { unique_id: _ } => {
                     tracing::trace!("🔒 Item sealed");
                 }
-                NetworkEvent::ItemSlotEquipped { slot, item } => {
-                    if let Some(e) = local_player_entity {
-                        if let Ok(mut eq) = ctx.world.get::<&mut crate::components::Equipment>(e) {
-                            eq.equip(*slot as u8, item.clone());
-                        }
+                NetworkEvent::ItemSlotEquipped { slot, unique_id, success } => {
+                    if *success {
+                        tracing::debug!("槽位装备成功: slot={} uid={}", slot, unique_id);
                     }
+                    // 实际物品数据由后续 UserSlotsRefresh 更新
                 }
-                NetworkEvent::ItemCombined { item } => {
-                    if let Some(e) = local_player_entity {
-                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
-                            let _ = inv.add_item(item.clone());
-                        }
+                NetworkEvent::ItemCombined { id_from, id_to, success, destroy } => {
+                    if *success {
+                        tracing::debug!("物品合成成功: from={} to={} destroy={}", id_from, id_to, destroy);
                     }
+                    // 实际物品数据由后续 UserSlotsRefresh 更新
                 }
                 NetworkEvent::ItemUpgraded { item } => {
                     // 升级后的物品替换原物品
