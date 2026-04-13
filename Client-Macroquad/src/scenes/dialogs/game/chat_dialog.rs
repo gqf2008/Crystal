@@ -13,6 +13,18 @@ use crate::resources::LibraryName;
 use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
 use crate::utils::ime::{set_ime_enabled, set_ime_position};
 use super::native_ui_utils::DragHelper;
+
+/// 全局聊天发送桥接：ChatDialog 设置此标志，ui_system 消费并发送网络事件。
+static PENDING_CHAT_MESSAGE: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
+
+fn pending_chat() -> &'static std::sync::Mutex<Option<String>> {
+    PENDING_CHAT_MESSAGE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// 检查是否有待发送的聊天消息（由 ui_system 调用）
+pub fn take_pending_chat_message() -> Option<String> {
+    pending_chat().lock().unwrap().take()
+}
 use super::ChatOptionSettingsHybrid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1133,17 +1145,21 @@ impl ChatDialogHybrid {
             
             // Enter 发送消息
             if is_key_pressed(KeyCode::Enter) && !self.input_text.is_empty() {
-                println!("📤 发送聊天: {}", self.input_text);
-                self.add_message(format!("[我] {}", self.input_text), WHITE);
+                let message = self.input_text.clone();
+                println!("📤 发送聊天: {}", message);
+                self.add_message(format!("[我] {}", message), WHITE);
 
-                // 对齐 C#：如果本次发送是私聊指令，记录 LastPM（用于下次按 '/' 预填）
-                if self.input_text.starts_with('/') {
-                    if let Some(first) = self.input_text.split_whitespace().next() {
+                // 记录私聊前缀（用于下次按 '/' 预填）
+                if message.starts_with('/') {
+                    if let Some(first) = message.split_whitespace().next() {
                         if first.len() > 1 {
                             self.last_pm = first.to_string();
                         }
                     }
                 }
+
+                // 设置待发送消息（由 ui_system 消费并发送网络事件）
+                *pending_chat().lock().unwrap() = Some(message);
 
                 self.input_text.clear();
             }

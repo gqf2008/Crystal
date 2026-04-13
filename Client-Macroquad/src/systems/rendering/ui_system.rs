@@ -556,6 +556,16 @@ impl RenderSystem for UIRenderSystem {
             }
         }
 
+        // 1.5) 检查 ChatDialog 的待发送消息，转发为网络事件
+        if let Some(message) = crate::scenes::dialogs::game::chat_dialog::take_pending_chat_message() {
+            if let Some(net) = ctx.net.as_ref() {
+                let _ = net.send(NetworkEvent::ChatRequest {
+                    message,
+                    linked_items: Vec::new(),
+                });
+            }
+        }
+
         // 2) 同步表现层数据 -> 具体 UI（小地图）
         let (minimap_world_size, minimap_player_pos, minimap_player_dir_radians) = {
             ctx.world
