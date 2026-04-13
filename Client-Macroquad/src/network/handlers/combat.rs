@@ -562,9 +562,9 @@ impl PacketHandler for CombatHandler {
 
             // InTrapRock
             x if x == ServerPacketIds::InTrapRock as u16 => {
-                if let Ok(_packet) = server::InTrapRock::read_body(&mut cursor) {
-                    events.push(NetworkEvent::TrapRockEntered { object_id: 0 });
-                    tracing::debug!("🪨 TrapRockEntered");
+                if let Ok(packet) = server::InTrapRock::read_body(&mut cursor) {
+                    events.push(NetworkEvent::TrapRockEntered { in_trap: packet.in_trap });
+                    tracing::debug!("🪨 InTrapRock: in_trap={}", packet.in_trap);
                 }
             }
 
@@ -579,10 +579,11 @@ impl PacketHandler for CombatHandler {
             // ObjectHidden
             x if x == ServerPacketIds::ObjectHidden as u16 => {
                 if let Ok(packet) = server::ObjectHidden::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ObjectHiddenByName {
-                        name: format!("{}", packet.object_id),
+                    events.push(NetworkEvent::ObjectHidden {
+                        object_id: packet.object_id,
+                        hidden: packet.hidden,
                     });
-                    tracing::debug!("👻 ObjectHiddenByName: object={} hidden={}", packet.object_id, packet.hidden);
+                    tracing::debug!("👻 ObjectHidden: object={} hidden={}", packet.object_id, packet.hidden);
                 }
             }
 
@@ -608,9 +609,9 @@ impl PacketHandler for CombatHandler {
 
             // AllowObserve
             x if x == ServerPacketIds::AllowObserve as u16 => {
-                if let Ok(_packet) = server::AllowObserve::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ObserveAllowed { allowed: true });
-                    tracing::debug!("👁️ ObserveAllowed");
+                if let Ok(packet) = server::AllowObserve::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ObserveAllowed { allowed: packet.allowed });
+                    tracing::debug!("👁️ ObserveAllowed: allowed={}", packet.allowed);
                 }
             }
 

@@ -290,17 +290,17 @@ impl PacketHandler for CharacterHandler {
 
             // ObjectName
             x if x == ServerPacketIds::ObjectName as u16 => {
-                if let Ok(_packet) = server::ObjectName::read_body(&mut cursor) {
-                    events.push(NetworkEvent::PlayerNameUpdated);
-                    tracing::debug!("📛 PlayerNameUpdated");
+                if let Ok(packet) = server::ObjectName::read_body(&mut cursor) {
+                    events.push(NetworkEvent::PlayerNameUpdated { object_id: packet.object_id, name: packet.name.clone() });
+                    tracing::debug!("📛 PlayerNameUpdated: object={} name={}", packet.object_id, packet.name);
                 }
             }
 
             // UserName
             x if x == ServerPacketIds::UserName as u16 => {
-                if let Ok(_packet) = server::UserName::read_body(&mut cursor) {
-                    events.push(NetworkEvent::UserNameUpdated);
-                    tracing::debug!("📛 UserNameUpdated");
+                if let Ok(packet) = server::UserName::read_body(&mut cursor) {
+                    events.push(NetworkEvent::UserNameUpdated { object_id: packet.object_id, name: packet.name.clone() });
+                    tracing::debug!("📛 UserNameUpdated: object={} name={}", packet.object_id, packet.name);
                 }
             }
 
@@ -358,8 +358,19 @@ impl PacketHandler for CharacterHandler {
 
             // UserSlotsRefresh
             x if x == ServerPacketIds::UserSlotsRefresh as u16 => {
-                if let Ok(_packet) = server::UserSlotsRefresh::read_body(&mut cursor) {
-                    tracing::debug!("🔄 UserSlotsRefresh");
+                if let Ok(packet) = server::UserSlotsRefresh::read_body(&mut cursor) {
+                    if let Some(inventory) = packet.inventory {
+                        let items: Vec<_> = inventory.into_iter().flatten().collect();
+                        let count = items.len();
+                        events.push(NetworkEvent::UserInventoryReceived { items });
+                        tracing::debug!("🔄 UserSlotsRefresh: {} inventory items", count);
+                    }
+                    if let Some(equipment) = packet.equipment {
+                        let items: Vec<_> = equipment.into_iter().flatten().collect();
+                        let count = items.len();
+                        events.push(NetworkEvent::UserEquipmentReceived { items });
+                        tracing::debug!("🔄 UserSlotsRefresh: {} equipment items", count);
+                    }
                 }
             }
 

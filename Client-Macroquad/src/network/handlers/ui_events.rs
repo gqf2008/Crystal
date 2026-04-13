@@ -176,9 +176,8 @@ impl PacketHandler for UiEventsHandler {
             // NewRecipeInfo
             x if x == ServerPacketIds::NewRecipeInfo as u16 => {
                 if let Ok(_packet) = server::NewRecipeInfo::read_body(&mut cursor) {
+                    events.push(NetworkEvent::NewRecipeInfoReceived);
                     tracing::debug!("📜 NewRecipeInfo received");
-                } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
                 }
             }
 

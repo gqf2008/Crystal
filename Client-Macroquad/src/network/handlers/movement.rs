@@ -137,7 +137,7 @@ impl PacketHandler for MovementHandler {
             x if x == ServerPacketIds::ObjectHide as u16 => {
                 if let Ok(packet) = server::ObjectHide::read_body(&mut cursor) {
                     tracing::trace!("👻 ObjectHidden: id={}", packet.object_id);
-                    events.push(NetworkEvent::ObjectHidden { object_id: packet.object_id });
+                    events.push(NetworkEvent::ObjectHidden { object_id: packet.object_id, hidden: true });
                 }
             }
             x if x == ServerPacketIds::ObjectShow as u16 => {

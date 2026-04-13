@@ -267,8 +267,8 @@ impl DialogSystem {
                 NetworkEvent::NewHeroCreated => {
                     cmds.push(UiCommand::PushHeroSystemChat("新英雄已创建".to_string()));
                 }
-                NetworkEvent::HeroInfoReceived => {
-                    cmds.push(UiCommand::PushHeroSystemChat("英雄信息已接收".to_string()));
+                NetworkEvent::HeroInfoReceived { hero_id } => {
+                    cmds.push(UiCommand::PushHeroSystemChat(format!("英雄信息已接收 (ID:{})", hero_id)));
                 }
                 NetworkEvent::HeroSpawnStateUpdated { state } => {
                     let state_str = match *state {

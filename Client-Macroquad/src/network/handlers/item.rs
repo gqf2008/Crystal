@@ -61,12 +61,11 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::EquipItem as u16 => {
                 if let Ok(packet) = server::EquipItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemEquipped {
-                        item: mir2_shared::UserItem {
-                            unique_id: packet.unique_id,
-                            ..Default::default()
-                        },
+                        unique_id: packet.unique_id,
+                        slot: packet.to as u8,
+                        success: packet.success,
                     });
-                    tracing::debug!("⚔️ Item equipped: uid={} (slot={}, success={})",
+                    tracing::debug!("⚔️ Item equipped: uid={} slot={} success={}",
                         packet.unique_id, packet.to, packet.success);
                 }
             }
@@ -75,10 +74,11 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::MergeItem as u16 => {
                 if let Ok(packet) = server::MergeItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemMerged {
-                        unique_id: packet.id_from,
-                        count: 0,
+                        id_from: packet.id_from,
+                        id_to: packet.id_to,
+                        success: packet.success,
                     });
-                    tracing::debug!("📦 Items merged: from={} to={} (success={})",
+                    tracing::debug!("📦 Items merged: from={} to={} success={}",
                         packet.id_from, packet.id_to, packet.success);
                 }
             }
@@ -109,9 +109,11 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::TakeBackItem as u16 => {
                 if let Ok(packet) = server::TakeBackItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemTakenBack {
-                        item: mir2_shared::UserItem::default(),
+                        from: packet.from,
+                        to: packet.to,
+                        success: packet.success,
                     });
-                    tracing::debug!("📤 Item taken back: {} -> {} (success={})",
+                    tracing::debug!("📤 Item taken back: {} -> {} success={}",
                         packet.from, packet.to, packet.success);
                 }
             }
@@ -120,9 +122,11 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::StoreItem as u16 => {
                 if let Ok(packet) = server::StoreItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemStored {
-                        item: mir2_shared::UserItem::default(),
+                        from: packet.from,
+                        to: packet.to,
+                        success: packet.success,
                     });
-                    tracing::debug!("🏦 Item stored: {} -> {} (success={})",
+                    tracing::debug!("🏦 Item stored: {} -> {} success={}",
                         packet.from, packet.to, packet.success);
                 }
             }

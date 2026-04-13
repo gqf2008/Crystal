@@ -1844,8 +1844,10 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectHeroSpawned => {
                     tracing::trace!("🦸 Object hero spawned");
                 }
-                NetworkEvent::ObjectHidden { object_id } => {
-                    hidden_objects.push(*object_id);
+                NetworkEvent::ObjectHidden { object_id, hidden } => {
+                    if *hidden {
+                        hidden_objects.push(*object_id);
+                    }
                 }
                 NetworkEvent::ObjectShown { object_id } => {
                     shown_objects.push(*object_id);
@@ -1918,11 +1920,11 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::ObjectGuildNameChanged2 { object_id, guild_name } => {
                     tracing::trace!("🏰 Object {} guild name changed: {}", object_id, guild_name);
                 }
-                NetworkEvent::PlayerNameUpdated => {
-                    tracing::trace!("👤 Player name updated");
+                NetworkEvent::PlayerNameUpdated { object_id, name } => {
+                    tracing::trace!("👤 Player {} name updated: {}", object_id, name);
                 }
-                NetworkEvent::UserNameUpdated => {
-                    tracing::trace!("👤 User name updated");
+                NetworkEvent::UserNameUpdated { object_id, name } => {
+                    tracing::trace!("👤 User {} name updated: {}", object_id, name);
                 }
 
                 // ===== 战斗扩展 =====
@@ -1987,16 +1989,9 @@ impl LogicSystem for NetworkApplySystem {
                 }
 
                 // ===== 物品扩展 =====
-                NetworkEvent::ItemEquipped { item } => {
-                    if let Some(e) = local_player_entity {
-                        if let Ok(mut eq) = ctx.world.get::<&mut crate::components::Equipment>(e) {
-                            if let Some(ref info) = item.info {
-                                let slot = eq.get_slot_for_type(info.item_type);
-                                if let Some(slot) = slot {
-                                    eq.equip(slot, item.clone());
-                                }
-                            }
-                        }
+                NetworkEvent::ItemEquipped { unique_id, slot, success } => {
+                    if *success {
+                        tracing::debug!("装备成功: uid={} slot={}", unique_id, slot);
                     }
                 }
                 NetworkEvent::ItemUnequipped { unique_id } => {
@@ -2031,17 +2026,11 @@ impl LogicSystem for NetworkApplySystem {
                         }
                     }
                 }
-                NetworkEvent::ItemMerged { unique_id, count } => {
-                    if let Some(e) = local_player_entity {
-                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
-                            for ref mut it in inv.items.iter_mut().flatten() {
-                                if it.unique_id == *unique_id {
-                                    it.count = *count as u16;
-                                    break;
-                                }
-                            }
-                        }
+                NetworkEvent::ItemMerged { id_from, id_to, success } => {
+                    if *success {
+                        tracing::debug!("物品合并成功: from={} to={}", id_from, id_to);
                     }
+                    // 实际物品数据由后续 UserSlotsRefresh 更新
                 }
                 NetworkEvent::ItemRemoved { unique_id } => {
                     if let Some(e) = local_player_entity {
@@ -2067,17 +2056,16 @@ impl LogicSystem for NetworkApplySystem {
                         }
                     }
                 }
-                NetworkEvent::ItemTakenBack { item } => {
-                    if let Some(e) = local_player_entity {
-                        if let Ok(mut inv) = ctx.world.get::<&mut crate::components::Inventory>(e) {
-                            let _ = inv.add_item(item.clone());
-                        }
+                NetworkEvent::ItemTakenBack { from, to, success } => {
+                    if *success {
+                        tracing::debug!("物品取回成功: {} -> {}", from, to);
                     }
+                    // 实际物品数据由后续 UserSlotsRefresh 更新
                 }
-                NetworkEvent::ItemStored { item } => {
-                    // 存入仓库：从背包移除，加入仓库（循环后处理）
-                    // 这里只标记日志
-                    tracing::trace!("📦 Item stored: unique_id={}", item.unique_id);
+                NetworkEvent::ItemStored { from, to, success } => {
+                    if *success {
+                        tracing::debug!("物品存入仓库: {} -> {}", from, to);
+                    }
                 }
                 NetworkEvent::ItemSplit { unique_id, count } => {
                     if let Some(e) = local_player_entity {
@@ -2380,8 +2368,8 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::NewHeroCreated => {
                     tracing::trace!("🦸 New hero created");
                 }
-                NetworkEvent::HeroInfoReceived => {
-                    tracing::trace!("🦸 Hero info received");
+                NetworkEvent::HeroInfoReceived { hero_id } => {
+                    tracing::trace!("🦸 Hero info received: hero_id={}", hero_id);
                 }
                 NetworkEvent::HeroSpawnStateUpdated { state } => {
                     tracing::trace!("🦸 Hero spawn state updated: {}", state);
@@ -2486,7 +2474,7 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::CompassUpdated { location } => { tracing::trace!("🧭 Compass updated: {:?}", location); }
                 NetworkEvent::BrowserOpened { url } => { tracing::trace!("🌐 Browser opened: {}", url); }
                 NetworkEvent::DoorOpened { door_id } => { tracing::trace!("🚪 Door {} opened", door_id); }
-                NetworkEvent::TrapRockEntered { object_id } => { tracing::trace!("🪤 Trap rock entered by {}", object_id); }
+                NetworkEvent::TrapRockEntered { in_trap } => { tracing::trace!("🪤 Trap rock: in_trap={}", in_trap); }
                 NetworkEvent::BaseStatsReceived => { tracing::trace!("📊 Base stats received"); }
                 NetworkEvent::InventoryResized { new_size } => {
                     if let Some(e) = local_player_entity {
@@ -2507,7 +2495,6 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::TransformUpdated { form } => { tracing::trace!("🔄 Transform updated: {}", form); }
                 NetworkEvent::MapEffectReceived { effect } => { tracing::trace!("🌈 Map effect: {}", effect); }
                 NetworkEvent::ObserveAllowed { allowed } => { tracing::trace!("👁️ Observe allowed: {}", allowed); }
-                NetworkEvent::ObjectHiddenByName { name } => { tracing::trace!("👻 Object hidden by name: {}", name); }
                 NetworkEvent::ObjectSpellReceived { object_id } => { tracing::trace!("✨ Object {} spell received", object_id); }
                 NetworkEvent::ObjectDecoReceived { object_id } => { tracing::trace!("🎭 Object {} deco received", object_id); }
                 NetworkEvent::ObjectSneakingReceived { object_id } => { tracing::trace!("🥷 Object {} sneaking received", object_id); }
@@ -2515,6 +2502,9 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::BindingShotSet { enabled } => { tracing::trace!("🎯 Binding shot set: {}", enabled); }
                 NetworkEvent::OutputMessageReceived { message } => { tracing::trace!("💬 Message: {}", message); }
                 NetworkEvent::UserStorageReceived { items: _ } => { tracing::trace!("📦 User storage received"); }
+                NetworkEvent::UserInventoryReceived { items } => { tracing::trace!("📦 User inventory received: {} items", items.len()); }
+                NetworkEvent::UserEquipmentReceived { items } => { tracing::trace!("📦 User equipment received: {} items", items.len()); }
+                NetworkEvent::NewRecipeInfoReceived => { tracing::trace!("📜 New recipe info received"); }
                 NetworkEvent::ChatItemStatsReceived => { tracing::trace!("💬 Chat item stats received"); }
                 NetworkEvent::ConcentrationSet { enabled } => { tracing::trace!("🎯 Concentration set: {}", enabled); }
                 NetworkEvent::ElementalSet { element } => { tracing::trace!("🔥 Elemental set: {}", element); }

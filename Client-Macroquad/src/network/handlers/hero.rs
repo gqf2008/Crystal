@@ -31,9 +31,9 @@ impl PacketHandler for HeroHandler {
 
             // HeroInformation
             x if x == ServerPacketIds::HeroInformation as u16 => {
-                if let Ok(_packet) = server::HeroInformation::read_body(&mut cursor) {
-                    events.push(NetworkEvent::HeroInfoReceived);
-                    tracing::debug!("🦸 Hero information received");
+                if let Ok(packet) = server::HeroInformation::read_body(&mut cursor) {
+                    events.push(NetworkEvent::HeroInfoReceived { hero_id: packet.hero_id });
+                    tracing::debug!("🦸 Hero information: hero_id={}", packet.hero_id);
                 }
             }
 
