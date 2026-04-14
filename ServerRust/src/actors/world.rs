@@ -1279,12 +1279,14 @@ impl Message<WorldAttackRequest> for WorldActor {
             }
         };
 
-        // 发送攻击请求到 PlayerActor
-        if let Ok(Some(result)) = record.actor_ref.ask(AttackRequest {
+        // 发送攻击请求到 PlayerActor，同时获取玩家属性用于伤害计算
+        let attacker_state = record.actor_ref.ask(GetPlayerState).await.ok().flatten();
+
+        if let (Some(ref state), Ok(Some(result))) = (attacker_state, record.actor_ref.ask(AttackRequest {
             session_id: msg.session_id,
             direction: msg.direction,
             spell: msg.spell,
-        }).await {
+        }).await) {
             // 广播 ObjectAttack 给其他玩家
             let others: Vec<_> = self.other_players(msg.session_id)
                 .into_iter()
@@ -1311,9 +1313,9 @@ impl Message<WorldAttackRequest> for WorldActor {
             for (oid, monster) in &mut self.monsters {
                 let dist = (monster.x - target_x).abs() + (monster.y - target_y).abs();
                 if dist <= 1 {
-                    // 命中怪物 - 使用战斗模块计算伤害
+                    // 命中怪物 - 使用战斗模块计算伤害（从 PlayerState 读取真实属性）
                     let attack_result = combat_attack::resolve_attack(
-                        5, 10, 0 // Phase 2: 玩家基础属性，后续从 PlayerState 读取
+                        state.min_attack, state.max_attack, 0
                     );
                     let damage = attack_result.damage;
                     monster.hp = monster.hp.saturating_sub(damage);
@@ -1385,9 +1387,9 @@ impl Message<WorldAttackRequest> for WorldActor {
 
                         // 只有范围内的玩家才受到伤害
                         if dist <= MELEE_RANGE {
-                            // 使用战斗模块计算伤害
+                            // 使用战斗模块计算伤害（从 PlayerState 读取真实属性，包含目标防御）
                             let attack_result = combat_attack::resolve_attack(
-                                5, 10, 2 // Phase 2: 基础属性，后续从 PlayerState 读取
+                                state.min_attack, state.max_attack, other_state.defence
                             );
                             let damage = attack_result.damage;
                             let _ = other_actor.ask(TakeDamage {
