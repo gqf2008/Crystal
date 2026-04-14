@@ -72,6 +72,6 @@ mod tests {
     fn test_connection_handler_creation() {
         let handler = ConnectionHandler;
         // opcode 0x0001 = ClientVersion, needs 1-byte payload (result)
-        assert!(handler.handle(&PacketHeader::new(5, 0x0001), &[1]).len() > 0);
+        assert!(!handler.handle(&PacketHeader::new(5, 0x0001), &[1]).is_empty());
     }
 }

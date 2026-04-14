@@ -1994,38 +1994,6 @@ impl LogicSystem for NetworkApplySystem {
                         tracing::debug!("装备成功: uid={} slot={}", unique_id, slot);
                     }
                 }
-                NetworkEvent::ItemUnequipped { unique_id } => {
-                    // 卸下装备回背包，先标记待处理（需根据 unique_id 找到对应槽位）
-                    if let Some(e) = local_player_entity {
-                        if let Ok(mut eq) = ctx.world.get::<&mut crate::components::Equipment>(e) {
-                            for slot in 0..14u8 {
-                                let current = match slot {
-                                    0 => eq.weapon.as_ref(),
-                                    1 => eq.armour.as_ref(),
-                                    2 => eq.helmet.as_ref(),
-                                    3 => eq.necklace.as_ref(),
-                                    4 => eq.bracelet_l.as_ref(),
-                                    5 => eq.bracelet_r.as_ref(),
-                                    6 => eq.ring_l.as_ref(),
-                                    7 => eq.ring_r.as_ref(),
-                                    8 => eq.amulet.as_ref(),
-                                    9 => eq.belt.as_ref(),
-                                    10 => eq.boots.as_ref(),
-                                    11 => eq.stone.as_ref(),
-                                    12 => eq.torch.as_ref(),
-                                    13 => eq.mount.as_ref(),
-                                    _ => None,
-                                };
-                                if let Some(it) = current {
-                                    if it.unique_id == *unique_id {
-                                        eq.unequip(slot);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
                 NetworkEvent::ItemMerged { id_from, id_to, success } => {
                     if *success {
                         tracing::debug!("物品合并成功: from={} to={}", id_from, id_to);
@@ -2147,9 +2115,6 @@ impl LogicSystem for NetworkApplySystem {
                 NetworkEvent::GroundItem { packet } => {
                     // 地面上的物品（可拾取）- 收集到循环外落地
                     ground_items.push(packet.clone());
-                }
-                NetworkEvent::GroundGold { amount } => {
-                    tracing::trace!("💰 Ground gold: {}", amount);
                 }
                 NetworkEvent::CreditChanged { delta } => {
                     tracing::trace!("💎 Credit changed: {}", delta);
