@@ -58,15 +58,13 @@ impl InputBox {
                 show_keyboard(true);
                 eprintln!("[InputBox] 获得焦点，启用输入法");
             }
-        } else {
-            if self.focused {
-                self.focused = false;
-                // 禁用输入法 - 这是关键！
-                show_keyboard(false);
-                eprintln!("[InputBox] 失去焦点，禁用输入法");
-            }
+        } else if self.focused {
+            self.focused = false;
+            // 禁用输入法 - 这是关键！
+            show_keyboard(false);
+            eprintln!("[InputBox] 失去焦点，禁用输入法");
         }
-        
+
         was_focused != self.focused
     }
     

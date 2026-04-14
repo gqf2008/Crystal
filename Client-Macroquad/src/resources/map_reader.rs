@@ -1304,7 +1304,7 @@ mod tests {
         let cell = CellInfo::new();
         assert_eq!(cell.back_index, 0);
         assert_eq!(cell.middle_index, 1);
-        assert_eq!(cell.fishing_cell, false);
+        assert!(!cell.fishing_cell);
         assert!(cell.cell_objects.is_none());
     }
 
