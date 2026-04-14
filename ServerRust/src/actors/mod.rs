@@ -1,3 +1,12 @@
 pub mod account;
+pub mod creature;
+pub mod friend;
+pub mod group;
+pub mod guild;
+pub mod inventory;
+pub mod mail;
 pub mod player;
+pub mod quest;
+pub mod refine;
+pub mod trade;
 pub mod world;

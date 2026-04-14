@@ -7,9 +7,16 @@ use kameo::message::Message;
 use kameo::prelude::Context;
 use tracing::{debug, info, warn};
 
+use crate::actors::inventory::PlayerInventory;
+use crate::actors::friend::FriendList;
+use crate::actors::mail::Mailbox;
+use crate::actors::guild::GuildRank;
+use crate::actors::quest::QuestLog;
+use crate::actors::creature::CreatureLog;
+use crate::actors::refine::RefineLog;
 use crate::gate::actor::{GateActor, SendToClient};
 use crate::maps::loader::MapData;
-use crate::util::wire::build_packet_bytes;
+use crate::util::wire::{build_packet_bytes, write_dotnet_string};
 
 /// 方向增量 (MirDirection: Up=0, UpRight=1, Right=2, DownRight=3, Down=4, DownLeft=5, Left=6, UpLeft=7)
 const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
@@ -54,6 +61,34 @@ pub struct PlayerState {
     pub max_attack: i32,
     /// 防御力
     pub defence: i32,
+    /// 背包 + 装备 + 金币
+    pub inventory: PlayerInventory,
+    /// 所属组队 ID（None = 无组队）
+    pub group_id: Option<u64>,
+    /// 好友列表
+    pub friend_list: FriendList,
+    /// 收件箱
+    pub mailbox: Mailbox,
+    /// 所属行会名称
+    pub guild_name: Option<String>,
+    /// 行会 rank
+    pub guild_rank: GuildRank,
+    /// 任务日志
+    pub quest_log: QuestLog,
+    /// 配偶名称
+    pub spouse_name: Option<String>,
+    /// 是否允许拜师
+    pub allow_mentor: bool,
+    /// 导师名称
+    pub mentor_name: Option<String>,
+    /// 宠物信息
+    pub creature_log: CreatureLog,
+    /// 英雄索引（0 = 无英雄）
+    pub hero_index: u8,
+    /// 英雄背包
+    pub hero_inventory: crate::actors::inventory::PlayerInventory,
+    /// 精炼日志
+    pub refine_log: RefineLog,
 }
 
 /// PlayerActor 状态
@@ -93,6 +128,20 @@ impl PlayerActor {
                 min_attack: 5,
                 max_attack: 10,
                 defence: 2,
+                inventory: PlayerInventory::new(),
+                group_id: None,
+                friend_list: FriendList::new(),
+                mailbox: Mailbox::new(),
+                guild_name: None,
+                guild_rank: GuildRank::Member,
+                quest_log: QuestLog::new(),
+                spouse_name: None,
+                allow_mentor: false,
+                mentor_name: None,
+                creature_log: CreatureLog::new(),
+                hero_index: 0,
+                hero_inventory: PlayerInventory::new(),
+                refine_log: RefineLog::new(),
             },
             gate_ref,
             map_data: None,
@@ -207,6 +256,27 @@ pub struct GetPlayerState;
 /// 设置地图数据
 pub struct SetMapData {
     pub map: MapData,
+}
+
+/// 复活玩家：重置 HP/MP 到最大值，设置位置
+pub struct RevivePlayer {
+    pub x: i32,
+    pub y: i32,
+    pub map_index: u16,
+}
+
+impl Message<RevivePlayer> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: RevivePlayer, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.x = msg.x;
+        self.state.y = msg.y;
+        self.state.hp = self.state.max_hp;
+        self.state.mp = self.state.max_mp;
+        // 发送位置更新
+        self.send_user_location();
+        true
+    }
 }
 
 // ============================================================
@@ -453,4 +523,789 @@ pub struct AttackResult {
     pub y: i32,
     pub direction: u8,
     pub spell: u8,
+}
+
+// ============================================================
+// 背包操作消息 Handler
+// ============================================================
+
+/// 添加物品到背包
+pub struct AddItemToInventory {
+    pub item: mir2_shared::data::item::UserItem,
+}
+
+impl Message<AddItemToInventory> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: AddItemToInventory, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        match self.state.inventory.add_item(msg.item) {
+            Some((_grid, _uid)) => {
+                // 发送 ItemChanged 通知客户端更新背包
+                self.send_inventory_changed();
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// 背包内移动
+pub struct InventoryMoveItem {
+    pub from_grid: u8,
+    pub to_grid: u8,
+}
+
+impl Message<InventoryMoveItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: InventoryMoveItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let success = self.state.inventory.move_item(msg.from_grid, msg.to_grid);
+        if success {
+            self.send_inventory_changed();
+        }
+        success
+    }
+}
+
+/// 获取物品信息
+pub struct GetItemInfo {
+    pub unique_id: u64,
+}
+
+impl Message<GetItemInfo> for PlayerActor {
+    type Reply = Option<mir2_shared::data::item::UserItem>;
+
+    async fn handle(&mut self, msg: GetItemInfo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.get_item(msg.unique_id).cloned()
+    }
+}
+
+/// 消耗物品
+pub struct ConsumeItem {
+    pub unique_id: u64,
+}
+
+impl Message<ConsumeItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: ConsumeItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let removed = self.state.inventory.remove_item_by_uid(msg.unique_id);
+        if removed.is_some() {
+            self.send_inventory_changed();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// 装备物品
+pub struct InventoryEquipItem {
+    pub grid: u8,
+    pub slot: crate::actors::inventory::EquipmentSlot,
+}
+
+impl Message<InventoryEquipItem> for PlayerActor {
+    type Reply = Option<(Option<mir2_shared::data::item::UserItem>, u64)>;
+
+    async fn handle(&mut self, msg: InventoryEquipItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let result = self.state.inventory.equip_item(msg.grid, msg.slot);
+        if result.is_some() {
+            self.send_inventory_changed();
+            self.send_equipment_changed();
+        }
+        result
+    }
+}
+
+/// 获取装备信息
+pub struct GetEquipmentInfo {
+    pub slot: crate::actors::inventory::EquipmentSlot,
+}
+
+impl Message<GetEquipmentInfo> for PlayerActor {
+    type Reply = Option<mir2_shared::data::item::UserItem>;
+
+    async fn handle(&mut self, msg: GetEquipmentInfo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.get_equipment(msg.slot).cloned()
+    }
+}
+
+/// 卸下装备
+pub struct InventoryUnequipItem {
+    pub slot: crate::actors::inventory::EquipmentSlot,
+}
+
+impl Message<InventoryUnequipItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: InventoryUnequipItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let result = self.state.inventory.unequip_item(msg.slot);
+        if result.is_some() {
+            self.send_inventory_changed();
+            self.send_equipment_changed();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// 从背包移除物品
+pub struct RemoveItemFromInventory {
+    pub unique_id: u64,
+}
+
+impl Message<RemoveItemFromInventory> for PlayerActor {
+    type Reply = Option<mir2_shared::data::item::UserItem>;
+
+    async fn handle(&mut self, msg: RemoveItemFromInventory, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let item = self.state.inventory.remove_item_by_uid(msg.unique_id);
+        if item.is_some() {
+            self.send_inventory_changed();
+        }
+        item
+    }
+}
+
+/// 合并物品
+pub struct InventoryMergeItem {
+    pub from_grid: u8,
+    pub to_grid: u8,
+}
+
+impl Message<InventoryMergeItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: InventoryMergeItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let success = self.state.inventory.merge_item(msg.from_grid, msg.to_grid);
+        if success {
+            self.send_inventory_changed();
+        }
+        success
+    }
+}
+
+/// 拆分物品
+pub struct InventorySplitItem {
+    pub grid: u8,
+    pub count: u16,
+}
+
+impl Message<InventorySplitItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: InventorySplitItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let success = self.state.inventory.split_item(msg.grid, msg.count);
+        if success {
+            self.send_inventory_changed();
+        }
+        success
+    }
+}
+
+/// 修理物品
+pub struct RepairItem {
+    pub unique_id: u64,
+}
+
+impl Message<RepairItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: RepairItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let success = self.state.inventory.repair_item(msg.unique_id);
+        if success {
+            self.send_inventory_changed();
+        }
+        success
+    }
+}
+
+/// 丢弃金币
+pub struct DropGold {
+    pub amount: u64,
+}
+
+impl Message<DropGold> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: DropGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if self.state.inventory.gold >= msg.amount {
+            self.state.inventory.gold -= msg.amount;
+            self.send_gold_changed();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// 添加金币
+pub struct AddGold {
+    pub amount: u64,
+}
+
+impl Message<AddGold> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: AddGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.gold += msg.amount;
+        self.send_gold_changed();
+        true
+    }
+}
+
+/// 扣减金币
+pub struct DeductGold {
+    pub amount: u64,
+}
+
+impl Message<DeductGold> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: DeductGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if self.state.inventory.gold >= msg.amount {
+            self.state.inventory.gold -= msg.amount;
+            self.send_gold_changed();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// 设置组队 ID
+pub struct SetGroupId {
+    pub group_id: Option<u64>,
+}
+
+impl Message<SetGroupId> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetGroupId, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.group_id = msg.group_id;
+    }
+}
+
+/// 添加好友到列表
+pub struct AddFriendToSelf {
+    pub friend_oid: u32,
+    pub friend_name: String,
+}
+
+impl Message<AddFriendToSelf> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: AddFriendToSelf, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.friend_list.add_friend(msg.friend_oid, msg.friend_name);
+    }
+}
+
+/// 从列表移除好友
+pub struct RemoveFriendFromSelf {
+    pub friend_oid: u32,
+}
+
+impl Message<RemoveFriendFromSelf> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: RemoveFriendFromSelf, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.friend_list.remove_friend(msg.friend_oid)
+    }
+}
+
+/// 设置好友备注
+pub struct SetFriendMemo {
+    pub friend_oid: u32,
+    pub memo: String,
+}
+
+impl Message<SetFriendMemo> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: SetFriendMemo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.friend_list.set_memo(msg.friend_oid, msg.memo)
+    }
+}
+
+// ============================================================
+// 邮件系统 Handler
+// ============================================================
+
+/// 添加邮件到收件箱
+pub struct AddMail {
+    pub mail: crate::actors::mail::MailMessage,
+}
+
+impl Message<AddMail> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: AddMail, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.mailbox.add_mail(msg.mail);
+    }
+}
+
+/// 获取邮件内容
+pub struct GetMail {
+    pub mail_id: u64,
+}
+
+impl Message<GetMail> for PlayerActor {
+    type Reply = Option<crate::actors::mail::MailMessage>;
+
+    async fn handle(&mut self, msg: GetMail, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.mailbox.get_mail(msg.mail_id).cloned()
+    }
+}
+
+/// 标记邮件已读
+pub struct MarkMailRead {
+    pub mail_id: u64,
+}
+
+impl Message<MarkMailRead> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: MarkMailRead, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.mailbox.mark_read(msg.mail_id)
+    }
+}
+
+/// 收取邮件附件（返回金币和物品）
+pub struct CollectMailAttachment {
+    pub mail_id: u64,
+}
+
+impl Message<CollectMailAttachment> for PlayerActor {
+    type Reply = Option<(u64, Vec<mir2_shared::data::item::UserItem>)>;
+
+    async fn handle(&mut self, msg: CollectMailAttachment, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.mailbox.collect_attachment(msg.mail_id)
+    }
+}
+
+/// 删除邮件
+pub struct DeleteMail {
+    pub mail_id: u64,
+}
+
+impl Message<DeleteMail> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: DeleteMail, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.mailbox.delete_mail(msg.mail_id)
+    }
+}
+
+// ============================================================
+// 行会系统 Handler
+// ============================================================
+
+/// 设置玩家行会信息
+pub struct SetGuildInfo {
+    pub guild_name: Option<String>,
+    pub rank: GuildRank,
+}
+
+impl Message<SetGuildInfo> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetGuildInfo, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.guild_name = msg.guild_name;
+        self.state.guild_rank = msg.rank;
+    }
+}
+
+// ============================================================
+// 任务系统 Handler
+// ============================================================
+
+/// 更新任务日志
+pub struct UpdateQuestLog {
+    pub quest_log: crate::actors::quest::QuestLog,
+}
+
+impl Message<UpdateQuestLog> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: UpdateQuestLog, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.quest_log = msg.quest_log;
+    }
+}
+
+/// 接受任务（在 PlayerActor 上执行）
+pub struct AcceptQuest {
+    pub quest: crate::actors::quest::QuestInstance,
+}
+
+impl Message<AcceptQuest> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: AcceptQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.quest_log.accept_quest(msg.quest)
+    }
+}
+
+/// 完成任务（在 PlayerActor 上执行，返回完成的奖励信息）
+pub struct CompleteQuest {
+    pub quest_index: i32,
+}
+
+impl Message<CompleteQuest> for PlayerActor {
+    type Reply = Option<crate::actors::quest::QuestInstance>;
+
+    async fn handle(&mut self, msg: CompleteQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.quest_log.complete_quest(msg.quest_index)
+    }
+}
+
+/// 放弃任务
+pub struct AbandonQuest {
+    pub quest_index: i32,
+}
+
+impl Message<AbandonQuest> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: AbandonQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.quest_log.abandon_quest(msg.quest_index)
+    }
+}
+
+/// 获取任务
+pub struct GetQuest {
+    pub quest_index: i32,
+}
+
+impl Message<GetQuest> for PlayerActor {
+    type Reply = Option<crate::actors::quest::QuestInstance>;
+
+    async fn handle(&mut self, msg: GetQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.quest_log.get_quest(msg.quest_index).cloned()
+    }
+}
+
+/// 检查是否已完成过该任务
+pub struct HasCompletedQuest {
+    pub quest_index: i32,
+}
+
+impl Message<HasCompletedQuest> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: HasCompletedQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.quest_log.completed_indices.contains(&msg.quest_index)
+    }
+}
+
+// ============================================================
+// 婚姻/师徒系统 Handler
+// ============================================================
+
+/// 设置配偶名称
+pub struct SetSpouse {
+    pub spouse_name: Option<String>,
+}
+
+impl Message<SetSpouse> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetSpouse, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.spouse_name = msg.spouse_name;
+    }
+}
+
+/// 设置是否允许拜师
+pub struct SetAllowMentor {
+    pub allow: bool,
+}
+
+impl Message<SetAllowMentor> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetAllowMentor, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.allow_mentor = msg.allow;
+    }
+}
+
+/// 设置导师名称
+pub struct SetMentor {
+    pub mentor_name: Option<String>,
+}
+
+impl Message<SetMentor> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetMentor, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.mentor_name = msg.mentor_name;
+    }
+}
+
+/// 设置宠物信息
+pub struct SetCreature {
+    pub creature_log: CreatureLog,
+}
+
+impl Message<SetCreature> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetCreature, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.creature_log = msg.creature_log;
+    }
+}
+
+/// 宠物饥饿计时
+pub struct TickCreatureHunger {
+    pub dt_seconds: u32,
+}
+
+impl Message<TickCreatureHunger> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: TickCreatureHunger, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.creature_log.tick(msg.dt_seconds);
+    }
+}
+
+/// 设置英雄索引
+pub struct SetHeroIndex {
+    pub hero_index: u8,
+}
+
+impl Message<SetHeroIndex> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetHeroIndex, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.hero_index = msg.hero_index;
+    }
+}
+
+/// 从英雄背包取回物品到主背包
+pub struct TakeBackHeroItem {
+    pub grid: u8,
+}
+
+impl Message<TakeBackHeroItem> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: TakeBackHeroItem, _ctx: &mut Context<Self, Self::Reply>) {
+        // 从英雄背包移除指定格子的物品并添加到主背包
+        if let Some(slot) = self.state.hero_inventory.backpack[msg.grid as usize].take() {
+            let _ = self.state.inventory.add_item(slot.item);
+        }
+    }
+}
+
+/// 从主背包转移物品到英雄背包
+pub struct TransferHeroItem {
+    pub grid: u8,
+}
+
+impl Message<TransferHeroItem> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: TransferHeroItem, _ctx: &mut Context<Self, Self::Reply>) {
+        // 从主背包移除指定格子的物品并添加到英雄背包
+        if let Some(slot) = self.state.inventory.backpack[msg.grid as usize].take() {
+            let _ = self.state.hero_inventory.add_item(slot.item);
+        }
+    }
+}
+
+/// 设置精炼日志
+pub struct SetRefineLog {
+    pub refine_log: crate::actors::refine::RefineLog,
+}
+
+impl Message<SetRefineLog> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetRefineLog, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.refine_log = msg.refine_log;
+    }
+}
+
+/// 存入仓库
+pub struct StoreItem {
+    pub grid: u8,
+}
+
+impl Message<StoreItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: StoreItem, _ctx: &mut Context<Self, Self::Reply>) -> bool {
+        match self.state.inventory.store_item(msg.grid) {
+            Some((_item, _storage_grid)) => true,
+            None => false,
+        }
+    }
+}
+
+/// 从仓库取出
+pub struct TakeBackItem {
+    pub grid: u8,
+}
+
+impl Message<TakeBackItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: TakeBackItem, _ctx: &mut Context<Self, Self::Reply>) -> bool {
+        match self.state.inventory.take_back_item(msg.grid) {
+            Some((_item, _backpack_grid)) => true,
+            None => false,
+        }
+    }
+}
+
+// ============================================================
+// 背包通知辅助函数
+// ============================================================
+
+impl PlayerActor {
+    fn send_inventory_changed(&self) {
+        // 发送 UserInformation 刷新（不含背包数据，客户端需主动查询）
+        self.send_user_information_refresh();
+    }
+
+    fn send_equipment_changed(&self) {
+        // 发送 UserInformation 刷新装备状态
+        self.send_user_information_refresh();
+    }
+
+    fn send_gold_changed(&self) {
+        // 发送 UserInformation 刷新金币
+        self.send_user_information_refresh();
+    }
+
+    /// 发送 UserInformation 刷新（不含完整背包数据）
+    fn send_user_information_refresh(&self) {
+        use mir2_shared::enums::ServerPacketIds;
+        let mut body = Vec::new();
+
+        body.extend_from_slice(&self.state.object_id.to_le_bytes());   // object_id
+        body.extend_from_slice(&1u32.to_le_bytes());                    // real_id
+        write_dotnet_string(&mut body, &self.state.name);               // name
+        write_dotnet_string(&mut body, "");                             // guild_name
+        write_dotnet_string(&mut body, "");                             // guild_rank
+        body.extend_from_slice(&0i32.to_le_bytes());                    // name_colour
+        body.push(0u8);                                                 // class=Warrior
+        body.push(0u8);                                                 // gender=Male
+        body.extend_from_slice(&self.state.level.to_le_bytes());        // level
+        body.extend_from_slice(&self.state.x.to_le_bytes());            // location_x
+        body.extend_from_slice(&self.state.y.to_le_bytes());            // location_y
+        body.push(self.state.direction);                                // direction
+        body.push(0u8);                                                 // hair
+        body.extend_from_slice(&(self.state.hp as i32).to_le_bytes());  // hp
+        body.extend_from_slice(&(self.state.mp as i32).to_le_bytes());  // mp
+        body.extend_from_slice(&(self.state.experience as i64).to_le_bytes()); // experience
+        body.extend_from_slice(&(self.state.max_experience as i64).to_le_bytes()); // max_experience
+        body.extend_from_slice(&0u16.to_le_bytes());                    // level_effects
+        body.push(0u8);                                                 // has_hero=false
+        body.push(0u8);                                                 // hero_behaviour=None
+
+        // 背包/装备数据（简化版：不发送完整物品，客户端通过 ItemChanged 等增量包更新）
+        body.push(0u8);                                                 // has_inventory=false
+        body.push(0u8);                                                 // has_equipment=false
+        body.push(0u8);                                                 // has_quest_inventory=false
+        body.extend_from_slice(&(self.state.inventory.gold as u32).to_le_bytes()); // gold
+        body.extend_from_slice(&0u32.to_le_bytes());                    // credit=0
+        body.push(0u8);                                                 // has_expanded_storage=false
+        body.extend_from_slice(&0i64.to_le_bytes());                    // expanded_storage_expiry_time
+        body.extend_from_slice(&0i32.to_le_bytes());                    // magic_count=0
+        body.extend_from_slice(&0i32.to_le_bytes());                    // creature_count=0
+        body.push(0u8);                                                 // summoned_creature_type
+        body.push(0u8);                                                 // creature_summoned=false
+        body.push(0u8);                                                 // allow_observe=false
+
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(ServerPacketIds::UserInformation as i16, &body),
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_state() -> PlayerState {
+        PlayerState {
+            object_id: 1000,
+            name: "TestPlayer".to_string(),
+            map_index: 0,
+            x: 330,
+            y: 330,
+            direction: 4,
+            hidden: false,
+            session_id: 1,
+            level: 1,
+            experience: 0,
+            max_experience: 100,
+            hp: 120,
+            max_hp: 120,
+            mp: 60,
+            max_mp: 60,
+            min_attack: 5,
+            max_attack: 10,
+            defence: 2,
+            inventory: PlayerInventory::new(),
+            group_id: None,
+            friend_list: FriendList::new(),
+            mailbox: Mailbox::new(),
+            guild_name: None,
+            guild_rank: GuildRank::Member,
+            quest_log: QuestLog::new(),
+            spouse_name: None,
+            allow_mentor: false,
+            mentor_name: None,
+            creature_log: CreatureLog::new(),
+            hero_index: 0,
+            hero_inventory: PlayerInventory::new(),
+            refine_log: RefineLog::new(),
+        }
+    }
+
+    #[test]
+    fn test_spouse_initial() {
+        assert!(make_state().spouse_name.is_none());
+    }
+
+    #[test]
+    fn test_set_spouse() {
+        let mut s = make_state();
+        s.spouse_name = Some("Partner".to_string());
+        assert_eq!(s.spouse_name, Some("Partner".to_string()));
+        s.spouse_name = None;
+        assert!(s.spouse_name.is_none());
+    }
+
+    #[test]
+    fn test_allow_mentor_toggle() {
+        let mut s = make_state();
+        assert!(!s.allow_mentor);
+        s.allow_mentor = true;
+        assert!(s.allow_mentor);
+        s.allow_mentor = false;
+        assert!(!s.allow_mentor);
+    }
+
+    #[test]
+    fn test_set_mentor() {
+        let mut s = make_state();
+        assert!(s.mentor_name.is_none());
+        s.mentor_name = Some("Master".to_string());
+        assert_eq!(s.mentor_name, Some("Master".to_string()));
+        s.mentor_name = None;
+        assert!(s.mentor_name.is_none());
+    }
+
+    #[test]
+    fn test_married_can_have_mentor() {
+        // A married player can still have a mentor
+        let mut s = make_state();
+        s.spouse_name = Some("Spouse".to_string());
+        s.mentor_name = Some("Master".to_string());
+        assert!(s.spouse_name.is_some());
+        assert!(s.mentor_name.is_some());
+    }
 }
