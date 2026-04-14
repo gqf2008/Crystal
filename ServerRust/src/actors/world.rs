@@ -5297,7 +5297,7 @@ impl Message<LockMailRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let mut state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        if let Some(mail) = state.mailbox.inbox.iter_mut().find(|m| m.mail_id == msg.mail_id) {
+        if let Some(mail) = state.mailbox.get_mail_mut(msg.mail_id) {
             mail.locked = msg.lock;
         }
         debug!("LockMail: {} mail_id={} lock={}", state.name, msg.mail_id, msg.lock);
@@ -5316,8 +5316,7 @@ impl Message<MailLockedItemRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let mut state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        // 标记邮件中的物品为锁定（邮件层面锁定）
-        if let Some(mail) = state.mailbox.inbox.iter_mut().find(|m| m.mail_id == msg.mail_id) {
+        if let Some(mail) = state.mailbox.get_mail_mut(msg.mail_id) {
             mail.locked = true;
         }
         debug!("MailLockedItem: {} mail_id={} item_index={}", state.name, msg.mail_id, msg.item_index);
@@ -5429,6 +5428,7 @@ impl Message<CancelReincarnationRequest> for WorldActor {
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
         debug!("CancelReincarnation: {}", state.name);
+        send_system_message(&self.gate_ref, msg.session_id, "轮回功能暂未开放");
     }
 }
 
@@ -5448,6 +5448,7 @@ impl Message<OpendoorRequest> for WorldActor {
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
         debug!("Opendoor: {} door_id={}", state.name, msg.door_id);
+        send_system_message(&self.gate_ref, msg.session_id, "该门已打开");
     }
 }
 
@@ -5469,6 +5470,8 @@ impl Message<DepositTradeItemRequest> for WorldActor {
         debug!("DepositTradeItem: {} uid={}", state.name, msg.unique_id);
         if !self.active_trades.values().any(|t| t.side_a.session_id == msg.session_id || t.side_b.session_id == msg.session_id) {
             send_system_message(&self.gate_ref, msg.session_id, "当前没有进行中的交易");
+        } else {
+            send_system_message(&self.gate_ref, msg.session_id, "交易物品存入功能暂未开放");
         }
     }
 }
@@ -5485,6 +5488,11 @@ impl Message<RetrieveTradeItemRequest> for WorldActor {
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
         debug!("RetrieveTradeItem: {} uid={}", state.name, msg.unique_id);
+        if !self.active_trades.values().any(|t| t.side_a.session_id == msg.session_id || t.side_b.session_id == msg.session_id) {
+            send_system_message(&self.gate_ref, msg.session_id, "当前没有进行中的交易");
+        } else {
+            send_system_message(&self.gate_ref, msg.session_id, "交易物品取回功能暂未开放");
+        }
     }
 }
 
@@ -5651,6 +5659,68 @@ impl Message<CancelItemRentalRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: CancelItemRentalRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("CancelItemRental: session={}", msg.session_id);
+        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+    }
+}
+
+pub struct ItemRentalFeeMsg {
+    pub session_id: u64,
+    pub amount: u32,
+}
+
+impl Message<ItemRentalFeeMsg> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ItemRentalFeeMsg, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("ItemRentalFee: session={} amount={}", msg.session_id, msg.amount);
+        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+    }
+}
+
+pub struct ItemRentalPeriodMsg {
+    pub session_id: u64,
+    pub duration: u32,
+}
+
+impl Message<ItemRentalPeriodMsg> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ItemRentalPeriodMsg, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("ItemRentalPeriod: session={} duration={}", msg.session_id, msg.duration);
+        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+    }
+}
+
+pub struct ItemRentalLockFeeMsg {
+    pub session_id: u64,
+}
+
+impl Message<ItemRentalLockFeeMsg> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ItemRentalLockFeeMsg, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("ItemRentalLockFee: session={}", msg.session_id);
+        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+    }
+}
+
+pub struct ItemRentalLockItemMsg {
+    pub session_id: u64,
+}
+
+impl Message<ItemRentalLockItemMsg> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ItemRentalLockItemMsg, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("ItemRentalLockItem: session={}", msg.session_id);
+        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+    }
+}
+
+pub struct ConfirmItemRentalMsg {
+    pub session_id: u64,
+}
+
+impl Message<ConfirmItemRentalMsg> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ConfirmItemRentalMsg, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("ConfirmItemRental: session={}", msg.session_id);
         send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
     }
 }

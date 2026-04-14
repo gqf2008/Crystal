@@ -761,10 +761,10 @@ impl Message<ClientData> for GateActor {
                 forward_item_rental_request(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ItemRentalFee as i16 => {
-                handle_item_rental_fee(&gate_ref, msg.session_id, payload);
+                forward_item_rental_fee(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ItemRentalPeriod as i16 => {
-                handle_item_rental_period(&gate_ref, msg.session_id, payload);
+                forward_item_rental_period(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::DepositRentalItem as i16 => {
                 forward_deposit_rental_item(&self.world_ref, msg.session_id, payload);
@@ -776,13 +776,13 @@ impl Message<ClientData> for GateActor {
                 forward_cancel_item_rental(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ItemRentalLockFee as i16 => {
-                handle_item_rental_lock_fee(&gate_ref, msg.session_id, payload);
+                forward_item_rental_lock_fee(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ItemRentalLockItem as i16 => {
-                handle_item_rental_lock_item(&gate_ref, msg.session_id, payload);
+                forward_item_rental_lock_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ConfirmItemRental as i16 => {
-                handle_confirm_item_rental(&gate_ref, msg.session_id, payload);
+                forward_confirm_item_rental(&self.world_ref, msg.session_id, payload);
             }
             // 其他
             x if x == ClientPacketIds::NPCConfirmInput as i16 => {
@@ -2481,19 +2481,19 @@ fn forward_item_rental_request(world_ref: &Option<ActorRef<crate::actors::world:
 }
 
 /// ItemRentalFee: [amount: u32]
-fn handle_item_rental_fee(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() >= 4 {
-        let amount = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-        debug!("ItemRentalFee: session={} amount={}", session_id, amount);
-    }
+fn forward_item_rental_fee(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let amount = if payload.len() >= 4 { u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) } else { 0 };
+    debug!("ItemRentalFee: session={} amount={}", session_id, amount);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::ItemRentalFeeMsg { session_id, amount });
 }
 
 /// ItemRentalPeriod: [duration: u32]
-fn handle_item_rental_period(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() >= 4 {
-        let duration = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-        debug!("ItemRentalPeriod: session={} duration={}", session_id, duration);
-    }
+fn forward_item_rental_period(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let duration = if payload.len() >= 4 { u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) } else { 0 };
+    debug!("ItemRentalPeriod: session={} duration={}", session_id, duration);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::ItemRentalPeriodMsg { session_id, duration });
 }
 
 /// DepositRentalItem: [unique_id: u64]
@@ -2522,18 +2522,24 @@ fn forward_cancel_item_rental(world_ref: &Option<ActorRef<crate::actors::world::
 }
 
 /// ItemRentalLockFee: []
-fn handle_item_rental_lock_fee(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+fn forward_item_rental_lock_fee(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
     debug!("ItemRentalLockFee: session={}", session_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::ItemRentalLockFeeMsg { session_id });
 }
 
 /// ItemRentalLockItem: []
-fn handle_item_rental_lock_item(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+fn forward_item_rental_lock_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
     debug!("ItemRentalLockItem: session={}", session_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::ItemRentalLockItemMsg { session_id });
 }
 
 /// ConfirmItemRental: []
-fn handle_confirm_item_rental(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+fn forward_confirm_item_rental(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
     debug!("ConfirmItemRental: session={}", session_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::ConfirmItemRentalMsg { session_id });
 }
 
 /// NPCConfirmInput: [npc_id: u32][input: DotNetString]
