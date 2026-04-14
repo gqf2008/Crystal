@@ -2210,6 +2210,16 @@ fn handle_request_chat_item(_gate_ref: &ActorRef<GateActor>, session_id: Session
 // 剩余 opcode stub handlers（Phase 15：覆盖所有未处理的 opcode）
 // ============================================================================
 
+/// 发送空市场搜索结果（复用）
+fn send_empty_market_results(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&0i32.to_le_bytes()); // count = 0
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(ServerPacketIds::MarketSuccess as i16, &body),
+    });
+}
+
 /// EquipSlotItem: [slot: u8] — 快捷装备栏装备
 fn handle_equip_slot_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 1 { return; }
@@ -2219,33 +2229,22 @@ fn handle_equip_slot_item(world_ref: &Option<ActorRef<crate::actors::world::Worl
     let _ = world_ref.ask(crate::actors::world::EquipSlotItemRequest { session_id, slot });
 }
 
-/// ConsignItem: [item_index: u32][price: u32][duration: u32]
+/// ConsignItem: [item_index: u32][price: u32][duration: u32] — 寄售
 fn handle_consign_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("ConsignItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "寄售功能开发中");
+    send_system_message(gate_ref, session_id, "寄售功能暂未开放");
 }
 
 /// MarketSearch: [keyword: DotNetString]
 fn handle_market_search(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("MarketSearch: session={}", session_id);
-    // 发送空结果
-    let mut body = Vec::new();
-    body.extend_from_slice(&0i32.to_le_bytes()); // count = 0
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::MarketSuccess as i16, &body),
-    });
+    send_empty_market_results(gate_ref, session_id);
 }
 
 /// MarketRefresh: []
 fn handle_market_refresh(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("MarketRefresh: session={}", session_id);
-    let mut body = Vec::new();
-    body.extend_from_slice(&0i32.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::MarketSuccess as i16, &body),
-    });
+    send_empty_market_results(gate_ref, session_id);
 }
 
 /// MarketPage: [page: u32]
@@ -2266,7 +2265,7 @@ fn handle_market_buy(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payl
     if payload.len() < 4 { return; }
     let listing_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("MarketBuy: session={} listing={}", session_id, listing_id);
-    send_system_message(gate_ref, session_id, "市场购买功能开发中");
+    send_system_message(gate_ref, session_id, "市场暂未开放");
 }
 
 /// MarketGetBack: [listing_id: u32]
@@ -2274,19 +2273,19 @@ fn handle_market_get_back(gate_ref: &ActorRef<GateActor>, session_id: SessionId,
     if payload.len() < 4 { return; }
     let listing_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("MarketGetBack: session={} listing={}", session_id, listing_id);
-    send_system_message(gate_ref, session_id, "取回寄售物品功能开发中");
+    send_system_message(gate_ref, session_id, "市场暂未开放");
 }
 
 /// MarketSellNow: [item_index: u32][price: u32]
 fn handle_market_sell_now(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("MarketSellNow: session={}", session_id);
-    send_system_message(gate_ref, session_id, "市场出售功能开发中");
+    send_system_message(gate_ref, session_id, "市场暂未开放");
 }
 
 /// FishingCast: [type: u8]
-fn handle_fishing_cast(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+fn handle_fishing_cast(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("FishingCast: session={}", session_id);
-    send_system_message(gate_ref, session_id, "钓鱼功能开发中");
+    // 钓鱼暂未开放，无需响应
 }
 
 /// FishingChangeAutocast: [enabled: bool]
@@ -2297,7 +2296,7 @@ fn handle_fishing_change_autocast(_gate_ref: &ActorRef<GateActor>, session_id: S
 /// CombineItem: [from: u32][to: u32]
 fn handle_combine_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("CombineItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "物品合成功能开发中");
+    send_system_message(gate_ref, session_id, "物品合成暂未开放");
 }
 
 /// AwakeningNeedMaterials: [item_index: u32]
@@ -2315,67 +2314,67 @@ fn handle_awakening_need_materials(gate_ref: &ActorRef<GateActor>, session_id: S
 /// AwakeningLockedItem: [unique_id: u64]
 fn handle_awakening_locked_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("AwakeningLockedItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "觉醒物品功能开发中");
+    send_system_message(gate_ref, session_id, "觉醒暂未开放");
 }
 
 /// Awakening: [unique_id: u64][material_slots: u32]
 fn handle_awakening(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("Awakening: session={}", session_id);
-    send_system_message(gate_ref, session_id, "觉醒功能开发中");
+    send_system_message(gate_ref, session_id, "觉醒暂未开放");
 }
 
 /// DisassembleItem: [unique_id: u64]
 fn handle_disassemble_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("DisassembleItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "物品分解功能开发中");
+    send_system_message(gate_ref, session_id, "物品分解暂未开放");
 }
 
 /// DowngradeAwakening: [unique_id: u64]
 fn handle_downgrade_awakening(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("DowngradeAwakening: session={}", session_id);
-    send_system_message(gate_ref, session_id, "降级觉醒功能开发中");
+    send_system_message(gate_ref, session_id, "觉醒降级暂未开放");
 }
 
 /// ResetAddedItem: [unique_id: u64]
 fn handle_reset_added_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("ResetAddedItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "重置附加属性功能开发中");
+    send_system_message(gate_ref, session_id, "重置附加属性暂未开放");
 }
 
 /// DepositTradeItem: [unique_id: u64]
 fn handle_deposit_trade_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("DepositTradeItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "交易物品存入功能开发中");
+    send_system_message(gate_ref, session_id, "交易物品操作暂未支持");
 }
 
 /// RetrieveTradeItem: [unique_id: u64]
 fn handle_retrieve_trade_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("RetrieveTradeItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "交易物品取回功能开发中");
+    send_system_message(gate_ref, session_id, "交易物品操作暂未支持");
 }
 
 /// GuildWarReturn: [guild_name: DotNetString]
 fn handle_guild_war_return(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("GuildWarReturn: session={}", session_id);
-    // 发送空结果（使用通用确认包）
+    send_system_message(gate_ref, session_id, "行会战暂未开放");
+}
+
+/// GuildBuffUpdate: [buff_id: u32]
+fn handle_guild_buff_update(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+    debug!("GuildBuffUpdate: session={}", session_id);
+    // 发送空 buff 列表
     let mut body = Vec::new();
-    body.push(0u8); // success = false
+    body.extend_from_slice(&0i32.to_le_bytes());
     let _ = gate_ref.ask(SendToClient {
         session_id,
         data: build_packet_bytes(ServerPacketIds::GuildBuffList as i16, &body),
     });
 }
 
-/// GuildBuffUpdate: [buff_id: u32]
-fn handle_guild_buff_update(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("GuildBuffUpdate: session={}", session_id);
-    send_system_message(gate_ref, session_id, "行会Buff功能开发中");
-}
-
 /// LockMail: [mail_id: u64][lock: bool]
-fn handle_lock_mail(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+fn handle_lock_mail(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("LockMail: session={}", session_id);
-    send_system_message(gate_ref, session_id, "邮件锁定功能开发中");
+    // 邮件锁定暂未开放，无需响应
 }
 
 /// MailLockedItem: [mail_id: u64][item_index: u32]
@@ -2388,7 +2387,7 @@ fn handle_mail_cost(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payl
     debug!("MailCost: session={}", session_id);
     // 返回计算结果（免费）
     let mut body = Vec::new();
-    body.extend_from_slice(&0u32.to_le_bytes()); // cost = 0
+    body.extend_from_slice(&0u32.to_le_bytes());
     let _ = gate_ref.ask(SendToClient {
         session_id,
         data: build_packet_bytes(ServerPacketIds::MailCost as i16, &body),
@@ -2403,7 +2402,7 @@ fn handle_share_quest(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _p
 /// AcceptReincarnation: []
 fn handle_accept_reincarnation(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("AcceptReincarnation: session={}", session_id);
-    send_system_message(gate_ref, session_id, "轮回功能开发中");
+    send_system_message(gate_ref, session_id, "轮回暂未开放");
 }
 
 /// CancelReincarnation: []
@@ -2414,6 +2413,7 @@ fn handle_cancel_reincarnation(_gate_ref: &ActorRef<GateActor>, session_id: Sess
 /// GetRentedItems: [page: u32]
 fn handle_get_rented_items(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("GetRentedItems: session={}", session_id);
+    // 发送空租赁物品列表
     let mut body = Vec::new();
     body.extend_from_slice(&0i32.to_le_bytes());
     let _ = gate_ref.ask(SendToClient {
@@ -2425,7 +2425,7 @@ fn handle_get_rented_items(gate_ref: &ActorRef<GateActor>, session_id: SessionId
 /// ItemRentalRequest: [target_name: DotNetString]
 fn handle_item_rental_request(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("ItemRentalRequest: session={}", session_id);
-    send_system_message(gate_ref, session_id, "物品租赁功能开发中");
+    send_system_message(gate_ref, session_id, "物品租赁暂未开放");
 }
 
 /// ItemRentalFee: [amount: u32]
@@ -2476,7 +2476,7 @@ fn handle_npc_confirm_input(_gate_ref: &ActorRef<GateActor>, session_id: Session
 /// GameshopBuy: [item_id: u32][quantity: u32]
 fn handle_gameshop_buy(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("GameshopBuy: session={}", session_id);
-    send_system_message(gate_ref, session_id, "游戏商店购买功能开发中");
+    send_system_message(gate_ref, session_id, "游戏商店暂未开放");
 }
 
 /// ReportIssue: [type: u32][description: DotNetString]
@@ -2516,6 +2516,6 @@ fn handle_guild_territory_page(gate_ref: &ActorRef<GateActor>, session_id: Sessi
 /// PurchaseGuildTerritory: [territory_id: u32]
 fn handle_purchase_guild_territory(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("PurchaseGuildTerritory: session={}", session_id);
-    send_system_message(gate_ref, session_id, "行会领地购买功能开发中");
+    send_system_message(gate_ref, session_id, "行会领地暂未开放");
 }
 
