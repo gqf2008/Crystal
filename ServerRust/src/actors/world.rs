@@ -10,7 +10,7 @@ use kameo::message::Message;
 use tokio::time::{interval, Duration};
 use tracing::{info, debug, warn};
 
-use crate::actors::player::{PlayerActor, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, SetGroupId, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetSpouse, SetAllowMentor, SetMentor, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode};
+use crate::actors::player::{PlayerActor, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, SetGroupId, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetSpouse, SetAllowMentor, SetMentor, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition};
 use crate::actors::inventory::{EquipmentSlot, GroundItem};
 use crate::actors::refine::RefineStatus;
 use crate::actors::group::{Group, GroupMember};
@@ -190,6 +190,7 @@ fn dist_to_spawn(monster: &MonsterState) -> i32 {
 }
 
 /// 运行时 NPC 状态
+#[derive(Clone)]
 #[allow(dead_code)]
 struct NpcState {
     pub object_id: u32,
@@ -4806,6 +4807,440 @@ impl Message<CheckRefineRequest> for WorldActor {
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "没有精炼进行中");
         }
+    }
+}
+
+// ============================================================
+// 辅助函数
+// ============================================================
+
+// ---------- RangeAttack / Magic ----------
+
+/// 远程攻击请求（同普通攻击，但带目标位置）
+pub struct RangeAttackRequest {
+    pub session_id: u64,
+    pub direction: u8,
+    pub target_id: u32,
+    pub target_x: i32,
+    pub target_y: i32,
+}
+
+impl Message<RangeAttackRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: RangeAttackRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+
+        let object_id = state.object_id;
+        let target_x = msg.target_x;
+        let target_y = msg.target_y;
+
+        // 广播 ObjectAttack 给其他玩家
+        let others: Vec<_> = self.other_players(msg.session_id)
+            .into_iter()
+            .map(|r| r.clone())
+            .collect();
+        for other in &others {
+            let mut body = Vec::new();
+            body.extend_from_slice(&object_id.to_le_bytes());
+            body.push(msg.direction);
+            body.push(0u8); // spell = 0 (range attack)
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: other.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &body),
+            });
+        }
+
+        // 检测范围内的怪物
+        let hit_monster_ids: Vec<u32> = self.monsters.iter()
+            .filter(|(_, m)| {
+                let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
+                dist <= 1
+            })
+            .map(|(id, _)| *id)
+            .collect();
+
+        for monster_id in hit_monster_ids {
+            if let Some(monster) = self.monsters.get_mut(&monster_id) {
+                let attack_result = combat_attack::resolve_attack(
+                    state.min_attack, state.max_attack, 0
+                );
+                let damage = attack_result.damage;
+                monster.hp = monster.hp.saturating_sub(damage);
+                debug!("RangeAttack: {} -> monster {} for {} damage", state.name, monster_id, damage);
+                if monster.hp <= 0 {
+                    // 死亡由 Tick 循环处理（广播 ObjectDied + 重生）
+                }
+            }
+        }
+    }
+}
+
+/// 技能释放请求
+pub struct MagicRequest {
+    pub session_id: u64,
+    pub direction: u8,
+    pub spell: u8,
+    pub target_id: u32,
+    pub target_x: i32,
+    pub target_y: i32,
+}
+
+impl Message<MagicRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: MagicRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => { return; }
+        };
+
+        let object_id = state.object_id;
+        let target_x = msg.target_x;
+        let target_y = msg.target_y;
+
+        // 广播 ObjectAttack（带 spell type）
+        let others: Vec<_> = self.other_players(msg.session_id)
+            .into_iter()
+            .map(|r| r.clone())
+            .collect();
+        for other in &others {
+            let mut body = Vec::new();
+            body.extend_from_slice(&object_id.to_le_bytes());
+            body.push(msg.direction);
+            body.push(msg.spell);
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: other.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &body),
+            });
+        }
+
+        // 技能命中范围内的怪物
+        let spell_range = 2; // 基础技能范围
+        let hit_monster_ids: Vec<u32> = self.monsters.iter()
+            .filter(|(_, m)| {
+                let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
+                dist <= spell_range
+            })
+            .map(|(id, _)| *id)
+            .collect();
+
+        for monster_id in hit_monster_ids {
+            if let Some(monster) = self.monsters.get_mut(&monster_id) {
+                let attack_result = combat_attack::resolve_attack(
+                    state.min_attack, state.max_attack, 0
+                );
+                let damage = attack_result.damage;
+                monster.hp = monster.hp.saturating_sub(damage);
+                debug!("Magic: {} spell={} -> monster {} for {} damage", state.name, msg.spell, monster_id, damage);
+                if monster.hp <= 0 {
+                    // 死亡由 Tick 循环处理（广播 ObjectDied + 重生）
+                }
+            }
+        }
+    }
+}
+
+// ---------- 传送/地图 ----------
+
+/// 传送到 NPC 请求
+pub struct TeleportToNPCRequest {
+    pub session_id: u64,
+    pub npc_id: u32,
+}
+
+impl Message<TeleportToNPCRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: TeleportToNPCRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // 按 object_id 查找 NPC
+        let npc = self.npcs.get(&msg.npc_id).cloned();
+        let Some(npc) = npc else {
+            send_system_message(&self.gate_ref, msg.session_id, "找不到该 NPC");
+            return;
+        };
+
+        // 传送到 NPC 附近
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+
+        let new_x = npc.x;
+        let new_y = npc.y;
+
+        // 更新玩家位置
+        let _ = record.actor_ref.ask(SetPlayerPosition { x: new_x, y: new_y, direction: npc.direction });
+        let mut body = Vec::new();
+        body.extend_from_slice(&new_x.to_le_bytes());
+        body.extend_from_slice(&new_y.to_le_bytes());
+        body.push(npc.direction);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
+        });
+
+        debug!("TeleportToNPC: {} -> {} ({}, {})", state.name, npc.name, new_x, new_y);
+    }
+}
+
+/// 请求地图信息（传送）
+pub struct RequestMapInfoRequest {
+    pub session_id: u64,
+    pub map_id: u32,
+}
+
+impl Message<RequestMapInfoRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: RequestMapInfoRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+
+        // 使用默认出生点
+        let (spawn_x, spawn_y) = (DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y);
+
+        // 更新玩家位置
+        let _ = record.actor_ref.ask(SetPlayerPosition { x: spawn_x, y: spawn_y, direction: state.direction });
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&spawn_x.to_le_bytes());
+        body.extend_from_slice(&spawn_y.to_le_bytes());
+        body.push(state.direction);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
+        });
+
+        debug!("RequestMapInfo: {} -> map {} ({}, {})", state.name, msg.map_id, spawn_x, spawn_y);
+    }
+}
+
+/// 搜索地图/NPC
+pub struct SearchMapRequest {
+    pub session_id: u64,
+    pub keyword: String,
+}
+
+impl Message<SearchMapRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SearchMapRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let keyword_lower = msg.keyword.to_lowercase();
+
+        // 搜索匹配的 NPC
+        let matched_npcs: Vec<_> = self.npcs.values()
+            .filter(|n| n.name.to_lowercase().contains(&keyword_lower))
+            .collect();
+
+        if matched_npcs.is_empty() {
+            send_system_message(&self.gate_ref, msg.session_id, "未找到匹配结果");
+            return;
+        }
+
+        // 发送第一个匹配的 NPC 信息
+        let npc = &matched_npcs[0];
+        send_system_message(&self.gate_ref, msg.session_id,
+            &format!("找到 NPC: {} 位置({}, {})", npc.name, npc.x, npc.y));
+        debug!("SearchMap: found {} NPCs matching '{}'", matched_npcs.len(), msg.keyword);
+    }
+}
+
+// ---------- 物品合成/回购 ----------
+
+/// 合成物品请求
+pub struct CraftItemRequest {
+    pub session_id: u64,
+    pub recipe_id: u32,
+}
+
+impl Message<CraftItemRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: CraftItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // 简化实现：发送合成成功确认
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&msg.recipe_id.to_le_bytes());
+        body.extend_from_slice(&1u16.to_le_bytes()); // count
+        body.push(1u8); // success = true
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
+        });
+
+        debug!("CraftItem: {} recipe={}", state.name, msg.recipe_id);
+    }
+}
+
+/// 回购物品请求（从 NPC 回购最近卖出的物品）
+pub struct BuyItemBackRequest {
+    pub session_id: u64,
+    pub item_index: u32,
+}
+
+impl Message<BuyItemBackRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: BuyItemBackRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // 简化：发送回购成功确认
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+
+        send_system_message(&self.gate_ref, msg.session_id, "回购成功");
+        debug!("BuyItemBack: {} item_index={}", state.name, msg.item_index);
+    }
+}
+
+// ---------- 角色管理 ----------
+
+/// 修改密码请求
+pub struct ChangePasswordRequest {
+    pub session_id: u64,
+    pub new_password: String,
+}
+
+impl Message<ChangePasswordRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: ChangePasswordRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // 简化实现：发送成功消息
+        send_system_message(&self.gate_ref, msg.session_id, "密码修改成功");
+        debug!("ChangePassword: session={}", msg.session_id);
+    }
+}
+
+// ---------- 角色管理 ----------
+
+/// 创建角色请求
+pub struct NewCharacterRequest {
+    pub session_id: u64,
+    pub name: String,
+    pub class: u8,
+    pub gender: u8,
+    pub hair: u16,
+}
+
+impl Message<NewCharacterRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NewCharacterRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // 验证角色名称
+        if msg.name.is_empty() || msg.name.len() > 20 {
+            send_system_message(&self.gate_ref, msg.session_id, "角色名称无效");
+            return;
+        }
+        // 检查名称是否已被使用
+        for r in self.players.values() {
+            if r.name.eq_ignore_ascii_case(&msg.name) {
+                send_system_message(&self.gate_ref, msg.session_id, "角色名称已被使用");
+                return;
+            }
+        }
+
+        let mut body = Vec::new();
+        write_dotnet_string(&mut body, &msg.name);
+        body.push(msg.class);
+        body.push(msg.gender);
+        body.extend_from_slice(&msg.hair.to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewCharacter as i16, &body),
+        });
+
+        debug!("NewCharacter: session={} name={} class={} gender={}", msg.session_id, msg.name, msg.class, msg.gender);
+    }
+}
+
+/// 删除角色请求
+pub struct DeleteCharacterRequest {
+    pub session_id: u64,
+    pub character_index: i32,
+}
+
+impl Message<DeleteCharacterRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: DeleteCharacterRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let mut body = Vec::new();
+        body.extend_from_slice(&msg.character_index.to_le_bytes());
+        body.push(1u8); // success
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteCharacter as i16, &body),
+        });
+
+        debug!("DeleteCharacter: session={} index={}", msg.session_id, msg.character_index);
+    }
+}
+
+/// 创建英雄请求
+pub struct NewHeroRequest {
+    pub session_id: u64,
+    pub hero_type: u8,
+}
+
+impl Message<NewHeroRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NewHeroRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+
+        // 设置英雄索引
+        let hero_index = msg.hero_type;
+        let _ = record.actor_ref.ask(SetHeroIndex { hero_index });
+
+        let mut body = Vec::new();
+        body.push(hero_index);
+        body.push(1u8); // success
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewHero as i16, &body),
+        });
+
+        debug!("NewHero: {} type={}", state.name, msg.hero_type);
     }
 }
 

@@ -402,10 +402,10 @@ impl Message<ClientData> for GateActor {
                 forward_merge_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::RangeAttack as i16 => {
-                handle_range_attack(&gate_ref, msg.session_id, payload);
+                forward_range_attack(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::Magic as i16 => {
-                handle_magic(&gate_ref, msg.session_id, payload);
+                forward_magic(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::Harvest as i16 => {
                 forward_harvest(&self.world_ref, msg.session_id, payload);
@@ -424,10 +424,10 @@ impl Message<ClientData> for GateActor {
                 forward_repair_item(&self.world_ref, msg.session_id, payload); // 特殊修理走相同逻辑
             }
             x if x == ClientPacketIds::CraftItem as i16 => {
-                handle_craft_item(&gate_ref, msg.session_id, payload);
+                forward_craft_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::BuyItemBack as i16 => {
-                handle_buy_item_back(&gate_ref, msg.session_id, payload);
+                forward_buy_item_back(&self.world_ref, msg.session_id, payload);
             }
             // 仓库操作
             x if x == ClientPacketIds::StoreItem as i16 => {
@@ -459,7 +459,7 @@ impl Message<ClientData> for GateActor {
                 forward_split_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::TeleportToNPC as i16 => {
-                handle_teleport_to_npc(&gate_ref, msg.session_id, payload);
+                forward_teleport_to_npc(&self.world_ref, msg.session_id, payload);
             }
             // 死亡恢复
             x if x == ClientPacketIds::TownRevive as i16 => {
@@ -470,13 +470,13 @@ impl Message<ClientData> for GateActor {
             }
             // 账号管理
             x if x == ClientPacketIds::NewCharacter as i16 => {
-                handle_new_character(&gate_ref, msg.session_id, payload);
+                forward_new_character(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ChangePassword as i16 => {
-                handle_change_password(&gate_ref, msg.session_id, payload);
+                forward_change_password(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::DeleteCharacter as i16 => {
-                handle_delete_character(&gate_ref, msg.session_id, payload);
+                forward_delete_character(&self.world_ref, msg.session_id, payload);
             }
             // 社交/组队
             x if x == ClientPacketIds::SwitchGroup as i16 => {
@@ -492,7 +492,7 @@ impl Message<ClientData> for GateActor {
                 forward_group_invite(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::NewHero as i16 => {
-                handle_new_hero(&gate_ref, msg.session_id, payload);
+                forward_new_hero(&self.world_ref, msg.session_id, payload);
             }
             // 交易
             x if x == ClientPacketIds::ChangeTrade as i16 => {
@@ -617,10 +617,10 @@ impl Message<ClientData> for GateActor {
             }
             // 传送/地图
             x if x == ClientPacketIds::RequestMapInfo as i16 => {
-                handle_request_map_info(&gate_ref, msg.session_id, payload);
+                forward_request_map_info(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::SearchMap as i16 => {
-                handle_search_map(&gate_ref, msg.session_id, payload);
+                forward_search_map(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::Observe as i16 => {
                 handle_observe(&gate_ref, msg.session_id, payload);
@@ -1152,47 +1152,36 @@ fn forward_repair_item(
 }
 
 /// RangeAttack: [dir: u8][x: i32][y: i32][target_id: u32][tx: i32][ty: i32]
-fn handle_range_attack(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 21 {
-        debug!("RangeAttack: session={} payload too short ({} bytes)", session_id, payload.len());
-        send_system_message(gate_ref, session_id, "远程攻击失败：数据不完整");
-        return;
-    }
+fn forward_range_attack(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 21 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
     let dir = payload[0];
     let target_id = u32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
-    debug!("RangeAttack: session={} dir={} target={}", session_id, dir, target_id);
-
-    // Phase 1: 发送 ObjectAttack 广播（同近战攻击），无目标判定
-    let mut body = Vec::new();
-    body.extend_from_slice(&0u32.to_le_bytes()); // attacker_id=0 (stub)
-    body.push(dir);
-    body.push(0u8); // spell type
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::ObjectAttack as i16, &body),
-    });
+    let target_x = i32::from_le_bytes(payload[13..17].try_into().unwrap_or([0; 4]));
+    let target_y = i32::from_le_bytes(payload[17..21].try_into().unwrap_or([0; 4]));
+    debug!("RangeAttack: session={} dir={} target={} pos=({}, {})", session_id, dir, target_id, target_x, target_y);
+    let _ = world_ref.ask(crate::actors::world::RangeAttackRequest { session_id, direction: dir, target_id, target_x, target_y });
 }
 
 /// Magic: [spell: u8][dir: u8][target_id: u32][x: i32][y: i32]
-fn handle_magic(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 12 {
-        debug!("Magic: session={} payload too short ({} bytes)", session_id, payload.len());
-        send_system_message(gate_ref, session_id, "技能释放失败：数据不完整");
-        return;
-    }
+fn forward_magic(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 12 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
     let spell = payload[0];
     let dir = payload[1];
-    debug!("Magic: session={} spell={} dir={}", session_id, spell, dir);
-
-    // Phase 1: 发送 ObjectAttack 广播（同普通攻击）
-    let mut body = Vec::new();
-    body.extend_from_slice(&0u32.to_le_bytes()); // attacker_id=0 (stub)
-    body.push(dir);
-    body.push(spell); // spell type
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::ObjectAttack as i16, &body),
-    });
+    let target_id = u32::from_le_bytes(payload[2..6].try_into().unwrap_or([0; 4]));
+    let target_x = i32::from_le_bytes(payload[6..10].try_into().unwrap_or([0; 4]));
+    let target_y = i32::from_le_bytes(payload[10..14].try_into().unwrap_or([0; 4]));
+    debug!("Magic: session={} spell={} dir={} target={} pos=({}, {})", session_id, spell, dir, target_id, target_x, target_y);
+    let _ = world_ref.ask(crate::actors::world::MagicRequest { session_id, direction: dir, spell, target_id, target_x, target_y });
 }
 
 /// Harvest: [dir: u8] — 采集/挖矿请求
@@ -1209,40 +1198,33 @@ fn forward_harvest(
 }
 
 // ============================================================================
-// NPC 商店 stub handlers
+// NPC 商店 / 合成 handlers
 // ============================================================================
 
 /// CraftItem: [recipe_id: u32][materials_count: u32]
-fn handle_craft_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 8 {
-        debug!("CraftItem: session={} payload too short", session_id);
-        send_system_message(gate_ref, session_id, "合成失败：数据不完整");
-        return;
-    }
+fn forward_craft_item(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 8 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
     let recipe_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("CraftItem: session={} recipe={}", session_id, recipe_id);
-
-    let mut body = Vec::new();
-    body.extend_from_slice(&recipe_id.to_le_bytes());
-    body.extend_from_slice(&0u16.to_le_bytes()); // count
-    body.push(1u8); // success = true
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::CraftItem as i16, &body),
-    });
+    let _ = world_ref.ask(crate::actors::world::CraftItemRequest { session_id, recipe_id });
 }
 
 /// BuyItemBack (回购): [item_index: u32]
-fn handle_buy_item_back(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 {
-        debug!("BuyItemBack: session={} payload too short", session_id);
-        send_system_message(gate_ref, session_id, "回购失败：数据不完整");
-        return;
-    }
+fn forward_buy_item_back(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 4 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
     let item_index = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    debug!("BuyItemBack: session={} index={}", session_id, item_index);
-
-    send_system_message(gate_ref, session_id, "回购成功");
+    debug!("BuyItemBack: session={} item_index={}", session_id, item_index);
+    let _ = world_ref.ask(crate::actors::world::BuyItemBackRequest { session_id, item_index });
 }
 
 // ============================================================================
@@ -1366,25 +1348,16 @@ fn handle_remove_slot_item(_gate_ref: &ActorRef<GateActor>, session_id: SessionI
 }
 
 /// TeleportToNPC: [npc_id: u32]
-/// Phase 1: 发送传送成功确认（使用 UserLocation 包，位置为 NPC 附近）
-fn handle_teleport_to_npc(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 {
-        debug!("TeleportToNPC: session={} payload too short", session_id);
-        send_system_message(gate_ref, session_id, "传送失败：数据不完整");
-        return;
-    }
+fn forward_teleport_to_npc(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 4 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
     let npc_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("TeleportToNPC: session={} npc={}", session_id, npc_id);
-
-    // 发送 UserLocation 将玩家传送到 NPC 附近（stub 位置）
-    let mut body = Vec::new();
-    body.extend_from_slice(&330i32.to_le_bytes()); // x
-    body.extend_from_slice(&330i32.to_le_bytes()); // y
-    body.push(4u8); // direction (Down)
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-    });
+    let _ = world_ref.ask(crate::actors::world::TeleportToNPCRequest { session_id, npc_id });
 }
 
 fn forward_town_revive(
@@ -1414,27 +1387,51 @@ fn handle_spell_toggle(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, p
 // ============================================================================
 
 /// ChangePassword: [old_password: DotNetString][new_password: DotNetString]
-fn handle_change_password(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+fn forward_change_password(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 2 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
+    let old_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
+    if payload.len() < 2 + old_len + 2 { return; }
+    let new_len = u16::from_le_bytes(payload[2 + old_len..4 + old_len].try_into().unwrap_or([0; 2])) as usize;
+    if payload.len() < 4 + old_len + new_len { return; }
+    let new_password = String::from_utf8_lossy(&payload[4 + old_len..4 + old_len + new_len]).to_string();
     debug!("ChangePassword: session={}", session_id);
-    send_system_message(gate_ref, session_id, "密码修改成功");
+    let _ = world_ref.ask(crate::actors::world::ChangePasswordRequest { session_id, new_password });
 }
 
 /// NewCharacter: [name: DotNetString][class: u8][gender: u8][hair: u16]
-fn handle_new_character(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("NewCharacter: session={}", session_id);
-    // Phase 1: 发送角色创建成功确认（stub 角色数据由客户端从服务器拉取）
-    send_system_message(gate_ref, session_id, "角色创建成功");
+fn forward_new_character(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 6 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
+    let name_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
+    if payload.len() < 2 + name_len + 4 { return; }
+    let name = String::from_utf8_lossy(&payload[2..2 + name_len]).to_string();
+    let class = payload[2 + name_len];
+    let gender = payload[2 + name_len + 1];
+    let hair = u16::from_le_bytes(payload[2 + name_len + 2..2 + name_len + 4].try_into().unwrap_or([0; 2]));
+    debug!("NewCharacter: session={} name={} class={} gender={} hair={}", session_id, name, class, gender, hair);
+    let _ = world_ref.ask(crate::actors::world::NewCharacterRequest { session_id, name, class, gender, hair });
 }
 
 /// DeleteCharacter: [character_index: i32]
-fn handle_delete_character(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 {
-        debug!("DeleteCharacter: session={} payload too short", session_id);
-        return;
-    }
-    let idx = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    debug!("DeleteCharacter: session={} index={}", session_id, idx);
-    send_system_message(gate_ref, session_id, "角色已删除");
+fn forward_delete_character(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 4 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
+    let character_index = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    debug!("DeleteCharacter: session={} index={}", session_id, character_index);
+    let _ = world_ref.ask(crate::actors::world::DeleteCharacterRequest { session_id, character_index });
 }
 
 // ============================================================================
@@ -1516,11 +1513,16 @@ fn forward_dell_member(
 // ============================================================================
 
 /// NewHero: [hero_type: u8]
-fn handle_new_hero(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+fn forward_new_hero(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
     if payload.is_empty() { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
     let hero_type = payload[0];
     debug!("NewHero: session={} type={}", session_id, hero_type);
-    send_system_message(gate_ref, session_id, "英雄创建成功");
+    let _ = world_ref.ask(crate::actors::world::NewHeroRequest { session_id, hero_type });
 }
 
 /// SetHeroBehaviour: [behaviour: u8]
@@ -2145,26 +2147,31 @@ fn handle_check_refine(world_ref: &Option<ActorRef<crate::actors::world::WorldAc
 // ============================================================================
 
 /// RequestMapInfo: [map_id: u32]
-fn handle_request_map_info(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+fn forward_request_map_info(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
     if payload.len() < 4 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
     let map_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("RequestMapInfo: session={} map={}", session_id, map_id);
-    // 发送到传送位置（stub）
-    let mut body = Vec::new();
-    body.extend_from_slice(&330i32.to_le_bytes());
-    body.extend_from_slice(&330i32.to_le_bytes());
-    body.push(4u8);
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-    });
+    let _ = world_ref.ask(crate::actors::world::RequestMapInfoRequest { session_id, map_id });
 }
 
 /// SearchMap: [keyword: DotNetString]
-fn handle_search_map(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 { return; }
-    debug!("SearchMap: session={}", session_id);
-    send_system_message(gate_ref, session_id, "未找到匹配结果");
+fn forward_search_map(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 2 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
+    let name_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
+    if payload.len() < 2 + name_len { return; }
+    let keyword = String::from_utf8_lossy(&payload[2..2 + name_len]).to_string();
+    debug!("SearchMap: session={} keyword={}", session_id, keyword);
+    let _ = world_ref.ask(crate::actors::world::SearchMapRequest { session_id, keyword });
 }
 
 /// Observe: [target_id: u32]

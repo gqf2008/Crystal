@@ -1114,6 +1114,23 @@ impl Message<SetHeroIndex> for PlayerActor {
     }
 }
 
+/// 设置玩家位置
+pub struct SetPlayerPosition {
+    pub x: i32,
+    pub y: i32,
+    pub direction: u8,
+}
+
+impl Message<SetPlayerPosition> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetPlayerPosition, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.x = msg.x;
+        self.state.y = msg.y;
+        self.state.direction = msg.direction;
+    }
+}
+
 /// 从英雄背包取回物品到主背包
 pub struct TakeBackHeroItem {
     pub grid: u8,
