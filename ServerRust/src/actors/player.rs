@@ -93,6 +93,10 @@ pub struct PlayerState {
     pub hero_inventory: crate::actors::inventory::PlayerInventory,
     /// 精炼日志
     pub refine_log: RefineLog,
+    /// 是否在钓鱼
+    pub is_fishing: bool,
+    /// 钓鱼自动释放
+    pub fishing_autocast: bool,
 }
 
 /// PlayerActor 状态
@@ -148,6 +152,8 @@ impl PlayerActor {
                 hero_index: 0,
                 hero_inventory: PlayerInventory::new(),
                 refine_log: RefineLog::new(),
+                is_fishing: false,
+                fishing_autocast: false,
             },
             gate_ref,
             map_data: None,
@@ -1131,6 +1137,21 @@ impl Message<SetPlayerPosition> for PlayerActor {
     }
 }
 
+/// 设置钓鱼状态
+pub struct SetFishing {
+    pub is_fishing: bool,
+    pub autocast: bool,
+}
+
+impl Message<SetFishing> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetFishing, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.is_fishing = msg.is_fishing;
+        self.state.fishing_autocast = msg.autocast;
+    }
+}
+
 /// 从英雄背包取回物品到主背包
 pub struct TakeBackHeroItem {
     pub grid: u8,
@@ -1315,6 +1336,8 @@ mod tests {
             hero_index: 0,
             hero_inventory: PlayerInventory::new(),
             refine_log: RefineLog::new(),
+            is_fishing: false,
+            fishing_autocast: false,
         }
     }
 

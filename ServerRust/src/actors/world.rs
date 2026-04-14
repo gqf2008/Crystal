@@ -10,7 +10,7 @@ use kameo::message::Message;
 use tokio::time::{interval, Duration};
 use tracing::{info, debug, warn};
 
-use crate::actors::player::{PlayerActor, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, SetGroupId, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetSpouse, SetAllowMentor, SetMentor, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition};
+use crate::actors::player::{PlayerActor, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, SetGroupId, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetSpouse, SetAllowMentor, SetMentor, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing};
 use crate::actors::inventory::{EquipmentSlot, GroundItem};
 use crate::actors::refine::RefineStatus;
 use crate::actors::group::{Group, GroupMember};
@@ -2985,6 +2985,7 @@ impl Message<SendMailRequest> for WorldActor {
                 .unwrap_or(0),
             read: false,
             collected: false,
+            locked: false,
             gold: total_gold,
             items,
         };
@@ -5241,6 +5242,547 @@ impl Message<NewHeroRequest> for WorldActor {
         });
 
         debug!("NewHero: {} type={}", state.name, msg.hero_type);
+    }
+}
+
+// ============================================================
+// 钓鱼系统
+// ============================================================
+
+pub struct FishingCastRequest {
+    pub session_id: u64,
+    pub fishing_type: u8,
+}
+
+impl Message<FishingCastRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: FishingCastRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        let _ = record.actor_ref.ask(SetFishing { is_fishing: true, autocast: false });
+        debug!("FishingCast: {} type={}", state.name, msg.fishing_type);
+    }
+}
+
+pub struct FishingChangeAutocastRequest {
+    pub session_id: u64,
+    pub enabled: bool,
+}
+
+impl Message<FishingChangeAutocastRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: FishingChangeAutocastRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        let _ = record.actor_ref.ask(SetFishing { is_fishing: state.is_fishing, autocast: msg.enabled });
+        debug!("FishingChangeAutocast: {} enabled={}", state.name, msg.enabled);
+    }
+}
+
+// ============================================================
+// 邮件锁定
+// ============================================================
+
+pub struct LockMailRequest {
+    pub session_id: u64,
+    pub mail_id: u64,
+    pub lock: bool,
+}
+
+impl Message<LockMailRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: LockMailRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let mut state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        if let Some(mail) = state.mailbox.inbox.iter_mut().find(|m| m.mail_id == msg.mail_id) {
+            mail.locked = msg.lock;
+        }
+        debug!("LockMail: {} mail_id={} lock={}", state.name, msg.mail_id, msg.lock);
+    }
+}
+
+pub struct MailLockedItemRequest {
+    pub session_id: u64,
+    pub mail_id: u64,
+    pub item_index: u32,
+}
+
+impl Message<MailLockedItemRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: MailLockedItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let mut state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        // 标记邮件中的物品为锁定（邮件层面锁定）
+        if let Some(mail) = state.mailbox.inbox.iter_mut().find(|m| m.mail_id == msg.mail_id) {
+            mail.locked = true;
+        }
+        debug!("MailLockedItem: {} mail_id={} item_index={}", state.name, msg.mail_id, msg.item_index);
+    }
+}
+
+// ============================================================
+// 任务分享
+// ============================================================
+
+pub struct ShareQuestRequest {
+    pub session_id: u64,
+    pub quest_id: u32,
+}
+
+impl Message<ShareQuestRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ShareQuestRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("ShareQuest: {} quest_id={}", state.name, msg.quest_id);
+    }
+}
+
+// ============================================================
+// 物品操作（合成/分解/重置）
+// ============================================================
+
+pub struct CombineItemRequest {
+    pub session_id: u64,
+    pub from_grid: u32,
+    pub to_grid: u32,
+}
+
+impl Message<CombineItemRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: CombineItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("CombineItem: {} from={} to={}", state.name, msg.from_grid, msg.to_grid);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CombineItem as i16, &[0u8]),
+        });
+    }
+}
+
+pub struct DisassembleItemRequest {
+    pub session_id: u64,
+    pub unique_id: u64,
+}
+
+impl Message<DisassembleItemRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: DisassembleItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("DisassembleItem: {} uid={}", state.name, msg.unique_id);
+        send_system_message(&self.gate_ref, msg.session_id, "该物品无法分解");
+    }
+}
+
+pub struct ResetAddedItemRequest {
+    pub session_id: u64,
+    pub unique_id: u64,
+}
+
+impl Message<ResetAddedItemRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ResetAddedItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("ResetAddedItem: {} uid={}", state.name, msg.unique_id);
+        send_system_message(&self.gate_ref, msg.session_id, "重置附加属性功能暂未开放");
+    }
+}
+
+// ============================================================
+// 轮回系统
+// ============================================================
+
+pub struct AcceptReincarnationRequest {
+    pub session_id: u64,
+}
+
+impl Message<AcceptReincarnationRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: AcceptReincarnationRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("AcceptReincarnation: {}", state.name);
+        send_system_message(&self.gate_ref, msg.session_id, "轮回功能暂未开放");
+    }
+}
+
+pub struct CancelReincarnationRequest {
+    pub session_id: u64,
+}
+
+impl Message<CancelReincarnationRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: CancelReincarnationRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("CancelReincarnation: {}", state.name);
+    }
+}
+
+// ============================================================
+// 开门
+// ============================================================
+
+pub struct OpendoorRequest {
+    pub session_id: u64,
+    pub door_id: u32,
+}
+
+impl Message<OpendoorRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: OpendoorRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("Opendoor: {} door_id={}", state.name, msg.door_id);
+    }
+}
+
+// ============================================================
+// 交易系统子操作（存入/取回交易物品）
+// ============================================================
+
+pub struct DepositTradeItemRequest {
+    pub session_id: u64,
+    pub unique_id: u64,
+}
+
+impl Message<DepositTradeItemRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: DepositTradeItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("DepositTradeItem: {} uid={}", state.name, msg.unique_id);
+        if !self.active_trades.values().any(|t| t.side_a.session_id == msg.session_id || t.side_b.session_id == msg.session_id) {
+            send_system_message(&self.gate_ref, msg.session_id, "当前没有进行中的交易");
+        }
+    }
+}
+
+pub struct RetrieveTradeItemRequest {
+    pub session_id: u64,
+    pub unique_id: u64,
+}
+
+impl Message<RetrieveTradeItemRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: RetrieveTradeItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("RetrieveTradeItem: {} uid={}", state.name, msg.unique_id);
+    }
+}
+
+// ============================================================
+// 市场/寄售系统（返回空列表）
+// ============================================================
+
+pub struct MarketSearchRequest {
+    pub session_id: u64,
+    pub item_index: u32,
+}
+
+impl Message<MarketSearchRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: MarketSearchRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("MarketSearch: session={} item={}", msg.session_id, msg.item_index);
+        let mut body = Vec::new();
+        body.extend_from_slice(&0i32.to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MarketSuccess as i16, &body),
+        });
+    }
+}
+
+pub struct MarketRefreshRequest {
+    pub session_id: u64,
+}
+
+impl Message<MarketRefreshRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: MarketRefreshRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("MarketRefresh: session={}", msg.session_id);
+        let mut body = Vec::new();
+        body.extend_from_slice(&0i32.to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCMarket as i16, &body),
+        });
+    }
+}
+
+pub struct MarketPageRequest {
+    pub session_id: u64,
+    pub page: u32,
+}
+
+impl Message<MarketPageRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: MarketPageRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("MarketPage: session={} page={}", msg.session_id, msg.page);
+        let mut body = Vec::new();
+        body.extend_from_slice(&0i32.to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCMarketPage as i16, &body),
+        });
+    }
+}
+
+pub struct MarketBuyRequest {
+    pub session_id: u64,
+    pub listing_id: u64,
+    pub count: u32,
+}
+
+impl Message<MarketBuyRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: MarketBuyRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("MarketBuy: session={} listing={} count={}", msg.session_id, msg.listing_id, msg.count);
+        send_system_message(&self.gate_ref, msg.session_id, "该商品已下架");
+    }
+}
+
+pub struct MarketGetBackRequest {
+    pub session_id: u64,
+    pub listing_id: u64,
+}
+
+impl Message<MarketGetBackRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: MarketGetBackRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("MarketGetBack: session={} listing={}", msg.session_id, msg.listing_id);
+        send_system_message(&self.gate_ref, msg.session_id, "无法取回寄售物品");
+    }
+}
+
+pub struct MarketSellNowRequest {
+    pub session_id: u64,
+    pub unique_id: u64,
+    pub price: u64,
+}
+
+impl Message<MarketSellNowRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: MarketSellNowRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("MarketSellNow: session={} uid={} price={}", msg.session_id, msg.unique_id, msg.price);
+        send_system_message(&self.gate_ref, msg.session_id, "寄售功能暂未开放");
+    }
+}
+
+pub struct ConsignItemRequest {
+    pub session_id: u64,
+    pub unique_id: u64,
+    pub price: u64,
+}
+
+impl Message<ConsignItemRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ConsignItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("ConsignItem: session={} uid={} price={}", msg.session_id, msg.unique_id, msg.price);
+        send_system_message(&self.gate_ref, msg.session_id, "寄售功能暂未开放");
+    }
+}
+
+// ============================================================
+// 物品租赁系统
+// ============================================================
+
+pub struct ItemRentalRequestMsg {
+    pub session_id: u64,
+    pub target_id: u64,
+}
+
+impl Message<ItemRentalRequestMsg> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ItemRentalRequestMsg, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("ItemRentalRequest: session={} target={}", msg.session_id, msg.target_id);
+        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+    }
+}
+
+pub struct DepositRentalItemRequest {
+    pub session_id: u64,
+    pub unique_id: u64,
+}
+
+impl Message<DepositRentalItemRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: DepositRentalItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("DepositRentalItem: session={} uid={}", msg.session_id, msg.unique_id);
+        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+    }
+}
+
+pub struct RetrieveRentalItemRequest {
+    pub session_id: u64,
+    pub unique_id: u64,
+}
+
+impl Message<RetrieveRentalItemRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: RetrieveRentalItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("RetrieveRentalItem: session={} uid={}", msg.session_id, msg.unique_id);
+        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+    }
+}
+
+pub struct CancelItemRentalRequest {
+    pub session_id: u64,
+}
+
+impl Message<CancelItemRentalRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: CancelItemRentalRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("CancelItemRental: session={}", msg.session_id);
+        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+    }
+}
+
+// ============================================================
+// 行会战/领地
+// ============================================================
+
+pub struct GuildWarReturnRequest {
+    pub session_id: u64,
+    pub guild_name: String,
+}
+
+impl Message<GuildWarReturnRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: GuildWarReturnRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("GuildWarReturn: session={} guild={}", msg.session_id, msg.guild_name);
+        send_system_message(&self.gate_ref, msg.session_id, "行会战暂未开放");
+    }
+}
+
+pub struct GuildBuffUpdateRequest {
+    pub session_id: u64,
+    pub buff_id: u32,
+}
+
+impl Message<GuildBuffUpdateRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: GuildBuffUpdateRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("GuildBuffUpdate: session={} buff_id={}", msg.session_id, msg.buff_id);
+        send_system_message(&self.gate_ref, msg.session_id, "行会BUFF暂未开放");
+    }
+}
+
+pub struct GuildTerritoryPageRequest {
+    pub session_id: u64,
+    pub page: u32,
+}
+
+impl Message<GuildTerritoryPageRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: GuildTerritoryPageRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("GuildTerritoryPage: session={} page={}", msg.session_id, msg.page);
+        let mut body = Vec::new();
+        body.extend_from_slice(&0i32.to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildTerritoryPage as i16, &body),
+        });
+    }
+}
+
+pub struct PurchaseGuildTerritoryRequest {
+    pub session_id: u64,
+    pub territory_id: u32,
+}
+
+impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: PurchaseGuildTerritoryRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("PurchaseGuildTerritory: session={} territory={}", msg.session_id, msg.territory_id);
+        send_system_message(&self.gate_ref, msg.session_id, "行会领地暂未开放");
+    }
+}
+
+// ============================================================
+// NPC确认输入
+// ============================================================
+
+pub struct NPCConfirmInputRequest {
+    pub session_id: u64,
+    pub npc_id: u32,
+    pub input_text: String,
+}
+
+impl Message<NPCConfirmInputRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: NPCConfirmInputRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("NPCConfirmInput: {} npc_id={} input={}", state.name, msg.npc_id, msg.input_text);
+    }
+}
+
+// ============================================================
+// 游戏商店/举报/排名
+// ============================================================
+
+pub struct GameshopBuyRequest {
+    pub session_id: u64,
+    pub item_id: u32,
+    pub count: u32,
+}
+
+impl Message<GameshopBuyRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: GameshopBuyRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("GameshopBuy: session={} item={} count={}", msg.session_id, msg.item_id, msg.count);
+        send_system_message(&self.gate_ref, msg.session_id, "游戏商店暂未开放");
+    }
+}
+
+pub struct ReportIssueRequest {
+    pub session_id: u64,
+    pub issue_type: u8,
+    pub description: String,
+}
+
+impl Message<ReportIssueRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ReportIssueRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("ReportIssue: session={} type={}", msg.session_id, msg.issue_type);
+        send_system_message(&self.gate_ref, msg.session_id, "举报信息已提交，感谢您的反馈");
+    }
+}
+
+pub struct GetRankingRequest {
+    pub session_id: u64,
+    pub rank_type: u8,
+}
+
+impl Message<GetRankingRequest> for WorldActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: GetRankingRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("GetRanking: session={} type={}", msg.session_id, msg.rank_type);
+        let mut body = Vec::new();
+        body.extend_from_slice(&0i32.to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Rankings as i16, &body),
+        });
     }
 }
 

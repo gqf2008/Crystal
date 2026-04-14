@@ -666,36 +666,36 @@ impl Message<ClientData> for GateActor {
             }
             // 市场/寄售
             x if x == ClientPacketIds::ConsignItem as i16 => {
-                handle_consign_item(&gate_ref, msg.session_id, payload);
+                forward_consign_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MarketSearch as i16 => {
-                handle_market_search(&gate_ref, msg.session_id, payload);
+                forward_market_search(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MarketRefresh as i16 => {
-                handle_market_refresh(&gate_ref, msg.session_id, payload);
+                forward_market_refresh(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MarketPage as i16 => {
-                handle_market_page(&gate_ref, msg.session_id, payload);
+                forward_market_page(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MarketBuy as i16 => {
-                handle_market_buy(&gate_ref, msg.session_id, payload);
+                forward_market_buy(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MarketGetBack as i16 => {
-                handle_market_get_back(&gate_ref, msg.session_id, payload);
+                forward_market_get_back(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MarketSellNow as i16 => {
-                handle_market_sell_now(&gate_ref, msg.session_id, payload);
+                forward_market_sell_now(&self.world_ref, msg.session_id, payload);
             }
             // 钓鱼
             x if x == ClientPacketIds::FishingCast as i16 => {
-                handle_fishing_cast(&gate_ref, msg.session_id, payload);
+                forward_fishing_cast(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::FishingChangeAutocast as i16 => {
-                handle_fishing_change_autocast(&gate_ref, msg.session_id, payload);
+                forward_fishing_change_autocast(&self.world_ref, msg.session_id, payload);
             }
             // 觉醒/分解
             x if x == ClientPacketIds::CombineItem as i16 => {
-                handle_combine_item(&gate_ref, msg.session_id, payload);
+                forward_combine_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::AwakeningNeedMaterials as i16 => {
                 handle_awakening_need_materials(&gate_ref, msg.session_id, payload);
@@ -707,27 +707,27 @@ impl Message<ClientData> for GateActor {
                 handle_awakening(&gate_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::DisassembleItem as i16 => {
-                handle_disassemble_item(&gate_ref, msg.session_id, payload);
+                forward_disassemble_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::DowngradeAwakening as i16 => {
                 handle_downgrade_awakening(&gate_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ResetAddedItem as i16 => {
-                handle_reset_added_item(&gate_ref, msg.session_id, payload);
+                forward_reset_added_item(&self.world_ref, msg.session_id, payload);
             }
             // 交易子操作
             x if x == ClientPacketIds::DepositTradeItem as i16 => {
-                handle_deposit_trade_item(&gate_ref, msg.session_id, payload);
+                forward_deposit_trade_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::RetrieveTradeItem as i16 => {
-                handle_retrieve_trade_item(&gate_ref, msg.session_id, payload);
+                forward_retrieve_trade_item(&self.world_ref, msg.session_id, payload);
             }
             // 行会扩展
             x if x == ClientPacketIds::GuildWarReturn as i16 => {
-                handle_guild_war_return(&gate_ref, msg.session_id, payload);
+                forward_guild_war_return(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::GuildBuffUpdate as i16 => {
-                handle_guild_buff_update(&gate_ref, msg.session_id, payload);
+                forward_guild_buff_update(&self.world_ref, msg.session_id, payload);
             }
             // 婚姻/师徒扩展
             x if x == ClientPacketIds::ReplaceWedRing as i16 => {
@@ -735,30 +735,30 @@ impl Message<ClientData> for GateActor {
             }
             // 邮件扩展
             x if x == ClientPacketIds::LockMail as i16 => {
-                handle_lock_mail(&gate_ref, msg.session_id, payload);
+                forward_lock_mail(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MailLockedItem as i16 => {
-                handle_mail_locked_item(&gate_ref, msg.session_id, payload);
+                forward_mail_locked_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MailCost as i16 => {
                 handle_mail_cost(&gate_ref, msg.session_id, payload);
             }
             // 轮回
             x if x == ClientPacketIds::ShareQuest as i16 => {
-                handle_share_quest(&gate_ref, msg.session_id, payload);
+                forward_share_quest(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::AcceptReincarnation as i16 => {
-                handle_accept_reincarnation(&gate_ref, msg.session_id, payload);
+                forward_accept_reincarnation(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::CancelReincarnation as i16 => {
-                handle_cancel_reincarnation(&gate_ref, msg.session_id, payload);
+                forward_cancel_reincarnation(&self.world_ref, msg.session_id, payload);
             }
             // 租赁系统
             x if x == ClientPacketIds::GetRentedItems as i16 => {
                 handle_get_rented_items(&gate_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ItemRentalRequest as i16 => {
-                handle_item_rental_request(&gate_ref, msg.session_id, payload);
+                forward_item_rental_request(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ItemRentalFee as i16 => {
                 handle_item_rental_fee(&gate_ref, msg.session_id, payload);
@@ -767,13 +767,13 @@ impl Message<ClientData> for GateActor {
                 handle_item_rental_period(&gate_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::DepositRentalItem as i16 => {
-                handle_deposit_rental_item(&gate_ref, msg.session_id, payload);
+                forward_deposit_rental_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::RetrieveRentalItem as i16 => {
-                handle_retrieve_rental_item(&gate_ref, msg.session_id, payload);
+                forward_retrieve_rental_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::CancelItemRental as i16 => {
-                handle_cancel_item_rental(&gate_ref, msg.session_id, payload);
+                forward_cancel_item_rental(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ItemRentalLockFee as i16 => {
                 handle_item_rental_lock_fee(&gate_ref, msg.session_id, payload);
@@ -786,26 +786,26 @@ impl Message<ClientData> for GateActor {
             }
             // 其他
             x if x == ClientPacketIds::NPCConfirmInput as i16 => {
-                handle_npc_confirm_input(&gate_ref, msg.session_id, payload);
+                forward_npc_confirm_input(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::GameshopBuy as i16 => {
-                handle_gameshop_buy(&gate_ref, msg.session_id, payload);
+                forward_gameshop_buy(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ReportIssue as i16 => {
-                handle_report_issue(&gate_ref, msg.session_id, payload);
+                forward_report_issue(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::GetRanking as i16 => {
-                handle_get_ranking(&gate_ref, msg.session_id, payload);
+                forward_get_ranking(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::Opendoor as i16 => {
-                handle_opendoor(&gate_ref, msg.session_id, payload);
+                forward_opendoor(&self.world_ref, msg.session_id, payload);
             }
             // 行会领地 (auto-value enums)
             x if x == ClientPacketIds::GuildTerritoryPage as i16 => {
-                handle_guild_territory_page(&gate_ref, msg.session_id, payload);
+                forward_guild_territory_page(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::PurchaseGuildTerritory as i16 => {
-                handle_purchase_guild_territory(&gate_ref, msg.session_id, payload);
+                forward_purchase_guild_territory(&self.world_ref, msg.session_id, payload);
             }
             _ => {
                 debug!("Unknown opcode {} from session {}", opcode, msg.session_id);
@@ -977,6 +977,14 @@ fn handle_keep_alive(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
         session_id,
         data: response,
     });
+}
+
+/// 解析 DotNetString: [length: i32 LE][bytes...]
+fn parse_dotnet_string(data: &[u8]) -> String {
+    use std::io::Cursor;
+    use mir2_shared::binary::read_dotnet_string;
+    let mut cursor = Cursor::new(data);
+    read_dotnet_string(&mut cursor).unwrap_or_default()
 }
 
 /// 解析聊天包：DotNetString message + i32 linked_items_count
@@ -2177,8 +2185,8 @@ fn forward_search_map(
 /// Observe: [target_id: u32]
 fn handle_observe(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
-    let target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    debug!("Observe: session={} target={}", session_id, target_id);
+    let _target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    debug!("Observe: session={}", session_id);
     send_system_message(gate_ref, session_id, "观察模式已开启");
 }
 
@@ -2217,16 +2225,6 @@ fn handle_request_chat_item(_gate_ref: &ActorRef<GateActor>, session_id: Session
 // 剩余 opcode stub handlers（Phase 15：覆盖所有未处理的 opcode）
 // ============================================================================
 
-/// 发送空市场搜索结果（复用）
-fn send_empty_market_results(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
-    let mut body = Vec::new();
-    body.extend_from_slice(&0i32.to_le_bytes()); // count = 0
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::MarketSuccess as i16, &body),
-    });
-}
-
 /// EquipSlotItem: [slot: u8] — 快捷装备栏装备
 fn handle_equip_slot_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 1 { return; }
@@ -2237,73 +2235,91 @@ fn handle_equip_slot_item(world_ref: &Option<ActorRef<crate::actors::world::Worl
 }
 
 /// ConsignItem: [item_index: u32][price: u32][duration: u32] — 寄售
-fn handle_consign_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("ConsignItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "寄售功能暂未开放");
+fn forward_consign_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 12 { return; }
+    let unique_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let price = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("ConsignItem: session={} uid={} price={}", session_id, unique_id, price);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::ConsignItemRequest { session_id, unique_id: unique_id as u64, price: price as u64 });
 }
 
 /// MarketSearch: [keyword: DotNetString]
-fn handle_market_search(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("MarketSearch: session={}", session_id);
-    send_empty_market_results(gate_ref, session_id);
+fn forward_market_search(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let item_index = if payload.len() >= 4 { u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) } else { 0 };
+    debug!("MarketSearch: session={} item={}", session_id, item_index);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::MarketSearchRequest { session_id, item_index });
 }
 
 /// MarketRefresh: []
-fn handle_market_refresh(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+fn forward_market_refresh(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
     debug!("MarketRefresh: session={}", session_id);
-    send_empty_market_results(gate_ref, session_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::MarketRefreshRequest { session_id });
 }
 
 /// MarketPage: [page: u32]
-fn handle_market_page(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+fn forward_market_page(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
     let page = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("MarketPage: session={} page={}", session_id, page);
-    let mut body = Vec::new();
-    body.extend_from_slice(&0i32.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::MarketSuccess as i16, &body),
-    });
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::MarketPageRequest { session_id, page });
 }
 
 /// MarketBuy: [listing_id: u32]
-fn handle_market_buy(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+fn forward_market_buy(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
     let listing_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("MarketBuy: session={} listing={}", session_id, listing_id);
-    send_system_message(gate_ref, session_id, "市场暂未开放");
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::MarketBuyRequest { session_id, listing_id: listing_id as u64, count: 1 });
 }
 
 /// MarketGetBack: [listing_id: u32]
-fn handle_market_get_back(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+fn forward_market_get_back(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
     let listing_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("MarketGetBack: session={} listing={}", session_id, listing_id);
-    send_system_message(gate_ref, session_id, "市场暂未开放");
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::MarketGetBackRequest { session_id, listing_id: listing_id as u64 });
 }
 
 /// MarketSellNow: [item_index: u32][price: u32]
-fn handle_market_sell_now(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("MarketSellNow: session={}", session_id);
-    send_system_message(gate_ref, session_id, "市场暂未开放");
+fn forward_market_sell_now(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 8 { return; }
+    let unique_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let price = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("MarketSellNow: session={} uid={} price={}", session_id, unique_id, price);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::MarketSellNowRequest { session_id, unique_id: unique_id as u64, price: price as u64 });
 }
 
 /// FishingCast: [type: u8]
-fn handle_fishing_cast(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("FishingCast: session={}", session_id);
-    // 钓鱼暂未开放，无需响应
+fn forward_fishing_cast(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let fishing_type = payload.first().copied().unwrap_or(0);
+    debug!("FishingCast: session={} type={}", session_id, fishing_type);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::FishingCastRequest { session_id, fishing_type });
 }
 
 /// FishingChangeAutocast: [enabled: bool]
-fn handle_fishing_change_autocast(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("FishingChangeAutocast: session={}", session_id);
+fn forward_fishing_change_autocast(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let enabled = payload.first().copied().unwrap_or(0) != 0;
+    debug!("FishingChangeAutocast: session={} enabled={}", session_id, enabled);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::FishingChangeAutocastRequest { session_id, enabled });
 }
 
 /// CombineItem: [from: u32][to: u32]
-fn handle_combine_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("CombineItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "物品合成暂未开放");
+fn forward_combine_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 8 { return; }
+    let from_grid = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let to_grid = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("CombineItem: session={} from={} to={}", session_id, from_grid, to_grid);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::CombineItemRequest { session_id, from_grid, to_grid });
 }
 
 /// AwakeningNeedMaterials: [item_index: u32]
@@ -2331,9 +2347,12 @@ fn handle_awakening(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payl
 }
 
 /// DisassembleItem: [unique_id: u64]
-fn handle_disassemble_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("DisassembleItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "物品分解暂未开放");
+fn forward_disassemble_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 8 { return; }
+    let uid = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    debug!("DisassembleItem: session={} uid={}", session_id, uid);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::DisassembleItemRequest { session_id, unique_id: uid });
 }
 
 /// DowngradeAwakening: [unique_id: u64]
@@ -2343,50 +2362,67 @@ fn handle_downgrade_awakening(gate_ref: &ActorRef<GateActor>, session_id: Sessio
 }
 
 /// ResetAddedItem: [unique_id: u64]
-fn handle_reset_added_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("ResetAddedItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "重置附加属性暂未开放");
+fn forward_reset_added_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 8 { return; }
+    let uid = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    debug!("ResetAddedItem: session={} uid={}", session_id, uid);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::ResetAddedItemRequest { session_id, unique_id: uid });
 }
 
 /// DepositTradeItem: [unique_id: u64]
-fn handle_deposit_trade_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("DepositTradeItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "交易物品操作暂未支持");
+fn forward_deposit_trade_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 8 { return; }
+    let uid = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    debug!("DepositTradeItem: session={} uid={}", session_id, uid);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::DepositTradeItemRequest { session_id, unique_id: uid });
 }
 
 /// RetrieveTradeItem: [unique_id: u64]
-fn handle_retrieve_trade_item(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("RetrieveTradeItem: session={}", session_id);
-    send_system_message(gate_ref, session_id, "交易物品操作暂未支持");
+fn forward_retrieve_trade_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 8 { return; }
+    let uid = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    debug!("RetrieveTradeItem: session={} uid={}", session_id, uid);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::RetrieveTradeItemRequest { session_id, unique_id: uid });
 }
 
 /// GuildWarReturn: [guild_name: DotNetString]
-fn handle_guild_war_return(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("GuildWarReturn: session={}", session_id);
-    send_system_message(gate_ref, session_id, "行会战暂未开放");
+fn forward_guild_war_return(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let guild_name = parse_dotnet_string(payload);
+    debug!("GuildWarReturn: session={} guild={}", session_id, guild_name);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::GuildWarReturnRequest { session_id, guild_name });
 }
 
 /// GuildBuffUpdate: [buff_id: u32]
-fn handle_guild_buff_update(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("GuildBuffUpdate: session={}", session_id);
-    // 发送空 buff 列表
-    let mut body = Vec::new();
-    body.extend_from_slice(&0i32.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::GuildBuffList as i16, &body),
-    });
+fn forward_guild_buff_update(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 4 { return; }
+    let buff_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    debug!("GuildBuffUpdate: session={} buff_id={}", session_id, buff_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::GuildBuffUpdateRequest { session_id, buff_id });
 }
 
 /// LockMail: [mail_id: u64][lock: bool]
-fn handle_lock_mail(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("LockMail: session={}", session_id);
-    // 邮件锁定暂未开放，无需响应
+fn forward_lock_mail(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 9 { return; }
+    let mail_id = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+    let lock = payload[8] != 0;
+    debug!("LockMail: session={} mail_id={} lock={}", session_id, mail_id, lock);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::LockMailRequest { session_id, mail_id, lock });
 }
 
 /// MailLockedItem: [mail_id: u64][item_index: u32]
-fn handle_mail_locked_item(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("MailLockedItem: session={}", session_id);
+fn forward_mail_locked_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 12 { return; }
+    let mail_id = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
+    let item_index = u32::from_le_bytes(payload[8..12].try_into().unwrap_or([0; 4]));
+    debug!("MailLockedItem: session={} mail_id={} item_index={}", session_id, mail_id, item_index);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::MailLockedItemRequest { session_id, mail_id, item_index });
 }
 
 /// MailCost: [items_count: u32][gold: u32]
@@ -2402,19 +2438,26 @@ fn handle_mail_cost(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payl
 }
 
 /// ShareQuest: [quest_id: u32]
-fn handle_share_quest(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("ShareQuest: session={}", session_id);
+fn forward_share_quest(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 4 { return; }
+    let quest_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    debug!("ShareQuest: session={} quest_id={}", session_id, quest_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::ShareQuestRequest { session_id, quest_id });
 }
 
 /// AcceptReincarnation: []
-fn handle_accept_reincarnation(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+fn forward_accept_reincarnation(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
     debug!("AcceptReincarnation: session={}", session_id);
-    send_system_message(gate_ref, session_id, "轮回暂未开放");
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::AcceptReincarnationRequest { session_id });
 }
 
 /// CancelReincarnation: []
-fn handle_cancel_reincarnation(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+fn forward_cancel_reincarnation(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
     debug!("CancelReincarnation: session={}", session_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::CancelReincarnationRequest { session_id });
 }
 
 /// GetRentedItems: [page: u32]
@@ -2430,34 +2473,52 @@ fn handle_get_rented_items(gate_ref: &ActorRef<GateActor>, session_id: SessionId
 }
 
 /// ItemRentalRequest: [target_name: DotNetString]
-fn handle_item_rental_request(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("ItemRentalRequest: session={}", session_id);
-    send_system_message(gate_ref, session_id, "物品租赁暂未开放");
+fn forward_item_rental_request(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let _target_name = parse_dotnet_string(payload);
+    debug!("ItemRentalRequest: session={} target={}", session_id, _target_name);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::ItemRentalRequestMsg { session_id, target_id: 0 });
 }
 
 /// ItemRentalFee: [amount: u32]
-fn handle_item_rental_fee(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("ItemRentalFee: session={}", session_id);
+fn handle_item_rental_fee(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let amount = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("ItemRentalFee: session={} amount={}", session_id, amount);
+    }
 }
 
 /// ItemRentalPeriod: [duration: u32]
-fn handle_item_rental_period(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("ItemRentalPeriod: session={}", session_id);
+fn handle_item_rental_period(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() >= 4 {
+        let duration = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+        debug!("ItemRentalPeriod: session={} duration={}", session_id, duration);
+    }
 }
 
 /// DepositRentalItem: [unique_id: u64]
-fn handle_deposit_rental_item(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("DepositRentalItem: session={}", session_id);
+fn forward_deposit_rental_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 8 { return; }
+    let uid = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    debug!("DepositRentalItem: session={} uid={}", session_id, uid);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::DepositRentalItemRequest { session_id, unique_id: uid });
 }
 
 /// RetrieveRentalItem: [unique_id: u64]
-fn handle_retrieve_rental_item(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("RetrieveRentalItem: session={}", session_id);
+fn forward_retrieve_rental_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 8 { return; }
+    let uid = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    debug!("RetrieveRentalItem: session={} uid={}", session_id, uid);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::RetrieveRentalItemRequest { session_id, unique_id: uid });
 }
 
 /// CancelItemRental: []
-fn handle_cancel_item_rental(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+fn forward_cancel_item_rental(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
     debug!("CancelItemRental: session={}", session_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::CancelItemRentalRequest { session_id });
 }
 
 /// ItemRentalLockFee: []
@@ -2476,53 +2537,64 @@ fn handle_confirm_item_rental(_gate_ref: &ActorRef<GateActor>, session_id: Sessi
 }
 
 /// NPCConfirmInput: [npc_id: u32][input: DotNetString]
-fn handle_npc_confirm_input(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("NPCConfirmInput: session={}", session_id);
+fn forward_npc_confirm_input(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 4 { return; }
+    let npc_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let input_text = parse_dotnet_string(&payload[4..]);
+    debug!("NPCConfirmInput: session={} npc_id={} input={}", session_id, npc_id, input_text);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::NPCConfirmInputRequest { session_id, npc_id, input_text });
 }
 
 /// GameshopBuy: [item_id: u32][quantity: u32]
-fn handle_gameshop_buy(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("GameshopBuy: session={}", session_id);
-    send_system_message(gate_ref, session_id, "游戏商店暂未开放");
+fn forward_gameshop_buy(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 8 { return; }
+    let item_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let count = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("GameshopBuy: session={} item={} count={}", session_id, item_id, count);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::GameshopBuyRequest { session_id, item_id, count });
 }
 
 /// ReportIssue: [type: u32][description: DotNetString]
-fn handle_report_issue(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("ReportIssue: session={}", session_id);
-    send_system_message(gate_ref, session_id, "感谢反馈，我们会尽快处理");
+fn forward_report_issue(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let issue_type = if payload.len() >= 4 { payload[3] } else { 0 };
+    let description = if payload.len() >= 4 { parse_dotnet_string(&payload[4..]) } else { String::new() };
+    debug!("ReportIssue: session={} type={}", session_id, issue_type);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::ReportIssueRequest { session_id, issue_type, description });
 }
 
 /// GetRanking: [type: u32][page: u32]
-fn handle_get_ranking(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("GetRanking: session={}", session_id);
-    // 发送空排行榜
-    let mut body = Vec::new();
-    body.extend_from_slice(&0i32.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::Rankings as i16, &body),
-    });
+fn forward_get_ranking(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let rank_type = if payload.len() >= 1 { payload[0] } else { 0 };
+    debug!("GetRanking: session={} type={}", session_id, rank_type);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::GetRankingRequest { session_id, rank_type });
 }
 
 /// Opendoor: [door_id: u32]
-fn handle_opendoor(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("Opendoor: session={}", session_id);
+fn forward_opendoor(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    if payload.len() < 4 { return; }
+    let door_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    debug!("Opendoor: session={} door_id={}", session_id, door_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::OpendoorRequest { session_id, door_id });
 }
 
 /// GuildTerritoryPage: [page: u32]
-fn handle_guild_territory_page(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("GuildTerritoryPage: session={}", session_id);
-    let mut body = Vec::new();
-    body.extend_from_slice(&0i32.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::GuildTerritoryPage as i16, &body),
-    });
+fn forward_guild_territory_page(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let page = if payload.len() >= 4 { u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) } else { 0 };
+    debug!("GuildTerritoryPage: session={} page={}", session_id, page);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::GuildTerritoryPageRequest { session_id, page });
 }
 
 /// PurchaseGuildTerritory: [territory_id: u32]
-fn handle_purchase_guild_territory(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
-    debug!("PurchaseGuildTerritory: session={}", session_id);
-    send_system_message(gate_ref, session_id, "行会领地暂未开放");
+fn forward_purchase_guild_territory(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let territory_id = if payload.len() >= 4 { u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) } else { 0 };
+    debug!("PurchaseGuildTerritory: session={} territory={}", session_id, territory_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref.ask(crate::actors::world::PurchaseGuildTerritoryRequest { session_id, territory_id });
 }
 

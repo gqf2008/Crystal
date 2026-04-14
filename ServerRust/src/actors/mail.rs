@@ -22,6 +22,8 @@ pub struct MailMessage {
     pub read: bool,
     /// 附件是否已收取
     pub collected: bool,
+    /// 邮件是否已锁定（无法删除/修改）
+    pub locked: bool,
     /// 附件金币
     pub gold: u64,
     /// 附件物品（最多 5 个）
@@ -123,6 +125,7 @@ mod tests {
             timestamp: 1000,
             read: false,
             collected: false,
+            locked: false,
             gold: 100,
             items: vec![],
         }
