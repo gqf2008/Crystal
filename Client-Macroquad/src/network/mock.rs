@@ -513,6 +513,60 @@ impl MockNetwork {
                     }
                 }
 
+                // 预填充初始邮件（收件箱 2 封 + 包裹 1 封）
+                use mir2_shared::packets::server::MailInfo;
+                let mock_mails = vec![
+                    MailInfo {
+                        mail_id: 1,
+                        sender_name: "系统管理员".to_string(),
+                        message: "欢迎体验传奇2！\\n祝您游戏愉快！".to_string(),
+                        opened: false,
+                        locked: false,
+                        can_reply: true,
+                        collected: false,
+                        send_date: chrono::Utc::now().timestamp() - 86400,
+                        gold: 500,
+                        items: Vec::new(),
+                    },
+                    MailInfo {
+                        mail_id: 2,
+                        sender_name: "新手引导".to_string(),
+                        message: "新手提示：按 I 打开背包，按 B 打开腰带，按 Tab 切换地图。".to_string(),
+                        opened: true,
+                        locked: false,
+                        can_reply: false,
+                        collected: true,
+                        send_date: chrono::Utc::now().timestamp() - 3600,
+                        gold: 100,
+                        items: Vec::new(),
+                    },
+                    MailInfo {
+                        mail_id: 3,
+                        sender_name: "补给商".to_string(),
+                        message: "您的包裹已到达，请及时领取。".to_string(),
+                        opened: false,
+                        locked: false,
+                        can_reply: true,
+                        collected: false,
+                        send_date: chrono::Utc::now().timestamp() - 1800,
+                        gold: 0,
+                        items: vec![UserItem {
+                            unique_id: 800_001,
+                            count: 1,
+                            current_dura: 100,
+                            info: Some(ItemInfo {
+                                index: 3001,
+                                name: "金创药（小量）".to_string(),
+                                price: 50,
+                                stack_size: 100,
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }],
+                    },
+                ];
+                let _ = response_tx.send(NetworkEvent::MailReceived { mails: mock_mails });
+
                 // base zones
                 state.zones.clear();
                 state.monsters.clear();

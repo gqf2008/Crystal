@@ -131,6 +131,7 @@ async fn main() {
 
         // 读取 player
         let mut player_info = None;
+        #[allow(clippy::never_loop)]
         for (pos, vel, input, player, _local) in ctx.world.query::<(
             &Position,
             &MovementVelocity,

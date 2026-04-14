@@ -45,13 +45,13 @@ async fn main() -> GameResult {
         },
     ];
     
-    // 创建初始场景
+    // 创建初始场景 (Box both variants to keep enum small)
     enum LocalScene {
-        Select(SelectScene),
-        Game(GameScene),
+        Select(Box<SelectScene>),
+        Game(Box<GameScene>),
     }
 
-    let mut scene = LocalScene::Select(SelectScene::new(characters)?);
+    let mut scene = LocalScene::Select(Box::new(SelectScene::new(characters)?));
     if let LocalScene::Select(s) = &mut scene {
         s.on_enter()?;
     }
@@ -75,7 +75,7 @@ async fn main() -> GameResult {
                         let mut g = GameScene::new();
                         g.load_textures();
                         g.on_enter()?;
-                        scene = LocalScene::Game(g);
+                        scene = LocalScene::Game(Box::new(g));
                     }
                     other => {
                         println!("🎬 场景切换请求: {:?}", other);

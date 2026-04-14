@@ -1,6 +1,6 @@
 # GameScene UI 实现状态
 
-> 最后更新: 2026-04-12
+> 最后更新: 2026-04-14
 > 本文档反映当前代码实际状态，非初始规划。
 
 ---
@@ -11,7 +11,7 @@
 |---|---|---|---|---|
 | 对话框 UI | 24 | 6 | 1 | ~88% |
 | 网络协议 | 250+ opcode | 17 未处理 | - | ~94% |
-| ECS 系统 | 25+ 核心系统 | 10 轻量 | 3 空桩 | ~90% |
+| ECS 系统 | 25+ 核心系统 | 10 轻量 | 0 空桩 | ~95% |
 | 场景流程 | Login → Select → Game | - | - | 100% |
 
 ---
@@ -72,10 +72,8 @@
 - **表现**: AnimationSystem(30KB), ParticleSystem, SoundSystem(17KB), CameraFollowSystem, CameraSystem, DialogSystem(46KB)
 - **渲染**: MapRenderSystem(14KB), SpriteRenderSystem(9KB), EffectRenderSystem(14KB), UIRenderSystem(58KB), DebugSystem(21KB)
 
-### 空桩系统（3 个）
-- `ResourcePreloadSystem` (6 行) — 资源懒加载已接管
-- `SaveSystem` (5 行) — 设置由 config.ini 管理
-- `SceneSystem` (5 行) — 场景切换由 GameState 直接管理
+### 空桩系统
+无 — 已清理
 
 ### 轻量系统
 HUDSystem(601B), UISystem(665B), MinimapSystem(3.8KB), FloatingTextSystem(1.2KB), HealthBarAnimSystem(2.5KB), PositionInterpolationSystem(1.4KB), RemoteMoveAnimSystem(1.9KB), MountStateSyncSystem(3.3KB), WeatherSystem(3.4KB, 已实现天气码→粒子发射器)
@@ -84,27 +82,27 @@ HUDSystem(601B), UISystem(665B), MinimapSystem(3.8KB), FloatingTextSystem(1.2KB)
 
 ## 网络处理覆盖
 
-| Handler | 已处理/总数 | 备注 |
+| Handler | 已处理/路由数 | 备注 |
 |---|---|---|
-| `item.rs` | 50/51 | 物品全生命周期 |
-| `combat.rs` | 47/47 | HeroHealthChanged 已发射 |
-| `movement.rs` | 29/30 | 移动/传送/闪现 |
-| `npc.rs` | 27/28 | 已清理死代码（6 个 market opcode） |
-| `guild.rs` | 14/15 | 完整 |
-| `chat.rs` | 2/3 | 群聊/私聊 |
-| `mail.rs` | 6/7 | 邮件/附件/发送/成本 |
-| `ui_events.rs` | 13/14 | 音效/坐骑/计时/钓鱼/排行榜/商城 |
-| `social.rs` | 5/6 | 婚姻/师徒 |
-| `friend.rs` | 1/2 | FriendUpdate |
-| `player.rs` | 1/2 | PlayerInspect |
-| `market.rs` | 6/7 | 寄售/市场 |
-| `creature.rs` | 4/5 | 守护生物 |
-| `hero.rs` | 11/12 | 英雄系统 |
-| `trade.rs` | 6/7 | 交易系统 |
-| `group.rs` | 7/8 | 组队系统 |
-| `quest.rs` | 6/7 | 任务系统 |
-| `character.rs` | 25/23 | LogOut/ReturnToLogin 已发射 |
-| `connection.rs` | 4/5 | 连接管理 |
+| `item.rs` | 55/54 | 物品全生命周期 |
+| `combat.rs` | 47/58 | 含 Misc/Status 区块 15 个额外匹配臂 |
+| `movement.rs` | 29/28 | 移动/传送/闪现 |
+| `npc.rs` | 27/27 | 已清理死代码（6 个 market opcode） |
+| `guild.rs` | 13/13 | 完整 |
+| `chat.rs` | 2/2 | 群聊/私聊 |
+| `mail.rs` | 6/6 | 邮件/附件/发送/成本 |
+| `ui_events.rs` | 12/12 | 音效/坐骑/计时/钓鱼/排行榜/商城 |
+| `social.rs` | 5/5 | 婚姻/师徒 |
+| `friend.rs` | 1/1 | FriendUpdate |
+| `player.rs` | 1/1 | PlayerInspect |
+| `market.rs` | 6/6 | 寄售/市场 |
+| `creature.rs` | 4/4 | 守护生物 |
+| `hero.rs` | 11/11 | 英雄系统 |
+| `trade.rs` | 6/6 | 交易系统 |
+| `group.rs` | 7/7 | 组队系统 |
+| `quest.rs` | 6/6 | 任务系统 |
+| `character.rs` | 29/29 | LogOut/ReturnToLogin 已发射 |
+| `connection.rs` | 4/4 | 连接管理 |
 
 ---
 
@@ -142,11 +140,18 @@ HUDSystem(601B), UISystem(665B), MinimapSystem(3.8KB), FloatingTextSystem(1.2KB)
 
 ## 最近完成的改进
 
+- ✅ **WeatherSystem 粒子跟随相机**：发射器每帧更新位置到相机位置，天气粒子不再固定在(0,0)
+- ✅ **Mock 邮件初始数据**：进入游戏时自动发送 3 封邮件（系统欢迎/新手引导/带包裹补给），验证 MailDialog UI 流程
+- ✅ **清理 3 个空桩系统**：ResourcePreloadSystem / SaveSystem / SceneSystem 已删除（从未注册，纯死代码）
+- ✅ **清理客户端死代码**：移除 ui_events.rs 中未路由的 NewRecipeInfo 匹配臂
+- ✅ **消除 test_select 大枚举警告**：Box<SelectScene> + Box<GameScene>，enum 从 824B → 16B
+- ✅ **Server 全部 49 个 stub handlers 转为真实响应**：物品操作/商店/NPC/传送/组队/好友/邮件/行会/婚姻/任务/精炼/地图/账号管理 全覆盖 (49→0 stubs)
+- ✅ Server 物品操作真实响应：MoveItem/UseItem/EquipItem/RemoveItem/DropItem/MergeItem/BuyItem/SellItem/RepairItem/SRepairItem/CraftItem/BuyItemBack/StoreItem/TakeBackItem/SplitItem/DropGold/Inspect/TeleportToNPC/TownRevive
 - ✅ Handler 缺口修复：HeroHealthChanged, LogOutSuccess, LogOutFailed, ReturnToLogin
 - ✅ unique_id 全链路保留：Inventory ↔ Belt ↔ Character 拖拽/回滚/转移
 - ✅ Character → Inventory 卸下装备自动发包 RemoveItemRequest
 - ✅ 组队事件下游接线：成员列表更新、组队模式切换、位置跟踪
-- ✅ Clippy 0 warnings（51 → 0，含 mock.rs 修复、Default 派生等）
+- ✅ Clippy 0 warnings（全量，含 binary targets）
 - ✅ QuestLogDialog 已绑定服务器数据（TODO 标注已过时）
 - ✅ WeatherSystem 完整实现：天气码→粒子发射器，Mock 随机天气
 - ✅ 粒子类型差异化：Blizzard/FlowersRain/FogCloud 专用生成逻辑

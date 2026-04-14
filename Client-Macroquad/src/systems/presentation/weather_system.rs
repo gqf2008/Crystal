@@ -47,19 +47,20 @@ impl WeatherSystem {
         let _ = ctx.world.despawn(old_entity);
     }
 
-    /// 创建新的天气粒子发射器
-    fn create_emitter(
+    /// 创建新的天气粒子发射器（指定位置）
+    fn create_emitter_at(
         &self,
         ctx: &mut crate::game::GameContext,
         particle_type: crate::components::ParticleType,
+        pos: crate::components::Position,
     ) -> Option<hecs::Entity> {
         use crate::components::{ParticleEmitter, Position};
 
         let emitter = ParticleEmitter {
-            emitter_location: Position { x: 0.0, y: 0.0 },
+            emitter_location: pos,
             generate_particles: true,
             next_particle_time: 0.0,
-            spawn_interval: 0.02, // 每 20ms 生成一个粒子
+            spawn_interval: 0.02,
             force_velocity: Position { x: 0.0, y: 0.0 },
             particle_type,
         };
@@ -74,7 +75,7 @@ impl crate::systems::LogicSystem for WeatherSystem {
         ctx: &mut crate::game::GameContext,
         _dt: f32,
     ) -> crate::game::GameResult {
-        use crate::components::WeatherState;
+        use crate::components::{Position, WeatherState};
 
         // 查找 WeatherState 组件
         let Some(weather_state) = ctx.world.iter().find_map(|e| e.get::<&WeatherState>().map(|w| (e.entity(), *w))) else {
@@ -84,8 +85,24 @@ impl crate::systems::LogicSystem for WeatherSystem {
         let (entity, state) = weather_state;
         let current_code = state.weather_code;
 
-        // 天气未变化，跳过
+        // 获取相机位置（天气粒子需要跟随相机）
+        let cam_pos = {
+            let mut cam_pos = None;
+            for (cam, pos) in ctx.world.query::<(&crate::components::Camera, &Position)>().iter() {
+                cam_pos = Some(*pos);
+                let _ = (cam,); // suppress unused warning
+                break;
+            }
+            cam_pos.unwrap_or(Position::new(0.0, 0.0))
+        };
+
+        // 天气未变化，但需要更新发射器位置跟随相机
         if current_code == self.last_weather_code {
+            if let Some(emitter_entity) = state.emitter_entity {
+                if let Ok(mut emitter) = ctx.world.get::<&mut crate::components::ParticleEmitter>(emitter_entity) {
+                    emitter.emitter_location = cam_pos;
+                }
+            }
             return Ok(());
         }
 
@@ -94,9 +111,9 @@ impl crate::systems::LogicSystem for WeatherSystem {
             self.destroy_old_emitter(ctx, old_entity);
         }
 
-        // 根据新天气码创建发射器
+        // 根据新天气码创建发射器（位置跟随相机）
         let new_emitter = Self::weather_to_particle_type(current_code)
-            .and_then(|pt| self.create_emitter(ctx, pt));
+            .and_then(|pt| self.create_emitter_at(ctx, pt, cam_pos));
 
         // 更新 WeatherState
         if let Ok(mut ws) = ctx.world.get::<&mut WeatherState>(entity) {
