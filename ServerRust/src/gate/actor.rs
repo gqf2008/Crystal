@@ -444,10 +444,10 @@ impl Message<ClientData> for GateActor {
                 handle_inspect(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ChangeAMode as i16 => {
-                handle_change_amode(&gate_ref, msg.session_id, payload);
+                forward_change_amode(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ChangePMode as i16 => {
-                handle_change_pmode(&gate_ref, msg.session_id, payload);
+                forward_change_pmode(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MagicKey as i16 => {
                 handle_magic_key(&gate_ref, msg.session_id, payload);
@@ -1319,21 +1319,31 @@ fn handle_inspect(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>
 }
 
 /// ChangeAMode (切换攻击模式): [mode: u8]
-fn handle_change_amode(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if !payload.is_empty() {
-        let mode = payload[0];
-        debug!("ChangeAMode: session={} mode={}", session_id, mode);
-    }
-    // 切换攻击模式无需回复，客户端自行更新状态
+fn forward_change_amode(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.is_empty() { return; }
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let mode = payload[0];
+    debug!("ChangeAMode: session={} mode={}", session_id, mode);
+    let mode = mir2_shared::enums::AttackMode::try_from(mode).unwrap_or(mir2_shared::enums::AttackMode::Peace);
+    let _ = world_ref.ask(crate::actors::world::ChangeAModeRequest { session_id, mode });
 }
 
-/// ChangePMode (切换和平模式): [mode: u8]
-fn handle_change_pmode(_gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if !payload.is_empty() {
-        let mode = payload[0];
-        debug!("ChangePMode: session={} mode={}", session_id, mode);
-    }
-    // 切换模式无需回复
+/// ChangePMode (切换宠物模式): [mode: u8]
+fn forward_change_pmode(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.is_empty() { return; }
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let mode = payload[0];
+    debug!("ChangePMode: session={} mode={}", session_id, mode);
+    let mode = mir2_shared::enums::PetMode::try_from(mode).unwrap_or(mir2_shared::enums::PetMode::Both);
+    let _ = world_ref.ask(crate::actors::world::ChangePModeRequest { session_id, mode });
 }
 
 /// MagicKey (设置快捷键): [slot: u8][spell_id: u16]

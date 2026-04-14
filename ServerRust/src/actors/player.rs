@@ -37,6 +37,10 @@ pub struct PlayerState {
     pub y: i32,
     /// 朝向 (0..7)
     pub direction: u8,
+    /// 攻击模式 (Peace/Group/Guild/EnemyGuild/RedBrown/All)
+    pub attack_mode: mir2_shared::enums::AttackMode,
+    /// 宠物模式 (Both/MoveOnly/AttackOnly/None/FocusMasterTarget)
+    pub pet_mode: mir2_shared::enums::PetMode,
     /// 是否隐藏
     pub hidden: bool,
     /// 所属 session
@@ -116,6 +120,8 @@ impl PlayerActor {
                 x: 330,
                 y: 330,
                 direction: 4, // Down
+                attack_mode: mir2_shared::enums::AttackMode::Peace,
+                pet_mode: mir2_shared::enums::PetMode::Both,
                 hidden: false,
                 session_id,
                 level: 1,
@@ -1067,6 +1073,34 @@ impl Message<TickCreatureHunger> for PlayerActor {
     }
 }
 
+/// 设置攻击模式
+pub struct SetAttackMode {
+    pub mode: mir2_shared::enums::AttackMode,
+}
+
+impl Message<SetAttackMode> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetAttackMode, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.attack_mode = msg.mode;
+        debug!("Player {} attack mode -> {:?}", self.state.name, msg.mode);
+    }
+}
+
+/// 设置宠物模式
+pub struct SetPetMode {
+    pub mode: mir2_shared::enums::PetMode,
+}
+
+impl Message<SetPetMode> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetPetMode, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.pet_mode = msg.mode;
+        debug!("Player {} pet mode -> {:?}", self.state.name, msg.mode);
+    }
+}
+
 /// 设置英雄索引
 pub struct SetHeroIndex {
     pub hero_index: u8,
@@ -1236,6 +1270,8 @@ mod tests {
             x: 330,
             y: 330,
             direction: 4,
+            attack_mode: mir2_shared::enums::AttackMode::Peace,
+            pet_mode: mir2_shared::enums::PetMode::Both,
             hidden: false,
             session_id: 1,
             level: 1,

@@ -10,7 +10,7 @@ use kameo::message::Message;
 use tokio::time::{interval, Duration};
 use tracing::{info, debug, warn};
 
-use crate::actors::player::{PlayerActor, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, SetGroupId, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetSpouse, SetAllowMentor, SetMentor, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog};
+use crate::actors::player::{PlayerActor, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, SetGroupId, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetSpouse, SetAllowMentor, SetMentor, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode};
 use crate::actors::inventory::{EquipmentSlot, GroundItem};
 use crate::actors::refine::RefineStatus;
 use crate::actors::group::{Group, GroupMember};
@@ -447,6 +447,18 @@ pub struct HarvestRequest {
 pub struct ChatRequest {
     pub session_id: u64,
     pub message: String,
+}
+
+/// 切换攻击模式请求（从 GateActor 转发）
+pub struct ChangeAModeRequest {
+    pub session_id: u64,
+    pub mode: mir2_shared::enums::AttackMode,
+}
+
+/// 切换宠物模式请求（从 GateActor 转发）
+pub struct ChangePModeRequest {
+    pub session_id: u64,
+    pub mode: mir2_shared::enums::PetMode,
 }
 
 /// NPC 对话请求（从 GateActor 转发）
@@ -1580,6 +1592,62 @@ impl Message<ChatRequest> for WorldActor {
                 data: packet.clone(),
             });
         }
+    }
+}
+
+impl Message<ChangeAModeRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: ChangeAModeRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r,
+            None => return,
+        };
+
+        // 更新玩家攻击模式
+        let _ = record.actor_ref.ask(SetAttackMode { mode: msg.mode }).await;
+
+        // 发送 ChangeAMode 确认包给客户端
+        let mut body = Vec::new();
+        body.push(msg.mode as u8);
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangeAMode as i16, &body);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: packet,
+        });
+        debug!("ChangeAMode: session={} mode={:?}", msg.session_id, msg.mode);
+    }
+}
+
+impl Message<ChangePModeRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: ChangePModeRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r,
+            None => return,
+        };
+
+        // 更新玩家宠物模式
+        let _ = record.actor_ref.ask(SetPetMode { mode: msg.mode }).await;
+
+        // 发送 ChangePMode 确认包给客户端
+        let mut body = Vec::new();
+        body.push(msg.mode as u8);
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangePMode as i16, &body);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: packet,
+        });
+        debug!("ChangePMode: session={} mode={:?}", msg.session_id, msg.mode);
     }
 }
 
