@@ -408,7 +408,7 @@ impl Message<ClientData> for GateActor {
                 handle_magic(&gate_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::Harvest as i16 => {
-                handle_harvest(&gate_ref, msg.session_id, payload);
+                forward_harvest(&self.world_ref, msg.session_id, payload);
             }
             // NPC 商店
             x if x == ClientPacketIds::BuyItem as i16 => {
@@ -1195,17 +1195,17 @@ fn handle_magic(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: 
     });
 }
 
-/// Harvest: [dir: u8]
-fn handle_harvest(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
-    if payload.is_empty() {
-        debug!("Harvest: session={} payload empty", session_id);
-        return;
-    }
+/// Harvest: [dir: u8] — 采集/挖矿请求
+fn forward_harvest(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.is_empty() { return; }
+    let world_ref = match world_ref { Some(w) => w, None => return };
     let dir = payload[0];
     debug!("Harvest: session={} dir={}", session_id, dir);
-
-    // Phase 1: 发送成功确认
-    send_system_message(gate_ref, session_id, "采集成功");
+    let _ = world_ref.ask(crate::actors::world::HarvestRequest { session_id, direction: dir });
 }
 
 // ============================================================================

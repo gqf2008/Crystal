@@ -437,6 +437,12 @@ pub struct PlayerLogOut {
     pub session_id: u64,
 }
 
+/// 采集请求（从 GateActor 转发）
+pub struct HarvestRequest {
+    pub session_id: u64,
+    pub direction: u8,
+}
+
 /// 聊天请求（从 GateActor 转发）
 pub struct ChatRequest {
     pub session_id: u64,
@@ -1392,6 +1398,80 @@ impl Message<WorldAttackRequest> for WorldActor {
                 }
             }
         }
+    }
+}
+
+// ============================================================
+// 采集系统（Harvest：挖矿/采集）
+// ============================================================
+
+/// 方向到坐标偏移（8 方向）
+const HARVEST_DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
+const HARVEST_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
+
+impl Message<HarvestRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: HarvestRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r,
+            None => return,
+        };
+
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+
+        let dir = msg.direction as usize % 8;
+        let target_x = state.x + HARVEST_DIR_DX[dir];
+        let target_y = state.y + HARVEST_DIR_DY[dir];
+
+        debug!(
+            "Harvest: {} session={} dir={} target=({}, {})",
+            state.name, msg.session_id, dir, target_x, target_y
+        );
+
+        // 广播 ObjectHarvest 给附近其他玩家
+        let harvest_body = {
+            let mut b = Vec::new();
+            b.extend_from_slice(&state.object_id.to_le_bytes());
+            b.extend_from_slice(&(target_x as i32).to_le_bytes());
+            b.extend_from_slice(&(target_y as i32).to_le_bytes());
+            b.push(msg.direction);
+            build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectHarvest as i16, &b)
+        };
+
+        for other in self.other_players(msg.session_id) {
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: other.session_id,
+                data: harvest_body.clone(),
+            });
+        }
+
+        // 延迟发送 ObjectHarvested（采集完成）
+        let gate_ref = self.gate_ref.clone();
+        let object_id = state.object_id;
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let mut b = Vec::new();
+            b.extend_from_slice(&object_id.to_le_bytes());
+            b.extend_from_slice(&(target_x as i32).to_le_bytes());
+            b.extend_from_slice(&(target_y as i32).to_le_bytes());
+            b.push(msg.direction);
+            let packet = build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::ObjectHarvested as i16, &b,
+            );
+            let _ = gate_ref.ask(SendToClient {
+                session_id: msg.session_id,
+                data: packet,
+            });
+            send_system_message(&gate_ref, msg.session_id, "采集成功");
+        });
     }
 }
 
