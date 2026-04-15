@@ -5612,13 +5612,20 @@ impl Message<ConsignItemRequest> for WorldActor {
 
 pub struct ItemRentalRequestMsg {
     pub session_id: u64,
-    pub target_id: u64,
+    pub target_name: String,
 }
 
 impl Message<ItemRentalRequestMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ItemRentalRequestMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("ItemRentalRequest: session={} target={}", msg.session_id, msg.target_id);
+        // Resolve target_name → session_id (best-effort; feature is stub for now)
+        let _target_id = self.players.values()
+            .find_map(|r| {
+                // Would need player name lookup here; currently stub
+                let _ = &r;
+                Option::<u64>::None
+            });
+        debug!("ItemRentalRequest: session={} target={}", msg.session_id, msg.target_name);
         send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
     }
 }

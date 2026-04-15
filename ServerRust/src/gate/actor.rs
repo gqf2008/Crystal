@@ -984,7 +984,13 @@ fn parse_dotnet_string(data: &[u8]) -> String {
     use std::io::Cursor;
     use mir2_shared::binary::read_dotnet_string;
     let mut cursor = Cursor::new(data);
-    read_dotnet_string(&mut cursor).unwrap_or_default()
+    match read_dotnet_string(&mut cursor) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("parse_dotnet_string: malformed input ({e:?}), data len={}", data.len());
+            String::new()
+        }
+    }
 }
 
 /// 解析聊天包：DotNetString message + i32 linked_items_count
@@ -2474,10 +2480,10 @@ fn handle_get_rented_items(gate_ref: &ActorRef<GateActor>, session_id: SessionId
 
 /// ItemRentalRequest: [target_name: DotNetString]
 fn forward_item_rental_request(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    let _target_name = parse_dotnet_string(payload);
-    debug!("ItemRentalRequest: session={} target={}", session_id, _target_name);
+    let target_name = parse_dotnet_string(payload);
+    debug!("ItemRentalRequest: session={} target={}", session_id, target_name);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::ItemRentalRequestMsg { session_id, target_id: 0 });
+    let _ = world_ref.ask(crate::actors::world::ItemRentalRequestMsg { session_id, target_name });
 }
 
 /// ItemRentalFee: [amount: u32]
@@ -2602,5 +2608,67 @@ fn forward_purchase_guild_territory(world_ref: &Option<ActorRef<crate::actors::w
     debug!("PurchaseGuildTerritory: session={} territory={}", session_id, territory_id);
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref.ask(crate::actors::world::PurchaseGuildTerritoryRequest { session_id, territory_id });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 7-bit encoded length + UTF-8 bytes
+    fn make_dotnet_string(s: &str) -> Vec<u8> {
+        let bytes = s.as_bytes();
+        let mut len = bytes.len();
+        let mut out = Vec::new();
+        loop {
+            let mut b = (len & 0x7F) as u8;
+            len >>= 7;
+            if len != 0 { b |= 0x80; }
+            out.push(b);
+            if len == 0 { break; }
+        }
+        out.extend_from_slice(bytes);
+        out
+    }
+
+    #[test]
+    fn test_parse_dotnet_string_empty() {
+        let data = make_dotnet_string("");
+        assert_eq!(parse_dotnet_string(&data), "");
+    }
+
+    #[test]
+    fn test_parse_dotnet_string_hello() {
+        let data = make_dotnet_string("hello");
+        assert_eq!(parse_dotnet_string(&data), "hello");
+    }
+
+    #[test]
+    fn test_parse_dotnet_string_chinese() {
+        let data = make_dotnet_string("物品租赁");
+        assert_eq!(parse_dotnet_string(&data), "物品租赁");
+    }
+
+    #[test]
+    fn test_parse_dotnet_string_malformed_empty() {
+        // Empty slice → read_u8 fails → returns empty string
+        let result = parse_dotnet_string(&[]);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_parse_dotnet_string_malformed_truncated_length() {
+        // Incomplete 7-bit length (continuation byte but no following byte)
+        let data = [0x80]; // says "more bytes coming" but none follow
+        let result = parse_dotnet_string(&data);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_parse_dotnet_string_malformed_truncated_body() {
+        // Length says 10 bytes but only 3 provided
+        let data = [10, 0x61, 0x62, 0x63];
+        let result = parse_dotnet_string(&data);
+        assert_eq!(result, "");
+    }
 }
 
