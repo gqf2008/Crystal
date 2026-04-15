@@ -6,8 +6,10 @@ pub const MAX_GROUP_SIZE: usize = 5;
 
 /// 组队模式（掉落分配）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum GroupMode {
     /// 各自拾取
+    #[default]
     All,
     /// 队长分配
     Leader,
@@ -15,11 +17,6 @@ pub enum GroupMode {
     Hunter,
 }
 
-impl Default for GroupMode {
-    fn default() -> Self {
-        Self::All
-    }
-}
 
 /// 组队成员
 #[derive(Debug, Clone)]

@@ -103,19 +103,17 @@ impl PlayerInventory {
     pub fn add_item(&mut self, mut item: UserItem) -> Option<(u8, u64)> {
         // 尝试合并到已有堆叠（相同 item_index 且可堆叠）
         if item.count > 1 {
-            for slot in &mut self.backpack {
-                if let Some(s) = slot {
-                    if s.item.item_index == item.item_index && s.item.count < s.item.max_dura.max(1) as u16 {
-                        let can_merge = s.item.count + item.count;
-                        let max_stack = s.item.max_dura.max(1) as u16;
-                        if can_merge <= max_stack {
-                            s.item.count = can_merge;
-                            return Some((s.grid, s.item.unique_id));
-                        } else {
-                            s.item.count = max_stack;
-                            item.count = can_merge - max_stack;
-                            // 继续处理剩余
-                        }
+            for s in self.backpack.iter_mut().flatten() {
+                if s.item.item_index == item.item_index && s.item.count < s.item.max_dura.max(1) {
+                    let can_merge = s.item.count + item.count;
+                    let max_stack = s.item.max_dura.max(1);
+                    if can_merge <= max_stack {
+                        s.item.count = can_merge;
+                        return Some((s.grid, s.item.unique_id));
+                    } else {
+                        s.item.count = max_stack;
+                        item.count = can_merge - max_stack;
+                        // 继续处理剩余
                     }
                 }
             }
@@ -169,21 +167,12 @@ impl PlayerInventory {
 
     /// 查询物品（按 unique_id）
     pub fn get_item(&self, uid: u64) -> Option<&UserItem> {
-        for slot in &self.backpack {
-            if let Some(s) = slot {
-                if s.item.unique_id == uid {
-                    return Some(&s.item);
-                }
+        for s in self.backpack.iter().flatten() {
+            if s.item.unique_id == uid {
+                return Some(&s.item);
             }
         }
-        for eq in &self.equipment {
-            if let Some(e) = eq {
-                if e.unique_id == uid {
-                    return Some(e);
-                }
-            }
-        }
-        None
+        self.equipment.iter().flatten().find(|&e| e.unique_id == uid).map(|e| e as _)
     }
 
     /// 移动物品：从 from_grid 到 to_grid
@@ -231,7 +220,7 @@ impl PlayerInventory {
             return false;
         }
 
-        let max_stack = to_item.max_dura.max(1) as u16;
+        let max_stack = to_item.max_dura.max(1);
         let new_count = from_item.count + to_item.count;
         if new_count > max_stack {
             return false; // 超出堆叠上限
@@ -340,23 +329,19 @@ impl PlayerInventory {
     /// 返回是否成功
     pub fn repair_item(&mut self, uid: u64) -> bool {
         // 检查背包
-        for slot in &mut self.backpack {
-            if let Some(s) = slot {
-                if s.item.unique_id == uid {
-                    s.item.current_dura = s.item.max_dura;
-                    s.item.dura_changed = true;
-                    return true;
-                }
+        for s in self.backpack.iter_mut().flatten() {
+            if s.item.unique_id == uid {
+                s.item.current_dura = s.item.max_dura;
+                s.item.dura_changed = true;
+                return true;
             }
         }
         // 检查装备
-        for eq in &mut self.equipment {
-            if let Some(e) = eq {
-                if e.unique_id == uid {
-                    e.current_dura = e.max_dura;
-                    e.dura_changed = true;
-                    return true;
-                }
+        for e in self.equipment.iter_mut().flatten() {
+            if e.unique_id == uid {
+                e.current_dura = e.max_dura;
+                e.dura_changed = true;
+                return true;
             }
         }
         false

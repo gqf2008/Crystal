@@ -61,7 +61,7 @@ pub struct BuffTickResult {
 }
 
 /// 对所有 Buff 进行 tick 处理
-pub fn tick_buffs(buffs: &mut Vec<BuffInstance>, _dt: u32) -> Vec<BuffTickResult> {
+pub fn tick_buffs(buffs: &mut [BuffInstance], _dt: u32) -> Vec<BuffTickResult> {
     let mut results = Vec::new();
 
     for buff in buffs.iter_mut() {

@@ -1615,8 +1615,7 @@ impl Message<ChangeAModeRequest> for WorldActor {
         let _ = record.actor_ref.ask(SetAttackMode { mode: msg.mode }).await;
 
         // 发送 ChangeAMode 确认包给客户端
-        let mut body = Vec::new();
-        body.push(msg.mode as u8);
+        let body = vec![msg.mode as u8];
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangeAMode as i16, &body);
         let _ = self.gate_ref.ask(SendToClient {
             session_id: msg.session_id,
@@ -1643,8 +1642,7 @@ impl Message<ChangePModeRequest> for WorldActor {
         let _ = record.actor_ref.ask(SetPetMode { mode: msg.mode }).await;
 
         // 发送 ChangePMode 确认包给客户端
-        let mut body = Vec::new();
-        body.push(msg.mode as u8);
+        let body = vec![msg.mode as u8];
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangePMode as i16, &body);
         let _ = self.gate_ref.ask(SendToClient {
             session_id: msg.session_id,
@@ -1997,8 +1995,10 @@ impl Message<DropGoldRequest> for WorldActor {
             };
 
             // 地面金币（用特殊物品表示）
-            let mut gold_item = mir2_shared::data::item::UserItem::default();
-            gold_item.item_index = 0; // 0 = gold marker
+            let gold_item = mir2_shared::data::item::UserItem {
+                item_index: 0, // 0 = gold marker
+                ..Default::default()
+            };
             self.ground_items.push(GroundItem {
                 item: gold_item,
                 x: player_pos.0,
@@ -2042,11 +2042,13 @@ impl Message<BuyItemRequest> for WorldActor {
         let _ = record.actor_ref.ask(DeductGold { amount: total_price }).await;
 
         // Phase 10: 从 NPC 商品列表获取真实 UserItem，暂时创建基础物品
-        let mut item = mir2_shared::data::item::UserItem::default();
-        item.item_index = msg.item_index as i32;
-        item.count = msg.count as u16;
-        item.max_dura = 100;
-        item.current_dura = 100;
+        let item = mir2_shared::data::item::UserItem {
+            item_index: msg.item_index as i32,
+            count: msg.count as u16,
+            max_dura: 100,
+            current_dura: 100,
+            ..Default::default()
+        };
 
         let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
         send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功 (花费 {} 金币)", total_price));
@@ -2598,9 +2600,9 @@ impl Message<TradeStartReply> for WorldActor {
     async fn handle(&mut self, msg: TradeStartReply, _ctx: &mut Context<Self, Self::Reply>) {
         // 解析发起者
         let initiator_id = self.pending_invites.remove(&msg.session_id)
-            .or_else(|| self.active_trades.get(&msg.session_id).and_then(|t| {
-                if t.side_a.session_id == msg.session_id { Some(t.side_b.session_id) }
-                else { Some(t.side_a.session_id) }
+            .or_else(|| self.active_trades.get(&msg.session_id).map(|t| {
+                if t.side_a.session_id == msg.session_id { t.side_b.session_id }
+                else { t.side_a.session_id }
             }));
 
         let Some(initiator_id) = initiator_id else {
@@ -4308,8 +4310,8 @@ impl WorldActor {
         let (s1, s2) = trade_data.participant_sessions();
         let gold_a = trade_data.side_a.gold;
         let gold_b = trade_data.side_b.gold;
-        let items_a: Vec<_> = trade_data.side_a.items.iter().cloned().collect();
-        let items_b: Vec<_> = trade_data.side_b.items.iter().cloned().collect();
+        let items_a: Vec<_> = trade_data.side_a.items.to_vec();
+        let items_b: Vec<_> = trade_data.side_b.items.to_vec();
 
         // 从 A 扣除金币和物品
         if let Some(rec) = self.players.get(&s1) {
@@ -4845,8 +4847,7 @@ impl Message<RangeAttackRequest> for WorldActor {
 
         // 广播 ObjectAttack 给其他玩家
         let others: Vec<_> = self.other_players(msg.session_id)
-            .into_iter()
-            .map(|r| r.clone())
+            .into_iter().cloned()
             .collect();
         for other in &others {
             let mut body = Vec::new();
@@ -4913,8 +4914,7 @@ impl Message<MagicRequest> for WorldActor {
 
         // 广播 ObjectAttack（带 spell type）
         let others: Vec<_> = self.other_players(msg.session_id)
-            .into_iter()
-            .map(|r| r.clone())
+            .into_iter().cloned()
             .collect();
         for other in &others {
             let mut body = Vec::new();
@@ -5233,9 +5233,7 @@ impl Message<NewHeroRequest> for WorldActor {
         let hero_index = msg.hero_type;
         let _ = record.actor_ref.ask(SetHeroIndex { hero_index });
 
-        let mut body = Vec::new();
-        body.push(hero_index);
-        body.push(1u8); // success
+        let body = vec![hero_index, 1u8];
         let _ = self.gate_ref.ask(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewHero as i16, &body),
@@ -6269,8 +6267,7 @@ fn send_mentor_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, re
 // ============================================================
 
 fn send_hero_update_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, hero_index: u8) {
-    let mut body = Vec::new();
-    body.push(hero_index);
+    let body = vec![hero_index];
     let _ = gate_ref.ask(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangeHero as i16, &body),

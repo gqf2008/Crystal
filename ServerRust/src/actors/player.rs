@@ -1267,10 +1267,10 @@ impl PlayerActor {
         body.extend_from_slice(&self.state.y.to_le_bytes());            // location_y
         body.push(self.state.direction);                                // direction
         body.push(0u8);                                                 // hair
-        body.extend_from_slice(&(self.state.hp as i32).to_le_bytes());  // hp
-        body.extend_from_slice(&(self.state.mp as i32).to_le_bytes());  // mp
-        body.extend_from_slice(&(self.state.experience as i64).to_le_bytes()); // experience
-        body.extend_from_slice(&(self.state.max_experience as i64).to_le_bytes()); // max_experience
+        body.extend_from_slice(&self.state.hp.to_le_bytes());  // hp
+        body.extend_from_slice(&self.state.mp.to_le_bytes());  // mp
+        body.extend_from_slice(&self.state.experience.to_le_bytes()); // experience
+        body.extend_from_slice(&self.state.max_experience.to_le_bytes()); // max_experience
         body.extend_from_slice(&0u16.to_le_bytes());                    // level_effects
         body.push(0u8);                                                 // has_hero=false
         body.push(0u8);                                                 // hero_behaviour=None

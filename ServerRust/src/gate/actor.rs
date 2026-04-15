@@ -2227,7 +2227,7 @@ fn handle_request_chat_item(_gate_ref: &ActorRef<GateActor>, session_id: Session
 
 /// EquipSlotItem: [slot: u8] — 快捷装备栏装备
 fn handle_equip_slot_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 1 { return; }
+    if payload.is_empty() { return; }
     let slot = payload[0];
     debug!("EquipSlotItem: session={} slot={}", session_id, slot);
     let world_ref = match world_ref { Some(w) => w, None => return };
@@ -2573,7 +2573,7 @@ fn forward_report_issue(world_ref: &Option<ActorRef<crate::actors::world::WorldA
 
 /// GetRanking: [type: u32][page: u32]
 fn forward_get_ranking(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    let rank_type = if payload.len() >= 1 { payload[0] } else { 0 };
+    let rank_type = if !payload.is_empty() { payload[0] } else { 0 };
     debug!("GetRanking: session={} type={}", session_id, rank_type);
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref.ask(crate::actors::world::GetRankingRequest { session_id, rank_type });
