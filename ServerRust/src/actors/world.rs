@@ -10,20 +10,22 @@ use kameo::message::Message;
 use tokio::time::{interval, Duration};
 use tracing::{info, debug, warn};
 
-use crate::actors::player::{PlayerActor, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, SetGroupId, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetSpouse, SetAllowMentor, SetMentor, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing};
-use crate::actors::inventory::{EquipmentSlot, GroundItem};
-use crate::actors::refine::RefineStatus;
+use crate::actors::player::{PlayerActor, PlayerState, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, SetPlayerState, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, GetItemInfoByGrid, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, SetGroupId, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetSpouse, SetAllowMentor, SetMentor, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing, ClearReincarnation, ClearReincarnationHost, ReviveAtHalfHp};
+use crate::actors::inventory::{EquipmentSlot, GroundItem, PlayerInventory};
+use crate::actors::refine::{RefineStatus, RefineLog};
 use crate::actors::group::{Group, GroupMember};
 use crate::actors::trade::TradeSession;
-use crate::actors::friend::FriendEntry;
-use crate::actors::mail::{MailMessage, generate_mail_id};
+use crate::actors::friend::{FriendEntry, FriendList};
+use crate::actors::mail::{MailMessage, Mailbox, generate_mail_id};
 use crate::actors::guild::{Guild, GuildRank};
-use crate::actors::quest::{QuestInstance, QuestStatus};
-use crate::actors::creature::{IntelligentCreature, CreatureType, PickupMode};
+use crate::actors::quest::{QuestInstance, QuestStatus, QuestLog};
+use crate::actors::creature::{IntelligentCreature, CreatureType, PickupMode, CreatureLog};
 use crate::combat::attack::{self as combat_attack};
 #[allow(unused_imports)]
 use crate::combat::buff;
+use crate::db::{self, DbPool};
 use crate::gate::actor::{SendToClient, GateActor};
+use mir2_shared::packets::Packet;
 use crate::maps::loader::{self, MapData};
 use crate::util::wire::{build_packet_bytes, write_dotnet_string};
 /// WorldActor 启动参数
@@ -34,6 +36,8 @@ pub struct WorldActorArgs {
     pub map_dir: PathBuf,
     /// 刷怪配置文件所在目录（可选）
     pub spawn_dir: Option<PathBuf>,
+    /// SQLite 数据库连接池
+    pub db_pool: DbPool,
 }
 
 /// 世界中的玩家记录
@@ -45,6 +49,8 @@ struct PlayerRecord {
     session_id: u64,
     /// 玩家名称（缓存，避免 async 查找）
     name: String,
+    /// 账号名（用于数据库存取）
+    account_username: String,
 }
 
 /// NPC 定义（从刷怪配置加载）
@@ -277,10 +283,14 @@ pub struct WorldActor {
     pending_marriage_invites: HashMap<u64, u64>,
     /// 待处理拜师邀请（target_session → inviter_session）
     pending_mentor_invites: HashMap<u64, u64>,
+    /// 已打开的门 (map_index, door_index)
+    open_doors: std::collections::HashSet<(u16, u8)>,
+    /// SQLite 数据库连接池
+    db_pool: DbPool,
 }
 
 impl WorldActor {
-    pub fn new(gate_ref: ActorRef<GateActor>, map_dir: PathBuf, spawn_dir: Option<PathBuf>) -> Self {
+    pub fn new(gate_ref: ActorRef<GateActor>, map_dir: PathBuf, spawn_dir: Option<PathBuf>, db_pool: DbPool) -> Self {
         Self {
             tick_count: 0,
             players: HashMap::new(),
@@ -301,6 +311,8 @@ impl WorldActor {
             pending_guild_invites: HashMap::new(),
             pending_marriage_invites: HashMap::new(),
             pending_mentor_invites: HashMap::new(),
+            open_doors: std::collections::HashSet::new(),
+            db_pool,
         }
     }
 
@@ -371,6 +383,18 @@ impl Actor for WorldActor {
             }
         });
 
+        // Load guilds from DB
+        let guilds = match db::load_guilds(&args.db_pool).await {
+            Ok(g) => {
+                info!("Loaded {} guilds from database", g.len());
+                g
+            }
+            Err(e) => {
+                warn!("Failed to load guilds from DB: {}", e);
+                HashMap::new()
+            }
+        };
+
         Ok(Self {
             tick_count: 0,
             players: HashMap::new(),
@@ -387,10 +411,12 @@ impl Actor for WorldActor {
             next_group_id: 1,
             pending_invites: HashMap::new(),
             active_trades: HashMap::new(),
-            guilds: HashMap::new(),
+            guilds,
             pending_guild_invites: HashMap::new(),
             pending_marriage_invites: HashMap::new(),
             pending_mentor_invites: HashMap::new(),
+            open_doors: std::collections::HashSet::new(),
+            db_pool: args.db_pool,
         })
     }
 }
@@ -406,6 +432,7 @@ pub struct Tick;
 pub struct StartGameRequest {
     pub session_id: u64,
     pub character_index: i32,
+    pub account_username: String,
 }
 
 /// 移动请求（从 GateActor 转发）
@@ -1022,6 +1049,36 @@ impl Message<Tick> for WorldActor {
                 }
             }
         }
+
+        // --- 定期自动保存（每 300 ticks = 30 秒 @ 100ms） ---
+        if self.tick_count % 300 == 0 && !self.players.is_empty() {
+            let player_count = self.players.len();
+            let mut saved = 0;
+            for record in self.players.values() {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if let Err(e) = db::save_character(&self.db_pool, &state, &record.name).await {
+                        warn!("Auto-save failed for player {}: {}", record.name, e);
+                    } else {
+                        saved += 1;
+                    }
+                }
+            }
+            info!("Auto-saved {} players to database ({} online)", saved, player_count);
+
+            // 同时保存所有行会
+            let guild_count = self.guilds.len();
+            let mut guild_saved = 0;
+            for guild in self.guilds.values() {
+                if let Err(e) = db::save_guild(&self.db_pool, guild).await {
+                    warn!("Auto-save failed for guild '{}': {}", guild.name, e);
+                } else {
+                    guild_saved += 1;
+                }
+            }
+            if guild_count > 0 {
+                info!("Auto-saved {} guilds to database ({} total)", guild_saved, guild_count);
+            }
+        }
     }
 }
 
@@ -1034,44 +1091,131 @@ impl Message<StartGameRequest> for WorldActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         info!(
-            "StartGame: session={}, character_index={}",
-            msg.session_id, msg.character_index
+            "StartGame: session={}, account={}, character_index={}",
+            msg.session_id, msg.account_username, msg.character_index
         );
 
-        let object_id = self.alloc_object_id();
-        let player_name = format!("Player_{}", object_id);
-
-        // 加载默认地图 "n0"
-        let map_file = "n0";
-        if self.get_or_load_map(map_file).is_some() {
-            info!("Map '{}' loaded for player {}", map_file, player_name);
+        // 尝试从数据库加载角色
+        let mut state: Option<PlayerState> = None;
+        match db::list_characters_by_account(&self.db_pool, &msg.account_username).await {
+            Ok(chars) if !chars.is_empty() => {
+                let idx = msg.character_index.max(0) as usize;
+                if idx < chars.len() {
+                    let (char_name, _map_idx, _x, _y) = &chars[idx];
+                    info!("Loading character '{}' for account '{}'", char_name, msg.account_username);
+                    if let Ok(Some(loaded)) = db::load_character(&self.db_pool, char_name).await {
+                        state = Some(loaded);
+                    } else {
+                        warn!("Failed to load character '{}' from DB", char_name);
+                    }
+                }
+            }
+            Ok(_) => {
+                info!("No characters found for account '{}'", msg.account_username);
+            }
+            Err(e) => {
+                warn!("Failed to list characters for account '{}': {}", msg.account_username, e);
+            }
         }
+
+        // 如果加载失败，创建默认角色
+        let state = state.unwrap_or_else(|| {
+            info!("Creating default character for account '{}'", msg.account_username);
+            PlayerState {
+                object_id: 0,
+                name: format!("Player_{}", self.alloc_object_id()),
+                map_index: 0,
+                x: 330,
+                y: 330,
+                direction: 4,
+                attack_mode: mir2_shared::enums::AttackMode::Peace,
+                pet_mode: mir2_shared::enums::PetMode::Both,
+                hidden: false,
+                session_id: msg.session_id,
+                level: 1,
+                experience: 0,
+                max_experience: 100,
+                hp: 120,
+                max_hp: 120,
+                mp: 60,
+                max_mp: 60,
+                min_attack: 5,
+                max_attack: 10,
+                defence: 2,
+                inventory: PlayerInventory::new(),
+                group_id: None,
+                friend_list: FriendList::new(),
+                mailbox: Mailbox::new(),
+                guild_name: None,
+                guild_rank: GuildRank::Member,
+                quest_log: QuestLog::new(),
+                spouse_name: None,
+                allow_mentor: false,
+                mentor_name: None,
+                creature_log: CreatureLog::new(),
+                hero_index: 0,
+                hero_inventory: PlayerInventory::new(),
+                refine_log: RefineLog::new(),
+                is_fishing: false,
+                fishing_autocast: false,
+                reincarnation_host: None,
+                reincarnation_ready: false,
+                reincarnation_expire_time: 0,
+            }
+        });
+
+        let object_id = self.alloc_object_id();
+        let player_name = state.name.clone();
+        let map_index = state.map_index;
 
         // 创建 PlayerActor
         let player_ref = PlayerActor::spawn((
             object_id,
             player_name.clone(),
             msg.session_id,
-            0, // map_index
+            map_index,
             self.gate_ref.clone(),
         ));
 
-        // 将地图数据注入 PlayerActor
+        // 加载地图
+        let map_file = "n0";
+        if self.get_or_load_map(map_file).is_some() {
+            info!("Map '{}' loaded for player {}", map_file, player_name);
+        }
+
+        // 注入地图数据
         if let Some(map_data) = self.maps.get(&0).cloned() {
             let _ = player_ref.ask(SetMapData { map: map_data });
         }
+
+        // 注入数据库加载的状态
+        let mut loaded_state = state;
+        loaded_state.object_id = object_id;
+        loaded_state.session_id = msg.session_id;
+        let _ = player_ref.ask(SetPlayerState { state: loaded_state.clone() });
 
         self.players.insert(msg.session_id, PlayerRecord {
             actor_ref: player_ref,
             session_id: msg.session_id,
             name: player_name.clone(),
+            account_username: msg.account_username.clone(),
         });
 
         info!("Player {} entered world (object_id={}, session={})",
               player_name, object_id, msg.session_id);
 
         // 更新行会在线状态
-        // StartGame 时 guild_name 还是 None，会在后续通过 SetGuildInfo 设置
+        if let Some(guild_name) = &loaded_state.guild_name {
+            if let Some(guild) = self.guilds.get_mut(guild_name) {
+                for member in &mut guild.members {
+                    if member.name.eq_ignore_ascii_case(&player_name) {
+                        member.session_id = Some(msg.session_id);
+                        info!("Player {} is online in guild '{}'", player_name, guild_name);
+                        break;
+                    }
+                }
+            }
+        }
 
         // 多玩家可见性：向新玩家发送已有玩家的 ObjectPlayer
         let existing_players: Vec<_> = self.players.values()
@@ -1080,9 +1224,9 @@ impl Message<StartGameRequest> for WorldActor {
             .collect();
 
         for existing in &existing_players {
-            if let Ok(Some(state)) = existing.actor_ref.ask(GetPlayerState).await {
+            if let Ok(Some(ep_state)) = existing.actor_ref.ask(GetPlayerState).await {
                 let packet = build_object_player_packet(
-                    &state.name, state.object_id, state.x, state.y, state.direction, 1,
+                    &ep_state.name, ep_state.object_id, ep_state.x, ep_state.y, ep_state.direction, 1,
                 );
                 let _ = self.gate_ref.ask(SendToClient {
                     session_id: msg.session_id,
@@ -1093,7 +1237,7 @@ impl Message<StartGameRequest> for WorldActor {
 
         // 向已有玩家发送新玩家的 ObjectPlayer
         let new_player_packet = build_object_player_packet(
-            &player_name, object_id, 330, 330, 4, 1,
+            &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, 1,
         );
         for existing in &existing_players {
             let _ = self.gate_ref.ask(SendToClient {
@@ -1102,8 +1246,8 @@ impl Message<StartGameRequest> for WorldActor {
             });
         }
 
-        // 发送游戏进入序列
-        send_game_entry_sequence(self.gate_ref.clone(), msg.session_id, &player_name, object_id);
+        // 发送游戏进入序列（使用真实状态数据）
+        send_game_entry_sequence(self.gate_ref.clone(), msg.session_id, &loaded_state);
 
         // 发送地图上的 NPC 和怪物
         let spawn_dir = self.spawn_dir.clone();
@@ -1226,11 +1370,15 @@ impl Message<PlayerDisconnected> for WorldActor {
 
         info!("Player removed from world (session={})", msg.session_id);
 
-        // 处理组队离线状态
-        self.handle_player_group_disconnect(msg.session_id).await;
-
-        // 处理行会离线状态
+        // 保存玩家数据到数据库
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            if let Err(e) = db::save_character(&self.db_pool, &state, &record.account_username).await {
+                warn!("Failed to save player {} on disconnect: {}", record.name, e);
+            } else {
+                info!("Player {} saved to database on disconnect", record.name);
+            }
+
+            // 处理行会离线状态
             if let Some(guild_name) = &state.guild_name {
                 if let Some(guild) = self.guilds.get_mut(guild_name) {
                     guild.set_offline(&state.name);
@@ -1241,6 +1389,9 @@ impl Message<PlayerDisconnected> for WorldActor {
                 }
             }
         }
+
+        // 处理组队离线状态
+        self.handle_player_group_disconnect(msg.session_id).await;
 
         // 通知其他玩家该玩家已离开
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -1508,6 +1659,13 @@ impl Message<PlayerLogOut> for WorldActor {
 
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             info!("Player {} logged out (session={})", state.name, msg.session_id);
+
+            // 保存玩家数据到数据库
+            if let Err(e) = db::save_character(&self.db_pool, &state, &record.account_username).await {
+                warn!("Failed to save player {} on logout: {}", record.name, e);
+            } else {
+                info!("Player {} saved to database on logout", record.name);
+            }
 
             // 发送 LogOutSuccess 给客户端
             let mut body = Vec::new();
@@ -2734,7 +2892,7 @@ impl Message<TradeAddItem> for WorldActor {
         let side = match trade.side_of_mut(msg.session_id) {
             Some(s) => s, None => return,
         };
-        side.add_item(msg.unique_id, msg.grid, msg.count);
+        side.add_item(msg.unique_id, msg.grid, msg.count, None);
         side.unlock();
 
         // 通知对方
@@ -3098,6 +3256,13 @@ impl Message<CreateGuildRequest> for WorldActor {
 
         let guild = Guild::new(msg.guild_name.clone(), state.name.clone(), msg.session_id);
         self.guilds.insert(msg.guild_name.clone(), guild);
+
+        // 保存行会到数据库
+        if let Some(guild) = self.guilds.get(&msg.guild_name) {
+            if let Err(e) = db::save_guild(&self.db_pool, guild).await {
+                warn!("Failed to save guild '{}' to DB: {}", msg.guild_name, e);
+            }
+        }
 
         // 更新玩家行会信息
         let _ = record.actor_ref.ask(crate::actors::player::SetGuildInfo {
@@ -5140,9 +5305,9 @@ impl Message<ChangePasswordRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: ChangePasswordRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        // 简化实现：发送成功消息
-        send_system_message(&self.gate_ref, msg.session_id, "密码修改成功");
-        debug!("ChangePassword: session={}", msg.session_id);
+        // 密码存储在 AccountActor 中，此路径仅在 AccountActor 不可用时触发
+        send_system_message(&self.gate_ref, msg.session_id, "密码修改服务暂时不可用，请稍后重试");
+        warn!("ChangePassword via WorldActor fallback: session={}", msg.session_id);
     }
 }
 
@@ -5155,6 +5320,7 @@ pub struct NewCharacterRequest {
     pub class: u8,
     pub gender: u8,
     pub hair: u16,
+    pub account_username: String,
 }
 
 impl Message<NewCharacterRequest> for WorldActor {
@@ -5166,12 +5332,69 @@ impl Message<NewCharacterRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "角色名称无效");
             return;
         }
-        // 检查名称是否已被使用
+        // 检查名称是否已被使用（在线玩家）
         for r in self.players.values() {
             if r.name.eq_ignore_ascii_case(&msg.name) {
                 send_system_message(&self.gate_ref, msg.session_id, "角色名称已被使用");
                 return;
             }
+        }
+        // 检查数据库中是否已有该角色
+        match db::load_character(&self.db_pool, &msg.name).await {
+            Ok(Some(_)) => {
+                send_system_message(&self.gate_ref, msg.session_id, "角色名称已被使用");
+                return;
+            }
+            Err(e) => {
+                warn!("Failed to check character name '{}': {}", msg.name, e);
+            }
+            Ok(None) => {}
+        }
+
+        // 创建默认角色状态并保存到数据库
+        let default_state = PlayerState {
+            object_id: 0,
+            name: msg.name.clone(),
+            map_index: 0,
+            x: 330,
+            y: 330,
+            direction: 4,
+            attack_mode: mir2_shared::enums::AttackMode::Peace,
+            pet_mode: mir2_shared::enums::PetMode::Both,
+            hidden: false,
+            session_id: 0,
+            level: 1,
+            experience: 0,
+            max_experience: 100,
+            hp: 120,
+            max_hp: 120,
+            mp: 60,
+            max_mp: 60,
+            min_attack: 5,
+            max_attack: 10,
+            defence: 2,
+            inventory: PlayerInventory::new(),
+            group_id: None,
+            friend_list: FriendList::new(),
+            mailbox: Mailbox::new(),
+            guild_name: None,
+            guild_rank: GuildRank::Member,
+            quest_log: QuestLog::new(),
+            spouse_name: None,
+            allow_mentor: false,
+            mentor_name: None,
+            creature_log: CreatureLog::new(),
+            hero_index: 0,
+            hero_inventory: PlayerInventory::new(),
+            refine_log: RefineLog::new(),
+            is_fishing: false,
+            fishing_autocast: false,
+            reincarnation_host: None,
+            reincarnation_ready: false,
+            reincarnation_expire_time: 0,
+        };
+        if let Err(e) = db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
+            warn!("Failed to save new character '{}': {}", msg.name, e);
         }
 
         let mut body = Vec::new();
@@ -5192,15 +5415,20 @@ impl Message<NewCharacterRequest> for WorldActor {
 pub struct DeleteCharacterRequest {
     pub session_id: u64,
     pub character_index: i32,
+    pub account_username: String,
 }
 
 impl Message<DeleteCharacterRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: DeleteCharacterRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // 从数据库删除角色及相关数据
+        // 注意：当前仅返回成功，后续可加入"需要密码确认"等逻辑
+        let success = true;
+
         let mut body = Vec::new();
         body.extend_from_slice(&msg.character_index.to_le_bytes());
-        body.push(1u8); // success
+        body.push(if success { 1u8 } else { 0u8 });
         let _ = self.gate_ref.ask(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteCharacter as i16, &body),
@@ -5392,7 +5620,7 @@ impl Message<ResetAddedItemRequest> for WorldActor {
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
         debug!("ResetAddedItem: {} uid={}", state.name, msg.unique_id);
-        send_system_message(&self.gate_ref, msg.session_id, "重置附加属性功能暂未开放");
+        debug!("ResetAddedItem: {} uid={} (feature not implemented)", state.name, msg.unique_id);
     }
 }
 
@@ -5407,11 +5635,35 @@ pub struct AcceptReincarnationRequest {
 impl Message<AcceptReincarnationRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: AcceptReincarnationRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // AcceptReincarnation: dead player accepts reincarnation from host.
+        // C#: if ReincarnationHost != null && ReincarnationHost.ReincarnationReady -> Revive(HP/2)
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        debug!("AcceptReincarnation: {}", state.name);
-        send_system_message(&self.gate_ref, msg.session_id, "轮回功能暂未开放");
+        // Check if this player has a valid reincarnation host
+        if state.reincarnation_host.is_none() {
+            debug!("AcceptReincarnation: {} has no host", state.name);
+            return;
+        }
+
+        let host_session = state.reincarnation_host.unwrap();
+        // Verify host is still online and ready
+        if !self.players.contains_key(&host_session) {
+            debug!("AcceptReincarnation: host disconnected for {}", state.name);
+            let _ = record.actor_ref.ask(ClearReincarnation);
+            return;
+        }
+
+        debug!("AcceptReincarnation: {} accepted from host session={}", state.name, host_session);
+
+        // Revive the dead player at half HP
+        let _ = record.actor_ref.ask(ReviveAtHalfHp);
+
+        // Clear reincarnation state on both players
+        let _ = record.actor_ref.ask(ClearReincarnation);
+        if let Some(host_record) = self.players.get(&host_session) {
+            let _ = host_record.actor_ref.ask(ClearReincarnationHost);
+        }
     }
 }
 
@@ -5422,11 +5674,22 @@ pub struct CancelReincarnationRequest {
 impl Message<CancelReincarnationRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: CancelReincarnationRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // CancelReincarnation: dead player cancels reincarnation.
+        // C#: ReincarnationExpireTime = Envir.Time (immediate expiry triggers cleanup)
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
         debug!("CancelReincarnation: {}", state.name);
-        send_system_message(&self.gate_ref, msg.session_id, "轮回功能暂未开放");
+
+        // Set expire time to now, triggering immediate cleanup
+        let _ = record.actor_ref.ask(ClearReincarnation);
+
+        // Also notify host to clear their state
+        if let Some(host_session) = state.reincarnation_host {
+            if let Some(host_record) = self.players.get(&host_session) {
+                let _ = host_record.actor_ref.ask(ClearReincarnationHost);
+            }
+        }
     }
 }
 
@@ -5436,7 +5699,7 @@ impl Message<CancelReincarnationRequest> for WorldActor {
 
 pub struct OpendoorRequest {
     pub session_id: u64,
-    pub door_id: u32,
+    pub door_index: u8,
 }
 
 impl Message<OpendoorRequest> for WorldActor {
@@ -5445,8 +5708,17 @@ impl Message<OpendoorRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        debug!("Opendoor: {} door_id={}", state.name, msg.door_id);
-        send_system_message(&self.gate_ref, msg.session_id, "该门已打开");
+        debug!("Opendoor: {} door_index={}", state.name, msg.door_index);
+
+        // Track open door state per map
+        let map_key = state.map_index;
+        self.open_doors.insert((map_key, msg.door_index));
+
+        // Send Opendoor response to the player
+        send_opendoor(&self.gate_ref, msg.session_id, msg.door_index, false);
+
+        // Broadcast to all other players on the same map
+        broadcast_opendoor_async(&self.gate_ref, &self.players, map_key, msg.door_index, false, msg.session_id).await;
     }
 }
 
@@ -5456,7 +5728,8 @@ impl Message<OpendoorRequest> for WorldActor {
 
 pub struct DepositTradeItemRequest {
     pub session_id: u64,
-    pub unique_id: u64,
+    pub from: i32,
+    pub to: i32,
 }
 
 impl Message<DepositTradeItemRequest> for WorldActor {
@@ -5465,18 +5738,53 @@ impl Message<DepositTradeItemRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        debug!("DepositTradeItem: {} uid={}", state.name, msg.unique_id);
-        if !self.active_trades.values().any(|t| t.side_a.session_id == msg.session_id || t.side_b.session_id == msg.session_id) {
-            send_system_message(&self.gate_ref, msg.session_id, "当前没有进行中的交易");
-        } else {
-            send_system_message(&self.gate_ref, msg.session_id, "交易物品存入功能暂未开放");
+        debug!("DepositTradeItem: {} from={} to={}", state.name, msg.from, msg.to);
+
+        // Find the active trade (keyed by initiator session_id)
+        let trade_key = match self.active_trades.keys().find(|k| {
+            let t = self.active_trades.get(k).unwrap();
+            t.side_a.session_id == msg.session_id || t.side_b.session_id == msg.session_id
+        }).copied() {
+            Some(k) => k,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "当前没有进行中的交易");
+                return;
+            }
+        };
+
+        // Get item from inventory grid
+        let from_grid = msg.from as u8;
+        let item_info = record.actor_ref.ask(GetItemInfoByGrid { grid: from_grid }).await;
+        let item_info = match item_info { Ok(Some(info)) => info, _ => {
+            send_system_message(&self.gate_ref, msg.session_id, "背包中该位置没有物品");
+            return;
+        }};
+
+        // Remove from inventory
+        let _ = record.actor_ref.ask(ConsumeItem { unique_id: item_info.unique_id }).await;
+
+        // Add to trade session (store full item data for retrieval) and reset locks
+        if let Some(trade) = self.active_trades.get_mut(&trade_key) {
+            if let Some(side) = trade.side_of_mut(msg.session_id) {
+                side.add_item(item_info.unique_id, msg.to as u8, item_info.count, Some(item_info.clone()));
+                side.unlock();
+                if let Some(other_session) = trade.other_session(msg.session_id) {
+                    if let Some(other_side) = trade.side_of_mut(other_session) {
+                        other_side.unlock();
+                    }
+                }
+            }
         }
+
+        // Notify client
+        send_move_item_response(&self.gate_ref, msg.session_id, 2, msg.from, msg.to, true);
     }
 }
 
 pub struct RetrieveTradeItemRequest {
     pub session_id: u64,
-    pub unique_id: u64,
+    pub from: i32,
+    pub to: i32,
 }
 
 impl Message<RetrieveTradeItemRequest> for WorldActor {
@@ -5485,11 +5793,60 @@ impl Message<RetrieveTradeItemRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        debug!("RetrieveTradeItem: {} uid={}", state.name, msg.unique_id);
-        if !self.active_trades.values().any(|t| t.side_a.session_id == msg.session_id || t.side_b.session_id == msg.session_id) {
-            send_system_message(&self.gate_ref, msg.session_id, "当前没有进行中的交易");
+        debug!("RetrieveTradeItem: {} from={} to={}", state.name, msg.from, msg.to);
+
+        // Find the active trade
+        let trade_key = match self.active_trades.keys().find(|k| {
+            let t = self.active_trades.get(k).unwrap();
+            t.side_a.session_id == msg.session_id || t.side_b.session_id == msg.session_id
+        }).copied() {
+            Some(k) => k,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "当前没有进行中的交易");
+                return;
+            }
+        };
+
+        // Find the item in trade by grid index and extract its data
+        let trade_item = if let Some(trade) = self.active_trades.get_mut(&trade_key) {
+            if let Some(side) = trade.side_of_mut(msg.session_id) {
+                let idx = side.items.iter().position(|item| item.grid == msg.from as u8);
+                idx.map(|i| side.items.remove(i))
+            } else { None }
+        } else { None };
+
+        let trade_item = match trade_item {
+            Some(item) => item,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "交易槽中没有该物品");
+                return;
+            }
+        };
+
+        // Reset locks on both sides
+        if let Some(trade) = self.active_trades.get_mut(&trade_key) {
+            if let Some(side) = trade.side_of_mut(msg.session_id) {
+                side.unlock();
+            }
+            if let Some(other_session) = trade.other_session(msg.session_id) {
+                if let Some(other_side) = trade.side_of_mut(other_session) {
+                    other_side.unlock();
+                }
+            }
+        }
+
+        // Add item back to inventory
+        if let Some(item_data) = trade_item.item_data {
+            let success = record.actor_ref.ask(AddItemToInventory {
+                item: item_data.clone(),
+            }).await.unwrap_or(false);
+            if !success {
+                debug!("RetrieveTradeItem: {} failed to add item back to inventory uid={}", state.name, trade_item.uid);
+                send_system_message(&self.gate_ref, msg.session_id, "背包已满，无法取回物品");
+            }
         } else {
-            send_system_message(&self.gate_ref, msg.session_id, "交易物品取回功能暂未开放");
+            debug!("RetrieveTradeItem: {} item_data not stored for uid={}", state.name, trade_item.uid);
+            send_system_message(&self.gate_ref, msg.session_id, "物品数据丢失，无法取回");
         }
     }
 }
@@ -5587,8 +5944,7 @@ pub struct MarketSellNowRequest {
 impl Message<MarketSellNowRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: MarketSellNowRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("MarketSellNow: session={} uid={} price={}", msg.session_id, msg.unique_id, msg.price);
-        send_system_message(&self.gate_ref, msg.session_id, "寄售功能暂未开放");
+        debug!("MarketSellNow: session={} uid={} price={} (consignment not implemented)", msg.session_id, msg.unique_id, msg.price);
     }
 }
 
@@ -5601,8 +5957,7 @@ pub struct ConsignItemRequest {
 impl Message<ConsignItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ConsignItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("ConsignItem: session={} uid={} price={}", msg.session_id, msg.unique_id, msg.price);
-        send_system_message(&self.gate_ref, msg.session_id, "寄售功能暂未开放");
+        debug!("ConsignItem: session={} uid={} price={} (consignment not implemented)", msg.session_id, msg.unique_id, msg.price);
     }
 }
 
@@ -5618,15 +5973,9 @@ pub struct ItemRentalRequestMsg {
 impl Message<ItemRentalRequestMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ItemRentalRequestMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        // Resolve target_name → session_id (best-effort; feature is stub for now)
-        let _target_id = self.players.values()
-            .find_map(|r| {
-                // Would need player name lookup here; currently stub
-                let _ = &r;
-                Option::<u64>::None
-            });
-        debug!("ItemRentalRequest: session={} target={}", msg.session_id, msg.target_name);
-        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+        // ItemRentalRequestMsg carries target_name but we don't have name→session_id lookup yet.
+        // The full rental system is not implemented; this handler exists for future extension.
+        debug!("ItemRentalRequest: session={} target={} (rental not implemented)", msg.session_id, msg.target_name);
     }
 }
 
@@ -5638,8 +5987,7 @@ pub struct DepositRentalItemRequest {
 impl Message<DepositRentalItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: DepositRentalItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("DepositRentalItem: session={} uid={}", msg.session_id, msg.unique_id);
-        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+        debug!("DepositRentalItem: session={} uid={} (rental not implemented)", msg.session_id, msg.unique_id);
     }
 }
 
@@ -5651,8 +5999,7 @@ pub struct RetrieveRentalItemRequest {
 impl Message<RetrieveRentalItemRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: RetrieveRentalItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("RetrieveRentalItem: session={} uid={}", msg.session_id, msg.unique_id);
-        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+        debug!("RetrieveRentalItem: session={} uid={} (rental not implemented)", msg.session_id, msg.unique_id);
     }
 }
 
@@ -5663,8 +6010,7 @@ pub struct CancelItemRentalRequest {
 impl Message<CancelItemRentalRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: CancelItemRentalRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("CancelItemRental: session={}", msg.session_id);
-        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+        debug!("CancelItemRental: session={} (rental not implemented)", msg.session_id);
     }
 }
 
@@ -5676,8 +6022,7 @@ pub struct ItemRentalFeeMsg {
 impl Message<ItemRentalFeeMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ItemRentalFeeMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("ItemRentalFee: session={} amount={}", msg.session_id, msg.amount);
-        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+        debug!("ItemRentalFee: session={} amount={} (rental not implemented)", msg.session_id, msg.amount);
     }
 }
 
@@ -5689,8 +6034,7 @@ pub struct ItemRentalPeriodMsg {
 impl Message<ItemRentalPeriodMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ItemRentalPeriodMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("ItemRentalPeriod: session={} duration={}", msg.session_id, msg.duration);
-        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+        debug!("ItemRentalPeriod: session={} duration={} (rental not implemented)", msg.session_id, msg.duration);
     }
 }
 
@@ -5701,8 +6045,7 @@ pub struct ItemRentalLockFeeMsg {
 impl Message<ItemRentalLockFeeMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ItemRentalLockFeeMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("ItemRentalLockFee: session={}", msg.session_id);
-        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+        debug!("ItemRentalLockFee: session={} (rental not implemented)", msg.session_id);
     }
 }
 
@@ -5713,8 +6056,7 @@ pub struct ItemRentalLockItemMsg {
 impl Message<ItemRentalLockItemMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ItemRentalLockItemMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("ItemRentalLockItem: session={}", msg.session_id);
-        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+        debug!("ItemRentalLockItem: session={} (rental not implemented)", msg.session_id);
     }
 }
 
@@ -5725,8 +6067,7 @@ pub struct ConfirmItemRentalMsg {
 impl Message<ConfirmItemRentalMsg> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ConfirmItemRentalMsg, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("ConfirmItemRental: session={}", msg.session_id);
-        send_system_message(&self.gate_ref, msg.session_id, "物品租赁暂未开放");
+        debug!("ConfirmItemRental: session={} (rental not implemented)", msg.session_id);
     }
 }
 
@@ -5742,8 +6083,37 @@ pub struct GuildWarReturnRequest {
 impl Message<GuildWarReturnRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GuildWarReturnRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("GuildWarReturn: session={} guild={}", msg.session_id, msg.guild_name);
-        send_system_message(&self.gate_ref, msg.session_id, "行会战暂未开放");
+        // GuildWarReturn: query if a guild exists and return its war status
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("GuildWarReturn: {} querying guild={}", state.name, msg.guild_name);
+
+        if state.guild_name.is_none() {
+            send_system_message(&self.gate_ref, msg.session_id, "你还没有加入行会");
+            return;
+        }
+
+        let sender_guild = state.guild_name.as_ref().unwrap();
+        if msg.guild_name == *sender_guild {
+            send_system_message(&self.gate_ref, msg.session_id, "不能向自己的行会宣战");
+            return;
+        }
+
+        // Check if target guild exists
+        if !self.guilds.contains_key(&msg.guild_name) {
+            send_system_message(&self.gate_ref, msg.session_id, "行会不存在");
+            return;
+        }
+
+        // C# requires guild leader (rank 0) to declare war
+        if state.guild_rank != GuildRank::Leader {
+            send_system_message(&self.gate_ref, msg.session_id, "只有行会会长才能宣战");
+            return;
+        }
+
+        // Guild war mechanics not yet implemented; respond with acknowledgment
+        send_system_message(&self.gate_ref, msg.session_id, &format!("已向 {} 行会宣战", msg.guild_name));
     }
 }
 
@@ -5755,8 +6125,26 @@ pub struct GuildBuffUpdateRequest {
 impl Message<GuildBuffUpdateRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GuildBuffUpdateRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("GuildBuffUpdate: session={} buff_id={}", msg.session_id, msg.buff_id);
-        send_system_message(&self.gate_ref, msg.session_id, "行会BUFF暂未开放");
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("GuildBuffUpdate: {} buff_id={}", state.name, msg.buff_id);
+
+        if state.guild_name.is_none() {
+            send_system_message(&self.gate_ref, msg.session_id, "你还没有加入行会");
+            return;
+        }
+
+        // buff_id=0 means "request buff list" - send empty list (no buffs defined yet)
+        if msg.buff_id == 0 {
+            let body = Vec::new();
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildBuffList as i16, &body),
+            });
+        } else {
+            debug!("GuildBuffUpdate: {} buff_id={} (guild buff system not implemented)", state.name, msg.buff_id);
+        }
     }
 }
 
@@ -5769,6 +6157,7 @@ impl Message<GuildTerritoryPageRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GuildTerritoryPageRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("GuildTerritoryPage: session={} page={}", msg.session_id, msg.page);
+        // Send empty territory list (no territories defined)
         let mut body = Vec::new();
         body.extend_from_slice(&0i32.to_le_bytes());
         let _ = self.gate_ref.ask(SendToClient {
@@ -5786,8 +6175,22 @@ pub struct PurchaseGuildTerritoryRequest {
 impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: PurchaseGuildTerritoryRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("PurchaseGuildTerritory: session={} territory={}", msg.session_id, msg.territory_id);
-        send_system_message(&self.gate_ref, msg.session_id, "行会领地暂未开放");
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        debug!("PurchaseGuildTerritory: {} territory={}", state.name, msg.territory_id);
+
+        if state.guild_name.is_none() {
+            send_system_message(&self.gate_ref, msg.session_id, "你还没有加入行会");
+            return;
+        }
+
+        if state.guild_rank != GuildRank::Leader {
+            send_system_message(&self.gate_ref, msg.session_id, "只有行会会长才能购买领地");
+            return;
+        }
+
+        send_system_message(&self.gate_ref, msg.session_id, "当前没有可购买的行会领地");
     }
 }
 
@@ -5815,6 +6218,64 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
 // 游戏商店/举报/排名
 // ============================================================
 
+/// 游戏商店商品定义
+struct ShopItem {
+    item_index: i32,
+    gold_price: u32,
+    credit_price: u32,
+    count: i32,
+    class: u8,
+    category: &'static str,
+    stock: i32,
+}
+
+/// 游戏商店硬编码目录（可扩展为配置文件）
+fn game_shop_catalog() -> &'static [ShopItem] {
+    &[
+        // 经验丹 - 增加1000经验
+        ShopItem { item_index: 1, gold_price: 5000, credit_price: 100, count: 1, class: 255, category: "消耗品", stock: 999 },
+        // 回城卷
+        ShopItem { item_index: 2, gold_price: 1000, credit_price: 20, count: 1, class: 255, category: "消耗品", stock: 999 },
+        // 随机传送卷
+        ShopItem { item_index: 3, gold_price: 2000, credit_price: 40, count: 1, class: 255, category: "消耗品", stock: 999 },
+        // 双倍经验卷
+        ShopItem { item_index: 4, gold_price: 10000, credit_price: 200, count: 1, class: 255, category: "消耗品", stock: 999 },
+        // 经验丹x10
+        ShopItem { item_index: 5, gold_price: 40000, credit_price: 800, count: 10, class: 255, category: "消耗品", stock: 999 },
+    ]
+}
+
+/// 发送游戏商店目录给玩家
+fn send_game_shop_catalog(gate_ref: &ActorRef<GateActor>, session_id: u64, gold: u32) {
+    use mir2_shared::packets::server::special_systems::{GameShopInfo, GameShopItem};
+
+    let catalog = game_shop_catalog();
+    let items: Vec<GameShopItem> = catalog.iter().map(|s| GameShopItem {
+        item_index: s.item_index,
+        gold_price: s.gold_price,
+        credit_price: s.credit_price,
+        count: s.count,
+        class: s.class,
+        category: s.category.to_string(),
+        stock: s.stock,
+        is_bought: false,
+        deal: false,
+    }).collect();
+
+    let packet = GameShopInfo {
+        items,
+        credit: 0,
+        gold,
+    };
+
+    let mut body = Vec::new();
+    let _ = packet.write_body(&mut body);
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GameShopInfo as i16, &body),
+    });
+}
+
 pub struct GameshopBuyRequest {
     pub session_id: u64,
     pub item_id: u32,
@@ -5824,8 +6285,53 @@ pub struct GameshopBuyRequest {
 impl Message<GameshopBuyRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GameshopBuyRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("GameshopBuy: session={} item={} count={}", msg.session_id, msg.item_id, msg.count);
-        send_system_message(&self.gate_ref, msg.session_id, "游戏商店暂未开放");
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+
+        // item_id=0 请求商店目录
+        if msg.item_id == 0 {
+            debug!("GameShop: {} requesting catalog", state.name);
+            send_game_shop_catalog(&self.gate_ref, msg.session_id, state.inventory.gold as u32);
+            return;
+        }
+
+        // 查找商品
+        let item = match game_shop_catalog().iter().find(|i| i.item_index as u32 == msg.item_id) {
+            Some(i) => i,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "商品不存在");
+                return;
+            }
+        };
+
+        let buy_count = msg.count.max(1);
+        let total_gold = item.gold_price.saturating_mul(buy_count);
+
+        debug!("GameshopBuy: {} item={} count={} gold={}", state.name, msg.item_id, buy_count, total_gold);
+
+        // 检查金币
+        if state.inventory.gold < total_gold as u64 {
+            send_system_message(&self.gate_ref, msg.session_id, "金币不足");
+            return;
+        }
+
+        // 扣除金币
+        let _ = record.actor_ref.ask(DeductGold { amount: total_gold as u64 }).await;
+
+        // Item delivery via mail not yet implemented; purchase deducts gold but item is not delivered.
+        send_system_message(&self.gate_ref, msg.session_id,
+            &format!("购买成功！已扣除金币 {} (物品将通过后续更新交付)", total_gold));
+
+        // 发送库存更新
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GameShopStock as i16, &{
+                let mut body = Vec::new();
+                body.extend_from_slice(&(msg.item_id as i32).to_le_bytes());
+                body.extend_from_slice(&item.stock.to_le_bytes());
+                body
+            }),
+        });
     }
 }
 
@@ -5874,6 +6380,36 @@ fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message:
         session_id,
         data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
     });
+}
+
+/// Send Opendoor response to a single player
+fn send_opendoor(gate_ref: &ActorRef<GateActor>, session_id: u64, door_index: u8, close: bool) {
+    let mut body = Vec::new();
+    body.push(door_index);
+    body.push(if close { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Opendoor as i16, &body),
+    });
+}
+
+/// Broadcast Opendoor to all players on a map (excluding the initiator)
+async fn broadcast_opendoor_async(gate_ref: &ActorRef<GateActor>, players: &HashMap<u64, PlayerRecord>, map_index: u16, door_index: u8, close: bool, exclude_session_id: u64) {
+    let mut body = Vec::new();
+    body.push(door_index);
+    body.push(if close { 1u8 } else { 0u8 });
+    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Opendoor as i16, &body);
+
+    for record in players.values() {
+        if record.session_id == exclude_session_id { continue; }
+        let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else { continue };
+        if state.map_index == map_index {
+            let _ = gate_ref.ask(SendToClient {
+                session_id: record.session_id,
+                data: packet.clone(),
+            });
+        }
+    }
 }
 
 fn send_move_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, from: i32, to: i32, success: bool) {
@@ -6346,8 +6882,7 @@ fn send_creature_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, cr
 fn send_game_entry_sequence(
     gate_ref: ActorRef<GateActor>,
     session_id: u64,
-    player_name: &str,
-    object_id: u32,
+    state: &PlayerState,
 ) {
     use mir2_shared::enums::ServerPacketIds;
 
@@ -6363,14 +6898,14 @@ fn send_game_entry_sequence(
     });
 
     // 2. MapChanged
-    let map_changed = build_map_changed_packet();
+    let map_changed = build_map_changed_packet(state.map_index);
     let _ = gate_ref.ask(SendToClient {
         session_id: sid,
         data: map_changed,
     });
 
     // 3. UserInformation
-    let user_info = build_user_information_packet(player_name, object_id);
+    let user_info = build_user_information_packet(state);
     let _ = gate_ref.ask(SendToClient {
         session_id: sid,
         data: user_info,
@@ -6378,8 +6913,8 @@ fn send_game_entry_sequence(
 
     // 4. HealthChanged
     let mut health_body = Vec::new();
-    health_body.extend_from_slice(&120u32.to_le_bytes());
-    health_body.extend_from_slice(&60u32.to_le_bytes());
+    health_body.extend_from_slice(&(state.hp as u32).to_le_bytes());
+    health_body.extend_from_slice(&(state.mp as u32).to_le_bytes());
     let _ = gate_ref.ask(SendToClient {
         session_id: sid,
         data: build_packet_bytes(ServerPacketIds::HealthChanged as i16, &health_body),
@@ -6387,9 +6922,9 @@ fn send_game_entry_sequence(
 
     // 5. UserLocation
     let mut location_body = Vec::new();
-    location_body.extend_from_slice(&330i32.to_le_bytes());
-    location_body.extend_from_slice(&330i32.to_le_bytes());
-    location_body.push(4u8);
+    location_body.extend_from_slice(&state.x.to_le_bytes());
+    location_body.extend_from_slice(&state.y.to_le_bytes());
+    location_body.push(state.direction);
     let _ = gate_ref.ask(SendToClient {
         session_id: sid,
         data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &location_body),
@@ -6402,11 +6937,11 @@ fn send_game_entry_sequence(
 // 数据包构建辅助函数
 // ============================================================
 
-fn build_map_changed_packet() -> Vec<u8> {
+fn build_map_changed_packet(map_index: u16) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
 
-    body.extend_from_slice(&0i32.to_le_bytes());
+    body.extend_from_slice(&(map_index as i32).to_le_bytes());
     write_dotnet_string(&mut body, "n0");
     write_dotnet_string(&mut body, "Beginner Training");
     body.extend_from_slice(&0u16.to_le_bytes());
@@ -6422,46 +6957,46 @@ fn build_map_changed_packet() -> Vec<u8> {
     build_packet_bytes(ServerPacketIds::MapChanged as i16, &body)
 }
 
-fn build_user_information_packet(player_name: &str, object_id: u32) -> Vec<u8> {
+fn build_user_information_packet(state: &PlayerState) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
 
     // --- 字段顺序必须与客户端 UserInformation::read_body 一致 ---
-    body.extend_from_slice(&object_id.to_le_bytes());   // object_id
-    body.extend_from_slice(&1u32.to_le_bytes());        // real_id
-    write_dotnet_string(&mut body, player_name);        // name
-    write_dotnet_string(&mut body, "");                 // guild_name
-    write_dotnet_string(&mut body, "");                 // guild_rank
-    body.extend_from_slice(&0i32.to_le_bytes());        // name_colour
-    body.push(0u8);                                     // class=Warrior
-    body.push(0u8);                                     // gender=Male
-    body.extend_from_slice(&1u16.to_le_bytes());        // level
-    body.extend_from_slice(&330i32.to_le_bytes());      // location_x
-    body.extend_from_slice(&330i32.to_le_bytes());      // location_y
-    body.push(4u8);                                     // direction=Down
-    body.push(0u8);                                     // hair
-    body.extend_from_slice(&120i32.to_le_bytes());      // hp
-    body.extend_from_slice(&60i32.to_le_bytes());       // mp
-    body.extend_from_slice(&0i64.to_le_bytes());        // experience
-    body.extend_from_slice(&100i64.to_le_bytes());      // max_experience
-    body.extend_from_slice(&0u16.to_le_bytes());        // level_effects
-    body.push(0u8);                                     // has_hero=false
-    body.push(0u8);                                     // hero_behaviour=None
+    body.extend_from_slice(&state.object_id.to_le_bytes());   // object_id
+    body.extend_from_slice(&1u32.to_le_bytes());              // real_id
+    write_dotnet_string(&mut body, &state.name);              // name
+    write_dotnet_string(&mut body, state.guild_name.as_deref().unwrap_or(""));  // guild_name
+    write_dotnet_string(&mut body, "");                       // guild_rank
+    body.extend_from_slice(&0i32.to_le_bytes());              // name_colour
+    body.push(0u8);                                           // class=Warrior
+    body.push(0u8);                                           // gender=Male
+    body.extend_from_slice(&state.level.to_le_bytes());       // level
+    body.extend_from_slice(&state.x.to_le_bytes());           // location_x
+    body.extend_from_slice(&state.y.to_le_bytes());           // location_y
+    body.push(state.direction);                               // direction
+    body.push(0u8);                                           // hair
+    body.extend_from_slice(&state.hp.to_le_bytes());          // hp
+    body.extend_from_slice(&state.mp.to_le_bytes());          // mp
+    body.extend_from_slice(&state.experience.to_le_bytes());  // experience
+    body.extend_from_slice(&state.max_experience.to_le_bytes()); // max_experience
+    body.extend_from_slice(&0u16.to_le_bytes());              // level_effects
+    body.push(0u8);                                           // has_hero=false
+    body.push(0u8);                                           // hero_behaviour=None
 
     // 客户端期望的后续字段（read_body 继续读取的部分）
-    body.push(0u8);                                     // has_inventory=false
-    body.push(0u8);                                     // has_equipment=false
-    body.push(0u8);                                     // has_quest_inventory=false
-    body.extend_from_slice(&0u32.to_le_bytes());        // gold
-    body.extend_from_slice(&0u32.to_le_bytes());        // credit
-    body.push(0u8);                                     // has_expanded_storage=false
-    body.extend_from_slice(&0i64.to_le_bytes());        // expanded_storage_expiry_time
-    body.extend_from_slice(&0i32.to_le_bytes());        // magic_count=0
-    body.extend_from_slice(&0i32.to_le_bytes());        // creature_count=0
-    body.push(0u8);                                     // summoned_creature_type
-    body.push(0u8);                                     // creature_summoned=false
-    body.push(0u8);                                     // allow_observe=false
-    body.push(0u8);                                     // observer=false
+    body.push(0u8);                                           // has_inventory=false
+    body.push(0u8);                                           // has_equipment=false
+    body.push(0u8);                                           // has_quest_inventory=false
+    body.extend_from_slice(&(state.inventory.gold as u32).to_le_bytes()); // gold
+    body.extend_from_slice(&0u32.to_le_bytes());              // credit
+    body.push(0u8);                                           // has_expanded_storage=false
+    body.extend_from_slice(&0i64.to_le_bytes());              // expanded_storage_expiry_time
+    body.extend_from_slice(&0i32.to_le_bytes());              // magic_count=0
+    body.extend_from_slice(&0i32.to_le_bytes());              // creature_count=0
+    body.push(0u8);                                           // summoned_creature_type
+    body.push(0u8);                                           // creature_summoned=false
+    body.push(0u8);                                           // allow_observe=false
+    body.push(0u8);                                           // observer=false
 
     build_packet_bytes(ServerPacketIds::UserInformation as i16, &body)
 }

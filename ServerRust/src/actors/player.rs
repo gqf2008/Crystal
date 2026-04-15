@@ -97,6 +97,12 @@ pub struct PlayerState {
     pub is_fishing: bool,
     /// 钓鱼自动释放
     pub fishing_autocast: bool,
+    /// 轮回宿主（发起轮回的玩家 session_id）
+    pub reincarnation_host: Option<u64>,
+    /// 轮回是否已就绪
+    pub reincarnation_ready: bool,
+    /// 轮回过期时间（WorldActor tick count，过期则自动取消）
+    pub reincarnation_expire_time: u64,
 }
 
 /// PlayerActor 状态
@@ -154,6 +160,9 @@ impl PlayerActor {
                 refine_log: RefineLog::new(),
                 is_fishing: false,
                 fishing_autocast: false,
+                reincarnation_host: None,
+                reincarnation_ready: false,
+                reincarnation_expire_time: 0,
             },
             gate_ref,
             map_data: None,
@@ -268,6 +277,23 @@ pub struct GetPlayerState;
 /// 设置地图数据
 pub struct SetMapData {
     pub map: MapData,
+}
+
+/// 设置玩家状态（用于从数据库加载后初始化）
+pub struct SetPlayerState {
+    pub state: PlayerState,
+}
+
+impl Message<SetPlayerState> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetPlayerState,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state = msg.state;
+    }
 }
 
 /// 复活玩家：重置 HP/MP 到最大值，设置位置
@@ -589,6 +615,19 @@ impl Message<GetItemInfo> for PlayerActor {
 
     async fn handle(&mut self, msg: GetItemInfo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
         self.state.inventory.get_item(msg.unique_id).cloned()
+    }
+}
+
+/// 获取指定格子的物品信息
+pub struct GetItemInfoByGrid {
+    pub grid: u8,
+}
+
+impl Message<GetItemInfoByGrid> for PlayerActor {
+    type Reply = Option<mir2_shared::data::item::UserItem>;
+
+    async fn handle(&mut self, msg: GetItemInfoByGrid, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.get_item_by_grid(msg.grid).cloned()
     }
 }
 
@@ -1230,6 +1269,47 @@ impl Message<TakeBackItem> for PlayerActor {
 }
 
 // ============================================================
+// 轮回系统消息
+// ============================================================
+
+/// 清除当前玩家的轮回状态（被施法者/死亡玩家使用）
+pub struct ClearReincarnation;
+
+impl Message<ClearReincarnation> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, _msg: ClearReincarnation, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.reincarnation_host = None;
+        self.state.reincarnation_ready = false;
+        self.state.reincarnation_expire_time = 0;
+    }
+}
+
+/// 清除宿主的轮回状态（施法者使用）
+pub struct ClearReincarnationHost;
+
+impl Message<ClearReincarnationHost> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, _msg: ClearReincarnationHost, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.reincarnation_ready = false;
+        self.state.reincarnation_expire_time = 0;
+    }
+}
+
+/// 以一半 HP 复活
+pub struct ReviveAtHalfHp;
+
+impl Message<ReviveAtHalfHp> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, _msg: ReviveAtHalfHp, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.hp = (self.state.max_hp / 2).max(1);
+        debug!("ReviveAtHalfHp: {} hp={}/{} (visual effect omitted)", self.state.name, self.state.hp, self.state.max_hp);
+    }
+}
+
+// ============================================================
 // 背包通知辅助函数
 // ============================================================
 
@@ -1338,6 +1418,9 @@ mod tests {
             refine_log: RefineLog::new(),
             is_fishing: false,
             fishing_autocast: false,
+            reincarnation_host: None,
+            reincarnation_ready: false,
+            reincarnation_expire_time: 0,
         }
     }
 
