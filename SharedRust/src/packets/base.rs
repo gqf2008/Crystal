@@ -30,10 +30,7 @@ impl PacketHeader {
         }
         
         // 包长度不应超过64KB(u16最大值,但实际游戏包应该更小)
-        const MAX_REASONABLE_PACKET_SIZE: u16 = 65535; // u16::MAX
-        if length > MAX_REASONABLE_PACKET_SIZE {
-            return Err(SharedError::PacketTooLarge(length as usize));
-        }
+        // 注: u16 天然上限 65535，此检查已省略（编译器优化）
         
         Ok(Self { length, opcode })
     }

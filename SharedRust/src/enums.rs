@@ -2702,6 +2702,7 @@ mod tests {
 
 /// Color represented as ARGB (Alpha, Red, Green, Blue)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Color {
     pub argb: i32,
 }
@@ -2738,11 +2739,6 @@ impl Color {
     }
 }
 
-impl Default for Color {
-    fn default() -> Self {
-        Color { argb: 0 }
-    }
-}
 
 
 

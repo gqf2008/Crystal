@@ -26,8 +26,8 @@ impl Packet for SendMail {
         let gold = reader.read_u32::<LittleEndian>()?;
         
         let mut items_idx = [0u64; 5];
-        for i in 0..5 {
-            items_idx[i] = reader.read_u64::<LittleEndian>()?;
+        for item in &mut items_idx {
+            *item = reader.read_u64::<LittleEndian>()?;
         }
         
         let stamped = reader.read_u8()? != 0;
@@ -170,8 +170,8 @@ impl Packet for MailCost {
         let gold = reader.read_u32::<LittleEndian>()?;
         
         let mut items_idx = [0u64; 5];
-        for i in 0..5 {
-            items_idx[i] = reader.read_u64::<LittleEndian>()?;
+        for item in &mut items_idx {
+            *item = reader.read_u64::<LittleEndian>()?;
         }
         
         let stamped = reader.read_u8()? != 0;

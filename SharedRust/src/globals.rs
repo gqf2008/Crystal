@@ -1,5 +1,5 @@
-/// Global constants used throughout the game
-/// Ported from Shared/Globals.cs
+//! Global constants used throughout the game
+//! Ported from Shared/Globals.cs
 
 pub const PRODUCT_CODENAME: &str = "Crystal";
 

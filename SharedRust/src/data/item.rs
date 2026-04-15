@@ -354,9 +354,7 @@ impl ItemInfo {
             match ch {
                 '[' => depth += 1,
                 ']' => {
-                    if depth > 0 {
-                        depth -= 1;
-                    }
+                    depth = depth.saturating_sub(1);
                 }
                 _ => {
                     if depth == 0 {
@@ -506,7 +504,7 @@ impl UserItem {
         let slot_count = reader.read_i32::<LittleEndian>()?;
         
         // 验证 slot_count 是否合理 (最大100个槽位，防止内存溢出)
-        if slot_count < 0 || slot_count > 100 {
+        if !(0..=100).contains(&slot_count) {
             return Err(SharedError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Invalid slot_count: {}, expected 0-100", slot_count),
@@ -717,7 +715,7 @@ impl UserItem {
 
         let desired = target
             .or_else(|| info.map(|i| usize::from(i.slots)))
-            .unwrap_or_else(|| self.slots.len());
+            .unwrap_or(self.slots.len());
 
         if desired != self.slots.len() {
             self.slots.resize_with(desired, || None);

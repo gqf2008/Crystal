@@ -8,6 +8,7 @@ use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub struct NewAccount {
     pub account_id: String,
     pub password: String,
@@ -18,19 +19,6 @@ pub struct NewAccount {
     pub email_address: String,
 }
 
-impl Default for NewAccount {
-    fn default() -> Self {
-        Self {
-            account_id: String::new(),
-            password: String::new(),
-            birth_date_binary: 0,
-            user_name: String::new(),
-            secret_question: String::new(),
-            secret_answer: String::new(),
-            email_address: String::new(),
-        }
-    }
-}
 
 impl Packet for NewAccount {
     const OPCODE: i16 = ClientPacketIds::NewAccount as i16;
@@ -60,21 +48,13 @@ impl Packet for NewAccount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub struct ChangePassword {
     pub account_id: String,
     pub current_password: String,
     pub new_password: String,
 }
 
-impl Default for ChangePassword {
-    fn default() -> Self {
-        Self {
-            account_id: String::new(),
-            current_password: String::new(),
-            new_password: String::new(),
-        }
-    }
-}
 
 impl Packet for ChangePassword {
     const OPCODE: i16 = ClientPacketIds::ChangePassword as i16;
@@ -96,19 +76,12 @@ impl Packet for ChangePassword {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub struct Login {
     pub account_id: String,
     pub password: String,
 }
 
-impl Default for Login {
-    fn default() -> Self {
-        Self {
-            account_id: String::new(),
-            password: String::new(),
-        }
-    }
-}
 
 impl Packet for Login {
     const OPCODE: i16 = ClientPacketIds::Login as i16;

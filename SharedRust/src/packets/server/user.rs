@@ -77,7 +77,7 @@ impl Packet for UserInformation {
         let inventory = if reader.read_u8()? != 0 {
             let count = reader.read_i32::<LittleEndian>()?;
             const MAX_INVENTORY_SIZE: i32 = 1000; // 合理上限
-            if count < 0 || count > MAX_INVENTORY_SIZE {
+            if !(0..=MAX_INVENTORY_SIZE).contains(&count) {
                 eprintln!("[UserInformation] Invalid inventory count: {}", count);
                 return Err(SharedError::PacketTooLarge(count as usize));
             }
@@ -99,7 +99,7 @@ impl Packet for UserInformation {
         let equipment = if reader.read_u8()? != 0 {
             let count = reader.read_i32::<LittleEndian>()?;
             const MAX_EQUIPMENT_SIZE: i32 = 100; // 合理上限
-            if count < 0 || count > MAX_EQUIPMENT_SIZE {
+            if !(0..=MAX_EQUIPMENT_SIZE).contains(&count) {
                 eprintln!("[UserInformation] Invalid equipment count: {}", count);
                 return Err(SharedError::PacketTooLarge(count as usize));
             }
@@ -121,7 +121,7 @@ impl Packet for UserInformation {
         let quest_inventory = if reader.read_u8()? != 0 {
             let count = reader.read_i32::<LittleEndian>()?;
             const MAX_QUEST_INVENTORY_SIZE: i32 = 500; // 合理上限
-            if count < 0 || count > MAX_QUEST_INVENTORY_SIZE {
+            if !(0..=MAX_QUEST_INVENTORY_SIZE).contains(&count) {
                 eprintln!("[UserInformation] Invalid quest inventory count: {}", count);
                 return Err(SharedError::PacketTooLarge(count as usize));
             }
@@ -147,7 +147,7 @@ impl Packet for UserInformation {
         // Read magics
         let magic_count = reader.read_i32::<LittleEndian>()?;
         const MAX_MAGIC_COUNT: i32 = 500;
-        if magic_count < 0 || magic_count > MAX_MAGIC_COUNT {
+        if !(0..=MAX_MAGIC_COUNT).contains(&magic_count) {
             eprintln!("[UserInformation] Invalid magic_count: {}", magic_count);
             return Err(SharedError::PacketTooLarge(magic_count as usize));
         }
@@ -160,7 +160,7 @@ impl Packet for UserInformation {
         // Skip intelligent creatures for now
         let creature_count = reader.read_i32::<LittleEndian>()?;
         const MAX_CREATURE_COUNT: i32 = 100;
-        if creature_count < 0 || creature_count > MAX_CREATURE_COUNT {
+        if !(0..=MAX_CREATURE_COUNT).contains(&creature_count) {
             eprintln!("[UserInformation] Invalid creature_count: {}", creature_count);
             return Err(SharedError::PacketTooLarge(creature_count as usize));
         }

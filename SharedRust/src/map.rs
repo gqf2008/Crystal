@@ -35,11 +35,6 @@ impl Point {
         Ok(())
     }
 
-    /// Add two points together (vector addition)
-    pub fn add(self, other: Point) -> Point {
-        Point::new(self.x + other.x, self.y + other.y)
-    }
-
     /// Add scalar values to x and y
     pub fn add_xy(self, x: i32, y: i32) -> Point {
         Point::new(self.x + x, self.y + y)
@@ -61,10 +56,6 @@ impl Point {
         self.y += dy;
     }
 
-    /// Format as "x, y" string (matches C# PointToString)
-    pub fn to_string(&self) -> String {
-        format!("{}, {}", self.x, self.y)
-    }
 }
 
 /// Implement Display for Point to match C# ToString behavior

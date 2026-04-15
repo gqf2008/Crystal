@@ -53,10 +53,6 @@ pub fn read_7bit_encoded_int<R: Read>(reader: &mut R) -> SharedResult<usize> {
 }
 
 pub fn write_7bit_encoded_int<W: Write>(writer: &mut W, mut value: usize) -> SharedResult<()> {
-    if value > DOTNET_STRING_MAX {
-        return Err(SharedError::StringTooLong { length: value });
-    }
-
     loop {
         let mut byte = (value & 0x7F) as u8;
         value >>= 7;
