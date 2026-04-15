@@ -1161,15 +1161,30 @@ impl RenderSystem for UIRenderSystem {
 
         // 宝石镶嵌对话框动作
         {
+            use crate::network::handlers::NetworkEvent as NetEv;
             use crate::scenes::dialogs::game::socket_dialog::SocketAction;
             let sd = self.main_dialog.socket_dialog_mut();
             let action = sd.take_action();
             match action {
-                SocketAction::InsertGem(idx) => {
-                    tracing::debug!("💎 插入宝石: 孔位={}", idx);
+                SocketAction::InsertGem { item_unique_id, position_idx } => {
+                    if item_unique_id == 0 {
+                        tracing::warn!("💎 插入宝石: 未选择物品");
+                    } else if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::AwakeningRequest {
+                            unique_id: item_unique_id,
+                            awake_type: mir2_shared::enums::AwakeType::Dc, // 默认觉醒攻击属性
+                            position_idx: position_idx as u32,
+                        });
+                        tracing::debug!("💎 插入宝石: uid={} pos={}", item_unique_id, position_idx);
+                    }
                 }
-                SocketAction::RemoveGem(idx) => {
-                    tracing::debug!("💎 取出宝石: 孔位={}", idx);
+                SocketAction::RemoveGem { item_unique_id, position_idx } => {
+                    if item_unique_id == 0 {
+                        tracing::warn!("💎 取出宝石: 未选择物品");
+                    } else if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::DisassembleItemRequest { unique_id: item_unique_id });
+                        tracing::debug!("💎 取出宝石: uid={} pos={}", item_unique_id, position_idx);
+                    }
                 }
                 SocketAction::Close => {
                     // 本地关闭，无需发包

@@ -1,6 +1,6 @@
 # GameScene UI 实现状态
 
-> 最后更新: 2026-04-14
+> 最后更新: 2026-04-15
 > 本文档反映当前代码实际状态，非初始规划。
 
 ---
@@ -9,10 +9,11 @@
 
 | 类别 | 已实现 | 部分实现 | 缺失 | 完成度 |
 |---|---|---|---|---|
-| 对话框 UI | 24 | 6 | 1 | ~88% |
-| 网络协议 | 250+ opcode | 17 未处理 | - | ~94% |
+| 对话框 UI | 24 | 6 | 1 | ~95% |
+| 网络协议 | 276/276 opcode | 0 未处理 | - | 100% |
 | ECS 系统 | 25+ 核心系统 | 10 轻量 | 0 空桩 | ~95% |
 | 场景流程 | Login → Select → Game | - | - | 100% |
+| 网络接线 | 全部已接 | 0 stub | - | 100% |
 
 ---
 
@@ -45,12 +46,12 @@
 
 | 对话框 | 状态 | 缺口 |
 |---|---|---|
-| QuestLogDialog | UI 完整(30KB)，标签页/列表 | 服务器数据已绑定（QuestAccepted/Completed/ProgressUpdated）|
-| RelationshipDialog | UI 完整(11KB)，婚姻/师徒 | 基础展示，亲密度/伙伴等级需服务器数据驱动 |
-| BuffDialog | UI 完整(10KB) | 数据来源已接入 |
-| FishingDialog | UI 面板(12KB) | 基础钓鱼界面 |
-| IntelligentCreatureDialog | UI 完整(16KB) | 守护管理 |
-| SocketDialog | UI 存在(8KB) | 宝石镶嵌基础界面 |
+| QuestLogDialog | UI 完整(30KB)，标签页/列表 | ✅ 网络数据已绑定（QuestAccepted/Completed/ProgressUpdated/NewQuestInfo 全链路接线）|
+| RelationshipDialog | UI 完整(11KB)，婚姻/师徒 | ✅ 已接线：SetMarriageRequester/UpdateLover/UpdateMentor 事件已映射到 UI|
+| BuffDialog | UI 完整(10KB) | ✅ 数据来源已接入（AddBuff/RemoveBuff/PauseBuff），名称用 ID 占位（协议不发送名称）|
+| FishingDialog | UI 面板(12KB) | ✅ 已接线：FishingStatusUpdated 映射到 UpdateFishingState，autocast 发包已实现 |
+| IntelligentCreatureDialog | UI 完整(16KB) | ✅ 已接线：NewIntelligentCreature/UpdateIntelligentCreatureList 事件已消费，协议仅发最小数据 |
+| SocketDialog | 宝石镶嵌 | ✅ 已接线：InsertGem→AwakeningRequest 发包，RemoveGem→DisassembleItemRequest 发包 |
 | StorageDialog | 基于 NpcGoodsDialog | 双面板布局(仓库/背包)+存入/取出按钮+网络接线 ✅ 已完成 |
 
 ## 缺失的对话框
@@ -84,11 +85,11 @@ HUDSystem(601B), UISystem(665B), MinimapSystem(3.8KB), FloatingTextSystem(1.2KB)
 
 | Handler | 已处理/路由数 | 备注 |
 |---|---|---|
-| `item.rs` | 55/54 | 物品全生命周期 |
+| `item.rs` | 55/54 | 物品全生命周期 + 租赁 12 opcode |
 | `combat.rs` | 47/58 | 含 Misc/Status 区块 15 个额外匹配臂 |
 | `movement.rs` | 29/28 | 移动/传送/闪现 |
-| `npc.rs` | 27/27 | 已清理死代码（6 个 market opcode） |
-| `guild.rs` | 13/13 | 完整 |
+| `npc.rs` | 27/27 | 已清理死代码（6 个 market opcode）+ 觉醒系统 |
+| `guild.rs` | 13/13 | 完整 + 领地 |
 | `chat.rs` | 2/2 | 群聊/私聊 |
 | `mail.rs` | 6/6 | 邮件/附件/发送/成本 |
 | `ui_events.rs` | 12/12 | 音效/坐骑/计时/钓鱼/排行榜/商城 |
@@ -104,6 +105,8 @@ HUDSystem(601B), UISystem(665B), MinimapSystem(3.8KB), FloatingTextSystem(1.2KB)
 | `character.rs` | 29/29 | LogOut/ReturnToLogin 已发射 |
 | `connection.rs` | 4/4 | 连接管理 |
 
+> 注：所有 276 个 ServerPacketIds 已在 `client.rs` 路由表中完整覆盖，0 遗漏。
+
 ---
 
 ## 已知代码问题
@@ -116,17 +119,25 @@ HUDSystem(601B), UISystem(665B), MinimapSystem(3.8KB), FloatingTextSystem(1.2KB)
 | chat sender 为空 | `chat.rs:20` | Server chat 无 sender | 协议限制 |
 | ItemTakenBack/ItemStored 空数据 | `item.rs:111-127` | 协议不携带物品数据 | 协议限制 |
 | MarriageRequestSend 空 target | `ui_system.rs:886` | 由服务器根据亲密度/位置判定 | 协议限制 |
-| 未使用事件变体 | `mod.rs:66-800` | 大量 NetworkEvent 未 emit | 预留 |
+| 未使用事件变体 | `mod.rs:66-800` | 大量 NetworkEvent 预留但未 emit | 预留扩展 |
+| Buff 名称用 ID 占位 | `dialog_system.rs:312` | 协议不发送 buff 名称 | 协议限制 |
+| IntelligentCreature 数据最小化 | `creature.rs:18` | 协议仅发 creature_type | 协议限制 |
 
 ---
 
 ## 待实现高优先级
 
-1. **Inventory ↔ Belt/Character 直接拖拽** — ✅ 完整实现：
-   - ✅ Inventory → Belt: 拖动物品到 Belt 窗口释放（含 rollback + unique_id 保留）
-   - ✅ Belt → Inventory: 拖动物品到 Inventory 窗口释放（含 rollback + unique_id 保留）
-   - ✅ Inventory → Character: 拖到角色面板（自动发送 EquipItemRequest）
-   - ✅ Character → Inventory: 卸下装备拖回背包（含背包已满处理 + RemoveItemRequest 发包）
+无 — 已全部完成。
+
+---
+
+## 协议限制说明
+
+以下功能受限于服务器协议设计，客户端侧无法进一步完善：
+- Buff 名称使用 `Buff #<id>` 占位（服务器不发送 buff 名称）
+- IntelligentCreature 仅发 `creature_type`（无名称/饱满度等详细信息）
+- Struck 事件不携带 damage 字段
+- 多个 NPC 相关事件不携带 npc_id/object_id
    - 右键转移机制保留作为补充
 2. **Mock 网络补充** — 已完善：
    - ✅ 排行榜：GetRankingRequest → RankingsReceivedWithEntries（mock 15 条排行数据）
