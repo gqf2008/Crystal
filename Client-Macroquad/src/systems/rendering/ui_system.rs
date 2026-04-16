@@ -1167,21 +1167,12 @@ impl RenderSystem for UIRenderSystem {
             let action = sd.take_action();
             match action {
                 SocketAction::InsertGem { item_unique_id, position_idx } => {
-                    if item_unique_id == 0 {
-                        tracing::warn!("💎 插入宝石: 未选择物品");
-                    } else if let Some(net) = ctx.net.as_ref() {
-                        let _ = net.send(NetEv::AwakeningRequest {
-                            unique_id: item_unique_id,
-                            awake_type: mir2_shared::enums::AwakeType::Dc, // 默认觉醒攻击属性
-                            position_idx: position_idx as u32,
-                        });
-                        tracing::debug!("💎 插入宝石: uid={} pos={}", item_unique_id, position_idx);
-                    }
+                    // 当前 UI 未实现宝石选择器，AwakeType 无法确定
+                    // 待实现背包宝石选择后再发包
+                    tracing::debug!("💎 插入宝石: 待实现宝石选择器 (uid={}, pos={})", item_unique_id, position_idx);
                 }
                 SocketAction::RemoveGem { item_unique_id, position_idx } => {
-                    if item_unique_id == 0 {
-                        tracing::warn!("💎 取出宝石: 未选择物品");
-                    } else if let Some(net) = ctx.net.as_ref() {
+                    if let Some(net) = ctx.net.as_ref() {
                         let _ = net.send(NetEv::DisassembleItemRequest { unique_id: item_unique_id });
                         tracing::debug!("💎 取出宝石: uid={} pos={}", item_unique_id, position_idx);
                     }

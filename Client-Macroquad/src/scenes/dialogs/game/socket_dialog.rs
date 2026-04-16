@@ -39,7 +39,7 @@ pub struct SocketDialogHybrid {
     sockets: Vec<SocketSlot>,
     item_name: String,
     /// 当前操作物品的 unique_id（用于发包）
-    item_unique_id: u64,
+    item_unique_id: Option<u64>,
     drag_helper: DragHelper,
     pending_action: SocketAction,
     // 纹理
@@ -68,7 +68,7 @@ impl SocketDialogHybrid {
             size: vec2(250.0, 200.0),
             sockets: Vec::new(),
             item_name: String::new(),
-            item_unique_id: 0,
+            item_unique_id: None,
             drag_helper: DragHelper::new(),
             pending_action: SocketAction::None,
             bg_texture: None,
@@ -111,7 +111,7 @@ impl SocketDialogHybrid {
     }
 
     /// 更新孔位数据
-    pub fn update_sockets(&mut self, item_unique_id: u64, item_name: String, sockets: Vec<SocketSlot>) {
+    pub fn update_sockets(&mut self, item_unique_id: Option<u64>, item_name: String, sockets: Vec<SocketSlot>) {
         self.item_unique_id = item_unique_id;
         self.item_name = item_name;
         self.sockets = sockets;
@@ -257,10 +257,14 @@ impl SocketDialogHybrid {
         }
 
         if let Some(idx) = clicked_remove {
-            self.pending_action = SocketAction::RemoveGem { item_unique_id: self.item_unique_id, position_idx: idx };
+            if let Some(uid) = self.item_unique_id {
+                self.pending_action = SocketAction::RemoveGem { item_unique_id: uid, position_idx: idx };
+            }
         }
         if let Some(idx) = clicked_insert {
-            self.pending_action = SocketAction::InsertGem { item_unique_id: self.item_unique_id, position_idx: idx };
+            // 插入宝石需要玩家从背包选择宝石，当前 UI 未实现宝石选择步骤
+            // 此处仅记录，暂不发包
+            tracing::debug!("💎 插入宝石: 需要宝石选择器 (uid={:?}, pos={})", self.item_unique_id, idx);
         }
     }
 }
