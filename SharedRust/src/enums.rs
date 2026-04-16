@@ -897,10 +897,10 @@ pub enum Monster {
     RedTurtle = 169,
     GreenTurtle = 170,
     BlueTurtle = 171,
-    Catapult1 = 172, // SPECIAL TODO
-    Catapult2 = 173, // SPECIAL TODO
+    Catapult1 = 172,
+    Catapult2 = 173,
     OldSpittingSpider = 174,
-    SiegeRepairman = 175, // SPECIAL TODO
+    SiegeRepairman = 175,
     BlueSanta = 176,
     BattleStandard = 177,
     Blank1 = 178,
@@ -1082,7 +1082,7 @@ pub enum Monster {
     Bear = 354, // Effect 1, AI 112
     Leopard = 355,
     ChieftainArcher = 356,
-    ChieftainSword = 357, // BOSS TODO
+    ChieftainSword = 357,
     StoningSpider = 358,  // Archer Spell mob
     VampireSpider = 359,  // Archer Spell mob
     SpittingToad = 360,   // Archer Spell mob
@@ -1093,12 +1093,12 @@ pub enum Monster {
     FrozenArcher = 365,  // AI 8
     FrozenKnight = 366,
     FrozenGolem = 367,
-    IcePhantom = 368, // TODO
+    IcePhantom = 368,
     SnowWolf = 369,
     SnowWolfKing = 370, // BOSS
     WaterDragon = 371,
     BlackTortoise = 372,
-    Manticore = 373, // TODO
+    Manticore = 373,
     DragonWarrior = 374,
     DragonArcher = 375,
     Kirin = 376,

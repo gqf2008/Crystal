@@ -273,4 +273,122 @@ mod tests {
         assert!(remainder2.is_empty());
         Ok(())
     }
+
+    // ============================================================
+    // Real-world protocol packet roundtrip tests
+    // ============================================================
+
+    use crate::packets::server::{
+        Chat as ServerChat, ObjectRemove, PlayerUpdate, HealthChanged,
+    };
+    use crate::packets::client::Chat as ClientChat;
+    use crate::enums::{MirDirection, ChatType};
+
+    #[test]
+    fn roundtrip_chat_server() -> SharedResult<()> {
+        let packet = ServerChat {
+            message: "Hello World!".to_string(),
+            chat_type: ChatType::Normal,
+        };
+        let mut bytes = Vec::new();
+        serialize_packet(&mut bytes, &packet)?;
+        let mut cursor = Cursor::new(bytes);
+        let decoded = deserialize_packet::<_, ServerChat>(&mut cursor)?;
+        assert_eq!(decoded.message, "Hello World!");
+        Ok(())
+    }
+
+    #[test]
+    fn roundtrip_chat_client() -> SharedResult<()> {
+        let packet = ClientChat {
+            message: "Test message".to_string(),
+            linked_items: Vec::new(),
+        };
+        let mut bytes = Vec::new();
+        serialize_packet(&mut bytes, &packet)?;
+        let mut cursor = Cursor::new(bytes);
+        let decoded = deserialize_packet::<_, ClientChat>(&mut cursor)?;
+        assert_eq!(decoded.message, "Test message");
+        Ok(())
+    }
+
+    #[test]
+    fn roundtrip_object_remove() -> SharedResult<()> {
+        let packet = ObjectRemove {
+            object_id: 12345,
+        };
+        let mut bytes = Vec::new();
+        serialize_packet(&mut bytes, &packet)?;
+        let mut cursor = Cursor::new(bytes);
+        let decoded = deserialize_packet::<_, ObjectRemove>(&mut cursor)?;
+        assert_eq!(decoded.object_id, 12345);
+        Ok(())
+    }
+
+    #[test]
+    fn roundtrip_player_update() -> SharedResult<()> {
+        let packet = PlayerUpdate {
+            object_id: 999,
+            light: 3,
+            weapon: 10,
+            weapon_effect: 0,
+            armor: 5,
+            wings_effect: 0,
+        };
+        let mut bytes = Vec::new();
+        serialize_packet(&mut bytes, &packet)?;
+        let mut cursor = Cursor::new(bytes);
+        let decoded = deserialize_packet::<_, PlayerUpdate>(&mut cursor)?;
+        assert_eq!(decoded.object_id, 999);
+        assert_eq!(decoded.light, 3);
+        assert_eq!(decoded.weapon, 10);
+        assert_eq!(decoded.armor, 5);
+        Ok(())
+    }
+
+    #[test]
+    fn roundtrip_health_changed() -> SharedResult<()> {
+        let packet = HealthChanged {
+            hp: 500,
+            mp: 200,
+        };
+        let mut bytes = Vec::new();
+        serialize_packet(&mut bytes, &packet)?;
+        let mut cursor = Cursor::new(bytes);
+        let decoded = deserialize_packet::<_, HealthChanged>(&mut cursor)?;
+        assert_eq!(decoded.hp, 500);
+        assert_eq!(decoded.mp, 200);
+        Ok(())
+    }
+
+    use crate::packets::client::combat::{Attack as ClientAttack, SpellToggle};
+
+    #[test]
+    fn roundtrip_attack_client() -> SharedResult<()> {
+        let packet = ClientAttack {
+            direction: MirDirection::Right,
+            spell: crate::enums::Spell::None,
+        };
+        let mut bytes = Vec::new();
+        serialize_packet(&mut bytes, &packet)?;
+        let mut cursor = Cursor::new(bytes);
+        let decoded = deserialize_packet::<_, ClientAttack>(&mut cursor)?;
+        assert_eq!(decoded.direction, MirDirection::Right);
+        Ok(())
+    }
+
+    #[test]
+    fn roundtrip_spell_toggle() -> SharedResult<()> {
+        let packet = SpellToggle {
+            spell: crate::enums::Spell::FireBall,
+            can_use: true,
+        };
+        let mut bytes = Vec::new();
+        serialize_packet(&mut bytes, &packet)?;
+        let mut cursor = Cursor::new(bytes);
+        let decoded = deserialize_packet::<_, SpellToggle>(&mut cursor)?;
+        assert_eq!(decoded.spell, crate::enums::Spell::FireBall);
+        assert!(decoded.can_use);
+        Ok(())
+    }
 }
