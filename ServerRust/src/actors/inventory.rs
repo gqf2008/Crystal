@@ -429,11 +429,16 @@ impl PlayerInventory {
 // ============================================================
 
 /// 全局 unique_id 计数器
-pub static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// 生成新的物品唯一 ID（供背包和邮件系统使用）
+pub fn generate_item_uid() -> u64 {
+    NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 
 impl PlayerInventory {
     fn next_unique_id(&self) -> u64 {
-        NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        generate_item_uid()
     }
 }
 

@@ -11,7 +11,7 @@ use tokio::time::{interval, Duration};
 use tracing::{info, debug, warn};
 
 use crate::actors::player::{PlayerActor, PlayerState, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, SetPlayerState, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, GetItemInfoByGrid, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, SetGroupId, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetSpouse, SetAllowMentor, SetMentor, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing, ClearReincarnation, ClearReincarnationHost, ReviveAtHalfHp};
-use crate::actors::inventory::{EquipmentSlot, GroundItem, PlayerInventory};
+use crate::actors::inventory::{EquipmentSlot, GroundItem, PlayerInventory, generate_item_uid};
 use crate::actors::refine::{RefineStatus, RefineLog};
 use crate::actors::group::{Group, GroupMember};
 use crate::actors::trade::TradeSession;
@@ -4053,14 +4053,7 @@ impl Message<AcceptQuestRequest> for WorldActor {
         }
 
         // Create quest instance from DB data
-        let quest = QuestInstance {
-            quest_index: msg.quest_index,
-            title: quest_db.name.clone(),
-            status: QuestStatus::InProgress,
-            progress: vec![],
-            exp_reward: quest_db.exp_reward as i64,
-            gold_reward: quest_db.gold_reward.max(0) as u64,
-        };
+        let quest = make_quest_instance(&quest_db);
         let accepted = match record.actor_ref.ask(AcceptQuest { quest }).await {
             Ok(s) => s, _ => return,
         };
@@ -6636,14 +6629,7 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
                     {
                         // Check not already accepted
                         if let Ok(None) = record.actor_ref.ask(GetQuest { quest_index: quest_db.index }).await {
-                            let quest = QuestInstance {
-                                quest_index: quest_db.index,
-                                title: quest_db.name.clone(),
-                                status: QuestStatus::InProgress,
-                                progress: vec![],
-                                exp_reward: quest_db.exp_reward as i64,
-                                gold_reward: quest_db.gold_reward.max(0) as u64,
-                            };
+                            let quest = make_quest_instance(quest_db);
                             if let Ok(true) = record.actor_ref.ask(AcceptQuest { quest }).await {
                                 send_system_message(&self.gate_ref, msg.session_id,
                                     &format!("任务已接受: {}", quest_db.name));
@@ -6795,10 +6781,7 @@ impl Message<GameshopBuyRequest> for WorldActor {
             return;
         }
 
-        // 扣除金币
-        let _ = record.actor_ref.ask(DeductGold { amount: total_gold as u64 }).await;
-
-        // 通过邮件交付物品
+        // 先构建邮件（在扣金币前，避免扣款后交付失败导致玩家损失）
         let shop_item = self.game_shop_items.iter().find(|i| i.item_index as u32 == msg.item_id);
         let item_index = if let Some(si) = shop_item {
             si.item_index
@@ -6808,23 +6791,22 @@ impl Message<GameshopBuyRequest> for WorldActor {
 
         let mail_items: Vec<mir2_shared::data::item::UserItem> = if let Some(item_db) = self.item_infos.get(&item_index) {
             (0..buy_count).map(|_| {
-                let uid = crate::actors::inventory::NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let uid = generate_item_uid();
                 mir2_shared::data::item::UserItem {
                     unique_id: uid,
                     item_index: item_db.index,
                     count: 1,
                     current_dura: item_db.durability as u16,
                     max_dura: item_db.durability as u16,
+                    // TODO: verify bool_flags bit 0 = identified; C# source uses enum flag
                     identified: item_db.start_item || item_db.bool_flags & (1 << 0) != 0,
                     ..Default::default()
                 }
             }).collect()
         } else {
-            // Fallback: create minimal item
             (0..buy_count).map(|_| {
-                let uid = crate::actors::inventory::NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 mir2_shared::data::item::UserItem {
-                    unique_id: uid,
+                    unique_id: generate_item_uid(),
                     item_index,
                     ..Default::default()
                 }
@@ -6848,6 +6830,10 @@ impl Message<GameshopBuyRequest> for WorldActor {
             items: mail_items,
         };
 
+        // 扣款
+        let _ = record.actor_ref.ask(DeductGold { amount: total_gold as u64 }).await;
+
+        // 发送邮件
         send_mail_received_packet(&self.gate_ref, msg.session_id, &mail);
         let _ = record.actor_ref.ask(crate::actors::player::AddMail { mail }).await;
 
@@ -6913,6 +6899,18 @@ fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message:
         session_id,
         data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
     });
+}
+
+/// 从 DB 任务配置创建任务实例
+fn make_quest_instance(qi: &db::QuestInfo) -> QuestInstance {
+    QuestInstance {
+        quest_index: qi.index,
+        title: qi.name.clone(),
+        status: QuestStatus::InProgress,
+        progress: vec![],
+        exp_reward: qi.exp_reward as i64,
+        gold_reward: qi.gold_reward.max(0) as u64,
+    }
 }
 
 /// Send Opendoor response to a single player
