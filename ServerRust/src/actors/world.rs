@@ -61,13 +61,14 @@ pub struct NpcSpawn {
     pub x: i32,
     pub y: i32,
     pub direction: u8,
+    pub db_index: i32,
 }
 
-/// 怪物定义（从刷怪配置加载）
+/// 怪物定义（从 DB 配置或 TOML 加载）
 #[derive(Debug, Clone)]
 pub struct MonsterSpawn {
     pub name: String,
-    pub image: u16, // Monster enum value
+    pub image: u16,
     pub x: i32,
     pub y: i32,
     pub direction: u8,
@@ -104,6 +105,7 @@ fn load_spawn_config(map_name: &str, spawn_dir: &Path) -> SpawnConfig {
                         x: n.x,
                         y: n.y,
                         direction: n.direction,
+                        db_index: 0,
                     }).collect(),
                     monsters: raw.monsters.into_iter().map(|m| MonsterSpawn {
                         name: m.name,
@@ -128,6 +130,51 @@ fn load_spawn_config(map_name: &str, spawn_dir: &Path) -> SpawnConfig {
             SpawnConfig::default()
         }
     }
+}
+
+use mir2_shared::enums::Stat;
+
+/// Build SpawnConfig from DB-loaded MapInfo + MonsterInfo
+fn spawn_config_from_db(
+    map_info: &db::MapInfo,
+    monster_infos: &HashMap<i32, db::MonsterInfo>,
+    npc_infos: &HashMap<i32, db::NPCInfo>,
+) -> SpawnConfig {
+    let npcs: Vec<NpcSpawn> = npc_infos.values()
+        .filter(|n| n.map_index == map_info.index)
+        .map(|n| NpcSpawn {
+            name: n.name.clone(),
+            image: n.image as u16,
+            x: n.x,
+            y: n.y,
+            direction: 0, // NPCs spawn facing north by default
+            db_index: n.index,
+        })
+        .collect();
+
+    let monsters: Vec<MonsterSpawn> = map_info.respawns.iter().filter_map(|r| {
+        let mi = monster_infos.get(&r.monster_index)?;
+        let hp = mi.stats.get(&(Stat::HP as u8)).copied().unwrap_or(50);
+        let min_ac = mi.stats.get(&(Stat::MinAC as u8)).copied().unwrap_or(0);
+        let max_ac = mi.stats.get(&(Stat::MaxAC as u8)).copied().unwrap_or(5);
+        Some(MonsterSpawn {
+            name: mi.name.clone(),
+            image: mi.image as u16,
+            x: r.x,
+            y: r.y,
+            direction: r.direction as u8,
+            hp,
+            min_dmg: min_ac,
+            max_dmg: max_ac,
+            xp: mi.experience,
+        })
+    }).collect();
+
+    if !monsters.is_empty() || !npcs.is_empty() {
+        debug!("DB spawn config for map '{}': {} NPCs, {} monsters", map_info.file_name, npcs.len(), monsters.len());
+    }
+
+    SpawnConfig { npcs, monsters }
 }
 
 #[derive(serde::Deserialize)]
@@ -197,14 +244,13 @@ fn dist_to_spawn(monster: &MonsterState) -> i32 {
 
 /// 运行时 NPC 状态
 #[derive(Clone)]
-#[allow(dead_code)]
 struct NpcState {
     pub object_id: u32,
     pub name: String,
-    pub image: u16,
     pub x: i32,
     pub y: i32,
     pub direction: u8,
+    pub db_index: i32,
 }
 
 /// 方向增量 (8 方向 MirDirection)
@@ -287,6 +333,24 @@ pub struct WorldActor {
     open_doors: std::collections::HashSet<(u16, u8)>,
     /// SQLite 数据库连接池
     db_pool: DbPool,
+    /// 游戏配置：地图信息（从 DB 加载）
+    map_infos: Vec<db::MapInfo>,
+    /// 游戏配置：物品信息
+    item_infos: HashMap<i32, db::ItemInfo>,
+    /// 游戏配置：怪物信息
+    monster_infos: HashMap<i32, db::MonsterInfo>,
+    /// 游戏配置：NPC 信息
+    npc_infos: HashMap<i32, db::NPCInfo>,
+    /// 游戏配置：任务信息
+    quest_infos: HashMap<i32, db::QuestInfo>,
+    /// 游戏配置：魔法信息（key = spell ID）
+    magic_infos: HashMap<u32, db::MagicInfo>,
+    /// 游戏配置：龙信息
+    dragon_info: Option<db::DragonInfo>,
+    /// 游戏商店物品（从 DB 加载）
+    game_shop_items: Vec<db::GameShopItem>,
+    /// 地图传送点索引: (map_index, source_x, source_y) -> MapMovementInfo
+    movement_index: HashMap<(i32, i32, i32), db::MapMovementInfo>,
 }
 
 impl WorldActor {
@@ -313,6 +377,15 @@ impl WorldActor {
             pending_mentor_invites: HashMap::new(),
             open_doors: std::collections::HashSet::new(),
             db_pool,
+            map_infos: Vec::new(),
+            item_infos: HashMap::new(),
+            monster_infos: HashMap::new(),
+            npc_infos: HashMap::new(),
+            quest_infos: HashMap::new(),
+            magic_infos: HashMap::new(),
+            dragon_info: None,
+            game_shop_items: Vec::new(),
+            movement_index: HashMap::new(),
         }
     }
 
@@ -349,10 +422,17 @@ impl WorldActor {
 
     /// 发送 NPC 商店商品列表（Phase 1：空列表，仅打开 UI）
     fn send_npc_goods(&self, session_id: u64, npc: &NpcState) {
+        // Use DB rate if available, default 1.0
+        let rate = if npc.db_index > 0 {
+            self.npc_infos.get(&npc.db_index).map(|n| n.rate as f32 / 100.0).unwrap_or(1.0)
+        } else {
+            1.0
+        };
+
         let mut body = Vec::new();
         // NPCGoods: [count: i32 LE][items...][rate: f32 LE][panel_type: u8][hide_added_stats: bool]
         body.extend_from_slice(&0i32.to_le_bytes()); // 空商品列表
-        body.extend_from_slice(&1.0f32.to_le_bytes()); // rate = 1.0
+        body.extend_from_slice(&rate.to_le_bytes());
         body.push(0u8); // PanelType::Buy
         body.push(0u8); // hide_added_stats = false
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCGoods as i16, &body);
@@ -360,7 +440,7 @@ impl WorldActor {
             session_id,
             data: packet,
         });
-        debug!("Sent empty goods list from NPC '{}' to session {}", npc.name, session_id);
+        debug!("Sent empty goods list from NPC '{}' (rate={}) to session {}", npc.name, rate, session_id);
     }
 }
 
@@ -395,6 +475,64 @@ impl Actor for WorldActor {
             }
         };
 
+        // Load game configs from DB (migrated from Server.MirDB)
+        let map_infos = match db::load_map_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} map configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load map_infos from DB: {}", e); Vec::new() }
+        };
+
+        let item_infos_list = match db::load_item_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} item configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load item_infos from DB: {}", e); Vec::new() }
+        };
+        let item_infos: HashMap<i32, db::ItemInfo> = item_infos_list.into_iter().map(|i| (i.index, i)).collect();
+
+        let monster_infos_list = match db::load_monster_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} monster configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load monster_infos from DB: {}", e); Vec::new() }
+        };
+        let monster_infos: HashMap<i32, db::MonsterInfo> = monster_infos_list.into_iter().map(|m| (m.index, m)).collect();
+
+        let npc_infos_list = match db::load_npc_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} NPC configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load npc_infos from DB: {}", e); Vec::new() }
+        };
+        let npc_infos: HashMap<i32, db::NPCInfo> = npc_infos_list.into_iter().map(|n| (n.index, n)).collect();
+
+        let quest_infos_list = match db::load_quest_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} quest configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load quest_infos from DB: {}", e); Vec::new() }
+        };
+        let quest_infos: HashMap<i32, db::QuestInfo> = quest_infos_list.into_iter().map(|q| (q.index, q)).collect();
+
+        let magic_infos_list = match db::load_magic_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} magic configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load magic_infos from DB: {}", e); Vec::new() }
+        };
+        let magic_infos: HashMap<u32, db::MagicInfo> = magic_infos_list.into_iter().map(|m| (m.spell as u32, m)).collect();
+
+        let dragon_info = match db::load_dragon_info(&args.db_pool, &monster_infos).await {
+            Ok(d) => { if d.is_some() { info!("Loaded dragon config from database"); } d }
+            Err(e) => { warn!("Failed to load dragon_info from DB: {}", e); None }
+        };
+
+        let game_shop_items = match db::load_game_shop_items(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} game shop items from database", m.len()); m }
+            Err(e) => { warn!("Failed to load game_shop_items from DB: {}", e); Vec::new() }
+        };
+
+        // Build movement trigger index for O(1) lookup: (map_index, source_x, source_y) -> MapMovementInfo
+        let movement_index: HashMap<(i32, i32, i32), db::MapMovementInfo> = {
+            let mut idx = HashMap::new();
+            for mi in &map_infos {
+                for mv in &mi.movements {
+                    idx.insert((mi.index, mv.source_x, mv.source_y), mv.clone());
+                }
+            }
+            info!("Indexed {} movement triggers", idx.len());
+            idx
+        };
+
         Ok(Self {
             tick_count: 0,
             players: HashMap::new(),
@@ -417,6 +555,15 @@ impl Actor for WorldActor {
             pending_mentor_invites: HashMap::new(),
             open_doors: std::collections::HashSet::new(),
             db_pool: args.db_pool,
+            map_infos,
+            item_infos,
+            monster_infos,
+            npc_infos,
+            quest_infos,
+            magic_infos,
+            dragon_info,
+            game_shop_items,
+            movement_index,
         })
     }
 }
@@ -1177,9 +1324,13 @@ impl Message<StartGameRequest> for WorldActor {
             self.gate_ref.clone(),
         ));
 
-        // 加载地图
-        let map_file = "n0";
-        if self.get_or_load_map(map_file).is_some() {
+        // 加载地图 — 优先用 DB 中的 map_infos 获取文件名
+        let (map_file, map_title, map_info_idx) = self.map_infos.iter()
+            .find(|m| m.index == map_index as i32)
+            .map(|m| (m.file_name.clone(), m.title.clone(), m.index))
+            .unwrap_or_else(|| ("n0".to_string(), "Unknown".to_string(), 0));
+
+        if self.get_or_load_map(&map_file).is_some() {
             info!("Map '{}' loaded for player {}", map_file, player_name);
         }
 
@@ -1192,6 +1343,18 @@ impl Message<StartGameRequest> for WorldActor {
         let mut loaded_state = state;
         loaded_state.object_id = object_id;
         loaded_state.session_id = msg.session_id;
+
+        // If position is (0,0), place at map safe zone spawn point
+        if loaded_state.x == 0 && loaded_state.y == 0 {
+            if let Some(mi) = self.map_infos.iter().find(|m| m.file_name == map_file) {
+                if let Some(sz) = mi.safe_zones.iter().find(|s| s.start_point) {
+                    info!("Placing {} at safe zone spawn ({}, {})", player_name, sz.x, sz.y);
+                    loaded_state.x = sz.x;
+                    loaded_state.y = sz.y;
+                }
+            }
+        }
+
         let _ = player_ref.ask(SetPlayerState { state: loaded_state.clone() });
 
         self.players.insert(msg.session_id, PlayerRecord {
@@ -1247,11 +1410,22 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // 发送游戏进入序列（使用真实状态数据）
-        send_game_entry_sequence(self.gate_ref.clone(), msg.session_id, &loaded_state);
+        send_game_entry_sequence(self.gate_ref.clone(), msg.session_id, &loaded_state, &map_file, &map_title);
 
         // 发送地图上的 NPC 和怪物
         let spawn_dir = self.spawn_dir.clone();
-        let (new_npcs, new_monsters) = spawn_npcs_and_monsters(self.gate_ref.clone(), &spawn_dir, map_file, msg.session_id, &mut || self.alloc_object_id());
+        let map_info = self.map_infos.iter().find(|m| m.index == map_info_idx);
+        let (new_npcs, new_monsters) = spawn_npcs_and_monsters(
+            self.gate_ref.clone(),
+            &spawn_dir,
+            &map_file,
+            msg.session_id,
+            &mut self.next_object_id,
+            map_info,
+            &self.monster_infos,
+            &self.npc_infos,
+            self.dragon_info.as_ref(),
+        );
         for npc in new_npcs {
             self.npcs.insert(npc.object_id, npc);
         }
@@ -1308,6 +1482,85 @@ impl Message<WorldMoveRequest> for WorldActor {
                     move_type,
                     exclude_session: msg.session_id,
                 });
+            }
+
+            // 检查是否踩到地图传送点（Movement）— O(1) index lookup
+            let mv = self.movement_index.get(&(state.map_index as i32, state.x, state.y)).cloned();
+
+            if let Some(mv) = mv {
+                let dest_map_index = mv.map_index;
+                let dest_x = mv.dest_x;
+                let dest_y = mv.dest_y;
+
+                // Look up dest map file name from DB-loaded map_infos
+                let dest_map_info = self.map_infos.iter()
+                    .find(|m| m.index == dest_map_index)
+                    .cloned();
+
+                if let Some(dest_mi) = dest_map_info {
+                    if dest_mi.no_teleport {
+                        debug!("Movement trigger blocked: map {} has no_teleport", dest_map_index);
+                        return;
+                    }
+
+                    let dest_file = dest_mi.file_name.clone();
+                    let dest_title = dest_mi.title.clone();
+                    let is_big_map = dest_mi.big_map;
+                    let player_ref = record.actor_ref.clone();
+                    let player_name = record.name.clone();
+
+                    // Load dest map
+                    if self.get_or_load_map(&dest_file).is_some() {
+                        info!("Player {} teleported via movement: {} ({},{}) -> {} ({},{})",
+                            player_name, state.map_index, state.x, state.y,
+                            dest_map_index, dest_x, dest_y);
+
+                        // Inject new map data into player for collision/pathfinding
+                        if let Some(map_data) = self.maps.get(&0).cloned() {
+                            let _ = player_ref.ask(SetMapData { map: map_data });
+                        }
+
+                        // Update player position
+                        let _ = player_ref.ask(SetPlayerPosition {
+                            x: dest_x,
+                            y: dest_y,
+                            direction: state.direction,
+                            map_index: Some(dest_map_index as u16),
+                        });
+
+                        // Send MapChanged packet
+                        let mut body = Vec::new();
+                        body.extend_from_slice(&(dest_map_index as i32).to_le_bytes());
+                        write_dotnet_string(&mut body, &dest_file);
+                        write_dotnet_string(&mut body, &dest_title);
+                        body.extend_from_slice(&0u16.to_le_bytes()); // min map index
+                        body.extend_from_slice(&0u16.to_le_bytes()); // max map index
+                        body.push(if is_big_map { 1u8 } else { 0u8 });
+                        body.extend_from_slice(&(dest_x as i32).to_le_bytes()); // spawn x
+                        body.extend_from_slice(&(dest_y as i32).to_le_bytes()); // spawn y
+                        body.push(4u8); // map type
+                        body.push(1u8); // light
+                        body.extend_from_slice(&0u16.to_le_bytes());
+                        body.extend_from_slice(&0u16.to_le_bytes());
+
+                        let _ = self.gate_ref.ask(SendToClient {
+                            session_id: msg.session_id,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MapChanged as i16, &body),
+                        });
+
+                        // Send UserLocation to confirm new position
+                        if let Ok(Some(new_state)) = player_ref.ask(GetPlayerState).await {
+                            let mut loc_body = Vec::new();
+                            loc_body.extend_from_slice(&(new_state.x as u32).to_le_bytes());
+                            loc_body.extend_from_slice(&(new_state.y as u32).to_le_bytes());
+                            loc_body.push(new_state.direction);
+                            let _ = self.gate_ref.ask(SendToClient {
+                                session_id: msg.session_id,
+                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc_body),
+                            });
+                        }
+                    }
+                }
             }
         }
     }
@@ -1849,14 +2102,72 @@ impl Message<NPCCallRequest> for WorldActor {
             return;
         }
 
+        // DB NPC visibility: time/level/class restrictions
+        if npc.db_index > 0 {
+            if let Some(npc_db) = self.npc_infos.get(&npc.db_index) {
+                // Level restriction
+                let player_level = if let Ok(Some(s)) = record.actor_ref.ask(GetPlayerState).await {
+                    s.level
+                } else {
+                    0
+                };
+                if npc_db.min_lev > 0 && player_level < npc_db.min_lev as u16 {
+                    debug!("NPC {} requires min level {}", npc.name, npc_db.min_lev);
+                    return;
+                }
+                if npc_db.max_lev > 0 && player_level > npc_db.max_lev as u16 {
+                    debug!("NPC {} requires max level {}", npc.name, npc_db.max_lev);
+                    return;
+                }
+                // Class restriction (TODO: add class field to PlayerState)
+                let _ = &npc_db.class_required;
+                // Day of week restriction
+                if let Some(ref dow) = npc_db.day_of_week {
+                    let today = chrono::Utc::now().format("%A").to_string();
+                    // Support both English ("Monday") and abbreviated ("Mon")
+                    let today_short = &today[..3];
+                    if !dow.is_empty() && !dow.contains(&today) && !dow.contains(today_short) {
+                        debug!("NPC {} not available on {}", npc.name, today);
+                        return;
+                    }
+                }
+            }
+        }
+
         debug!("Player called NPC '{}' (#{}) with key='{}'", npc.name, msg.npc_object_id, msg.key);
 
         // 发送 NPCResponse 对话页面
         let dialog_lines = match msg.key.as_str() {
-            "[@Main]" => vec![
-                format!("欢迎来到{}", npc.name),
-                "有什么我可以帮你的吗？".to_string(),
-            ],
+            "[@Main]" => {
+                let mut lines = vec![format!("欢迎来到{}", npc.name)];
+                // Show available quests from DB NPCInfo
+                if npc.db_index > 0 {
+                    if let Some(npc_db) = self.npc_infos.get(&npc.db_index) {
+                        let pending: Vec<&db::QuestInfo> = npc_db.collect_quest_indexes.iter()
+                            .filter_map(|qi| self.quest_infos.get(qi))
+                            .collect();
+                        let finishable: Vec<&db::QuestInfo> = npc_db.finish_quest_indexes.iter()
+                            .filter_map(|qi| self.quest_infos.get(qi))
+                            .collect();
+                        if !pending.is_empty() {
+                            lines.push("——可接受任务——".into());
+                            for q in &pending {
+                                lines.push(format!("[{}] {}", q.name, q.file_name));
+                            }
+                        }
+                        if !finishable.is_empty() {
+                            lines.push("——可完成任务——".into());
+                            for q in &finishable {
+                                lines.push(format!("[{}] {}", q.name, q.file_name));
+                            }
+                        }
+                    }
+                }
+                if lines.len() == 1 {
+                    lines.push("有什么我可以帮你的吗？".into());
+                }
+                lines
+            }
             "[@Buy]" => {
                 // 触发 NPC 商店（Phase 2：发送空商品列表打开商店 UI）
                 self.send_npc_goods(msg.session_id, npc);
@@ -1961,6 +2272,18 @@ impl Message<UseItemRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
+
+        // Check map no_drug flag
+        let player_state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        if let Some(mi) = self.map_infos.iter().find(|m| m.index == player_state.map_index as i32) {
+            if mi.no_drug {
+                send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用物品");
+                return;
+            }
+        }
 
         // 查询物品信息
         let item_info = record.actor_ref.ask(GetItemInfo { unique_id: msg.unique_id }).await.unwrap_or(None);
@@ -2186,8 +2509,14 @@ impl Message<BuyItemRequest> for WorldActor {
             _ => return,
         };
 
-        // 简单定价：item_index * 10 金币/个
-        let price_per_unit = msg.item_index as u64 * 10;
+        // Validate item against DB-loaded item_infos
+        let item_db = self.item_infos.get(&(msg.item_index as i32)).cloned();
+        let Some(item_db) = item_db else {
+            send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+            return;
+        };
+
+        let price_per_unit = item_db.price as u64;
         let total_price = price_per_unit * msg.count as u64;
 
         // 检查金币
@@ -2199,18 +2528,18 @@ impl Message<BuyItemRequest> for WorldActor {
         // 扣除金币
         let _ = record.actor_ref.ask(DeductGold { amount: total_price }).await;
 
-        // Phase 10: 从 NPC 商品列表获取真实 UserItem，暂时创建基础物品
+        // Create item from DB template
         let item = mir2_shared::data::item::UserItem {
             item_index: msg.item_index as i32,
             count: msg.count as u16,
-            max_dura: 100,
-            current_dura: 100,
+            max_dura: item_db.durability as u16,
+            current_dura: item_db.durability as u16,
             ..Default::default()
         };
 
         let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
         send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功 (花费 {} 金币)", total_price));
-        debug!("BuyItem: {} bought item={} x{} for {} gold", state.name, msg.item_index, msg.count, total_price);
+        debug!("BuyItem: {} bought item={} ({}) x{} for {} gold", state.name, item_db.name, msg.item_index, msg.count, total_price);
     }
 }
 
@@ -2244,9 +2573,11 @@ impl Message<SellItemRequest> for WorldActor {
             return;
         }
 
-        // 定价：基于 item_index 的简单公式
-        let price_per_unit = (item_data.item_index as u64 * 5).max(1);
-        let total_gold = price_per_unit * msg.count as u64;
+        // 定价：基于 DB 中物品的 price（卖价通常为买价的一半）
+        let item_db_price = self.item_infos.get(&item_data.item_index)
+            .map(|i| i.price as u64)
+            .unwrap_or(item_data.item_index as u64 * 5);
+        let total_gold = (item_db_price / 2).max(1) * msg.count as u64;
 
         let success = record.actor_ref.ask(AddGold { amount: total_gold }).await.unwrap_or(false);
         if success {
@@ -3690,6 +4021,25 @@ impl Message<AcceptQuestRequest> for WorldActor {
             Some(r) => r, None => return,
         };
 
+        // Validate quest exists in DB
+        let quest_db = self.quest_infos.get(&msg.quest_index).cloned();
+        let Some(quest_db) = quest_db else {
+            send_system_message(&self.gate_ref, msg.session_id, "任务不存在");
+            return;
+        };
+
+        // Check level requirement
+        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            if state.level < quest_db.required_min_level as u16 {
+                send_system_message(&self.gate_ref, msg.session_id, "等级不足");
+                return;
+            }
+            if quest_db.required_max_level > 0 && state.level > quest_db.required_max_level as u16 {
+                send_system_message(&self.gate_ref, msg.session_id, "等级过高");
+                return;
+            }
+        }
+
         // 检查是否已接受该任务
         if let Ok(Some(_quest)) = record.actor_ref.ask(GetQuest { quest_index: msg.quest_index }).await {
             send_system_message(&self.gate_ref, msg.session_id, "该任务已接受");
@@ -3702,23 +4052,22 @@ impl Message<AcceptQuestRequest> for WorldActor {
             return;
         }
 
-        // 创建任务实例
+        // Create quest instance from DB data
         let quest = QuestInstance {
             quest_index: msg.quest_index,
-            title: format!("任务 #{}", msg.quest_index),
+            title: quest_db.name.clone(),
             status: QuestStatus::InProgress,
             progress: vec![],
-            exp_reward: 1000,
-            gold_reward: 500,
+            exp_reward: quest_db.exp_reward as i64,
+            gold_reward: quest_db.gold_reward.max(0) as u64,
         };
-
         let accepted = match record.actor_ref.ask(AcceptQuest { quest }).await {
             Ok(s) => s, _ => return,
         };
 
         if accepted {
             send_system_message(&self.gate_ref, msg.session_id, "任务已接受");
-            debug!("Quest accepted: {} by session {}", msg.quest_index, msg.session_id);
+            debug!("Quest accepted: {} ({}) by session {}", quest_db.name, msg.quest_index, msg.session_id);
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "任务接受失败");
         }
@@ -5073,6 +5422,10 @@ impl Message<MagicRequest> for WorldActor {
             _ => { return; }
         };
 
+        // Validate spell exists in DB
+        let spell_db = self.magic_infos.get(&(msg.spell as u32));
+        let spell_range = spell_db.map(|m| m.range as i32).unwrap_or(2);
+
         let object_id = state.object_id;
         let target_x = msg.target_x;
         let target_y = msg.target_y;
@@ -5093,7 +5446,6 @@ impl Message<MagicRequest> for WorldActor {
         }
 
         // 技能命中范围内的怪物
-        let spell_range = 2; // 基础技能范围
         let hit_monster_ids: Vec<u32> = self.monsters.iter()
             .filter(|(_, m)| {
                 let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
@@ -5151,7 +5503,7 @@ impl Message<TeleportToNPCRequest> for WorldActor {
         let new_y = npc.y;
 
         // 更新玩家位置
-        let _ = record.actor_ref.ask(SetPlayerPosition { x: new_x, y: new_y, direction: npc.direction });
+        let _ = record.actor_ref.ask(SetPlayerPosition { x: new_x, y: new_y, direction: npc.direction, map_index: None });
         let mut body = Vec::new();
         body.extend_from_slice(&new_x.to_le_bytes());
         body.extend_from_slice(&new_y.to_le_bytes());
@@ -5184,11 +5536,48 @@ impl Message<RequestMapInfoRequest> for WorldActor {
             _ => return,
         };
 
-        // 使用默认出生点
-        let (spawn_x, spawn_y) = (DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y);
+        // Look up target map from DB
+        let target_map_info = self.map_infos.iter().find(|m| m.index == msg.map_id as i32);
+        let Some(dest_mi) = target_map_info else {
+            send_system_message(&self.gate_ref, msg.session_id, "地图不存在");
+            return;
+        };
 
-        // 更新玩家位置
-        let _ = record.actor_ref.ask(SetPlayerPosition { x: spawn_x, y: spawn_y, direction: state.direction });
+        // Check no_recall flag
+        if dest_mi.no_recall {
+            send_system_message(&self.gate_ref, msg.session_id, "无法传送到该地图");
+            return;
+        }
+
+        let dest_file = dest_mi.file_name.clone();
+        let dest_title = dest_mi.title.clone();
+
+        // Place at safe zone spawn point if available
+        let (spawn_x, spawn_y) = dest_mi.safe_zones.iter()
+            .find(|s| s.start_point)
+            .map(|s| (s.x, s.y))
+            .unwrap_or((DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y));
+
+        // Load dest map
+        if self.get_or_load_map(&dest_file).is_none() {
+            send_system_message(&self.gate_ref, msg.session_id, "地图加载失败");
+            return;
+        }
+
+        // Inject new map data into player for collision/pathfinding
+        if let Some(map_data) = self.maps.get(&0).cloned() {
+            let _ = record.actor_ref.ask(SetMapData { map: map_data });
+        }
+
+        // Update player position
+        let _ = record.actor_ref.ask(SetPlayerPosition { x: spawn_x, y: spawn_y, direction: state.direction, map_index: Some(msg.map_id as u16) });
+
+        // Send MapChanged first, then UserLocation (client processes in order)
+        let map_changed_body = build_map_changed_packet(msg.map_id as u16, &dest_file, &dest_title);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: msg.session_id,
+            data: map_changed_body,
+        });
 
         let mut body = Vec::new();
         body.extend_from_slice(&spawn_x.to_le_bytes());
@@ -5199,7 +5588,7 @@ impl Message<RequestMapInfoRequest> for WorldActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
         });
 
-        debug!("RequestMapInfo: {} -> map {} ({}, {})", state.name, msg.map_id, spawn_x, spawn_y);
+        debug!("RequestMapInfo: {} -> map {} ({}) ({}, {})", state.name, msg.map_id, dest_file, spawn_x, spawn_y);
     }
 }
 
@@ -5215,21 +5604,39 @@ impl Message<SearchMapRequest> for WorldActor {
     async fn handle(&mut self, msg: SearchMapRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let keyword_lower = msg.keyword.to_lowercase();
 
+        // 搜索匹配的地图
+        let matched_maps: Vec<_> = self.map_infos.iter()
+            .filter(|m| m.title.to_lowercase().contains(&keyword_lower) || m.file_name.to_lowercase().contains(&keyword_lower))
+            .collect();
+
         // 搜索匹配的 NPC
         let matched_npcs: Vec<_> = self.npcs.values()
             .filter(|n| n.name.to_lowercase().contains(&keyword_lower))
             .collect();
 
-        if matched_npcs.is_empty() {
+        if matched_maps.is_empty() && matched_npcs.is_empty() {
             send_system_message(&self.gate_ref, msg.session_id, "未找到匹配结果");
             return;
         }
 
-        // 发送第一个匹配的 NPC 信息
-        let npc = &matched_npcs[0];
-        send_system_message(&self.gate_ref, msg.session_id,
-            &format!("找到 NPC: {} 位置({}, {})", npc.name, npc.x, npc.y));
-        debug!("SearchMap: found {} NPCs matching '{}'", matched_npcs.len(), msg.keyword);
+        let mut result = String::new();
+        if !matched_maps.is_empty() {
+            result.push_str(&format!("地图({}): ", matched_maps.len()));
+            for (i, m) in matched_maps.iter().take(5).enumerate() {
+                if i > 0 { result.push_str(", "); }
+                result.push_str(&format!("{}(#{}))", m.title, m.index));
+            }
+        }
+        if !matched_npcs.is_empty() {
+            if !result.is_empty() { result.push_str(" | "); }
+            result.push_str(&format!("NPC({}): ", matched_npcs.len()));
+            for (i, n) in matched_npcs.iter().take(5).enumerate() {
+                if i > 0 { result.push_str(", "); }
+                result.push_str(&format!("{}({},{})", n.name, n.x, n.y));
+            }
+        }
+        send_system_message(&self.gate_ref, msg.session_id, &result);
+        debug!("SearchMap: {} maps, {} NPCs matching '{}'", matched_maps.len(), matched_npcs.len(), msg.keyword);
     }
 }
 
@@ -6211,6 +6618,62 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
         debug!("NPCConfirmInput: {} npc_id={} input={}", state.name, msg.npc_id, msg.input_text);
+
+        // Try to match input as a quest file_name for quick acceptance
+        let npc = match self.npcs.get(&msg.npc_id) {
+            Some(n) => n,
+            None => return,
+        };
+        if npc.db_index > 0 {
+            if let Some(npc_db) = self.npc_infos.get(&npc.db_index) {
+                // Check if input matches a collectable quest
+                let quest_db = npc_db.collect_quest_indexes.iter()
+                    .filter_map(|qi| self.quest_infos.get(qi))
+                    .find(|q| q.file_name == msg.input_text || q.name == msg.input_text);
+                if let Some(quest_db) = quest_db {
+                    if state.level >= quest_db.required_min_level as u16
+                        && (quest_db.required_max_level == 0 || state.level <= quest_db.required_max_level as u16)
+                    {
+                        // Check not already accepted
+                        if let Ok(None) = record.actor_ref.ask(GetQuest { quest_index: quest_db.index }).await {
+                            let quest = QuestInstance {
+                                quest_index: quest_db.index,
+                                title: quest_db.name.clone(),
+                                status: QuestStatus::InProgress,
+                                progress: vec![],
+                                exp_reward: quest_db.exp_reward as i64,
+                                gold_reward: quest_db.gold_reward.max(0) as u64,
+                            };
+                            if let Ok(true) = record.actor_ref.ask(AcceptQuest { quest }).await {
+                                send_system_message(&self.gate_ref, msg.session_id,
+                                    &format!("任务已接受: {}", quest_db.name));
+                            }
+                            return;
+                        }
+                    }
+                }
+                // Check if input matches a finishable quest
+                let quest_db = npc_db.finish_quest_indexes.iter()
+                    .filter_map(|qi| self.quest_infos.get(qi))
+                    .find(|q| q.file_name == msg.input_text || q.name == msg.input_text);
+                if let Some(quest_db) = quest_db {
+                    // Complete the quest
+                    if let Ok(Some(quest)) = record.actor_ref.ask(GetQuest { quest_index: quest_db.index }).await {
+                        if quest.status == QuestStatus::InProgress {
+                            let _ = record.actor_ref.ask(CompleteQuest { quest_index: quest_db.index }).await;
+                            // Grant rewards
+                            let _ = record.actor_ref.ask(AddExperience { amount: quest_db.exp_reward }).await;
+                            let _ = record.actor_ref.ask(AddGold { amount: quest_db.gold_reward.max(0) as u64 }).await;
+                            send_system_message(&self.gate_ref, msg.session_id,
+                                &format!("任务完成: +{}经验, +{}金币", quest_db.exp_reward, quest_db.gold_reward.max(0)));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        send_system_message(&self.gate_ref, msg.session_id, "无法识别该指令");
     }
 }
 
@@ -6229,8 +6692,8 @@ struct ShopItem {
     stock: i32,
 }
 
-/// 游戏商店硬编码目录（可扩展为配置文件）
-fn game_shop_catalog() -> &'static [ShopItem] {
+/// 游戏商店硬编码目录（fallback，当 DB 无数据时使用）
+fn game_shop_catalog_fallback() -> &'static [ShopItem] {
     &[
         // 经验丹 - 增加1000经验
         ShopItem { item_index: 1, gold_price: 5000, credit_price: 100, count: 1, class: 255, category: "消耗品", stock: 999 },
@@ -6246,21 +6709,35 @@ fn game_shop_catalog() -> &'static [ShopItem] {
 }
 
 /// 发送游戏商店目录给玩家
-fn send_game_shop_catalog(gate_ref: &ActorRef<GateActor>, session_id: u64, gold: u32) {
-    use mir2_shared::packets::server::special_systems::{GameShopInfo, GameShopItem};
+fn send_game_shop_catalog(gate_ref: &ActorRef<GateActor>, session_id: u64, gold: u32, shop_items: &[db::GameShopItem]) {
+    use mir2_shared::packets::server::special_systems::{GameShopInfo, GameShopItem as ProtoItem};
 
-    let catalog = game_shop_catalog();
-    let items: Vec<GameShopItem> = catalog.iter().map(|s| GameShopItem {
-        item_index: s.item_index,
-        gold_price: s.gold_price,
-        credit_price: s.credit_price,
-        count: s.count,
-        class: s.class,
-        category: s.category.to_string(),
-        stock: s.stock,
-        is_bought: false,
-        deal: false,
-    }).collect();
+    let items: Vec<ProtoItem> = if shop_items.is_empty() {
+        // Fallback to hardcoded
+        game_shop_catalog_fallback().iter().map(|s| ProtoItem {
+            item_index: s.item_index,
+            gold_price: s.gold_price,
+            credit_price: s.credit_price,
+            count: s.count,
+            class: s.class,
+            category: s.category.to_string(),
+            stock: s.stock,
+            is_bought: false,
+            deal: false,
+        }).collect()
+    } else {
+        shop_items.iter().map(|s| ProtoItem {
+            item_index: s.item_index,
+            gold_price: s.gold_price,
+            credit_price: s.credit_price,
+            count: s.count as i32,
+            class: 255, // DB class_name is string; use default
+            category: s.category.clone(),
+            stock: s.stock,
+            is_bought: false,
+            deal: s.deal,
+        }).collect()
+    };
 
     let packet = GameShopInfo {
         items,
@@ -6291,21 +6768,24 @@ impl Message<GameshopBuyRequest> for WorldActor {
         // item_id=0 请求商店目录
         if msg.item_id == 0 {
             debug!("GameShop: {} requesting catalog", state.name);
-            send_game_shop_catalog(&self.gate_ref, msg.session_id, state.inventory.gold as u32);
+            send_game_shop_catalog(&self.gate_ref, msg.session_id, state.inventory.gold as u32, &self.game_shop_items);
             return;
         }
 
-        // 查找商品
-        let item = match game_shop_catalog().iter().find(|i| i.item_index as u32 == msg.item_id) {
-            Some(i) => i,
-            None => {
-                send_system_message(&self.gate_ref, msg.session_id, "商品不存在");
-                return;
-            }
+        // 查找商品（优先 DB，fallback 硬编码）
+        let db_item = self.game_shop_items.iter().find(|i| i.item_index as u32 == msg.item_id);
+        let fallback = game_shop_catalog_fallback().iter().find(|i| i.item_index as u32 == msg.item_id);
+        let (item_price, item_count) = if let Some(di) = db_item {
+            (di.gold_price as u64, di.count as u32)
+        } else if let Some(fi) = fallback {
+            (fi.gold_price as u64, fi.count as u32)
+        } else {
+            send_system_message(&self.gate_ref, msg.session_id, "商品不存在");
+            return;
         };
 
-        let buy_count = msg.count.max(1);
-        let total_gold = item.gold_price.saturating_mul(buy_count);
+        let buy_count = msg.count.max(1).min(item_count);
+        let total_gold = item_price.saturating_mul(buy_count as u64);
 
         debug!("GameshopBuy: {} item={} count={} gold={}", state.name, msg.item_id, buy_count, total_gold);
 
@@ -6318,17 +6798,70 @@ impl Message<GameshopBuyRequest> for WorldActor {
         // 扣除金币
         let _ = record.actor_ref.ask(DeductGold { amount: total_gold as u64 }).await;
 
-        // Item delivery via mail not yet implemented; purchase deducts gold but item is not delivered.
+        // 通过邮件交付物品
+        let shop_item = self.game_shop_items.iter().find(|i| i.item_index as u32 == msg.item_id);
+        let item_index = if let Some(si) = shop_item {
+            si.item_index
+        } else {
+            msg.item_id as i32
+        };
+
+        let mail_items: Vec<mir2_shared::data::item::UserItem> = if let Some(item_db) = self.item_infos.get(&item_index) {
+            (0..buy_count).map(|_| {
+                let uid = crate::actors::inventory::NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                mir2_shared::data::item::UserItem {
+                    unique_id: uid,
+                    item_index: item_db.index,
+                    count: 1,
+                    current_dura: item_db.durability as u16,
+                    max_dura: item_db.durability as u16,
+                    identified: item_db.start_item || item_db.bool_flags & (1 << 0) != 0,
+                    ..Default::default()
+                }
+            }).collect()
+        } else {
+            // Fallback: create minimal item
+            (0..buy_count).map(|_| {
+                let uid = crate::actors::inventory::NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                mir2_shared::data::item::UserItem {
+                    unique_id: uid,
+                    item_index,
+                    ..Default::default()
+                }
+            }).collect()
+        };
+
+        let mail = MailMessage {
+            mail_id: generate_mail_id(),
+            sender_name: "GameShop".to_string(),
+            receiver_name: state.name.clone(),
+            subject: "商城购买".to_string(),
+            body: format!("您购买了 {} 件商品", buy_count),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+            read: false,
+            collected: false,
+            locked: false,
+            gold: 0,
+            items: mail_items,
+        };
+
+        send_mail_received_packet(&self.gate_ref, msg.session_id, &mail);
+        let _ = record.actor_ref.ask(crate::actors::player::AddMail { mail }).await;
+
         send_system_message(&self.gate_ref, msg.session_id,
-            &format!("购买成功！已扣除金币 {} (物品将通过后续更新交付)", total_gold));
+            &format!("购买成功！已扣除金币 {}，物品已通过邮件发送", total_gold));
 
         // 发送库存更新
+        let stock_remaining = item_count.saturating_sub(buy_count);
         let _ = self.gate_ref.ask(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GameShopStock as i16, &{
                 let mut body = Vec::new();
                 body.extend_from_slice(&(msg.item_id as i32).to_le_bytes());
-                body.extend_from_slice(&item.stock.to_le_bytes());
+                body.extend_from_slice(&stock_remaining.to_le_bytes());
                 body
             }),
         });
@@ -6883,6 +7416,8 @@ fn send_game_entry_sequence(
     gate_ref: ActorRef<GateActor>,
     session_id: u64,
     state: &PlayerState,
+    map_file: &str,
+    map_title: &str,
 ) {
     use mir2_shared::enums::ServerPacketIds;
 
@@ -6898,7 +7433,7 @@ fn send_game_entry_sequence(
     });
 
     // 2. MapChanged
-    let map_changed = build_map_changed_packet(state.map_index);
+    let map_changed = build_map_changed_packet(state.map_index, map_file, map_title);
     let _ = gate_ref.ask(SendToClient {
         session_id: sid,
         data: map_changed,
@@ -6937,13 +7472,13 @@ fn send_game_entry_sequence(
 // 数据包构建辅助函数
 // ============================================================
 
-fn build_map_changed_packet(map_index: u16) -> Vec<u8> {
+fn build_map_changed_packet(map_index: u16, file_name: &str, title: &str) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
 
     body.extend_from_slice(&(map_index as i32).to_le_bytes());
-    write_dotnet_string(&mut body, "n0");
-    write_dotnet_string(&mut body, "Beginner Training");
+    write_dotnet_string(&mut body, file_name);
+    write_dotnet_string(&mut body, title);
     body.extend_from_slice(&0u16.to_le_bytes());
     body.extend_from_slice(&0u16.to_le_bytes());
     body.push(1u8);
@@ -7095,14 +7630,20 @@ fn spawn_npcs_and_monsters(
     spawn_dir: &Option<PathBuf>,
     map_file: &str,
     session_id: u64,
-    alloc_object_id: &mut dyn FnMut() -> u32,
+    next_object_id: &mut u32,
+    map_info: Option<&db::MapInfo>,
+    monster_infos: &HashMap<i32, db::MonsterInfo>,
+    npc_infos: &HashMap<i32, db::NPCInfo>,
+    dragon_info: Option<&db::DragonInfo>,
 ) -> (Vec<NpcState>, Vec<MonsterState>) {
-    let spawn_dir = match spawn_dir {
-        Some(d) => d,
-        None => return (Vec::new(), Vec::new()),
+    // Try DB-loaded configs first, fall back to TOML
+    let config = if let Some(mi) = map_info {
+        spawn_config_from_db(mi, monster_infos, npc_infos)
+    } else if let Some(d) = spawn_dir {
+        load_spawn_config(map_file, d)
+    } else {
+        return (Vec::new(), Vec::new());
     };
-
-    let config = load_spawn_config(map_file, spawn_dir);
     if config.npcs.is_empty() && config.monsters.is_empty() {
         return (Vec::new(), Vec::new());
     }
@@ -7110,7 +7651,8 @@ fn spawn_npcs_and_monsters(
     // 发送 NPC 并创建运行时状态
     let mut npcs = Vec::new();
     for npc in &config.npcs {
-        let object_id = alloc_object_id();
+        let object_id = *next_object_id;
+        *next_object_id += 1;
         let packet = build_object_npc_packet(npc, object_id);
         let _ = gate_ref.ask(SendToClient {
             session_id,
@@ -7120,17 +7662,18 @@ fn spawn_npcs_and_monsters(
         npcs.push(NpcState {
             object_id,
             name: npc.name.clone(),
-            image: npc.image,
             x: npc.x,
             y: npc.y,
             direction: npc.direction,
+            db_index: npc.db_index,
         });
     }
 
     // 发送怪物并创建运行时状态
     let mut monsters = Vec::new();
     for monster in &config.monsters {
-        let object_id = alloc_object_id();
+        let object_id = *next_object_id;
+        *next_object_id += 1;
         let packet = build_object_monster_packet(monster, object_id, &monster.name);
         let _ = gate_ref.ask(SendToClient {
             session_id,
@@ -7157,5 +7700,45 @@ fn spawn_npcs_and_monsters(
 
     info!("Spawned {} NPCs and {} monsters for session {}",
           config.npcs.len(), config.monsters.len(), session_id);
+
+    // Spawn dragon if enabled and on this map
+    if let Some(dragon) = dragon_info {
+        if dragon.enabled && dragon.map_file_name == map_file {
+            if let Some(monster_index) = dragon.monster_index {
+                if let Some(monster_db) = monster_infos.get(&monster_index) {
+                    let object_id = *next_object_id;
+                    *next_object_id += 1;
+                    let hp = monster_db.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(10000);
+                    let min_dmg = monster_db.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(50);
+                    let max_dmg = monster_db.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(100);
+                    let xp = monster_db.experience;
+                    let packet = build_object_monster_packet(
+                        &MonsterSpawn { name: dragon.monster_name.clone(), image: monster_db.image as u16, x: dragon.location_x, y: dragon.location_y, direction: 0, hp, min_dmg, max_dmg, xp },
+                        object_id,
+                        &dragon.monster_name,
+                    );
+                    let _ = gate_ref.ask(SendToClient { session_id, data: packet });
+                    monsters.push(MonsterState {
+                        object_id,
+                        name: dragon.monster_name.clone(),
+                        image: monster_db.image as u16,
+                        x: dragon.location_x,
+                        y: dragon.location_y,
+                        direction: 0,
+                        hp,
+                        max_hp: hp,
+                        min_dmg,
+                        max_dmg,
+                        xp,
+                        spawn_x: dragon.location_x,
+                        spawn_y: dragon.location_y,
+                        next_attack_tick: 0,
+                    });
+                    info!("Spawned dragon at ({}, {}) on map {}", dragon.location_x, dragon.location_y, map_file);
+                }
+            }
+        }
+    }
+
     (npcs, monsters)
 }

@@ -175,6 +175,15 @@ impl PlayerInventory {
         self.equipment.iter().flatten().find(|&e| e.unique_id == uid).map(|e| e as _)
     }
 
+    /// 查询物品（按格子索引）
+    pub fn get_item_by_grid(&self, grid: u8) -> Option<&UserItem> {
+        let idx = grid as usize;
+        if idx >= BACKPACK_SIZE {
+            return None;
+        }
+        self.backpack[idx].as_ref().map(|s| &s.item)
+    }
+
     /// 移动物品：从 from_grid 到 to_grid
     /// 返回是否成功
     pub fn move_item(&mut self, from_grid: u8, to_grid: u8) -> bool {
@@ -420,7 +429,7 @@ impl PlayerInventory {
 // ============================================================
 
 /// 全局 unique_id 计数器
-static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+pub static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl PlayerInventory {
     fn next_unique_id(&self) -> u64 {
