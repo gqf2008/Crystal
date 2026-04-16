@@ -1410,7 +1410,8 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // 发送游戏进入序列（使用真实状态数据）
-        send_game_entry_sequence(self.gate_ref.clone(), msg.session_id, &loaded_state, &map_file, &map_title);
+        let is_big_map = self.map_infos.iter().find(|m| m.index == map_info_idx).map(|m| m.big_map).unwrap_or(false);
+        send_game_entry_sequence(self.gate_ref.clone(), msg.session_id, &loaded_state, &map_file, &map_title, is_big_map);
 
         // 发送地图上的 NPC 和怪物
         let spawn_dir = self.spawn_dir.clone();
@@ -1529,23 +1530,9 @@ impl Message<WorldMoveRequest> for WorldActor {
                         });
 
                         // Send MapChanged packet
-                        let mut body = Vec::new();
-                        body.extend_from_slice(&(dest_map_index as i32).to_le_bytes());
-                        write_dotnet_string(&mut body, &dest_file);
-                        write_dotnet_string(&mut body, &dest_title);
-                        body.extend_from_slice(&0u16.to_le_bytes()); // min map index
-                        body.extend_from_slice(&0u16.to_le_bytes()); // max map index
-                        body.push(if is_big_map { 1u8 } else { 0u8 });
-                        body.extend_from_slice(&(dest_x as i32).to_le_bytes()); // spawn x
-                        body.extend_from_slice(&(dest_y as i32).to_le_bytes()); // spawn y
-                        body.push(4u8); // map type
-                        body.push(1u8); // light
-                        body.extend_from_slice(&0u16.to_le_bytes());
-                        body.extend_from_slice(&0u16.to_le_bytes());
-
                         let _ = self.gate_ref.ask(SendToClient {
                             session_id: msg.session_id,
-                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MapChanged as i16, &body),
+                            data: build_map_changed_packet(dest_map_index as u16, &dest_file, &dest_title, dest_x, dest_y, is_big_map),
                         });
 
                         // Send UserLocation to confirm new position
@@ -5566,7 +5553,7 @@ impl Message<RequestMapInfoRequest> for WorldActor {
         let _ = record.actor_ref.ask(SetPlayerPosition { x: spawn_x, y: spawn_y, direction: state.direction, map_index: Some(msg.map_id as u16) });
 
         // Send MapChanged first, then UserLocation (client processes in order)
-        let map_changed_body = build_map_changed_packet(msg.map_id as u16, &dest_file, &dest_title);
+        let map_changed_body = build_map_changed_packet(msg.map_id as u16, &dest_file, &dest_title, spawn_x, spawn_y, false);
         let _ = self.gate_ref.ask(SendToClient {
             session_id: msg.session_id,
             data: map_changed_body,
@@ -7416,6 +7403,7 @@ fn send_game_entry_sequence(
     state: &PlayerState,
     map_file: &str,
     map_title: &str,
+    is_big_map: bool,
 ) {
     use mir2_shared::enums::ServerPacketIds;
 
@@ -7431,7 +7419,7 @@ fn send_game_entry_sequence(
     });
 
     // 2. MapChanged
-    let map_changed = build_map_changed_packet(state.map_index, map_file, map_title);
+    let map_changed = build_map_changed_packet(state.map_index, map_file, map_title, state.x, state.y, is_big_map);
     let _ = gate_ref.ask(SendToClient {
         session_id: sid,
         data: map_changed,
@@ -7470,7 +7458,14 @@ fn send_game_entry_sequence(
 // 数据包构建辅助函数
 // ============================================================
 
-fn build_map_changed_packet(map_index: u16, file_name: &str, title: &str) -> Vec<u8> {
+fn build_map_changed_packet(
+    map_index: u16,
+    file_name: &str,
+    title: &str,
+    spawn_x: i32,
+    spawn_y: i32,
+    is_big_map: bool,
+) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
 
@@ -7479,9 +7474,9 @@ fn build_map_changed_packet(map_index: u16, file_name: &str, title: &str) -> Vec
     write_dotnet_string(&mut body, title);
     body.extend_from_slice(&0u16.to_le_bytes());
     body.extend_from_slice(&0u16.to_le_bytes());
-    body.push(1u8);
-    body.extend_from_slice(&330i32.to_le_bytes());
-    body.extend_from_slice(&330i32.to_le_bytes());
+    body.push(if is_big_map { 1u8 } else { 0u8 });
+    body.extend_from_slice(&spawn_x.to_le_bytes());
+    body.extend_from_slice(&spawn_y.to_le_bytes());
     body.push(4u8);
     body.push(1u8);
     body.extend_from_slice(&0u16.to_le_bytes());
