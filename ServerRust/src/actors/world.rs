@@ -333,8 +333,8 @@ pub struct WorldActor {
     open_doors: std::collections::HashSet<(u16, u8)>,
     /// SQLite 数据库连接池
     db_pool: DbPool,
-    /// 游戏配置：地图信息（从 DB 加载）
-    map_infos: Vec<db::MapInfo>,
+    /// 游戏配置：地图信息（key = map index）
+    map_infos: HashMap<i32, db::MapInfo>,
     /// 游戏配置：物品信息
     item_infos: HashMap<i32, db::ItemInfo>,
     /// 游戏配置：怪物信息
@@ -377,7 +377,7 @@ impl WorldActor {
             pending_mentor_invites: HashMap::new(),
             open_doors: std::collections::HashSet::new(),
             db_pool,
-            map_infos: Vec::new(),
+            map_infos: HashMap::new(),
             item_infos: HashMap::new(),
             monster_infos: HashMap::new(),
             npc_infos: HashMap::new(),
@@ -476,10 +476,11 @@ impl Actor for WorldActor {
         };
 
         // Load game configs from DB (migrated from Server.MirDB)
-        let map_infos = match db::load_map_infos(&args.db_pool).await {
+        let map_infos_list = match db::load_map_infos(&args.db_pool).await {
             Ok(m) => { info!("Loaded {} map configs from database", m.len()); m }
             Err(e) => { warn!("Failed to load map_infos from DB: {}", e); Vec::new() }
         };
+        let map_infos: HashMap<i32, db::MapInfo> = map_infos_list.into_iter().map(|m| (m.index, m)).collect();
 
         let item_infos_list = match db::load_item_infos(&args.db_pool).await {
             Ok(m) => { info!("Loaded {} item configs from database", m.len()); m }
@@ -524,7 +525,7 @@ impl Actor for WorldActor {
         // Build movement trigger index for O(1) lookup: (map_index, source_x, source_y) -> MapMovementInfo
         let movement_index: HashMap<(i32, i32, i32), db::MapMovementInfo> = {
             let mut idx = HashMap::new();
-            for mi in &map_infos {
+            for mi in map_infos.values() {
                 for mv in &mi.movements {
                     idx.insert((mi.index, mv.source_x, mv.source_y), mv.clone());
                 }
@@ -1325,8 +1326,7 @@ impl Message<StartGameRequest> for WorldActor {
         ));
 
         // 加载地图 — 优先用 DB 中的 map_infos 获取文件名
-        let (map_file, map_title, map_info_idx) = self.map_infos.iter()
-            .find(|m| m.index == map_index as i32)
+        let (map_file, map_title, map_info_idx) = self.map_infos.get(&(map_index as i32))
             .map(|m| (m.file_name.clone(), m.title.clone(), m.index))
             .unwrap_or_else(|| ("n0".to_string(), "Unknown".to_string(), 0));
 
@@ -1346,7 +1346,7 @@ impl Message<StartGameRequest> for WorldActor {
 
         // If position is (0,0), place at map safe zone spawn point
         if loaded_state.x == 0 && loaded_state.y == 0 {
-            if let Some(mi) = self.map_infos.iter().find(|m| m.file_name == map_file) {
+            if let Some(mi) = self.map_infos.get(&(map_index as i32)) {
                 if let Some(sz) = mi.safe_zones.iter().find(|s| s.start_point) {
                     info!("Placing {} at safe zone spawn ({}, {})", player_name, sz.x, sz.y);
                     loaded_state.x = sz.x;
@@ -1410,12 +1410,12 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // 发送游戏进入序列（使用真实状态数据）
-        let is_big_map = self.map_infos.iter().find(|m| m.index == map_info_idx).map(|m| m.big_map).unwrap_or(false);
+        let is_big_map = self.map_infos.get(&map_info_idx).map(|m| m.big_map).unwrap_or(false);
         send_game_entry_sequence(self.gate_ref.clone(), msg.session_id, &loaded_state, &map_file, &map_title, is_big_map);
 
         // 发送地图上的 NPC 和怪物
         let spawn_dir = self.spawn_dir.clone();
-        let map_info = self.map_infos.iter().find(|m| m.index == map_info_idx);
+        let map_info = self.map_infos.get(&map_info_idx);
         let (new_npcs, new_monsters) = spawn_npcs_and_monsters(
             self.gate_ref.clone(),
             &spawn_dir,
@@ -1494,9 +1494,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                 let dest_y = mv.dest_y;
 
                 // Look up dest map file name from DB-loaded map_infos
-                let dest_map_info = self.map_infos.iter()
-                    .find(|m| m.index == dest_map_index)
-                    .cloned();
+                let dest_map_info = self.map_infos.get(&dest_map_index).cloned();
 
                 if let Some(dest_mi) = dest_map_info {
                     if dest_mi.no_teleport {
@@ -2265,7 +2263,7 @@ impl Message<UseItemRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
-        if let Some(mi) = self.map_infos.iter().find(|m| m.index == player_state.map_index as i32) {
+        if let Some(mi) = self.map_infos.get(&(player_state.map_index as i32)) {
             if mi.no_drug {
                 send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用物品");
                 return;
@@ -5517,8 +5515,7 @@ impl Message<RequestMapInfoRequest> for WorldActor {
         };
 
         // Look up target map from DB
-        let target_map_info = self.map_infos.iter().find(|m| m.index == msg.map_id as i32);
-        let Some(dest_mi) = target_map_info else {
+        let Some(dest_mi) = self.map_infos.get(&(msg.map_id as i32)) else {
             send_system_message(&self.gate_ref, msg.session_id, "地图不存在");
             return;
         };
@@ -5585,7 +5582,7 @@ impl Message<SearchMapRequest> for WorldActor {
         let keyword_lower = msg.keyword.to_lowercase();
 
         // 搜索匹配的地图
-        let matched_maps: Vec<_> = self.map_infos.iter()
+        let matched_maps: Vec<_> = self.map_infos.values()
             .filter(|m| m.title.to_lowercase().contains(&keyword_lower) || m.file_name.to_lowercase().contains(&keyword_lower))
             .collect();
 
