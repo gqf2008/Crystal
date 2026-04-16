@@ -291,6 +291,11 @@ impl PlayerInventory {
         self.backpack.iter().any(|s| s.is_none())
     }
 
+    /// 检查能否获得物品（对应 C# CanGainItems）
+    pub fn can_gain_items(&self) -> bool {
+        self.has_space()
+    }
+
     /// 计算背包中已有物品的数量
     pub fn item_count(&self) -> usize {
         self.backpack.iter().filter(|s| s.is_some()).count()

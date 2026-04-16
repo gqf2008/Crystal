@@ -8,5 +8,7 @@ pub mod mail;
 pub mod player;
 pub mod quest;
 pub mod refine;
+pub mod social;
+pub mod social_packets;
 pub mod trade;
 pub mod world;

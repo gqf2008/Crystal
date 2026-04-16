@@ -9,6 +9,7 @@ use tracing::{info, error, warn};
 
 use crystal_server::actors::account::AccountActor;
 use crystal_server::actors::world::{WorldActor, WorldActorArgs};
+use crystal_server::actors::social::{SocialActor, SocialActorArgs};
 use crystal_server::gate::actor::{GateActor, SetAccountRef, SetWorldRef};
 use crystal_server::util::config;
 use crystal_server::db;
@@ -70,12 +71,21 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // WorldActor 启动，携带 GateActor 引用 + 地图目录 + 刷怪目录 + 数据库
+    // SocialActor 先启动，WorldActor 依赖它
+    let social_ref = SocialActor::spawn(SocialActorArgs {
+        gate_ref: gate_ref.clone(),
+        db_pool: db_pool.clone(),
+        config: Default::default(), // TODO: wire shared config later
+    });
+    info!("SocialActor spawned");
+
     let world_ref = WorldActor::spawn(WorldActorArgs {
         tick_interval_ms: cfg.server.tick_ms,
         gate_ref: gate_ref.clone(),
         map_dir,
         spawn_dir: Some(spawn_dir),
         db_pool: db_pool.clone(),
+        social_ref: social_ref.clone(),
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 

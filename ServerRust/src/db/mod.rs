@@ -61,6 +61,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             hero_index INTEGER NOT NULL DEFAULT 0,
             is_fishing INTEGER NOT NULL DEFAULT 0,
             fishing_autocast INTEGER NOT NULL DEFAULT 0,
+            is_dead INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (account_username) REFERENCES accounts(username),
             FOREIGN KEY (guild_name) REFERENCES guilds(name)
         );
@@ -558,8 +559,8 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             hp, max_hp, mp, max_mp, min_attack, max_attack, defence,
             gold, group_id, guild_name, guild_rank,
             spouse_name, allow_mentor, mentor_name, hero_index,
-            is_fishing, fishing_autocast
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+            is_fishing, fishing_autocast, is_dead
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -590,6 +591,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(state.hero_index as i32)
     .bind(if state.is_fishing { 1 } else { 0 })
     .bind(if state.fishing_autocast { 1 } else { 0 })
+    .bind(if state.is_dead { 1 } else { 0 })
     .execute(pool)
     .await?;
 
@@ -678,10 +680,16 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         hero_inventory,
         refine_log,
         is_fishing: row.get::<i32, _>("is_fishing") != 0,
+        is_mounted: false,
+        is_dead: row.get::<i32, _>("is_dead") != 0,
         fishing_autocast: row.get::<i32, _>("fishing_autocast") != 0,
         reincarnation_host: None,
         reincarnation_ready: false,
         reincarnation_expire_time: 0,
+        enable_group_recall: false,
+        last_recall_time: 0,
+        allow_lover_recall: row.get::<Option<i32>, _>("allow_lover_recall").map(|v| v != 0).unwrap_or(false),
+        is_gm: false, // TODO: load from accounts.admin_account column
     };
 
     Ok(Some(state))

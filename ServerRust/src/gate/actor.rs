@@ -34,6 +34,8 @@ pub struct GateActor {
     account_ref: Option<ActorRef<crate::actors::account::AccountActor>>,
     /// WorldActor 引用
     world_ref: Option<ActorRef<crate::actors::world::WorldActor>>,
+    /// SocialActor 引用
+    social_ref: Option<ActorRef<crate::actors::social::SocialActor>>,
 }
 
 impl GateActor {
@@ -43,6 +45,7 @@ impl GateActor {
             session_usernames: HashMap::new(),
             account_ref: None,
             world_ref: None,
+            social_ref: None,
         }
     }
 
@@ -52,6 +55,10 @@ impl GateActor {
 
     pub fn set_world_ref(&mut self, world_ref: ActorRef<crate::actors::world::WorldActor>) {
         self.world_ref = Some(world_ref);
+    }
+
+    pub fn set_social_ref(&mut self, social_ref: ActorRef<crate::actors::social::SocialActor>) {
+        self.social_ref = Some(social_ref);
     }
 }
 
@@ -491,51 +498,51 @@ impl Message<ClientData> for GateActor {
             }
             // 社交/组队
             x if x == ClientPacketIds::SwitchGroup as i16 => {
-                forward_switch_group(&self.world_ref, msg.session_id, payload);
+                forward_switch_group(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::AddMember as i16 => {
-                forward_add_member(&self.world_ref, msg.session_id, payload);
+                forward_add_member(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::DellMember as i16 => {
-                forward_dell_member(&self.world_ref, msg.session_id, payload);
+                forward_dell_member(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::GroupInvite as i16 => {
-                forward_group_invite(&self.world_ref, msg.session_id, payload);
+                forward_group_invite(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::NewHero as i16 => {
                 forward_new_hero(&self.world_ref, msg.session_id, payload);
             }
             // 交易
             x if x == ClientPacketIds::ChangeTrade as i16 => {
-                forward_change_trade(&self.world_ref, msg.session_id, payload);
+                forward_change_trade(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::TradeRequest as i16 => {
-                forward_trade_request(&self.world_ref, msg.session_id, payload);
+                forward_trade_request(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::TradeReply as i16 => {
-                forward_trade_reply(&self.world_ref, msg.session_id, payload);
+                forward_trade_reply(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::TradeConfirm as i16 => {
-                forward_trade_confirm(&self.world_ref, msg.session_id, payload);
+                forward_trade_confirm(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::TradeCancel as i16 => {
-                forward_trade_cancel(&self.world_ref, msg.session_id, payload);
+                forward_trade_cancel(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::TradeGold as i16 => {
-                forward_trade_gold(&self.world_ref, msg.session_id, payload);
+                forward_trade_gold(&self.social_ref, msg.session_id, payload);
             }
             // 好友
             x if x == ClientPacketIds::AddFriend as i16 => {
-                forward_add_friend(&self.world_ref, msg.session_id, payload);
+                forward_add_friend(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::RemoveFriend as i16 => {
-                forward_remove_friend(&self.world_ref, msg.session_id, payload);
+                forward_remove_friend(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::RefreshFriends as i16 => {
-                forward_refresh_friends(&self.world_ref, msg.session_id);
+                forward_refresh_friends(&self.social_ref, msg.session_id);
             }
             x if x == ClientPacketIds::AddMemo as i16 => {
-                forward_add_memo(&self.world_ref, msg.session_id, payload);
+                forward_add_memo(&self.social_ref, msg.session_id, payload);
             }
             // 邮件
             x if x == ClientPacketIds::SendMail as i16 => {
@@ -552,53 +559,53 @@ impl Message<ClientData> for GateActor {
             }
             // 行会
             x if x == ClientPacketIds::GuildInvite as i16 => {
-                handle_guild_invite(&self.world_ref, msg.session_id, payload);
+                handle_guild_invite(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::RequestGuildInfo as i16 => {
-                handle_request_guild_info(&self.world_ref, msg.session_id, payload);
+                handle_request_guild_info(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::EditGuildMember as i16 => {
-                handle_edit_guild_member(&self.world_ref, msg.session_id, payload);
+                handle_edit_guild_member(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::EditGuildNotice as i16 => {
-                handle_edit_guild_notice(&self.world_ref, msg.session_id, payload);
+                handle_edit_guild_notice(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::GuildNameReturn as i16 => {
-                handle_guild_name_return(&self.world_ref, msg.session_id, payload);
+                handle_guild_name_return(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::GuildStorageGoldChange as i16 => {
-                handle_guild_storage_gold(&self.world_ref, msg.session_id, payload);
+                handle_guild_storage_gold(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::GuildStorageItemChange as i16 => {
-                handle_guild_storage_item(&self.world_ref, msg.session_id, payload);
+                handle_guild_storage_item(&self.social_ref, msg.session_id, payload);
             }
             // 婚姻
             x if x == ClientPacketIds::MarriageRequest as i16 => {
-                handle_marriage_request(&self.world_ref, msg.session_id, payload);
+                handle_marriage_request(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MarriageReply as i16 => {
-                handle_marriage_reply(&self.world_ref, msg.session_id, payload);
+                handle_marriage_reply(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::ChangeMarriage as i16 => {
-                handle_change_marriage(&self.world_ref, msg.session_id, payload);
+                handle_change_marriage(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::DivorceRequest as i16 => {
-                handle_divorce_request(&self.world_ref, msg.session_id, payload);
+                handle_divorce_request(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::DivorceReply as i16 => {
-                handle_divorce_reply(&self.world_ref, msg.session_id, payload);
+                handle_divorce_reply(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::AddMentor as i16 => {
-                handle_add_mentor(&self.world_ref, msg.session_id, payload);
+                handle_add_mentor(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MentorReply as i16 => {
-                handle_mentor_reply(&self.world_ref, msg.session_id, payload);
+                handle_mentor_reply(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::AllowMentor as i16 => {
-                handle_allow_mentor(&self.world_ref, msg.session_id, payload);
+                handle_allow_mentor(&self.social_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::CancelMentor as i16 => {
-                handle_cancel_mentor(&self.world_ref, msg.session_id, payload);
+                handle_cancel_mentor(&self.social_ref, msg.session_id, payload);
             }
             // 任务
             x if x == ClientPacketIds::AcceptQuest as i16 => {
@@ -1495,34 +1502,32 @@ fn forward_delete_character(
 
 /// SwitchGroup: [allow_group: bool] (1 byte)
 fn forward_switch_group(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.is_empty() { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let _allow_group = payload[0] != 0;
-    // Phase 3: SwitchGroup 切换组队模式，当前实现为离开/加入默认组队
-    let _ = world_ref.ask(crate::actors::world::SwitchGroupRequest {
+    let _ = social_ref.ask(crate::actors::social::SwitchGroupRequest {
         session_id,
-        target_id: 0, // 0 = leave current group
+        target_id: 0,
     });
 }
 
 /// AddMember: [name: string] (DotNet string format)
 fn forward_add_member(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.len() < 2 { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    // 解析 DotNet 字符串（长度前缀 + UTF8）
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let name_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
     if payload.len() < 2 + name_len { return; }
     let name = String::from_utf8_lossy(&payload[2..2 + name_len]).to_string();
     debug!("AddMember: session={} name={}", session_id, name);
-    let _ = world_ref.ask(crate::actors::world::GroupInviteRequest {
+    let _ = social_ref.ask(crate::actors::social::GroupInviteRequest {
         session_id,
         target_name: name,
     });
@@ -1530,34 +1535,34 @@ fn forward_add_member(
 
 /// GroupInvite: [accept_invite: bool] (1 byte) - 邀请回复
 fn forward_group_invite(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.is_empty() { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let accept = payload[0] != 0;
     debug!("GroupInvite reply: session={} accept={}", session_id, accept);
-    let _ = world_ref.ask(crate::actors::world::GroupInviteReply {
+    let _ = social_ref.ask(crate::actors::social::GroupInviteReply {
         session_id,
-        inviter_id: 0, // resolved from pending_invites in handler
+        inviter_id: 0,
         accept,
     });
 }
 
 /// DellMember: [name: string] (DotNet string format)
 fn forward_dell_member(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.len() < 2 { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let name_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
     if payload.len() < 2 + name_len { return; }
     let name = String::from_utf8_lossy(&payload[2..2 + name_len]).to_string();
     debug!("DellMember: session={} name={}", session_id, name);
-    let _ = world_ref.ask(crate::actors::world::DellMemberRequest {
+    let _ = social_ref.ask(crate::actors::social::DellMemberRequest {
         session_id,
         member_name: name,
     });
@@ -1648,23 +1653,23 @@ fn handle_transfer_hero_item(world_ref: &Option<ActorRef<crate::actors::world::W
 
 /// ChangeTrade: 添加/移除交易物品（客户端触发）
 fn forward_change_trade(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.len() < 9 { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let is_add = payload[0] != 0;
     let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
     let grid = if payload.len() >= 10 { payload[9] } else { 0 };
     let count = if payload.len() >= 12 { u16::from_le_bytes(payload[10..12].try_into().unwrap_or([0; 2])) } else { 1 };
 
     if is_add {
-        let _ = world_ref.ask(crate::actors::world::TradeAddItem {
+        let _ = social_ref.ask(crate::actors::social::TradeAddItem {
             session_id, unique_id: uid, grid, count,
         });
     } else {
-        let _ = world_ref.ask(crate::actors::world::TradeRemoveItem {
+        let _ = social_ref.ask(crate::actors::social::TradeRemoveItem {
             session_id, unique_id: uid,
         });
     }
@@ -1672,66 +1677,66 @@ fn forward_change_trade(
 
 /// TradeRequest: 发起交易
 fn forward_trade_request(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     _payload: &[u8],
 ) {
-    if world_ref.is_none() { return; }
-    let _ = world_ref.as_ref().unwrap().ask(crate::actors::world::TradeStartRequest {
+    if social_ref.is_none() { return; }
+    let _ = social_ref.as_ref().unwrap().ask(crate::actors::social::TradeStartRequest {
         session_id,
     });
 }
 
 /// TradeReply: [accept: bool]
 fn forward_trade_reply(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.is_empty() { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let accept = payload[0] != 0;
-    let _ = world_ref.ask(crate::actors::world::TradeStartReply {
+    let _ = social_ref.ask(crate::actors::social::TradeStartReply {
         session_id, accept,
     });
 }
 
 /// TradeConfirm: [locked: bool]
 fn forward_trade_confirm(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.is_empty() { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let locked = payload[0] != 0;
-    let _ = world_ref.ask(crate::actors::world::TradeConfirmLock {
+    let _ = social_ref.ask(crate::actors::social::TradeConfirmLock {
         session_id, locked,
     });
 }
 
 /// TradeCancel: 取消交易
 fn forward_trade_cancel(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     _payload: &[u8],
 ) {
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::TradeCancel {
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::TradeCancel {
         session_id,
     });
 }
 
 /// TradeGold: [amount: u32]
 fn forward_trade_gold(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.len() < 4 { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let amount = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    let _ = world_ref.ask(crate::actors::world::TradeAddGold {
+    let _ = social_ref.ask(crate::actors::social::TradeAddGold {
         session_id, amount,
     });
 }
@@ -1746,56 +1751,56 @@ fn forward_trade_gold(
 
 /// AddFriend: [name: DotNetString][blocked: bool]
 fn forward_add_friend(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.len() < 2 { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let name_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
     if payload.len() < 2 + name_len + 1 { return; }
     let name = String::from_utf8_lossy(&payload[2..2 + name_len]).to_string();
     let blocked = payload[2 + name_len] != 0;
     debug!("AddFriend: session={} name={} blocked={}", session_id, name, blocked);
-    let _ = world_ref.ask(crate::actors::world::AddFriendRequest {
+    let _ = social_ref.ask(crate::actors::social::AddFriendRequest {
         session_id, friend_name: name, blocked,
     });
 }
 
 /// RemoveFriend: [character_index: i32]
 fn forward_remove_friend(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.len() < 4 { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let character_index = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("RemoveFriend: session={} char_idx={}", session_id, character_index);
-    let _ = world_ref.ask(crate::actors::world::RemoveFriendRequest {
+    let _ = social_ref.ask(crate::actors::social::RemoveFriendRequest {
         session_id, friend_object_id: character_index as u32,
     });
 }
 
 /// RefreshFriends: no payload
 fn forward_refresh_friends(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
 ) {
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::RefreshFriendsRequest {
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::RefreshFriendsRequest {
         session_id,
     });
 }
 
 /// AddMemo: [character_index: i32][memo: DotNetString]
 fn forward_add_memo(
-    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
     if payload.len() < 4 { return; }
-    let world_ref = match world_ref { Some(w) => w, None => return };
+    let social_ref = match social_ref { Some(s) => s, None => return };
     let character_index = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     let memo = if payload.len() > 4 {
         String::from_utf8_lossy(&payload[4..]).to_string()
@@ -1803,7 +1808,7 @@ fn forward_add_memo(
         String::new()
     };
     debug!("AddMemo: session={} char_idx={}", session_id, character_index);
-    let _ = world_ref.ask(crate::actors::world::AddMemoRequest {
+    let _ = social_ref.ask(crate::actors::social::AddMemoRequest {
         session_id, friend_object_id: character_index as u32, memo,
     });
 }
@@ -1898,27 +1903,26 @@ fn handle_delete_mail(world_ref: &Option<ActorRef<crate::actors::world::WorldAct
 // ============================================================================
 
 /// GuildInvite: [accept: bool] - 行会邀请回复
-fn handle_guild_invite(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_guild_invite(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.is_empty() { return; }
     let accept = payload[0] != 0;
     debug!("GuildInvite: session={} accept={}", session_id, accept);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::GuildInviteReply { session_id, accept });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::GuildInviteReply { session_id, accept });
 }
 
 /// RequestGuildInfo: [info_type: u8]
-fn handle_request_guild_info(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_request_guild_info(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     let info_type = payload.first().copied().unwrap_or(0);
     debug!("RequestGuildInfo: session={} type={}", session_id, info_type);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::RequestGuildInfo { session_id, info_type });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::RequestGuildInfo { session_id, info_type });
 }
 
 /// EditGuildMember: [change_type: u8][rank_index: u8][name: DotNetString][rank_name: DotNetString]
-fn handle_edit_guild_member(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_edit_guild_member(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 2 { return; }
     let change_type = payload[0];
-    // Parse member name
     let name_start = 2;
     if name_start + 4 > payload.len() { return; }
     let name_len = u32::from_le_bytes(payload[name_start..name_start+4].try_into().unwrap_or([0;4])) as usize;
@@ -1929,12 +1933,12 @@ fn handle_edit_guild_member(world_ref: &Option<ActorRef<crate::actors::world::Wo
         return;
     };
     debug!("EditGuildMember: session={} type={} name={}", session_id, change_type, member_name);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::EditGuildMemberRequest { session_id, change_type, member_name });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::EditGuildMemberRequest { session_id, change_type, member_name });
 }
 
 /// EditGuildNotice: [count: i32][line1: DotNetString][line2: DotNetString]...
-fn handle_edit_guild_notice(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_edit_guild_notice(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
     let count = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4])) as usize;
     let mut notice_lines = Vec::new();
@@ -1948,41 +1952,41 @@ fn handle_edit_guild_notice(world_ref: &Option<ActorRef<crate::actors::world::Wo
         offset += len;
     }
     debug!("EditGuildNotice: session={} lines={}", session_id, notice_lines.len());
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::EditGuildNoticeRequest { session_id, notice: notice_lines });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::EditGuildNoticeRequest { session_id, notice: notice_lines });
 }
 
 /// GuildNameReturn: [name: DotNetString]
-fn handle_guild_name_return(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_guild_name_return(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
     let name_len = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4])) as usize;
     if payload.len() < 4 + name_len { return; }
     let name = String::from_utf8_lossy(&payload[4..4+name_len]).to_string();
     debug!("GuildNameReturn: session={} name={}", session_id, name);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::CreateGuildRequest { session_id, guild_name: name });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::CreateGuildRequest { session_id, guild_name: name });
 }
 
 /// GuildStorageGoldChange: [change_type: u8][amount: u32]
-fn handle_guild_storage_gold(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_guild_storage_gold(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 5 { return; }
     let change_type = payload[0];
     let amount = u32::from_le_bytes(payload[1..5].try_into().unwrap_or([0;4]));
     debug!("GuildStorageGoldChange: session={} type={} amount={}", session_id, change_type, amount);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::GuildStorageGoldChangeRequest { session_id, change_type, amount });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::GuildStorageGoldChangeRequest { session_id, change_type, amount });
 }
 
 /// GuildStorageItemChange: [change_type: u8][grid: u8][unique_id: u64][count: u32]
-fn handle_guild_storage_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_guild_storage_item(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 12 { return; }
     let change_type = payload[0];
     let grid = payload[1];
     let uid = u64::from_le_bytes(payload[2..10].try_into().unwrap_or([0; 8]));
     let count = u32::from_le_bytes(payload[10..14].try_into().unwrap_or([0; 4]));
     debug!("GuildStorageItemChange: session={} type={} grid={} uid={} count={}", session_id, change_type, grid, uid, count);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::GuildStorageItemChangeRequest { session_id, change_type, grid, unique_id: uid, count });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::GuildStorageItemChangeRequest { session_id, change_type, grid, unique_id: uid, count });
 }
 
 // ============================================================================
@@ -1990,89 +1994,89 @@ fn handle_guild_storage_item(world_ref: &Option<ActorRef<crate::actors::world::W
 // ============================================================================
 
 /// MarriageRequest: [target_name: DotNetString]
-fn handle_marriage_request(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_marriage_request(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
     let name_len = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4])) as usize;
     let target_name = if payload.len() >= 4 + name_len {
         String::from_utf8_lossy(&payload[4..4+name_len]).to_string()
     } else { return; };
     debug!("MarriageRequest: session={} to={}", session_id, target_name);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::MarriageRequest { session_id, target_name });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::MarriageRequest { session_id, target_name });
 }
 
 /// MarriageReply: [accept: bool]
-fn handle_marriage_reply(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_marriage_reply(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.is_empty() { return; }
     let accept = payload[0] != 0;
     debug!("MarriageReply: session={} accept={}", session_id, accept);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::MarriageReply { session_id, accept });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::MarriageReply { session_id, accept });
 }
 
 /// ChangeMarriage: no payload or minimal
-fn handle_change_marriage(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
+fn handle_change_marriage(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, _payload: &[u8]) {
     debug!("ChangeMarriage: session={}", session_id);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::ChangeMarriage { session_id });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::SocialChangeMarriage { session_id });
 }
 
 /// DivorceRequest
-fn handle_divorce_request(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_divorce_request(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
     let name_len = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4])) as usize;
     let partner_name = if payload.len() >= 4 + name_len {
         String::from_utf8_lossy(&payload[4..4+name_len]).to_string()
     } else { return; };
     debug!("DivorceRequest: session={} partner={}", session_id, partner_name);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::DivorceRequest { session_id, partner_name });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::SocialDivorceRequest { session_id, partner_name });
 }
 
 /// DivorceReply: [accept: bool]
-fn handle_divorce_reply(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_divorce_reply(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.is_empty() { return; }
     let accept = payload[0] != 0;
     debug!("DivorceReply: session={} accept={}", session_id, accept);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::DivorceReply { session_id, accept });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::SocialDivorceReply { session_id, accept });
 }
 
 /// AddMentor: [mentor_name: DotNetString]
-fn handle_add_mentor(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_add_mentor(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
     let name_len = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4])) as usize;
     let mentor_name = if payload.len() >= 4 + name_len {
         String::from_utf8_lossy(&payload[4..4+name_len]).to_string()
     } else { return; };
     debug!("AddMentor: session={} mentor={}", session_id, mentor_name);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::AddMentor { session_id, mentor_name });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::SocialAddMentor { session_id, mentor_name });
 }
 
 /// MentorReply: [accept: bool]
-fn handle_mentor_reply(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_mentor_reply(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.is_empty() { return; }
     let accept = payload[0] != 0;
     debug!("MentorReply: session={} accept={}", session_id, accept);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::MentorReply { session_id, accept });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::SocialMentorReply { session_id, accept });
 }
 
 /// AllowMentor: [allow: bool]
-fn handle_allow_mentor(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+fn handle_allow_mentor(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.is_empty() { return; }
     let allow = payload[0] != 0;
     debug!("AllowMentor: session={} allow={}", session_id, allow);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::AllowMentor { session_id, allow });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::SocialAllowMentor { session_id, allow });
 }
 
 /// CancelMentor
-fn handle_cancel_mentor(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
+fn handle_cancel_mentor(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, _payload: &[u8]) {
     debug!("CancelMentor: session={}", session_id);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::CancelMentor { session_id });
+    let social_ref = match social_ref { Some(s) => s, None => return };
+    let _ = social_ref.ask(crate::actors::social::SocialCancelMentor { session_id });
 }
 
 // ============================================================================
@@ -2448,23 +2452,15 @@ fn forward_reset_added_item(world_ref: &Option<ActorRef<crate::actors::world::Wo
 }
 
 /// DepositTradeItem: [from: i32][to: i32]
-fn forward_deposit_trade_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 8 { return; }
-    let from = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    let to = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
-    debug!("DepositTradeItem: session={} from={} to={}", session_id, from, to);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::DepositTradeItemRequest { session_id, from, to });
+fn forward_deposit_trade_item(_world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
+    // Trade sub-operations migrated to SocialActor; not yet implemented here
+    debug!("DepositTradeItem: session={} (not implemented)", session_id);
 }
 
 /// RetrieveTradeItem: [from: i32][to: i32]
-fn forward_retrieve_trade_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 8 { return; }
-    let from = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    let to = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
-    debug!("RetrieveTradeItem: session={} from={} to={}", session_id, from, to);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.ask(crate::actors::world::RetrieveTradeItemRequest { session_id, from, to });
+fn forward_retrieve_trade_item(_world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, _payload: &[u8]) {
+    // Trade sub-operations migrated to SocialActor; not yet implemented here
+    debug!("RetrieveTradeItem: session={} (not implemented)", session_id);
 }
 
 /// GuildWarReturn: [guild_name: DotNetString]

@@ -95,6 +95,10 @@ pub struct PlayerState {
     pub refine_log: RefineLog,
     /// 是否在钓鱼
     pub is_fishing: bool,
+    /// 是否骑乘坐骑
+    pub is_mounted: bool,
+    /// 是否死亡（对应 C# Dead）
+    pub is_dead: bool,
     /// 钓鱼自动释放
     pub fishing_autocast: bool,
     /// 轮回宿主（发起轮回的玩家 session_id）
@@ -103,6 +107,14 @@ pub struct PlayerState {
     pub reincarnation_ready: bool,
     /// 轮回过期时间（WorldActor tick count，过期则自动取消）
     pub reincarnation_expire_time: u64,
+    /// 是否允许组队召回（对应 C# EnableGroupRecall）
+    pub enable_group_recall: bool,
+    /// 上次使用组队召回的时间戳（毫秒，对应 C# LastRecallTime）
+    pub last_recall_time: u64,
+    /// 是否允许配偶召回（对应 C# AllowLoverRecall）
+    pub allow_lover_recall: bool,
+    /// 是否为 GM（对应 C# IsGM / AccountInfo.AdminAccount）
+    pub is_gm: bool,
 }
 
 /// PlayerActor 状态
@@ -159,10 +171,16 @@ impl PlayerActor {
                 hero_inventory: PlayerInventory::new(),
                 refine_log: RefineLog::new(),
                 is_fishing: false,
+                is_mounted: false,
+                is_dead: false,
                 fishing_autocast: false,
                 reincarnation_host: None,
                 reincarnation_ready: false,
                 reincarnation_expire_time: 0,
+                enable_group_recall: false,
+                last_recall_time: 0,
+                allow_lover_recall: false,
+                is_gm: false,
             },
             gate_ref,
             map_data: None,
@@ -1165,6 +1183,7 @@ pub struct SetPlayerPosition {
     pub y: i32,
     pub direction: u8,
     pub map_index: Option<u16>,
+    pub is_mounted: Option<bool>,
 }
 
 impl Message<SetPlayerPosition> for PlayerActor {
@@ -1177,6 +1196,72 @@ impl Message<SetPlayerPosition> for PlayerActor {
         if let Some(mi) = msg.map_index {
             self.state.map_index = mi;
         }
+        if let Some(mounted) = msg.is_mounted {
+            self.state.is_mounted = mounted;
+        }
+    }
+}
+
+/// 设置组队召回冷却时间
+pub struct SetLastRecallTime {
+    pub last_recall_time: u64,
+}
+
+impl Message<SetLastRecallTime> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetLastRecallTime, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.last_recall_time = msg.last_recall_time;
+    }
+}
+
+/// 设置是否允许组队召回
+pub struct SetEnableGroupRecall {
+    pub enable: bool,
+}
+
+impl Message<SetEnableGroupRecall> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetEnableGroupRecall, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.enable_group_recall = msg.enable;
+    }
+}
+
+/// 设置是否允许配偶召回（对应 C# AllowLoverRecall）
+pub struct SetAllowLoverRecall {
+    pub allow: bool,
+}
+
+impl Message<SetAllowLoverRecall> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetAllowLoverRecall, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.allow_lover_recall = msg.allow;
+    }
+}
+
+/// 检查能否获得物品（背包是否有空间）
+pub struct CanGainItems;
+
+impl Message<CanGainItems> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, _msg: CanGainItems, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.can_gain_items()
+    }
+}
+
+/// 检查能否获得金币（是否超过上限）
+pub struct CanGainGold {
+    pub amount: u32,
+}
+
+impl Message<CanGainGold> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: CanGainGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        (msg.amount as u64) + self.state.inventory.gold <= u32::MAX as u64
     }
 }
 
@@ -1421,11 +1506,17 @@ mod tests {
             hero_inventory: PlayerInventory::new(),
             refine_log: RefineLog::new(),
             is_fishing: false,
+            is_mounted: false,
             fishing_autocast: false,
             reincarnation_host: None,
             reincarnation_ready: false,
             reincarnation_expire_time: 0,
-        }
+            enable_group_recall: false,
+            last_recall_time: 0,
+            allow_lover_recall: false,
+            is_gm: false,
+        };
+        s
     }
 
     #[test]
