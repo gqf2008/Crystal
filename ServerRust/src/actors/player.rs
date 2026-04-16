@@ -1164,6 +1164,7 @@ pub struct SetPlayerPosition {
     pub x: i32,
     pub y: i32,
     pub direction: u8,
+    pub map_index: Option<u16>,
 }
 
 impl Message<SetPlayerPosition> for PlayerActor {
@@ -1173,6 +1174,9 @@ impl Message<SetPlayerPosition> for PlayerActor {
         self.state.x = msg.x;
         self.state.y = msg.y;
         self.state.direction = msg.direction;
+        if let Some(mi) = msg.map_index {
+            self.state.map_index = mi;
+        }
     }
 }
 

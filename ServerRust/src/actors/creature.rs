@@ -2,7 +2,7 @@
 // 纯数据结构，由 WorldActor 调用
 
 /// 宠物类型（对应 mir2_shared::IntelligentCreatureType）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CreatureType {
     None = 0,
     BabyPanda = 1,
@@ -36,7 +36,7 @@ impl From<u8> for CreatureType {
 }
 
 /// 拾取模式
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PickupMode {
     None = 0,
     GoldOnly = 1,
@@ -62,7 +62,7 @@ impl From<PickupMode> for u8 {
 }
 
 /// 宠物实例
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IntelligentCreature {
     /// 宠物类型
     pub creature_type: CreatureType,

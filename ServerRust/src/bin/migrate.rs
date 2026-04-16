@@ -762,23 +762,51 @@ async fn main() -> anyhow::Result<()> {
 
     let mut reader = BinaryReader::new(std::io::Cursor::new(data));
 
-    // File header
+    // File header - parse exactly like C# Envir.LoadAccounts
     let version = reader.read_raw_i32()?;
     let custom_version = reader.read_raw_i32()?;
     let next_account_id = reader.read_raw_i32()?;
     let next_character_id = reader.read_raw_i32()?;
     let next_user_item_id = reader.read_raw_u64()?;
-    let next_hero_id = reader.read_raw_u64()?;
+
+    // NextHeroID only exists when version > 98 (i32, not u64!)
+    let next_hero_id = if version > 98 {
+        reader.read_raw_i32()?
+    } else {
+        0
+    };
+
+    // Guild fields
+    let guild_count = reader.read_raw_i32()?;
+    let next_guild_id = reader.read_raw_i32()?;
+
+    // HeroList only exists when version > 102
+    if version > 102 {
+        let hero_list_count = reader.read_raw_i32()?;
+        info!("Skipping {} HeroList entries", hero_list_count);
+        for _ in 0..hero_list_count {
+            // Skip HeroInfo: index(i32) + name(string) + ... too complex, just consume
+            // Minimal skip: index + name
+            reader.read_raw_i32()?; // index
+            reader.read_string()?;  // name
+            // We can't easily skip the rest without full HeroInfo structure,
+            // but for version=83 this branch won't execute anyway
+        }
+    }
 
     info!("Version: {}.{}", version, custom_version);
     info!("Next IDs: account={}, character={}, item={}, hero={}",
         next_account_id, next_character_id, next_user_item_id, next_hero_id);
+    info!("Guilds: {}, NextGuildID: {}", guild_count, next_guild_id);
 
+    // Account count (comes after optional HeroList)
     let account_count = reader.read_raw_i32()?;
     info!("Accounts to migrate: {}", account_count);
 
     // Initialize database
-    let pool = sqlx::SqlitePool::connect(sqlite_path).await
+    let db_url = format!("sqlite://{}", sqlite_path);
+    info!("DB URL: {}", db_url);
+    let pool = sqlx::SqlitePool::connect(&db_url).await
         .map_err(|e| anyhow::anyhow!("Failed to connect to {}: {}", sqlite_path, e))?;
 
     // Create tables

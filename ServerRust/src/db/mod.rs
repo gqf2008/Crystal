@@ -174,6 +174,262 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             successful_refines INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
+        -- Game config tables (migrated from Server.MirDB)
+        CREATE TABLE IF NOT EXISTS map_infos (
+            index INTEGER PRIMARY KEY,
+            file_name TEXT NOT NULL,
+            title TEXT NOT NULL,
+            mini_map INTEGER NOT NULL DEFAULT 0,
+            light INTEGER NOT NULL DEFAULT 0,
+            big_map INTEGER NOT NULL DEFAULT 0,
+            no_teleport INTEGER NOT NULL DEFAULT 0,
+            no_reconnect INTEGER NOT NULL DEFAULT 0,
+            no_reconnect_map TEXT,
+            no_random INTEGER NOT NULL DEFAULT 0,
+            no_escape INTEGER NOT NULL DEFAULT 0,
+            no_recall INTEGER NOT NULL DEFAULT 0,
+            no_drug INTEGER NOT NULL DEFAULT 0,
+            no_position INTEGER NOT NULL DEFAULT 0,
+            no_throw_item INTEGER NOT NULL DEFAULT 0,
+            no_drop_player INTEGER NOT NULL DEFAULT 0,
+            no_drop_monster INTEGER NOT NULL DEFAULT 0,
+            no_names INTEGER NOT NULL DEFAULT 0,
+            fight INTEGER NOT NULL DEFAULT 0,
+            fire INTEGER NOT NULL DEFAULT 0,
+            fire_damage INTEGER NOT NULL DEFAULT 0,
+            lightning INTEGER NOT NULL DEFAULT 0,
+            lightning_damage INTEGER NOT NULL DEFAULT 0,
+            map_dark_light INTEGER NOT NULL DEFAULT 0,
+            mine_index INTEGER NOT NULL DEFAULT 0,
+            no_mount INTEGER NOT NULL DEFAULT 0,
+            need_bridle INTEGER NOT NULL DEFAULT 0,
+            no_fight INTEGER NOT NULL DEFAULT 0,
+            music INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS safe_zones (
+            map_index INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            size INTEGER NOT NULL DEFAULT 0,
+            start_point INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (map_index, x, y),
+            FOREIGN KEY (map_index) REFERENCES map_infos(index)
+        );
+        CREATE TABLE IF NOT EXISTS map_respawns (
+            map_index INTEGER NOT NULL,
+            monster_index INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            spread INTEGER NOT NULL DEFAULT 0,
+            delay INTEGER NOT NULL DEFAULT 0,
+            direction INTEGER NOT NULL DEFAULT 0,
+            route_path TEXT,
+            random_delay INTEGER NOT NULL DEFAULT 0,
+            respawn_index INTEGER NOT NULL DEFAULT 0,
+            save_respawn_time INTEGER NOT NULL DEFAULT 0,
+            respawn_ticks INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (map_index) REFERENCES map_infos(index)
+        );
+        CREATE TABLE IF NOT EXISTS map_movements (
+            map_index INTEGER NOT NULL,
+            source_x INTEGER NOT NULL,
+            source_y INTEGER NOT NULL,
+            dest_x INTEGER NOT NULL,
+            dest_y INTEGER NOT NULL,
+            need_hole INTEGER NOT NULL DEFAULT 0,
+            need_move INTEGER NOT NULL DEFAULT 0,
+            conquest_index INTEGER NOT NULL DEFAULT 0,
+            show_on_big_map INTEGER NOT NULL DEFAULT 0,
+            icon INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (map_index) REFERENCES map_infos(index)
+        );
+        CREATE TABLE IF NOT EXISTS mine_zones (
+            map_index INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            size INTEGER NOT NULL DEFAULT 0,
+            mine INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (map_index) REFERENCES map_infos(index)
+        );
+        CREATE TABLE IF NOT EXISTS item_infos (
+            index INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            type INTEGER NOT NULL DEFAULT 0,
+            grade INTEGER NOT NULL DEFAULT 0,
+            required_type INTEGER NOT NULL DEFAULT 0,
+            required_class INTEGER NOT NULL DEFAULT 0,
+            required_gender INTEGER NOT NULL DEFAULT 0,
+            set_type INTEGER NOT NULL DEFAULT 0,
+            shape INTEGER NOT NULL DEFAULT 0,
+            weight INTEGER NOT NULL DEFAULT 0,
+            light INTEGER NOT NULL DEFAULT 0,
+            required_amount INTEGER NOT NULL DEFAULT 0,
+            image INTEGER NOT NULL DEFAULT 0,
+            durability INTEGER NOT NULL DEFAULT 0,
+            stack_size INTEGER NOT NULL DEFAULT 0,
+            price INTEGER NOT NULL DEFAULT 0,
+            start_item INTEGER NOT NULL DEFAULT 0,
+            effect INTEGER NOT NULL DEFAULT 0,
+            bool_flags INTEGER NOT NULL DEFAULT 0,
+            bind_mode INTEGER NOT NULL DEFAULT 0,
+            special_mode INTEGER NOT NULL DEFAULT 0,
+            random_stats_id INTEGER NOT NULL DEFAULT 0,
+            can_fast_run INTEGER NOT NULL DEFAULT 0,
+            can_awakening INTEGER NOT NULL DEFAULT 0,
+            slots INTEGER NOT NULL DEFAULT 0,
+            stats_json TEXT NOT NULL DEFAULT '{}',
+            has_tool_tip INTEGER NOT NULL DEFAULT 0,
+            tool_tip TEXT
+        );
+        CREATE TABLE IF NOT EXISTS monster_infos (
+            index INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            image INTEGER NOT NULL DEFAULT 0,
+            ai INTEGER NOT NULL DEFAULT 0,
+            effect INTEGER NOT NULL DEFAULT 0,
+            level INTEGER NOT NULL DEFAULT 0,
+            view_range INTEGER NOT NULL DEFAULT 0,
+            cool_eye INTEGER NOT NULL DEFAULT 0,
+            stats_json TEXT NOT NULL DEFAULT '{}',
+            light INTEGER NOT NULL DEFAULT 0,
+            attack_speed INTEGER NOT NULL DEFAULT 0,
+            move_speed INTEGER NOT NULL DEFAULT 0,
+            experience INTEGER NOT NULL DEFAULT 0,
+            can_push INTEGER NOT NULL DEFAULT 0,
+            can_tame INTEGER NOT NULL DEFAULT 0,
+            auto_rev INTEGER NOT NULL DEFAULT 0,
+            undead INTEGER NOT NULL DEFAULT 0,
+            drop_path TEXT
+        );
+        CREATE TABLE IF NOT EXISTS npc_infos (
+            index INTEGER PRIMARY KEY,
+            map_index INTEGER NOT NULL,
+            file_name TEXT NOT NULL,
+            name TEXT NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            image INTEGER NOT NULL DEFAULT 0,
+            rate INTEGER NOT NULL DEFAULT 0,
+            time_visible INTEGER NOT NULL DEFAULT 0,
+            hour_start INTEGER NOT NULL DEFAULT 0,
+            minute_start INTEGER NOT NULL DEFAULT 0,
+            hour_end INTEGER NOT NULL DEFAULT 0,
+            minute_end INTEGER NOT NULL DEFAULT 0,
+            min_lev INTEGER NOT NULL DEFAULT 0,
+            max_lev INTEGER NOT NULL DEFAULT 0,
+            day_of_week TEXT,
+            class_required TEXT,
+            conquest INTEGER NOT NULL DEFAULT 0,
+            flag_needed INTEGER NOT NULL DEFAULT 0,
+            show_on_big_map INTEGER NOT NULL DEFAULT 0,
+            big_map_icon INTEGER NOT NULL DEFAULT 0,
+            can_teleport_to INTEGER NOT NULL DEFAULT 0,
+            conquest_visible INTEGER NOT NULL DEFAULT 0,
+            collect_quest_indexes TEXT NOT NULL DEFAULT '[]',
+            finish_quest_indexes TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS quest_infos (
+            index INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            group_name TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            required_min_level INTEGER NOT NULL DEFAULT 0,
+            required_max_level INTEGER NOT NULL DEFAULT 0,
+            required_quest INTEGER NOT NULL DEFAULT 0,
+            required_class INTEGER NOT NULL DEFAULT 0,
+            quest_type INTEGER NOT NULL DEFAULT 0,
+            exp_reward INTEGER NOT NULL DEFAULT 0,
+            gold_reward INTEGER NOT NULL DEFAULT 0,
+            goto_message TEXT,
+            kill_message TEXT,
+            item_message TEXT,
+            flag_message TEXT,
+            time_limit_seconds INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS dragon_info (
+            id INTEGER PRIMARY KEY DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            map_file_name TEXT NOT NULL,
+            monster_name TEXT NOT NULL,
+            body_name TEXT NOT NULL,
+            location_x INTEGER NOT NULL,
+            location_y INTEGER NOT NULL,
+            drop_area_top_x INTEGER NOT NULL,
+            drop_area_top_y INTEGER NOT NULL,
+            drop_area_bottom_x INTEGER NOT NULL,
+            drop_area_bottom_y INTEGER NOT NULL,
+            exps_json TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS magic_infos (
+            name TEXT PRIMARY KEY,
+            spell INTEGER NOT NULL DEFAULT 0,
+            base_cost INTEGER NOT NULL DEFAULT 0,
+            level_cost INTEGER NOT NULL DEFAULT 0,
+            icon INTEGER NOT NULL DEFAULT 0,
+            level1 INTEGER NOT NULL DEFAULT 0,
+            level2 INTEGER NOT NULL DEFAULT 0,
+            level3 INTEGER NOT NULL DEFAULT 0,
+            need1 INTEGER NOT NULL DEFAULT 0,
+            need2 INTEGER NOT NULL DEFAULT 0,
+            need3 INTEGER NOT NULL DEFAULT 0,
+            delay_base INTEGER NOT NULL DEFAULT 0,
+            delay_reduction INTEGER NOT NULL DEFAULT 0,
+            power_base INTEGER NOT NULL DEFAULT 0,
+            power_bonus INTEGER NOT NULL DEFAULT 0,
+            mpower_base INTEGER NOT NULL DEFAULT 0,
+            mpower_bonus INTEGER NOT NULL DEFAULT 0,
+            range INTEGER NOT NULL DEFAULT 0,
+            multiplier_base REAL NOT NULL DEFAULT 0.0,
+            multiplier_bonus REAL NOT NULL DEFAULT 0.0
+        );
+        CREATE TABLE IF NOT EXISTS game_shop_items (
+            item_index INTEGER PRIMARY KEY,
+            gindex INTEGER NOT NULL DEFAULT 0,
+            gold_price INTEGER NOT NULL DEFAULT 0,
+            credit_price INTEGER NOT NULL DEFAULT 0,
+            count INTEGER NOT NULL DEFAULT 0,
+            class TEXT NOT NULL,
+            category TEXT NOT NULL,
+            stock INTEGER NOT NULL DEFAULT 0,
+            infinite_stock INTEGER NOT NULL DEFAULT 0,
+            deal INTEGER NOT NULL DEFAULT 0,
+            top_item INTEGER NOT NULL DEFAULT 0,
+            date INTEGER NOT NULL DEFAULT 0,
+            can_buy_credit INTEGER NOT NULL DEFAULT 0,
+            can_buy_gold INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS conquest_infos (
+            index INTEGER PRIMARY KEY,
+            full_map INTEGER NOT NULL DEFAULT 0,
+            location_x INTEGER NOT NULL,
+            location_y INTEGER NOT NULL,
+            size INTEGER NOT NULL DEFAULT 0,
+            name TEXT NOT NULL,
+            map_index INTEGER NOT NULL,
+            palace_index INTEGER NOT NULL,
+            guard_index INTEGER NOT NULL,
+            gate_index INTEGER NOT NULL,
+            wall_index INTEGER NOT NULL,
+            siege_index INTEGER NOT NULL,
+            flag_index INTEGER NOT NULL DEFAULT 0,
+            extra_maps_json TEXT NOT NULL DEFAULT '[]',
+            start_hour INTEGER NOT NULL DEFAULT 0,
+            war_length INTEGER NOT NULL DEFAULT 0,
+            conquest_type INTEGER NOT NULL DEFAULT 0,
+            conquest_game INTEGER NOT NULL DEFAULT 0,
+            monday INTEGER NOT NULL DEFAULT 0,
+            tuesday INTEGER NOT NULL DEFAULT 0,
+            wednesday INTEGER NOT NULL DEFAULT 0,
+            thursday INTEGER NOT NULL DEFAULT 0,
+            friday INTEGER NOT NULL DEFAULT 0,
+            saturday INTEGER NOT NULL DEFAULT 0,
+            sunday INTEGER NOT NULL DEFAULT 0,
+            king_x INTEGER NOT NULL,
+            king_y INTEGER NOT NULL,
+            king_size INTEGER NOT NULL DEFAULT 0,
+            control_point_index INTEGER NOT NULL DEFAULT 0
+        );
         "#
     ).execute(&pool).await?;
 
@@ -1051,3 +1307,581 @@ impl RefineStatus {
 }
 
 use std::collections::HashMap;
+
+// ============================================================
+// Game config loading (migrated from Server.MirDB)
+// ============================================================
+
+/// Map safe zone
+#[derive(Debug, Clone)]
+pub struct SafeZoneInfo {
+    pub map_index: i32,
+    pub x: i32,
+    pub y: i32,
+    pub size: i32,
+    pub start_point: bool,
+}
+
+/// Map respawn
+#[derive(Debug, Clone)]
+pub struct MapRespawnInfo {
+    pub map_index: i32,
+    pub monster_index: i32,
+    pub x: i32,
+    pub y: i32,
+    pub count: i32,
+    pub spread: i32,
+    pub delay: i32,
+    pub direction: i32,
+    pub route_path: Option<String>,
+    pub random_delay: i32,
+    pub respawn_index: i32,
+    pub save_respawn_time: bool,
+    pub respawn_ticks: i32,
+}
+
+/// Map movement (teleport)
+#[derive(Debug, Clone)]
+pub struct MapMovementInfo {
+    pub map_index: i32,
+    pub source_x: i32,
+    pub source_y: i32,
+    pub dest_x: i32,
+    pub dest_y: i32,
+    pub need_hole: bool,
+    pub need_move: bool,
+    pub conquest_index: i32,
+    pub show_on_big_map: bool,
+    pub icon: i32,
+}
+
+/// Map info with nested data
+#[derive(Debug, Clone)]
+pub struct MapInfo {
+    pub index: i32,
+    pub file_name: String,
+    pub title: String,
+    pub mini_map: i32,
+    pub light: i32,
+    pub big_map: bool,
+    pub no_teleport: bool,
+    pub no_reconnect: bool,
+    pub no_reconnect_map: String,
+    pub no_random: bool,
+    pub no_escape: bool,
+    pub no_recall: bool,
+    pub no_drug: bool,
+    pub no_position: bool,
+    pub no_throw_item: bool,
+    pub no_drop_player: bool,
+    pub no_drop_monster: bool,
+    pub no_names: bool,
+    pub fight: bool,
+    pub fire: bool,
+    pub fire_damage: i32,
+    pub lightning: bool,
+    pub lightning_damage: i32,
+    pub map_dark_light: i32,
+    pub mine_index: i32,
+    pub no_mount: bool,
+    pub need_bridle: bool,
+    pub no_fight: bool,
+    pub music: bool,
+    pub no_town_teleport: bool,
+    pub no_reincarnation: bool,
+    pub weather_particles: bool,
+    pub gt: bool,
+    pub gt_index: i32,
+    pub safe_zones: Vec<SafeZoneInfo>,
+    pub respawns: Vec<MapRespawnInfo>,
+    pub movements: Vec<MapMovementInfo>,
+}
+
+/// Item info (flat from DB, stats parsed from JSON)
+#[derive(Debug, Clone)]
+pub struct ItemInfo {
+    pub index: i32,
+    pub name: String,
+    pub item_type: i32,
+    pub grade: i32,
+    pub required_type: i32,
+    pub required_class: i32,
+    pub required_gender: i32,
+    pub set_type: i32,
+    pub shape: i32,
+    pub weight: i32,
+    pub light: i32,
+    pub required_amount: i32,
+    pub image: i32,
+    pub durability: i32,
+    pub stack_size: i32,
+    pub price: u32,
+    pub start_item: bool,
+    pub effect: i32,
+    pub bool_flags: i64,
+    pub bind_mode: i32,
+    pub special_mode: i32,
+    pub random_stats_id: i32,
+    pub can_fast_run: bool,
+    pub can_awakening: bool,
+    pub slots: i32,
+    pub stats_json: String,
+    pub has_tool_tip: bool,
+    pub tool_tip: Option<String>,
+}
+
+/// Monster info (flat from DB, stats parsed from JSON)
+#[derive(Debug, Clone)]
+pub struct MonsterInfo {
+    pub index: i32,
+    pub name: String,
+    pub image: i32,
+    pub ai: i32,
+    pub effect: i32,
+    pub level: i32,
+    pub view_range: i32,
+    pub cool_eye: i32,
+    pub stats_json: String,
+    pub stats: HashMap<u8, i32>,
+    pub light: i32,
+    pub attack_speed: i32,
+    pub move_speed: i32,
+    pub experience: i32,
+    pub can_push: bool,
+    pub can_tame: bool,
+    pub auto_rev: bool,
+    pub undead: bool,
+    pub drop_path: Option<String>,
+}
+
+/// NPC info
+#[derive(Debug, Clone)]
+pub struct NPCInfo {
+    pub index: i32,
+    pub map_index: i32,
+    pub file_name: String,
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub image: i32,
+    pub rate: i32,
+    pub time_visible: i32,
+    pub hour_start: i32,
+    pub minute_start: i32,
+    pub hour_end: i32,
+    pub minute_end: i32,
+    pub min_lev: i32,
+    pub max_lev: i32,
+    pub day_of_week: Option<String>,
+    pub class_required: Option<String>,
+    pub conquest: i32,
+    pub flag_needed: i32,
+    pub show_on_big_map: bool,
+    pub big_map_icon: i32,
+    pub can_teleport_to: bool,
+    pub conquest_visible: bool,
+    pub collect_quest_indexes: Vec<i32>,
+    pub finish_quest_indexes: Vec<i32>,
+}
+
+/// Quest info
+#[derive(Debug, Clone)]
+pub struct QuestInfo {
+    pub index: i32,
+    pub name: String,
+    pub group_name: String,
+    pub file_name: String,
+    pub required_min_level: i32,
+    pub required_max_level: i32,
+    pub required_quest: i32,
+    pub required_class: i32,
+    pub quest_type: i32,
+    pub exp_reward: i32,
+    pub gold_reward: i32,
+    pub goto_message: Option<String>,
+    pub kill_message: Option<String>,
+    pub item_message: Option<String>,
+    pub flag_message: Option<String>,
+    pub time_limit_seconds: i32,
+}
+
+/// Game shop item
+#[derive(Debug, Clone)]
+pub struct GameShopItem {
+    pub item_index: i32,
+    pub gindex: i32,
+    pub gold_price: u32,
+    pub credit_price: u32,
+    pub count: u16,
+    pub class_name: String,
+    pub category: String,
+    pub stock: i32,
+    pub infinite_stock: bool,
+    pub deal: bool,
+    pub top_item: bool,
+    pub date: i64,
+    pub can_buy_credit: bool,
+    pub can_buy_gold: bool,
+}
+
+/// Magic info
+#[derive(Debug, Clone)]
+pub struct MagicInfo {
+    pub name: String,
+    pub spell: i32,
+    pub base_cost: i32,
+    pub level_cost: i32,
+    pub icon: i32,
+    pub level1: i32,
+    pub level2: i32,
+    pub level3: i32,
+    pub need1: i32,
+    pub need2: i32,
+    pub need3: i32,
+    pub delay_base: i32,
+    pub delay_reduction: i32,
+    pub power_base: i32,
+    pub power_bonus: i32,
+    pub mpower_base: i32,
+    pub mpower_bonus: i32,
+    pub range: i32,
+    pub multiplier_base: f64,
+    pub multiplier_bonus: f64,
+}
+
+/// Dragon info
+#[derive(Debug, Clone)]
+pub struct DragonInfo {
+    pub id: i32,
+    pub enabled: bool,
+    pub map_file_name: String,
+    pub monster_name: String,
+    /// Resolved from monster_name at load time; None if monster not found
+    pub monster_index: Option<i32>,
+    pub body_name: String,
+    pub location_x: i32,
+    pub location_y: i32,
+    pub drop_area_top_x: i32,
+    pub drop_area_top_y: i32,
+    pub drop_area_bottom_x: i32,
+    pub drop_area_bottom_y: i32,
+    pub exps: Vec<i64>,
+}
+
+/// Load all map infos from DB with nested safe_zones, respawns, movements
+pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
+    // 4 queries total instead of 1 + N*3
+    let rows = sqlx::query("SELECT * FROM map_infos").fetch_all(pool).await?;
+    let sz_rows = sqlx::query("SELECT * FROM safe_zones").fetch_all(pool).await?;
+    let rs_rows = sqlx::query("SELECT * FROM map_respawns").fetch_all(pool).await?;
+    let mv_rows = sqlx::query("SELECT * FROM map_movements").fetch_all(pool).await?;
+
+    // Index child rows by map_index
+    let mut sz_by_map: HashMap<i32, Vec<SafeZoneInfo>> = HashMap::new();
+    for r in sz_rows {
+        let mi: i32 = r.get("map_index");
+        sz_by_map.entry(mi).or_default().push(SafeZoneInfo {
+            map_index: mi,
+            x: r.get("x"),
+            y: r.get("y"),
+            size: r.get("size"),
+            start_point: r.get::<i32, _>("start_point") != 0,
+        });
+    }
+
+    let mut rs_by_map: HashMap<i32, Vec<MapRespawnInfo>> = HashMap::new();
+    for r in rs_rows {
+        let mi: i32 = r.get("map_index");
+        rs_by_map.entry(mi).or_default().push(MapRespawnInfo {
+            map_index: mi,
+            monster_index: r.get("monster_index"),
+            x: r.get("x"),
+            y: r.get("y"),
+            count: r.get("count"),
+            spread: r.get("spread"),
+            delay: r.get("delay"),
+            direction: r.get("direction"),
+            route_path: r.get::<Option<String>, _>("route_path"),
+            random_delay: r.get("random_delay"),
+            respawn_index: r.get("respawn_index"),
+            save_respawn_time: r.get::<i32, _>("save_respawn_time") != 0,
+            respawn_ticks: r.get("respawn_ticks"),
+        });
+    }
+
+    let mut mv_by_map: HashMap<i32, Vec<MapMovementInfo>> = HashMap::new();
+    for r in mv_rows {
+        let mi: i32 = r.get("map_index");
+        mv_by_map.entry(mi).or_default().push(MapMovementInfo {
+            map_index: mi,
+            source_x: r.get("source_x"),
+            source_y: r.get("source_y"),
+            dest_x: r.get("dest_x"),
+            dest_y: r.get("dest_y"),
+            need_hole: r.get::<i32, _>("need_hole") != 0,
+            need_move: r.get::<i32, _>("need_move") != 0,
+            conquest_index: r.get("conquest_index"),
+            show_on_big_map: r.get::<i32, _>("show_on_big_map") != 0,
+            icon: r.get("icon"),
+        });
+    }
+
+    let mut maps = Vec::with_capacity(rows.len());
+    for row in rows {
+        let index: i32 = row.get("index");
+        maps.push(MapInfo {
+            index,
+            file_name: row.get("file_name"),
+            title: row.get("title"),
+            mini_map: row.get("mini_map"),
+            light: row.get("light"),
+            big_map: row.get::<i32, _>("big_map") != 0,
+            no_teleport: row.get::<i32, _>("no_teleport") != 0,
+            no_reconnect: row.get::<i32, _>("no_reconnect") != 0,
+            no_reconnect_map: row.get::<Option<String>, _>("no_reconnect_map").unwrap_or_default(),
+            no_random: row.get::<i32, _>("no_random") != 0,
+            no_escape: row.get::<i32, _>("no_escape") != 0,
+            no_recall: row.get::<i32, _>("no_recall") != 0,
+            no_drug: row.get::<i32, _>("no_drug") != 0,
+            no_position: row.get::<i32, _>("no_position") != 0,
+            no_throw_item: row.get::<i32, _>("no_throw_item") != 0,
+            no_drop_player: row.get::<i32, _>("no_drop_player") != 0,
+            no_drop_monster: row.get::<i32, _>("no_drop_monster") != 0,
+            no_names: row.get::<i32, _>("no_names") != 0,
+            fight: row.get::<i32, _>("fight") != 0,
+            fire: row.get::<i32, _>("fire") != 0,
+            fire_damage: row.get("fire_damage"),
+            lightning: row.get::<i32, _>("lightning") != 0,
+            lightning_damage: row.get("lightning_damage"),
+            map_dark_light: row.get("map_dark_light"),
+            mine_index: row.get("mine_index"),
+            no_mount: row.get::<i32, _>("no_mount") != 0,
+            need_bridle: row.get::<i32, _>("need_bridle") != 0,
+            no_fight: row.get::<i32, _>("no_fight") != 0,
+            music: row.get::<i32, _>("music") != 0,
+            no_town_teleport: row.get::<Option<i32>, _>("no_town_teleport").unwrap_or(0) != 0,
+            no_reincarnation: row.get::<Option<i32>, _>("no_reincarnation").unwrap_or(0) != 0,
+            weather_particles: row.get::<Option<i32>, _>("weather_particles").unwrap_or(0) != 0,
+            gt: row.get::<Option<i32>, _>("gt").unwrap_or(0) != 0,
+            gt_index: row.get::<Option<i32>, _>("gt_index").unwrap_or(0),
+            safe_zones: sz_by_map.remove(&index).unwrap_or_default(),
+            respawns: rs_by_map.remove(&index).unwrap_or_default(),
+            movements: mv_by_map.remove(&index).unwrap_or_default(),
+        });
+    }
+
+    Ok(maps)
+}
+
+/// Load all item infos from DB
+pub async fn load_item_infos(pool: &DbPool) -> anyhow::Result<Vec<ItemInfo>> {
+    let rows = sqlx::query("SELECT * FROM item_infos ORDER BY index").fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|r| ItemInfo {
+        index: r.get("index"),
+        name: r.get("name"),
+        item_type: r.get("type"),
+        grade: r.get("grade"),
+        required_type: r.get("required_type"),
+        required_class: r.get("required_class"),
+        required_gender: r.get("required_gender"),
+        set_type: r.get("set_type"),
+        shape: r.get("shape"),
+        weight: r.get("weight"),
+        light: r.get("light"),
+        required_amount: r.get("required_amount"),
+        image: r.get("image"),
+        durability: r.get("durability"),
+        stack_size: r.get("stack_size"),
+        price: r.get::<i64, _>("price") as u32,
+        start_item: r.get::<i32, _>("start_item") != 0,
+        effect: r.get("effect"),
+        bool_flags: r.get("bool_flags"),
+        bind_mode: r.get("bind_mode"),
+        special_mode: r.get("special_mode"),
+        random_stats_id: r.get("random_stats_id"),
+        can_fast_run: r.get::<i32, _>("can_fast_run") != 0,
+        can_awakening: r.get::<i32, _>("can_awakening") != 0,
+        slots: r.get("slots"),
+        stats_json: r.get("stats_json"),
+        has_tool_tip: r.get::<i32, _>("has_tool_tip") != 0,
+        tool_tip: r.get::<Option<String>, _>("tool_tip"),
+    }).collect())
+}
+
+/// Load all monster infos from DB
+pub async fn load_monster_infos(pool: &DbPool) -> anyhow::Result<Vec<MonsterInfo>> {
+    let rows = sqlx::query("SELECT * FROM monster_infos ORDER BY index").fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|r| {
+        let stats_json: String = r.get("stats_json");
+        let stats: HashMap<u8, i32> = serde_json::from_str(&stats_json)
+            .unwrap_or_else(|e| {
+                tracing::warn!("Failed to parse monster stats JSON for index {}: {}", r.get::<i32, _>("index"), e);
+                HashMap::new()
+            });
+        MonsterInfo {
+            index: r.get("index"),
+            name: r.get("name"),
+            image: r.get("image"),
+            ai: r.get("ai"),
+            effect: r.get("effect"),
+            level: r.get("level"),
+            view_range: r.get("view_range"),
+            cool_eye: r.get("cool_eye"),
+            stats_json,
+            stats,
+            light: r.get("light"),
+            attack_speed: r.get("attack_speed"),
+            move_speed: r.get("move_speed"),
+            experience: r.get("experience"),
+            can_push: r.get::<i32, _>("can_push") != 0,
+            can_tame: r.get::<i32, _>("can_tame") != 0,
+            auto_rev: r.get::<i32, _>("auto_rev") != 0,
+            undead: r.get::<i32, _>("undead") != 0,
+            drop_path: r.get::<Option<String>, _>("drop_path"),
+        }
+    }).collect())
+}
+
+/// Load all NPC infos from DB
+pub async fn load_npc_infos(pool: &DbPool) -> anyhow::Result<Vec<NPCInfo>> {
+    let rows = sqlx::query("SELECT * FROM npc_infos ORDER BY index").fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|r| {
+        let collect_quest_indexes: Vec<i32> =
+            serde_json::from_str(&r.get::<String, _>("collect_quest_indexes")).unwrap_or_default();
+        let finish_quest_indexes: Vec<i32> =
+            serde_json::from_str(&r.get::<String, _>("finish_quest_indexes")).unwrap_or_default();
+
+        NPCInfo {
+            index: r.get("index"),
+            map_index: r.get("map_index"),
+            file_name: r.get("file_name"),
+            name: r.get("name"),
+            x: r.get("x"),
+            y: r.get("y"),
+            image: r.get("image"),
+            rate: r.get("rate"),
+            time_visible: r.get("time_visible"),
+            hour_start: r.get("hour_start"),
+            minute_start: r.get("minute_start"),
+            hour_end: r.get("hour_end"),
+            minute_end: r.get("minute_end"),
+            min_lev: r.get("min_lev"),
+            max_lev: r.get("max_lev"),
+            day_of_week: r.get::<Option<String>, _>("day_of_week"),
+            class_required: r.get::<Option<String>, _>("class_required"),
+            conquest: r.get("conquest"),
+            flag_needed: r.get("flag_needed"),
+            show_on_big_map: r.get::<i32, _>("show_on_big_map") != 0,
+            big_map_icon: r.get("big_map_icon"),
+            can_teleport_to: r.get::<i32, _>("can_teleport_to") != 0,
+            conquest_visible: r.get::<i32, _>("conquest_visible") != 0,
+            collect_quest_indexes,
+            finish_quest_indexes,
+        }
+    }).collect())
+}
+
+/// Load all quest infos from DB
+pub async fn load_quest_infos(pool: &DbPool) -> anyhow::Result<Vec<QuestInfo>> {
+    let rows = sqlx::query("SELECT * FROM quest_infos ORDER BY index").fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|r| QuestInfo {
+        index: r.get("index"),
+        name: r.get("name"),
+        group_name: r.get("group_name"),
+        file_name: r.get("file_name"),
+        required_min_level: r.get("required_min_level"),
+        required_max_level: r.get("required_max_level"),
+        required_quest: r.get("required_quest"),
+        required_class: r.get("required_class"),
+        quest_type: r.get("quest_type"),
+        exp_reward: r.get("exp_reward"),
+        gold_reward: r.get("gold_reward"),
+        goto_message: r.get::<Option<String>, _>("goto_message"),
+        kill_message: r.get::<Option<String>, _>("kill_message"),
+        item_message: r.get::<Option<String>, _>("item_message"),
+        flag_message: r.get::<Option<String>, _>("flag_message"),
+        time_limit_seconds: r.get("time_limit_seconds"),
+    }).collect())
+}
+
+/// Load all magic infos from DB
+pub async fn load_magic_infos(pool: &DbPool) -> anyhow::Result<Vec<MagicInfo>> {
+    let rows = sqlx::query("SELECT * FROM magic_infos ORDER BY name").fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|r| MagicInfo {
+        name: r.get("name"),
+        spell: r.get("spell"),
+        base_cost: r.get("base_cost"),
+        level_cost: r.get("level_cost"),
+        icon: r.get("icon"),
+        level1: r.get("level1"),
+        level2: r.get("level2"),
+        level3: r.get("level3"),
+        need1: r.get("need1"),
+        need2: r.get("need2"),
+        need3: r.get("need3"),
+        delay_base: r.get("delay_base"),
+        delay_reduction: r.get("delay_reduction"),
+        power_base: r.get("power_base"),
+        power_bonus: r.get("power_bonus"),
+        mpower_base: r.get("mpower_base"),
+        mpower_bonus: r.get("mpower_bonus"),
+        range: r.get("range"),
+        multiplier_base: r.get("multiplier_base"),
+        multiplier_bonus: r.get("multiplier_bonus"),
+    }).collect())
+}
+
+/// Load all game shop items from DB
+pub async fn load_game_shop_items(pool: &DbPool) -> anyhow::Result<Vec<GameShopItem>> {
+    let rows = sqlx::query("SELECT * FROM game_shop_items ORDER BY gindex").fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|r| GameShopItem {
+        item_index: r.get("item_index"),
+        gindex: r.get("gindex"),
+        gold_price: r.get("gold_price"),
+        credit_price: r.get("credit_price"),
+        count: r.get("count"),
+        class_name: r.get("class"),
+        category: r.get("category"),
+        stock: r.get("stock"),
+        infinite_stock: r.get::<i32, _>("infinite_stock") != 0,
+        deal: r.get::<i32, _>("deal") != 0,
+        top_item: r.get::<i32, _>("top_item") != 0,
+        date: r.get("date"),
+        can_buy_credit: r.get::<i32, _>("can_buy_credit") != 0,
+        can_buy_gold: r.get::<i32, _>("can_buy_gold") != 0,
+    }).collect())
+}
+
+/// Load dragon info from DB (single row). Resolves monster_index from monster_name.
+pub async fn load_dragon_info(
+    pool: &DbPool,
+    monster_infos: &HashMap<i32, MonsterInfo>,
+) -> anyhow::Result<Option<DragonInfo>> {
+    let row = sqlx::query("SELECT * FROM dragon_info LIMIT 1").fetch_optional(pool).await?;
+    match row {
+        Some(r) => {
+            let exps: Vec<i64> = serde_json::from_str(&r.get::<String, _>("exps_json")).unwrap_or_default();
+            let monster_name: String = r.get("monster_name");
+            let monster_index = monster_infos.values().find(|m| m.name == monster_name).map(|m| m.index);
+            if monster_index.is_none() {
+                tracing::warn!("Dragon references unknown monster_name='{}'", monster_name);
+            }
+            Ok(Some(DragonInfo {
+                id: r.get("id"),
+                enabled: r.get::<i32, _>("enabled") != 0,
+                map_file_name: r.get("map_file_name"),
+                monster_name,
+                monster_index,
+                body_name: r.get("body_name"),
+                location_x: r.get("location_x"),
+                location_y: r.get("location_y"),
+                drop_area_top_x: r.get("drop_area_top_x"),
+                drop_area_top_y: r.get("drop_area_top_y"),
+                drop_area_bottom_x: r.get("drop_area_bottom_x"),
+                drop_area_bottom_y: r.get("drop_area_bottom_y"),
+                exps,
+            }))
+        }
+        None => Ok(None),
+    }
+}

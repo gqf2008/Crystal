@@ -5,12 +5,13 @@ use std::env;
 use std::path::PathBuf;
 
 use kameo::actor::Spawn;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 
 use crystal_server::actors::account::AccountActor;
 use crystal_server::actors::world::{WorldActor, WorldActorArgs};
 use crystal_server::gate::actor::{GateActor, SetAccountRef, SetWorldRef};
 use crystal_server::util::config;
+use crystal_server::db;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -51,17 +52,35 @@ async fn main() -> anyhow::Result<()> {
     let map_dir = PathBuf::from(&cfg.server.map_data_dir);
     let spawn_dir = PathBuf::from("Data/spawn");
 
-    // WorldActor 启动，携带 GateActor 引用 + 地图目录 + 刷怪目录
+    // 初始化 SQLite 数据库
+    let db_path = PathBuf::from("data/crystal.db");
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let db_pool = match db::init_db(&db_path).await {
+        Ok(pool) => {
+            info!("SQLite database initialized at {}", db_path.display());
+            pool
+        }
+        Err(e) => {
+            warn!("Failed to initialize SQLite DB, using in-memory only: {}", e);
+            // Fallback: still start server but without persistence
+            db::init_db(&PathBuf::from(":memory:")).await.expect("in-memory DB should always work")
+        }
+    };
+
+    // WorldActor 启动，携带 GateActor 引用 + 地图目录 + 刷怪目录 + 数据库
     let world_ref = WorldActor::spawn(WorldActorArgs {
         tick_interval_ms: cfg.server.tick_ms,
         gate_ref: gate_ref.clone(),
         map_dir,
         spawn_dir: Some(spawn_dir),
+        db_pool: db_pool.clone(),
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 
-    // AccountActor 需要 GateActor 的引用
-    let account_ref = AccountActor::spawn(gate_ref.clone());
+    // AccountActor 需要 GateActor 的引用和数据库
+    let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
     info!("AccountActor spawned");
 
     // 双向链接：GateActor 需要 AccountActor 和 WorldActor 的引用

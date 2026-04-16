@@ -3,6 +3,7 @@
 
 pub mod actors;
 pub mod combat;
+pub mod db;
 pub mod gate;
 pub mod maps;
 // 子系统（聊天/交易/组队/邮件/商城/任务）- Phase 3+ 实现后取消注释

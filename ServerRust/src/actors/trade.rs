@@ -21,6 +21,8 @@ pub struct TradeItem {
     pub grid: u8,
     /// 堆叠数量（拆分的部分）
     pub count: u16,
+    /// 完整物品数据（用于取回时重新加入背包）
+    pub item_data: Option<mir2_shared::data::item::UserItem>,
 }
 
 /// 交易一方
@@ -50,11 +52,12 @@ impl TradeSide {
     }
 
     /// 添加物品
-    pub fn add_item(&mut self, uid: u64, grid: u8, count: u16) {
+    pub fn add_item(&mut self, uid: u64, grid: u8, count: u16, item_data: Option<mir2_shared::data::item::UserItem>) {
         if let Some(idx) = self.items.iter().position(|i| i.uid == uid) {
             self.items[idx].count = count;
+            self.items[idx].item_data = item_data;
         } else {
-            self.items.push(TradeItem { uid, grid, count });
+            self.items.push(TradeItem { uid, grid, count, item_data });
         }
     }
 
@@ -171,8 +174,8 @@ mod tests {
     fn test_add_items_and_gold() {
         let mut session = make_session();
         let side_a = session.side_of_mut(1).unwrap();
-        side_a.add_item(100, 0, 5);
-        side_a.add_item(200, 1, 1);
+        side_a.add_item(100, 0, 5, None);
+        side_a.add_item(200, 1, 1, None);
         side_a.gold = 500;
 
         assert_eq!(side_a.items.len(), 2);
@@ -204,8 +207,8 @@ mod tests {
     fn test_item_replacement() {
         let mut session = make_session();
         let side_a = session.side_of_mut(1).unwrap();
-        side_a.add_item(100, 0, 5);
-        side_a.add_item(100, 0, 10); // same uid, should update count
+        side_a.add_item(100, 0, 5, None);
+        side_a.add_item(100, 0, 10, None); // same uid, should update count
         assert_eq!(side_a.items.len(), 1);
         assert_eq!(side_a.items[0].count, 10);
     }

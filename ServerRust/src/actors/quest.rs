@@ -10,7 +10,7 @@ pub enum QuestStatus {
 }
 
 /// 任务进度项
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuestProgress {
     /// 进度描述 ID
     pub progress_id: i32,
