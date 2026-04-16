@@ -177,6 +177,14 @@ fn spawn_config_from_db(
     SpawnConfig { npcs, monsters }
 }
 
+/// DB spawn context — bundles references to avoid 9-arg function
+struct SpawnContext<'a> {
+    map_info: Option<&'a db::MapInfo>,
+    monster_infos: &'a HashMap<i32, db::MonsterInfo>,
+    npc_infos: &'a HashMap<i32, db::NPCInfo>,
+    dragon_info: Option<&'a db::DragonInfo>,
+}
+
 #[derive(serde::Deserialize)]
 struct RawSpawnConfig {
     #[serde(default)]
@@ -1415,17 +1423,19 @@ impl Message<StartGameRequest> for WorldActor {
 
         // 发送地图上的 NPC 和怪物
         let spawn_dir = self.spawn_dir.clone();
-        let map_info = self.map_infos.get(&map_info_idx);
+        let spawn_ctx = SpawnContext {
+            map_info: self.map_infos.get(&map_info_idx),
+            monster_infos: &self.monster_infos,
+            npc_infos: &self.npc_infos,
+            dragon_info: self.dragon_info.as_ref(),
+        };
         let (new_npcs, new_monsters) = spawn_npcs_and_monsters(
             self.gate_ref.clone(),
             &spawn_dir,
             &map_file,
             msg.session_id,
             &mut self.next_object_id,
-            map_info,
-            &self.monster_infos,
-            &self.npc_infos,
-            self.dragon_info.as_ref(),
+            &spawn_ctx,
         );
         for npc in new_npcs {
             self.npcs.insert(npc.object_id, npc);
@@ -7621,14 +7631,11 @@ fn spawn_npcs_and_monsters(
     map_file: &str,
     session_id: u64,
     next_object_id: &mut u32,
-    map_info: Option<&db::MapInfo>,
-    monster_infos: &HashMap<i32, db::MonsterInfo>,
-    npc_infos: &HashMap<i32, db::NPCInfo>,
-    dragon_info: Option<&db::DragonInfo>,
+    ctx: &SpawnContext<'_>,
 ) -> (Vec<NpcState>, Vec<MonsterState>) {
     // Try DB-loaded configs first, fall back to TOML
-    let config = if let Some(mi) = map_info {
-        spawn_config_from_db(mi, monster_infos, npc_infos)
+    let config = if let Some(mi) = ctx.map_info {
+        spawn_config_from_db(mi, ctx.monster_infos, ctx.npc_infos)
     } else if let Some(d) = spawn_dir {
         load_spawn_config(map_file, d)
     } else {
@@ -7692,10 +7699,10 @@ fn spawn_npcs_and_monsters(
           config.npcs.len(), config.monsters.len(), session_id);
 
     // Spawn dragon if enabled and on this map
-    if let Some(dragon) = dragon_info {
+    if let Some(dragon) = ctx.dragon_info {
         if dragon.enabled && dragon.map_file_name == map_file {
             if let Some(monster_index) = dragon.monster_index {
-                if let Some(monster_db) = monster_infos.get(&monster_index) {
+                if let Some(monster_db) = ctx.monster_infos.get(&monster_index) {
                     let object_id = *next_object_id;
                     *next_object_id += 1;
                     let hp = monster_db.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(10000);
