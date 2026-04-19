@@ -79,11 +79,13 @@ async fn main() -> anyhow::Result<()> {
     });
     info!("SocialActor spawned");
 
+    let quest_dir = PathBuf::from("Daneo1989/Envir/Quests");
     let world_ref = WorldActor::spawn(WorldActorArgs {
         tick_interval_ms: cfg.server.tick_ms,
         gate_ref: gate_ref.clone(),
         map_dir,
         spawn_dir: Some(spawn_dir),
+        quest_dir,
         db_pool: db_pool.clone(),
         social_ref: social_ref.clone(),
     });

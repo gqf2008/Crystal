@@ -16,7 +16,7 @@ use crate::actors::refine::{RefineStatus, RefineLog};
 use crate::actors::friend::FriendList;
 use crate::actors::mail::{MailMessage, Mailbox, generate_mail_id};
 use crate::actors::guild::GuildRank;
-use crate::actors::quest::{QuestInstance, QuestStatus, QuestLog};
+use crate::actors::quest::{QuestInstance, QuestProgress, QuestStatus, QuestLog};
 use crate::actors::creature::{IntelligentCreature, CreatureType, PickupMode, CreatureLog};
 use crate::combat::attack::{self as combat_attack};
 #[allow(unused_imports)]
@@ -35,6 +35,8 @@ pub struct WorldActorArgs {
     pub map_dir: PathBuf,
     /// 刷怪配置文件所在目录（可选）
     pub spawn_dir: Option<PathBuf>,
+    /// 任务文件所在目录（{file_name}.txt）
+    pub quest_dir: PathBuf,
     /// SQLite 数据库连接池
     pub db_pool: DbPool,
     /// SocialActor 引用（用于转发社交命令）
@@ -1039,10 +1041,20 @@ impl Actor for WorldActor {
             Err(e) => { warn!("Failed to load npc_scripts from DB: {}", e); HashMap::new() }
         };
 
-        let quest_infos_list = match db::load_quest_infos(&args.db_pool).await {
+        let mut quest_infos_list = match db::load_quest_infos(&args.db_pool).await {
             Ok(m) => { info!("Loaded {} quest configs from database", m.len()); m }
             Err(e) => { warn!("Failed to load quest_infos from DB: {}", e); Vec::new() }
         };
+        db::resolve_quest_tasks(&mut quest_infos_list, &args.quest_dir, &monster_infos, &item_infos);
+        let mut resolved_kill = 0usize;
+        let mut resolved_item = 0usize;
+        let mut resolved_flag = 0usize;
+        for q in &quest_infos_list {
+            resolved_kill += q.kill_tasks.len();
+            resolved_item += q.item_tasks.len();
+            resolved_flag += q.flag_tasks.len();
+        }
+        info!("Resolved {} kill tasks, {} item tasks, {} flag tasks from quest files", resolved_kill, resolved_item, resolved_flag);
         let quest_infos: HashMap<i32, db::QuestInfo> = quest_infos_list.into_iter().map(|q| (q.index, q)).collect();
 
         let magic_infos_list = match db::load_magic_infos(&args.db_pool).await {
@@ -1703,10 +1715,34 @@ impl Message<Tick> for WorldActor {
                                 }
                                 debug!("GroupXP: {} members split {} xp ({} each) from '{}'", group_sessions.len(), monster.xp, xp_per, monster.name);
                             }
+                            // 组队任务击杀进度
+                            for sid in &group_sessions {
+                                if let Some(record) = self.players.get(sid) {
+                                    let updates = record.actor_ref.ask(crate::actors::player::ProcessMonsterKill {
+                                        monster_index: monster.monster_index,
+                                    }).await.unwrap_or_default();
+                                    if !updates.is_empty() {
+                                        send_system_message(&self.gate_ref, *sid, &format!("任务进度更新：击杀了 {}", monster.name));
+                                    }
+                                    for (quest_index, _mid, complete) in updates {
+                                        debug!("QuestKill: session={} quest={} monster={} complete={}", sid, quest_index, monster.monster_index, complete);
+                                    }
+                                }
+                            }
                         } else if let Some(record) = self.players.get(&session_id) {
                             let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
                                 amount: monster.xp,
                             }).await;
+                            // 单人任务击杀进度
+                            let updates = record.actor_ref.ask(crate::actors::player::ProcessMonsterKill {
+                                monster_index: monster.monster_index,
+                            }).await.unwrap_or_default();
+                            if !updates.is_empty() {
+                                send_system_message(&self.gate_ref, session_id, &format!("任务进度更新：击杀了 {}", monster.name));
+                            }
+                            for (quest_index, _mid, complete) in updates {
+                                debug!("QuestKill: session={} quest={} monster={} complete={}", session_id, quest_index, monster.monster_index, complete);
+                            }
                         }
                     }
 
@@ -6545,11 +6581,33 @@ fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message:
 
 /// 从 DB 任务配置创建任务实例
 fn make_quest_instance(qi: &db::QuestInfo) -> QuestInstance {
+    let mut progress = Vec::new();
+    for kill in &qi.kill_tasks {
+        progress.push(QuestProgress {
+            progress_id: kill.monster_index,
+            current: 0,
+            target: kill.count,
+        });
+    }
+    for item in &qi.item_tasks {
+        progress.push(QuestProgress {
+            progress_id: item.item_index,
+            current: 0,
+            target: item.count,
+        });
+    }
+    for flag in &qi.flag_tasks {
+        progress.push(QuestProgress {
+            progress_id: flag.number,
+            current: 0,
+            target: 1,
+        });
+    }
     QuestInstance {
         quest_index: qi.index,
         title: qi.name.clone(),
         status: QuestStatus::InProgress,
-        progress: vec![],
+        progress,
         exp_reward: qi.exp_reward as i64,
         gold_reward: qi.gold_reward.max(0) as u64,
     }

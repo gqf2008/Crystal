@@ -1490,6 +1490,19 @@ impl Message<HasCompletedQuest> for PlayerActor {
     }
 }
 
+/// 处理怪物击杀进度
+pub struct ProcessMonsterKill {
+    pub monster_index: i32,
+}
+
+impl Message<ProcessMonsterKill> for PlayerActor {
+    type Reply = Vec<(i32, i32, bool)>;
+
+    async fn handle(&mut self, msg: ProcessMonsterKill, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.quest_log.process_kill(msg.monster_index)
+    }
+}
+
 // ============================================================
 // 婚姻/师徒系统 Handler
 // ============================================================

@@ -1557,6 +1557,26 @@ pub struct NPCInfo {
 
 /// Quest info
 #[derive(Debug, Clone)]
+pub struct QuestKillTask {
+    pub monster_index: i32,
+    pub count: i32,
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct QuestItemTask {
+    pub item_index: i32,
+    pub count: i32,
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct QuestFlagTask {
+    pub number: i32,
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct QuestInfo {
     pub index: i32,
     pub name: String,
@@ -1574,6 +1594,10 @@ pub struct QuestInfo {
     pub item_message: Option<String>,
     pub flag_message: Option<String>,
     pub time_limit_seconds: i32,
+    /// Parsed from quest .txt files
+    pub kill_tasks: Vec<QuestKillTask>,
+    pub item_tasks: Vec<QuestItemTask>,
+    pub flag_tasks: Vec<QuestFlagTask>,
 }
 
 /// NPC 商品信息
@@ -1947,7 +1971,151 @@ pub async fn load_quest_infos(pool: &DbPool) -> anyhow::Result<Vec<QuestInfo>> {
         item_message: r.get::<Option<String>, _>("item_message"),
         flag_message: r.get::<Option<String>, _>("flag_message"),
         time_limit_seconds: r.get("time_limit_seconds"),
+        kill_tasks: Vec::new(),
+        item_tasks: Vec::new(),
+        flag_tasks: Vec::new(),
     }).collect())
+}
+
+/// Parse quest .txt files and resolve monster/item names to indices.
+/// Call this after `load_quest_infos`, `load_monster_infos`, and `load_item_infos`.
+pub fn resolve_quest_tasks(
+    quests: &mut [QuestInfo],
+    quest_dir: &Path,
+    monster_infos: &HashMap<i32, MonsterInfo>,
+    item_infos: &HashMap<i32, ItemInfo>,
+) {
+    // Build name → index lookups (case-insensitive, space-stripped fallback)
+    let mut monster_by_name: HashMap<String, i32> = HashMap::new();
+    for (idx, info) in monster_infos {
+        monster_by_name.insert(info.name.to_lowercase(), *idx);
+        monster_by_name.insert(info.name.to_lowercase().replace(' ', ""), *idx);
+    }
+
+    let mut item_by_name: HashMap<String, i32> = HashMap::new();
+    for (idx, info) in item_infos {
+        item_by_name.insert(info.name.to_lowercase(), *idx);
+        item_by_name.insert(info.name.to_lowercase().replace(' ', ""), *idx);
+    }
+
+    for quest in quests {
+        let path = quest_dir.join(format!("{}.txt", quest.file_name));
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let mut current_section: Option<String> = None;
+        for raw_line in content.lines() {
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with("//") {
+                continue;
+            }
+            if line.starts_with('[') && line.ends_with(']') {
+                current_section = Some(line.to_uppercase());
+                continue;
+            }
+            let section = match &current_section {
+                Some(s) => s.as_str(),
+                None => continue,
+            };
+            match section {
+                "[@KILLTASKS]" => {
+                    if let Some(task) = parse_kill_task(line, &monster_by_name) {
+                        quest.kill_tasks.push(task);
+                    }
+                }
+                "[@ITEMTASKS]" => {
+                    if let Some(task) = parse_item_task(line, &item_by_name) {
+                        quest.item_tasks.push(task);
+                    }
+                }
+                "[@FLAGTASKS]" => {
+                    if let Some(task) = parse_flag_task(line) {
+                        quest.flag_tasks.push(task);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn extract_quoted_message(line: &str) -> Option<String> {
+    let first = line.find('"')?;
+    let last = line.rfind('"')?;
+    if first >= last {
+        return None;
+    }
+    Some(line[first + 1..last].to_string())
+}
+
+fn parse_kill_task(line: &str, monster_by_name: &HashMap<String, i32>) -> Option<QuestKillTask> {
+    let message = extract_quoted_message(line).unwrap_or_default();
+    let trimmed = if let Some(idx) = line.find('"') {
+        line[..idx].trim()
+    } else {
+        line.trim()
+    };
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    if parts.is_empty() {
+        return None;
+    }
+    let name = parts[0];
+    let count = parts.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(1);
+
+    let name_lower = name.to_lowercase();
+    let monster_index = monster_by_name
+        .get(&name_lower)
+        .or_else(|| monster_by_name.get(&name_lower.replace(' ', "")))
+        .copied()?;
+
+    Some(QuestKillTask {
+        monster_index,
+        count,
+        message,
+    })
+}
+
+fn parse_item_task(line: &str, item_by_name: &HashMap<String, i32>) -> Option<QuestItemTask> {
+    let message = extract_quoted_message(line).unwrap_or_default();
+    let trimmed = if let Some(idx) = line.find('"') {
+        line[..idx].trim()
+    } else {
+        line.trim()
+    };
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    if parts.is_empty() {
+        return None;
+    }
+    let name = parts[0];
+    let count = parts.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(1);
+
+    let name_lower = name.to_lowercase();
+    let item_index = item_by_name
+        .get(&name_lower)
+        .or_else(|| item_by_name.get(&name_lower.replace(' ', "")))
+        .copied()?;
+
+    Some(QuestItemTask {
+        item_index,
+        count,
+        message,
+    })
+}
+
+fn parse_flag_task(line: &str) -> Option<QuestFlagTask> {
+    let message = extract_quoted_message(line).unwrap_or_default();
+    let trimmed = if let Some(idx) = line.find('"') {
+        line[..idx].trim()
+    } else {
+        line.trim()
+    };
+    let number = trimmed.parse::<i32>().ok()?;
+    if number < 0 {
+        return None;
+    }
+    Some(QuestFlagTask { number, message })
 }
 
 /// Load all magic infos from DB

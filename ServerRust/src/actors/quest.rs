@@ -112,6 +112,27 @@ impl QuestLog {
             quest.update_progress(progress_id, amount);
         }
     }
+
+    /// 处理怪物击杀：为所有需要该怪物的活跃任务增加进度
+    /// 返回更新的任务列表: (quest_index, progress_id, is_complete)
+    pub fn process_kill(&mut self, monster_index: i32) -> Vec<(i32, i32, bool)> {
+        let mut updated = Vec::new();
+        for quest in &mut self.quests {
+            let mut changed = false;
+            for p in &mut quest.progress {
+                if p.progress_id == monster_index && p.current < p.target {
+                    p.current += 1;
+                    changed = true;
+                    break; // C# behavior: only first matching task per quest gets credit
+                }
+            }
+            if changed {
+                let complete = quest.is_progress_complete();
+                updated.push((quest.quest_index, monster_index, complete));
+            }
+        }
+        updated
+    }
 }
 
 #[cfg(test)]
