@@ -3807,12 +3807,84 @@ impl Message<ChatRequest> for WorldActor {
             _ => {}
         }
 
-        // 获取玩家名称
-        let player_name = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-            state.name
+        // 获取玩家名称和组队信息
+        let (player_name, group_id) = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            (state.name, state.group_id)
         } else {
             return;
         };
+
+        // 私聊 /w <name> <message>
+        if let Some(whisper_cmd) = message.strip_prefix("/w ").or_else(|| message.strip_prefix("/W ")) {
+            let mut whisper_parts = whisper_cmd.splitn(2, ' ');
+            let target_name = whisper_parts.next().unwrap_or("").trim();
+            let whisper_msg = whisper_parts.next().unwrap_or("").trim();
+            if !target_name.is_empty() && !whisper_msg.is_empty() {
+                let mut found = false;
+                for (sid, other) in &self.players {
+                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                        if os.name.eq_ignore_ascii_case(target_name) {
+                            found = true;
+                            // 发给目标: WhisperIn
+                            let mut in_body = Vec::new();
+                            write_dotnet_string(&mut in_body, &format!("{}: {}", player_name, whisper_msg));
+                            in_body.push(mir2_shared::enums::ChatType::WhisperIn as u8);
+                            let _ = self.gate_ref.ask(SendToClient {
+                                session_id: *sid,
+                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &in_body),
+                            });
+                            // 发给自己: WhisperOut
+                            let mut out_body = Vec::new();
+                            write_dotnet_string(&mut out_body, &format!("-> {}: {}", target_name, whisper_msg));
+                            out_body.push(mir2_shared::enums::ChatType::WhisperOut as u8);
+                            let _ = self.gate_ref.ask(SendToClient {
+                                session_id: msg.session_id,
+                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &out_body),
+                            });
+                            debug!("Whisper: {} -> {}: {}", player_name, target_name, whisper_msg);
+                            break;
+                        }
+                    }
+                }
+                if !found {
+                    send_system_message(&self.gate_ref, msg.session_id, "目标玩家不在线");
+                }
+                return;
+            }
+        }
+
+        // 组队聊天 /g <message> 或 ! <message>
+        let group_msg = message.strip_prefix("/g ").or_else(|| message.strip_prefix("/G "))
+            .or_else(|| message.strip_prefix("! "));
+        if let Some(gmsg) = group_msg {
+            let gmsg = gmsg.trim();
+            if !gmsg.is_empty() {
+                if let Some(gid) = group_id {
+                    let mut sent = false;
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.group_id == Some(gid) {
+                                let mut body = Vec::new();
+                                write_dotnet_string(&mut body, &format!("[组队] {}: {}", player_name, gmsg));
+                                body.push(mir2_shared::enums::ChatType::Group as u8);
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id: *sid,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
+                                });
+                                sent = true;
+                            }
+                        }
+                    }
+                    if sent {
+                        debug!("Group chat: {} (group={}): {}", player_name, gid, gmsg);
+                    }
+                    return;
+                } else {
+                    send_system_message(&self.gate_ref, msg.session_id, "你不在队伍中");
+                    return;
+                }
+            }
+        }
 
         let formatted = format!("[{}]: {}", player_name, message);
         debug!("Chat from {}: {}", player_name, message);
