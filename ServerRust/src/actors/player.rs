@@ -1533,6 +1533,24 @@ impl Message<AbandonQuest> for PlayerActor {
     }
 }
 
+/// 任务失败（超时等）
+pub struct FailQuest {
+    pub quest_index: i32,
+}
+
+impl Message<FailQuest> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: FailQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if let Some(quest) = self.state.quest_log.get_quest_mut(msg.quest_index) {
+            quest.status = crate::actors::quest::QuestStatus::Failed;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// 获取任务
 pub struct GetQuest {
     pub quest_index: i32,

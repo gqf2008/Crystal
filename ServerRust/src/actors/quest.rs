@@ -7,6 +7,7 @@ pub enum QuestStatus {
     Accepted,
     InProgress,
     Completed,
+    Failed,
 }
 
 /// 任务进度项
@@ -35,6 +36,10 @@ pub struct QuestInstance {
     pub exp_reward: i64,
     /// 奖励金币
     pub gold_reward: u64,
+    /// 任务接受时的 Unix 时间戳（秒）
+    pub start_time: u64,
+    /// 时间限制（秒，0=无限制）
+    pub time_limit_seconds: i32,
 }
 
 impl QuestInstance {
@@ -149,6 +154,8 @@ mod tests {
             ],
             exp_reward: 1000,
             gold_reward: 500,
+            start_time: 0,
+            time_limit_seconds: 0,
         }
     }
 

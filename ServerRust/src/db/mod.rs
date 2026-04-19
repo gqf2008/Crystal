@@ -464,6 +464,12 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
         "#
     ).execute(&pool).await?;
 
+    // Migration: add quest timer columns (safe to re-run)
+    let _ = sqlx::query("ALTER TABLE quests ADD COLUMN start_time INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE quests ADD COLUMN time_limit_seconds INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+
     info!("SQLite database initialized: {}", db_path.display());
     Ok(pool)
 }
@@ -1087,10 +1093,11 @@ async fn save_quests(pool: &DbPool, character_name: &str, log: &QuestLog) -> any
             QuestStatus::Accepted => "Accepted",
             QuestStatus::InProgress => "InProgress",
             QuestStatus::Completed => "Completed",
+            QuestStatus::Failed => "Failed",
         };
         sqlx::query(
-            "INSERT INTO quests (character_name, quest_index, title, status, progress_json, exp_reward, gold_reward)
-             VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO quests (character_name, quest_index, title, status, progress_json, exp_reward, gold_reward, start_time, time_limit_seconds)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(character_name)
         .bind(q.quest_index)
@@ -1099,6 +1106,8 @@ async fn save_quests(pool: &DbPool, character_name: &str, log: &QuestLog) -> any
         .bind(&progress_json)
         .bind(q.exp_reward)
         .bind(q.gold_reward as i64)
+        .bind(q.start_time as i64)
+        .bind(q.time_limit_seconds)
         .execute(pool).await?;
     }
 
@@ -1115,7 +1124,7 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
     let mut log = QuestLog::new();
 
     let rows = sqlx::query(
-        "SELECT quest_index, title, status, progress_json, exp_reward, gold_reward
+        "SELECT quest_index, title, status, progress_json, exp_reward, gold_reward, start_time, time_limit_seconds
          FROM quests WHERE character_name = ?"
     )
     .bind(character_name)
@@ -1127,6 +1136,7 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
         let status = match status_str.as_str() {
             "Accepted" => QuestStatus::Accepted,
             "Completed" => QuestStatus::Completed,
+            "Failed" => QuestStatus::Failed,
             _ => QuestStatus::InProgress,
         };
 
@@ -1140,6 +1150,8 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
             progress,
             exp_reward: row.get("exp_reward"),
             gold_reward: row.get::<i64, _>("gold_reward") as u64,
+            start_time: row.get::<i64, _>("start_time") as u64,
+            time_limit_seconds: row.get("time_limit_seconds"),
         });
     }
 

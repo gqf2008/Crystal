@@ -955,6 +955,26 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKQUESTTIME" => {
+                        let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0);
+                                let expired = state.quest_log.quests.iter().any(|q| {
+                                    q.quest_index == quest_index
+                                        && q.time_limit_seconds > 0
+                                        && matches!(q.status, QuestStatus::InProgress | QuestStatus::Accepted)
+                                        && now.saturating_sub(q.start_time) >= q.time_limit_seconds as u64
+                                });
+                                if expired {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "CHECKPKPOINT" => {
                         let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
                         let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
@@ -2645,6 +2665,35 @@ impl Message<Tick> for WorldActor {
                 provoked: false,
             });
             debug!("Monster '{}' respawned as #{}", spawn.name, new_oid);
+        }
+
+        // --- 任务超时检查（每 10 秒） ---
+        if self.tick_count.is_multiple_of(100) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            for (session_id, record) in &self.players {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    for quest in &state.quest_log.quests {
+                        if quest.time_limit_seconds > 0
+                            && matches!(quest.status, QuestStatus::InProgress | QuestStatus::Accepted)
+                            && now.saturating_sub(quest.start_time) >= quest.time_limit_seconds as u64
+                        {
+                            let failed = record.actor_ref.ask(crate::actors::player::FailQuest {
+                                quest_index: quest.quest_index,
+                            }).await.unwrap_or(false);
+                            if failed {
+                                send_system_message(
+                                    &self.gate_ref, *session_id,
+                                    &format!("任务 '{}' 已超时失败", quest.title)
+                                );
+                                debug!("Quest expired: {} for session {}", quest.title, session_id);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // --- 精炼自动完成（每 10 秒检查一次） ---
@@ -4955,7 +5004,11 @@ impl Message<AcceptQuestRequest> for WorldActor {
         }
 
         // Create quest instance from DB data
-        let quest = make_quest_instance(&quest_db);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let quest = make_quest_instance(&quest_db, now);
         let accepted = match record.actor_ref.ask(AcceptQuest { quest }).await {
             Ok(s) => s, _ => return,
         };
@@ -7298,7 +7351,11 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
                     {
                         // Check not already accepted
                         if let Ok(None) = record.actor_ref.ask(GetQuest { quest_index: quest_db.index }).await {
-                            let quest = make_quest_instance(quest_db);
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            let quest = make_quest_instance(quest_db, now);
                             if let Ok(true) = record.actor_ref.ask(AcceptQuest { quest }).await {
                                 send_system_message(&self.gate_ref, msg.session_id,
                                     &format!("任务已接受: {}", quest_db.name));
@@ -7624,7 +7681,7 @@ fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message:
 }
 
 /// 从 DB 任务配置创建任务实例
-fn make_quest_instance(qi: &db::QuestInfo) -> QuestInstance {
+fn make_quest_instance(qi: &db::QuestInfo, start_time: u64) -> QuestInstance {
     let mut progress = Vec::new();
     for kill in &qi.kill_tasks {
         progress.push(QuestProgress {
@@ -7654,6 +7711,8 @@ fn make_quest_instance(qi: &db::QuestInfo) -> QuestInstance {
         progress,
         exp_reward: qi.exp_reward as i64,
         gold_reward: qi.gold_reward.max(0) as u64,
+        start_time,
+        time_limit_seconds: qi.time_limit_seconds,
     }
 }
 
