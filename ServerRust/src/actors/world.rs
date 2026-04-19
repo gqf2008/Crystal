@@ -5616,6 +5616,63 @@ impl Message<SearchMapRequest> for WorldActor {
     }
 }
 
+// ---------- 合成配方 ----------
+
+/// 合成材料
+#[derive(Debug, Clone)]
+pub struct CraftIngredient {
+    pub item_index: i32,
+    pub count: u16,
+}
+
+/// 合成配方
+#[derive(Debug, Clone)]
+pub struct CraftRecipe {
+    pub recipe_id: u32,
+    pub product_index: i32,
+    pub product_count: u16,
+    pub success_rate: u8,
+    pub ingredients: Vec<CraftIngredient>,
+}
+
+/// 硬编码合成配方表（后续可从 DB 加载）
+fn get_craft_recipes() -> Vec<CraftRecipe> {
+    vec![
+        // recipe_id 1: 铁剑 = 木材 x3 + 铁矿石 x2, 80%
+        CraftRecipe {
+            recipe_id: 1,
+            product_index: 100,
+            product_count: 1,
+            success_rate: 80,
+            ingredients: vec![
+                CraftIngredient { item_index: 1, count: 3 },
+                CraftIngredient { item_index: 2, count: 2 },
+            ],
+        },
+        // recipe_id 2: 治疗药水 = 草药 x2 + 清水 x1, 95%
+        CraftRecipe {
+            recipe_id: 2,
+            product_index: 101,
+            product_count: 1,
+            success_rate: 95,
+            ingredients: vec![
+                CraftIngredient { item_index: 3, count: 2 },
+                CraftIngredient { item_index: 4, count: 1 },
+            ],
+        },
+        // recipe_id 3: 强化石 = 铁矿石 x5, 60%
+        CraftRecipe {
+            recipe_id: 3,
+            product_index: 102,
+            product_count: 1,
+            success_rate: 60,
+            ingredients: vec![
+                CraftIngredient { item_index: 2, count: 5 },
+            ],
+        },
+    ]
+}
+
 // ---------- 物品合成/回购 ----------
 
 /// 合成物品请求
@@ -5628,7 +5685,6 @@ impl Message<CraftItemRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: CraftItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        // 简化实现：发送合成成功确认
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r.clone(),
             None => return,
@@ -5638,16 +5694,96 @@ impl Message<CraftItemRequest> for WorldActor {
             _ => return,
         };
 
+        // 查找配方
+        let recipes = get_craft_recipes();
+        let recipe = match recipes.iter().find(|r| r.recipe_id == msg.recipe_id) {
+            Some(r) => r.clone(),
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "未知配方");
+                let mut body = Vec::new();
+                body.extend_from_slice(&msg.recipe_id.to_le_bytes());
+                body.extend_from_slice(&0u16.to_le_bytes());
+                body.push(0u8); // success = false
+                let _ = self.gate_ref.ask(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
+                });
+                return;
+            }
+        };
+
+        // 检查背包空间
+        if !state.inventory.has_space() {
+            send_system_message(&self.gate_ref, msg.session_id, "背包已满");
+            let mut body = Vec::new();
+            body.extend_from_slice(&msg.recipe_id.to_le_bytes());
+            body.extend_from_slice(&0u16.to_le_bytes());
+            body.push(0u8);
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
+            });
+            return;
+        }
+
+        // 检查材料
+        for ing in &recipe.ingredients {
+            let has = record.actor_ref.ask(crate::actors::player::HasItem {
+                item_index: ing.item_index,
+                count: ing.count,
+            }).await.unwrap_or(false);
+            if !has {
+                send_system_message(&self.gate_ref, msg.session_id, "材料不足");
+                let mut body = Vec::new();
+                body.extend_from_slice(&msg.recipe_id.to_le_bytes());
+                body.extend_from_slice(&0u16.to_le_bytes());
+                body.push(0u8);
+                let _ = self.gate_ref.ask(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
+                });
+                return;
+            }
+        }
+
+        // 扣除材料
+        for ing in &recipe.ingredients {
+            let _ = record.actor_ref.ask(crate::actors::player::RemoveItemByIndex {
+                item_index: ing.item_index,
+                count: ing.count,
+            }).await;
+        }
+
+        // 成功率判定
+        let success = fastrand::u8(0..100) < recipe.success_rate;
+
+        if success {
+            let mut item = mir2_shared::data::item::UserItem {
+                item_index: recipe.product_index,
+                count: recipe.product_count,
+                ..Default::default()
+            };
+            if let Some(info) = self.item_infos.get(&recipe.product_index) {
+                item.max_dura = info.durability as u16;
+                item.current_dura = info.durability as u16;
+            }
+            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+            send_system_message(&self.gate_ref, msg.session_id, "合成成功！");
+            debug!("CraftItem: {} recipe={} success", state.name, msg.recipe_id);
+        } else {
+            send_system_message(&self.gate_ref, msg.session_id, "合成失败，材料已消耗");
+            debug!("CraftItem: {} recipe={} failed", state.name, msg.recipe_id);
+        }
+
+        // 发送 CraftItem 响应
         let mut body = Vec::new();
         body.extend_from_slice(&msg.recipe_id.to_le_bytes());
-        body.extend_from_slice(&1u16.to_le_bytes()); // count
-        body.push(1u8); // success = true
+        body.extend_from_slice(&(if success { recipe.product_count } else { 0 }).to_le_bytes());
+        body.push(if success { 1u8 } else { 0u8 });
         let _ = self.gate_ref.ask(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
         });
-
-        debug!("CraftItem: {} recipe={}", state.name, msg.recipe_id);
     }
 }
 
