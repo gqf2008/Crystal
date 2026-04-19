@@ -1651,6 +1651,12 @@ pub struct NpcGoodsInfo {
     pub item_index: i32,
     pub count: i32,
     pub price: i32,
+    /// 当前库存（>0 表示有货，0=售罄）
+    pub stock: i32,
+    /// 是否无限库存
+    pub infinite_stock: bool,
+    /// 最大库存（用于自动补货）
+    pub max_stock: i32,
 }
 
 /// NPC 脚本信息
@@ -1931,11 +1937,16 @@ pub async fn load_npc_goods(pool: &DbPool) -> anyhow::Result<HashMap<i32, Vec<Np
     let mut map: HashMap<i32, Vec<NpcGoodsInfo>> = HashMap::new();
     for r in rows {
         let npc_index: i32 = r.get("npc_index");
+        let stock: i32 = r.get("stock");
+        let infinite: i32 = r.get("infinite_stock");
         let entry = NpcGoodsInfo {
             npc_index,
             item_index: r.get("item_index"),
             count: r.get("count"),
             price: r.get("price"),
+            stock,
+            infinite_stock: infinite != 0,
+            max_stock: stock,
         };
         map.entry(npc_index).or_default().push(entry);
     }

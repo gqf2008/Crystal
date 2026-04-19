@@ -2791,6 +2791,22 @@ impl Message<Tick> for WorldActor {
             }
         }
 
+        // --- NPC 商店自动补货（每小时） ---
+        if self.tick_count.is_multiple_of(36000) {
+            let mut restocked = 0usize;
+            for goods_list in self.npc_goods.values_mut() {
+                for good in goods_list.iter_mut() {
+                    if !good.infinite_stock && good.stock < good.max_stock {
+                        good.stock = good.max_stock;
+                        restocked += 1;
+                    }
+                }
+            }
+            if restocked > 0 {
+                info!("NPC shop restock: {} items restocked", restocked);
+            }
+        }
+
         // --- 精炼自动完成（每 10 秒检查一次） ---
         if self.tick_count.is_multiple_of(100) {
             let current_time = std::time::SystemTime::now()
@@ -4838,14 +4854,32 @@ impl Message<BuyItemRequest> for WorldActor {
             }
         };
 
-        let goods_list = self.npc_goods.get(&npc_db_index).cloned().unwrap_or_default();
-        let good = match goods_list.iter().find(|g| g.item_index == msg.item_index as i32) {
-            Some(g) => g,
+        // 获取商品列表（可变引用以便扣减库存）
+        let goods_list = match self.npc_goods.get_mut(&npc_db_index) {
+            Some(list) => list,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "该 NPC 不出售任何物品");
+                return;
+            }
+        };
+        let good_idx = match goods_list.iter().position(|g| g.item_index == msg.item_index as i32) {
+            Some(idx) => idx,
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "该 NPC 不出售此物品");
                 return;
             }
         };
+
+        // 检查库存
+        let good = &goods_list[good_idx];
+        if !good.infinite_stock && good.stock <= 0 {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品已售罄");
+            return;
+        }
+        if !good.infinite_stock && good.stock < msg.count as i32 {
+            send_system_message(&self.gate_ref, msg.session_id, &format!("库存不足（仅剩 {} 个）", good.stock));
+            return;
+        }
 
         // Validate item against DB-loaded item_infos
         let item_db = match self.item_infos.get(&(msg.item_index as i32)) {
@@ -4871,6 +4905,11 @@ impl Message<BuyItemRequest> for WorldActor {
         // 扣除金币
         let _ = record.actor_ref.ask(DeductGold { amount: total_price }).await;
 
+        // 扣减库存
+        if !goods_list[good_idx].infinite_stock {
+            goods_list[good_idx].stock -= msg.count as i32;
+        }
+
         // Create item from DB template
         let item = mir2_shared::data::item::UserItem {
             item_index: msg.item_index as i32,
@@ -4887,7 +4926,8 @@ impl Message<BuyItemRequest> for WorldActor {
         }
         send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功 (花费 {} 金币)", total_price));
         let npc_name = self.npcs.get(&msg.npc_id).map(|n| n.name.as_str()).unwrap_or("?");
-        debug!("BuyItem: {} bought item={} ({}) x{} for {} gold from NPC '{}'", state.name, item_db.name, msg.item_index, msg.count, total_price, npc_name);
+        debug!("BuyItem: {} bought item={} ({}) x{} for {} gold from NPC '{}' (stock={})", state.name, item_db.name, msg.item_index, msg.count, total_price, npc_name,
+            if goods_list[good_idx].infinite_stock { "∞".to_string() } else { goods_list[good_idx].stock.to_string() });
     }
 }
 
