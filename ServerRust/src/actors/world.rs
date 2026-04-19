@@ -964,6 +964,39 @@ impl WorldActor {
                         }
                     }
                     "BREAK" => break,
+                    "TELEPORT" | "MOVE" => {
+                        let map_name = parts.next().unwrap_or("");
+                        let tx = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(330);
+                        let ty = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(330);
+                        // 查找 map_index（通过 file_name 匹配）
+                        let target_map_index = self.map_infos.values()
+                            .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
+                            .map(|m| m.index as u16);
+                        if let Some(map_index) = target_map_index {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                        x: tx,
+                                        y: ty,
+                                        direction: state.direction,
+                                        map_index: Some(map_index),
+                                        is_mounted: None,
+                                    }).await;
+                                    let mut body = Vec::new();
+                                    body.extend_from_slice(&tx.to_le_bytes());
+                                    body.extend_from_slice(&ty.to_le_bytes());
+                                    body.push(state.direction);
+                                    let _ = self.gate_ref.ask(SendToClient {
+                                        session_id,
+                                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
+                                    });
+                                    debug!("NPC teleport: session={} to map={} ({},{})", session_id, map_name, tx, ty);
+                                }
+                            }
+                        } else {
+                            warn!("NPC teleport: map '{}' not found", map_name);
+                        }
+                    }
                     _ => {}
                 }
             } else if !skip {
@@ -4219,6 +4252,25 @@ impl Message<FinishQuestRequest> for WorldActor {
         }
         if completed_quest.gold_reward > 0 {
             let _ = record.actor_ref.ask(AddGold { amount: completed_quest.gold_reward }).await;
+        }
+
+        // 发放固定物品奖励
+        if let Some(quest_db) = self.quest_infos.get(&msg.quest_index) {
+            for reward in &quest_db.fixed_rewards {
+                let mut item = mir2_shared::data::item::UserItem {
+                    item_index: reward.item_index,
+                    count: reward.count,
+                    ..Default::default()
+                };
+                if let Some(info) = self.item_infos.get(&reward.item_index) {
+                    item.max_dura = info.durability as u16;
+                    item.current_dura = info.durability as u16;
+                }
+                let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+            }
+            if !quest_db.fixed_rewards.is_empty() {
+                let _ = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await;
+            }
         }
 
         send_system_message(&self.gate_ref, msg.session_id, &format!("任务完成！获得 {} 经验，{} 金币", completed_quest.exp_reward, completed_quest.gold_reward));

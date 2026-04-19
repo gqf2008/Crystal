@@ -1577,6 +1577,12 @@ pub struct QuestFlagTask {
 }
 
 #[derive(Debug, Clone)]
+pub struct QuestItemReward {
+    pub item_index: i32,
+    pub count: u16,
+}
+
+#[derive(Debug, Clone)]
 pub struct QuestInfo {
     pub index: i32,
     pub name: String,
@@ -1598,6 +1604,8 @@ pub struct QuestInfo {
     pub kill_tasks: Vec<QuestKillTask>,
     pub item_tasks: Vec<QuestItemTask>,
     pub flag_tasks: Vec<QuestFlagTask>,
+    pub fixed_rewards: Vec<QuestItemReward>,
+    pub select_rewards: Vec<QuestItemReward>,
 }
 
 /// NPC 商品信息
@@ -1974,6 +1982,8 @@ pub async fn load_quest_infos(pool: &DbPool) -> anyhow::Result<Vec<QuestInfo>> {
         kill_tasks: Vec::new(),
         item_tasks: Vec::new(),
         flag_tasks: Vec::new(),
+        fixed_rewards: Vec::new(),
+        select_rewards: Vec::new(),
     }).collect())
 }
 
@@ -2035,10 +2045,37 @@ pub fn resolve_quest_tasks(
                         quest.flag_tasks.push(task);
                     }
                 }
+                "[@FIXEDREWARDS]" => {
+                    if let Some(reward) = parse_reward(line, &item_by_name) {
+                        quest.fixed_rewards.push(reward);
+                    }
+                }
+                "[@SELECTREWARDS]" => {
+                    if let Some(reward) = parse_reward(line, &item_by_name) {
+                        quest.select_rewards.push(reward);
+                    }
+                }
                 _ => {}
             }
         }
     }
+}
+
+fn parse_reward(line: &str, item_by_name: &HashMap<String, i32>) -> Option<QuestItemReward> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.is_empty() {
+        return None;
+    }
+    let name = parts[0];
+    let count = parts.get(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+
+    let name_lower = name.to_lowercase();
+    let item_index = item_by_name
+        .get(&name_lower)
+        .or_else(|| item_by_name.get(&name_lower.replace(' ', "")))
+        .copied()?;
+
+    Some(QuestItemReward { item_index, count })
 }
 
 fn extract_quoted_message(line: &str) -> Option<String> {
