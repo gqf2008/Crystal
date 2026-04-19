@@ -374,6 +374,8 @@ struct MonsterState {
     pub provoked: bool,
     /// 是否为精英怪物
     pub is_elite: bool,
+    /// 是否为世界Boss
+    pub is_boss: bool,
 }
 
 fn dist_to_spawn(monster: &MonsterState) -> i32 {
@@ -473,6 +475,8 @@ pub struct WorldActor {
     npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
     respawn_queue: HashMap<u32, (MonsterSpawn, u64)>,
+    /// 世界Boss存活队列 (object_id → 自动消失 tick)
+    world_boss_queue: HashMap<u32, u64>,
     /// 死亡玩家复活队列 (session_id → 死亡 tick)
     player_death_queue: HashMap<u64, u64>,
     /// 钓鱼进度计数器 (session_id → 已钓鱼 tick 数)
@@ -525,6 +529,7 @@ impl WorldActor {
             monsters: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
+            world_boss_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
             fishing_tick_counters: HashMap::new(),
             ground_items: Vec::new(),
@@ -802,7 +807,7 @@ impl WorldActor {
             _ => return,
         };
 
-        let count_mul = if monster.is_elite { 2u16 } else { 1u16 };
+        let count_mul = if monster.is_boss { 3u16 } else if monster.is_elite { 2u16 } else { 1u16 };
 
         for drop in &drops {
             let roll = fastrand::f64();
@@ -829,6 +834,20 @@ impl WorldActor {
                     fastrand::u16(drop.min_count..=drop.max_count)
                 } else {
                     drop.min_count
+                };
+                self.spawn_single_drop(monster, drop.item_index, count).await;
+            }
+        }
+
+        // 世界Boss额外掉落：大量金币 + 全掉落保底
+        if monster.is_boss {
+            let gold_drop = fastrand::u32(5000..=20000) as u64;
+            self.spawn_single_drop(monster, 0, gold_drop as u16).await;
+            for drop in &drops {
+                let count = if drop.max_count > drop.min_count {
+                    fastrand::u16(drop.min_count..=drop.max_count).saturating_mul(2)
+                } else {
+                    drop.min_count.saturating_mul(2)
                 };
                 self.spawn_single_drop(monster, drop.item_index, count).await;
             }
@@ -1709,6 +1728,80 @@ impl WorldActor {
                             }
                         }
                     }
+                    "SPAWNWORLDBOSS" => {
+                        let monster_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let map_name = parts.next().unwrap_or("");
+                        let bx = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(330);
+                        let by = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(330);
+                        if monster_index > 0 {
+                            if let Some(monster_info) = self.monster_infos.get(&monster_index).cloned() {
+                                let target_map_index = self.map_infos.values()
+                                    .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
+                                    .map(|m| m.index as u16)
+                                    .unwrap_or(0);
+                                let boss_oid = self.alloc_object_id();
+                                let boss_hp = monster_info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(100).saturating_mul(10);
+                                let boss_min_dmg = monster_info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5).saturating_mul(3);
+                                let boss_max_dmg = monster_info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10).saturating_mul(3);
+                                let boss_xp = monster_info.experience.saturating_mul(5);
+                                let boss = MonsterState {
+                                    object_id: boss_oid,
+                                    name: format!("[世界Boss] {}", monster_info.name),
+                                    image: monster_info.image as u16,
+                                    monster_index,
+                                    x: bx,
+                                    y: by,
+                                    direction: 0,
+                                    hp: boss_hp,
+                                    max_hp: boss_hp,
+                                    min_dmg: boss_min_dmg,
+                                    max_dmg: boss_max_dmg,
+                                    xp: boss_xp,
+                                    spawn_x: bx,
+                                    spawn_y: by,
+                                    map_index: target_map_index,
+                                    next_attack_tick: 0,
+                                    next_move_tick: 0,
+                                    next_summon_tick: 0,
+                                    ai_profile: MonsterAiProfile::from_info(&monster_info),
+                                    ai_state: MonsterAiState::Idle,
+                                    target_session: None,
+                                    provoked: true, // Boss is always aggressive
+                                    is_elite: false,
+                                    is_boss: true,
+                                };
+                                self.monsters.insert(boss_oid, boss);
+                                // 10 minutes = 6000 ticks (100ms each)
+                                self.world_boss_queue.insert(boss_oid, self.tick_count + 6000);
+                                let packet = build_object_monster_packet(
+                                    &MonsterSpawn {
+                                        name: format!("[世界Boss] {}", monster_info.name),
+                                        image: monster_info.image as u16,
+                                        monster_index,
+                                        x: bx,
+                                        y: by,
+                                        direction: 0,
+                                        hp: boss_hp,
+                                        min_dmg: boss_min_dmg,
+                                        max_dmg: boss_max_dmg,
+                                        xp: boss_xp,
+                                        map_index: target_map_index,
+                                    }, boss_oid, &format!("[世界Boss] {}", monster_info.name));
+                                for session_id in self.players.keys() {
+                                    let _ = self.gate_ref.ask(SendToClient {
+                                        session_id: *session_id,
+                                        data: packet.clone(),
+                                    });
+                                }
+                                let map_title = self.map_infos.get(&(target_map_index as i32))
+                                    .map(|m| m.title.clone())
+                                    .unwrap_or_else(|| map_name.to_string());
+                                broadcast_system_message(&self.gate_ref, &self.players,
+                                    &format!("⚠️ 世界Boss {} 降临 {}！勇士们，前往讨伐！", monster_info.name, map_title));
+                                debug!("World boss '{}' spawned as #{} at ({},{})", monster_info.name, boss_oid, bx, by);
+                            }
+                        }
+                    }
                     "LOCAL" => {
                         let message = parts.collect::<Vec<_>>().join(" ");
                         if !message.is_empty() {
@@ -1993,6 +2086,7 @@ impl Actor for WorldActor {
             monsters: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
+            world_boss_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
             fishing_tick_counters: HashMap::new(),
             ground_items: Vec::new(),
@@ -2651,6 +2745,7 @@ impl Message<Tick> for WorldActor {
                     target_session: None,
                     provoked: false,
                     is_elite: false,
+                    is_boss: false,
                 });
                 debug!("Summoned monster '{}' as #{} at ({},{})", spawn.name, new_oid, spawn.x, spawn.y);
             }
@@ -2744,6 +2839,15 @@ impl Message<Tick> for WorldActor {
 
                     // 生成掉落物品
                     self.spawn_monster_drops(&monster).await;
+
+                    // 世界Boss被击败广播
+                    if monster.is_boss {
+                        self.world_boss_queue.remove(oid);
+                        broadcast_system_message(
+                            &self.gate_ref, &self.players,
+                            &format!("世界Boss {} 被英勇的勇士们击败了！", monster.name));
+                        debug!("World boss '{}' defeated", monster.name);
+                    }
 
                     // 发放经验（支持组队平分）
                     let mut nearest_session: Option<u64> = None;
@@ -3059,6 +3163,7 @@ impl Message<Tick> for WorldActor {
                 target_session: None,
                 provoked: false,
                 is_elite,
+                is_boss: false,
             });
             if is_elite {
                 let map_name = self.map_infos.get(&(spawn.map_index as i32)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
@@ -3067,6 +3172,31 @@ impl Message<Tick> for WorldActor {
                 debug!("Elite monster '{}' spawned as #{} at ({},{})", name, new_oid, spawn.x, spawn.y);
             } else {
                 debug!("Monster '{}' respawned as #{}", spawn.name, new_oid);
+            }
+        }
+
+        // --- 世界Boss超时消失 ---
+        let mut boss_despawns = Vec::new();
+        for (oid, despawn_tick) in &self.world_boss_queue {
+            if self.tick_count >= *despawn_tick {
+                boss_despawns.push(*oid);
+            }
+        }
+        for oid in boss_despawns {
+            self.world_boss_queue.remove(&oid);
+            if let Some(monster) = self.monsters.remove(&oid) {
+                let body = oid.to_le_bytes().to_vec();
+                let packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &body);
+                for session_id in self.players.keys() {
+                    let _ = self.gate_ref.ask(SendToClient {
+                        session_id: *session_id,
+                        data: packet.clone(),
+                    });
+                }
+                broadcast_system_message(&self.gate_ref, &self.players,
+                    &format!("世界Boss {} 因无人挑战而消失了", monster.name));
+                debug!("World boss '{}' (#{}) despawned (timeout)", monster.name, oid);
             }
         }
 
@@ -9209,6 +9339,7 @@ fn spawn_npcs_and_monsters(
             target_session: None,
             provoked: false,
             is_elite,
+            is_boss: false,
         });
         if is_elite {
             debug!("Elite monster '{}' spawned as #{} at ({},{})", name, object_id, monster.x, monster.y);
@@ -9260,6 +9391,7 @@ fn spawn_npcs_and_monsters(
                         target_session: None,
                         provoked: false,
                         is_elite: false,
+                        is_boss: false,
                     });
                     info!("Spawned dragon at ({}, {}) on map {}", dragon.location_x, dragon.location_y, map_file);
                 }
