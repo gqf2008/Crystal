@@ -424,12 +424,21 @@ impl MonsterState {
     }
 }
 
+/// 商店回购条目
+#[derive(Debug, Clone)]
+pub struct BuybackItem {
+    pub item: mir2_shared::data::item::UserItem,
+    pub sell_price: u64,
+}
+
 /// WorldActor 状态
 pub struct WorldActor {
     /// Tick 计数器
     tick_count: u64,
     /// 在线玩家 Actor 引用（按 session_id 索引）
     players: HashMap<u64, PlayerRecord>,
+    /// 商店回购列表（session_id -> 最近卖出的物品，最多保留 10 个）
+    buyback_items: HashMap<u64, Vec<BuybackItem>>,
     /// 已加载的地图缓存
     maps: HashMap<u16, MapData>,
     /// GateActor 引用，用于发数据包给客户端
@@ -487,6 +496,7 @@ impl WorldActor {
         Self {
             tick_count: 0,
             players: HashMap::new(),
+            buyback_items: HashMap::new(),
             maps: HashMap::new(),
             gate_ref,
             map_dir,
@@ -1181,6 +1191,7 @@ impl Actor for WorldActor {
         Ok(Self {
             tick_count: 0,
             players: HashMap::new(),
+            buyback_items: HashMap::new(),
             maps: HashMap::new(),
             gate_ref: args.gate_ref,
             map_dir: args.map_dir,
@@ -3976,6 +3987,16 @@ impl Message<SellItemRequest> for WorldActor {
 
         let success = record.actor_ref.ask(AddGold { amount: total_gold }).await.unwrap_or(false);
         if success {
+            // 记录到回购列表（最多保留 10 个）
+            let buyback = BuybackItem {
+                item: item_data.clone(),
+                sell_price: total_gold,
+            };
+            let list = self.buyback_items.entry(msg.session_id).or_default();
+            list.insert(0, buyback);
+            while list.len() > 10 {
+                list.pop();
+            }
             send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, true);
             debug!("SellItem: {} sold item={} x{} for {} gold", state.name, item_data.item_index, msg.count, total_gold);
         }
@@ -5441,7 +5462,6 @@ impl Message<BuyItemBackRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: BuyItemBackRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        // 简化：发送回购成功确认
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r.clone(),
             None => return,
@@ -5451,8 +5471,47 @@ impl Message<BuyItemBackRequest> for WorldActor {
             _ => return,
         };
 
-        send_system_message(&self.gate_ref, msg.session_id, "回购成功");
-        debug!("BuyItemBack: {} item_index={}", state.name, msg.item_index);
+        // 查找回购列表中的对应物品
+        let list = match self.buyback_items.get_mut(&msg.session_id) {
+            Some(l) => l,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "没有可回购的物品");
+                return;
+            }
+        };
+        let idx = match list.iter().position(|b| b.item.item_index == msg.item_index as i32) {
+            Some(i) => i,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品已无法回购");
+                return;
+            }
+        };
+
+        let buyback = list.remove(idx);
+        let cost = buyback.sell_price * 2;
+
+        // 检查背包空间
+        if !state.inventory.has_space() {
+            send_system_message(&self.gate_ref, msg.session_id, "背包已满");
+            list.insert(idx, buyback);
+            return;
+        }
+
+        // 扣除金币
+        let deducted = record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await.unwrap_or(false);
+        if !deducted {
+            send_system_message(&self.gate_ref, msg.session_id, "金币不足");
+            list.insert(idx, buyback);
+            return;
+        }
+
+        // 添加物品到背包
+        let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory {
+            item: buyback.item.clone(),
+        }).await;
+
+        send_system_message(&self.gate_ref, msg.session_id, &format!("回购成功，花费 {} 金币", cost));
+        debug!("BuyItemBack: {} item_index={} cost={}", state.name, msg.item_index, cost);
     }
 }
 
