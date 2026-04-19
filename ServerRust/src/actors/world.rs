@@ -3331,21 +3331,71 @@ impl Message<UseItemRequest> for WorldActor {
         }
 
         // 查询物品信息
-        let item_info = record.actor_ref.ask(GetItemInfo { unique_id: msg.unique_id }).await.unwrap_or(None);
-        match item_info {
-            Some(_item) => {
-                // 消耗品：扣减 count 或移除
-                let consumed = record.actor_ref.ask(ConsumeItem { unique_id: msg.unique_id }).await.unwrap_or(false);
-                if consumed {
-                    debug!("Player session={} used item uid={}", msg.session_id, msg.unique_id);
-                    // 发送 UseItem 响应
-                    send_use_item_response(&self.gate_ref, msg.session_id, msg.unique_id);
-                }
-            }
+        let user_item = record.actor_ref.ask(GetItemInfo { unique_id: msg.unique_id }).await.unwrap_or(None);
+        let item_index = match user_item {
+            Some(ref item) => item.item_index,
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+                return;
+            }
+        };
+
+        let item_db = self.item_infos.get(&item_index).cloned();
+
+        // 消耗品：扣减 count 或移除
+        let consumed = record.actor_ref.ask(ConsumeItem { unique_id: msg.unique_id }).await.unwrap_or(false);
+        if !consumed {
+            send_system_message(&self.gate_ref, msg.session_id, "使用物品失败");
+            return;
+        }
+
+        debug!("Player session={} used item uid={} index={}", msg.session_id, msg.unique_id, item_index);
+
+        // 根据物品类型执行效果
+        if let Some(ref db) = item_db {
+            match db.item_type {
+                // Potion
+                13 => {
+                    use mir2_shared::enums::Stat;
+                    let hp_recover = db.stats.get(&(Stat::HP as u8)).copied().unwrap_or(0);
+                    let mp_recover = db.stats.get(&(Stat::MP as u8)).copied().unwrap_or(0);
+                    if hp_recover > 0 {
+                        let _ = record.actor_ref.ask(crate::actors::player::Heal {
+                            amount: hp_recover,
+                        }).await;
+                    }
+                    if mp_recover > 0 {
+                        let _ = record.actor_ref.ask(crate::actors::player::AddMP {
+                            amount: mp_recover,
+                        }).await;
+                    }
+                    if hp_recover > 0 || mp_recover > 0 {
+                        debug!("Potion: {} recovered hp={} mp={}", player_state.name, hp_recover, mp_recover);
+                    }
+                }
+                // Scroll (回城卷等)
+                17 => {
+                    // 传送到当前地图安全区中心
+                    let (tx, ty) = self.maps.get(&player_state.map_index)
+                        .and_then(|m| m.safe_zone_rects.first())
+                        .map(|(x1, y1, x2, y2)| ((x1 + x2) / 2, (y1 + y2) / 2))
+                        .unwrap_or((330, 330));
+                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                        x: tx,
+                        y: ty,
+                        direction: player_state.direction,
+                        map_index: None,
+                        is_mounted: None,
+                    }).await;
+                    send_system_message(&self.gate_ref, msg.session_id, "已返回安全区");
+                    debug!("Scroll: {} teleported to safe zone ({}, {})", player_state.name, tx, ty);
+                }
+                _ => {}
             }
         }
+
+        // 发送 UseItem 响应
+        send_use_item_response(&self.gate_ref, msg.session_id, msg.unique_id);
     }
 }
 

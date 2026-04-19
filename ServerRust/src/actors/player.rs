@@ -1161,6 +1161,28 @@ impl Message<DeductMP> for PlayerActor {
     }
 }
 
+/// 恢复 MP
+pub struct AddMP {
+    pub amount: i32,
+}
+
+impl Message<AddMP> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: AddMP, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if msg.amount <= 0 { return; }
+        self.state.mp = (self.state.mp + msg.amount).min(self.state.max_mp);
+        // 同步客户端
+        let mut body = Vec::new();
+        body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+        body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
+        });
+    }
+}
+
 /// 检查背包中是否有指定数量的物品（按 item_index）
 pub struct HasItem {
     pub item_index: i32,
