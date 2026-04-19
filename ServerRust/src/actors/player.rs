@@ -678,6 +678,42 @@ impl Message<AddExperience> for PlayerActor {
     }
 }
 
+/// 扣除经验（死亡惩罚等）
+pub struct DeductExperience {
+    pub amount: i32,
+}
+
+impl Message<DeductExperience> for PlayerActor {
+    type Reply = i64;
+
+    async fn handle(
+        &mut self,
+        msg: DeductExperience,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let amount = msg.amount.max(0) as i64;
+        let before = self.state.experience;
+        self.state.experience = self.state.experience.saturating_sub(amount);
+        let deducted = before - self.state.experience;
+
+        debug!(
+            "Player {} lost {} exp (total={}/{})",
+            self.state.name, deducted, self.state.experience, self.state.max_experience
+        );
+
+        // 发送经验更新给客户端
+        let mut body = Vec::new();
+        body.extend_from_slice(&self.state.experience.to_le_bytes());
+        body.extend_from_slice(&self.state.max_experience.to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainExperience as i16, &body),
+        });
+
+        deducted
+    }
+}
+
 /// 治疗请求（来自 Healing/MassHealing 等魔法）
 pub struct Heal {
     pub amount: i32,

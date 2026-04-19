@@ -2183,6 +2183,18 @@ impl Message<Tick> for WorldActor {
                                             });
                                         }
                                         death_drops.push((target_session, victim.x, victim.y, victim.map_index));
+
+                                        // 死亡经验惩罚：损失 2% 当前等级所需经验
+                                        let penalty = (victim.max_experience / 50).max(1) as i32;
+                                        let deducted = record.actor_ref.ask(crate::actors::player::DeductExperience {
+                                            amount: penalty,
+                                        }).await.unwrap_or(0);
+                                        if deducted > 0 {
+                                            send_system_message(
+                                                &self.gate_ref, target_session,
+                                                &format!("你损失了 {} 经验值", deducted)
+                                            );
+                                        }
                                     }
                                 }
                             }
