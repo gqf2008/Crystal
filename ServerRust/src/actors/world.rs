@@ -7161,12 +7161,49 @@ impl Message<GetRankingRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GetRankingRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("GetRanking: session={} type={}", msg.session_id, msg.rank_type);
-        let mut body = Vec::new();
-        body.extend_from_slice(&0i32.to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Rankings as i16, &body),
+
+        // 收集在线玩家信息
+        let mut entries: Vec<(String, u8, i32, i64)> = Vec::new();
+        for (_, record) in &self.players {
+            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                entries.push((
+                    state.name.clone(),
+                    state.class as u8,
+                    state.level as i32,
+                    state.experience,
+                ));
+            }
+        }
+
+        // 按等级降序、经验降序排序
+        entries.sort_by(|a, b| {
+            b.2.cmp(&a.2).then_with(|| b.3.cmp(&a.3))
         });
+
+        // 取前 20 名
+        let rankings: Vec<mir2_shared::packets::server::special_systems::RankInfo> = entries
+            .into_iter()
+            .take(20)
+            .enumerate()
+            .map(|(idx, (name, class, level, experience))| {
+                mir2_shared::packets::server::special_systems::RankInfo {
+                    rank: (idx + 1) as i32,
+                    player_name: name,
+                    class,
+                    level,
+                    experience,
+                }
+            })
+            .collect();
+
+        let packet = mir2_shared::packets::server::special_systems::Rankings { rankings };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Rankings as i16, &body),
+            });
+        }
     }
 }
 
