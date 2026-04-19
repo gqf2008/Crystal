@@ -3803,10 +3803,18 @@ impl Message<PickUpRequest> for WorldActor {
         let player_pos = (state.x, state.y);
 
         // 查找附近可拾取的物品（1 格内，同地图）
+        const OWNERSHIP_TICKS: u64 = 300; // ~30 秒保护期
         let pickup_idx = self.ground_items.iter().position(|gi| {
-            gi.map_index == state.map_index
-                && (gi.x - player_pos.0).abs() <= 1
-                && (gi.y - player_pos.1).abs() <= 1
+            if gi.map_index != state.map_index { return false; }
+            if (gi.x - player_pos.0).abs() > 1 { return false; }
+            if (gi.y - player_pos.1).abs() > 1 { return false; }
+            // 所有权保护：保护期内只有掉落者可拾取
+            if let Some(dropper) = gi.dropper_session {
+                if self.tick_count < gi.drop_tick + OWNERSHIP_TICKS && dropper != msg.session_id {
+                    return false;
+                }
+            }
+            true
         });
 
         if let Some(idx) = pickup_idx {
