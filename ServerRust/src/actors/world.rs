@@ -9,6 +9,7 @@ use kameo::prelude::Context;
 use kameo::message::Message;
 use tokio::time::{interval, Duration};
 use tracing::{info, debug, warn};
+use chrono::Timelike;
 
 use crate::actors::player::{PlayerActor, PlayerState, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, SetPlayerState, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, DeductMP, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing, ClearReincarnation, ClearReincarnationHost, ReviveAtHalfHp};
 use crate::actors::inventory::{EquipmentSlot, GroundItem, PlayerInventory, generate_item_uid};
@@ -981,6 +982,19 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKMAP" => {
+                        let map_name = parts.next().unwrap_or("").to_string();
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let current_map = self.map_infos.get(&(state.map_index as i32))
+                                    .map(|m| m.file_name.as_str())
+                                    .unwrap_or("");
+                                if !current_map.eq_ignore_ascii_case(&map_name) {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "CHECKHP" => {
                         let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
                         let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
@@ -990,6 +1004,15 @@ impl WorldActor {
                                     skip = true;
                                 }
                             }
+                        }
+                    }
+                    "CHECKTIME" => {
+                        let min_hour = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                        let max_hour = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(23);
+                        let now = chrono::Local::now();
+                        let hour = now.hour();
+                        if hour < min_hour || hour > max_hour {
+                            skip = true;
                         }
                     }
                     "RAND" => {
