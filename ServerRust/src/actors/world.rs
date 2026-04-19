@@ -1120,6 +1120,37 @@ impl WorldActor {
                             let _ = record.actor_ref.ask(crate::actors::player::RepairAllEquipment).await;
                         }
                     }
+                    "RESURRECT" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.is_dead {
+                                    let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
+                                    send_system_message(&self.gate_ref, session_id, "你已复活！");
+                                    debug!("NPC resurrect: {}", state.name);
+                                }
+                            }
+                        }
+                    }
+                    "HEAL" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.hp < state.max_hp || state.mp < state.max_mp {
+                                    state.hp = state.max_hp;
+                                    state.mp = state.max_mp;
+                                    let (hp, mp) = (state.hp, state.mp);
+                                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state }).await;
+                                    let mut body = Vec::new();
+                                    body.extend_from_slice(&hp.to_le_bytes());
+                                    body.extend_from_slice(&mp.to_le_bytes());
+                                    let _ = self.gate_ref.ask(SendToClient {
+                                        session_id,
+                                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
+                                    });
+                                    send_system_message(&self.gate_ref, session_id, "你的生命和魔法已恢复！");
+                                }
+                            }
+                        }
+                    }
                     "STORAGE" => {
                         if let Some(record) = self.players.get(&session_id) {
                             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
