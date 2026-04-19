@@ -1012,6 +1012,30 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKBUFF" => {
+                        let buff_type_str = parts.next().unwrap_or("").to_uppercase();
+                        let target_buff = match buff_type_str.as_str() {
+                            "HPREGEN" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::HpRegen { amount_per_tick: 0 })),
+                            "MPREGEN" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::MpRegen { amount_per_tick: 0 })),
+                            "ATTACK" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::AttackBoost { bonus: 0 })),
+                            "DEFENSE" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::DefenseBoost { bonus: 0 })),
+                            "POISON" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::Poison { damage_per_tick: 0 })),
+                            "SILENCE" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::Silence)),
+                            "STUN" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::Stun)),
+                            "INVISIBILITY" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility)),
+                            _ => None,
+                        };
+                        if let Some(target_tag) = target_buff {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let has_buff = state.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == target_tag);
+                                    if !has_buff {
+                                        skip = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
                     "CHECKMAP" => {
                         let map_name = parts.next().unwrap_or("").to_string();
                         if let Some(record) = self.players.get(&session_id) {
@@ -1261,6 +1285,10 @@ impl WorldActor {
                             goto_target = Some(target.to_string());
                             break;
                         }
+                    }
+                    "CLOSE" => {
+                        output.clear();
+                        break;
                     }
                     "BREAK" => break,
                     "TELEPORT" | "MOVE" => {
