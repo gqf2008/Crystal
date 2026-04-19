@@ -53,18 +53,28 @@ pub struct PlayerState {
     pub max_experience: i64,
     /// 当前 HP
     pub hp: i32,
-    /// 最大 HP
+    /// 最大 HP（基础+装备加成后的总值）
     pub max_hp: i32,
     /// 当前 MP
     pub mp: i32,
-    /// 最大 MP
+    /// 最大 MP（基础+装备加成后的总值）
     pub max_mp: i32,
-    /// 最小攻击力
+    /// 最小攻击力（基础+装备加成后的总值）
     pub min_attack: i32,
-    /// 最大攻击力
+    /// 最大攻击力（基础+装备加成后的总值）
     pub max_attack: i32,
-    /// 防御力
+    /// 防御力（基础+装备加成后的总值）
     pub defence: i32,
+    /// 装备加成：最小攻击力
+    pub bonus_min_attack: i32,
+    /// 装备加成：最大攻击力
+    pub bonus_max_attack: i32,
+    /// 装备加成：防御力
+    pub bonus_defence: i32,
+    /// 装备加成：最大 HP
+    pub bonus_max_hp: i32,
+    /// 装备加成：最大 MP
+    pub bonus_max_mp: i32,
     /// 背包 + 装备 + 金币
     pub inventory: PlayerInventory,
     /// 所属组队 ID（None = 无组队）
@@ -162,6 +172,11 @@ impl PlayerActor {
                 min_attack: 5,
                 max_attack: 10,
                 defence: 2,
+                bonus_min_attack: 0,
+                bonus_max_attack: 0,
+                bonus_defence: 0,
+                bonus_max_hp: 0,
+                bonus_max_mp: 0,
                 inventory: PlayerInventory::new(),
                 group_id: None,
                 friend_list: FriendList::new(),
@@ -723,6 +738,51 @@ impl Message<TickBuff> for PlayerActor {
     }
 }
 
+/// 设置装备属性加成（WorldActor 计算后下发）
+pub struct SetStatBonuses {
+    pub bonus_min_attack: i32,
+    pub bonus_max_attack: i32,
+    pub bonus_defence: i32,
+    pub bonus_max_hp: i32,
+    pub bonus_max_mp: i32,
+}
+
+impl Message<SetStatBonuses> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetStatBonuses,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let d_min = msg.bonus_min_attack - self.state.bonus_min_attack;
+        let d_max = msg.bonus_max_attack - self.state.bonus_max_attack;
+        let d_def = msg.bonus_defence - self.state.bonus_defence;
+        let d_hp = msg.bonus_max_hp - self.state.bonus_max_hp;
+        let d_mp = msg.bonus_max_mp - self.state.bonus_max_mp;
+
+        if d_min != 0 || d_max != 0 || d_def != 0 || d_hp != 0 || d_mp != 0 {
+            self.state.min_attack += d_min;
+            self.state.max_attack += d_max;
+            self.state.defence += d_def;
+            self.state.max_hp += d_hp;
+            self.state.max_mp += d_mp;
+
+            //  Clamp HP/MP within new max
+            self.state.hp = self.state.hp.min(self.state.max_hp);
+            self.state.mp = self.state.mp.min(self.state.max_mp);
+
+            self.state.bonus_min_attack = msg.bonus_min_attack;
+            self.state.bonus_max_attack = msg.bonus_max_attack;
+            self.state.bonus_defence = msg.bonus_defence;
+            self.state.bonus_max_hp = msg.bonus_max_hp;
+            self.state.bonus_max_mp = msg.bonus_max_mp;
+
+            self.send_user_information_refresh();
+        }
+    }
+}
+
 /// 攻击结果（返回给 WorldActor 用于广播）
 pub struct AttackResult {
     pub object_id: u32,
@@ -730,6 +790,44 @@ pub struct AttackResult {
     pub y: i32,
     pub direction: u8,
     pub spell: u8,
+}
+
+/// 损耗装备耐久
+pub struct DamageEquipment {
+    pub slot: crate::actors::inventory::EquipmentSlot,
+    pub amount: u16,
+}
+
+impl Message<DamageEquipment> for PlayerActor {
+    type Reply = bool; // true = item broke
+
+    async fn handle(
+        &mut self,
+        msg: DamageEquipment,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let broke = if let Some(ref mut item) = self.state.inventory.equipment[msg.slot as usize] {
+            if item.current_dura > msg.amount {
+                item.current_dura -= msg.amount;
+                item.dura_changed = true;
+                false
+            } else {
+                item.current_dura = 0;
+                item.dura_changed = true;
+                true
+            }
+        } else {
+            false
+        };
+
+        if broke {
+            self.state.inventory.equipment[msg.slot as usize] = None;
+            self.send_equipment_changed();
+            self.send_inventory_changed();
+        }
+
+        broke
+    }
 }
 
 // ============================================================
@@ -1725,6 +1823,11 @@ mod tests {
             min_attack: 5,
             max_attack: 10,
             defence: 2,
+            bonus_min_attack: 0,
+            bonus_max_attack: 0,
+            bonus_defence: 0,
+            bonus_max_hp: 0,
+            bonus_max_mp: 0,
             inventory: PlayerInventory::new(),
             group_id: None,
             friend_list: FriendList::new(),

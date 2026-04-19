@@ -1298,6 +1298,7 @@ impl Message<Tick> for WorldActor {
             let mut moved_monsters = Vec::new();
             let mut moved_targets: HashSet<(i32, i32)> = HashSet::new();
             let mut death_drops: Vec<(u64, i32, i32, u16)> = Vec::new();
+            let mut broken_armor: Vec<(u64, EquipmentSlot)> = Vec::new();
             // 预收集怪物当前位置（用于碰撞检测）
             let monster_positions: HashSet<(i32, i32)> = self.monsters.values().map(|m| (m.x, m.y)).collect();
 
@@ -1425,11 +1426,37 @@ impl Message<Tick> for WorldActor {
                         if !target_in_safe {
                             // 伤害
                             if let Some(record) = self.players.get(&target_session) {
-                                if record.actor_ref.ask(TakeDamage {
+                                let died = record.actor_ref.ask(TakeDamage {
                                     attacker_id: monster.object_id,
                                     attacker_session: target_session,
                                     damage,
-                                }).await.unwrap_or(false) {
+                                }).await.unwrap_or(false);
+
+                                // 装备耐久损耗（存活时）
+                                if !died {
+                                    let armor_slots = [
+                                        EquipmentSlot::Armour,
+                                        EquipmentSlot::Helmet,
+                                        EquipmentSlot::BraceletL,
+                                        EquipmentSlot::BraceletR,
+                                        EquipmentSlot::RingL,
+                                        EquipmentSlot::RingR,
+                                        EquipmentSlot::Shoes,
+                                        EquipmentSlot::Necklace,
+                                    ];
+                                    let slot = armor_slots[fastrand::usize(0..armor_slots.len())];
+                                    let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
+                                        slot,
+                                        amount: 1,
+                                    }).await.unwrap_or(false);
+                                    if broke {
+                                        debug!("Player session={} {:?} broke from monster damage!", target_session, slot);
+                                        // 延迟到怪物循环结束后广播（避免借用冲突）
+                                        broken_armor.push((target_session, slot));
+                                    }
+                                }
+
+                                if died {
                                     if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
                                         let mut died_body = Vec::new();
                                         died_body.extend_from_slice(&victim.object_id.to_le_bytes());
@@ -1505,6 +1532,41 @@ impl Message<Tick> for WorldActor {
                             session_id: *session_id,
                             data: walk_packet.clone(),
                         });
+                    }
+                }
+            }
+
+            // 处理破损装备广播（避免在怪物循环内借用 self）
+            for (target_session, slot) in &broken_armor {
+                if let Some(record) = self.players.get(target_session) {
+                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
+                            &state.inventory.equipment, &self.item_infos,
+                        );
+                        let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
+                            bonus_min_attack: b_min,
+                            bonus_max_attack: b_max,
+                            bonus_defence: b_def,
+                            bonus_max_hp: b_hp,
+                            bonus_max_mp: b_mp,
+                        }).await;
+                        if *slot == EquipmentSlot::Weapon || *slot == EquipmentSlot::Armour {
+                            let weapon_shape = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                                .and_then(|item| self.item_infos.get(&item.item_index))
+                                .map(|info| info.shape as i16).unwrap_or(-1);
+                            let armor_shape = state.inventory.get_equipment(EquipmentSlot::Armour)
+                                .and_then(|item| self.item_infos.get(&item.item_index))
+                                .map(|info| info.shape as i16).unwrap_or(0);
+                            let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                                .and_then(|item| self.item_infos.get(&item.item_index))
+                                .map(|info| info.effect as i16).unwrap_or(0);
+                            for other in self.other_players(*target_session) {
+                                send_player_update(
+                                    &self.gate_ref, other.session_id, state.object_id,
+                                    0, weapon_shape, weapon_effect, armor_shape, 0,
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -1866,6 +1928,11 @@ impl Message<StartGameRequest> for WorldActor {
                 min_attack: 5,
                 max_attack: 10,
                 defence: 2,
+                bonus_min_attack: 0,
+                bonus_max_attack: 0,
+                bonus_defence: 0,
+                bonus_max_hp: 0,
+                bonus_max_mp: 0,
                 inventory: PlayerInventory::new(),
                 group_id: None,
                 friend_list: FriendList::new(),
@@ -1940,6 +2007,16 @@ impl Message<StartGameRequest> for WorldActor {
             }
         }
 
+        // 初始化装备属性加成（从已装备物品计算）
+        let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
+            &loaded_state.inventory.equipment, &self.item_infos,
+        );
+        loaded_state.bonus_min_attack = b_min;
+        loaded_state.bonus_max_attack = b_max;
+        loaded_state.bonus_defence = b_def;
+        loaded_state.bonus_max_hp = b_hp;
+        loaded_state.bonus_max_mp = b_mp;
+
         let _ = player_ref.ask(SetPlayerState { state: loaded_state.clone() });
 
         self.players.insert(msg.session_id, PlayerRecord {
@@ -1963,9 +2040,19 @@ impl Message<StartGameRequest> for WorldActor {
 
         for existing in &existing_players {
             if let Ok(Some(ep_state)) = existing.actor_ref.ask(GetPlayerState).await {
+                let ep_weapon = ep_state.inventory.get_equipment(EquipmentSlot::Weapon)
+                    .and_then(|item| self.item_infos.get(&item.item_index))
+                    .map(|info| info.shape as i16).unwrap_or(-1);
+                let ep_armor = ep_state.inventory.get_equipment(EquipmentSlot::Armour)
+                    .and_then(|item| self.item_infos.get(&item.item_index))
+                    .map(|info| info.shape as i16).unwrap_or(0);
+                let ep_weapon_effect = ep_state.inventory.get_equipment(EquipmentSlot::Weapon)
+                    .and_then(|item| self.item_infos.get(&item.item_index))
+                    .map(|info| info.effect as i16).unwrap_or(0);
                 let packet = build_object_player_packet(
                     &ep_state.name, ep_state.object_id, ep_state.x, ep_state.y, ep_state.direction, 1,
                     name_colour_for_pk(ep_state.pk_points),
+                    ep_weapon, ep_weapon_effect, ep_armor,
                 );
                 let _ = self.gate_ref.ask(SendToClient {
                     session_id: msg.session_id,
@@ -1975,9 +2062,19 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // 向已有玩家发送新玩家的 ObjectPlayer
+        let new_weapon = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(-1);
+        let new_armor = loaded_state.inventory.get_equipment(EquipmentSlot::Armour)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(0);
+        let new_weapon_effect = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.effect as i16).unwrap_or(0);
         let new_player_packet = build_object_player_packet(
             &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, 1,
             name_colour_for_pk(loaded_state.pk_points),
+            new_weapon, new_weapon_effect, new_armor,
         );
         for existing in &existing_players {
             let _ = self.gate_ref.ask(SendToClient {
@@ -2476,6 +2573,54 @@ impl Message<WorldAttackRequest> for WorldActor {
 
                     hit_monster = true;
                     break; // 一次只打一只
+                }
+            }
+
+            // 武器耐久损耗（每次攻击一次）
+            if hit_monster {
+                if let Some(record) = self.players.get(&msg.session_id) {
+                    let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
+                        slot: EquipmentSlot::Weapon,
+                        amount: 1,
+                    }).await.unwrap_or(false);
+                    if broke {
+                        debug!("Player {} weapon broke!", result.object_id);
+                        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                            let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
+                                &state.inventory.equipment, &self.item_infos,
+                            );
+                            let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
+                                bonus_min_attack: b_min,
+                                bonus_max_attack: b_max,
+                                bonus_defence: b_def,
+                                bonus_max_hp: b_hp,
+                                bonus_max_mp: b_mp,
+                            }).await;
+                            let weapon_shape = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                                .and_then(|item| self.item_infos.get(&item.item_index))
+                                .map(|info| info.shape as i16).unwrap_or(-1);
+                            let armor_shape = state.inventory.get_equipment(EquipmentSlot::Armour)
+                                .and_then(|item| self.item_infos.get(&item.item_index))
+                                .map(|info| info.shape as i16).unwrap_or(0);
+                            let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                                .and_then(|item| self.item_infos.get(&item.item_index))
+                                .map(|info| info.effect as i16).unwrap_or(0);
+                            let light: u8 = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                                .and_then(|item| self.item_infos.get(&item.item_index))
+                                .map(|info| info.light as u8)
+                                .unwrap_or(0)
+                                .max(state.inventory.get_equipment(EquipmentSlot::Armour)
+                                    .and_then(|item| self.item_infos.get(&item.item_index))
+                                    .map(|info| info.light as u8)
+                                    .unwrap_or(0));
+                            for other in self.other_players(msg.session_id) {
+                                send_player_update(
+                                    &self.gate_ref, other.session_id, state.object_id,
+                                    light, weapon_shape, weapon_effect, armor_shape, 0,
+                                );
+                            }
+                        }
+                    }
                 }
             }
 
@@ -3136,6 +3281,48 @@ impl Message<EquipItemRequest> for WorldActor {
             Some((_old_equipment, _new_uid)) => {
                 debug!("Player session={} equipped item uid={} to slot {}", msg.session_id, msg.unique_id, msg.slot);
                 send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, true);
+
+                // 重新计算装备加成
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
+                        &state.inventory.equipment, &self.item_infos,
+                    );
+                    let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
+                        bonus_min_attack: b_min,
+                        bonus_max_attack: b_max,
+                        bonus_defence: b_def,
+                        bonus_max_hp: b_hp,
+                        bonus_max_mp: b_mp,
+                    }).await;
+
+                    // 广播装备视觉变化
+                    let weapon_shape = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                        .and_then(|item| self.item_infos.get(&item.item_index))
+                        .map(|info| info.shape as i16)
+                        .unwrap_or(-1);
+                    let armor_shape = state.inventory.get_equipment(EquipmentSlot::Armour)
+                        .and_then(|item| self.item_infos.get(&item.item_index))
+                        .map(|info| info.shape as i16)
+                        .unwrap_or(0);
+                    let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                        .and_then(|item| self.item_infos.get(&item.item_index))
+                        .map(|info| info.effect as i16)
+                        .unwrap_or(0);
+                    let light: u8 = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                        .and_then(|item| self.item_infos.get(&item.item_index))
+                        .map(|info| info.light as u8)
+                        .unwrap_or(0)
+                        .max(state.inventory.get_equipment(EquipmentSlot::Armour)
+                            .and_then(|item| self.item_infos.get(&item.item_index))
+                            .map(|info| info.light as u8)
+                            .unwrap_or(0));
+                    for other in self.other_players(msg.session_id) {
+                        send_player_update(
+                            &self.gate_ref, other.session_id, state.object_id,
+                            light, weapon_shape, weapon_effect, armor_shape, 0,
+                        );
+                    }
+                }
             }
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "装备失败");
@@ -3173,6 +3360,48 @@ impl Message<RemoveItemRequest> for WorldActor {
             Ok(true) => {
                 debug!("Player session={} unequipped item uid={} from slot {:?}", msg.session_id, msg.unique_id, slot);
                 send_remove_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, true);
+
+                // 重新计算装备加成
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
+                        &state.inventory.equipment, &self.item_infos,
+                    );
+                    let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
+                        bonus_min_attack: b_min,
+                        bonus_max_attack: b_max,
+                        bonus_defence: b_def,
+                        bonus_max_hp: b_hp,
+                        bonus_max_mp: b_mp,
+                    }).await;
+
+                    // 广播装备视觉变化
+                    let weapon_shape = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                        .and_then(|item| self.item_infos.get(&item.item_index))
+                        .map(|info| info.shape as i16)
+                        .unwrap_or(-1);
+                    let armor_shape = state.inventory.get_equipment(EquipmentSlot::Armour)
+                        .and_then(|item| self.item_infos.get(&item.item_index))
+                        .map(|info| info.shape as i16)
+                        .unwrap_or(0);
+                    let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                        .and_then(|item| self.item_infos.get(&item.item_index))
+                        .map(|info| info.effect as i16)
+                        .unwrap_or(0);
+                    let light: u8 = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                        .and_then(|item| self.item_infos.get(&item.item_index))
+                        .map(|info| info.light as u8)
+                        .unwrap_or(0)
+                        .max(state.inventory.get_equipment(EquipmentSlot::Armour)
+                            .and_then(|item| self.item_infos.get(&item.item_index))
+                            .map(|info| info.light as u8)
+                            .unwrap_or(0));
+                    for other in self.other_players(msg.session_id) {
+                        send_player_update(
+                            &self.gate_ref, other.session_id, state.object_id,
+                            light, weapon_shape, weapon_effect, armor_shape, 0,
+                        );
+                    }
+                }
             }
             _ => {
                 send_system_message(&self.gate_ref, msg.session_id, "背包已满，无法卸下装备");
@@ -4883,6 +5112,11 @@ impl Message<NewCharacterRequest> for WorldActor {
             min_attack: 5,
             max_attack: 10,
             defence: 2,
+            bonus_min_attack: 0,
+            bonus_max_attack: 0,
+            bonus_defence: 0,
+            bonus_max_hp: 0,
+            bonus_max_mp: 0,
             inventory: PlayerInventory::new(),
             group_id: None,
             friend_list: FriendList::new(),
@@ -6101,6 +6335,31 @@ fn send_use_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: 
     });
 }
 
+/// 计算装备属性加成总和
+fn calculate_equipment_bonuses(
+    equipment: &[Option<mir2_shared::data::item::UserItem>],
+    item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+) -> (i32, i32, i32, i32, i32) {
+    use mir2_shared::enums::Stat;
+    let mut min_atk = 0i32;
+    let mut max_atk = 0i32;
+    let mut def = 0i32;
+    let mut hp = 0i32;
+    let mut mp = 0i32;
+
+    for eq in equipment.iter().flatten() {
+        if let Some(info) = item_infos.get(&eq.item_index) {
+            min_atk += info.stats.get(&(Stat::MinDC as u8)).copied().unwrap_or(0);
+            max_atk += info.stats.get(&(Stat::MaxDC as u8)).copied().unwrap_or(0);
+            def += info.stats.get(&(Stat::MaxAC as u8)).copied().unwrap_or(0);
+            hp += info.stats.get(&(Stat::HP as u8)).copied().unwrap_or(0);
+            mp += info.stats.get(&(Stat::MP as u8)).copied().unwrap_or(0);
+        }
+    }
+
+    (min_atk, max_atk, def, hp, mp)
+}
+
 fn send_equip_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, slot: i32, success: bool) {
     let mut body = Vec::new();
     body.push(grid);
@@ -6476,6 +6735,7 @@ fn build_user_information_packet(state: &PlayerState) -> Vec<u8> {
 fn build_object_player_packet(
     name: &str, object_id: u32, x: i32, y: i32, direction: u8, level: u16,
     name_colour: i32,
+    weapon: i16, weapon_effect: i16, armor: i16,
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
@@ -6493,9 +6753,9 @@ fn build_object_player_packet(
     body.push(direction);                               // direction
     body.push(0u8);                                     // hair
     body.push(1u8);                                     // light
-    body.extend_from_slice(&0i16.to_le_bytes());        // weapon
-    body.extend_from_slice(&0i16.to_le_bytes());        // weapon_effect
-    body.extend_from_slice(&0i16.to_le_bytes());        // armour
+    body.extend_from_slice(&weapon.to_le_bytes());        // weapon
+    body.extend_from_slice(&weapon_effect.to_le_bytes()); // weapon_effect
+    body.extend_from_slice(&armor.to_le_bytes());         // armour
     body.extend_from_slice(&0u16.to_le_bytes());        // poison=None (client reads u16)
     body.push(0u8);                                     // dead=false
     body.push(0u8);                                     // hidden=false
@@ -6513,6 +6773,31 @@ fn build_object_player_packet(
     body.extend_from_slice(&0u16.to_le_bytes());        // level_effects=None (client reads u16)
 
     build_packet_bytes(ServerPacketIds::ObjectPlayer as i16, &body)
+}
+
+/// 发送 PlayerUpdate 数据包（装备视觉变化）
+fn send_player_update(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    object_id: u32,
+    light: u8,
+    weapon: i16,
+    weapon_effect: i16,
+    armor: i16,
+    wings_effect: u8,
+) {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    body.extend_from_slice(&object_id.to_le_bytes());
+    body.push(light);
+    body.extend_from_slice(&weapon.to_le_bytes());
+    body.extend_from_slice(&weapon_effect.to_le_bytes());
+    body.extend_from_slice(&armor.to_le_bytes());
+    body.push(wings_effect);
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(ServerPacketIds::PlayerUpdate as i16, &body),
+    });
 }
 
 /// 构建 ObjectColourChanged 数据包

@@ -694,6 +694,11 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         min_attack: row.get("min_attack"),
         max_attack: row.get("max_attack"),
         defence: row.get("defence"),
+        bonus_min_attack: 0,
+        bonus_max_attack: 0,
+        bonus_defence: 0,
+        bonus_max_hp: 0,
+        bonus_max_mp: 0,
         inventory,
         group_id: row.get::<Option<i64>, _>("group_id").map(|v| v as u64),
         friend_list,
@@ -1466,6 +1471,7 @@ pub struct ItemInfo {
     pub can_awakening: bool,
     pub slots: i32,
     pub stats_json: String,
+    pub stats: HashMap<u8, i32>,
     pub has_tool_tip: bool,
     pub tool_tip: Option<String>,
 }
@@ -1743,35 +1749,44 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
 /// Load all item infos from DB
 pub async fn load_item_infos(pool: &DbPool) -> anyhow::Result<Vec<ItemInfo>> {
     let rows = sqlx::query("SELECT * FROM item_infos ORDER BY index").fetch_all(pool).await?;
-    Ok(rows.into_iter().map(|r| ItemInfo {
-        index: r.get("index"),
-        name: r.get("name"),
-        item_type: r.get("type"),
-        grade: r.get("grade"),
-        required_type: r.get("required_type"),
-        required_class: r.get("required_class"),
-        required_gender: r.get("required_gender"),
-        set_type: r.get("set_type"),
-        shape: r.get("shape"),
-        weight: r.get("weight"),
-        light: r.get("light"),
-        required_amount: r.get("required_amount"),
-        image: r.get("image"),
-        durability: r.get("durability"),
-        stack_size: r.get("stack_size"),
-        price: r.get::<i64, _>("price") as u32,
-        start_item: r.get::<i32, _>("start_item") != 0,
-        effect: r.get("effect"),
-        bool_flags: r.get("bool_flags"),
-        bind_mode: r.get("bind_mode"),
-        special_mode: r.get("special_mode"),
-        random_stats_id: r.get("random_stats_id"),
-        can_fast_run: r.get::<i32, _>("can_fast_run") != 0,
-        can_awakening: r.get::<i32, _>("can_awakening") != 0,
-        slots: r.get("slots"),
-        stats_json: r.get("stats_json"),
-        has_tool_tip: r.get::<i32, _>("has_tool_tip") != 0,
-        tool_tip: r.get::<Option<String>, _>("tool_tip"),
+    Ok(rows.into_iter().map(|r| {
+        let stats_json: String = r.get("stats_json");
+        let stats: HashMap<u8, i32> = serde_json::from_str(&stats_json)
+            .unwrap_or_else(|e| {
+                tracing::warn!("Failed to parse item stats JSON for index {}: {}", r.get::<i32, _>("index"), e);
+                HashMap::new()
+            });
+        ItemInfo {
+            index: r.get("index"),
+            name: r.get("name"),
+            item_type: r.get("type"),
+            grade: r.get("grade"),
+            required_type: r.get("required_type"),
+            required_class: r.get("required_class"),
+            required_gender: r.get("required_gender"),
+            set_type: r.get("set_type"),
+            shape: r.get("shape"),
+            weight: r.get("weight"),
+            light: r.get("light"),
+            required_amount: r.get("required_amount"),
+            image: r.get("image"),
+            durability: r.get("durability"),
+            stack_size: r.get("stack_size"),
+            price: r.get::<i64, _>("price") as u32,
+            start_item: r.get::<i32, _>("start_item") != 0,
+            effect: r.get("effect"),
+            bool_flags: r.get("bool_flags"),
+            bind_mode: r.get("bind_mode"),
+            special_mode: r.get("special_mode"),
+            random_stats_id: r.get("random_stats_id"),
+            can_fast_run: r.get::<i32, _>("can_fast_run") != 0,
+            can_awakening: r.get::<i32, _>("can_awakening") != 0,
+            slots: r.get("slots"),
+            stats_json,
+            stats,
+            has_tool_tip: r.get::<i32, _>("has_tool_tip") != 0,
+            tool_tip: r.get::<Option<String>, _>("tool_tip"),
+        }
     }).collect())
 }
 
