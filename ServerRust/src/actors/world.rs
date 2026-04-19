@@ -1675,6 +1675,28 @@ impl WorldActor {
                             if let Some(record) = self.players.get(&session_id) {
                                 if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
                                     if !state.is_mounted {
+                                        // Check map mount restrictions
+                                        if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
+                                            if mi.no_mount {
+                                                send_system_message(&self.gate_ref, session_id, "该地图禁止骑乘坐骑");
+                                                continue;
+                                            }
+                                            if mi.need_bridle {
+                                                let has_bridle = state.inventory.backpack.iter().any(|slot| {
+                                                    slot.as_ref().and_then(|s| {
+                                                        self.item_infos.get(&s.item.item_index)
+                                                            .map(|info| {
+                                                                let name = info.name.to_lowercase();
+                                                                name.contains("bridle") || name.contains("马鞭")
+                                                            })
+                                                    }).unwrap_or(false)
+                                                });
+                                                if !has_bridle {
+                                                    send_system_message(&self.gate_ref, session_id, "你需要马鞭才能在此地图骑乘坐骑");
+                                                    continue;
+                                                }
+                                            }
+                                        }
                                         state.is_mounted = true;
                                         state.mount_type = mount_type;
                                         let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
@@ -2960,6 +2982,60 @@ impl Message<Tick> for WorldActor {
                 if let Some(record) = self.players.get(&session_id) {
                     let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
                 }
+            }
+        }
+
+        // --- 地图环境伤害（每 20 ticks = 2秒） ---
+        if self.tick_count % 20 == 0 {
+            for (session_id, record) in &self.players {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if state.is_dead { continue; }
+                    if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
+                        if mi.fire || mi.lightning {
+                            let in_safe = self.maps.get(&state.map_index)
+                                .map(|m| m.is_safe_zone(state.x, state.y))
+                                .unwrap_or(false);
+                            if in_safe { continue; }
+                            let damage = if mi.fire { mi.fire_damage } else { mi.lightning_damage };
+                            if damage > 0 {
+                                let died = record.actor_ref.ask(TakeDamage {
+                                    attacker_id: 0, // environment
+                                    attacker_session: 0,
+                                    damage,
+                                }).await.unwrap_or(false);
+                                if died {
+                                    self.player_death_queue.insert(*session_id, self.tick_count);
+                                    broadcast_system_message(&self.gate_ref, &self.players,
+                                        &format!("{} 在{}中倒下了", state.name,
+                                            if mi.fire { "火海" } else { "雷暴" }));
+                                } else {
+                                    let msg = if mi.fire { "你受到了火焰伤害！" } else { "你受到了闪电伤害！" };
+                                    send_system_message(&self.gate_ref, *session_id, msg);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- 自动下坐骑：进入禁止坐骑地图时（每 20 ticks） ---
+        if self.tick_count % 20 == 0 {
+            let mut to_dismount: Vec<u64> = Vec::new();
+            for (session_id, record) in &self.players {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if state.is_mounted {
+                        if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
+                            if mi.no_mount {
+                                to_dismount.push(*session_id);
+                            }
+                        }
+                    }
+                }
+            }
+            for session_id in to_dismount {
+                self.dismount_player(session_id).await;
+                send_system_message(&self.gate_ref, session_id, "该地图禁止骑乘坐骑，已自动下坐骑");
             }
         }
 
@@ -4798,6 +4874,34 @@ impl Message<NPCCallRequest> for WorldActor {
                     let today_short = &today[..3];
                     if !dow.is_empty() && !dow.contains(&today) && !dow.contains(today_short) {
                         debug!("NPC {} not available on {}", npc.name, today);
+                        return;
+                    }
+                }
+                // Time-based visibility: hour_start/minute_start to hour_end/minute_end
+                if npc_db.time_visible > 0 {
+                    let now = chrono::Local::now();
+                    let current_minutes = now.hour() as i32 * 60 + now.minute() as i32;
+                    let start_minutes = npc_db.hour_start * 60 + npc_db.minute_start;
+                    let end_minutes = npc_db.hour_end * 60 + npc_db.minute_end;
+                    let in_window = if start_minutes <= end_minutes {
+                        current_minutes >= start_minutes && current_minutes <= end_minutes
+                    } else {
+                        // Crosses midnight (e.g. 22:00 to 06:00)
+                        current_minutes >= start_minutes || current_minutes <= end_minutes
+                    };
+                    if !in_window {
+                        debug!("NPC {} not available at {}:{} (window {}:{}-{}:{})",
+                            npc.name, now.hour(), now.minute(),
+                            npc_db.hour_start, npc_db.minute_start, npc_db.hour_end, npc_db.minute_end);
+                        return;
+                    }
+                }
+                // Flag requirement check
+                if npc_db.flag_needed > 0 {
+                    let flag_key = format!("NPC_VISIBLE_{}", npc_db.flag_needed);
+                    let has_flag = player_state.flags.get(&flag_key).copied().unwrap_or(0) > 0;
+                    if !has_flag {
+                        debug!("NPC {} requires flag {}", npc.name, npc_db.flag_needed);
                         return;
                     }
                 }
