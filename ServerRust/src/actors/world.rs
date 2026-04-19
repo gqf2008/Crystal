@@ -992,6 +992,15 @@ impl WorldActor {
                             }
                         }
                     }
+                    "RAND" => {
+                        let n = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+                        if n > 1 {
+                            let roll = fastrand::u32(1..=n);
+                            if roll != 1 {
+                                skip = true;
+                            }
+                        }
+                    }
                     "CHECKMP" => {
                         let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
                         let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
