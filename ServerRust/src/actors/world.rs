@@ -2965,6 +2965,59 @@ impl Message<Tick> for WorldActor {
                                 }
                                 debug!("GroupXP: {} members split {} xp ({} each) from '{}'", group_sessions.len(), monster.xp, xp_per, monster.name);
                             }
+                            // 组队师徒/夫妻经验加成
+                            for sid in &group_sessions {
+                                if let Some(record) = self.players.get(sid) {
+                                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                        // 师徒加成
+                                        if let Some(ref mentor_name) = state.mentor_name {
+                                            for (other_sid, other_record) in &self.players {
+                                                if *other_sid == *sid { continue; }
+                                                if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
+                                                    if other_state.name.eq_ignore_ascii_case(mentor_name)
+                                                        && other_state.map_index == state.map_index {
+                                                        let dist = (other_state.x - state.x).abs() + (other_state.y - state.y).abs();
+                                                        if dist <= 12 {
+                                                            let bonus = (monster.xp as f64 * 0.10).round() as i32;
+                                                            let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
+                                                                amount: self.apply_global_exp_multiplier(bonus),
+                                                            }).await;
+                                                            let _ = other_record.actor_ref.ask(crate::actors::player::AddExperience {
+                                                                amount: self.apply_global_exp_multiplier(bonus),
+                                                            }).await;
+                                                            send_system_message(&self.gate_ref, *sid, "师徒同心，额外获得经验！");
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        // 夫妻加成
+                                        if let Some(ref spouse_name) = state.spouse_name {
+                                            for (other_sid, other_record) in &self.players {
+                                                if *other_sid == *sid { continue; }
+                                                if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
+                                                    if other_state.name.eq_ignore_ascii_case(spouse_name)
+                                                        && other_state.map_index == state.map_index {
+                                                        let dist = (other_state.x - state.x).abs() + (other_state.y - state.y).abs();
+                                                        if dist <= 12 {
+                                                            let bonus = (monster.xp as f64 * 0.10).round() as i32;
+                                                            let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
+                                                                amount: self.apply_global_exp_multiplier(bonus),
+                                                            }).await;
+                                                            let _ = other_record.actor_ref.ask(crate::actors::player::AddExperience {
+                                                                amount: self.apply_global_exp_multiplier(bonus),
+                                                            }).await;
+                                                            send_system_message(&self.gate_ref, *sid, "夫妻同心，额外获得经验！");
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             // 组队任务击杀进度
                             for sid in &group_sessions {
                                 if let Some(record) = self.players.get(sid) {
@@ -2983,6 +3036,57 @@ impl Message<Tick> for WorldActor {
                             let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
                                 amount: self.apply_global_exp_multiplier(monster.xp),
                             }).await;
+                            // 单人师徒/夫妻经验加成
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                // 师徒加成
+                                if let Some(ref mentor_name) = state.mentor_name {
+                                    for (other_sid, other_record) in &self.players {
+                                        if *other_sid == session_id { continue; }
+                                        if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
+                                            if other_state.name.eq_ignore_ascii_case(mentor_name)
+                                                && other_state.map_index == state.map_index {
+                                                let dist = (other_state.x - state.x).abs() + (other_state.y - state.y).abs();
+                                                if dist <= 12 {
+                                                    let bonus = (monster.xp as f64 * 0.10).round() as i32;
+                                                    let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
+                                                        amount: self.apply_global_exp_multiplier(bonus),
+                                                    }).await;
+                                                    let _ = other_record.actor_ref.ask(crate::actors::player::AddExperience {
+                                                        amount: self.apply_global_exp_multiplier(bonus),
+                                                    }).await;
+                                                    send_system_message(
+                                                        &self.gate_ref, session_id, "师徒同心，额外获得经验！");
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // 夫妻加成
+                                if let Some(ref spouse_name) = state.spouse_name {
+                                    for (other_sid, other_record) in &self.players {
+                                        if *other_sid == session_id { continue; }
+                                        if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
+                                            if other_state.name.eq_ignore_ascii_case(spouse_name)
+                                                && other_state.map_index == state.map_index {
+                                                let dist = (other_state.x - state.x).abs() + (other_state.y - state.y).abs();
+                                                if dist <= 12 {
+                                                    let bonus = (monster.xp as f64 * 0.10).round() as i32;
+                                                    let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
+                                                        amount: self.apply_global_exp_multiplier(bonus),
+                                                    }).await;
+                                                    let _ = other_record.actor_ref.ask(crate::actors::player::AddExperience {
+                                                        amount: self.apply_global_exp_multiplier(bonus),
+                                                    }).await;
+                                                    send_system_message(
+                                                        &self.gate_ref, session_id, "夫妻同心，额外获得经验！");
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             // 单人任务击杀进度
                             let updates = record.actor_ref.ask(crate::actors::player::ProcessMonsterKill {
                                 monster_index: monster.monster_index,
