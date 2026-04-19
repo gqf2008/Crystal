@@ -257,6 +257,10 @@ enum MonsterAiType {
     Ranged,
     /// 法师：保持距离进行魔法远程攻击
     Mage,
+    /// 治疗者：治疗附近受伤的怪物
+    Healer,
+    /// 召唤者：低血量时召唤援军
+    Summoner,
 }
 
 impl MonsterAiType {
@@ -269,6 +273,8 @@ impl MonsterAiType {
             6 => Self::Guard,
             10 | 11 | 12 => Self::Ranged,
             20 | 21 | 22 => Self::Mage,
+            30 | 31 => Self::Healer,
+            40 | 41 => Self::Summoner,
             _ => Self::Aggressive,
         }
     }
@@ -303,6 +309,8 @@ impl MonsterAiProfile {
             MonsterAiType::Boss => (view_range * 2, 2, 3, 1),
             MonsterAiType::Ranged => (view_range, 4, 6, 2),
             MonsterAiType::Mage => (view_range, 6, 8, 2),
+            MonsterAiType::Healer => (view_range, 4, 8, 2),
+            MonsterAiType::Summoner => (view_range, 1, 5, 2),
         };
         Self {
             ai_type,
@@ -353,6 +361,8 @@ struct MonsterState {
     pub next_attack_tick: u64,
     /// 下次可移动的 tick
     pub next_move_tick: u64,
+    /// 下次可召唤的 tick（Summoner 用）
+    pub next_summon_tick: u64,
     /// AI 配置（创建时从 DB 加载）
     pub ai_profile: MonsterAiProfile,
     /// 当前 AI 状态
@@ -1885,6 +1895,13 @@ impl Message<Tick> for WorldActor {
             let mut broken_armor: Vec<(u64, EquipmentSlot)> = Vec::new();
             // 预收集怪物当前位置（用于碰撞检测）
             let monster_positions: HashSet<(i32, i32)> = self.monsters.values().map(|m| (m.x, m.y)).collect();
+            // 预收集怪物快照（用于 Healer AI 寻找受伤盟友）
+            let monster_snapshot: Vec<(u32, i32, i32, i32, i32, u16, i32, String, u16, u8)> = self.monsters.values()
+                .map(|m| (m.object_id, m.x, m.y, m.hp, m.max_hp, m.map_index, m.monster_index, m.name.clone(), m.image, m.direction))
+                .collect();
+            // Healer 治疗动作和 Summoner 召唤动作（在循环后应用）
+            let mut heal_actions: Vec<(u32, i32)> = Vec::new();
+            let mut summon_spawns: Vec<MonsterSpawn> = Vec::new();
 
             for (oid, monster) in &mut self.monsters {
                 let profile = &monster.ai_profile;
@@ -1962,13 +1979,97 @@ impl Message<Tick> for WorldActor {
                         monster.next_move_tick = self.tick_count + profile.move_interval;
                         monster.ai_state = MonsterAiState::Flee;
                     } else if dist <= profile.attack_range && can_attack {
-                        // 攻击
-                        let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
-                        let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(7)) as i32 % dmg_range)
-                            + monster.min_dmg;
-                        debug!("Monster '{}' (#{}) attacks Player {} for {} dmg [AI={:?}]", monster.name, *oid, target_session, damage, profile.ai_type);
-                        monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
-                        monster.ai_state = MonsterAiState::Attack;
+                        // Healer AI：优先治疗附近受伤的怪物
+                        let mut did_heal = false;
+                        if profile.ai_type == MonsterAiType::Healer {
+                            let mut best_target: Option<(u32, i32)> = None; // (oid, deficit)
+                            for (snap_oid, sx, sy, shp, smax, smap, _, _, _, _) in &monster_snapshot {
+                                if *snap_oid == *oid { continue; }
+                                if *smap != monster.map_index { continue; }
+                                let dist_ally = (monster.x - sx).abs() + (monster.y - sy).abs();
+                                if dist_ally <= profile.aggro_range && *shp < *smax {
+                                    let deficit = *smax - *shp;
+                                    if best_target.is_none_or(|(_, d)| deficit > d) {
+                                        best_target = Some((*snap_oid, deficit));
+                                    }
+                                }
+                            }
+                            if let Some((target_oid, _)) = best_target {
+                                let heal_amount = (monster.max_hp / 4).max(10);
+                                heal_actions.push((target_oid, heal_amount));
+                                monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                                monster.ai_state = MonsterAiState::Attack;
+                                did_heal = true;
+                                debug!("Monster '{}' (#{}) heals ally #{} for {} HP", monster.name, *oid, target_oid, heal_amount);
+                                // 广播治疗法术效果
+                                let mut heal_body = Vec::new();
+                                heal_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                                heal_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
+                                heal_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
+                                heal_body.push(monster.direction);
+                                heal_body.push(SPELL_HEALING);
+                                heal_body.extend_from_slice(&0u16.to_le_bytes());
+                                heal_body.push(0u8);
+                                let heal_packet = build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &heal_body);
+                                for sid in self.players.keys() {
+                                    let _ = self.gate_ref.ask(SendToClient {
+                                        session_id: *sid,
+                                        data: heal_packet.clone(),
+                                    });
+                                }
+                            }
+                        }
+                        // Summoner AI：低血量时召唤援军
+                        let mut did_summon = false;
+                        if profile.ai_type == MonsterAiType::Summoner && !did_heal {
+                            let hp_pct = monster.hp as f32 / monster.max_hp as f32;
+                            if hp_pct < 0.5 && self.tick_count >= monster.next_summon_tick {
+                                // 找附近可行走的位置
+                                let offsets: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+                                let mut spawn_count = 0;
+                                for (dx, dy) in offsets {
+                                    if spawn_count >= 2 { break; }
+                                    let sx = monster.x + dx;
+                                    let sy = monster.y + dy;
+                                    if self.maps.get(&monster.map_index).map(|m| m.is_walkable(sx, sy)).unwrap_or(false)
+                                        && !monster_positions.contains(&(sx, sy))
+                                    {
+                                        summon_spawns.push(MonsterSpawn {
+                                            name: format!("{}的召唤物", monster.name),
+                                            image: monster.image,
+                                            monster_index: monster.monster_index,
+                                            x: sx,
+                                            y: sy,
+                                            direction: monster.direction,
+                                            hp: (monster.max_hp / 2).max(1),
+                                            min_dmg: (monster.min_dmg / 2).max(1),
+                                            max_dmg: (monster.max_dmg / 2).max(1),
+                                            xp: (monster.xp / 2).max(1),
+                                            map_index: monster.map_index,
+                                        });
+                                        spawn_count += 1;
+                                    }
+                                }
+                                if spawn_count > 0 {
+                                    monster.next_summon_tick = self.tick_count + 100; // 10秒冷却
+                                    monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                                    monster.ai_state = MonsterAiState::Attack;
+                                    did_summon = true;
+                                    debug!("Monster '{}' (#{}) summons {} adds", monster.name, *oid, spawn_count);
+                                }
+                            }
+                        }
+                        if did_heal || did_summon {
+                            // 已执行特殊动作，跳过普通攻击
+                        } else {
+                            // 攻击
+                            let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
+                            let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(7)) as i32 % dmg_range)
+                                + monster.min_dmg;
+                            debug!("Monster '{}' (#{}) attacks Player {} for {} dmg [AI={:?}]", monster.name, *oid, target_session, damage, profile.ai_type);
+                            monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                            monster.ai_state = MonsterAiState::Attack;
 
                         let is_ranged = matches!(profile.ai_type, MonsterAiType::Ranged | MonsterAiType::Mage);
                         let spell_id = match profile.ai_type {
@@ -2063,6 +2164,7 @@ impl Message<Tick> for WorldActor {
                         } else {
                             debug!("Monster '{}' attack on {} blocked: target in safe zone", monster.name, target_session);
                         }
+                        } // close else (normal attack)
                     } else if should_chase && dist > profile.attack_range && can_move {
                         // 追击
                         let (nx, ny, dir) = monster.step_toward(px, py);
@@ -2094,6 +2196,61 @@ impl Message<Tick> for WorldActor {
                 if monster.hp <= 0 {
                     dead_monsters.push(*oid);
                 }
+            }
+
+            // 应用 Healer 治疗（在循环外，避免借用冲突）
+            for (target_oid, heal_amount) in &heal_actions {
+                if let Some(target) = self.monsters.get_mut(target_oid) {
+                    target.hp = (target.hp + *heal_amount).min(target.max_hp);
+                }
+            }
+
+            // 应用 Summoner 召唤（在循环外创建新怪物）
+            for spawn in &summon_spawns {
+                let new_oid = self.alloc_object_id();
+                let packet = build_object_monster_packet(spawn, new_oid, &spawn.name);
+                for session_id in self.players.keys() {
+                    let _ = self.gate_ref.ask(SendToClient {
+                        session_id: *session_id,
+                        data: packet.clone(),
+                    });
+                }
+                let ai_profile = self.monster_infos
+                    .get(&spawn.monster_index)
+                    .map(MonsterAiProfile::from_info)
+                    .unwrap_or_else(|| MonsterAiProfile {
+                        ai_type: MonsterAiType::Aggressive,
+                        aggro_range: 10,
+                        attack_range: 1,
+                        attack_cooldown: 5,
+                        move_interval: 2,
+                        flee_threshold: 0.0,
+                    });
+                self.monsters.insert(new_oid, MonsterState {
+                    object_id: new_oid,
+                    name: spawn.name.clone(),
+                    image: spawn.image,
+                    monster_index: spawn.monster_index,
+                    x: spawn.x,
+                    y: spawn.y,
+                    direction: spawn.direction,
+                    hp: spawn.hp,
+                    max_hp: spawn.hp,
+                    min_dmg: spawn.min_dmg,
+                    max_dmg: spawn.max_dmg,
+                    xp: spawn.xp,
+                    spawn_x: spawn.x,
+                    spawn_y: spawn.y,
+                    map_index: spawn.map_index,
+                    next_attack_tick: 0,
+                    next_move_tick: 0,
+                    next_summon_tick: 0,
+                    ai_profile,
+                    ai_state: MonsterAiState::Idle,
+                    target_session: None,
+                    provoked: false,
+                });
+                debug!("Summoned monster '{}' as #{} at ({},{})", spawn.name, new_oid, spawn.x, spawn.y);
             }
 
             // 应用移动并广播
@@ -2476,6 +2633,7 @@ impl Message<Tick> for WorldActor {
                 map_index: spawn.map_index,
                 next_attack_tick: 0,
                 next_move_tick: 0,
+                next_summon_tick: 0,
                 ai_profile,
                 ai_state: MonsterAiState::Idle,
                 target_session: None,
@@ -8179,6 +8337,7 @@ fn spawn_npcs_and_monsters(
             map_index,
             next_attack_tick: 0,
             next_move_tick: 0,
+            next_summon_tick: 0,
             ai_profile,
             ai_state: MonsterAiState::Idle,
             target_session: None,
@@ -8225,6 +8384,7 @@ fn spawn_npcs_and_monsters(
                         map_index,
                         next_attack_tick: 0,
                         next_move_tick: 0,
+                        next_summon_tick: 0,
                         ai_profile,
                         ai_state: MonsterAiState::Idle,
                         target_session: None,
