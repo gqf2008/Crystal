@@ -830,6 +830,33 @@ impl Message<DamageEquipment> for PlayerActor {
     }
 }
 
+/// 修理所有装备（恢复耐久到最大值）
+pub struct RepairAllEquipment;
+
+impl Message<RepairAllEquipment> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        _msg: RepairAllEquipment,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let mut any_repaired = false;
+        for slot_idx in 0..crate::actors::inventory::EquipmentSlot::COUNT {
+            if let Some(ref mut item) = self.state.inventory.equipment[slot_idx] {
+                if item.current_dura < item.max_dura {
+                    item.current_dura = item.max_dura;
+                    item.dura_changed = true;
+                    any_repaired = true;
+                }
+            }
+        }
+        if any_repaired {
+            self.send_equipment_changed();
+        }
+    }
+}
+
 // ============================================================
 // 背包操作消息 Handler
 // ============================================================

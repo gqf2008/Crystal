@@ -889,6 +889,11 @@ impl WorldActor {
                             }).await;
                         }
                     }
+                    "REPAIR" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            let _ = record.actor_ref.ask(crate::actors::player::RepairAllEquipment).await;
+                        }
+                    }
                     "GOTO" => {
                         if let Some(target) = parts.next() {
                             goto_target = Some(target.to_string());
