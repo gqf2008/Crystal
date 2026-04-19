@@ -1138,6 +1138,14 @@ impl WorldActor {
                             }
                         }
                     }
+                    "GLOBAL" => {
+                        let message = parts.collect::<Vec<_>>().join(" ");
+                        if !message.is_empty() {
+                            for sid in self.players.keys() {
+                                send_system_message(&self.gate_ref, *sid, &format!("[全局] {}", message));
+                            }
+                        }
+                    }
                     "REMOVEBUFF" => {
                         let buff_type_str = parts.next().unwrap_or("").to_uppercase();
                         let buff_type = match buff_type_str.as_str() {
