@@ -458,6 +458,8 @@ pub struct WorldActor {
     respawn_queue: HashMap<u32, (MonsterSpawn, u64)>,
     /// 死亡玩家复活队列 (session_id → 死亡 tick)
     player_death_queue: HashMap<u64, u64>,
+    /// 钓鱼进度计数器 (session_id → 已钓鱼 tick 数)
+    fishing_tick_counters: HashMap<u64, u32>,
     /// 地面掉落物品
     ground_items: Vec<GroundItem>,
     /// 已打开的门 (map_index, door_index)
@@ -507,6 +509,7 @@ impl WorldActor {
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
+            fishing_tick_counters: HashMap::new(),
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
             db_pool,
@@ -1400,6 +1403,7 @@ impl Actor for WorldActor {
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
+            fishing_tick_counters: HashMap::new(),
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
             db_pool: args.db_pool,
@@ -2130,6 +2134,65 @@ impl Message<Tick> for WorldActor {
                         session_id: *sid,
                         data: packet.clone(),
                     });
+                }
+            }
+        }
+
+        // --- 钓鱼收获判定（每 tick 检查） ---
+        {
+            let mut caught = Vec::new(); // session_id
+            let mut stopped = Vec::new(); // session_id
+            for (session_id, record) in &self.players {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if !state.is_fishing { continue; }
+
+                    let counter = self.fishing_tick_counters.entry(*session_id).or_insert(0);
+                    *counter += 1;
+
+                    // 钓鱼需要 30~70 ticks（约 3~7 秒）才有收获
+                    let required = 30 + ((*session_id as u32 + *counter).wrapping_mul(1103515245).wrapping_add(12345) % 41);
+                    if *counter >= required {
+                        // 收获判定
+                        let roll = ((*session_id + self.tick_count) % 100) as u8;
+                        if roll < 60 {
+                            // 金币 10~50
+                            let gold = 10 + ((*session_id + self.tick_count) % 41) as u64;
+                            let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: gold }).await;
+                            send_system_message(&self.gate_ref, *session_id, &format!("钓到了宝箱！获得 {} 金币", gold));
+                        } else if roll < 80 {
+                            // 随机物品：从已加载的物品中挑一个低阶物品
+                            let item_index = Self::random_fishing_item_index(&self.item_infos, *session_id, self.tick_count);
+                            let item = crate::actors::inventory::make_item(item_index, 1);
+                            let added = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await.unwrap_or(false);
+                            if added {
+                                send_system_message(&self.gate_ref, *session_id, "钓到了一件物品！");
+                            } else {
+                                send_system_message(&self.gate_ref, *session_id, "钓到了物品，但背包已满！");
+                            }
+                        } else if roll < 95 {
+                            // 经验 10~30
+                            let xp = 10 + ((*session_id + self.tick_count) % 21) as i32;
+                            let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: xp }).await;
+                            send_system_message(&self.gate_ref, *session_id, &format!("钓到了经验珠！获得 {} 经验", xp));
+                        } else {
+                            send_system_message(&self.gate_ref, *session_id, "鱼跑了...");
+                        }
+
+                        if state.fishing_autocast {
+                            caught.push(*session_id);
+                        } else {
+                            stopped.push(*session_id);
+                        }
+                    }
+                }
+            }
+            for session_id in caught {
+                self.fishing_tick_counters.insert(session_id, 0);
+            }
+            for session_id in stopped {
+                self.fishing_tick_counters.remove(&session_id);
+                if let Some(record) = self.players.get(&session_id) {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetFishing { is_fishing: false, autocast: false }).await;
                 }
             }
         }
@@ -7110,6 +7173,22 @@ impl Message<GetRankingRequest> for WorldActor {
 // ============================================================
 // 辅助函数
 // ============================================================
+
+impl WorldActor {
+    /// 从已加载的物品配置中随机选择一个适合钓鱼收获的物品索引
+    fn random_fishing_item_index(
+        item_infos: &HashMap<i32, db::ItemInfo>,
+        session_id: u64,
+        tick_count: u64,
+    ) -> i32 {
+        if item_infos.is_empty() {
+            return 1;
+        }
+        let keys: Vec<i32> = item_infos.keys().copied().collect();
+        let idx = ((session_id + tick_count) as usize) % keys.len();
+        keys[idx]
+    }
+}
 
 fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message: &str) {
     use mir2_shared::enums::ServerPacketIds;

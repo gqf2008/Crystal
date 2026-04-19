@@ -503,38 +503,39 @@ impl PlayerInventory {
     }
 }
 
+/// 创建一个测试/辅助用的 UserItem（unique_id=0，由 add_item 自动分配）
+pub fn make_item(index: i32, count: u16) -> UserItem {
+    UserItem {
+        unique_id: 0,
+        item_index: index,
+        info: None,
+        current_dura: 100,
+        max_dura: 100,
+        count,
+        gem_count: 0,
+        refined_value: mir2_shared::enums::RefinedValue::None,
+        refine_added: 0,
+        refine_success_chance: 0,
+        dura_changed: false,
+        soul_bound_id: 0,
+        identified: false,
+        cursed: false,
+        wedding_ring: 0,
+        buyback_expiry_date_binary: 0,
+        slots: Vec::new(),
+        expire_info: None,
+        rental_information: None,
+        sealed_info: None,
+        is_shop_item: false,
+        awake: Default::default(),
+        added_stats: Default::default(),
+        is_gm_made: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn make_item(index: i32, count: u16) -> UserItem {
-        UserItem {
-            unique_id: 0,
-            item_index: index,
-            info: None,
-            current_dura: 100,
-            max_dura: 100,
-            count,
-            gem_count: 0,
-            refined_value: mir2_shared::enums::RefinedValue::None,
-            refine_added: 0,
-            refine_success_chance: 0,
-            dura_changed: false,
-            soul_bound_id: 0,
-            identified: false,
-            cursed: false,
-            wedding_ring: 0,
-            buyback_expiry_date_binary: 0,
-            slots: Vec::new(),
-            expire_info: None,
-            rental_information: None,
-            sealed_info: None,
-            is_shop_item: false,
-            awake: Default::default(),
-            added_stats: Default::default(),
-            is_gm_made: false,
-        }
-    }
 
     #[test]
     fn test_add_item() {
