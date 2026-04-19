@@ -1036,6 +1036,21 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKWEAPON" => {
+                        let required_index = parts.next().and_then(|s| s.parse::<i32>().ok());
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let weapon = state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::Weapon);
+                                let matches = match required_index {
+                                    Some(idx) => weapon.map(|w| w.item_index == idx).unwrap_or(false),
+                                    None => weapon.is_some(),
+                                };
+                                if !matches {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "CHECKMAP" => {
                         let map_name = parts.next().unwrap_or("").to_string();
                         if let Some(record) = self.players.get(&session_id) {
