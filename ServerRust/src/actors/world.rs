@@ -851,7 +851,7 @@ impl WorldActor {
         &mut self,
         lines: &mut [String],
         session_id: u64,
-        _npc: &NpcState,
+        npc: &NpcState,
     ) -> (Vec<String>, Option<String>) {
         let mut output = Vec::new();
         let mut skip = false;
@@ -1322,6 +1322,31 @@ impl WorldActor {
                             }
                         } else {
                             warn!("NPC teleport: map '{}' not found", map_name);
+                        }
+                    }
+                    "RECALL" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let map_index = self.npc_infos.get(&npc.db_index)
+                                    .map(|i| i.map_index as u16)
+                                    .unwrap_or(state.map_index);
+                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                    x: npc.x,
+                                    y: npc.y,
+                                    direction: state.direction,
+                                    map_index: Some(map_index),
+                                    is_mounted: None,
+                                }).await;
+                                let mut body = Vec::new();
+                                body.extend_from_slice(&npc.x.to_le_bytes());
+                                body.extend_from_slice(&npc.y.to_le_bytes());
+                                body.push(state.direction);
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
+                                });
+                                debug!("NPC recall: session={} to npc {} ({},{})", session_id, npc.name, npc.x, npc.y);
+                            }
                         }
                     }
                     _ => {}
