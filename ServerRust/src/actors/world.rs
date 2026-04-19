@@ -7096,7 +7096,7 @@ fn send_inspect_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, state: &
 
     body.extend_from_slice(&state.object_id.to_le_bytes());
     write_dotnet_string(&mut body, &state.name);
-    write_dotnet_string(&mut body, ""); // guild_name (简化)
+    write_dotnet_string(&mut body, state.guild_name.as_deref().unwrap_or(""));
     body.extend_from_slice(&state.level.to_le_bytes());
     body.push(state.class as u8);
     body.push(state.gender as u8);
