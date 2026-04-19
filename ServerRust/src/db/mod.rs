@@ -152,6 +152,13 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             PRIMARY KEY (character_name, spell),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
+        CREATE TABLE IF NOT EXISTS player_flags (
+            character_name TEXT NOT NULL,
+            flag_key TEXT NOT NULL,
+            flag_value INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (character_name, flag_key),
+            FOREIGN KEY (character_name) REFERENCES characters(name)
+        );
         CREATE TABLE IF NOT EXISTS guilds (
             name TEXT PRIMARY KEY,
             notice_json TEXT NOT NULL DEFAULT '[]',
@@ -672,6 +679,9 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     // Save magics
     save_magics(pool, &state.name, &state.magics).await?;
 
+    // Save flags
+    save_flags(pool, &state.name, &state.flags).await?;
+
     Ok(())
 }
 
@@ -695,6 +705,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
     let creature_log = load_creatures(pool, character_name).await?;
     let refine_log = load_refine(pool, character_name).await?;
     let magics = load_magics(pool, character_name).await?;
+    let flags = load_flags(pool, character_name).await?;
     let hero_inventory = load_hero_inventory(pool, character_name).await?;
 
     let attack_mode = parse_attack_mode(&row.get::<String, _>("attack_mode"));
@@ -764,6 +775,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         pk_kill_count: row.get::<i32, _>("pk_kill_count") as u32,
         buffs: Vec::new(),
         magics,
+        flags,
     };
 
     Ok(Some(state))
@@ -1450,6 +1462,33 @@ async fn load_magics(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<
         });
     }
     Ok(magics)
+}
+
+async fn save_flags(pool: &DbPool, character_name: &str, flags: &std::collections::HashMap<String, i32>) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM player_flags WHERE character_name = ?")
+        .bind(character_name)
+        .execute(pool).await?;
+    for (key, value) in flags {
+        sqlx::query("INSERT INTO player_flags (character_name, flag_key, flag_value) VALUES (?, ?, ?)")
+            .bind(character_name)
+            .bind(key)
+            .bind(*value)
+            .execute(pool).await?;
+    }
+    Ok(())
+}
+
+async fn load_flags(pool: &DbPool, character_name: &str) -> anyhow::Result<std::collections::HashMap<String, i32>> {
+    let rows = sqlx::query("SELECT flag_key, flag_value FROM player_flags WHERE character_name = ?")
+        .bind(character_name)
+        .fetch_all(pool).await?;
+    let mut flags = std::collections::HashMap::new();
+    for r in rows {
+        let key: String = r.get("flag_key");
+        let value: i32 = r.get("flag_value");
+        flags.insert(key, value);
+    }
+    Ok(flags)
 }
 
 use std::collections::HashMap;

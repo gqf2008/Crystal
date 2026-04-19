@@ -1466,6 +1466,57 @@ impl WorldActor {
                             }
                         }
                     }
+                    "SETFLAG" => {
+                        let key = parts.next().unwrap_or("").to_string();
+                        let value = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if !key.is_empty() {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    state.flags.insert(key, value);
+                                    let _ = record.actor_ref.ask(SetPlayerState { state }).await;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKFLAG" => {
+                        let key = parts.next().unwrap_or("").to_string();
+                        let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
+                        if !key.is_empty() {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let flag_val = state.flags.get(&key).copied().unwrap_or(0);
+                                    if flag_val < min || flag_val > max {
+                                        skip = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "INCFLAG" => {
+                        let key = parts.next().unwrap_or("").to_string();
+                        let amount = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(1);
+                        if !key.is_empty() {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let new_val = state.flags.get(&key).copied().unwrap_or(0).saturating_add(amount);
+                                    state.flags.insert(key, new_val);
+                                    let _ = record.actor_ref.ask(SetPlayerState { state }).await;
+                                }
+                            }
+                        }
+                    }
+                    "DELFLAG" => {
+                        let key = parts.next().unwrap_or("").to_string();
+                        if !key.is_empty() {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    state.flags.remove(&key);
+                                    let _ = record.actor_ref.ask(SetPlayerState { state }).await;
+                                }
+                            }
+                        }
+                    }
                     "LOCAL" => {
                         let message = parts.collect::<Vec<_>>().join(" ");
                         if !message.is_empty() {
@@ -3119,6 +3170,7 @@ impl Message<StartGameRequest> for WorldActor {
                 pk_kill_count: 0,
                 buffs: Vec::new(),
                 magics: Vec::new(),
+                flags: std::collections::HashMap::new(),
             }
         });
 
@@ -6993,6 +7045,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             pk_kill_count: 0,
             buffs: Vec::new(),
             magics: Vec::new(),
+            flags: std::collections::HashMap::new(),
         };
         if let Err(e) = db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
             warn!("Failed to save new character '{}': {}", msg.name, e);

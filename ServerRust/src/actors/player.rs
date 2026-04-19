@@ -153,6 +153,8 @@ pub struct PlayerState {
     pub buffs: Vec<crate::combat::buff::BuffInstance>,
     /// 已学习的魔法/技能列表
     pub magics: Vec<PlayerMagic>,
+    /// NPC Flag 列表（脚本进度追踪）
+    pub flags: std::collections::HashMap<String, i32>,
 }
 
 impl PlayerState {
@@ -263,6 +265,7 @@ impl PlayerActor {
                 is_gm: false,
                 buffs: Vec::new(),
                 magics: Vec::new(),
+                flags: std::collections::HashMap::new(),
             },
             gate_ref,
             map_data: None,
@@ -2187,6 +2190,7 @@ mod tests {
             pk_kill_count: 0,
             buffs: Vec::new(),
             magics: Vec::new(),
+            flags: std::collections::HashMap::new(),
         }
     }
 
