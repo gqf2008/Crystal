@@ -1125,6 +1125,12 @@ impl WorldActor {
                             }
                         }
                     }
+                    "SAY" => {
+                        let message = parts.collect::<Vec<_>>().join(" ");
+                        if !message.is_empty() {
+                            send_system_message(&self.gate_ref, session_id, &message);
+                        }
+                    }
                     "GOTO" => {
                         if let Some(target) = parts.next() {
                             goto_target = Some(target.to_string());
