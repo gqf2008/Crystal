@@ -656,6 +656,7 @@ impl WorldActor {
                     });
                 }
                 self.ground_items.push(GroundItem {
+                    object_id: drop_oid,
                     item: mir2_shared::data::item::UserItem {
                         item_index: 0,
                         count,
@@ -700,6 +701,7 @@ impl WorldActor {
                     });
                 }
                 self.ground_items.push(GroundItem {
+                    object_id: drop_oid,
                     item,
                     x: monster.x,
                     y: monster.y,
@@ -747,7 +749,7 @@ impl WorldActor {
             for sid in self.players.keys() {
                 let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
             }
-            self.ground_items.push(GroundItem { item, x, y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count });
+            self.ground_items.push(GroundItem { object_id: drop_oid, item, x, y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count });
         }
 
         // 掉落金币（1-5%）
@@ -771,6 +773,7 @@ impl WorldActor {
                         let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
                     }
                     self.ground_items.push(GroundItem {
+                        object_id: drop_oid,
                         item: mir2_shared::data::item::UserItem {
                             item_index: 0,
                             count: gold_drop as u16,
@@ -1637,10 +1640,26 @@ impl Message<Tick> for WorldActor {
             const GROUND_ITEM_LIFETIME_TICKS: u64 = 600; // ~60 秒
             let expired: Vec<_> = self.ground_items.iter()
                 .filter(|gi| self.tick_count >= gi.drop_tick + GROUND_ITEM_LIFETIME_TICKS)
-                .map(|gi| (gi.x, gi.y, gi.map_index))
+                .map(|gi| (gi.object_id, gi.map_index))
                 .collect();
             if !expired.is_empty() {
                 self.ground_items.retain(|gi| self.tick_count < gi.drop_tick + GROUND_ITEM_LIFETIME_TICKS);
+                for (oid, map_idx) in &expired {
+                    let mut remove_body = Vec::new();
+                    remove_body.extend_from_slice(&oid.to_le_bytes());
+                    let remove_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &remove_body);
+                    for (sid, rec) in &self.players {
+                        if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                            if s.map_index == *map_idx {
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id: *sid,
+                                    data: remove_packet.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
                 debug!("Cleaned up {} expired ground items", expired.len());
             }
         }
@@ -1962,10 +1981,9 @@ impl Message<StartGameRequest> for WorldActor {
         let map_index_val = loaded_state.map_index;
         let ground_sync: Vec<_> = self.ground_items.iter()
             .filter(|gi| gi.map_index == map_index_val)
-            .map(|gi| (gi.item.clone(), gi.x, gi.y))
+            .map(|gi| (gi.object_id, gi.item.clone(), gi.x, gi.y))
             .collect();
-        for (item, x, y) in ground_sync {
-            let drop_oid = self.alloc_object_id();
+        for (drop_oid, item, x, y) in ground_sync {
             if item.item_index == 0 {
                 let object_gold = mir2_shared::packets::server::ObjectGold {
                     object_id: drop_oid,
@@ -1974,7 +1992,8 @@ impl Message<StartGameRequest> for WorldActor {
                     location_y: y,
                 };
                 let mut buf = Vec::new();
-                if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
+                if mir2_shared::packets::base::serialize_packet(
+                    &mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
                     let _ = self.gate_ref.ask(SendToClient { session_id: msg.session_id, data: buf });
                 }
             } else {
@@ -1985,7 +2004,8 @@ impl Message<StartGameRequest> for WorldActor {
                     location_y: y,
                 };
                 let mut buf = Vec::new();
-                if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
+                if mir2_shared::packets::base::serialize_packet(
+                    &mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
                     let _ = self.gate_ref.ask(SendToClient { session_id: msg.session_id, data: buf });
                 }
             }
@@ -2852,22 +2872,44 @@ impl Message<PickUpRequest> for WorldActor {
 
         if let Some(idx) = pickup_idx {
             let ground_item = self.ground_items.remove(idx);
+            let picked_oid = ground_item.object_id;
             debug!(
                 "Player session={} picked up item uid={} at ({}, {})",
                 msg.session_id, ground_item.item.unique_id, ground_item.x, ground_item.y
             );
 
             // 通知 PlayerActor 添加到背包
+            let mut picked_up = false;
             if let Ok(success) = record.actor_ref.ask(AddItemToInventory {
                 item: ground_item.item.clone(),
             }).await {
-                if !success {
+                if success {
+                    picked_up = true;
+                } else {
                     // 背包已满，放回去
                     self.ground_items.push(ground_item);
                     send_system_message(&self.gate_ref, msg.session_id, "背包已满");
                 }
             } else {
                 self.ground_items.push(ground_item);
+            }
+
+            // 拾取成功：广播 ObjectRemove 给同地图玩家
+            if picked_up {
+                let mut remove_body = Vec::new();
+                remove_body.extend_from_slice(&picked_oid.to_le_bytes());
+                let remove_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &remove_body);
+                for (sid, rec) in &self.players {
+                    if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                        if s.map_index == state.map_index {
+                            let _ = self.gate_ref.ask(SendToClient {
+                                session_id: *sid,
+                                data: remove_packet.clone(),
+                            });
+                        }
+                    }
+                }
             }
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "附近没有可以拾取的物品。");
@@ -3026,8 +3068,24 @@ impl Message<DropItemRequest> for WorldActor {
 
             debug!("Player session={} dropped item uid={}", msg.session_id, msg.unique_id);
 
+            // 广播 ObjectItem 给所有玩家
+            let drop_oid = self.alloc_object_id();
+            let object_item = mir2_shared::packets::server::ObjectItem {
+                object_id: drop_oid,
+                item: item.clone(),
+                location_x: player_pos.0,
+                location_y: player_pos.1,
+            };
+            let mut buf = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
+                for sid in self.players.keys() {
+                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+                }
+            }
+
             // 添加到地面物品
             self.ground_items.push(GroundItem {
+                object_id: drop_oid,
                 item: item.clone(),
                 x: player_pos.0,
                 y: player_pos.1,
@@ -3113,12 +3171,30 @@ impl Message<DropGoldRequest> for WorldActor {
                 _ => return,
             };
 
+            // 广播 ObjectGold 给所有玩家
+            let drop_oid = self.alloc_object_id();
+            let object_gold = mir2_shared::packets::server::ObjectGold {
+                object_id: drop_oid,
+                gold: amount as u32,
+                location_x: player_pos.0,
+                location_y: player_pos.1,
+            };
+            let mut buf = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
+                for sid in self.players.keys() {
+                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+                }
+            }
+
             // 地面金币（用特殊物品表示）
             let gold_item = mir2_shared::data::item::UserItem {
                 item_index: 0, // 0 = gold marker
+                count: amount as u16,
                 ..Default::default()
             };
             self.ground_items.push(GroundItem {
+                object_id: drop_oid,
                 item: gold_item,
                 x: player_pos.0,
                 y: player_pos.1,

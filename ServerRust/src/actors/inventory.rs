@@ -54,6 +54,7 @@ pub struct InventorySlot {
 /// 地面掉落物品（世界中，非玩家持有）
 #[derive(Debug, Clone)]
 pub struct GroundItem {
+    pub object_id: u32,
     pub item: UserItem,
     pub x: i32,
     pub y: i32,
