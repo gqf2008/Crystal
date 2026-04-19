@@ -568,13 +568,19 @@ impl Message<AddExperience> for PlayerActor {
         while self.state.experience >= self.state.max_experience && self.state.level < MAX_LEVEL {
             self.state.experience -= self.state.max_experience;
             self.state.level += 1;
-            self.state.max_hp += 10;
+
+            // 属性成长（Warrior 模板）
+            self.state.max_hp += 12;
             self.state.hp = self.state.max_hp;
-            self.state.max_mp += 5;
+            self.state.max_mp += 4;
             self.state.mp = self.state.max_mp;
+            self.state.min_attack += 1;
+            self.state.max_attack += 2;
+            self.state.defence += 1;
             self.state.max_experience = (self.state.max_experience as f64 * 1.5) as i64;
 
-            info!("Player {} leveled up to {}!", self.state.name, self.state.level);
+            info!("Player {} leveled up to {}! (atk={}-{} def={})",
+                  self.state.name, self.state.level, self.state.min_attack, self.state.max_attack, self.state.defence);
 
             // 发送 LevelChanged
             let mut lv_body = Vec::new();
