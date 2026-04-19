@@ -611,6 +611,26 @@ impl WorldActor {
         debug!("Sent {} goods from NPC '{}' (rate={}) to session {}", goods.len(), npc.name, rate, session_id);
     }
 
+    /// 发送仓库内容给客户端（打开仓库 UI）
+    fn send_user_storage(&self, session_id: u64, storage: &[Option<crate::actors::inventory::InventorySlot>]) {
+        let items: Vec<Option<mir2_shared::data::item::UserItem>> = storage.iter()
+            .map(|slot| slot.as_ref().map(|s| s.item.clone()))
+            .collect();
+
+        let packet = mir2_shared::packets::server::player::UserStorage { storage: items };
+        let mut body = Vec::new();
+        if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet) {
+            warn!("Failed to serialize UserStorage: {}", e);
+            return;
+        }
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserStorage as i16, &body);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: packet,
+        });
+        debug!("Sent UserStorage to session {}", session_id);
+    }
+
     /// 怪物死亡时生成掉落并广播给所有在线玩家
     async fn spawn_monster_drops(&mut self, monster: &MonsterState) {
         // 查找该怪物的掉落配置
@@ -892,6 +912,13 @@ impl WorldActor {
                     "REPAIR" => {
                         if let Some(record) = self.players.get(&session_id) {
                             let _ = record.actor_ref.ask(crate::actors::player::RepairAllEquipment).await;
+                        }
+                    }
+                    "STORAGE" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                self.send_user_storage(session_id, &state.inventory.storage);
+                            }
                         }
                     }
                     "GIVEEXP" => {
@@ -3106,11 +3133,19 @@ impl Message<NPCCallRequest> for WorldActor {
                         if npc.db_index > 0 && self.npc_goods.get(&npc.db_index).is_some_and(|g| !g.is_empty()) {
                             lines.push("<购买/@Buy>".into());
                         }
+                        lines.push("<仓库/@Storage>".into());
                         lines
                     }
                     "[@Buy]" => {
                         self.send_npc_goods(msg.session_id, &npc);
                         return;
+                    }
+                    "[@Storage]" => {
+                        dialog_lines = vec![
+                            format!("{}: 请妥善保管你的物品。", npc.name),
+                        ];
+                        self.send_user_storage(msg.session_id, &player_state.inventory.storage);
+                        break;
                     }
                     _ => vec![
                         format!("{} 说：", npc.name),
