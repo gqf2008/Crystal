@@ -8116,8 +8116,94 @@ impl Message<DisassembleItemRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        debug!("DisassembleItem: {} uid={}", state.name, msg.unique_id);
-        send_system_message(&self.gate_ref, msg.session_id, "该物品无法分解");
+        // 查找物品
+        let item = match record.actor_ref.ask(crate::actors::player::GetItemInfo { unique_id: msg.unique_id }).await {
+            Ok(Some(i)) => i,
+            _ => {
+                send_system_message(&self.gate_ref, msg.session_id, "找不到该物品");
+                return;
+            }
+        };
+
+        // 获取物品信息
+        let item_info = match self.item_infos.get(&item.item_index) {
+            Some(i) => i,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法分解");
+                return;
+            }
+        };
+
+        // 只有装备类物品可以分解（有耐久度的非消耗品）
+        if item_info.durability <= 0 || item_info.item_type == 0 {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法分解");
+            return;
+        }
+
+        // 分解产出 = 根据等级和类型决定
+        let grade = item_info.grade.max(1);
+        let item_name = item_info.name.clone();
+        let (mat_index, mat_count, mat_name) = match item_info.item_type {
+            // 武器 -> 铁矿石
+            1 => (500, grade as u16, "铁矿石"),
+            // 盔甲/饰品 -> 布料/皮革
+            2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 => (501, grade as u16, "皮革"),
+            _ => (502, (grade / 2).max(1) as u16, "宝石碎片"),
+        };
+
+        // 移除原物品
+        let removed = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventory {
+            unique_id: msg.unique_id,
+        }).await.ok().flatten();
+        if removed.is_none() {
+            send_system_message(&self.gate_ref, msg.session_id, "分解失败：无法移除物品");
+            return;
+        }
+
+        // 给予材料
+        let material = crate::actors::inventory::make_item(mat_index, mat_count);
+        let added = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item: material }).await.unwrap_or(false);
+        if added {
+            send_system_message(&self.gate_ref, msg.session_id,
+                &format!("分解成功！获得 {} x{}", mat_name, mat_count));
+        } else {
+            // 背包满了：把材料丢到地上
+            let drop_oid = self.alloc_object_id();
+            let object_item = mir2_shared::packets::server::ObjectItem {
+                object_id: drop_oid,
+                item: mir2_shared::data::item::UserItem {
+                    item_index: mat_index,
+                    count: mat_count,
+                    ..Default::default()
+                },
+                location_x: state.x,
+                location_y: state.y,
+            };
+            let mut buf = Vec::new();
+            if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
+                warn!("Failed to serialize disassemble drop: {}", e);
+            } else {
+                for sid in self.players.keys() {
+                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+                }
+                self.ground_items.push(GroundItem {
+                    object_id: drop_oid,
+                    item: mir2_shared::data::item::UserItem {
+                        item_index: mat_index,
+                        count: mat_count,
+                        ..Default::default()
+                    },
+                    x: state.x,
+                    y: state.y,
+                    map_index: state.map_index,
+                    dropper_session: Some(msg.session_id),
+                    drop_tick: self.tick_count,
+                });
+            }
+            send_system_message(&self.gate_ref, msg.session_id,
+                &format!("分解成功！背包已满，{} x{} 已掉落在地", mat_name, mat_count));
+        }
+        debug!("DisassembleItem: {} disassembled {} into {} x{}", state.name, item_name, mat_name, mat_count);
     }
 }
 
