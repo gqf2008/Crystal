@@ -325,6 +325,9 @@ impl PlayerInventory {
                     s.item.count = 0;
                     // 标记为空（后续清理）
                 }
+                if count == 0 {
+                    break;
+                }
             }
         }
         // 清理空槽位

@@ -99,6 +99,10 @@ pub struct PlayerState {
     pub is_mounted: bool,
     /// 是否死亡（对应 C# Dead）
     pub is_dead: bool,
+    /// PK 值（>0 = 红名，每杀1人+100，在线 tick 衰减）
+    pub pk_points: i32,
+    /// 累计击杀玩家数
+    pub pk_kill_count: u32,
     /// 钓鱼自动释放
     pub fishing_autocast: bool,
     /// 轮回宿主（发起轮回的玩家 session_id）
@@ -175,6 +179,8 @@ impl PlayerActor {
                 is_fishing: false,
                 is_mounted: false,
                 is_dead: false,
+                pk_points: 0,
+                pk_kill_count: 0,
                 fishing_autocast: false,
                 reincarnation_host: None,
                 reincarnation_ready: false,
@@ -1010,6 +1016,37 @@ impl Message<RemoveItemByIndex> for PlayerActor {
     }
 }
 
+/// 增加 PK 值（击杀玩家时调用）
+pub struct AddPkPoints {
+    pub points: i32,
+}
+
+impl Message<AddPkPoints> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: AddPkPoints, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if msg.points > 0 {
+            self.state.pk_points += msg.points;
+            self.state.pk_kill_count += 1;
+            debug!("Player {} PK points +{} (total={}, kills={})",
+                   self.state.name, msg.points, self.state.pk_points, self.state.pk_kill_count);
+        }
+    }
+}
+
+/// PK 值衰减（每 tick 调用）
+pub struct DecayPkPoints;
+
+impl Message<DecayPkPoints> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, _msg: DecayPkPoints, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if self.state.pk_points > 0 {
+            self.state.pk_points = (self.state.pk_points - 1).max(0);
+        }
+    }
+}
+
 /// 死亡时随机掉落背包物品（返回被掉落的物品列表）
 pub struct DropRandomItemsOnDeath;
 
@@ -1022,7 +1059,9 @@ impl Message<DropRandomItemsOnDeath> for PlayerActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let mut dropped = Vec::new();
-        let max_drop = fastrand::u8(0..=2);
+        // 红名玩家掉落更多（基础 0-2，红名 +1-3）
+        let base_max = if self.state.pk_points > 0 { 5u8 } else { 2u8 };
+        let max_drop = fastrand::u8(0..=base_max);
         for _ in 0..max_drop {
             if let Some(item) = self.state.inventory.random_drop_one() {
                 dropped.push(item);
@@ -1704,8 +1743,11 @@ mod tests {
             last_recall_time: 0,
             allow_lover_recall: false,
             is_gm: false,
-        };
-        s
+            is_dead: false,
+            pk_points: 0,
+            pk_kill_count: 0,
+            buffs: Vec::new(),
+        }
     }
 
     #[test]

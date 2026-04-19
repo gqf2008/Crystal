@@ -62,6 +62,8 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             is_fishing INTEGER NOT NULL DEFAULT 0,
             fishing_autocast INTEGER NOT NULL DEFAULT 0,
             is_dead INTEGER NOT NULL DEFAULT 0,
+            pk_points INTEGER NOT NULL DEFAULT 0,
+            pk_kill_count INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (account_username) REFERENCES accounts(username),
             FOREIGN KEY (guild_name) REFERENCES guilds(name)
         );
@@ -584,8 +586,8 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             hp, max_hp, mp, max_mp, min_attack, max_attack, defence,
             gold, group_id, guild_name, guild_rank,
             spouse_name, allow_mentor, mentor_name, hero_index,
-            is_fishing, fishing_autocast, is_dead
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+            is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -617,6 +619,8 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(if state.is_fishing { 1 } else { 0 })
     .bind(if state.fishing_autocast { 1 } else { 0 })
     .bind(if state.is_dead { 1 } else { 0 })
+    .bind(state.pk_points)
+    .bind(state.pk_kill_count as i32)
     .execute(pool)
     .await?;
 
@@ -715,6 +719,8 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         last_recall_time: 0,
         allow_lover_recall: row.get::<Option<i32>, _>("allow_lover_recall").map(|v| v != 0).unwrap_or(false),
         is_gm: false, // TODO: load from accounts.admin_account column
+        pk_points: row.get::<i32, _>("pk_points"),
+        pk_kill_count: row.get::<i32, _>("pk_kill_count") as u32,
         buffs: Vec::new(),
     };
 

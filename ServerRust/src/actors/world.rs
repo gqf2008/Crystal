@@ -52,6 +52,8 @@ struct PlayerRecord {
     name: String,
     /// 账号名（用于数据库存取）
     account_username: String,
+    /// 上次广播的 PK 值（用于检测名字颜色变化）
+    last_pk_points: i32,
 }
 
 /// NPC 定义（从刷怪配置加载）
@@ -386,6 +388,7 @@ const SPELL_MAGIC_SHIELD: u8 = 43;
 const SPELL_SOUL_SHIELD: u8 = 69;
 const SPELL_BLESSED_ARMOUR: u8 = 71;
 const SPELL_TELEPORT: u8 = 37;
+const SPELL_FIREBALL: u8 = 31; // 法师怪物默认法术
 
 impl MonsterState {
     /// 朝目标方向走一步，返回新位置和方向
@@ -1350,6 +1353,11 @@ impl Message<Tick> for WorldActor {
                         monster.ai_state = MonsterAiState::Attack;
 
                         let is_ranged = matches!(profile.ai_type, MonsterAiType::Ranged | MonsterAiType::Mage);
+                        let spell_id = match profile.ai_type {
+                            MonsterAiType::Mage => SPELL_FIREBALL,
+                            MonsterAiType::Ranged => 1u8,
+                            _ => 0u8,
+                        };
 
                         // ObjectAttack 广播
                         let mut attack_body = Vec::new();
@@ -1357,13 +1365,13 @@ impl Message<Tick> for WorldActor {
                         attack_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
                         attack_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
                         attack_body.push(monster.direction);
-                        attack_body.push(if is_ranged { 1u8 } else { 0u8 });
+                        attack_body.push(spell_id);
                         attack_body.extend_from_slice(&0u16.to_le_bytes());
                         attack_body.push(0u8);
                         let attack_packet = build_packet_bytes(
                             mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
                         if is_ranged {
-                            // 远程攻击广播给所有玩家（弹道动画）
+                            // 远程/法术攻击广播给所有玩家（弹道动画）
                             for sid in self.players.keys() {
                                 let _ = self.gate_ref.ask(SendToClient {
                                     session_id: *sid,
@@ -1594,6 +1602,33 @@ impl Message<Tick> for WorldActor {
             }
         }
 
+        // --- PK 值衰减 + 名字颜色广播（每 10 ticks） ---
+        if self.tick_count % 10 == 0 {
+            let mut colour_changes = Vec::new();
+            for (session_id, record) in &self.players {
+                let _ = record.actor_ref.ask(crate::actors::player::DecayPkPoints).await;
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    let new_colour = name_colour_for_pk(state.pk_points);
+                    let old_colour = name_colour_for_pk(record.last_pk_points);
+                    if new_colour != old_colour {
+                        colour_changes.push((*session_id, state.object_id, new_colour, state.pk_points));
+                    }
+                }
+            }
+            for (session_id, object_id, new_colour, pk_points) in colour_changes {
+                if let Some(record) = self.players.get_mut(&session_id) {
+                    record.last_pk_points = pk_points;
+                }
+                let packet = build_object_colour_changed_packet(object_id, new_colour);
+                for (sid, _) in &self.players {
+                    let _ = self.gate_ref.ask(SendToClient {
+                        session_id: *sid,
+                        data: packet.clone(),
+                    });
+                }
+            }
+        }
+
         // --- 重生处理 ---
         let mut to_respawn = Vec::new();
         for (oid, (spawn, tick)) in &self.respawn_queue {
@@ -1785,6 +1820,8 @@ impl Message<StartGameRequest> for WorldActor {
                 is_mounted: false,
                 allow_lover_recall: false,
                 is_gm: false,
+                pk_points: 0,
+                pk_kill_count: 0,
                 buffs: Vec::new(),
             }
         });
@@ -1839,6 +1876,7 @@ impl Message<StartGameRequest> for WorldActor {
             session_id: msg.session_id,
             name: player_name.clone(),
             account_username: msg.account_username.clone(),
+            last_pk_points: loaded_state.pk_points,
         });
 
         info!("Player {} entered world (object_id={}, session={})",
@@ -1856,6 +1894,7 @@ impl Message<StartGameRequest> for WorldActor {
             if let Ok(Some(ep_state)) = existing.actor_ref.ask(GetPlayerState).await {
                 let packet = build_object_player_packet(
                     &ep_state.name, ep_state.object_id, ep_state.x, ep_state.y, ep_state.direction, 1,
+                    name_colour_for_pk(ep_state.pk_points),
                 );
                 let _ = self.gate_ref.ask(SendToClient {
                     session_id: msg.session_id,
@@ -1867,6 +1906,7 @@ impl Message<StartGameRequest> for WorldActor {
         // 向已有玩家发送新玩家的 ObjectPlayer
         let new_player_packet = build_object_player_packet(
             &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, 1,
+            name_colour_for_pk(loaded_state.pk_points),
         );
         for existing in &existing_players {
             let _ = self.gate_ref.ask(SendToClient {
@@ -2124,7 +2164,7 @@ impl Message<WorldAttackRequest> for WorldActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r,
+            Some(r) => r.clone(),
             None => {
                 warn!("Attack request for unknown session {}", msg.session_id);
                 return;
@@ -2280,6 +2320,24 @@ impl Message<WorldAttackRequest> for WorldActor {
                                     });
                                 }
                                 self.handle_player_death_drop(other_session, other_state.x, other_state.y, other_state.map_index).await;
+
+                                // 击杀玩家：增加 PK 值并广播名字颜色变化
+                                let _ = record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
+                                if let Ok(Some(attacker_state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let colour_packet = build_object_colour_changed_packet(
+                                        attacker_state.object_id,
+                                        name_colour_for_pk(attacker_state.pk_points),
+                                    );
+                                    for (sid, _) in &self.players {
+                                        let _ = self.gate_ref.ask(SendToClient {
+                                            session_id: *sid,
+                                            data: colour_packet.clone(),
+                                        });
+                                    }
+                                    if let Some(r) = self.players.get_mut(&msg.session_id) {
+                                        r.last_pk_points = attacker_state.pk_points;
+                                    }
+                                }
                             }
                             debug!("Hit! {} damaged {} for {} (dist={}, crit={})",
                                    result.object_id, other_state.name, damage, dist, attack_result.is_critical);
@@ -4554,6 +4612,8 @@ impl Message<NewCharacterRequest> for WorldActor {
             is_mounted: false,
             allow_lover_recall: false,
             is_gm: false,
+            pk_points: 0,
+            pk_kill_count: 0,
             buffs: Vec::new(),
         };
         if let Err(e) = db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
@@ -6061,6 +6121,17 @@ fn build_map_changed_packet(
     build_packet_bytes(ServerPacketIds::MapChanged as i16, &body)
 }
 
+/// 根据 PK 值计算名字颜色（0=白名, 1=红名, 2=橙名）
+fn name_colour_for_pk(pk_points: i32) -> i32 {
+    if pk_points >= 200 {
+        1 // Red
+    } else if pk_points >= 100 {
+        2 // Orange
+    } else {
+        0 // White
+    }
+}
+
 fn build_user_information_packet(state: &PlayerState) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
@@ -6071,7 +6142,7 @@ fn build_user_information_packet(state: &PlayerState) -> Vec<u8> {
     write_dotnet_string(&mut body, &state.name);              // name
     write_dotnet_string(&mut body, state.guild_name.as_deref().unwrap_or(""));  // guild_name
     write_dotnet_string(&mut body, "");                       // guild_rank
-    body.extend_from_slice(&0i32.to_le_bytes());              // name_colour
+    body.extend_from_slice(&name_colour_for_pk(state.pk_points).to_le_bytes()); // name_colour
     body.push(0u8);                                           // class=Warrior
     body.push(0u8);                                           // gender=Male
     body.extend_from_slice(&state.level.to_le_bytes());       // level
@@ -6108,6 +6179,7 @@ fn build_user_information_packet(state: &PlayerState) -> Vec<u8> {
 /// 构建 ObjectPlayer 数据包（其他玩家进入视野）
 fn build_object_player_packet(
     name: &str, object_id: u32, x: i32, y: i32, direction: u8, level: u16,
+    name_colour: i32,
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
@@ -6116,7 +6188,7 @@ fn build_object_player_packet(
     write_dotnet_string(&mut body, name);               // name
     write_dotnet_string(&mut body, "");                 // guild_name
     write_dotnet_string(&mut body, "");                 // guild_rank_name
-    body.extend_from_slice(&0i32.to_le_bytes());        // name_colour
+    body.extend_from_slice(&name_colour.to_le_bytes()); // name_colour
     body.push(0u8);                                     // class=Warrior
     body.push(0u8);                                     // gender=Male
     body.extend_from_slice(&level.to_le_bytes());       // level
@@ -6145,6 +6217,15 @@ fn build_object_player_packet(
     body.extend_from_slice(&0u16.to_le_bytes());        // level_effects=None (client reads u16)
 
     build_packet_bytes(ServerPacketIds::ObjectPlayer as i16, &body)
+}
+
+/// 构建 ObjectColourChanged 数据包
+fn build_object_colour_changed_packet(object_id: u32, name_colour: i32) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    body.extend_from_slice(&object_id.to_le_bytes());
+    body.extend_from_slice(&name_colour.to_le_bytes());
+    build_packet_bytes(ServerPacketIds::ObjectColourChanged as i16, &body)
 }
 
 /// 构建 ObjectNpc 数据包
