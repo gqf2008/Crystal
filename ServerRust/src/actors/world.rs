@@ -2708,6 +2708,89 @@ impl Message<Tick> for WorldActor {
             }
         }
 
+        // --- 宠物自动拾取 ---
+        {
+            let mut pet_pickups: Vec<(usize, u64)> = Vec::new(); // (ground_item_index, session_id)
+            for (session_id, record) in &self.players {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    let creature = match state.creature_log.active_creature {
+                        Some(ref c) if c.enabled && !c.is_starving() => c,
+                        _ => continue,
+                    };
+                    let pickup_mode = creature.pickup_mode;
+                    if pickup_mode == crate::actors::creature::PickupMode::None {
+                        continue;
+                    }
+                    // 找附近匹配的物品（最多拾取 1 个/ tick）
+                    for (gi_idx, gi) in self.ground_items.iter().enumerate() {
+                        let dist = (state.x - gi.x).abs() + (state.y - gi.y).abs();
+                        if dist > 3 { continue; }
+                        if gi.map_index != state.map_index { continue; }
+                        // 绑定物品（dropper_session 不为空）不能拾取
+                        if gi.dropper_session.is_some() && gi.dropper_session != Some(*session_id) { continue; }
+
+                        let is_gold = gi.item.item_index == 0;
+                        let should_pickup = match pickup_mode {
+                            crate::actors::creature::PickupMode::GoldOnly => is_gold,
+                            crate::actors::creature::PickupMode::GoldAndItem => true,
+                            crate::actors::creature::PickupMode::All => true,
+                            _ => false,
+                        };
+                        if should_pickup {
+                            pet_pickups.push((gi_idx, *session_id));
+                            break; // 每个玩家每 tick 最多拾取 1 个
+                        }
+                    }
+                }
+            }
+
+            // 应用拾取（从后往前删除，避免索引偏移）
+            pet_pickups.sort_by(|a, b| b.0.cmp(&a.0));
+            pet_pickups.dedup_by(|a, b| a.0 == b.0); // 同一物品只拾取一次
+
+            for (gi_idx, session_id) in pet_pickups {
+                if gi_idx >= self.ground_items.len() { continue; }
+                let gi = self.ground_items.remove(gi_idx);
+
+                // 广播移除
+                let remove_body = gi.object_id.to_le_bytes().to_vec();
+                let remove_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &remove_body);
+                for sid in self.players.keys() {
+                    let _ = self.gate_ref.ask(SendToClient {
+                        session_id: *sid,
+                        data: remove_packet.clone(),
+                    });
+                }
+
+                if let Some(record) = self.players.get(&session_id) {
+                    if gi.item.item_index == 0 {
+                        // 金币
+                        let gold = gi.item.count as u64;
+                        let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: gold }).await;
+                        send_system_message(&self.gate_ref, session_id,
+                            &format!("宠物帮你拾取了 {} 金币", gold));
+                    } else {
+                        // 检查背包空间
+                        let has_space = record.actor_ref.ask(crate::actors::player::HasItemSpace).await.unwrap_or(false);
+                        if has_space {
+                            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory {
+                                item: gi.item.clone(),
+                            }).await;
+                            send_system_message(
+                                &self.gate_ref, session_id,
+                                &format!("宠物帮你拾取了物品"));
+                        } else {
+                            // 背包已满，把物品掉回去
+                            self.ground_items.push(gi);
+                            send_system_message(&self.gate_ref, session_id,
+                                "宠物发现物品但你的背包已满");
+                        }
+                    }
+                }
+            }
+        }
+
         // --- 精炼自动完成（每 10 秒检查一次） ---
         if self.tick_count.is_multiple_of(100) {
             let current_time = std::time::SystemTime::now()

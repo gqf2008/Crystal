@@ -1316,6 +1316,17 @@ impl Message<RemoveItemByIndex> for PlayerActor {
     }
 }
 
+/// 检查背包是否有空位
+pub struct HasItemSpace;
+
+impl Message<HasItemSpace> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, _msg: HasItemSpace, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.has_space()
+    }
+}
+
 /// 增加 PK 值（击杀玩家时调用）
 pub struct AddPkPoints {
     pub points: i32,
