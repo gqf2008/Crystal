@@ -648,8 +648,8 @@ impl Message<Heal> for PlayerActor {
 
         // 发送 HealthChanged 给客户端
         let mut body = Vec::new();
-        body.extend_from_slice(&self.state.hp.to_le_bytes());
-        body.extend_from_slice(&self.state.max_hp.to_le_bytes());
+        body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+        body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
         let _ = self.gate_ref.ask(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
@@ -681,7 +681,7 @@ impl Message<Revive> for PlayerActor {
         // 发送 HealthChanged
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.hp.to_le_bytes());
-        body.extend_from_slice(&self.state.max_hp.to_le_bytes());
+        body.extend_from_slice(&self.state.mp.to_le_bytes());
         let _ = self.gate_ref.ask(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
@@ -745,7 +745,7 @@ impl Message<TickBuff> for PlayerActor {
         if total_hp != 0 || total_mp != 0 {
             let mut body = Vec::new();
             body.extend_from_slice(&self.state.hp.to_le_bytes());
-            body.extend_from_slice(&self.state.max_hp.to_le_bytes());
+            body.extend_from_slice(&self.state.mp.to_le_bytes());
             let _ = self.gate_ref.ask(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
@@ -1128,6 +1128,32 @@ impl Message<DeductGold> for PlayerActor {
         if self.state.inventory.gold >= msg.amount {
             self.state.inventory.gold -= msg.amount;
             self.send_gold_changed();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// 扣减 MP
+pub struct DeductMP {
+    pub amount: i32,
+}
+
+impl Message<DeductMP> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: DeductMP, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if self.state.mp >= msg.amount {
+            self.state.mp -= msg.amount;
+            // 同步客户端
+            let mut body = Vec::new();
+            body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+            body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
+            });
             true
         } else {
             false

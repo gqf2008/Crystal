@@ -10,7 +10,7 @@ use kameo::message::Message;
 use tokio::time::{interval, Duration};
 use tracing::{info, debug, warn};
 
-use crate::actors::player::{PlayerActor, PlayerState, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, SetPlayerState, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing, ClearReincarnation, ClearReincarnationHost, ReviveAtHalfHp};
+use crate::actors::player::{PlayerActor, PlayerState, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, SetPlayerState, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, DeductMP, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing, ClearReincarnation, ClearReincarnationHost, ReviveAtHalfHp};
 use crate::actors::inventory::{EquipmentSlot, GroundItem, PlayerInventory, generate_item_uid};
 use crate::actors::refine::{RefineStatus, RefineLog};
 use crate::actors::friend::FriendList;
@@ -4788,24 +4788,62 @@ impl Message<MagicRequest> for WorldActor {
         let spell_db = self.magic_infos.get(&(msg.spell as u32));
         let spell_range = spell_db.map(|m| m.range as i32).unwrap_or(2);
         let power = spell_db.map(|m| m.power_base).unwrap_or(10);
+        let mp_cost = spell_db.map(|m| m.base_cost).unwrap_or(5);
+
+        // 检查并扣除 MP
+        if state.mp < mp_cost {
+            send_system_message(&self.gate_ref, msg.session_id, "魔法值不足");
+            return;
+        }
+        let mp_ok = record.actor_ref.ask(DeductMP { amount: mp_cost }).await.unwrap_or(false);
+        if !mp_ok {
+            send_system_message(&self.gate_ref, msg.session_id, "魔法值不足");
+            return;
+        }
 
         let object_id = state.object_id;
         let target_x = msg.target_x;
         let target_y = msg.target_y;
 
-        // 广播 ObjectAttack（带 spell type）
+        // 发送 MagicCast 给施法者（确认施法）
+        let spell_enum = mir2_shared::enums::Spell::try_from(msg.spell)
+            .unwrap_or(mir2_shared::enums::Spell::None);
+        let magic_cast = mir2_shared::packets::server::magic_combat::MagicCast { spell: spell_enum };
+        let mut cast_body = Vec::new();
+        if magic_cast.write_body(&mut cast_body).is_ok() {
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MagicCast as i16, &cast_body),
+            });
+        }
+
+        // 广播 ObjectMagic 给其他玩家
         let others: Vec<_> = self.other_players(msg.session_id)
             .into_iter().cloned()
             .collect();
-        for other in &others {
-            let mut body = Vec::new();
-            body.extend_from_slice(&object_id.to_le_bytes());
-            body.push(msg.direction);
-            body.push(msg.spell);
-            let _ = self.gate_ref.ask(SendToClient {
-                session_id: other.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &body),
-            });
+        let object_magic = mir2_shared::packets::server::magic_combat::ObjectMagic {
+            object_id,
+            location_x: state.x,
+            location_y: state.y,
+            direction: mir2_shared::enums::MirDirection::try_from(msg.direction)
+                .unwrap_or(mir2_shared::enums::MirDirection::Up),
+            spell: spell_enum,
+            target_id: msg.target_id,
+            target_x,
+            target_y,
+            cast: true,
+            level: 0,
+            self_broadcast: false,
+            secondary_target_ids: Vec::new(),
+        };
+        let mut om_body = Vec::new();
+        if object_magic.write_body(&mut om_body).is_ok() {
+            for other in &others {
+                let _ = self.gate_ref.ask(SendToClient {
+                    session_id: other.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectMagic as i16, &om_body),
+                });
+            }
         }
 
         // 根据魔法类型执行不同效果
