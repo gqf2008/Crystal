@@ -11,7 +11,7 @@ use tokio::time::{interval, Duration};
 use tracing::{info, debug, warn};
 use chrono::Timelike;
 
-use crate::actors::player::{PlayerActor, PlayerState, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, SetPlayerState, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, DeductMP, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetCreature, TickCreatureHunger, RestoreCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing, ClearReincarnation, ClearReincarnationHost, ReviveAtHalfHp};
+use crate::actors::player::{PlayerActor, PlayerState, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, SetPlayerState, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, DeductMP, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetCreature, TickCreatureHunger, RestoreCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing, ClearReincarnation, ClearReincarnationHost, ReviveAtHalfHp, SetExpMultiplier};
 use crate::actors::inventory::{EquipmentSlot, GroundItem, PlayerInventory, generate_item_uid};
 use crate::actors::refine::{RefineStatus, RefineLog};
 use crate::actors::friend::FriendList;
@@ -513,6 +513,10 @@ pub struct WorldActor {
     movement_index: HashMap<(i32, i32, i32), db::MapMovementInfo>,
     /// SocialActor 引用（用于转发社交命令）
     social_ref: ActorRef<SocialActor>,
+    /// 全局经验倍率事件
+    global_exp_multiplier: f64,
+    /// 全局经验倍率过期时间（tick count）
+    global_exp_event_end_tick: u64,
 }
 
 impl WorldActor {
@@ -548,6 +552,17 @@ impl WorldActor {
             game_shop_items: Vec::new(),
             movement_index: HashMap::new(),
             social_ref,
+            global_exp_multiplier: 1.0,
+            global_exp_event_end_tick: 0,
+        }
+    }
+
+    /// 计算全局经验倍率后的经验值
+    fn apply_global_exp_multiplier(&self, base: i32) -> i32 {
+        if self.tick_count < self.global_exp_event_end_tick {
+            (base as f64 * self.global_exp_multiplier).round() as i32
+        } else {
+            base
         }
     }
 
@@ -1403,7 +1418,7 @@ impl WorldActor {
                         let amount = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
                         if amount > 0 {
                             if let Some(record) = self.players.get(&session_id) {
-                                let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount }).await;
+                                let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: self.apply_global_exp_multiplier(amount) }).await;
                             }
                         }
                     }
@@ -1632,7 +1647,7 @@ impl WorldActor {
                                     }
                                 };
                                 if completed_quest.exp_reward > 0 {
-                                    let _ = record.actor_ref.ask(AddExperience { amount: completed_quest.exp_reward as i32 }).await;
+                                    let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32) }).await;
                                 }
                                 if completed_quest.gold_reward > 0 {
                                     let _ = record.actor_ref.ask(AddGold { amount: completed_quest.gold_reward }).await;
@@ -2108,6 +2123,8 @@ impl Actor for WorldActor {
             game_shop_items,
             movement_index,
             social_ref: args.social_ref,
+            global_exp_multiplier: 1.0,
+            global_exp_event_end_tick: 0,
         })
     }
 }
@@ -2885,7 +2902,7 @@ impl Message<Tick> for WorldActor {
                                 for sid in &group_sessions {
                                     if let Some(record) = self.players.get(sid) {
                                         let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
-                                            amount: xp_per,
+                                            amount: self.apply_global_exp_multiplier(xp_per),
                                         }).await;
                                     }
                                 }
@@ -2907,7 +2924,7 @@ impl Message<Tick> for WorldActor {
                             }
                         } else if let Some(record) = self.players.get(&session_id) {
                             let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
-                                amount: monster.xp,
+                                amount: self.apply_global_exp_multiplier(monster.xp),
                             }).await;
                             // 单人任务击杀进度
                             let updates = record.actor_ref.ask(crate::actors::player::ProcessMonsterKill {
@@ -3039,6 +3056,31 @@ impl Message<Tick> for WorldActor {
             }
         }
 
+        // --- 经验倍率过期检查（每 100 ticks = 10秒） ---
+        if self.tick_count % 100 == 0 {
+            for (session_id, record) in &self.players {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if state.exp_multiplier > 1.0 && self.tick_count >= state.exp_multiplier_end_tick {
+                        let _ = record.actor_ref.ask(SetExpMultiplier {
+                            multiplier: 1.0,
+                            end_tick: 0,
+                        }).await;
+                        send_system_message(&self.gate_ref, *session_id, "双倍经验效果已结束");
+                        debug!("Exp multiplier expired for session {}", session_id);
+                    }
+                }
+            }
+            // 全局经验事件过期广播
+            if self.global_exp_multiplier > 1.0 && self.tick_count >= self.global_exp_event_end_tick {
+                self.global_exp_multiplier = 1.0;
+                self.global_exp_event_end_tick = 0;
+                for (session_id, _) in &self.players {
+                    send_system_message(&self.gate_ref, *session_id, "全服双倍经验活动已结束");
+                }
+                info!("Global exp event ended");
+            }
+        }
+
         // --- PK 值衰减 + 名字颜色广播（每 10 ticks） ---
         if self.tick_count % 10 == 0 {
             let mut colour_changes = Vec::new();
@@ -3100,7 +3142,7 @@ impl Message<Tick> for WorldActor {
                         } else if roll < 95 {
                             // 经验 10~30
                             let xp = 10 + ((*session_id + self.tick_count) % 21) as i32;
-                            let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: xp }).await;
+                            let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: self.apply_global_exp_multiplier(xp) }).await;
                             send_system_message(&self.gate_ref, *session_id, &format!("钓到了经验珠！获得 {} 经验", xp));
                         } else {
                             send_system_message(&self.gate_ref, *session_id, "鱼跑了...");
@@ -3561,6 +3603,8 @@ impl Message<StartGameRequest> for WorldActor {
                 buffs: Vec::new(),
                 magics: Vec::new(),
                 flags: std::collections::HashMap::new(),
+                exp_multiplier: 1.0,
+                exp_multiplier_end_tick: 0,
             }
         });
 
@@ -4733,6 +4777,35 @@ impl Message<ChatRequest> for WorldActor {
             }
         }
 
+        // GM 经验活动 /expevent <multiplier> <duration_minutes>
+        if let Some(eargs) = message.strip_prefix("/expevent ").or_else(|| message.strip_prefix("/EXPEVENT ")) {
+            let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                state.is_gm
+            } else {
+                false
+            };
+            if !is_gm {
+                send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
+                return;
+            }
+            let parts: Vec<&str> = eargs.trim().split_whitespace().collect();
+            if parts.len() >= 2 {
+                if let (Ok(mul), Ok(dur)) = (parts[0].parse::<f64>(), parts[1].parse::<u64>()) {
+                    let duration_ticks = dur * 600; // minutes -> ticks (1 min = 600 ticks @ 100ms)
+                    self.global_exp_multiplier = mul.max(1.0);
+                    self.global_exp_event_end_tick = self.tick_count + duration_ticks;
+                    broadcast_system_message(&self.gate_ref, &self.players,
+                        &format!("【服务器活动】经验倍率 x{} 已启动，持续 {} 分钟！", mul, dur));
+                    debug!("GM {} started exp event: x{} for {} min", msg.session_id, mul, dur);
+                } else {
+                    send_system_message(&self.gate_ref, msg.session_id, "用法: /expevent <倍率> <分钟>");
+                }
+            } else {
+                send_system_message(&self.gate_ref, msg.session_id, "用法: /expevent <倍率> <分钟>");
+            }
+            return;
+        }
+
         // 在线人数 /online
         if message.trim().eq_ignore_ascii_case("/online") || message.trim().eq_ignore_ascii_case("/who") {
             let count = self.players.len();
@@ -5177,6 +5250,18 @@ impl Message<UseItemRequest> for WorldActor {
         }
 
         debug!("Player session={} used item uid={} index={}", msg.session_id, msg.unique_id, item_index);
+
+        // 特殊物品：双倍经验卷（不依赖 item_type）
+        if item_index == 4 {
+            let duration_ticks = 6000; // 10分钟 = 6000 ticks @ 100ms
+            let end_tick = self.tick_count + duration_ticks;
+            let _ = record.actor_ref.ask(SetExpMultiplier {
+                multiplier: 2.0,
+                end_tick,
+            }).await;
+            send_system_message(&self.gate_ref, msg.session_id, "双倍经验效果已启动，持续10分钟！");
+            debug!("DoubleExpScroll: {} activated 2x exp for 10 min", player_state.name);
+        }
 
         // 根据物品类型执行效果
         if let Some(ref db) = item_db {
@@ -6081,7 +6166,7 @@ impl Message<FinishQuestRequest> for WorldActor {
         // 发放奖励
         if completed_quest.exp_reward > 0 {
             let _ = record.actor_ref.ask(AddExperience {
-                amount: completed_quest.exp_reward as i32,
+                amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32),
             }).await;
         }
         if completed_quest.gold_reward > 0 {
@@ -7551,6 +7636,8 @@ impl Message<NewCharacterRequest> for WorldActor {
             buffs: Vec::new(),
             magics: Vec::new(),
             flags: std::collections::HashMap::new(),
+            exp_multiplier: 1.0,
+            exp_multiplier_end_tick: 0,
         };
         if let Err(e) = db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
             warn!("Failed to save new character '{}': {}", msg.name, e);
@@ -8437,7 +8524,7 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
                         if quest.status == QuestStatus::InProgress {
                             let _ = record.actor_ref.ask(CompleteQuest { quest_index: quest_db.index }).await;
                             // Grant rewards
-                            let _ = record.actor_ref.ask(AddExperience { amount: quest_db.exp_reward }).await;
+                            let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(quest_db.exp_reward) }).await;
                             let _ = record.actor_ref.ask(AddGold { amount: quest_db.gold_reward.max(0) as u64 }).await;
                             send_system_message(&self.gate_ref, msg.session_id,
                                 &format!("任务完成: +{}经验, +{}金币", quest_db.exp_reward, quest_db.gold_reward.max(0)));

@@ -777,6 +777,8 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         buffs: Vec::new(),
         magics,
         flags,
+        exp_multiplier: 1.0,
+        exp_multiplier_end_tick: 0,
     };
 
     Ok(Some(state))

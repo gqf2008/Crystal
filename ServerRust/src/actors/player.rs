@@ -157,6 +157,10 @@ pub struct PlayerState {
     pub magics: Vec<PlayerMagic>,
     /// NPC Flag 列表（脚本进度追踪）
     pub flags: std::collections::HashMap<String, i32>,
+    /// 经验倍率（1.0 = 正常，2.0 = 双倍）
+    pub exp_multiplier: f64,
+    /// 经验倍率过期时间（WorldActor tick count）
+    pub exp_multiplier_end_tick: u64,
 }
 
 impl PlayerState {
@@ -269,6 +273,8 @@ impl PlayerActor {
                 buffs: Vec::new(),
                 magics: Vec::new(),
                 flags: std::collections::HashMap::new(),
+                exp_multiplier: 1.0,
+                exp_multiplier_end_tick: 0,
             },
             gate_ref,
             map_data: None,
@@ -389,6 +395,25 @@ pub struct GetPlayerState;
 /// 设置地图数据
 pub struct SetMapData {
     pub map: MapData,
+}
+
+/// 设置经验倍率
+pub struct SetExpMultiplier {
+    pub multiplier: f64,
+    pub end_tick: u64,
+}
+
+impl Message<SetExpMultiplier> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetExpMultiplier,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.exp_multiplier = msg.multiplier.max(1.0);
+        self.state.exp_multiplier_end_tick = msg.end_tick;
+    }
 }
 
 /// 设置玩家状态（用于从数据库加载后初始化）
@@ -646,12 +671,13 @@ impl Message<AddExperience> for PlayerActor {
         msg: AddExperience,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let amount = msg.amount.max(0) as i64;
+        let base = msg.amount.max(0) as i64;
+        let amount = (base as f64 * self.state.exp_multiplier).round() as i64;
         self.state.experience += amount;
 
         debug!(
-            "Player {} gained {} exp (total={}/{})",
-            self.state.name, amount, self.state.experience, self.state.max_experience
+            "Player {} gained {} exp (base={} x{:.1}) (total={}/{})",
+            self.state.name, amount, base, self.state.exp_multiplier, self.state.experience, self.state.max_experience
         );
 
         // 发送 GainExperience 给客户端
@@ -2195,6 +2221,8 @@ mod tests {
             buffs: Vec::new(),
             magics: Vec::new(),
             flags: std::collections::HashMap::new(),
+            exp_multiplier: 1.0,
+            exp_multiplier_end_tick: 0,
         }
     }
 
