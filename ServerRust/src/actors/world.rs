@@ -1275,7 +1275,8 @@ impl Message<Tick> for WorldActor {
         // --- 怪物 AI ---
         if !self.monsters.is_empty() && !self.players.is_empty() {
             // 收集所有玩家位置（避免在循环中借用 self）
-            let player_positions: Vec<(u64, i32, i32, u32)> = {
+            // 预收集玩家位置 + PK 值（用于 Guard AI 红名优先）
+            let player_positions: Vec<(u64, i32, i32, u32, i32)> = {
                 let mut results = Vec::new();
                 for (session_id, record) in &self.players {
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -1284,7 +1285,7 @@ impl Message<Tick> for WorldActor {
                                 .map(|m| m.is_safe_zone(state.x, state.y))
                                 .unwrap_or(false);
                             if !in_safe {
-                                results.push((*session_id, state.x, state.y, state.object_id));
+                                results.push((*session_id, state.x, state.y, state.object_id, state.pk_points));
                             }
                         }
                     }
@@ -1304,12 +1305,38 @@ impl Message<Tick> for WorldActor {
                 let profile = &monster.ai_profile;
 
                 // 找最近玩家（在视野范围内）
+                // Guard AI：优先攻击红名玩家（PK 值 > 0）
                 let mut nearest: Option<(u64, i32, i32, i32)> = None;
-                for (session, px, py, _) in &player_positions {
-                    let dist = (monster.x - px).abs() + (monster.y - py).abs();
-                    if dist <= profile.aggro_range {
-                        if nearest.is_none_or(|n| dist < n.3) {
-                            nearest = Some((*session, *px, *py, dist));
+                if profile.ai_type == MonsterAiType::Guard {
+                    // 先找范围内的红名玩家
+                    let mut red_nearest: Option<(u64, i32, i32, i32)> = None;
+                    for (session, px, py, _, pk) in &player_positions {
+                        let dist = (monster.x - px).abs() + (monster.y - py).abs();
+                        if dist <= profile.aggro_range && *pk > 0 {
+                            if red_nearest.is_none_or(|n| dist < n.3) {
+                                red_nearest = Some((*session, *px, *py, dist));
+                            }
+                        }
+                    }
+                    if red_nearest.is_some() {
+                        nearest = red_nearest;
+                    } else {
+                        for (session, px, py, _, _) in &player_positions {
+                            let dist = (monster.x - px).abs() + (monster.y - py).abs();
+                            if dist <= profile.aggro_range {
+                                if nearest.is_none_or(|n| dist < n.3) {
+                                    nearest = Some((*session, *px, *py, dist));
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    for (session, px, py, _, _) in &player_positions {
+                        let dist = (monster.x - px).abs() + (monster.y - py).abs();
+                        if dist <= profile.aggro_range {
+                            if nearest.is_none_or(|n| dist < n.3) {
+                                nearest = Some((*session, *px, *py, dist));
+                            }
                         }
                     }
                 }
