@@ -115,6 +115,12 @@ pub fn apply_buff(buffs: &mut Vec<BuffInstance>, new_buff: BuffInstance) {
     buffs.push(new_buff);
 }
 
+/// 移除指定类型的 Buff
+pub fn remove_buff_by_type(buffs: &mut Vec<BuffInstance>, buff_type: &BuffType) {
+    let tag = std::mem::discriminant(buff_type);
+    buffs.retain(|b| std::mem::discriminant(&b.buff_type) != tag);
+}
+
 /// 计算 Buff 对属性的加成（攻击力/防御力等）
 pub fn get_stat_bonus(buffs: &[BuffInstance], stat_type: &BuffType) -> i32 {
     buffs

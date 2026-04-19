@@ -743,6 +743,23 @@ impl Message<ApplyBuff> for PlayerActor {
     }
 }
 
+/// 移除指定类型的 Buff
+pub struct RemoveBuff {
+    pub buff_type: crate::combat::buff::BuffType,
+}
+
+impl Message<RemoveBuff> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: RemoveBuff,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        crate::combat::buff::remove_buff_by_type(&mut self.state.buffs, &msg.buff_type);
+    }
+}
+
 /// Buff tick（由 WorldActor 主循环每 tick 调用）
 pub struct TickBuff;
 

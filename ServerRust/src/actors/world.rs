@@ -981,6 +981,28 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKHP" => {
+                        let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.hp < min || state.hp > max {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKMP" => {
+                        let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.mp < min || state.mp > max {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "TAKEGOLD" => {
                         let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
                         if let Some(record) = self.players.get(&session_id) {
@@ -1081,6 +1103,25 @@ impl WorldActor {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                    "REMOVEBUFF" => {
+                        let buff_type_str = parts.next().unwrap_or("").to_uppercase();
+                        let buff_type = match buff_type_str.as_str() {
+                            "HPREGEN" => Some(crate::combat::buff::BuffType::HpRegen { amount_per_tick: 0 }),
+                            "MPREGEN" => Some(crate::combat::buff::BuffType::MpRegen { amount_per_tick: 0 }),
+                            "ATTACK" => Some(crate::combat::buff::BuffType::AttackBoost { bonus: 0 }),
+                            "DEFENSE" => Some(crate::combat::buff::BuffType::DefenseBoost { bonus: 0 }),
+                            "POISON" => Some(crate::combat::buff::BuffType::Poison { damage_per_tick: 0 }),
+                            "SILENCE" => Some(crate::combat::buff::BuffType::Silence),
+                            "STUN" => Some(crate::combat::buff::BuffType::Stun),
+                            "INVISIBILITY" => Some(crate::combat::buff::BuffType::Invisibility),
+                            _ => None,
+                        };
+                        if let Some(bt) = buff_type {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let _ = record.actor_ref.ask(crate::actors::player::RemoveBuff { buff_type: bt }).await;
                             }
                         }
                     }
