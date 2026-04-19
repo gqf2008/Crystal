@@ -515,8 +515,14 @@ pub struct WorldActor {
     social_ref: ActorRef<SocialActor>,
     /// 全局经验倍率事件
     global_exp_multiplier: f64,
-    /// 全局经验倍率过期时间（tick count）
+    /// 全局掉落倍率
+    global_drop_multiplier: f64,
+    /// 全局金币倍率
+    global_gold_multiplier: f64,
+    /// 全局事件过期时间（tick count）
     global_exp_event_end_tick: u64,
+    /// 当前全局事件名称
+    global_event_name: Option<String>,
     /// 隐身中的玩家 session 集合（用于视野管理）
     invisible_sessions: std::collections::HashSet<u64>,
 }
@@ -555,7 +561,10 @@ impl WorldActor {
             movement_index: HashMap::new(),
             social_ref,
             global_exp_multiplier: 1.0,
+            global_drop_multiplier: 1.0,
+            global_gold_multiplier: 1.0,
             global_exp_event_end_tick: 0,
+            global_event_name: None,
             invisible_sessions: HashSet::new(),
         }
     }
@@ -752,6 +761,33 @@ impl WorldActor {
         debug!("Sent UserStorage to session {}", session_id);
     }
 
+    /// 发送 CombineItem 响应给客户端
+    fn send_combine_item_response(
+        &self,
+        session_id: u64,
+        id_from: u64,
+        id_to: u64,
+        success: bool,
+        destroy: bool,
+    ) {
+        let packet = mir2_shared::packets::server::item_operations::CombineItem {
+            grid: mir2_shared::enums::MirGridType::Inventory,
+            id_from,
+            id_to,
+            success,
+            destroy,
+        };
+        let mut body = Vec::new();
+        if let Err(e) = packet.write_body(&mut body) {
+            warn!("Failed to serialize CombineItem: {}", e);
+            return;
+        }
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CombineItem as i16, &body),
+        });
+    }
+
     /// 广播玩家外观更新给同地图的其他玩家
     async fn broadcast_player_appearance(&self,
         session_id: u64,
@@ -882,6 +918,9 @@ impl WorldActor {
         };
 
         let count_mul = drop_count_multiplier(monster.is_boss, monster.is_elite);
+        let global_drop_mul = if self.tick_count < self.global_exp_event_end_tick {
+            self.global_drop_multiplier
+        } else { 1.0 };
 
         for drop in &drops {
             let roll = fastrand::f64();
@@ -893,7 +932,8 @@ impl WorldActor {
             } else {
                 drop.min_count.saturating_mul(count_mul)
             };
-            self.spawn_single_drop(monster, drop.item_index, count).await;
+            let adjusted = (count as f64 * global_drop_mul).round() as u16;
+            self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
         }
 
         // 精英怪额外掉落判定（50% 原概率）
@@ -909,13 +949,17 @@ impl WorldActor {
                 } else {
                     drop.min_count
                 };
-                self.spawn_single_drop(monster, drop.item_index, count).await;
+                let adjusted = (count as f64 * global_drop_mul).round() as u16;
+                self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
             }
         }
 
         // 世界Boss额外掉落：大量金币 + 全掉落保底
         if monster.is_boss {
-            let gold_drop = fastrand::u32(5000..=20000) as u64;
+            let global_gold_mul = if self.tick_count < self.global_exp_event_end_tick {
+                self.global_gold_multiplier
+            } else { 1.0 };
+            let gold_drop = (fastrand::u32(5000..=20000) as f64 * global_gold_mul).round() as u64;
             self.spawn_single_drop(monster, 0, gold_drop as u16).await;
             for drop in &drops {
                 let count = if drop.max_count > drop.min_count {
@@ -923,7 +967,8 @@ impl WorldActor {
                 } else {
                     drop.min_count.saturating_mul(2)
                 };
-                self.spawn_single_drop(monster, drop.item_index, count).await;
+                let adjusted = (count as f64 * global_drop_mul).round() as u16;
+                self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
             }
         }
     }
@@ -2224,7 +2269,10 @@ impl Actor for WorldActor {
             movement_index,
             social_ref: args.social_ref,
             global_exp_multiplier: 1.0,
+            global_drop_multiplier: 1.0,
+            global_gold_multiplier: 1.0,
             global_exp_event_end_tick: 0,
+            global_event_name: None,
             invisible_sessions: HashSet::new(),
         })
     }
@@ -3275,14 +3323,41 @@ impl Message<Tick> for WorldActor {
                     }
                 }
             }
-            // 全局经验事件过期广播
-            if self.global_exp_multiplier > 1.0 && self.tick_count >= self.global_exp_event_end_tick {
+            // 全局事件过期广播
+            if self.tick_count >= self.global_exp_event_end_tick && self.global_exp_event_end_tick > 0 {
+                let event_name = self.global_event_name.take().unwrap_or_else(|| "活动".to_string());
                 self.global_exp_multiplier = 1.0;
+                self.global_drop_multiplier = 1.0;
+                self.global_gold_multiplier = 1.0;
                 self.global_exp_event_end_tick = 0;
                 for (session_id, _) in &self.players {
-                    send_system_message(&self.gate_ref, *session_id, "全服双倍经验活动已结束");
+                    send_system_message(&self.gate_ref, *session_id, &format!("全服{}已结束", event_name));
                 }
-                info!("Global exp event ended");
+                info!("Global event ended: {}", event_name);
+            }
+            // 随机世界事件触发（每 36000 ticks = 1 小时，20% 概率）
+            if self.tick_count > 0 && self.tick_count % 36000 == 0 && self.global_exp_event_end_tick == 0 {
+                let roll = fastrand::u32(1..=100);
+                if roll <= 20 {
+                    let event_roll = fastrand::u32(1..=100);
+                    let (name, exp_mul, drop_mul, gold_mul, duration_min) = match event_roll {
+                        1..=40 => ("双倍经验", 2.0, 1.0, 1.0, 10),
+                        41..=70 => ("掉落狂欢", 1.0, 2.0, 1.0, 10),
+                        71..=90 => ("金币雨", 1.0, 1.0, 2.0, 10),
+                        _ => ("三重盛宴", 2.0, 2.0, 2.0, 5),
+                    };
+                    let duration_ticks = duration_min * 600;
+                    self.global_exp_multiplier = exp_mul;
+                    self.global_drop_multiplier = drop_mul;
+                    self.global_gold_multiplier = gold_mul;
+                    self.global_exp_event_end_tick = self.tick_count + duration_ticks;
+                    self.global_event_name = Some(name.to_string());
+                    broadcast_system_message(&self.gate_ref, &self.players,
+                        &format!("【世界事件】{} 活动已启动！经验 x{} 掉落 x{} 金币 x{}，持续 {} 分钟！",
+                            name, exp_mul, drop_mul, gold_mul, duration_min));
+                    info!("Random world event started: {} (exp={} drop={} gold={} for {} min)",
+                        name, exp_mul, drop_mul, gold_mul, duration_min);
+                }
             }
             // 隐身过期检查：从 invisible_sessions 中移除已过期玩家并广播现身
             let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
@@ -5095,7 +5170,10 @@ impl Message<ChatRequest> for WorldActor {
                 if let (Ok(mul), Ok(dur)) = (parts[0].parse::<f64>(), parts[1].parse::<u64>()) {
                     let duration_ticks = dur * 600; // minutes -> ticks (1 min = 600 ticks @ 100ms)
                     self.global_exp_multiplier = mul.max(1.0);
+                    self.global_drop_multiplier = mul.max(1.0);
+                    self.global_gold_multiplier = mul.max(1.0);
                     self.global_exp_event_end_tick = self.tick_count + duration_ticks;
+                    self.global_event_name = Some("经验活动".to_string());
                     broadcast_system_message(&self.gate_ref, &self.players,
                         &format!("【服务器活动】经验倍率 x{} 已启动，持续 {} 分钟！", mul, dur));
                     debug!("GM {} started exp event: x{} for {} min", msg.session_id, mul, dur);
@@ -8141,11 +8219,86 @@ impl Message<CombineItemRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        debug!("CombineItem: {} from={} to={}", state.name, msg.from_grid, msg.to_grid);
-        let _ = self.gate_ref.ask(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CombineItem as i16, &[0u8]),
-        });
+        let from_grid = msg.from_grid as u8;
+        let to_grid = msg.to_grid as u8;
+
+        // 获取源物品和目标物品
+        let source = match record.actor_ref.ask(crate::actors::player::GetItemInfoByGrid { grid: from_grid }).await {
+            Ok(Some(i)) => i,
+            _ => {
+                send_system_message(&self.gate_ref, msg.session_id, "找不到源物品");
+                self.send_combine_item_response(msg.session_id, 0, 0, false, false);
+                return;
+            }
+        };
+        let target = match record.actor_ref.ask(crate::actors::player::GetItemInfoByGrid { grid: to_grid }).await {
+            Ok(Some(i)) => i,
+            _ => {
+                send_system_message(&self.gate_ref, msg.session_id, "找不到目标物品");
+                self.send_combine_item_response(msg.session_id, 0, 0, false, false);
+                return;
+            }
+        };
+
+        // 获取物品信息
+        let source_info = match self.item_infos.get(&source.item_index) {
+            Some(i) => i,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "无法识别源物品");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+        };
+        let target_info = match self.item_infos.get(&target.item_index) {
+            Some(i) => i,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "无法识别目标物品");
+                self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+                return;
+            }
+        };
+
+        // 源物品必须是宝石 (ItemType::Gem = 18)
+        if source_info.item_type != 18 {
+            send_system_message(&self.gate_ref, msg.session_id, "源物品不是宝石");
+            self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+            return;
+        }
+
+        // 目标物品必须是可镶嵌的装备
+        let can_socket = matches!(target_info.item_type,
+            1 | 2 | 4 | 5 | 6 | 7 | 9 | 10 | 19
+        );
+        if !can_socket {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法镶嵌宝石");
+            self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+            return;
+        }
+
+        // 检查目标物品是否有空槽位
+        let slot_count = target_info.slots as usize;
+        let filled_slots = target.slots.iter().filter(|s| s.is_some()).count();
+        if slot_count == 0 || filled_slots >= slot_count {
+            send_system_message(&self.gate_ref, msg.session_id, "目标物品没有空槽位");
+            self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+            return;
+        }
+
+        // 执行镶嵌
+        let result = record.actor_ref.ask(crate::actors::player::SocketGem {
+            from_grid,
+            to_grid,
+            target_slot_count: slot_count,
+        }).await.ok().flatten();
+
+        if let Some((source_uid, target_uid)) = result {
+            send_system_message(&self.gate_ref, msg.session_id, "宝石镶嵌成功！");
+            self.send_combine_item_response(msg.session_id, source_uid, target_uid, true, true);
+            debug!("CombineItem: {} socketed gem {} into item {}", state.name, source_uid, target_uid);
+        } else {
+            send_system_message(&self.gate_ref, msg.session_id, "宝石镶嵌失败");
+            self.send_combine_item_response(msg.session_id, source.unique_id, target.unique_id, false, false);
+        }
     }
 }
 

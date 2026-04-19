@@ -1256,6 +1256,25 @@ impl Message<ResetItemAddedStats> for PlayerActor {
     }
 }
 
+/// 镶嵌宝石：将背包中的宝石插入目标装备的空槽位
+pub struct SocketGem {
+    pub from_grid: u8,
+    pub to_grid: u8,
+    pub target_slot_count: usize,
+}
+
+impl Message<SocketGem> for PlayerActor {
+    type Reply = Option<(u64, u64)>; // (source_uid, target_uid)
+
+    async fn handle(&mut self, msg: SocketGem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let result = self.state.inventory.socket_gem(msg.from_grid, msg.to_grid, msg.target_slot_count);
+        if result.is_some() {
+            self.send_inventory_changed();
+        }
+        result
+    }
+}
+
 /// 丢弃金币
 pub struct DropGold {
     pub amount: u64,

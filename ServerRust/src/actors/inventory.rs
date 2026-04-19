@@ -493,6 +493,52 @@ impl PlayerInventory {
     pub fn storage_has_space(&self) -> bool {
         self.storage.iter().any(|s| s.is_none())
     }
+
+    /// 镶嵌宝石：将 from_grid 的宝石插入 to_grid 装备的第一个空槽位
+    /// 返回 (source_uid, target_uid) 或 None
+    pub fn socket_gem(&mut self, from_grid: u8, to_grid: u8, target_slot_count: usize) -> Option<(u64, u64)> {
+        let fi = from_grid as usize;
+        let ti = to_grid as usize;
+        if fi >= BACKPACK_SIZE || ti >= BACKPACK_SIZE || fi == ti {
+            return None;
+        }
+
+        // 先检查目标是否有空槽位（避免提前取走源物品后失败导致物品丢失）
+        {
+            let target_slot = self.backpack.get(ti)?;
+            let target = &target_slot.as_ref()?.item;
+            let mut slots = target.slots.clone();
+            if slots.len() < target_slot_count {
+                slots.resize_with(target_slot_count, || None);
+            }
+            if !slots.iter().any(|s| s.is_none()) {
+                return None;
+            }
+        }
+
+        // 取出源物品（宝石）
+        let source = self.backpack.get_mut(fi)?.take()?;
+        let source_uid = source.item.unique_id;
+
+        // 获取目标物品（装备）
+        let target_slot = self.backpack.get_mut(ti)?;
+        let target = &mut target_slot.as_mut()?.item;
+
+        // 确保目标槽位数组已初始化
+        if target.slots.len() < target_slot_count {
+            target.slots.resize_with(target_slot_count, || None);
+        }
+
+        // 查找第一个空槽位
+        let empty_idx = target.slots.iter().position(|s| s.is_none())?;
+
+        // 镶嵌宝石
+        target.slots[empty_idx] = Some(source.item);
+        target.gem_count = target.gem_count.saturating_add(1);
+        let target_uid = target.unique_id;
+
+        Some((source_uid, target_uid))
+    }
 }
 
 // ============================================================
@@ -666,5 +712,65 @@ mod tests {
 
         // 修理不存在的物品
         assert!(!inv.repair_item(99999));
+    }
+
+    #[test]
+    fn test_socket_gem() {
+        let mut inv = PlayerInventory::new();
+        // 添加宝石到格子 0
+        let mut gem = make_item(100, 1);
+        gem.unique_id = 1;
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item: gem });
+
+        // 添加装备到格子 1（预设 2 个槽位）
+        let mut equip = make_item(200, 1);
+        equip.unique_id = 2;
+        equip.slots = vec![None, None];
+        inv.backpack[1] = Some(InventorySlot { grid: 1, item: equip });
+
+        // 镶嵌成功
+        let result = inv.socket_gem(0, 1, 2);
+        assert!(result.is_some());
+        let (source_uid, target_uid) = result.unwrap();
+        assert_eq!(source_uid, 1);
+        assert_eq!(target_uid, 2);
+
+        // 源格已空
+        assert!(inv.backpack[0].is_none());
+        // 目标装备槽位被填充
+        let target = inv.backpack[1].as_ref().unwrap();
+        assert_eq!(target.item.gem_count, 1);
+        assert!(target.item.slots[0].is_some());
+        assert_eq!(target.item.slots[0].as_ref().unwrap().unique_id, 1);
+        assert!(target.item.slots[1].is_none());
+    }
+
+    #[test]
+    fn test_socket_gem_no_empty_slots() {
+        let mut inv = PlayerInventory::new();
+        let mut gem = make_item(100, 1);
+        gem.unique_id = 1;
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item: gem });
+
+        // 装备槽位已满
+        let mut equip = make_item(200, 1);
+        equip.unique_id = 2;
+        equip.slots = vec![Some(make_item(300, 1))];
+        inv.backpack[1] = Some(InventorySlot { grid: 1, item: equip });
+
+        // 镶嵌失败（无空槽）
+        assert!(inv.socket_gem(0, 1, 1).is_none());
+        // 源物品应保留
+        assert!(inv.backpack[0].is_some());
+    }
+
+    #[test]
+    fn test_socket_gem_same_grid() {
+        let mut inv = PlayerInventory::new();
+        let gem = make_item(100, 1);
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item: gem });
+
+        // 同格子镶嵌应失败
+        assert!(inv.socket_gem(0, 0, 2).is_none());
     }
 }
