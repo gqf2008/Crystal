@@ -3092,7 +3092,13 @@ impl Message<NPCCallRequest> for WorldActor {
                     debug!("NPC {} requires max level {}", npc.name, npc_db.max_lev);
                     return;
                 }
-                let _ = &npc_db.class_required;
+                if let Some(ref required) = npc_db.class_required {
+                    let class_name = format!("{:?}", player_state.class);
+                    if !required.is_empty() && required != &class_name {
+                        debug!("NPC {} requires class {} (player is {})", npc.name, required, class_name);
+                        return;
+                    }
+                }
                 if let Some(ref dow) = npc_db.day_of_week {
                     let today = chrono::Utc::now().format("%A").to_string();
                     let today_short = &today[..3];
