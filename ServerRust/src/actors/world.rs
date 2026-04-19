@@ -2217,6 +2217,31 @@ impl Message<Tick> for WorldActor {
             debug!("Monster '{}' respawned as #{}", spawn.name, new_oid);
         }
 
+        // --- 精炼自动完成（每 10 秒检查一次） ---
+        if self.tick_count.is_multiple_of(100) {
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            for (session_id, record) in &self.players {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if let Some(ref item) = state.refine_log.active_refine {
+                        if item.status == RefineStatus::Pending && current_time >= item.finish_time {
+                            let mut log = state.refine_log.clone();
+                            let success = log.finish();
+                            let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
+                            if success {
+                                send_system_message(&self.gate_ref, *session_id, "精炼完成！物品已提升");
+                            } else {
+                                send_system_message(&self.gate_ref, *session_id, "精炼失败，物品已损毁");
+                            }
+                            debug!("AutoRefine: {} result={}", state.name, success);
+                        }
+                    }
+                }
+            }
+        }
+
         if self.tick_count.is_multiple_of(100) {
             debug!(
                 "World tick #{} (online: {}, monsters: {})",
