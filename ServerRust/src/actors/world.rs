@@ -1074,6 +1074,28 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKNEARBY" => {
+                        let distance = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(10);
+                        let min_count = parts.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let mut nearby = 0usize;
+                                for (_, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.session_id == state.session_id { continue; }
+                                        if os.map_index != state.map_index { continue; }
+                                        let dist = (state.x - os.x).abs() + (state.y - os.y).abs();
+                                        if dist <= distance {
+                                            nearby += 1;
+                                        }
+                                    }
+                                }
+                                if nearby < min_count {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "CHECKHP" => {
                         let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
                         let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
