@@ -990,6 +990,29 @@ impl WorldActor {
                             }
                         }
                     }
+                    "GIVEBUFF" => {
+                        let buff_type_str = parts.next().unwrap_or("").to_uppercase();
+                        let duration = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(30);
+                        let interval = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+                        let power = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let buff_type = match buff_type_str.as_str() {
+                            "HPREGEN" => Some(crate::combat::buff::BuffType::HpRegen { amount_per_tick: power.max(1) }),
+                            "MPREGEN" => Some(crate::combat::buff::BuffType::MpRegen { amount_per_tick: power.max(1) }),
+                            "ATTACK" => Some(crate::combat::buff::BuffType::AttackBoost { bonus: power }),
+                            "DEFENSE" => Some(crate::combat::buff::BuffType::DefenseBoost { bonus: power }),
+                            "POISON" => Some(crate::combat::buff::BuffType::Poison { damage_per_tick: power.max(1) }),
+                            "SILENCE" => Some(crate::combat::buff::BuffType::Silence),
+                            "STUN" => Some(crate::combat::buff::BuffType::Stun),
+                            "INVISIBILITY" => Some(crate::combat::buff::BuffType::Invisibility),
+                            _ => None,
+                        };
+                        if let Some(bt) = buff_type {
+                            let buff = crate::combat::buff::BuffInstance::new(bt, duration, interval);
+                            if let Some(record) = self.players.get(&session_id) {
+                                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                            }
+                        }
+                    }
                     "GOTO" => {
                         if let Some(target) = parts.next() {
                             goto_target = Some(target.to_string());
