@@ -3864,21 +3864,47 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
             return;
         }
 
-        // 查找附近的地面物品
+        // 查找附近的地面物品（同地图）
         let distance = 3; // 宠物拾取范围
         let item_idx = self.ground_items.iter().position(|item| {
-            (item.x - msg.x).abs() <= distance && (item.y - msg.y).abs() <= distance
+            item.map_index == state.map_index
+                && (item.x - msg.x).abs() <= distance
+                && (item.y - msg.y).abs() <= distance
         });
 
         if let Some(idx) = item_idx {
             let item = self.ground_items.remove(idx);
+            let picked_oid = item.object_id;
             // 将物品添加到玩家背包
+            let mut picked_up = false;
             if let Some(rec) = self.players.get(&msg.session_id) {
-                let _ = rec.actor_ref.ask(AddItemToInventory {
-                    item: item.item,
-                }).await;
+                if let Ok(true) = rec.actor_ref.ask(AddItemToInventory {
+                    item: item.item.clone(),
+                }).await {
+                    picked_up = true;
+                }
+            }
+            if picked_up {
+                // 广播 ObjectRemove
+                let mut remove_body = Vec::new();
+                remove_body.extend_from_slice(&picked_oid.to_le_bytes());
+                let remove_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &remove_body);
+                for (sid, rec) in &self.players {
+                    if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                        if s.map_index == state.map_index {
+                            let _ = self.gate_ref.ask(SendToClient {
+                                session_id: *sid,
+                                data: remove_packet.clone(),
+                            });
+                        }
+                    }
+                }
                 debug!("Creature pickup: {} picked up item at ({},{})",
                        state.name, msg.x, msg.y);
+            } else {
+                // 添加失败，放回去
+                self.ground_items.push(item);
             }
         }
     }
