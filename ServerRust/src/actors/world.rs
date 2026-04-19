@@ -2708,6 +2708,9 @@ impl Message<Tick> for WorldActor {
                 is_elite,
             });
             if is_elite {
+                let map_name = self.map_infos.get(&(spawn.map_index as i32)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
+                broadcast_system_message(&self.gate_ref, &self.players,
+                    &format!("一只 [精英]{} 出现在 {}！勇士们，前往讨伐！", spawn.name, map_name));
                 debug!("Elite monster '{}' spawned as #{} at ({},{})", name, new_oid, spawn.x, spawn.y);
             } else {
                 debug!("Monster '{}' respawned as #{}", spawn.name, new_oid);
@@ -3209,6 +3212,11 @@ impl Message<StartGameRequest> for WorldActor {
         for door_idx in open_doors_sync {
             send_opendoor(&self.gate_ref, msg.session_id, door_idx, false);
         }
+
+        // 发送欢迎消息
+        let online_count = self.players.len();
+        send_system_message(&self.gate_ref, msg.session_id,
+            &format!("欢迎来到水晶世界！当前在线玩家: {} 人", online_count));
     }
 }
 
@@ -4092,6 +4100,34 @@ impl Message<ChatRequest> for WorldActor {
                 debug!("Shout: {} on map {}: {} ({} recipients)", player_name, sender_map, smsg, sent);
                 return;
             }
+        }
+
+        // GM 全服公告 /announce <message>
+        if let Some(amsg) = message.strip_prefix("/announce ").or_else(|| message.strip_prefix("/ANNOUNCE ")) {
+            let amsg = amsg.trim();
+            if !amsg.is_empty() {
+                let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    state.is_gm || record.account_username.eq_ignore_ascii_case("admin")
+                } else {
+                    false
+                };
+                if is_gm {
+                    broadcast_system_message(&self.gate_ref, &self.players,
+                        &format!("[公告] {}", amsg));
+                    debug!("Announce: {}", amsg);
+                } else {
+                    send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
+                }
+                return;
+            }
+        }
+
+        // 在线人数 /online
+        if message.trim().eq_ignore_ascii_case("/online") || message.trim().eq_ignore_ascii_case("/who") {
+            let count = self.players.len();
+            send_system_message(&self.gate_ref, msg.session_id,
+                &format!("当前在线玩家: {} 人", count));
+            return;
         }
 
         let formatted = format!("[{}]: {}", player_name, message);
@@ -7982,6 +8018,21 @@ fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message:
         session_id,
         data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
     });
+}
+
+/// 向所有在线玩家广播系统消息
+fn broadcast_system_message(gate_ref: &ActorRef<GateActor>, players: &HashMap<u64, PlayerRecord>, message: &str) {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    crate::util::wire::write_dotnet_string(&mut body, message);
+    body.push(mir2_shared::enums::ChatType::System as u8);
+    let packet = build_packet_bytes(ServerPacketIds::Chat as i16, &body);
+    for session_id in players.keys() {
+        let _ = gate_ref.ask(SendToClient {
+            session_id: *session_id,
+            data: packet.clone(),
+        });
+    }
 }
 
 /// 从 DB 任务配置创建任务实例
