@@ -2373,3 +2373,62 @@ pub async fn load_dragon_info(
         None => Ok(None),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    async fn temp_pool() -> DbPool {
+        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE player_flags (
+                character_name TEXT NOT NULL,
+                flag_key TEXT NOT NULL,
+                flag_value INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (character_name, flag_key)
+            )"
+        ).execute(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_save_load_flags_roundtrip() {
+        let pool = temp_pool().await;
+        let mut flags = HashMap::new();
+        flags.insert("quest_started".to_string(), 1);
+        flags.insert("npc_talk_count".to_string(), 5);
+
+        save_flags(&pool, "Hero", &flags).await.unwrap();
+        let loaded = load_flags(&pool, "Hero").await.unwrap();
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded.get("quest_started"), Some(&1));
+        assert_eq!(loaded.get("npc_talk_count"), Some(&5));
+    }
+
+    #[tokio::test]
+    async fn test_save_flags_overwrites() {
+        let pool = temp_pool().await;
+        let mut flags = HashMap::new();
+        flags.insert("key".to_string(), 10);
+        save_flags(&pool, "Hero", &flags).await.unwrap();
+
+        let mut flags2 = HashMap::new();
+        flags2.insert("key".to_string(), 20);
+        flags2.insert("new_key".to_string(), 30);
+        save_flags(&pool, "Hero", &flags2).await.unwrap();
+
+        let loaded = load_flags(&pool, "Hero").await.unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded.get("key"), Some(&20));
+        assert_eq!(loaded.get("new_key"), Some(&30));
+    }
+
+    #[tokio::test]
+    async fn test_load_flags_empty() {
+        let pool = temp_pool().await;
+        let loaded = load_flags(&pool, "Nobody").await.unwrap();
+        assert!(loaded.is_empty());
+    }
+}

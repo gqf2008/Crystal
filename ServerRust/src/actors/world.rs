@@ -691,16 +691,11 @@ impl WorldActor {
         debug!("Sent UserStorage to session {}", session_id);
     }
 
-    /// 强制玩家下坐骑并广播外观更新
-    async fn dismount_player(&mut self,
+    /// 广播玩家外观更新给同地图的其他玩家
+    async fn broadcast_player_appearance(&self,
         session_id: u64,
+        state: &crate::actors::player::PlayerState,
     ) {
-        let Some(record) = self.players.get(&session_id) else { return };
-        let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await else { return };
-        if !state.is_mounted { return; }
-        state.is_mounted = false;
-        state.mount_type = 0;
-        let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
         let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
             .and_then(|item| self.item_infos.get(&item.item_index))
             .map(|info| info.shape as i16).unwrap_or(-1);
@@ -717,11 +712,27 @@ impl WorldActor {
             weapon, weapon_effect, armor,
             state.mount_type, state.is_mounted,
         );
-        for (sid, _) in &self.players {
-            if *sid != session_id {
-                let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+        let player_map_index = state.map_index;
+        for (sid, other_record) in &self.players {
+            if *sid == session_id { continue; }
+            if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
+                if other_state.map_index != player_map_index { continue; }
             }
+            let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
         }
+    }
+
+    /// 强制玩家下坐骑并广播外观更新
+    async fn dismount_player(&mut self,
+        session_id: u64,
+    ) {
+        let Some(record) = self.players.get(&session_id) else { return };
+        let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await else { return };
+        if !state.is_mounted { return; }
+        state.is_mounted = false;
+        state.mount_type = 0;
+        let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+        self.broadcast_player_appearance(session_id, &state).await;
     }
 
     /// 怪物死亡时生成掉落并广播给所有在线玩家
@@ -807,7 +818,7 @@ impl WorldActor {
             _ => return,
         };
 
-        let count_mul = if monster.is_boss { 3u16 } else if monster.is_elite { 2u16 } else { 1u16 };
+        let count_mul = drop_count_multiplier(monster.is_boss, monster.is_elite);
 
         for drop in &drops {
             let roll = fastrand::f64();
@@ -1667,28 +1678,7 @@ impl WorldActor {
                                         state.is_mounted = true;
                                         state.mount_type = mount_type;
                                         let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
-                                        // Broadcast updated appearance to nearby players
-                                        let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                                            .and_then(|item| self.item_infos.get(&item.item_index))
-                                            .map(|info| info.shape as i16).unwrap_or(-1);
-                                        let armor = state.inventory.get_equipment(EquipmentSlot::Armour)
-                                            .and_then(|item| self.item_infos.get(&item.item_index))
-                                            .map(|info| info.shape as i16).unwrap_or(0);
-                                        let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                                            .and_then(|item| self.item_infos.get(&item.item_index))
-                                            .map(|info| info.effect as i16).unwrap_or(0);
-                                        let packet = build_object_player_packet(
-                                            &state.name, state.object_id, state.x, state.y, state.direction, state.level,
-                                            name_colour_for_pk(state.pk_points),
-                                            state.class, state.gender, state.hair,
-                                            weapon, weapon_effect, armor,
-                                            state.mount_type, state.is_mounted,
-                                        );
-                                        for (sid, _) in &self.players {
-                                            if *sid != session_id {
-                                                let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
-                                            }
-                                        }
+                                        self.broadcast_player_appearance(session_id, &state).await;
                                         send_system_message(&self.gate_ref, session_id, "你骑上了坐骑");
                                     }
                                 }
@@ -1702,27 +1692,7 @@ impl WorldActor {
                                     state.is_mounted = false;
                                     state.mount_type = 0;
                                     let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
-                                    let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                                        .and_then(|item| self.item_infos.get(&item.item_index))
-                                        .map(|info| info.shape as i16).unwrap_or(-1);
-                                    let armor = state.inventory.get_equipment(EquipmentSlot::Armour)
-                                        .and_then(|item| self.item_infos.get(&item.item_index))
-                                        .map(|info| info.shape as i16).unwrap_or(0);
-                                    let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                                        .and_then(|item| self.item_infos.get(&item.item_index))
-                                        .map(|info| info.effect as i16).unwrap_or(0);
-                                    let packet = build_object_player_packet(
-                                        &state.name, state.object_id, state.x, state.y, state.direction, state.level,
-                                        name_colour_for_pk(state.pk_points),
-                                        state.class, state.gender, state.hair,
-                                        weapon, weapon_effect, armor,
-                                        state.mount_type, state.is_mounted,
-                                    );
-                                    for (sid, _) in &self.players {
-                                        if *sid != session_id {
-                                            let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
-                                        }
-                                    }
+                                    self.broadcast_player_appearance(session_id, &state).await;
                                     send_system_message(&self.gate_ref, session_id, "你下了坐骑");
                                 }
                             }
@@ -1739,6 +1709,17 @@ impl WorldActor {
                                     .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
                                     .map(|m| m.index as u16)
                                     .unwrap_or(0);
+                                if target_map_index == 0 {
+                                    send_system_message(&self.gate_ref, session_id, "地图不存在");
+                                    continue;
+                                }
+                                let walkable = self.maps.get(&target_map_index)
+                                    .map(|m| m.is_walkable(bx, by))
+                                    .unwrap_or(false);
+                                if !walkable {
+                                    send_system_message(&self.gate_ref, session_id, "该坐标不可行走");
+                                    continue;
+                                }
                                 let boss_oid = self.alloc_object_id();
                                 let boss_hp = monster_info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(100).saturating_mul(10);
                                 let boss_min_dmg = monster_info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5).saturating_mul(3);
@@ -3178,7 +3159,7 @@ impl Message<Tick> for WorldActor {
         // --- 世界Boss超时消失 ---
         let mut boss_despawns = Vec::new();
         for (oid, despawn_tick) in &self.world_boss_queue {
-            if self.tick_count >= *despawn_tick {
+            if should_despawn_boss(self.tick_count, *despawn_tick) {
                 boss_despawns.push(*oid);
             }
         }
@@ -9402,9 +9383,17 @@ fn spawn_npcs_and_monsters(
     (npcs, monsters)
 }
 
+fn drop_count_multiplier(is_boss: bool, is_elite: bool) -> u16 {
+    if is_boss { 3 } else if is_elite { 2 } else { 1 }
+}
+
+fn should_despawn_boss(tick_count: u64, despawn_tick: u64) -> bool {
+    tick_count >= despawn_tick
+}
+
 #[cfg(test)]
 mod tests {
-    use super::name_colour_for_pk;
+    use super::*;
 
     #[test]
     fn test_name_colour_for_pk_thresholds() {
@@ -9423,5 +9412,62 @@ mod tests {
         assert_eq!(5u16.saturating_mul(2), 10);
         assert_eq!(100u16.saturating_mul(2), 200);
         assert_eq!(u16::MAX.saturating_mul(2), u16::MAX);
+    }
+
+    #[test]
+    fn test_drop_count_multiplier() {
+        assert_eq!(drop_count_multiplier(false, false), 1); // normal
+        assert_eq!(drop_count_multiplier(false, true), 2);  // elite
+        assert_eq!(drop_count_multiplier(true, false), 3);  // boss
+        assert_eq!(drop_count_multiplier(true, true), 3);   // boss trumps elite
+    }
+
+    #[test]
+    fn test_should_despawn_boss() {
+        assert!(!should_despawn_boss(0, 6000));
+        assert!(!should_despawn_boss(5999, 6000));
+        assert!(should_despawn_boss(6000, 6000)); // 10 min timeout
+        assert!(should_despawn_boss(6001, 6000));
+        assert!(should_despawn_boss(99999, 6000));
+    }
+
+    #[test]
+    fn test_boss_monster_state() {
+        let boss = MonsterState {
+            object_id: 1,
+            name: "TestBoss".to_string(),
+            image: 100,
+            monster_index: 50,
+            x: 100,
+            y: 100,
+            direction: 0,
+            hp: 10000,
+            max_hp: 10000,
+            min_dmg: 50,
+            max_dmg: 100,
+            xp: 5000,
+            spawn_x: 100,
+            spawn_y: 100,
+            map_index: 0,
+            next_attack_tick: 0,
+            next_move_tick: 0,
+            next_summon_tick: 0,
+            ai_profile: MonsterAiProfile {
+                ai_type: MonsterAiType::Boss,
+                aggro_range: 10,
+                attack_range: 2,
+                attack_cooldown: 3,
+                move_interval: 1,
+                flee_threshold: 0.0,
+            },
+            ai_state: MonsterAiState::Idle,
+            target_session: None,
+            provoked: false,
+            is_elite: false,
+            is_boss: true,
+        };
+        assert!(boss.is_boss);
+        assert!(!boss.is_elite);
+        assert_eq!(boss.ai_profile.ai_type, MonsterAiType::Boss);
     }
 }
