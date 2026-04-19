@@ -1096,6 +1096,17 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKEXP" => {
+                        let min = parts.next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(i64::MAX);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.experience < min || state.experience > max {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "CHECKHP" => {
                         let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
                         let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
