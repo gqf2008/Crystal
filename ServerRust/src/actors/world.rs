@@ -3875,6 +3875,13 @@ impl Message<WorldMoveRequest> for WorldActor {
                         debug!("Movement trigger blocked: map {} has no_teleport", dest_map_index);
                         return;
                     }
+                    // Check no_escape on source map
+                    if let Some(src_mi) = self.map_infos.get(&(state.map_index as i32)) {
+                        if src_mi.no_escape {
+                            debug!("Movement trigger blocked: source map {} has no_escape", state.map_index);
+                            return;
+                        }
+                    }
 
                     let dest_file = dest_mi.file_name.clone();
                     let dest_title = dest_mi.title.clone();
@@ -5193,22 +5200,83 @@ impl Message<UseItemRequest> for WorldActor {
                         debug!("Potion: {} recovered hp={} mp={}", player_state.name, hp_recover, mp_recover);
                     }
                 }
-                // Scroll (回城卷等)
+                // Scroll (回城卷 / 随机传送卷)
                 17 => {
-                    // 传送到当前地图安全区中心
-                    let (tx, ty) = self.maps.get(&player_state.map_index)
-                        .and_then(|m| m.safe_zone_rects.first())
-                        .map(|(x1, y1, x2, y2)| ((x1 + x2) / 2, (y1 + y2) / 2))
-                        .unwrap_or((330, 330));
-                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                        x: tx,
-                        y: ty,
-                        direction: player_state.direction,
-                        map_index: None,
-                        is_mounted: None,
-                    }).await;
-                    send_system_message(&self.gate_ref, msg.session_id, "已返回安全区");
-                    debug!("Scroll: {} teleported to safe zone ({}, {})", player_state.name, tx, ty);
+                    if let Some(mi) = self.map_infos.get(&(player_state.map_index as i32)) {
+                        if mi.no_escape {
+                            send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用传送卷");
+                            return;
+                        }
+                        match item_index {
+                            // 回城卷 -> 传送到当前地图安全区
+                            2 => {
+                                if mi.no_town_teleport {
+                                    send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用回城卷");
+                                    return;
+                                }
+                                let (tx, ty) = self.maps.get(&player_state.map_index)
+                                    .and_then(|m| m.safe_zone_rects.first())
+                                    .map(|(x1, y1, x2, y2)| ((x1 + x2) / 2, (y1 + y2) / 2))
+                                    .unwrap_or((330, 330));
+                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                    x: tx,
+                                    y: ty,
+                                    direction: player_state.direction,
+                                    map_index: None,
+                                    is_mounted: None,
+                                }).await;
+                                send_system_message(&self.gate_ref, msg.session_id, "已返回安全区");
+                                debug!("Scroll: {} teleported to safe zone ({}, {})", player_state.name, tx, ty);
+                            }
+                            // 随机传送卷 -> 传送到当前地图随机可行走位置
+                            3 => {
+                                if mi.no_random {
+                                    send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用随机传送卷");
+                                    return;
+                                }
+                                if let Some(map) = self.maps.get(&player_state.map_index) {
+                                    let (max_x, max_y) = (map.width as i32, map.height as i32);
+                                    let mut attempts = 0;
+                                    let mut rx = player_state.x;
+                                    let mut ry = player_state.y;
+                                    while attempts < 20 {
+                                        let cx = fastrand::i32(0..max_x);
+                                        let cy = fastrand::i32(0..max_y);
+                                        if map.is_walkable(cx, cy) {
+                                            rx = cx;
+                                            ry = cy;
+                                            break;
+                                        }
+                                        attempts += 1;
+                                    }
+                                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                        x: rx,
+                                        y: ry,
+                                        direction: player_state.direction,
+                                        map_index: None,
+                                        is_mounted: None,
+                                    }).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, "随机传送完成");
+                                    debug!("RandomScroll: {} teleported to ({}, {})", player_state.name, rx, ry);
+                                }
+                            }
+                            _ => {
+                                // 未知卷轴 -> 默认回城行为
+                                let (tx, ty) = self.maps.get(&player_state.map_index)
+                                    .and_then(|m| m.safe_zone_rects.first())
+                                    .map(|(x1, y1, x2, y2)| ((x1 + x2) / 2, (y1 + y2) / 2))
+                                    .unwrap_or((330, 330));
+                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                    x: tx,
+                                    y: ty,
+                                    direction: player_state.direction,
+                                    map_index: None,
+                                    is_mounted: None,
+                                }).await;
+                                send_system_message(&self.gate_ref, msg.session_id, "已返回安全区");
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -6901,6 +6969,16 @@ impl Message<MagicRequest> for WorldActor {
             }
             // --- 传送类 ---
             SPELL_TELEPORT => {
+                if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
+                    if mi.no_teleport {
+                        send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用传送魔法");
+                        return;
+                    }
+                    if mi.no_escape {
+                        send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用传送魔法");
+                        return;
+                    }
+                }
                 // 限制在地图边界内
                 let (max_x, max_y) = self.maps.get(&state.map_index)
                     .map(|m| (m.width as i32, m.height as i32))
