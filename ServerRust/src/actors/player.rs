@@ -1503,6 +1503,39 @@ impl Message<ProcessMonsterKill> for PlayerActor {
     }
 }
 
+/// 检查任务物品进度（在背包变化后调用）
+pub struct CheckQuestItemProgress;
+
+impl Message<CheckQuestItemProgress> for PlayerActor {
+    type Reply = Vec<(i32, i32, bool)>;
+
+    async fn handle(&mut self, _msg: CheckQuestItemProgress, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let mut updated = Vec::new();
+        for quest in &mut self.state.quest_log.quests {
+            let mut any_changed = false;
+            for p in &mut quest.progress {
+                let count = self.state.inventory.count_item_by_index(p.progress_id);
+                let count_i32 = count as i32;
+                if count_i32 > p.current && count_i32 <= p.target {
+                    p.current = count_i32;
+                    any_changed = true;
+                } else if count_i32 >= p.target && p.current < p.target {
+                    p.current = p.target;
+                    any_changed = true;
+                }
+            }
+            if any_changed {
+                let complete = quest.is_progress_complete();
+                // 找到变化了的进度项（取第一个变化的作为代表）
+                if let Some(p) = quest.progress.first() {
+                    updated.push((quest.quest_index, p.progress_id, complete));
+                }
+            }
+        }
+        updated
+    }
+}
+
 // ============================================================
 // 婚姻/师徒系统 Handler
 // ============================================================
