@@ -371,6 +371,8 @@ struct MonsterState {
     pub target_session: Option<u64>,
     /// 是否已被激怒（Passive 怪物被攻击后变为 Aggressive）
     pub provoked: bool,
+    /// 是否为精英怪物
+    pub is_elite: bool,
 }
 
 fn dist_to_spawn(monster: &MonsterState) -> i32 {
@@ -684,104 +686,117 @@ impl WorldActor {
     }
 
     /// 怪物死亡时生成掉落并广播给所有在线玩家
+    async fn spawn_single_drop(&mut self, monster: &MonsterState, item_index: i32, count: u16) {
+        let drop_oid = self.alloc_object_id();
+        if item_index == 0 {
+            let gold = count as u32;
+            let object_gold = mir2_shared::packets::server::ObjectGold {
+                object_id: drop_oid,
+                gold,
+                location_x: monster.x,
+                location_y: monster.y,
+            };
+            let mut buf = Vec::new();
+            if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
+                warn!("Failed to serialize ObjectGold: {}", e);
+                return;
+            }
+            for session_id in self.players.keys() {
+                let _ = self.gate_ref.ask(SendToClient {
+                    session_id: *session_id,
+                    data: buf.clone(),
+                });
+            }
+            self.ground_items.push(GroundItem {
+                object_id: drop_oid,
+                item: mir2_shared::data::item::UserItem {
+                    item_index: 0,
+                    count,
+                    ..Default::default()
+                },
+                x: monster.x,
+                y: monster.y,
+                map_index: monster.map_index,
+                dropper_session: None,
+                drop_tick: self.tick_count,
+            });
+            debug!("Monster '{}' dropped {} gold at ({}, {})", monster.name, gold, monster.x, monster.y);
+        } else {
+            let mut item = mir2_shared::data::item::UserItem {
+                item_index,
+                unique_id: generate_item_uid(),
+                count,
+                ..Default::default()
+            };
+            if let Some(info) = self.item_infos.get(&item_index) {
+                item.max_dura = info.durability as u16;
+                item.current_dura = info.durability as u16;
+            }
+            let object_item = mir2_shared::packets::server::ObjectItem {
+                object_id: drop_oid,
+                item: item.clone(),
+                location_x: monster.x,
+                location_y: monster.y,
+            };
+            let mut buf = Vec::new();
+            if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
+                warn!("Failed to serialize ObjectItem: {}", e);
+                return;
+            }
+            for session_id in self.players.keys() {
+                let _ = self.gate_ref.ask(SendToClient {
+                    session_id: *session_id,
+                    data: buf.clone(),
+                });
+            }
+            self.ground_items.push(GroundItem {
+                object_id: drop_oid,
+                item,
+                x: monster.x,
+                y: monster.y,
+                map_index: monster.map_index,
+                dropper_session: None,
+                drop_tick: self.tick_count,
+            });
+            debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, item_index, count, monster.x, monster.y);
+        }
+    }
+
     async fn spawn_monster_drops(&mut self, monster: &MonsterState) {
-        // 查找该怪物的掉落配置
         let drops = match self.monster_drops.get(&monster.monster_index) {
             Some(d) if !d.is_empty() => d.clone(),
             _ => return,
         };
 
-        for drop in drops {
-            // 概率判定
+        let count_mul = if monster.is_elite { 2u16 } else { 1u16 };
+
+        for drop in &drops {
             let roll = fastrand::f64();
             if roll > drop.chance {
                 continue;
             }
-
-            // 掉落数量
             let count = if drop.max_count > drop.min_count {
-                fastrand::u16(drop.min_count..=drop.max_count)
+                fastrand::u16(drop.min_count..=drop.max_count).saturating_mul(count_mul)
             } else {
-                drop.min_count
+                drop.min_count.saturating_mul(count_mul)
             };
+            self.spawn_single_drop(monster, drop.item_index, count).await;
+        }
 
-            let drop_oid = self.alloc_object_id();
-
-            if drop.item_index == 0 {
-                // 金币掉落（用 ObjectGold）
-                let gold = count as u32;
-                let object_gold = mir2_shared::packets::server::ObjectGold {
-                    object_id: drop_oid,
-                    gold,
-                    location_x: monster.x,
-                    location_y: monster.y,
-                };
-                let mut buf = Vec::new();
-                if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
-                    warn!("Failed to serialize ObjectGold: {}", e);
+        // 精英怪额外掉落判定（50% 原概率）
+        if monster.is_elite {
+            for drop in &drops {
+                let bonus_chance = drop.chance * 0.5;
+                let roll = fastrand::f64();
+                if roll > bonus_chance {
                     continue;
                 }
-                for session_id in self.players.keys() {
-                    let _ = self.gate_ref.ask(SendToClient {
-                        session_id: *session_id,
-                        data: buf.clone(),
-                    });
-                }
-                self.ground_items.push(GroundItem {
-                    object_id: drop_oid,
-                    item: mir2_shared::data::item::UserItem {
-                        item_index: 0,
-                        count,
-                        ..Default::default()
-                    },
-                    x: monster.x,
-                    y: monster.y,
-                    map_index: monster.map_index,
-                    dropper_session: None,
-                    drop_tick: self.tick_count,
-                });
-                debug!("Monster '{}' dropped {} gold at ({}, {})", monster.name, gold, monster.x, monster.y);
-            } else {
-                // 物品掉落
-                let mut item = mir2_shared::data::item::UserItem {
-                    item_index: drop.item_index,
-                    unique_id: generate_item_uid(),
-                    count,
-                    ..Default::default()
+                let count = if drop.max_count > drop.min_count {
+                    fastrand::u16(drop.min_count..=drop.max_count)
+                } else {
+                    drop.min_count
                 };
-                // 填充耐久（如果有物品配置）
-                if let Some(info) = self.item_infos.get(&drop.item_index) {
-                    item.max_dura = info.durability as u16;
-                    item.current_dura = info.durability as u16;
-                }
-
-                let object_item = mir2_shared::packets::server::ObjectItem {
-                    object_id: drop_oid,
-                    item: item.clone(),
-                    location_x: monster.x,
-                    location_y: monster.y,
-                };
-                let mut buf = Vec::new();
-                if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
-                    warn!("Failed to serialize ObjectItem: {}", e);
-                    continue;
-                }
-                for session_id in self.players.keys() {
-                    let _ = self.gate_ref.ask(SendToClient {
-                        session_id: *session_id,
-                        data: buf.clone(),
-                    });
-                }
-                self.ground_items.push(GroundItem {
-                    object_id: drop_oid,
-                    item,
-                    x: monster.x,
-                    y: monster.y,
-                    map_index: monster.map_index,
-                    dropper_session: None,
-                    drop_tick: self.tick_count,
-                });
-                debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, drop.item_index, count, monster.x, monster.y);
+                self.spawn_single_drop(monster, drop.item_index, count).await;
             }
         }
     }
@@ -2286,6 +2301,7 @@ impl Message<Tick> for WorldActor {
                     ai_state: MonsterAiState::Idle,
                     target_session: None,
                     provoked: false,
+                    is_elite: false,
                 });
                 debug!("Summoned monster '{}' as #{} at ({},{})", spawn.name, new_oid, spawn.x, spawn.y);
             }
@@ -2652,19 +2668,33 @@ impl Message<Tick> for WorldActor {
                     move_interval: 2,
                     flee_threshold: 0.0,
                 });
+            // 精英判定：3% 概率
+            let is_elite = fastrand::u8(1..=100) <= 3;
+            let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
+                (
+                    format!("[精英] {}", spawn.name),
+                    spawn.hp * 2,
+                    spawn.hp * 2,
+                    (spawn.min_dmg as f32 * 1.5) as i32,
+                    (spawn.max_dmg as f32 * 1.5) as i32,
+                    spawn.xp * 2,
+                )
+            } else {
+                (spawn.name.clone(), spawn.hp, spawn.hp, spawn.min_dmg, spawn.max_dmg, spawn.xp)
+            };
             self.monsters.insert(new_oid, MonsterState {
                 object_id: new_oid,
-                name: spawn.name.clone(),
+                name: name.clone(),
                 image: spawn.image,
                 monster_index: spawn.monster_index,
                 x: spawn.x,
                 y: spawn.y,
                 direction: spawn.direction,
-                hp: spawn.hp,
-                max_hp: spawn.hp,
-                min_dmg: spawn.min_dmg,
-                max_dmg: spawn.max_dmg,
-                xp: spawn.xp,
+                hp,
+                max_hp,
+                min_dmg,
+                max_dmg,
+                xp,
                 spawn_x: spawn.x,
                 spawn_y: spawn.y,
                 map_index: spawn.map_index,
@@ -2675,8 +2705,13 @@ impl Message<Tick> for WorldActor {
                 ai_state: MonsterAiState::Idle,
                 target_session: None,
                 provoked: false,
+                is_elite,
             });
-            debug!("Monster '{}' respawned as #{}", spawn.name, new_oid);
+            if is_elite {
+                debug!("Elite monster '{}' spawned as #{} at ({},{})", name, new_oid, spawn.x, spawn.y);
+            } else {
+                debug!("Monster '{}' respawned as #{}", spawn.name, new_oid);
+            }
         }
 
         // --- 任务超时检查（每 10 秒） ---
@@ -8635,7 +8670,23 @@ fn spawn_npcs_and_monsters(
     for monster in &config.monsters {
         let object_id = *next_object_id;
         *next_object_id += 1;
-        let packet = build_object_monster_packet(monster, object_id, &monster.name);
+
+        // 精英判定：3% 概率
+        let is_elite = fastrand::u8(1..=100) <= 3;
+        let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
+            (
+                format!("[精英] {}", monster.name),
+                monster.hp * 2,
+                monster.hp * 2,
+                (monster.min_dmg as f32 * 1.5) as i32,
+                (monster.max_dmg as f32 * 1.5) as i32,
+                monster.xp * 2,
+            )
+        } else {
+            (monster.name.clone(), monster.hp, monster.hp, monster.min_dmg, monster.max_dmg, monster.xp)
+        };
+
+        let packet = build_object_monster_packet(monster, object_id, &name);
         let _ = gate_ref.ask(SendToClient {
             session_id,
             data: packet,
@@ -8654,17 +8705,17 @@ fn spawn_npcs_and_monsters(
             });
         monsters.push(MonsterState {
             object_id,
-            name: monster.name.clone(),
+            name: name.clone(),
             image: monster.image,
             monster_index: monster.monster_index,
             x: monster.x,
             y: monster.y,
             direction: monster.direction,
-            hp: monster.hp,
-            max_hp: monster.hp,
-            min_dmg: monster.min_dmg,
-            max_dmg: monster.max_dmg,
-            xp: monster.xp,
+            hp,
+            max_hp,
+            min_dmg,
+            max_dmg,
+            xp,
             spawn_x: monster.x,
             spawn_y: monster.y,
             map_index,
@@ -8675,7 +8726,11 @@ fn spawn_npcs_and_monsters(
             ai_state: MonsterAiState::Idle,
             target_session: None,
             provoked: false,
+            is_elite,
         });
+        if is_elite {
+            debug!("Elite monster '{}' spawned as #{} at ({},{})", name, object_id, monster.x, monster.y);
+        }
     }
 
     info!("Spawned {} NPCs and {} monsters for session {}",
@@ -8722,6 +8777,7 @@ fn spawn_npcs_and_monsters(
                         ai_state: MonsterAiState::Idle,
                         target_session: None,
                         provoked: false,
+                        is_elite: false,
                     });
                     info!("Spawned dragon at ({}, {}) on map {}", dragon.location_x, dragon.location_y, map_file);
                 }
