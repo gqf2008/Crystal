@@ -18,6 +18,20 @@ use crate::gate::actor::{GateActor, SendToClient};
 use crate::maps::loader::MapData;
 use crate::util::wire::{build_packet_bytes, write_dotnet_string};
 
+/// 玩家已学习的魔法/技能
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PlayerMagic {
+    pub spell: i32,
+    pub level: u8,
+    pub experience: u16,
+}
+
+impl PlayerMagic {
+    pub fn new(spell: i32) -> Self {
+        Self { spell, level: 0, experience: 0 }
+    }
+}
+
 /// 方向增量 (MirDirection: Up=0, UpRight=1, Right=2, DownRight=3, Down=4, DownLeft=5, Left=6, UpLeft=7)
 const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
 const DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
@@ -137,6 +151,8 @@ pub struct PlayerState {
     pub is_gm: bool,
     /// 当前 Buff/Debuff 列表
     pub buffs: Vec<crate::combat::buff::BuffInstance>,
+    /// 已学习的魔法/技能列表
+    pub magics: Vec<PlayerMagic>,
 }
 
 impl PlayerState {
@@ -246,6 +262,7 @@ impl PlayerActor {
                 allow_lover_recall: false,
                 is_gm: false,
                 buffs: Vec::new(),
+                magics: Vec::new(),
             },
             gate_ref,
             map_data: None,
@@ -2169,6 +2186,7 @@ mod tests {
             pk_points: 0,
             pk_kill_count: 0,
             buffs: Vec::new(),
+            magics: Vec::new(),
         }
     }
 

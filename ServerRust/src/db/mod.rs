@@ -144,6 +144,14 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             PRIMARY KEY (character_name, quest_index),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
+        CREATE TABLE IF NOT EXISTS player_magics (
+            character_name TEXT NOT NULL,
+            spell INTEGER NOT NULL,
+            level INTEGER NOT NULL DEFAULT 0,
+            experience INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (character_name, spell),
+            FOREIGN KEY (character_name) REFERENCES characters(name)
+        );
         CREATE TABLE IF NOT EXISTS guilds (
             name TEXT PRIMARY KEY,
             notice_json TEXT NOT NULL DEFAULT '[]',
@@ -661,6 +669,9 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     // Save refine
     save_refine(pool, &state.name, &state.refine_log).await?;
 
+    // Save magics
+    save_magics(pool, &state.name, &state.magics).await?;
+
     Ok(())
 }
 
@@ -683,6 +694,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
     let quest_log = load_quests(pool, character_name).await?;
     let creature_log = load_creatures(pool, character_name).await?;
     let refine_log = load_refine(pool, character_name).await?;
+    let magics = load_magics(pool, character_name).await?;
     let hero_inventory = load_hero_inventory(pool, character_name).await?;
 
     let attack_mode = parse_attack_mode(&row.get::<String, _>("attack_mode"));
@@ -751,6 +763,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         pk_points: row.get::<i32, _>("pk_points"),
         pk_kill_count: row.get::<i32, _>("pk_kill_count") as u32,
         buffs: Vec::new(),
+        magics,
     };
 
     Ok(Some(state))
@@ -1403,6 +1416,40 @@ impl RefineStatus {
             _ => None,
         }
     }
+}
+
+async fn save_magics(pool: &DbPool, character_name: &str, magics: &[crate::actors::player::PlayerMagic]) -> anyhow::Result<()> {
+    // Delete existing magics for this character
+    sqlx::query("DELETE FROM player_magics WHERE character_name = ?")
+        .bind(character_name)
+        .execute(pool).await?;
+    // Insert current magics
+    for magic in magics {
+        sqlx::query(
+            "INSERT INTO player_magics (character_name, spell, level, experience) VALUES (?, ?, ?, ?)"
+        )
+        .bind(character_name)
+        .bind(magic.spell)
+        .bind(magic.level as i32)
+        .bind(magic.experience as i32)
+        .execute(pool).await?;
+    }
+    Ok(())
+}
+
+async fn load_magics(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<crate::actors::player::PlayerMagic>> {
+    let rows = sqlx::query("SELECT spell, level, experience FROM player_magics WHERE character_name = ?")
+        .bind(character_name)
+        .fetch_all(pool).await?;
+    let mut magics = Vec::new();
+    for r in rows {
+        magics.push(crate::actors::player::PlayerMagic {
+            spell: r.get("spell"),
+            level: r.get::<i32, _>("level") as u8,
+            experience: r.get::<i32, _>("experience") as u16,
+        });
+    }
+    Ok(magics)
 }
 
 use std::collections::HashMap;

@@ -1367,6 +1367,105 @@ impl WorldActor {
                             }
                         }
                     }
+                    "GIVESKILL" => {
+                        let spell = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if spell > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let mut added = false;
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    if !state.magics.iter().any(|m| m.spell == spell) {
+                                        state.magics.push(crate::actors::player::PlayerMagic::new(spell));
+                                        let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+                                        added = true;
+                                    }
+                                }
+                                if added {
+                                    // 发送 NewMagic 包给客户端
+                                    if let Some(info) = self.magic_infos.get(&(spell as u32)) {
+                                        let magic = mir2_shared::data::client_data::ClientMagic {
+                                            name: info.name.clone(),
+                                            spell: mir2_shared::enums::Spell::try_from(spell as u8).unwrap_or(mir2_shared::enums::Spell::None),
+                                            base_cost: info.base_cost as u8,
+                                            level_cost: info.level_cost as u8,
+                                            icon: info.icon as u8,
+                                            level1: info.level1 as u8,
+                                            level2: info.level2 as u8,
+                                            level3: info.level3 as u8,
+                                            need1: info.need1 as u16,
+                                            need2: info.need2 as u16,
+                                            need3: info.need3 as u16,
+                                            level: 0,
+                                            key: 0,
+                                            experience: 0,
+                                            delay: info.delay_base as i64,
+                                            range: info.range as u8,
+                                            cast_time: 0,
+                                        };
+                                        let new_magic = mir2_shared::packets::server::magic::NewMagic { magic, hero: false };
+                                        let mut body = Vec::new();
+                                        if new_magic.write_body(&mut body).is_ok() {
+                                            let _ = self.gate_ref.ask(SendToClient {
+                                                session_id,
+                                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewMagic as i16, &body),
+                                            });
+                                        }
+                                    }
+                                    send_system_message(&self.gate_ref, session_id, "你学会了一项新技能！");
+                                    debug!("GIVESKILL: session={} spell={}", session_id, spell);
+                                } else {
+                                    send_system_message(&self.gate_ref, session_id, "你已经学会了这个技能");
+                                }
+                            }
+                        }
+                    }
+                    "CHECKSKILL" => {
+                        let spell = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let min_level = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        let max_level = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(255);
+                        if spell > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let has_skill = state.magics.iter().any(|m| m.spell == spell && m.level >= min_level && m.level <= max_level);
+                                    if !has_skill {
+                                        skip = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "UPGRADESKILL" => {
+                        let spell = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if spell > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let mut upgraded = false;
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    if let Some(magic) = state.magics.iter_mut().find(|m| m.spell == spell) {
+                                        if magic.level < 3 {
+                                            magic.level += 1;
+                                            upgraded = true;
+                                        }
+                                    }
+                                    if upgraded {
+                                        let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+                                        // 发送 MagicLeveled 包
+                                        let spell_enum = mir2_shared::enums::Spell::try_from(spell as u8).unwrap_or(mir2_shared::enums::Spell::None);
+                                        let leveled = mir2_shared::packets::server::magic::MagicLeveled { spell: spell_enum, level: state.magics.iter().find(|m| m.spell == spell).map(|m| m.level).unwrap_or(0), hero: false };
+                                        let mut body = Vec::new();
+                                        if leveled.write_body(&mut body).is_ok() {
+                                            let _ = self.gate_ref.ask(SendToClient {
+                                                session_id,
+                                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MagicLeveled as i16, &body),
+                                            });
+                                        }
+                                        send_system_message(&self.gate_ref, session_id, "技能升级成功！");
+                                        debug!("UPGRADESKILL: session={} spell={} level={}", session_id, spell, state.magics.iter().find(|m| m.spell == spell).map(|m| m.level).unwrap_or(0));
+                                    } else {
+                                        send_system_message(&self.gate_ref, session_id, "技能已达到最高等级或未学习");
+                                    }
+                                }
+                            }
+                        }
+                    }
                     "LOCAL" => {
                         let message = parts.collect::<Vec<_>>().join(" ");
                         if !message.is_empty() {
@@ -3019,6 +3118,7 @@ impl Message<StartGameRequest> for WorldActor {
                 pk_points: 0,
                 pk_kill_count: 0,
                 buffs: Vec::new(),
+                magics: Vec::new(),
             }
         });
 
@@ -3221,6 +3321,39 @@ impl Message<StartGameRequest> for WorldActor {
             .collect();
         for door_idx in open_doors_sync {
             send_opendoor(&self.gate_ref, msg.session_id, door_idx, false);
+        }
+
+        // 发送已学习的技能列表给客户端
+        for magic in &loaded_state.magics {
+            if let Some(info) = self.magic_infos.get(&(magic.spell as u32)) {
+                let client_magic = mir2_shared::data::client_data::ClientMagic {
+                    name: info.name.clone(),
+                    spell: mir2_shared::enums::Spell::try_from(magic.spell as u8).unwrap_or(mir2_shared::enums::Spell::None),
+                    base_cost: info.base_cost as u8,
+                    level_cost: info.level_cost as u8,
+                    icon: info.icon as u8,
+                    level1: info.level1 as u8,
+                    level2: info.level2 as u8,
+                    level3: info.level3 as u8,
+                    need1: info.need1 as u16,
+                    need2: info.need2 as u16,
+                    need3: info.need3 as u16,
+                    level: magic.level,
+                    key: 0,
+                    experience: magic.experience,
+                    delay: info.delay_base as i64,
+                    range: info.range as u8,
+                    cast_time: 0,
+                };
+                let new_magic = mir2_shared::packets::server::magic::NewMagic { magic: client_magic, hero: false };
+                let mut body = Vec::new();
+                if new_magic.write_body(&mut body).is_ok() {
+                    let _ = self.gate_ref.ask(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewMagic as i16, &body),
+                    });
+                }
+            }
         }
 
         // 发送欢迎消息
@@ -6183,6 +6316,13 @@ impl Message<MagicRequest> for WorldActor {
 
         // Validate spell exists in DB
         let spell_db = self.magic_infos.get(&(msg.spell as u32));
+
+        // 检查玩家是否已学习该技能（基础攻击魔法不需要学习）
+        let basic_spells = [0, 1]; // None, 基础攻击
+        if !basic_spells.contains(&msg.spell) && !state.magics.iter().any(|m| m.spell == msg.spell as i32) {
+            send_system_message(&self.gate_ref, msg.session_id, "你尚未学会这个技能");
+            return;
+        }
         let spell_range = spell_db.map(|m| m.range as i32).unwrap_or(2);
         let power = spell_db.map(|m| m.power_base).unwrap_or(10);
         let mp_cost = spell_db.map(|m| m.base_cost).unwrap_or(5);
@@ -6852,6 +6992,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             pk_points: 0,
             pk_kill_count: 0,
             buffs: Vec::new(),
+            magics: Vec::new(),
         };
         if let Err(e) = db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
             warn!("Failed to save new character '{}': {}", msg.name, e);
