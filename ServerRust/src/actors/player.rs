@@ -1694,6 +1694,25 @@ impl Message<TickCreatureHunger> for PlayerActor {
     }
 }
 
+/// 恢复宠物饥饿值
+pub struct RestoreCreatureHunger {
+    pub amount: u8,
+}
+
+impl Message<RestoreCreatureHunger> for PlayerActor {
+    type Reply = bool; // true = restored, false = no active pet
+
+    async fn handle(&mut self, msg: RestoreCreatureHunger, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if let Some(ref mut creature) = self.state.creature_log.active_creature {
+            if creature.enabled {
+                creature.restore_hunger(msg.amount);
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// 设置攻击模式
 pub struct SetAttackMode {
     pub mode: mir2_shared::enums::AttackMode,

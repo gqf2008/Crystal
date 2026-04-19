@@ -11,7 +11,7 @@ use tokio::time::{interval, Duration};
 use tracing::{info, debug, warn};
 use chrono::Timelike;
 
-use crate::actors::player::{PlayerActor, PlayerState, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, SetPlayerState, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, DeductMP, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetCreature, TickCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing, ClearReincarnation, ClearReincarnationHost, ReviveAtHalfHp};
+use crate::actors::player::{PlayerActor, PlayerState, MoveType, MoveRequest, TurnRequest, BroadcastMovement, GetPlayerState, SetMapData, SetPlayerState, AttackRequest, TakeDamage, AddItemToInventory, InventoryMoveItem, GetItemInfo, ConsumeItem, InventoryEquipItem, GetEquipmentInfo, InventoryUnequipItem, RemoveItemFromInventory, InventoryMergeItem, InventorySplitItem, DropGold, AddGold, DeductGold, DeductMP, AddExperience, AcceptQuest, CompleteQuest, AbandonQuest, GetQuest, HasCompletedQuest, SetCreature, TickCreatureHunger, RestoreCreatureHunger, SetHeroIndex, StoreItem, TakeBackItem, SetRefineLog, SetAttackMode, SetPetMode, SetPlayerPosition, SetFishing, ClearReincarnation, ClearReincarnationHost, ReviveAtHalfHp};
 use crate::actors::inventory::{EquipmentSlot, GroundItem, PlayerInventory, generate_item_uid};
 use crate::actors::refine::{RefineStatus, RefineLog};
 use crate::actors::friend::FriendList;
@@ -1297,6 +1297,17 @@ impl WorldActor {
                         if !message.is_empty() {
                             for sid in self.players.keys() {
                                 send_system_message(&self.gate_ref, *sid, &format!("[全局] {}", message));
+                            }
+                        }
+                    }
+                    "GIVEPETFOOD" => {
+                        let amount = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(20);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let restored = record.actor_ref.ask(RestoreCreatureHunger { amount }).await.unwrap_or(false);
+                            if restored {
+                                send_system_message(&self.gate_ref, session_id, &format!("宠物吃了食物，饥饿值恢复 {} 点", amount));
+                            } else {
+                                send_system_message(&self.gate_ref, session_id, "你没有召唤宠物");
                             }
                         }
                     }
