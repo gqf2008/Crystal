@@ -1016,6 +1016,40 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKPET" => {
+                        let required_type = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let matches = match state.creature_log.active_creature {
+                                    Some(ref c) if c.enabled => {
+                                        if required_type == 0 {
+                                            true // any pet
+                                        } else {
+                                            c.creature_type as u8 == required_type
+                                        }
+                                    }
+                                    _ => false,
+                                };
+                                if !matches {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKPETFOOD" => {
+                        let min_hunger = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(20);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let enough = match state.creature_log.active_creature {
+                                    Some(ref c) if c.enabled => c.hunger >= min_hunger,
+                                    _ => false,
+                                };
+                                if !enough {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "CHECKBUFF" => {
                         let buff_type_str = parts.next().unwrap_or("").to_uppercase();
                         let target_buff = match buff_type_str.as_str() {
@@ -1177,6 +1211,18 @@ impl WorldActor {
                             let _ = record.actor_ref.ask(crate::actors::player::RemoveItemByIndex {
                                 item_index, count,
                             }).await;
+                        }
+                    }
+                    "TAKEPETFOOD" => {
+                        let item_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let count = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let removed = record.actor_ref.ask(crate::actors::player::RemoveItemByIndex {
+                                item_index, count,
+                            }).await.unwrap_or(false);
+                            if !removed {
+                                send_system_message(&self.gate_ref, session_id, "你没有足够的宠物食物");
+                            }
                         }
                     }
                     "GIVEITEM" => {
