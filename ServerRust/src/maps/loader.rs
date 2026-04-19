@@ -14,6 +14,9 @@ pub struct CellInfo {
     pub walkable: bool,
 }
 
+/// 安全区矩形 (x1, y1, x2, y2)
+pub type SafeZoneRect = (i32, i32, i32, i32);
+
 /// 加载后的地图数据
 #[derive(Debug, Clone)]
 pub struct MapData {
@@ -22,6 +25,8 @@ pub struct MapData {
     pub width: i16,
     pub height: i16,
     pub cells: Vec<Vec<CellInfo>>,
+    /// 安全区矩形列表（左闭右闭）
+    pub safe_zone_rects: Vec<SafeZoneRect>,
 }
 
 impl MapData {
@@ -36,6 +41,19 @@ impl MapData {
             return false;
         }
         self.cells[x as usize][y as usize].walkable
+    }
+
+    /// 检查指定坐标是否在安全区内
+    pub fn is_safe_zone(&self, x: i32, y: i32) -> bool {
+        if !self.is_valid(x, y) {
+            return false;
+        }
+        for (x1, y1, x2, y2) in &self.safe_zone_rects {
+            if x >= *x1 && x <= *x2 && y >= *y1 && y <= *y2 {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -155,6 +173,7 @@ fn load_type_100(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
         width,
         height,
         cells,
+        safe_zone_rects: Vec::new(),
     })
 }
 
@@ -233,6 +252,7 @@ fn load_type_0(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
         width,
         height,
         cells,
+        safe_zone_rects: Vec::new(),
     })
 }
 

@@ -301,6 +301,56 @@ impl PlayerInventory {
         self.backpack.iter().filter(|s| s.is_some()).count()
     }
 
+    /// 按 item_index 统计背包中该物品的总数量（包含堆叠）
+    pub fn count_item_by_index(&self, item_index: i32) -> u16 {
+        self.backpack.iter().flatten()
+            .filter(|s| s.item.item_index == item_index)
+            .map(|s| s.item.count)
+            .sum()
+    }
+
+    /// 按 item_index 从背包中移除指定数量的物品
+    /// 返回是否成功移除了全部数量
+    pub fn remove_item_by_index(&mut self, item_index: i32, mut count: u16) -> bool {
+        if self.count_item_by_index(item_index) < count {
+            return false;
+        }
+        for s in self.backpack.iter_mut().flatten() {
+            if s.item.item_index == item_index {
+                if s.item.count > count {
+                    s.item.count -= count;
+                    return true;
+                } else {
+                    count -= s.item.count;
+                    s.item.count = 0;
+                    // 标记为空（后续清理）
+                }
+            }
+        }
+        // 清理空槽位
+        for slot in self.backpack.iter_mut() {
+            if let Some(ref s) = slot {
+                if s.item.count == 0 {
+                    *slot = None;
+                }
+            }
+        }
+        true
+    }
+
+    /// 从背包中随机选择一个物品并移除返回（用于死亡掉落）
+    pub fn random_drop_one(&mut self) -> Option<UserItem> {
+        let occupied: Vec<usize> = self.backpack.iter().enumerate()
+            .filter(|(_, s)| s.is_some())
+            .map(|(i, _)| i)
+            .collect();
+        if occupied.is_empty() {
+            return None;
+        }
+        let idx = occupied[fastrand::usize(0..occupied.len())];
+        self.backpack[idx].take().map(|s| s.item)
+    }
+
     // ============================================================
     // 装备操作
     // ============================================================

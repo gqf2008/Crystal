@@ -431,6 +431,31 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             king_size INTEGER NOT NULL DEFAULT 0,
             control_point_index INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS monster_drops (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            monster_index INTEGER NOT NULL,
+            item_index INTEGER NOT NULL,
+            min_count INTEGER NOT NULL DEFAULT 1,
+            max_count INTEGER NOT NULL DEFAULT 1,
+            chance REAL NOT NULL DEFAULT 1.0,
+            FOREIGN KEY (monster_index) REFERENCES monster_infos(index)
+        );
+        CREATE INDEX IF NOT EXISTS idx_monster_drops_monster ON monster_drops(monster_index);
+        CREATE TABLE IF NOT EXISTS npc_goods (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            npc_index INTEGER NOT NULL,
+            item_index INTEGER NOT NULL,
+            count INTEGER NOT NULL DEFAULT 1,
+            price INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (npc_index) REFERENCES npc_infos(index)
+        );
+        CREATE INDEX IF NOT EXISTS idx_npc_goods_npc ON npc_goods(npc_index);
+        CREATE TABLE IF NOT EXISTS npc_scripts (
+            npc_index INTEGER NOT NULL,
+            page_name TEXT NOT NULL,
+            lines_json TEXT NOT NULL DEFAULT '[]',
+            PRIMARY KEY (npc_index, page_name)
+        );
         "#
     ).execute(&pool).await?;
 
@@ -690,6 +715,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         last_recall_time: 0,
         allow_lover_recall: row.get::<Option<i32>, _>("allow_lover_recall").map(|v| v != 0).unwrap_or(false),
         is_gm: false, // TODO: load from accounts.admin_account column
+        buffs: Vec::new(),
     };
 
     Ok(Some(state))
@@ -1462,6 +1488,16 @@ pub struct MonsterInfo {
     pub drop_path: Option<String>,
 }
 
+/// Monster drop entry (from DB)
+#[derive(Debug, Clone)]
+pub struct MonsterDropInfo {
+    pub monster_index: i32,
+    pub item_index: i32,
+    pub min_count: u16,
+    pub max_count: u16,
+    pub chance: f64,
+}
+
 /// NPC info
 #[derive(Debug, Clone)]
 pub struct NPCInfo {
@@ -1511,6 +1547,23 @@ pub struct QuestInfo {
     pub item_message: Option<String>,
     pub flag_message: Option<String>,
     pub time_limit_seconds: i32,
+}
+
+/// NPC 商品信息
+#[derive(Debug, Clone)]
+pub struct NpcGoodsInfo {
+    pub npc_index: i32,
+    pub item_index: i32,
+    pub count: i32,
+    pub price: i32,
+}
+
+/// NPC 脚本信息
+#[derive(Debug, Clone)]
+pub struct NpcScriptInfo {
+    pub npc_index: i32,
+    pub page_name: String,
+    pub lines: Vec<String>,
 }
 
 /// Game shop item
@@ -1748,6 +1801,55 @@ pub async fn load_monster_infos(pool: &DbPool) -> anyhow::Result<Vec<MonsterInfo
             drop_path: r.get::<Option<String>, _>("drop_path"),
         }
     }).collect())
+}
+
+/// Load monster drops grouped by monster_index
+pub async fn load_monster_drops(pool: &DbPool) -> anyhow::Result<HashMap<i32, Vec<MonsterDropInfo>>> {
+    let rows = sqlx::query("SELECT * FROM monster_drops ORDER BY monster_index").fetch_all(pool).await?;
+    let mut map: HashMap<i32, Vec<MonsterDropInfo>> = HashMap::new();
+    for r in rows {
+        let monster_index: i32 = r.get("monster_index");
+        let entry = MonsterDropInfo {
+            monster_index,
+            item_index: r.get("item_index"),
+            min_count: r.get::<i32, _>("min_count") as u16,
+            max_count: r.get::<i32, _>("max_count") as u16,
+            chance: r.get::<f64, _>("chance"),
+        };
+        map.entry(monster_index).or_default().push(entry);
+    }
+    Ok(map)
+}
+
+/// Load NPC goods grouped by npc_index
+pub async fn load_npc_goods(pool: &DbPool) -> anyhow::Result<HashMap<i32, Vec<NpcGoodsInfo>>> {
+    let rows = sqlx::query("SELECT * FROM npc_goods ORDER BY npc_index").fetch_all(pool).await?;
+    let mut map: HashMap<i32, Vec<NpcGoodsInfo>> = HashMap::new();
+    for r in rows {
+        let npc_index: i32 = r.get("npc_index");
+        let entry = NpcGoodsInfo {
+            npc_index,
+            item_index: r.get("item_index"),
+            count: r.get("count"),
+            price: r.get("price"),
+        };
+        map.entry(npc_index).or_default().push(entry);
+    }
+    Ok(map)
+}
+
+/// Load NPC scripts grouped by (npc_index, page_name)
+pub async fn load_npc_scripts(pool: &DbPool) -> anyhow::Result<HashMap<(i32, String), Vec<String>>> {
+    let rows = sqlx::query("SELECT * FROM npc_scripts").fetch_all(pool).await?;
+    let mut map: HashMap<(i32, String), Vec<String>> = HashMap::new();
+    for r in rows {
+        let npc_index: i32 = r.get("npc_index");
+        let page_name: String = r.get("page_name");
+        let lines_json: String = r.get("lines_json");
+        let lines: Vec<String> = serde_json::from_str(&lines_json).unwrap_or_default();
+        map.insert((npc_index, page_name.clone()), lines);
+    }
+    Ok(map)
 }
 
 /// Load all NPC infos from DB

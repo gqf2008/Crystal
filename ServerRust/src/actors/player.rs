@@ -115,6 +115,8 @@ pub struct PlayerState {
     pub allow_lover_recall: bool,
     /// 是否为 GM（对应 C# IsGM / AccountInfo.AdminAccount）
     pub is_gm: bool,
+    /// 当前 Buff/Debuff 列表
+    pub buffs: Vec<crate::combat::buff::BuffInstance>,
 }
 
 /// PlayerActor 状态
@@ -181,6 +183,7 @@ impl PlayerActor {
                 last_recall_time: 0,
                 allow_lover_recall: false,
                 is_gm: false,
+                buffs: Vec::new(),
             },
             gate_ref,
             map_data: None,
@@ -481,7 +484,7 @@ impl Message<AttackRequest> for PlayerActor {
 }
 
 impl Message<TakeDamage> for PlayerActor {
-    type Reply = ();
+    type Reply = bool;
 
     async fn handle(
         &mut self,
@@ -504,6 +507,13 @@ impl Message<TakeDamage> for PlayerActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Struck as i16, &struck_body),
         });
 
+        // 死亡处理
+        if self.state.hp <= 0 && !self.state.is_dead {
+            self.state.is_dead = true;
+            debug!("Player {} died (attacker={})", self.state.name, msg.attacker_id);
+            return true;
+        }
+
         // 发送 HealthChanged
         if self.state.hp > 0 {
             let mut health_body = Vec::new();
@@ -514,6 +524,7 @@ impl Message<TakeDamage> for PlayerActor {
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &health_body),
             });
         }
+        false
     }
 }
 
@@ -567,6 +578,134 @@ impl Message<AddExperience> for PlayerActor {
             let _ = self.gate_ref.ask(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LevelChanged as i16, &lv_body),
+            });
+        }
+    }
+}
+
+/// 治疗请求（来自 Healing/MassHealing 等魔法）
+pub struct Heal {
+    pub amount: i32,
+}
+
+impl Message<Heal> for PlayerActor {
+    type Reply = i32; // 实际回复量
+
+    async fn handle(
+        &mut self,
+        msg: Heal,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if self.state.is_dead || msg.amount <= 0 {
+            return 0;
+        }
+        let before = self.state.hp;
+        self.state.hp = (self.state.hp + msg.amount).min(self.state.max_hp);
+        let healed = self.state.hp - before;
+
+        // 发送 HealthChanged 给客户端
+        let mut body = Vec::new();
+        body.extend_from_slice(&self.state.hp.to_le_bytes());
+        body.extend_from_slice(&self.state.max_hp.to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
+        });
+
+        debug!("Player {} healed for {} HP ({} -> {})", self.state.name, healed, before, self.state.hp);
+        healed
+    }
+}
+
+/// 复活请求（WorldActor 在死亡倒计时后调用）
+pub struct Revive;
+
+impl Message<Revive> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        _msg: Revive,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if !self.state.is_dead {
+            return;
+        }
+        self.state.is_dead = false;
+        self.state.hp = self.state.max_hp;
+        self.state.mp = self.state.max_mp;
+
+        // 发送 HealthChanged
+        let mut body = Vec::new();
+        body.extend_from_slice(&self.state.hp.to_le_bytes());
+        body.extend_from_slice(&self.state.max_hp.to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
+        });
+
+        debug!("Player {} revived (hp={} mp={})", self.state.name, self.state.hp, self.state.mp);
+    }
+}
+
+/// Buff 应用请求
+pub struct ApplyBuff {
+    pub buff: crate::combat::buff::BuffInstance,
+}
+
+impl Message<ApplyBuff> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: ApplyBuff,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        crate::combat::buff::apply_buff(&mut self.state.buffs,
+            msg.buff,
+        );
+    }
+}
+
+/// Buff tick（由 WorldActor 主循环每 tick 调用）
+pub struct TickBuff;
+
+impl Message<TickBuff> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        _msg: TickBuff,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if self.state.buffs.is_empty() {
+            return;
+        }
+        let results = crate::combat::buff::tick_buffs(&mut self.state.buffs, 1);
+        let mut total_hp = 0i32;
+        let mut total_mp = 0i32;
+        for r in &results {
+            total_hp += r.hp_change;
+            total_mp += r.mp_change;
+        }
+        if total_hp != 0 {
+            self.state.hp = (self.state.hp + total_hp).clamp(0, self.state.max_hp);
+        }
+        if total_mp != 0 {
+            self.state.mp = (self.state.mp + total_mp).clamp(0, self.state.max_mp);
+        }
+        // 移除过期 buff
+        crate::combat::buff::expire_buffs(&mut self.state.buffs,
+        );
+
+        // 如有变化，同步客户端
+        if total_hp != 0 || total_mp != 0 {
+            let mut body = Vec::new();
+            body.extend_from_slice(&self.state.hp.to_le_bytes());
+            body.extend_from_slice(&self.state.max_hp.to_le_bytes());
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
             });
         }
     }
@@ -840,6 +979,56 @@ impl Message<DeductGold> for PlayerActor {
         } else {
             false
         }
+    }
+}
+
+/// 检查背包中是否有指定数量的物品（按 item_index）
+pub struct HasItem {
+    pub item_index: i32,
+    pub count: u16,
+}
+
+impl Message<HasItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: HasItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.count_item_by_index(msg.item_index) >= msg.count
+    }
+}
+
+/// 按 item_index 从背包中移除指定数量的物品
+pub struct RemoveItemByIndex {
+    pub item_index: i32,
+    pub count: u16,
+}
+
+impl Message<RemoveItemByIndex> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: RemoveItemByIndex, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.remove_item_by_index(msg.item_index, msg.count)
+    }
+}
+
+/// 死亡时随机掉落背包物品（返回被掉落的物品列表）
+pub struct DropRandomItemsOnDeath;
+
+impl Message<DropRandomItemsOnDeath> for PlayerActor {
+    type Reply = Vec<mir2_shared::data::item::UserItem>;
+
+    async fn handle(
+        &mut self,
+        _msg: DropRandomItemsOnDeath,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let mut dropped = Vec::new();
+        let max_drop = fastrand::u8(0..=2);
+        for _ in 0..max_drop {
+            if let Some(item) = self.state.inventory.random_drop_one() {
+                dropped.push(item);
+            }
+        }
+        dropped
     }
 }
 

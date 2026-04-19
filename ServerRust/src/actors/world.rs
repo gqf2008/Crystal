@@ -1,7 +1,7 @@
 // WorldActor - 游戏世界主循环
 // 对应 C# GameSrv/WorldServer.cs + M2Server 核心逻辑
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use kameo::actor::{Actor, ActorRef, Spawn};
@@ -70,6 +70,8 @@ pub struct NpcSpawn {
 pub struct MonsterSpawn {
     pub name: String,
     pub image: u16,
+    /// 对应 monster_infos.index（掉落查询用）
+    pub monster_index: i32,
     pub x: i32,
     pub y: i32,
     pub direction: u8,
@@ -111,6 +113,7 @@ fn load_spawn_config(map_name: &str, spawn_dir: &Path) -> SpawnConfig {
                     monsters: raw.monsters.into_iter().map(|m| MonsterSpawn {
                         name: m.name,
                         image: m.image,
+                        monster_index: 0, // TOML spawn 无 DB 索引，后续通过 image/name 匹配
                         x: m.x,
                         y: m.y,
                         direction: m.direction,
@@ -161,6 +164,7 @@ fn spawn_config_from_db(
         Some(MonsterSpawn {
             name: mi.name.clone(),
             image: mi.image as u16,
+            monster_index: mi.index,
             x: r.x,
             y: r.y,
             direction: r.direction as u8,
@@ -228,11 +232,103 @@ fn default_min_dmg() -> i32 { 1 }
 fn default_max_dmg() -> i32 { 5 }
 fn default_xp() -> i32 { 10 }
 
+/// AI 行为类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MonsterAiType {
+    /// 被动：不会主动攻击，只有被攻击才反击
+    Passive,
+    /// 主动：发现玩家就追击并攻击（默认）
+    Aggressive,
+    /// 逃跑：低血量时会逃跑
+    Coward,
+    /// 守卫：只保护特定区域，超出范围回退
+    Guard,
+    /// Boss：强化版主动，更高攻击频率和范围
+    Boss,
+    /// 远程：保持距离进行物理远程攻击
+    Ranged,
+    /// 法师：保持距离进行魔法远程攻击
+    Mage,
+}
+
+impl MonsterAiType {
+    /// 从 DB 的 ai 字段解析
+    fn from_db_ai(ai: i32) -> Self {
+        match ai {
+            0 | 1 => Self::Passive,
+            64 | 81 | 82 | 252 => Self::Boss,
+            4 | 5 => Self::Coward,
+            6 => Self::Guard,
+            10 | 11 | 12 => Self::Ranged,
+            20 | 21 | 22 => Self::Mage,
+            _ => Self::Aggressive,
+        }
+    }
+}
+
+/// AI 运行时参数（从 MonsterInfo 构建）
+#[derive(Debug, Clone)]
+struct MonsterAiProfile {
+    pub ai_type: MonsterAiType,
+    /// 视野/仇恨范围
+    pub aggro_range: i32,
+    /// 攻击范围（1=近战，>1=远程）
+    pub attack_range: i32,
+    /// 攻击冷却（ticks）
+    pub attack_cooldown: u64,
+    /// 移动速度（每多少 tick 移动一次）
+    pub move_interval: u64,
+    /// 逃跑阈值（HP 百分比，Coward 用）
+    pub flee_threshold: f32,
+}
+
+impl MonsterAiProfile {
+    /// 从 MonsterInfo 构建默认 AI 配置
+    fn from_info(info: &db::MonsterInfo) -> Self {
+        let ai_type = MonsterAiType::from_db_ai(info.ai);
+        let view_range = info.view_range.max(3);
+        let (aggro_range, attack_range, attack_cooldown, move_interval) = match ai_type {
+            MonsterAiType::Passive => (view_range, 1, 10, 2),
+            MonsterAiType::Aggressive => (view_range, 1, 5, 2),
+            MonsterAiType::Coward => (view_range / 2, 1, 8, 1),
+            MonsterAiType::Guard => (view_range, 1, 5, 2),
+            MonsterAiType::Boss => (view_range * 2, 2, 3, 1),
+            MonsterAiType::Ranged => (view_range, 4, 6, 2),
+            MonsterAiType::Mage => (view_range, 6, 8, 2),
+        };
+        Self {
+            ai_type,
+            aggro_range,
+            attack_range,
+            attack_cooldown,
+            move_interval,
+            flee_threshold: if ai_type == MonsterAiType::Coward { 0.3 } else { 0.0 },
+        }
+    }
+}
+
+/// AI 运行时状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MonsterAiState {
+    ///  idle / 巡逻
+    Idle,
+    /// 追击目标
+    Chase,
+    /// 攻击中
+    Attack,
+    /// 逃跑
+    Flee,
+    /// 返回出生点
+    Return,
+}
+
 /// 运行时怪物状态
 struct MonsterState {
     pub object_id: u32,
     pub name: String,
     pub image: u16,
+    /// 对应 monster_infos 的 index（用于掉落查询）
+    pub monster_index: i32,
     pub x: i32,
     pub y: i32,
     pub direction: u8,
@@ -243,8 +339,20 @@ struct MonsterState {
     pub xp: i32,
     pub spawn_x: i32,
     pub spawn_y: i32,
+    /// 所在地图索引（当前服务器单地图运行，默认 0）
+    pub map_index: u16,
     /// 下次可攻击的 tick
     pub next_attack_tick: u64,
+    /// 下次可移动的 tick
+    pub next_move_tick: u64,
+    /// AI 配置（创建时从 DB 加载）
+    pub ai_profile: MonsterAiProfile,
+    /// 当前 AI 状态
+    pub ai_state: MonsterAiState,
+    /// 当前目标玩家 session（None = 无目标）
+    pub target_session: Option<u64>,
+    /// 是否已被激怒（Passive 怪物被攻击后变为 Aggressive）
+    pub provoked: bool,
 }
 
 fn dist_to_spawn(monster: &MonsterState) -> i32 {
@@ -270,6 +378,15 @@ const MON_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
 const DEFAULT_SPAWN_X: i32 = 330;
 const DEFAULT_SPAWN_Y: i32 = 330;
 
+// 魔法 spell ID 常量（Mir2 原数值）
+const SPELL_HEALING: u8 = 61;
+const SPELL_MASS_HEALING: u8 = 75;
+const SPELL_HEALING_CIRCLE: u8 = 86;
+const SPELL_MAGIC_SHIELD: u8 = 43;
+const SPELL_SOUL_SHIELD: u8 = 69;
+const SPELL_BLESSED_ARMOUR: u8 = 71;
+const SPELL_TELEPORT: u8 = 37;
+
 impl MonsterState {
     /// 朝目标方向走一步，返回新位置和方向
     fn step_toward(&self, tx: i32, ty: i32) -> (i32, i32, u8) {
@@ -289,6 +406,16 @@ impl MonsterState {
         let nx = self.x + MON_DIR_DX[best_dir as usize];
         let ny = self.y + MON_DIR_DY[best_dir as usize];
         (nx, ny, best_dir)
+    }
+
+    /// 远离目标方向走一步（逃跑用）
+    fn step_away(&self, tx: i32, ty: i32) -> (i32, i32, u8) {
+        let dx = tx - self.x;
+        let dy = ty - self.y;
+        // 远离 = 朝向相反方向
+        let opposite_x = self.x - dx;
+        let opposite_y = self.y - dy;
+        self.step_toward(opposite_x, opposite_y)
     }
 }
 
@@ -314,6 +441,8 @@ pub struct WorldActor {
     npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
     respawn_queue: HashMap<u32, (MonsterSpawn, u64)>,
+    /// 死亡玩家复活队列 (session_id → 死亡 tick)
+    player_death_queue: HashMap<u64, u64>,
     /// 地面掉落物品
     ground_items: Vec<GroundItem>,
     /// 已打开的门 (map_index, door_index)
@@ -326,8 +455,14 @@ pub struct WorldActor {
     item_infos: HashMap<i32, db::ItemInfo>,
     /// 游戏配置：怪物信息
     monster_infos: HashMap<i32, db::MonsterInfo>,
+    /// 游戏配置：怪物掉落（monster_index -> drop list）
+    monster_drops: HashMap<i32, Vec<db::MonsterDropInfo>>,
     /// 游戏配置：NPC 信息
     npc_infos: HashMap<i32, db::NPCInfo>,
+    /// 游戏配置：NPC 商品（npc_index -> goods list）
+    npc_goods: HashMap<i32, Vec<db::NpcGoodsInfo>>,
+    /// 游戏配置：NPC 脚本 ((npc_index, page_name) -> lines)
+    npc_scripts: HashMap<(i32, String), Vec<String>>,
     /// 游戏配置：任务信息
     quest_infos: HashMap<i32, db::QuestInfo>,
     /// 游戏配置：魔法信息（key = spell ID）
@@ -355,13 +490,17 @@ impl WorldActor {
             monsters: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
+            player_death_queue: HashMap::new(),
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
             db_pool,
             map_infos: HashMap::new(),
             item_infos: HashMap::new(),
             monster_infos: HashMap::new(),
+            monster_drops: HashMap::new(),
             npc_infos: HashMap::new(),
+            npc_goods: HashMap::new(),
+            npc_scripts: HashMap::new(),
             quest_infos: HashMap::new(),
             magic_infos: HashMap::new(),
             dragon_info: None,
@@ -375,8 +514,16 @@ impl WorldActor {
     fn get_or_load_map(&mut self, file_name: &str) -> Option<&MapData> {
         if !self.maps.contains_key(&0) || self.maps.get(&0).map(|m| m.file_name != file_name).unwrap_or(true) {
             match loader::load_map(file_name, &self.map_dir) {
-                Ok(map) => {
+                Ok(mut map) => {
                     info!("Loaded map: {} ({}x{})", map.file_name, map.width, map.height);
+                    // 应用 DB 中的 no_fight（整图安全区）
+                    if let Some(mi) = self.map_infos.values().find(|m| m.file_name == file_name) {
+                        if mi.no_fight {
+                            map.safe_zone_rects.push((0, 0, map.width as i32 - 1, map.height as i32 - 1));
+                        }
+                    }
+                    // 硬编码常见地图安全区（可后续迁移到配置）
+                    Self::apply_hardcoded_safe_zones(file_name, &mut map);
                     self.maps.insert(0, map);
                 }
                 Err(e) => {
@@ -386,6 +533,19 @@ impl WorldActor {
             }
         }
         self.maps.get(&0)
+    }
+
+    /// 为已知地图注入默认安全区（坐标为 Mir2 经典值）
+    fn apply_hardcoded_safe_zones(file_name: &str, map: &mut MapData) {
+        let name = file_name.to_lowercase();
+        if name.contains("0") || name.contains("bichon") {
+            // 比奇省安全区（新手村附近）
+            map.safe_zone_rects.push((260, 245, 295, 285));
+        }
+        if name.contains("3") || name.contains("mongchon") || name.contains("pranja") {
+            // 盟重省安全区
+            map.safe_zone_rects.push((325, 255, 360, 295));
+        }
     }
 
     /// 分配下一个对象 ID
@@ -411,18 +571,329 @@ impl WorldActor {
             1.0
         };
 
+        let goods = self.npc_goods.get(&npc.db_index).cloned().unwrap_or_default();
+
+        let mut items = Vec::new();
+        for good in &goods {
+            let mut item = mir2_shared::data::item::UserItem {
+                item_index: good.item_index,
+                count: good.count as u16,
+                ..Default::default()
+            };
+            // 填充耐久（如果有物品配置）
+            if let Some(info) = self.item_infos.get(&good.item_index) {
+                item.max_dura = info.durability as u16;
+                item.current_dura = info.durability as u16;
+            }
+            items.push(item);
+        }
+
+        let npc_goods_packet = mir2_shared::packets::server::npc_interaction::NPCGoods {
+            list: items,
+            rate,
+            panel_type: mir2_shared::enums::PanelType::Buy,
+            hide_added_stats: false,
+        };
+
         let mut body = Vec::new();
-        // NPCGoods: [count: i32 LE][items...][rate: f32 LE][panel_type: u8][hide_added_stats: bool]
-        body.extend_from_slice(&0i32.to_le_bytes()); // 空商品列表
-        body.extend_from_slice(&rate.to_le_bytes());
-        body.push(0u8); // PanelType::Buy
-        body.push(0u8); // hide_added_stats = false
+        if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &npc_goods_packet) {
+            warn!("Failed to serialize NPCGoods: {}", e);
+            return;
+        }
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCGoods as i16, &body);
         let _ = self.gate_ref.ask(SendToClient {
             session_id,
             data: packet,
         });
-        debug!("Sent empty goods list from NPC '{}' (rate={}) to session {}", npc.name, rate, session_id);
+        debug!("Sent {} goods from NPC '{}' (rate={}) to session {}", goods.len(), npc.name, rate, session_id);
+    }
+
+    /// 怪物死亡时生成掉落并广播给所有在线玩家
+    async fn spawn_monster_drops(&mut self, monster: &MonsterState) {
+        // 查找该怪物的掉落配置
+        let drops = match self.monster_drops.get(&monster.monster_index) {
+            Some(d) if !d.is_empty() => d.clone(),
+            _ => return,
+        };
+
+        for drop in drops {
+            // 概率判定
+            let roll = fastrand::f64();
+            if roll > drop.chance {
+                continue;
+            }
+
+            // 掉落数量
+            let count = if drop.max_count > drop.min_count {
+                fastrand::u16(drop.min_count..=drop.max_count)
+            } else {
+                drop.min_count
+            };
+
+            let drop_oid = self.alloc_object_id();
+
+            if drop.item_index == 0 {
+                // 金币掉落（用 ObjectGold）
+                let gold = count as u32;
+                let object_gold = mir2_shared::packets::server::ObjectGold {
+                    object_id: drop_oid,
+                    gold,
+                    location_x: monster.x,
+                    location_y: monster.y,
+                };
+                let mut buf = Vec::new();
+                if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
+                    warn!("Failed to serialize ObjectGold: {}", e);
+                    continue;
+                }
+                for session_id in self.players.keys() {
+                    let _ = self.gate_ref.ask(SendToClient {
+                        session_id: *session_id,
+                        data: buf.clone(),
+                    });
+                }
+                self.ground_items.push(GroundItem {
+                    item: mir2_shared::data::item::UserItem {
+                        item_index: 0,
+                        count,
+                        ..Default::default()
+                    },
+                    x: monster.x,
+                    y: monster.y,
+                    map_index: 0,
+                    dropper_session: None,
+                });
+                debug!("Monster '{}' dropped {} gold at ({}, {})", monster.name, gold, monster.x, monster.y);
+            } else {
+                // 物品掉落
+                let mut item = mir2_shared::data::item::UserItem {
+                    item_index: drop.item_index,
+                    unique_id: generate_item_uid(),
+                    count,
+                    ..Default::default()
+                };
+                // 填充耐久（如果有物品配置）
+                if let Some(info) = self.item_infos.get(&drop.item_index) {
+                    item.max_dura = info.durability as u16;
+                    item.current_dura = info.durability as u16;
+                }
+
+                let object_item = mir2_shared::packets::server::ObjectItem {
+                    object_id: drop_oid,
+                    item: item.clone(),
+                    location_x: monster.x,
+                    location_y: monster.y,
+                };
+                let mut buf = Vec::new();
+                if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
+                    warn!("Failed to serialize ObjectItem: {}", e);
+                    continue;
+                }
+                for session_id in self.players.keys() {
+                    let _ = self.gate_ref.ask(SendToClient {
+                        session_id: *session_id,
+                        data: buf.clone(),
+                    });
+                }
+                self.ground_items.push(GroundItem {
+                    item,
+                    x: monster.x,
+                    y: monster.y,
+                    map_index: 0,
+                    dropper_session: None,
+                });
+                debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, drop.item_index, count, monster.x, monster.y);
+            }
+        }
+    }
+
+    /// 玩家死亡时随机掉落背包物品和金币（安全区不掉落）
+    async fn handle_player_death_drop(
+        &mut self,
+        session_id: u64,
+        x: i32,
+        y: i32,
+        map_index: u16,
+    ) {
+        // 安全区不掉落
+        if self.maps.get(&map_index).map(|m| m.is_safe_zone(x, y)).unwrap_or(false) {
+            return;
+        }
+        let actor_ref = match self.players.get(&session_id) {
+            Some(r) => r.actor_ref.clone(),
+            None => return,
+        };
+
+        // 掉落背包物品（0-2 个）
+        let dropped = actor_ref.ask(crate::actors::player::DropRandomItemsOnDeath).await.unwrap_or_default();
+        for item in dropped {
+            let drop_oid = self.alloc_object_id();
+            let object_item = mir2_shared::packets::server::ObjectItem {
+                object_id: drop_oid,
+                item: item.clone(),
+                location_x: x,
+                location_y: y,
+            };
+            let mut buf = Vec::new();
+            if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
+                warn!("Failed to serialize ObjectItem: {}", e);
+                continue;
+            }
+            for sid in self.players.keys() {
+                let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+            }
+            self.ground_items.push(GroundItem { item, x, y, map_index, dropper_session: Some(session_id) });
+        }
+
+        // 掉落金币（1-5%）
+        if let Ok(Some(state)) = actor_ref.ask(GetPlayerState).await {
+            let pct = fastrand::u8(1..=5);
+            let gold_drop = state.inventory.gold * pct as u64 / 100;
+            if gold_drop > 0 {
+                let _ = actor_ref.ask(crate::actors::player::DeductGold { amount: gold_drop }).await;
+                let drop_oid = self.alloc_object_id();
+                let object_gold = mir2_shared::packets::server::ObjectGold {
+                    object_id: drop_oid,
+                    gold: gold_drop as u32,
+                    location_x: x,
+                    location_y: y,
+                };
+                let mut buf = Vec::new();
+                if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
+                    warn!("Failed to serialize ObjectGold: {}", e);
+                } else {
+                    for sid in self.players.keys() {
+                        let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+                    }
+                    self.ground_items.push(GroundItem {
+                        item: mir2_shared::data::item::UserItem {
+                            item_index: 0,
+                            count: gold_drop as u16,
+                            ..Default::default()
+                        },
+                        x, y, map_index, dropper_session: Some(session_id),
+                    });
+                }
+            }
+        }
+    }
+
+    /// 执行 NPC 脚本行，解析条件命令与动作命令
+    /// 返回 (显示文本, GOTO 目标页面名)
+    async fn eval_npc_script(
+        &mut self,
+        lines: &mut [String],
+        session_id: u64,
+        _npc: &NpcState,
+    ) -> (Vec<String>, Option<String>) {
+        let mut output = Vec::new();
+        let mut skip = false;
+        let mut goto_target: Option<String> = None;
+
+        for line in lines.iter_mut() {
+            let t = line.trim();
+            if t.starts_with('<') && t.ends_with('>') {
+                let inner = &t[1..t.len() - 1];
+                let mut parts = inner.split_whitespace();
+                let cmd = match parts.next() {
+                    Some(c) => c.to_uppercase(),
+                    None => continue,
+                };
+
+                if skip {
+                    if cmd == "END" || cmd == "ENDIF" {
+                        skip = false;
+                    }
+                    continue;
+                }
+
+                match cmd.as_str() {
+                    "CHECKLEVEL" => {
+                        let min = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(u16::MAX);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.level < min || state.level > max {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKGOLD" => {
+                        let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.inventory.gold < amount {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKITEM" => {
+                        let item_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let count = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let has = record.actor_ref.ask(crate::actors::player::HasItem {
+                                item_index, count,
+                            }).await.unwrap_or(false);
+                            if !has {
+                                skip = true;
+                            }
+                        }
+                    }
+                    "TAKEGOLD" => {
+                        let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let _ = record.actor_ref.ask(crate::actors::player::DeductGold { amount }).await;
+                        }
+                    }
+                    "GIVEGOLD" => {
+                        let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount }).await;
+                        }
+                    }
+                    "TAKEITEM" => {
+                        let item_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let count = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let _ = record.actor_ref.ask(crate::actors::player::RemoveItemByIndex {
+                                item_index, count,
+                            }).await;
+                        }
+                    }
+                    "GIVEITEM" => {
+                        let item_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let count = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let mut item = mir2_shared::data::item::UserItem {
+                                item_index,
+                                count,
+                                ..Default::default()
+                            };
+                            if let Some(info) = self.item_infos.get(&item_index) {
+                                item.max_dura = info.durability as u16;
+                                item.current_dura = info.durability as u16;
+                            }
+                            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory {
+                                item,
+                            }).await;
+                        }
+                    }
+                    "GOTO" => {
+                        if let Some(target) = parts.next() {
+                            goto_target = Some(target.to_string());
+                            break;
+                        }
+                    }
+                    "BREAK" => break,
+                    _ => {}
+                }
+            } else if !skip {
+                output.push(line.clone());
+            }
+        }
+        (output, goto_target)
     }
 }
 
@@ -476,11 +947,26 @@ impl Actor for WorldActor {
         };
         let monster_infos: HashMap<i32, db::MonsterInfo> = monster_infos_list.into_iter().map(|m| (m.index, m)).collect();
 
+        let monster_drops = match db::load_monster_drops(&args.db_pool).await {
+            Ok(d) => { info!("Loaded drop configs for {} monsters from database", d.len()); d }
+            Err(e) => { warn!("Failed to load monster_drops from DB: {}", e); HashMap::new() }
+        };
+
         let npc_infos_list = match db::load_npc_infos(&args.db_pool).await {
             Ok(m) => { info!("Loaded {} NPC configs from database", m.len()); m }
             Err(e) => { warn!("Failed to load npc_infos from DB: {}", e); Vec::new() }
         };
         let npc_infos: HashMap<i32, db::NPCInfo> = npc_infos_list.into_iter().map(|n| (n.index, n)).collect();
+
+        let npc_goods = match db::load_npc_goods(&args.db_pool).await {
+            Ok(g) => { info!("Loaded goods for {} NPCs from database", g.len()); g }
+            Err(e) => { warn!("Failed to load npc_goods from DB: {}", e); HashMap::new() }
+        };
+
+        let npc_scripts = match db::load_npc_scripts(&args.db_pool).await {
+            Ok(s) => { info!("Loaded {} NPC script pages from database", s.len()); s }
+            Err(e) => { warn!("Failed to load npc_scripts from DB: {}", e); HashMap::new() }
+        };
 
         let quest_infos_list = match db::load_quest_infos(&args.db_pool).await {
             Ok(m) => { info!("Loaded {} quest configs from database", m.len()); m }
@@ -527,13 +1013,17 @@ impl Actor for WorldActor {
             monsters: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
+            player_death_queue: HashMap::new(),
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
             db_pool: args.db_pool,
             map_infos,
             item_infos,
             monster_infos,
+            monster_drops,
             npc_infos,
+            npc_goods,
+            npc_scripts,
             quest_infos,
             magic_infos,
             dragon_info,
@@ -780,7 +1270,14 @@ impl Message<Tick> for WorldActor {
                 let mut results = Vec::new();
                 for (session_id, record) in &self.players {
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                        results.push((*session_id, state.x, state.y, state.object_id));
+                        if !state.is_dead {
+                            let in_safe = self.maps.get(&state.map_index)
+                                .map(|m| m.is_safe_zone(state.x, state.y))
+                                .unwrap_or(false);
+                            if !in_safe {
+                                results.push((*session_id, state.x, state.y, state.object_id));
+                            }
+                        }
                     }
                 }
                 results
@@ -789,62 +1286,147 @@ impl Message<Tick> for WorldActor {
             // 对每个怪物执行 AI
             let mut dead_monsters = Vec::new();
             let mut moved_monsters = Vec::new();
+            let mut moved_targets: HashSet<(i32, i32)> = HashSet::new();
+            let mut death_drops: Vec<(u64, i32, i32, u16)> = Vec::new();
+            // 预收集怪物当前位置（用于碰撞检测）
+            let monster_positions: HashSet<(i32, i32)> = self.monsters.values().map(|m| (m.x, m.y)).collect();
 
             for (oid, monster) in &mut self.monsters {
-                // 找最近玩家
-                let mut nearest: Option<(u64, i32, i32, i32)> = None; // (session, px, py, dist)
+                let profile = &monster.ai_profile;
+
+                // 找最近玩家（在视野范围内）
+                let mut nearest: Option<(u64, i32, i32, i32)> = None;
                 for (session, px, py, _) in &player_positions {
                     let dist = (monster.x - px).abs() + (monster.y - py).abs();
-                    if nearest.is_none_or(|n| dist < n.3) {
-                        nearest = Some((*session, *px, *py, dist));
+                    if dist <= profile.aggro_range {
+                        if nearest.is_none_or(|n| dist < n.3) {
+                            nearest = Some((*session, *px, *py, dist));
+                        }
                     }
                 }
 
-                let (aggro_range, attack_range, attack_cooldown_ticks) = (10, 1, 5);
+                // 更新目标
+                if let Some((sess, _, _, _)) = nearest {
+                    monster.target_session = Some(sess);
+                } else {
+                    monster.target_session = None;
+                }
+
+                // 低血量逃跑判定（Coward）
+                let hp_pct = monster.hp as f32 / monster.max_hp as f32;
+                let is_fleeing = profile.ai_type == MonsterAiType::Coward && hp_pct < profile.flee_threshold;
+
+                // 是否在攻击冷却中
+                let can_attack = self.tick_count >= monster.next_attack_tick;
+                // 是否可以移动（移动间隔）
+                let can_move = self.tick_count >= monster.next_move_tick;
+
+                // Passive 怪物：未激怒时不主动攻击
+                let should_chase = match profile.ai_type {
+                    MonsterAiType::Passive => monster.provoked,
+                    MonsterAiType::Guard => nearest.is_some_and(|(_, _, _, d)| d <= profile.aggro_range) && dist_to_spawn(monster) <= profile.aggro_range * 2,
+                    _ => nearest.is_some(),
+                };
 
                 if let Some((target_session, px, py, dist)) = nearest {
-                    if dist <= attack_range && self.tick_count >= monster.next_attack_tick {
-                        // 攻击范围内且冷却完毕 → 攻击最近玩家
-                        let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(7)) as i32 % (monster.max_dmg - monster.min_dmg + 1))
+                    if is_fleeing && can_move {
+                        // 逃跑：远离目标
+                        let (nx, ny, dir) = monster.step_away(px, py);
+                        if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                            && !monster_positions.contains(&(nx, ny))
+                            && moved_targets.insert((nx, ny))
+                        {
+                            moved_monsters.push((*oid, nx, ny, dir));
+                        }
+                        monster.next_move_tick = self.tick_count + profile.move_interval;
+                        monster.ai_state = MonsterAiState::Flee;
+                    } else if dist <= profile.attack_range && can_attack {
+                        // 攻击
+                        let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
+                        let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(7)) as i32 % dmg_range)
                             + monster.min_dmg;
-                        debug!("Monster '{}' (#{}) attacks Player {} for {} dmg", monster.name, *oid, target_session, damage);
+                        debug!("Monster '{}' (#{}) attacks Player {} for {} dmg [AI={:?}]", monster.name, *oid, target_session, damage, profile.ai_type);
+                        monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                        monster.ai_state = MonsterAiState::Attack;
 
-                        // 记录攻击冷却
-                        monster.next_attack_tick = self.tick_count + attack_cooldown_ticks;
+                        let is_ranged = matches!(profile.ai_type, MonsterAiType::Ranged | MonsterAiType::Mage);
 
-                        // 发送 ObjectAttack 动画
+                        // ObjectAttack 广播
                         let mut attack_body = Vec::new();
                         attack_body.extend_from_slice(&monster.object_id.to_le_bytes());
                         attack_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
                         attack_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
                         attack_body.push(monster.direction);
-                        attack_body.push(0u8); // spell
+                        attack_body.push(if is_ranged { 1u8 } else { 0u8 });
                         attack_body.extend_from_slice(&0u16.to_le_bytes());
                         attack_body.push(0u8);
                         let attack_packet = build_packet_bytes(
                             mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
-                        let _ = self.gate_ref.ask(SendToClient {
-                            session_id: target_session,
-                            data: attack_packet,
-                        });
-
-                        // 让玩家扣血
+                        if is_ranged {
+                            // 远程攻击广播给所有玩家（弹道动画）
+                            for sid in self.players.keys() {
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id: *sid,
+                                    data: attack_packet.clone(),
+                                });
+                            }
+                        } else {
+                            let _ = self.gate_ref.ask(SendToClient {
+                                session_id: target_session,
+                                data: attack_packet,
+                            });
+                        }
+                        // 伤害
                         if let Some(record) = self.players.get(&target_session) {
-                            let _ = record.actor_ref.ask(TakeDamage {
+                            if record.actor_ref.ask(TakeDamage {
                                 attacker_id: monster.object_id,
                                 attacker_session: target_session,
                                 damage,
-                            });
+                            }).await.unwrap_or(false) {
+                                if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let mut died_body = Vec::new();
+                                    died_body.extend_from_slice(&victim.object_id.to_le_bytes());
+                                    died_body.extend_from_slice(&(victim.x as u32).to_le_bytes());
+                                    died_body.extend_from_slice(&(victim.y as u32).to_le_bytes());
+                                    died_body.push(victim.direction);
+                                    died_body.push(0u8);
+                                    let died_packet = build_packet_bytes(
+                                        mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &died_body);
+                                    for (sid, _) in &self.players {
+                                        let _ = self.gate_ref.ask(SendToClient {
+                                            session_id: *sid,
+                                            data: died_packet.clone(),
+                                        });
+                                    }
+                                    death_drops.push((target_session, victim.x, victim.y, victim.map_index));
+                                }
+                            }
                         }
-                    } else if dist <= aggro_range && dist > attack_range {
-                        // 在仇恨范围内但不在攻击范围 → 走向玩家
+                    } else if should_chase && dist > profile.attack_range && can_move {
+                        // 追击
                         let (nx, ny, dir) = monster.step_toward(px, py);
+                        if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                            && !monster_positions.contains(&(nx, ny))
+                            && moved_targets.insert((nx, ny))
+                        {
+                            moved_monsters.push((*oid, nx, ny, dir));
+                        }
+                        monster.next_move_tick = self.tick_count + profile.move_interval;
+                        monster.ai_state = MonsterAiState::Chase;
+                    }
+                } else if can_move && dist_to_spawn(monster) > 2 {
+                    // 无目标 → 回出生点
+                    let (nx, ny, dir) = monster.step_toward(monster.spawn_x, monster.spawn_y);
+                    if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                        && !monster_positions.contains(&(nx, ny))
+                        && moved_targets.insert((nx, ny))
+                    {
                         moved_monsters.push((*oid, nx, ny, dir));
                     }
-                } else if dist_to_spawn(monster) > 2 {
-                    // 没有玩家在仇恨范围 → 回出生点
-                    let (nx, ny, dir) = monster.step_toward(monster.spawn_x, monster.spawn_y);
-                    moved_monsters.push((*oid, nx, ny, dir));
+                    monster.next_move_tick = self.tick_count + profile.move_interval;
+                    monster.ai_state = MonsterAiState::Return;
+                } else {
+                    monster.ai_state = MonsterAiState::Idle;
                 }
 
                 // 检查死亡
@@ -905,20 +1487,49 @@ impl Message<Tick> for WorldActor {
                         });
                     }
 
-                    // 发放经验给最近的玩家
+                    // 生成掉落物品
+                    self.spawn_monster_drops(&monster).await;
+
+                    // 发放经验（支持组队平分）
                     let mut nearest_session: Option<u64> = None;
                     let mut nearest_dist = i32::MAX;
+                    let mut nearest_group_id: Option<u64> = None;
                     for (session_id, record) in &self.players {
                         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                             let dist = (state.x - monster.x).abs() + (state.y - monster.y).abs();
                             if dist < nearest_dist {
                                 nearest_dist = dist;
                                 nearest_session = Some(*session_id);
+                                nearest_group_id = state.group_id;
                             }
                         }
                     }
                     if let Some(session_id) = nearest_session {
-                        if let Some(record) = self.players.get(&session_id) {
+                        if let Some(group_id) = nearest_group_id {
+                            // 组队经验：组内所有在线成员平分
+                            let mut group_sessions = Vec::new();
+                            for (sid, record) in &self.players {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    if state.group_id == Some(group_id) {
+                                        let dist = (state.x - monster.x).abs() + (state.y - monster.y).abs();
+                                        if dist <= 12 && state.map_index == monster.map_index {
+                                            group_sessions.push(*sid);
+                                        }
+                                    }
+                                }
+                            }
+                            if !group_sessions.is_empty() {
+                                let xp_per = (monster.xp / group_sessions.len() as i32).max(1);
+                                for sid in &group_sessions {
+                                    if let Some(record) = self.players.get(sid) {
+                                        let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
+                                            amount: xp_per,
+                                        }).await;
+                                    }
+                                }
+                                debug!("GroupXP: {} members split {} xp ({} each) from '{}'", group_sessions.len(), monster.xp, xp_per, monster.name);
+                            }
+                        } else if let Some(record) = self.players.get(&session_id) {
                             let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
                                 amount: monster.xp,
                             }).await;
@@ -930,6 +1541,7 @@ impl Message<Tick> for WorldActor {
                     let spawn = MonsterSpawn {
                         name: monster.name.clone(),
                         image: monster.image,
+                        monster_index: monster.monster_index,
                         x: monster.spawn_x,
                         y: monster.spawn_y,
                         direction: monster.direction,
@@ -939,6 +1551,45 @@ impl Message<Tick> for WorldActor {
                         xp: monster.xp,
                     };
                     self.respawn_queue.insert(*oid, (spawn, respawn_tick));
+                }
+            }
+
+            // 处理玩家死亡掉落（在怪物循环外，避免借用冲突）
+            for (sid, x, y, map_index) in death_drops {
+                self.handle_player_death_drop(sid, x, y, map_index).await;
+            }
+        }
+
+        // --- 玩家 Buff tick + 死亡复活（每 5 ticks 执行一次） ---
+        if self.tick_count % 5 == 0 {
+            let mut to_revive = Vec::new();
+            let mut to_remove = Vec::new();
+            for (session_id, record) in &self.players {
+                let _ = record.actor_ref.ask(crate::actors::player::TickBuff).await;
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if state.is_dead {
+                        match self.player_death_queue.get(session_id) {
+                            None => {
+                                self.player_death_queue.insert(*session_id, self.tick_count);
+                            }
+                            Some(death_tick) => {
+                                if self.tick_count >= death_tick + 60 {
+                                    to_revive.push(*session_id);
+                                }
+                            }
+                        }
+                    } else if self.player_death_queue.contains_key(session_id) {
+                        to_remove.push(*session_id);
+                    }
+                }
+            }
+            for session_id in to_remove {
+                self.player_death_queue.remove(&session_id);
+            }
+            for session_id in to_revive {
+                self.player_death_queue.remove(&session_id);
+                if let Some(record) = self.players.get(&session_id) {
+                    let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
                 }
             }
         }
@@ -960,10 +1611,22 @@ impl Message<Tick> for WorldActor {
                     data: packet.clone(),
                 });
             }
+            let ai_profile = self.monster_infos
+                .get(&spawn.monster_index)
+                .map(MonsterAiProfile::from_info)
+                .unwrap_or_else(|| MonsterAiProfile {
+                    ai_type: MonsterAiType::Aggressive,
+                    aggro_range: 10,
+                    attack_range: 1,
+                    attack_cooldown: 5,
+                    move_interval: 2,
+                    flee_threshold: 0.0,
+                });
             self.monsters.insert(new_oid, MonsterState {
                 object_id: new_oid,
                 name: spawn.name.clone(),
                 image: spawn.image,
+                monster_index: spawn.monster_index,
                 x: spawn.x,
                 y: spawn.y,
                 direction: spawn.direction,
@@ -974,7 +1637,13 @@ impl Message<Tick> for WorldActor {
                 xp: spawn.xp,
                 spawn_x: spawn.x,
                 spawn_y: spawn.y,
+                map_index: 0,
                 next_attack_tick: 0,
+                next_move_tick: 0,
+                ai_profile,
+                ai_state: MonsterAiState::Idle,
+                target_session: None,
+                provoked: false,
             });
             debug!("Monster '{}' respawned as #{}", spawn.name, new_oid);
         }
@@ -1116,6 +1785,7 @@ impl Message<StartGameRequest> for WorldActor {
                 is_mounted: false,
                 allow_lover_recall: false,
                 is_gm: false,
+                buffs: Vec::new(),
             }
         });
 
@@ -1249,6 +1919,9 @@ impl Message<WorldMoveRequest> for WorldActor {
                 return;
             }
         };
+        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            if state.is_dead { return; }
+        }
 
         let move_type = if msg.is_run { MoveType::Run } else { MoveType::Walk };
 
@@ -1460,6 +2133,9 @@ impl Message<WorldAttackRequest> for WorldActor {
 
         // 发送攻击请求到 PlayerActor，同时获取玩家属性用于伤害计算
         let attacker_state = record.actor_ref.ask(GetPlayerState).await.ok().flatten();
+        if let Some(ref state) = attacker_state {
+            if state.is_dead { return; }
+        }
 
         if let (Some(ref state), Ok(Some(result))) = (attacker_state, record.actor_ref.ask(AttackRequest {
             session_id: msg.session_id,
@@ -1498,6 +2174,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                     );
                     let damage = attack_result.damage;
                     monster.hp = monster.hp.saturating_sub(damage);
+                    monster.provoked = true;
+                    monster.target_session = Some(msg.session_id);
                     debug!("Player {} hit monster '{}' (#{}) for {} dmg (crit={}) (hp={}/{})",
                            result.object_id, monster.name, *oid, damage, attack_result.is_critical, monster.hp, monster.max_hp);
 
@@ -1566,16 +2244,43 @@ impl Message<WorldAttackRequest> for WorldActor {
 
                         // 只有范围内的玩家才受到伤害
                         if dist <= MELEE_RANGE {
+                            // 安全区保护：双方任一在安全区内则禁止伤害
+                            let attacker_safe = self.maps.get(&state.map_index)
+                                .map(|m| m.is_safe_zone(state.x, state.y))
+                                .unwrap_or(false);
+                            let target_safe = self.maps.get(&other_state.map_index)
+                                .map(|m| m.is_safe_zone(other_state.x, other_state.y))
+                                .unwrap_or(false);
+                            if attacker_safe || target_safe {
+                                continue;
+                            }
+
                             // 使用战斗模块计算伤害（从 PlayerState 读取真实属性，包含目标防御）
                             let attack_result = combat_attack::resolve_attack(
                                 state.min_attack, state.max_attack, other_state.defence
                             );
                             let damage = attack_result.damage;
-                            let _ = other_actor.ask(TakeDamage {
+                            if other_actor.ask(TakeDamage {
                                 attacker_id: result.object_id,
                                 attacker_session: msg.session_id,
                                 damage,
-                            });
+                            }).await.unwrap_or(false) {
+                                let mut died_body = Vec::new();
+                                died_body.extend_from_slice(&other_state.object_id.to_le_bytes());
+                                died_body.extend_from_slice(&(other_state.x as u32).to_le_bytes());
+                                died_body.extend_from_slice(&(other_state.y as u32).to_le_bytes());
+                                died_body.push(other_state.direction);
+                                died_body.push(0u8);
+                                let died_packet = build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &died_body);
+                                for (sid, _) in &self.players {
+                                    let _ = self.gate_ref.ask(SendToClient {
+                                        session_id: *sid,
+                                        data: died_packet.clone(),
+                                    });
+                                }
+                                self.handle_player_death_drop(other_session, other_state.x, other_state.y, other_state.map_index).await;
+                            }
                             debug!("Hit! {} damaged {} for {} (dist={}, crit={})",
                                    result.object_id, other_state.name, damage, dist, attack_result.is_critical);
                         }
@@ -1619,6 +2324,7 @@ impl Message<HarvestRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+        if state.is_dead { return; }
 
         let dir = msg.direction as usize % 8;
         let target_x = state.x + HARVEST_DIR_DX[dir];
@@ -1869,16 +2575,17 @@ impl Message<NPCCallRequest> for WorldActor {
             }
         };
 
-        // 获取玩家位置
-        let player_pos = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-            (state.x, state.y)
-        } else {
-            return;
+        // 获取玩家状态
+        let player_state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
         };
+        if player_state.is_dead { return; }
+        let player_pos = (player_state.x, player_state.y);
 
         // 查找对应的 NPC
         let npc = match self.npcs.get(&msg.npc_object_id) {
-            Some(n) => n,
+            Some(n) => n.clone(),
             None => {
                 warn!("NPC call for unknown object_id {}", msg.npc_object_id);
                 return;
@@ -1895,26 +2602,17 @@ impl Message<NPCCallRequest> for WorldActor {
         // DB NPC visibility: time/level/class restrictions
         if npc.db_index > 0 {
             if let Some(npc_db) = self.npc_infos.get(&npc.db_index) {
-                // Level restriction
-                let player_level = if let Ok(Some(s)) = record.actor_ref.ask(GetPlayerState).await {
-                    s.level
-                } else {
-                    0
-                };
-                if npc_db.min_lev > 0 && player_level < npc_db.min_lev as u16 {
+                if npc_db.min_lev > 0 && player_state.level < npc_db.min_lev as u16 {
                     debug!("NPC {} requires min level {}", npc.name, npc_db.min_lev);
                     return;
                 }
-                if npc_db.max_lev > 0 && player_level > npc_db.max_lev as u16 {
+                if npc_db.max_lev > 0 && player_state.level > npc_db.max_lev as u16 {
                     debug!("NPC {} requires max level {}", npc.name, npc_db.max_lev);
                     return;
                 }
-                // Class restriction (TODO: add class field to PlayerState)
                 let _ = &npc_db.class_required;
-                // Day of week restriction
                 if let Some(ref dow) = npc_db.day_of_week {
                     let today = chrono::Utc::now().format("%A").to_string();
-                    // Support both English ("Monday") and abbreviated ("Mon")
                     let today_short = &today[..3];
                     if !dow.is_empty() && !dow.contains(&today) && !dow.contains(today_short) {
                         debug!("NPC {} not available on {}", npc.name, today);
@@ -1926,48 +2624,74 @@ impl Message<NPCCallRequest> for WorldActor {
 
         debug!("Player called NPC '{}' (#{}) with key='{}'", npc.name, msg.npc_object_id, msg.key);
 
-        // 发送 NPCResponse 对话页面
-        let dialog_lines = match msg.key.as_str() {
-            "[@Main]" => {
-                let mut lines = vec![format!("欢迎来到{}", npc.name)];
-                // Show available quests from DB NPCInfo
-                if npc.db_index > 0 {
-                    if let Some(npc_db) = self.npc_infos.get(&npc.db_index) {
-                        let pending: Vec<&db::QuestInfo> = npc_db.collect_quest_indexes.iter()
-                            .filter_map(|qi| self.quest_infos.get(qi))
-                            .collect();
-                        let finishable: Vec<&db::QuestInfo> = npc_db.finish_quest_indexes.iter()
-                            .filter_map(|qi| self.quest_infos.get(qi))
-                            .collect();
-                        if !pending.is_empty() {
-                            lines.push("——可接受任务——".into());
-                            for q in &pending {
-                                lines.push(format!("[{}] {}", q.name, q.file_name));
+        // 优先使用 DB 脚本（支持 GOTO 跳转）
+        let mut dialog_lines = Vec::new();
+        let mut current_key = msg.key.clone();
+        let mut goto_depth = 0;
+        const MAX_GOTO_DEPTH: usize = 10;
+
+        while goto_depth < MAX_GOTO_DEPTH {
+            goto_depth += 1;
+            let script_key = (npc.db_index, current_key.clone());
+            if let Some(mut lines) = self.npc_scripts.get(&script_key).cloned() {
+                for line in &mut lines {
+                    *line = line.replace("$USERNAME", &player_state.name)
+                                .replace("$NPCNAME", &npc.name)
+                                .replace("$LEVEL", &player_state.level.to_string());
+                }
+                let (out, goto) = self.eval_npc_script(&mut lines, msg.session_id, &npc).await;
+                if let Some(target) = goto {
+                    current_key = format!("[@{}]", target);
+                    continue;
+                }
+                dialog_lines = out;
+                break;
+            } else {
+                dialog_lines = match current_key.as_str() {
+                    "[@Main]" => {
+                        let mut lines = vec![format!("欢迎来到{}", npc.name)];
+                        if npc.db_index > 0 {
+                            if let Some(npc_db) = self.npc_infos.get(&npc.db_index) {
+                                let pending: Vec<&db::QuestInfo> = npc_db.collect_quest_indexes.iter()
+                                    .filter_map(|qi| self.quest_infos.get(qi))
+                                    .collect();
+                                let finishable: Vec<&db::QuestInfo> = npc_db.finish_quest_indexes.iter()
+                                    .filter_map(|qi| self.quest_infos.get(qi))
+                                    .collect();
+                                if !pending.is_empty() {
+                                    lines.push("——可接受任务——".into());
+                                    for q in &pending {
+                                        lines.push(format!("[{}] {}", q.name, q.file_name));
+                                    }
+                                }
+                                if !finishable.is_empty() {
+                                    lines.push("——可完成任务——".into());
+                                    for q in &finishable {
+                                        lines.push(format!("[{}] {}", q.name, q.file_name));
+                                    }
+                                }
                             }
                         }
-                        if !finishable.is_empty() {
-                            lines.push("——可完成任务——".into());
-                            for q in &finishable {
-                                lines.push(format!("[{}] {}", q.name, q.file_name));
-                            }
+                        if lines.len() == 1 {
+                            lines.push("有什么我可以帮你的吗？".into());
                         }
+                        if npc.db_index > 0 && self.npc_goods.get(&npc.db_index).is_some_and(|g| !g.is_empty()) {
+                            lines.push("<购买/@Buy>".into());
+                        }
+                        lines
                     }
-                }
-                if lines.len() == 1 {
-                    lines.push("有什么我可以帮你的吗？".into());
-                }
-                lines
+                    "[@Buy]" => {
+                        self.send_npc_goods(msg.session_id, &npc);
+                        return;
+                    }
+                    _ => vec![
+                        format!("{} 说：", npc.name),
+                        format!("你说了：{}", msg.key),
+                    ],
+                };
+                break;
             }
-            "[@Buy]" => {
-                // 触发 NPC 商店（Phase 2：发送空商品列表打开商店 UI）
-                self.send_npc_goods(msg.session_id, npc);
-                return;
-            }
-            _ => vec![
-                format!("{} 说：", npc.name),
-                format!("你说了：{}", msg.key),
-            ],
-        };
+        }
 
         let mut body = Vec::new();
         body.extend_from_slice(&(dialog_lines.len() as i32).to_le_bytes());
@@ -1996,10 +2720,12 @@ impl Message<PickUpRequest> for WorldActor {
             None => return,
         };
 
-        let player_pos = match record.actor_ref.ask(GetPlayerState).await {
-            Ok(Some(s)) => (s.x, s.y),
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
             _ => return,
         };
+        if state.is_dead { return; }
+        let player_pos = (state.x, state.y);
 
         // 查找附近可拾取的物品（1 格内）
         let pickup_idx = self.ground_items.iter().position(|gi| {
@@ -2068,6 +2794,7 @@ impl Message<UseItemRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+        if player_state.is_dead { return; }
         if let Some(mi) = self.map_infos.get(&(player_state.map_index as i32)) {
             if mi.no_drug {
                 send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用物品");
@@ -2171,12 +2898,15 @@ impl Message<DropItemRequest> for WorldActor {
             None => return,
         };
 
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        if state.is_dead { return; }
+
         let item = record.actor_ref.ask(RemoveItemFromInventory { unique_id: msg.unique_id }).await.unwrap_or(None);
         if let Some(item) = item {
-            let player_pos = match record.actor_ref.ask(GetPlayerState).await {
-                Ok(Some(s)) => (s.x, s.y),
-                _ => return,
-            };
+            let player_pos = (state.x, state.y);
 
             debug!("Player session={} dropped item uid={}", msg.session_id, msg.unique_id);
 
@@ -2247,6 +2977,7 @@ impl Message<DropGoldRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+        if state.is_dead { return; }
 
         if msg.amount == 0 {
             return;
@@ -2299,14 +3030,37 @@ impl Message<BuyItemRequest> for WorldActor {
             _ => return,
         };
 
-        // Validate item against DB-loaded item_infos
-        let item_db = self.item_infos.get(&(msg.item_index as i32)).cloned();
-        let Some(item_db) = item_db else {
-            send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
-            return;
+        // 查找 NPC 并验证商品是否在销售列表中
+        let npc_db_index = match self.npcs.get(&msg.npc_id) {
+            Some(n) => n.db_index,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "找不到该 NPC");
+                return;
+            }
         };
 
-        let price_per_unit = item_db.price as u64;
+        let goods_list = self.npc_goods.get(&npc_db_index).cloned().unwrap_or_default();
+        let good = match goods_list.iter().find(|g| g.item_index == msg.item_index as i32) {
+            Some(g) => g,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "该 NPC 不出售此物品");
+                return;
+            }
+        };
+
+        // Validate item against DB-loaded item_infos
+        let item_db = match self.item_infos.get(&(msg.item_index as i32)) {
+            Some(i) => i,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+                return;
+            }
+        };
+
+        // 计算价格：优先使用 npc_goods 中的自定义价格，否则使用 item_db.price * NPC rate（整数运算避免浮点误差）
+        let npc_rate = self.npc_infos.get(&npc_db_index).map(|n| n.rate).unwrap_or(100).max(1) as u64;
+        let base_price = if good.price > 0 { good.price as u64 } else { item_db.price as u64 };
+        let price_per_unit = ((base_price * npc_rate) / 100).max(1);
         let total_price = price_per_unit * msg.count as u64;
 
         // 检查金币
@@ -2329,7 +3083,8 @@ impl Message<BuyItemRequest> for WorldActor {
 
         let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
         send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功 (花费 {} 金币)", total_price));
-        debug!("BuyItem: {} bought item={} ({}) x{} for {} gold", state.name, item_db.name, msg.item_index, msg.count, total_price);
+        let npc_name = self.npcs.get(&msg.npc_id).map(|n| n.name.as_str()).unwrap_or("?");
+        debug!("BuyItem: {} bought item={} ({}) x{} for {} gold from NPC '{}'", state.name, item_db.name, msg.item_index, msg.count, total_price, npc_name);
     }
 }
 
@@ -2596,6 +3351,7 @@ impl Message<TownReviveRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+        if !state.is_dead { return; }
 
         // 复活：重置 HP/MP 到最大值，回到地图出生点
         let spawn_x = DEFAULT_SPAWN_X;
@@ -3282,6 +4038,7 @@ impl Message<RangeAttackRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+        if state.is_dead { return; }
 
         let object_id = state.object_id;
         let target_x = msg.target_x;
@@ -3318,6 +4075,8 @@ impl Message<RangeAttackRequest> for WorldActor {
                 );
                 let damage = attack_result.damage;
                 monster.hp = monster.hp.saturating_sub(damage);
+                monster.provoked = true;
+                monster.target_session = Some(msg.session_id);
                 debug!("RangeAttack: {} -> monster {} for {} damage", state.name, monster_id, damage);
                 if monster.hp <= 0 {
                     // 死亡由 Tick 循环处理（广播 ObjectDied + 重生）
@@ -3349,10 +4108,12 @@ impl Message<MagicRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => { return; }
         };
+        if state.is_dead { return; }
 
         // Validate spell exists in DB
         let spell_db = self.magic_infos.get(&(msg.spell as u32));
         let spell_range = spell_db.map(|m| m.range as i32).unwrap_or(2);
+        let power = spell_db.map(|m| m.power_base).unwrap_or(10);
 
         let object_id = state.object_id;
         let target_x = msg.target_x;
@@ -3373,25 +4134,85 @@ impl Message<MagicRequest> for WorldActor {
             });
         }
 
-        // 技能命中范围内的怪物
-        let hit_monster_ids: Vec<u32> = self.monsters.iter()
-            .filter(|(_, m)| {
-                let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
-                dist <= spell_range
-            })
-            .map(|(id, _)| *id)
-            .collect();
-
-        for monster_id in hit_monster_ids {
-            if let Some(monster) = self.monsters.get_mut(&monster_id) {
-                let attack_result = combat_attack::resolve_attack(
-                    state.min_attack, state.max_attack, 0
+        // 根据魔法类型执行不同效果
+        match msg.spell {
+            // --- 治愈类 ---
+            SPELL_HEALING | SPELL_MASS_HEALING | SPELL_HEALING_CIRCLE => {
+                let heal_amount = power.max(10);
+                let _ = record.actor_ref.ask(crate::actors::player::Heal {
+                    amount: heal_amount,
+                }).await;
+                debug!("Magic: {} casts Healing(spell={}) for {} HP", state.name, msg.spell, heal_amount);
+            }
+            // --- Buff 类 ---
+            SPELL_MAGIC_SHIELD => {
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::DefenseBoost { bonus: (power / 2).max(5) },
+                    300, // 30秒 @ 100ms tick
+                    5,
                 );
-                let damage = attack_result.damage;
-                monster.hp = monster.hp.saturating_sub(damage);
-                debug!("Magic: {} spell={} -> monster {} for {} damage", state.name, msg.spell, monster_id, damage);
-                if monster.hp <= 0 {
-                    // 死亡由 Tick 循环处理（广播 ObjectDied + 重生）
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts MagicShield (defense +{})", state.name, (power / 2).max(5));
+            }
+            SPELL_SOUL_SHIELD => {
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::DefenseBoost { bonus: (power / 3).max(3) },
+                    600, // 60秒
+                    5,
+                );
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts SoulShield (defense +{})", state.name, (power / 3).max(3));
+            }
+            SPELL_BLESSED_ARMOUR => {
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::AttackBoost { bonus: (power / 2).max(5) },
+                    600,
+                    5,
+                );
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts BlessedArmour (attack +{})", state.name, (power / 2).max(5));
+            }
+            // --- 传送类 ---
+            SPELL_TELEPORT => {
+                // 限制在地图边界内
+                let (max_x, max_y) = self.maps.get(&state.map_index)
+                    .map(|m| (m.width as i32, m.height as i32))
+                    .unwrap_or((i32::MAX, i32::MAX));
+                let tx = target_x.clamp(0, max_x - 1);
+                let ty = target_y.clamp(0, max_y - 1);
+                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                    x: tx,
+                    y: ty,
+                    direction: msg.direction,
+                    map_index: None,
+                    is_mounted: None,
+                }).await;
+                debug!("Magic: {} teleports to ({}, {})", state.name, tx, ty);
+            }
+            // --- 默认：伤害类 ---
+            _ => {
+                // 技能命中范围内的怪物
+                let hit_monster_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| {
+                        let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
+                        dist <= spell_range
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+
+                // 魔法伤害 = spell power + 玩家魔法加成
+                let power_min = spell_db.map(|m| m.power_base).unwrap_or(10).max(1);
+                let power_max = spell_db.map(|m| (m.power_base + m.power_bonus).max(power_min)).unwrap_or(power_min + 5);
+                let magic_bonus = state.min_attack / 4; // 简化：攻击力的一部分转化为魔法伤害
+                for monster_id in hit_monster_ids {
+                    if let Some(monster) = self.monsters.get_mut(&monster_id) {
+                        let base_damage = fastrand::i32(power_min..=power_max);
+                        let damage = (base_damage + magic_bonus).max(1);
+                        monster.hp = monster.hp.saturating_sub(damage);
+                        monster.provoked = true;
+                        monster.target_session = Some(msg.session_id);
+                        debug!("Magic: {} spell={} -> monster {} for {} damage (base={} bonus={})", state.name, msg.spell, monster_id, damage, base_damage, magic_bonus);
+                    }
                 }
             }
         }
@@ -3426,6 +4247,7 @@ impl Message<TeleportToNPCRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+        if state.is_dead { return; }
 
         let new_x = npc.x;
         let new_y = npc.y;
@@ -3732,6 +4554,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             is_mounted: false,
             allow_lover_recall: false,
             is_gm: false,
+            buffs: Vec::new(),
         };
         if let Err(e) = db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
             warn!("Failed to save new character '{}': {}", msg.name, e);
@@ -3825,6 +4648,7 @@ impl Message<FishingCastRequest> for WorldActor {
     async fn handle(&mut self, msg: FishingCastRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        if state.is_dead { return; }
 
         let _ = record.actor_ref.ask(SetFishing { is_fishing: true, autocast: false });
         debug!("FishingCast: {} type={}", state.name, msg.fishing_type);
@@ -5422,10 +6246,22 @@ fn spawn_npcs_and_monsters(
             data: packet,
         });
 
+        let ai_profile = ctx.monster_infos
+            .get(&monster.monster_index)
+            .map(MonsterAiProfile::from_info)
+            .unwrap_or_else(|| MonsterAiProfile {
+                ai_type: MonsterAiType::Aggressive,
+                aggro_range: 10,
+                attack_range: 1,
+                attack_cooldown: 5,
+                move_interval: 2,
+                flee_threshold: 0.0,
+            });
         monsters.push(MonsterState {
             object_id,
             name: monster.name.clone(),
             image: monster.image,
+            monster_index: monster.monster_index,
             x: monster.x,
             y: monster.y,
             direction: monster.direction,
@@ -5436,7 +6272,13 @@ fn spawn_npcs_and_monsters(
             xp: monster.xp,
             spawn_x: monster.x,
             spawn_y: monster.y,
+            map_index: 0,
             next_attack_tick: 0,
+            next_move_tick: 0,
+            ai_profile,
+            ai_state: MonsterAiState::Idle,
+            target_session: None,
+            provoked: false,
         });
     }
 
@@ -5455,15 +6297,17 @@ fn spawn_npcs_and_monsters(
                     let max_dmg = monster_db.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(100);
                     let xp = monster_db.experience;
                     let packet = build_object_monster_packet(
-                        &MonsterSpawn { name: dragon.monster_name.clone(), image: monster_db.image as u16, x: dragon.location_x, y: dragon.location_y, direction: 0, hp, min_dmg, max_dmg, xp },
+                        &MonsterSpawn { name: dragon.monster_name.clone(), image: monster_db.image as u16, monster_index, x: dragon.location_x, y: dragon.location_y, direction: 0, hp, min_dmg, max_dmg, xp },
                         object_id,
                         &dragon.monster_name,
                     );
                     let _ = gate_ref.ask(SendToClient { session_id, data: packet });
+                    let ai_profile = MonsterAiProfile::from_info(monster_db);
                     monsters.push(MonsterState {
                         object_id,
                         name: dragon.monster_name.clone(),
                         image: monster_db.image as u16,
+                        monster_index,
                         x: dragon.location_x,
                         y: dragon.location_y,
                         direction: 0,
@@ -5474,7 +6318,13 @@ fn spawn_npcs_and_monsters(
                         xp,
                         spawn_x: dragon.location_x,
                         spawn_y: dragon.location_y,
+                        map_index: 0,
                         next_attack_tick: 0,
+                        next_move_tick: 0,
+                        ai_profile,
+                        ai_state: MonsterAiState::Idle,
+                        target_session: None,
+                        provoked: false,
                     });
                     info!("Spawned dragon at ({}, {}) on map {}", dragon.location_x, dragon.location_y, map_file);
                 }
