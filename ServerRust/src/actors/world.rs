@@ -894,6 +894,14 @@ impl WorldActor {
                             let _ = record.actor_ref.ask(crate::actors::player::RepairAllEquipment).await;
                         }
                     }
+                    "GIVEEXP" => {
+                        let amount = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if amount > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount }).await;
+                            }
+                        }
+                    }
                     "GOTO" => {
                         if let Some(target) = parts.next() {
                             goto_target = Some(target.to_string());
