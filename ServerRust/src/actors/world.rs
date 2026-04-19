@@ -3807,9 +3807,9 @@ impl Message<ChatRequest> for WorldActor {
             _ => {}
         }
 
-        // 获取玩家名称和组队信息
-        let (player_name, group_id) = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-            (state.name, state.group_id)
+        // 获取玩家名称、组队和公会信息
+        let (player_name, group_id, guild_name) = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            (state.name, state.group_id, state.guild_name.clone())
         } else {
             return;
         };
@@ -3883,6 +3883,68 @@ impl Message<ChatRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, "你不在队伍中");
                     return;
                 }
+            }
+        }
+
+        // 公会聊天 /guild <message> 或 /gu <message>
+        let guild_msg = message.strip_prefix("/guild ").or_else(|| message.strip_prefix("/GUILD "))
+            .or_else(|| message.strip_prefix("/gu ")).or_else(|| message.strip_prefix("/GU "));
+        if let Some(gmsg) = guild_msg {
+            let gmsg = gmsg.trim();
+            if !gmsg.is_empty() {
+                if let Some(ref gname) = guild_name {
+                    let mut sent = false;
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.guild_name.as_ref() == Some(gname) {
+                                let mut body = Vec::new();
+                                write_dotnet_string(&mut body, &format!("[公会] {}: {}", player_name, gmsg));
+                                body.push(mir2_shared::enums::ChatType::Guild as u8);
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id: *sid,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
+                                });
+                                sent = true;
+                            }
+                        }
+                    }
+                    if sent {
+                        debug!("Guild chat: {} (guild={}): {}", player_name, gname, gmsg);
+                    }
+                    return;
+                } else {
+                    send_system_message(&self.gate_ref, msg.session_id, "你不在公会中");
+                    return;
+                }
+            }
+        }
+
+        // 喊话 /s <message> — 同地图广播
+        if let Some(smsg) = message.strip_prefix("/s ").or_else(|| message.strip_prefix("/S ")) {
+            let smsg = smsg.trim();
+            if !smsg.is_empty() {
+                let sender_map = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    state.map_index
+                } else {
+                    return;
+                };
+                let mut sent = 0usize;
+                for (sid, other) in &self.players {
+                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                        if os.map_index == sender_map {
+                            let mut body = Vec::new();
+                            write_dotnet_string(&mut body, &format!("[喊话] {}: {}", player_name, smsg));
+                            body.push(mir2_shared::enums::ChatType::Shout as u8);
+                            let _ = self.gate_ref.ask(SendToClient {
+                                session_id: *sid,
+                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
+                            });
+                            sent += 1;
+                        }
+                    }
+                }
+                debug!("Shout: {} on map {}: {} ({} recipients)", player_name, sender_map, smsg, sent);
+                return;
             }
         }
 
