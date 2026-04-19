@@ -339,6 +339,7 @@ enum MonsterAiState {
 }
 
 /// 运行时怪物状态
+#[derive(Clone)]
 struct MonsterState {
     pub object_id: u32,
     pub name: String,
@@ -2673,11 +2674,11 @@ impl Message<Tick> for WorldActor {
             let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
                 (
                     format!("[精英] {}", spawn.name),
-                    spawn.hp * 2,
-                    spawn.hp * 2,
+                    spawn.hp.saturating_mul(2),
+                    spawn.hp.saturating_mul(2),
                     (spawn.min_dmg as f32 * 1.5) as i32,
                     (spawn.max_dmg as f32 * 1.5) as i32,
-                    spawn.xp * 2,
+                    spawn.xp.saturating_mul(2),
                 )
             } else {
                 (spawn.name.clone(), spawn.hp, spawn.hp, spawn.min_dmg, spawn.max_dmg, spawn.xp)
@@ -3166,8 +3167,17 @@ impl Message<StartGameRequest> for WorldActor {
         for npc in new_npcs {
             self.npcs.insert(npc.object_id, npc);
         }
-        for monster in new_monsters {
-            self.monsters.insert(monster.object_id, monster);
+        for monster in &new_monsters {
+            self.monsters.insert(monster.object_id, monster.clone());
+        }
+
+        // 初始生成精英广播
+        for monster in &new_monsters {
+            if monster.is_elite {
+                let map_name = self.map_infos.get(&(map_index as i32)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
+                broadcast_system_message(&self.gate_ref, &self.players,
+                    &format!("一只 [精英]{} 出现在 {}！勇士们，前往讨伐！", monster.name.strip_prefix("[精英] ").unwrap_or(&monster.name), map_name));
+            }
         }
 
         // 同步当前地图上的地面物品给新玩家
@@ -3390,8 +3400,18 @@ impl Message<WorldMoveRequest> for WorldActor {
                         for npc in new_npcs {
                             self.npcs.insert(npc.object_id, npc);
                         }
-                        for monster in new_monsters {
-                            self.monsters.insert(monster.object_id, monster);
+                        for monster in &new_monsters {
+                            self.monsters.insert(monster.object_id, monster.clone());
+                        }
+
+                        // 初始生成精英广播
+                        for monster in &new_monsters {
+                            if monster.is_elite {
+                                let map_name = self.map_infos.get(&(dest_map_index)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
+                                broadcast_system_message(
+                                    &self.gate_ref, &self.players,
+                                    &format!("一只 [精英]{} 出现在 {}！勇士们，前往讨伐！", monster.name.strip_prefix("[精英] ").unwrap_or(&monster.name), map_name));
+                            }
                         }
 
                         // 同步新地图上的地面物品
@@ -4106,8 +4126,12 @@ impl Message<ChatRequest> for WorldActor {
         if let Some(amsg) = message.strip_prefix("/announce ").or_else(|| message.strip_prefix("/ANNOUNCE ")) {
             let amsg = amsg.trim();
             if !amsg.is_empty() {
+                if amsg.len() > MAX_CHAT_LENGTH {
+                    send_system_message(&self.gate_ref, msg.session_id, "公告内容过长");
+                    return;
+                }
                 let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                    state.is_gm || record.account_username.eq_ignore_ascii_case("admin")
+                    state.is_gm
                 } else {
                     false
                 };
@@ -8727,11 +8751,11 @@ fn spawn_npcs_and_monsters(
         let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
             (
                 format!("[精英] {}", monster.name),
-                monster.hp * 2,
-                monster.hp * 2,
+                monster.hp.saturating_mul(2),
+                monster.hp.saturating_mul(2),
                 (monster.min_dmg as f32 * 1.5) as i32,
                 (monster.max_dmg as f32 * 1.5) as i32,
-                monster.xp * 2,
+                monster.xp.saturating_mul(2),
             )
         } else {
             (monster.name.clone(), monster.hp, monster.hp, monster.min_dmg, monster.max_dmg, monster.xp)
@@ -8837,4 +8861,28 @@ fn spawn_npcs_and_monsters(
     }
 
     (npcs, monsters)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::name_colour_for_pk;
+
+    #[test]
+    fn test_name_colour_for_pk_thresholds() {
+        assert_eq!(name_colour_for_pk(0), 0);    // White
+        assert_eq!(name_colour_for_pk(50), 0);   // White
+        assert_eq!(name_colour_for_pk(99), 0);   // White
+        assert_eq!(name_colour_for_pk(100), 2);  // Orange
+        assert_eq!(name_colour_for_pk(150), 2);  // Orange
+        assert_eq!(name_colour_for_pk(199), 2);  // Orange
+        assert_eq!(name_colour_for_pk(200), 1);  // Red
+        assert_eq!(name_colour_for_pk(500), 1);  // Red
+    }
+
+    #[test]
+    fn test_elite_multiplier_saturation() {
+        assert_eq!(5u16.saturating_mul(2), 10);
+        assert_eq!(100u16.saturating_mul(2), 200);
+        assert_eq!(u16::MAX.saturating_mul(2), u16::MAX);
+    }
 }

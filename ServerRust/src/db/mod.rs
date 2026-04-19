@@ -469,6 +469,9 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE quests ADD COLUMN time_limit_seconds INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // Migration: add GM flag to accounts (safe to re-run)
+    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN admin_account INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
 
     info!("SQLite database initialized: {}", db_path.display());
     Ok(pool)
@@ -663,7 +666,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
 
 pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Result<Option<PlayerState>> {
     let row = sqlx::query(
-        "SELECT * FROM characters WHERE name = ?"
+        "SELECT c.*, a.admin_account FROM characters c JOIN accounts a ON c.account_username = a.username WHERE c.name = ?"
     )
     .bind(character_name)
     .fetch_optional(pool)
@@ -744,7 +747,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         enable_group_recall: false,
         last_recall_time: 0,
         allow_lover_recall: row.get::<Option<i32>, _>("allow_lover_recall").map(|v| v != 0).unwrap_or(false),
-        is_gm: false, // TODO: load from accounts.admin_account column
+        is_gm: row.get::<i32, _>("admin_account") != 0,
         pk_points: row.get::<i32, _>("pk_points"),
         pk_kill_count: row.get::<i32, _>("pk_kill_count") as u32,
         buffs: Vec::new(),
