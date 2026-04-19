@@ -982,6 +982,15 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKREINCARNATION" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.reincarnation_host.is_none() && !state.reincarnation_ready {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "CHECKMAP" => {
                         let map_name = parts.next().unwrap_or("").to_string();
                         if let Some(record) = self.players.get(&session_id) {
