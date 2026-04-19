@@ -1390,31 +1390,40 @@ impl Message<Tick> for WorldActor {
                                 data: attack_packet,
                             });
                         }
-                        // 伤害
-                        if let Some(record) = self.players.get(&target_session) {
-                            if record.actor_ref.ask(TakeDamage {
-                                attacker_id: monster.object_id,
-                                attacker_session: target_session,
-                                damage,
-                            }).await.unwrap_or(false) {
-                                if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
-                                    let mut died_body = Vec::new();
-                                    died_body.extend_from_slice(&victim.object_id.to_le_bytes());
-                                    died_body.extend_from_slice(&(victim.x as u32).to_le_bytes());
-                                    died_body.extend_from_slice(&(victim.y as u32).to_le_bytes());
-                                    died_body.push(victim.direction);
-                                    died_body.push(0u8);
-                                    let died_packet = build_packet_bytes(
-                                        mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &died_body);
-                                    for (sid, _) in &self.players {
-                                        let _ = self.gate_ref.ask(SendToClient {
-                                            session_id: *sid,
-                                            data: died_packet.clone(),
-                                        });
+                        // 安全区保护：目标在安全区内则不受怪物伤害
+                        let target_in_safe = self.maps.get(&monster.map_index)
+                            .map(|m| m.is_safe_zone(px, py))
+                            .unwrap_or(false);
+
+                        if !target_in_safe {
+                            // 伤害
+                            if let Some(record) = self.players.get(&target_session) {
+                                if record.actor_ref.ask(TakeDamage {
+                                    attacker_id: monster.object_id,
+                                    attacker_session: target_session,
+                                    damage,
+                                }).await.unwrap_or(false) {
+                                    if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+                                        let mut died_body = Vec::new();
+                                        died_body.extend_from_slice(&victim.object_id.to_le_bytes());
+                                        died_body.extend_from_slice(&(victim.x as u32).to_le_bytes());
+                                        died_body.extend_from_slice(&(victim.y as u32).to_le_bytes());
+                                        died_body.push(victim.direction);
+                                        died_body.push(0u8);
+                                        let died_packet = build_packet_bytes(
+                                            mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &died_body);
+                                        for (sid, _) in &self.players {
+                                            let _ = self.gate_ref.ask(SendToClient {
+                                                session_id: *sid,
+                                                data: died_packet.clone(),
+                                            });
+                                        }
+                                        death_drops.push((target_session, victim.x, victim.y, victim.map_index));
                                     }
-                                    death_drops.push((target_session, victim.x, victim.y, victim.map_index));
                                 }
                             }
+                        } else {
+                            debug!("Monster '{}' attack on {} blocked: target in safe zone", monster.name, target_session);
                         }
                     } else if should_chase && dist > profile.attack_range && can_move {
                         // 追击
