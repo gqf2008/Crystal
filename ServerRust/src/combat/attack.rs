@@ -8,7 +8,13 @@ pub fn calculate_damage(attacker_atk_min: i32, attacker_atk_max: i32, defender_d
     let _atk_range = (atk_max - atk_min).max(1);
 
     // 使用简单线性同余生成伪随机（避免依赖额外 rng）
-    let atk = atk_min; // 最小伤害保底
+    let range = (atk_max - atk_min).max(1) as u64;
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let rand_offset = (seed.wrapping_mul(1103515245).wrapping_add(12345)) % range;
+    let atk = atk_min + rand_offset as i32;
 
     atk.saturating_sub(defender_def.max(0)).max(1)
 }

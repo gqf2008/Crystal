@@ -139,6 +139,38 @@ pub struct PlayerState {
     pub buffs: Vec<crate::combat::buff::BuffInstance>,
 }
 
+impl PlayerState {
+    /// 计算包含装备+Buff加成的最小攻击力
+    pub fn effective_min_attack(&self) -> i32 {
+        let base = self.min_attack + self.bonus_min_attack;
+        let buff_bonus = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::AttackBoost { bonus: 0 },
+        );
+        (base + buff_bonus).max(0)
+    }
+
+    /// 计算包含装备+Buff加成的最大攻击力
+    pub fn effective_max_attack(&self) -> i32 {
+        let base = self.max_attack + self.bonus_max_attack;
+        let buff_bonus = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::AttackBoost { bonus: 0 },
+        );
+        (base + buff_bonus).max(self.effective_min_attack())
+    }
+
+    /// 计算包含装备+Buff加成的防御力
+    pub fn effective_defence(&self) -> i32 {
+        let base = self.defence + self.bonus_defence;
+        let buff_bonus = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::DefenseBoost { bonus: 0 },
+        );
+        (base + buff_bonus).max(0)
+    }
+}
+
 /// PlayerActor 状态
 pub struct PlayerActor {
     pub state: PlayerState,

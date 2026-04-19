@@ -2690,9 +2690,9 @@ impl Message<WorldAttackRequest> for WorldActor {
             for (oid, monster) in &mut self.monsters {
                 let dist = (monster.x - target_x).abs() + (monster.y - target_y).abs();
                 if dist <= 1 {
-                    // 命中怪物 - 使用战斗模块计算伤害（从 PlayerState 读取真实属性）
+                    // 命中怪物 - 使用战斗模块计算伤害（包含 Buff 加成）
                     let attack_result = combat_attack::resolve_attack(
-                        state.min_attack, state.max_attack, 0
+                        state.effective_min_attack(), state.effective_max_attack(), 0
                     );
                     let damage = attack_result.damage;
                     monster.hp = monster.hp.saturating_sub(damage);
@@ -2830,9 +2830,9 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 continue;
                             }
 
-                            // 使用战斗模块计算伤害（从 PlayerState 读取真实属性，包含目标防御）
+                            // 使用战斗模块计算伤害（包含 Buff 加成）
                             let attack_result = combat_attack::resolve_attack(
-                                state.min_attack, state.max_attack, other_state.defence
+                                state.effective_min_attack(), state.effective_max_attack(), other_state.effective_defence()
                             );
                             let damage = attack_result.damage;
                             if other_actor.ask(TakeDamage {
@@ -4944,7 +4944,7 @@ impl Message<RangeAttackRequest> for WorldActor {
         for monster_id in hit_monster_ids {
             if let Some(monster) = self.monsters.get_mut(&monster_id) {
                 let attack_result = combat_attack::resolve_attack(
-                    state.min_attack, state.max_attack, 0
+                    state.effective_min_attack(), state.effective_max_attack(), 0
                 );
                 let damage = attack_result.damage;
                 monster.hp = monster.hp.saturating_sub(damage);
@@ -4980,7 +4980,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                         }
 
                         let attack_result = combat_attack::resolve_attack(
-                            state.min_attack, state.max_attack, other_state.defence
+                            state.effective_min_attack(), state.effective_max_attack(), other_state.effective_defence()
                         );
                         let damage = attack_result.damage;
                         if other.actor_ref.ask(TakeDamage {
