@@ -872,6 +872,27 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKCLASS" => {
+                        let mask = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let class_bit = 1u8 << (state.class as u8);
+                                if class_bit & mask == 0 {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKGENDER" => {
+                        let required = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.gender as u8 != required {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "CHECKGOLD" => {
                         let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
                         if let Some(record) = self.players.get(&session_id) {
