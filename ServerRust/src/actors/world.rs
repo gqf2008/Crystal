@@ -8218,8 +8218,16 @@ impl Message<ResetAddedItemRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        debug!("ResetAddedItem: {} uid={}", state.name, msg.unique_id);
-        debug!("ResetAddedItem: {} uid={} (feature not implemented)", state.name, msg.unique_id);
+        let success = record.actor_ref.ask(crate::actors::player::ResetItemAddedStats {
+            unique_id: msg.unique_id,
+        }).await.unwrap_or(false);
+        if success {
+            send_system_message(&self.gate_ref, msg.session_id, "物品附加属性已重置");
+            debug!("ResetAddedItem: {} uid={} - success", state.name, msg.unique_id);
+        } else {
+            send_system_message(&self.gate_ref, msg.session_id, "找不到该物品或无法重置");
+            debug!("ResetAddedItem: {} uid={} - failed", state.name, msg.unique_id);
+        }
     }
 }
 

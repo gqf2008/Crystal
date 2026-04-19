@@ -178,6 +178,16 @@ impl PlayerInventory {
         self.equipment.iter().flatten().find(|&e| e.unique_id == uid).map(|e| e as _)
     }
 
+    /// 查询物品（可变引用，按 unique_id）
+    pub fn get_item_mut(&mut self, uid: u64) -> Option<&mut UserItem> {
+        for s in self.backpack.iter_mut().flatten() {
+            if s.item.unique_id == uid {
+                return Some(&mut s.item);
+            }
+        }
+        self.equipment.iter_mut().flatten().find(|e| e.unique_id == uid)
+    }
+
     /// 查询物品（按格子索引）
     pub fn get_item_by_grid(&self, grid: u8) -> Option<&UserItem> {
         let idx = grid as usize;

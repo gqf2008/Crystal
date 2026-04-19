@@ -1236,6 +1236,26 @@ impl Message<RepairItem> for PlayerActor {
     }
 }
 
+/// 重置物品附加属性（洗点）
+pub struct ResetItemAddedStats {
+    pub unique_id: u64,
+}
+
+impl Message<ResetItemAddedStats> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: ResetItemAddedStats, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if let Some(item) = self.state.inventory.get_item_mut(msg.unique_id) {
+            item.awake = Default::default();
+            item.added_stats = Default::default();
+            self.send_inventory_changed();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// 丢弃金币
 pub struct DropGold {
     pub amount: u64,
