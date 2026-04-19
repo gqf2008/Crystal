@@ -611,6 +611,28 @@ impl WorldActor {
         debug!("Sent {} goods from NPC '{}' (rate={}) to session {}", goods.len(), npc.name, rate, session_id);
     }
 
+    /// 发送 NPC 面板（出售/修理等，空商品列表）
+    fn send_npc_panel(&self, session_id: u64, panel_type: mir2_shared::enums::PanelType) {
+        let packet = mir2_shared::packets::server::npc_interaction::NPCGoods {
+            list: Vec::new(),
+            rate: 1.0,
+            panel_type,
+            hide_added_stats: false,
+        };
+        let mut body = Vec::new();
+        if let Err(e) = mir2_shared::packets::base::serialize_packet(
+            &mut std::io::Cursor::new(&mut body), &packet) {
+            warn!("Failed to serialize NPCGoods panel: {}", e);
+            return;
+        }
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCGoods as i16, &body);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: packet,
+        });
+        debug!("Sent NPC panel {:?} to session {}", panel_type, session_id);
+    }
+
     /// 发送仓库内容给客户端（打开仓库 UI）
     fn send_user_storage(&self, session_id: u64, storage: &[Option<crate::actors::inventory::InventorySlot>]) {
         let items: Vec<Option<mir2_shared::data::item::UserItem>> = storage.iter()
@@ -3138,12 +3160,28 @@ impl Message<NPCCallRequest> for WorldActor {
                         if npc.db_index > 0 && self.npc_goods.get(&npc.db_index).is_some_and(|g| !g.is_empty()) {
                             lines.push("<购买/@Buy>".into());
                         }
+                        lines.push("<出售/@Sell>".into());
+                        lines.push("<修理/@Repair>".into());
                         lines.push("<仓库/@Storage>".into());
                         lines
                     }
                     "[@Buy]" => {
                         self.send_npc_goods(msg.session_id, &npc);
                         return;
+                    }
+                    "[@Sell]" => {
+                        dialog_lines = vec![
+                            format!("{}: 请把要出售的物品放入窗口。", npc.name),
+                        ];
+                        self.send_npc_panel(msg.session_id, mir2_shared::enums::PanelType::Sell);
+                        break;
+                    }
+                    "[@Repair]" => {
+                        dialog_lines = vec![
+                            format!("{}: 我会帮你修好装备的。", npc.name),
+                        ];
+                        self.send_npc_panel(msg.session_id, mir2_shared::enums::PanelType::Repair);
+                        break;
                     }
                     "[@Storage]" => {
                         dialog_lines = vec![
