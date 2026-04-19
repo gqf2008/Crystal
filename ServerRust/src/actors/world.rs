@@ -84,6 +84,7 @@ pub struct MonsterSpawn {
     pub min_dmg: i32,
     pub max_dmg: i32,
     pub xp: i32,
+    pub map_index: u16,
 }
 
 /// 地图刷怪配置
@@ -94,7 +95,7 @@ pub struct SpawnConfig {
 }
 
 /// 加载刷怪配置
-fn load_spawn_config(map_name: &str, spawn_dir: &Path) -> SpawnConfig {
+fn load_spawn_config(map_name: &str, map_index: u16, spawn_dir: &Path) -> SpawnConfig {
     let path = spawn_dir.join(format!("{}.toml", map_name));
     if !path.exists() {
         debug!("No spawn config for map '{}'", map_name);
@@ -126,6 +127,7 @@ fn load_spawn_config(map_name: &str, spawn_dir: &Path) -> SpawnConfig {
                         min_dmg: m.min_dmg,
                         max_dmg: m.max_dmg,
                         xp: m.xp,
+                        map_index,
                     }).collect(),
                 }
             }
@@ -177,6 +179,7 @@ fn spawn_config_from_db(
             min_dmg: min_ac,
             max_dmg: max_ac,
             xp: mi.experience,
+            map_index: map_info.index as u16,
         })
     }).collect();
 
@@ -373,6 +376,7 @@ struct NpcState {
     pub y: i32,
     pub direction: u8,
     pub db_index: i32,
+    pub map_index: u16,
 }
 
 /// 方向增量 (8 方向 MirDirection)
@@ -2208,6 +2212,7 @@ impl Message<Tick> for WorldActor {
                         min_dmg: monster.min_dmg,
                         max_dmg: monster.max_dmg,
                         xp: monster.xp,
+                        map_index: monster.map_index,
                     };
                     self.respawn_queue.insert(*oid, (spawn, respawn_tick));
                 }
@@ -2411,7 +2416,7 @@ impl Message<Tick> for WorldActor {
                 xp: spawn.xp,
                 spawn_x: spawn.x,
                 spawn_y: spawn.y,
-                map_index: 0,
+                map_index: spawn.map_index,
                 next_attack_tick: 0,
                 next_move_tick: 0,
                 ai_profile,
@@ -2735,6 +2740,7 @@ impl Message<StartGameRequest> for WorldActor {
             self.gate_ref.clone(),
             &spawn_dir,
             &map_file,
+            loaded_state.map_index,
             msg.session_id,
             &mut self.next_object_id,
             &spawn_ctx,
@@ -2953,6 +2959,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                             self.gate_ref.clone(),
                             &self.spawn_dir,
                             &dest_file_clone,
+                            dest_map_index as u16,
                             msg.session_id,
                             &mut self.next_object_id,
                             &spawn_ctx,
@@ -8036,6 +8043,7 @@ fn spawn_npcs_and_monsters(
     gate_ref: ActorRef<GateActor>,
     spawn_dir: &Option<PathBuf>,
     map_file: &str,
+    map_index: u16,
     session_id: u64,
     next_object_id: &mut u32,
     ctx: &SpawnContext<'_>,
@@ -8044,7 +8052,7 @@ fn spawn_npcs_and_monsters(
     let config = if let Some(mi) = ctx.map_info {
         spawn_config_from_db(mi, ctx.monster_infos, ctx.npc_infos)
     } else if let Some(d) = spawn_dir {
-        load_spawn_config(map_file, d)
+        load_spawn_config(map_file, map_index, d)
     } else {
         return (Vec::new(), Vec::new());
     };
@@ -8070,6 +8078,7 @@ fn spawn_npcs_and_monsters(
             y: npc.y,
             direction: npc.direction,
             db_index: npc.db_index,
+            map_index,
         });
     }
 
@@ -8110,7 +8119,7 @@ fn spawn_npcs_and_monsters(
             xp: monster.xp,
             spawn_x: monster.x,
             spawn_y: monster.y,
-            map_index: 0,
+            map_index,
             next_attack_tick: 0,
             next_move_tick: 0,
             ai_profile,
@@ -8135,7 +8144,7 @@ fn spawn_npcs_and_monsters(
                     let max_dmg = monster_db.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(100);
                     let xp = monster_db.experience;
                     let packet = build_object_monster_packet(
-                        &MonsterSpawn { name: dragon.monster_name.clone(), image: monster_db.image as u16, monster_index, x: dragon.location_x, y: dragon.location_y, direction: 0, hp, min_dmg, max_dmg, xp },
+                        &MonsterSpawn { name: dragon.monster_name.clone(), image: monster_db.image as u16, monster_index, x: dragon.location_x, y: dragon.location_y, direction: 0, hp, min_dmg, max_dmg, xp, map_index },
                         object_id,
                         &dragon.monster_name,
                     );
@@ -8156,7 +8165,7 @@ fn spawn_npcs_and_monsters(
                         xp,
                         spawn_x: dragon.location_x,
                         spawn_y: dragon.location_y,
-                        map_index: 0,
+                        map_index,
                         next_attack_tick: 0,
                         next_move_tick: 0,
                         ai_profile,
