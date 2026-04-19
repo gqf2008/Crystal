@@ -937,6 +937,17 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKPKPOINT" => {
+                        let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.pk_points < min || state.pk_points > max {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "TAKEGOLD" => {
                         let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
                         if let Some(record) = self.players.get(&session_id) {
@@ -1020,6 +1031,23 @@ impl WorldActor {
                             let buff = crate::combat::buff::BuffInstance::new(bt, duration, interval);
                             if let Some(record) = self.players.get(&session_id) {
                                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                            }
+                        }
+                    }
+                    "LOCAL" => {
+                        let message = parts.collect::<Vec<_>>().join(" ");
+                        if !message.is_empty() {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let map_index = state.map_index;
+                                    for (sid, other) in &self.players {
+                                        if let Ok(Some(other_state)) = other.actor_ref.ask(GetPlayerState).await {
+                                            if other_state.map_index == map_index {
+                                                send_system_message(&self.gate_ref, *sid, &format!("[本地] {}", message));
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
