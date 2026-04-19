@@ -1047,6 +1047,30 @@ async fn load_mail(pool: &DbPool, character_name: &str) -> anyhow::Result<Mailbo
     Ok(mailbox)
 }
 
+/// 插入单封邮件（用于离线玩家收邮件）
+pub async fn insert_mail(pool: &DbPool, character_name: &str, mail: &MailMessage) -> anyhow::Result<()> {
+    let items_json = serde_json::to_string(&mail.items)?;
+    sqlx::query(
+        r#"INSERT INTO mail (character_name, mail_id, sender_name, subject, body, timestamp,
+            read_flag, collected, locked, gold, items_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+    )
+    .bind(character_name)
+    .bind(mail.mail_id as i64)
+    .bind(&mail.sender_name)
+    .bind(&mail.subject)
+    .bind(&mail.body)
+    .bind(mail.timestamp)
+    .bind(if mail.read { 1 } else { 0 })
+    .bind(if mail.collected { 1 } else { 0 })
+    .bind(if mail.locked { 1 } else { 0 })
+    .bind(mail.gold as i64)
+    .bind(&items_json)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 // ============================================================
 // Quests save/load
 // ============================================================

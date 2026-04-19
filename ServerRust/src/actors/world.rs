@@ -6596,10 +6596,18 @@ impl Message<SendMailRequest> for WorldActor {
             if let Some(target_record) = self.players.get(&target) {
                 let _ = target_record.actor_ref.ask(crate::actors::player::AddMail { mail: mail.clone() }).await;
                 send_mail_received_packet(&self.gate_ref, target, &mail);
+                debug!("Mail delivered online: {} -> {}", sender_state.name, msg.receiver_name);
             }
+        } else {
+            // 收件人不在线，保存到数据库
+            if let Err(e) = db::insert_mail(&self.db_pool, &msg.receiver_name, &mail).await {
+                warn!("Failed to save offline mail for {}: {}", msg.receiver_name, e);
+                send_system_message(&self.gate_ref, msg.session_id, "邮件发送失败，请稍后重试");
+                return;
+            }
+            debug!("Mail saved offline: {} -> {}", sender_state.name, msg.receiver_name);
         }
 
-        debug!("Mail sent from {} to {} (gold={}, items={})", sender_state.name, msg.receiver_name, total_gold, mail.items.len());
         send_system_message(&self.gate_ref, msg.session_id, "邮件已发送");
     }
 }
