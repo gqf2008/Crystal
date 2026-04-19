@@ -517,6 +517,8 @@ pub struct WorldActor {
     global_exp_multiplier: f64,
     /// 全局经验倍率过期时间（tick count）
     global_exp_event_end_tick: u64,
+    /// 隐身中的玩家 session 集合（用于视野管理）
+    invisible_sessions: std::collections::HashSet<u64>,
 }
 
 impl WorldActor {
@@ -554,6 +556,7 @@ impl WorldActor {
             social_ref,
             global_exp_multiplier: 1.0,
             global_exp_event_end_tick: 0,
+            invisible_sessions: HashSet::new(),
         }
     }
 
@@ -563,6 +566,49 @@ impl WorldActor {
             (base as f64 * self.global_exp_multiplier).round() as i32
         } else {
             base
+        }
+    }
+
+    /// 发送 ObjectRemove 给同地图其他玩家，使该玩家从他人视野中消失
+    async fn hide_player_from_others(&self, session_id: u64, state: &crate::actors::player::PlayerState) {
+        let mut body = Vec::new();
+        body.extend_from_slice(&state.object_id.to_le_bytes());
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &body);
+        for (sid, record) in &self.players {
+            if *sid == session_id { continue; }
+            if let Ok(Some(other_state)) = record.actor_ref.ask(GetPlayerState).await {
+                if other_state.map_index == state.map_index {
+                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+                }
+            }
+        }
+    }
+
+    /// 发送 ObjectPlayer 给同地图其他玩家，使该玩家重新出现在他人视野中
+    async fn reveal_player_to_others(&self, session_id: u64, state: &crate::actors::player::PlayerState) {
+        let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(-1);
+        let armor = state.inventory.get_equipment(EquipmentSlot::Armour)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(0);
+        let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.effect as i16).unwrap_or(0);
+        let packet = build_object_player_packet(
+            &state.name, state.object_id, state.x, state.y, state.direction, state.level,
+            name_colour_for_pk(state.pk_points),
+            state.class, state.gender, state.hair,
+            weapon, weapon_effect, armor,
+            state.mount_type, state.is_mounted,
+        );
+        for (sid, record) in &self.players {
+            if *sid == session_id { continue; }
+            if let Ok(Some(other_state)) = record.actor_ref.ask(GetPlayerState).await {
+                if other_state.map_index == state.map_index {
+                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+                }
+            }
         }
     }
 
@@ -711,6 +757,8 @@ impl WorldActor {
         session_id: u64,
         state: &crate::actors::player::PlayerState,
     ) {
+        // 隐身玩家不广播外观变化
+        if self.invisible_sessions.contains(&session_id) { return; }
         let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
             .and_then(|item| self.item_infos.get(&item.item_index))
             .map(|info| info.shape as i16).unwrap_or(-1);
@@ -1439,9 +1487,17 @@ impl WorldActor {
                             _ => None,
                         };
                         if let Some(bt) = buff_type {
+                            let is_invis = matches!(bt, crate::combat::buff::BuffType::Invisibility);
                             let buff = crate::combat::buff::BuffInstance::new(bt, duration, interval);
                             if let Some(record) = self.players.get(&session_id) {
                                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                                if is_invis {
+                                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                        self.invisible_sessions.insert(session_id);
+                                        self.hide_player_from_others(session_id, &state).await;
+                                        send_system_message(&self.gate_ref, session_id, "你进入了隐身状态");
+                                    }
+                                }
                             }
                         }
                     }
@@ -2125,6 +2181,7 @@ impl Actor for WorldActor {
             social_ref: args.social_ref,
             global_exp_multiplier: 1.0,
             global_exp_event_end_tick: 0,
+            invisible_sessions: HashSet::new(),
         })
     }
 }
@@ -3079,6 +3136,25 @@ impl Message<Tick> for WorldActor {
                 }
                 info!("Global exp event ended");
             }
+            // 隐身过期检查：从 invisible_sessions 中移除已过期玩家并广播现身
+            let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
+            let mut to_reveal: Vec<(u64, crate::actors::player::PlayerState)> = Vec::new();
+            for session_id in &self.invisible_sessions {
+                if let Some(record) = self.players.get(session_id) {
+                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        let still_invisible = state.buffs.iter()
+                            .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
+                        if !still_invisible {
+                            to_reveal.push((*session_id, state));
+                        }
+                    }
+                }
+            }
+            for (session_id, state) in to_reveal {
+                self.invisible_sessions.remove(&session_id);
+                self.reveal_player_to_others(session_id, &state).await;
+                send_system_message(&self.gate_ref, session_id, "隐身效果已结束");
+            }
         }
 
         // --- PK 值衰减 + 名字颜色广播（每 10 ticks） ---
@@ -3682,8 +3758,13 @@ impl Message<StartGameRequest> for WorldActor {
             .cloned()
             .collect();
 
+        let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
         for existing in &existing_players {
             if let Ok(Some(ep_state)) = existing.actor_ref.ask(GetPlayerState).await {
+                // 跳过隐身玩家
+                let is_invisible = ep_state.buffs.iter()
+                    .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
+                if is_invisible { continue; }
                 let ep_weapon = ep_state.inventory.get_equipment(EquipmentSlot::Weapon)
                     .and_then(|item| self.item_infos.get(&item.item_index))
                     .map(|info| info.shape as i16).unwrap_or(-1);
@@ -3707,28 +3788,35 @@ impl Message<StartGameRequest> for WorldActor {
             }
         }
 
-        // 向已有玩家发送新玩家的 ObjectPlayer
-        let new_weapon = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
-            .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| info.shape as i16).unwrap_or(-1);
-        let new_armor = loaded_state.inventory.get_equipment(EquipmentSlot::Armour)
-            .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| info.shape as i16).unwrap_or(0);
-        let new_weapon_effect = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
-            .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| info.effect as i16).unwrap_or(0);
-        let new_player_packet = build_object_player_packet(
-            &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, loaded_state.level,
-            name_colour_for_pk(loaded_state.pk_points),
-            loaded_state.class, loaded_state.gender, loaded_state.hair,
-            new_weapon, new_weapon_effect, new_armor,
-            loaded_state.mount_type, loaded_state.is_mounted,
-        );
-        for existing in &existing_players {
-            let _ = self.gate_ref.ask(SendToClient {
-                session_id: existing.session_id,
-                data: new_player_packet.clone(),
-            });
+        // 向已有玩家发送新玩家的 ObjectPlayer（隐身新玩家不发送）
+        let new_is_invisible = loaded_state.buffs.iter()
+            .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
+        if new_is_invisible {
+            self.invisible_sessions.insert(msg.session_id);
+        }
+        if !new_is_invisible {
+            let new_weapon = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
+                .and_then(|item| self.item_infos.get(&item.item_index))
+                .map(|info| info.shape as i16).unwrap_or(-1);
+            let new_armor = loaded_state.inventory.get_equipment(EquipmentSlot::Armour)
+                .and_then(|item| self.item_infos.get(&item.item_index))
+                .map(|info| info.shape as i16).unwrap_or(0);
+            let new_weapon_effect = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
+                .and_then(|item| self.item_infos.get(&item.item_index))
+                .map(|info| info.effect as i16).unwrap_or(0);
+            let new_player_packet = build_object_player_packet(
+                &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, loaded_state.level,
+                name_colour_for_pk(loaded_state.pk_points),
+                loaded_state.class, loaded_state.gender, loaded_state.hair,
+                new_weapon, new_weapon_effect, new_armor,
+                loaded_state.mount_type, loaded_state.is_mounted,
+            );
+            for existing in &existing_players {
+                let _ = self.gate_ref.ask(SendToClient {
+                    session_id: existing.session_id,
+                    data: new_player_packet.clone(),
+                });
+            }
         }
 
         // 发送游戏进入序列（使用真实状态数据）
@@ -3887,20 +3975,23 @@ impl Message<WorldMoveRequest> for WorldActor {
 
         // 获取移动后的状态并广播给其他玩家
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-            let others: Vec<_> = self.other_players(msg.session_id)
-                .into_iter()
-                .map(|r| r.actor_ref.clone())
-                .collect();
+            // 隐身玩家移动时不广播给其他人
+            if !self.invisible_sessions.contains(&msg.session_id) {
+                let others: Vec<_> = self.other_players(msg.session_id)
+                    .into_iter()
+                    .map(|r| r.actor_ref.clone())
+                    .collect();
 
-            for other in others {
-                let _ = other.ask(BroadcastMovement {
-                    object_id: state.object_id,
-                    x: state.x,
-                    y: state.y,
-                    direction: state.direction,
-                    move_type,
-                    exclude_session: msg.session_id,
-                });
+                for other in others {
+                    let _ = other.ask(BroadcastMovement {
+                        object_id: state.object_id,
+                        x: state.x,
+                        y: state.y,
+                        direction: state.direction,
+                        move_type,
+                        exclude_session: msg.session_id,
+                    });
+                }
             }
 
             // 检查是否踩到地图传送点（Movement）— O(1) index lookup
@@ -4140,6 +4231,7 @@ impl Message<PlayerDisconnected> for WorldActor {
             Some(r) => r,
             None => return,
         };
+        self.invisible_sessions.remove(&msg.session_id);
 
         info!("Player removed from world (session={})", msg.session_id);
 
@@ -4202,6 +4294,16 @@ impl Message<WorldAttackRequest> for WorldActor {
 
         // 攻击时自动下坐骑
         self.dismount_player(msg.session_id).await;
+
+        // 攻击时打破隐身
+        if self.invisible_sessions.remove(&msg.session_id) {
+            if let Some(ref state) = attacker_state {
+                let _ = record.actor_ref.ask(crate::actors::player::RemoveBuff {
+                    buff_type: crate::combat::buff::BuffType::Invisibility,
+                }).await;
+                self.reveal_player_to_others(msg.session_id, state).await;
+            }
+        }
 
         if let (Some(ref state), Ok(Some(result))) = (attacker_state, record.actor_ref.ask(AttackRequest {
             session_id: msg.session_id,
@@ -4526,6 +4628,7 @@ impl Message<PlayerLogOut> for WorldActor {
                 return;
             }
         };
+        self.invisible_sessions.remove(&msg.session_id);
 
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             info!("Player {} logged out (session={})", state.name, msg.session_id);
@@ -6944,6 +7047,14 @@ impl Message<MagicRequest> for WorldActor {
 
         // 施法时自动下坐骑
         self.dismount_player(msg.session_id).await;
+
+        // 施法时打破隐身
+        if self.invisible_sessions.remove(&msg.session_id) {
+            let _ = record.actor_ref.ask(crate::actors::player::RemoveBuff {
+                buff_type: crate::combat::buff::BuffType::Invisibility,
+            }).await;
+            self.reveal_player_to_others(msg.session_id, &state).await;
+        }
 
         // Validate spell exists in DB
         let spell_db = self.magic_infos.get(&(msg.spell as u32));
