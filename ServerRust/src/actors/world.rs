@@ -525,6 +525,8 @@ pub struct WorldActor {
     global_event_name: Option<String>,
     /// 隐身中的玩家 session 集合（用于视野管理）
     invisible_sessions: std::collections::HashSet<u64>,
+    /// 当前光照设置（0=Normal, 1=Dawn, 2=Day, 3=Evening, 4=Night）
+    current_light: u8,
 }
 
 impl WorldActor {
@@ -566,6 +568,7 @@ impl WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            current_light: Self::light_for_hour(chrono::Local::now().hour()),
         }
     }
 
@@ -576,6 +579,32 @@ impl WorldActor {
         } else {
             base
         }
+    }
+
+    /// 根据小时计算光照设置
+    fn light_for_hour(hour: u32) -> u8 {
+        match hour {
+            0..=4 => 4,   // Night
+            5..=6 => 1,   // Dawn
+            7..=16 => 2,  // Day
+            17..=18 => 3, // Evening
+            19..=23 => 4, // Night
+            _ => 2,
+        }
+    }
+
+    /// 发送当前 TimeOfDay 给指定玩家
+    fn send_time_of_day(&self, session_id: u64, light: u8) {
+        let packet = mir2_shared::packets::server::player::TimeOfDay { lights: light };
+        let mut body = Vec::new();
+        if let Err(e) = packet.write_body(&mut body) {
+            warn!("Failed to serialize TimeOfDay: {}", e);
+            return;
+        }
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TimeOfDay as i16, &body),
+        });
     }
 
     /// 发送 ObjectRemove 给同地图其他玩家，使该玩家从他人视野中消失
@@ -2274,6 +2303,7 @@ impl Actor for WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            current_light: Self::light_for_hour(chrono::Local::now().hour()),
         })
     }
 }
@@ -3785,6 +3815,26 @@ impl Message<Tick> for WorldActor {
             }
         }
 
+        // --- 昼夜循环（每 600 ticks = 1 分钟检查一次） ---
+        if self.tick_count.is_multiple_of(600) {
+            let hour = chrono::Local::now().hour();
+            let new_light = Self::light_for_hour(hour);
+            if new_light != self.current_light {
+                self.current_light = new_light;
+                for session_id in self.players.keys() {
+                    self.send_time_of_day(*session_id, new_light);
+                }
+                let light_name = match new_light {
+                    1 => "黎明",
+                    2 => "白天",
+                    3 => "黄昏",
+                    4 => "夜晚",
+                    _ => "正常",
+                };
+                info!("Time of day changed to {} (hour={})", light_name, hour);
+            }
+        }
+
         // --- 定期自动保存（每 300 ticks = 30 秒 @ 100ms） ---
         if self.tick_count % 300 == 0 && !self.players.is_empty() {
             let player_count = self.players.len();
@@ -4155,10 +4205,20 @@ impl Message<StartGameRequest> for WorldActor {
             }
         }
 
+        // 发送当前昼夜光照给新玩家
+        self.send_time_of_day(msg.session_id, self.current_light);
+
         // 发送欢迎消息
         let online_count = self.players.len();
+        let light_name = match self.current_light {
+            1 => "黎明",
+            2 => "白天",
+            3 => "黄昏",
+            4 => "夜晚",
+            _ => "正常",
+        };
         send_system_message(&self.gate_ref, msg.session_id,
-            &format!("欢迎来到水晶世界！当前在线玩家: {} 人", online_count));
+            &format!("欢迎来到水晶世界！当前在线玩家: {} 人，当前时间: {}", online_count, light_name));
     }
 }
 
@@ -10295,5 +10355,20 @@ mod tests {
         assert!(boss.is_boss);
         assert!(!boss.is_elite);
         assert_eq!(boss.ai_profile.ai_type, MonsterAiType::Boss);
+    }
+
+    #[test]
+    fn test_light_for_hour() {
+        assert_eq!(WorldActor::light_for_hour(0), 4);  // Night
+        assert_eq!(WorldActor::light_for_hour(4), 4);  // Night
+        assert_eq!(WorldActor::light_for_hour(5), 1);  // Dawn
+        assert_eq!(WorldActor::light_for_hour(6), 1);  // Dawn
+        assert_eq!(WorldActor::light_for_hour(7), 2);  // Day
+        assert_eq!(WorldActor::light_for_hour(12), 2); // Day
+        assert_eq!(WorldActor::light_for_hour(16), 2); // Day
+        assert_eq!(WorldActor::light_for_hour(17), 3); // Evening
+        assert_eq!(WorldActor::light_for_hour(18), 3); // Evening
+        assert_eq!(WorldActor::light_for_hour(19), 4); // Night
+        assert_eq!(WorldActor::light_for_hour(23), 4); // Night
     }
 }
