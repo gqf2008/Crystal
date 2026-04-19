@@ -390,6 +390,7 @@ impl Message<RevivePlayer> for PlayerActor {
     type Reply = bool;
 
     async fn handle(&mut self, msg: RevivePlayer, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.is_dead = false;
         self.state.x = msg.x;
         self.state.y = msg.y;
         self.state.hp = self.state.max_hp;
