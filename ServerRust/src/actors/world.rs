@@ -2134,6 +2134,104 @@ impl Message<WorldMoveRequest> for WorldActor {
                                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc_body),
                             });
                         }
+
+                        // 清理旧地图视野：发送 ObjectRemove 给该玩家（移除旧地图上的怪物/玩家/地面物品）
+                        let old_map = state.map_index;
+                        for (oid, monster) in &self.monsters {
+                            if monster.map_index == old_map {
+                                let mut rb = Vec::new();
+                                rb.extend_from_slice(&oid.to_le_bytes());
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rb),
+                                });
+                            }
+                        }
+                        for (sid, rec) in &self.players {
+                            if *sid != msg.session_id {
+                                if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                                    if s.map_index == old_map {
+                                        let mut rb = Vec::new();
+                                        rb.extend_from_slice(&s.object_id.to_le_bytes());
+                                        let _ = self.gate_ref.ask(SendToClient {
+                                            session_id: msg.session_id,
+                                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rb),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        for gi in &self.ground_items {
+                            if gi.map_index == old_map {
+                                let mut rb = Vec::new();
+                                rb.extend_from_slice(&gi.object_id.to_le_bytes());
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rb),
+                                });
+                            }
+                        }
+
+                        // 发送新地图上的 NPC 和怪物给该玩家
+                        let spawn_ctx = SpawnContext {
+                            map_info: self.map_infos.get(&dest_map_index),
+                            monster_infos: &self.monster_infos,
+                            npc_infos: &self.npc_infos,
+                            dragon_info: self.dragon_info.as_ref(),
+                        };
+                        let dest_file_clone = dest_file.clone();
+                        let (new_npcs, new_monsters) = spawn_npcs_and_monsters(
+                            self.gate_ref.clone(),
+                            &self.spawn_dir,
+                            &dest_file_clone,
+                            msg.session_id,
+                            &mut self.next_object_id,
+                            &spawn_ctx,
+                        );
+                        for npc in new_npcs {
+                            self.npcs.insert(npc.object_id, npc);
+                        }
+                        for monster in new_monsters {
+                            self.monsters.insert(monster.object_id, monster);
+                        }
+
+                        // 同步新地图上的地面物品
+                        let dest_map_u16 = dest_map_index as u16;
+                        for gi in &self.ground_items {
+                            if gi.map_index != dest_map_u16 { continue; }
+                            if gi.item.item_index == 0 {
+                                let object_gold = mir2_shared::packets::server::ObjectGold {
+                                    object_id: gi.object_id,
+                                    gold: gi.item.count as u32,
+                                    location_x: gi.x,
+                                    location_y: gi.y,
+                                };
+                                let mut buf = Vec::new();
+                                if mir2_shared::packets::base::serialize_packet(
+                                    &mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
+                                    let _ = self.gate_ref.ask(SendToClient { session_id: msg.session_id, data: buf });
+                                }
+                            } else {
+                                let object_item = mir2_shared::packets::server::ObjectItem {
+                                    object_id: gi.object_id,
+                                    item: gi.item.clone(),
+                                    location_x: gi.x,
+                                    location_y: gi.y,
+                                };
+                                let mut buf = Vec::new();
+                                if mir2_shared::packets::base::serialize_packet(
+                                    &mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
+                                    let _ = self.gate_ref.ask(SendToClient { session_id: msg.session_id, data: buf });
+                                }
+                            }
+                        }
+
+                        // 同步新地图上已打开的门
+                        for (map_idx, door_idx) in &self.open_doors {
+                            if *map_idx == dest_map_u16 {
+                                send_opendoor(&self.gate_ref, msg.session_id, *door_idx, false);
+                            }
+                        }
                     }
                 }
             }
