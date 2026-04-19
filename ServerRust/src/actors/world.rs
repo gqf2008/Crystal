@@ -1015,6 +1015,13 @@ impl WorldActor {
                             skip = true;
                         }
                     }
+                    "CHECKDAY" => {
+                        let day_name = parts.next().unwrap_or("").to_lowercase();
+                        let today = chrono::Local::now().format("%A").to_string().to_lowercase();
+                        if today != day_name {
+                            skip = true;
+                        }
+                    }
                     "RAND" => {
                         let n = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
                         if n > 1 {
