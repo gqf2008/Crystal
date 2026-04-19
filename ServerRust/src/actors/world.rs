@@ -1517,6 +1517,95 @@ impl WorldActor {
                             }
                         }
                     }
+                    "ACCEPTQUEST" => {
+                        let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if quest_index > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                // Check quest exists
+                                let Some(quest_db) = self.quest_infos.get(&quest_index) else {
+                                    send_system_message(&self.gate_ref, session_id, "任务不存在");
+                                    continue;
+                                };
+                                // Check level
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    if state.level < quest_db.required_min_level as u16 {
+                                        send_system_message(&self.gate_ref, session_id, "等级不足");
+                                        continue;
+                                    }
+                                    if quest_db.required_max_level > 0 && state.level > quest_db.required_max_level as u16 {
+                                        send_system_message(&self.gate_ref, session_id, "等级过高");
+                                        continue;
+                                    }
+                                }
+                                // Check not already accepted or completed
+                                if let Ok(Some(_)) = record.actor_ref.ask(GetQuest { quest_index }).await {
+                                    send_system_message(&self.gate_ref, session_id, "该任务已接受");
+                                    continue;
+                                }
+                                if let Ok(true) = record.actor_ref.ask(HasCompletedQuest { quest_index }).await {
+                                    send_system_message(&self.gate_ref, session_id, "该任务已完成");
+                                    continue;
+                                }
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0);
+                                let quest = make_quest_instance(quest_db, now);
+                                if let Ok(true) = record.actor_ref.ask(AcceptQuest { quest }).await {
+                                    send_system_message(&self.gate_ref, session_id, "任务已接受");
+                                }
+                            }
+                        }
+                    }
+                    "COMPLETEQUEST" => {
+                        let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if quest_index > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let completed_quest = match record.actor_ref.ask(CompleteQuest { quest_index }).await {
+                                    Ok(Some(q)) => q,
+                                    _ => {
+                                        send_system_message(&self.gate_ref, session_id, "无法完成任务");
+                                        continue;
+                                    }
+                                };
+                                if completed_quest.exp_reward > 0 {
+                                    let _ = record.actor_ref.ask(AddExperience { amount: completed_quest.exp_reward as i32 }).await;
+                                }
+                                if completed_quest.gold_reward > 0 {
+                                    let _ = record.actor_ref.ask(AddGold { amount: completed_quest.gold_reward }).await;
+                                }
+                                if let Some(quest_db) = self.quest_infos.get(&quest_index) {
+                                    for reward in &quest_db.fixed_rewards {
+                                        let mut item = mir2_shared::data::item::UserItem {
+                                            item_index: reward.item_index,
+                                            count: reward.count,
+                                            ..Default::default()
+                                        };
+                                        if let Some(info) = self.item_infos.get(&reward.item_index) {
+                                            item.max_dura = info.durability as u16;
+                                            item.current_dura = info.durability as u16;
+                                        }
+                                        let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                                    }
+                                    if !quest_db.fixed_rewards.is_empty() {
+                                        let _ = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await;
+                                    }
+                                }
+                                send_system_message(&self.gate_ref, session_id, &format!("任务完成！获得 {} 经验，{} 金币", completed_quest.exp_reward, completed_quest.gold_reward));
+                                send_quest_complete_packet(&self.gate_ref, session_id, completed_quest.quest_index);
+                            }
+                        }
+                    }
+                    "ABANDONQUEST" => {
+                        let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if quest_index > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(true) = record.actor_ref.ask(AbandonQuest { quest_index }).await {
+                                    send_system_message(&self.gate_ref, session_id, "任务已放弃");
+                                }
+                            }
+                        }
+                    }
                     "LOCAL" => {
                         let message = parts.collect::<Vec<_>>().join(" ");
                         if !message.is_empty() {
