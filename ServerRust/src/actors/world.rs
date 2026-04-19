@@ -4574,6 +4574,33 @@ impl Message<HarvestRequest> for WorldActor {
             state.name, msg.session_id, dir, target_x, target_y
         );
 
+        // 检查当前地图是否可采集
+        let map_info = self.map_infos.get(&(state.map_index as i32));
+        let mine_index = map_info.map(|m| m.mine_index).unwrap_or(0);
+        if mine_index <= 0 {
+            send_system_message(&self.gate_ref, msg.session_id, "这里没有什么可采集的");
+            return;
+        }
+
+        // 检查是否持有镐类工具
+        let has_pickaxe = state.inventory.backpack.iter().chain(state.inventory.storage.iter())
+            .any(|slot| {
+                if let Some(item) = slot {
+                    self.item_infos.get(&item.item.item_index)
+                        .map(|info| {
+                            let n = info.name.to_lowercase();
+                            n.contains('镐') || n.contains("pick") || n.contains("hoe") || n.contains("锄")
+                        })
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            });
+        if !has_pickaxe {
+            send_system_message(&self.gate_ref, msg.session_id, "你需要一把镐才能采矿");
+            return;
+        }
+
         // 广播 ObjectHarvest 给附近其他玩家
         let harvest_body = {
             let mut b = Vec::new();
@@ -4583,7 +4610,6 @@ impl Message<HarvestRequest> for WorldActor {
             b.push(msg.direction);
             build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectHarvest as i16, &b)
         };
-
         for other in self.other_players(msg.session_id) {
             let _ = self.gate_ref.ask(SendToClient {
                 session_id: other.session_id,
@@ -4591,9 +4617,11 @@ impl Message<HarvestRequest> for WorldActor {
             });
         }
 
-        // 延迟发送 ObjectHarvested（采集完成）
-        let gate_ref = self.gate_ref.clone();
+        // 延迟处理采集结果
         let object_id = state.object_id;
+        let gate_ref = self.gate_ref.clone();
+        let actor_ref = record.actor_ref.clone();
+        let item_infos = self.item_infos.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(1500)).await;
             let mut b = Vec::new();
@@ -4608,7 +4636,30 @@ impl Message<HarvestRequest> for WorldActor {
                 session_id: msg.session_id,
                 data: packet,
             });
-            send_system_message(&gate_ref, msg.session_id, "采集成功");
+
+            // 掉落判定
+            let roll = (msg.session_id.wrapping_add(tokio::time::Instant::now().elapsed().as_millis() as u64) % 100) as u8;
+            let (drop_item_index, drop_count, drop_name) = match mine_index {
+                1 if roll < 70 => (500, 1 + (roll % 2) as u16, "铁矿石"),
+                2 if roll < 50 => (501, 1, "金矿石"),
+                3 if roll < 30 => (502, 1, "宝石"),
+                _ => (0, 0, ""),
+            };
+            if drop_item_index > 0 {
+                let item_name = item_infos.get(&drop_item_index)
+                    .map(|i| i.name.clone())
+                    .unwrap_or_else(|| drop_name.to_string());
+                let item = mir2_shared::data::item::UserItem {
+                    item_index: drop_item_index,
+                    count: drop_count,
+                    ..Default::default()
+                };
+                let _ = actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                send_system_message(&gate_ref, msg.session_id,
+                    &format!("采集成功！获得了 {} x{}", item_name, drop_count));
+            } else {
+                send_system_message(&gate_ref, msg.session_id, "采集成功，但这次什么也没有挖到");
+            }
         });
     }
 }
