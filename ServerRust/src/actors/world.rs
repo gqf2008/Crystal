@@ -686,6 +686,39 @@ impl WorldActor {
         debug!("Sent UserStorage to session {}", session_id);
     }
 
+    /// 强制玩家下坐骑并广播外观更新
+    async fn dismount_player(&mut self,
+        session_id: u64,
+    ) {
+        let Some(record) = self.players.get(&session_id) else { return };
+        let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await else { return };
+        if !state.is_mounted { return; }
+        state.is_mounted = false;
+        state.mount_type = 0;
+        let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+        let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(-1);
+        let armor = state.inventory.get_equipment(EquipmentSlot::Armour)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(0);
+        let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.effect as i16).unwrap_or(0);
+        let packet = build_object_player_packet(
+            &state.name, state.object_id, state.x, state.y, state.direction, state.level,
+            name_colour_for_pk(state.pk_points),
+            state.class, state.gender, state.hair,
+            weapon, weapon_effect, armor,
+            state.mount_type, state.is_mounted,
+        );
+        for (sid, _) in &self.players {
+            if *sid != session_id {
+                let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+            }
+        }
+    }
+
     /// 怪物死亡时生成掉落并广播给所有在线玩家
     async fn spawn_single_drop(&mut self, monster: &MonsterState, item_index: i32, count: u16) {
         let drop_oid = self.alloc_object_id();
@@ -1606,6 +1639,76 @@ impl WorldActor {
                             }
                         }
                     }
+                    "MOUNT" => {
+                        let mount_type = parts.next().and_then(|s| s.parse::<i16>().ok()).unwrap_or(1);
+                        if mount_type > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    if !state.is_mounted {
+                                        state.is_mounted = true;
+                                        state.mount_type = mount_type;
+                                        let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+                                        // Broadcast updated appearance to nearby players
+                                        let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                                            .and_then(|item| self.item_infos.get(&item.item_index))
+                                            .map(|info| info.shape as i16).unwrap_or(-1);
+                                        let armor = state.inventory.get_equipment(EquipmentSlot::Armour)
+                                            .and_then(|item| self.item_infos.get(&item.item_index))
+                                            .map(|info| info.shape as i16).unwrap_or(0);
+                                        let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                                            .and_then(|item| self.item_infos.get(&item.item_index))
+                                            .map(|info| info.effect as i16).unwrap_or(0);
+                                        let packet = build_object_player_packet(
+                                            &state.name, state.object_id, state.x, state.y, state.direction, state.level,
+                                            name_colour_for_pk(state.pk_points),
+                                            state.class, state.gender, state.hair,
+                                            weapon, weapon_effect, armor,
+                                            state.mount_type, state.is_mounted,
+                                        );
+                                        for (sid, _) in &self.players {
+                                            if *sid != session_id {
+                                                let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+                                            }
+                                        }
+                                        send_system_message(&self.gate_ref, session_id, "你骑上了坐骑");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "DISMOUNT" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.is_mounted {
+                                    state.is_mounted = false;
+                                    state.mount_type = 0;
+                                    let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+                                    let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                                        .and_then(|item| self.item_infos.get(&item.item_index))
+                                        .map(|info| info.shape as i16).unwrap_or(-1);
+                                    let armor = state.inventory.get_equipment(EquipmentSlot::Armour)
+                                        .and_then(|item| self.item_infos.get(&item.item_index))
+                                        .map(|info| info.shape as i16).unwrap_or(0);
+                                    let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+                                        .and_then(|item| self.item_infos.get(&item.item_index))
+                                        .map(|info| info.effect as i16).unwrap_or(0);
+                                    let packet = build_object_player_packet(
+                                        &state.name, state.object_id, state.x, state.y, state.direction, state.level,
+                                        name_colour_for_pk(state.pk_points),
+                                        state.class, state.gender, state.hair,
+                                        weapon, weapon_effect, armor,
+                                        state.mount_type, state.is_mounted,
+                                    );
+                                    for (sid, _) in &self.players {
+                                        if *sid != session_id {
+                                            let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+                                        }
+                                    }
+                                    send_system_message(&self.gate_ref, session_id, "你下了坐骑");
+                                }
+                            }
+                        }
+                    }
                     "LOCAL" => {
                         let message = parts.collect::<Vec<_>>().join(" ");
                         if !message.is_empty() {
@@ -2173,6 +2276,7 @@ impl Message<Tick> for WorldActor {
             let mut moved_targets: HashSet<(i32, i32)> = HashSet::new();
             let mut death_drops: Vec<(u64, i32, i32, u16)> = Vec::new();
             let mut broken_armor: Vec<(u64, EquipmentSlot)> = Vec::new();
+            let mut dismount_sessions: Vec<u64> = Vec::new();
             // 预收集怪物当前位置（用于碰撞检测）
             let monster_positions: HashSet<(i32, i32)> = self.monsters.values().map(|m| (m.x, m.y)).collect();
             // 预收集怪物快照（用于 Healer AI 寻找受伤盟友）
@@ -2396,6 +2500,11 @@ impl Message<Tick> for WorldActor {
                                     attacker_session: target_session,
                                     damage,
                                 }).await.unwrap_or(false);
+
+                                // 被攻击时自动下坐骑
+                                if !died {
+                                    dismount_sessions.push(target_session);
+                                }
 
                                 // 装备耐久损耗（存活时）
                                 if !died {
@@ -2728,6 +2837,10 @@ impl Message<Tick> for WorldActor {
             // 处理玩家死亡掉落（在怪物循环外，避免借用冲突）
             for (sid, x, y, map_index) in death_drops {
                 self.handle_player_death_drop(sid, x, y, map_index).await;
+            }
+            // 处理被怪物攻击后的自动下坐骑（在怪物循环外，避免借用冲突）
+            for sid in dismount_sessions {
+                self.dismount_player(sid).await;
             }
         }
 
@@ -3253,6 +3366,7 @@ impl Message<StartGameRequest> for WorldActor {
                 last_recall_time: 0,
                 is_dead: false,
                 is_mounted: false,
+                mount_type: 0,
                 allow_lover_recall: false,
                 is_gm: false,
                 pk_points: 0,
@@ -3353,6 +3467,7 @@ impl Message<StartGameRequest> for WorldActor {
                     name_colour_for_pk(ep_state.pk_points),
                     ep_state.class, ep_state.gender, ep_state.hair,
                     ep_weapon, ep_weapon_effect, ep_armor,
+                    ep_state.mount_type, ep_state.is_mounted,
                 );
                 let _ = self.gate_ref.ask(SendToClient {
                     session_id: msg.session_id,
@@ -3376,6 +3491,7 @@ impl Message<StartGameRequest> for WorldActor {
             name_colour_for_pk(loaded_state.pk_points),
             loaded_state.class, loaded_state.gender, loaded_state.hair,
             new_weapon, new_weapon_effect, new_armor,
+            loaded_state.mount_type, loaded_state.is_mounted,
         );
         for existing in &existing_players {
             let _ = self.gate_ref.ask(SendToClient {
@@ -3845,6 +3961,9 @@ impl Message<WorldAttackRequest> for WorldActor {
         if let Some(ref state) = attacker_state {
             if state.is_dead { return; }
         }
+
+        // 攻击时自动下坐骑
+        self.dismount_player(msg.session_id).await;
 
         if let (Some(ref state), Ok(Some(result))) = (attacker_state, record.actor_ref.ask(AttackRequest {
             session_id: msg.session_id,
@@ -6455,6 +6574,9 @@ impl Message<MagicRequest> for WorldActor {
         };
         if state.is_dead { return; }
 
+        // 施法时自动下坐骑
+        self.dismount_player(msg.session_id).await;
+
         // Validate spell exists in DB
         let spell_db = self.magic_infos.get(&(msg.spell as u32));
 
@@ -7128,6 +7250,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             last_recall_time: 0,
             is_dead: false,
             is_mounted: false,
+            mount_type: 0,
             allow_lover_recall: false,
             is_gm: false,
             pk_points: 0,
@@ -8860,6 +8983,7 @@ fn build_object_player_packet(
     gender: mir2_shared::enums::MirGender,
     hair: u8,
     weapon: i16, weapon_effect: i16, armor: i16,
+    mount_type: i16, is_mounted: bool,
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
@@ -8886,8 +9010,8 @@ fn build_object_player_packet(
     body.push(0u8);                                     // effect=None
     body.push(0u8);                                     // wing_effect
     body.push(0u8);                                     // extra=false
-    body.extend_from_slice(&0i16.to_le_bytes());        // mount_type
-    body.push(0u8);                                     // riding_mount=false
+    body.extend_from_slice(&mount_type.to_le_bytes());  // mount_type
+    body.push(if is_mounted { 1u8 } else { 0u8 });      // riding_mount
     body.push(0u8);                                     // fishing=false
     body.extend_from_slice(&0i16.to_le_bytes());        // transform_type
     body.extend_from_slice(&0u32.to_le_bytes());        // element_orb_effect

@@ -127,6 +127,8 @@ pub struct PlayerState {
     pub is_fishing: bool,
     /// 是否骑乘坐骑
     pub is_mounted: bool,
+    /// 坐骑类型（0 = 无坐骑，>0 = 坐骑外观ID）
+    pub mount_type: i16,
     /// 是否死亡（对应 C# Dead）
     pub is_dead: bool,
     /// PK 值（>0 = 红名，每杀1人+100，在线 tick 衰减）
@@ -252,6 +254,7 @@ impl PlayerActor {
                 refine_log: RefineLog::new(),
                 is_fishing: false,
                 is_mounted: false,
+                mount_type: 0,
                 is_dead: false,
                 pk_points: 0,
                 pk_kill_count: 0,
@@ -2177,6 +2180,7 @@ mod tests {
             refine_log: RefineLog::new(),
             is_fishing: false,
             is_mounted: false,
+            mount_type: 0,
             fishing_autocast: false,
             reincarnation_host: None,
             reincarnation_ready: false,

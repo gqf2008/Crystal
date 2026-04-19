@@ -762,6 +762,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         refine_log,
         is_fishing: row.get::<i32, _>("is_fishing") != 0,
         is_mounted: false,
+        mount_type: 0,
         is_dead: row.get::<i32, _>("is_dead") != 0,
         fishing_autocast: row.get::<i32, _>("fishing_autocast") != 0,
         reincarnation_host: None,
