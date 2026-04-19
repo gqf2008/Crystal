@@ -2023,6 +2023,50 @@ impl WorldActor {
                             }
                         }
                     }
+                    "LOTTERY" => {
+                        let cost = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(100);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.inventory.gold < cost {
+                                    send_system_message(&self.gate_ref, session_id, "金币不足，无法抽奖");
+                                    continue;
+                                }
+                                let deducted = record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await.unwrap_or(false);
+                                if !deducted {
+                                    send_system_message(&self.gate_ref, session_id, "金币扣除失败");
+                                    continue;
+                                }
+                                // 抽奖掉落表
+                                let roll = fastrand::u32(1..=100);
+                                let (item_idx, count, prize_name) = match roll {
+                                    1..=50 => (0, 0, ""), // 50% 空手
+                                    51..=75 => (1, 1, "经验丹"),
+                                    76..=90 => (2, 1, "回城卷"),
+                                    91..=97 => (3, 1, "随机传送卷"),
+                                    98..=99 => (4, 1, "双倍经验卷"),
+                                    100 => (5, 10, "经验丹大礼包"),
+                                    _ => (0, 0, ""),
+                                };
+                                if item_idx > 0 {
+                                    let item = crate::actors::inventory::make_item(item_idx, count);
+                                    let added = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await.unwrap_or(false);
+                                    if added {
+                                        send_system_message(
+                                            &self.gate_ref, session_id,
+                                            &format!("恭喜中奖！获得 {} x{}", prize_name, count));
+                                    } else {
+                                        send_system_message(
+                                            &self.gate_ref, session_id,
+                                            &format!("恭喜中奖！但背包已满，{} x{} 无法获得", prize_name, count));
+                                    }
+                                } else {
+                                    send_system_message(
+                                        &self.gate_ref, session_id, "很遗憾，这次没有中奖...");
+                                }
+                                debug!("LOTTERY: session={} roll={} prize={}x{}", session_id, roll, item_idx, count);
+                            }
+                        }
+                    }
                     _ => {}
                 }
             } else if !skip {
