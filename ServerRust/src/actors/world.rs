@@ -663,8 +663,9 @@ impl WorldActor {
                     },
                     x: monster.x,
                     y: monster.y,
-                    map_index: 0,
+                    map_index: monster.map_index,
                     dropper_session: None,
+                    drop_tick: self.tick_count,
                 });
                 debug!("Monster '{}' dropped {} gold at ({}, {})", monster.name, gold, monster.x, monster.y);
             } else {
@@ -702,8 +703,9 @@ impl WorldActor {
                     item,
                     x: monster.x,
                     y: monster.y,
-                    map_index: 0,
+                    map_index: monster.map_index,
                     dropper_session: None,
+                    drop_tick: self.tick_count,
                 });
                 debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, drop.item_index, count, monster.x, monster.y);
             }
@@ -745,7 +747,7 @@ impl WorldActor {
             for sid in self.players.keys() {
                 let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
             }
-            self.ground_items.push(GroundItem { item, x, y, map_index, dropper_session: Some(session_id) });
+            self.ground_items.push(GroundItem { item, x, y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count });
         }
 
         // 掉落金币（1-5%）
@@ -775,6 +777,7 @@ impl WorldActor {
                             ..Default::default()
                         },
                         x, y, map_index, dropper_session: Some(session_id),
+                        drop_tick: self.tick_count,
                     });
                 }
             }
@@ -1629,6 +1632,19 @@ impl Message<Tick> for WorldActor {
             }
         }
 
+        // --- 地面物品过期清理（每 50 ticks ≈ 5 秒清理一次） ---
+        if self.tick_count % 50 == 0 {
+            const GROUND_ITEM_LIFETIME_TICKS: u64 = 600; // ~60 秒
+            let expired: Vec<_> = self.ground_items.iter()
+                .filter(|gi| self.tick_count >= gi.drop_tick + GROUND_ITEM_LIFETIME_TICKS)
+                .map(|gi| (gi.x, gi.y, gi.map_index))
+                .collect();
+            if !expired.is_empty() {
+                self.ground_items.retain(|gi| self.tick_count < gi.drop_tick + GROUND_ITEM_LIFETIME_TICKS);
+                debug!("Cleaned up {} expired ground items", expired.len());
+            }
+        }
+
         // --- 重生处理 ---
         let mut to_respawn = Vec::new();
         for (oid, (spawn, tick)) in &self.respawn_queue {
@@ -1940,6 +1956,48 @@ impl Message<StartGameRequest> for WorldActor {
         }
         for monster in new_monsters {
             self.monsters.insert(monster.object_id, monster);
+        }
+
+        // 同步当前地图上的地面物品给新玩家
+        let map_index_val = loaded_state.map_index;
+        let ground_sync: Vec<_> = self.ground_items.iter()
+            .filter(|gi| gi.map_index == map_index_val)
+            .map(|gi| (gi.item.clone(), gi.x, gi.y))
+            .collect();
+        for (item, x, y) in ground_sync {
+            let drop_oid = self.alloc_object_id();
+            if item.item_index == 0 {
+                let object_gold = mir2_shared::packets::server::ObjectGold {
+                    object_id: drop_oid,
+                    gold: item.count as u32,
+                    location_x: x,
+                    location_y: y,
+                };
+                let mut buf = Vec::new();
+                if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
+                    let _ = self.gate_ref.ask(SendToClient { session_id: msg.session_id, data: buf });
+                }
+            } else {
+                let object_item = mir2_shared::packets::server::ObjectItem {
+                    object_id: drop_oid,
+                    item,
+                    location_x: x,
+                    location_y: y,
+                };
+                let mut buf = Vec::new();
+                if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
+                    let _ = self.gate_ref.ask(SendToClient { session_id: msg.session_id, data: buf });
+                }
+            }
+        }
+
+        // 同步当前地图上已打开的门给新玩家
+        let open_doors_sync: Vec<_> = self.open_doors.iter()
+            .filter(|(map_idx, _)| *map_idx == map_index_val)
+            .map(|(_, door_idx)| *door_idx)
+            .collect();
+        for door_idx in open_doors_sync {
+            send_opendoor(&self.gate_ref, msg.session_id, door_idx, false);
         }
     }
 }
@@ -2785,9 +2843,9 @@ impl Message<PickUpRequest> for WorldActor {
         if state.is_dead { return; }
         let player_pos = (state.x, state.y);
 
-        // 查找附近可拾取的物品（1 格内）
+        // 查找附近可拾取的物品（1 格内，同地图）
         let pickup_idx = self.ground_items.iter().position(|gi| {
-            gi.map_index == 0
+            gi.map_index == state.map_index
                 && (gi.x - player_pos.0).abs() <= 1
                 && (gi.y - player_pos.1).abs() <= 1
         });
@@ -2973,8 +3031,9 @@ impl Message<DropItemRequest> for WorldActor {
                 item: item.clone(),
                 x: player_pos.0,
                 y: player_pos.1,
-                map_index: 0,
+                map_index: state.map_index,
                 dropper_session: Some(msg.session_id),
+                drop_tick: self.tick_count,
             });
 
             send_drop_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count as u32, true);
@@ -3063,8 +3122,9 @@ impl Message<DropGoldRequest> for WorldActor {
                 item: gold_item,
                 x: player_pos.0,
                 y: player_pos.1,
-                map_index: 0,
+                map_index: state.map_index,
                 dropper_session: Some(msg.session_id),
+                drop_tick: self.tick_count,
             });
 
             // 通知客户端金币变化

@@ -60,6 +60,8 @@ pub struct GroundItem {
     pub map_index: u16,
     /// 拾取者 session（绑定后其他人无法拾取）
     pub dropper_session: Option<u64>,
+    /// 掉落时的 tick 计数（用于过期清理）
+    pub drop_tick: u64,
 }
 
 /// 仓库格子数
