@@ -991,6 +991,24 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKMOUNTED" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if !state.is_mounted {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKFISHING" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if !state.is_fishing {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "CHECKMAP" => {
                         let map_name = parts.next().unwrap_or("").to_string();
                         if let Some(record) = self.players.get(&session_id) {
