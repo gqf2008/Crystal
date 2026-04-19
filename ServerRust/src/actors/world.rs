@@ -1199,6 +1199,23 @@ impl WorldActor {
                             }
                         }
                     }
+                    "GIVEPET" => {
+                        let creature_type_id = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        let creature_type = crate::actors::creature::CreatureType::from(creature_type_id);
+                        if creature_type != crate::actors::creature::CreatureType::None {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let mut log = state.creature_log;
+                                    let mut creature = crate::actors::creature::IntelligentCreature::new(creature_type);
+                                    creature.enabled = true;
+                                    log.set_creature(creature);
+                                    let _ = record.actor_ref.ask(crate::actors::player::SetCreature { creature_log: log }).await;
+                                    send_system_message(&self.gate_ref, session_id, "获得新宠物！");
+                                    debug!("GIVEPET: {} type={:?}", state.name, creature_type);
+                                }
+                            }
+                        }
+                    }
                     "SAY" => {
                         let message = parts.collect::<Vec<_>>().join(" ");
                         if !message.is_empty() {
