@@ -573,6 +573,7 @@ impl Message<TakeDamage> for PlayerActor {
         // 死亡处理
         if self.state.hp <= 0 && !self.state.is_dead {
             self.state.is_dead = true;
+            self.state.buffs.clear();
             debug!("Player {} died (attacker={})", self.state.name, msg.attacker_id);
             return true;
         }
