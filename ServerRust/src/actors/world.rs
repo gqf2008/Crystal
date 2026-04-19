@@ -948,6 +948,39 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKGUILD" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.guild_name.is_none() {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKSPOUSE" => {
+                        let required = parts.next().unwrap_or("").to_string();
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if required.is_empty() {
+                                    // 空字符串 = 检查是否有任何配偶
+                                    if state.spouse_name.is_none() {
+                                        skip = true;
+                                    }
+                                } else if state.spouse_name.as_ref().map(|s| s.as_str()) != Some(&required) {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKMENTOR" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.mentor_name.is_none() {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
                     "TAKEGOLD" => {
                         let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
                         if let Some(record) = self.players.get(&session_id) {
