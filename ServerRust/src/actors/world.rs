@@ -2708,6 +2708,11 @@ impl Message<WorldAttackRequest> for WorldActor {
 
                         // 只有范围内的玩家才受到伤害
                         if dist <= MELEE_RANGE {
+                            // 攻击模式检查
+                            if !can_attack_player(state, &other_state) {
+                                continue;
+                            }
+
                             // 安全区保护：双方任一在安全区内则禁止伤害
                             let attacker_safe = self.maps.get(&state.map_index)
                                 .map(|m| m.is_safe_zone(state.x, state.y))
@@ -4798,6 +4803,7 @@ impl Message<RangeAttackRequest> for WorldActor {
             .map(|(id, _)| *id)
             .collect();
 
+        let mut hit_monster = false;
         for monster_id in hit_monster_ids {
             if let Some(monster) = self.monsters.get_mut(&monster_id) {
                 let attack_result = combat_attack::resolve_attack(
@@ -4808,8 +4814,81 @@ impl Message<RangeAttackRequest> for WorldActor {
                 monster.provoked = true;
                 monster.target_session = Some(msg.session_id);
                 debug!("RangeAttack: {} -> monster {} for {} damage", state.name, monster_id, damage);
+                hit_monster = true;
                 if monster.hp <= 0 {
                     // 死亡由 Tick 循环处理（广播 ObjectDied + 重生）
+                }
+            }
+        }
+
+        // 未命中怪物时尝试命中玩家（PvP）
+        if !hit_monster {
+            for other in &others {
+                if let Ok(Some(other_state)) = other.actor_ref.ask(GetPlayerState).await {
+                    let dist = (other_state.x - target_x).abs() + (other_state.y - target_y).abs();
+                    if dist <= 1 {
+                        // 攻击模式检查
+                        if !can_attack_player(&state, &other_state) {
+                            continue;
+                        }
+                        // 安全区保护
+                        let attacker_safe = self.maps.get(&state.map_index)
+                            .map(|m| m.is_safe_zone(state.x, state.y))
+                            .unwrap_or(false);
+                        let target_safe = self.maps.get(&other_state.map_index)
+                            .map(|m| m.is_safe_zone(other_state.x, other_state.y))
+                            .unwrap_or(false);
+                        if attacker_safe || target_safe {
+                            continue;
+                        }
+
+                        let attack_result = combat_attack::resolve_attack(
+                            state.min_attack, state.max_attack, other_state.defence
+                        );
+                        let damage = attack_result.damage;
+                        if other.actor_ref.ask(TakeDamage {
+                            attacker_id: object_id,
+                            attacker_session: msg.session_id,
+                            damage,
+                        }).await.unwrap_or(false) {
+                            // 目标死亡处理
+                            let mut died_body = Vec::new();
+                            died_body.extend_from_slice(&other_state.object_id.to_le_bytes());
+                            died_body.extend_from_slice(&(other_state.x as u32).to_le_bytes());
+                            died_body.extend_from_slice(&(other_state.y as u32).to_le_bytes());
+                            died_body.push(other_state.direction);
+                            died_body.push(0u8);
+                            let died_packet = build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &died_body);
+                            for (sid, _) in &self.players {
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id: *sid,
+                                    data: died_packet.clone(),
+                                });
+                            }
+                            self.handle_player_death_drop(other.session_id, other_state.x, other_state.y, other_state.map_index).await;
+
+                            // 增加 PK 值
+                            let _ = record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
+                            if let Ok(Some(attacker_state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let colour_packet = build_object_colour_changed_packet(
+                                    attacker_state.object_id,
+                                    name_colour_for_pk(attacker_state.pk_points),
+                                );
+                                for (sid, _) in &self.players {
+                                    let _ = self.gate_ref.ask(SendToClient {
+                                        session_id: *sid,
+                                        data: colour_packet.clone(),
+                                    });
+                                }
+                                if let Some(r) = self.players.get_mut(&msg.session_id) {
+                                    r.last_pk_points = attacker_state.pk_points;
+                                }
+                            }
+                        }
+                        debug!("RangeAttack PvP: {} damaged {} for {}", state.name, other_state.name, damage);
+                        break; // 远程攻击只命中一个目标
+                    }
                 }
             }
         }
@@ -6876,6 +6955,33 @@ fn name_colour_for_pk(pk_points: i32) -> i32 {
         2 // Orange
     } else {
         0 // White
+    }
+}
+
+/// 检查攻击者是否可以在当前攻击模式下攻击目标玩家
+fn can_attack_player(attacker: &PlayerState, target: &PlayerState) -> bool {
+    use mir2_shared::enums::AttackMode;
+    match attacker.attack_mode {
+        AttackMode::Peace => false,
+        AttackMode::Group => {
+            // 不能攻击同组成员
+            attacker.group_id.is_none() || attacker.group_id != target.group_id
+        }
+        AttackMode::Guild => {
+            // 不能攻击同行会成员
+            attacker.guild_name.is_none() || attacker.guild_name != target.guild_name
+        }
+        AttackMode::EnemyGuild => {
+            // 简化：只能攻击不同行会的玩家（且双方都有行会）
+            attacker.guild_name.is_some()
+                && target.guild_name.is_some()
+                && attacker.guild_name != target.guild_name
+        }
+        AttackMode::RedBrown => {
+            // 只能攻击红名/橙名玩家
+            target.pk_points >= 100
+        }
+        AttackMode::All => true,
     }
 }
 
