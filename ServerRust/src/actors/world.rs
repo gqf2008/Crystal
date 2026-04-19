@@ -1872,9 +1872,14 @@ impl Message<Tick> for WorldActor {
             // 预收集玩家位置 + PK 值（用于 Guard AI 红名优先）
             let player_positions: Vec<(u64, i32, i32, u32, i32)> = {
                 let mut results = Vec::new();
+                let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
                 for (session_id, record) in &self.players {
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                         if !state.is_dead {
+                            // 隐身玩家不会被怪物检测到
+                            let is_invisible = state.buffs.iter()
+                                .any(|b| std::mem::discriminant(&b.buff_type) == invis_tag);
+                            if is_invisible { continue; }
                             let in_safe = self.maps.get(&state.map_index)
                                 .map(|m| m.is_safe_zone(state.x, state.y))
                                 .unwrap_or(false);
