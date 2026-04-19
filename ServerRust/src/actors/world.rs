@@ -1958,6 +1958,9 @@ impl Message<StartGameRequest> for WorldActor {
                 pet_mode: mir2_shared::enums::PetMode::Both,
                 hidden: false,
                 session_id: msg.session_id,
+                class: mir2_shared::enums::MirClass::Warrior,
+                gender: mir2_shared::enums::MirGender::Male,
+                hair: 0,
                 level: 1,
                 experience: 0,
                 max_experience: 100,
@@ -2090,8 +2093,9 @@ impl Message<StartGameRequest> for WorldActor {
                     .and_then(|item| self.item_infos.get(&item.item_index))
                     .map(|info| info.effect as i16).unwrap_or(0);
                 let packet = build_object_player_packet(
-                    &ep_state.name, ep_state.object_id, ep_state.x, ep_state.y, ep_state.direction, 1,
+                    &ep_state.name, ep_state.object_id, ep_state.x, ep_state.y, ep_state.direction, ep_state.level,
                     name_colour_for_pk(ep_state.pk_points),
+                    ep_state.class, ep_state.gender, ep_state.hair,
                     ep_weapon, ep_weapon_effect, ep_armor,
                 );
                 let _ = self.gate_ref.ask(SendToClient {
@@ -2112,8 +2116,9 @@ impl Message<StartGameRequest> for WorldActor {
             .and_then(|item| self.item_infos.get(&item.item_index))
             .map(|info| info.effect as i16).unwrap_or(0);
         let new_player_packet = build_object_player_packet(
-            &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, 1,
+            &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, loaded_state.level,
             name_colour_for_pk(loaded_state.pk_points),
+            loaded_state.class, loaded_state.gender, loaded_state.hair,
             new_weapon, new_weapon_effect, new_armor,
         );
         for existing in &existing_players {
@@ -5139,6 +5144,10 @@ impl Message<NewCharacterRequest> for WorldActor {
         }
 
         // 创建默认角色状态并保存到数据库
+        let class = mir2_shared::enums::MirClass::try_from(msg.class)
+            .unwrap_or(mir2_shared::enums::MirClass::Warrior);
+        let gender = mir2_shared::enums::MirGender::try_from(msg.gender)
+            .unwrap_or(mir2_shared::enums::MirGender::Male);
         let default_state = PlayerState {
             object_id: 0,
             name: msg.name.clone(),
@@ -5150,6 +5159,9 @@ impl Message<NewCharacterRequest> for WorldActor {
             pet_mode: mir2_shared::enums::PetMode::Both,
             hidden: false,
             session_id: 0,
+            class,
+            gender,
+            hair: msg.hair as u8,
             level: 1,
             experience: 0,
             max_experience: 100,
@@ -6532,8 +6544,8 @@ fn send_inspect_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, state: &
     write_dotnet_string(&mut body, &state.name);
     write_dotnet_string(&mut body, ""); // guild_name (简化)
     body.extend_from_slice(&state.level.to_le_bytes());
-    body.push(0u8); // class=Warrior (简化)
-    body.push(0u8); // gender=Male (简化)
+    body.push(state.class as u8);
+    body.push(state.gender as u8);
     // 装备信息（只发送已装备的）
     body.push(state.inventory.equipment.iter().filter(|s| s.is_some()).count() as u8);
     for eq in state.inventory.equipment.iter().flatten() {
@@ -6746,13 +6758,13 @@ fn build_user_information_packet(state: &PlayerState) -> Vec<u8> {
     write_dotnet_string(&mut body, state.guild_name.as_deref().unwrap_or(""));  // guild_name
     write_dotnet_string(&mut body, "");                       // guild_rank
     body.extend_from_slice(&name_colour_for_pk(state.pk_points).to_le_bytes()); // name_colour
-    body.push(0u8);                                           // class=Warrior
-    body.push(0u8);                                           // gender=Male
+    body.push(state.class as u8);                             // class
+    body.push(state.gender as u8);                            // gender
     body.extend_from_slice(&state.level.to_le_bytes());       // level
     body.extend_from_slice(&state.x.to_le_bytes());           // location_x
     body.extend_from_slice(&state.y.to_le_bytes());           // location_y
     body.push(state.direction);                               // direction
-    body.push(0u8);                                           // hair
+    body.push(state.hair);                                    // hair
     body.extend_from_slice(&state.hp.to_le_bytes());          // hp
     body.extend_from_slice(&state.mp.to_le_bytes());          // mp
     body.extend_from_slice(&state.experience.to_le_bytes());  // experience
@@ -6783,6 +6795,9 @@ fn build_user_information_packet(state: &PlayerState) -> Vec<u8> {
 fn build_object_player_packet(
     name: &str, object_id: u32, x: i32, y: i32, direction: u8, level: u16,
     name_colour: i32,
+    class: mir2_shared::enums::MirClass,
+    gender: mir2_shared::enums::MirGender,
+    hair: u8,
     weapon: i16, weapon_effect: i16, armor: i16,
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
@@ -6793,13 +6808,13 @@ fn build_object_player_packet(
     write_dotnet_string(&mut body, "");                 // guild_name
     write_dotnet_string(&mut body, "");                 // guild_rank_name
     body.extend_from_slice(&name_colour.to_le_bytes()); // name_colour
-    body.push(0u8);                                     // class=Warrior
-    body.push(0u8);                                     // gender=Male
+    body.push(class as u8);                             // class
+    body.push(gender as u8);                            // gender
     body.extend_from_slice(&level.to_le_bytes());       // level
     body.extend_from_slice(&x.to_le_bytes());           // location_x
     body.extend_from_slice(&y.to_le_bytes());           // location_y
     body.push(direction);                               // direction
-    body.push(0u8);                                     // hair
+    body.push(hair);                                    // hair
     body.push(1u8);                                     // light
     body.extend_from_slice(&weapon.to_le_bytes());        // weapon
     body.extend_from_slice(&weapon_effect.to_le_bytes()); // weapon_effect

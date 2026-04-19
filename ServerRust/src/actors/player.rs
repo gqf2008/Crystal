@@ -45,6 +45,12 @@ pub struct PlayerState {
     pub hidden: bool,
     /// 所属 session
     pub session_id: u64,
+    /// 职业
+    pub class: mir2_shared::enums::MirClass,
+    /// 性别
+    pub gender: mir2_shared::enums::MirGender,
+    /// 发型
+    pub hair: u8,
     /// 等级
     pub level: u16,
     /// 当前经验
@@ -162,6 +168,9 @@ impl PlayerActor {
                 pet_mode: mir2_shared::enums::PetMode::Both,
                 hidden: false,
                 session_id,
+                class: mir2_shared::enums::MirClass::Warrior,
+                gender: mir2_shared::enums::MirGender::Male,
+                hair: 0,
                 level: 1,
                 experience: 0,
                 max_experience: 100,
@@ -584,14 +593,21 @@ impl Message<AddExperience> for PlayerActor {
             self.state.experience -= self.state.max_experience;
             self.state.level += 1;
 
-            // 属性成长（Warrior 模板）
-            self.state.max_hp += 12;
+            // 属性成长（按职业）
+            let (hp_gain, mp_gain, min_atk_gain, max_atk_gain, def_gain) = match self.state.class {
+                mir2_shared::enums::MirClass::Warrior => (12, 4, 1, 2, 1),
+                mir2_shared::enums::MirClass::Wizard => (6, 10, 1, 2, 0),
+                mir2_shared::enums::MirClass::Taoist => (8, 8, 1, 2, 1),
+                mir2_shared::enums::MirClass::Assassin => (8, 5, 1, 2, 1),
+                mir2_shared::enums::MirClass::Archer => (7, 6, 1, 2, 1),
+            };
+            self.state.max_hp += hp_gain;
             self.state.hp = self.state.max_hp;
-            self.state.max_mp += 4;
+            self.state.max_mp += mp_gain;
             self.state.mp = self.state.max_mp;
-            self.state.min_attack += 1;
-            self.state.max_attack += 2;
-            self.state.defence += 1;
+            self.state.min_attack += min_atk_gain;
+            self.state.max_attack += max_atk_gain;
+            self.state.defence += def_gain;
             self.state.max_experience = (self.state.max_experience as f64 * 1.5) as i64;
 
             info!("Player {} leveled up to {}! (atk={}-{} def={})",
@@ -1840,6 +1856,9 @@ mod tests {
             pet_mode: mir2_shared::enums::PetMode::Both,
             hidden: false,
             session_id: 1,
+            class: mir2_shared::enums::MirClass::Warrior,
+            gender: mir2_shared::enums::MirGender::Male,
+            hair: 0,
             level: 1,
             experience: 0,
             max_experience: 100,

@@ -35,6 +35,9 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             name TEXT PRIMARY KEY,
             account_username TEXT NOT NULL,
             schema_version INTEGER NOT NULL DEFAULT 1,
+            class INTEGER NOT NULL DEFAULT 0,
+            gender INTEGER NOT NULL DEFAULT 0,
+            hair INTEGER NOT NULL DEFAULT 0,
             map_index INTEGER NOT NULL DEFAULT 0,
             x INTEGER NOT NULL DEFAULT 0,
             y INTEGER NOT NULL DEFAULT 0,
@@ -581,17 +584,21 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     // Save character
     sqlx::query(
         r#"INSERT OR REPLACE INTO characters (
-            name, account_username, schema_version, map_index, x, y, direction,
+            name, account_username, schema_version, class, gender, hair,
+            map_index, x, y, direction,
             attack_mode, pet_mode, level, experience, max_experience,
             hp, max_hp, mp, max_mp, min_attack, max_attack, defence,
             gold, group_id, guild_name, guild_rank,
             spouse_name, allow_mentor, mentor_name, hero_index,
             is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
     .bind(1i32)
+    .bind(state.class as i32)
+    .bind(state.gender as i32)
+    .bind(state.hair as i32)
     .bind(state.map_index as i32)
     .bind(state.x)
     .bind(state.y)
@@ -673,6 +680,11 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
     let pet_mode = parse_pet_mode(&row.get::<String, _>("pet_mode"));
     let guild_rank = GuildRank::from_u8(row.get::<i32, _>("guild_rank") as u8);
 
+    let class_val = row.get::<i32, _>("class") as u8;
+    let class = mir2_shared::enums::MirClass::try_from(class_val).unwrap_or(mir2_shared::enums::MirClass::Warrior);
+    let gender_val = row.get::<i32, _>("gender") as u8;
+    let gender = mir2_shared::enums::MirGender::try_from(gender_val).unwrap_or(mir2_shared::enums::MirGender::Male);
+
     let state = PlayerState {
         object_id: 0, // Will be assigned by WorldActor
         name: row.get::<String, _>("name"),
@@ -684,6 +696,9 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         pet_mode,
         hidden: false,
         session_id: 0, // Will be set on connect
+        class,
+        gender,
+        hair: row.get::<i32, _>("hair") as u8,
         level: row.get::<i32, _>("level") as u16,
         experience: row.get("experience"),
         max_experience: row.get("max_experience"),
