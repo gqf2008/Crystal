@@ -292,6 +292,12 @@ impl PlayerActor {
         }
     }
 
+    /// 检查是否有指定类型的 Buff
+    fn has_buff(&self, buff_type: crate::combat::buff::BuffType) -> bool {
+        let tag = std::mem::discriminant(&buff_type);
+        self.state.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == tag)
+    }
+
     /// 发送 UserLocation 给玩家
     fn send_user_location(&self) {
         let mut body = Vec::new();
@@ -413,6 +419,9 @@ impl Message<MoveRequest> for PlayerActor {
         msg: MoveRequest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        if self.has_buff(crate::combat::buff::BuffType::Stun) {
+            return false;
+        }
         let steps = if msg.is_run { 2 } else { 1 };
         let success = self.try_move(msg.direction, steps);
 
@@ -440,6 +449,9 @@ impl Message<TurnRequest> for PlayerActor {
         msg: TurnRequest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        if self.has_buff(crate::combat::buff::BuffType::Stun) {
+            return;
+        }
         self.turn(msg.direction);
         debug!("Player {} turned to dir={}", self.state.name, msg.direction);
         self.send_user_location();
@@ -524,6 +536,12 @@ impl Message<AttackRequest> for PlayerActor {
         msg: AttackRequest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        if self.has_buff(crate::combat::buff::BuffType::Stun) {
+            return None;
+        }
+        if msg.spell != 0 && self.has_buff(crate::combat::buff::BuffType::Silence) {
+            return None;
+        }
         if msg.direction < 8 {
             self.state.direction = msg.direction;
         }
