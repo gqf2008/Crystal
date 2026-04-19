@@ -894,6 +894,18 @@ impl WorldActor {
                             }
                         }
                     }
+                    "CHECKQUEST" => {
+                        let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let required_state = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let actual_state = record.actor_ref.ask(crate::actors::player::CheckQuestState {
+                                quest_index,
+                            }).await.unwrap_or(0);
+                            if actual_state != required_state {
+                                skip = true;
+                            }
+                        }
+                    }
                     "TAKEGOLD" => {
                         let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
                         if let Some(record) = self.players.get(&session_id) {

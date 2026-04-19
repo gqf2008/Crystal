@@ -1490,6 +1490,26 @@ impl Message<HasCompletedQuest> for PlayerActor {
     }
 }
 
+/// 查询任务状态
+/// 返回: 0=未接受/不存在, 1=已接受(进行中), 2=已完成
+pub struct CheckQuestState {
+    pub quest_index: i32,
+}
+
+impl Message<CheckQuestState> for PlayerActor {
+    type Reply = u8;
+
+    async fn handle(&mut self, msg: CheckQuestState, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if self.state.quest_log.completed_indices.contains(&msg.quest_index) {
+            return 2;
+        }
+        if self.state.quest_log.get_quest(msg.quest_index).is_some() {
+            return 1;
+        }
+        0
+    }
+}
+
 /// 处理怪物击杀进度
 pub struct ProcessMonsterKill {
     pub monster_index: i32,
