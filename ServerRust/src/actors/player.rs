@@ -2542,6 +2542,11 @@ mod tests {
             flags: std::collections::HashMap::new(),
             exp_multiplier: 1.0,
             exp_multiplier_end_tick: 0,
+            auto_pot_hp: 0,
+            auto_pot_mp: 0,
+            auto_pot_hp_item: -1,
+            auto_pot_mp_item: -1,
+            hero_behaviour: 0,
         }
     }
 

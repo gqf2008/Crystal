@@ -1,0 +1,3561 @@
+// WorldActor - 游戏世界主循环
+// 对应 C# GameSrv/WorldServer.cs + M2Server 核心逻辑
+
+// 子模块（已集成）
+mod awakening;
+mod combat;
+mod guild;
+mod hero;
+mod item;
+mod mail;
+mod market;
+mod npc;
+mod quest;
+mod session;
+mod tick;
+
+// Re-export submodule structs for external access
+pub use tick::Tick;
+pub use session::*;
+pub use item::*;
+pub use combat::*;
+pub use awakening::*;
+pub use market::*;
+pub use mail::*;
+pub use quest::*;
+pub use hero::*;
+pub use guild::*;
+pub use npc::*;
+
+// Re-exports for submodules (use super::*)
+pub use std::collections::{HashMap, HashSet};
+pub use std::path::{Path, PathBuf};
+pub use kameo::actor::{Actor, ActorRef, Spawn};
+pub use kameo::prelude::Context;
+pub use kameo::message::Message;
+pub use tokio::time::{interval, Duration};
+pub use tracing::{info, debug, warn};
+pub use chrono::Timelike;
+pub use crate::actors::player::*;
+pub use crate::actors::inventory::{EquipmentSlot, GroundItem, PlayerInventory, generate_item_uid};
+pub use crate::actors::refine::{RefineStatus, RefineLog};
+pub use crate::actors::friend::FriendList;
+pub use crate::actors::mail::{MailMessage, Mailbox, generate_mail_id};
+pub use crate::actors::guild::GuildRank;
+pub use crate::actors::quest::{QuestInstance, QuestProgress, QuestStatus, QuestLog};
+pub use crate::actors::creature::{IntelligentCreature, CreatureType, PickupMode, CreatureLog};
+pub use crate::combat::attack::{self as combat_attack};
+pub use crate::combat::buff;
+pub use crate::db::{self, DbPool};
+pub use crate::gate::actor::{SendToClient, GateActor};
+pub use crate::actors::social::{SocialActor, SocialChatCommand};
+pub use mir2_shared::packets::Packet;
+pub use mir2_shared;
+pub use crate::maps::loader::{self, MapData};
+pub use crate::util::wire::{build_packet_bytes, write_dotnet_string};
+
+/// WorldActor 启动参数
+pub struct WorldActorArgs {
+    pub tick_interval_ms: u64,
+    pub gate_ref: ActorRef<GateActor>,
+    /// 地图文件所在目录
+    pub map_dir: PathBuf,
+    /// 刷怪配置文件所在目录（可选）
+    pub spawn_dir: Option<PathBuf>,
+    /// 任务文件所在目录（{file_name}.txt）
+    pub quest_dir: PathBuf,
+    /// SQLite 数据库连接池
+    pub db_pool: DbPool,
+    /// SocialActor 引用（用于转发社交命令）
+    pub social_ref: ActorRef<SocialActor>,
+}
+
+/// 世界中的玩家记录
+#[derive(Clone)]
+struct PlayerRecord {
+    /// PlayerActor 引用
+    actor_ref: ActorRef<PlayerActor>,
+    /// Session ID（用于路由到 GateActor）
+    session_id: u64,
+    /// 玩家名称（缓存，避免 async 查找）
+    name: String,
+    /// 账号名（用于数据库存取）
+    account_username: String,
+    /// 上次广播的 PK 值（用于检测名字颜色变化）
+    last_pk_points: i32,
+    /// 玩家 object_id（缓存，避免 async 查找）
+    object_id: u32,
+}
+
+/// NPC 定义（从刷怪配置加载）
+#[derive(Debug, Clone)]
+pub struct NpcSpawn {
+    pub name: String,
+    pub image: u16, // Monster enum value
+    pub x: i32,
+    pub y: i32,
+    pub direction: u8,
+    pub db_index: i32,
+}
+
+/// 怪物定义（从 DB 配置或 TOML 加载）
+#[derive(Debug, Clone)]
+pub struct MonsterSpawn {
+    pub name: String,
+    pub image: u16,
+    /// 对应 monster_infos.index（掉落查询用）
+    pub monster_index: i32,
+    pub x: i32,
+    pub y: i32,
+    pub direction: u8,
+    pub hp: i32,
+    pub min_dmg: i32,
+    pub max_dmg: i32,
+    pub xp: i32,
+    pub map_index: u16,
+}
+
+/// 地图刷怪配置
+#[derive(Debug, Clone, Default)]
+pub struct SpawnConfig {
+    pub npcs: Vec<NpcSpawn>,
+    pub monsters: Vec<MonsterSpawn>,
+}
+
+/// 加载刷怪配置
+fn load_spawn_config(map_name: &str, map_index: u16, spawn_dir: &Path) -> SpawnConfig {
+    let path = spawn_dir.join(format!("{}.toml", map_name));
+    if !path.exists() {
+        debug!("No spawn config for map '{}'", map_name);
+        return SpawnConfig::default();
+    }
+
+    match std::fs::read_to_string(&path) {
+        Ok(content) => match toml::from_str::<RawSpawnConfig>(&content) {
+            Ok(raw) => {
+                info!("Loaded spawn config: {} ({} NPCs, {} monsters)",
+                      path.display(), raw.npcs.len(), raw.monsters.len());
+                SpawnConfig {
+                    npcs: raw.npcs.into_iter().map(|n| NpcSpawn {
+                        name: n.name,
+                        image: n.image,
+                        x: n.x,
+                        y: n.y,
+                        direction: n.direction,
+                        db_index: 0,
+                    }).collect(),
+                    monsters: raw.monsters.into_iter().map(|m| MonsterSpawn {
+                        name: m.name,
+                        image: m.image,
+                        monster_index: 0, // TOML spawn 无 DB 索引，后续通过 image/name 匹配
+                        x: m.x,
+                        y: m.y,
+                        direction: m.direction,
+                        hp: m.hp,
+                        min_dmg: m.min_dmg,
+                        max_dmg: m.max_dmg,
+                        xp: m.xp,
+                        map_index,
+                    }).collect(),
+                }
+            }
+            Err(e) => {
+                warn!("Failed to parse spawn config '{}': {}", path.display(), e);
+                SpawnConfig::default()
+            }
+        },
+        Err(e) => {
+            warn!("Failed to read spawn config '{}': {}", path.display(), e);
+            SpawnConfig::default()
+        }
+    }
+}
+
+use mir2_shared::enums::Stat;
+
+/// Build SpawnConfig from DB-loaded MapInfo + MonsterInfo
+fn spawn_config_from_db(
+    map_info: &db::MapInfo,
+    monster_infos: &HashMap<i32, db::MonsterInfo>,
+    npc_infos: &HashMap<i32, db::NPCInfo>,
+) -> SpawnConfig {
+    let npcs: Vec<NpcSpawn> = npc_infos.values()
+        .filter(|n| n.map_index == map_info.index)
+        .map(|n| NpcSpawn {
+            name: n.name.clone(),
+            image: n.image as u16,
+            x: n.x,
+            y: n.y,
+            direction: 0, // NPCs spawn facing north by default
+            db_index: n.index,
+        })
+        .collect();
+
+    let monsters: Vec<MonsterSpawn> = map_info.respawns.iter().filter_map(|r| {
+        let mi = monster_infos.get(&r.monster_index)?;
+        let hp = mi.stats.get(&(Stat::HP as u8)).copied().unwrap_or(50);
+        let min_ac = mi.stats.get(&(Stat::MinAC as u8)).copied().unwrap_or(0);
+        let max_ac = mi.stats.get(&(Stat::MaxAC as u8)).copied().unwrap_or(5);
+        Some(MonsterSpawn {
+            name: mi.name.clone(),
+            image: mi.image as u16,
+            monster_index: mi.index,
+            x: r.x,
+            y: r.y,
+            direction: r.direction as u8,
+            hp,
+            min_dmg: min_ac,
+            max_dmg: max_ac,
+            xp: mi.experience,
+            map_index: map_info.index as u16,
+        })
+    }).collect();
+
+    if !monsters.is_empty() || !npcs.is_empty() {
+        debug!("DB spawn config for map '{}': {} NPCs, {} monsters", map_info.file_name, npcs.len(), monsters.len());
+    }
+
+    SpawnConfig { npcs, monsters }
+}
+
+/// DB spawn context — bundles references to avoid 9-arg function
+struct SpawnContext<'a> {
+    map_info: Option<&'a db::MapInfo>,
+    monster_infos: &'a HashMap<i32, db::MonsterInfo>,
+    npc_infos: &'a HashMap<i32, db::NPCInfo>,
+    dragon_info: Option<&'a db::DragonInfo>,
+}
+
+#[derive(serde::Deserialize)]
+struct RawSpawnConfig {
+    #[serde(default)]
+    npcs: Vec<RawNpc>,
+    #[serde(default)]
+    monsters: Vec<RawMonster>,
+}
+
+#[derive(serde::Deserialize)]
+struct RawNpc {
+    name: String,
+    image: u16,
+    x: i32,
+    y: i32,
+    #[serde(default = "default_direction")]
+    direction: u8,
+}
+
+#[derive(serde::Deserialize)]
+struct RawMonster {
+    name: String,
+    image: u16,
+    x: i32,
+    y: i32,
+    #[serde(default = "default_direction")]
+    direction: u8,
+    #[serde(default = "default_hp")]
+    hp: i32,
+    #[serde(default = "default_min_dmg")]
+    min_dmg: i32,
+    #[serde(default = "default_max_dmg")]
+    max_dmg: i32,
+    #[serde(default = "default_xp")]
+    xp: i32,
+}
+
+fn default_direction() -> u8 { 4 }
+fn default_hp() -> i32 { 50 }
+fn default_min_dmg() -> i32 { 1 }
+fn default_max_dmg() -> i32 { 5 }
+fn default_xp() -> i32 { 10 }
+
+/// AI 行为类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MonsterAiType {
+    /// 被动：不会主动攻击，只有被攻击才反击
+    Passive,
+    /// 主动：发现玩家就追击并攻击（默认）
+    Aggressive,
+    /// 逃跑：低血量时会逃跑
+    Coward,
+    /// 守卫：只保护特定区域，超出范围回退
+    Guard,
+    /// Boss：强化版主动，更高攻击频率和范围
+    Boss,
+    /// 远程：保持距离进行物理远程攻击
+    Ranged,
+    /// 法师：保持距离进行魔法远程攻击
+    Mage,
+    /// 治疗者：治疗附近受伤的怪物
+    Healer,
+    /// 召唤者：低血量时召唤援军
+    Summoner,
+}
+
+impl MonsterAiType {
+    /// 从 DB 的 ai 字段解析
+    fn from_db_ai(ai: i32) -> Self {
+        match ai {
+            0 | 1 => Self::Passive,
+            64 | 81 | 82 | 252 => Self::Boss,
+            4 | 5 => Self::Coward,
+            6 => Self::Guard,
+            10 | 11 | 12 => Self::Ranged,
+            20 | 21 | 22 => Self::Mage,
+            30 | 31 => Self::Healer,
+            40 | 41 => Self::Summoner,
+            _ => Self::Aggressive,
+        }
+    }
+}
+
+/// AI 运行时参数（从 MonsterInfo 构建）
+#[derive(Debug, Clone)]
+struct MonsterAiProfile {
+    pub ai_type: MonsterAiType,
+    /// 视野/仇恨范围
+    pub aggro_range: i32,
+    /// 攻击范围（1=近战，>1=远程）
+    pub attack_range: i32,
+    /// 攻击冷却（ticks）
+    pub attack_cooldown: u64,
+    /// 移动速度（每多少 tick 移动一次）
+    pub move_interval: u64,
+    /// 逃跑阈值（HP 百分比，Coward 用）
+    pub flee_threshold: f32,
+}
+
+impl MonsterAiProfile {
+    /// 从 MonsterInfo 构建默认 AI 配置
+    fn from_info(info: &db::MonsterInfo) -> Self {
+        let ai_type = MonsterAiType::from_db_ai(info.ai);
+        let view_range = info.view_range.max(3);
+        let (aggro_range, attack_range, attack_cooldown, move_interval) = match ai_type {
+            MonsterAiType::Passive => (view_range, 1, 10, 2),
+            MonsterAiType::Aggressive => (view_range, 1, 5, 2),
+            MonsterAiType::Coward => (view_range / 2, 1, 8, 1),
+            MonsterAiType::Guard => (view_range, 1, 5, 2),
+            MonsterAiType::Boss => (view_range * 2, 2, 3, 1),
+            MonsterAiType::Ranged => (view_range, 4, 6, 2),
+            MonsterAiType::Mage => (view_range, 6, 8, 2),
+            MonsterAiType::Healer => (view_range, 4, 8, 2),
+            MonsterAiType::Summoner => (view_range, 1, 5, 2),
+        };
+        Self {
+            ai_type,
+            aggro_range,
+            attack_range,
+            attack_cooldown,
+            move_interval,
+            flee_threshold: if ai_type == MonsterAiType::Coward { 0.3 } else { 0.0 },
+        }
+    }
+}
+
+/// AI 运行时状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MonsterAiState {
+    ///  idle / 巡逻
+    Idle,
+    /// 追击目标
+    Chase,
+    /// 攻击中
+    Attack,
+    /// 逃跑
+    Flee,
+    /// 返回出生点
+    Return,
+}
+
+/// 运行时怪物状态
+#[derive(Clone)]
+struct MonsterState {
+    pub object_id: u32,
+    pub name: String,
+    pub image: u16,
+    /// 对应 monster_infos 的 index（用于掉落查询）
+    pub monster_index: i32,
+    pub x: i32,
+    pub y: i32,
+    pub direction: u8,
+    pub hp: i32,
+    pub max_hp: i32,
+    pub min_dmg: i32,
+    pub max_dmg: i32,
+    pub xp: i32,
+    pub spawn_x: i32,
+    pub spawn_y: i32,
+    /// 所在地图索引（当前服务器单地图运行，默认 0）
+    pub map_index: u16,
+    /// 下次可攻击的 tick
+    pub next_attack_tick: u64,
+    /// 下次可移动的 tick
+    pub next_move_tick: u64,
+    /// 下次可召唤的 tick（Summoner 用）
+    pub next_summon_tick: u64,
+    /// AI 配置（创建时从 DB 加载）
+    pub ai_profile: MonsterAiProfile,
+    /// 当前 AI 状态
+    pub ai_state: MonsterAiState,
+    /// 当前目标玩家 session（None = 无目标）
+    pub target_session: Option<u64>,
+    /// 是否已被激怒（Passive 怪物被攻击后变为 Aggressive）
+    pub provoked: bool,
+    /// 是否为精英怪物
+    pub is_elite: bool,
+    /// 是否为世界Boss
+    pub is_boss: bool,
+}
+
+fn dist_to_spawn(monster: &MonsterState) -> i32 {
+    (monster.x - monster.spawn_x).abs() + (monster.y - monster.spawn_y).abs()
+}
+
+/// 运行时 NPC 状态
+#[derive(Clone)]
+#[allow(dead_code)]
+struct NpcState {
+    pub object_id: u32,
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub direction: u8,
+    pub db_index: i32,
+    pub map_index: u16,
+}
+
+/// 方向增量 (8 方向 MirDirection)
+const MON_DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
+const MON_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
+
+/// 默认复活点
+const DEFAULT_SPAWN_X: i32 = 330;
+const DEFAULT_SPAWN_Y: i32 = 330;
+
+// 魔法 spell ID 常量（Mir2 原数值）
+const SPELL_HEALING: u8 = 61;
+const SPELL_MASS_HEALING: u8 = 75;
+const SPELL_HEALING_CIRCLE: u8 = 86;
+const SPELL_MAGIC_SHIELD: u8 = 43;
+const SPELL_SOUL_SHIELD: u8 = 69;
+const SPELL_BLESSED_ARMOUR: u8 = 71;
+const SPELL_TELEPORT: u8 = 37;
+const SPELL_FIREBALL: u8 = 31; // 法师怪物默认法术
+
+impl MonsterState {
+    /// 朝目标方向走一步，返回新位置和方向
+    fn step_toward(&self, tx: i32, ty: i32) -> (i32, i32, u8) {
+        let dx = tx - self.x;
+        let dy = ty - self.y;
+        let mut best_dir = 4u8;
+        let mut best_dist = (dx * dx + dy * dy) as u64;
+        for dir in 0..8u8 {
+            let nx = self.x + MON_DIR_DX[dir as usize];
+            let ny = self.y + MON_DIR_DY[dir as usize];
+            let dist = ((nx - tx).pow(2) + (ny - ty).pow(2)) as u64;
+            if dist < best_dist {
+                best_dist = dist;
+                best_dir = dir;
+            }
+        }
+        let nx = self.x + MON_DIR_DX[best_dir as usize];
+        let ny = self.y + MON_DIR_DY[best_dir as usize];
+        (nx, ny, best_dir)
+    }
+
+    /// 远离目标方向走一步（逃跑用）
+    fn step_away(&self, tx: i32, ty: i32) -> (i32, i32, u8) {
+        let dx = tx - self.x;
+        let dy = ty - self.y;
+        // 远离 = 朝向相反方向
+        let opposite_x = self.x - dx;
+        let opposite_y = self.y - dy;
+        self.step_toward(opposite_x, opposite_y)
+    }
+}
+
+/// 商店回购条目
+#[derive(Debug, Clone)]
+pub struct BuybackItem {
+    pub item: mir2_shared::data::item::UserItem,
+    pub sell_price: u64,
+}
+
+/// WorldActor 状态
+pub struct WorldActor {
+    /// Tick 计数器
+    pub(crate) tick_count: u64,
+    /// 在线玩家 Actor 引用（按 session_id 索引）
+    pub(crate) players: HashMap<u64, PlayerRecord>,
+    /// 商店回购列表（session_id -> 最近卖出的物品，最多保留 10 个）
+    pub(crate) buyback_items: HashMap<u64, Vec<BuybackItem>>,
+    /// 已加载的地图缓存
+    pub(crate) maps: HashMap<u16, MapData>,
+    /// GateActor 引用，用于发数据包给客户端
+    pub(crate) gate_ref: ActorRef<GateActor>,
+    /// 地图目录
+    pub(crate) map_dir: PathBuf,
+    /// 刷怪配置目录
+    pub(crate) spawn_dir: Option<PathBuf>,
+    /// 下一个对象 ID
+    pub(crate) next_object_id: u32,
+    /// 活跃怪物（按 object_id 索引）
+    pub(crate) monsters: HashMap<u32, MonsterState>,
+    /// 活跃 NPC（按 object_id 索引）
+    pub(crate) npcs: HashMap<u32, NpcState>,
+    /// 等待重生的怪物 (object_id → 重生 tick)
+    pub(crate) respawn_queue: HashMap<u32, (MonsterSpawn, u64)>,
+    /// 世界Boss存活队列 (object_id → 自动消失 tick)
+    pub(crate) world_boss_queue: HashMap<u32, u64>,
+    /// 死亡玩家复活队列 (session_id → 死亡 tick)
+    pub(crate) player_death_queue: HashMap<u64, u64>,
+    /// 钓鱼进度计数器 (session_id → 已钓鱼 tick 数)
+    pub(crate) fishing_tick_counters: HashMap<u64, u32>,
+    /// 地面掉落物品
+    pub(crate) ground_items: Vec<GroundItem>,
+    /// 已打开的门 (map_index, door_index)
+    pub(crate) open_doors: std::collections::HashSet<(u16, u8)>,
+    /// SQLite 数据库连接池
+    pub(crate) db_pool: DbPool,
+    /// 游戏配置：地图信息（key = map index）
+    pub(crate) map_infos: HashMap<i32, db::MapInfo>,
+    /// 游戏配置：物品信息
+    pub(crate) item_infos: HashMap<i32, db::ItemInfo>,
+    /// 游戏配置：怪物信息
+    pub(crate) monster_infos: HashMap<i32, db::MonsterInfo>,
+    /// 游戏配置：怪物掉落（monster_index -> drop list）
+    pub(crate) monster_drops: HashMap<i32, Vec<db::MonsterDropInfo>>,
+    /// 游戏配置：NPC 信息
+    pub(crate) npc_infos: HashMap<i32, db::NPCInfo>,
+    /// 游戏配置：NPC 商品（npc_index -> goods list）
+    pub(crate) npc_goods: HashMap<i32, Vec<db::NpcGoodsInfo>>,
+    /// 游戏配置：NPC 脚本 ((npc_index, page_name) -> lines)
+    pub(crate) npc_scripts: HashMap<(i32, String), Vec<String>>,
+    /// 游戏配置：任务信息
+    pub(crate) quest_infos: HashMap<i32, db::QuestInfo>,
+    /// 游戏配置：魔法信息（key = spell ID）
+    pub(crate) magic_infos: HashMap<u32, db::MagicInfo>,
+    /// 游戏配置：龙信息
+    pub(crate) dragon_info: Option<db::DragonInfo>,
+    /// 游戏商店物品（从 DB 加载）
+    pub(crate) game_shop_items: Vec<db::GameShopItem>,
+    /// 地图传送点索引: (map_index, source_x, source_y) -> MapMovementInfo
+    pub(crate) movement_index: HashMap<(i32, i32, i32), db::MapMovementInfo>,
+    /// SocialActor 引用（用于转发社交命令）
+    pub(crate) social_ref: ActorRef<SocialActor>,
+    /// 全局经验倍率事件
+    pub(crate) global_exp_multiplier: f64,
+    /// 全局掉落倍率
+    pub(crate) global_drop_multiplier: f64,
+    /// 全局金币倍率
+    pub(crate) global_gold_multiplier: f64,
+    /// 全局事件过期时间（tick count）
+    pub(crate) global_exp_event_end_tick: u64,
+    /// 当前全局事件名称
+    pub(crate) global_event_name: Option<String>,
+    /// 隐身中的玩家 session 集合（用于视野管理）
+    pub(crate) invisible_sessions: std::collections::HashSet<u64>,
+    /// 当前光照设置（0=Normal, 1=Dawn, 2=Day, 3=Evening, 4=Night）
+    pub(crate) current_light: mir2_shared::enums::LightSetting,
+    /// 寄售/拍卖列表
+    pub(crate) auctions: Vec<AuctionListing>,
+    /// 下一个拍卖ID
+    pub(crate) next_auction_id: u64,
+    /// 市场搜索缓存 (session_id -> search results indices)
+    pub(crate) market_search_cache: HashMap<u64, MarketSearchCache>,
+    /// 物品租赁会话 (initiator_session_id -> RentalSession)
+    pub(crate) rental_sessions: HashMap<u64, RentalSession>,
+    /// 已生效的租赁记录 (renter_name -> list of RentedItem)
+    pub(crate) player_rentals: HashMap<String, Vec<RentedItem>>,
+    /// 行会战争声明 (guild_name -> set of enemy guild names)
+    pub(crate) guild_wars: HashMap<String, std::collections::HashSet<String>>,
+}
+
+/// 租赁会话状态
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+struct RentalSession {
+    partner_session: u64,
+    partner_name: String,
+    fee: u32,
+    period_hours: u32,
+    owner_item: Option<mir2_shared::data::item::UserItem>,
+    renter_locked: bool,
+    owner_locked: bool,
+}
+
+/// 已生效的租赁记录
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+struct RentedItem {
+    item: mir2_shared::data::item::UserItem,
+    owner_name: String,
+    renter_name: String,
+    rental_fee: u32,
+    expiry_timestamp: i64,
+}
+
+/// 寄售列表项
+#[derive(Debug, Clone)]
+pub struct AuctionListing {
+    pub auction_id: u64,
+    pub seller_name: String,
+    pub item: mir2_shared::data::item::UserItem,
+    pub price: u32,
+    pub consignment_date: i64,
+    pub sold: bool,
+    pub buyer_name: Option<String>,
+    pub item_type: u8, // MarketItemType
+}
+
+impl WorldActor {
+    pub fn new(gate_ref: ActorRef<GateActor>, map_dir: PathBuf, spawn_dir: Option<PathBuf>, db_pool: DbPool, social_ref: ActorRef<SocialActor>) -> Self {
+        Self {
+            tick_count: 0,
+            players: HashMap::new(),
+            buyback_items: HashMap::new(),
+            maps: HashMap::new(),
+            gate_ref,
+            map_dir,
+            spawn_dir,
+            next_object_id: 1000,
+            monsters: HashMap::new(),
+            npcs: HashMap::new(),
+            respawn_queue: HashMap::new(),
+            world_boss_queue: HashMap::new(),
+            player_death_queue: HashMap::new(),
+            fishing_tick_counters: HashMap::new(),
+            ground_items: Vec::new(),
+            open_doors: std::collections::HashSet::new(),
+            db_pool,
+            map_infos: HashMap::new(),
+            item_infos: HashMap::new(),
+            monster_infos: HashMap::new(),
+            monster_drops: HashMap::new(),
+            npc_infos: HashMap::new(),
+            npc_goods: HashMap::new(),
+            npc_scripts: HashMap::new(),
+            quest_infos: HashMap::new(),
+            magic_infos: HashMap::new(),
+            dragon_info: None,
+            game_shop_items: Vec::new(),
+            movement_index: HashMap::new(),
+            social_ref,
+            global_exp_multiplier: 1.0,
+            global_drop_multiplier: 1.0,
+            global_gold_multiplier: 1.0,
+            global_exp_event_end_tick: 0,
+            global_event_name: None,
+            invisible_sessions: HashSet::new(),
+            current_light: Self::light_for_hour(chrono::Local::now().hour()),
+            auctions: Vec::new(),
+            next_auction_id: 1,
+            market_search_cache: HashMap::new(),
+            rental_sessions: HashMap::new(),
+            player_rentals: HashMap::new(),
+            guild_wars: HashMap::new(),
+        }
+    }
+
+    /// 计算全局经验倍率后的经验值
+    pub(crate) fn apply_global_exp_multiplier(&self, base: i32) -> i32 {
+        if self.tick_count < self.global_exp_event_end_tick {
+            (base as f64 * self.global_exp_multiplier).round() as i32
+        } else {
+            base
+        }
+    }
+
+    /// 根据小时计算光照设置（基于服务器本地时区）
+    pub(crate) fn light_for_hour(hour: u32) -> mir2_shared::enums::LightSetting {
+        use mir2_shared::enums::LightSetting;
+        match hour {
+            0..=4 => LightSetting::Night,
+            5..=6 => LightSetting::Dawn,
+            7..=16 => LightSetting::Day,
+            17..=18 => LightSetting::Evening,
+            19..=23 => LightSetting::Night,
+            _ => LightSetting::Day,
+        }
+    }
+
+    /// 发送当前 TimeOfDay 给指定玩家
+    pub(crate) fn send_time_of_day(&self, session_id: u64, light: mir2_shared::enums::LightSetting) {
+        let packet = mir2_shared::packets::server::player::TimeOfDay { lights: light as u8 };
+        let mut body = Vec::new();
+        if let Err(e) = packet.write_body(&mut body) {
+            warn!("Failed to serialize TimeOfDay: {}", e);
+            return;
+        }
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TimeOfDay as i16, &body),
+        });
+    }
+
+    /// 发送 ObjectRemove 给同地图其他玩家，使该玩家从他人视野中消失
+    pub(crate) async fn hide_player_from_others(&self, session_id: u64, state: &crate::actors::player::PlayerState) {
+        let mut body = Vec::new();
+        body.extend_from_slice(&state.object_id.to_le_bytes());
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &body);
+        for (sid, record) in &self.players {
+            if *sid == session_id { continue; }
+            if let Ok(Some(other_state)) = record.actor_ref.ask(GetPlayerState).await {
+                if other_state.map_index == state.map_index {
+                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+                }
+            }
+        }
+    }
+
+    /// 发送 ObjectPlayer 给同地图其他玩家，使该玩家重新出现在他人视野中
+    pub(crate) async fn reveal_player_to_others(&self, session_id: u64, state: &crate::actors::player::PlayerState) {
+        let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(-1);
+        let armor = state.inventory.get_equipment(EquipmentSlot::Armour)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(0);
+        let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.effect as i16).unwrap_or(0);
+        let packet = build_object_player_packet(
+            &state.name, state.object_id, state.x, state.y, state.direction, state.level,
+            name_colour_for_pk(state.pk_points),
+            state.class, state.gender, state.hair,
+            weapon, weapon_effect, armor,
+            state.mount_type, state.is_mounted,
+        );
+        for (sid, record) in &self.players {
+            if *sid == session_id { continue; }
+            if let Ok(Some(other_state)) = record.actor_ref.ask(GetPlayerState).await {
+                if other_state.map_index == state.map_index {
+                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+                }
+            }
+        }
+    }
+
+    /// 加载或获取已缓存的地图
+    pub(crate) fn get_or_load_map(&mut self, file_name: &str) -> Option<&MapData> {
+        if !self.maps.contains_key(&0) || self.maps.get(&0).map(|m| m.file_name != file_name).unwrap_or(true) {
+            match loader::load_map(file_name, &self.map_dir) {
+                Ok(mut map) => {
+                    info!("Loaded map: {} ({}x{})", map.file_name, map.width, map.height);
+                    // 应用 DB 中的 no_fight（整图安全区）
+                    if let Some(mi) = self.map_infos.values().find(|m| m.file_name == file_name) {
+                        if mi.no_fight {
+                            map.safe_zone_rects.push((0, 0, map.width as i32 - 1, map.height as i32 - 1));
+                        }
+                    }
+                    // 硬编码常见地图安全区（可后续迁移到配置）
+                    Self::apply_hardcoded_safe_zones(file_name, &mut map);
+                    self.maps.insert(0, map);
+                }
+                Err(e) => {
+                    warn!("Failed to load map '{}': {}", file_name, e);
+                    return None;
+                }
+            }
+        }
+        self.maps.get(&0)
+    }
+
+    /// 为已知地图注入默认安全区（坐标为 Mir2 经典值）
+    pub(crate) fn apply_hardcoded_safe_zones(file_name: &str, map: &mut MapData) {
+        let name = file_name.to_lowercase();
+        if name.contains("0") || name.contains("bichon") {
+            // 比奇省安全区（新手村附近）
+            map.safe_zone_rects.push((260, 245, 295, 285));
+        }
+        if name.contains("3") || name.contains("mongchon") || name.contains("pranja") {
+            // 盟重省安全区
+            map.safe_zone_rects.push((325, 255, 360, 295));
+        }
+    }
+
+    /// 分配下一个对象 ID
+    pub(crate) fn alloc_object_id(&mut self) -> u32 {
+        let id = self.next_object_id;
+        self.next_object_id += 1;
+        id
+    }
+
+    /// 获取所有其他玩家的引用（排除指定 session）
+    pub(crate) fn other_players(&self, exclude_session: u64) -> Vec<&PlayerRecord> {
+        self.players.values()
+            .filter(|r| r.session_id != exclude_session)
+            .collect()
+    }
+
+    /// 发送 NPC 商店商品列表（Phase 1：空列表，仅打开 UI）
+    pub(crate) fn send_npc_goods(&self, session_id: u64, npc: &NpcState) {
+        // Use DB rate if available, default 1.0
+        let rate = if npc.db_index > 0 {
+            self.npc_infos.get(&npc.db_index).map(|n| n.rate as f32 / 100.0).unwrap_or(1.0)
+        } else {
+            1.0
+        };
+
+        let goods = self.npc_goods.get(&npc.db_index).cloned().unwrap_or_default();
+
+        let mut items = Vec::new();
+        for good in &goods {
+            let mut item = mir2_shared::data::item::UserItem {
+                item_index: good.item_index,
+                count: good.count as u16,
+                ..Default::default()
+            };
+            // 填充耐久（如果有物品配置）
+            if let Some(info) = self.item_infos.get(&good.item_index) {
+                item.max_dura = info.durability as u16;
+                item.current_dura = info.durability as u16;
+            }
+            items.push(item);
+        }
+
+        let npc_goods_packet = mir2_shared::packets::server::npc_interaction::NPCGoods {
+            list: items,
+            rate,
+            panel_type: mir2_shared::enums::PanelType::Buy,
+            hide_added_stats: false,
+        };
+
+        let mut body = Vec::new();
+        if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &npc_goods_packet) {
+            warn!("Failed to serialize NPCGoods: {}", e);
+            return;
+        }
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCGoods as i16, &body);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: packet,
+        });
+        debug!("Sent {} goods from NPC '{}' (rate={}) to session {}", goods.len(), npc.name, rate, session_id);
+    }
+
+    /// 发送 NPC 面板（出售/修理等，空商品列表）
+    pub(crate) fn send_npc_panel(&self, session_id: u64, panel_type: mir2_shared::enums::PanelType) {
+        let packet = mir2_shared::packets::server::npc_interaction::NPCGoods {
+            list: Vec::new(),
+            rate: 1.0,
+            panel_type,
+            hide_added_stats: false,
+        };
+        let mut body = Vec::new();
+        if let Err(e) = mir2_shared::packets::base::serialize_packet(
+            &mut std::io::Cursor::new(&mut body), &packet) {
+            warn!("Failed to serialize NPCGoods panel: {}", e);
+            return;
+        }
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCGoods as i16, &body);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: packet,
+        });
+        debug!("Sent NPC panel {:?} to session {}", panel_type, session_id);
+    }
+
+    /// 发送仓库内容给客户端（打开仓库 UI）
+    pub(crate) fn send_user_storage(&self, session_id: u64, storage: &[Option<crate::actors::inventory::InventorySlot>]) {
+        let items: Vec<Option<mir2_shared::data::item::UserItem>> = storage.iter()
+            .map(|slot| slot.as_ref().map(|s| s.item.clone()))
+            .collect();
+
+        let packet = mir2_shared::packets::server::player::UserStorage { storage: items };
+        let mut body = Vec::new();
+        if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet) {
+            warn!("Failed to serialize UserStorage: {}", e);
+            return;
+        }
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserStorage as i16, &body);
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: packet,
+        });
+        debug!("Sent UserStorage to session {}", session_id);
+    }
+
+    /// 发送 CombineItem 响应给客户端
+    pub(crate) fn send_combine_item_response(
+        &self,
+        session_id: u64,
+        id_from: u64,
+        id_to: u64,
+        success: bool,
+        destroy: bool,
+    ) {
+        let packet = mir2_shared::packets::server::item_operations::CombineItem {
+            grid: mir2_shared::enums::MirGridType::Inventory,
+            id_from,
+            id_to,
+            success,
+            destroy,
+        };
+        let mut body = Vec::new();
+        if let Err(e) = packet.write_body(&mut body) {
+            warn!("Failed to serialize CombineItem: {}", e);
+            return;
+        }
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CombineItem as i16, &body),
+        });
+    }
+
+    /// 广播玩家外观更新给同地图的其他玩家
+    pub(crate) async fn broadcast_player_appearance(&self,
+        session_id: u64,
+        state: &crate::actors::player::PlayerState,
+    ) {
+        // 隐身玩家不广播外观变化
+        if self.invisible_sessions.contains(&session_id) { return; }
+        let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(-1);
+        let armor = state.inventory.get_equipment(EquipmentSlot::Armour)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(0);
+        let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.effect as i16).unwrap_or(0);
+        let packet = build_object_player_packet(
+            &state.name, state.object_id, state.x, state.y, state.direction, state.level,
+            name_colour_for_pk(state.pk_points),
+            state.class, state.gender, state.hair,
+            weapon, weapon_effect, armor,
+            state.mount_type, state.is_mounted,
+        );
+        let player_map_index = state.map_index;
+        for (sid, other_record) in &self.players {
+            if *sid == session_id { continue; }
+            if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
+                if other_state.map_index != player_map_index { continue; }
+            }
+            let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+        }
+    }
+
+    /// 强制玩家下坐骑并广播外观更新
+    pub(crate) async fn dismount_player(&mut self,
+        session_id: u64,
+    ) {
+        let Some(record) = self.players.get(&session_id) else { return };
+        let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await else { return };
+        if !state.is_mounted { return; }
+        state.is_mounted = false;
+        state.mount_type = 0;
+        let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+        self.broadcast_player_appearance(session_id, &state).await;
+    }
+
+    /// 怪物死亡时生成掉落并广播给所有在线玩家
+    pub(crate) async fn spawn_single_drop(&mut self, monster: &MonsterState, item_index: i32, count: u16) {
+        let drop_oid = self.alloc_object_id();
+        if item_index == 0 {
+            let gold = count as u32;
+            let object_gold = mir2_shared::packets::server::ObjectGold {
+                object_id: drop_oid,
+                gold,
+                location_x: monster.x,
+                location_y: monster.y,
+            };
+            let mut buf = Vec::new();
+            if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
+                warn!("Failed to serialize ObjectGold: {}", e);
+                return;
+            }
+            for session_id in self.players.keys() {
+                let _ = self.gate_ref.ask(SendToClient {
+                    session_id: *session_id,
+                    data: buf.clone(),
+                });
+            }
+            self.ground_items.push(GroundItem {
+                object_id: drop_oid,
+                item: mir2_shared::data::item::UserItem {
+                    item_index: 0,
+                    count,
+                    ..Default::default()
+                },
+                x: monster.x,
+                y: monster.y,
+                map_index: monster.map_index,
+                dropper_session: None,
+                drop_tick: self.tick_count,
+            });
+            debug!("Monster '{}' dropped {} gold at ({}, {})", monster.name, gold, monster.x, monster.y);
+        } else {
+            let mut item = mir2_shared::data::item::UserItem {
+                item_index,
+                unique_id: generate_item_uid(),
+                count,
+                ..Default::default()
+            };
+            if let Some(info) = self.item_infos.get(&item_index) {
+                item.max_dura = info.durability as u16;
+                item.current_dura = info.durability as u16;
+            }
+            let object_item = mir2_shared::packets::server::ObjectItem {
+                object_id: drop_oid,
+                item: item.clone(),
+                location_x: monster.x,
+                location_y: monster.y,
+            };
+            let mut buf = Vec::new();
+            if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
+                warn!("Failed to serialize ObjectItem: {}", e);
+                return;
+            }
+            for session_id in self.players.keys() {
+                let _ = self.gate_ref.ask(SendToClient {
+                    session_id: *session_id,
+                    data: buf.clone(),
+                });
+            }
+            self.ground_items.push(GroundItem {
+                object_id: drop_oid,
+                item,
+                x: monster.x,
+                y: monster.y,
+                map_index: monster.map_index,
+                dropper_session: None,
+                drop_tick: self.tick_count,
+            });
+            debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, item_index, count, monster.x, monster.y);
+        }
+    }
+
+    pub(crate) async fn spawn_monster_drops(&mut self, monster: &MonsterState) {
+        let drops = match self.monster_drops.get(&monster.monster_index) {
+            Some(d) if !d.is_empty() => d.clone(),
+            _ => return,
+        };
+
+        let count_mul = drop_count_multiplier(monster.is_boss, monster.is_elite);
+        let global_drop_mul = if self.tick_count < self.global_exp_event_end_tick {
+            self.global_drop_multiplier
+        } else { 1.0 };
+
+        for drop in &drops {
+            let roll = fastrand::f64();
+            if roll > drop.chance {
+                continue;
+            }
+            let count = if drop.max_count > drop.min_count {
+                fastrand::u16(drop.min_count..=drop.max_count).saturating_mul(count_mul)
+            } else {
+                drop.min_count.saturating_mul(count_mul)
+            };
+            let adjusted = (count as f64 * global_drop_mul).round() as u16;
+            self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
+        }
+
+        // 精英怪额外掉落判定（50% 原概率）
+        if monster.is_elite {
+            for drop in &drops {
+                let bonus_chance = drop.chance * 0.5;
+                let roll = fastrand::f64();
+                if roll > bonus_chance {
+                    continue;
+                }
+                let count = if drop.max_count > drop.min_count {
+                    fastrand::u16(drop.min_count..=drop.max_count)
+                } else {
+                    drop.min_count
+                };
+                let adjusted = (count as f64 * global_drop_mul).round() as u16;
+                self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
+            }
+        }
+
+        // 世界Boss额外掉落：大量金币 + 全掉落保底
+        if monster.is_boss {
+            let global_gold_mul = if self.tick_count < self.global_exp_event_end_tick {
+                self.global_gold_multiplier
+            } else { 1.0 };
+            let gold_drop = (fastrand::u32(5000..=20000) as f64 * global_gold_mul).round() as u64;
+            self.spawn_single_drop(monster, 0, gold_drop as u16).await;
+            for drop in &drops {
+                let count = if drop.max_count > drop.min_count {
+                    fastrand::u16(drop.min_count..=drop.max_count).saturating_mul(2)
+                } else {
+                    drop.min_count.saturating_mul(2)
+                };
+                let adjusted = (count as f64 * global_drop_mul).round() as u16;
+                self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
+            }
+        }
+    }
+
+    /// 玩家死亡时随机掉落背包物品和金币（安全区不掉落）
+    pub(crate) async fn handle_player_death_drop(
+        &mut self,
+        session_id: u64,
+        x: i32,
+        y: i32,
+        map_index: u16,
+    ) {
+        // 安全区不掉落
+        if self.maps.get(&map_index).map(|m| m.is_safe_zone(x, y)).unwrap_or(false) {
+            return;
+        }
+        let actor_ref = match self.players.get(&session_id) {
+            Some(r) => r.actor_ref.clone(),
+            None => return,
+        };
+
+        // 掉落背包物品（0-2 个）
+        let dropped = actor_ref.ask(crate::actors::player::DropRandomItemsOnDeath).await.unwrap_or_default();
+        for item in dropped {
+            let drop_oid = self.alloc_object_id();
+            let object_item = mir2_shared::packets::server::ObjectItem {
+                object_id: drop_oid,
+                item: item.clone(),
+                location_x: x,
+                location_y: y,
+            };
+            let mut buf = Vec::new();
+            if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
+                warn!("Failed to serialize ObjectItem: {}", e);
+                continue;
+            }
+            for sid in self.players.keys() {
+                let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+            }
+            self.ground_items.push(GroundItem { object_id: drop_oid, item, x, y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count });
+        }
+
+        // 掉落金币（1-5%）
+        if let Ok(Some(state)) = actor_ref.ask(GetPlayerState).await {
+            let pct = fastrand::u8(1..=5);
+            let gold_drop = state.inventory.gold * pct as u64 / 100;
+            if gold_drop > 0 {
+                let _ = actor_ref.ask(crate::actors::player::DeductGold { amount: gold_drop }).await;
+                let drop_oid = self.alloc_object_id();
+                let object_gold = mir2_shared::packets::server::ObjectGold {
+                    object_id: drop_oid,
+                    gold: gold_drop as u32,
+                    location_x: x,
+                    location_y: y,
+                };
+                let mut buf = Vec::new();
+                if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
+                    warn!("Failed to serialize ObjectGold: {}", e);
+                } else {
+                    for sid in self.players.keys() {
+                        let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+                    }
+                    self.ground_items.push(GroundItem {
+                        object_id: drop_oid,
+                        item: mir2_shared::data::item::UserItem {
+                            item_index: 0,
+                            count: gold_drop as u16,
+                            ..Default::default()
+                        },
+                        x, y, map_index, dropper_session: Some(session_id),
+                        drop_tick: self.tick_count,
+                    });
+                }
+            }
+        }
+    }
+
+    /// 执行 NPC 脚本行，解析条件命令与动作命令
+    /// 返回 (显示文本, GOTO 目标页面名)
+    pub(crate) async fn eval_npc_script(
+        &mut self,
+        lines: &mut [String],
+        session_id: u64,
+        npc: &NpcState,
+    ) -> (Vec<String>, Option<String>) {
+        let mut output = Vec::new();
+        let mut skip = false;
+        let mut goto_target: Option<String> = None;
+
+        for line in lines.iter_mut() {
+            let t = line.trim();
+            if t.starts_with('<') && t.ends_with('>') {
+                let inner = &t[1..t.len() - 1];
+                let mut parts = inner.split_whitespace();
+                let cmd = match parts.next() {
+                    Some(c) => c.to_uppercase(),
+                    None => continue,
+                };
+
+                if skip {
+                    if cmd == "END" || cmd == "ENDIF" {
+                        skip = false;
+                    }
+                    continue;
+                }
+
+                match cmd.as_str() {
+                    "CHECKLEVEL" => {
+                        let min = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(u16::MAX);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.level < min || state.level > max {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKCLASS" => {
+                        let mask = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let class_bit = 1u8 << (state.class as u8);
+                                if class_bit & mask == 0 {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKGENDER" => {
+                        let required = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.gender as u8 != required {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKGOLD" => {
+                        let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.inventory.gold < amount {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKITEM" => {
+                        let item_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let count = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let has = record.actor_ref.ask(crate::actors::player::HasItem {
+                                item_index, count,
+                            }).await.unwrap_or(false);
+                            if !has {
+                                skip = true;
+                            }
+                        }
+                    }
+                    "CHECKQUEST" => {
+                        let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let required_state = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let actual_state = record.actor_ref.ask(crate::actors::player::CheckQuestState {
+                                quest_index,
+                            }).await.unwrap_or(0);
+                            if actual_state != required_state {
+                                skip = true;
+                            }
+                        }
+                    }
+                    "CHECKQUESTTIME" => {
+                        let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0);
+                                let expired = state.quest_log.quests.iter().any(|q| {
+                                    q.quest_index == quest_index
+                                        && q.time_limit_seconds > 0
+                                        && matches!(q.status, QuestStatus::InProgress | QuestStatus::Accepted)
+                                        && now.saturating_sub(q.start_time) >= q.time_limit_seconds as u64
+                                });
+                                if expired {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKPKPOINT" => {
+                        let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.pk_points < min || state.pk_points > max {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKGUILD" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.guild_name.is_none() {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKSPOUSE" => {
+                        let required = parts.next().unwrap_or("").to_string();
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if required.is_empty() {
+                                    // 空字符串 = 检查是否有任何配偶
+                                    if state.spouse_name.is_none() {
+                                        skip = true;
+                                    }
+                                } else if state.spouse_name.as_ref().map(|s| s.as_str()) != Some(&required) {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKMENTOR" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.mentor_name.is_none() {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKREINCARNATION" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.reincarnation_host.is_none() && !state.reincarnation_ready {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKMOUNTED" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if !state.is_mounted {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKFISHING" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if !state.is_fishing {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKPET" => {
+                        let required_type = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let matches = match state.creature_log.active_creature {
+                                    Some(ref c) if c.enabled => {
+                                        if required_type == 0 {
+                                            true // any pet
+                                        } else {
+                                            c.creature_type as u8 == required_type
+                                        }
+                                    }
+                                    _ => false,
+                                };
+                                if !matches {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKPETFOOD" => {
+                        let min_hunger = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(20);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let enough = match state.creature_log.active_creature {
+                                    Some(ref c) if c.enabled => c.hunger >= min_hunger,
+                                    _ => false,
+                                };
+                                if !enough {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKBUFF" => {
+                        let buff_type_str = parts.next().unwrap_or("").to_uppercase();
+                        let target_buff = match buff_type_str.as_str() {
+                            "HPREGEN" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::HpRegen { amount_per_tick: 0 })),
+                            "MPREGEN" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::MpRegen { amount_per_tick: 0 })),
+                            "ATTACK" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::AttackBoost { bonus: 0 })),
+                            "DEFENSE" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::DefenseBoost { bonus: 0 })),
+                            "POISON" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::Poison { damage_per_tick: 0 })),
+                            "SILENCE" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::Silence)),
+                            "STUN" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::Stun)),
+                            "INVISIBILITY" => Some(std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility)),
+                            _ => None,
+                        };
+                        if let Some(target_tag) = target_buff {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let has_buff = state.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == target_tag);
+                                    if !has_buff {
+                                        skip = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "CHECKWEAPON" => {
+                        let required_index = parts.next().and_then(|s| s.parse::<i32>().ok());
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let weapon = state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::Weapon);
+                                let matches = match required_index {
+                                    Some(idx) => weapon.map(|w| w.item_index == idx).unwrap_or(false),
+                                    None => weapon.is_some(),
+                                };
+                                if !matches {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKMAP" => {
+                        let map_name = parts.next().unwrap_or("").to_string();
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let current_map = self.map_infos.get(&(state.map_index as i32))
+                                    .map(|m| m.file_name.as_str())
+                                    .unwrap_or("");
+                                if !current_map.eq_ignore_ascii_case(&map_name) {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKDIRECTION" => {
+                        let required = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.direction != required {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKNEARBY" => {
+                        let distance = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(10);
+                        let min_count = parts.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let mut nearby = 0usize;
+                                for (_, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.session_id == state.session_id { continue; }
+                                        if os.map_index != state.map_index { continue; }
+                                        let dist = (state.x - os.x).abs() + (state.y - os.y).abs();
+                                        if dist <= distance {
+                                            nearby += 1;
+                                        }
+                                    }
+                                }
+                                if nearby < min_count {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKEXP" => {
+                        let min = parts.next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(i64::MAX);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.experience < min || state.experience > max {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKHP" => {
+                        let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.hp < min || state.hp > max {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKTIME" => {
+                        let min_hour = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                        let max_hour = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(23);
+                        let now = chrono::Local::now();
+                        let hour = now.hour();
+                        if hour < min_hour || hour > max_hour {
+                            skip = true;
+                        }
+                    }
+                    "CHECKDAY" => {
+                        let day_name = parts.next().unwrap_or("").to_lowercase();
+                        let today = chrono::Local::now().format("%A").to_string().to_lowercase();
+                        if today != day_name {
+                            skip = true;
+                        }
+                    }
+                    "RAND" => {
+                        let n = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+                        if n > 1 {
+                            let roll = fastrand::u32(1..=n);
+                            if roll != 1 {
+                                skip = true;
+                            }
+                        }
+                    }
+                    "CHECKMP" => {
+                        let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.mp < min || state.mp > max {
+                                    skip = true;
+                                }
+                            }
+                        }
+                    }
+                    "TAKEGOLD" => {
+                        let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let _ = record.actor_ref.ask(crate::actors::player::DeductGold { amount }).await;
+                        }
+                    }
+                    "GIVEGOLD" => {
+                        let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount }).await;
+                        }
+                    }
+                    "TAKEITEM" => {
+                        let item_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let count = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let _ = record.actor_ref.ask(crate::actors::player::RemoveItemByIndex {
+                                item_index, count,
+                            }).await;
+                        }
+                    }
+                    "TAKEPETFOOD" => {
+                        let item_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let count = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let removed = record.actor_ref.ask(crate::actors::player::RemoveItemByIndex {
+                                item_index, count,
+                            }).await.unwrap_or(false);
+                            if !removed {
+                                send_system_message(&self.gate_ref, session_id, "你没有足够的宠物食物");
+                            }
+                        }
+                    }
+                    "GIVEITEM" => {
+                        let item_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let count = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let mut item = mir2_shared::data::item::UserItem {
+                                item_index,
+                                count,
+                                ..Default::default()
+                            };
+                            if let Some(info) = self.item_infos.get(&item_index) {
+                                item.max_dura = info.durability as u16;
+                                item.current_dura = info.durability as u16;
+                            }
+                            let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory {
+                                item,
+                            }).await;
+                            let updates = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await.unwrap_or_default();
+                            if !updates.is_empty() {
+                                send_system_message(&self.gate_ref, session_id, "任务进度更新：获得物品");
+                            }
+                        }
+                    }
+                    "REPAIR" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            let _ = record.actor_ref.ask(crate::actors::player::RepairAllEquipment).await;
+                        }
+                    }
+                    "RESURRECT" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.is_dead {
+                                    let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
+                                    send_system_message(&self.gate_ref, session_id, "你已复活！");
+                                    debug!("NPC resurrect: {}", state.name);
+                                }
+                            }
+                        }
+                    }
+                    "HEAL" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.hp < state.max_hp || state.mp < state.max_mp {
+                                    state.hp = state.max_hp;
+                                    state.mp = state.max_mp;
+                                    let (hp, mp) = (state.hp, state.mp);
+                                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state }).await;
+                                    let mut body = Vec::new();
+                                    body.extend_from_slice(&hp.to_le_bytes());
+                                    body.extend_from_slice(&mp.to_le_bytes());
+                                    let _ = self.gate_ref.ask(SendToClient {
+                                        session_id,
+                                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
+                                    });
+                                    send_system_message(&self.gate_ref, session_id, "你的生命和魔法已恢复！");
+                                }
+                            }
+                        }
+                    }
+                    "STORAGE" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                self.send_user_storage(session_id, &state.inventory.storage);
+                            }
+                        }
+                    }
+                    "GIVEEXP" => {
+                        let amount = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if amount > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: self.apply_global_exp_multiplier(amount) }).await;
+                            }
+                        }
+                    }
+                    "GIVEBUFF" => {
+                        let buff_type_str = parts.next().unwrap_or("").to_uppercase();
+                        let duration = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(30);
+                        let interval = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+                        let power = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let buff_type = match buff_type_str.as_str() {
+                            "HPREGEN" => Some(crate::combat::buff::BuffType::HpRegen { amount_per_tick: power.max(1) }),
+                            "MPREGEN" => Some(crate::combat::buff::BuffType::MpRegen { amount_per_tick: power.max(1) }),
+                            "ATTACK" => Some(crate::combat::buff::BuffType::AttackBoost { bonus: power }),
+                            "DEFENSE" => Some(crate::combat::buff::BuffType::DefenseBoost { bonus: power }),
+                            "POISON" => Some(crate::combat::buff::BuffType::Poison { damage_per_tick: power.max(1) }),
+                            "SILENCE" => Some(crate::combat::buff::BuffType::Silence),
+                            "STUN" => Some(crate::combat::buff::BuffType::Stun),
+                            "INVISIBILITY" => Some(crate::combat::buff::BuffType::Invisibility),
+                            _ => None,
+                        };
+                        if let Some(bt) = buff_type {
+                            let is_invis = matches!(bt, crate::combat::buff::BuffType::Invisibility);
+                            let buff = crate::combat::buff::BuffInstance::new(bt, duration, interval);
+                            if let Some(record) = self.players.get(&session_id) {
+                                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                                if is_invis {
+                                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                        self.invisible_sessions.insert(session_id);
+                                        self.hide_player_from_others(session_id, &state).await;
+                                        send_system_message(&self.gate_ref, session_id, "你进入了隐身状态");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "GIVESKILL" => {
+                        let spell = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if spell > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let mut added = false;
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    if !state.magics.iter().any(|m| m.spell == spell) {
+                                        state.magics.push(crate::actors::player::PlayerMagic::new(spell));
+                                        let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+                                        added = true;
+                                    }
+                                }
+                                if added {
+                                    // 发送 NewMagic 包给客户端
+                                    if let Some(info) = self.magic_infos.get(&(spell as u32)) {
+                                        let magic = mir2_shared::data::client_data::ClientMagic {
+                                            name: info.name.clone(),
+                                            spell: mir2_shared::enums::Spell::try_from(spell as u8).unwrap_or(mir2_shared::enums::Spell::None),
+                                            base_cost: info.base_cost as u8,
+                                            level_cost: info.level_cost as u8,
+                                            icon: info.icon as u8,
+                                            level1: info.level1 as u8,
+                                            level2: info.level2 as u8,
+                                            level3: info.level3 as u8,
+                                            need1: info.need1 as u16,
+                                            need2: info.need2 as u16,
+                                            need3: info.need3 as u16,
+                                            level: 0,
+                                            key: 0,
+                                            experience: 0,
+                                            delay: info.delay_base as i64,
+                                            range: info.range as u8,
+                                            cast_time: 0,
+                                        };
+                                        let new_magic = mir2_shared::packets::server::magic::NewMagic { magic, hero: false };
+                                        let mut body = Vec::new();
+                                        if new_magic.write_body(&mut body).is_ok() {
+                                            let _ = self.gate_ref.ask(SendToClient {
+                                                session_id,
+                                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewMagic as i16, &body),
+                                            });
+                                        }
+                                    }
+                                    send_system_message(&self.gate_ref, session_id, "你学会了一项新技能！");
+                                    debug!("GIVESKILL: session={} spell={}", session_id, spell);
+                                } else {
+                                    send_system_message(&self.gate_ref, session_id, "你已经学会了这个技能");
+                                }
+                            }
+                        }
+                    }
+                    "CHECKSKILL" => {
+                        let spell = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let min_level = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        let max_level = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(255);
+                        if spell > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let has_skill = state.magics.iter().any(|m| m.spell == spell && m.level >= min_level && m.level <= max_level);
+                                    if !has_skill {
+                                        skip = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "UPGRADESKILL" => {
+                        let spell = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if spell > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let mut upgraded = false;
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    if let Some(magic) = state.magics.iter_mut().find(|m| m.spell == spell) {
+                                        if magic.level < 3 {
+                                            magic.level += 1;
+                                            upgraded = true;
+                                        }
+                                    }
+                                    if upgraded {
+                                        let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+                                        // 发送 MagicLeveled 包
+                                        let spell_enum = mir2_shared::enums::Spell::try_from(spell as u8).unwrap_or(mir2_shared::enums::Spell::None);
+                                        let leveled = mir2_shared::packets::server::magic::MagicLeveled { spell: spell_enum, level: state.magics.iter().find(|m| m.spell == spell).map(|m| m.level).unwrap_or(0), hero: false };
+                                        let mut body = Vec::new();
+                                        if leveled.write_body(&mut body).is_ok() {
+                                            let _ = self.gate_ref.ask(SendToClient {
+                                                session_id,
+                                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MagicLeveled as i16, &body),
+                                            });
+                                        }
+                                        send_system_message(&self.gate_ref, session_id, "技能升级成功！");
+                                        debug!("UPGRADESKILL: session={} spell={} level={}", session_id, spell, state.magics.iter().find(|m| m.spell == spell).map(|m| m.level).unwrap_or(0));
+                                    } else {
+                                        send_system_message(&self.gate_ref, session_id, "技能已达到最高等级或未学习");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "SETFLAG" => {
+                        let key = parts.next().unwrap_or("").to_string();
+                        let value = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if !key.is_empty() {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    state.flags.insert(key, value);
+                                    let _ = record.actor_ref.ask(SetPlayerState { state }).await;
+                                }
+                            }
+                        }
+                    }
+                    "CHECKFLAG" => {
+                        let key = parts.next().unwrap_or("").to_string();
+                        let min = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let max = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(i32::MAX);
+                        if !key.is_empty() {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let flag_val = state.flags.get(&key).copied().unwrap_or(0);
+                                    if flag_val < min || flag_val > max {
+                                        skip = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "INCFLAG" => {
+                        let key = parts.next().unwrap_or("").to_string();
+                        let amount = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(1);
+                        if !key.is_empty() {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let new_val = state.flags.get(&key).copied().unwrap_or(0).saturating_add(amount);
+                                    state.flags.insert(key, new_val);
+                                    let _ = record.actor_ref.ask(SetPlayerState { state }).await;
+                                }
+                            }
+                        }
+                    }
+                    "DELFLAG" => {
+                        let key = parts.next().unwrap_or("").to_string();
+                        if !key.is_empty() {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    state.flags.remove(&key);
+                                    let _ = record.actor_ref.ask(SetPlayerState { state }).await;
+                                }
+                            }
+                        }
+                    }
+                    "ACCEPTQUEST" => {
+                        let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if quest_index > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                // Check quest exists
+                                let Some(quest_db) = self.quest_infos.get(&quest_index) else {
+                                    send_system_message(&self.gate_ref, session_id, "任务不存在");
+                                    continue;
+                                };
+                                // Check level
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    if state.level < quest_db.required_min_level as u16 {
+                                        send_system_message(&self.gate_ref, session_id, "等级不足");
+                                        continue;
+                                    }
+                                    if quest_db.required_max_level > 0 && state.level > quest_db.required_max_level as u16 {
+                                        send_system_message(&self.gate_ref, session_id, "等级过高");
+                                        continue;
+                                    }
+                                }
+                                // Check not already accepted or completed
+                                if let Ok(Some(_)) = record.actor_ref.ask(GetQuest { quest_index }).await {
+                                    send_system_message(&self.gate_ref, session_id, "该任务已接受");
+                                    continue;
+                                }
+                                if let Ok(true) = record.actor_ref.ask(HasCompletedQuest { quest_index }).await {
+                                    send_system_message(&self.gate_ref, session_id, "该任务已完成");
+                                    continue;
+                                }
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0);
+                                let quest = make_quest_instance(quest_db, now);
+                                if let Ok(true) = record.actor_ref.ask(AcceptQuest { quest }).await {
+                                    send_system_message(&self.gate_ref, session_id, "任务已接受");
+                                }
+                            }
+                        }
+                    }
+                    "COMPLETEQUEST" => {
+                        let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if quest_index > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let completed_quest = match record.actor_ref.ask(CompleteQuest { quest_index }).await {
+                                    Ok(Some(q)) => q,
+                                    _ => {
+                                        send_system_message(&self.gate_ref, session_id, "无法完成任务");
+                                        continue;
+                                    }
+                                };
+                                if completed_quest.exp_reward > 0 {
+                                    let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32) }).await;
+                                }
+                                if completed_quest.gold_reward > 0 {
+                                    let _ = record.actor_ref.ask(AddGold { amount: completed_quest.gold_reward }).await;
+                                }
+                                if let Some(quest_db) = self.quest_infos.get(&quest_index) {
+                                    for reward in &quest_db.fixed_rewards {
+                                        let mut item = mir2_shared::data::item::UserItem {
+                                            item_index: reward.item_index,
+                                            count: reward.count,
+                                            ..Default::default()
+                                        };
+                                        if let Some(info) = self.item_infos.get(&reward.item_index) {
+                                            item.max_dura = info.durability as u16;
+                                            item.current_dura = info.durability as u16;
+                                        }
+                                        let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                                    }
+                                    if !quest_db.fixed_rewards.is_empty() {
+                                        let _ = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await;
+                                    }
+                                }
+                                send_system_message(&self.gate_ref, session_id, &format!("任务完成！获得 {} 经验，{} 金币", completed_quest.exp_reward, completed_quest.gold_reward));
+                                send_quest_complete_packet(&self.gate_ref, session_id, completed_quest.quest_index);
+                            }
+                        }
+                    }
+                    "ABANDONQUEST" => {
+                        let quest_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        if quest_index > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(true) = record.actor_ref.ask(AbandonQuest { quest_index }).await {
+                                    send_system_message(&self.gate_ref, session_id, "任务已放弃");
+                                }
+                            }
+                        }
+                    }
+                    "MOUNT" => {
+                        let mount_type = parts.next().and_then(|s| s.parse::<i16>().ok()).unwrap_or(1);
+                        if mount_type > 0 {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    if !state.is_mounted {
+                                        // Check map mount restrictions
+                                        if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
+                                            if mi.no_mount {
+                                                send_system_message(&self.gate_ref, session_id, "该地图禁止骑乘坐骑");
+                                                continue;
+                                            }
+                                            if mi.need_bridle {
+                                                let has_bridle = state.inventory.backpack.iter().any(|slot| {
+                                                    slot.as_ref().and_then(|s| {
+                                                        self.item_infos.get(&s.item.item_index)
+                                                            .map(|info| {
+                                                                let name = info.name.to_lowercase();
+                                                                name.contains("bridle") || name.contains("马鞭")
+                                                            })
+                                                    }).unwrap_or(false)
+                                                });
+                                                if !has_bridle {
+                                                    send_system_message(&self.gate_ref, session_id, "你需要马鞭才能在此地图骑乘坐骑");
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                        state.is_mounted = true;
+                                        state.mount_type = mount_type;
+                                        let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+                                        self.broadcast_player_appearance(session_id, &state).await;
+                                        send_system_message(&self.gate_ref, session_id, "你骑上了坐骑");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "DISMOUNT" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.is_mounted {
+                                    state.is_mounted = false;
+                                    state.mount_type = 0;
+                                    let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
+                                    self.broadcast_player_appearance(session_id, &state).await;
+                                    send_system_message(&self.gate_ref, session_id, "你下了坐骑");
+                                }
+                            }
+                        }
+                    }
+                    "SPAWNWORLDBOSS" => {
+                        let monster_index = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let map_name = parts.next().unwrap_or("");
+                        let bx = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(330);
+                        let by = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(330);
+                        if monster_index > 0 {
+                            if let Some(monster_info) = self.monster_infos.get(&monster_index).cloned() {
+                                let target_map_index = self.map_infos.values()
+                                    .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
+                                    .map(|m| m.index as u16)
+                                    .unwrap_or(0);
+                                if target_map_index == 0 {
+                                    send_system_message(&self.gate_ref, session_id, "地图不存在");
+                                    continue;
+                                }
+                                let walkable = self.maps.get(&target_map_index)
+                                    .map(|m| m.is_walkable(bx, by))
+                                    .unwrap_or(false);
+                                if !walkable {
+                                    send_system_message(&self.gate_ref, session_id, "该坐标不可行走");
+                                    continue;
+                                }
+                                let boss_oid = self.alloc_object_id();
+                                let boss_hp = monster_info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(100).saturating_mul(10);
+                                let boss_min_dmg = monster_info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5).saturating_mul(3);
+                                let boss_max_dmg = monster_info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10).saturating_mul(3);
+                                let boss_xp = monster_info.experience.saturating_mul(5);
+                                let boss = MonsterState {
+                                    object_id: boss_oid,
+                                    name: format!("[世界Boss] {}", monster_info.name),
+                                    image: monster_info.image as u16,
+                                    monster_index,
+                                    x: bx,
+                                    y: by,
+                                    direction: 0,
+                                    hp: boss_hp,
+                                    max_hp: boss_hp,
+                                    min_dmg: boss_min_dmg,
+                                    max_dmg: boss_max_dmg,
+                                    xp: boss_xp,
+                                    spawn_x: bx,
+                                    spawn_y: by,
+                                    map_index: target_map_index,
+                                    next_attack_tick: 0,
+                                    next_move_tick: 0,
+                                    next_summon_tick: 0,
+                                    ai_profile: MonsterAiProfile::from_info(&monster_info),
+                                    ai_state: MonsterAiState::Idle,
+                                    target_session: None,
+                                    provoked: true, // Boss is always aggressive
+                                    is_elite: false,
+                                    is_boss: true,
+                                };
+                                self.monsters.insert(boss_oid, boss);
+                                // 10 minutes = 6000 ticks (100ms each)
+                                self.world_boss_queue.insert(boss_oid, self.tick_count + 6000);
+                                let packet = build_object_monster_packet(
+                                    &MonsterSpawn {
+                                        name: format!("[世界Boss] {}", monster_info.name),
+                                        image: monster_info.image as u16,
+                                        monster_index,
+                                        x: bx,
+                                        y: by,
+                                        direction: 0,
+                                        hp: boss_hp,
+                                        min_dmg: boss_min_dmg,
+                                        max_dmg: boss_max_dmg,
+                                        xp: boss_xp,
+                                        map_index: target_map_index,
+                                    }, boss_oid, &format!("[世界Boss] {}", monster_info.name));
+                                for session_id in self.players.keys() {
+                                    let _ = self.gate_ref.ask(SendToClient {
+                                        session_id: *session_id,
+                                        data: packet.clone(),
+                                    });
+                                }
+                                let map_title = self.map_infos.get(&(target_map_index as i32))
+                                    .map(|m| m.title.clone())
+                                    .unwrap_or_else(|| map_name.to_string());
+                                broadcast_system_message(&self.gate_ref, &self.players,
+                                    &format!("⚠️ 世界Boss {} 降临 {}！勇士们，前往讨伐！", monster_info.name, map_title));
+                                debug!("World boss '{}' spawned as #{} at ({},{})", monster_info.name, boss_oid, bx, by);
+                            }
+                        }
+                    }
+                    "LOCAL" => {
+                        let message = parts.collect::<Vec<_>>().join(" ");
+                        if !message.is_empty() {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let map_index = state.map_index;
+                                    for (sid, other) in &self.players {
+                                        if let Ok(Some(other_state)) = other.actor_ref.ask(GetPlayerState).await {
+                                            if other_state.map_index == map_index {
+                                                send_system_message(&self.gate_ref, *sid, &format!("[本地] {}", message));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "GLOBAL" => {
+                        let message = parts.collect::<Vec<_>>().join(" ");
+                        if !message.is_empty() {
+                            for sid in self.players.keys() {
+                                send_system_message(&self.gate_ref, *sid, &format!("[全局] {}", message));
+                            }
+                        }
+                    }
+                    "GIVEPETFOOD" => {
+                        let amount = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(20);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let restored = record.actor_ref.ask(RestoreCreatureHunger { amount }).await.unwrap_or(false);
+                            if restored {
+                                send_system_message(&self.gate_ref, session_id, &format!("宠物吃了食物，饥饿值恢复 {} 点", amount));
+                            } else {
+                                send_system_message(&self.gate_ref, session_id, "你没有召唤宠物");
+                            }
+                        }
+                    }
+                    "REMOVEBUFF" => {
+                        let buff_type_str = parts.next().unwrap_or("").to_uppercase();
+                        let buff_type = match buff_type_str.as_str() {
+                            "HPREGEN" => Some(crate::combat::buff::BuffType::HpRegen { amount_per_tick: 0 }),
+                            "MPREGEN" => Some(crate::combat::buff::BuffType::MpRegen { amount_per_tick: 0 }),
+                            "ATTACK" => Some(crate::combat::buff::BuffType::AttackBoost { bonus: 0 }),
+                            "DEFENSE" => Some(crate::combat::buff::BuffType::DefenseBoost { bonus: 0 }),
+                            "POISON" => Some(crate::combat::buff::BuffType::Poison { damage_per_tick: 0 }),
+                            "SILENCE" => Some(crate::combat::buff::BuffType::Silence),
+                            "STUN" => Some(crate::combat::buff::BuffType::Stun),
+                            "INVISIBILITY" => Some(crate::combat::buff::BuffType::Invisibility),
+                            _ => None,
+                        };
+                        if let Some(bt) = buff_type {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let _ = record.actor_ref.ask(crate::actors::player::RemoveBuff { buff_type: bt }).await;
+                            }
+                        }
+                    }
+                    "GIVEPET" => {
+                        let creature_type_id = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        let creature_type = crate::actors::creature::CreatureType::from(creature_type_id);
+                        if creature_type != crate::actors::creature::CreatureType::None {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let mut log = state.creature_log;
+                                    let mut creature = crate::actors::creature::IntelligentCreature::new(creature_type);
+                                    creature.enabled = true;
+                                    log.set_creature(creature);
+                                    let _ = record.actor_ref.ask(crate::actors::player::SetCreature { creature_log: log }).await;
+                                    send_system_message(&self.gate_ref, session_id, "获得新宠物！");
+                                    debug!("GIVEPET: {} type={:?}", state.name, creature_type);
+                                }
+                            }
+                        }
+                    }
+                    "SAY" => {
+                        let message = parts.collect::<Vec<_>>().join(" ");
+                        if !message.is_empty() {
+                            send_system_message(&self.gate_ref, session_id, &message);
+                        }
+                    }
+                    "GOTO" => {
+                        if let Some(target) = parts.next() {
+                            goto_target = Some(target.to_string());
+                            break;
+                        }
+                    }
+                    "CLOSE" => {
+                        output.clear();
+                        break;
+                    }
+                    "BREAK" => break,
+                    "TELEPORT" | "MOVE" => {
+                        let map_name = parts.next().unwrap_or("");
+                        let tx = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(330);
+                        let ty = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(330);
+                        // 查找 map_index（通过 file_name 匹配）
+                        let target_map_index = self.map_infos.values()
+                            .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
+                            .map(|m| m.index as u16);
+                        if let Some(map_index) = target_map_index {
+                            if let Some(record) = self.players.get(&session_id) {
+                                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                        x: tx,
+                                        y: ty,
+                                        direction: state.direction,
+                                        map_index: Some(map_index),
+                                        is_mounted: None,
+                                    }).await;
+                                    let mut body = Vec::new();
+                                    body.extend_from_slice(&tx.to_le_bytes());
+                                    body.extend_from_slice(&ty.to_le_bytes());
+                                    body.push(state.direction);
+                                    let _ = self.gate_ref.ask(SendToClient {
+                                        session_id,
+                                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
+                                    });
+                                    debug!("NPC teleport: session={} to map={} ({},{})", session_id, map_name, tx, ty);
+                                }
+                            }
+                        } else {
+                            warn!("NPC teleport: map '{}' not found", map_name);
+                        }
+                    }
+                    "RECALL" => {
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let map_index = self.npc_infos.get(&npc.db_index)
+                                    .map(|i| i.map_index as u16)
+                                    .unwrap_or(state.map_index);
+                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                    x: npc.x,
+                                    y: npc.y,
+                                    direction: state.direction,
+                                    map_index: Some(map_index),
+                                    is_mounted: None,
+                                }).await;
+                                let mut body = Vec::new();
+                                body.extend_from_slice(&npc.x.to_le_bytes());
+                                body.extend_from_slice(&npc.y.to_le_bytes());
+                                body.push(state.direction);
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
+                                });
+                                debug!("NPC recall: session={} to npc {} ({},{})", session_id, npc.name, npc.x, npc.y);
+                            }
+                        }
+                    }
+                    "LOTTERY" => {
+                        let cost = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(100);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if state.inventory.gold < cost {
+                                    send_system_message(&self.gate_ref, session_id, "金币不足，无法抽奖");
+                                    continue;
+                                }
+                                let deducted = record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await.unwrap_or(false);
+                                if !deducted {
+                                    send_system_message(&self.gate_ref, session_id, "金币扣除失败");
+                                    continue;
+                                }
+                                // 抽奖掉落表
+                                let roll = fastrand::u32(1..=100);
+                                let (item_idx, count, prize_name) = match roll {
+                                    1..=50 => (0, 0, ""), // 50% 空手
+                                    51..=75 => (1, 1, "经验丹"),
+                                    76..=90 => (2, 1, "回城卷"),
+                                    91..=97 => (3, 1, "随机传送卷"),
+                                    98..=99 => (4, 1, "双倍经验卷"),
+                                    100 => (5, 10, "经验丹大礼包"),
+                                    _ => (0, 0, ""),
+                                };
+                                if item_idx > 0 {
+                                    let item = crate::actors::inventory::make_item(item_idx, count);
+                                    let added = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await.unwrap_or(false);
+                                    if added {
+                                        send_system_message(
+                                            &self.gate_ref, session_id,
+                                            &format!("恭喜中奖！获得 {} x{}", prize_name, count));
+                                    } else {
+                                        send_system_message(
+                                            &self.gate_ref, session_id,
+                                            &format!("恭喜中奖！但背包已满，{} x{} 无法获得", prize_name, count));
+                                    }
+                                } else {
+                                    send_system_message(
+                                        &self.gate_ref, session_id, "很遗憾，这次没有中奖...");
+                                }
+                                debug!("LOTTERY: session={} roll={} prize={}x{}", session_id, roll, item_idx, count);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            } else if !skip {
+                output.push(line.clone());
+            }
+        }
+        (output, goto_target)
+    }
+}
+
+impl Actor for WorldActor {
+    type Args = WorldActorArgs;
+    type Error = anyhow::Error;
+
+    async fn on_start(
+        args: WorldActorArgs,
+        actor_ref: ActorRef<Self>,
+    ) -> Result<Self, Self::Error> {
+        info!("WorldActor started (tick interval: {}ms)", args.tick_interval_ms);
+
+        // 启动主循环
+        tokio::spawn(async move {
+            let mut interval = interval(Duration::from_millis(args.tick_interval_ms));
+            loop {
+                interval.tick().await;
+                let _ = actor_ref.ask(Tick).await;
+            }
+        });
+
+        // Load guilds from DB (SocialActor handles guild data now)
+        let _guilds = match db::load_guilds(&args.db_pool).await {
+            Ok(g) => {
+                info!("Loaded {} guilds from database", g.len());
+                g
+            }
+            Err(e) => {
+                warn!("Failed to load guilds from DB: {}", e);
+                HashMap::new()
+            }
+        };
+
+        // Load game configs from DB (migrated from Server.MirDB)
+        let map_infos_list = match db::load_map_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} map configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load map_infos from DB: {}", e); Vec::new() }
+        };
+        let map_infos: HashMap<i32, db::MapInfo> = map_infos_list.into_iter().map(|m| (m.index, m)).collect();
+
+        let item_infos_list = match db::load_item_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} item configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load item_infos from DB: {}", e); Vec::new() }
+        };
+        let item_infos: HashMap<i32, db::ItemInfo> = item_infos_list.into_iter().map(|i| (i.index, i)).collect();
+
+        let monster_infos_list = match db::load_monster_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} monster configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load monster_infos from DB: {}", e); Vec::new() }
+        };
+        let monster_infos: HashMap<i32, db::MonsterInfo> = monster_infos_list.into_iter().map(|m| (m.index, m)).collect();
+
+        let monster_drops = match db::load_monster_drops(&args.db_pool).await {
+            Ok(d) => { info!("Loaded drop configs for {} monsters from database", d.len()); d }
+            Err(e) => { warn!("Failed to load monster_drops from DB: {}", e); HashMap::new() }
+        };
+
+        let npc_infos_list = match db::load_npc_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} NPC configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load npc_infos from DB: {}", e); Vec::new() }
+        };
+        let npc_infos: HashMap<i32, db::NPCInfo> = npc_infos_list.into_iter().map(|n| (n.index, n)).collect();
+
+        let npc_goods = match db::load_npc_goods(&args.db_pool).await {
+            Ok(g) => { info!("Loaded goods for {} NPCs from database", g.len()); g }
+            Err(e) => { warn!("Failed to load npc_goods from DB: {}", e); HashMap::new() }
+        };
+
+        let npc_scripts = match db::load_npc_scripts(&args.db_pool).await {
+            Ok(s) => { info!("Loaded {} NPC script pages from database", s.len()); s }
+            Err(e) => { warn!("Failed to load npc_scripts from DB: {}", e); HashMap::new() }
+        };
+
+        let mut quest_infos_list = match db::load_quest_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} quest configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load quest_infos from DB: {}", e); Vec::new() }
+        };
+        db::resolve_quest_tasks(&mut quest_infos_list, &args.quest_dir, &monster_infos, &item_infos);
+        let mut resolved_kill = 0usize;
+        let mut resolved_item = 0usize;
+        let mut resolved_flag = 0usize;
+        for q in &quest_infos_list {
+            resolved_kill += q.kill_tasks.len();
+            resolved_item += q.item_tasks.len();
+            resolved_flag += q.flag_tasks.len();
+        }
+        info!("Resolved {} kill tasks, {} item tasks, {} flag tasks from quest files", resolved_kill, resolved_item, resolved_flag);
+        let quest_infos: HashMap<i32, db::QuestInfo> = quest_infos_list.into_iter().map(|q| (q.index, q)).collect();
+
+        let magic_infos_list = match db::load_magic_infos(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} magic configs from database", m.len()); m }
+            Err(e) => { warn!("Failed to load magic_infos from DB: {}", e); Vec::new() }
+        };
+        let magic_infos: HashMap<u32, db::MagicInfo> = magic_infos_list.into_iter().map(|m| (m.spell as u32, m)).collect();
+
+        let dragon_info = match db::load_dragon_info(&args.db_pool, &monster_infos).await {
+            Ok(d) => { if d.is_some() { info!("Loaded dragon config from database"); } d }
+            Err(e) => { warn!("Failed to load dragon_info from DB: {}", e); None }
+        };
+
+        let game_shop_items = match db::load_game_shop_items(&args.db_pool).await {
+            Ok(m) => { info!("Loaded {} game shop items from database", m.len()); m }
+            Err(e) => { warn!("Failed to load game_shop_items from DB: {}", e); Vec::new() }
+        };
+
+        // Load auctions from DB
+        let mut auctions = Vec::new();
+        let mut next_auction_id = 1u64;
+        match db::load_all_auctions(&args.db_pool).await {
+            Ok(rows) => {
+                for (id, seller, item_json, price, date, sold, item_type, buyer_name) in rows {
+                    if let Ok(item) = serde_json::from_str::<mir2_shared::data::item::UserItem>(&item_json) {
+                        let aid = id as u64;
+                        if aid >= next_auction_id {
+                            next_auction_id = aid + 1;
+                        }
+                        auctions.push(AuctionListing {
+                            auction_id: aid,
+                            seller_name: seller,
+                            item,
+                            price: price as u32,
+                            consignment_date: date,
+                            sold: sold != 0,
+                            buyer_name,
+                            item_type: item_type as u8,
+                        });
+                    }
+                }
+                info!("Loaded {} auctions from database", auctions.len());
+            }
+            Err(e) => warn!("Failed to load auctions: {}", e),
+        }
+
+        // Build movement trigger index for O(1) lookup: (map_index, source_x, source_y) -> MapMovementInfo
+        let movement_index: HashMap<(i32, i32, i32), db::MapMovementInfo> = {
+            let mut idx = HashMap::new();
+            for mi in map_infos.values() {
+                for mv in &mi.movements {
+                    idx.insert((mi.index, mv.source_x, mv.source_y), mv.clone());
+                }
+            }
+            info!("Indexed {} movement triggers", idx.len());
+            idx
+        };
+
+        Ok(Self {
+            tick_count: 0,
+            players: HashMap::new(),
+            buyback_items: HashMap::new(),
+            maps: HashMap::new(),
+            gate_ref: args.gate_ref,
+            map_dir: args.map_dir,
+            spawn_dir: args.spawn_dir,
+            next_object_id: 1000,
+            monsters: HashMap::new(),
+            npcs: HashMap::new(),
+            respawn_queue: HashMap::new(),
+            world_boss_queue: HashMap::new(),
+            player_death_queue: HashMap::new(),
+            fishing_tick_counters: HashMap::new(),
+            ground_items: Vec::new(),
+            open_doors: std::collections::HashSet::new(),
+            db_pool: args.db_pool,
+            map_infos,
+            item_infos,
+            monster_infos,
+            monster_drops,
+            npc_infos,
+            npc_goods,
+            npc_scripts,
+            quest_infos,
+            magic_infos,
+            dragon_info,
+            game_shop_items,
+            movement_index,
+            social_ref: args.social_ref,
+            global_exp_multiplier: 1.0,
+            global_drop_multiplier: 1.0,
+            global_gold_multiplier: 1.0,
+            global_exp_event_end_tick: 0,
+            global_event_name: None,
+            invisible_sessions: HashSet::new(),
+            current_light: Self::light_for_hour(chrono::Local::now().hour()),
+            auctions,
+            next_auction_id,
+            market_search_cache: HashMap::new(),
+            rental_sessions: HashMap::new(),
+            player_rentals: HashMap::new(),
+            guild_wars: HashMap::new(),
+        })
+    }
+}
+
+/// 合成材料
+#[derive(Debug, Clone)]
+pub struct CraftIngredient {
+    pub item_index: i32,
+    pub count: u16,
+}
+
+/// 合成配方
+#[derive(Debug, Clone)]
+pub struct CraftRecipe {
+    pub recipe_id: u32,
+    pub product_index: i32,
+    pub product_count: u16,
+    pub success_rate: u8,
+    pub ingredients: Vec<CraftIngredient>,
+}
+
+/// 市场搜索缓存
+#[derive(Debug, Clone)]
+struct MarketSearchCache {
+    results: Vec<usize>, // indices into self.auctions
+}
+
+impl WorldActor {
+    fn send_awakening_result(&self, session_id: u64, result: i32, remove_id: i64) {
+        let packet = mir2_shared::packets::server::awakening_system::Awakening { result, remove_id };
+        let mut body = Vec::new();
+        if let Err(e) = packet.write_body(&mut body) {
+            warn!("Failed to serialize Awakening result: {}", e);
+            return;
+        }
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Awakening as i16, &body),
+        });
+    }
+}
+
+impl WorldActor {
+    fn send_rental_packet<T: mir2_shared::packets::Packet>(&self, session_id: u64, packet: T) {
+        let mut body = Vec::new();
+        if let Err(e) = packet.write_body(&mut body) {
+            warn!("Failed to serialize rental packet: {}", e);
+            return;
+        }
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id,
+            data: build_packet_bytes(T::OPCODE, &body),
+        });
+    }
+
+    async fn find_session_by_name(&self, name: &str) -> Option<u64> {
+        for (sid, record) in &self.players {
+            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                if state.name == name {
+                    return Some(*sid);
+                }
+            }
+        }
+        None
+    }
+}
+
+/// 硬编码合成配方表（后续可从 DB 加载）
+fn get_craft_recipes() -> Vec<CraftRecipe> {
+    vec![
+        // recipe_id 1: 铁剑 = 木材 x3 + 铁矿石 x2, 80%
+        CraftRecipe {
+            recipe_id: 1,
+            product_index: 100,
+            product_count: 1,
+            success_rate: 80,
+            ingredients: vec![
+                CraftIngredient { item_index: 1, count: 3 },
+                CraftIngredient { item_index: 2, count: 2 },
+            ],
+        },
+        // recipe_id 2: 治疗药水 = 草药 x2 + 清水 x1, 95%
+        CraftRecipe {
+            recipe_id: 2,
+            product_index: 101,
+            product_count: 1,
+            success_rate: 95,
+            ingredients: vec![
+                CraftIngredient { item_index: 3, count: 2 },
+                CraftIngredient { item_index: 4, count: 1 },
+            ],
+        },
+        // recipe_id 3: 强化石 = 铁矿石 x5, 60%
+        CraftRecipe {
+            recipe_id: 3,
+            product_index: 102,
+            product_count: 1,
+            success_rate: 60,
+            ingredients: vec![
+                CraftIngredient { item_index: 2, count: 5 },
+            ],
+        },
+    ]
+}
+
+// ============================================================
+// 辅助函数
+// ============================================================
+
+impl WorldActor {
+    /// 从已加载的物品配置中随机选择一个适合钓鱼收获的物品索引
+    fn random_fishing_item_index(
+        item_infos: &HashMap<i32, db::ItemInfo>,
+        session_id: u64,
+        tick_count: u64,
+    ) -> i32 {
+        if item_infos.is_empty() {
+            return 1;
+        }
+        let keys: Vec<i32> = item_infos.keys().copied().collect();
+        let idx = ((session_id + tick_count) as usize) % keys.len();
+        keys[idx]
+    }
+}
+
+fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message: &str) {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    crate::util::wire::write_dotnet_string(&mut body, message);
+    body.push(0u8); // ChatType::System
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
+    });
+}
+
+/// Send an item to a player via mail (for offline delivery or inventory-full fallback)
+fn send_item_via_mail(
+    db_pool: &crate::db::DbPool,
+    receiver_name: &str,
+    item: mir2_shared::data::item::UserItem,
+    subject: &str,
+    body: &str,
+) {
+    let mail = MailMessage {
+        mail_id: generate_mail_id(),
+        sender_name: "系统".to_string(),
+        receiver_name: receiver_name.to_string(),
+        subject: subject.to_string(),
+        body: body.to_string(),
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+        read: false,
+        collected: false,
+        locked: false,
+        gold: 0,
+        items: vec![item],
+    };
+    // Fire and forget — we're likely in a tick handler
+    let pool = db_pool.clone();
+    let receiver = receiver_name.to_string();
+    tokio::spawn(async move {
+        if let Err(e) = db::insert_mail(&pool, &receiver, &mail).await {
+            warn!("Failed to send item via mail to {}: {}", receiver, e);
+        }
+    });
+}
+
+/// 向所有在线玩家广播系统消息
+fn broadcast_system_message(gate_ref: &ActorRef<GateActor>, players: &HashMap<u64, PlayerRecord>, message: &str) {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    crate::util::wire::write_dotnet_string(&mut body, message);
+    body.push(mir2_shared::enums::ChatType::System as u8);
+    let packet = build_packet_bytes(ServerPacketIds::Chat as i16, &body);
+    for session_id in players.keys() {
+        let _ = gate_ref.ask(SendToClient {
+            session_id: *session_id,
+            data: packet.clone(),
+        });
+    }
+}
+
+/// 从 DB 任务配置创建任务实例
+fn make_quest_instance(qi: &db::QuestInfo, start_time: u64) -> QuestInstance {
+    let mut progress = Vec::new();
+    for kill in &qi.kill_tasks {
+        progress.push(QuestProgress {
+            progress_id: kill.monster_index,
+            current: 0,
+            target: kill.count,
+        });
+    }
+    for item in &qi.item_tasks {
+        progress.push(QuestProgress {
+            progress_id: item.item_index,
+            current: 0,
+            target: item.count,
+        });
+    }
+    for flag in &qi.flag_tasks {
+        progress.push(QuestProgress {
+            progress_id: flag.number,
+            current: 0,
+            target: 1,
+        });
+    }
+    QuestInstance {
+        quest_index: qi.index,
+        title: qi.name.clone(),
+        status: QuestStatus::InProgress,
+        progress,
+        exp_reward: qi.exp_reward as i64,
+        gold_reward: qi.gold_reward.max(0) as u64,
+        start_time,
+        time_limit_seconds: qi.time_limit_seconds,
+    }
+}
+
+/// Send Opendoor response to a single player
+fn send_opendoor(gate_ref: &ActorRef<GateActor>, session_id: u64, door_index: u8, close: bool) {
+    let mut body = Vec::new();
+    body.push(door_index);
+    body.push(if close { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Opendoor as i16, &body),
+    });
+}
+
+/// Broadcast Opendoor to all players on a map (excluding the initiator)
+async fn broadcast_opendoor_async(gate_ref: &ActorRef<GateActor>, players: &HashMap<u64, PlayerRecord>, map_index: u16, door_index: u8, close: bool, exclude_session_id: u64) {
+    let mut body = Vec::new();
+    body.push(door_index);
+    body.push(if close { 1u8 } else { 0u8 });
+    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Opendoor as i16, &body);
+
+    for record in players.values() {
+        if record.session_id == exclude_session_id { continue; }
+        let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else { continue };
+        if state.map_index == map_index {
+            let _ = gate_ref.ask(SendToClient {
+                session_id: record.session_id,
+                data: packet.clone(),
+            });
+        }
+    }
+}
+
+fn send_move_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, from: i32, to: i32, success: bool) {
+    let mut body = Vec::new();
+    body.push(grid);
+    body.extend_from_slice(&from.to_le_bytes());
+    body.extend_from_slice(&to.to_le_bytes());
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MoveItem as i16, &body),
+    });
+}
+
+fn send_use_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: u64) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&uid.to_le_bytes());
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UseItem as i16, &body),
+    });
+}
+
+/// 计算装备属性加成总和
+fn calculate_equipment_bonuses(
+    equipment: &[Option<mir2_shared::data::item::UserItem>],
+    item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+) -> (i32, i32, i32, i32, i32) {
+    use mir2_shared::enums::Stat;
+    let mut min_atk = 0i32;
+    let mut max_atk = 0i32;
+    let mut def = 0i32;
+    let mut hp = 0i32;
+    let mut mp = 0i32;
+
+    for eq in equipment.iter().flatten() {
+        if let Some(info) = item_infos.get(&eq.item_index) {
+            min_atk += info.stats.get(&(Stat::MinDC as u8)).copied().unwrap_or(0);
+            max_atk += info.stats.get(&(Stat::MaxDC as u8)).copied().unwrap_or(0);
+            def += info.stats.get(&(Stat::MaxAC as u8)).copied().unwrap_or(0);
+            hp += info.stats.get(&(Stat::HP as u8)).copied().unwrap_or(0);
+            mp += info.stats.get(&(Stat::MP as u8)).copied().unwrap_or(0);
+        }
+    }
+
+    (min_atk, max_atk, def, hp, mp)
+}
+
+fn send_equip_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, slot: i32, success: bool) {
+    let mut body = Vec::new();
+    body.push(grid);
+    body.extend_from_slice(&uid.to_le_bytes());
+    body.extend_from_slice(&slot.to_le_bytes());
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::EquipItem as i16, &body),
+    });
+}
+
+fn send_remove_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, success: bool) {
+    let mut body = Vec::new();
+    body.push(grid);
+    body.extend_from_slice(&uid.to_le_bytes());
+    body.extend_from_slice(&0i32.to_le_bytes());
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveItem as i16, &body),
+    });
+}
+
+fn send_drop_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: u64, count: u32, success: bool) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&uid.to_le_bytes());
+    body.extend_from_slice(&count.to_le_bytes());
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DropItem as i16, &body),
+    });
+}
+
+fn send_merge_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid_from: u8, grid_to: u8, from_uid: u64, to_uid: u64, success: bool) {
+    let mut body = Vec::new();
+    body.push(grid_from);
+    body.push(grid_to);
+    body.extend_from_slice(&from_uid.to_le_bytes());
+    body.extend_from_slice(&to_uid.to_le_bytes());
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MergeItem as i16, &body),
+    });
+}
+
+fn send_split_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, count: u32) {
+    let mut body = Vec::new();
+    body.push(grid);
+    body.extend_from_slice(&uid.to_le_bytes());
+    body.extend_from_slice(&count.to_le_bytes());
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SplitItem as i16, &body),
+    });
+}
+
+fn send_sell_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: u64, count: u32, success: bool) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&uid.to_le_bytes());
+    body.extend_from_slice(&count.to_le_bytes());
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SellItem as i16, &body),
+    });
+}
+
+// ============================================================
+// 邮件系统网络辅助函数
+// ============================================================
+
+fn send_mail_received_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, mail: &MailMessage) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&mail.mail_id.to_le_bytes());
+    write_dotnet_string(&mut body, &mail.sender_name);
+    write_dotnet_string(&mut body, &mail.subject);
+    body.extend_from_slice(&mail.timestamp.to_le_bytes());
+    body.push(if mail.read { 1u8 } else { 0u8 });
+    body.push(if mail.collected { 1u8 } else { 0u8 });
+    body.extend_from_slice(&(mail.gold as u32).to_le_bytes());
+    body.push(mail.items.len() as u8);
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ReceiveMail as i16, &body),
+    });
+}
+
+fn send_mail_content_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, mail: &MailMessage) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&mail.mail_id.to_le_bytes());
+    write_dotnet_string(&mut body, &mail.sender_name);
+    write_dotnet_string(&mut body, &mail.subject);
+    write_dotnet_string(&mut body, &mail.body);
+    body.extend_from_slice(&mail.timestamp.to_le_bytes());
+    body.push(if mail.read { 1u8 } else { 0u8 });
+    body.push(if mail.collected { 1u8 } else { 0u8 });
+    body.extend_from_slice(&(mail.gold as u32).to_le_bytes());
+    body.push(mail.items.len() as u8);
+    // 发送附件物品信息
+    for item in &mail.items {
+        body.extend_from_slice(&item.unique_id.to_le_bytes());
+        body.extend_from_slice(&(item.item_index as u32).to_le_bytes());
+        write_dotnet_string(&mut body, &item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default());
+        body.extend_from_slice(&item.count.to_le_bytes());
+        body.extend_from_slice(&item.current_dura.to_le_bytes());
+        body.extend_from_slice(&item.max_dura.to_le_bytes());
+    }
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ReceiveMail as i16, &body),
+    });
+}
+
+fn send_inspect_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, state: &crate::actors::player::PlayerState) {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+
+    body.extend_from_slice(&state.object_id.to_le_bytes());
+    write_dotnet_string(&mut body, &state.name);
+    write_dotnet_string(&mut body, state.guild_name.as_deref().unwrap_or(""));
+    body.extend_from_slice(&state.level.to_le_bytes());
+    body.push(state.class as u8);
+    body.push(state.gender as u8);
+    // 装备信息（只发送已装备的）
+    body.push(state.inventory.equipment.iter().filter(|s| s.is_some()).count() as u8);
+    for eq in state.inventory.equipment.iter().flatten() {
+        body.extend_from_slice(&eq.unique_id.to_le_bytes());
+        body.extend_from_slice(&eq.item_index.to_le_bytes());
+        body.extend_from_slice(&(eq.current_dura as i32).to_le_bytes());
+        body.extend_from_slice(&(eq.max_dura as i32).to_le_bytes());
+    }
+
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(ServerPacketIds::PlayerInspect as i16, &body),
+    });
+}
+
+// ============================================================
+// 任务系统网络辅助函数
+// ============================================================
+
+fn send_quest_complete_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, quest_index: i32) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&quest_index.to_le_bytes());
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CompleteQuest as i16, &body),
+    });
+}
+
+// ============================================================
+// 英雄系统网络辅助函数
+// ============================================================
+
+fn send_hero_update_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, hero_index: u8) {
+    let body = vec![hero_index];
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangeHero as i16, &body),
+    });
+}
+
+// ============================================================
+// 仓库/金币网络辅助函数
+// ============================================================
+
+fn send_store_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, _grid: u8, success: bool) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&0i32.to_le_bytes()); // from
+    body.extend_from_slice(&0i32.to_le_bytes()); // to
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::StoreItem as i16, &body),
+    });
+}
+
+fn send_take_back_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, _grid: u8, success: bool) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&0i32.to_le_bytes()); // from
+    body.extend_from_slice(&0i32.to_le_bytes()); // to
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TakeBackItem as i16, &body),
+    });
+}
+
+fn send_gold_changed_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, new_gold: u64) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&(new_gold as u32).to_le_bytes());
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LoseGold as i16, &body),
+    });
+}
+
+// ============================================================
+// 宠物系统网络辅助函数
+// ============================================================
+
+fn send_creature_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, creature: Option<&IntelligentCreature>) {
+    let mut body = Vec::new();
+    if let Some(c) = creature {
+        body.extend_from_slice(&1i32.to_le_bytes());
+        body.push(c.creature_type as u8);
+        body.push(c.pickup_mode as u8);
+        body.push(if c.enabled { 1u8 } else { 0u8 });
+        body.push(c.hunger);
+        write_dotnet_string(&mut body, c.custom_name.as_deref().unwrap_or(""));
+    } else {
+        body.extend_from_slice(&0i32.to_le_bytes());
+    }
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UpdateIntelligentCreatureList as i16, &body),
+    });
+}
+
+// ============================================================
+// 游戏进入序列
+// ============================================================
+
+/// 发送完整的游戏进入序列到客户端
+fn send_game_entry_sequence(
+    gate_ref: ActorRef<GateActor>,
+    session_id: u64,
+    state: &PlayerState,
+    map_file: &str,
+    map_title: &str,
+    is_big_map: bool,
+) {
+    use mir2_shared::enums::ServerPacketIds;
+
+    let sid = session_id;
+
+    // 1. StartGame (result=4=Success, resolution=0)
+    let mut start_game_body = Vec::new();
+    start_game_body.push(4u8);
+    start_game_body.extend_from_slice(&0i32.to_le_bytes());
+    let _ = gate_ref.ask(SendToClient {
+        session_id: sid,
+        data: build_packet_bytes(ServerPacketIds::StartGame as i16, &start_game_body),
+    });
+
+    // 2. MapChanged
+    let map_changed = build_map_changed_packet(state.map_index, map_file, map_title, state.x, state.y, is_big_map);
+    let _ = gate_ref.ask(SendToClient {
+        session_id: sid,
+        data: map_changed,
+    });
+
+    // 3. UserInformation
+    let user_info = build_user_information_packet(state);
+    let _ = gate_ref.ask(SendToClient {
+        session_id: sid,
+        data: user_info,
+    });
+
+    // 4. HealthChanged
+    let mut health_body = Vec::new();
+    health_body.extend_from_slice(&(state.hp as u32).to_le_bytes());
+    health_body.extend_from_slice(&(state.mp as u32).to_le_bytes());
+    let _ = gate_ref.ask(SendToClient {
+        session_id: sid,
+        data: build_packet_bytes(ServerPacketIds::HealthChanged as i16, &health_body),
+    });
+
+    // 5. UserLocation
+    let mut location_body = Vec::new();
+    location_body.extend_from_slice(&state.x.to_le_bytes());
+    location_body.extend_from_slice(&state.y.to_le_bytes());
+    location_body.push(state.direction);
+    let _ = gate_ref.ask(SendToClient {
+        session_id: sid,
+        data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &location_body),
+    });
+
+    info!("Game entry sequence sent to session {}", sid);
+}
+
+// ============================================================
+// 数据包构建辅助函数
+// ============================================================
+
+fn build_map_changed_packet(
+    map_index: u16,
+    file_name: &str,
+    title: &str,
+    spawn_x: i32,
+    spawn_y: i32,
+    is_big_map: bool,
+) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+
+    body.extend_from_slice(&(map_index as i32).to_le_bytes());
+    write_dotnet_string(&mut body, file_name);
+    write_dotnet_string(&mut body, title);
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.push(if is_big_map { 1u8 } else { 0u8 });
+    body.extend_from_slice(&spawn_x.to_le_bytes());
+    body.extend_from_slice(&spawn_y.to_le_bytes());
+    body.push(4u8);
+    body.push(1u8);
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+
+    build_packet_bytes(ServerPacketIds::MapChanged as i16, &body)
+}
+
+/// 根据 PK 值计算名字颜色（0=白名, 1=红名, 2=橙名）
+fn name_colour_for_pk(pk_points: i32) -> i32 {
+    if pk_points >= 200 {
+        1 // Red
+    } else if pk_points >= 100 {
+        2 // Orange
+    } else {
+        0 // White
+    }
+}
+
+/// 检查攻击者是否可以在当前攻击模式下攻击目标玩家
+fn can_attack_player(attacker: &PlayerState, target: &PlayerState) -> bool {
+    use mir2_shared::enums::AttackMode;
+    match attacker.attack_mode {
+        AttackMode::Peace => false,
+        AttackMode::Group => {
+            // 不能攻击同组成员
+            attacker.group_id.is_none() || attacker.group_id != target.group_id
+        }
+        AttackMode::Guild => {
+            // 不能攻击同行会成员
+            attacker.guild_name.is_none() || attacker.guild_name != target.guild_name
+        }
+        AttackMode::EnemyGuild => {
+            // 简化：只能攻击不同行会的玩家（且双方都有行会）
+            attacker.guild_name.is_some()
+                && target.guild_name.is_some()
+                && attacker.guild_name != target.guild_name
+        }
+        AttackMode::RedBrown => {
+            // 只能攻击红名/橙名玩家
+            target.pk_points >= 100
+        }
+        AttackMode::All => true,
+    }
+}
+
+fn build_user_information_packet(state: &PlayerState) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+
+    // --- 字段顺序必须与客户端 UserInformation::read_body 一致 ---
+    body.extend_from_slice(&state.object_id.to_le_bytes());   // object_id
+    body.extend_from_slice(&1u32.to_le_bytes());              // real_id
+    write_dotnet_string(&mut body, &state.name);              // name
+    write_dotnet_string(&mut body, state.guild_name.as_deref().unwrap_or(""));  // guild_name
+    write_dotnet_string(&mut body, "");                       // guild_rank
+    body.extend_from_slice(&name_colour_for_pk(state.pk_points).to_le_bytes()); // name_colour
+    body.push(state.class as u8);                             // class
+    body.push(state.gender as u8);                            // gender
+    body.extend_from_slice(&state.level.to_le_bytes());       // level
+    body.extend_from_slice(&state.x.to_le_bytes());           // location_x
+    body.extend_from_slice(&state.y.to_le_bytes());           // location_y
+    body.push(state.direction);                               // direction
+    body.push(state.hair);                                    // hair
+    body.extend_from_slice(&state.hp.to_le_bytes());          // hp
+    body.extend_from_slice(&state.mp.to_le_bytes());          // mp
+    body.extend_from_slice(&state.experience.to_le_bytes());  // experience
+    body.extend_from_slice(&state.max_experience.to_le_bytes()); // max_experience
+    body.extend_from_slice(&0u16.to_le_bytes());              // level_effects
+    body.push(0u8);                                           // has_hero=false
+    body.push(state.hero_behaviour);                           // hero_behaviour
+
+    // 客户端期望的后续字段（read_body 继续读取的部分）
+    body.push(0u8);                                           // has_inventory=false
+    body.push(0u8);                                           // has_equipment=false
+    body.push(0u8);                                           // has_quest_inventory=false
+    body.extend_from_slice(&(state.inventory.gold as u32).to_le_bytes()); // gold
+    body.extend_from_slice(&0u32.to_le_bytes());              // credit
+    body.push(0u8);                                           // has_expanded_storage=false
+    body.extend_from_slice(&0i64.to_le_bytes());              // expanded_storage_expiry_time
+    body.extend_from_slice(&0i32.to_le_bytes());              // magic_count=0
+    body.extend_from_slice(&0i32.to_le_bytes());              // creature_count=0
+    body.push(0u8);                                           // summoned_creature_type
+    body.push(0u8);                                           // creature_summoned=false
+    body.push(0u8);                                           // allow_observe=false
+    body.push(0u8);                                           // observer=false
+
+    build_packet_bytes(ServerPacketIds::UserInformation as i16, &body)
+}
+
+/// 构建 ObjectPlayer 数据包（其他玩家进入视野）
+fn build_object_player_packet(
+    name: &str, object_id: u32, x: i32, y: i32, direction: u8, level: u16,
+    name_colour: i32,
+    class: mir2_shared::enums::MirClass,
+    gender: mir2_shared::enums::MirGender,
+    hair: u8,
+    weapon: i16, weapon_effect: i16, armor: i16,
+    mount_type: i16, is_mounted: bool,
+) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+
+    body.extend_from_slice(&object_id.to_le_bytes());   // object_id
+    write_dotnet_string(&mut body, name);               // name
+    write_dotnet_string(&mut body, "");                 // guild_name
+    write_dotnet_string(&mut body, "");                 // guild_rank_name
+    body.extend_from_slice(&name_colour.to_le_bytes()); // name_colour
+    body.push(class as u8);                             // class
+    body.push(gender as u8);                            // gender
+    body.extend_from_slice(&level.to_le_bytes());       // level
+    body.extend_from_slice(&x.to_le_bytes());           // location_x
+    body.extend_from_slice(&y.to_le_bytes());           // location_y
+    body.push(direction);                               // direction
+    body.push(hair);                                    // hair
+    body.push(1u8);                                     // light
+    body.extend_from_slice(&weapon.to_le_bytes());        // weapon
+    body.extend_from_slice(&weapon_effect.to_le_bytes()); // weapon_effect
+    body.extend_from_slice(&armor.to_le_bytes());         // armour
+    body.extend_from_slice(&0u16.to_le_bytes());        // poison=None (client reads u16)
+    body.push(0u8);                                     // dead=false
+    body.push(0u8);                                     // hidden=false
+    body.push(0u8);                                     // effect=None
+    body.push(0u8);                                     // wing_effect
+    body.push(0u8);                                     // extra=false
+    body.extend_from_slice(&mount_type.to_le_bytes());  // mount_type
+    body.push(if is_mounted { 1u8 } else { 0u8 });      // riding_mount
+    body.push(0u8);                                     // fishing=false
+    body.extend_from_slice(&0i16.to_le_bytes());        // transform_type
+    body.extend_from_slice(&0u32.to_le_bytes());        // element_orb_effect
+    body.extend_from_slice(&0u32.to_le_bytes());        // element_orb_lvl
+    body.extend_from_slice(&0u32.to_le_bytes());        // element_orb_max
+    body.extend_from_slice(&0i32.to_le_bytes());        // buffs count=0
+    body.extend_from_slice(&0u16.to_le_bytes());        // level_effects=None (client reads u16)
+
+    build_packet_bytes(ServerPacketIds::ObjectPlayer as i16, &body)
+}
+
+/// 发送 PlayerUpdate 数据包（装备视觉变化）
+fn send_player_update(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    object_id: u32,
+    light: u8,
+    weapon: i16,
+    weapon_effect: i16,
+    armor: i16,
+    wings_effect: u8,
+) {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    body.extend_from_slice(&object_id.to_le_bytes());
+    body.push(light);
+    body.extend_from_slice(&weapon.to_le_bytes());
+    body.extend_from_slice(&weapon_effect.to_le_bytes());
+    body.extend_from_slice(&armor.to_le_bytes());
+    body.push(wings_effect);
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(ServerPacketIds::PlayerUpdate as i16, &body),
+    });
+}
+
+/// 构建 ObjectColourChanged 数据包
+fn build_object_colour_changed_packet(object_id: u32, name_colour: i32) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    body.extend_from_slice(&object_id.to_le_bytes());
+    body.extend_from_slice(&name_colour.to_le_bytes());
+    build_packet_bytes(ServerPacketIds::ObjectColourChanged as i16, &body)
+}
+
+/// 构建 ObjectNpc 数据包
+fn build_object_npc_packet(npc: &NpcSpawn, object_id: u32) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+
+    body.extend_from_slice(&object_id.to_le_bytes());   // object_id
+    write_dotnet_string(&mut body, &npc.name);          // name
+    body.extend_from_slice(&0i32.to_le_bytes());        // name_colour
+    body.extend_from_slice(&npc.image.to_le_bytes());   // image (NPC/Monster enum)
+    body.extend_from_slice(&0i32.to_le_bytes());        // colour
+    body.extend_from_slice(&npc.x.to_le_bytes());       // location_x
+    body.extend_from_slice(&npc.y.to_le_bytes());       // location_y
+    body.push(npc.direction);                           // direction
+    body.extend_from_slice(&0i32.to_le_bytes());        // quest_ids count=0
+
+    build_packet_bytes(ServerPacketIds::ObjectNpc as i16, &body)
+}
+
+/// 构建 ObjectMonster 数据包
+fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &str) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+
+    body.extend_from_slice(&object_id.to_le_bytes());   // object_id
+    write_dotnet_string(&mut body, name);               // name
+    body.extend_from_slice(&0i32.to_le_bytes());        // name_colour
+    body.extend_from_slice(&monster.x.to_le_bytes());   // location_x
+    body.extend_from_slice(&monster.y.to_le_bytes());   // location_y
+    body.extend_from_slice(&monster.image.to_le_bytes()); // image (Monster enum)
+    body.push(monster.direction);                       // direction
+    body.push(0u8);                                     // effect=None
+    body.push(0u8);                                     // ai=None
+    body.push(1u8);                                     // light
+    body.push(0u8);                                     // dead=false
+    body.push(0u8);                                     // skeleton=false
+    body.extend_from_slice(&0u16.to_le_bytes());        // poison=None
+    body.push(0u8);                                     // hidden=false
+    body.extend_from_slice(&0i64.to_le_bytes());        // shock_time
+    body.push(0u8);                                     // binding_shot_center=false
+    body.push(0u8);                                     // extra=false
+    body.push(0u8);                                     // extra_byte
+    body.extend_from_slice(&0i32.to_le_bytes());        // buffs count=0
+
+    build_packet_bytes(ServerPacketIds::ObjectMonster as i16, &body)
+}
+
+/// 发送地图上的 NPC 和怪物给新玩家，返回 NPC 和怪物列表
+fn spawn_npcs_and_monsters(
+    gate_ref: ActorRef<GateActor>,
+    spawn_dir: &Option<PathBuf>,
+    map_file: &str,
+    map_index: u16,
+    session_id: u64,
+    next_object_id: &mut u32,
+    ctx: &SpawnContext<'_>,
+) -> (Vec<NpcState>, Vec<MonsterState>) {
+    // Try DB-loaded configs first, fall back to TOML
+    let config = if let Some(mi) = ctx.map_info {
+        spawn_config_from_db(mi, ctx.monster_infos, ctx.npc_infos)
+    } else if let Some(d) = spawn_dir {
+        load_spawn_config(map_file, map_index, d)
+    } else {
+        return (Vec::new(), Vec::new());
+    };
+    if config.npcs.is_empty() && config.monsters.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    // 发送 NPC 并创建运行时状态
+    let mut npcs = Vec::new();
+    for npc in &config.npcs {
+        let object_id = *next_object_id;
+        *next_object_id += 1;
+        let packet = build_object_npc_packet(npc, object_id);
+        let _ = gate_ref.ask(SendToClient {
+            session_id,
+            data: packet,
+        });
+
+        npcs.push(NpcState {
+            object_id,
+            name: npc.name.clone(),
+            x: npc.x,
+            y: npc.y,
+            direction: npc.direction,
+            db_index: npc.db_index,
+            map_index,
+        });
+    }
+
+    // 发送怪物并创建运行时状态
+    let mut monsters = Vec::new();
+    for monster in &config.monsters {
+        let object_id = *next_object_id;
+        *next_object_id += 1;
+
+        // 精英判定：3% 概率
+        let is_elite = fastrand::u8(1..=100) <= 3;
+        let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
+            (
+                format!("[精英] {}", monster.name),
+                monster.hp.saturating_mul(2),
+                monster.hp.saturating_mul(2),
+                (monster.min_dmg as f32 * 1.5) as i32,
+                (monster.max_dmg as f32 * 1.5) as i32,
+                monster.xp.saturating_mul(2),
+            )
+        } else {
+            (monster.name.clone(), monster.hp, monster.hp, monster.min_dmg, monster.max_dmg, monster.xp)
+        };
+
+        let packet = build_object_monster_packet(monster, object_id, &name);
+        let _ = gate_ref.ask(SendToClient {
+            session_id,
+            data: packet,
+        });
+
+        let ai_profile = ctx.monster_infos
+            .get(&monster.monster_index)
+            .map(MonsterAiProfile::from_info)
+            .unwrap_or_else(|| MonsterAiProfile {
+                ai_type: MonsterAiType::Aggressive,
+                aggro_range: 10,
+                attack_range: 1,
+                attack_cooldown: 5,
+                move_interval: 2,
+                flee_threshold: 0.0,
+            });
+        monsters.push(MonsterState {
+            object_id,
+            name: name.clone(),
+            image: monster.image,
+            monster_index: monster.monster_index,
+            x: monster.x,
+            y: monster.y,
+            direction: monster.direction,
+            hp,
+            max_hp,
+            min_dmg,
+            max_dmg,
+            xp,
+            spawn_x: monster.x,
+            spawn_y: monster.y,
+            map_index,
+            next_attack_tick: 0,
+            next_move_tick: 0,
+            next_summon_tick: 0,
+            ai_profile,
+            ai_state: MonsterAiState::Idle,
+            target_session: None,
+            provoked: false,
+            is_elite,
+            is_boss: false,
+        });
+        if is_elite {
+            debug!("Elite monster '{}' spawned as #{} at ({},{})", name, object_id, monster.x, monster.y);
+        }
+    }
+
+    info!("Spawned {} NPCs and {} monsters for session {}",
+          config.npcs.len(), config.monsters.len(), session_id);
+
+    // Spawn dragon if enabled and on this map
+    if let Some(dragon) = ctx.dragon_info {
+        if dragon.enabled && dragon.map_file_name == map_file {
+            if let Some(monster_index) = dragon.monster_index {
+                if let Some(monster_db) = ctx.monster_infos.get(&monster_index) {
+                    let object_id = *next_object_id;
+                    *next_object_id += 1;
+                    let hp = monster_db.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(10000);
+                    let min_dmg = monster_db.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(50);
+                    let max_dmg = monster_db.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(100);
+                    let xp = monster_db.experience;
+                    let packet = build_object_monster_packet(
+                        &MonsterSpawn { name: dragon.monster_name.clone(), image: monster_db.image as u16, monster_index, x: dragon.location_x, y: dragon.location_y, direction: 0, hp, min_dmg, max_dmg, xp, map_index },
+                        object_id,
+                        &dragon.monster_name,
+                    );
+                    let _ = gate_ref.ask(SendToClient { session_id, data: packet });
+                    let ai_profile = MonsterAiProfile::from_info(monster_db);
+                    monsters.push(MonsterState {
+                        object_id,
+                        name: dragon.monster_name.clone(),
+                        image: monster_db.image as u16,
+                        monster_index,
+                        x: dragon.location_x,
+                        y: dragon.location_y,
+                        direction: 0,
+                        hp,
+                        max_hp: hp,
+                        min_dmg,
+                        max_dmg,
+                        xp,
+                        spawn_x: dragon.location_x,
+                        spawn_y: dragon.location_y,
+                        map_index,
+                        next_attack_tick: 0,
+                        next_move_tick: 0,
+                        next_summon_tick: 0,
+                        ai_profile,
+                        ai_state: MonsterAiState::Idle,
+                        target_session: None,
+                        provoked: false,
+                        is_elite: false,
+                        is_boss: false,
+                    });
+                    info!("Spawned dragon at ({}, {}) on map {}", dragon.location_x, dragon.location_y, map_file);
+                }
+            }
+        }
+    }
+
+    (npcs, monsters)
+}
+
+fn drop_count_multiplier(is_boss: bool, is_elite: bool) -> u16 {
+    if is_boss { 3 } else if is_elite { 2 } else { 1 }
+}
+
+fn should_despawn_boss(tick_count: u64, despawn_tick: u64) -> bool {
+    tick_count >= despawn_tick
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_name_colour_for_pk_thresholds() {
+        assert_eq!(name_colour_for_pk(0), 0);    // White
+        assert_eq!(name_colour_for_pk(50), 0);   // White
+        assert_eq!(name_colour_for_pk(99), 0);   // White
+        assert_eq!(name_colour_for_pk(100), 2);  // Orange
+        assert_eq!(name_colour_for_pk(150), 2);  // Orange
+        assert_eq!(name_colour_for_pk(199), 2);  // Orange
+        assert_eq!(name_colour_for_pk(200), 1);  // Red
+        assert_eq!(name_colour_for_pk(500), 1);  // Red
+    }
+
+    #[test]
+    fn test_elite_multiplier_saturation() {
+        assert_eq!(5u16.saturating_mul(2), 10);
+        assert_eq!(100u16.saturating_mul(2), 200);
+        assert_eq!(u16::MAX.saturating_mul(2), u16::MAX);
+    }
+
+    #[test]
+    fn test_drop_count_multiplier() {
+        assert_eq!(drop_count_multiplier(false, false), 1); // normal
+        assert_eq!(drop_count_multiplier(false, true), 2);  // elite
+        assert_eq!(drop_count_multiplier(true, false), 3);  // boss
+        assert_eq!(drop_count_multiplier(true, true), 3);   // boss trumps elite
+    }
+
+    #[test]
+    fn test_should_despawn_boss() {
+        assert!(!should_despawn_boss(0, 6000));
+        assert!(!should_despawn_boss(5999, 6000));
+        assert!(should_despawn_boss(6000, 6000)); // 10 min timeout
+        assert!(should_despawn_boss(6001, 6000));
+        assert!(should_despawn_boss(99999, 6000));
+    }
+
+    #[test]
+    fn test_boss_monster_state() {
+        let boss = MonsterState {
+            object_id: 1,
+            name: "TestBoss".to_string(),
+            image: 100,
+            monster_index: 50,
+            x: 100,
+            y: 100,
+            direction: 0,
+            hp: 10000,
+            max_hp: 10000,
+            min_dmg: 50,
+            max_dmg: 100,
+            xp: 5000,
+            spawn_x: 100,
+            spawn_y: 100,
+            map_index: 0,
+            next_attack_tick: 0,
+            next_move_tick: 0,
+            next_summon_tick: 0,
+            ai_profile: MonsterAiProfile {
+                ai_type: MonsterAiType::Boss,
+                aggro_range: 10,
+                attack_range: 2,
+                attack_cooldown: 3,
+                move_interval: 1,
+                flee_threshold: 0.0,
+            },
+            ai_state: MonsterAiState::Idle,
+            target_session: None,
+            provoked: false,
+            is_elite: false,
+            is_boss: true,
+        };
+        assert!(boss.is_boss);
+        assert!(!boss.is_elite);
+        assert_eq!(boss.ai_profile.ai_type, MonsterAiType::Boss);
+    }
+
+    #[test]
+    fn test_light_for_hour() {
+        use mir2_shared::enums::LightSetting;
+        assert_eq!(WorldActor::light_for_hour(0), LightSetting::Night);
+        assert_eq!(WorldActor::light_for_hour(4), LightSetting::Night);
+        assert_eq!(WorldActor::light_for_hour(5), LightSetting::Dawn);
+        assert_eq!(WorldActor::light_for_hour(6), LightSetting::Dawn);
+        assert_eq!(WorldActor::light_for_hour(7), LightSetting::Day);
+        assert_eq!(WorldActor::light_for_hour(12), LightSetting::Day);
+        assert_eq!(WorldActor::light_for_hour(16), LightSetting::Day);
+        assert_eq!(WorldActor::light_for_hour(17), LightSetting::Evening);
+        assert_eq!(WorldActor::light_for_hour(18), LightSetting::Evening);
+        assert_eq!(WorldActor::light_for_hour(19), LightSetting::Night);
+        assert_eq!(WorldActor::light_for_hour(23), LightSetting::Night);
+    }
+
+    #[test]
+    fn test_awake_type_name() {
+        use mir2_shared::enums::AwakeType;
+        assert_eq!(awake_type_name(AwakeType::Dc), "攻击");
+        assert_eq!(awake_type_name(AwakeType::Mc), "魔法");
+        assert_eq!(awake_type_name(AwakeType::Sc), "道术");
+        assert_eq!(awake_type_name(AwakeType::Ac), "防御");
+        assert_eq!(awake_type_name(AwakeType::Mac), "魔防");
+        assert_eq!(awake_type_name(AwakeType::HpMp), "生命/魔法");
+        assert_eq!(awake_type_name(AwakeType::None), "未知");
+    }
+
+    #[test]
+    fn test_awake_success_rate_constant() {
+        assert_eq!(mir2_shared::data::item::Awake::SUCCESS_RATE, 70);
+        assert_eq!(mir2_shared::data::item::Awake::MAX_AWAKE_LEVEL, 5);
+    }
+
+    #[test]
+    fn test_awake_level_and_value() {
+        use mir2_shared::data::item::Awake;
+        use mir2_shared::enums::AwakeType;
+
+        let mut awake = Awake::default();
+        assert_eq!(awake.awake_level(), 0);
+        assert!(!awake.is_max_level());
+        assert_eq!(awake.awake_value(), 0);
+
+        awake.awake_type = AwakeType::Dc;
+        awake.levels = vec![2, 3, 1];
+        assert_eq!(awake.awake_level(), 3);
+        assert_eq!(awake.awake_value(), 6);
+        assert_eq!(awake.get_dc(), 6);
+        assert_eq!(awake.get_mc(), 0);
+        assert!(!awake.is_max_level());
+
+        awake.levels = vec![1, 1, 1, 1, 1];
+        assert!(awake.is_max_level());
+    }
+}
